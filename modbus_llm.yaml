@@ -1,0 +1,183 @@
+# LLM: Dies ist die Beschfreibung der Modbusschnittstelle für den SAX Speicher
+# ==============================================================================
+# DOCUMENT METADATA & OVERVIEW
+# ==============================================================================
+document_title: "12 Unterstützte Protokolle - SAX Power Home (Plus)"
+topic: "Modbus TCP Integration & Register Mappings"
+target_audience: "Smart Home Integrators / System Engineers"
+description: >
+  Beschreibt die Modbus-TCP-Schnittstelle zur externen Steuerung und
+  Datenabfrage des SAX Power Home (Plus) Speichersystems.
+
+# ==============================================================================
+# CONNECTION PARAMETERS & SYSTEM SETTINGS
+# ==============================================================================
+connection_settings:
+  protocol: "Modbus TCP"
+  standard_port: 502
+  write_interval_recommendation:
+    min_seconds: 5
+    max_minutes: 5
+  addressing_rule:
+    offset_formula: "Interne Adresse = Protokolladresse - 40001"
+    function_code_03_holding_registers: true
+    example:
+      protocol_address: 40042
+      internal_address: 41
+
+operation_modes:
+  smart_meter_rs485:
+    type: "Nullregelung via SAX Power Smart Meter"
+    readable_values: ["SOC", "Momentanleistung Speicher", "Leistung Netzverknüpfungspunkt"]
+    writable_values: ["Lade- und Entlade-Grenzwerte"]
+  p_sollwert_tcp:
+    type: "Sollwertvorgabe (Keine Smart Meter Regelung)"
+    power_gradient_factory_setting: "0.27%/s"
+    readable_values: ["SOC", "Momentanleistung Speicher", "Leistung Netzverknüpfungspunkt"]
+    required_inputs: ["Sollwerte für Betrieb"]
+
+# ==============================================================================
+# REGISTER MAPS
+# ==============================================================================
+register_maps:
+
+  # ----------------------------------------------------------------------------
+  # BASIC MODE (Unit-ID: 64 / 0x40)
+  # ----------------------------------------------------------------------------
+  - slave_id: 64
+    mode: "Basic Mode"
+    device: "SAX Power Home (Plus)"
+    registers:
+      - protocol_addr: 40042
+        internal_addr: 41
+        name: "Sollwert Leistung P"
+        unit: "Watt"
+        datatype: "uint16"
+        access: "Write"
+        notes: "Nur in Betriebsart P-Sollwert (TCP) verfügbar."
+      - protocol_addr: 40043
+        internal_addr: 42
+        name: "Sollwert cos(Phi)"
+        unit: null
+        datatype: "uint16"
+        access: "Write"
+        notes: "Nur in Betriebsart P-Sollwert (TCP) verfügbar."
+      - protocol_addr: 40044
+        internal_addr: 43
+        name: "Leistungsgrenzwert für Entladung"
+        unit: "Watt"
+        datatype: "uint16"
+        access: "Write"
+        notes: "Nur nach Freischaltung verfügbar."
+      - protocol_addr: 40045
+        internal_addr: 44
+        name: "Leistungsgrenzwert für Ladung"
+        unit: "Watt"
+        datatype: "uint16"
+        access: "Write"
+        notes: "Nur nach Freischaltung verfügbar."
+      - protocol_addr: 40046
+        internal_addr: 45
+        name: "Schaltzustand des Speichers"
+        unit: null
+        datatype: "uint16"
+        access: "Read/Write"
+        notes: "Write Commands: 01=Aus, 02=Ein | Read Commands: 01=Aus, 02=Ein, 03=Verbunden"
+      - protocol_addr: 40047
+        internal_addr: 46
+        name: "SOC des Speichers (Messwert)"
+        unit: "Prozent"
+        datatype: "uint16"
+        access: "Read"
+      - protocol_addr: 40048
+        internal_addr: 47
+        name: "Leistung P des Speichers (Messwert)"
+        unit: "Watt"
+        datatype: "uint16"
+        access: "Read"
+      - protocol_addr: 40049
+        internal_addr: 48
+        name: "Leistung des Smart Meters"
+        unit: "Watt"
+        datatype: "uint16"
+        access: "Read"
+
+  # ----------------------------------------------------------------------------
+  # EXTENDED MODE - SPEICHER (Slave-ID: 40)
+  # ----------------------------------------------------------------------------
+  - slave_id: 40
+    mode: "Extended Mode"
+    device: "SAX Power Home (Plus)"
+    scaling_rule: "Skalierungsfaktor ist Exponent von 10 (z.B. -1 = Multiplikator 0.1)"
+    registers:
+      - { protocol_addr: 40071, internal_addr: 70, name: "SunSpec ID", unit: null, datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40072, internal_addr: 71, name: "SunSpec Length", unit: null, datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40073, internal_addr: 72, name: "Summe Phasenströme", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40074, internal_addr: 73, name: "Strom L1", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40075, internal_addr: 74, name: "Strom L2", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40076, internal_addr: 75, name: "Strom L3", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40077, internal_addr: 76, name: "Strom Skalierung", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: -2" }
+      - { protocol_addr: 40078, internal_addr: 77, name: "N.A.", unit: null, datatype: null, access: "Read" }
+      - { protocol_addr: 40079, internal_addr: 78, name: "N.A.", unit: null, datatype: null, access: "Read" }
+      - { protocol_addr: 40080, internal_addr: 79, name: "N.A.", unit: null, datatype: null, access: "Read" }
+      - { protocol_addr: 40081, internal_addr: 80, name: "Spannung L1", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40082, internal_addr: 81, name: "Spannung L2", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40083, internal_addr: 82, name: "Spannung L3", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40084, internal_addr: 83, name: "Spannung Skalierung", unit: null, datatype: null, access: "Read", notes: "wellknown: -1" }
+      - { protocol_addr: 40085, internal_addr: 84, name: "Summenleistung AC (Wirk)", unit: "W", datatype: "int16", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40086, internal_addr: 85, name: "Skalierung Summenleistung (Wirk)", unit: "sunssf", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40087, internal_addr: 86, name: "Netzfrequenz", unit: "Hz", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40088, internal_addr: 87, name: "Skalierung Netzfrequenz", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: -1" }
+      - { protocol_addr: 40089, internal_addr: 88, name: "Summenleistung AC (Schein)", unit: "VA", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40090, internal_addr: 89, name: "Skalierung Summenleistung (Schein)", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40091, internal_addr: 90, name: "Summenleistung AC (Blind)", unit: "VAr", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40092, internal_addr: 91, name: "Skalierung Summenleistung (Blind)", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40093, internal_addr: 92, name: "Leistungsfaktor", unit: "Prozent", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40094, internal_addr: 93, name: "Skalierung Leistungsfaktor", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: -1" }
+
+  # ----------------------------------------------------------------------------
+  # EXTENDED MODE - SMART METER (Slave-ID: 40)
+  # ----------------------------------------------------------------------------
+  - slave_id: 40
+    mode: "Extended Mode"
+    device: "Smartmeter"
+    registers:
+      - { protocol_addr: 40095, internal_addr: 94, name: "N.A.", unit: null, datatype: null, access: "Read" }
+      - { protocol_addr: 40096, internal_addr: 95, name: "Energie Eingespeist", unit: "kWh", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40097, internal_addr: 96, name: "Energie Bezogen", unit: "kWh", datatype: "sunssf", access: "Read" }
+      - { protocol_addr: 40098, internal_addr: 97, name: "Energie Skalierung", unit: "sunssf", datatype: null, access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40099, internal_addr: 98, name: "Schaltzustand des Speichers", unit: null, datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40100, internal_addr: 99, name: "Strom L1", unit: "A", datatype: "int16", access: "Read", notes: "Faktor -2" }
+      - { protocol_addr: 40101, internal_addr: 100, name: "Strom L2", unit: "A", datatype: "int16", access: "Read", notes: "Faktor -2" }
+      - { protocol_addr: 40102, internal_addr: 101, name: "Strom L3", unit: "A", datatype: "int16", access: "Read", notes: "Faktor -2" }
+      - { protocol_addr: 40103, internal_addr: 102, name: "Wirkleistung L1", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40104, internal_addr: 103, name: "Wirkleistung L12", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40105, internal_addr: 104, name: "Wirkleistung L13", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40106, internal_addr: 105, name: "Skalierung Leistung", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40107, internal_addr: 106, name: "Spannung L1", unit: "V", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40108, internal_addr: 107, name: "Spannung L2", unit: "V", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40109, internal_addr: 108, name: "Spannung L3", unit: "V", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40110, internal_addr: 109, name: "Summenleistung (Wirk)", unit: "W", datatype: "int16", access: "Read" }
+
+  # ----------------------------------------------------------------------------
+  # IMMEDIATE CONTROLS (Slave-ID: 123)
+  # ----------------------------------------------------------------------------
+  - slave_id: 123
+    mode: "Immediate Controls"
+    status: "Future Release / Experimental (Stand 03/25 noch nicht verfügbar)"
+    write_requirement: "Für eine erfolgreiche Sollwertsteuerung müssen beide Register zeitgleich geschrieben werden."
+    registers:
+      - protocol_addr: 40349
+        internal_addr: 348
+        name: "Sollwert Leistung"
+        unit: "%"
+        datatype: "int16"
+        access: "Read/Write"
+        value_range: "-10000 bis +10000"
+        notes: "Faktor 100"
+      - protocol_addr: 40353
+        internal_addr: 352
+        name: "Steuerungsmodus (Choking)"
+        unit: null
+        datatype: "int16"
+        access: "Read/Write"

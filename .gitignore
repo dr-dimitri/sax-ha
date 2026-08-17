@@ -1,3 +1,16 @@
+# macOS
+.DS_Store
+
+# Home Assistant local dev/test data (see config/configuration.yaml)
+config/.storage/
+config/.cloud/
+config/home-assistant.log*
+config/home-assistant_v2.db*
+config/custom_components/sax_power
+config/deps/
+config/tts/
+config/blueprints/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -1,0 +1,5 @@
+homeassistant
+pymodbus>=3.10.0
+pytest
+pytest-homeassistant-custom-component
+pytest-asyncio

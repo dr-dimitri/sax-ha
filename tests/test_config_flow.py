@@ -24,7 +24,10 @@ async def test_user_flow_success(hass) -> None:
     client.connected = True
     read_result = MagicMock()
     read_result.isError.return_value = False
-    read_result.registers = [50]
+    # 40 Register genügen sowohl für den Basic-Mode-Block (8 Register) als
+    # auch den Extended-Mode-Block (40 Register), die async_setup_entry
+    # nach der Config-Flow-Validierung ausliest.
+    read_result.registers = [50] * 40
     client.read_holding_registers = AsyncMock(return_value=read_result)
     client.close = MagicMock()
 

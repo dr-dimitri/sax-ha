@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -17,14 +19,56 @@ from .const import (
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
     READ_BLOCK_COUNT,
+    READ_BLOCK_EXT_COUNT,
+    READ_BLOCK_EXT_START,
     READ_BLOCK_START,
+    REG_EXT_CURRENT_L1,
+    REG_EXT_CURRENT_L2,
+    REG_EXT_CURRENT_L3,
+    REG_EXT_CURRENT_SF,
+    REG_EXT_CURRENT_SUM,
+    REG_EXT_FREQUENCY,
+    REG_EXT_FREQUENCY_SF,
+    REG_EXT_POWER_ACTIVE,
+    REG_EXT_POWER_ACTIVE_SF,
+    REG_EXT_POWER_APPARENT,
+    REG_EXT_POWER_APPARENT_SF,
+    REG_EXT_POWER_FACTOR,
+    REG_EXT_POWER_FACTOR_SF,
+    REG_EXT_POWER_REACTIVE,
+    REG_EXT_POWER_REACTIVE_SF,
+    REG_EXT_SM_CURRENT_L1,
+    REG_EXT_SM_CURRENT_L2,
+    REG_EXT_SM_CURRENT_L3,
+    REG_EXT_SM_ENERGY_CONSUMED,
+    REG_EXT_SM_ENERGY_FED_IN,
+    REG_EXT_SM_ENERGY_SF,
+    REG_EXT_SM_POWER_L1,
+    REG_EXT_SM_POWER_L2,
+    REG_EXT_SM_POWER_L3,
+    REG_EXT_SM_POWER_SF,
+    REG_EXT_SM_POWER_TOTAL,
+    REG_EXT_SM_SWITCH_STATE,
+    REG_EXT_SM_VOLTAGE_L1,
+    REG_EXT_SM_VOLTAGE_L2,
+    REG_EXT_SM_VOLTAGE_L3,
+    REG_EXT_SUNSPEC_ID,
+    REG_EXT_SUNSPEC_LENGTH,
+    REG_EXT_VOLTAGE_L1,
+    REG_EXT_VOLTAGE_L2,
+    REG_EXT_VOLTAGE_L3,
+    REG_EXT_VOLTAGE_SF,
     REG_LIMIT_CHARGE,
     REG_LIMIT_DISCHARGE,
     REG_POWER,
+    REG_SETPOINT_COSPHI,
     REG_SETPOINT_POWER,
     REG_SMARTMETER_POWER,
     REG_SOC,
     REG_SWITCH_STATE,
+    SM_CURRENT_SCALE_FACTOR,
+    SWITCH_STATE_LABELS,
+    SWITCH_STATE_UNKNOWN_LABEL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +84,18 @@ def to_unsigned16(value: int) -> int:
     return value & 0xFFFF
 
 
-class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, int]]):
+def apply_sunssf(raw_value: int, raw_scale_factor: int) -> float:
+    """Apply a SunSpec scale factor register: value * 10**sunssf.
+
+    Beide Rohwerte sind vorzeichenbehaftete 16-Bit-Register (siehe
+    modbus_llm.yaml, Abschnitt "SunSpec-Skalierung").
+    """
+    value = to_signed16(raw_value)
+    scale_factor = to_signed16(raw_scale_factor)
+    return round(value * (10**scale_factor), 3)
+
+
+class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinates Modbus reads/writes for a SAX Power storage system."""
 
     def __init__(
@@ -48,6 +103,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, int]]):
         hass: HomeAssistant,
         client: AsyncModbusTcpClient,
         slave_id: int,
+        slave_id_extended: int,
         scan_interval: int,
     ) -> None:
         super().__init__(
@@ -58,6 +114,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, int]]):
         )
         self.client = client
         self.slave_id = slave_id
+        self.slave_id_extended = slave_id_extended
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
@@ -65,39 +122,161 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, int]]):
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
 
-    async def _async_update_data(self) -> dict[str, int]:
+    async def _async_update_data(self) -> dict[str, Any]:
         try:
             if not self.client.connected:
                 await self.client.connect()
-            result = await self.client.read_holding_registers(
+            basic_result = await self.client.read_holding_registers(
                 address=READ_BLOCK_START,
                 count=READ_BLOCK_COUNT,
                 device_id=self.slave_id,
+            )
+            extended_result = await self.client.read_holding_registers(
+                address=READ_BLOCK_EXT_START,
+                count=READ_BLOCK_EXT_COUNT,
+                device_id=self.slave_id_extended,
             )
         except (TimeoutError, ModbusException) as err:
             raise UpdateFailed(
                 f"Fehler bei der Kommunikation mit dem SAX Speicher: {err}"
             ) from err
 
-        if result.isError():
-            raise UpdateFailed(f"Modbus-Fehlerantwort vom SAX Speicher: {result}")
+        if basic_result.isError():
+            raise UpdateFailed(f"Modbus-Fehlerantwort (Basic Mode): {basic_result}")
+        if extended_result.isError():
+            raise UpdateFailed(
+                f"Modbus-Fehlerantwort (Extended Mode): {extended_result}"
+            )
 
-        regs = result.registers
+        basic_regs = basic_result.registers
+        ext_regs = extended_result.registers
 
-        def reg(address: int) -> int:
-            return regs[address - READ_BLOCK_START]
+        def basic_reg(address: int) -> int:
+            return basic_regs[address - READ_BLOCK_START]
 
-        data = {
-            "switch_state": reg(REG_SWITCH_STATE),
-            "soc": reg(REG_SOC),
-            "power": to_signed16(reg(REG_POWER)),
-            "smartmeter_power": to_signed16(reg(REG_SMARTMETER_POWER)),
-            "discharge_limit": reg(REG_LIMIT_DISCHARGE),
-            "charge_limit": reg(REG_LIMIT_CHARGE),
+        def ext_reg(address: int) -> int:
+            return ext_regs[address - READ_BLOCK_EXT_START]
+
+        switch_state = basic_reg(REG_SWITCH_STATE)
+        data: dict[str, Any] = {
+            "switch_state": switch_state,
+            "switch_state_text": SWITCH_STATE_LABELS.get(
+                switch_state, SWITCH_STATE_UNKNOWN_LABEL
+            ),
+            "setpoint_power": to_signed16(basic_reg(REG_SETPOINT_POWER)),
+            "setpoint_cosphi": to_signed16(basic_reg(REG_SETPOINT_COSPHI)),
+            "soc": basic_reg(REG_SOC),
+            "power": to_signed16(basic_reg(REG_POWER)),
+            "smartmeter_power": to_signed16(basic_reg(REG_SMARTMETER_POWER)),
+            "discharge_limit": basic_reg(REG_LIMIT_DISCHARGE),
+            "charge_limit": basic_reg(REG_LIMIT_CHARGE),
         }
+        data.update(self._parse_extended(ext_reg))
 
         await self._async_enforce_max_soc(data)
         return data
+
+    def _parse_extended(self, ext_reg: Callable[[int], int]) -> dict[str, Any]:
+        """Parse the Extended-Mode-Register-Block (Speicher + Smart Meter).
+
+        Wendet die SunSpec-Skalierung an und berechnet für jede
+        Phasen-Trio-Gruppe (L1/L2/L3) zusätzlich eine Summe, siehe
+        anforderung.yaml Anforderung REQ-ALL-REGISTERS-READABLE.
+        """
+        current_sf = ext_reg(REG_EXT_CURRENT_SF)
+        current_l1 = apply_sunssf(ext_reg(REG_EXT_CURRENT_L1), current_sf)
+        current_l2 = apply_sunssf(ext_reg(REG_EXT_CURRENT_L2), current_sf)
+        current_l3 = apply_sunssf(ext_reg(REG_EXT_CURRENT_L3), current_sf)
+
+        voltage_sf = ext_reg(REG_EXT_VOLTAGE_SF)
+        voltage_l1 = apply_sunssf(ext_reg(REG_EXT_VOLTAGE_L1), voltage_sf)
+        voltage_l2 = apply_sunssf(ext_reg(REG_EXT_VOLTAGE_L2), voltage_sf)
+        voltage_l3 = apply_sunssf(ext_reg(REG_EXT_VOLTAGE_L3), voltage_sf)
+
+        sm_current_scale = 10**SM_CURRENT_SCALE_FACTOR
+        sm_current_l1 = round(
+            to_signed16(ext_reg(REG_EXT_SM_CURRENT_L1)) * sm_current_scale, 3
+        )
+        sm_current_l2 = round(
+            to_signed16(ext_reg(REG_EXT_SM_CURRENT_L2)) * sm_current_scale, 3
+        )
+        sm_current_l3 = round(
+            to_signed16(ext_reg(REG_EXT_SM_CURRENT_L3)) * sm_current_scale, 3
+        )
+
+        sm_power_sf = ext_reg(REG_EXT_SM_POWER_SF)
+        sm_power_l1 = apply_sunssf(ext_reg(REG_EXT_SM_POWER_L1), sm_power_sf)
+        sm_power_l2 = apply_sunssf(ext_reg(REG_EXT_SM_POWER_L2), sm_power_sf)
+        sm_power_l3 = apply_sunssf(ext_reg(REG_EXT_SM_POWER_L3), sm_power_sf)
+
+        sm_voltage_l1 = to_signed16(ext_reg(REG_EXT_SM_VOLTAGE_L1))
+        sm_voltage_l2 = to_signed16(ext_reg(REG_EXT_SM_VOLTAGE_L2))
+        sm_voltage_l3 = to_signed16(ext_reg(REG_EXT_SM_VOLTAGE_L3))
+
+        sm_switch_state = ext_reg(REG_EXT_SM_SWITCH_STATE)
+
+        return {
+            "ext_sunspec_id": ext_reg(REG_EXT_SUNSPEC_ID),
+            "ext_sunspec_length": ext_reg(REG_EXT_SUNSPEC_LENGTH),
+            "ext_current_sum_native": apply_sunssf(
+                ext_reg(REG_EXT_CURRENT_SUM), current_sf
+            ),
+            "ext_current_l1": current_l1,
+            "ext_current_l2": current_l2,
+            "ext_current_l3": current_l3,
+            "ext_current_sf": to_signed16(current_sf),
+            "ext_current_sum": round(current_l1 + current_l2 + current_l3, 3),
+            "ext_voltage_l1": voltage_l1,
+            "ext_voltage_l2": voltage_l2,
+            "ext_voltage_l3": voltage_l3,
+            "ext_voltage_sf": to_signed16(voltage_sf),
+            "ext_voltage_sum": round(voltage_l1 + voltage_l2 + voltage_l3, 3),
+            "ext_power_active": apply_sunssf(
+                ext_reg(REG_EXT_POWER_ACTIVE), ext_reg(REG_EXT_POWER_ACTIVE_SF)
+            ),
+            "ext_power_active_sf": to_signed16(ext_reg(REG_EXT_POWER_ACTIVE_SF)),
+            "ext_frequency": apply_sunssf(
+                ext_reg(REG_EXT_FREQUENCY), ext_reg(REG_EXT_FREQUENCY_SF)
+            ),
+            "ext_frequency_sf": to_signed16(ext_reg(REG_EXT_FREQUENCY_SF)),
+            "ext_power_apparent": apply_sunssf(
+                ext_reg(REG_EXT_POWER_APPARENT), ext_reg(REG_EXT_POWER_APPARENT_SF)
+            ),
+            "ext_power_apparent_sf": to_signed16(ext_reg(REG_EXT_POWER_APPARENT_SF)),
+            "ext_power_reactive": apply_sunssf(
+                ext_reg(REG_EXT_POWER_REACTIVE), ext_reg(REG_EXT_POWER_REACTIVE_SF)
+            ),
+            "ext_power_reactive_sf": to_signed16(ext_reg(REG_EXT_POWER_REACTIVE_SF)),
+            "ext_power_factor": apply_sunssf(
+                ext_reg(REG_EXT_POWER_FACTOR), ext_reg(REG_EXT_POWER_FACTOR_SF)
+            ),
+            "ext_power_factor_sf": to_signed16(ext_reg(REG_EXT_POWER_FACTOR_SF)),
+            "sm_energy_fed_in": apply_sunssf(
+                ext_reg(REG_EXT_SM_ENERGY_FED_IN), ext_reg(REG_EXT_SM_ENERGY_SF)
+            ),
+            "sm_energy_consumed": apply_sunssf(
+                ext_reg(REG_EXT_SM_ENERGY_CONSUMED), ext_reg(REG_EXT_SM_ENERGY_SF)
+            ),
+            "sm_energy_sf": to_signed16(ext_reg(REG_EXT_SM_ENERGY_SF)),
+            "sm_switch_state": sm_switch_state,
+            "sm_switch_state_text": SWITCH_STATE_LABELS.get(
+                sm_switch_state, SWITCH_STATE_UNKNOWN_LABEL
+            ),
+            "sm_current_l1": sm_current_l1,
+            "sm_current_l2": sm_current_l2,
+            "sm_current_l3": sm_current_l3,
+            "sm_current_sum": round(sm_current_l1 + sm_current_l2 + sm_current_l3, 3),
+            "sm_power_l1": sm_power_l1,
+            "sm_power_l2": sm_power_l2,
+            "sm_power_l3": sm_power_l3,
+            "sm_power_sf": to_signed16(sm_power_sf),
+            "sm_power_sum": round(sm_power_l1 + sm_power_l2 + sm_power_l3, 3),
+            "sm_voltage_l1": sm_voltage_l1,
+            "sm_voltage_l2": sm_voltage_l2,
+            "sm_voltage_l3": sm_voltage_l3,
+            "sm_voltage_sum": sm_voltage_l1 + sm_voltage_l2 + sm_voltage_l3,
+            "sm_power_total": to_signed16(ext_reg(REG_EXT_SM_POWER_TOTAL)),
+        }
 
     async def async_write_register(self, address: int, value: int) -> None:
         """Write a single holding register, raising HomeAssistantError on failure."""
@@ -134,7 +313,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, int]]):
             await self._async_enforce_max_soc(self.data)
             self.async_set_updated_data(self.data)
 
-    async def _async_enforce_max_soc(self, data: dict[str, int]) -> None:
+    async def _async_enforce_max_soc(self, data: dict[str, Any]) -> None:
         if self._max_soc is None:
             return
 

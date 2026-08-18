@@ -219,9 +219,6 @@
       },
       "discharge_limit": {
         "name": "Entladeleistungsgrenzwert"
-      },
-      "timed_charge_target_soc": {
-        "name": "Ziel-SOC (Zeitfenster)"
       }
     },
     "switch": {

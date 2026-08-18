@@ -219,9 +219,6 @@
       },
       "discharge_limit": {
         "name": "Discharge power limit"
-      },
-      "timed_charge_target_soc": {
-        "name": "Target SOC (time window)"
       }
     },
     "switch": {

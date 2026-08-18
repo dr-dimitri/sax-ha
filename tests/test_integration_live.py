@@ -391,15 +391,16 @@ async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
 async def test_live_timed_charge_writes_setpoint_when_in_window(
     hass, socket_enabled
 ) -> None:
-    """End-to-End-Test für das zeitgesteuerte Laden (neues Feature): Ziel-
-    SOC und Zeitfenster über die entsprechenden Number-/Time-Entities
-    setzen, dann per Switch aktivieren - das muss innerhalb des
-    Zeitfensters bei SOC < Ziel-SOC einen echten negativen P-Sollwert-Write
-    auf Register 41 auslösen (derselbe Mechanismus wie start_grid_charge).
-    Die Ladeleistung kommt dabei aus dem zentralen Ladeleistungsgrenzwert
-    (Register 44, hier per _build_basic_registers()-Default 3000W) - es
-    gibt bewusst keine eigene Leistungseinstellung mehr, siehe
-    anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+    """End-to-End-Test für das zeitgesteuerte Laden (neues Feature): Zeitfenster
+    über die entsprechenden Time-Entities setzen, dann per Switch aktivieren
+    - das muss innerhalb des Zeitfensters bei SOC < Ziel-SOC einen echten
+    negativen P-Sollwert-Write auf Register 41 auslösen (derselbe Mechanismus
+    wie start_grid_charge). Sowohl die Ladeleistung (zentraler
+    Ladeleistungsgrenzwert, Register 44, hier per
+    _build_basic_registers()-Default 3000W) als auch der Ziel-SOC (zentrales
+    "Maximaler Lade-SOC", Register 46 als Vergleichswert) sind bewusst keine
+    eigenen Einstellungen, siehe anforderung.yaml
+    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_registers = _build_basic_registers()
@@ -433,7 +434,7 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         await hass.async_block_till_done()
 
         registry = er.async_get(hass)
-        target_soc_id = _entity_id(registry, entry.entry_id, "timed_charge_target_soc")
+        max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
         start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
         end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
         enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
@@ -446,7 +447,7 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         await hass.services.async_call(
             "number",
             "set_value",
-            {"entity_id": target_soc_id, "value": 90},
+            {"entity_id": max_soc_id, "value": 90},
             blocking=True,
         )
         await hass.services.async_call(
@@ -505,7 +506,8 @@ async def test_live_start_discharge_button_writes_discharge_limit(
     Drücken muss einen echten positiven P-Sollwert-Write auf Register 41
     auslösen, mit dem Wert des zentralen Entladeleistungsgrenzwerts
     (Register 43) - keine eigene Leistungseinstellung, siehe
-    anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+    anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS. Erneutes Drücken
+    muss die Entladung wieder stoppen (Umschalt-Verhalten)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
@@ -558,6 +560,16 @@ async def test_live_start_discharge_button_writes_discharge_limit(
             # 3000: Entladeleistungsgrenzwert (Register 43,
             # _build_basic_registers()-Default), positiv = Entladung.
             assert to_signed16(result.registers[0]) == 3000
+            assert coordinator.discharge_active is True
+
+            # -- Erneutes Drücken stoppt die Entladung wieder --
+            await hass.services.async_call(
+                "button", "press", {"entity_id": button_id}, blocking=True
+            )
+            await hass.async_block_till_done()
+
+            assert coordinator.discharge_active is False
+            assert coordinator.grid_charge_active is False
         finally:
             await coordinator.async_stop_grid_charge()
     finally:

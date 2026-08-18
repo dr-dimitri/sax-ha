@@ -1,0 +1,23 @@
+# Verbindungsdaten für den optionalen Live-Hardware-Test
+# (tests/test_real_hardware.py), der echte Werte direkt von einem
+# physischen SAX Power Home (Plus) im lokalen Netz ausliest - im
+# Unterschied zu test_integration_live.py, das gegen einen simulierten
+# Modbus-Server läuft.
+#
+# "host" ist absichtlich im Repo abgelegt (nicht in .env/.gitignore), damit
+# die Ziel-IP für dieses Repository/diese Entwicklungsumgebung persistiert
+# ist. Bei "host: null" (Auslieferungszustand) wird der Live-Hardware-Test
+# automatisch übersprungen - er läuft also weder in CI noch auf
+# Entwicklerrechnern ohne physischen Zugriff auf den Speicher.
+#
+# Eintragen und ausprobieren: host auf die reale IP-Adresse setzen, danach
+# `pytest tests/test_real_hardware.py -v` ausführen. Der Test ist rein
+# lesend und verändert keine Register auf dem realen Speicher.
+host: 192.168.178.87
+port: 502
+slave_id_basic: 64
+slave_id_extended: 40
+# Timeout in Sekunden für den ersten Verbindungsversuch, bevor der Test statt
+# eines Fehlschlags übersprungen wird (z. B. wenn der Speicher gerade
+# offline ist).
+connect_timeout: 3

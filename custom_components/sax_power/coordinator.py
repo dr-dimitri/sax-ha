@@ -10,11 +10,13 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
@@ -105,6 +107,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         slave_id: int,
         slave_id_extended: int,
         scan_interval: int,
+        entry_id: str,
     ) -> None:
         super().__init__(
             hass,
@@ -115,12 +118,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.client = client
         self.slave_id = slave_id
         self.slave_id_extended = slave_id_extended
+        self.entry_id = entry_id
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
         self._pre_clamp_charge_limit = 0
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
+        # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
+        # jede Funktion der Integration und lässt das Update fehlschlagen
+        # (UpdateFailed), wenn es nicht lesbar ist. Extended Mode wird davon
+        # bewusst entkoppelt: ist Slave-ID self.slave_id_extended (z. B.
+        # weil auf dem Gateway nicht freigeschaltet) nicht erreichbar,
+        # bleiben die Basic-Mode-Sensoren trotzdem verfügbar und nur die
+        # Extended-Mode-Sensoren zeigen "unbekannt" (siehe anforderung.yaml,
+        # REQ-EXTENDED-MODE-RESILIENCE). Vorher führte ein nicht
+        # erreichbarer Extended-Mode-Block dazu, dass ConfigEntryNotReady
+        # ausgelöst wurde und die Integration gar keine Entities anlegte.
+        self._extended_available = True
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -131,31 +146,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 count=READ_BLOCK_COUNT,
                 device_id=self.slave_id,
             )
-            extended_result = await self.client.read_holding_registers(
-                address=READ_BLOCK_EXT_START,
-                count=READ_BLOCK_EXT_COUNT,
-                device_id=self.slave_id_extended,
-            )
         except (TimeoutError, ModbusException) as err:
             raise UpdateFailed(
-                f"Fehler bei der Kommunikation mit dem SAX Speicher: {err}"
+                f"Fehler bei der Kommunikation mit dem SAX Speicher (Basic Mode, "
+                f"Slave-ID {self.slave_id}): {err}"
             ) from err
-
         if basic_result.isError():
             raise UpdateFailed(f"Modbus-Fehlerantwort (Basic Mode): {basic_result}")
-        if extended_result.isError():
-            raise UpdateFailed(
-                f"Modbus-Fehlerantwort (Extended Mode): {extended_result}"
-            )
 
         basic_regs = basic_result.registers
-        ext_regs = extended_result.registers
 
         def basic_reg(address: int) -> int:
             return basic_regs[address - READ_BLOCK_START]
-
-        def ext_reg(address: int) -> int:
-            return ext_regs[address - READ_BLOCK_EXT_START]
 
         switch_state = basic_reg(REG_SWITCH_STATE)
         data: dict[str, Any] = {
@@ -171,10 +173,62 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "discharge_limit": basic_reg(REG_LIMIT_DISCHARGE),
             "charge_limit": basic_reg(REG_LIMIT_CHARGE),
         }
-        data.update(self._parse_extended(ext_reg))
+
+        data.update(await self._async_read_extended())
 
         await self._async_enforce_max_soc(data)
         return data
+
+    async def _async_read_extended(self) -> dict[str, Any]:
+        """Read+parse den Extended-Mode-Block, ohne bei Fehlern das gesamte
+        Update scheitern zu lassen (siehe Kommentar in __init__)."""
+        try:
+            extended_result = await self.client.read_holding_registers(
+                address=READ_BLOCK_EXT_START,
+                count=READ_BLOCK_EXT_COUNT,
+                device_id=self.slave_id_extended,
+            )
+            if extended_result.isError():
+                raise ModbusException(
+                    f"Modbus-Fehlerantwort (Extended Mode): {extended_result}"
+                )
+        except (TimeoutError, ModbusException) as err:
+            if self._extended_available:
+                _LOGGER.warning(
+                    "Extended-Mode-Register (Slave-ID %s) nicht erreichbar - "
+                    "Basic-Mode-Sensoren bleiben verfügbar, Extended-Mode-"
+                    "Sensoren zeigen bis zur Wiederherstellung 'unbekannt': %s",
+                    self.slave_id_extended,
+                    err,
+                )
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    f"extended_mode_unavailable_{self.entry_id}",
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="extended_mode_unavailable",
+                    translation_placeholders={"slave_id": str(self.slave_id_extended)},
+                )
+            self._extended_available = False
+            return {}
+
+        if not self._extended_available:
+            _LOGGER.info(
+                "Extended-Mode-Register (Slave-ID %s) wieder erreichbar.",
+                self.slave_id_extended,
+            )
+            ir.async_delete_issue(
+                self.hass, DOMAIN, f"extended_mode_unavailable_{self.entry_id}"
+            )
+        self._extended_available = True
+
+        ext_regs = extended_result.registers
+
+        def ext_reg(address: int) -> int:
+            return ext_regs[address - READ_BLOCK_EXT_START]
+
+        return self._parse_extended(ext_reg)
 
     def _parse_extended(self, ext_reg: Callable[[int], int]) -> dict[str, Any]:
         """Parse the Extended-Mode-Register-Block (Speicher + Smart Meter).
@@ -371,3 +425,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         await self.async_stop_grid_charge()
+        ir.async_delete_issue(
+            self.hass, DOMAIN, f"extended_mode_unavailable_{self.entry_id}"
+        )

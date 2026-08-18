@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from custom_components.sax_power.const import READ_BLOCK_START, REG_SOC
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
     apply_sunssf,
@@ -52,7 +53,12 @@ def _make_client() -> MagicMock:
 
 def _make_coordinator(hass, client: MagicMock) -> SaxPowerCoordinator:
     return SaxPowerCoordinator(
-        hass, client, slave_id=64, slave_id_extended=40, scan_interval=10
+        hass,
+        client,
+        slave_id=64,
+        slave_id_extended=40,
+        scan_interval=10,
+        entry_id="test_entry_id",
     )
 
 
@@ -103,6 +109,62 @@ async def test_async_write_register_raises_on_modbus_error(hass) -> None:
 
     with pytest.raises(HomeAssistantError):
         await coordinator.async_write_register(41, 1000)
+
+
+def _make_read_side_effect(basic_registers: list[int], *, extended_error: bool):
+    """Simuliert unterschiedliche read_holding_registers-Antworten je nach
+    device_id, wie sie der Coordinator für Basic- bzw. Extended-Mode-Reads
+    verwendet."""
+
+    def _side_effect(*, address: int, count: int, device_id: int):
+        result = MagicMock()
+        if device_id != 40:
+            result.isError.return_value = False
+            result.registers = basic_registers
+        else:
+            result.isError.return_value = extended_error
+            result.registers = [] if extended_error else [0] * count
+        return result
+
+    return _side_effect
+
+
+async def test_update_data_degrades_gracefully_when_extended_unavailable(hass) -> None:
+    """Ein nicht erreichbarer Extended-Mode-Block darf nicht die Basic-Mode-
+    Sensoren mit ausfallen lassen (siehe anforderung.yaml,
+    REQ-EXTENDED-MODE-RESILIENCE) - vorher führte das zu ConfigEntryNotReady
+    und damit zu gar keinen Entities in Home Assistant."""
+    client = _make_client()
+    basic_registers = [0] * 8
+    basic_registers[REG_SOC - READ_BLOCK_START] = 55
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=True)
+    )
+
+    coordinator = _make_coordinator(hass, client)
+    data = await coordinator._async_update_data()
+
+    assert data["soc"] == 55
+    assert "ext_current_l1" not in data
+    assert coordinator._extended_available is False
+
+
+async def test_update_data_recovers_when_extended_becomes_available(hass) -> None:
+    """Nach einem vorherigen Extended-Mode-Ausfall müssen die Extended-
+    Sensoren wieder befüllt werden, sobald der Block wieder lesbar ist."""
+    client = _make_client()
+    basic_registers = [0] * 8
+    basic_registers[REG_SOC - READ_BLOCK_START] = 55
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=False)
+    )
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator._extended_available = False
+    data = await coordinator._async_update_data()
+
+    assert data["ext_sunspec_id"] == 0
+    assert coordinator._extended_available is True
 
 
 def test_parse_extended_computes_phase_sums(hass) -> None:

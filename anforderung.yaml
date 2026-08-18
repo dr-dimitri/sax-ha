@@ -1,6 +1,8 @@
 Hier ist die ergänzte Anweisung, die den DevContainer für lokale Testumgebungen (inkl. VS Code Integration) abdeckt sowie die neuen Funktionen (Maximaler SOC und Netzladung) berücksichtigt.
 Promp-Anweisung für das LLM (Coding Prompt)
 Du bist ein erfahrener Home Assistant Core Entwickler. Deine Aufgabe ist es, eine benutzerdefinierte Home Assistant Integration (Custom Component) in Python für das SAX Power Home (Plus) Speichersystem auf Basis der Modbus-TCP-Spezifikation zu schreiben.
+Alle Änderungen die vorgenommen werden, müssen hier eingetragen und überarbeitet werden.
+Wichtig ist, dass die einfache Lesbarkeit für ein LLM erhalten bleibt.
 
 Befolge bei der Codegenerierung strikt die folgenden Best Practices, Architekturmuster, Sicherheitsrichtlinien und Entwicklungsstandards:
 
@@ -169,6 +171,18 @@ requirement_all_registers_readable:
     fehl (UpdateFailed), wenn dieser zweite Read fehlschlägt - keine
     Teilverfügbarkeit einzelner Register-Gruppen.
 
+    NACHTRAG (siehe requirement_extended_mode_resilience unten): Die
+    Kopplung "Extended-Mode-Read-Fehler lässt das GESAMTE Update
+    fehlschlagen" hat sich in der Praxis als Ursache für einen
+    Totalausfall erwiesen (keine einzige Entity mehr in Home Assistant,
+    sobald Slave-ID 40 nicht erreichbar ist - z. B. weil Extended Mode
+    auf dem SAX-Gateway nicht freigeschaltet ist). Diese Kopplung wurde
+    daher aufgehoben: Ein fehlschlagender Extended-Mode-Read lässt nur
+    noch die Extended-Mode-Sensoren "unbekannt" werden, Basic Mode bleibt
+    unberührt. "Keine Teilverfügbarkeit einzelner Register-Gruppen" gilt
+    weiterhin *innerhalb* eines Read-Blocks (Basic ODER Extended: alles
+    oder nichts pro Aufruf), nicht mehr *zwischen* den beiden Blöcken.
+
   acceptance_criteria:
     - "Alle in scope.include gelisteten Register sind nach dem Setup als
        sensor.* Entity in Home Assistant sichtbar und liefern einen Wert."
@@ -180,3 +194,129 @@ requirement_all_registers_readable:
     - "Testfälle (tests/) decken sowohl die SunSpec-Skalierung als auch
        die Summenberechnung ab, inklusive eines End-to-End-Tests gegen
        einen simulierten Extended-Mode-Modbus-Server (Slave-ID 40)."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): IP-ADRESSE ÜBER DIE OBERFLÄCHE ÄNDERBAR
+# ==============================================================================
+requirement_ip_configurable_ui:
+  id: REQ-IP-CONFIGURABLE-UI
+  title: "IP-Adresse des SAX Speichers über die Home-Assistant-Oberfläche eintragbar, persistiert und jederzeit änderbar"
+  status: done
+  requested_by: user
+  description: >
+    Der Config Flow (Ersteinrichtung, `async_step_user`) fragte bereits
+    IP-Adresse, Port, Slave-IDs und Aktualisierungsintervall ab und
+    persistierte sie im Home-Assistant-Config-Entry - eine Möglichkeit,
+    diese Werte NACH der Ersteinrichtung wieder zu ändern, fehlte jedoch.
+    Ergänzt wurde ein Reconfigure-Flow (`async_step_reconfigure`), über den
+    Menüpunkt "Neu konfigurieren" am Gerät jederzeit aufrufbar:
+      - Formular ist mit den aktuell gespeicherten Werten vorbelegt.
+      - Verbindung wird vor dem Speichern erneut validiert (derselbe
+        Testread wie bei der Ersteinrichtung).
+      - Bei Erfolg werden die neuen Werte vollständig persistiert
+        (`entry.data`) und die Integration automatisch neu geladen -
+        SaxPowerCoordinator/Client werden mit der neuen IP neu aufgebaut.
+      - Kollisionsprüfung schließt Duplikate mit einem *anderen* bereits
+        konfigurierten Speicher aus, ohne beim unveränderten Speichern der
+        eigenen (unveränderten) IP fälschlich abzubrechen.
+  requirements:
+    - "Reconfigure-Formular verwendet dieselben Felder wie die
+       Ersteinrichtung (IP-Adresse, Port, Slave-IDs, Intervall)."
+    - "Fehlermeldungen unterscheiden TCP-Verbindungsfehler
+       ('cannot_connect') von einer Modbus-Fehlerantwort bei bestehender
+       Verbindung ('invalid_response', z. B. falsche Slave-ID) - siehe
+       config_flow.CannotConnect / InvalidResponse."
+    - "hacs.json/manifest verlangen mindestens die Home-Assistant-Version,
+       die den Reconfigure-Flow (`SOURCE_RECONFIGURE`,
+       `async_update_reload_and_abort`) unterstützt."
+  acceptance_criteria:
+    - "tests/test_config_flow.py deckt sowohl erfolgreiche IP-Änderung
+       (inkl. Persistierung + Neuladen) als auch fehlgeschlagene Validierung
+       (Daten bleiben unverändert) ab."
+    - "README.md beschreibt, wie die IP-Adresse nachträglich geändert
+       wird (Gerät -> Neu konfigurieren)."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): BUGFIX "KEINE SENSOREN IN HOME ASSISTANT"
+# ==============================================================================
+requirement_extended_mode_resilience:
+  id: REQ-EXTENDED-MODE-RESILIENCE
+  title: "Nicht erreichbarer Extended-Mode-Block darf nicht mehr alle Sensoren lahmlegen"
+  status: done
+  requested_by: user
+  description: >
+    Ursache für "in Home Assistant werden keine Sensoren angeboten": Seit
+    REQ-ALL-REGISTERS-READABLE fragt der Coordinator zusätzlich zum Basic
+    Mode (Slave-ID 64) auch den Extended-Mode-Block (Slave-ID 40) ab und
+    ließ das GESAMTE Update fehlschlagen, wenn dieser zweite Read scheitert
+    (z. B. weil Extended Mode auf dem realen SAX-Gateway nicht freigeschaltet
+    oder das Register dort nicht erreichbar ist). Ein fehlschlagendes
+    `async_config_entry_first_refresh()` löst in Home Assistant
+    `ConfigEntryNotReady` aus - die Config Entry wird dann nie fertig
+    aufgebaut und es werden gar keine Entities angelegt, auch nicht die
+    Basic-Mode-Sensoren (SOC, Lade-/Entladeleistung, Schalter), die mit
+    Extended Mode gar nichts zu tun haben.
+
+    Fix: Basic Mode und Extended Mode werden im Coordinator entkoppelt
+    (`SaxPowerCoordinator._async_read_extended`):
+      - Scheitert der Basic-Mode-Read weiterhin: UpdateFailed wie bisher,
+        da Basic Mode die Mindestanforderung für jede Funktion ist.
+      - Scheitert der Extended-Mode-Read: Update schlägt NICHT fehl, die
+        Extended-Mode-Schlüssel fehlen für diesen Zyklus in
+        `coordinator.data` (Sensoren zeigen "unbekannt"), Basic-Mode-Daten
+        bleiben unverändert verfügbar. Bei Wiederherstellung werden die
+        Extended-Mode-Sensoren automatisch wieder befüllt.
+      - Zustandswechsel (verfügbar -> nicht verfügbar -> wieder verfügbar)
+        werden geloggt (WARNING/INFO) und zusätzlich als Home-Assistant-
+        Repair-Issue (`extended_mode_unavailable`) sichtbar gemacht, damit
+        der Anwender eine klare, dauerhaft sichtbare Fehlermeldung im UI
+        erhält statt nur einen Log-Eintrag.
+  acceptance_criteria:
+    - "Live-Test gegen einen simulierten Modbus-Server ohne Extended-Mode-
+       Gerät (Slave-ID 40 nicht im Server-Context) zeigt: Config Entry lädt
+       erfolgreich, Basic-Mode-Sensoren liefern echte Werte, Extended-Mode-
+       Sensoren existieren als Entity mit Zustand 'unbekannt'
+       (tests/test_integration_live.py,
+       test_live_modbus_extended_mode_unavailable_keeps_basic_sensors)."
+    - "Unit-Tests decken sowohl den Übergang verfügbar -> nicht verfügbar
+       als auch die Wiederherstellung ab (tests/test_coordinator.py)."
+    - "README.md, Abschnitt 'Bekannte Lücken', ist entsprechend
+       aktualisiert (Extended Mode ist nicht mehr Pflicht)."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): TESTS GEGEN ECHTE SAX-HARDWARE
+# ==============================================================================
+requirement_real_hardware_tests:
+  id: REQ-REAL-HARDWARE-TESTS
+  title: "Testfälle lesen echte Werte von einem physischen SAX Speicher"
+  status: done
+  requested_by: user
+  description: >
+    Ergänzend zu test_integration_live.py (echtes Wire-Protokoll, aber
+    simulierter Modbus-Server) liest tests/test_real_hardware.py Werte von
+    einem *echten* SAX Power Home (Plus) im lokalen Netz - rein lesend,
+    kein Schreibzugriff auf ein ggf. produktives Speichersystem.
+
+    Die IP-Adresse des Ziel-Speichers ist in tests/real_device.yaml im
+    Repository abgelegt (wie vom Anwender gefordert: "Die IP soll im Repo
+    abgespeichert werden"), getrennt von der eigentlichen Integration
+    (dort bleibt die IP wie gehabt ausschließlich im Home-Assistant-
+    Config-Entry, siehe REQ-IP-CONFIGURABLE-UI). Ist dort keine IP
+    hinterlegt (Auslieferungszustand: `host: null`) oder der Speicher
+    nicht erreichbar, wird der Test automatisch übersprungen (`pytest.skip`)
+    - er blockiert also weder CI noch die Arbeit von Entwicklern ohne
+    physischen Zugriff auf die Hardware.
+  requirements:
+    - "tests/real_device.yaml enthält Host, Port, beide Slave-IDs und einen
+       Verbindungs-Timeout, mit Kommentar zur Verwendung."
+    - "Gelesene Basic-Mode-Werte (SOC, Leistung) werden auf plausible
+       Wertebereiche geprüft statt auf feste erwartete Werte, da der
+       tatsächliche Gerätezustand zur Testzeit unbekannt ist."
+    - "Ist Extended Mode auf dem realen Gerät nicht erreichbar, wird der
+       entsprechende Testfall übersprungen statt fehlzuschlagen (konsistent
+       mit REQ-EXTENDED-MODE-RESILIENCE)."
+  acceptance_criteria:
+    - "pytest läuft ohne hinterlegte IP vollständig durch (2 Tests werden
+       übersprungen, keine Fehler)."
+    - "README.md beschreibt tests/real_device.yaml und wie der
+       Live-Hardware-Test aktiviert wird."

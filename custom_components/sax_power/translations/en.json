@@ -11,13 +11,26 @@
           "slave_id_extended": "Slave ID (Extended Mode)",
           "scan_interval": "Update interval (seconds)"
         }
+      },
+      "reconfigure": {
+        "title": "Change SAX Power Home connection",
+        "description": "Update the IP address or other connection details of the SAX Power Home (Plus) storage system. The integration reloads automatically with the new values after saving.",
+        "data": {
+          "host": "IP address",
+          "port": "Port",
+          "slave_id_basic": "Slave ID (Basic Mode)",
+          "slave_id_extended": "Slave ID (Extended Mode)",
+          "scan_interval": "Update interval (seconds)"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the SAX storage system. Check IP address, port and slave ID."
+      "cannot_connect": "Failed to connect to the SAX storage system. Check the IP address and port, and that the storage system is reachable on the network.",
+      "invalid_response": "Connected to the storage system, but it replied with a Modbus error. Check the slave ID (Basic Mode)."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "reconfigure_successful": "The connection details have been updated."
     }
   },
   "entity": {
@@ -182,6 +195,12 @@
       "storage": {
         "name": "Storage"
       }
+    }
+  },
+  "issues": {
+    "extended_mode_unavailable": {
+      "title": "SAX Extended Mode unreachable",
+      "description": "The Extended Mode register block (slave ID {slave_id}) of the SAX storage system is unreachable. Sensors that depend on it (SunSpec readings, smart meter detail values) show \"unknown\" until the connection is restored. Basic Mode sensors (state of charge, charge/discharge power, switch) are not affected. Please check whether Extended Mode is enabled on the SAX gateway and whether the configured slave ID (Extended Mode) is correct."
     }
   },
   "services": {

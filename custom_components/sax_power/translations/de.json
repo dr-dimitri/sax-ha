@@ -222,9 +222,6 @@
       },
       "timed_charge_target_soc": {
         "name": "Ziel-SOC (Zeitfenster)"
-      },
-      "timed_charge_power": {
-        "name": "Ladeleistung (Zeitfenster)"
       }
     },
     "switch": {
@@ -241,6 +238,11 @@
       },
       "timed_charge_end": {
         "name": "Ende Zeitfenster"
+      }
+    },
+    "button": {
+      "start_discharge": {
+        "name": "Entladung starten"
       }
     }
   },

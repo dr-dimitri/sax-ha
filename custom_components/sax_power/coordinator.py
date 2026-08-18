@@ -20,7 +20,6 @@ from pymodbus.exceptions import ModbusException
 from .const import (
     BATTERY_EVENT_LABELS,
     CONTROL_MODE_LABELS,
-    DEFAULT_TIMED_CHARGE_POWER,
     DEFAULT_TIMED_CHARGE_TARGET_SOC,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
@@ -186,7 +185,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_target_soc = DEFAULT_TIMED_CHARGE_TARGET_SOC
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
-        self._timed_charge_power = DEFAULT_TIMED_CHARGE_POWER
         self._timed_charge_active = False
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
@@ -574,6 +572,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_charge_task.cancel()
             self._grid_charge_task = None
 
+    async def async_start_discharge(self) -> None:
+        """Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert
+        (Register 43, dieselbe Number-Entity "Entladeleistungsgrenzwert") als
+        Sollwert. Bewusst keine eigene Leistungseinstellung für diese
+        Aktion, um keine redundante Einstellmöglichkeit zu erzeugen (siehe
+        anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS). Nutzt
+        denselben Hintergrund-Task wie async_start_grid_charge/das
+        zeitgesteuerte Laden, siehe Kommentar oben.
+        """
+        if self.data is None:
+            raise HomeAssistantError("Noch keine Daten vom SAX Speicher verfügbar.")
+        await self.async_start_grid_charge(self.data["discharge_limit"])
+
     async def _async_grid_charge_loop(self) -> None:
         try:
             while True:
@@ -593,12 +604,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Nachtstromtarife). Nutzt intern denselben Mechanismus wie der
     # `start_grid_charge`-Service (periodischer P-Sollwert-Write auf
     # Register 41 über async_start_grid_charge/async_stop_grid_charge).
+    # Die Ladeleistung ist bewusst KEINE eigene Einstellung, sondern nutzt
+    # den zentralen Ladeleistungsgrenzwert (data["charge_limit"], Register
+    # 44) - dieselbe Number-Entity wie an anderer Stelle im UI, um keine
+    # redundante Einstellmöglichkeit zu erzeugen (siehe anforderung.yaml,
+    # REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
     #
     # Wichtig: Zeitgesteuertes Laden und der manuelle
-    # `start_grid_charge`/`stop_grid_charge`-Service teilen sich denselben
-    # Hintergrund-Task (_grid_charge_task). Werden beide gleichzeitig
-    # verwendet, gewinnt der zuletzt schreibende Aufruf - es gibt keine
-    # eigene Arbitrierung zwischen den beiden.
+    # `start_grid_charge`/`stop_grid_charge`-Service (sowie der
+    # "Entladung starten"-Button) teilen sich denselben Hintergrund-Task
+    # (_grid_charge_task). Werden mehrere davon gleichzeitig verwendet,
+    # gewinnt der zuletzt schreibende Aufruf - es gibt keine eigene
+    # Arbitrierung zwischen ihnen.
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -616,10 +633,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def timed_charge_end(self) -> dt_time | None:
         return self._timed_charge_end
 
-    @property
-    def timed_charge_power(self) -> int:
-        return self._timed_charge_power
-
     async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
         self._timed_charge_enabled = enabled
         await self._async_apply_timed_charge_change()
@@ -634,10 +647,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
         self._timed_charge_end = value
-        await self._async_apply_timed_charge_change()
-
-    async def async_set_timed_charge_power(self, value: int) -> None:
-        self._timed_charge_power = value
         await self._async_apply_timed_charge_change()
 
     async def _async_apply_timed_charge_change(self) -> None:
@@ -669,7 +678,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and data["soc"] < self._timed_charge_target_soc
         )
         if should_charge and not self._timed_charge_active:
-            await self.async_start_grid_charge(-self._timed_charge_power)
+            await self.async_start_grid_charge(-data["charge_limit"])
             self._timed_charge_active = True
         elif not should_charge and self._timed_charge_active:
             await self.async_stop_grid_charge()

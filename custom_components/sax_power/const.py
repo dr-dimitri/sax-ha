@@ -254,5 +254,7 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # von PV-Überschuss (z. B. für günstige Nachtstromtarife). Nutzt intern
 # denselben Mechanismus wie der `start_grid_charge`-Service (P-Sollwert-
 # Schreiben auf Register 41), siehe SaxPowerCoordinator._async_enforce_timed_charge.
+# Die Ladeleistung ist bewusst KEINE eigene Einstellung, sondern nutzt den
+# zentralen Ladeleistungsgrenzwert (Register 44) - siehe anforderung.yaml,
+# REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS.
 DEFAULT_TIMED_CHARGE_TARGET_SOC = 90
-DEFAULT_TIMED_CHARGE_POWER = 3000  # W, positiver Wert (wird beim Laden negiert)

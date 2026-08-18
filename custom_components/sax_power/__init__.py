@@ -18,8 +18,10 @@ from .const import (
     ATTR_POWER,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
+    CONF_SLAVE_ID_EXTENDED,
     DATA_COORDINATOR,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SLAVE_ID_EXTENDED,
     DOMAIN,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
@@ -62,6 +64,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         client,
         slave_id=entry.data[CONF_SLAVE_ID_BASIC],
+        slave_id_extended=entry.data.get(
+            CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED
+        ),
         scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
     )
     await coordinator.async_config_entry_first_refresh()

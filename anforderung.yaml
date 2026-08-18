@@ -77,3 +77,106 @@ Damit die lokale Entwicklung in VS Code auf Anhieb funktioniert, erzeugt das LLM
   "postCreateCommand": "pip install homeassistant pytest-homeassistant-custom-component ruff black pymodbus",
   "forwardPorts": [8123]
 }
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): ALLE MODBUS-REGISTER LESBAR + PHASENSUMMEN
+# Strukturiert als YAML (statt Freitext) für zuverlässiges LLM-Parsing.
+# ==============================================================================
+requirement_all_registers_readable:
+  id: REQ-ALL-REGISTERS-READABLE
+  title: "Alle Modbus-Register lesbar über Home Assistant + berechnete Phasensummen"
+  status: open
+  requested_by: user
+  description: >
+    Sämtliche in modbus_llm.yaml dokumentierten Modbus-Register (Basic Mode
+    Slave-ID 64 UND Extended Mode Slave-ID 40 für Speicher und Smart Meter)
+    sollen als Home Assistant SensorEntity lesbar sein - nicht nur die
+    bisher implementierte Teilmenge (SOC, Lade-/Entladeleistung). Register,
+    die bereits über NumberEntity/SwitchEntity weg-/rückles­bar sind
+    (Leistungsgrenzwerte, Speicher-Schaltzustand), zählen als "lesbar" und
+    benötigen keinen zusätzlichen Sensor.
+
+  scope:
+    include:
+      - group: basic_mode
+        slave_id: 64
+        register_range: [40042, 40049]
+        note: >
+          Inkl. der als "Write" markierten Sollwert-Register (Sollwert
+          Leistung P, Sollwert cos(phi)) zusätzlich als Nur-Lese-Sensor,
+          sowie "Leistung des Smart Meters" (40049), das bisher gelesen
+          aber nicht als Entity exponiert wurde.
+      - group: extended_mode_speicher
+        slave_id: 40
+        register_range: [40071, 40094]
+        note: >
+          SunSpec ID/Length, Phasenströme L1-L3 + Skalierungsfaktor,
+          Phasenspannungen L1-L3 + Skalierungsfaktor, Wirk-/Schein-/
+          Blindleistung + je Skalierungsfaktor, Netzfrequenz +
+          Skalierungsfaktor, Leistungsfaktor + Skalierungsfaktor.
+      - group: extended_mode_smart_meter
+        slave_id: 40
+        register_range: [40095, 40110]
+        note: >
+          Energie eingespeist/bezogen + Skalierungsfaktor, Schaltzustand
+          Speicher (Spiegel-Register), Phasenströme L1-L3, Phasen-
+          wirkleistung L1-L3 (in modbus_llm.yaml fälschlich als
+          L1/L12/L13 statt L1/L2/L3 benannt) + Skalierungsfaktor,
+          Phasenspannungen L1-L3 (unskaliert laut Doku), Summenleistung.
+    exclude:
+      - registers: [40078, 40079, 40080, 40095]
+        reason: >
+          Register ohne definierte Bedeutung laut Hersteller-Doku
+          (name: "N.A." in modbus_llm.yaml) können nicht sinnvoll benannt
+          und daher nicht sinnvoll als Entity exponiert werden.
+      - registers: [40349, 40353]
+        reason: >
+          "Immediate Controls" (Slave-ID 123) ist laut modbus_llm.yaml
+          "Future Release / Experimental (Stand 03/25 noch nicht
+          verfügbar)" und existiert auf aktueller Hardware nicht - daher
+          bewusst nicht implementiert.
+
+  requirements:
+    - "Jedes neue Sensor-Feld erhält einen deutschen, fachlich
+       verständlichen Namen (keine reinen Registernummern oder
+       unübersetzten SunSpec-Rohbezeichnungen als Anzeigename)."
+    - "SunSpec-Skalierungsfaktor-Register (sunssf) werden auf die
+       zugehörigen Messwerte angewendet (Wert * 10^sunssf, Exponent
+       vorzeichenbehaftet) UND zusätzlich selbst als Diagnose-Sensor
+       (entity_category: diagnostic) exponiert, damit wirklich alle
+       Register sichtbar bleiben."
+    - "Für jede Gruppe von Registern, die dieselbe physikalische Größe auf
+       den drei Phasen L1/L2/L3 abbildet, wird zusätzlich ein berechneter
+       Summenwert (L1+L2+L3) als eigener Sensor bereitgestellt - auch
+       wenn der Hersteller bereits einen eigenen Summen-Registerwert
+       anbietet (dieser bleibt parallel als separater, als
+       Herstellerwert gekennzeichneter Sensor erhalten, z. B. 'Summe
+       Phasenströme' in Register 40073)."
+    - phase_triplets_affected:
+        - { group: extended_mode_speicher, name: "Phasenströme", registers: [40074, 40075, 40076] }
+        - { group: extended_mode_speicher, name: "Phasenspannungen", registers: [40081, 40082, 40083] }
+        - { group: extended_mode_smart_meter, name: "Phasenströme", registers: [40100, 40101, 40102] }
+        - { group: extended_mode_smart_meter, name: "Phasenwirkleistung", registers: [40103, 40104, 40105] }
+        - { group: extended_mode_smart_meter, name: "Phasenspannungen", registers: [40107, 40108, 40109] }
+
+  architecture_note: >
+    Extended Mode (Slave-ID 40) wird bisher vom Coordinator nicht
+    abgefragt, obwohl slave_id_extended bereits im Config Flow erfasst
+    wird. Der Coordinator muss um einen zweiten Read-Block erweitert
+    werden (Register 40071-40110 sind zusammenhängend, ein einziger
+    read_holding_registers-Aufruf mit count=40 auf slave_id_extended
+    deckt Speicher- und Smart-Meter-Teilblock ab). Ein Update schlägt
+    fehl (UpdateFailed), wenn dieser zweite Read fehlschlägt - keine
+    Teilverfügbarkeit einzelner Register-Gruppen.
+
+  acceptance_criteria:
+    - "Alle in scope.include gelisteten Register sind nach dem Setup als
+       sensor.* Entity in Home Assistant sichtbar und liefern einen Wert."
+    - "Jede unter phase_triplets_affected gelistete Phasen-Trio-Gruppe hat
+       zusätzlich genau einen berechneten Summen-Sensor."
+    - "README.md beschreibt die neuen Sensoren, gruppiert nach Basic
+       Mode / Extended Mode Speicher / Extended Mode Smart Meter, sowie
+       die Summenlogik."
+    - "Testfälle (tests/) decken sowohl die SunSpec-Skalierung als auch
+       die Summenberechnung ab, inklusive eines End-to-End-Tests gegen
+       einen simulierten Extended-Mode-Modbus-Server (Slave-ID 40)."

@@ -22,17 +22,166 @@
   },
   "entity": {
     "sensor": {
-      "soc": { "name": "State of charge" },
-      "discharge_power": { "name": "Discharge power" },
-      "charge_power": { "name": "Charge power" }
+      "soc": {
+        "name": "State of charge"
+      },
+      "discharge_power": {
+        "name": "Discharge power"
+      },
+      "charge_power": {
+        "name": "Charge power"
+      },
+      "smartmeter_power": {
+        "name": "Smart meter power (Basic Mode)"
+      },
+      "switch_state_text": {
+        "name": "Storage switch state (text)"
+      },
+      "setpoint_power": {
+        "name": "Setpoint power P"
+      },
+      "setpoint_cosphi": {
+        "name": "Setpoint cos(phi)"
+      },
+      "ext_sunspec_id": {
+        "name": "SunSpec ID"
+      },
+      "ext_sunspec_length": {
+        "name": "SunSpec length"
+      },
+      "ext_current_sum_native": {
+        "name": "Phase current sum (manufacturer value)"
+      },
+      "ext_current_l1": {
+        "name": "Phase current L1"
+      },
+      "ext_current_l2": {
+        "name": "Phase current L2"
+      },
+      "ext_current_l3": {
+        "name": "Phase current L3"
+      },
+      "ext_current_sf": {
+        "name": "Phase current scale factor"
+      },
+      "ext_current_sum": {
+        "name": "Phase current sum (L1+L2+L3, calculated)"
+      },
+      "ext_voltage_l1": {
+        "name": "Voltage L1"
+      },
+      "ext_voltage_l2": {
+        "name": "Voltage L2"
+      },
+      "ext_voltage_l3": {
+        "name": "Voltage L3"
+      },
+      "ext_voltage_sf": {
+        "name": "Voltage scale factor"
+      },
+      "ext_voltage_sum": {
+        "name": "Voltage sum (L1+L2+L3, calculated)"
+      },
+      "ext_power_active": {
+        "name": "Active power sum (AC)"
+      },
+      "ext_power_active_sf": {
+        "name": "Active power scale factor"
+      },
+      "ext_frequency": {
+        "name": "Grid frequency"
+      },
+      "ext_frequency_sf": {
+        "name": "Grid frequency scale factor"
+      },
+      "ext_power_apparent": {
+        "name": "Apparent power sum (AC)"
+      },
+      "ext_power_apparent_sf": {
+        "name": "Apparent power scale factor"
+      },
+      "ext_power_reactive": {
+        "name": "Reactive power sum (AC)"
+      },
+      "ext_power_reactive_sf": {
+        "name": "Reactive power scale factor"
+      },
+      "ext_power_factor": {
+        "name": "Power factor"
+      },
+      "ext_power_factor_sf": {
+        "name": "Power factor scale factor"
+      },
+      "sm_energy_fed_in": {
+        "name": "Smart meter energy fed in"
+      },
+      "sm_energy_consumed": {
+        "name": "Smart meter energy consumed"
+      },
+      "sm_energy_sf": {
+        "name": "Smart meter energy scale factor"
+      },
+      "sm_switch_state_text": {
+        "name": "Smart meter storage switch state"
+      },
+      "sm_current_l1": {
+        "name": "Smart meter current L1"
+      },
+      "sm_current_l2": {
+        "name": "Smart meter current L2"
+      },
+      "sm_current_l3": {
+        "name": "Smart meter current L3"
+      },
+      "sm_current_sum": {
+        "name": "Smart meter current sum (L1+L2+L3, calculated)"
+      },
+      "sm_power_l1": {
+        "name": "Smart meter active power L1"
+      },
+      "sm_power_l2": {
+        "name": "Smart meter active power L2"
+      },
+      "sm_power_l3": {
+        "name": "Smart meter active power L3"
+      },
+      "sm_power_sf": {
+        "name": "Smart meter active power scale factor"
+      },
+      "sm_power_sum": {
+        "name": "Smart meter active power sum (L1+L2+L3, calculated)"
+      },
+      "sm_voltage_l1": {
+        "name": "Smart meter voltage L1"
+      },
+      "sm_voltage_l2": {
+        "name": "Smart meter voltage L2"
+      },
+      "sm_voltage_l3": {
+        "name": "Smart meter voltage L3"
+      },
+      "sm_voltage_sum": {
+        "name": "Smart meter voltage sum (L1+L2+L3, calculated)"
+      },
+      "sm_power_total": {
+        "name": "Smart meter total active power"
+      }
     },
     "number": {
-      "max_soc": { "name": "Maximum charge SOC" },
-      "charge_limit": { "name": "Charge power limit" },
-      "discharge_limit": { "name": "Discharge power limit" }
+      "max_soc": {
+        "name": "Maximum charge SOC"
+      },
+      "charge_limit": {
+        "name": "Charge power limit"
+      },
+      "discharge_limit": {
+        "name": "Discharge power limit"
+      }
     },
     "switch": {
-      "storage": { "name": "Storage" }
+      "storage": {
+        "name": "Storage"
+      }
     }
   },
   "services": {
@@ -40,15 +189,24 @@
       "name": "Start grid charge",
       "description": "Starts grid charging of the SAX storage system.",
       "fields": {
-        "device_id": { "name": "Device", "description": "The SAX Power device." },
-        "power": { "name": "Power", "description": "Setpoint for grid charging in watts." }
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Setpoint for grid charging in watts."
+        }
       }
     },
     "stop_grid_charge": {
       "name": "Stop grid charge",
       "description": "Stops the periodic setpoint writes of grid charging.",
       "fields": {
-        "device_id": { "name": "Device", "description": "The SAX Power device." }
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        }
       }
     }
   }

@@ -22,17 +22,166 @@
   },
   "entity": {
     "sensor": {
-      "soc": { "name": "Ladezustand" },
-      "discharge_power": { "name": "Entladeleistung" },
-      "charge_power": { "name": "Ladeleistung" }
+      "soc": {
+        "name": "Ladezustand"
+      },
+      "discharge_power": {
+        "name": "Entladeleistung"
+      },
+      "charge_power": {
+        "name": "Ladeleistung"
+      },
+      "smartmeter_power": {
+        "name": "Smart Meter Leistung (Basic Mode)"
+      },
+      "switch_state_text": {
+        "name": "Speicher Schaltzustand (Text)"
+      },
+      "setpoint_power": {
+        "name": "Sollwert Leistung P"
+      },
+      "setpoint_cosphi": {
+        "name": "Sollwert cos(phi)"
+      },
+      "ext_sunspec_id": {
+        "name": "SunSpec ID"
+      },
+      "ext_sunspec_length": {
+        "name": "SunSpec Länge"
+      },
+      "ext_current_sum_native": {
+        "name": "Phasenstrom Summe (Herstellerwert)"
+      },
+      "ext_current_l1": {
+        "name": "Phasenstrom L1"
+      },
+      "ext_current_l2": {
+        "name": "Phasenstrom L2"
+      },
+      "ext_current_l3": {
+        "name": "Phasenstrom L3"
+      },
+      "ext_current_sf": {
+        "name": "Phasenstrom Skalierungsfaktor"
+      },
+      "ext_current_sum": {
+        "name": "Phasenstrom Summe (L1+L2+L3, berechnet)"
+      },
+      "ext_voltage_l1": {
+        "name": "Spannung L1"
+      },
+      "ext_voltage_l2": {
+        "name": "Spannung L2"
+      },
+      "ext_voltage_l3": {
+        "name": "Spannung L3"
+      },
+      "ext_voltage_sf": {
+        "name": "Spannung Skalierungsfaktor"
+      },
+      "ext_voltage_sum": {
+        "name": "Spannung Summe (L1+L2+L3, berechnet)"
+      },
+      "ext_power_active": {
+        "name": "Wirkleistung Summe (AC)"
+      },
+      "ext_power_active_sf": {
+        "name": "Wirkleistung Skalierungsfaktor"
+      },
+      "ext_frequency": {
+        "name": "Netzfrequenz"
+      },
+      "ext_frequency_sf": {
+        "name": "Netzfrequenz Skalierungsfaktor"
+      },
+      "ext_power_apparent": {
+        "name": "Scheinleistung Summe (AC)"
+      },
+      "ext_power_apparent_sf": {
+        "name": "Scheinleistung Skalierungsfaktor"
+      },
+      "ext_power_reactive": {
+        "name": "Blindleistung Summe (AC)"
+      },
+      "ext_power_reactive_sf": {
+        "name": "Blindleistung Skalierungsfaktor"
+      },
+      "ext_power_factor": {
+        "name": "Leistungsfaktor"
+      },
+      "ext_power_factor_sf": {
+        "name": "Leistungsfaktor Skalierungsfaktor"
+      },
+      "sm_energy_fed_in": {
+        "name": "Smart Meter Energie eingespeist"
+      },
+      "sm_energy_consumed": {
+        "name": "Smart Meter Energie bezogen"
+      },
+      "sm_energy_sf": {
+        "name": "Smart Meter Energie Skalierungsfaktor"
+      },
+      "sm_switch_state_text": {
+        "name": "Smart Meter Schaltzustand Speicher"
+      },
+      "sm_current_l1": {
+        "name": "Smart Meter Strom L1"
+      },
+      "sm_current_l2": {
+        "name": "Smart Meter Strom L2"
+      },
+      "sm_current_l3": {
+        "name": "Smart Meter Strom L3"
+      },
+      "sm_current_sum": {
+        "name": "Smart Meter Strom Summe (L1+L2+L3, berechnet)"
+      },
+      "sm_power_l1": {
+        "name": "Smart Meter Wirkleistung L1"
+      },
+      "sm_power_l2": {
+        "name": "Smart Meter Wirkleistung L2"
+      },
+      "sm_power_l3": {
+        "name": "Smart Meter Wirkleistung L3"
+      },
+      "sm_power_sf": {
+        "name": "Smart Meter Wirkleistung Skalierungsfaktor"
+      },
+      "sm_power_sum": {
+        "name": "Smart Meter Wirkleistung Summe (L1+L2+L3, berechnet)"
+      },
+      "sm_voltage_l1": {
+        "name": "Smart Meter Spannung L1"
+      },
+      "sm_voltage_l2": {
+        "name": "Smart Meter Spannung L2"
+      },
+      "sm_voltage_l3": {
+        "name": "Smart Meter Spannung L3"
+      },
+      "sm_voltage_sum": {
+        "name": "Smart Meter Spannung Summe (L1+L2+L3, berechnet)"
+      },
+      "sm_power_total": {
+        "name": "Smart Meter Wirkleistung Gesamt"
+      }
     },
     "number": {
-      "max_soc": { "name": "Maximaler Lade-SOC" },
-      "charge_limit": { "name": "Ladeleistungsgrenzwert" },
-      "discharge_limit": { "name": "Entladeleistungsgrenzwert" }
+      "max_soc": {
+        "name": "Maximaler Lade-SOC"
+      },
+      "charge_limit": {
+        "name": "Ladeleistungsgrenzwert"
+      },
+      "discharge_limit": {
+        "name": "Entladeleistungsgrenzwert"
+      }
     },
     "switch": {
-      "storage": { "name": "Speicher" }
+      "storage": {
+        "name": "Speicher"
+      }
     }
   },
   "services": {
@@ -40,15 +189,24 @@
       "name": "Netzladung starten",
       "description": "Startet die Netzladung des SAX Speichers.",
       "fields": {
-        "device_id": { "name": "Gerät", "description": "Das SAX Power Gerät." },
-        "power": { "name": "Leistung", "description": "Sollwert für die Netzladung in Watt." }
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        },
+        "power": {
+          "name": "Leistung",
+          "description": "Sollwert für die Netzladung in Watt."
+        }
       }
     },
     "stop_grid_charge": {
       "name": "Netzladung stoppen",
       "description": "Beendet die periodischen Sollwert-Schreibbefehle der Netzladung.",
       "fields": {
-        "device_id": { "name": "Gerät", "description": "Das SAX Power Gerät." }
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        }
       }
     }
   }

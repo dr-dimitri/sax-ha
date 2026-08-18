@@ -1,463 +1,303 @@
-Hier ist die ergänzte Anweisung, die den DevContainer für lokale Testumgebungen (inkl. VS Code Integration) abdeckt sowie die neuen Funktionen (Maximaler SOC und Netzladung) berücksichtigt.
-Promp-Anweisung für das LLM (Coding Prompt)
-Du bist ein erfahrener Home Assistant Core Entwickler. Deine Aufgabe ist es, eine benutzerdefinierte Home Assistant Integration (Custom Component) in Python für das SAX Power Home (Plus) Speichersystem auf Basis der Modbus-TCP-Spezifikation zu schreiben.
-Alle Änderungen die vorgenommen werden, müssen hier eingetragen und überarbeitet werden.
-Wichtig ist, dass die einfache Lesbarkeit für ein LLM erhalten bleibt.
-
-Befolge bei der Codegenerierung strikt die folgenden Best Practices, Architekturmuster, Sicherheitsrichtlinien und Entwicklungsstandards:
-
-1. ENTWICKLUNGSUMGEBUNG & DEVCONTAINER (LOKALE TESTS)
-- Lege eine vollständige Entwicklungs- und Testkonfiguration für VS Code DevContainer an (`.devcontainer/devcontainer.json` & `.devcontainer/Dockerfile`).
-- Verwende das offizielle Home Assistant DevContainer Image (`mcr.microsoft.com/devcontainers/python:3.12` oder die offizielle Home Assistant Core Development Environment).
-- Integriere VS Code Extensions für Python (ms-python.python), Black Formatter (ms-python.black-formatter), Ruff (charliermarsh.ruff) und YAML (redhat.vscode-yaml).
-- Richte automatisierte Tasks ein, um Home Assistant lokal im Testmodus mit geladener Component auszuführen (`hass -c config`).
-- Binde `pytest`, `pytest-homeassistant-custom-component` und `pytest-asyncio` als Test-Dependencies ein, um Unit-Tests lokal ausführen zu können.
-
-2. ARCHITEKTUR & HOME ASSISTANT STANDARDS
-- Asynchrone Architektur: Der gesamte I/O-Code muss vollständig asynchron laufen (`async`/`await`). Verwende `pymodbus.client.AsyncModbusTcpClient`.
-- DataUpdateCoordinator: Implementiere einen zentralen `DataUpdateCoordinator` in `coordinator.py`. Alle Entitäten beziehen ihre Daten ausschließlich über diesen Coordinator (Prevention von Polling-Spam).
-- Config Flow: Erstelle einen GUI-basierten Einrichtungsprozess (`config_flow.py`). Yaml-Konfigurationen sind veraltet. Abzufragende Parameter beim Setup: IP-Adresse, Port (Default 502), Slave-IDs (Default 64 & 40), Aktualisierungsintervall (Default 10s).
-- Entitätstypen:
-  * Lese-Register -> `SensorEntity` (`sensor.py`)
-  * Schreibbare Leistungswerte / Limits -> `NumberEntity` (`number.py`)
-  * Schalter & Netzwerksteuerung -> `SwitchEntity` / `ButtonEntity` (`switch.py`, `button.py`)
-
-3. ERFORDERLICHE ERWEITERTE FUNKTIONALITÄTEN
-Die Bescheibung der vorhandenen Modbusregister findest Du in der Datei mudbus_llm.yaml
-- Max. SOC Einstellung:
-  * Erstelle eine `NumberEntity` für den maximalen Lade-SOC des Speichers (z. B. 0–100 %).
-  * Steuere das Entlade-/Ladelimit dynamisch oder passe die Registerwerte bei Erreichen des Max-SOC an.
-- Start Netzladung (Grid Charge):
-  * Implementiere eine Funktion (via `SwitchEntity` oder als Home Assistant Service `sax_power.start_grid_charge`), um das Laden aus dem Netz manuell einzuleiten.
-  * Hierfür muss das System in den P-Sollwert-Modus schalten (Slave-ID 64, Register 40042 / Interne Adr. 41) und ein negativer/positiver Leistungssollwert übergeben werden.
-  * Beachte: Periodisches Wiederholen der Schreibbefehle (alle 5 s bis 5 min) bei aktiver Netzladung zur Vermeidung von Timeout-Resets.
-- Anzeige des SOC in Prozent
-- Anzeige der Entladung ins Hausnetz in Watt
-- Anzeige der Temperatur
-- Anzeige der Ladelesitung in Watt
-
-4. MODBUS REGISTERS & BERECHNUNGEN
-- Address Offset: Interne Registeradresse = Protokolladresse - 40001.
-- SunSpec-Skalierung (sunssf): Implementiere eine Hilfsfunktion für Skalierungsfaktoren als Exponent von 10 (`Wert * 10^sunssf`).
-- Write Periodic Task: Implementiere im Coordinator oder in der Entität einen Hintergrund-Task, der aktiven Sollwert-Schreibbefehlen periodisch auffrischt.
-
-5. CODE-QUALITÄT, FORMATIERUNG & SICHERHEIT
-- Typisierung & Linting: Strikte Verwendung von Type Hints (PEP 484). Konformität mit Ruff/Black und PEP 8.
-- Ordnerstruktur:
-  * `.devcontainer/` (devcontainer.json, Dockerfile)
-  * `custom_components/sax_power/`
-    - `manifest.json` (iot_class: local_polling, requirements: ["pymodbus>=3.5.0"])
-    - `const.py` (Zentrale Register, Limits, Domain)
-    - `__init__.py` (Setup, Async Entry)
-    - `config_flow.py` (Options & Config Flow)
-    - `coordinator.py` (DataUpdateCoordinator & Modbus-Abfragen)
-    - `sensor.py`, `number.py`, `switch.py`
-    - `services.yaml` (Exponierte Services für Netzladung)
-  * `tests/` (Async Testfiles für Pytest)
-- Fehlerbehandlung: Fange `ModbusException` und `asyncio.TimeoutError` sauber ab. Mappe sie auf `UpdateFailed` bzw. `ConfigEntryNotReady`.
-- Security: Transaktionsprüfungen und Absicherung gegen ungültige Wertebereichseingaben (Range Validation).
-
-Erstelle nun die Konfigurationsdateien für den DevContainer sowie den Python-Code der Kernkomponenten.
-
-Zusätzliche DevContainer-Struktur (Erklärung)
-Damit die lokale Entwicklung in VS Code auf Anhieb funktioniert, erzeugt das LLM folgende zusätzliche Dateien für deinen Ordner:
-1. .devcontainer/devcontainer.json
-{
-  "name": "Home Assistant Dev Environment",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bullseye",
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "charliermarsh.ruff",
-        "ms-python.black-formatter",
-        "redhat.vscode-yaml"
-      ]
-    }
-  },
-  "postCreateCommand": "pip install homeassistant pytest-homeassistant-custom-component ruff black pymodbus",
-  "forwardPorts": [8123]
-}
+# ==============================================================================
+# HINWEIS FÜR KÜNFTIGE ÄNDERUNGEN AN DIESER DATEI
+# ==============================================================================
+# Diese Datei beschreibt ausschließlich den aktuellen Ist-Zustand der
+# Anforderungen an die Integration und deren Umsetzung. Sie ist KEIN
+# Änderungsprotokoll und keine Chronik:
+#
+#   - Kein "requested_by", keine Erzählung, wie/warum/durch wen eine
+#     Anforderung entstanden ist (kein "Nutzer berichtete...", "Live-Test
+#     ergab...", "frühere Version hatte fälschlich...").
+#   - Keine Beschreibung vergangener Fehler, Debugging-Wege oder
+#     verworfener Zwischenstände - nur das aktuell gültige Verhalten.
+#   - Jeder requirement_*-Block enthält ausschließlich: id, title, status
+#     (done/open/partially_done), description (reiner Ist-Zustand), sowie
+#     bei Bedarf requirements/acceptance_criteria (aktuell gültige,
+#     prüfbare Kriterien).
+#   - Historie (wer/wann/warum eine Änderung vorgenommen wurde) gehört in
+#     die Git-Historie (Commit-Nachrichten, Pull Requests), nicht hierher.
+#
+# Beim Hinzufügen neuer oder Ändern bestehender Anforderungen: überholte
+# Formulierungen ERSETZEN statt ergänzen. Diese Datei bildet immer nur den
+# aktuellen Zustand ab, nie den Weg dorthin.
+# ==============================================================================
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): ALLE MODBUS-REGISTER LESBAR + PHASENSUMMEN
-# Strukturiert als YAML (statt Freitext) für zuverlässiges LLM-Parsing.
+# ARCHITEKTUR & HOME ASSISTANT STANDARDS
+# ==============================================================================
+# - Asynchrone Architektur: Sämtlicher I/O-Code läuft vollständig asynchron
+#   (async/await) über pymodbus.client.AsyncModbusTcpClient.
+# - Ein zentraler DataUpdateCoordinator (coordinator.py) bündelt alle Reads/
+#   Writes; sämtliche Entitäten beziehen ihre Daten ausschließlich aus
+#   coordinator.data (kein eigenes Polling einzelner Entitäten).
+# - Einrichtung ausschließlich über den GUI-Config-Flow (config_flow.py):
+#   IP-Adresse, Port (Default 502), Slave-ID Basic Mode (Default 64),
+#   Slave-ID SunSpec-Modus (Default 100), Aktualisierungsintervall
+#   (Default 10s). Keine YAML-Konfiguration.
+# - Entitätstypen: Lese-Register -> SensorEntity (sensor.py); schreibbare
+#   Leistungswerte/Limits -> NumberEntity (number.py); Schalter ->
+#   SwitchEntity (switch.py); zustandslose Aktionen -> ButtonEntity
+#   (button.py); Zeitfenster -> TimeEntity (time.py).
+# - Typisierung & Linting: durchgängige Type Hints (PEP 484), Konformität
+#   mit Ruff/Black und PEP 8.
+# - Fehlerbehandlung: ModbusException und asyncio.TimeoutError werden
+#   abgefangen und auf UpdateFailed bzw. ConfigEntryNotReady gemappt.
+# - Security: Transaktions- und Wertebereichsprüfung (Range Validation) vor
+#   jedem Schreibzugriff.
+#
+# Ordnerstruktur:
+#   .devcontainer/                DevContainer für lokale Entwicklung
+#   custom_components/sax_power/
+#     manifest.json                Metadaten, Requirements (pymodbus>=3.10.0), Domain
+#     const.py                     Register-/Konfigurationskonstanten, Defaults
+#     config_flow.py                GUI-Einrichtung + Reconfigure-Flow
+#     coordinator.py                DataUpdateCoordinator: Reads, Writes, Software-Logik
+#     entity.py                     Basisklasse mit gemeinsamer DeviceInfo
+#     __init__.py                   Setup/Teardown des Config Entry, Services
+#     sensor.py / number.py / switch.py / time.py / button.py   Plattformen
+#     services.yaml                 Service-Schema für die UI
+#     translations/                 DE/EN-Übersetzungen
+#   tests/                         Testfälle (siehe README.md, Abschnitt Tests)
+#
+# ==============================================================================
+# MODBUS-REGISTER & BERECHNUNGEN
+# ==============================================================================
+# - Basic Mode (Slave-ID 64): interne Registeradresse = Protokolladresse -
+#   40001.
+# - SunSpec-Modus (Slave-ID 100): interne Registeradresse = Protokolladresse
+#   - 40000 (anderer Offset als Basic Mode).
+# - SunSpec-Skalierung (sunssf): Wert * 10^sunssf (Exponent vorzeichen-
+#   behaftet), siehe coordinator.apply_sunssf.
+# - Die vollständige Registerzuordnung (Protokolladresse <-> interne Adresse
+#   <-> Bedeutung) steht in modbus_llm.yaml, verifiziert gegen die
+#   offizielle sax-power.net-Dokumentation modbus.pdf.
+# - Periodische Sollwert-Writes (Netzladung, zeitgesteuertes Laden,
+#   Entladung starten) werden alle 30s wiederholt, solange der jeweilige
+#   Mechanismus aktiv ist, da der Speicher einen nicht periodisch
+#   aufgefrischten Sollwert nach einem Timeout verwirft.
+#
+# ==============================================================================
+# ENTWICKLUNGSUMGEBUNG (DEVCONTAINER)
+# ==============================================================================
+# .devcontainer/devcontainer.json:
+#
+# {
+#   "name": "Home Assistant Dev Environment",
+#   "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bullseye",
+#   "customizations": {
+#     "vscode": {
+#       "extensions": [
+#         "ms-python.python",
+#         "ms-python.vscode-pylance",
+#         "charliermarsh.ruff",
+#         "ms-python.black-formatter",
+#         "redhat.vscode-yaml"
+#       ]
+#     }
+#   },
+#   "postCreateCommand": "pip install homeassistant pytest-homeassistant-custom-component ruff black pymodbus",
+#   "forwardPorts": [8123]
+# }
+#
+# Im Container steht `hass -c config` bereit (lokale Home-Assistant-Instanz
+# mit verlinkter Custom Component, Port 8123), außerdem pytest, ruff und
+# black.
+
+# ==============================================================================
+# ANFORDERUNG: ALLE MODBUS-REGISTER LESBAR
 # ==============================================================================
 requirement_all_registers_readable:
   id: REQ-ALL-REGISTERS-READABLE
   title: "Alle Modbus-Register lesbar über Home Assistant + berechnete Phasensummen"
-  status: open
-  requested_by: user
+  status: done
   description: >
-    Sämtliche in modbus_llm.yaml dokumentierten Modbus-Register (Basic Mode
-    Slave-ID 64 UND Extended Mode Slave-ID 40 für Speicher und Smart Meter)
-    sollen als Home Assistant SensorEntity lesbar sein - nicht nur die
-    bisher implementierte Teilmenge (SOC, Lade-/Entladeleistung). Register,
-    die bereits über NumberEntity/SwitchEntity weg-/rückles­bar sind
-    (Leistungsgrenzwerte, Speicher-Schaltzustand), zählen als "lesbar" und
-    benötigen keinen zusätzlichen Sensor.
-
-  scope:
-    include:
-      - group: basic_mode
-        slave_id: 64
-        register_range: [40042, 40049]
-        note: >
-          Inkl. der als "Write" markierten Sollwert-Register (Sollwert
-          Leistung P, Sollwert cos(phi)) zusätzlich als Nur-Lese-Sensor,
-          sowie "Leistung des Smart Meters" (40049), das bisher gelesen
-          aber nicht als Entity exponiert wurde.
-      - group: extended_mode_speicher
-        slave_id: 40
-        register_range: [40071, 40094]
-        note: >
-          SunSpec ID/Length, Phasenströme L1-L3 + Skalierungsfaktor,
-          Phasenspannungen L1-L3 + Skalierungsfaktor, Wirk-/Schein-/
-          Blindleistung + je Skalierungsfaktor, Netzfrequenz +
-          Skalierungsfaktor, Leistungsfaktor + Skalierungsfaktor.
-      - group: extended_mode_smart_meter
-        slave_id: 40
-        register_range: [40095, 40110]
-        note: >
-          Energie eingespeist/bezogen + Skalierungsfaktor, Schaltzustand
-          Speicher (Spiegel-Register), Phasenströme L1-L3, Phasen-
-          wirkleistung L1-L3 (in modbus_llm.yaml fälschlich als
-          L1/L12/L13 statt L1/L2/L3 benannt) + Skalierungsfaktor,
-          Phasenspannungen L1-L3 (unskaliert laut Doku), Summenleistung.
-    exclude:
-      - registers: [40078, 40079, 40080, 40095]
-        reason: >
-          Register ohne definierte Bedeutung laut Hersteller-Doku
-          (name: "N.A." in modbus_llm.yaml) können nicht sinnvoll benannt
-          und daher nicht sinnvoll als Entity exponiert werden.
-      - registers: [40349, 40353]
-        reason: >
-          "Immediate Controls" (Slave-ID 123) ist laut modbus_llm.yaml
-          "Future Release / Experimental (Stand 03/25 noch nicht
-          verfügbar)" und existiert auf aktueller Hardware nicht - daher
-          bewusst nicht implementiert.
-
+    Sämtliche in modbus_llm.yaml/modbus.pdf dokumentierten Register sind
+    als Home Assistant Entity abrufbar: Basic Mode (Slave-ID 64) über
+    sensor.py/number.py/switch.py, SunSpec-Modus (Slave-ID 100) über
+    sensor.py (~56 Sensoren, beschreibungsbasiert). Register, die bereits
+    über eine NumberEntity/SwitchEntity weg-/rücklesbar sind, gelten als
+    "lesbar" und benötigen keinen zusätzlichen Sensor.
   requirements:
-    - "Jedes neue Sensor-Feld erhält einen deutschen, fachlich
-       verständlichen Namen (keine reinen Registernummern oder
-       unübersetzten SunSpec-Rohbezeichnungen als Anzeigename)."
+    - "Jedes Sensor-Feld hat einen deutschen, fachlich verständlichen
+       Namen (keine reinen Registernummern oder unübersetzten
+       SunSpec-Rohbezeichnungen als Anzeigename)."
     - "SunSpec-Skalierungsfaktor-Register (sunssf) werden auf die
-       zugehörigen Messwerte angewendet (Wert * 10^sunssf, Exponent
-       vorzeichenbehaftet) UND zusätzlich selbst als Diagnose-Sensor
-       (entity_category: diagnostic) exponiert, damit wirklich alle
-       Register sichtbar bleiben."
-    - "Für jede Gruppe von Registern, die dieselbe physikalische Größe auf
-       den drei Phasen L1/L2/L3 abbildet, wird zusätzlich ein berechneter
-       Summenwert (L1+L2+L3) als eigener Sensor bereitgestellt - auch
-       wenn der Hersteller bereits einen eigenen Summen-Registerwert
-       anbietet (dieser bleibt parallel als separater, als
-       Herstellerwert gekennzeichneter Sensor erhalten, z. B. 'Summe
-       Phasenströme' in Register 40073)."
-    - phase_triplets_affected:
-        - { group: extended_mode_speicher, name: "Phasenströme", registers: [40074, 40075, 40076] }
-        - { group: extended_mode_speicher, name: "Phasenspannungen", registers: [40081, 40082, 40083] }
-        - { group: extended_mode_smart_meter, name: "Phasenströme", registers: [40100, 40101, 40102] }
-        - { group: extended_mode_smart_meter, name: "Phasenwirkleistung", registers: [40103, 40104, 40105] }
-        - { group: extended_mode_smart_meter, name: "Phasenspannungen", registers: [40107, 40108, 40109] }
-
-  architecture_note: >
-    Extended Mode (Slave-ID 40) wird bisher vom Coordinator nicht
-    abgefragt, obwohl slave_id_extended bereits im Config Flow erfasst
-    wird. Der Coordinator muss um einen zweiten Read-Block erweitert
-    werden (Register 40071-40110 sind zusammenhängend, ein einziger
-    read_holding_registers-Aufruf mit count=40 auf slave_id_extended
-    deckt Speicher- und Smart-Meter-Teilblock ab). Ein Update schlägt
-    fehl (UpdateFailed), wenn dieser zweite Read fehlschlägt - keine
-    Teilverfügbarkeit einzelner Register-Gruppen.
-
-    NACHTRAG (siehe requirement_extended_mode_resilience unten): Die
-    Kopplung "Extended-Mode-Read-Fehler lässt das GESAMTE Update
-    fehlschlagen" hat sich in der Praxis als Ursache für einen
-    Totalausfall erwiesen (keine einzige Entity mehr in Home Assistant,
-    sobald Slave-ID 40 nicht erreichbar ist - z. B. weil Extended Mode
-    auf dem SAX-Gateway nicht freigeschaltet ist). Diese Kopplung wurde
-    daher aufgehoben: Ein fehlschlagender Extended-Mode-Read lässt nur
-    noch die Extended-Mode-Sensoren "unbekannt" werden, Basic Mode bleibt
-    unberührt. "Keine Teilverfügbarkeit einzelner Register-Gruppen" gilt
-    weiterhin *innerhalb* eines Read-Blocks (Basic ODER Extended: alles
-    oder nichts pro Aufruf), nicht mehr *zwischen* den beiden Blöcken.
-
+       zugehörigen Messwerte angewendet und zusätzlich selbst als
+       Diagnose-Sensor (entity_category: diagnostic) exponiert."
+    - "Für Registergruppen mit L1/L2/L3-Aufteilung existiert je nach
+       Verfügbarkeit ein herstellerseitiger oder berechneter
+       Summen-Sensor."
   acceptance_criteria:
-    - "Alle in scope.include gelisteten Register sind nach dem Setup als
-       sensor.* Entity in Home Assistant sichtbar und liefern einen Wert."
-    - "Jede unter phase_triplets_affected gelistete Phasen-Trio-Gruppe hat
-       zusätzlich genau einen berechneten Summen-Sensor."
-    - "README.md beschreibt die neuen Sensoren, gruppiert nach Basic
-       Mode / Extended Mode Speicher / Extended Mode Smart Meter, sowie
-       die Summenlogik."
-    - "Testfälle (tests/) decken sowohl die SunSpec-Skalierung als auch
-       die Summenberechnung ab, inklusive eines End-to-End-Tests gegen
-       einen simulierten Extended-Mode-Modbus-Server (Slave-ID 40)."
+    - "Alle dokumentierten Register sind nach dem Setup als sensor.*-Entity
+       sichtbar und liefern einen Wert (SunSpec-Modus vorausgesetzt
+       erreichbar, siehe REQ-EXTENDED-MODE-RESILIENCE)."
+    - "README.md beschreibt die Sensoren gruppiert nach Basic Mode und
+       SunSpec-Modus."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): IP-ADRESSE ÜBER DIE OBERFLÄCHE ÄNDERBAR
+# ANFORDERUNG: IP-ADRESSE ÜBER DIE OBERFLÄCHE ÄNDERBAR
 # ==============================================================================
 requirement_ip_configurable_ui:
   id: REQ-IP-CONFIGURABLE-UI
   title: "IP-Adresse des SAX Speichers über die Home-Assistant-Oberfläche eintragbar, persistiert und jederzeit änderbar"
   status: done
-  requested_by: user
   description: >
-    Der Config Flow (Ersteinrichtung, `async_step_user`) fragte bereits
-    IP-Adresse, Port, Slave-IDs und Aktualisierungsintervall ab und
-    persistierte sie im Home-Assistant-Config-Entry - eine Möglichkeit,
-    diese Werte NACH der Ersteinrichtung wieder zu ändern, fehlte jedoch.
-    Ergänzt wurde ein Reconfigure-Flow (`async_step_reconfigure`), über den
-    Menüpunkt "Neu konfigurieren" am Gerät jederzeit aufrufbar:
-      - Formular ist mit den aktuell gespeicherten Werten vorbelegt.
-      - Verbindung wird vor dem Speichern erneut validiert (derselbe
-        Testread wie bei der Ersteinrichtung).
-      - Bei Erfolg werden die neuen Werte vollständig persistiert
-        (`entry.data`) und die Integration automatisch neu geladen -
-        SaxPowerCoordinator/Client werden mit der neuen IP neu aufgebaut.
-      - Kollisionsprüfung schließt Duplikate mit einem *anderen* bereits
-        konfigurierten Speicher aus, ohne beim unveränderten Speichern der
-        eigenen (unveränderten) IP fälschlich abzubrechen.
+    Der Config Flow (config_flow.py) unterstützt sowohl die Ersteinrichtung
+    (async_step_user) als auch einen Reconfigure-Flow
+    (async_step_reconfigure), erreichbar über
+    "Einstellungen -> Geräte & Dienste -> SAX Power Home -> ⋮ -> Neu
+    konfigurieren". Das Formular ist mit den aktuell gespeicherten Werten
+    vorbelegt. Die neue Verbindung wird vor dem Speichern geprüft
+    (derselbe Testread wie bei der Ersteinrichtung); bei Erfolg werden die
+    Werte persistiert (entry.data) und die Integration lädt automatisch mit
+    den neuen Daten neu. Eine Kollisionsprüfung verhindert Duplikate mit
+    einem anderen bereits konfigurierten Speicher, ohne beim unveränderten
+    Speichern der eigenen IP fälschlich abzubrechen.
   requirements:
     - "Reconfigure-Formular verwendet dieselben Felder wie die
        Ersteinrichtung (IP-Adresse, Port, Slave-IDs, Intervall)."
     - "Fehlermeldungen unterscheiden TCP-Verbindungsfehler
        ('cannot_connect') von einer Modbus-Fehlerantwort bei bestehender
-       Verbindung ('invalid_response', z. B. falsche Slave-ID) - siehe
-       config_flow.CannotConnect / InvalidResponse."
-    - "hacs.json/manifest verlangen mindestens die Home-Assistant-Version,
-       die den Reconfigure-Flow (`SOURCE_RECONFIGURE`,
-       `async_update_reload_and_abort`) unterstützt."
+       Verbindung ('invalid_response', z. B. falsche Slave-ID)."
   acceptance_criteria:
     - "tests/test_config_flow.py deckt sowohl erfolgreiche IP-Änderung
-       (inkl. Persistierung + Neuladen) als auch fehlgeschlagene Validierung
-       (Daten bleiben unverändert) ab."
+       (inkl. Persistierung + Neuladen) als auch fehlgeschlagene
+       Validierung (Daten bleiben unverändert) ab."
     - "README.md beschreibt, wie die IP-Adresse nachträglich geändert
-       wird (Gerät -> Neu konfigurieren)."
+       wird."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): BUGFIX "KEINE SENSOREN IN HOME ASSISTANT"
+# ANFORDERUNG: SUNSPEC-MODUS OPTIONAL (KEIN TOTALAUSFALL BEI NICHTVERFÜGBARKEIT)
 # ==============================================================================
 requirement_extended_mode_resilience:
   id: REQ-EXTENDED-MODE-RESILIENCE
-  title: "Nicht erreichbarer Extended-Mode-Block darf nicht mehr alle Sensoren lahmlegen"
+  title: "Nicht erreichbarer SunSpec-Modus-Block darf nicht alle Sensoren lahmlegen"
   status: done
-  requested_by: user
   description: >
-    Ursache für "in Home Assistant werden keine Sensoren angeboten": Seit
-    REQ-ALL-REGISTERS-READABLE fragt der Coordinator zusätzlich zum Basic
-    Mode (Slave-ID 64) auch den Extended-Mode-Block (Slave-ID 40) ab und
-    ließ das GESAMTE Update fehlschlagen, wenn dieser zweite Read scheitert
-    (z. B. weil Extended Mode auf dem realen SAX-Gateway nicht freigeschaltet
-    oder das Register dort nicht erreichbar ist). Ein fehlschlagendes
-    `async_config_entry_first_refresh()` löst in Home Assistant
-    `ConfigEntryNotReady` aus - die Config Entry wird dann nie fertig
-    aufgebaut und es werden gar keine Entities angelegt, auch nicht die
-    Basic-Mode-Sensoren (SOC, Lade-/Entladeleistung, Schalter), die mit
-    Extended Mode gar nichts zu tun haben.
-
-    Fix: Basic Mode und Extended Mode werden im Coordinator entkoppelt
-    (`SaxPowerCoordinator._async_read_extended`):
-      - Scheitert der Basic-Mode-Read weiterhin: UpdateFailed wie bisher,
-        da Basic Mode die Mindestanforderung für jede Funktion ist.
-      - Scheitert der Extended-Mode-Read: Update schlägt NICHT fehl, die
-        Extended-Mode-Schlüssel fehlen für diesen Zyklus in
-        `coordinator.data` (Sensoren zeigen "unbekannt"), Basic-Mode-Daten
+    Basic Mode (Slave-ID 64) und SunSpec-Modus (Slave-ID 100) werden im
+    Coordinator entkoppelt gelesen (SaxPowerCoordinator._async_read_extended):
+      - Scheitert der Basic-Mode-Read: UpdateFailed, da Basic Mode die
+        Mindestanforderung für jede Funktion der Integration ist.
+      - Scheitert der SunSpec-Modus-Read: Das Update schlägt NICHT fehl;
+        die betroffenen Sensoren zeigen "unbekannt", Basic-Mode-Daten
         bleiben unverändert verfügbar. Bei Wiederherstellung werden die
-        Extended-Mode-Sensoren automatisch wieder befüllt.
+        SunSpec-Sensoren automatisch wieder befüllt.
       - Zustandswechsel (verfügbar -> nicht verfügbar -> wieder verfügbar)
-        werden geloggt (WARNING/INFO) und zusätzlich als Home-Assistant-
-        Repair-Issue (`extended_mode_unavailable`) sichtbar gemacht, damit
-        der Anwender eine klare, dauerhaft sichtbare Fehlermeldung im UI
-        erhält statt nur einen Log-Eintrag.
+        werden geloggt und zusätzlich als Home-Assistant-Repair-Issue
+        (extended_mode_unavailable) angezeigt.
   acceptance_criteria:
-    - "Live-Test gegen einen simulierten Modbus-Server ohne Extended-Mode-
-       Gerät (Slave-ID 40 nicht im Server-Context) zeigt: Config Entry lädt
-       erfolgreich, Basic-Mode-Sensoren liefern echte Werte, Extended-Mode-
-       Sensoren existieren als Entity mit Zustand 'unbekannt'
-       (tests/test_integration_live.py,
-       test_live_modbus_extended_mode_unavailable_keeps_basic_sensors)."
+    - "Live-Test gegen einen simulierten Modbus-Server ohne SunSpec-Modus-
+       Gerät zeigt: Config Entry lädt erfolgreich, Basic-Mode-Sensoren
+       liefern echte Werte, SunSpec-Sensoren existieren als Entity mit
+       Zustand 'unbekannt' (tests/test_integration_live.py)."
     - "Unit-Tests decken sowohl den Übergang verfügbar -> nicht verfügbar
        als auch die Wiederherstellung ab (tests/test_coordinator.py)."
-    - "README.md, Abschnitt 'Bekannte Lücken', ist entsprechend
-       aktualisiert (Extended Mode ist nicht mehr Pflicht)."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): TESTS GEGEN ECHTE SAX-HARDWARE
+# ANFORDERUNG: TESTS GEGEN ECHTE SAX-HARDWARE
 # ==============================================================================
 requirement_real_hardware_tests:
   id: REQ-REAL-HARDWARE-TESTS
   title: "Testfälle lesen echte Werte von einem physischen SAX Speicher"
   status: done
-  requested_by: user
   description: >
-    Ergänzend zu test_integration_live.py (echtes Wire-Protokoll, aber
-    simulierter Modbus-Server) liest tests/test_real_hardware.py Werte von
-    einem *echten* SAX Power Home (Plus) im lokalen Netz - rein lesend,
-    kein Schreibzugriff auf ein ggf. produktives Speichersystem.
-
-    Die IP-Adresse des Ziel-Speichers ist in tests/real_device.yaml im
-    Repository abgelegt (wie vom Anwender gefordert: "Die IP soll im Repo
-    abgespeichert werden"), getrennt von der eigentlichen Integration
-    (dort bleibt die IP wie gehabt ausschließlich im Home-Assistant-
-    Config-Entry, siehe REQ-IP-CONFIGURABLE-UI). Ist dort keine IP
-    hinterlegt (Auslieferungszustand: `host: null`) oder der Speicher
-    nicht erreichbar, wird der Test automatisch übersprungen (`pytest.skip`)
-    - er blockiert also weder CI noch die Arbeit von Entwicklern ohne
-    physischen Zugriff auf die Hardware.
+    tests/test_real_hardware.py liest Werte von einem echten SAX Power
+    Home (Plus) im lokalen Netz - rein lesend, kein Schreibzugriff. Die
+    Verbindungsdaten stehen in tests/real_device.yaml (Host, Port, beide
+    Slave-IDs, Verbindungs-Timeout). Ist dort keine IP hinterlegt
+    (Auslieferungszustand: host: null) oder der Speicher nicht erreichbar,
+    werden die betroffenen Tests automatisch übersprungen (pytest.skip).
   requirements:
-    - "tests/real_device.yaml enthält Host, Port, beide Slave-IDs und einen
-       Verbindungs-Timeout, mit Kommentar zur Verwendung."
     - "Gelesene Basic-Mode-Werte (SOC, Leistung) werden auf plausible
-       Wertebereiche geprüft statt auf feste erwartete Werte, da der
-       tatsächliche Gerätezustand zur Testzeit unbekannt ist."
-    - "Ist Extended Mode auf dem realen Gerät nicht erreichbar, wird der
-       entsprechende Testfall übersprungen statt fehlzuschlagen (konsistent
-       mit REQ-EXTENDED-MODE-RESILIENCE)."
+       Wertebereiche geprüft statt auf feste erwartete Werte."
+    - "Ist der SunSpec-Modus auf dem realen Gerät nicht erreichbar, wird
+       der entsprechende Testfall übersprungen statt fehlzuschlagen
+       (konsistent mit REQ-EXTENDED-MODE-RESILIENCE)."
   acceptance_criteria:
-    - "pytest läuft ohne hinterlegte IP vollständig durch (2 Tests werden
-       übersprungen, keine Fehler)."
+    - "pytest läuft ohne hinterlegte IP vollständig durch (betroffene
+       Tests werden übersprungen, keine Fehler)."
     - "README.md beschreibt tests/real_device.yaml und wie der
        Live-Hardware-Test aktiviert wird."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): SUNSPEC-MODE-KORREKTUR (Slave-ID 100 statt 40)
+# ANFORDERUNG: SUNSPEC-MODUS-REGISTERKARTE (SLAVE-ID 100)
 # ==============================================================================
 requirement_sunspec_mode_correction:
   id: REQ-SUNSPEC-MODE-CORRECTION
-  title: "Extended-Mode-Registerkarte war fehlerhaft - Korrektur anhand der offiziellen sax-power.net-Dokumentation (modbus.pdf)"
+  title: "SunSpec-Modus-Registerkarte (Slave-ID 100) als alleinige Quelle für Speicher-/Netz-/Akkudetails"
   status: done
-  requested_by: user
   description: >
-    Nutzer hat die offizielle sax-power.net-Modbus-Dokumentation
-    (Datei modbus.pdf im Repo-Root, "SAX Power Home/Home Plus Modbus-TCP
-    Dokumentation (SUNSPEC-Mode)") bereitgestellt und gebeten, sie mit
-    modbus_llm.yaml abzugleichen. Ergebnis: modbus_llm.yaml war an
-    mehreren Stellen nachweislich falsch:
+    Der SunSpec-Modus liegt auf Slave-ID 100 mit Adress-Offset -40000
+    (Register 40000-40114, siehe modbus.pdf und modbus_llm.yaml) und
+    enthält einen zusammenhängenden Block aus fünf SunSpec-Modellen:
+    Common (Geräteidentität), "3Ph Inverter" (103, Speicherelektronik),
+    "Immediate Controls" (123, Sollwertvorgabe, nur lesend genutzt), "WYE
+    Connect 3Ph Meter" (203, Netz/Smart Meter) und "Battery Base" (802,
+    Akkuzellen).
 
-      - "Extended Mode" wurde dort mit Slave-ID 40 dokumentiert. Diese
-        Slave-ID existiert auf echter Hardware nicht - ein Read darauf
-        liefert eine Modbus-Exception (Code 11 "Gateway Target Device
-        Failed to Respond"). modbus.pdf dokumentiert stattdessen eine
-        einzige, offiziell unterstützte "SUNSPEC-Mode"-Schnittstelle auf
-        Slave-ID 100.
-      - Der dafür verwendete Adress-Offset (-40001) war für diesen Block
-        ebenfalls falsch. Der korrekte Offset (-40000) wurde über die
-        SunSpec-Kennung "SunS" (0x53756E53, laut SunSpec-Standard immer an
-        Wire-Adresse 0) verifiziert.
-      - "Immediate Controls" wurde fälschlich als eigene Slave-ID 123 mit
-        Status "noch nicht verfügbar" dokumentiert. Tatsächlich ist 123
-        die SunSpec-Modell-Nummer innerhalb des einen Registerblocks auf
-        Slave-ID 100, und der Modus ist aktiv nutzbar (Register
-        40049-40053).
-      - Die produktiven Basic-Mode-Register 47 ("Leistung P des
-        Speichers") und 48 ("Leistung des Smart Meters") lieferten im
-        Live-Test gegen echte Hardware wiederholt physikalisch
-        unplausible Werte (~16000-16600W bei einem 4600W-Gerät im
-        Leerlauf, erwartete Last unter 10W) - vermutlich ein
-        Firmware-seitiger Bug (Speicherbereich dieser beiden Register
-        driftete langsam um 2^14, ohne auf reale Lastwechsel zu
-        reagieren).
+    Entlade-/Ladeleistung (discharge_power/charge_power) werden aus
+    Register 40029 ("Wirkleistung Speicher Summe") abgeleitet, die
+    Smart-Meter-Leistung aus Register 40072 ("Summenwirkleistung Netz").
+    Die Basic-Mode-Register 47 ("Leistung P des Speichers") und 48
+    ("Leistung des Smart Meters") werden nicht mehr gelesen.
 
-    Der komplette, gegen echte Hardware byte-genau verifizierte
-    SunSpec-Mode-Registerblock (Slave-ID 100, Adresse 0-114, siehe
-    modbus_llm.yaml) ersetzt die vorherige "Extended Mode"-Implementierung
-    vollständig: const.py, coordinator.py (`_parse_extended`) und
-    sensor.py wurden neu aufgebaut. Die Entlade-/Ladeleistung
-    (`discharge_power`/`charge_power`) sowie die Smart-Meter-Leistung
-    (`smartmeter_power`) beziehen ihre Werte jetzt aus dem SunSpec-Mode
-    (Register 40029 bzw. 40072) statt aus den defekten Basic-Mode-
-    Registern 47/48, die von der Integration nicht mehr gelesen werden.
+    Der Schreibpfad für Netzladung, zeitgesteuertes Laden und den
+    "Entladung starten"-Button bleibt auf Basic Mode (Register 41, Slave
+    64, absoluter Watt-Sollwert). Die SunSpec-seitigen "Immediate
+    Controls"-Werte (Register 40049-40053, prozentualer Sollwert) sind
+    ausschließlich als Nur-Lese-Sensoren verfügbar
+    (ic_power_setpoint_pct, ic_timeout, ic_control_mode_text,
+    ic_max_power_reference).
 
-    Zusätzliche Randbedingung: Der Anwender nutzt als Smartmeter ein
-    ADL400 (nicht das in modbus.pdf für Modell 203 vorausgesetzte
-    ADW200). Am echten Gerät waren die Netz-Register (Modell 203) trotzdem
-    plausibel befüllt - nur PV-Leistung (Register 40045) war durchgehend
-    0, was zur Doku-Aussage passt, dass PV-Leistung ADW200 voraussetzt.
-  verification:
-    - "Byte-genaue Live-Verifikation gegen echte Hardware: SunSpec-Kennung
-       'SunS' an Adresse 0/1, alle 'wellknown'-Scalefaktoren aus
-       modbus.pdf, Hersteller-String 'SAXPOWER', Referenzwert
-       Maximalleistung (4600W) - alle stimmen exakt mit modbus.pdf überein."
-    - "Wirkleistung Speicher Summe (Register 40029) lieferte im Live-Test
-       plausible Werte (1W bzw. -2W bei nahezu Nulllast), im Gegensatz zu
-       Register 47 (16000+W bei identischer realer Last)."
+    PV-Leistung (Register 40045) und das komplette Meter-Modell 203 sind
+    laut modbus.pdf nur mit dem Smartmeter ADW200 vollständig verfügbar.
+    Mit einem ADL400 sind die Netz-Register (Ströme, Spannungen,
+    Leistungen) dennoch plausibel befüllt; nur PV-Leistung bleibt
+    durchgehend 0.
   acceptance_criteria:
-    - "modbus_llm.yaml dokumentiert den SunSpec-Mode-Block korrekt
-       (Slave-ID 100, Offset -40000) und markiert die defekten
-       Basic-Mode-Register 47/48 als DEPRECATED mit Begründung."
+    - "modbus_llm.yaml dokumentiert den SunSpec-Modus-Block korrekt
+       (Slave-ID 100, Offset -40000) und markiert die nicht mehr
+       genutzten Basic-Mode-Register 47/48 als DEPRECATED."
     - "tests/test_coordinator.py, tests/test_integration_live.py und
-       tests/test_real_hardware.py sind auf Slave-ID 100 umgestellt und
-       laufen gegen simulierte UND echte Hardware erfolgreich durch."
-    - "README.md und die Sensortabellen sind auf die neuen Sensor-Keys
-       umgestellt."
-    - "Der Schreibpfad für Netzladung (`start_grid_charge`-Service) bleibt
-       unverändert (Basic Mode, Register 41) - eine Umstellung auf den
-       offiziellen prozentualen Immediate-Controls-Schreibpfad
-       (Register 40049-40051) ist bewusst NICHT Teil dieser Änderung, da
-       ein Wechsel des Schreibpfads für ein Gerät, das reale
-       Leistungsflüsse in ein Haus steuert, eine eigene, gezielte
-       Abstimmung mit dem Anwender verdient. Die zugehörigen Werte sind
-       bereits als Nur-Lese-Sensoren verfügbar (ic_power_setpoint_pct,
-       ic_timeout, ic_control_mode_text, ic_max_power_reference)."
+       tests/test_real_hardware.py laufen gegen Slave-ID 100."
+    - "README.md und die Sensortabellen verwenden die aktuellen
+       Sensor-Keys."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): ZEITGESTEUERTES LADEN AUF ZIEL-SOC
+# ANFORDERUNG: ZEITGESTEUERTES LADEN AUF ZIEL-SOC
 # ==============================================================================
 requirement_timed_soc_charge:
   id: REQ-TIMED-SOC-CHARGE
   title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden"
   status: done
-  requested_by: user
   description: >
-    Neues Feature unter "Steuerung": Der Speicher soll innerhalb eines
-    konfigurierbaren Zeitfensters aktiv auf einen Ziel-SOC geladen werden,
-    unabhängig von PV-Überschuss - Beispiel: "Lade auf 90 %, wenn es
-    zwischen 1 und 5 Uhr ist" (klassischer Anwendungsfall: günstiger
-    Nachtstromtarif).
+    Software-Logik (kein natives Geräteregister), umgesetzt in
+    SaxPowerCoordinator._async_enforce_timed_charge und bei jedem
+    Poll-Zyklus sowie bei jeder Einstellungsänderung neu ausgewertet: Ist
+    das Feature aktiviert (switch.py, "Zeitgesteuertes Laden"), die
+    aktuelle Uhrzeit innerhalb des konfigurierten Zeitfensters
+    (time.py, "Beginn Zeitfenster"/"Ende Zeitfenster", HH:MM, darf über
+    Mitternacht laufen) und der SOC unter dem Ziel-SOC, schreibt der
+    Coordinator einen negativen P-Sollwert auf Register 41 in Höhe des
+    zentralen Ladeleistungsgrenzwerts (Register 44) und wiederholt das
+    periodisch alle 30s. Wird der Ziel-SOC erreicht, das Zeitfenster
+    verlassen oder das Feature deaktiviert, stoppt der periodische Write
+    automatisch.
 
-    Reine Software-Logik (kein natives Geräteregister), analog zur
-    bestehenden Max-SOC-Logik. Neue Entitäten:
-      - switch.py: "Zeitgesteuertes Laden" (Ein/Aus)
-      - number.py: "Ziel-SOC (Zeitfenster)" (0-100 %),
-        "Ladeleistung (Zeitfenster)" (W)
-      - time.py (neue Plattform): "Beginn Zeitfenster",
-        "Ende Zeitfenster" (jeweils HH:MM, via TimeEntity)
-      - sensor.py (Diagnose): "Zeitgesteuertes Laden aktiv"
+    Als Ziel-SOC dient die bereits vorhandene "Maximaler Lade-SOC"-Entity
+    (number.py); ist kein Wert gesetzt, gilt ersatzweise 100 %. Es gibt
+    keine eigene Ziel-SOC- oder Leistungseinstellung für dieses Feature.
 
-    Umsetzung in `SaxPowerCoordinator._async_enforce_timed_charge`
-    (coordinator.py), bei jedem Poll-Zyklus (und sofort bei jeder
-    Einstellungsänderung) neu ausgewertet: Ist das Feature aktiviert, die
-    aktuelle Uhrzeit im Zeitfenster (`_is_time_in_window`, unterstützt über
-    Mitternacht laufende Fenster) und der SOC unter dem Ziel-SOC, wird
-    `async_start_grid_charge(-Ladeleistung)` aufgerufen - derselbe
-    Mechanismus wie der bestehende `start_grid_charge`-Service (Register
-    41, periodischer Write alle 30s). Wird der Ziel-SOC erreicht, das
-    Fenster verlassen oder das Feature deaktiviert, wird
-    `async_stop_grid_charge()` aufgerufen.
+    Aktiviert-Zustand sowie Start-/Endzeit werden über RestoreEntity
+    über Neustarts hinweg persistiert. Zusätzlich zeigt ein
+    Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv
+    nachgeladen wird.
 
-    Alle fünf Werte sind reiner Coordinator-Zustand ohne Geräteregister
-    (wie schon Max-SOC) und werden daher über `RestoreEntity` bei jedem
-    Home-Assistant-Neustart aus dem zuletzt bekannten Entity-Zustand
-    wiederhergestellt - sonst müsste der Zeitplan nach jedem Neustart neu
-    eingerichtet werden.
-  known_interaction: >
-    Zeitgesteuertes Laden und der manuelle
-    `start_grid_charge`/`stop_grid_charge`-Service teilen sich denselben
-    Hintergrund-Task (`_grid_charge_task`). Es gibt bewusst keine eigene
-    Arbitrierung zwischen beiden - bei gleichzeitiger Nutzung gewinnt der
-    zuletzt schreibende Aufruf. Dokumentiert in README.md.
-  testing_note: >
-    Für die Zeitfenster-Logik wurde bewusst NICHT die `freezer`-Fixture
-    (freezegun) verwendet, da freezegun auch die vom Event-Loop für
-    `asyncio.sleep` genutzte Uhr einfriert und dadurch der in
-    `async_start_grid_charge` gespawnte Hintergrund-Task nie mehr aufwacht
-    - der erste Testlauf hing deshalb unbegrenzt. Stattdessen wird gezielt
-    nur `coordinator.dt_util.now` gepatcht (siehe `_patched_now` in
-    tests/test_coordinator.py). Zur Absicherung gegen zukünftige ähnliche
-    Hänger wurde zusätzlich ein globales pytest-Timeout (60s,
-    pyproject.toml) ergänzt.
+    Zeitgesteuertes Laden, der "Entladung starten"-Button und der
+    manuelle start_grid_charge/stop_grid_charge-Service teilen sich
+    denselben Hintergrund-Task. Werden mehrere davon gleichzeitig
+    verwendet, gewinnt der zuletzt schreibende Aufruf - es gibt keine
+    eigene Arbitrierung zwischen ihnen.
   acceptance_criteria:
     - "tests/test_coordinator.py deckt _is_time_in_window (normales
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
@@ -467,136 +307,71 @@ requirement_timed_soc_charge:
        über echte Modbus-TCP-Kommunikation verifiziert, dass Aktivieren
        des Features innerhalb des Zeitfensters einen echten negativen
        P-Sollwert-Write auf Register 41 auslöst."
-    - "README.md beschreibt die neuen Entitäten sowie die Interaktion mit
-       dem bestehenden Netzladung-Service."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): ENTLADUNG-STARTEN-BUTTON + KEINE REDUNDANTEN
+# ANFORDERUNG: ENTLADUNG-STARTEN-BUTTON; KEINE REDUNDANTEN
 # LEISTUNGSEINSTELLUNGEN
 # ==============================================================================
 requirement_discharge_button_dedup_settings:
   id: REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS
   title: "Schaltfläche zum Starten der Entladung; keine redundanten Leistungseinstellungen"
   status: done
-  requested_by: user
   description: >
-    Zwei Änderungen an der Steuerung:
-
-    1. Neue Schaltfläche (`ButtonEntity`, nicht `SwitchEntity` - bewusst
-       stateless) "Entladung starten" unter "Steuerung"
-       (`button.py`, neue Plattform). Startet beim Drücken die Entladung
-       über denselben Mechanismus wie der `start_grid_charge`-Service
-       (`SaxPowerCoordinator.async_start_discharge` ->
-       `async_start_grid_charge`, positiver P-Sollwert auf Register 41,
-       periodischer Write alle 30s). Bewusst kein symmetrischer
-       "Stop"-Button - dafür existiert bereits der
-       `stop_grid_charge`-Service.
-
-    2. Die beim zeitgesteuerten Laden (REQ-TIMED-SOC-CHARGE) neu
-       eingeführte Number-Entity "Ladeleistung (Zeitfenster)" wurde
-       WIEDER ENTFERNT: Der Anwender wies darauf hin, dass es nur EINE
-       zentrale Einstellung für die maximale Ladeleistung geben soll
-       (die bereits vorhandene "Ladeleistungsgrenzwert"-Entity, Register
-       44) statt einer zusätzlichen, redundanten. Dasselbe Prinzip gilt
-       für die neue Entladung-starten-Aktion: sie nutzt die bereits
-       vorhandene "Entladeleistungsgrenzwert"-Entity (Register 43) statt
-       einer eigenen Leistungseinstellung.
-
-       `SaxPowerCoordinator._async_enforce_timed_charge` liest die
-       Ladeleistung jetzt aus `data["charge_limit"]` statt aus einem
-       eigenen `_timed_charge_power`-Zustand. `async_start_discharge`
-       liest analog `data["discharge_limit"]`.
-  known_interaction: >
-    Der neue Button teilt sich denselben Hintergrund-Task
-    (`_grid_charge_task`) wie zeitgesteuertes Laden und der manuelle
-    `start_grid_charge`/`stop_grid_charge`-Service - siehe bereits
-    dokumentierte Einschränkung unter REQ-TIMED-SOC-CHARGE, jetzt um den
-    Button erweitert.
+    button.py exponiert die ButtonEntity "Entladung starten" unter
+    "Steuerung". Sie nutzt zum Schreiben denselben Mechanismus wie der
+    start_grid_charge-Service (positiver P-Sollwert auf Register 41,
+    periodischer Write alle 30s) und liest den Sollwert aus der bereits
+    vorhandenen "Entladeleistungsgrenzwert"-Entity (Register 43) statt
+    eine eigene Leistungseinstellung anzubieten. Zeitgesteuertes Laden
+    liest analog aus der "Ladeleistungsgrenzwert"-Entity (Register 44).
+    Es existiert genau eine zentrale Einstellung je Richtung
+    (Lade-/Entladeleistungsgrenzwert), keine featurespezifischen
+    Duplikate.
   acceptance_criteria:
-    - "number.py enthält keine 'timed_charge_power'-Entity mehr; const.py
-       keine zugehörige DEFAULT_TIMED_CHARGE_POWER-Konstante."
-    - "button.py exponiert eine ButtonEntity 'Entladung starten', deren
-       async_press coordinator.async_start_discharge() aufruft."
-    - "tests/test_coordinator.py deckt async_start_discharge ab (Fehler
-       ohne Daten, Verwendung von data['discharge_limit'] als Sollwert)."
-    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
-       über echte Modbus-TCP-Kommunikation verifiziert, dass ein
-       Button-Press einen echten positiven P-Sollwert-Write in Höhe des
-       Entladeleistungsgrenzwerts auf Register 41 auslöst."
-    - "README.md dokumentiert den neuen Button sowie die Streichung der
-       Zeitfenster-Leistungseinstellung."
+    - "number.py enthält keine featurespezifische Leistungseinstellung
+       für zeitgesteuertes Laden oder den Entladung-starten-Button."
+    - "tests/test_coordinator.py und tests/test_integration_live.py
+       decken ab, dass der Button den zentralen
+       Entladeleistungsgrenzwert als Sollwert verwendet."
 
 # ==============================================================================
-# ANFORDERUNG (ERGÄNZUNG): TOGGLE-VERHALTEN + ZIEL-SOC-DEDUP FÜR
-# ZEITGESTEUERTES LADEN
+# ANFORDERUNG: TOGGLE-VERHALTEN + ZIEL-SOC-DEDUP FÜR ZEITGESTEUERTES LADEN
 # ==============================================================================
 requirement_discharge_toggle_and_target_soc_dedup:
   id: REQ-DISCHARGE-TOGGLE-TARGET-SOC-DEDUP
-  title: "Entladung-starten-Button schaltet um; Ziel-SOC (Zeitfenster) entfernt"
-  status: partially_done
-  requested_by: user
+  title: "Entladung-starten-Button schaltet um; einheitlicher Ziel-SOC für zeitgesteuertes Laden"
+  status: done
   description: >
-    Zwei weitere Änderungen, im selben Geist wie
-    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS:
+    Zeitgesteuertes Laden nutzt als Ziel-SOC ausschließlich die bereits
+    vorhandene "Maximaler Lade-SOC"-Entity (kein eigenes Ziel-SOC-Feld für
+    dieses Feature); fehlt der Wert, gilt ersatzweise 100 %. Eine Änderung
+    des Ziel-SOC wirkt sofort (async_set_max_soc wertet
+    _async_enforce_timed_charge unmittelbar neu aus statt erst beim
+    nächsten Poll-Zyklus).
 
-    1. Die Number-Entity "Ziel-SOC (Zeitfenster)" (REQ-TIMED-SOC-CHARGE)
-       wurde entfernt. Zeitgesteuertes Laden nutzt jetzt denselben
-       Ziel-SOC wie die bereits vorhandene "Maximaler Lade-SOC"-Entity
-       (`SaxPowerCoordinator._max_soc`) - fehlt dieser Wert (None), gilt
-       ersatzweise `MAX_SOC` (100 %) als Ziel. `async_set_max_soc`
-       evaluiert seitdem zusätzlich `_async_enforce_timed_charge` neu,
-       damit eine Änderung sofort wirkt statt erst beim nächsten
-       Poll-Zyklus.
+    Der "Entladung starten"-Button hat Umschalt-Verhalten
+    (SaxPowerCoordinator.async_toggle_discharge): Der erste Druck startet
+    die Entladung mit dem zentralen Entladeleistungsgrenzwert als
+    Sollwert; ein erneuter Druck stoppt sie wieder, sofern die laufende
+    Entladung über diesen Button gestartet wurde. Ist der
+    Entladeleistungsgrenzwert 0 W, meldet der Button einen Fehler statt
+    eines wirkungslosen Sollwert-Writes.
 
-    2. Der "Entladung starten"-Button (`button.py`) hat jetzt
-       Umschalt-Verhalten: `SaxPowerCoordinator.async_toggle_discharge`
-       (ersetzt `async_start_discharge`) merkt sich intern
-       (`self._discharge_active`), ob die aktuell laufende Entladung über
-       diesen Button gestartet wurde, und stoppt sie bei erneutem
-       Tastendruck (`async_stop_grid_charge`) statt sie erneut zu starten.
-       Zusätzlich: Ist der Entladeleistungsgrenzwert 0 W, wird ein Fehler
-       gemeldet statt eines wirkungslosen Sollwert-Writes (0 W hätte real
-       keinen Effekt).
-  known_issue: >
-    Nutzer berichtete, dass die Entladung beim Drücken des Buttons in der
-    Praxis NICHT tatsächlich startet (Speicher entlädt sich nicht sichtbar).
-    Der Coordinator-Code wurde erneut geprüft (Register-Adresse, Slave-ID,
-    Vorzeichen, Freigabe-Logik) - kein offensichtlicher Implementierungsfehler
-    gefunden; das Schreibverhalten ist identisch zum bereits über den
-    simulierten UND partiell über echte Hardware verifizierten
-    `start_grid_charge`-Mechanismus (Laden, negativer Sollwert). Mögliche
-    Ursachen, die NICHT ohne Zugriff auf das reale Gerät verifizierbar sind:
-      - Vorzeichenkonvention von Register 41 könnte für die Entlade-Richtung
-        (positiver Sollwert) anders sein als angenommen - die Konvention war
-        von Anfang an als unverifizierte Annahme dokumentiert (siehe
-        "Bekannte Lücken" in README.md).
-      - Der Basic-Mode-Schreibweg (Register 41, Slave 64) könnte auf der
-        aktuellen Firmware generell unzuverlässig sein - analog zu den
-        bereits als defekt identifizierten Basic-Mode-Leseregistern 47/48
-        (siehe REQ-SUNSPEC-MODE-CORRECTION). Falls das zutrifft, wäre der
-        korrekte Fix eine Umstellung auf den offiziellen SunSpec-Schreibweg
-        ("Immediate Controls", Slave-ID 100, Register 40049-40051,
-        prozentual statt absolut in Watt) für alle drei Nutzungen
-        (start_grid_charge-Service, zeitgesteuertes Laden, Entladung-
-        starten-Button) - das wäre eine grössere, eigene Änderung.
-    Rückfrage an den Nutzer (ob `start_grid_charge`/Laden bereits
-    nachweislich funktioniert hat) blieb bislang unbeantwortet. Bis zur
-    Klärung wurden nur risikoarme, unabhängig korrekte Verbesserungen
-    umgesetzt (0W-Guard, Debug-Logging vor jedem Start/Stop-Write), aber
-    KEIN Wechsel des Schreibmechanismus - das wäre ohne Bestätigung der
-    Ursache eine Vermutung auf Gerätefunktionen mit echten physischen
-    Auswirkungen.
+    Der Sollwert auf Register 41 wird als vorzeichenbehafteter 16-Bit-Wert
+    im Zweierkomplement übertragen: positive Werte entsprechen Entladung
+    (Watt direkt als Ganzzahl), negative Werte (Laden) werden vor dem
+    Schreiben als `65536 + Sollwert` codiert (siehe
+    coordinator.to_unsigned16).
+  known_limitation: >
+    Ob Register 41 auf einem gegebenen Gerät aktiv nutzbar ("freigeschaltet")
+    ist, ist geräte-/firmwareabhängig und muss vom Anwender vor Ort geprüft
+    werden - die Integration kann das nicht selbst feststellen.
   acceptance_criteria:
-    - "number.py enthält keine 'timed_charge_target_soc'-Entity mehr."
-    - "_async_enforce_timed_charge nutzt self._max_soc (Fallback MAX_SOC)
-       als Ziel-SOC."
+    - "number.py enthält keine eigene Ziel-SOC-Entity für zeitgesteuertes
+       Laden."
     - "async_toggle_discharge stoppt eine über den Button gestartete
-       Entladung bei erneutem Aufruf, statt sie erneut zu starten."
-    - "async_toggle_discharge lehnt einen Start mit Entladeleistungsgrenzwert
-       0 W mit klarer Fehlermeldung ab."
-    - "tests/test_coordinator.py und tests/test_integration_live.py decken
-       beide Änderungen ab, inklusive des Umschalt-Verhaltens (zweiter
-       Tastendruck stoppt)."
-    - "OFFEN: Tatsächliches Funktionieren der Entladung auf echter Hardware
-       ist NICHT verifiziert - erfordert Rückmeldung/Logs vom Nutzer nach
-       Deployment, ggf. Folge-Issue für Umstellung auf SunSpec-Schreibweg."
+       Entladung bei erneutem Aufruf, statt sie erneut zu starten, und
+       lehnt einen Start bei Entladeleistungsgrenzwert 0 W ab."
+    - "tests/test_coordinator.py und tests/test_integration_live.py
+       decken das Umschalt-Verhalten (zweiter Tastendruck stoppt) sowie
+       die Zweierkomplement-Codierung ab."

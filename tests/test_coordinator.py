@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.sax_power.const import READ_BLOCK_START, REG_SOC
+from custom_components.sax_power.const import (
+    READ_BLOCK_COUNT,
+    READ_BLOCK_START,
+    REG_SOC,
+)
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
     apply_sunssf,
@@ -56,7 +60,7 @@ def _make_coordinator(hass, client: MagicMock) -> SaxPowerCoordinator:
         hass,
         client,
         slave_id=64,
-        slave_id_extended=40,
+        slave_id_extended=100,
         scan_interval=10,
         entry_id="test_entry_id",
     )
@@ -113,12 +117,12 @@ async def test_async_write_register_raises_on_modbus_error(hass) -> None:
 
 def _make_read_side_effect(basic_registers: list[int], *, extended_error: bool):
     """Simuliert unterschiedliche read_holding_registers-Antworten je nach
-    device_id, wie sie der Coordinator für Basic- bzw. Extended-Mode-Reads
-    verwendet."""
+    device_id, wie sie der Coordinator für Basic-Mode- (Slave 64) bzw.
+    SunSpec-Modus-Reads (Slave 100) verwendet."""
 
     def _side_effect(*, address: int, count: int, device_id: int):
         result = MagicMock()
-        if device_id != 40:
+        if device_id != 100:
             result.isError.return_value = False
             result.registers = basic_registers
         else:
@@ -130,12 +134,12 @@ def _make_read_side_effect(basic_registers: list[int], *, extended_error: bool):
 
 
 async def test_update_data_degrades_gracefully_when_extended_unavailable(hass) -> None:
-    """Ein nicht erreichbarer Extended-Mode-Block darf nicht die Basic-Mode-
+    """Ein nicht erreichbarer SunSpec-Modus-Block darf nicht die Basic-Mode-
     Sensoren mit ausfallen lassen (siehe anforderung.yaml,
     REQ-EXTENDED-MODE-RESILIENCE) - vorher führte das zu ConfigEntryNotReady
     und damit zu gar keinen Entities in Home Assistant."""
     client = _make_client()
-    basic_registers = [0] * 8
+    basic_registers = [0] * READ_BLOCK_COUNT
     basic_registers[REG_SOC - READ_BLOCK_START] = 55
     client.read_holding_registers = AsyncMock(
         side_effect=_make_read_side_effect(basic_registers, extended_error=True)
@@ -145,15 +149,15 @@ async def test_update_data_degrades_gracefully_when_extended_unavailable(hass) -
     data = await coordinator._async_update_data()
 
     assert data["soc"] == 55
-    assert "ext_current_l1" not in data
+    assert "storage_power_active" not in data
     assert coordinator._extended_available is False
 
 
 async def test_update_data_recovers_when_extended_becomes_available(hass) -> None:
-    """Nach einem vorherigen Extended-Mode-Ausfall müssen die Extended-
+    """Nach einem vorherigen SunSpec-Modus-Ausfall müssen die SunSpec-
     Sensoren wieder befüllt werden, sobald der Block wieder lesbar ist."""
     client = _make_client()
-    basic_registers = [0] * 8
+    basic_registers = [0] * READ_BLOCK_COUNT
     basic_registers[REG_SOC - READ_BLOCK_START] = 55
     client.read_holding_registers = AsyncMock(
         side_effect=_make_read_side_effect(basic_registers, extended_error=False)
@@ -163,73 +167,104 @@ async def test_update_data_recovers_when_extended_becomes_available(hass) -> Non
     coordinator._extended_available = False
     data = await coordinator._async_update_data()
 
-    assert data["ext_sunspec_id"] == 0
+    assert data["storage_power_active"] == 0
     assert coordinator._extended_available is True
 
 
-def test_parse_extended_computes_phase_sums(hass) -> None:
-    """Jede Phasen-Trio-Gruppe muss zusätzlich einen berechneten Summenwert liefern
-    (siehe anforderung.yaml, REQ-ALL-REGISTERS-READABLE)."""
+def test_parse_extended_decodes_sunspec_block(hass) -> None:
+    """Parst den kompletten SunSpec-Modus-Block (Slave-ID 100, siehe
+    modbus.pdf) - Common, 3Ph Inverter (103), Immediate Controls (123),
+    Meter (203) und Battery (802). Siehe anforderung.yaml,
+    REQ-SUNSPEC-MODE-CORRECTION."""
     client = _make_client()
     coordinator = _make_coordinator(hass, client)
 
-    # Register-Layout: internal_addr -> Rohwert. sf-Register = 0 (Faktor 1),
-    # damit die erwarteten Werte den Rohwerten entsprechen.
-    raw = {
-        70: 1,  # SunSpec ID
-        71: 2,  # SunSpec Length
-        72: 30,  # Summe Phasenströme (Herstellerwert)
-        73: 5,  # Strom L1
-        74: 6,  # Strom L2
-        75: 7,  # Strom L3
-        76: 0,  # Strom Skalierung (sf=0)
-        80: 230,  # Spannung L1
-        81: 231,  # Spannung L2
-        82: 229,  # Spannung L3
-        83: 0,  # Spannung Skalierung
-        84: 1000,  # Wirkleistung Summe
-        85: 0,
-        86: 50,  # Netzfrequenz
-        87: 0,
-        88: 1100,  # Scheinleistung Summe
-        89: 0,
-        90: 100,  # Blindleistung Summe
-        91: 0,
-        92: 95,  # Leistungsfaktor
-        93: 0,
-        95: 1000,  # Energie eingespeist
-        96: 2000,  # Energie bezogen
-        97: 0,
-        98: 2,  # Schaltzustand (Ein)
-        99: 500,  # Strom L1 (Faktor -2 fest)
-        100: 600,
-        101: 700,
-        102: 300,  # Wirkleistung L1
-        103: 400,
-        104: 500,
-        105: 0,
-        106: 231,  # Spannung L1
-        107: 232,
-        108: 233,
-        109: 1200,  # Summenleistung
-    }
+    # Alle 115 Register (Adresse 0-114) auf 0 vorbelegen, damit fehlende
+    # Overrides unten nicht zu KeyError führen, und dann die für den Test
+    # relevanten Werte überschreiben. sf-Register = 0 (Faktor 1), damit
+    # skalierte Werte den Rohwerten entsprechen.
+    raw = dict.fromkeys(range(115), 0)
+    raw.update(
+        {
+            0: 21365,  # SunS (Hi)
+            1: 28243,  # SunS (Lo)
+            4: 21313,  # Hersteller "SA"
+            5: 22608,  # "XP"
+            6: 20311,  # "OW"
+            7: 17746,  # "ER" -> "SAXPOWER"
+            8: 18511,  # Gerätemodell "HO"
+            9: 19781,  # "ME"
+            10: to_unsigned16(0),  # kein "PL"-Suffix -> "SAX Power Home"
+            11: 23,  # Version Master
+            12: 56,  # Version Gateway
+            13: 15448,  # Seriennummer Hi
+            14: 97,  # Seriennummer Lo
+            17: 30,  # Speicher Stromsumme
+            18: 5,
+            19: 6,
+            20: 7,
+            25: 230,  # Speicher Spannung A
+            26: 231,
+            27: 229,
+            29: 1500,  # Wirkleistung Speicher Summe -> storage_power_active
+            33: 1600,  # Scheinleistung
+            35: 100,  # Blindleistung
+            37: 95,  # Leistungsfaktor
+            41: 35,  # Maximale Zelltemperatur
+            43: 4,  # Zustand: Ein
+            44: 0,  # Event: Normalbetrieb
+            46: 1,  # Scalefaktor PV-Leistung (PV-Leistung selbst bleibt 0)
+            49: 0,  # Leistungsvorgabe %
+            50: 300,  # Timeout
+            51: 1,  # Steuermodus: Sollwertvorgabe
+            52: to_unsigned16(-2),  # Scalefaktor Leistungsvorgabe
+            53: 4600,  # Referenzwert Maximalleistung
+            56: 20,  # Netz Stromsumme
+            57: 6,
+            58: 7,
+            59: 7,
+            62: 231,  # Netzspannung L1
+            63: 232,
+            64: 233,
+            72: 250,  # Summenwirkleistung Netz -> smartmeter_power
+            97: 7680,  # Kapazität Speichersystem
+            98: 0,  # Verfügbare Ladeleistung
+            99: 4600,  # Verfügbare Entladeleistung
+            100: 100,  # Maximaler SoC
+            101: 0,  # Minimaler SoC
+            102: 55,  # Aktueller SoC
+            103: 45,  # Entladetiefe
+            106: 1,  # Ladestatus Akku: Leistung anliegend
+            108: 0,  # Event: Normalbetrieb
+            109: 3300,  # Durchschnittliche Zellspannung
+        }
+    )
 
     def ext_reg(address: int) -> int:
         return raw[address]
 
     data = coordinator._parse_extended(ext_reg)
 
-    assert data["ext_current_l1"] == 5
-    assert data["ext_current_l2"] == 6
-    assert data["ext_current_l3"] == 7
-    assert data["ext_current_sum"] == 18
-    assert data["ext_current_sum_native"] == 30  # Herstellerwert bleibt eigenständig
+    assert data["sun_manufacturer"] == "SAXPOWER"
+    assert data["sun_model"] == "HOME"
+    assert data["sun_version_master"] == 23
+    assert data["sun_serial_number"] == (15448 << 16) | 97
 
-    assert data["ext_voltage_sum"] == 230 + 231 + 229
+    assert data["storage_current_sum"] == 30
+    assert data["storage_current_a"] == 5
+    assert data["storage_power_active"] == 1500
+    assert data["storage_state_text"] == "Ein"
+    assert data["storage_event_text"] == "Normalbetrieb"
 
-    assert data["sm_current_l1"] == 5.0  # 500 * 10**-2
-    assert data["sm_current_sum"] == 5.0 + 6.0 + 7.0
+    assert data["ic_control_mode_text"] == "Sollwertvorgabe"
+    assert data["ic_max_power_reference"] == 4600
 
-    assert data["sm_power_sum"] == 300 + 400 + 500
-    assert data["sm_voltage_sum"] == 231 + 232 + 233
-    assert data["sm_switch_state_text"] == "Ein"
+    assert data["grid_current_sum"] == 20
+    assert data["smartmeter_power"] == 250
+
+    assert data["battery_capacity"] == 7680
+    assert data["battery_soc"] == 55
+    assert data["battery_discharge_power_available"] == 4600
+    assert data["battery_charging_active"] is True
+    assert data["battery_event_text"] == "Normalbetrieb"
+    assert data["battery_cell_voltage_avg"] == 3300

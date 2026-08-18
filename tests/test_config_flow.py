@@ -14,7 +14,7 @@ VALID_INPUT = {
     "host": "192.168.1.50",
     "port": 502,
     "slave_id_basic": 64,
-    "slave_id_extended": 40,
+    "slave_id_extended": 100,
     "scan_interval": 10,
 }
 
@@ -25,10 +25,10 @@ async def test_user_flow_success(hass) -> None:
     client.connected = True
     read_result = MagicMock()
     read_result.isError.return_value = False
-    # 40 Register genügen sowohl für den Basic-Mode-Block (8 Register) als
-    # auch den Extended-Mode-Block (40 Register), die async_setup_entry
+    # 115 Register genügen sowohl für den Basic-Mode-Block (6 Register) als
+    # auch den SunSpec-Modus-Block (115 Register), die async_setup_entry
     # nach der Config-Flow-Validierung ausliest.
-    read_result.registers = [50] * 40
+    read_result.registers = [50] * 115
     client.read_holding_registers = AsyncMock(return_value=read_result)
     client.close = MagicMock()
 

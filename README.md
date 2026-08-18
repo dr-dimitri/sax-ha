@@ -7,69 +7,70 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
 
 ### Sensoren (`sensor.py`)
 
-Alle in `modbus_llm.yaml` dokumentierten Register sind als Sensor lesbar
-(siehe `anforderung.yaml`, Anforderung `REQ-ALL-REGISTERS-READABLE`) – mit
-deutschen, fachlich verständlichen Namen. Ausgenommen sind nur Register ohne
-definierte Bedeutung ("N.A." laut Hersteller-Doku) und "Immediate Controls"
-(Slave-ID 123), das auf aktueller Hardware noch nicht verfügbar ist.
+Die Sensoren stammen aus zwei unterschiedlichen Modbus-Registerkarten mit
+unterschiedlicher Slave-ID (siehe `modbus_llm.yaml` und `modbus.pdf`, die
+offizielle sax-power.net-Dokumentation im Repo-Root):
 
 **Basic Mode (Slave-ID 64):**
 
 | Entität | Quelle | Beschreibung |
 | --- | --- | --- |
 | Ladezustand | Register 46 | SOC des Speichers in % |
-| Entladeleistung | Register 47 (positiver Anteil) | Leistung, die aktuell ins Hausnetz abgegeben wird, in W |
-| Ladeleistung | Register 47 (negativer Anteil, invertiert) | Leistung, die aktuell in den Speicher geladen wird, in W |
-| Smart Meter Leistung (Basic Mode) | Register 48 | Leistung am Smart Meter, in W |
 | Speicher Schaltzustand (Text) | Register 45 | "Aus" / "Ein" / "Verbunden" als Klartext (Diagnose) |
 | Sollwert Leistung P | Register 41 | Aktuell gesetzter P-Sollwert, in W (Diagnose) |
 | Sollwert cos(phi) | Register 42 | Aktuell gesetzter cos(phi)-Sollwert (Diagnose) |
 
-Register 47 liefert einen einzelnen vorzeichenbehafteten Wert für Lade-/
-Entladeleistung. Die Integration liest ihn einmal und leitet daraus zwei
-Sensoren ab: ist der Wert positiv, wird er als Entladeleistung angezeigt
-(Ladeleistung = 0), ist er negativ, als Ladeleistung (Entladeleistung = 0).
+Die früher hier ebenfalls gelesenen Register 47 ("Leistung P des
+Speichers") und 48 ("Leistung des Smart Meters") wurden entfernt – ein
+Live-Test gegen echte Hardware ergab dort wiederholt physikalisch
+unplausible Werte (~16000W bei einem 4600W-Gerät im Leerlauf, vermutlich
+ein Firmware-Bug). Entlade-/Ladeleistung sowie Smart-Meter-Leistung kommen
+seitdem zuverlässig aus dem SunSpec-Modus, siehe unten
+(`anforderung.yaml`, `REQ-SUNSPEC-MODE-CORRECTION`).
 
-**Extended Mode – Speicher (Slave-ID 40, Register 40071–40094):**
+**SunSpec-Modus (Slave-ID 100, Register 40000–40114, siehe `modbus.pdf`):**
 
-SunSpec-Rohwerte (Ströme, Spannungen, Leistungen, Frequenz, Leistungsfaktor)
+Ein einzelner zusammenhängender Registerblock mit fünf SunSpec-Modellen:
+Common (Geräteidentität), "3Ph Inverter" (103, Speicherelektronik),
+"Immediate Controls" (123, Sollwertvorgabe), "WYE Connect 3Ph Meter" (203,
+Netz/Smart Meter) und "Battery Base" (802, Akkuzellen). SunSpec-Rohwerte
 werden über die zugehörigen `sunssf`-Skalierungsregister in physikalische
 Einheiten umgerechnet (`Wert × 10^sunssf`, siehe `coordinator.apply_sunssf`).
-Jedes Skalierungsregister ist zusätzlich als eigener Diagnose-Sensor
-sichtbar, damit wirklich jedes Register lesbar bleibt.
 
 | Entität | Beschreibung |
 | --- | --- |
-| SunSpec ID / SunSpec Länge | Diagnose-Werte des SunSpec-Blocks |
-| Phasenstrom Summe (Herstellerwert) | Herstellerseitig bereits summierter Wert (Register 40073) |
-| Phasenstrom L1/L2/L3 | Einzelne Phasenströme, in A |
-| **Phasenstrom Summe (L1+L2+L3, berechnet)** | Von der Integration berechnete Summe der drei Phasen |
-| Spannung L1/L2/L3 | Einzelne Phasenspannungen, in V |
-| **Spannung Summe (L1+L2+L3, berechnet)** | Von der Integration berechnete Summe der drei Phasen |
-| Wirkleistung Summe (AC) / Scheinleistung Summe (AC) / Blindleistung Summe (AC) | in W / VA / var |
+| Hersteller / Gerätemodell / Softwareversion Master/Gateway / Seriennummer | Geräteidentität (Diagnose) |
+| **Entladeleistung / Ladeleistung** | Aus Register 40029 ("Wirkleistung Speicher Summe") abgeleitet – ersetzt das defekte Basic-Mode-Register 47 |
+| Speicher Stromsumme / -Strom A/B/C | in A |
+| Speicher Spannung A/B/C | in V |
+| Wirkleistung/Scheinleistung/Blindleistung Speicher Summe | in W / VA / var (Diagnose) |
+| Leistungsfaktor Speicher Summe | dimensionslos |
+| Netzfrequenz (Speicher) | in Hz |
+| Maximale Zelltemperatur | in °C |
+| Speicher Zustand / Speicher Ereignis | Klartext (Diagnose) |
+| PV-Leistung | in W – laut Doku nur mit Smartmeter ADW200 verfügbar (siehe Hinweis unten) |
+| Leistungsvorgabe / Timeout / Steuermodus / Referenzwert Maximalleistung | Immediate-Controls-Werte, nur lesend (Diagnose) |
+| Netz Stromsumme / -Strom L1/L2/L3 | in A |
+| Netzspannung Durchschnitt (L-N) / L1/L2/L3 | in V |
 | Netzfrequenz | in Hz |
-| Leistungsfaktor | in % |
+| **Smart Meter Leistung** | Aus Register 40072 ("Summenwirkleistung Netz") – ersetzt das defekte Basic-Mode-Register 48 |
+| Netzleistung L1/L2/L3 | in W |
+| Scheinleistung/Blindleistung/Leistungsfaktor Netz Summe | in VA / var / dimensionslos |
+| Speicherkapazität / Verfügbare Lade-/Entladeleistung | in Wh / W (Diagnose) |
+| Maximaler/Minimaler SoC / Akku SoC (SunSpec) / Entladetiefe | in % (Diagnose) |
+| Ladestatus Akku / Akku Ereignis | Klartext (Diagnose) |
+| Durchschnittliche Zellspannung | in mV (Diagnose) |
 
-**Extended Mode – Smart Meter (Slave-ID 40, Register 40095–40110):**
+**Hinweis ADL400 vs. ADW200:** `modbus.pdf` dokumentiert, dass PV-Leistung
+und das komplette Meter-Modell 203 nur mit dem Smartmeter ADW200 verfügbar
+seien. Auf einem mit **ADL400** verifizierten Gerät waren die
+Netz-Register (Ströme, Spannungen, Leistungen) dennoch plausibel befüllt –
+nur PV-Leistung war durchgehend 0. Falls dein Speicher ein anderes
+Smartmeter nutzt, können einzelne Werte abweichen oder 0 bleiben.
 
-| Entität | Beschreibung |
-| --- | --- |
-| Smart Meter Energie eingespeist / bezogen | in kWh |
-| Smart Meter Schaltzustand Speicher | Klartext-Spiegel des Basic-Mode-Schaltzustands (Diagnose) |
-| Smart Meter Strom L1/L2/L3 | in A (fester Faktor 10⁻², nicht über ein sunssf-Register) |
-| **Smart Meter Strom Summe (L1+L2+L3, berechnet)** | Berechnete Summe der drei Phasen |
-| Smart Meter Wirkleistung L1/L2/L3 | in W (in `modbus_llm.yaml` fälschlich als L1/L12/L13 statt L1/L2/L3 benannt) |
-| **Smart Meter Wirkleistung Summe (L1+L2+L3, berechnet)** | Berechnete Summe der drei Phasen |
-| Smart Meter Spannung L1/L2/L3 | in V (laut Doku unskaliert) |
-| **Smart Meter Spannung Summe (L1+L2+L3, berechnet)** | Berechnete Summe der drei Phasen |
-| Smart Meter Wirkleistung Gesamt | Herstellerseitig bereits summierter Wert (Register 40110) |
-
-Für jede Gruppe von drei Phasenregistern (L1/L2/L3) wird zusätzlich ein
-eigener, berechneter Summensensor bereitgestellt – auch dort, wo der
-Hersteller bereits einen eigenen Summenwert liefert (dieser bleibt als
-separater, klar gekennzeichneter Sensor erhalten). Betroffene Gruppen:
-Phasenströme und -spannungen im Speicher-Block sowie Phasenströme,
--wirkleistung und -spannungen im Smart-Meter-Block.
+Ist der SunSpec-Modus nicht erreichbar (siehe Abschnitt "Bekannte Lücken"),
+zeigen alle Sensoren aus dieser Tabelle "unbekannt"; die Basic-Mode-Sensoren
+bleiben davon unberührt.
 
 ### Zahlenfelder (`number.py`)
 
@@ -147,7 +148,7 @@ custom_components/sax_power/
 │                          SunSpec-Skalierung, Phasensummen, Max-SOC-Logik, Netzladung
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
-├── sensor.py              ~48 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
+├── sensor.py              ~55 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
 ├── number.py              Max-SOC, Lade-/Entladeleistungsgrenzwert
 ├── switch.py              Speicher ein/aus
 ├── services.yaml           Service-Schema für die UI
@@ -173,30 +174,31 @@ liest ihren Zustand ausschließlich aus `coordinator.data` und schreibt
 Änderungen über `coordinator.async_write_register(...)`.
 
 **Register-Mapping:** Der Coordinator liest pro Poll-Intervall zwei
-zusammenhängende Register-Blöcke mit je einem `read_holding_registers`-
-Aufruf: Basic Mode (Slave-ID 64, Register 41–48, `READ_BLOCK_START`/
-`READ_BLOCK_COUNT`) und Extended Mode (Slave-ID 40, Register 70–109 –
-Speicher- und Smart-Meter-Teilblock sind zusammenhängend,
-`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`). Innerhalb eines Blocks gilt
-weiterhin "alles oder nichts": Schlägt der Basic-Mode-Read fehl, schlägt das
-gesamte Update fehl (`UpdateFailed`), da Basic Mode die Mindestanforderung
-für jede Funktion der Integration ist. Schlägt dagegen nur der
-Extended-Mode-Read fehl (z. B. weil Extended Mode auf dem SAX-Gateway nicht
-freigeschaltet ist), bleiben die Basic-Mode-Sensoren unverändert verfügbar
-und lediglich die Extended-Mode-Sensoren zeigen "unbekannt", bis der Block
-wieder lesbar ist (`SaxPowerCoordinator._async_read_extended`, siehe
-anforderung.yaml `REQ-EXTENDED-MODE-RESILIENCE`). Ein dauerhafter
-Extended-Mode-Ausfall wird zusätzlich als Home-Assistant-Repair-Issue
-angezeigt. Die genaue Zuordnung Protokolladresse ↔ interne Adresse ↔
-Bedeutung steht in `modbus_llm.yaml`; `const.py` referenziert nur die
-intern verwendeten Adressen.
+zusammenhängende Register-Blöcke auf zwei unterschiedlichen Slave-IDs mit je
+einem `read_holding_registers`-Aufruf: Basic Mode (Slave-ID 64, Register
+41–46, `READ_BLOCK_START`/`READ_BLOCK_COUNT`, Adress-Offset `-40001`) und
+SunSpec-Modus (Slave-ID 100, Register 40000–40114, `READ_BLOCK_EXT_START`/
+`READ_BLOCK_EXT_COUNT`, Adress-Offset `-40000` – **anderer Offset als Basic
+Mode!**, siehe `modbus_llm.yaml`). Innerhalb eines Blocks gilt "alles oder
+nichts": Schlägt der Basic-Mode-Read fehl, schlägt das gesamte Update fehl
+(`UpdateFailed`), da Basic Mode die Mindestanforderung für jede Funktion der
+Integration ist. Schlägt dagegen nur der SunSpec-Modus-Read fehl (z. B. weil
+Slave-ID 100 auf dem SAX-Gateway nicht erreichbar ist oder die Firmware zu
+alt ist, siehe `modbus.pdf` "Verfügbarkeit"), bleiben die Basic-Mode-Sensoren
+unverändert verfügbar und lediglich die SunSpec-Sensoren zeigen "unbekannt",
+bis der Block wieder lesbar ist (`SaxPowerCoordinator._async_read_extended`,
+siehe anforderung.yaml `REQ-EXTENDED-MODE-RESILIENCE`). Ein dauerhafter
+Ausfall wird zusätzlich als Home-Assistant-Repair-Issue angezeigt. Die genaue
+Zuordnung Protokolladresse ↔ interne Adresse ↔ Bedeutung steht in
+`modbus_llm.yaml`; `const.py` referenziert nur die intern verwendeten
+Adressen.
 
-**SunSpec-Skalierung & Phasensummen:** `coordinator.apply_sunssf(raw_value,
+**SunSpec-Skalierung:** `coordinator.apply_sunssf(raw_value,
 raw_scale_factor)` wendet `Wert × 10^sunssf` an (beide Rohwerte signed
-16-Bit). `SaxPowerCoordinator._parse_extended` wertet damit alle
-Extended-Mode-Register aus und berechnet für jede Phasen-Trio-Gruppe
-(L1/L2/L3) zusätzlich eine Summe – unabhängig davon, ob der Hersteller
-bereits einen eigenen Summenwert liefert.
+16-Bit). `SaxPowerCoordinator._parse_extended` wertet damit den kompletten
+SunSpec-Modus-Block aus (Common/Inverter/Immediate Controls/Meter/Battery,
+siehe `modbus.pdf`) und dekodiert zusätzlich die als ASCII-Zeichenpaare
+codierten Hersteller-/Modell-Register (`coordinator.decode_ascii_registers`).
 
 **Refresh-Verhalten:** Nutzerausgelöste Schreibaktionen (Switch, Number)
 rufen nach dem Schreiben `coordinator.async_refresh()` auf – das ist die
@@ -212,17 +214,17 @@ tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
 │                                  Max-SOC-Klemmung, Fehlerbehandlung bei Modbus-Schreibfehlern,
-│                                  Parsing des Extended-Mode-Blocks inkl. Phasensummen (gemockt)
+│                                  Parsing des kompletten SunSpec-Modus-Blocks (gemockt)
 ├── test_config_flow.py            Unit-Tests: erfolgreicher Config Flow, "cannot_connect"-Fehler
 │                                  (gemockter AsyncModbusTcpClient)
-├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~48 Sensor-Beschreibungen:
+├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~55 Sensor-Beschreibungen:
 │                                  eindeutige Keys, vollständige DE/EN-Übersetzungen,
 │                                  value_fn wirft für keinen Sensor eine Exception
 ├── test_integration_live.py        End-to-End-Tests gegen einen echten, lokal gestarteten
 │                                  Modbus-TCP-Server (kein Mock) – prüft den kompletten Weg
 │                                  Config Entry → Coordinator → Entities → echtes Wire-Protokoll,
 │                                  inkl. Regressionstest für REQ-EXTENDED-MODE-RESILIENCE
-│                                  (Extended Mode nicht erreichbar → Basic-Mode-Sensoren bleiben da)
+│                                  (SunSpec-Modus nicht erreichbar → Basic-Mode-Sensoren bleiben da)
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py
@@ -232,23 +234,22 @@ tests/
 mocken den `pymodbus`-Client bzw. arbeiten rein auf Python-Ebene und prüfen
 die Programmlogik. `test_integration_live.py` geht einen Schritt weiter: Er
 startet mit `pymodbus.server.ModbusTcpServer` einen echten Modbus-TCP-Server
-auf `127.0.0.1` mit simulierten Geräten (Slave-ID 64 Basic Mode, Slave-ID 40
-Extended Mode), befüllt sie mit Registerwerten aus `modbus_llm.yaml` und lässt
+auf `127.0.0.1` mit simulierten Geräten (Slave-ID 64 Basic Mode, Slave-ID 100
+SunSpec-Modus), befüllt sie mit Registerwerten aus `modbus_llm.yaml` und lässt
 die Integration real darüber kommunizieren. Geprüft werden u. a.:
 
-- korrektes Lesen von SOC/Lade-/Entladeleistung über echtes TCP
-- Extended-Mode-Register mit SunSpec-Skalierung (z. B. Netzfrequenz,
-  Leistungsfaktor) über echtes TCP
-- berechnete Phasensummen unterscheiden sich korrekt vom parallel
-  exponierten Herstellerwert
+- korrektes Lesen von SOC über echtes TCP
+- Entlade-/Ladeleistung und Smart-Meter-Leistung aus dem SunSpec-Modus
+  (Register 40029/40072) über echtes TCP
+- SunSpec-Skalierung (z. B. Netzfrequenz, Zelltemperatur) über echtes TCP
 - Speicher-Switch aus/an inkl. Rücklesen des geschriebenen Werts
 - Max-SOC-Klemmung (SOC über Zielwert → Ladelimit-Register wird auf 0 geschrieben)
 - Netzladung: periodischer Sollwert-Write auf Register 41, verifiziert über
   einen unabhängigen zweiten Modbus-Client
-- Fehlt der Extended-Mode-Server (Slave-ID 40) komplett: Config Entry lädt
+- Fehlt der SunSpec-Modus-Server (Slave-ID 100) komplett: Config Entry lädt
   trotzdem erfolgreich, Basic-Mode-Sensoren liefern echte Werte,
-  Extended-Mode-Sensoren zeigen "unbekannt" statt die Integration am Start
-  zu hindern
+  SunSpec-Sensoren zeigen "unbekannt" statt die Integration am Start zu
+  hindern
 
 Dieser Live-Test hat einen echten Bug aufgedeckt (debounced Refresh, siehe
 oben) – ein reiner Mock-Test hätte das nicht sichtbar gemacht, da er die
@@ -309,7 +310,7 @@ bereits vorinstalliert – dort reicht direkt `pytest -v` ohne eigenes venv.
 | `pytest_homeassistant_custom_component...SocketBlockedError` / `Socket opened during test` bei eigenen neuen Tests | pytest-homeassistant-custom-component sperrt Socket-Erstellung standardmäßig komplett (bis auf `127.0.0.1`). Die `socket_enabled`-Fixture aus pytest-socket **reicht dafür allein nicht aus** – sie hebt zwar die Socket-Sperre auf, wird aber vom Setup-Hook des HA-Test-Plugins wieder auf `127.0.0.1` zurückgesetzt, sobald eine echte externe IP angesprochen wird. | Für Verbindungen zu einer echten externen IP explizit `pytest_socket.enable_socket()` gefolgt von `pytest_socket.socket_allow_hosts([host, "127.0.0.1"], allow_unix_socket=True)` aufrufen (siehe `real_client`-Fixture in `test_real_hardware.py`). Für Verbindungen nur zu `127.0.0.1` (wie in `test_integration_live.py`) genügt weiterhin die `socket_enabled`-Fixture. |
 | `tests/test_real_hardware.py` wird übersprungen (`SKIPPED`) | Kein `host` in `tests/real_device.yaml` hinterlegt, oder der Speicher ist gerade nicht erreichbar. | Mit `pytest -rs` den genauen Skip-Grund anzeigen lassen. `host` in `tests/real_device.yaml` eintragen (siehe Abschnitt unten) bzw. Erreichbarkeit prüfen (siehe nächste Zeile). |
 | Live-Hardware-Test bricht mit Verbindungsfehler ab statt zu überspringen | Der erste Verbindungsversuch (`connect()`) klappt kurzzeitig, ein späterer Read schlägt dann fehl (Netzwerk instabil, falscher Port/Slave-ID). | IP/Port in `tests/real_device.yaml` prüfen (`ping <IP>`, `nc -vz <IP> 502`). Prüfen, ob eine andere Anwendung (z. B. eine bereits laufende Home-Assistant-Instanz) parallel denselben Modbus-Port belegt – SAX-Geräte erlauben oft nur eine aktive Verbindung gleichzeitig. |
-| `test_read_real_extended_mode_values` wird übersprungen, `test_read_real_basic_mode_values` läuft durch | Extended Mode (Slave-ID 40) ist auf dem SAX-Gateway nicht freigeschaltet/erreichbar – das Gerät antwortet dann entweder mit einer Modbus-Fehlerantwort oder (häufiger) mit Modbus-Exception-Code 11 "Gateway Target Device Failed to Respond", was pymodbus als `ModbusIOException` auswirft. | Erwartetes, dokumentiertes Verhalten (siehe `REQ-EXTENDED-MODE-RESILIENCE`) – kein Fehler, entspricht der Fehlerbehandlung im produktiven Coordinator. Falls Extended Mode erwartet wird: Freischaltung beim Hersteller/Installateur klären. |
+| `test_read_real_sunspec_mode_values` wird übersprungen, `test_read_real_basic_mode_values` läuft durch | Der SunSpec-Modus (Slave-ID 100) ist auf diesem Gerät nicht erreichbar – z. B. zu alte Firmware (siehe `modbus.pdf` "Verfügbarkeit": Master V61/Gateway V54 oder neuer nötig). Das Gerät antwortet dann entweder mit einer Modbus-Fehlerantwort oder mit Modbus-Exception-Code 11 "Gateway Target Device Failed to Respond", was pymodbus als `ModbusIOException` auswirft. | Erwartetes, dokumentiertes Verhalten (siehe `REQ-EXTENDED-MODE-RESILIENCE`) – kein Fehler, entspricht der Fehlerbehandlung im produktiven Coordinator. Falls der SunSpec-Modus erwartet wird: Firmware-Version beim Hersteller/Installateur klären. |
 | `ruff`/`black` melden Formatierungsfehler bei eigenen Änderungen | Code entspricht nicht dem Projektstil (Zeilenlänge 88, Formatierung). | `pip install ruff black` (falls nicht vorhanden), dann `black custom_components tests` zum automatischen Formatieren und `ruff check custom_components tests` zur Kontrolle. |
 | Tests schlagen nach einem `git pull` plötzlich fehl | `requirements_test.txt` hat sich geändert (neue/aktualisierte Abhängigkeit), venv ist veraltet. | `source .venv/bin/activate && pip install -r requirements_test.txt` erneut ausführen. |
 
@@ -326,7 +327,7 @@ siehe `anforderung.yaml` `REQ-REAL-HARDWARE-TESTS`):
 host: null   # <- echte IP eintragen, z. B. "192.168.1.50"
 port: 502
 slave_id_basic: 64
-slave_id_extended: 40
+slave_id_extended: 100
 connect_timeout: 3
 ```
 
@@ -341,35 +342,62 @@ pytest tests/test_real_hardware.py -v
 
 ## Bekannte Lücken / Annahmen
 
-- **Temperatursensor**: Im vorliegenden Register-Mapping (`modbus_llm.yaml`)
-  ist kein Temperaturregister dokumentiert. Der Sensor ist daher noch nicht
-  implementiert. Sobald die Registeradresse bekannt ist, kann sie einfach in
-  `custom_components/sax_power/const.py` und `sensor.py` ergänzt werden.
-- **Vorzeichenkonvention** von Register 47 (Leistung P des Speichers) und dem
-  P-Sollwert-Register 41 ist herstellerseitig nicht dokumentiert. Die
-  Integration geht davon aus: positiv = Entladung/Einspeisung. Bitte am
+- **Registerkarte korrigiert (`REQ-SUNSPEC-MODE-CORRECTION`)**: Eine frühere
+  Version dokumentierte "Extended Mode" mit Slave-ID 40 und Adress-Offset
+  `-40001`. Beides war nachweislich falsch – Slave-ID 40 existiert auf
+  echter Hardware nicht (Modbus-Exception "Gateway Target Device Failed to
+  Respond"). Anhand der offiziellen sax-power.net-Dokumentation
+  (`modbus.pdf` im Repo-Root) sowie byte-genauer Verifikation gegen ein
+  echtes Gerät wurde das korrigiert: die tatsächliche Schnittstelle heißt
+  "SunSpec-Modus", liegt auf **Slave-ID 100** mit Offset `-40000` und
+  enthält u. a. auch "Immediate Controls" (vorher fälschlich als eigene,
+  "noch nicht verfügbare" Slave-ID 123 dokumentiert – tatsächlich eine
+  SunSpec-Modell-Nummer innerhalb desselben Blocks, aktiv nutzbar).
+- **Basic-Mode-Register 47/48 entfernt**: Lieferten im Live-Test gegen
+  echte Hardware wiederholt physikalisch unplausible Werte (~16000W bei
+  einem 4600W-Gerät im Leerlauf) – vermutlich ein Firmware-Bug. Entlade-/
+  Ladeleistung sowie Smart-Meter-Leistung kommen seitdem aus dem
+  SunSpec-Modus (Register 40029 bzw. 40072).
+- **PV-Leistung/Meter-Modell 203 und ADW200 vs. ADL400**: `modbus.pdf`
+  dokumentiert diese Register als nur mit dem Smartmeter ADW200 verfügbar.
+  Mit einem ADL400 waren die Netz-Register in Tests dennoch plausibel
+  befüllt, PV-Leistung blieb 0. Bei anderen Smartmeter-Modellen können
+  einzelne Werte abweichen.
+- **Vorzeichenkonvention** von Register 40029 (Wirkleistung Speicher Summe)
+  und dem P-Sollwert-Register 41 ist herstellerseitig nicht dokumentiert.
+  Die Integration geht davon aus: positiv = Entladung/Einspeisung. Bitte am
   realen Gerät verifizieren und ggf. in `coordinator.py`/`sensor.py` anpassen.
 - **Max-SOC** ist kein natives Geräteregister, sondern eine Software-Logik:
   Beim Erreichen des Zielwerts wird das Ladelimit-Register (44) auf 0
-  gesetzt und beim Unterschreiten wieder freigegeben.
-- **"Immediate Controls" (Slave-ID 123)** ist laut `modbus_llm.yaml` "Future
-  Release / Experimental (Stand 03/25 noch nicht verfügbar)" und existiert
-  auf aktueller Hardware nicht – daher bewusst nicht implementiert.
-- **Registerbenennung Smart-Meter-Wirkleistung**: `modbus_llm.yaml` benennt
-  die drei Phasenwirkleistungs-Register als "L1"/"L12"/"L13" statt
-  "L1"/"L2"/"L3". Die Integration behandelt dies als Tippfehler in der
-  Quelldokumentation und interpretiert sie als L1/L2/L3.
-- **Extended Mode ist optional** (seit `REQ-EXTENDED-MODE-RESILIENCE`): Der
-  Coordinator fragt seit `REQ-ALL-REGISTERS-READABLE` zusätzlich den
-  Extended-Mode-Block (Slave-ID 40) ab. Ist dieser nicht erreichbar (z. B.
-  weil Extended Mode auf dem SAX-Gateway nicht freigeschaltet ist), bleiben
-  die Basic-Mode-Sensoren (SOC, Lade-/Entladeleistung, Schalter) trotzdem
-  verfügbar; nur die Extended-Mode-Sensoren zeigen "unbekannt", bis der
-  Block wieder lesbar ist. Vorher führte ein nicht erreichbarer
-  Extended-Mode-Block dazu, dass die gesamte Integration mit
-  `ConfigEntryNotReady` scheiterte und **gar keine** Entities angelegt
-  wurden – das war die Ursache für den Fehlerbericht "es werden keine
-  Sensoren angeboten".
+  gesetzt und beim Unterschreiten wieder freigegeben. Der SunSpec-Modus
+  liefert zwar native "Maximaler SoC"/"Minimaler SoC"-Register
+  (40100/40101), diese sind laut `modbus.pdf` aber nur lesbar (`R`), nicht
+  schreibbar – die Software-Logik bleibt daher der einzige Weg, ein
+  Ladelimit durchzusetzen.
+- **Netzladung-Service nutzt weiterhin Basic Mode**: `sax_power.start_grid_charge`
+  schreibt unverändert einen absoluten Watt-Sollwert auf Register 41 (Slave
+  64). Der SunSpec-Modus böte dafür offiziell einen prozentualen Weg
+  ("Immediate Controls", Register 40049–40051) – die zugehörigen Werte sind
+  bereits als Nur-Lese-Sensoren sichtbar, ein Wechsel des Schreibpfads
+  wurde aber bewusst nicht vorgenommen (siehe `REQ-SUNSPEC-MODE-CORRECTION`
+  in `anforderung.yaml`), da das Ändern eines aktiven Schreibpfads für ein
+  Gerät, das reale Leistungsflüsse in ein Haus steuert, eine eigene,
+  gezielte Abstimmung verdient.
+- **Registerbenennung Smart-Meter-Wirkleistung** (Basic Mode,
+  `modbus_llm.yaml`): historisch benannte die Doku dort drei
+  Phasenwirkleistungs-Register als "L1"/"L12"/"L13" statt "L1"/"L2"/"L3" –
+  betrifft nicht mehr aktiv gelesene Register, nur noch als Hinweis
+  relevant, falls diese Register künftig wieder verwendet werden.
+- **SunSpec-Modus ist optional** (`REQ-EXTENDED-MODE-RESILIENCE`): Ist
+  Slave-ID 100 nicht erreichbar (z. B. zu alte Firmware, siehe
+  `modbus.pdf` "Verfügbarkeit": Master V61/Gateway V54 oder neuer nötig),
+  bleiben die Basic-Mode-Sensoren (SOC, Schalter, Leistungsgrenzwerte)
+  trotzdem verfügbar; nur die SunSpec-Sensoren (inkl. Entlade-/Ladeleistung
+  und Smart-Meter-Leistung) zeigen "unbekannt", bis der Block wieder lesbar
+  ist. Vorher führte ein nicht erreichbarer Extended-Mode-Block dazu, dass
+  die gesamte Integration mit `ConfigEntryNotReady` scheiterte und **gar
+  keine** Entities angelegt wurden – das war die ursprüngliche Ursache für
+  den Fehlerbericht "es werden keine Sensoren angeboten".
 
 ## Installation über HACS (empfohlen)
 
@@ -379,7 +407,7 @@ pytest tests/test_real_hardware.py -v
 3. Auf **Hinzufügen** klicken, danach die Integration "SAX Power Home" in HACS suchen und installieren
 4. Home Assistant neu starten
 5. **Einstellungen → Geräte & Dienste → Integration hinzufügen** → nach "SAX Power" suchen
-6. IP-Adresse, Port (Standard 502), Slave-IDs (Standard 64 & 40) und Aktualisierungsintervall eingeben
+6. IP-Adresse, Port (Standard 502), Slave-IDs (Standard 64 & 100) und Aktualisierungsintervall eingeben
 
 ## Manuelle Installation
 
@@ -400,5 +428,9 @@ Das Repo enthält einen VS Code DevContainer für die lokale Entwicklung/Tests:
 
 ## Quellen
 
-Die Anforderungen und das Modbus-Register-Mapping stammen aus
-`anforderung.yaml` bzw. `modbus_llm.yaml` in diesem Repository.
+Die Anforderungen stammen aus `anforderung.yaml`. Das Modbus-Register-Mapping
+in `modbus_llm.yaml` ist für den Basic-Mode-Block (Slave-ID 64) sowie den
+SunSpec-Modus-Block (Slave-ID 100) gegen `modbus.pdf` – die offizielle
+sax-power.net-Dokumentation ("SAX Power Home/Home Plus Modbus-TCP
+Dokumentation (SUNSPEC-Mode)") – sowie byte-genau gegen echte Hardware
+verifiziert (siehe `anforderung.yaml`, `REQ-SUNSPEC-MODE-CORRECTION`).

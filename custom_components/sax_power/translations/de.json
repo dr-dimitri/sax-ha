@@ -8,7 +8,7 @@
           "host": "IP-Adresse",
           "port": "Port",
           "slave_id_basic": "Slave-ID (Basic Mode)",
-          "slave_id_extended": "Slave-ID (Extended Mode)",
+          "slave_id_extended": "Slave-ID (SunSpec-Modus)",
           "scan_interval": "Aktualisierungsintervall (Sekunden)"
         }
       },
@@ -19,7 +19,7 @@
           "host": "IP-Adresse",
           "port": "Port",
           "slave_id_basic": "Slave-ID (Basic Mode)",
-          "slave_id_extended": "Slave-ID (Extended Mode)",
+          "slave_id_extended": "Slave-ID (SunSpec-Modus)",
           "scan_interval": "Aktualisierungsintervall (Sekunden)"
         }
       }
@@ -56,128 +56,155 @@
       "setpoint_cosphi": {
         "name": "Sollwert cos(phi)"
       },
-      "ext_sunspec_id": {
-        "name": "SunSpec ID"
+      "sun_manufacturer": {
+        "name": "Hersteller"
       },
-      "ext_sunspec_length": {
-        "name": "SunSpec Länge"
+      "sun_model": {
+        "name": "Gerätemodell"
       },
-      "ext_current_sum_native": {
-        "name": "Phasenstrom Summe (Herstellerwert)"
+      "sun_version_master": {
+        "name": "Softwareversion Master"
       },
-      "ext_current_l1": {
-        "name": "Phasenstrom L1"
+      "sun_version_gateway": {
+        "name": "Softwareversion Gateway"
       },
-      "ext_current_l2": {
-        "name": "Phasenstrom L2"
+      "sun_serial_number": {
+        "name": "Seriennummer"
       },
-      "ext_current_l3": {
-        "name": "Phasenstrom L3"
+      "storage_current_sum": {
+        "name": "Speicher Stromsumme"
       },
-      "ext_current_sf": {
-        "name": "Phasenstrom Skalierungsfaktor"
+      "storage_current_a": {
+        "name": "Speicher Strom A"
       },
-      "ext_current_sum": {
-        "name": "Phasenstrom Summe (L1+L2+L3, berechnet)"
+      "storage_current_b": {
+        "name": "Speicher Strom B"
       },
-      "ext_voltage_l1": {
-        "name": "Spannung L1"
+      "storage_current_c": {
+        "name": "Speicher Strom C"
       },
-      "ext_voltage_l2": {
-        "name": "Spannung L2"
+      "storage_voltage_a": {
+        "name": "Speicher Spannung A"
       },
-      "ext_voltage_l3": {
-        "name": "Spannung L3"
+      "storage_voltage_b": {
+        "name": "Speicher Spannung B"
       },
-      "ext_voltage_sf": {
-        "name": "Spannung Skalierungsfaktor"
+      "storage_voltage_c": {
+        "name": "Speicher Spannung C"
       },
-      "ext_voltage_sum": {
-        "name": "Spannung Summe (L1+L2+L3, berechnet)"
+      "storage_power_active": {
+        "name": "Wirkleistung Speicher Summe"
       },
-      "ext_power_active": {
-        "name": "Wirkleistung Summe (AC)"
+      "storage_power_apparent": {
+        "name": "Scheinleistung Speicher Summe"
       },
-      "ext_power_active_sf": {
-        "name": "Wirkleistung Skalierungsfaktor"
+      "storage_power_reactive": {
+        "name": "Blindleistung Speicher Summe"
       },
-      "ext_frequency": {
+      "storage_power_factor": {
+        "name": "Leistungsfaktor Speicher Summe"
+      },
+      "storage_frequency": {
+        "name": "Netzfrequenz (Speicher)"
+      },
+      "storage_max_cell_temp": {
+        "name": "Maximale Zelltemperatur"
+      },
+      "storage_state_text": {
+        "name": "Speicher Zustand"
+      },
+      "storage_event_text": {
+        "name": "Speicher Ereignis"
+      },
+      "pv_power": {
+        "name": "PV-Leistung"
+      },
+      "ic_power_setpoint_pct": {
+        "name": "Leistungsvorgabe"
+      },
+      "ic_timeout": {
+        "name": "Timeout Leistungsvorgabe"
+      },
+      "ic_control_mode_text": {
+        "name": "Steuermodus"
+      },
+      "ic_max_power_reference": {
+        "name": "Referenzwert Maximalleistung"
+      },
+      "grid_current_sum": {
+        "name": "Netz Stromsumme"
+      },
+      "grid_current_l1": {
+        "name": "Netz Strom L1"
+      },
+      "grid_current_l2": {
+        "name": "Netz Strom L2"
+      },
+      "grid_current_l3": {
+        "name": "Netz Strom L3"
+      },
+      "grid_voltage_ln_avg": {
+        "name": "Netzspannung Durchschnitt (L-N)"
+      },
+      "grid_voltage_l1": {
+        "name": "Netzspannung L1"
+      },
+      "grid_voltage_l2": {
+        "name": "Netzspannung L2"
+      },
+      "grid_voltage_l3": {
+        "name": "Netzspannung L3"
+      },
+      "grid_frequency": {
         "name": "Netzfrequenz"
       },
-      "ext_frequency_sf": {
-        "name": "Netzfrequenz Skalierungsfaktor"
+      "grid_power_active_l1": {
+        "name": "Netzleistung L1"
       },
-      "ext_power_apparent": {
-        "name": "Scheinleistung Summe (AC)"
+      "grid_power_active_l2": {
+        "name": "Netzleistung L2"
       },
-      "ext_power_apparent_sf": {
-        "name": "Scheinleistung Skalierungsfaktor"
+      "grid_power_active_l3": {
+        "name": "Netzleistung L3"
       },
-      "ext_power_reactive": {
-        "name": "Blindleistung Summe (AC)"
+      "grid_power_apparent_sum": {
+        "name": "Scheinleistung Netz Summe"
       },
-      "ext_power_reactive_sf": {
-        "name": "Blindleistung Skalierungsfaktor"
+      "grid_power_reactive_sum": {
+        "name": "Blindleistung Netz Summe"
       },
-      "ext_power_factor": {
-        "name": "Leistungsfaktor"
+      "grid_power_factor_sum": {
+        "name": "Leistungsfaktor Netz Summe"
       },
-      "ext_power_factor_sf": {
-        "name": "Leistungsfaktor Skalierungsfaktor"
+      "battery_capacity": {
+        "name": "Speicherkapazität"
       },
-      "sm_energy_fed_in": {
-        "name": "Smart Meter Energie eingespeist"
+      "battery_charge_power_available": {
+        "name": "Verfügbare Ladeleistung"
       },
-      "sm_energy_consumed": {
-        "name": "Smart Meter Energie bezogen"
+      "battery_discharge_power_available": {
+        "name": "Verfügbare Entladeleistung"
       },
-      "sm_energy_sf": {
-        "name": "Smart Meter Energie Skalierungsfaktor"
+      "battery_soc_max": {
+        "name": "Maximaler SoC"
       },
-      "sm_switch_state_text": {
-        "name": "Smart Meter Schaltzustand Speicher"
+      "battery_soc_min": {
+        "name": "Minimaler SoC"
       },
-      "sm_current_l1": {
-        "name": "Smart Meter Strom L1"
+      "battery_soc": {
+        "name": "Akku SoC (SunSpec)"
       },
-      "sm_current_l2": {
-        "name": "Smart Meter Strom L2"
+      "battery_discharge_depth": {
+        "name": "Entladetiefe"
       },
-      "sm_current_l3": {
-        "name": "Smart Meter Strom L3"
+      "battery_charging_active_text": {
+        "name": "Ladestatus Akku"
       },
-      "sm_current_sum": {
-        "name": "Smart Meter Strom Summe (L1+L2+L3, berechnet)"
+      "battery_event_text": {
+        "name": "Akku Ereignis"
       },
-      "sm_power_l1": {
-        "name": "Smart Meter Wirkleistung L1"
-      },
-      "sm_power_l2": {
-        "name": "Smart Meter Wirkleistung L2"
-      },
-      "sm_power_l3": {
-        "name": "Smart Meter Wirkleistung L3"
-      },
-      "sm_power_sf": {
-        "name": "Smart Meter Wirkleistung Skalierungsfaktor"
-      },
-      "sm_power_sum": {
-        "name": "Smart Meter Wirkleistung Summe (L1+L2+L3, berechnet)"
-      },
-      "sm_voltage_l1": {
-        "name": "Smart Meter Spannung L1"
-      },
-      "sm_voltage_l2": {
-        "name": "Smart Meter Spannung L2"
-      },
-      "sm_voltage_l3": {
-        "name": "Smart Meter Spannung L3"
-      },
-      "sm_voltage_sum": {
-        "name": "Smart Meter Spannung Summe (L1+L2+L3, berechnet)"
-      },
-      "sm_power_total": {
-        "name": "Smart Meter Wirkleistung Gesamt"
+      "battery_cell_voltage_avg": {
+        "name": "Durchschnittliche Zellspannung"
       }
     },
     "number": {
@@ -199,8 +226,8 @@
   },
   "issues": {
     "extended_mode_unavailable": {
-      "title": "SAX Extended Mode nicht erreichbar",
-      "description": "Der Extended-Mode-Registerblock (Slave-ID {slave_id}) des SAX Speichers ist nicht erreichbar. Die davon abhängigen Sensoren (SunSpec-Messwerte, Smart-Meter-Detailwerte) zeigen \"unbekannt\", bis die Verbindung wiederhergestellt ist. Die Basic-Mode-Sensoren (Ladezustand, Lade-/Entladeleistung, Schalter) sind davon nicht betroffen. Bitte prüfen, ob Extended Mode auf dem SAX-Gateway aktiviert und die konfigurierte Slave-ID (Extended Mode) korrekt ist."
+      "title": "SAX SunSpec-Modus nicht erreichbar",
+      "description": "Der SunSpec-Modus-Registerblock (Slave-ID {slave_id}) des SAX Speichers ist nicht erreichbar. Die davon abhängigen Sensoren (Speicher-Detailwerte, Netz-/Smart-Meter-Werte, Akkuwerte) zeigen \"unbekannt\", bis die Verbindung wiederhergestellt ist. Die Basic-Mode-Sensoren (Ladezustand, Schalter, Leistungsgrenzwerte) sind davon nicht betroffen. Bitte prüfen, ob die konfigurierte Slave-ID (SunSpec-Modus, Standard: 100) korrekt ist und ob das Gerät die Firmwarekombination Master V61/Gateway V54 oder neuer verwendet."
     }
   },
   "services": {

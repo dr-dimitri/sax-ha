@@ -320,3 +320,84 @@ requirement_real_hardware_tests:
        übersprungen, keine Fehler)."
     - "README.md beschreibt tests/real_device.yaml und wie der
        Live-Hardware-Test aktiviert wird."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): SUNSPEC-MODE-KORREKTUR (Slave-ID 100 statt 40)
+# ==============================================================================
+requirement_sunspec_mode_correction:
+  id: REQ-SUNSPEC-MODE-CORRECTION
+  title: "Extended-Mode-Registerkarte war fehlerhaft - Korrektur anhand der offiziellen sax-power.net-Dokumentation (modbus.pdf)"
+  status: done
+  requested_by: user
+  description: >
+    Nutzer hat die offizielle sax-power.net-Modbus-Dokumentation
+    (Datei modbus.pdf im Repo-Root, "SAX Power Home/Home Plus Modbus-TCP
+    Dokumentation (SUNSPEC-Mode)") bereitgestellt und gebeten, sie mit
+    modbus_llm.yaml abzugleichen. Ergebnis: modbus_llm.yaml war an
+    mehreren Stellen nachweislich falsch:
+
+      - "Extended Mode" wurde dort mit Slave-ID 40 dokumentiert. Diese
+        Slave-ID existiert auf echter Hardware nicht - ein Read darauf
+        liefert eine Modbus-Exception (Code 11 "Gateway Target Device
+        Failed to Respond"). modbus.pdf dokumentiert stattdessen eine
+        einzige, offiziell unterstützte "SUNSPEC-Mode"-Schnittstelle auf
+        Slave-ID 100.
+      - Der dafür verwendete Adress-Offset (-40001) war für diesen Block
+        ebenfalls falsch. Der korrekte Offset (-40000) wurde über die
+        SunSpec-Kennung "SunS" (0x53756E53, laut SunSpec-Standard immer an
+        Wire-Adresse 0) verifiziert.
+      - "Immediate Controls" wurde fälschlich als eigene Slave-ID 123 mit
+        Status "noch nicht verfügbar" dokumentiert. Tatsächlich ist 123
+        die SunSpec-Modell-Nummer innerhalb des einen Registerblocks auf
+        Slave-ID 100, und der Modus ist aktiv nutzbar (Register
+        40049-40053).
+      - Die produktiven Basic-Mode-Register 47 ("Leistung P des
+        Speichers") und 48 ("Leistung des Smart Meters") lieferten im
+        Live-Test gegen echte Hardware wiederholt physikalisch
+        unplausible Werte (~16000-16600W bei einem 4600W-Gerät im
+        Leerlauf, erwartete Last unter 10W) - vermutlich ein
+        Firmware-seitiger Bug (Speicherbereich dieser beiden Register
+        driftete langsam um 2^14, ohne auf reale Lastwechsel zu
+        reagieren).
+
+    Der komplette, gegen echte Hardware byte-genau verifizierte
+    SunSpec-Mode-Registerblock (Slave-ID 100, Adresse 0-114, siehe
+    modbus_llm.yaml) ersetzt die vorherige "Extended Mode"-Implementierung
+    vollständig: const.py, coordinator.py (`_parse_extended`) und
+    sensor.py wurden neu aufgebaut. Die Entlade-/Ladeleistung
+    (`discharge_power`/`charge_power`) sowie die Smart-Meter-Leistung
+    (`smartmeter_power`) beziehen ihre Werte jetzt aus dem SunSpec-Mode
+    (Register 40029 bzw. 40072) statt aus den defekten Basic-Mode-
+    Registern 47/48, die von der Integration nicht mehr gelesen werden.
+
+    Zusätzliche Randbedingung: Der Anwender nutzt als Smartmeter ein
+    ADL400 (nicht das in modbus.pdf für Modell 203 vorausgesetzte
+    ADW200). Am echten Gerät waren die Netz-Register (Modell 203) trotzdem
+    plausibel befüllt - nur PV-Leistung (Register 40045) war durchgehend
+    0, was zur Doku-Aussage passt, dass PV-Leistung ADW200 voraussetzt.
+  verification:
+    - "Byte-genaue Live-Verifikation gegen echte Hardware: SunSpec-Kennung
+       'SunS' an Adresse 0/1, alle 'wellknown'-Scalefaktoren aus
+       modbus.pdf, Hersteller-String 'SAXPOWER', Referenzwert
+       Maximalleistung (4600W) - alle stimmen exakt mit modbus.pdf überein."
+    - "Wirkleistung Speicher Summe (Register 40029) lieferte im Live-Test
+       plausible Werte (1W bzw. -2W bei nahezu Nulllast), im Gegensatz zu
+       Register 47 (16000+W bei identischer realer Last)."
+  acceptance_criteria:
+    - "modbus_llm.yaml dokumentiert den SunSpec-Mode-Block korrekt
+       (Slave-ID 100, Offset -40000) und markiert die defekten
+       Basic-Mode-Register 47/48 als DEPRECATED mit Begründung."
+    - "tests/test_coordinator.py, tests/test_integration_live.py und
+       tests/test_real_hardware.py sind auf Slave-ID 100 umgestellt und
+       laufen gegen simulierte UND echte Hardware erfolgreich durch."
+    - "README.md und die Sensortabellen sind auf die neuen Sensor-Keys
+       umgestellt."
+    - "Der Schreibpfad für Netzladung (`start_grid_charge`-Service) bleibt
+       unverändert (Basic Mode, Register 41) - eine Umstellung auf den
+       offiziellen prozentualen Immediate-Controls-Schreibpfad
+       (Register 40049-40051) ist bewusst NICHT Teil dieser Änderung, da
+       ein Wechsel des Schreibpfads für ein Gerät, das reale
+       Leistungsflüsse in ein Haus steuert, eine eigene, gezielte
+       Abstimmung mit dem Anwender verdient. Die zugehörigen Werte sind
+       bereits als Nur-Lese-Sensoren verfügbar (ic_power_setpoint_pct,
+       ic_timeout, ic_control_mode_text, ic_max_power_reference)."

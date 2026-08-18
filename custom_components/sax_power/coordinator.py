@@ -16,61 +16,101 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    BATTERY_EVENT_LABELS,
+    CONTROL_MODE_LABELS,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
+    ISSUE_EXTENDED_MODE_UNAVAILABLE,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
-    REG_EXT_CURRENT_L1,
-    REG_EXT_CURRENT_L2,
-    REG_EXT_CURRENT_L3,
-    REG_EXT_CURRENT_SF,
-    REG_EXT_CURRENT_SUM,
-    REG_EXT_FREQUENCY,
-    REG_EXT_FREQUENCY_SF,
-    REG_EXT_POWER_ACTIVE,
-    REG_EXT_POWER_ACTIVE_SF,
-    REG_EXT_POWER_APPARENT,
-    REG_EXT_POWER_APPARENT_SF,
-    REG_EXT_POWER_FACTOR,
-    REG_EXT_POWER_FACTOR_SF,
-    REG_EXT_POWER_REACTIVE,
-    REG_EXT_POWER_REACTIVE_SF,
-    REG_EXT_SM_CURRENT_L1,
-    REG_EXT_SM_CURRENT_L2,
-    REG_EXT_SM_CURRENT_L3,
-    REG_EXT_SM_ENERGY_CONSUMED,
-    REG_EXT_SM_ENERGY_FED_IN,
-    REG_EXT_SM_ENERGY_SF,
-    REG_EXT_SM_POWER_L1,
-    REG_EXT_SM_POWER_L2,
-    REG_EXT_SM_POWER_L3,
-    REG_EXT_SM_POWER_SF,
-    REG_EXT_SM_POWER_TOTAL,
-    REG_EXT_SM_SWITCH_STATE,
-    REG_EXT_SM_VOLTAGE_L1,
-    REG_EXT_SM_VOLTAGE_L2,
-    REG_EXT_SM_VOLTAGE_L3,
-    REG_EXT_SUNSPEC_ID,
-    REG_EXT_SUNSPEC_LENGTH,
-    REG_EXT_VOLTAGE_L1,
-    REG_EXT_VOLTAGE_L2,
-    REG_EXT_VOLTAGE_L3,
-    REG_EXT_VOLTAGE_SF,
     REG_LIMIT_CHARGE,
     REG_LIMIT_DISCHARGE,
-    REG_POWER,
     REG_SETPOINT_COSPHI,
     REG_SETPOINT_POWER,
-    REG_SMARTMETER_POWER,
     REG_SOC,
+    REG_SUN_BATTERY_CAPACITY,
+    REG_SUN_BATTERY_CAPACITY_SF,
+    REG_SUN_BATTERY_CELL_VOLTAGE_AVG,
+    REG_SUN_BATTERY_CELL_VOLTAGE_SF,
+    REG_SUN_BATTERY_CHARGE_POWER_AVAILABLE,
+    REG_SUN_BATTERY_CHARGING_ACTIVE,
+    REG_SUN_BATTERY_DISCHARGE_DEPTH,
+    REG_SUN_BATTERY_DISCHARGE_POWER_AVAILABLE,
+    REG_SUN_BATTERY_EVENT,
+    REG_SUN_BATTERY_POWER_SF,
+    REG_SUN_BATTERY_SOC,
+    REG_SUN_BATTERY_SOC_MAX,
+    REG_SUN_BATTERY_SOC_MIN,
+    REG_SUN_BATTERY_SOC_SF,
+    REG_SUN_IC_CONTROL_MODE,
+    REG_SUN_IC_MAX_POWER_REFERENCE,
+    REG_SUN_IC_POWER_SETPOINT_PCT,
+    REG_SUN_IC_POWER_SETPOINT_SF,
+    REG_SUN_IC_TIMEOUT,
+    REG_SUN_MANUFACTURER,
+    REG_SUN_METER_CURRENT_L1,
+    REG_SUN_METER_CURRENT_L2,
+    REG_SUN_METER_CURRENT_L3,
+    REG_SUN_METER_CURRENT_SF,
+    REG_SUN_METER_CURRENT_SUM,
+    REG_SUN_METER_FREQUENCY,
+    REG_SUN_METER_FREQUENCY_SF,
+    REG_SUN_METER_POWER_ACTIVE_L1,
+    REG_SUN_METER_POWER_ACTIVE_L2,
+    REG_SUN_METER_POWER_ACTIVE_L3,
+    REG_SUN_METER_POWER_ACTIVE_SF,
+    REG_SUN_METER_POWER_ACTIVE_SUM,
+    REG_SUN_METER_POWER_APPARENT_SF,
+    REG_SUN_METER_POWER_APPARENT_SUM,
+    REG_SUN_METER_POWER_FACTOR_SF,
+    REG_SUN_METER_POWER_FACTOR_SUM,
+    REG_SUN_METER_POWER_REACTIVE_SF,
+    REG_SUN_METER_POWER_REACTIVE_SUM,
+    REG_SUN_METER_VOLTAGE_L1,
+    REG_SUN_METER_VOLTAGE_L2,
+    REG_SUN_METER_VOLTAGE_L3,
+    REG_SUN_METER_VOLTAGE_LN_AVG,
+    REG_SUN_METER_VOLTAGE_SF,
+    REG_SUN_MODEL,
+    REG_SUN_PV_POWER,
+    REG_SUN_PV_POWER_SF,
+    REG_SUN_SERIAL_HI,
+    REG_SUN_SERIAL_LO,
+    REG_SUN_STORAGE_CURRENT_A,
+    REG_SUN_STORAGE_CURRENT_B,
+    REG_SUN_STORAGE_CURRENT_C,
+    REG_SUN_STORAGE_CURRENT_SF,
+    REG_SUN_STORAGE_CURRENT_SUM,
+    REG_SUN_STORAGE_EVENT,
+    REG_SUN_STORAGE_FREQUENCY,
+    REG_SUN_STORAGE_FREQUENCY_SF,
+    REG_SUN_STORAGE_MAX_CELL_TEMP,
+    REG_SUN_STORAGE_POWER_ACTIVE,
+    REG_SUN_STORAGE_POWER_ACTIVE_SF,
+    REG_SUN_STORAGE_POWER_APPARENT,
+    REG_SUN_STORAGE_POWER_APPARENT_SF,
+    REG_SUN_STORAGE_POWER_FACTOR,
+    REG_SUN_STORAGE_POWER_FACTOR_SF,
+    REG_SUN_STORAGE_POWER_REACTIVE,
+    REG_SUN_STORAGE_POWER_REACTIVE_SF,
+    REG_SUN_STORAGE_STATE,
+    REG_SUN_STORAGE_TEMP_SF,
+    REG_SUN_STORAGE_VOLTAGE_A,
+    REG_SUN_STORAGE_VOLTAGE_B,
+    REG_SUN_STORAGE_VOLTAGE_C,
+    REG_SUN_STORAGE_VOLTAGE_SF,
+    REG_SUN_VERSION_GATEWAY,
+    REG_SUN_VERSION_MASTER,
     REG_SWITCH_STATE,
-    SM_CURRENT_SCALE_FACTOR,
+    STORAGE_EVENT_LABELS,
+    STORAGE_STATE_LABELS,
     SWITCH_STATE_LABELS,
     SWITCH_STATE_UNKNOWN_LABEL,
+    UNKNOWN_LABEL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,11 +130,24 @@ def apply_sunssf(raw_value: int, raw_scale_factor: int) -> float:
     """Apply a SunSpec scale factor register: value * 10**sunssf.
 
     Beide Rohwerte sind vorzeichenbehaftete 16-Bit-Register (siehe
-    modbus_llm.yaml, Abschnitt "SunSpec-Skalierung").
+    modbus.pdf, Abschnitt "SUNSPEC-Scalefaktoren").
     """
     value = to_signed16(raw_value)
     scale_factor = to_signed16(raw_scale_factor)
     return round(value * (10**scale_factor), 3)
+
+
+def decode_ascii_registers(registers: list[int]) -> str:
+    """Decode SunSpec "str (encoded uint16)" registers into ASCII-Text.
+
+    Jedes Register enthält zwei ASCII-Zeichen (High-Byte zuerst). Siehe
+    modbus.pdf, z. B. Hersteller-Register 40004-40007 = "SAXPOWER".
+    """
+    raw = bytearray()
+    for reg in registers:
+        raw.append((reg >> 8) & 0xFF)
+        raw.append(reg & 0xFF)
+    return raw.decode("ascii", errors="replace").strip("\x00 ")
 
 
 class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -127,11 +180,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_charge_power = 0
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
-        # (UpdateFailed), wenn es nicht lesbar ist. Extended Mode wird davon
-        # bewusst entkoppelt: ist Slave-ID self.slave_id_extended (z. B.
-        # weil auf dem Gateway nicht freigeschaltet) nicht erreichbar,
-        # bleiben die Basic-Mode-Sensoren trotzdem verfügbar und nur die
-        # Extended-Mode-Sensoren zeigen "unbekannt" (siehe anforderung.yaml,
+        # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
+        # (Slave-ID self.slave_id_extended, Default 100, siehe modbus.pdf)
+        # wird davon bewusst entkoppelt: ist er nicht erreichbar, bleiben
+        # die Basic-Mode-Sensoren trotzdem verfügbar und nur die
+        # SunSpec-Sensoren zeigen "unbekannt" (siehe anforderung.yaml,
         # REQ-EXTENDED-MODE-RESILIENCE). Vorher führte ein nicht
         # erreichbarer Extended-Mode-Block dazu, dass ConfigEntryNotReady
         # ausgelöst wurde und die Integration gar keine Entities anlegte.
@@ -168,8 +221,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "setpoint_power": to_signed16(basic_reg(REG_SETPOINT_POWER)),
             "setpoint_cosphi": to_signed16(basic_reg(REG_SETPOINT_COSPHI)),
             "soc": basic_reg(REG_SOC),
-            "power": to_signed16(basic_reg(REG_POWER)),
-            "smartmeter_power": to_signed16(basic_reg(REG_SMARTMETER_POWER)),
             "discharge_limit": basic_reg(REG_LIMIT_DISCHARGE),
             "charge_limit": basic_reg(REG_LIMIT_CHARGE),
         }
@@ -180,8 +231,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return data
 
     async def _async_read_extended(self) -> dict[str, Any]:
-        """Read+parse den Extended-Mode-Block, ohne bei Fehlern das gesamte
-        Update scheitern zu lassen (siehe Kommentar in __init__)."""
+        """Read+parse den SunSpec-Modus-Block (Slave-ID self.slave_id_extended,
+        Default 100), ohne bei Fehlern das gesamte Update scheitern zu lassen
+        (siehe Kommentar in __init__)."""
         try:
             extended_result = await self.client.read_holding_registers(
                 address=READ_BLOCK_EXT_START,
@@ -190,24 +242,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if extended_result.isError():
                 raise ModbusException(
-                    f"Modbus-Fehlerantwort (Extended Mode): {extended_result}"
+                    f"Modbus-Fehlerantwort (SunSpec-Modus): {extended_result}"
                 )
         except (TimeoutError, ModbusException) as err:
             if self._extended_available:
                 _LOGGER.warning(
-                    "Extended-Mode-Register (Slave-ID %s) nicht erreichbar - "
-                    "Basic-Mode-Sensoren bleiben verfügbar, Extended-Mode-"
-                    "Sensoren zeigen bis zur Wiederherstellung 'unbekannt': %s",
+                    "SunSpec-Modus-Register (Slave-ID %s) nicht erreichbar - "
+                    "Basic-Mode-Sensoren bleiben verfügbar, SunSpec-Sensoren "
+                    "zeigen bis zur Wiederherstellung 'unbekannt': %s",
                     self.slave_id_extended,
                     err,
                 )
                 ir.async_create_issue(
                     self.hass,
                     DOMAIN,
-                    f"extended_mode_unavailable_{self.entry_id}",
+                    f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}",
                     is_fixable=False,
                     severity=ir.IssueSeverity.WARNING,
-                    translation_key="extended_mode_unavailable",
+                    translation_key=ISSUE_EXTENDED_MODE_UNAVAILABLE,
                     translation_placeholders={"slave_id": str(self.slave_id_extended)},
                 )
             self._extended_available = False
@@ -215,11 +267,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not self._extended_available:
             _LOGGER.info(
-                "Extended-Mode-Register (Slave-ID %s) wieder erreichbar.",
+                "SunSpec-Modus-Register (Slave-ID %s) wieder erreichbar.",
                 self.slave_id_extended,
             )
             ir.async_delete_issue(
-                self.hass, DOMAIN, f"extended_mode_unavailable_{self.entry_id}"
+                self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
             )
         self._extended_available = True
 
@@ -231,105 +283,194 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._parse_extended(ext_reg)
 
     def _parse_extended(self, ext_reg: Callable[[int], int]) -> dict[str, Any]:
-        """Parse the Extended-Mode-Register-Block (Speicher + Smart Meter).
+        """Parse den SunSpec-Modus-Registerblock (Slave-ID 100, modbus.pdf).
 
-        Wendet die SunSpec-Skalierung an und berechnet für jede
-        Phasen-Trio-Gruppe (L1/L2/L3) zusätzlich eine Summe, siehe
-        anforderung.yaml Anforderung REQ-ALL-REGISTERS-READABLE.
+        Deckt SunSpec Common-, "3Ph Inverter"- (103, Speicherelektronik),
+        "Immediate Controls"- (123), "WYE Connect 3Ph Meter"- (203, Netz/
+        Smart Meter) und "Battery Base"-Modell (802, Akkuzellen) ab. Siehe
+        anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION: löst die zuvor
+        angenommene, auf realer Hardware nicht existente Slave-ID 40 ab.
         """
-        current_sf = ext_reg(REG_EXT_CURRENT_SF)
-        current_l1 = apply_sunssf(ext_reg(REG_EXT_CURRENT_L1), current_sf)
-        current_l2 = apply_sunssf(ext_reg(REG_EXT_CURRENT_L2), current_sf)
-        current_l3 = apply_sunssf(ext_reg(REG_EXT_CURRENT_L3), current_sf)
+        storage_current_sf = ext_reg(REG_SUN_STORAGE_CURRENT_SF)
+        storage_voltage_sf = ext_reg(REG_SUN_STORAGE_VOLTAGE_SF)
+        storage_state = ext_reg(REG_SUN_STORAGE_STATE)
+        storage_event = ext_reg(REG_SUN_STORAGE_EVENT)
 
-        voltage_sf = ext_reg(REG_EXT_VOLTAGE_SF)
-        voltage_l1 = apply_sunssf(ext_reg(REG_EXT_VOLTAGE_L1), voltage_sf)
-        voltage_l2 = apply_sunssf(ext_reg(REG_EXT_VOLTAGE_L2), voltage_sf)
-        voltage_l3 = apply_sunssf(ext_reg(REG_EXT_VOLTAGE_L3), voltage_sf)
+        control_mode = ext_reg(REG_SUN_IC_CONTROL_MODE)
 
-        sm_current_scale = 10**SM_CURRENT_SCALE_FACTOR
-        sm_current_l1 = round(
-            to_signed16(ext_reg(REG_EXT_SM_CURRENT_L1)) * sm_current_scale, 3
-        )
-        sm_current_l2 = round(
-            to_signed16(ext_reg(REG_EXT_SM_CURRENT_L2)) * sm_current_scale, 3
-        )
-        sm_current_l3 = round(
-            to_signed16(ext_reg(REG_EXT_SM_CURRENT_L3)) * sm_current_scale, 3
-        )
+        meter_current_sf = ext_reg(REG_SUN_METER_CURRENT_SF)
+        meter_voltage_sf = ext_reg(REG_SUN_METER_VOLTAGE_SF)
+        meter_power_active_sf = ext_reg(REG_SUN_METER_POWER_ACTIVE_SF)
 
-        sm_power_sf = ext_reg(REG_EXT_SM_POWER_SF)
-        sm_power_l1 = apply_sunssf(ext_reg(REG_EXT_SM_POWER_L1), sm_power_sf)
-        sm_power_l2 = apply_sunssf(ext_reg(REG_EXT_SM_POWER_L2), sm_power_sf)
-        sm_power_l3 = apply_sunssf(ext_reg(REG_EXT_SM_POWER_L3), sm_power_sf)
-
-        sm_voltage_l1 = to_signed16(ext_reg(REG_EXT_SM_VOLTAGE_L1))
-        sm_voltage_l2 = to_signed16(ext_reg(REG_EXT_SM_VOLTAGE_L2))
-        sm_voltage_l3 = to_signed16(ext_reg(REG_EXT_SM_VOLTAGE_L3))
-
-        sm_switch_state = ext_reg(REG_EXT_SM_SWITCH_STATE)
+        battery_capacity_sf = ext_reg(REG_SUN_BATTERY_CAPACITY_SF)
+        battery_power_sf = ext_reg(REG_SUN_BATTERY_POWER_SF)
+        battery_soc_sf = ext_reg(REG_SUN_BATTERY_SOC_SF)
+        battery_event = ext_reg(REG_SUN_BATTERY_EVENT)
 
         return {
-            "ext_sunspec_id": ext_reg(REG_EXT_SUNSPEC_ID),
-            "ext_sunspec_length": ext_reg(REG_EXT_SUNSPEC_LENGTH),
-            "ext_current_sum_native": apply_sunssf(
-                ext_reg(REG_EXT_CURRENT_SUM), current_sf
+            # -- SunSpec Common (Identität, Diagnose) --
+            "sun_manufacturer": decode_ascii_registers(
+                [ext_reg(REG_SUN_MANUFACTURER + i) for i in range(4)]
             ),
-            "ext_current_l1": current_l1,
-            "ext_current_l2": current_l2,
-            "ext_current_l3": current_l3,
-            "ext_current_sf": to_signed16(current_sf),
-            "ext_current_sum": round(current_l1 + current_l2 + current_l3, 3),
-            "ext_voltage_l1": voltage_l1,
-            "ext_voltage_l2": voltage_l2,
-            "ext_voltage_l3": voltage_l3,
-            "ext_voltage_sf": to_signed16(voltage_sf),
-            "ext_voltage_sum": round(voltage_l1 + voltage_l2 + voltage_l3, 3),
-            "ext_power_active": apply_sunssf(
-                ext_reg(REG_EXT_POWER_ACTIVE), ext_reg(REG_EXT_POWER_ACTIVE_SF)
+            "sun_model": decode_ascii_registers(
+                [ext_reg(REG_SUN_MODEL + i) for i in range(3)]
             ),
-            "ext_power_active_sf": to_signed16(ext_reg(REG_EXT_POWER_ACTIVE_SF)),
-            "ext_frequency": apply_sunssf(
-                ext_reg(REG_EXT_FREQUENCY), ext_reg(REG_EXT_FREQUENCY_SF)
+            "sun_version_master": ext_reg(REG_SUN_VERSION_MASTER),
+            "sun_version_gateway": ext_reg(REG_SUN_VERSION_GATEWAY),
+            "sun_serial_number": (ext_reg(REG_SUN_SERIAL_HI) << 16)
+            | ext_reg(REG_SUN_SERIAL_LO),
+            # -- Model 103: 3Ph Inverter (Speicherelektronik) --
+            "storage_current_sum": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_SUM), storage_current_sf
             ),
-            "ext_frequency_sf": to_signed16(ext_reg(REG_EXT_FREQUENCY_SF)),
-            "ext_power_apparent": apply_sunssf(
-                ext_reg(REG_EXT_POWER_APPARENT), ext_reg(REG_EXT_POWER_APPARENT_SF)
+            "storage_current_a": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_A), storage_current_sf
             ),
-            "ext_power_apparent_sf": to_signed16(ext_reg(REG_EXT_POWER_APPARENT_SF)),
-            "ext_power_reactive": apply_sunssf(
-                ext_reg(REG_EXT_POWER_REACTIVE), ext_reg(REG_EXT_POWER_REACTIVE_SF)
+            "storage_current_b": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_B), storage_current_sf
             ),
-            "ext_power_reactive_sf": to_signed16(ext_reg(REG_EXT_POWER_REACTIVE_SF)),
-            "ext_power_factor": apply_sunssf(
-                ext_reg(REG_EXT_POWER_FACTOR), ext_reg(REG_EXT_POWER_FACTOR_SF)
+            "storage_current_c": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_C), storage_current_sf
             ),
-            "ext_power_factor_sf": to_signed16(ext_reg(REG_EXT_POWER_FACTOR_SF)),
-            "sm_energy_fed_in": apply_sunssf(
-                ext_reg(REG_EXT_SM_ENERGY_FED_IN), ext_reg(REG_EXT_SM_ENERGY_SF)
+            "storage_voltage_a": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_VOLTAGE_A), storage_voltage_sf
             ),
-            "sm_energy_consumed": apply_sunssf(
-                ext_reg(REG_EXT_SM_ENERGY_CONSUMED), ext_reg(REG_EXT_SM_ENERGY_SF)
+            "storage_voltage_b": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_VOLTAGE_B), storage_voltage_sf
             ),
-            "sm_energy_sf": to_signed16(ext_reg(REG_EXT_SM_ENERGY_SF)),
-            "sm_switch_state": sm_switch_state,
-            "sm_switch_state_text": SWITCH_STATE_LABELS.get(
-                sm_switch_state, SWITCH_STATE_UNKNOWN_LABEL
+            "storage_voltage_c": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_VOLTAGE_C), storage_voltage_sf
             ),
-            "sm_current_l1": sm_current_l1,
-            "sm_current_l2": sm_current_l2,
-            "sm_current_l3": sm_current_l3,
-            "sm_current_sum": round(sm_current_l1 + sm_current_l2 + sm_current_l3, 3),
-            "sm_power_l1": sm_power_l1,
-            "sm_power_l2": sm_power_l2,
-            "sm_power_l3": sm_power_l3,
-            "sm_power_sf": to_signed16(sm_power_sf),
-            "sm_power_sum": round(sm_power_l1 + sm_power_l2 + sm_power_l3, 3),
-            "sm_voltage_l1": sm_voltage_l1,
-            "sm_voltage_l2": sm_voltage_l2,
-            "sm_voltage_l3": sm_voltage_l3,
-            "sm_voltage_sum": sm_voltage_l1 + sm_voltage_l2 + sm_voltage_l3,
-            "sm_power_total": to_signed16(ext_reg(REG_EXT_SM_POWER_TOTAL)),
+            "storage_power_active": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_POWER_ACTIVE),
+                ext_reg(REG_SUN_STORAGE_POWER_ACTIVE_SF),
+            ),
+            "storage_power_apparent": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_POWER_APPARENT),
+                ext_reg(REG_SUN_STORAGE_POWER_APPARENT_SF),
+            ),
+            "storage_power_reactive": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_POWER_REACTIVE),
+                ext_reg(REG_SUN_STORAGE_POWER_REACTIVE_SF),
+            ),
+            "storage_power_factor": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_POWER_FACTOR),
+                ext_reg(REG_SUN_STORAGE_POWER_FACTOR_SF),
+            ),
+            "storage_frequency": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_FREQUENCY),
+                ext_reg(REG_SUN_STORAGE_FREQUENCY_SF),
+            ),
+            "storage_max_cell_temp": apply_sunssf(
+                ext_reg(REG_SUN_STORAGE_MAX_CELL_TEMP), ext_reg(REG_SUN_STORAGE_TEMP_SF)
+            ),
+            "storage_state": storage_state,
+            "storage_state_text": STORAGE_STATE_LABELS.get(
+                storage_state, UNKNOWN_LABEL
+            ),
+            "storage_event": storage_event,
+            "storage_event_text": STORAGE_EVENT_LABELS.get(
+                storage_event, UNKNOWN_LABEL
+            ),
+            # PV-Leistung laut modbus.pdf nur mit Smartmeter ADW200 verfügbar
+            # - mit ADL400 typischerweise 0, siehe anforderung.yaml.
+            "pv_power": apply_sunssf(
+                ext_reg(REG_SUN_PV_POWER), ext_reg(REG_SUN_PV_POWER_SF)
+            ),
+            # -- Model 123: Immediate Controls --
+            "ic_power_setpoint_pct": apply_sunssf(
+                ext_reg(REG_SUN_IC_POWER_SETPOINT_PCT),
+                ext_reg(REG_SUN_IC_POWER_SETPOINT_SF),
+            ),
+            "ic_timeout": ext_reg(REG_SUN_IC_TIMEOUT),
+            "ic_control_mode": control_mode,
+            "ic_control_mode_text": CONTROL_MODE_LABELS.get(
+                control_mode, UNKNOWN_LABEL
+            ),
+            "ic_max_power_reference": ext_reg(REG_SUN_IC_MAX_POWER_REFERENCE),
+            # -- Model 203: WYE Connect 3Ph Meter (Netz/Smart Meter) --
+            "grid_current_sum": apply_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_SUM), meter_current_sf
+            ),
+            "grid_current_l1": apply_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_L1), meter_current_sf
+            ),
+            "grid_current_l2": apply_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_L2), meter_current_sf
+            ),
+            "grid_current_l3": apply_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_L3), meter_current_sf
+            ),
+            "grid_voltage_ln_avg": apply_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_LN_AVG), meter_voltage_sf
+            ),
+            "grid_voltage_l1": apply_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_L1), meter_voltage_sf
+            ),
+            "grid_voltage_l2": apply_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_L2), meter_voltage_sf
+            ),
+            "grid_voltage_l3": apply_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_L3), meter_voltage_sf
+            ),
+            "grid_frequency": apply_sunssf(
+                ext_reg(REG_SUN_METER_FREQUENCY), ext_reg(REG_SUN_METER_FREQUENCY_SF)
+            ),
+            # Ersetzt das früher fehlerhafte "smartmeter_power" (Basic Mode,
+            # Register 48), siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION.
+            "smartmeter_power": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_ACTIVE_SUM), meter_power_active_sf
+            ),
+            "grid_power_active_l1": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_ACTIVE_L1), meter_power_active_sf
+            ),
+            "grid_power_active_l2": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_ACTIVE_L2), meter_power_active_sf
+            ),
+            "grid_power_active_l3": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_ACTIVE_L3), meter_power_active_sf
+            ),
+            "grid_power_apparent_sum": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_APPARENT_SUM),
+                ext_reg(REG_SUN_METER_POWER_APPARENT_SF),
+            ),
+            "grid_power_reactive_sum": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_REACTIVE_SUM),
+                ext_reg(REG_SUN_METER_POWER_REACTIVE_SF),
+            ),
+            "grid_power_factor_sum": apply_sunssf(
+                ext_reg(REG_SUN_METER_POWER_FACTOR_SUM),
+                ext_reg(REG_SUN_METER_POWER_FACTOR_SF),
+            ),
+            # -- Model 802: Battery Base (Akkuzellen) --
+            "battery_capacity": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_CAPACITY), battery_capacity_sf
+            ),
+            "battery_charge_power_available": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_CHARGE_POWER_AVAILABLE), battery_power_sf
+            ),
+            "battery_discharge_power_available": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_DISCHARGE_POWER_AVAILABLE), battery_power_sf
+            ),
+            "battery_soc_max": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_SOC_MAX), battery_soc_sf
+            ),
+            "battery_soc_min": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_SOC_MIN), battery_soc_sf
+            ),
+            "battery_soc": apply_sunssf(ext_reg(REG_SUN_BATTERY_SOC), battery_soc_sf),
+            "battery_discharge_depth": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_DISCHARGE_DEPTH), battery_soc_sf
+            ),
+            "battery_charging_active": bool(ext_reg(REG_SUN_BATTERY_CHARGING_ACTIVE)),
+            "battery_event": battery_event,
+            "battery_event_text": BATTERY_EVENT_LABELS.get(
+                battery_event, UNKNOWN_LABEL
+            ),
+            "battery_cell_voltage_avg": apply_sunssf(
+                ext_reg(REG_SUN_BATTERY_CELL_VOLTAGE_AVG),
+                ext_reg(REG_SUN_BATTERY_CELL_VOLTAGE_SF),
+            ),
         }
 
     async def async_write_register(self, address: int, value: int) -> None:
@@ -387,6 +528,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Das Schreiben von Register 41 versetzt den Speicher laut Doku implizit
     # in den P-Sollwert-Modus. Der Wert muss periodisch wiederholt werden,
     # da der Speicher sonst per Timeout in den vorherigen Modus zurückfällt.
+    #
+    # Hinweis: Dies nutzt weiterhin den Basic-Mode-Weg (Register 41, absolute
+    # Watt). modbus.pdf dokumentiert zusätzlich einen offiziellen,
+    # prozentualen Weg über den SunSpec-Modus ("Immediate Controls", Modell
+    # 123, Register 40049-40051). Diese Integration liest die zugehörigen
+    # Werte bereits als Sensoren mit (ic_power_setpoint_pct etc.), stellt sie
+    # aber (noch) nicht als Schreibpfad zur Verfügung - das Umstellen eines
+    # aktiven Schreibpfads für ein Gerät, das Leistung in ein reales Haus
+    # ein-/ausspeist, verdient eine eigene, gezielte Abstimmung statt einer
+    # Nebenwirkung dieser Änderung. Siehe anforderung.yaml,
+    # REQ-SUNSPEC-MODE-CORRECTION.
 
     @property
     def grid_charge_active(self) -> bool:
@@ -426,5 +578,5 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_shutdown(self) -> None:
         await self.async_stop_grid_charge()
         ir.async_delete_issue(
-            self.hass, DOMAIN, f"extended_mode_unavailable_{self.entry_id}"
+            self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

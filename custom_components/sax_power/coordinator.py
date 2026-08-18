@@ -20,11 +20,11 @@ from pymodbus.exceptions import ModbusException
 from .const import (
     BATTERY_EVENT_LABELS,
     CONTROL_MODE_LABELS,
-    DEFAULT_TIMED_CHARGE_TARGET_SOC,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
     MAX_SETPOINT_POWER,
+    MAX_SOC,
     MIN_SETPOINT_POWER,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
@@ -181,8 +181,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pre_clamp_charge_limit = 0
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
+        self._discharge_active = False
         self._timed_charge_enabled = False
-        self._timed_charge_target_soc = DEFAULT_TIMED_CHARGE_TARGET_SOC
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
@@ -512,10 +512,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._max_soc
 
     async def async_set_max_soc(self, max_soc: int | None) -> None:
-        """Set (or clear with None) the software-side max charge SOC."""
+        """Set (or clear with None) the software-side max charge SOC.
+
+        Wird auch als Ziel-SOC für das zeitgesteuerte Laden verwendet
+        (siehe Abschnitt "Zeitgesteuertes Laden" unten) - deshalb hier
+        zusätzlich _async_enforce_timed_charge neu auswerten.
+        """
         self._max_soc = max_soc
         if self.data is not None:
             await self._async_enforce_max_soc(self.data)
+            await self._async_enforce_timed_charge(self.data)
+            self.data["timed_charge_active"] = self._timed_charge_active
             self.async_set_updated_data(self.data)
 
     async def _async_enforce_max_soc(self, data: dict[str, Any]) -> None:
@@ -572,18 +579,43 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_charge_task.cancel()
             self._grid_charge_task = None
 
-    async def async_start_discharge(self) -> None:
+    @property
+    def discharge_active(self) -> bool:
+        return self._discharge_active
+
+    async def async_toggle_discharge(self) -> None:
         """Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert
         (Register 43, dieselbe Number-Entity "Entladeleistungsgrenzwert") als
-        Sollwert. Bewusst keine eigene Leistungseinstellung für diese
-        Aktion, um keine redundante Einstellmöglichkeit zu erzeugen (siehe
-        anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS). Nutzt
-        denselben Hintergrund-Task wie async_start_grid_charge/das
-        zeitgesteuerte Laden, siehe Kommentar oben.
+        Sollwert, oder stoppt eine über diese Aktion laufende Entladung
+        wieder (erneutes Drücken des Buttons schaltet um). Bewusst keine
+        eigene Leistungseinstellung, um keine redundante Einstellmöglichkeit
+        zu erzeugen (siehe anforderung.yaml,
+        REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS). Nutzt denselben
+        Hintergrund-Task wie async_start_grid_charge/das zeitgesteuerte
+        Laden, siehe Kommentar oben.
         """
+        if self._discharge_active:
+            _LOGGER.debug("Entladung stoppen (erneuter Tastendruck).")
+            await self.async_stop_grid_charge()
+            self._discharge_active = False
+            return
+
         if self.data is None:
             raise HomeAssistantError("Noch keine Daten vom SAX Speicher verfügbar.")
-        await self.async_start_grid_charge(self.data["discharge_limit"])
+        discharge_limit = self.data["discharge_limit"]
+        if discharge_limit <= 0:
+            raise HomeAssistantError(
+                "Entladeleistungsgrenzwert ist 0 W - es würde kein Sollwert "
+                "bewirkt. Bitte zuerst einen Wert über 0 W bei der "
+                "Number-Entity 'Entladeleistungsgrenzwert' setzen."
+            )
+        _LOGGER.debug(
+            "Entladung starten: Sollwert %s W auf Register %s.",
+            discharge_limit,
+            REG_SETPOINT_POWER,
+        )
+        await self.async_start_grid_charge(discharge_limit)
+        self._discharge_active = True
 
     async def _async_grid_charge_loop(self) -> None:
         try:
@@ -604,11 +636,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Nachtstromtarife). Nutzt intern denselben Mechanismus wie der
     # `start_grid_charge`-Service (periodischer P-Sollwert-Write auf
     # Register 41 über async_start_grid_charge/async_stop_grid_charge).
-    # Die Ladeleistung ist bewusst KEINE eigene Einstellung, sondern nutzt
-    # den zentralen Ladeleistungsgrenzwert (data["charge_limit"], Register
-    # 44) - dieselbe Number-Entity wie an anderer Stelle im UI, um keine
-    # redundante Einstellmöglichkeit zu erzeugen (siehe anforderung.yaml,
-    # REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
+    # Sowohl die Ladeleistung (data["charge_limit"], Register 44) als auch
+    # der Ziel-SOC sind bewusst KEINE eigenen Einstellungen: Der Ziel-SOC
+    # nutzt denselben Wert wie "Maximaler Lade-SOC" (self._max_soc, siehe
+    # Max-SOC-Abschnitt oben) - fehlt dieser (None), wird MAX_SOC (100 %)
+    # als Ziel angenommen. Das vermeidet redundante Einstellmöglichkeiten
+    # (siehe anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
     #
     # Wichtig: Zeitgesteuertes Laden und der manuelle
     # `start_grid_charge`/`stop_grid_charge`-Service (sowie der
@@ -622,10 +655,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._timed_charge_enabled
 
     @property
-    def timed_charge_target_soc(self) -> int:
-        return self._timed_charge_target_soc
-
-    @property
     def timed_charge_start(self) -> dt_time | None:
         return self._timed_charge_start
 
@@ -635,10 +664,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
         self._timed_charge_enabled = enabled
-        await self._async_apply_timed_charge_change()
-
-    async def async_set_timed_charge_target_soc(self, target_soc: int) -> None:
-        self._timed_charge_target_soc = target_soc
         await self._async_apply_timed_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
@@ -672,10 +697,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return now >= start or now < end
 
     async def _async_enforce_timed_charge(self, data: dict[str, Any]) -> None:
+        target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
         should_charge = (
             self._timed_charge_enabled
             and self._is_time_in_window(dt_util.now().time())
-            and data["soc"] < self._timed_charge_target_soc
+            and data["soc"] < target_soc
         )
         if should_charge and not self._timed_charge_active:
             await self.async_start_grid_charge(-data["charge_limit"])

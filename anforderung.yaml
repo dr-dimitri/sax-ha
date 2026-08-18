@@ -525,3 +525,78 @@ requirement_discharge_button_dedup_settings:
        Entladeleistungsgrenzwerts auf Register 41 auslöst."
     - "README.md dokumentiert den neuen Button sowie die Streichung der
        Zeitfenster-Leistungseinstellung."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): TOGGLE-VERHALTEN + ZIEL-SOC-DEDUP FÜR
+# ZEITGESTEUERTES LADEN
+# ==============================================================================
+requirement_discharge_toggle_and_target_soc_dedup:
+  id: REQ-DISCHARGE-TOGGLE-TARGET-SOC-DEDUP
+  title: "Entladung-starten-Button schaltet um; Ziel-SOC (Zeitfenster) entfernt"
+  status: partially_done
+  requested_by: user
+  description: >
+    Zwei weitere Änderungen, im selben Geist wie
+    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS:
+
+    1. Die Number-Entity "Ziel-SOC (Zeitfenster)" (REQ-TIMED-SOC-CHARGE)
+       wurde entfernt. Zeitgesteuertes Laden nutzt jetzt denselben
+       Ziel-SOC wie die bereits vorhandene "Maximaler Lade-SOC"-Entity
+       (`SaxPowerCoordinator._max_soc`) - fehlt dieser Wert (None), gilt
+       ersatzweise `MAX_SOC` (100 %) als Ziel. `async_set_max_soc`
+       evaluiert seitdem zusätzlich `_async_enforce_timed_charge` neu,
+       damit eine Änderung sofort wirkt statt erst beim nächsten
+       Poll-Zyklus.
+
+    2. Der "Entladung starten"-Button (`button.py`) hat jetzt
+       Umschalt-Verhalten: `SaxPowerCoordinator.async_toggle_discharge`
+       (ersetzt `async_start_discharge`) merkt sich intern
+       (`self._discharge_active`), ob die aktuell laufende Entladung über
+       diesen Button gestartet wurde, und stoppt sie bei erneutem
+       Tastendruck (`async_stop_grid_charge`) statt sie erneut zu starten.
+       Zusätzlich: Ist der Entladeleistungsgrenzwert 0 W, wird ein Fehler
+       gemeldet statt eines wirkungslosen Sollwert-Writes (0 W hätte real
+       keinen Effekt).
+  known_issue: >
+    Nutzer berichtete, dass die Entladung beim Drücken des Buttons in der
+    Praxis NICHT tatsächlich startet (Speicher entlädt sich nicht sichtbar).
+    Der Coordinator-Code wurde erneut geprüft (Register-Adresse, Slave-ID,
+    Vorzeichen, Freigabe-Logik) - kein offensichtlicher Implementierungsfehler
+    gefunden; das Schreibverhalten ist identisch zum bereits über den
+    simulierten UND partiell über echte Hardware verifizierten
+    `start_grid_charge`-Mechanismus (Laden, negativer Sollwert). Mögliche
+    Ursachen, die NICHT ohne Zugriff auf das reale Gerät verifizierbar sind:
+      - Vorzeichenkonvention von Register 41 könnte für die Entlade-Richtung
+        (positiver Sollwert) anders sein als angenommen - die Konvention war
+        von Anfang an als unverifizierte Annahme dokumentiert (siehe
+        "Bekannte Lücken" in README.md).
+      - Der Basic-Mode-Schreibweg (Register 41, Slave 64) könnte auf der
+        aktuellen Firmware generell unzuverlässig sein - analog zu den
+        bereits als defekt identifizierten Basic-Mode-Leseregistern 47/48
+        (siehe REQ-SUNSPEC-MODE-CORRECTION). Falls das zutrifft, wäre der
+        korrekte Fix eine Umstellung auf den offiziellen SunSpec-Schreibweg
+        ("Immediate Controls", Slave-ID 100, Register 40049-40051,
+        prozentual statt absolut in Watt) für alle drei Nutzungen
+        (start_grid_charge-Service, zeitgesteuertes Laden, Entladung-
+        starten-Button) - das wäre eine grössere, eigene Änderung.
+    Rückfrage an den Nutzer (ob `start_grid_charge`/Laden bereits
+    nachweislich funktioniert hat) blieb bislang unbeantwortet. Bis zur
+    Klärung wurden nur risikoarme, unabhängig korrekte Verbesserungen
+    umgesetzt (0W-Guard, Debug-Logging vor jedem Start/Stop-Write), aber
+    KEIN Wechsel des Schreibmechanismus - das wäre ohne Bestätigung der
+    Ursache eine Vermutung auf Gerätefunktionen mit echten physischen
+    Auswirkungen.
+  acceptance_criteria:
+    - "number.py enthält keine 'timed_charge_target_soc'-Entity mehr."
+    - "_async_enforce_timed_charge nutzt self._max_soc (Fallback MAX_SOC)
+       als Ziel-SOC."
+    - "async_toggle_discharge stoppt eine über den Button gestartete
+       Entladung bei erneutem Aufruf, statt sie erneut zu starten."
+    - "async_toggle_discharge lehnt einen Start mit Entladeleistungsgrenzwert
+       0 W mit klarer Fehlermeldung ab."
+    - "tests/test_coordinator.py und tests/test_integration_live.py decken
+       beide Änderungen ab, inklusive des Umschalt-Verhaltens (zweiter
+       Tastendruck stoppt)."
+    - "OFFEN: Tatsächliches Funktionieren der Entladung auf echter Hardware
+       ist NICHT verifiziert - erfordert Rückmeldung/Logs vom Nutzer nach
+       Deployment, ggf. Folge-Issue für Umstellung auf SunSpec-Schreibweg."

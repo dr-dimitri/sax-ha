@@ -82,16 +82,16 @@ bleiben davon unberührt.
 
 | Entität | Register | Beschreibung |
 | --- | --- | --- |
-| Maximaler Lade-SOC | – (Software-Logik) | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird |
+| Maximaler Lade-SOC | – (Software-Logik) | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird – zentrale Einstellung, auch als Ziel-SOC für zeitgesteuertes Laden (siehe unten) |
 | Ladeleistungsgrenzwert | Register 44 | Direkt schreibbares Leistungslimit für die Ladung (W) – zentrale Einstellung, auch für zeitgesteuertes Laden (siehe unten) |
 | Entladeleistungsgrenzwert | Register 43 | Direkt schreibbares Leistungslimit für die Entladung (W) – zentrale Einstellung, auch für den "Entladung starten"-Button (siehe unten) |
-| Ziel-SOC (Zeitfenster) | – (Software-Logik) | Für zeitgesteuertes Laden, siehe Abschnitt unten |
 
-Bewusst **keine eigenen Leistungseinstellungen** für zeitgesteuertes Laden
-oder den Entladung-starten-Button: Beide nutzen die bereits vorhandenen
-zentralen Leistungsgrenzwerte oben, um keine redundanten
+Bewusst **keine eigenen Ziel-SOC-/Leistungseinstellungen** für
+zeitgesteuertes Laden oder den Entladung-starten-Button: Beide nutzen die
+bereits vorhandenen zentralen Einstellungen oben, um keine redundanten
 Einstellmöglichkeiten zu erzeugen (siehe `anforderung.yaml`,
-`REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS`).
+`REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS`). Ist "Maximaler Lade-SOC" nicht
+gesetzt, gilt für zeitgesteuertes Laden ersatzweise 100 % als Ziel.
 
 **Maximaler Lade-SOC** ist kein natives Geräteregister. Der `DataUpdateCoordinator`
 vergleicht bei jedem Poll den aktuellen SOC (Register 46) mit dem gesetzten
@@ -111,13 +111,18 @@ SOC wieder darunter, wird der ursprüngliche Wert zurückgeschrieben. Siehe
 
 | Entität | Beschreibung |
 | --- | --- |
-| Entladung starten | Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert (siehe oben) als Sollwert |
+| Entladung starten | Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert (siehe oben) als Sollwert; erneutes Drücken stoppt sie wieder (Umschalt-Verhalten) |
 
-Schreibt einen positiven P-Sollwert auf Register 41 in Höhe des aktuell
-gesetzten Entladeleistungsgrenzwerts (Register 43) und wiederholt das
-periodisch (derselbe Mechanismus wie `start_grid_charge`, siehe unten). Es
-gibt bewusst keinen symmetrischen "Stop"-Button in der UI – dafür steht
-weiterhin der `stop_grid_charge`-Service zur Verfügung (siehe unten).
+Erster Druck schreibt einen positiven P-Sollwert auf Register 41 in Höhe
+des aktuell gesetzten Entladeleistungsgrenzwerts (Register 43) und
+wiederholt das periodisch (derselbe Mechanismus wie `start_grid_charge`,
+siehe unten). Zweiter Druck stoppt die Entladung wieder
+(`SaxPowerCoordinator.async_toggle_discharge` merkt sich intern, ob die
+laufende Entladung über diesen Button gestartet wurde). Ist der
+Entladeleistungsgrenzwert 0 W, meldet der Button einen Fehler statt einen
+wirkungslosen Sollwert von 0 zu schreiben. Da `ButtonEntity` in Home
+Assistant stateless ist, zeigt der Button selbst keinen Ein-/Aus-Zustand
+an.
 
 ### Zeitgesteuertes Laden
 
@@ -133,27 +138,33 @@ bei jedem Poll-Zyklus neu ausgewertet.
 | Entität | Plattform | Beschreibung |
 | --- | --- | --- |
 | Zeitgesteuertes Laden | `switch.py` | Ein-/Ausschalten des Features |
-| Ziel-SOC (Zeitfenster) | `number.py` | Ziel-Ladezustand in % (0–100) |
 | Beginn Zeitfenster | `time.py` | Startzeit (HH:MM) |
 | Ende Zeitfenster | `time.py` | Endzeit (HH:MM) |
 | Zeitgesteuertes Laden aktiv | `sensor.py` (Diagnose) | Zeigt, ob gerade aktiv nachgeladen wird |
 
+Kein eigenes Ziel-SOC: Genutzt wird der bereits vorhandene
+"Maximaler Lade-SOC" (siehe Abschnitt "Zahlenfelder" oben) – ist dieser
+nicht gesetzt, gilt ersatzweise 100 % als Ziel.
+
 **Funktionsweise:** Ist das Feature aktiviert, die aktuelle Uhrzeit
-innerhalb des Zeitfensters und der SOC unter dem Ziel-SOC, schreibt der
-Coordinator einen negativen P-Sollwert auf Register 41 – in Höhe des
-zentralen Ladeleistungsgrenzwerts (keine eigene Leistungseinstellung,
-siehe Abschnitt "Zahlenfelder" oben) und technisch derselbe Mechanismus
-wie der `start_grid_charge`-Service (periodischer Write alle 30s, siehe
-unten). Wird der Ziel-SOC erreicht, das Zeitfenster verlassen oder das
-Feature deaktiviert, stoppt der periodische Write automatisch wieder.
+innerhalb des Zeitfensters und der SOC unter dem Ziel-SOC ("Maximaler
+Lade-SOC"), schreibt der Coordinator einen negativen P-Sollwert auf
+Register 41 – in Höhe des zentralen Ladeleistungsgrenzwerts (keine eigene
+Leistungseinstellung, siehe Abschnitt "Zahlenfelder" oben) und technisch
+derselbe Mechanismus wie der `start_grid_charge`-Service (periodischer
+Write alle 30s, siehe unten). Wird der Ziel-SOC erreicht, das Zeitfenster
+verlassen oder das Feature deaktiviert, stoppt der periodische Write
+automatisch wieder.
 
 Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
 05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
 Fenster als leer statt als "ganztägig" – es wird dann nie geladen.
 
-Alle vier Werte werden über Neustarts hinweg persistiert (`RestoreEntity`),
-damit ein einmal eingerichteter Zeitplan nicht bei jedem Home-Assistant-
-Neustart neu gesetzt werden muss.
+Die verbleibenden Werte (Aktiviert-Zustand, Start-/Endzeit) werden über
+Neustarts hinweg persistiert (`RestoreEntity`), damit ein einmal
+eingerichteter Zeitplan nicht bei jedem Home-Assistant-Neustart neu gesetzt
+werden muss. Der Ziel-SOC ("Maximaler Lade-SOC") ist ohnehin dauerhaft
+über den Coordinator gesetzt.
 
 **Wichtig:** Zeitgesteuertes Laden, der "Entladung starten"-Button (siehe
 oben) und der manuelle `start_grid_charge`/`stop_grid_charge`-Service
@@ -218,7 +229,7 @@ custom_components/sax_power/
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
 ├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
-├── number.py              Max-SOC, Lade-/Entladeleistungsgrenzwert, Zeitfenster-Ziel-SOC
+├── number.py              Max-SOC (auch Ziel-SOC für Zeitfenster), Lade-/Entladeleistungsgrenzwert
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes Laden
 ├── button.py               Entladung starten
@@ -288,7 +299,8 @@ tests/
 │                                  Max-SOC-Klemmung, Fehlerbehandlung bei Modbus-Schreibfehlern,
 │                                  Parsing des kompletten SunSpec-Modus-Blocks (gemockt),
 │                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden,
-│                                  Entladung-starten (zentraler Entladeleistungsgrenzwert)
+│                                  Entladung-starten inkl. Umschalt-Verhalten (zweiter
+│                                  Tastendruck stoppt) und 0W-Fehlerfall
 ├── test_config_flow.py            Unit-Tests: erfolgreicher Config Flow, "cannot_connect"-Fehler
 │                                  (gemockter AsyncModbusTcpClient)
 ├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~56 Sensor-Beschreibungen:
@@ -300,7 +312,7 @@ tests/
 │                                  inkl. Regressionstest für REQ-EXTENDED-MODE-RESILIENCE
 │                                  (SunSpec-Modus nicht erreichbar → Basic-Mode-Sensoren bleiben da)
 │                                  sowie End-to-End-Tests für zeitgesteuertes Laden und
-│                                  den "Entladung starten"-Button
+│                                  den "Entladung starten"-Button (inkl. Umschalt-Verhalten)
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

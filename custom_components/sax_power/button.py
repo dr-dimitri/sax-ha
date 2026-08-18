@@ -22,13 +22,14 @@ async def async_setup_entry(
 
 
 class SaxPowerStartDischargeButton(SaxPowerEntity, ButtonEntity):
-    """Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert.
+    """Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert,
+    oder stoppt sie bei erneutem Drücken wieder (Umschalt-Verhalten).
 
     Nutzt bewusst keine eigene Leistungseinstellung, sondern den bereits
     vorhandenen "Entladeleistungsgrenzwert" (Register 43), um keine
     redundante Einstellmöglichkeit zu erzeugen (siehe anforderung.yaml,
     REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS). Siehe
-    SaxPowerCoordinator.async_start_discharge.
+    SaxPowerCoordinator.async_toggle_discharge.
     """
 
     _attr_translation_key = "start_discharge"
@@ -38,4 +39,4 @@ class SaxPowerStartDischargeButton(SaxPowerEntity, ButtonEntity):
         self._attr_unique_id = f"{entry_id}_start_discharge"
 
     async def async_press(self) -> None:
-        await self.coordinator.async_start_discharge()
+        await self.coordinator.async_toggle_discharge()

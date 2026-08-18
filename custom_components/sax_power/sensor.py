@@ -137,6 +137,14 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_direct("switch_state_text"),
     ),
     SaxPowerSensorEntityDescription(
+        key="timed_charge_active_text",
+        translation_key="timed_charge_active_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_bool_text(
+            "timed_charge_active", true_text="Aktiv", false_text="Inaktiv"
+        ),
+    ),
+    SaxPowerSensorEntityDescription(
         key="setpoint_power",
         translation_key="setpoint_power",
         device_class=SensorDeviceClass.POWER,

@@ -32,7 +32,12 @@ from .coordinator import SaxPowerCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SWITCH]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.NUMBER,
+    Platform.SWITCH,
+    Platform.TIME,
+]
 
 SERVICE_GRID_CHARGE_SCHEMA = vol.Schema(
     {

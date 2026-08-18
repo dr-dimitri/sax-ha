@@ -61,6 +61,12 @@ Einheiten umgerechnet (`Wert × 10^sunssf`, siehe `coordinator.apply_sunssf`).
 | Ladestatus Akku / Akku Ereignis | Klartext (Diagnose) |
 | Durchschnittliche Zellspannung | in mV (Diagnose) |
 
+**Hinweis Einheit "var":** Blindleistung (reaktive Leistung) wird
+physikalisch korrekt in **var** (Volt-Ampere reaktiv) angegeben, nicht in
+Watt – analog zu Scheinleistung in VA. Das ist keine falsche Einheit,
+sondern dieselbe Konvention wie bei jedem anderen Energiemessgerät (W nur
+für Wirkleistung, VA für Scheinleistung, var für Blindleistung).
+
 **Hinweis ADL400 vs. ADW200:** `modbus.pdf` dokumentiert, dass PV-Leistung
 und das komplette Meter-Modell 203 nur mit dem Smartmeter ADW200 verfügbar
 seien. Auf einem mit **ADL400** verifizierten Gerät waren die
@@ -79,6 +85,8 @@ bleiben davon unberührt.
 | Maximaler Lade-SOC | – (Software-Logik) | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird |
 | Ladeleistungsgrenzwert | Register 44 | Direkt schreibbares Leistungslimit für die Ladung (W) |
 | Entladeleistungsgrenzwert | Register 43 | Direkt schreibbares Leistungslimit für die Entladung (W) |
+| Ziel-SOC (Zeitfenster) | – (Software-Logik) | Für zeitgesteuertes Laden, siehe Abschnitt unten |
+| Ladeleistung (Zeitfenster) | – (Software-Logik) | Für zeitgesteuertes Laden, siehe Abschnitt unten |
 
 **Maximaler Lade-SOC** ist kein natives Geräteregister. Der `DataUpdateCoordinator`
 vergleicht bei jedem Poll den aktuellen SOC (Register 46) mit dem gesetzten
@@ -92,6 +100,49 @@ SOC wieder darunter, wird der ursprüngliche Wert zurückgeschrieben. Siehe
 | Entität | Register | Beschreibung |
 | --- | --- | --- |
 | Speicher | Register 45 | Schaltet den Speicher ein/aus. Aus = 1, Ein = 2; beim Lesen gilt zusätzlich 3 = "Verbunden" als "an" |
+| Zeitgesteuertes Laden | – (Software-Logik) | Aktiviert/deaktiviert das zeitgesteuerte Laden, siehe unten |
+
+### Zeitgesteuertes Laden
+
+Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv auf
+einen Ziel-SOC – unabhängig von PV-Überschuss, z. B. für günstige
+Nachtstromtarife ("Lade auf 90 %, wenn es zwischen 1 und 5 Uhr ist"). Reine
+Software-Logik (kein natives Geräteregister), umgesetzt in
+`SaxPowerCoordinator._async_enforce_timed_charge` (`coordinator.py`) und
+bei jedem Poll-Zyklus neu ausgewertet.
+
+**Neue Entitäten** (unter "Steuerung" am Gerät):
+
+| Entität | Plattform | Beschreibung |
+| --- | --- | --- |
+| Zeitgesteuertes Laden | `switch.py` | Ein-/Ausschalten des Features |
+| Ziel-SOC (Zeitfenster) | `number.py` | Ziel-Ladezustand in % (0–100) |
+| Ladeleistung (Zeitfenster) | `number.py` | Leistung, mit der geladen wird, in W |
+| Beginn Zeitfenster | `time.py` | Startzeit (HH:MM) |
+| Ende Zeitfenster | `time.py` | Endzeit (HH:MM) |
+| Zeitgesteuertes Laden aktiv | `sensor.py` (Diagnose) | Zeigt, ob gerade aktiv nachgeladen wird |
+
+**Funktionsweise:** Ist das Feature aktiviert, die aktuelle Uhrzeit
+innerhalb des Zeitfensters und der SOC unter dem Ziel-SOC, schreibt der
+Coordinator einen negativen P-Sollwert (Ladeleistung) auf Register 41 –
+technisch derselbe Mechanismus wie der `start_grid_charge`-Service
+(periodischer Write alle 30s, siehe unten). Wird der Ziel-SOC erreicht,
+das Zeitfenster verlassen oder das Feature deaktiviert, stoppt der
+periodische Write automatisch wieder.
+
+Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
+05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
+Fenster als leer statt als "ganztägig" – es wird dann nie geladen.
+
+Alle fünf Werte werden über Neustarts hinweg persistiert
+(`RestoreEntity`), damit ein einmal eingerichteter Zeitplan nicht bei
+jedem Home-Assistant-Neustart neu gesetzt werden muss.
+
+**Wichtig:** Zeitgesteuertes Laden und der manuelle
+`start_grid_charge`/`stop_grid_charge`-Service (siehe unten) teilen sich
+denselben Hintergrund-Task. Werden beide gleichzeitig verwendet, gewinnt
+der zuletzt schreibende Aufruf – es gibt keine eigene Arbitrierung
+zwischen den beiden.
 
 ### Services (`__init__.py`, `services.yaml`)
 
@@ -145,12 +196,14 @@ custom_components/sax_power/
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── config_flow.py       GUI-Einrichtung, Verbindungsvalidierung
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+Extended), Writes,
-│                          SunSpec-Skalierung, Phasensummen, Max-SOC-Logik, Netzladung
+│                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
+│                          zeitgesteuertes Laden
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
-├── sensor.py              ~55 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
-├── number.py              Max-SOC, Lade-/Entladeleistungsgrenzwert
-├── switch.py              Speicher ein/aus
+├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
+├── number.py              Max-SOC, Lade-/Entladeleistungsgrenzwert, Zeitfenster-Ziel-SOC/-Leistung
+├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus
+├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes Laden
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -214,10 +267,11 @@ tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
 │                                  Max-SOC-Klemmung, Fehlerbehandlung bei Modbus-Schreibfehlern,
-│                                  Parsing des kompletten SunSpec-Modus-Blocks (gemockt)
+│                                  Parsing des kompletten SunSpec-Modus-Blocks (gemockt),
+│                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden
 ├── test_config_flow.py            Unit-Tests: erfolgreicher Config Flow, "cannot_connect"-Fehler
 │                                  (gemockter AsyncModbusTcpClient)
-├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~55 Sensor-Beschreibungen:
+├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~56 Sensor-Beschreibungen:
 │                                  eindeutige Keys, vollständige DE/EN-Übersetzungen,
 │                                  value_fn wirft für keinen Sensor eine Exception
 ├── test_integration_live.py        End-to-End-Tests gegen einen echten, lokal gestarteten
@@ -225,6 +279,7 @@ tests/
 │                                  Config Entry → Coordinator → Entities → echtes Wire-Protokoll,
 │                                  inkl. Regressionstest für REQ-EXTENDED-MODE-RESILIENCE
 │                                  (SunSpec-Modus nicht erreichbar → Basic-Mode-Sensoren bleiben da)
+│                                  sowie End-to-End-Test für zeitgesteuertes Laden
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

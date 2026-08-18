@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import time as dt_time
 from datetime import timedelta
 from typing import Any
 
@@ -12,12 +13,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
     BATTERY_EVENT_LABELS,
     CONTROL_MODE_LABELS,
+    DEFAULT_TIMED_CHARGE_POWER,
+    DEFAULT_TIMED_CHARGE_TARGET_SOC,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
@@ -178,6 +182,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pre_clamp_charge_limit = 0
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
+        self._timed_charge_enabled = False
+        self._timed_charge_target_soc = DEFAULT_TIMED_CHARGE_TARGET_SOC
+        self._timed_charge_start: dt_time | None = None
+        self._timed_charge_end: dt_time | None = None
+        self._timed_charge_power = DEFAULT_TIMED_CHARGE_POWER
+        self._timed_charge_active = False
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -228,6 +238,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data.update(await self._async_read_extended())
 
         await self._async_enforce_max_soc(data)
+        await self._async_enforce_timed_charge(data)
+        data["timed_charge_active"] = self._timed_charge_active
         return data
 
     async def _async_read_extended(self) -> dict[str, Any]:
@@ -574,6 +586,94 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except HomeAssistantError:
             _LOGGER.exception("Netzladung: periodischer Schreibvorgang fehlgeschlagen")
             raise
+
+    # -- Zeitgesteuertes Laden ----------------------------------------------
+    # Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv
+    # auf einen Ziel-SOC, unabhängig von PV-Überschuss (z. B. für günstige
+    # Nachtstromtarife). Nutzt intern denselben Mechanismus wie der
+    # `start_grid_charge`-Service (periodischer P-Sollwert-Write auf
+    # Register 41 über async_start_grid_charge/async_stop_grid_charge).
+    #
+    # Wichtig: Zeitgesteuertes Laden und der manuelle
+    # `start_grid_charge`/`stop_grid_charge`-Service teilen sich denselben
+    # Hintergrund-Task (_grid_charge_task). Werden beide gleichzeitig
+    # verwendet, gewinnt der zuletzt schreibende Aufruf - es gibt keine
+    # eigene Arbitrierung zwischen den beiden.
+
+    @property
+    def timed_charge_enabled(self) -> bool:
+        return self._timed_charge_enabled
+
+    @property
+    def timed_charge_target_soc(self) -> int:
+        return self._timed_charge_target_soc
+
+    @property
+    def timed_charge_start(self) -> dt_time | None:
+        return self._timed_charge_start
+
+    @property
+    def timed_charge_end(self) -> dt_time | None:
+        return self._timed_charge_end
+
+    @property
+    def timed_charge_power(self) -> int:
+        return self._timed_charge_power
+
+    async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
+        self._timed_charge_enabled = enabled
+        await self._async_apply_timed_charge_change()
+
+    async def async_set_timed_charge_target_soc(self, target_soc: int) -> None:
+        self._timed_charge_target_soc = target_soc
+        await self._async_apply_timed_charge_change()
+
+    async def async_set_timed_charge_start(self, value: dt_time) -> None:
+        self._timed_charge_start = value
+        await self._async_apply_timed_charge_change()
+
+    async def async_set_timed_charge_end(self, value: dt_time) -> None:
+        self._timed_charge_end = value
+        await self._async_apply_timed_charge_change()
+
+    async def async_set_timed_charge_power(self, value: int) -> None:
+        self._timed_charge_power = value
+        await self._async_apply_timed_charge_change()
+
+    async def _async_apply_timed_charge_change(self) -> None:
+        """Re-evaluate das Zeitfenster sofort nach einer Einstellungsänderung,
+        statt bis zum nächsten Poll-Intervall zu warten."""
+        if self.data is not None:
+            await self._async_enforce_timed_charge(self.data)
+            self.data["timed_charge_active"] = self._timed_charge_active
+            self.async_set_updated_data(self.data)
+
+    def _is_time_in_window(self, now: dt_time) -> bool:
+        """True, wenn `now` im konfigurierten Zeitfenster liegt.
+
+        Unterstützt über Mitternacht laufende Fenster (z. B. 23:00-05:00).
+        Ist start == end (oder eines der beiden nicht gesetzt), gilt das
+        Fenster als leer (nie aktiv) statt als "ganztägig".
+        """
+        start, end = self._timed_charge_start, self._timed_charge_end
+        if start is None or end is None:
+            return False
+        if start <= end:
+            return start <= now < end
+        return now >= start or now < end
+
+    async def _async_enforce_timed_charge(self, data: dict[str, Any]) -> None:
+        should_charge = (
+            self._timed_charge_enabled
+            and self._is_time_in_window(dt_util.now().time())
+            and data["soc"] < self._timed_charge_target_soc
+        )
+        if should_charge and not self._timed_charge_active:
+            await self.async_start_grid_charge(-self._timed_charge_power)
+            self._timed_charge_active = True
+        elif not should_charge and self._timed_charge_active:
+            await self.async_stop_grid_charge()
+            self._timed_charge_active = False
 
     async def async_shutdown(self) -> None:
         await self.async_stop_grid_charge()

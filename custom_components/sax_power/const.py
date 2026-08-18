@@ -247,3 +247,12 @@ ATTR_DEVICE_ID = "device_id"
 DATA_COORDINATOR = "coordinator"
 
 ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
+
+# -- Zeitgesteuertes Laden -------------------------------------------------
+# Software-Logik (kein natives Geräteregister): Lädt den Speicher innerhalb
+# eines konfigurierbaren Zeitfensters aktiv auf einen Ziel-SOC, unabhängig
+# von PV-Überschuss (z. B. für günstige Nachtstromtarife). Nutzt intern
+# denselben Mechanismus wie der `start_grid_charge`-Service (P-Sollwert-
+# Schreiben auf Register 41), siehe SaxPowerCoordinator._async_enforce_timed_charge.
+DEFAULT_TIMED_CHARGE_TARGET_SOC = 90
+DEFAULT_TIMED_CHARGE_POWER = 3000  # W, positiver Wert (wird beim Laden negiert)

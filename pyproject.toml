@@ -12,3 +12,6 @@ select = ["E", "F", "W", "I", "UP", "B"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Absicherung gegen hängende Tests (z. B. freezegun + asyncio.sleep in
+# Hintergrund-Tasks, siehe tests/test_coordinator.py _patched_now).
+timeout = 60

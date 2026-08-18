@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SAX Power Home verbinden",
+        "description": "Verbindungsdaten des SAX Power Home (Plus) Speichers über Modbus TCP.",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "Port",
+          "slave_id_basic": "Slave-ID (Basic Mode)",
+          "slave_id_extended": "Slave-ID (Extended Mode)",
+          "scan_interval": "Aktualisierungsintervall (Sekunden)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum SAX Speicher fehlgeschlagen. IP-Adresse, Port und Slave-ID prüfen."
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits konfiguriert."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "soc": { "name": "Ladezustand" },
+      "discharge_power": { "name": "Entladeleistung" },
+      "charge_power": { "name": "Ladeleistung" }
+    },
+    "number": {
+      "max_soc": { "name": "Maximaler Lade-SOC" },
+      "charge_limit": { "name": "Ladeleistungsgrenzwert" },
+      "discharge_limit": { "name": "Entladeleistungsgrenzwert" }
+    },
+    "switch": {
+      "storage": { "name": "Speicher" }
+    }
+  },
+  "services": {
+    "start_grid_charge": {
+      "name": "Netzladung starten",
+      "description": "Startet die Netzladung des SAX Speichers.",
+      "fields": {
+        "device_id": { "name": "Gerät", "description": "Das SAX Power Gerät." },
+        "power": { "name": "Leistung", "description": "Sollwert für die Netzladung in Watt." }
+      }
+    },
+    "stop_grid_charge": {
+      "name": "Netzladung stoppen",
+      "description": "Beendet die periodischen Sollwert-Schreibbefehle der Netzladung.",
+      "fields": {
+        "device_id": { "name": "Gerät", "description": "Das SAX Power Gerät." }
+      }
+    }
+  }
+}

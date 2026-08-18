@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect SAX Power Home",
+        "description": "Connection details for the SAX Power Home (Plus) storage system via Modbus TCP.",
+        "data": {
+          "host": "IP address",
+          "port": "Port",
+          "slave_id_basic": "Slave ID (Basic Mode)",
+          "slave_id_extended": "Slave ID (Extended Mode)",
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the SAX storage system. Check IP address, port and slave ID."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "soc": { "name": "State of charge" },
+      "discharge_power": { "name": "Discharge power" },
+      "charge_power": { "name": "Charge power" }
+    },
+    "number": {
+      "max_soc": { "name": "Maximum charge SOC" },
+      "charge_limit": { "name": "Charge power limit" },
+      "discharge_limit": { "name": "Discharge power limit" }
+    },
+    "switch": {
+      "storage": { "name": "Storage" }
+    }
+  },
+  "services": {
+    "start_grid_charge": {
+      "name": "Start grid charge",
+      "description": "Starts grid charging of the SAX storage system.",
+      "fields": {
+        "device_id": { "name": "Device", "description": "The SAX Power device." },
+        "power": { "name": "Power", "description": "Setpoint for grid charging in watts." }
+      }
+    },
+    "stop_grid_charge": {
+      "name": "Stop grid charge",
+      "description": "Stops the periodic setpoint writes of grid charging.",
+      "fields": {
+        "device_id": { "name": "Device", "description": "The SAX Power device." }
+      }
+    }
+  }
+}

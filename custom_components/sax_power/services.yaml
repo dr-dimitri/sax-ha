@@ -1,0 +1,39 @@
+start_grid_charge:
+  name: Netzladung starten
+  description: >-
+    Startet die Netzladung des SAX Speichers. Schaltet das Gerät implizit in
+    den P-Sollwert-Modus (Register 40042) und schreibt den Sollwert
+    periodisch (alle 30s), bis stop_grid_charge aufgerufen wird.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    power:
+      name: Leistung
+      description: >-
+        Sollwert für die Netzladung in Watt. Vorzeichenkonvention ist
+        herstellerseitig nicht dokumentiert und sollte am realen Gerät
+        verifiziert werden.
+      required: true
+      selector:
+        number:
+          min: -32768
+          max: 32767
+          unit_of_measurement: W
+          mode: box
+
+stop_grid_charge:
+  name: Netzladung stoppen
+  description: Beendet die periodischen Sollwert-Schreibbefehle der Netzladung.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power

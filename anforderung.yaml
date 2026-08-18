@@ -1,0 +1,79 @@
+Hier ist die ergänzte Anweisung, die den DevContainer für lokale Testumgebungen (inkl. VS Code Integration) abdeckt sowie die neuen Funktionen (Maximaler SOC und Netzladung) berücksichtigt.
+Promp-Anweisung für das LLM (Coding Prompt)
+Du bist ein erfahrener Home Assistant Core Entwickler. Deine Aufgabe ist es, eine benutzerdefinierte Home Assistant Integration (Custom Component) in Python für das SAX Power Home (Plus) Speichersystem auf Basis der Modbus-TCP-Spezifikation zu schreiben.
+
+Befolge bei der Codegenerierung strikt die folgenden Best Practices, Architekturmuster, Sicherheitsrichtlinien und Entwicklungsstandards:
+
+1. ENTWICKLUNGSUMGEBUNG & DEVCONTAINER (LOKALE TESTS)
+- Lege eine vollständige Entwicklungs- und Testkonfiguration für VS Code DevContainer an (`.devcontainer/devcontainer.json` & `.devcontainer/Dockerfile`).
+- Verwende das offizielle Home Assistant DevContainer Image (`mcr.microsoft.com/devcontainers/python:3.12` oder die offizielle Home Assistant Core Development Environment).
+- Integriere VS Code Extensions für Python (ms-python.python), Black Formatter (ms-python.black-formatter), Ruff (charliermarsh.ruff) und YAML (redhat.vscode-yaml).
+- Richte automatisierte Tasks ein, um Home Assistant lokal im Testmodus mit geladener Component auszuführen (`hass -c config`).
+- Binde `pytest`, `pytest-homeassistant-custom-component` und `pytest-asyncio` als Test-Dependencies ein, um Unit-Tests lokal ausführen zu können.
+
+2. ARCHITEKTUR & HOME ASSISTANT STANDARDS
+- Asynchrone Architektur: Der gesamte I/O-Code muss vollständig asynchron laufen (`async`/`await`). Verwende `pymodbus.client.AsyncModbusTcpClient`.
+- DataUpdateCoordinator: Implementiere einen zentralen `DataUpdateCoordinator` in `coordinator.py`. Alle Entitäten beziehen ihre Daten ausschließlich über diesen Coordinator (Prevention von Polling-Spam).
+- Config Flow: Erstelle einen GUI-basierten Einrichtungsprozess (`config_flow.py`). Yaml-Konfigurationen sind veraltet. Abzufragende Parameter beim Setup: IP-Adresse, Port (Default 502), Slave-IDs (Default 64 & 40), Aktualisierungsintervall (Default 10s).
+- Entitätstypen:
+  * Lese-Register -> `SensorEntity` (`sensor.py`)
+  * Schreibbare Leistungswerte / Limits -> `NumberEntity` (`number.py`)
+  * Schalter & Netzwerksteuerung -> `SwitchEntity` / `ButtonEntity` (`switch.py`, `button.py`)
+
+3. ERFORDERLICHE ERWEITERTE FUNKTIONALITÄTEN
+Die Bescheibung der vorhandenen Modbusregister findest Du in der Datei mudbus_llm.yaml
+- Max. SOC Einstellung:
+  * Erstelle eine `NumberEntity` für den maximalen Lade-SOC des Speichers (z. B. 0–100 %).
+  * Steuere das Entlade-/Ladelimit dynamisch oder passe die Registerwerte bei Erreichen des Max-SOC an.
+- Start Netzladung (Grid Charge):
+  * Implementiere eine Funktion (via `SwitchEntity` oder als Home Assistant Service `sax_power.start_grid_charge`), um das Laden aus dem Netz manuell einzuleiten.
+  * Hierfür muss das System in den P-Sollwert-Modus schalten (Slave-ID 64, Register 40042 / Interne Adr. 41) und ein negativer/positiver Leistungssollwert übergeben werden.
+  * Beachte: Periodisches Wiederholen der Schreibbefehle (alle 5 s bis 5 min) bei aktiver Netzladung zur Vermeidung von Timeout-Resets.
+- Anzeige des SOC in Prozent
+- Anzeige der Entladung ins Hausnetz in Watt
+- Anzeige der Temperatur
+- Anzeige der Ladelesitung in Watt
+
+4. MODBUS REGISTERS & BERECHNUNGEN
+- Address Offset: Interne Registeradresse = Protokolladresse - 40001.
+- SunSpec-Skalierung (sunssf): Implementiere eine Hilfsfunktion für Skalierungsfaktoren als Exponent von 10 (`Wert * 10^sunssf`).
+- Write Periodic Task: Implementiere im Coordinator oder in der Entität einen Hintergrund-Task, der aktiven Sollwert-Schreibbefehlen periodisch auffrischt.
+
+5. CODE-QUALITÄT, FORMATIERUNG & SICHERHEIT
+- Typisierung & Linting: Strikte Verwendung von Type Hints (PEP 484). Konformität mit Ruff/Black und PEP 8.
+- Ordnerstruktur:
+  * `.devcontainer/` (devcontainer.json, Dockerfile)
+  * `custom_components/sax_power/`
+    - `manifest.json` (iot_class: local_polling, requirements: ["pymodbus>=3.5.0"])
+    - `const.py` (Zentrale Register, Limits, Domain)
+    - `__init__.py` (Setup, Async Entry)
+    - `config_flow.py` (Options & Config Flow)
+    - `coordinator.py` (DataUpdateCoordinator & Modbus-Abfragen)
+    - `sensor.py`, `number.py`, `switch.py`
+    - `services.yaml` (Exponierte Services für Netzladung)
+  * `tests/` (Async Testfiles für Pytest)
+- Fehlerbehandlung: Fange `ModbusException` und `asyncio.TimeoutError` sauber ab. Mappe sie auf `UpdateFailed` bzw. `ConfigEntryNotReady`.
+- Security: Transaktionsprüfungen und Absicherung gegen ungültige Wertebereichseingaben (Range Validation).
+
+Erstelle nun die Konfigurationsdateien für den DevContainer sowie den Python-Code der Kernkomponenten.
+
+Zusätzliche DevContainer-Struktur (Erklärung)
+Damit die lokale Entwicklung in VS Code auf Anhieb funktioniert, erzeugt das LLM folgende zusätzliche Dateien für deinen Ordner:
+1. .devcontainer/devcontainer.json
+{
+  "name": "Home Assistant Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bullseye",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-python.black-formatter",
+        "redhat.vscode-yaml"
+      ]
+    }
+  },
+  "postCreateCommand": "pip install homeassistant pytest-homeassistant-custom-component ruff black pymodbus",
+  "forwardPorts": [8123]
+}

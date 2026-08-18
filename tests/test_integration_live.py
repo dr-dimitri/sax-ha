@@ -165,7 +165,7 @@ def _build_extended_registers(**overrides: int) -> list[int]:
 
 def _entity_id(registry: er.EntityRegistry, entry_id: str, suffix: str) -> str:
     unique_id = f"{entry_id}_{suffix}"
-    for platform in ("sensor", "number", "switch", "time"):
+    for platform in ("sensor", "number", "switch", "time", "button"):
         found = registry.async_get_entity_id(platform, DOMAIN, unique_id)
         if found:
             return found
@@ -392,10 +392,14 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     hass, socket_enabled
 ) -> None:
     """End-to-End-Test für das zeitgesteuerte Laden (neues Feature): Ziel-
-    SOC, Zeitfenster und Ladeleistung über die entsprechenden Number-/Time-
-    Entities setzen, dann per Switch aktivieren - das muss innerhalb des
+    SOC und Zeitfenster über die entsprechenden Number-/Time-Entities
+    setzen, dann per Switch aktivieren - das muss innerhalb des
     Zeitfensters bei SOC < Ziel-SOC einen echten negativen P-Sollwert-Write
-    auf Register 41 auslösen (derselbe Mechanismus wie start_grid_charge)."""
+    auf Register 41 auslösen (derselbe Mechanismus wie start_grid_charge).
+    Die Ladeleistung kommt dabei aus dem zentralen Ladeleistungsgrenzwert
+    (Register 44, hier per _build_basic_registers()-Default 3000W) - es
+    gibt bewusst keine eigene Leistungseinstellung mehr, siehe
+    anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_registers = _build_basic_registers()
@@ -430,7 +434,6 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
 
         registry = er.async_get(hass)
         target_soc_id = _entity_id(registry, entry.entry_id, "timed_charge_target_soc")
-        power_id = _entity_id(registry, entry.entry_id, "timed_charge_power")
         start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
         end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
         enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
@@ -445,9 +448,6 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             "set_value",
             {"entity_id": target_soc_id, "value": 90},
             blocking=True,
-        )
-        await hass.services.async_call(
-            "number", "set_value", {"entity_id": power_id, "value": 2500}, blocking=True
         )
         await hass.services.async_call(
             "time",
@@ -485,10 +485,79 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
                 address=41, count=1, device_id=SLAVE_ID_BASIC
             )
             verify_client.close()
-            assert to_signed16(result.registers[0]) == -2500
+            # -3000: negativer Ladeleistungsgrenzwert (Register 44,
+            # _build_basic_registers()-Default), nicht mehr konfigurierbar
+            # über eine eigene Zeitfenster-Leistungseinstellung.
+            assert to_signed16(result.registers[0]) == -3000
 
             await hass.async_block_till_done()
             assert hass.states.get(active_text_id).state == "Aktiv"
+        finally:
+            await coordinator.async_stop_grid_charge()
+    finally:
+        await server.shutdown()
+
+
+async def test_live_start_discharge_button_writes_discharge_limit(
+    hass, socket_enabled
+) -> None:
+    """End-to-End-Test für den "Entladung starten"-Button (neues Feature):
+    Drücken muss einen echten positiven P-Sollwert-Write auf Register 41
+    auslösen, mit dem Wert des zentralen Entladeleistungsgrenzwerts
+    (Register 43) - keine eigene Leistungseinstellung, siehe
+    anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 3))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 3,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        button_id = _entity_id(registry, entry.entry_id, "start_discharge")
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+
+        try:
+            await hass.services.async_call(
+                "button", "press", {"entity_id": button_id}, blocking=True
+            )
+            await hass.async_block_till_done()
+            await asyncio.sleep(0.2)
+
+            assert coordinator.grid_charge_active is True
+
+            verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 3)
+            await verify_client.connect()
+            result = await verify_client.read_holding_registers(
+                address=41, count=1, device_id=SLAVE_ID_BASIC
+            )
+            verify_client.close()
+            # 3000: Entladeleistungsgrenzwert (Register 43,
+            # _build_basic_registers()-Default), positiv = Entladung.
+            assert to_signed16(result.registers[0]) == 3000
         finally:
             await coordinator.async_stop_grid_charge()
     finally:

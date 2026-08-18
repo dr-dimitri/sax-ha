@@ -222,9 +222,6 @@
       },
       "timed_charge_target_soc": {
         "name": "Target SOC (time window)"
-      },
-      "timed_charge_power": {
-        "name": "Charge power (time window)"
       }
     },
     "switch": {
@@ -241,6 +238,11 @@
       },
       "timed_charge_end": {
         "name": "Time window end"
+      }
+    },
+    "button": {
+      "start_discharge": {
+        "name": "Start discharge"
       }
     }
   },

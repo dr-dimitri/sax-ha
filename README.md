@@ -83,10 +83,15 @@ bleiben davon unberührt.
 | Entität | Register | Beschreibung |
 | --- | --- | --- |
 | Maximaler Lade-SOC | – (Software-Logik) | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird |
-| Ladeleistungsgrenzwert | Register 44 | Direkt schreibbares Leistungslimit für die Ladung (W) |
-| Entladeleistungsgrenzwert | Register 43 | Direkt schreibbares Leistungslimit für die Entladung (W) |
+| Ladeleistungsgrenzwert | Register 44 | Direkt schreibbares Leistungslimit für die Ladung (W) – zentrale Einstellung, auch für zeitgesteuertes Laden (siehe unten) |
+| Entladeleistungsgrenzwert | Register 43 | Direkt schreibbares Leistungslimit für die Entladung (W) – zentrale Einstellung, auch für den "Entladung starten"-Button (siehe unten) |
 | Ziel-SOC (Zeitfenster) | – (Software-Logik) | Für zeitgesteuertes Laden, siehe Abschnitt unten |
-| Ladeleistung (Zeitfenster) | – (Software-Logik) | Für zeitgesteuertes Laden, siehe Abschnitt unten |
+
+Bewusst **keine eigenen Leistungseinstellungen** für zeitgesteuertes Laden
+oder den Entladung-starten-Button: Beide nutzen die bereits vorhandenen
+zentralen Leistungsgrenzwerte oben, um keine redundanten
+Einstellmöglichkeiten zu erzeugen (siehe `anforderung.yaml`,
+`REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS`).
 
 **Maximaler Lade-SOC** ist kein natives Geräteregister. Der `DataUpdateCoordinator`
 vergleicht bei jedem Poll den aktuellen SOC (Register 46) mit dem gesetzten
@@ -101,6 +106,18 @@ SOC wieder darunter, wird der ursprüngliche Wert zurückgeschrieben. Siehe
 | --- | --- | --- |
 | Speicher | Register 45 | Schaltet den Speicher ein/aus. Aus = 1, Ein = 2; beim Lesen gilt zusätzlich 3 = "Verbunden" als "an" |
 | Zeitgesteuertes Laden | – (Software-Logik) | Aktiviert/deaktiviert das zeitgesteuerte Laden, siehe unten |
+
+### Schaltflächen (`button.py`)
+
+| Entität | Beschreibung |
+| --- | --- |
+| Entladung starten | Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert (siehe oben) als Sollwert |
+
+Schreibt einen positiven P-Sollwert auf Register 41 in Höhe des aktuell
+gesetzten Entladeleistungsgrenzwerts (Register 43) und wiederholt das
+periodisch (derselbe Mechanismus wie `start_grid_charge`, siehe unten). Es
+gibt bewusst keinen symmetrischen "Stop"-Button in der UI – dafür steht
+weiterhin der `stop_grid_charge`-Service zur Verfügung (siehe unten).
 
 ### Zeitgesteuertes Laden
 
@@ -117,32 +134,32 @@ bei jedem Poll-Zyklus neu ausgewertet.
 | --- | --- | --- |
 | Zeitgesteuertes Laden | `switch.py` | Ein-/Ausschalten des Features |
 | Ziel-SOC (Zeitfenster) | `number.py` | Ziel-Ladezustand in % (0–100) |
-| Ladeleistung (Zeitfenster) | `number.py` | Leistung, mit der geladen wird, in W |
 | Beginn Zeitfenster | `time.py` | Startzeit (HH:MM) |
 | Ende Zeitfenster | `time.py` | Endzeit (HH:MM) |
 | Zeitgesteuertes Laden aktiv | `sensor.py` (Diagnose) | Zeigt, ob gerade aktiv nachgeladen wird |
 
 **Funktionsweise:** Ist das Feature aktiviert, die aktuelle Uhrzeit
 innerhalb des Zeitfensters und der SOC unter dem Ziel-SOC, schreibt der
-Coordinator einen negativen P-Sollwert (Ladeleistung) auf Register 41 –
-technisch derselbe Mechanismus wie der `start_grid_charge`-Service
-(periodischer Write alle 30s, siehe unten). Wird der Ziel-SOC erreicht,
-das Zeitfenster verlassen oder das Feature deaktiviert, stoppt der
-periodische Write automatisch wieder.
+Coordinator einen negativen P-Sollwert auf Register 41 – in Höhe des
+zentralen Ladeleistungsgrenzwerts (keine eigene Leistungseinstellung,
+siehe Abschnitt "Zahlenfelder" oben) und technisch derselbe Mechanismus
+wie der `start_grid_charge`-Service (periodischer Write alle 30s, siehe
+unten). Wird der Ziel-SOC erreicht, das Zeitfenster verlassen oder das
+Feature deaktiviert, stoppt der periodische Write automatisch wieder.
 
 Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
 05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
 Fenster als leer statt als "ganztägig" – es wird dann nie geladen.
 
-Alle fünf Werte werden über Neustarts hinweg persistiert
-(`RestoreEntity`), damit ein einmal eingerichteter Zeitplan nicht bei
-jedem Home-Assistant-Neustart neu gesetzt werden muss.
+Alle vier Werte werden über Neustarts hinweg persistiert (`RestoreEntity`),
+damit ein einmal eingerichteter Zeitplan nicht bei jedem Home-Assistant-
+Neustart neu gesetzt werden muss.
 
-**Wichtig:** Zeitgesteuertes Laden und der manuelle
-`start_grid_charge`/`stop_grid_charge`-Service (siehe unten) teilen sich
-denselben Hintergrund-Task. Werden beide gleichzeitig verwendet, gewinnt
-der zuletzt schreibende Aufruf – es gibt keine eigene Arbitrierung
-zwischen den beiden.
+**Wichtig:** Zeitgesteuertes Laden, der "Entladung starten"-Button (siehe
+oben) und der manuelle `start_grid_charge`/`stop_grid_charge`-Service
+(siehe unten) teilen sich denselben Hintergrund-Task. Werden mehrere davon
+gleichzeitig verwendet, gewinnt der zuletzt schreibende Aufruf – es gibt
+keine eigene Arbitrierung zwischen ihnen.
 
 ### Services (`__init__.py`, `services.yaml`)
 
@@ -201,9 +218,10 @@ custom_components/sax_power/
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
 ├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
-├── number.py              Max-SOC, Lade-/Entladeleistungsgrenzwert, Zeitfenster-Ziel-SOC/-Leistung
+├── number.py              Max-SOC, Lade-/Entladeleistungsgrenzwert, Zeitfenster-Ziel-SOC
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes Laden
+├── button.py               Entladung starten
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -221,8 +239,9 @@ nachträglich ändern" oben.
 **Datenfluss:** `config_flow.py` sammelt Host/Port/Slave-IDs/Intervall und
 validiert die Verbindung mit einem Testlesen. `__init__.py` baut daraus einen
 `AsyncModbusTcpClient` und einen `SaxPowerCoordinator` (`coordinator.py`),
-lädt anschließend die Plattformen `sensor`, `number`, `switch` und
-registriert die beiden Services. Jede Entität (`entity.py` als Basisklasse)
+lädt anschließend die Plattformen `sensor`, `number`, `switch`, `time` und
+`button` und registriert die beiden Services. Jede Entität (`entity.py` als
+Basisklasse)
 liest ihren Zustand ausschließlich aus `coordinator.data` und schreibt
 Änderungen über `coordinator.async_write_register(...)`.
 
@@ -268,7 +287,8 @@ tests/
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
 │                                  Max-SOC-Klemmung, Fehlerbehandlung bei Modbus-Schreibfehlern,
 │                                  Parsing des kompletten SunSpec-Modus-Blocks (gemockt),
-│                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden
+│                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden,
+│                                  Entladung-starten (zentraler Entladeleistungsgrenzwert)
 ├── test_config_flow.py            Unit-Tests: erfolgreicher Config Flow, "cannot_connect"-Fehler
 │                                  (gemockter AsyncModbusTcpClient)
 ├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~56 Sensor-Beschreibungen:
@@ -279,7 +299,8 @@ tests/
 │                                  Config Entry → Coordinator → Entities → echtes Wire-Protokoll,
 │                                  inkl. Regressionstest für REQ-EXTENDED-MODE-RESILIENCE
 │                                  (SunSpec-Modus nicht erreichbar → Basic-Mode-Sensoren bleiben da)
-│                                  sowie End-to-End-Test für zeitgesteuertes Laden
+│                                  sowie End-to-End-Tests für zeitgesteuertes Laden und
+│                                  den "Entladung starten"-Button
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

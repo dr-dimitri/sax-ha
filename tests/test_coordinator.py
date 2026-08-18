@@ -344,11 +344,13 @@ async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_timed_charge_target_soc(90)
-    await coordinator.async_set_timed_charge_power(3000)
     await coordinator.async_set_timed_charge_enabled(True)
 
     try:
         with _patched_now(2):
+            # Ladeleistung stammt aus dem zentralen Ladeleistungsgrenzwert
+            # (data["charge_limit"]), keine eigene Einstellung mehr - siehe
+            # anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS.
             await coordinator._async_enforce_timed_charge(
                 {"soc": 50, "charge_limit": 3000}
             )
@@ -411,3 +413,39 @@ async def test_enforce_timed_charge_inactive_when_disabled(hass) -> None:
 
     assert coordinator._timed_charge_active is False
     assert coordinator.grid_charge_active is False
+
+
+# -- Entladung starten (Button) ----------------------------------------------
+
+
+async def test_start_discharge_raises_without_data(hass) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_start_discharge()
+
+
+async def test_start_discharge_uses_central_discharge_limit(hass) -> None:
+    """Der Entladung-starten-Button nutzt den zentralen Entladeleistungs-
+    grenzwert (data["discharge_limit"]) statt einer eigenen Einstellung -
+    siehe anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "charge_limit": 3000, "discharge_limit": 4600}
+
+    try:
+        await coordinator.async_start_discharge()
+        await asyncio.sleep(0.1)
+
+        assert coordinator.grid_charge_active is True
+        client.write_register.assert_awaited_with(
+            address=41, value=to_unsigned16(4600), device_id=64
+        )
+    finally:
+        await coordinator.async_stop_grid_charge()

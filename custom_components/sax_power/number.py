@@ -11,7 +11,6 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DATA_COORDINATOR,
-    DEFAULT_TIMED_CHARGE_POWER,
     DEFAULT_TIMED_CHARGE_TARGET_SOC,
     DOMAIN,
     MAX_POWER_LIMIT,
@@ -37,7 +36,6 @@ async def async_setup_entry(
             SaxPowerChargeLimitNumber(coordinator, entry.entry_id),
             SaxPowerDischargeLimitNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeTargetSocNumber(coordinator, entry.entry_id),
-            SaxPowerTimedChargePowerNumber(coordinator, entry.entry_id),
         ]
     )
 
@@ -156,43 +154,4 @@ class SaxPowerTimedChargeTargetSocNumber(RestoreEntity, SaxPowerEntity, NumberEn
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_timed_charge_target_soc(int(value))
-        self.async_write_ha_state()
-
-
-class SaxPowerTimedChargePowerNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
-    """Ladeleistung für das zeitgesteuerte Laden (Software-Logik, kein Register).
-
-    Wird beim Aktivieren als negativer P-Sollwert geschrieben (siehe
-    SaxPowerCoordinator._async_enforce_timed_charge / async_start_grid_charge).
-    """
-
-    _attr_translation_key = "timed_charge_power"
-    _attr_native_min_value = MIN_POWER_LIMIT
-    _attr_native_max_value = MAX_POWER_LIMIT
-    _attr_native_step = 50
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_mode = NumberMode.BOX
-
-    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_timed_charge_power"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if self.coordinator.timed_charge_power != DEFAULT_TIMED_CHARGE_POWER:
-            return
-        if (last_state := await self.async_get_last_state()) is None:
-            return
-        try:
-            value = int(float(last_state.state))
-        except (ValueError, TypeError):
-            return
-        await self.coordinator.async_set_timed_charge_power(value)
-
-    @property
-    def native_value(self) -> int:
-        return self.coordinator.timed_charge_power
-
-    async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_timed_charge_power(int(value))
         self.async_write_ha_state()

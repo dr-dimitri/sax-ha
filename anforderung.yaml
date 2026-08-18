@@ -469,3 +469,59 @@ requirement_timed_soc_charge:
        P-Sollwert-Write auf Register 41 auslöst."
     - "README.md beschreibt die neuen Entitäten sowie die Interaktion mit
        dem bestehenden Netzladung-Service."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): ENTLADUNG-STARTEN-BUTTON + KEINE REDUNDANTEN
+# LEISTUNGSEINSTELLUNGEN
+# ==============================================================================
+requirement_discharge_button_dedup_settings:
+  id: REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS
+  title: "Schaltfläche zum Starten der Entladung; keine redundanten Leistungseinstellungen"
+  status: done
+  requested_by: user
+  description: >
+    Zwei Änderungen an der Steuerung:
+
+    1. Neue Schaltfläche (`ButtonEntity`, nicht `SwitchEntity` - bewusst
+       stateless) "Entladung starten" unter "Steuerung"
+       (`button.py`, neue Plattform). Startet beim Drücken die Entladung
+       über denselben Mechanismus wie der `start_grid_charge`-Service
+       (`SaxPowerCoordinator.async_start_discharge` ->
+       `async_start_grid_charge`, positiver P-Sollwert auf Register 41,
+       periodischer Write alle 30s). Bewusst kein symmetrischer
+       "Stop"-Button - dafür existiert bereits der
+       `stop_grid_charge`-Service.
+
+    2. Die beim zeitgesteuerten Laden (REQ-TIMED-SOC-CHARGE) neu
+       eingeführte Number-Entity "Ladeleistung (Zeitfenster)" wurde
+       WIEDER ENTFERNT: Der Anwender wies darauf hin, dass es nur EINE
+       zentrale Einstellung für die maximale Ladeleistung geben soll
+       (die bereits vorhandene "Ladeleistungsgrenzwert"-Entity, Register
+       44) statt einer zusätzlichen, redundanten. Dasselbe Prinzip gilt
+       für die neue Entladung-starten-Aktion: sie nutzt die bereits
+       vorhandene "Entladeleistungsgrenzwert"-Entity (Register 43) statt
+       einer eigenen Leistungseinstellung.
+
+       `SaxPowerCoordinator._async_enforce_timed_charge` liest die
+       Ladeleistung jetzt aus `data["charge_limit"]` statt aus einem
+       eigenen `_timed_charge_power`-Zustand. `async_start_discharge`
+       liest analog `data["discharge_limit"]`.
+  known_interaction: >
+    Der neue Button teilt sich denselben Hintergrund-Task
+    (`_grid_charge_task`) wie zeitgesteuertes Laden und der manuelle
+    `start_grid_charge`/`stop_grid_charge`-Service - siehe bereits
+    dokumentierte Einschränkung unter REQ-TIMED-SOC-CHARGE, jetzt um den
+    Button erweitert.
+  acceptance_criteria:
+    - "number.py enthält keine 'timed_charge_power'-Entity mehr; const.py
+       keine zugehörige DEFAULT_TIMED_CHARGE_POWER-Konstante."
+    - "button.py exponiert eine ButtonEntity 'Entladung starten', deren
+       async_press coordinator.async_start_discharge() aufruft."
+    - "tests/test_coordinator.py deckt async_start_discharge ab (Fehler
+       ohne Daten, Verwendung von data['discharge_limit'] als Sollwert)."
+    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
+       über echte Modbus-TCP-Kommunikation verifiziert, dass ein
+       Button-Press einen echten positiven P-Sollwert-Write in Höhe des
+       Entladeleistungsgrenzwerts auf Register 41 auslöst."
+    - "README.md dokumentiert den neuen Button sowie die Streichung der
+       Zeitfenster-Leistungseinstellung."

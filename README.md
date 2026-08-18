@@ -14,7 +14,6 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
   - [Sensoren](#sensoren)
   - [Zahlenfelder](#zahlenfelder)
   - [Schalter](#schalter)
-  - [Schaltflächen](#schaltflächen)
   - [Zeitgesteuertes Laden](#zeitgesteuertes-laden)
   - [Services](#services)
 - [IP-Adresse nachträglich ändern](#ip-adresse-nachträglich-ändern)
@@ -92,7 +91,7 @@ Die Sensoren stammen aus zwei Registerkarten mit unterschiedlicher Slave-ID:
 | Maximale Zelltemperatur | in °C |
 | Speicher Zustand / Speicher Ereignis | Klartext (Diagnose) |
 | PV-Leistung | in W – nur mit Smartmeter ADW200 verfügbar (siehe Hinweis unten) |
-| Leistungsvorgabe / Timeout / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte |
+| Leistungsvorgabe / Timeout / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte – Leistungsvorgabe und Steuermodus werden intern auch von zeitgesteuertem Laden/Netzladung geschrieben, siehe [unten](#zeitgesteuertes-laden) |
 | Netz Stromsumme / -Strom L1/L2/L3 | in A |
 | Netzspannung Durchschnitt (L-N) / L1/L2/L3 | in V |
 | Netzfrequenz | in Hz |
@@ -125,11 +124,11 @@ unberührt.
 | Entität | Beschreibung |
 | --- | --- |
 | Maximaler Lade-SOC | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird – zentrale Einstellung, auch als Ziel-SOC für zeitgesteuertes Laden |
-| Ladeleistungsgrenzwert | Direkt schreibbares Leistungslimit für die Ladung (W) – zentrale Einstellung, auch für zeitgesteuertes Laden |
-| Entladeleistungsgrenzwert | Direkt schreibbares Leistungslimit für die Entladung (W) – zentrale Einstellung, auch für "Entladung starten" |
+| Ladeleistungsgrenzwert | Direkt schreibbares Leistungslimit für die Ladung (W) – zentrale Einstellung, auch für zeitgesteuertes Laden und die manuelle Netzladung |
+| Entladeleistungsgrenzwert | Direkt schreibbares Leistungslimit für die Entladung (W) |
 
 Es gibt bewusst keine eigenen Ziel-SOC-/Leistungseinstellungen für
-zeitgesteuertes Laden oder den "Entladung starten"-Button: Beide nutzen die
+zeitgesteuertes Laden oder die manuelle Netzladung: Beide nutzen die
 zentralen Einstellungen oben. Ist "Maximaler Lade-SOC" nicht gesetzt, gilt
 für zeitgesteuertes Laden ersatzweise 100 % als Ziel.
 
@@ -139,52 +138,50 @@ für zeitgesteuertes Laden ersatzweise 100 % als Ziel.
 | --- | --- |
 | Speicher | Schaltet den Speicher ein/aus |
 | Zeitgesteuertes Laden | Aktiviert/deaktiviert das zeitgesteuerte Laden, siehe [unten](#zeitgesteuertes-laden) |
-
-### Schaltflächen
-
-| Entität | Beschreibung |
-| --- | --- |
-| Entladung starten | Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert als Sollwert; erneutes Drücken stoppt sie wieder |
-
-Erster Druck startet die Entladung in Höhe des aktuell gesetzten
-Entladeleistungsgrenzwerts, ein zweiter Druck stoppt sie wieder. Ist der
-Entladeleistungsgrenzwert 0 W, meldet der Button einen Fehler statt einen
-wirkungslosen Sollwert von 0 zu schreiben. Da die Schaltfläche technisch
-zustandslos ist, zeigt sie selbst keinen Ein-/Aus-Zustand an – der aktuelle
-Zustand lässt sich am Sensor "Sollwert Leistung P" ablesen.
+| Netzladung | Lädt den Speicher sofort aus dem Netz, unabhängig von Zeitfenster/Ziel-SOC, siehe [unten](#zeitgesteuertes-laden) |
 
 ### Zeitgesteuertes Laden
 
-Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv auf
-einen Ziel-SOC – unabhängig von PV-Überschuss, z. B. für günstige
-Nachtstromtarife ("Lade auf 90 %, wenn es zwischen 1 und 5 Uhr ist").
+Lädt den Speicher aktiv aus dem Netz, unabhängig von PV-Überschuss – entweder
+zeitgesteuert bis zu einem Ziel-SOC ("Lade auf 90 %, wenn es zwischen 1 und
+5 Uhr ist") oder manuell per Schalter, ohne Zeitfenster/Ziel-SOC.
+
+Beide schreiben über den SunSpec-Modus (Slave-ID 100, "Immediate Controls"):
+Register 40051 (Steuermodus) auf Sollwertvorgabe, danach Register 40049
+(Leistungsvorgabe in Prozent der Referenz-Maximalleistung, umgerechnet aus
+dem zentralen Ladeleistungsgrenzwert). Beide Register werden periodisch
+neu geschrieben (Intervall aus dem geräteseitig gemeldeten Timeout,
+Register 40050, abgeleitet), da das Gerät den Sollwert sonst verwirft. Beim
+Stoppen (Zielerreichung, Fensterende oder Ausschalten) wird Register 40051
+aktiv auf SmartMeter-Nullregelung zurückgesetzt.
 
 **Entitäten** (unter "Steuerung" am Gerät):
 
 | Entität | Beschreibung |
 | --- | --- |
-| Zeitgesteuertes Laden | Ein-/Ausschalten des Features |
-| Beginn Zeitfenster | Startzeit (HH:MM) |
-| Ende Zeitfenster | Endzeit (HH:MM) |
-| Zeitgesteuertes Laden aktiv | Diagnose-Sensor, zeigt ob gerade aktiv nachgeladen wird |
+| Zeitgesteuertes Laden | Ein-/Ausschalten des zeitgesteuerten Ladens |
+| Netzladung | Ein-/Ausschalten der manuellen Netzladung |
+| Beginn Zeitfenster | Startzeit (HH:MM) für zeitgesteuertes Laden |
+| Ende Zeitfenster | Endzeit (HH:MM) für zeitgesteuertes Laden |
+| Zeitgesteuertes Laden aktiv | Diagnose-Sensor, zeigt ob gerade zeitgesteuert nachgeladen wird (nicht die manuelle Netzladung) |
 
-Genutzt wird der bereits vorhandene "Maximaler Lade-SOC" als Ziel (siehe
-[Zahlenfelder](#zahlenfelder)) sowie der zentrale Ladeleistungsgrenzwert als
-Ladeleistung – es gibt keine eigenen Einstellungen dafür.
+Genutzt wird der bereits vorhandene "Maximaler Lade-SOC" als Ziel für das
+zeitgesteuerte Laden (siehe [Zahlenfelder](#zahlenfelder)) sowie der
+zentrale Ladeleistungsgrenzwert als Ladeleistung für beide – es gibt keine
+eigenen Einstellungen dafür.
 
 Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
 05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
-Fenster als leer – es wird dann nie geladen.
+Fenster als leer – es wird dann nie zeitgesteuert geladen.
 
-Aktiviert-Zustand sowie Start-/Endzeit bleiben über Neustarts hinweg
-erhalten, ein einmal eingerichteter Zeitplan muss also nicht nach jedem
-Home-Assistant-Neustart neu gesetzt werden.
+Aktiviert-Zustand von beiden Schaltern sowie Start-/Endzeit bleiben über
+Neustarts hinweg erhalten, ein einmal eingerichteter Zeitplan muss also
+nicht nach jedem Home-Assistant-Neustart neu gesetzt werden.
 
-**Wichtig:** Zeitgesteuertes Laden, der "Entladung starten"-Button und der
-manuelle `start_grid_charge`/`stop_grid_charge`-Service teilen sich denselben
-Hintergrund-Mechanismus. Werden mehrere davon gleichzeitig verwendet, gewinnt
-der zuletzt schreibende Aufruf – es gibt keine eigene Priorisierung
-zwischen ihnen.
+**Wichtig:** Der manuelle `start_grid_charge`/`stop_grid_charge`-Service
+schreibt weiterhin über den älteren Basic-Mode-Weg (Register 41, absoluter
+Watt-Sollwert, freie Vorzeichenwahl) und läuft unabhängig von
+zeitgesteuertem Laden/Netzladung, mit eigenem Hintergrund-Task.
 
 ### Services
 
@@ -226,17 +223,22 @@ gespeichert und die Integration lädt automatisch mit den neuen Daten neu.
 - **Maximaler Lade-SOC** ist kein natives Geräteregister, sondern eine
   Software-Logik: Beim Erreichen des Zielwerts wird das Ladelimit-Register
   auf 0 gesetzt und beim Unterschreiten wieder freigegeben.
-- **Netzladung, zeitgesteuertes Laden und "Entladung starten"** schreiben
-  einen absoluten Watt-Sollwert auf Basic-Mode-Register 41. Ob dieses
-  Register auf einem gegebenen Gerät aktiv nutzbar ("freigeschaltet") ist,
-  ist geräte-/firmwareabhängig und sollte vor dem produktiven Einsatz am
-  eigenen Gerät geprüft werden.
+- **Der `start_grid_charge`-Service** schreibt einen absoluten Watt-Sollwert
+  auf Basic-Mode-Register 41. Ob dieses Register auf einem gegebenen Gerät
+  aktiv nutzbar ("freigeschaltet") ist, ist geräte-/firmwareabhängig und
+  sollte vor dem produktiven Einsatz am eigenen Gerät geprüft werden.
+- **Vorzeichenkonvention** von Register 40049 (Leistungsvorgabe,
+  zeitgesteuertes Laden/manuelle Netzladung) ist herstellerseitig ebenfalls
+  nicht dokumentiert. Die Integration geht in Analogie zu Register 40029
+  davon aus: negativ = Laden, positiv = Entladen.
 - **SunSpec-Modus ist optional**: Ist er nicht erreichbar (z. B. zu alte
   Firmware – Master V61/Gateway V54 oder neuer erforderlich), bleiben die
   Basic-Mode-Sensoren (SOC, Schalter, Leistungsgrenzwerte) trotzdem
   verfügbar; nur die SunSpec-Sensoren zeigen "unbekannt", bis der Block
-  wieder lesbar ist. Ein dauerhafter Ausfall wird zusätzlich als
-  Home-Assistant-Repair-Issue angezeigt.
+  wieder lesbar ist. Zeitgesteuertes Laden und die manuelle Netzladung
+  benötigen den SunSpec-Modus zwingend (Schreibpfad) und können in diesem
+  Zustand keinen neuen Ladevorgang starten. Ein dauerhafter Ausfall wird
+  zusätzlich als Home-Assistant-Repair-Issue angezeigt.
 
 ## Weiterführende Dokumentation
 

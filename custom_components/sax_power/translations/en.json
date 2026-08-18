@@ -227,6 +227,9 @@
       },
       "timed_charge_enabled": {
         "name": "Timed charge"
+      },
+      "manual_grid_charge_enabled": {
+        "name": "Grid charge"
       }
     },
     "time": {
@@ -235,11 +238,6 @@
       },
       "timed_charge_end": {
         "name": "Time window end"
-      }
-    },
-    "button": {
-      "start_discharge": {
-        "name": "Start discharge"
       }
     }
   },

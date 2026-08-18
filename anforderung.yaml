@@ -36,8 +36,7 @@
 #   (Default 10s). Keine YAML-Konfiguration.
 # - Entitätstypen: Lese-Register -> SensorEntity (sensor.py); schreibbare
 #   Leistungswerte/Limits -> NumberEntity (number.py); Schalter ->
-#   SwitchEntity (switch.py); zustandslose Aktionen -> ButtonEntity
-#   (button.py); Zeitfenster -> TimeEntity (time.py).
+#   SwitchEntity (switch.py); Zeitfenster -> TimeEntity (time.py).
 # - Typisierung & Linting: durchgängige Type Hints (PEP 484), Konformität
 #   mit Ruff/Black und PEP 8.
 # - Fehlerbehandlung: ModbusException und asyncio.TimeoutError werden
@@ -54,7 +53,7 @@
 #     coordinator.py                DataUpdateCoordinator: Reads, Writes, Software-Logik
 #     entity.py                     Basisklasse mit gemeinsamer DeviceInfo
 #     __init__.py                   Setup/Teardown des Config Entry, Services
-#     sensor.py / number.py / switch.py / time.py / button.py   Plattformen
+#     sensor.py / number.py / switch.py / time.py   Plattformen
 #     services.yaml                 Service-Schema für die UI
 #     translations/                 DE/EN-Übersetzungen
 #   tests/                         Testfälle (siehe README.md, Abschnitt Tests)
@@ -71,10 +70,13 @@
 # - Die vollständige Registerzuordnung (Protokolladresse <-> interne Adresse
 #   <-> Bedeutung) steht in modbus_llm.yaml, verifiziert gegen die
 #   offizielle sax-power.net-Dokumentation modbus.pdf.
-# - Periodische Sollwert-Writes (Netzladung, zeitgesteuertes Laden,
-#   Entladung starten) werden alle 30s wiederholt, solange der jeweilige
+# - Periodische Sollwert-Writes werden wiederholt, solange der jeweilige
 #   Mechanismus aktiv ist, da der Speicher einen nicht periodisch
-#   aufgefrischten Sollwert nach einem Timeout verwirft.
+#   aufgefrischten Sollwert nach einem Timeout verwirft: Basic-Mode-Netzladung
+#   (start_grid_charge-Service, Register 41) alle 30s fest; zeitgesteuertes
+#   Laden/manuelle Netzladung (SunSpec-Modus, Register 40049/40051) mit einem
+#   aus dem geräteseitig gemeldeten Timeout (Register 40050) abgeleiteten
+#   Intervall (die Hälfte des Timeouts, gedeckelt auf 30s, mindestens 5s).
 #
 # ==============================================================================
 # ENTWICKLUNGSUMGEBUNG (DEVCONTAINER)
@@ -231,9 +233,10 @@ requirement_sunspec_mode_correction:
     (Register 40000-40114, siehe modbus.pdf und modbus_llm.yaml) und
     enthält einen zusammenhängenden Block aus fünf SunSpec-Modellen:
     Common (Geräteidentität), "3Ph Inverter" (103, Speicherelektronik),
-    "Immediate Controls" (123, Sollwertvorgabe, nur lesend genutzt), "WYE
-    Connect 3Ph Meter" (203, Netz/Smart Meter) und "Battery Base" (802,
-    Akkuzellen).
+    "Immediate Controls" (123, Sollwertvorgabe - Register 40049/40051
+    zusätzlich als Schreibpfad für zeitgesteuertes Laden und die manuelle
+    Netzladung, siehe REQ-MANUAL-GRID-CHARGE-SWITCH), "WYE Connect 3Ph
+    Meter" (203, Netz/Smart Meter) und "Battery Base" (802, Akkuzellen).
 
     Entlade-/Ladeleistung (discharge_power/charge_power) werden aus
     Register 40029 ("Wirkleistung Speicher Summe") abgeleitet, die
@@ -241,13 +244,16 @@ requirement_sunspec_mode_correction:
     Die Basic-Mode-Register 47 ("Leistung P des Speichers") und 48
     ("Leistung des Smart Meters") werden nicht mehr gelesen.
 
-    Der Schreibpfad für Netzladung, zeitgesteuertes Laden und den
-    "Entladung starten"-Button bleibt auf Basic Mode (Register 41, Slave
-    64, absoluter Watt-Sollwert). Die SunSpec-seitigen "Immediate
-    Controls"-Werte (Register 40049-40053, prozentualer Sollwert) sind
-    ausschließlich als Nur-Lese-Sensoren verfügbar
-    (ic_power_setpoint_pct, ic_timeout, ic_control_mode_text,
-    ic_max_power_reference).
+    Die "Immediate Controls"-Werte bleiben zusätzlich als
+    Nur-Lese-Diagnosesensoren verfügbar (ic_power_setpoint_pct,
+    ic_timeout, ic_control_mode_text, ic_max_power_reference) - diese
+    Sensoren zeigen den tatsächlichen Geräte-Zustand, unabhängig davon,
+    ob er gerade von der Integration selbst gesetzt wurde.
+
+    Der Basic-Mode-P-Sollwert (Register 41, Slave 64, absoluter
+    Watt-Sollwert) bleibt ausschließlich für den manuellen
+    start_grid_charge/stop_grid_charge-Service in Verwendung, siehe
+    REQ-MANUAL-GRID-CHARGE-SWITCH.
 
     PV-Leistung (Register 40045) und das komplette Meter-Modell 203 sind
     laut modbus.pdf nur mit dem Smartmeter ADW200 vollständig verfügbar.
@@ -272,106 +278,89 @@ requirement_timed_soc_charge:
   status: done
   description: >
     Software-Logik (kein natives Geräteregister), umgesetzt in
-    SaxPowerCoordinator._async_enforce_timed_charge und bei jedem
+    SaxPowerCoordinator._async_enforce_grid_charge und bei jedem
     Poll-Zyklus sowie bei jeder Einstellungsänderung neu ausgewertet: Ist
     das Feature aktiviert (switch.py, "Zeitgesteuertes Laden"), die
     aktuelle Uhrzeit innerhalb des konfigurierten Zeitfensters
     (time.py, "Beginn Zeitfenster"/"Ende Zeitfenster", HH:MM, darf über
-    Mitternacht laufen) und der SOC unter dem Ziel-SOC, schreibt der
-    Coordinator einen negativen P-Sollwert auf Register 41 in Höhe des
-    zentralen Ladeleistungsgrenzwerts (Register 44) und wiederholt das
-    periodisch alle 30s. Wird der Ziel-SOC erreicht, das Zeitfenster
-    verlassen oder das Feature deaktiviert, stoppt der periodische Write
-    automatisch.
+    Mitternacht laufen) und der SOC unter dem Ziel-SOC, startet der
+    Coordinator die SunSpec-Modus-Netzladung (siehe
+    REQ-MANUAL-GRID-CHARGE-SWITCH für den Schreibmechanismus) mit einem
+    negativen Sollwert in Höhe des zentralen Ladeleistungsgrenzwerts
+    (Register 44). Wird der Ziel-SOC erreicht, das Zeitfenster verlassen
+    oder das Feature deaktiviert, stoppt die Netzladung automatisch -
+    außer die manuelle Netzladung (Schalter "Netzladung") hält sie
+    weiterhin aktiv.
 
     Als Ziel-SOC dient die bereits vorhandene "Maximaler Lade-SOC"-Entity
     (number.py); ist kein Wert gesetzt, gilt ersatzweise 100 %. Es gibt
     keine eigene Ziel-SOC- oder Leistungseinstellung für dieses Feature.
+    Eine Änderung des Ziel-SOC wirkt sofort (async_set_max_soc wertet
+    _async_enforce_grid_charge unmittelbar neu aus statt erst beim
+    nächsten Poll-Zyklus).
 
     Aktiviert-Zustand sowie Start-/Endzeit werden über RestoreEntity
     über Neustarts hinweg persistiert. Zusätzlich zeigt ein
     Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv
-    nachgeladen wird.
-
-    Zeitgesteuertes Laden, der "Entladung starten"-Button und der
-    manuelle start_grid_charge/stop_grid_charge-Service teilen sich
-    denselben Hintergrund-Task. Werden mehrere davon gleichzeitig
-    verwendet, gewinnt der zuletzt schreibende Aufruf - es gibt keine
-    eigene Arbitrierung zwischen ihnen.
+    nachgeladen wird - er spiegelt ausschließlich die zeitgesteuerte
+    Bedingung wider, nicht die manuelle Netzladung.
   acceptance_criteria:
     - "tests/test_coordinator.py deckt _is_time_in_window (normales
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
-       Fenster) sowie _async_enforce_timed_charge (Start/Stop bei
+       Fenster) sowie _async_enforce_grid_charge (Start/Stop bei
        Zielerreichung/Fensterende/Deaktivierung) ab."
     - "tests/test_integration_live.py enthält einen End-to-End-Test, der
        über echte Modbus-TCP-Kommunikation verifiziert, dass Aktivieren
-       des Features innerhalb des Zeitfensters einen echten negativen
-       P-Sollwert-Write auf Register 41 auslöst."
+       des Features innerhalb des Zeitfensters einen echten Write auf
+       die SunSpec-Modus-Register 40049/40051 auslöst."
 
 # ==============================================================================
-# ANFORDERUNG: ENTLADUNG-STARTEN-BUTTON; KEINE REDUNDANTEN
-# LEISTUNGSEINSTELLUNGEN
+# ANFORDERUNG: MANUELLE NETZLADUNG (SCHALTER) ÜBER DEN SUNSPEC-MODUS;
+# KEINE REDUNDANTEN LEISTUNGSEINSTELLUNGEN
 # ==============================================================================
-requirement_discharge_button_dedup_settings:
-  id: REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS
-  title: "Schaltfläche zum Starten der Entladung; keine redundanten Leistungseinstellungen"
+requirement_manual_grid_charge_switch:
+  id: REQ-MANUAL-GRID-CHARGE-SWITCH
+  title: "Schalter für manuelle Netzladung über SunSpec-Modus-Register 40049/40051; keine redundanten Leistungseinstellungen"
   status: done
   description: >
-    button.py exponiert die ButtonEntity "Entladung starten" unter
-    "Steuerung". Sie nutzt zum Schreiben denselben Mechanismus wie der
-    start_grid_charge-Service (positiver P-Sollwert auf Register 41,
-    periodischer Write alle 30s) und liest den Sollwert aus der bereits
-    vorhandenen "Entladeleistungsgrenzwert"-Entity (Register 43) statt
-    eine eigene Leistungseinstellung anzubieten. Zeitgesteuertes Laden
-    liest analog aus der "Ladeleistungsgrenzwert"-Entity (Register 44).
-    Es existiert genau eine zentrale Einstellung je Richtung
-    (Lade-/Entladeleistungsgrenzwert), keine featurespezifischen
-    Duplikate.
+    switch.py exponiert die SwitchEntity "Netzladung" unter "Steuerung".
+    Eingeschaltet lädt sie den Speicher direkt aus dem Netz, unabhängig
+    von Zeitfenster und Ziel-SOC des zeitgesteuerten Ladens (siehe
+    REQ-TIMED-SOC-CHARGE) - z. B. um sofort aus dem Netz zu laden, ohne
+    das zeitgesteuerte Laden aktivieren zu müssen. Beide Wege teilen sich
+    denselben Hintergrund-Task (SaxPowerCoordinator._sun_charge_task,
+    _async_enforce_grid_charge) und lesen den Sollwert aus der bereits
+    vorhandenen "Ladeleistungsgrenzwert"-Entity (Register 44) statt eine
+    eigene Leistungseinstellung anzubieten.
+
+    Schreibmechanismus (SunSpec-Modus, Slave-ID 100, Modell 123
+    "Immediate Controls", siehe modbus_llm.yaml): Erst wird Register 40051
+    (Steuermodus) auf 1 (Sollwertvorgabe) gesetzt, danach Register 40049
+    (Leistungsvorgabe, Prozent der Referenz-Maximalleistung Register
+    40053) auf den aus Watt umgerechneten Sollwert
+    (SaxPowerCoordinator._watts_to_ic_setpoint_raw; negativ=Laden,
+    positiv=Entladen - Vorzeichenkonvention laut modbus.pdf nicht
+    dokumentiert, hier analog zum Basic-Mode-P-Sollwert angenommen). Beide
+    Register werden periodisch neu geschrieben (SaxPowerCoordinator.
+    _sun_ic_write_interval: die Hälfte des von Register 40050 gemeldeten
+    Timeouts, gedeckelt auf 30s, mindestens alle 5s), da das Gerät den
+    Sollwert sonst nach Ablauf des Timeouts verwirft. Wird die Netzladung
+    beendet (Zielerreichung, Fensterende, Deaktivierung beider Schalter),
+    setzt der Coordinator Register 40051 aktiv zurück auf 0
+    (SmartMeter-Nullregelung), statt nur passiv auf den Timeout zu warten.
+
+    Ersetzt den früheren, gleichnamig als Basic-Mode-P-Sollwert (Register
+    41) umgesetzten Weg für zeitgesteuertes Laden. Der Basic-Mode-Weg
+    (Register 41) bleibt ausschließlich für den manuellen
+    start_grid_charge/stop_grid_charge-Service erhalten (absoluter
+    Watt-Sollwert, freie Vorzeichenwahl, eigener Hintergrund-Task).
   acceptance_criteria:
     - "number.py enthält keine featurespezifische Leistungseinstellung
-       für zeitgesteuertes Laden oder den Entladung-starten-Button."
-    - "tests/test_coordinator.py und tests/test_integration_live.py
-       decken ab, dass der Button den zentralen
-       Entladeleistungsgrenzwert als Sollwert verwendet."
-
-# ==============================================================================
-# ANFORDERUNG: TOGGLE-VERHALTEN + ZIEL-SOC-DEDUP FÜR ZEITGESTEUERTES LADEN
-# ==============================================================================
-requirement_discharge_toggle_and_target_soc_dedup:
-  id: REQ-DISCHARGE-TOGGLE-TARGET-SOC-DEDUP
-  title: "Entladung-starten-Button schaltet um; einheitlicher Ziel-SOC für zeitgesteuertes Laden"
-  status: done
-  description: >
-    Zeitgesteuertes Laden nutzt als Ziel-SOC ausschließlich die bereits
-    vorhandene "Maximaler Lade-SOC"-Entity (kein eigenes Ziel-SOC-Feld für
-    dieses Feature); fehlt der Wert, gilt ersatzweise 100 %. Eine Änderung
-    des Ziel-SOC wirkt sofort (async_set_max_soc wertet
-    _async_enforce_timed_charge unmittelbar neu aus statt erst beim
-    nächsten Poll-Zyklus).
-
-    Der "Entladung starten"-Button hat Umschalt-Verhalten
-    (SaxPowerCoordinator.async_toggle_discharge): Der erste Druck startet
-    die Entladung mit dem zentralen Entladeleistungsgrenzwert als
-    Sollwert; ein erneuter Druck stoppt sie wieder, sofern die laufende
-    Entladung über diesen Button gestartet wurde. Ist der
-    Entladeleistungsgrenzwert 0 W, meldet der Button einen Fehler statt
-    eines wirkungslosen Sollwert-Writes.
-
-    Der Sollwert auf Register 41 wird als vorzeichenbehafteter 16-Bit-Wert
-    im Zweierkomplement übertragen: positive Werte entsprechen Entladung
-    (Watt direkt als Ganzzahl), negative Werte (Laden) werden vor dem
-    Schreiben als `65536 + Sollwert` codiert (siehe
-    coordinator.to_unsigned16).
-  known_limitation: >
-    Ob Register 41 auf einem gegebenen Gerät aktiv nutzbar ("freigeschaltet")
-    ist, ist geräte-/firmwareabhängig und muss vom Anwender vor Ort geprüft
-    werden - die Integration kann das nicht selbst feststellen.
-  acceptance_criteria:
-    - "number.py enthält keine eigene Ziel-SOC-Entity für zeitgesteuertes
-       Laden."
-    - "async_toggle_discharge stoppt eine über den Button gestartete
-       Entladung bei erneutem Aufruf, statt sie erneut zu starten, und
-       lehnt einen Start bei Entladeleistungsgrenzwert 0 W ab."
-    - "tests/test_coordinator.py und tests/test_integration_live.py
-       decken das Umschalt-Verhalten (zweiter Tastendruck stoppt) sowie
-       die Zweierkomplement-Codierung ab."
+       für zeitgesteuertes Laden oder die manuelle Netzladung."
+    - "tests/test_coordinator.py deckt die Watt-zu-Prozent-Umrechnung
+       (inkl. Klemmung auf ±100 %), das Schreibintervall
+       (_sun_ic_write_interval) sowie Start/Stop beider Schalter ab."
+    - "tests/test_integration_live.py enthält End-to-End-Tests, die über
+       echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren
+       jeweils Register 40051 auf Sollwertvorgabe setzt und Deaktivieren
+       es wieder auf SmartMeter-Nullregelung zurücksetzt."

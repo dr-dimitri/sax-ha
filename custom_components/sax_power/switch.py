@@ -50,8 +50,8 @@ class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_write_register(REG_SWITCH_STATE, SWITCH_STATE_ON)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_write_register(REG_SWITCH_STATE, SWITCH_STATE_OFF)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh()

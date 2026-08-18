@@ -88,7 +88,7 @@ class SaxPowerChargeLimitNumber(SaxPowerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_write_register(REG_LIMIT_CHARGE, int(value))
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh()
 
 
 class SaxPowerDischargeLimitNumber(SaxPowerEntity, NumberEntity):
@@ -113,4 +113,4 @@ class SaxPowerDischargeLimitNumber(SaxPowerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_write_register(REG_LIMIT_DISCHARGE, int(value))
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh()

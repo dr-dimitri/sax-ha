@@ -32,7 +32,14 @@ from pymodbus.datastore import (
 from pymodbus.server import ModbusTcpServer
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
+from custom_components.sax_power.const import (
+    DATA_COORDINATOR,
+    DOMAIN,
+    REG_SUN_IC_CONTROL_MODE,
+    REG_SUN_IC_POWER_SETPOINT_PCT,
+    SUN_IC_CONTROL_MODE_SETPOINT,
+    SUN_IC_CONTROL_MODE_SMARTMETER,
+)
 from custom_components.sax_power.coordinator import to_signed16, to_unsigned16
 
 SLAVE_ID_BASIC = 64
@@ -165,7 +172,7 @@ def _build_extended_registers(**overrides: int) -> list[int]:
 
 def _entity_id(registry: er.EntityRegistry, entry_id: str, suffix: str) -> str:
     unique_id = f"{entry_id}_{suffix}"
-    for platform in ("sensor", "number", "switch", "time", "button"):
+    for platform in ("sensor", "number", "switch", "time"):
         found = registry.async_get_entity_id(platform, DOMAIN, unique_id)
         if found:
             return found
@@ -391,12 +398,13 @@ async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
 async def test_live_timed_charge_writes_setpoint_when_in_window(
     hass, socket_enabled
 ) -> None:
-    """End-to-End-Test für das zeitgesteuerte Laden (neues Feature): Zeitfenster
-    über die entsprechenden Time-Entities setzen, dann per Switch aktivieren
-    - das muss innerhalb des Zeitfensters bei SOC < Ziel-SOC einen echten
-    negativen P-Sollwert-Write auf Register 41 auslösen (derselbe Mechanismus
-    wie start_grid_charge). Sowohl die Ladeleistung (zentraler
-    Ladeleistungsgrenzwert, Register 44, hier per
+    """End-to-End-Test für das zeitgesteuerte Laden: Zeitfenster über die
+    entsprechenden Time-Entities setzen, dann per Switch aktivieren - das
+    muss innerhalb des Zeitfensters bei SOC < Ziel-SOC einen echten Write
+    über den SunSpec-Modus (Slave-ID 100, "Immediate Controls") auslösen:
+    erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
+    40049 (Leistungsvorgabe %, negativ = Laden). Sowohl die Ladeleistung
+    (zentraler Ladeleistungsgrenzwert, Register 44, hier per
     _build_basic_registers()-Default 3000W) als auch der Ziel-SOC (zentrales
     "Maximaler Lade-SOC", Register 46 als Vergleichswert) sind bewusst keine
     eigenen Einstellungen, siehe anforderung.yaml
@@ -477,37 +485,52 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
                 await hass.async_block_till_done()
 
             assert hass.states.get(enabled_id).state == "on"
-            assert coordinator.grid_charge_active is True
+            assert coordinator.sun_charge_active is True
             await asyncio.sleep(0.2)
 
             verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 2)
             await verify_client.connect()
-            result = await verify_client.read_holding_registers(
-                address=41, count=1, device_id=SLAVE_ID_BASIC
+            control_mode_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
+            )
+            setpoint_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                count=1,
+                device_id=SLAVE_ID_EXTENDED,
             )
             verify_client.close()
-            # -3000: negativer Ladeleistungsgrenzwert (Register 44,
-            # _build_basic_registers()-Default), nicht mehr konfigurierbar
-            # über eine eigene Zeitfenster-Leistungseinstellung.
-            assert to_signed16(result.registers[0]) == -3000
+            assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
+            # -3000 W (negativer Ladeleistungsgrenzwert, Register 44) / 4600 W
+            # Referenz-Maximalleistung (Register 40053, _build_extended_registers()-
+            # Default) * 100 = -65.217...%, skaliert mit sunssf -2 -> -6522.
+            assert to_signed16(setpoint_result.registers[0]) == -6522
 
             await hass.async_block_till_done()
             assert hass.states.get(active_text_id).state == "Aktiv"
         finally:
-            await coordinator.async_stop_grid_charge()
+            await coordinator.async_stop_sun_charge()
+
+        # Beim Stoppen wird der Steuermodus aktiv auf SmartMeter-Nullregelung
+        # zurückgesetzt (Register 40051), statt nur passiv auf den geräteseitigen
+        # Timeout (Register 40050) zu warten.
+        verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 2)
+        await verify_client.connect()
+        control_mode_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
+        )
+        verify_client.close()
+        assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
     finally:
         await server.shutdown()
 
 
-async def test_live_start_discharge_button_writes_discharge_limit(
+async def test_live_manual_grid_charge_switch_ignores_time_window(
     hass, socket_enabled
 ) -> None:
-    """End-to-End-Test für den "Entladung starten"-Button (neues Feature):
-    Drücken muss einen echten positiven P-Sollwert-Write auf Register 41
-    auslösen, mit dem Wert des zentralen Entladeleistungsgrenzwerts
-    (Register 43) - keine eigene Leistungseinstellung, siehe
-    anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS. Erneutes Drücken
-    muss die Entladung wieder stoppen (Umschalt-Verhalten)."""
+    """End-to-End-Test für die manuelle Netzladung (Schalter "Netzladung"):
+    Einschalten muss unabhängig von Zeitfenster/Ziel-SOC einen echten Write
+    über den SunSpec-Modus auslösen (derselbe Mechanismus wie zeitgesteuertes
+    Laden)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
@@ -539,38 +562,41 @@ async def test_live_start_discharge_button_writes_discharge_limit(
         await hass.async_block_till_done()
 
         registry = er.async_get(hass)
-        button_id = _entity_id(registry, entry.entry_id, "start_discharge")
+        manual_id = _entity_id(registry, entry.entry_id, "manual_grid_charge_enabled")
+        active_text_id = _entity_id(
+            registry, entry.entry_id, "timed_charge_active_text"
+        )
         coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
 
         try:
+            # Bewusst kein Zeitfenster gesetzt und kein zeitgesteuertes Laden
+            # aktiviert - die manuelle Netzladung ist davon unabhängig.
             await hass.services.async_call(
-                "button", "press", {"entity_id": button_id}, blocking=True
+                "switch", "turn_on", {"entity_id": manual_id}, blocking=True
             )
             await hass.async_block_till_done()
             await asyncio.sleep(0.2)
 
-            assert coordinator.grid_charge_active is True
+            assert hass.states.get(manual_id).state == "on"
+            assert coordinator.sun_charge_active is True
+            # Der Diagnose-Sensor für zeitgesteuertes Laden bleibt unberührt.
+            assert hass.states.get(active_text_id).state == "Inaktiv"
 
             verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 3)
             await verify_client.connect()
-            result = await verify_client.read_holding_registers(
-                address=41, count=1, device_id=SLAVE_ID_BASIC
+            control_mode_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
             )
             verify_client.close()
-            # 3000: Entladeleistungsgrenzwert (Register 43,
-            # _build_basic_registers()-Default), positiv = Entladung.
-            assert to_signed16(result.registers[0]) == 3000
-            assert coordinator.discharge_active is True
+            assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
 
-            # -- Erneutes Drücken stoppt die Entladung wieder --
             await hass.services.async_call(
-                "button", "press", {"entity_id": button_id}, blocking=True
+                "switch", "turn_off", {"entity_id": manual_id}, blocking=True
             )
             await hass.async_block_till_done()
 
-            assert coordinator.discharge_active is False
-            assert coordinator.grid_charge_active is False
+            assert coordinator.sun_charge_active is False
         finally:
-            await coordinator.async_stop_grid_charge()
+            await coordinator.async_stop_sun_charge()
     finally:
         await server.shutdown()

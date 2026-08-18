@@ -227,6 +227,9 @@
       },
       "timed_charge_enabled": {
         "name": "Zeitgesteuertes Laden"
+      },
+      "manual_grid_charge_enabled": {
+        "name": "Netzladung"
       }
     },
     "time": {
@@ -235,11 +238,6 @@
       },
       "timed_charge_end": {
         "name": "Ende Zeitfenster"
-      }
-    },
-    "button": {
-      "start_discharge": {
-        "name": "Entladung starten"
       }
     }
   },

@@ -23,8 +23,10 @@ from .const import (
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
+    MAX_IC_POWER_SETPOINT_PCT,
     MAX_SETPOINT_POWER,
     MAX_SOC,
+    MIN_IC_POWER_SETPOINT_PCT,
     MIN_SETPOINT_POWER,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
@@ -111,6 +113,9 @@ from .const import (
     REG_SWITCH_STATE,
     STORAGE_EVENT_LABELS,
     STORAGE_STATE_LABELS,
+    SUN_IC_CONTROL_MODE_SETPOINT,
+    SUN_IC_CONTROL_MODE_SMARTMETER,
+    SUN_IC_MIN_WRITE_INTERVAL,
     SWITCH_STATE_LABELS,
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
@@ -181,11 +186,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pre_clamp_charge_limit = 0
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
-        self._discharge_active = False
         self._timed_charge_enabled = False
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
+        self._manual_grid_charge_enabled = False
+        self._sun_charge_task: asyncio.Task | None = None
+        self._sun_charge_power = 0
+        self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -236,7 +244,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data.update(await self._async_read_extended())
 
         await self._async_enforce_max_soc(data)
-        await self._async_enforce_timed_charge(data)
+        await self._async_enforce_grid_charge(data)
         data["timed_charge_active"] = self._timed_charge_active
         return data
 
@@ -307,6 +315,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         storage_event = ext_reg(REG_SUN_STORAGE_EVENT)
 
         control_mode = ext_reg(REG_SUN_IC_CONTROL_MODE)
+        # Für den Schreibpfad (Watt -> Prozent-Sollwert) zwischengespeichert,
+        # siehe SaxPowerCoordinator._watts_to_ic_setpoint_raw.
+        self._ic_power_setpoint_sf_raw = ext_reg(REG_SUN_IC_POWER_SETPOINT_SF)
 
         meter_current_sf = ext_reg(REG_SUN_METER_CURRENT_SF)
         meter_voltage_sf = ext_reg(REG_SUN_METER_VOLTAGE_SF)
@@ -484,21 +495,37 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     async def async_write_register(self, address: int, value: int) -> None:
-        """Write a single holding register, raising HomeAssistantError on failure."""
+        """Write a single Basic-Mode holding register (Slave-ID self.slave_id),
+        raising HomeAssistantError on failure."""
+        await self._async_write_register(address, value, device_id=self.slave_id)
+
+    async def async_write_extended_register(self, address: int, value: int) -> None:
+        """Write a single SunSpec-Modus holding register (Slave-ID
+        self.slave_id_extended, interne Adresse = Protokolladresse - 40000),
+        raising HomeAssistantError on failure."""
+        await self._async_write_register(
+            address, value, device_id=self.slave_id_extended
+        )
+
+    async def _async_write_register(
+        self, address: int, value: int, *, device_id: int
+    ) -> None:
         async with self._write_lock:
             try:
                 if not self.client.connected:
                     await self.client.connect()
                 result = await self.client.write_register(
-                    address=address, value=to_unsigned16(value), device_id=self.slave_id
+                    address=address, value=to_unsigned16(value), device_id=device_id
                 )
             except (TimeoutError, ModbusException) as err:
                 raise HomeAssistantError(
-                    f"Schreiben von Register {address} fehlgeschlagen: {err}"
+                    f"Schreiben von Register {address} (Slave-ID {device_id}) "
+                    f"fehlgeschlagen: {err}"
                 ) from err
             if result.isError():
                 raise HomeAssistantError(
-                    f"Modbus-Fehler beim Schreiben von Register {address}: {result}"
+                    f"Modbus-Fehler beim Schreiben von Register {address} "
+                    f"(Slave-ID {device_id}): {result}"
                 )
 
     # -- Max-SOC -----------------------------------------------------------
@@ -515,13 +542,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set (or clear with None) the software-side max charge SOC.
 
         Wird auch als Ziel-SOC für das zeitgesteuerte Laden verwendet
-        (siehe Abschnitt "Zeitgesteuertes Laden" unten) - deshalb hier
-        zusätzlich _async_enforce_timed_charge neu auswerten.
+        (siehe Abschnitt "Zeitgesteuertes Laden & manuelle Netzladung"
+        unten) - deshalb hier zusätzlich _async_enforce_grid_charge neu
+        auswerten.
         """
         self._max_soc = max_soc
         if self.data is not None:
             await self._async_enforce_max_soc(self.data)
-            await self._async_enforce_timed_charge(self.data)
+            await self._async_enforce_grid_charge(self.data)
             self.data["timed_charge_active"] = self._timed_charge_active
             self.async_set_updated_data(self.data)
 
@@ -541,21 +569,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._max_soc_clamped = False
             data["charge_limit"] = self._pre_clamp_charge_limit
 
-    # -- Netzladung (Grid Charge) -------------------------------------------
+    # -- Netzladung (Grid Charge, Basic Mode) --------------------------------
     # Das Schreiben von Register 41 versetzt den Speicher laut Doku implizit
     # in den P-Sollwert-Modus. Der Wert muss periodisch wiederholt werden,
     # da der Speicher sonst per Timeout in den vorherigen Modus zurückfällt.
     #
-    # Hinweis: Dies nutzt weiterhin den Basic-Mode-Weg (Register 41, absolute
-    # Watt). modbus.pdf dokumentiert zusätzlich einen offiziellen,
-    # prozentualen Weg über den SunSpec-Modus ("Immediate Controls", Modell
-    # 123, Register 40049-40051). Diese Integration liest die zugehörigen
-    # Werte bereits als Sensoren mit (ic_power_setpoint_pct etc.), stellt sie
-    # aber (noch) nicht als Schreibpfad zur Verfügung - das Umstellen eines
-    # aktiven Schreibpfads für ein Gerät, das Leistung in ein reales Haus
-    # ein-/ausspeist, verdient eine eigene, gezielte Abstimmung statt einer
-    # Nebenwirkung dieser Änderung. Siehe anforderung.yaml,
-    # REQ-SUNSPEC-MODE-CORRECTION.
+    # Ausschließlich noch für den manuellen start_grid_charge/stop_grid_charge-
+    # Service (absoluter Watt-Sollwert, freie Vorzeichenwahl). Zeitgesteuertes
+    # Laden und die manuelle Netzladung nutzen stattdessen den SunSpec-Modus-
+    # Pfad weiter unten (_async_sun_charge_loop), siehe dort.
 
     @property
     def grid_charge_active(self) -> bool:
@@ -579,44 +601,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_charge_task.cancel()
             self._grid_charge_task = None
 
-    @property
-    def discharge_active(self) -> bool:
-        return self._discharge_active
-
-    async def async_toggle_discharge(self) -> None:
-        """Startet die Entladung mit dem zentralen Entladeleistungsgrenzwert
-        (Register 43, dieselbe Number-Entity "Entladeleistungsgrenzwert") als
-        Sollwert, oder stoppt eine über diese Aktion laufende Entladung
-        wieder (erneutes Drücken des Buttons schaltet um). Bewusst keine
-        eigene Leistungseinstellung, um keine redundante Einstellmöglichkeit
-        zu erzeugen (siehe anforderung.yaml,
-        REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS). Nutzt denselben
-        Hintergrund-Task wie async_start_grid_charge/das zeitgesteuerte
-        Laden, siehe Kommentar oben.
-        """
-        if self._discharge_active:
-            _LOGGER.debug("Entladung stoppen (erneuter Tastendruck).")
-            await self.async_stop_grid_charge()
-            self._discharge_active = False
-            return
-
-        if self.data is None:
-            raise HomeAssistantError("Noch keine Daten vom SAX Speicher verfügbar.")
-        discharge_limit = self.data["discharge_limit"]
-        if discharge_limit <= 0:
-            raise HomeAssistantError(
-                "Entladeleistungsgrenzwert ist 0 W - es würde kein Sollwert "
-                "bewirkt. Bitte zuerst einen Wert über 0 W bei der "
-                "Number-Entity 'Entladeleistungsgrenzwert' setzen."
-            )
-        _LOGGER.debug(
-            "Entladung starten: Sollwert %s W auf Register %s.",
-            discharge_limit,
-            REG_SETPOINT_POWER,
-        )
-        await self.async_start_grid_charge(discharge_limit)
-        self._discharge_active = True
-
     async def _async_grid_charge_loop(self) -> None:
         try:
             while True:
@@ -630,25 +614,146 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("Netzladung: periodischer Schreibvorgang fehlgeschlagen")
             raise
 
-    # -- Zeitgesteuertes Laden ----------------------------------------------
-    # Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv
-    # auf einen Ziel-SOC, unabhängig von PV-Überschuss (z. B. für günstige
-    # Nachtstromtarife). Nutzt intern denselben Mechanismus wie der
-    # `start_grid_charge`-Service (periodischer P-Sollwert-Write auf
-    # Register 41 über async_start_grid_charge/async_stop_grid_charge).
-    # Sowohl die Ladeleistung (data["charge_limit"], Register 44) als auch
-    # der Ziel-SOC sind bewusst KEINE eigenen Einstellungen: Der Ziel-SOC
-    # nutzt denselben Wert wie "Maximaler Lade-SOC" (self._max_soc, siehe
-    # Max-SOC-Abschnitt oben) - fehlt dieser (None), wird MAX_SOC (100 %)
-    # als Ziel angenommen. Das vermeidet redundante Einstellmöglichkeiten
-    # (siehe anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
+    # -- Netzladung (SunSpec-Modus, Immediate Controls) ----------------------
+    # Schreibpfad für zeitgesteuertes Laden und die manuelle Netzladung
+    # (siehe Abschnitt weiter unten): SunSpec-Modus (Slave-ID
+    # self.slave_id_extended), Modell 123 "Immediate Controls".
     #
-    # Wichtig: Zeitgesteuertes Laden und der manuelle
-    # `start_grid_charge`/`stop_grid_charge`-Service (sowie der
-    # "Entladung starten"-Button) teilen sich denselben Hintergrund-Task
-    # (_grid_charge_task). Werden mehrere davon gleichzeitig verwendet,
-    # gewinnt der zuletzt schreibende Aufruf - es gibt keine eigene
-    # Arbitrierung zwischen ihnen.
+    # Ablauf laut modbus.pdf/modbus_llm.yaml: Erst Register 40051
+    # (Steuermodus) auf 1 (Sollwertvorgabe) setzen, danach kann Register
+    # 40049 (Leistungsvorgabe, Prozent der Referenz-Maximalleistung Register
+    # 40053) gesetzt werden. Beide Register unterliegen demselben Timeout
+    # (Register 40050, siehe REG_SUN_IC_TIMEOUT, max. 300s) und werden vom
+    # Gerät verworfen, wenn sie nicht rechtzeitig erneut geschrieben werden -
+    # deshalb schreibt die Schleife pro Zyklus beide Register neu (nicht nur
+    # den Sollwert), mit einem Intervall, das sicher unterhalb des vom Gerät
+    # gemeldeten Timeouts liegt (siehe _sun_ic_write_interval). Beim Stoppen
+    # wird Register 40051 aktiv zurück auf 0 (SmartMeter-Nullregelung)
+    # gesetzt, statt nur passiv auf den Timeout zu warten.
+    #
+    # Vorzeichenkonvention für Register 40049 laut modbus.pdf nicht
+    # dokumentiert. Hier analog zum Basic-Mode-P-Sollwert (Register 41) und
+    # zur gemessenen Wirkleistung (Register 40029, "positiv = Entladung")
+    # angenommen: negativ = Laden, positiv = Entladen. Vor Produktiveinsatz
+    # gegen echte Hardware verifizieren.
+
+    @property
+    def sun_charge_active(self) -> bool:
+        return self._sun_charge_task is not None and not self._sun_charge_task.done()
+
+    def _watts_to_ic_setpoint_raw(self, power_watts: int, data: dict[str, Any]) -> int:
+        max_power_reference = data.get("ic_max_power_reference")
+        if not max_power_reference:
+            raise HomeAssistantError(
+                "Referenzwert Maximalleistung (Register 40053) noch nicht "
+                "bekannt - SunSpec-Modus-Block muss zuerst erfolgreich "
+                "gelesen worden sein."
+            )
+        scale_factor = to_signed16(self._ic_power_setpoint_sf_raw)
+        percent = (power_watts / max_power_reference) * 100
+        percent = max(
+            MIN_IC_POWER_SETPOINT_PCT, min(MAX_IC_POWER_SETPOINT_PCT, percent)
+        )
+        return to_unsigned16(round(percent / (10**scale_factor)))
+
+    def _sun_ic_write_interval(self) -> int:
+        """Wiederholungsintervall für die Schleife: die Hälfte des vom Gerät
+        gemeldeten Timeouts (Register 40050), gedeckelt auf
+        GRID_CHARGE_WRITE_INTERVAL und SUN_IC_MIN_WRITE_INTERVAL, solange
+        kein aktueller Timeout-Wert bekannt ist."""
+        timeout = self.data.get("ic_timeout") if self.data is not None else None
+        if not timeout:
+            return GRID_CHARGE_WRITE_INTERVAL
+        return max(
+            SUN_IC_MIN_WRITE_INTERVAL, min(timeout // 2, GRID_CHARGE_WRITE_INTERVAL)
+        )
+
+    async def async_start_sun_charge(self, power: int) -> None:
+        """Start (or update the setpoint of) periodic SunSpec-Modus grid-charge
+        writes (Register 40049/40051)."""
+        if not MIN_SETPOINT_POWER <= power <= MAX_SETPOINT_POWER:
+            raise HomeAssistantError(
+                f"power muss zwischen {MIN_SETPOINT_POWER} und "
+                f"{MAX_SETPOINT_POWER} liegen"
+            )
+        self._sun_charge_power = power
+        if self._sun_charge_task is None or self._sun_charge_task.done():
+            self._sun_charge_task = self.hass.async_create_background_task(
+                self._async_sun_charge_loop(), name="sax_power_sun_charge"
+            )
+
+    async def async_stop_sun_charge(self) -> None:
+        """No-op, wenn gerade keine SunSpec-Netzladung läuft (analog zu
+        async_stop_grid_charge) - schreibt den Steuermodus deshalb nur
+        zurück, wenn zuvor tatsächlich ein Lade-Task aktiv war, statt bei
+        jedem Aufruf (z. B. beim Entladen des Config Entry) unbedingt in ein
+        eventuell vom Nutzer selbst gesetztes Register 40051 einzugreifen."""
+        if self._sun_charge_task is None:
+            return
+        self._sun_charge_task.cancel()
+        try:
+            await self._sun_charge_task
+        except asyncio.CancelledError:
+            pass
+        self._sun_charge_task = None
+        try:
+            await self.async_write_extended_register(
+                REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
+            )
+        except HomeAssistantError:
+            _LOGGER.exception(
+                "Netzladung (SunSpec-Modus): Steuermodus konnte nicht auf "
+                "SmartMeter-Nullregelung zurückgesetzt werden - Gerät fällt "
+                "spätestens nach Ablauf des Timeouts (Register 40050) "
+                "automatisch zurück."
+            )
+
+    async def _async_sun_charge_loop(self) -> None:
+        try:
+            while True:
+                await self.async_write_extended_register(
+                    REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
+                )
+                setpoint_raw = self._watts_to_ic_setpoint_raw(
+                    self._sun_charge_power, self.data or {}
+                )
+                await self.async_write_extended_register(
+                    REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
+                )
+                await asyncio.sleep(self._sun_ic_write_interval())
+        except asyncio.CancelledError:
+            raise
+        except HomeAssistantError:
+            _LOGGER.exception(
+                "Netzladung (SunSpec-Modus): periodischer Schreibvorgang fehlgeschlagen"
+            )
+            raise
+
+    # -- Zeitgesteuertes Laden & manuelle Netzladung -------------------------
+    # Beide lädt den Speicher aktiv aus dem Netz über den SunSpec-Modus-Pfad
+    # oben (_async_sun_charge_loop), unabhängig von PV-Überschuss:
+    #
+    # - Zeitgesteuertes Laden: nur innerhalb eines konfigurierbaren
+    #   Zeitfensters, bis zu einem Ziel-SOC (z. B. für günstige
+    #   Nachtstromtarife).
+    # - Manuelle Netzladung (Schalter "Netzladung"): unabhängig von
+    #   Zeitfenster und Ziel-SOC, solange der Schalter aktiv ist - z. B. um
+    #   sofort aus dem Netz zu laden, ohne das zeitgesteuerte Laden zu
+    #   aktivieren.
+    #
+    # Beide sind bewusst KEINE eigenen Leistungseinstellungen: Sie nutzen
+    # den zentralen Ladeleistungsgrenzwert (data["charge_limit"], Register
+    # 44). Der Ziel-SOC für das zeitgesteuerte Laden nutzt denselben Wert
+    # wie "Maximaler Lade-SOC" (self._max_soc, siehe Max-SOC-Abschnitt oben)
+    # - fehlt dieser (None), wird MAX_SOC (100 %) als Ziel angenommen. Das
+    # vermeidet redundante Einstellmöglichkeiten (siehe anforderung.yaml,
+    # REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
+    #
+    # Beide teilen sich denselben Hintergrund-Task (_sun_charge_task): Ist
+    # mindestens eine der beiden Bedingungen erfüllt, läuft die Schleife;
+    # der Diagnose-Sensor "Zeitgesteuertes Laden aktiv" spiegelt dabei
+    # ausschließlich die zeitgesteuerte Bedingung wider, nicht den manuellen
+    # Schalter.
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -662,23 +767,32 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def timed_charge_end(self) -> dt_time | None:
         return self._timed_charge_end
 
+    @property
+    def manual_grid_charge_enabled(self) -> bool:
+        return self._manual_grid_charge_enabled
+
     async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
         self._timed_charge_enabled = enabled
-        await self._async_apply_timed_charge_change()
+        await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
         self._timed_charge_start = value
-        await self._async_apply_timed_charge_change()
+        await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
         self._timed_charge_end = value
-        await self._async_apply_timed_charge_change()
+        await self._async_apply_grid_charge_change()
 
-    async def _async_apply_timed_charge_change(self) -> None:
-        """Re-evaluate das Zeitfenster sofort nach einer Einstellungsänderung,
-        statt bis zum nächsten Poll-Intervall zu warten."""
+    async def async_set_manual_grid_charge_enabled(self, enabled: bool) -> None:
+        self._manual_grid_charge_enabled = enabled
+        await self._async_apply_grid_charge_change()
+
+    async def _async_apply_grid_charge_change(self) -> None:
+        """Re-evaluate Zeitfenster/manuellen Schalter sofort nach einer
+        Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
+        warten."""
         if self.data is not None:
-            await self._async_enforce_timed_charge(self.data)
+            await self._async_enforce_grid_charge(self.data)
             self.data["timed_charge_active"] = self._timed_charge_active
             self.async_set_updated_data(self.data)
 
@@ -696,22 +810,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start <= now < end
         return now >= start or now < end
 
-    async def _async_enforce_timed_charge(self, data: dict[str, Any]) -> None:
+    async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
-        should_charge = (
+        timed_should_charge = (
             self._timed_charge_enabled
             and self._is_time_in_window(dt_util.now().time())
             and data["soc"] < target_soc
         )
-        if should_charge and not self._timed_charge_active:
-            await self.async_start_grid_charge(-data["charge_limit"])
-            self._timed_charge_active = True
-        elif not should_charge and self._timed_charge_active:
-            await self.async_stop_grid_charge()
-            self._timed_charge_active = False
+        should_charge = self._manual_grid_charge_enabled or timed_should_charge
+
+        if should_charge:
+            await self.async_start_sun_charge(-data["charge_limit"])
+        elif self.sun_charge_active:
+            await self.async_stop_sun_charge()
+
+        self._timed_charge_active = timed_should_charge
 
     async def async_shutdown(self) -> None:
         await self.async_stop_grid_charge()
+        await self.async_stop_sun_charge()
         ir.async_delete_issue(
             self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

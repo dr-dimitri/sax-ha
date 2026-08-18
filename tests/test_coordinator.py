@@ -10,9 +10,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.sax_power.const import (
+    GRID_CHARGE_WRITE_INTERVAL,
     READ_BLOCK_COUNT,
     READ_BLOCK_START,
     REG_SOC,
+    REG_SUN_IC_CONTROL_MODE,
+    REG_SUN_IC_POWER_SETPOINT_PCT,
+    SUN_IC_CONTROL_MODE_SETPOINT,
+    SUN_IC_CONTROL_MODE_SMARTMETER,
+    SUN_IC_MIN_WRITE_INTERVAL,
 )
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
@@ -335,36 +341,61 @@ def _patched_now(hour: int, minute: int = 0):
 async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
     hass,
 ) -> None:
+    """Zeitgesteuertes Laden schreibt über den SunSpec-Modus (Slave-ID 100):
+    erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
+    40049 (Leistungsvorgabe %) - siehe anforderung.yaml,
+    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
     client.write_register = AsyncMock(return_value=write_result)
 
     coordinator = _make_coordinator(hass, client)
+    # ic_max_power_reference/ic_timeout werden vom Hintergrund-Task
+    # (_async_sun_charge_loop) aus coordinator.data gelesen, nicht aus dem
+    # unten übergebenen data-Dict - siehe SaxPowerCoordinator._sun_ic_write_interval.
+    coordinator.data = {
+        "soc": 50,
+        "charge_limit": 3000,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Maximaler Lade-SOC"
-    await coordinator.async_set_timed_charge_enabled(True)
 
     try:
         with _patched_now(2):
-            # Ladeleistung stammt aus dem zentralen Ladeleistungsgrenzwert
-            # (data["charge_limit"]), keine eigene Einstellung mehr - siehe
-            # anforderung.yaml REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS.
-            await coordinator._async_enforce_timed_charge(
-                {"soc": 50, "charge_limit": 3000}
-            )
-        # async_start_grid_charge spawnt nur den Hintergrund-Task; der erste
+            await coordinator.async_set_timed_charge_enabled(True)
+        # async_start_sun_charge spawnt nur den Hintergrund-Task; der erste
         # Schreibvorgang läuft asynchron, daher kurz dem Event-Loop Zeit geben.
         await asyncio.sleep(0.1)
 
         assert coordinator._timed_charge_active is True
-        assert coordinator.grid_charge_active is True
+        assert coordinator.sun_charge_active is True
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        )
+        # -3000 W / 4600 W Referenz-Maximalleistung * 100 = -65.217...%,
+        # skaliert mit sunssf -2 (Default-Annahme, siehe
+        # SaxPowerCoordinator._watts_to_ic_setpoint_raw) -> -6522.
         client.write_register.assert_awaited_with(
-            address=41, value=to_unsigned16(-3000), device_id=64
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=to_unsigned16(-6522),
+            device_id=100,
         )
     finally:
-        await coordinator.async_stop_grid_charge()
+        await coordinator.async_stop_sun_charge()
+
+    # Beim Stoppen wird der Steuermodus aktiv auf SmartMeter-Nullregelung
+    # zurückgesetzt, statt nur passiv auf den Timeout zu warten.
+    client.write_register.assert_awaited_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
 
 
 async def test_enforce_timed_charge_stops_when_target_soc_reached(hass) -> None:
@@ -374,17 +405,25 @@ async def test_enforce_timed_charge_stops_when_target_soc_reached(hass) -> None:
     client.write_register = AsyncMock(return_value=write_result)
 
     coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 90,
+        "charge_limit": 3000,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Maximaler Lade-SOC"
-    await coordinator.async_set_timed_charge_enabled(True)
     coordinator._timed_charge_active = True
-    coordinator._grid_charge_task = MagicMock(done=MagicMock(return_value=False))
+    # Echter (cancelbarer) Task statt MagicMock, da async_stop_sun_charge die
+    # Cancellation awaitet, bevor es den Steuermodus zurücksetzt.
+    coordinator._sun_charge_task = asyncio.create_task(asyncio.sleep(3600))
 
     with _patched_now(2):
-        await coordinator._async_enforce_timed_charge({"soc": 90, "charge_limit": 3000})
+        await coordinator._async_enforce_grid_charge({"soc": 90, "charge_limit": 3000})
 
     assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
 
 
 async def test_enforce_timed_charge_inactive_outside_window(hass) -> None:
@@ -395,10 +434,10 @@ async def test_enforce_timed_charge_inactive_outside_window(hass) -> None:
     await coordinator.async_set_timed_charge_enabled(True)
 
     with _patched_now(12):
-        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
+        await coordinator._async_enforce_grid_charge({"soc": 10, "charge_limit": 3000})
 
     assert coordinator._timed_charge_active is False
-    assert coordinator.grid_charge_active is False
+    assert coordinator.sun_charge_active is False
 
 
 async def test_enforce_timed_charge_inactive_when_disabled(hass) -> None:
@@ -409,81 +448,133 @@ async def test_enforce_timed_charge_inactive_when_disabled(hass) -> None:
     # timed_charge_enabled bleibt False (Default)
 
     with _patched_now(2):
-        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
+        await coordinator._async_enforce_grid_charge({"soc": 10, "charge_limit": 3000})
 
     assert coordinator._timed_charge_active is False
-    assert coordinator.grid_charge_active is False
+    assert coordinator.sun_charge_active is False
 
 
-# -- Entladung starten (Button, Umschalt-Verhalten) --------------------------
+# -- Manuelle Netzladung (Schalter) -------------------------------------------
 
 
-async def test_toggle_discharge_raises_without_data(hass) -> None:
-    from homeassistant.exceptions import HomeAssistantError
-
-    coordinator = _make_coordinator(hass, _make_client())
-
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_toggle_discharge()
-
-
-async def test_toggle_discharge_raises_when_discharge_limit_is_zero(hass) -> None:
-    """Ein Entladeleistungsgrenzwert von 0 W würde stillschweigend keinen
-    Effekt haben - stattdessen ein klarer Fehler statt eines wirkungslosen
-    Sollwert-Writes."""
-    from homeassistant.exceptions import HomeAssistantError
-
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.data = {"soc": 50, "charge_limit": 3000, "discharge_limit": 0}
-
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_toggle_discharge()
-
-    assert coordinator.discharge_active is False
-
-
-async def test_toggle_discharge_starts_using_central_discharge_limit(hass) -> None:
-    """Der Entladung-starten-Button nutzt den zentralen Entladeleistungs-
-    grenzwert (data["discharge_limit"]) statt einer eigenen Einstellung -
-    siehe anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+async def test_manual_grid_charge_ignores_time_window(hass) -> None:
+    """Die manuelle Netzladung lädt unabhängig vom Zeitfenster des
+    zeitgesteuerten Ladens, solange der Schalter aktiv ist."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
     client.write_register = AsyncMock(return_value=write_result)
 
     coordinator = _make_coordinator(hass, client)
-    coordinator.data = {"soc": 50, "charge_limit": 3000, "discharge_limit": 4600}
+    coordinator.data = {
+        "soc": 50,
+        "charge_limit": 3000,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
 
     try:
-        await coordinator.async_toggle_discharge()
+        # Bewusst kein Zeitfenster gesetzt/aktiviert und keine
+        # _patched_now - die manuelle Netzladung ist davon unabhängig.
+        await coordinator.async_set_manual_grid_charge_enabled(True)
         await asyncio.sleep(0.1)
 
-        assert coordinator.discharge_active is True
-        assert coordinator.grid_charge_active is True
-        client.write_register.assert_awaited_with(
-            address=41, value=to_unsigned16(4600), device_id=64
+        assert coordinator.sun_charge_active is True
+        # Der Diagnose-Sensor "Zeitgesteuertes Laden aktiv" bleibt False -
+        # er spiegelt nur die zeitgesteuerte Bedingung, nicht den manuellen
+        # Schalter.
+        assert coordinator._timed_charge_active is False
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
         )
     finally:
-        await coordinator.async_stop_grid_charge()
+        await coordinator.async_stop_sun_charge()
 
 
-async def test_toggle_discharge_second_press_stops_it(hass) -> None:
-    """Erneutes Drücken des Buttons muss die laufende Entladung wieder
-    stoppen (statt sie erneut zu starten)."""
+async def test_manual_grid_charge_turn_off_stops_charging(hass) -> None:
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
     client.write_register = AsyncMock(return_value=write_result)
 
     coordinator = _make_coordinator(hass, client)
-    coordinator.data = {"soc": 50, "charge_limit": 3000, "discharge_limit": 4600}
+    coordinator.data = {
+        "soc": 50,
+        "charge_limit": 3000,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
 
-    await coordinator.async_toggle_discharge()
+    await coordinator.async_set_manual_grid_charge_enabled(True)
     await asyncio.sleep(0.1)
-    assert coordinator.discharge_active is True
-    assert coordinator.grid_charge_active is True
+    assert coordinator.sun_charge_active is True
 
-    await coordinator.async_toggle_discharge()
+    await coordinator.async_set_manual_grid_charge_enabled(False)
 
-    assert coordinator.discharge_active is False
-    assert coordinator.grid_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_stop_sun_charge_is_noop_when_not_running(hass) -> None:
+    """Analog zu async_stop_grid_charge: ein Aufruf ohne laufende Ladung
+    (z. B. beim Entladen des Config Entry) darf nicht ungefragt in Register
+    40051 eingreifen."""
+    client = _make_client()
+    client.write_register = AsyncMock()
+    coordinator = _make_coordinator(hass, client)
+
+    await coordinator.async_stop_sun_charge()
+
+    client.write_register.assert_not_awaited()
+
+
+# -- SunSpec-Modus-Netzladung: Watt/Prozent-Konvertierung & Schreibintervall -
+
+
+@pytest.mark.parametrize(
+    ("power_watts", "max_power_reference", "expected_raw"),
+    [
+        (-3000, 4600, to_unsigned16(-6522)),  # Laden, ~-65.22%
+        (4600, 4600, 10000),  # Entladen mit voller Referenzleistung -> +100%
+        (
+            -9200,
+            4600,
+            to_unsigned16(-10000),
+        ),  # jenseits Referenzleistung -> -100% geklemmt
+    ],
+)
+def test_watts_to_ic_setpoint_raw(
+    hass, power_watts: int, max_power_reference: int, expected_raw: int
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._ic_power_setpoint_sf_raw = to_unsigned16(-2)  # wellknown
+    data = {"ic_max_power_reference": max_power_reference}
+    assert coordinator._watts_to_ic_setpoint_raw(power_watts, data) == expected_raw
+
+
+def test_watts_to_ic_setpoint_raw_raises_without_max_power_reference(hass) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+
+    with pytest.raises(HomeAssistantError):
+        coordinator._watts_to_ic_setpoint_raw(-3000, {})
+
+
+@pytest.mark.parametrize(
+    ("ic_timeout", "expected_interval"),
+    [
+        (None, GRID_CHARGE_WRITE_INTERVAL),  # noch kein Timeout bekannt -> Fallback
+        (300, GRID_CHARGE_WRITE_INTERVAL),  # Geräte-Default (modbus.pdf) -> gedeckelt
+        (20, 10),  # Hälfte des gemeldeten Timeouts
+        (4, SUN_IC_MIN_WRITE_INTERVAL),  # sehr kurzer Timeout -> Untergrenze
+    ],
+)
+def test_sun_ic_write_interval(
+    hass, ic_timeout: int | None, expected_interval: int
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    if ic_timeout is not None:
+        coordinator.data = {"ic_timeout": ic_timeout}
+    assert coordinator._sun_ic_write_interval() == expected_interval

@@ -211,9 +211,9 @@ register_maps:
       # -- SunSpec Model 123 "Immediate Controls" --
       - { protocol_addr: 40047, internal_addr: 47, name: "Sunspec Model ID", datatype: "uint16", access: "Read", notes: "wellknown: 123" }
       - { protocol_addr: 40048, internal_addr: 48, name: "Sunspec Length", datatype: "uint16", access: "Read", notes: "wellknown: 7" }
-      - { protocol_addr: 40049, internal_addr: 49, name: "Leistungsvorgabe prozentual der Maximalleistung", unit: "%", datatype: "int16", access: "Read/Write", notes: "-100*SF bis +100*SF; Vorzeichenkonvention nicht dokumentiert" }
-      - { protocol_addr: 40050, internal_addr: 50, name: "Timeout der Leistungsvorgabe", unit: "s", datatype: "uint16", access: "Read/Write", notes: "max. 300s" }
-      - { protocol_addr: 40051, internal_addr: 51, name: "Steuermodus", datatype: "uint16", access: "Read/Write", notes: "0:SmartMeter-Nullregelung 1:Sollwertvorgabe" }
+      - { protocol_addr: 40049, internal_addr: 49, name: "Leistungsvorgabe prozentual der Maximalleistung", unit: "%", datatype: "int16", access: "Read/Write", notes: "-100*SF bis +100*SF; Vorzeichenkonvention nicht dokumentiert (Integration nimmt an: negativ=Laden, positiv=Entladen). Schreibpfad für zeitgesteuertes Laden und manuelle Netzladung, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE." }
+      - { protocol_addr: 40050, internal_addr: 50, name: "Timeout der Leistungsvorgabe", unit: "s", datatype: "uint16", access: "Read/Write", notes: "max. 300s. Die Integration liest diesen Wert und wiederholt Schreibvorgänge auf 40049/40051 sicher innerhalb dieses Zeitfensters (nie öfter als alle 30s, nie seltener als die Hälfte des Timeouts)." }
+      - { protocol_addr: 40051, internal_addr: 51, name: "Steuermodus", datatype: "uint16", access: "Read/Write", notes: "0:SmartMeter-Nullregelung 1:Sollwertvorgabe. Muss vor einem Schreibvorgang auf 40049 auf 1 gesetzt sein; die Integration setzt es beim Beenden der Netzladung aktiv wieder auf 0 zurück." }
       - { protocol_addr: 40052, internal_addr: 52, name: "Scalefaktor Leistungsvorgabe", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -2 (10000=100%)" }
       - { protocol_addr: 40053, internal_addr: 53, name: "Referenzwert Maximalleistung", unit: "W", datatype: "uint16", access: "Read", notes: "Bezugspunkt für 100%: 4600/9200/13800" }
       # -- SunSpec Model 203 "WYE Connect 3Ph Meter ABC" (Netz/Smart Meter) --

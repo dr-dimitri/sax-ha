@@ -184,6 +184,11 @@ MIN_IC_POWER_SETPOINT_PCT = -100.0
 MAX_IC_POWER_SETPOINT_PCT = 100.0
 MAX_IC_TIMEOUT_SECONDS = 300
 
+# Steuermodus-Werte für Register 40051 (siehe REG_SUN_IC_CONTROL_MODE oben
+# sowie CONTROL_MODE_LABELS unten).
+SUN_IC_CONTROL_MODE_SMARTMETER = 0  # Normalbetrieb (SmartMeter-Nullregelung)
+SUN_IC_CONTROL_MODE_SETPOINT = 1  # Sollwertvorgabe - Voraussetzung für Register 40049
+
 STORAGE_STATE_LABELS = {
     1: "Aus",
     2: "Standby",
@@ -236,8 +241,19 @@ MIN_SETPOINT_POWER = -32768
 MAX_SETPOINT_POWER = 32767
 
 # Doku: "Periodisches Wiederholen der Schreibbefehle (alle 5s bis 5min) bei
-# aktiver Netzladung zur Vermeidung von Timeout-Resets."
+# aktiver Netzladung zur Vermeidung von Timeout-Resets." Gilt für den
+# Basic-Mode-Pfad (Register 41, start_grid_charge-Service).
 GRID_CHARGE_WRITE_INTERVAL = 30  # Sekunden
+
+# -- SunSpec-Modus-Netzladung (Immediate Controls, Register 40049/40051) --
+# Das Wiederholungsintervall für den periodischen Refresh ist die Hälfte des
+# vom Gerät gemeldeten Timeouts (Register 40050, siehe REG_SUN_IC_TIMEOUT),
+# damit der Sollwert sicher vor dessen Ablauf aufgefrischt wird.
+# GRID_CHARGE_WRITE_INTERVAL dient dabei als Obergrenze (kein Grund, öfter zu
+# schreiben als beim Basic-Mode-Pfad) sowie als Fallback, solange der
+# Timeout-Wert noch nicht gelesen wurde. Siehe
+# SaxPowerCoordinator._sun_ic_write_interval.
+SUN_IC_MIN_WRITE_INTERVAL = 5  # Sekunden, Untergrenze gegen zu enges Polling
 
 SERVICE_START_GRID_CHARGE = "start_grid_charge"
 SERVICE_STOP_GRID_CHARGE = "stop_grid_charge"
@@ -248,13 +264,23 @@ DATA_COORDINATOR = "coordinator"
 
 ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 
-# -- Zeitgesteuertes Laden -------------------------------------------------
-# Software-Logik (kein natives Geräteregister): Lädt den Speicher innerhalb
-# eines konfigurierbaren Zeitfensters aktiv auf einen Ziel-SOC, unabhängig
-# von PV-Überschuss (z. B. für günstige Nachtstromtarife). Nutzt intern
-# denselben Mechanismus wie der `start_grid_charge`-Service (P-Sollwert-
-# Schreiben auf Register 41), siehe SaxPowerCoordinator._async_enforce_timed_charge.
-# Weder die Ladeleistung (nutzt den zentralen Ladeleistungsgrenzwert,
-# Register 44) noch der Ziel-SOC (nutzt "Maximaler Lade-SOC", Fallback
-# MAX_SOC oben) sind eigene Einstellungen - siehe anforderung.yaml,
-# REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS.
+# -- Zeitgesteuertes Laden & manuelle Netzladung ---------------------------
+# Beides Software-Logik (kein natives Geräteregister für die Aktivierung
+# selbst): Lädt den Speicher aktiv aus dem Netz, unabhängig von
+# PV-Überschuss. Beide Wege teilen sich denselben Hintergrund-Task
+# (SaxPowerCoordinator._sun_charge_task) und schreiben über den SunSpec-
+# Modus (Slave-ID 100, "Immediate Controls", Register 40051 Steuermodus auf
+# Sollwertvorgabe + Register 40049 Leistungsvorgabe in Prozent der
+# Referenz-Maximalleistung), NICHT mehr über den Basic-Mode-P-Sollwert
+# (Register 41) - siehe SaxPowerCoordinator._async_enforce_grid_charge.
+#
+# - "Zeitgesteuertes Laden" lädt nur innerhalb eines konfigurierbaren
+#   Zeitfensters bis zu einem Ziel-SOC (z. B. für günstige
+#   Nachtstromtarife).
+# - "Netzladung" (manueller Schalter) lädt unabhängig von Zeitfenster und
+#   Ziel-SOC, solange der Schalter aktiv ist.
+#
+# Beide nutzen den zentralen Ladeleistungsgrenzwert (Register 44) als
+# Leistung; "Zeitgesteuertes Laden" zusätzlich "Maximaler Lade-SOC"
+# (Fallback MAX_SOC oben) als Ziel-SOC. Keine eigenen Einstellungen dafür -
+# siehe anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS.

@@ -68,6 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED
         ),
         scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        entry_id=entry.entry_id,
     )
     await coordinator.async_config_entry_first_refresh()
 

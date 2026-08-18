@@ -11,13 +11,26 @@
           "slave_id_extended": "Slave-ID (Extended Mode)",
           "scan_interval": "Aktualisierungsintervall (Sekunden)"
         }
+      },
+      "reconfigure": {
+        "title": "SAX Power Home – Verbindung ändern",
+        "description": "IP-Adresse oder andere Verbindungsdaten des SAX Power Home (Plus) Speichers anpassen. Die Integration wird nach dem Speichern automatisch mit den neuen Werten neu geladen.",
+        "data": {
+          "host": "IP-Adresse",
+          "port": "Port",
+          "slave_id_basic": "Slave-ID (Basic Mode)",
+          "slave_id_extended": "Slave-ID (Extended Mode)",
+          "scan_interval": "Aktualisierungsintervall (Sekunden)"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Verbindung zum SAX Speicher fehlgeschlagen. IP-Adresse, Port und Slave-ID prüfen."
+      "cannot_connect": "Verbindung zum SAX Speicher fehlgeschlagen. IP-Adresse und Port prüfen sowie ob der Speicher im Netzwerk erreichbar ist.",
+      "invalid_response": "Verbindung zum Speicher steht, aber er hat mit einem Modbus-Fehler geantwortet. Bitte die Slave-ID (Basic Mode) prüfen."
     },
     "abort": {
-      "already_configured": "Dieses Gerät ist bereits konfiguriert."
+      "already_configured": "Dieses Gerät ist bereits konfiguriert.",
+      "reconfigure_successful": "Die Verbindungsdaten wurden aktualisiert."
     }
   },
   "entity": {
@@ -182,6 +195,12 @@
       "storage": {
         "name": "Speicher"
       }
+    }
+  },
+  "issues": {
+    "extended_mode_unavailable": {
+      "title": "SAX Extended Mode nicht erreichbar",
+      "description": "Der Extended-Mode-Registerblock (Slave-ID {slave_id}) des SAX Speichers ist nicht erreichbar. Die davon abhängigen Sensoren (SunSpec-Messwerte, Smart-Meter-Detailwerte) zeigen \"unbekannt\", bis die Verbindung wiederhergestellt ist. Die Basic-Mode-Sensoren (Ladezustand, Lade-/Entladeleistung, Schalter) sind davon nicht betroffen. Bitte prüfen, ob Extended Mode auf dem SAX-Gateway aktiviert und die konfigurierte Slave-ID (Extended Mode) korrekt ist."
     }
   },
   "services": {

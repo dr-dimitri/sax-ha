@@ -121,6 +121,21 @@ Power Gerät adressiert (relevant, falls mehrere Speicher eingerichtet sind).
   `DataUpdateCoordinator` pro Config Entry bündelt alle Reads/Writes und
   verhindert parallele/kollidierende Modbus-Zugriffe (`asyncio.Lock`)
 
+### IP-Adresse nachträglich ändern
+
+Die Verbindungsdaten (IP-Adresse, Port, Slave-IDs, Aktualisierungsintervall)
+werden bei der Ersteinrichtung im Home-Assistant-Config-Entry gespeichert und
+lassen sich jederzeit über die Oberfläche ändern, z. B. wenn sich die IP des
+SAX Speichers ändert:
+
+**Einstellungen → Geräte & Dienste → SAX Power Home → ⋮ (Gerät) → Neu konfigurieren**
+
+Das Formular ist mit den aktuell gespeicherten Werten vorbelegt. Die neue
+Verbindung wird vor dem Speichern geprüft (derselbe Testread wie bei der
+Ersteinrichtung); bei Erfolg werden die Werte persistiert und die Integration
+lädt automatisch mit den neuen Daten neu. Siehe `anforderung.yaml`,
+Anforderung `REQ-IP-CONFIGURABLE-UI`.
+
 ## Aufbau
 
 ```
@@ -142,6 +157,13 @@ tests/                Siehe Abschnitt "Tests"
 .devcontainer/         VS Code DevContainer für lokale Entwicklung
 ```
 
+**Verbindungsdaten ändern:** `config_flow.py` implementiert sowohl
+`async_step_user` (Ersteinrichtung) als auch `async_step_reconfigure`
+(spätere Änderung, z. B. der IP-Adresse) über eine gemeinsame Methode
+(`_async_step_connection`). Beide validieren die Verbindung mit demselben
+Testread, bevor die Daten gespeichert werden. Siehe Abschnitt "IP-Adresse
+nachträglich ändern" oben.
+
 **Datenfluss:** `config_flow.py` sammelt Host/Port/Slave-IDs/Intervall und
 validiert die Verbindung mit einem Testlesen. `__init__.py` baut daraus einen
 `AsyncModbusTcpClient` und einen `SaxPowerCoordinator` (`coordinator.py`),
@@ -155,11 +177,19 @@ zusammenhängende Register-Blöcke mit je einem `read_holding_registers`-
 Aufruf: Basic Mode (Slave-ID 64, Register 41–48, `READ_BLOCK_START`/
 `READ_BLOCK_COUNT`) und Extended Mode (Slave-ID 40, Register 70–109 –
 Speicher- und Smart-Meter-Teilblock sind zusammenhängend,
-`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`). Schlägt einer der beiden
-Reads fehl, schlägt das gesamte Update fehl (`UpdateFailed`) – es gibt keine
-Teilverfügbarkeit einzelner Register-Gruppen. Die genaue Zuordnung
-Protokolladresse ↔ interne Adresse ↔ Bedeutung steht in `modbus_llm.yaml`;
-`const.py` referenziert nur die intern verwendeten Adressen.
+`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`). Innerhalb eines Blocks gilt
+weiterhin "alles oder nichts": Schlägt der Basic-Mode-Read fehl, schlägt das
+gesamte Update fehl (`UpdateFailed`), da Basic Mode die Mindestanforderung
+für jede Funktion der Integration ist. Schlägt dagegen nur der
+Extended-Mode-Read fehl (z. B. weil Extended Mode auf dem SAX-Gateway nicht
+freigeschaltet ist), bleiben die Basic-Mode-Sensoren unverändert verfügbar
+und lediglich die Extended-Mode-Sensoren zeigen "unbekannt", bis der Block
+wieder lesbar ist (`SaxPowerCoordinator._async_read_extended`, siehe
+anforderung.yaml `REQ-EXTENDED-MODE-RESILIENCE`). Ein dauerhafter
+Extended-Mode-Ausfall wird zusätzlich als Home-Assistant-Repair-Issue
+angezeigt. Die genaue Zuordnung Protokolladresse ↔ interne Adresse ↔
+Bedeutung steht in `modbus_llm.yaml`; `const.py` referenziert nur die
+intern verwendeten Adressen.
 
 **SunSpec-Skalierung & Phasensummen:** `coordinator.apply_sunssf(raw_value,
 raw_scale_factor)` wendet `Wert × 10^sunssf` an (beide Rohwerte signed
@@ -188,20 +218,23 @@ tests/
 ├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~48 Sensor-Beschreibungen:
 │                                  eindeutige Keys, vollständige DE/EN-Übersetzungen,
 │                                  value_fn wirft für keinen Sensor eine Exception
-└── test_integration_live.py        End-to-End-Test gegen einen echten, lokal gestarteten
-                                   Modbus-TCP-Server (kein Mock, Slave 64 UND Slave 40) – prüft
-                                   den kompletten Weg Config Entry → Coordinator → Entities →
-                                   echtes Wire-Protokoll
+├── test_integration_live.py        End-to-End-Tests gegen einen echten, lokal gestarteten
+│                                  Modbus-TCP-Server (kein Mock) – prüft den kompletten Weg
+│                                  Config Entry → Coordinator → Entities → echtes Wire-Protokoll,
+│                                  inkl. Regressionstest für REQ-EXTENDED-MODE-RESILIENCE
+│                                  (Extended Mode nicht erreichbar → Basic-Mode-Sensoren bleiben da)
+├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
+│                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
+└── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py
 ```
 
 `test_coordinator.py`, `test_config_flow.py` und `test_sensor_descriptions.py`
 mocken den `pymodbus`-Client bzw. arbeiten rein auf Python-Ebene und prüfen
 die Programmlogik. `test_integration_live.py` geht einen Schritt weiter: Er
 startet mit `pymodbus.server.ModbusTcpServer` einen echten Modbus-TCP-Server
-auf `127.0.0.1` mit zwei simulierten Geräten (Slave-ID 64 Basic Mode,
-Slave-ID 40 Extended Mode), befüllt sie mit Registerwerten aus
-`modbus_llm.yaml` und lässt die Integration real darüber kommunizieren.
-Geprüft werden u. a.:
+auf `127.0.0.1` mit simulierten Geräten (Slave-ID 64 Basic Mode, Slave-ID 40
+Extended Mode), befüllt sie mit Registerwerten aus `modbus_llm.yaml` und lässt
+die Integration real darüber kommunizieren. Geprüft werden u. a.:
 
 - korrektes Lesen von SOC/Lade-/Entladeleistung über echtes TCP
 - Extended-Mode-Register mit SunSpec-Skalierung (z. B. Netzfrequenz,
@@ -212,20 +245,99 @@ Geprüft werden u. a.:
 - Max-SOC-Klemmung (SOC über Zielwert → Ladelimit-Register wird auf 0 geschrieben)
 - Netzladung: periodischer Sollwert-Write auf Register 41, verifiziert über
   einen unabhängigen zweiten Modbus-Client
+- Fehlt der Extended-Mode-Server (Slave-ID 40) komplett: Config Entry lädt
+  trotzdem erfolgreich, Basic-Mode-Sensoren liefern echte Werte,
+  Extended-Mode-Sensoren zeigen "unbekannt" statt die Integration am Start
+  zu hindern
 
 Dieser Live-Test hat einen echten Bug aufgedeckt (debounced Refresh, siehe
 oben) – ein reiner Mock-Test hätte das nicht sichtbar gemacht, da er die
 zeitliche Reihenfolge realer Schreibvorgänge nicht abbildet.
 
-**Ausführen:**
+Alle Tests laufen auch ohne echte Hardware und ohne Internetzugriff (der
+Live-Test bindet nur an `127.0.0.1`) – der Live-Hardware-Test
+(`test_real_hardware.py`) wird ohne hinterlegte IP automatisch
+übersprungen, siehe Abschnitt "Test gegen echte Hardware" unten.
+
+### Manuelle Testausführung
+
+Die Tests laufen außerhalb des DevContainers in einer eigenen Python-
+Umgebung (venv), damit `homeassistant` & Co. nicht die System-Python-
+Installation zumüllen:
 
 ```bash
+cd sax-ha
+
+# Einmalig: virtuelle Umgebung anlegen und Abhängigkeiten installieren
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements_test.txt
+
+# Alle Tests ausführen
 pytest -v
 ```
 
-Alle Tests laufen auch ohne echte Hardware und ohne Internetzugriff (der
-Live-Test bindet nur an `127.0.0.1`).
+Bei künftigen Läufen genügt (ggf. nach erneutem `pip install`, falls sich
+`requirements_test.txt` geändert hat):
+
+```bash
+source .venv/bin/activate
+pytest -v
+```
+
+Nützliche Varianten:
+
+| Befehl | Zweck |
+| --- | --- |
+| `pytest` | Alle Tests, kompakte Ausgabe |
+| `pytest -v` | Alle Tests, ein Ergebnis pro Testfall |
+| `pytest -rs` | Zusätzlich Grund für übersprungene (`SKIPPED`) Tests anzeigen |
+| `pytest tests/test_coordinator.py -v` | Nur eine Testdatei |
+| `pytest -k max_soc -v` | Nur Tests, deren Name "max_soc" enthält |
+| `pytest tests/test_real_hardware.py -v` | Nur der Live-Hardware-Test (siehe unten) |
+
+Im **DevContainer** (`.devcontainer/`) sind `homeassistant`, `pytest` etc.
+bereits vorinstalliert – dort reicht direkt `pytest -v` ohne eigenes venv.
+
+**Mögliche Probleme und Lösungen:**
+
+| Problem | Ursache | Lösung |
+| --- | --- | --- |
+| `command not found: pip` | Auf macOS/Linux ist `pip` oft nicht direkt im `PATH`, nur `pip3`/`python3 -m pip`. | Venv aktivieren (`source .venv/bin/activate`) – darin heißt der Befehl wieder schlicht `pip`. Alternativ `python3 -m pip install -r requirements_test.txt`. |
+| `ModuleNotFoundError: No module named 'homeassistant'` (o. Ä.) | venv nicht aktiviert oder `pip install -r requirements_test.txt` noch nicht/nicht erneut ausgeführt. | `source .venv/bin/activate` prüfen (Prompt zeigt `(.venv)`), danach `pip install -r requirements_test.txt` (erneut) ausführen. |
+| Installation von `homeassistant` dauert sehr lange / bricht ab | `homeassistant` hat viele Abhängigkeiten; instabile Internetverbindung. | Erneut versuchen, ggf. `pip install -r requirements_test.txt -v` für Fortschrittsanzeige. Reiner Installationsvorgang, kein Testproblem. |
+| `pytest_homeassistant_custom_component...SocketBlockedError` / `Socket opened during test` bei eigenen neuen Tests | pytest-homeassistant-custom-component sperrt Socket-Erstellung standardmäßig komplett (bis auf `127.0.0.1`). Die `socket_enabled`-Fixture aus pytest-socket **reicht dafür allein nicht aus** – sie hebt zwar die Socket-Sperre auf, wird aber vom Setup-Hook des HA-Test-Plugins wieder auf `127.0.0.1` zurückgesetzt, sobald eine echte externe IP angesprochen wird. | Für Verbindungen zu einer echten externen IP explizit `pytest_socket.enable_socket()` gefolgt von `pytest_socket.socket_allow_hosts([host, "127.0.0.1"], allow_unix_socket=True)` aufrufen (siehe `real_client`-Fixture in `test_real_hardware.py`). Für Verbindungen nur zu `127.0.0.1` (wie in `test_integration_live.py`) genügt weiterhin die `socket_enabled`-Fixture. |
+| `tests/test_real_hardware.py` wird übersprungen (`SKIPPED`) | Kein `host` in `tests/real_device.yaml` hinterlegt, oder der Speicher ist gerade nicht erreichbar. | Mit `pytest -rs` den genauen Skip-Grund anzeigen lassen. `host` in `tests/real_device.yaml` eintragen (siehe Abschnitt unten) bzw. Erreichbarkeit prüfen (siehe nächste Zeile). |
+| Live-Hardware-Test bricht mit Verbindungsfehler ab statt zu überspringen | Der erste Verbindungsversuch (`connect()`) klappt kurzzeitig, ein späterer Read schlägt dann fehl (Netzwerk instabil, falscher Port/Slave-ID). | IP/Port in `tests/real_device.yaml` prüfen (`ping <IP>`, `nc -vz <IP> 502`). Prüfen, ob eine andere Anwendung (z. B. eine bereits laufende Home-Assistant-Instanz) parallel denselben Modbus-Port belegt – SAX-Geräte erlauben oft nur eine aktive Verbindung gleichzeitig. |
+| `test_read_real_extended_mode_values` wird übersprungen, `test_read_real_basic_mode_values` läuft durch | Extended Mode (Slave-ID 40) ist auf dem SAX-Gateway nicht freigeschaltet/erreichbar – das Gerät antwortet dann entweder mit einer Modbus-Fehlerantwort oder (häufiger) mit Modbus-Exception-Code 11 "Gateway Target Device Failed to Respond", was pymodbus als `ModbusIOException` auswirft. | Erwartetes, dokumentiertes Verhalten (siehe `REQ-EXTENDED-MODE-RESILIENCE`) – kein Fehler, entspricht der Fehlerbehandlung im produktiven Coordinator. Falls Extended Mode erwartet wird: Freischaltung beim Hersteller/Installateur klären. |
+| `ruff`/`black` melden Formatierungsfehler bei eigenen Änderungen | Code entspricht nicht dem Projektstil (Zeilenlänge 88, Formatierung). | `pip install ruff black` (falls nicht vorhanden), dann `black custom_components tests` zum automatischen Formatieren und `ruff check custom_components tests` zur Kontrolle. |
+| Tests schlagen nach einem `git pull` plötzlich fehl | `requirements_test.txt` hat sich geändert (neue/aktualisierte Abhängigkeit), venv ist veraltet. | `source .venv/bin/activate && pip install -r requirements_test.txt` erneut ausführen. |
+
+### Test gegen echte Hardware
+
+`tests/test_real_hardware.py` liest – anders als `test_integration_live.py`
+(simulierter Server) – Werte direkt von einem echten SAX Power Home (Plus)
+im lokalen Netz. Rein lesend, kein Schreibzugriff.
+
+Die Ziel-IP steht in `tests/real_device.yaml` (im Repository abgelegt,
+siehe `anforderung.yaml` `REQ-REAL-HARDWARE-TESTS`):
+
+```yaml
+host: null   # <- echte IP eintragen, z. B. "192.168.1.50"
+port: 502
+slave_id_basic: 64
+slave_id_extended: 40
+connect_timeout: 3
+```
+
+Solange `host: null` (Auslieferungszustand) oder der Speicher nicht
+erreichbar ist, werden die beiden Tests automatisch übersprungen (kein
+Fehlschlag) – der Test läuft also weder in CI noch bei Entwicklern ohne
+physischen Zugriff auf die Hardware. Nach Eintragen einer echten IP:
+
+```bash
+pytest tests/test_real_hardware.py -v
+```
 
 ## Bekannte Lücken / Annahmen
 
@@ -247,11 +359,17 @@ Live-Test bindet nur an `127.0.0.1`).
   die drei Phasenwirkleistungs-Register als "L1"/"L12"/"L13" statt
   "L1"/"L2"/"L3". Die Integration behandelt dies als Tippfehler in der
   Quelldokumentation und interpretiert sie als L1/L2/L3.
-- **Extended Mode ist jetzt Pflicht**: Da der Coordinator seit
-  `REQ-ALL-REGISTERS-READABLE` auch den Extended-Mode-Block (Slave-ID 40)
-  abfragt, muss dieser auf dem Gateway erreichbar sein – sonst schlägt jedes
-  Update fehl und alle Entities (auch die des Basic Mode) werden
-  `unavailable`.
+- **Extended Mode ist optional** (seit `REQ-EXTENDED-MODE-RESILIENCE`): Der
+  Coordinator fragt seit `REQ-ALL-REGISTERS-READABLE` zusätzlich den
+  Extended-Mode-Block (Slave-ID 40) ab. Ist dieser nicht erreichbar (z. B.
+  weil Extended Mode auf dem SAX-Gateway nicht freigeschaltet ist), bleiben
+  die Basic-Mode-Sensoren (SOC, Lade-/Entladeleistung, Schalter) trotzdem
+  verfügbar; nur die Extended-Mode-Sensoren zeigen "unbekannt", bis der
+  Block wieder lesbar ist. Vorher führte ein nicht erreichbarer
+  Extended-Mode-Block dazu, dass die gesamte Integration mit
+  `ConfigEntryNotReady` scheiterte und **gar keine** Entities angelegt
+  wurden – das war die Ursache für den Fehlerbericht "es werden keine
+  Sensoren angeboten".
 
 ## Installation über HACS (empfohlen)
 

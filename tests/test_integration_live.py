@@ -18,6 +18,8 @@ import asyncio
 import warnings
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import STATE_UNKNOWN
 from homeassistant.helpers import entity_registry as er
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.datastore import (
@@ -260,5 +262,65 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
             DOMAIN, "stop_grid_charge", {"device_id": device_id}, blocking=True
         )
         assert coordinator.grid_charge_active is False
+    finally:
+        await server.shutdown()
+
+
+async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
+    hass, socket_enabled
+) -> None:
+    """Regressionstest für den Bug 'keine Sensoren in Home Assistant':
+
+    Ist der Extended-Mode-Block (Slave-ID 40) auf dem Gateway nicht
+    freigeschaltet/erreichbar - was bei echter Hardware vorkommen kann, wenn
+    Extended Mode dort nicht aktiviert ist - darf das die Integration nicht
+    mehr komplett am Start hindern (vorher: ConfigEntryNotReady -> gar keine
+    Entities). Basic-Mode-Sensoren müssen weiterhin echte Werte liefern,
+    Extended-Mode-Sensoren dürfen lediglich "unbekannt" zeigen. Siehe
+    anforderung.yaml, REQ-EXTENDED-MODE-RESILIENCE."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        # Bewusst nur Slave-ID 64 (Basic Mode) im Server-Context - simuliert
+        # ein Gateway, auf dem Extended Mode (Slave-ID 40) nicht verfügbar
+        # ist.
+        context = ModbusServerContext(
+            devices={SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr)},
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 1))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 1,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+        )
+        entry.add_to_hass(hass)
+
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
+
+        registry = er.async_get(hass)
+
+        # -- Basic-Mode-Sensoren liefern trotz fehlendem Extended Mode
+        #    weiterhin echte Werte --
+        soc_id = _entity_id(registry, entry.entry_id, "soc")
+        switch_id = _entity_id(registry, entry.entry_id, "storage_switch")
+        assert hass.states.get(soc_id).state == "55"
+        assert hass.states.get(switch_id).state == "on"
+
+        # -- Extended-Mode-Sensoren existieren weiterhin als Entity, zeigen
+        #    aber "unbekannt" statt die Integration am Laden zu hindern --
+        ext_current_l1_id = _entity_id(registry, entry.entry_id, "ext_current_l1")
+        assert hass.states.get(ext_current_l1_id).state == STATE_UNKNOWN
     finally:
         await server.shutdown()

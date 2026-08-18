@@ -8,6 +8,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DATA_COORDINATOR,
@@ -27,7 +28,12 @@ async def async_setup_entry(
     coordinator: SaxPowerCoordinator = hass.data[DOMAIN][entry.entry_id][
         DATA_COORDINATOR
     ]
-    async_add_entities([SaxPowerStorageSwitch(coordinator, entry.entry_id)])
+    async_add_entities(
+        [
+            SaxPowerStorageSwitch(coordinator, entry.entry_id),
+            SaxPowerTimedChargeSwitch(coordinator, entry.entry_id),
+        ]
+    )
 
 
 class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
@@ -55,3 +61,37 @@ class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_write_register(REG_SWITCH_STATE, SWITCH_STATE_OFF)
         await self.coordinator.async_refresh()
+
+
+class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+    """Aktiviert/deaktiviert das zeitgesteuerte Laden (Software-Logik).
+
+    Siehe SaxPowerCoordinator._async_enforce_timed_charge sowie die
+    zugehörigen Number-/Time-Entities (Ziel-SOC, Zeitfenster, Ladeleistung).
+    """
+
+    _attr_translation_key = "timed_charge_enabled"
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_timed_charge_enabled"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.timed_charge_enabled:
+            return
+        if (last_state := await self.async_get_last_state()) is None:
+            return
+        await self.coordinator.async_set_timed_charge_enabled(last_state.state == "on")
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.timed_charge_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_timed_charge_enabled(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_timed_charge_enabled(False)
+        self.async_write_ha_state()

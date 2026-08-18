@@ -50,6 +50,9 @@
       "switch_state_text": {
         "name": "Storage switch state (text)"
       },
+      "timed_charge_active_text": {
+        "name": "Timed charge active"
+      },
       "setpoint_power": {
         "name": "Setpoint power P"
       },
@@ -216,11 +219,28 @@
       },
       "discharge_limit": {
         "name": "Discharge power limit"
+      },
+      "timed_charge_target_soc": {
+        "name": "Target SOC (time window)"
+      },
+      "timed_charge_power": {
+        "name": "Charge power (time window)"
       }
     },
     "switch": {
       "storage": {
         "name": "Storage"
+      },
+      "timed_charge_enabled": {
+        "name": "Timed charge"
+      }
+    },
+    "time": {
+      "timed_charge_start": {
+        "name": "Time window start"
+      },
+      "timed_charge_end": {
+        "name": "Time window end"
       }
     }
   },

@@ -50,6 +50,9 @@
       "switch_state_text": {
         "name": "Speicher Schaltzustand (Text)"
       },
+      "timed_charge_active_text": {
+        "name": "Zeitgesteuertes Laden aktiv"
+      },
       "setpoint_power": {
         "name": "Sollwert Leistung P"
       },
@@ -216,11 +219,28 @@
       },
       "discharge_limit": {
         "name": "Entladeleistungsgrenzwert"
+      },
+      "timed_charge_target_soc": {
+        "name": "Ziel-SOC (Zeitfenster)"
+      },
+      "timed_charge_power": {
+        "name": "Ladeleistung (Zeitfenster)"
       }
     },
     "switch": {
       "storage": {
         "name": "Speicher"
+      },
+      "timed_charge_enabled": {
+        "name": "Zeitgesteuertes Laden"
+      }
+    },
+    "time": {
+      "timed_charge_start": {
+        "name": "Beginn Zeitfenster"
+      },
+      "timed_charge_end": {
+        "name": "Ende Zeitfenster"
       }
     }
   },

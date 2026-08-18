@@ -401,3 +401,71 @@ requirement_sunspec_mode_correction:
        Abstimmung mit dem Anwender verdient. Die zugehörigen Werte sind
        bereits als Nur-Lese-Sensoren verfügbar (ic_power_setpoint_pct,
        ic_timeout, ic_control_mode_text, ic_max_power_reference)."
+
+# ==============================================================================
+# ANFORDERUNG (ERGÄNZUNG): ZEITGESTEUERTES LADEN AUF ZIEL-SOC
+# ==============================================================================
+requirement_timed_soc_charge:
+  id: REQ-TIMED-SOC-CHARGE
+  title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden"
+  status: done
+  requested_by: user
+  description: >
+    Neues Feature unter "Steuerung": Der Speicher soll innerhalb eines
+    konfigurierbaren Zeitfensters aktiv auf einen Ziel-SOC geladen werden,
+    unabhängig von PV-Überschuss - Beispiel: "Lade auf 90 %, wenn es
+    zwischen 1 und 5 Uhr ist" (klassischer Anwendungsfall: günstiger
+    Nachtstromtarif).
+
+    Reine Software-Logik (kein natives Geräteregister), analog zur
+    bestehenden Max-SOC-Logik. Neue Entitäten:
+      - switch.py: "Zeitgesteuertes Laden" (Ein/Aus)
+      - number.py: "Ziel-SOC (Zeitfenster)" (0-100 %),
+        "Ladeleistung (Zeitfenster)" (W)
+      - time.py (neue Plattform): "Beginn Zeitfenster",
+        "Ende Zeitfenster" (jeweils HH:MM, via TimeEntity)
+      - sensor.py (Diagnose): "Zeitgesteuertes Laden aktiv"
+
+    Umsetzung in `SaxPowerCoordinator._async_enforce_timed_charge`
+    (coordinator.py), bei jedem Poll-Zyklus (und sofort bei jeder
+    Einstellungsänderung) neu ausgewertet: Ist das Feature aktiviert, die
+    aktuelle Uhrzeit im Zeitfenster (`_is_time_in_window`, unterstützt über
+    Mitternacht laufende Fenster) und der SOC unter dem Ziel-SOC, wird
+    `async_start_grid_charge(-Ladeleistung)` aufgerufen - derselbe
+    Mechanismus wie der bestehende `start_grid_charge`-Service (Register
+    41, periodischer Write alle 30s). Wird der Ziel-SOC erreicht, das
+    Fenster verlassen oder das Feature deaktiviert, wird
+    `async_stop_grid_charge()` aufgerufen.
+
+    Alle fünf Werte sind reiner Coordinator-Zustand ohne Geräteregister
+    (wie schon Max-SOC) und werden daher über `RestoreEntity` bei jedem
+    Home-Assistant-Neustart aus dem zuletzt bekannten Entity-Zustand
+    wiederhergestellt - sonst müsste der Zeitplan nach jedem Neustart neu
+    eingerichtet werden.
+  known_interaction: >
+    Zeitgesteuertes Laden und der manuelle
+    `start_grid_charge`/`stop_grid_charge`-Service teilen sich denselben
+    Hintergrund-Task (`_grid_charge_task`). Es gibt bewusst keine eigene
+    Arbitrierung zwischen beiden - bei gleichzeitiger Nutzung gewinnt der
+    zuletzt schreibende Aufruf. Dokumentiert in README.md.
+  testing_note: >
+    Für die Zeitfenster-Logik wurde bewusst NICHT die `freezer`-Fixture
+    (freezegun) verwendet, da freezegun auch die vom Event-Loop für
+    `asyncio.sleep` genutzte Uhr einfriert und dadurch der in
+    `async_start_grid_charge` gespawnte Hintergrund-Task nie mehr aufwacht
+    - der erste Testlauf hing deshalb unbegrenzt. Stattdessen wird gezielt
+    nur `coordinator.dt_util.now` gepatcht (siehe `_patched_now` in
+    tests/test_coordinator.py). Zur Absicherung gegen zukünftige ähnliche
+    Hänger wurde zusätzlich ein globales pytest-Timeout (60s,
+    pyproject.toml) ergänzt.
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt _is_time_in_window (normales
+       Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
+       Fenster) sowie _async_enforce_timed_charge (Start/Stop bei
+       Zielerreichung/Fensterende/Deaktivierung) ab."
+    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
+       über echte Modbus-TCP-Kommunikation verifiziert, dass Aktivieren
+       des Features innerhalb des Zeitfensters einen echten negativen
+       P-Sollwert-Write auf Register 41 auslöst."
+    - "README.md beschreibt die neuen Entitäten sowie die Interaktion mit
+       dem bestehenden Netzladung-Service."

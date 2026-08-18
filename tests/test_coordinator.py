@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+from datetime import datetime
+from datetime import time as dt_time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -268,3 +271,143 @@ def test_parse_extended_decodes_sunspec_block(hass) -> None:
     assert data["battery_charging_active"] is True
     assert data["battery_event_text"] == "Normalbetrieb"
     assert data["battery_cell_voltage_avg"] == 3300
+
+
+# -- Zeitgesteuertes Laden ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "now", "expected"),
+    [
+        (dt_time(1, 0), dt_time(5, 0), dt_time(3, 0), True),  # innerhalb
+        (dt_time(1, 0), dt_time(5, 0), dt_time(0, 30), False),  # davor
+        (dt_time(1, 0), dt_time(5, 0), dt_time(5, 0), False),  # Ende exklusiv
+        (dt_time(1, 0), dt_time(5, 0), dt_time(1, 0), True),  # Start inklusiv
+        (
+            dt_time(23, 0),
+            dt_time(5, 0),
+            dt_time(23, 30),
+            True,
+        ),  # über Mitternacht, abends
+        (
+            dt_time(23, 0),
+            dt_time(5, 0),
+            dt_time(1, 0),
+            True,
+        ),  # über Mitternacht, morgens
+        (
+            dt_time(23, 0),
+            dt_time(5, 0),
+            dt_time(12, 0),
+            False,
+        ),  # über Mitternacht, tagsüber
+    ],
+)
+def test_is_time_in_window(
+    hass, start: dt_time, end: dt_time, now: dt_time, expected: bool
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = start
+    coordinator._timed_charge_end = end
+    assert coordinator._is_time_in_window(now) is expected
+
+
+def test_is_time_in_window_unset_is_never_active(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    assert coordinator._is_time_in_window(dt_time(3, 0)) is False
+
+
+def _patched_now(hour: int, minute: int = 0):
+    """Patcht dt_util.now() auf einen festen Zeitpunkt.
+
+    Bewusst statt der `freezer`-Fixture (freezegun): freezegun friert auch
+    die vom Event-Loop für `asyncio.sleep` genutzte Uhr ein, wodurch der in
+    async_start_grid_charge gespawnte Hintergrund-Task nie mehr aufwacht und
+    der Test hängt. Ein gezielter Patch nur von dt_util.now() betrifft
+    ausschließlich unsere eigene Zeitfenster-Prüfung.
+    """
+    return patch(
+        "custom_components.sax_power.coordinator.dt_util.now",
+        return_value=datetime(2024, 1, 1, hour, minute),
+    )
+
+
+async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
+    hass,
+) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_timed_charge_target_soc(90)
+    await coordinator.async_set_timed_charge_power(3000)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    try:
+        with _patched_now(2):
+            await coordinator._async_enforce_timed_charge(
+                {"soc": 50, "charge_limit": 3000}
+            )
+        # async_start_grid_charge spawnt nur den Hintergrund-Task; der erste
+        # Schreibvorgang läuft asynchron, daher kurz dem Event-Loop Zeit geben.
+        await asyncio.sleep(0.1)
+
+        assert coordinator._timed_charge_active is True
+        assert coordinator.grid_charge_active is True
+        client.write_register.assert_awaited_with(
+            address=41, value=to_unsigned16(-3000), device_id=64
+        )
+    finally:
+        await coordinator.async_stop_grid_charge()
+
+
+async def test_enforce_timed_charge_stops_when_target_soc_reached(hass) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_timed_charge_target_soc(90)
+    await coordinator.async_set_timed_charge_enabled(True)
+    coordinator._timed_charge_active = True
+    coordinator._grid_charge_task = MagicMock(done=MagicMock(return_value=False))
+
+    with _patched_now(2):
+        await coordinator._async_enforce_timed_charge({"soc": 90, "charge_limit": 3000})
+
+    assert coordinator._timed_charge_active is False
+
+
+async def test_enforce_timed_charge_inactive_outside_window(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_timed_charge_target_soc(90)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    with _patched_now(12):
+        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
+
+    assert coordinator._timed_charge_active is False
+    assert coordinator.grid_charge_active is False
+
+
+async def test_enforce_timed_charge_inactive_when_disabled(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_timed_charge_target_soc(90)
+    # timed_charge_enabled bleibt False (Default)
+
+    with _patched_now(2):
+        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
+
+    assert coordinator._timed_charge_active is False
+    assert coordinator.grid_charge_active is False

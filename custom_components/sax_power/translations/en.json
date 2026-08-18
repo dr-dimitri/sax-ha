@@ -8,7 +8,7 @@
           "host": "IP address",
           "port": "Port",
           "slave_id_basic": "Slave ID (Basic Mode)",
-          "slave_id_extended": "Slave ID (Extended Mode)",
+          "slave_id_extended": "Slave ID (SunSpec mode)",
           "scan_interval": "Update interval (seconds)"
         }
       },
@@ -19,7 +19,7 @@
           "host": "IP address",
           "port": "Port",
           "slave_id_basic": "Slave ID (Basic Mode)",
-          "slave_id_extended": "Slave ID (Extended Mode)",
+          "slave_id_extended": "Slave ID (SunSpec mode)",
           "scan_interval": "Update interval (seconds)"
         }
       }
@@ -45,7 +45,7 @@
         "name": "Charge power"
       },
       "smartmeter_power": {
-        "name": "Smart meter power (Basic Mode)"
+        "name": "Smart meter power"
       },
       "switch_state_text": {
         "name": "Storage switch state (text)"
@@ -56,128 +56,155 @@
       "setpoint_cosphi": {
         "name": "Setpoint cos(phi)"
       },
-      "ext_sunspec_id": {
-        "name": "SunSpec ID"
+      "sun_manufacturer": {
+        "name": "Manufacturer"
       },
-      "ext_sunspec_length": {
-        "name": "SunSpec length"
+      "sun_model": {
+        "name": "Device model"
       },
-      "ext_current_sum_native": {
-        "name": "Phase current sum (manufacturer value)"
+      "sun_version_master": {
+        "name": "Master firmware version"
       },
-      "ext_current_l1": {
-        "name": "Phase current L1"
+      "sun_version_gateway": {
+        "name": "Gateway firmware version"
       },
-      "ext_current_l2": {
-        "name": "Phase current L2"
+      "sun_serial_number": {
+        "name": "Serial number"
       },
-      "ext_current_l3": {
-        "name": "Phase current L3"
+      "storage_current_sum": {
+        "name": "Storage current sum"
       },
-      "ext_current_sf": {
-        "name": "Phase current scale factor"
+      "storage_current_a": {
+        "name": "Storage current A"
       },
-      "ext_current_sum": {
-        "name": "Phase current sum (L1+L2+L3, calculated)"
+      "storage_current_b": {
+        "name": "Storage current B"
       },
-      "ext_voltage_l1": {
-        "name": "Voltage L1"
+      "storage_current_c": {
+        "name": "Storage current C"
       },
-      "ext_voltage_l2": {
-        "name": "Voltage L2"
+      "storage_voltage_a": {
+        "name": "Storage voltage A"
       },
-      "ext_voltage_l3": {
-        "name": "Voltage L3"
+      "storage_voltage_b": {
+        "name": "Storage voltage B"
       },
-      "ext_voltage_sf": {
-        "name": "Voltage scale factor"
+      "storage_voltage_c": {
+        "name": "Storage voltage C"
       },
-      "ext_voltage_sum": {
-        "name": "Voltage sum (L1+L2+L3, calculated)"
+      "storage_power_active": {
+        "name": "Active power storage sum"
       },
-      "ext_power_active": {
-        "name": "Active power sum (AC)"
+      "storage_power_apparent": {
+        "name": "Apparent power storage sum"
       },
-      "ext_power_active_sf": {
-        "name": "Active power scale factor"
+      "storage_power_reactive": {
+        "name": "Reactive power storage sum"
       },
-      "ext_frequency": {
+      "storage_power_factor": {
+        "name": "Power factor storage sum"
+      },
+      "storage_frequency": {
+        "name": "Grid frequency (storage)"
+      },
+      "storage_max_cell_temp": {
+        "name": "Maximum cell temperature"
+      },
+      "storage_state_text": {
+        "name": "Storage state"
+      },
+      "storage_event_text": {
+        "name": "Storage event"
+      },
+      "pv_power": {
+        "name": "PV power"
+      },
+      "ic_power_setpoint_pct": {
+        "name": "Power setpoint"
+      },
+      "ic_timeout": {
+        "name": "Power setpoint timeout"
+      },
+      "ic_control_mode_text": {
+        "name": "Control mode"
+      },
+      "ic_max_power_reference": {
+        "name": "Maximum power reference"
+      },
+      "grid_current_sum": {
+        "name": "Grid current sum"
+      },
+      "grid_current_l1": {
+        "name": "Grid current L1"
+      },
+      "grid_current_l2": {
+        "name": "Grid current L2"
+      },
+      "grid_current_l3": {
+        "name": "Grid current L3"
+      },
+      "grid_voltage_ln_avg": {
+        "name": "Grid voltage average (L-N)"
+      },
+      "grid_voltage_l1": {
+        "name": "Grid voltage L1"
+      },
+      "grid_voltage_l2": {
+        "name": "Grid voltage L2"
+      },
+      "grid_voltage_l3": {
+        "name": "Grid voltage L3"
+      },
+      "grid_frequency": {
         "name": "Grid frequency"
       },
-      "ext_frequency_sf": {
-        "name": "Grid frequency scale factor"
+      "grid_power_active_l1": {
+        "name": "Grid power L1"
       },
-      "ext_power_apparent": {
-        "name": "Apparent power sum (AC)"
+      "grid_power_active_l2": {
+        "name": "Grid power L2"
       },
-      "ext_power_apparent_sf": {
-        "name": "Apparent power scale factor"
+      "grid_power_active_l3": {
+        "name": "Grid power L3"
       },
-      "ext_power_reactive": {
-        "name": "Reactive power sum (AC)"
+      "grid_power_apparent_sum": {
+        "name": "Apparent power grid sum"
       },
-      "ext_power_reactive_sf": {
-        "name": "Reactive power scale factor"
+      "grid_power_reactive_sum": {
+        "name": "Reactive power grid sum"
       },
-      "ext_power_factor": {
-        "name": "Power factor"
+      "grid_power_factor_sum": {
+        "name": "Power factor grid sum"
       },
-      "ext_power_factor_sf": {
-        "name": "Power factor scale factor"
+      "battery_capacity": {
+        "name": "Storage capacity"
       },
-      "sm_energy_fed_in": {
-        "name": "Smart meter energy fed in"
+      "battery_charge_power_available": {
+        "name": "Available charge power"
       },
-      "sm_energy_consumed": {
-        "name": "Smart meter energy consumed"
+      "battery_discharge_power_available": {
+        "name": "Available discharge power"
       },
-      "sm_energy_sf": {
-        "name": "Smart meter energy scale factor"
+      "battery_soc_max": {
+        "name": "Maximum SoC"
       },
-      "sm_switch_state_text": {
-        "name": "Smart meter storage switch state"
+      "battery_soc_min": {
+        "name": "Minimum SoC"
       },
-      "sm_current_l1": {
-        "name": "Smart meter current L1"
+      "battery_soc": {
+        "name": "Battery SoC (SunSpec)"
       },
-      "sm_current_l2": {
-        "name": "Smart meter current L2"
+      "battery_discharge_depth": {
+        "name": "Discharge depth"
       },
-      "sm_current_l3": {
-        "name": "Smart meter current L3"
+      "battery_charging_active_text": {
+        "name": "Battery charging status"
       },
-      "sm_current_sum": {
-        "name": "Smart meter current sum (L1+L2+L3, calculated)"
+      "battery_event_text": {
+        "name": "Battery event"
       },
-      "sm_power_l1": {
-        "name": "Smart meter active power L1"
-      },
-      "sm_power_l2": {
-        "name": "Smart meter active power L2"
-      },
-      "sm_power_l3": {
-        "name": "Smart meter active power L3"
-      },
-      "sm_power_sf": {
-        "name": "Smart meter active power scale factor"
-      },
-      "sm_power_sum": {
-        "name": "Smart meter active power sum (L1+L2+L3, calculated)"
-      },
-      "sm_voltage_l1": {
-        "name": "Smart meter voltage L1"
-      },
-      "sm_voltage_l2": {
-        "name": "Smart meter voltage L2"
-      },
-      "sm_voltage_l3": {
-        "name": "Smart meter voltage L3"
-      },
-      "sm_voltage_sum": {
-        "name": "Smart meter voltage sum (L1+L2+L3, calculated)"
-      },
-      "sm_power_total": {
-        "name": "Smart meter total active power"
+      "battery_cell_voltage_avg": {
+        "name": "Average cell voltage"
       }
     },
     "number": {
@@ -199,8 +226,8 @@
   },
   "issues": {
     "extended_mode_unavailable": {
-      "title": "SAX Extended Mode unreachable",
-      "description": "The Extended Mode register block (slave ID {slave_id}) of the SAX storage system is unreachable. Sensors that depend on it (SunSpec readings, smart meter detail values) show \"unknown\" until the connection is restored. Basic Mode sensors (state of charge, charge/discharge power, switch) are not affected. Please check whether Extended Mode is enabled on the SAX gateway and whether the configured slave ID (Extended Mode) is correct."
+      "title": "SAX SunSpec mode unreachable",
+      "description": "The SunSpec mode register block (slave ID {slave_id}) of the SAX storage system is unreachable. Sensors that depend on it (storage detail values, grid/smart meter values, battery values) show \"unknown\" until the connection is restored. Basic Mode sensors (state of charge, switch, power limits) are not affected. Please check whether the configured slave ID (SunSpec mode, default: 100) is correct and whether the device runs firmware combination Master V61/Gateway V54 or newer."
     }
   },
   "services": {

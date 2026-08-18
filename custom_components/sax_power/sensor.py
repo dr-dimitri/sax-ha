@@ -1,11 +1,9 @@
 """Sensor platform for SAX Power.
 
-Exponiert sämtliche in modbus_llm.yaml dokumentierten (und sinnvoll
-benennbaren) Modbus-Register als SensorEntity, siehe anforderung.yaml,
-Anforderung REQ-ALL-REGISTERS-READABLE. Die Sensoren sind
-beschreibungsbasiert definiert (eine Entity-Klasse, eine Liste von
-Descriptions) statt als eine Klasse pro Register, damit die ~48 Sensoren
-wartbar bleiben.
+Exponiert die Basic-Mode-Register (Slave-ID 64) sowie die im SunSpec-Modus
+(Slave-ID 100, siehe modbus.pdf) verfügbaren Werte als SensorEntity. Die
+Sensoren sind beschreibungsbasiert definiert (eine Entity-Klasse, eine Liste
+von Descriptions), siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 """
 
 from __future__ import annotations
@@ -31,6 +29,8 @@ from homeassistant.const import (
     UnitOfFrequency,
     UnitOfPower,
     UnitOfReactivePower,
+    UnitOfTemperature,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -53,8 +53,51 @@ def _direct(key: str) -> Callable[[dict[str, Any]], StateType]:
     return lambda data: data.get(key)
 
 
+def _positive_part(key: str) -> Callable[[dict[str, Any]], StateType]:
+    """Positiver Anteil eines vorzeichenbehafteten Werts, sonst 0.
+
+    Gibt None zurück (-> Sensor "unbekannt"), solange der Quellwert selbst
+    None ist (z. B. weil der SunSpec-Modus gerade nicht erreichbar ist).
+    """
+
+    def value_fn(data: dict[str, Any]) -> StateType:
+        value = data.get(key)
+        if value is None:
+            return None
+        return value if value > 0 else 0
+
+    return value_fn
+
+
+def _negative_part(key: str) -> Callable[[dict[str, Any]], StateType]:
+    """Negativer Anteil (invertiert, positiv dargestellt), sonst 0.
+
+    Siehe _positive_part.
+    """
+
+    def value_fn(data: dict[str, Any]) -> StateType:
+        value = data.get(key)
+        if value is None:
+            return None
+        return -value if value < 0 else 0
+
+    return value_fn
+
+
+def _bool_text(
+    key: str, *, true_text: str, false_text: str
+) -> Callable[[dict[str, Any]], StateType]:
+    def value_fn(data: dict[str, Any]) -> StateType:
+        value = data.get(key)
+        if value is None:
+            return None
+        return true_text if value else false_text
+
+    return value_fn
+
+
 SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
-    # -- Basic Mode (Slave-ID 64, Register 40042-40049) ---------------------
+    # -- Basic Mode (Slave-ID 64, Register 40042-40047) ---------------------
     SaxPowerSensorEntityDescription(
         key="soc",
         translation_key="soc",
@@ -69,7 +112,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=lambda data: data["power"] if data["power"] > 0 else 0,
+        value_fn=_positive_part("storage_power_active"),
     ),
     SaxPowerSensorEntityDescription(
         key="charge_power",
@@ -77,7 +120,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=lambda data: -data["power"] if data["power"] < 0 else 0,
+        value_fn=_negative_part("storage_power_active"),
     ),
     SaxPowerSensorEntityDescription(
         key="smartmeter_power",
@@ -108,311 +151,390 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("setpoint_cosphi"),
     ),
-    # -- Extended Mode - Speicher (Slave-ID 40, Register 40071-40094) -------
+    # -- SunSpec-Modus: Common (Slave-ID 100, Identität, Diagnose) -----------
     SaxPowerSensorEntityDescription(
-        key="ext_sunspec_id",
-        translation_key="ext_sunspec_id",
+        key="sun_manufacturer",
+        translation_key="sun_manufacturer",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_sunspec_id"),
+        value_fn=_direct("sun_manufacturer"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_sunspec_length",
-        translation_key="ext_sunspec_length",
+        key="sun_model",
+        translation_key="sun_model",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_sunspec_length"),
+        value_fn=_direct("sun_model"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_current_sum_native",
-        translation_key="ext_current_sum_native",
-        device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("ext_current_sum_native"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_current_l1",
-        translation_key="ext_current_l1",
-        device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("ext_current_l1"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_current_l2",
-        translation_key="ext_current_l2",
-        device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("ext_current_l2"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_current_l3",
-        translation_key="ext_current_l3",
-        device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("ext_current_l3"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_current_sf",
-        translation_key="ext_current_sf",
+        key="sun_version_master",
+        translation_key="sun_version_master",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_current_sf"),
+        value_fn=_direct("sun_version_master"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_current_sum",
-        translation_key="ext_current_sum",
+        key="sun_version_gateway",
+        translation_key="sun_version_gateway",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("sun_version_gateway"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="sun_serial_number",
+        translation_key="sun_serial_number",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("sun_serial_number"),
+    ),
+    # -- SunSpec-Modus: Modell 103 "3Ph Inverter" (Speicherelektronik) -------
+    SaxPowerSensorEntityDescription(
+        key="storage_current_sum",
+        translation_key="storage_current_sum",
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("ext_current_sum"),
+        value_fn=_direct("storage_current_sum"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_voltage_l1",
-        translation_key="ext_voltage_l1",
+        key="storage_current_a",
+        translation_key="storage_current_a",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        value_fn=_direct("storage_current_a"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_current_b",
+        translation_key="storage_current_b",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        value_fn=_direct("storage_current_b"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_current_c",
+        translation_key="storage_current_c",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        value_fn=_direct("storage_current_c"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_voltage_a",
+        translation_key="storage_voltage_a",
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("ext_voltage_l1"),
+        value_fn=_direct("storage_voltage_a"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_voltage_l2",
-        translation_key="ext_voltage_l2",
+        key="storage_voltage_b",
+        translation_key="storage_voltage_b",
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("ext_voltage_l2"),
+        value_fn=_direct("storage_voltage_b"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_voltage_l3",
-        translation_key="ext_voltage_l3",
+        key="storage_voltage_c",
+        translation_key="storage_voltage_c",
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("ext_voltage_l3"),
+        value_fn=_direct("storage_voltage_c"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_voltage_sf",
-        translation_key="ext_voltage_sf",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_voltage_sf"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_voltage_sum",
-        translation_key="ext_voltage_sum",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("ext_voltage_sum"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_power_active",
-        translation_key="ext_power_active",
+        key="storage_power_active",
+        translation_key="storage_power_active",
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=_direct("ext_power_active"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_power_active_sf",
-        translation_key="ext_power_active_sf",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_power_active_sf"),
+        value_fn=_direct("storage_power_active"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_frequency",
-        translation_key="ext_frequency",
-        device_class=SensorDeviceClass.FREQUENCY,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfFrequency.HERTZ,
-        value_fn=_direct("ext_frequency"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_frequency_sf",
-        translation_key="ext_frequency_sf",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_frequency_sf"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_power_apparent",
-        translation_key="ext_power_apparent",
+        key="storage_power_apparent",
+        translation_key="storage_power_apparent",
         device_class=SensorDeviceClass.APPARENT_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfApparentPower.VOLT_AMPERE,
-        value_fn=_direct("ext_power_apparent"),
+        value_fn=_direct("storage_power_apparent"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_power_apparent_sf",
-        translation_key="ext_power_apparent_sf",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_power_apparent_sf"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_power_reactive",
-        translation_key="ext_power_reactive",
+        key="storage_power_reactive",
+        translation_key="storage_power_reactive",
         device_class=SensorDeviceClass.REACTIVE_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfReactivePower.VOLT_AMPERE_REACTIVE,
-        value_fn=_direct("ext_power_reactive"),
+        value_fn=_direct("storage_power_reactive"),
     ),
     SaxPowerSensorEntityDescription(
-        key="ext_power_reactive_sf",
-        translation_key="ext_power_reactive_sf",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_power_reactive_sf"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_power_factor",
-        translation_key="ext_power_factor",
+        key="storage_power_factor",
+        translation_key="storage_power_factor",
         device_class=SensorDeviceClass.POWER_FACTOR,
         state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_direct("storage_power_factor"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_frequency",
+        translation_key="storage_frequency",
+        device_class=SensorDeviceClass.FREQUENCY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfFrequency.HERTZ,
+        value_fn=_direct("storage_frequency"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_max_cell_temp",
+        translation_key="storage_max_cell_temp",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=_direct("storage_max_cell_temp"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_state_text",
+        translation_key="storage_state_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("storage_state_text"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="storage_event_text",
+        translation_key="storage_event_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("storage_event_text"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="pv_power",
+        translation_key="pv_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=_direct("pv_power"),
+    ),
+    # -- SunSpec-Modus: Modell 123 "Immediate Controls" ----------------------
+    SaxPowerSensorEntityDescription(
+        key="ic_power_setpoint_pct",
+        translation_key="ic_power_setpoint_pct",
         native_unit_of_measurement=PERCENTAGE,
-        value_fn=_direct("ext_power_factor"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="ext_power_factor_sf",
-        translation_key="ext_power_factor_sf",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("ext_power_factor_sf"),
-    ),
-    # -- Extended Mode - Smart Meter (Slave-ID 40, Register 40095-40110) ----
-    SaxPowerSensorEntityDescription(
-        key="sm_energy_fed_in",
-        translation_key="sm_energy_fed_in",
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        value_fn=_direct("sm_energy_fed_in"),
+        value_fn=_direct("ic_power_setpoint_pct"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_energy_consumed",
-        translation_key="sm_energy_consumed",
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        value_fn=_direct("sm_energy_consumed"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="sm_energy_sf",
-        translation_key="sm_energy_sf",
+        key="ic_timeout",
+        translation_key="ic_timeout",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("sm_energy_sf"),
+        value_fn=_direct("ic_timeout"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_switch_state_text",
-        translation_key="sm_switch_state_text",
+        key="ic_control_mode_text",
+        translation_key="ic_control_mode_text",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("sm_switch_state_text"),
+        value_fn=_direct("ic_control_mode_text"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_current_l1",
-        translation_key="sm_current_l1",
+        key="ic_max_power_reference",
+        translation_key="ic_max_power_reference",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("ic_max_power_reference"),
+    ),
+    # -- SunSpec-Modus: Modell 203 "WYE Connect 3Ph Meter" (Netz/Smart Meter) -
+    SaxPowerSensorEntityDescription(
+        key="grid_current_sum",
+        translation_key="grid_current_sum",
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("sm_current_l1"),
+        value_fn=_direct("grid_current_sum"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_current_l2",
-        translation_key="sm_current_l2",
+        key="grid_current_l1",
+        translation_key="grid_current_l1",
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("sm_current_l2"),
+        value_fn=_direct("grid_current_l1"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_current_l3",
-        translation_key="sm_current_l3",
+        key="grid_current_l2",
+        translation_key="grid_current_l2",
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("sm_current_l3"),
+        value_fn=_direct("grid_current_l2"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_current_sum",
-        translation_key="sm_current_sum",
+        key="grid_current_l3",
+        translation_key="grid_current_l3",
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        value_fn=_direct("sm_current_sum"),
+        value_fn=_direct("grid_current_l3"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_power_l1",
-        translation_key="sm_power_l1",
+        key="grid_voltage_ln_avg",
+        translation_key="grid_voltage_ln_avg",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        value_fn=_direct("grid_voltage_ln_avg"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_voltage_l1",
+        translation_key="grid_voltage_l1",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        value_fn=_direct("grid_voltage_l1"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_voltage_l2",
+        translation_key="grid_voltage_l2",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        value_fn=_direct("grid_voltage_l2"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_voltage_l3",
+        translation_key="grid_voltage_l3",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        value_fn=_direct("grid_voltage_l3"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_frequency",
+        translation_key="grid_frequency",
+        device_class=SensorDeviceClass.FREQUENCY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfFrequency.HERTZ,
+        value_fn=_direct("grid_frequency"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_power_active_l1",
+        translation_key="grid_power_active_l1",
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=_direct("sm_power_l1"),
+        value_fn=_direct("grid_power_active_l1"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_power_l2",
-        translation_key="sm_power_l2",
+        key="grid_power_active_l2",
+        translation_key="grid_power_active_l2",
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=_direct("sm_power_l2"),
+        value_fn=_direct("grid_power_active_l2"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_power_l3",
-        translation_key="sm_power_l3",
+        key="grid_power_active_l3",
+        translation_key="grid_power_active_l3",
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=_direct("sm_power_l3"),
+        value_fn=_direct("grid_power_active_l3"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_power_sf",
-        translation_key="sm_power_sf",
+        key="grid_power_apparent_sum",
+        translation_key="grid_power_apparent_sum",
+        device_class=SensorDeviceClass.APPARENT_POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfApparentPower.VOLT_AMPERE,
+        value_fn=_direct("grid_power_apparent_sum"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_power_reactive_sum",
+        translation_key="grid_power_reactive_sum",
+        device_class=SensorDeviceClass.REACTIVE_POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfReactivePower.VOLT_AMPERE_REACTIVE,
+        value_fn=_direct("grid_power_reactive_sum"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_power_factor_sum",
+        translation_key="grid_power_factor_sum",
+        device_class=SensorDeviceClass.POWER_FACTOR,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=_direct("grid_power_factor_sum"),
+    ),
+    # -- SunSpec-Modus: Modell 802 "Battery Base" (Akkuzellen) ---------------
+    SaxPowerSensorEntityDescription(
+        key="battery_capacity",
+        translation_key="battery_capacity",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("sm_power_sf"),
+        value_fn=_direct("battery_capacity"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_power_sum",
-        translation_key="sm_power_sum",
+        key="battery_charge_power_available",
+        translation_key="battery_charge_power_available",
         device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=_direct("sm_power_sum"),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_charge_power_available"),
     ),
     SaxPowerSensorEntityDescription(
-        key="sm_voltage_l1",
-        translation_key="sm_voltage_l1",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("sm_voltage_l1"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="sm_voltage_l2",
-        translation_key="sm_voltage_l2",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("sm_voltage_l2"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="sm_voltage_l3",
-        translation_key="sm_voltage_l3",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("sm_voltage_l3"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="sm_voltage_sum",
-        translation_key="sm_voltage_sum",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        value_fn=_direct("sm_voltage_sum"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="sm_power_total",
-        translation_key="sm_power_total",
+        key="battery_discharge_power_available",
+        translation_key="battery_discharge_power_available",
         device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
-        value_fn=_direct("sm_power_total"),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_discharge_power_available"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_soc_max",
+        translation_key="battery_soc_max",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_soc_max"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_soc_min",
+        translation_key="battery_soc_min",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_soc_min"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_soc",
+        translation_key="battery_soc",
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_soc"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_discharge_depth",
+        translation_key="battery_discharge_depth",
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_discharge_depth"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_charging_active_text",
+        translation_key="battery_charging_active_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_bool_text(
+            "battery_charging_active",
+            true_text="Leistung anliegend",
+            false_text="Keine Leistung",
+        ),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_event_text",
+        translation_key="battery_event_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_event_text"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="battery_cell_voltage_avg",
+        translation_key="battery_cell_voltage_avg",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("battery_cell_voltage_avg"),
     ),
 )
 

@@ -7,9 +7,9 @@ Fehler ab, die reine Mock-Tests nicht finden würden (z.B. falsches
 Keyword-Argument für die Device-/Slave-ID, falsche Registeradressierung,
 falsche Vorzeichenkonvertierung auf dem Wire-Format).
 
-Simuliert werden sowohl Basic Mode (Slave-ID 64) als auch Extended Mode
-(Slave-ID 40, Speicher + Smart Meter), siehe anforderung.yaml,
-Anforderung REQ-ALL-REGISTERS-READABLE.
+Simuliert werden sowohl Basic Mode (Slave-ID 64) als auch der SunSpec-Modus
+(Slave-ID 100, siehe modbus.pdf), verifiziert gegen eine echte SAX Power
+Home Plus. Siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
 from custom_components.sax_power.coordinator import to_signed16, to_unsigned16
 
 SLAVE_ID_BASIC = 64
-SLAVE_ID_EXTENDED = 40
+SLAVE_ID_EXTENDED = 100
 TEST_PORT = 15502
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -49,8 +49,6 @@ def _build_basic_registers(**overrides: int) -> list[int]:
         44: 3000,  # Leistungsgrenzwert Ladung
         45: 2,  # Schaltzustand: Ein
         46: 55,  # SOC %
-        47: 1200,  # Leistung P (positiv = Entladung)
-        48: to_unsigned16(-300),  # Leistung Smart Meter
     }
     defaults.update(overrides)
     for addr, value in defaults.items():
@@ -59,46 +57,103 @@ def _build_basic_registers(**overrides: int) -> list[int]:
 
 
 def _build_extended_registers(**overrides: int) -> list[int]:
-    values = [0] * 120
+    """Registerinhalt für den SunSpec-Modus (Slave-ID 100), siehe
+    modbus.pdf. Adresse 0 = Protokolladresse 40000 (Offset -40000, nicht
+    -40001 wie im Basic Mode!), verifiziert gegen eine echte SAX Power Home
+    Plus (siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION)."""
+    values = [0] * 200
     defaults = {
-        # -- Speicher (Register 40071-40094) --
-        70: 1,  # SunSpec ID
-        71: 2,  # SunSpec Length
-        72: 99,  # Summe Phasenströme (Herstellerwert, bewusst != Summe der L1-L3 unten)
-        73: 5,  # Strom L1
-        74: 6,  # Strom L2
-        75: 7,  # Strom L3
-        76: 0,  # Strom Skalierung (sf=0)
-        80: 2300,  # Spannung L1 (roh)
-        81: 2310,  # Spannung L2
-        82: 2290,  # Spannung L3
-        83: to_unsigned16(-1),  # Spannung Skalierung (sf=-1 -> Faktor 0.1)
-        84: 1000,  # Wirkleistung Summe (sf=0)
-        85: 0,
-        86: 500,  # Netzfrequenz (roh, sf=-1 -> 50.0 Hz)
-        87: to_unsigned16(-1),
-        88: 1100,  # Scheinleistung Summe (sf=0)
-        89: 0,
-        90: 100,  # Blindleistung Summe (sf=0)
+        0: 21365,  # SunSpecID (Hi) - "Su"
+        1: 28243,  # SunSpecID (Lo) - "nS"
+        2: 1,  # SunSpec Model ID: Common
+        3: 15,  # Länge
+        4: 21313,  # Hersteller "SA"
+        5: 22608,  # "XP"
+        6: 20311,  # "OW"
+        7: 17746,  # "ER" -> "SAXPOWER"
+        8: 18511,  # Gerätemodell "HO"
+        9: 19781,  # "ME" -> "HOME"
+        10: 0,  # kein "PL"-Suffix
+        11: 23,  # Version Master
+        12: 56,  # Version Gateway
+        13: 15448,  # Seriennummer (Hi)
+        14: 97,  # Seriennummer (Lo)
+        15: 103,  # Model Identifier: 3Ph Inverter
+        16: 32,  # Model Länge
+        17: 30,  # AC Strom Summe (Speicher)
+        18: 5,  # AC Strom Speicher A
+        19: 6,  # AC Strom Speicher B
+        20: 7,  # AC Strom Speicher C
+        21: 0,  # Scalefaktor AC Strom
+        25: 230,  # Spannung Speicher A
+        26: 231,  # Spannung Speicher B
+        27: 229,  # Spannung Speicher C
+        28: 0,  # Scalefaktor Spannung
+        29: 1200,  # Wirkleistung Speicher Summe (positiv = Entladung)
+        30: 0,  # Scalefaktor Leistung
+        31: 500,  # Netzfrequenz (Speicher), roh -> 50.0 Hz
+        32: to_unsigned16(-1),  # Scalefaktor Netzfrequenz
+        33: 1100,  # Scheinleistung Speicher Summe
+        34: 0,
+        35: 100,  # Blindleistung Speicher Summe
+        36: 0,
+        37: 950,  # Leistungsfaktor Speicher Summe
+        38: 0,
+        41: 350,  # Maximale Zelltemperatur, roh -> 35.0 °C
+        42: to_unsigned16(-1),  # Scalefaktor Temperatur
+        43: 4,  # Zustand: Ein
+        44: 0,  # Event: Normalbetrieb
+        45: 0,  # PV-Leistung
+        46: 1,  # Scalefaktor PV-Leistung
+        47: 123,  # Sunspec Model ID: Immediate Controls
+        48: 7,  # Sunspec Length
+        49: 0,  # Leistungsvorgabe %
+        50: 300,  # Timeout
+        51: 0,  # Steuermodus: SmartMeter-Nullregelung
+        52: to_unsigned16(-2),  # Scalefaktor Leistungsvorgabe
+        53: 4600,  # Referenzwert Maximalleistung
+        54: 203,  # Sunspec Model ID: Meter
+        55: 41,  # Sunspec Length
+        56: 20,  # AC Strom Summe (Netz)
+        57: 6,  # AC Strom Netz L1
+        58: 7,  # AC Strom Netz L2
+        59: 7,  # AC Strom Netz L3
+        60: 0,  # Scalefaktor Strom
+        61: 230,  # Durchschnitt Spannung Netz L-N
+        62: 231,  # Netzspannung L1
+        63: 232,  # Netzspannung L2
+        64: 233,  # Netzspannung L3
+        69: 0,  # Scalefaktor Spannung
+        70: 500,  # Netzfrequenz, roh -> 50.0 Hz
+        71: to_unsigned16(-1),  # Scalefaktor Frequenz
+        72: to_unsigned16(-300),  # Summenwirkleistung Netz -> smartmeter_power
+        73: 68,  # Netzleistung L1
+        74: 90,  # Netzleistung L2
+        75: 87,  # Netzleistung L3
+        76: 0,  # Scalefaktor Netzleistung
+        77: 1100,  # Summenscheinleistung Netz
+        81: 0,
+        82: 100,  # Summenblindleistung Netz
+        86: 0,
+        87: 950,  # Leistungsfaktor Netz Summe
         91: 0,
-        92: 950,  # Leistungsfaktor (roh, sf=-1 -> 95.0 %)
-        93: to_unsigned16(-1),
-        # -- Smart Meter (Register 40095-40110) --
-        95: 1000,  # Energie eingespeist (sf=0)
-        96: 2000,  # Energie bezogen (sf=0)
-        97: 0,
-        98: 2,  # Schaltzustand des Speichers (Spiegel): Ein
-        99: 500,  # Strom L1 (fester Faktor -2 -> 5.0 A)
-        100: 600,  # Strom L2 -> 6.0 A
-        101: 700,  # Strom L3 -> 7.0 A
-        102: 300,  # Wirkleistung L1
-        103: 400,  # Wirkleistung L2
-        104: 500,  # Wirkleistung L3
-        105: 0,  # Skalierung Leistung (sf=0)
-        106: 231,  # Spannung L1 (unskaliert)
-        107: 232,  # Spannung L2
-        108: 233,  # Spannung L3
-        109: 1200,  # Summenleistung (Wirk)
+        95: 802,  # Sunspec Model ID: Battery
+        96: 20,  # Sunspec Length
+        97: 5700,  # Kapazität Speichersystem
+        98: 0,  # Verfügbare Ladeleistung
+        99: 3000,  # Verfügbare Entladeleistung
+        100: 100,  # Maximaler SoC
+        101: 0,  # Minimaler SoC
+        102: 55,  # Aktueller SoC
+        103: 45,  # Entladetiefe
+        106: 1,  # Ladestatus Akku: Leistung anliegend
+        108: 0,  # Event: Normalbetrieb
+        109: 3300,  # Durchschnittliche Zellspannung
+        110: 0,
+        111: 0,
+        112: 0,
+        113: 0,
+        114: 0,
     }
     defaults.update(overrides)
     for addr, value in defaults.items():
@@ -122,7 +177,7 @@ def _state_float(hass, entity_id: str) -> float:
 async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
     """Setzt die Integration gegen einen echten Modbus-Server auf und prüft
     Lese- und Schreibpfade (inkl. Max-SOC-Klemmung, Netzladung und die
-    Extended-Mode-Register mit SunSpec-Skalierung + Phasensummen) end-to-end."""
+    SunSpec-Modus-Register mit Skalierung) end-to-end."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
@@ -164,47 +219,53 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
 
         # -- Initiale Basic-Mode-Werte, gelesen über echtes TCP --
         assert hass.states.get(soc_id).state == "55"
-        assert hass.states.get(discharge_id).state == "1200"
-        assert hass.states.get(charge_id).state == "0"
         assert hass.states.get(switch_id).state == "on"
 
-        # -- Extended Mode: SunSpec-Skalierung über echtes TCP --
-        ext_current_l1_id = _entity_id(registry, entry.entry_id, "ext_current_l1")
-        ext_current_sum_id = _entity_id(registry, entry.entry_id, "ext_current_sum")
-        ext_current_sum_native_id = _entity_id(
-            registry, entry.entry_id, "ext_current_sum_native"
+        # -- Entlade-/Ladeleistung stammen jetzt aus dem SunSpec-Modus
+        #    (Register 40029 "Wirkleistung Speicher Summe"), nicht mehr aus
+        #    dem unzuverlässigen Basic-Mode-Register 47, siehe
+        #    anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION --
+        assert hass.states.get(discharge_id).state == "1200"
+        assert hass.states.get(charge_id).state == "0"
+
+        # -- SunSpec-Modus: Skalierung über echtes TCP --
+        storage_current_a_id = _entity_id(registry, entry.entry_id, "storage_current_a")
+        storage_voltage_a_id = _entity_id(registry, entry.entry_id, "storage_voltage_a")
+        storage_frequency_id = _entity_id(registry, entry.entry_id, "storage_frequency")
+        storage_temp_id = _entity_id(registry, entry.entry_id, "storage_max_cell_temp")
+        storage_state_id = _entity_id(registry, entry.entry_id, "storage_state_text")
+
+        assert _state_float(hass, storage_current_a_id) == 5
+        assert _state_float(hass, storage_voltage_a_id) == 230
+        assert _state_float(hass, storage_frequency_id) == pytest.approx(50.0)
+        assert _state_float(hass, storage_temp_id) == pytest.approx(35.0)
+        assert hass.states.get(storage_state_id).state == "Ein"
+
+        # -- SunSpec-Modus: Netz/Smart Meter --
+        smartmeter_power_id = _entity_id(registry, entry.entry_id, "smartmeter_power")
+        grid_current_sum_id = _entity_id(registry, entry.entry_id, "grid_current_sum")
+        grid_frequency_id = _entity_id(registry, entry.entry_id, "grid_frequency")
+        assert hass.states.get(smartmeter_power_id).state == "-300"
+        assert _state_float(hass, grid_current_sum_id) == 20
+        assert _state_float(hass, grid_frequency_id) == pytest.approx(50.0)
+
+        # -- SunSpec-Modus: Battery-Modell --
+        battery_soc_id = _entity_id(registry, entry.entry_id, "battery_soc")
+        battery_capacity_id = _entity_id(registry, entry.entry_id, "battery_capacity")
+        battery_charging_id = _entity_id(
+            registry, entry.entry_id, "battery_charging_active_text"
         )
-        ext_voltage_sum_id = _entity_id(registry, entry.entry_id, "ext_voltage_sum")
-        ext_frequency_id = _entity_id(registry, entry.entry_id, "ext_frequency")
-        ext_power_factor_id = _entity_id(registry, entry.entry_id, "ext_power_factor")
+        assert _state_float(hass, battery_soc_id) == 55
+        assert _state_float(hass, battery_capacity_id) == 5700
+        assert hass.states.get(battery_charging_id).state == "Leistung anliegend"
 
-        assert _state_float(hass, ext_current_l1_id) == 5
-        # Phasen-Summe muss berechnet werden (L1+L2+L3 = 5+6+7) und sich vom
-        # separat exponierten Herstellerwert (Register 40073) unterscheiden.
-        assert _state_float(hass, ext_current_sum_id) == 18
-        assert _state_float(hass, ext_current_sum_native_id) == 99
-        assert _state_float(hass, ext_voltage_sum_id) == pytest.approx(690.0)
-        assert _state_float(hass, ext_frequency_id) == pytest.approx(50.0)
-        assert _state_float(hass, ext_power_factor_id) == pytest.approx(95.0)
-
-        # -- Extended Mode: Smart Meter Phasen-Summen --
-        sm_current_sum_id = _entity_id(registry, entry.entry_id, "sm_current_sum")
-        sm_power_sum_id = _entity_id(registry, entry.entry_id, "sm_power_sum")
-        sm_voltage_sum_id = _entity_id(registry, entry.entry_id, "sm_voltage_sum")
-        sm_switch_state_text_id = _entity_id(
-            registry, entry.entry_id, "sm_switch_state_text"
-        )
-
-        assert _state_float(hass, sm_current_sum_id) == pytest.approx(18.0)
-        assert _state_float(hass, sm_power_sum_id) == 1200
-        assert _state_float(hass, sm_voltage_sum_id) == 696
-        assert hass.states.get(sm_switch_state_text_id).state == "Ein"
+        # -- Identitäts-Sensoren (SunSpec Common Model) --
+        manufacturer_id = _entity_id(registry, entry.entry_id, "sun_manufacturer")
+        assert hass.states.get(manufacturer_id).state == "SAXPOWER"
 
         # -- Bisher ungenutzte Basic-Mode-Register jetzt ebenfalls sichtbar --
         setpoint_power_id = _entity_id(registry, entry.entry_id, "setpoint_power")
-        smartmeter_power_id = _entity_id(registry, entry.entry_id, "smartmeter_power")
         assert hass.states.get(setpoint_power_id).state == "0"
-        assert hass.states.get(smartmeter_power_id).state == "-300"
 
         # -- Speicher ausschalten (echter Write über TCP) --
         await hass.services.async_call(
@@ -271,19 +332,18 @@ async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
 ) -> None:
     """Regressionstest für den Bug 'keine Sensoren in Home Assistant':
 
-    Ist der Extended-Mode-Block (Slave-ID 40) auf dem Gateway nicht
-    freigeschaltet/erreichbar - was bei echter Hardware vorkommen kann, wenn
-    Extended Mode dort nicht aktiviert ist - darf das die Integration nicht
-    mehr komplett am Start hindern (vorher: ConfigEntryNotReady -> gar keine
-    Entities). Basic-Mode-Sensoren müssen weiterhin echte Werte liefern,
-    Extended-Mode-Sensoren dürfen lediglich "unbekannt" zeigen. Siehe
-    anforderung.yaml, REQ-EXTENDED-MODE-RESILIENCE."""
+    Ist der SunSpec-Modus-Block (Slave-ID 100) auf dem Gateway nicht
+    erreichbar - was bei echter Hardware vorkommen kann - darf das die
+    Integration nicht mehr komplett am Start hindern (vorher:
+    ConfigEntryNotReady -> gar keine Entities). Basic-Mode-Sensoren müssen
+    weiterhin echte Werte liefern, SunSpec-Sensoren dürfen lediglich
+    "unbekannt" zeigen. Siehe anforderung.yaml, REQ-EXTENDED-MODE-RESILIENCE."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
         # Bewusst nur Slave-ID 64 (Basic Mode) im Server-Context - simuliert
-        # ein Gateway, auf dem Extended Mode (Slave-ID 40) nicht verfügbar
-        # ist.
+        # ein Gateway, auf dem der SunSpec-Modus (Slave-ID 100) nicht
+        # verfügbar ist.
         context = ModbusServerContext(
             devices={SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr)},
             single=False,
@@ -311,16 +371,16 @@ async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
 
         registry = er.async_get(hass)
 
-        # -- Basic-Mode-Sensoren liefern trotz fehlendem Extended Mode
+        # -- Basic-Mode-Sensoren liefern trotz fehlendem SunSpec-Modus
         #    weiterhin echte Werte --
         soc_id = _entity_id(registry, entry.entry_id, "soc")
         switch_id = _entity_id(registry, entry.entry_id, "storage_switch")
         assert hass.states.get(soc_id).state == "55"
         assert hass.states.get(switch_id).state == "on"
 
-        # -- Extended-Mode-Sensoren existieren weiterhin als Entity, zeigen
-        #    aber "unbekannt" statt die Integration am Laden zu hindern --
-        ext_current_l1_id = _entity_id(registry, entry.entry_id, "ext_current_l1")
-        assert hass.states.get(ext_current_l1_id).state == STATE_UNKNOWN
+        # -- SunSpec-Sensoren existieren weiterhin als Entity, zeigen aber
+        #    "unbekannt" statt die Integration am Laden zu hindern --
+        storage_current_a_id = _entity_id(registry, entry.entry_id, "storage_current_a")
+        assert hass.states.get(storage_current_a_id).state == STATE_UNKNOWN
     finally:
         await server.shutdown()

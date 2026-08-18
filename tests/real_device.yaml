@@ -16,7 +16,7 @@
 host: 192.168.178.87
 port: 502
 slave_id_basic: 64
-slave_id_extended: 40
+slave_id_extended: 100
 # Timeout in Sekunden für den ersten Verbindungsversuch, bevor der Test statt
 # eines Fehlschlags übersprungen wird (z. B. wenn der Speicher gerade
 # offline ist).

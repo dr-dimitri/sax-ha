@@ -1,4 +1,16 @@
 # LLM: Dies ist die Beschfreibung der Modbusschnittstelle für den SAX Speicher
+#
+# HINWEIS (siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION): Die
+# ursprüngliche Version dieser Datei enthielt für "Extended Mode" eine
+# Slave-ID 40 und einen Adress-Offset -40001, die beide gegen die offizielle
+# sax-power.net-Dokumentation (Datei modbus.pdf im Repo-Root) sowie gegen
+# echte Hardware verifiziert FALSCH waren - Slave-ID 40 existiert auf realer
+# Hardware nicht (Modbus-Exception "Gateway Target Device Failed to
+# Respond"). Der Abschnitt "SUNSPEC-MODE" unten ersetzt das vollständig,
+# transkribiert und byte-genau gegen ein echtes Gerät verifiziert
+# (SunSpec-Kennung "SunS", alle "wellknown"-Scalefaktoren, alle Werte
+# plausibel). Der Basic-Mode-Abschnitt (Slave-ID 64) bleibt unverändert
+# korrekt - dort stimmten Slave-ID und Offset bereits.
 # ==============================================================================
 # DOCUMENT METADATA & OVERVIEW
 # ==============================================================================
@@ -19,11 +31,19 @@ connection_settings:
     min_seconds: 5
     max_minutes: 5
   addressing_rule:
-    offset_formula: "Interne Adresse = Protokolladresse - 40001"
+    offset_formula: "Interne Adresse = Protokolladresse - 40001 (NUR Basic Mode, Slave-ID 64)"
+    offset_formula_sunspec_mode: "Interne Adresse = Protokolladresse - 40000 (SunSpec-Mode, Slave-ID 100 - siehe modbus.pdf)"
     function_code_03_holding_registers: true
     example:
       protocol_address: 40042
       internal_address: 41
+    note: >
+      Zwei unterschiedliche Register-Karten mit unterschiedlichem Offset auf
+      demselben Gerät: Basic Mode (Slave-ID 64, Offset -40001) und
+      SunSpec-Mode (Slave-ID 100, Offset -40000). Der SunSpec-Mode-Offset ist
+      anhand der SunSpec-Kennung "SunS" an Protokolladresse 40000 gegen
+      echte Hardware verifiziert (siehe anforderung.yaml,
+      REQ-SUNSPEC-MODE-CORRECTION).
 
 operation_modes:
   smart_meter_rs485:
@@ -95,89 +115,167 @@ register_maps:
         unit: "Watt"
         datatype: "uint16"
         access: "Read"
+        status: "DEPRECATED - siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION"
+        notes: >
+          Live-Test gegen echte Hardware ergab hier wiederholt physikalisch
+          unplausible Werte (~16000W bei einem 4600W-Gerät im Leerlauf).
+          Die Integration liest dieses Register nicht mehr; die korrekte
+          Entlade-/Ladeleistung kommt stattdessen aus dem SunSpec-Modus
+          (Register 40029, siehe unten).
       - protocol_addr: 40049
         internal_addr: 48
         name: "Leistung des Smart Meters"
         unit: "Watt"
         datatype: "uint16"
         access: "Read"
+        status: "DEPRECATED - siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION"
+        notes: >
+          Dieselbe Beobachtung wie bei Register 47. Die Integration liest
+          dieses Register nicht mehr; die korrekte Netz-/Smart-Meter-
+          Leistung kommt stattdessen aus dem SunSpec-Modus (Register
+          40072, siehe unten).
 
   # ----------------------------------------------------------------------------
-  # EXTENDED MODE - SPEICHER (Slave-ID: 40)
+  # SUNSPEC-MODE (Slave-ID: 100) - siehe modbus.pdf (offizielle
+  # sax-power.net-Dokumentation), verfügbar ab Firmwarekombination Master
+  # V61 / Gateway V54. Byte-genau gegen eine echte SAX Power Home Plus
+  # verifiziert (siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION).
+  #
+  # WICHTIG: Adress-Offset ist hier -40000, NICHT -40001 wie im Basic Mode!
+  # Verifiziert über die SunSpec-Kennung "SunS" (0x53756E53), die laut
+  # SunSpec-Standard immer an Wire-Adresse 0 (= Protokolladresse 40000)
+  # steht - genau das wurde am echten Gerät gemessen.
+  #
+  # Enthält 5 aneinandergereihte SunSpec-Modelle in einem zusammenhängenden
+  # Block (40000-40114, 115 Register, ein einziger read_holding_registers-
+  # Aufruf genügt): Common (1), 3Ph Inverter (103, Speicherelektronik),
+  # Immediate Controls (123, Sollwertvorgabe), WYE Connect 3Ph Meter (203,
+  # Netz/Smart Meter - laut modbus.pdf nur mit Smartmeter ADW200 vollständig
+  # verfügbar; auf einem mit ADL400 verifizierten Gerät waren die
+  # Netz-Register dennoch plausibel befüllt, einzig PV-Leistung war 0),
+  # Battery Base (802, Akkuzellen).
+  #
+  # Hinweis zu "123": Das ist die SunSpec-Modell-Nummer (ein Datenfeld
+  # innerhalb dieses einen Registerblocks), KEINE separate Modbus-Slave-ID -
+  # anders als in einer früheren Version dieser Datei fälschlich behauptet.
   # ----------------------------------------------------------------------------
-  - slave_id: 40
-    mode: "Extended Mode"
+  - slave_id: 100
+    mode: "SunSpec-Mode"
     device: "SAX Power Home (Plus)"
-    scaling_rule: "Skalierungsfaktor ist Exponent von 10 (z.B. -1 = Multiplikator 0.1)"
+    scaling_rule: "Skalierungsfaktor (sunssf) ist Exponent von 10 (z.B. -1 = Multiplikator 0.1)"
     registers:
-      - { protocol_addr: 40071, internal_addr: 70, name: "SunSpec ID", unit: null, datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40072, internal_addr: 71, name: "SunSpec Length", unit: null, datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40073, internal_addr: 72, name: "Summe Phasenströme", unit: "A", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40074, internal_addr: 73, name: "Strom L1", unit: "A", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40075, internal_addr: 74, name: "Strom L2", unit: "A", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40076, internal_addr: 75, name: "Strom L3", unit: "A", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40077, internal_addr: 76, name: "Strom Skalierung", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: -2" }
-      - { protocol_addr: 40078, internal_addr: 77, name: "N.A.", unit: null, datatype: null, access: "Read" }
-      - { protocol_addr: 40079, internal_addr: 78, name: "N.A.", unit: null, datatype: null, access: "Read" }
-      - { protocol_addr: 40080, internal_addr: 79, name: "N.A.", unit: null, datatype: null, access: "Read" }
-      - { protocol_addr: 40081, internal_addr: 80, name: "Spannung L1", unit: "V", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40082, internal_addr: 81, name: "Spannung L2", unit: "V", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40083, internal_addr: 82, name: "Spannung L3", unit: "V", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40084, internal_addr: 83, name: "Spannung Skalierung", unit: null, datatype: null, access: "Read", notes: "wellknown: -1" }
-      - { protocol_addr: 40085, internal_addr: 84, name: "Summenleistung AC (Wirk)", unit: "W", datatype: "int16", access: "Read", notes: "wellknown: 1" }
-      - { protocol_addr: 40086, internal_addr: 85, name: "Skalierung Summenleistung (Wirk)", unit: "sunssf", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40087, internal_addr: 86, name: "Netzfrequenz", unit: "Hz", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40088, internal_addr: 87, name: "Skalierung Netzfrequenz", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: -1" }
-      - { protocol_addr: 40089, internal_addr: 88, name: "Summenleistung AC (Schein)", unit: "VA", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40090, internal_addr: 89, name: "Skalierung Summenleistung (Schein)", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: 1" }
-      - { protocol_addr: 40091, internal_addr: 90, name: "Summenleistung AC (Blind)", unit: "VAr", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40092, internal_addr: 91, name: "Skalierung Summenleistung (Blind)", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: 1" }
-      - { protocol_addr: 40093, internal_addr: 92, name: "Leistungsfaktor", unit: "Prozent", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40094, internal_addr: 93, name: "Skalierung Leistungsfaktor", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: -1" }
-
-  # ----------------------------------------------------------------------------
-  # EXTENDED MODE - SMART METER (Slave-ID: 40)
-  # ----------------------------------------------------------------------------
-  - slave_id: 40
-    mode: "Extended Mode"
-    device: "Smartmeter"
-    registers:
-      - { protocol_addr: 40095, internal_addr: 94, name: "N.A.", unit: null, datatype: null, access: "Read" }
-      - { protocol_addr: 40096, internal_addr: 95, name: "Energie Eingespeist", unit: "kWh", datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40097, internal_addr: 96, name: "Energie Bezogen", unit: "kWh", datatype: "sunssf", access: "Read" }
-      - { protocol_addr: 40098, internal_addr: 97, name: "Energie Skalierung", unit: "sunssf", datatype: null, access: "Read", notes: "wellknown: 1" }
-      - { protocol_addr: 40099, internal_addr: 98, name: "Schaltzustand des Speichers", unit: null, datatype: "uint16", access: "Read" }
-      - { protocol_addr: 40100, internal_addr: 99, name: "Strom L1", unit: "A", datatype: "int16", access: "Read", notes: "Faktor -2" }
-      - { protocol_addr: 40101, internal_addr: 100, name: "Strom L2", unit: "A", datatype: "int16", access: "Read", notes: "Faktor -2" }
-      - { protocol_addr: 40102, internal_addr: 101, name: "Strom L3", unit: "A", datatype: "int16", access: "Read", notes: "Faktor -2" }
-      - { protocol_addr: 40103, internal_addr: 102, name: "Wirkleistung L1", unit: "W", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40104, internal_addr: 103, name: "Wirkleistung L12", unit: "W", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40105, internal_addr: 104, name: "Wirkleistung L13", unit: "W", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40106, internal_addr: 105, name: "Skalierung Leistung", unit: "sunssf", datatype: "sunssf", access: "Read", notes: "wellknown: 1" }
-      - { protocol_addr: 40107, internal_addr: 106, name: "Spannung L1", unit: "V", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40108, internal_addr: 107, name: "Spannung L2", unit: "V", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40109, internal_addr: 108, name: "Spannung L3", unit: "V", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40110, internal_addr: 109, name: "Summenleistung (Wirk)", unit: "W", datatype: "int16", access: "Read" }
-
-  # ----------------------------------------------------------------------------
-  # IMMEDIATE CONTROLS (Slave-ID: 123)
-  # ----------------------------------------------------------------------------
-  - slave_id: 123
-    mode: "Immediate Controls"
-    status: "Future Release / Experimental (Stand 03/25 noch nicht verfügbar)"
-    write_requirement: "Für eine erfolgreiche Sollwertsteuerung müssen beide Register zeitgleich geschrieben werden."
-    registers:
-      - protocol_addr: 40349
-        internal_addr: 348
-        name: "Sollwert Leistung"
-        unit: "%"
-        datatype: "int16"
-        access: "Read/Write"
-        value_range: "-10000 bis +10000"
-        notes: "Faktor 100"
-      - protocol_addr: 40353
-        internal_addr: 352
-        name: "Steuerungsmodus (Choking)"
-        unit: null
-        datatype: "int16"
-        access: "Read/Write"
+      # -- SunSpec Common Model (1) --
+      - { protocol_addr: 40000, internal_addr: 0, name: "SunSpec ID (Hi)", datatype: "uint16", access: "Read", notes: "wellknown: 21365 (\"Su\")" }
+      - { protocol_addr: 40001, internal_addr: 1, name: "SunSpec ID (Lo)", datatype: "uint16", access: "Read", notes: "wellknown: 28243 (\"nS\")" }
+      - { protocol_addr: 40002, internal_addr: 2, name: "SunSpec Model ID", datatype: "uint16", access: "Read", notes: "wellknown: 1 (Common)" }
+      - { protocol_addr: 40003, internal_addr: 3, name: "Länge", datatype: "uint16", access: "Read", notes: "wellknown: 15" }
+      - { protocol_addr: 40004, internal_addr: 4, name: "Hersteller", datatype: "str (encoded uint16)", access: "Read", notes: "4 Register -> \"SAXPOWER\"" }
+      - { protocol_addr: 40008, internal_addr: 8, name: "Gerätemodell", datatype: "str (encoded uint16)", access: "Read", notes: "3 Register -> \"HOME\" (+\"PL\" bei Home Plus)" }
+      - { protocol_addr: 40011, internal_addr: 11, name: "Version Master", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40012, internal_addr: 12, name: "Version Gateway", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40013, internal_addr: 13, name: "Seriennummer (Hi)", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40014, internal_addr: 14, name: "Seriennummer (Lo)", datatype: "uint16", access: "Read" }
+      # -- SunSpec Model 103 "3Ph Inverter" (Speicherelektronik) --
+      - { protocol_addr: 40015, internal_addr: 15, name: "Model Identifier", datatype: "uint16", access: "Read", notes: "wellknown: 103" }
+      - { protocol_addr: 40016, internal_addr: 16, name: "Model Länge", datatype: "uint16", access: "Read", notes: "wellknown: 32" }
+      - { protocol_addr: 40017, internal_addr: 17, name: "AC Strom Summe (Speicher)", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40018, internal_addr: 18, name: "AC Strom Speicher A", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40019, internal_addr: 19, name: "AC Strom Speicher B", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40020, internal_addr: 20, name: "AC Strom Speicher C", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40021, internal_addr: 21, name: "Scalefaktor AC Strom", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -2" }
+      - { protocol_addr: 40022, internal_addr: 22, name: "Spannung Speicher L1-L2", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40023, internal_addr: 23, name: "Spannung Speicher L2-L3", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40024, internal_addr: 24, name: "Spannung Speicher L3-L1", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40025, internal_addr: 25, name: "Spannung Speicher A", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40026, internal_addr: 26, name: "Spannung Speicher B", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40027, internal_addr: 27, name: "Spannung Speicher C", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40028, internal_addr: 28, name: "Scalefaktor Spannung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -1" }
+      - { protocol_addr: 40029, internal_addr: 29, name: "Wirkleistung Speicher Summe", unit: "W", datatype: "int16", access: "Read", notes: "Ersetzt das unzuverlässige Basic-Mode-Register 47" }
+      - { protocol_addr: 40030, internal_addr: 30, name: "Scalefaktor Leistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40031, internal_addr: 31, name: "Netzfrequenz", unit: "Hz", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40032, internal_addr: 32, name: "Scalefaktor Netzfrequenz", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -2" }
+      - { protocol_addr: 40033, internal_addr: 33, name: "Scheinleistung Speicher Summe", unit: "VA", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40034, internal_addr: 34, name: "Scalefaktor Scheinleistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40035, internal_addr: 35, name: "Blindleistung Speicher Summe", unit: "Var", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40036, internal_addr: 36, name: "Scalefaktor Blindleistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40037, internal_addr: 37, name: "Leistungsfaktor Speicher Summe", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40038, internal_addr: 38, name: "Scalefaktor Leistungsfaktor", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -3" }
+      - { protocol_addr: 40039, internal_addr: 39, name: "Reserve", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40040, internal_addr: 40, name: "Reserve", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40041, internal_addr: 41, name: "Maximale Zelltemperatur", unit: "°C", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40042, internal_addr: 42, name: "Scalefaktor Temperatur", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40043, internal_addr: 43, name: "Zustand", datatype: "int16", access: "Read", notes: "1:Aus 2:Standby 3:Wartezeit 4:Ein 7:SM-Fehler" }
+      - { protocol_addr: 40044, internal_addr: 44, name: "Event", datatype: "uint16", access: "Read", notes: "0:Normalbetrieb 4:Insel-Fehler 8:f>> 9:f<< 10:U>> 11:U<< 15:Hardwarefehler" }
+      - { protocol_addr: 40045, internal_addr: 45, name: "PV-Leistung", unit: "W", datatype: "uint16", access: "Read", notes: "Gemessen durch ADW200 - mit ADL400 typischerweise 0" }
+      - { protocol_addr: 40046, internal_addr: 46, name: "Scalefaktor PV-Leistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 1" }
+      # -- SunSpec Model 123 "Immediate Controls" --
+      - { protocol_addr: 40047, internal_addr: 47, name: "Sunspec Model ID", datatype: "uint16", access: "Read", notes: "wellknown: 123" }
+      - { protocol_addr: 40048, internal_addr: 48, name: "Sunspec Length", datatype: "uint16", access: "Read", notes: "wellknown: 7" }
+      - { protocol_addr: 40049, internal_addr: 49, name: "Leistungsvorgabe prozentual der Maximalleistung", unit: "%", datatype: "int16", access: "Read/Write", notes: "-100*SF bis +100*SF; Vorzeichenkonvention nicht dokumentiert" }
+      - { protocol_addr: 40050, internal_addr: 50, name: "Timeout der Leistungsvorgabe", unit: "s", datatype: "uint16", access: "Read/Write", notes: "max. 300s" }
+      - { protocol_addr: 40051, internal_addr: 51, name: "Steuermodus", datatype: "uint16", access: "Read/Write", notes: "0:SmartMeter-Nullregelung 1:Sollwertvorgabe" }
+      - { protocol_addr: 40052, internal_addr: 52, name: "Scalefaktor Leistungsvorgabe", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -2 (10000=100%)" }
+      - { protocol_addr: 40053, internal_addr: 53, name: "Referenzwert Maximalleistung", unit: "W", datatype: "uint16", access: "Read", notes: "Bezugspunkt für 100%: 4600/9200/13800" }
+      # -- SunSpec Model 203 "WYE Connect 3Ph Meter ABC" (Netz/Smart Meter) --
+      - { protocol_addr: 40054, internal_addr: 54, name: "Sunspec Model ID", datatype: "uint16", access: "Read", notes: "wellknown: 203" }
+      - { protocol_addr: 40055, internal_addr: 55, name: "Sunspec Length", datatype: "uint16", access: "Read", notes: "wellknown: 41" }
+      - { protocol_addr: 40056, internal_addr: 56, name: "AC Strom Summe (Netz)", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40057, internal_addr: 57, name: "AC Strom Netz L1", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40058, internal_addr: 58, name: "AC Strom Netz L2", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40059, internal_addr: 59, name: "AC Strom Netz L3", unit: "A", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40060, internal_addr: 60, name: "Scalefaktor Strom", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -1" }
+      - { protocol_addr: 40061, internal_addr: 61, name: "Durchschnitt Spannung Netz L-N", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40062, internal_addr: 62, name: "Netzspannung L1", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40063, internal_addr: 63, name: "Netzspannung L2", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40064, internal_addr: 64, name: "Netzspannung L3", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40065, internal_addr: 65, name: "Durchschnitt Spannung L-L", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40066, internal_addr: 66, name: "Netzspannung L1-L2", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40067, internal_addr: 67, name: "Netzspannung L2-L3", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40068, internal_addr: 68, name: "Netzspannung L1-L3", unit: "V", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40069, internal_addr: 69, name: "Scalefaktor Spannung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -1" }
+      - { protocol_addr: 40070, internal_addr: 70, name: "Netzfrequenz", unit: "Hz", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40071, internal_addr: 71, name: "Scalefaktor Frequenz", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -2" }
+      - { protocol_addr: 40072, internal_addr: 72, name: "Summenwirkleistung Netz", unit: "W", datatype: "int16", access: "Read", notes: "Ersetzt das unzuverlässige Basic-Mode-Register 48" }
+      - { protocol_addr: 40073, internal_addr: 73, name: "Netzleistung L1", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40074, internal_addr: 74, name: "Netzleistung L2", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40075, internal_addr: 75, name: "Netzleistung L3", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40076, internal_addr: 76, name: "Scalefaktor Netzleistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40077, internal_addr: 77, name: "Summenscheinleistung Netz", unit: "VA", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40078, internal_addr: 78, name: "Scheinleistung Netz L1", unit: "VA", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40079, internal_addr: 79, name: "Scheinleistung Netz L2", unit: "VA", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40080, internal_addr: 80, name: "Scheinleistung Netz L3", unit: "VA", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40081, internal_addr: 81, name: "Scalefaktor Scheinleistung Netz", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40082, internal_addr: 82, name: "Summenblindleistung Netz", unit: "Var", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40083, internal_addr: 83, name: "Blindleistung Netz L1", unit: "Var", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40084, internal_addr: 84, name: "Blindleistung Netz L2", unit: "Var", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40085, internal_addr: 85, name: "Blindleistung Netz L3", unit: "Var", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40086, internal_addr: 86, name: "Scalefaktor Blindleistung Netz", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 1" }
+      - { protocol_addr: 40087, internal_addr: 87, name: "Leistungsfaktor Netz Summe", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40088, internal_addr: 88, name: "Leistungsfaktor L1", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40089, internal_addr: 89, name: "Leistungsfaktor L2", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40090, internal_addr: 90, name: "Leistungsfaktor L3", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40091, internal_addr: 91, name: "Scalefaktor Leistungsfaktor", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -3" }
+      - { protocol_addr: 40092, internal_addr: 92, name: "Reserve", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40093, internal_addr: 93, name: "Reserve", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40094, internal_addr: 94, name: "Reserve", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 3" }
+      # -- SunSpec Model 802 "Battery Base Model" (Akkuzellen) --
+      - { protocol_addr: 40095, internal_addr: 95, name: "Sunspec Model ID", datatype: "uint16", access: "Read", notes: "wellknown: 802" }
+      - { protocol_addr: 40096, internal_addr: 96, name: "Sunspec Length", datatype: "uint16", access: "Read", notes: "wellknown: 20" }
+      - { protocol_addr: 40097, internal_addr: 97, name: "Kapazität Speichersystem", unit: "Wh", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40098, internal_addr: 98, name: "Verfügbare Ladeleistung Speichersystem", unit: "W", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40099, internal_addr: 99, name: "Verfügbare Entladeleistung Speichersystem", unit: "W", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40100, internal_addr: 100, name: "Maximaler SoC", unit: "%", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40101, internal_addr: 101, name: "Minimaler SoC", unit: "%", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40102, internal_addr: 102, name: "Aktueller SoC", unit: "%", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40103, internal_addr: 103, name: "Entladetiefe", unit: "%", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40104, internal_addr: 104, name: "Reserve", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40105, internal_addr: 105, name: "Reserve", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40106, internal_addr: 106, name: "Ladestatus Akku", datatype: "uint16", access: "Read", notes: "0:keine Leistung 1:Leistung anliegend" }
+      - { protocol_addr: 40107, internal_addr: 107, name: "Reserve", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40108, internal_addr: 108, name: "Event", datatype: "uint16", access: "Read", notes: "0:Normalbetrieb 3:Übertemperatur 4:Untertemperatur" }
+      - { protocol_addr: 40109, internal_addr: 109, name: "Durchschnittliche Zellspannung", unit: "mV", datatype: "uint16", access: "Read" }
+      - { protocol_addr: 40110, internal_addr: 110, name: "Scalefaktor Kapazität", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40111, internal_addr: 111, name: "Scalefaktor Lade/Entladeleistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40112, internal_addr: 112, name: "Scalefaktor SoC", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40113, internal_addr: 113, name: "Reserve", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }
+      - { protocol_addr: 40114, internal_addr: 114, name: "Scalefaktor Zellspannung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 0" }

@@ -225,6 +225,9 @@
       },
       "charge_limit": {
         "name": "Max. Netzladeleistung"
+      },
+      "discharge_power_setpoint": {
+        "name": "Entladeleistung"
       }
     },
     "switch": {
@@ -233,6 +236,9 @@
       },
       "timed_charge_enabled": {
         "name": "Netzladung aktiv"
+      },
+      "manual_discharge": {
+        "name": "Manuelle Entladung"
       }
     },
     "time": {

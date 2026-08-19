@@ -15,6 +15,7 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
   - [Zahlenfelder](#zahlenfelder)
   - [Schalter](#schalter)
   - [Zeitgesteuertes Laden](#zeitgesteuertes-laden)
+  - [Manuelle Entladung](#manuelle-entladung)
   - [Services](#services)
 - [IP-Adresse nachträglich ändern](#ip-adresse-nachträglich-ändern)
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
@@ -96,7 +97,7 @@ Die Sensoren stammen aus zwei Registerkarten mit unterschiedlicher Slave-ID:
 | Maximale Zelltemperatur | in °C |
 | Speicher Zustand / Speicher Ereignis | Klartext (Diagnose) |
 | PV-Leistung | in W – nur mit Smartmeter ADW200 verfügbar (siehe Hinweis unten) |
-| Leistungsvorgabe / Timeout / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte – Leistungsvorgabe und Steuermodus werden intern auch von "Netzladung aktiv" und der Max-SOC-Sperre geschrieben, siehe [unten](#zeitgesteuertes-laden) |
+| Leistungsvorgabe / Timeout / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte – Leistungsvorgabe und Steuermodus werden intern auch von "Netzladung aktiv", der Max-SOC-Sperre und "Manuelle Entladung" geschrieben, siehe [unten](#zeitgesteuertes-laden) bzw. [unten](#manuelle-entladung) |
 | Netz Stromsumme / -Strom L1/L2/L3 | in A |
 | Netzspannung Durchschnitt (L-N) / L1/L2/L3 | in V |
 | Netzfrequenz | in Hz |
@@ -130,6 +131,7 @@ unberührt.
 | --- | --- |
 | Max. SOC | Ziel-SOC (0–100 %) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
 | Max. Netzladeleistung | Ziel-Leistung für die Netzladung (W) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung einmalig mit dem beim Start gelesenen Ladeleistungsgrenzwert (Register 44) vorbelegt |
+| Entladeleistung | Ziel-Leistung für die manuelle Entladung (W) – siehe [unten](#manuelle-entladung). Ohne vorherige Einstellung 100 W (Hard-Default, kein analoges Geräteregister), bleibt über Neustarts hinweg erhalten |
 
 Es gibt bewusst keine eigene Ziel-SOC-/Leistungseinstellung für
 zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben.
@@ -140,6 +142,7 @@ zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben.
 | --- | --- |
 | Speicher On/Off | Schaltet den Speicher ein/aus |
 | Netzladung aktiv | Aktiviert/deaktiviert das zeitgesteuerte Laden, siehe [unten](#zeitgesteuertes-laden) |
+| Manuelle Entladung | Entlädt den Speicher sofort mit "Entladeleistung", siehe [unten](#manuelle-entladung) |
 
 ### Zeitgesteuertes Laden
 
@@ -198,6 +201,35 @@ Home-Assistant-Neustart neu gesetzt werden.
 schreibt weiterhin über den älteren Basic-Mode-Weg (Register 41, absoluter
 Watt-Sollwert, freie Vorzeichenwahl) und läuft unabhängig vom
 zeitgesteuerten Laden, mit eigenem Hintergrund-Task.
+
+### Manuelle Entladung
+
+Entlädt den Speicher auf Zuruf mit einer festen Leistung ("Entladeleistung",
+Default 100 W), über denselben SunSpec-Modus-Weg wie Netzladung/Max-SOC-Sperre
+oben (Register 40051/40049), nur mit positivem statt negativem Sollwert.
+
+**Entitäten** (unter "Steuerung" am Gerät):
+
+| Entität | Beschreibung |
+| --- | --- |
+| Manuelle Entladung | Ein-/Ausschalten der Funktion |
+| Entladeleistung | Sollwert in Watt (Default 100 W, bleibt über Neustarts hinweg erhalten) |
+
+**Priorität gegenüber Netzladung/Max-SOC-Sperre:** Die manuelle Entladung
+hat die höchste Priorität - ist sie eingeschaltet, wird immer entladen,
+unabhängig davon, ob gerade zeitgesteuert geladen wird oder die Max-SOC-Sperre
+aktiv ist (ein Entladen des vollen Speichers widerspricht nicht deren Zweck).
+Wird eine laufende zeitgesteuerte Netzladung durch die manuelle Entladung
+unterbrochen, ändert das weder "Netzladung aktiv" noch das Zeitfenster noch
+"Max. Netzladeleistung" - beim Ausschalten der manuellen Entladung läuft die
+Netzladung von selbst weiter, sofern diese Einstellungen weiterhin zutreffen
+(Zeitfenster noch offen, Ziel-SOC noch nicht erreicht). Ein Wechsel des
+Sollwerts (z. B. von Laden auf Entladen) wird dabei sofort geschrieben, statt
+erst auf die nächste planmäßige Wiederholung zu warten.
+
+Bewusst **kein RestoreEntity** für den Schalter selbst: Er setzt sich nach
+jedem Home-Assistant-Neustart auf "aus" zurück, damit eine manuell gestartete
+Entladung nicht unbeaufsichtigt über einen Neustart hinweg weiterläuft.
 
 ### Services
 

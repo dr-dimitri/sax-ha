@@ -476,6 +476,183 @@ async def test_enforce_grid_charge_releases_max_soc_clamp_below_target(hass) -> 
     )
 
 
+# -- Manuelle Entladung (höchste Priorität) ----------------------------------
+
+
+async def test_manual_discharge_interrupts_active_timed_charge(hass) -> None:
+    """Wird die manuelle Entladung während einer laufenden zeitgesteuerten
+    Netzladung eingeschaltet, muss der Speicher sofort entladen (positiver
+    Sollwert) statt weiter zu laden - siehe anforderung.yaml,
+    REQ-MANUAL-DISCHARGE."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_discharge_power(500)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is True
+
+            await coordinator.async_set_manual_discharge_enabled(True)
+            await asyncio.sleep(0.1)
+
+        assert coordinator._timed_charge_active is False
+        assert coordinator.sun_charge_active is True
+        # 500 W / 4600 W Referenz-Maximalleistung * 100 = ~10.87%, positiv
+        # (Entladen) statt negativ (Laden) - siehe
+        # SaxPowerCoordinator._watts_to_ic_setpoint_raw.
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=1087,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_timed_charge_resumes_after_manual_discharge_ends(hass) -> None:
+    """Sobald die manuelle Entladung wieder ausgeschaltet wird, muss die
+    zeitgesteuerte Netzladung von selbst weiterlaufen, sofern weiterhin alle
+    anderen Bedingungen erfüllt sind (Zeitfenster, Max-SOC nicht erreicht,
+    "Max. Netzladeleistung" gesetzt) - siehe anforderung.yaml,
+    REQ-MANUAL-DISCHARGE."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_discharge_power(500)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            await coordinator.async_set_manual_discharge_enabled(True)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is False
+
+            await coordinator.async_set_manual_discharge_enabled(False)
+            await asyncio.sleep(0.1)
+
+        assert coordinator._timed_charge_active is True
+        assert coordinator.sun_charge_active is True
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=to_unsigned16(-6522),  # wie in test_enforce_grid_charge_*, -3000 W
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_manual_discharge_overrides_max_soc_lock(hass) -> None:
+    """Ist der Ziel-SOC bereits erreicht (Max-SOC-Sperre würde greifen),
+    muss eine eingeschaltete manuelle Entladung trotzdem entladen dürfen -
+    ein Entladen des vollen Speichers widerspricht nicht dem Zweck der
+    Sperre (die nur Überladen verhindert)."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 95, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    await coordinator.async_set_discharge_power(500)
+    await coordinator.async_set_manual_discharge_enabled(True)
+
+    try:
+        await coordinator._async_enforce_grid_charge({"soc": 95})
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is False
+        assert coordinator.sun_charge_active is True
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=1087,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_max_soc_lock_resumes_after_manual_discharge_ends(hass) -> None:
+    """Nach dem Ausschalten der manuellen Entladung muss die Max-SOC-Sperre
+    wieder greifen, wenn der SOC weiterhin am/über dem Zielwert liegt."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 95, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    await coordinator.async_set_discharge_power(500)
+    await coordinator.async_set_manual_discharge_enabled(True)
+    await asyncio.sleep(0.1)
+
+    try:
+        await coordinator.async_set_manual_discharge_enabled(False)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_manual_discharge_disabled_by_default(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    assert coordinator.manual_discharge_enabled is False
+    assert coordinator.discharge_power is None
+
+
+async def test_manual_discharge_treats_unset_power_as_zero(hass) -> None:
+    """Ohne gesetzte "Entladeleistung" darf die manuelle Entladung nicht
+    crashen - sie schreibt stattdessen einen 0%-Sollwert (kein Effekt)."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    # discharge_power bleibt None (Default)
+
+    try:
+        await coordinator.async_set_manual_discharge_enabled(True)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.sun_charge_active is True
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_stop_sun_charge_is_noop_when_not_running(hass) -> None:
     """Analog zu async_stop_grid_charge: ein Aufruf ohne laufende Ladung
     (z. B. beim Entladen des Config Entry) darf nicht ungefragt in Register

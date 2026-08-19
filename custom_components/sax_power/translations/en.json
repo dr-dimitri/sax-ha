@@ -225,6 +225,9 @@
       },
       "charge_limit": {
         "name": "Max. grid charge power"
+      },
+      "discharge_power_setpoint": {
+        "name": "Discharge power"
       }
     },
     "switch": {
@@ -233,6 +236,9 @@
       },
       "timed_charge_enabled": {
         "name": "Grid charge active"
+      },
+      "manual_discharge": {
+        "name": "Manual discharge"
       }
     },
     "time": {

@@ -33,6 +33,11 @@ DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"
 DEFAULT_TIMED_CHARGE_ENABLED = False
 
+# Hard-Default für "Entladeleistung" (number.py, manuelle Entladung), da es
+# dafür kein analoges Geräteregister als Vorbelegung gibt (anders als "Max.
+# Netzladeleistung", siehe SaxPowerChargeLimitNumber).
+DEFAULT_DISCHARGE_POWER = 100
+
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
 # Alle benötigten Register liegen zusammenhängend in einem Block (41-46),

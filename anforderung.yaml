@@ -506,7 +506,7 @@ requirement_grid_serving_charge:
     _timed_charge_months/_grid_serving_months, je ein set[int] aus 1-12,
     Properties timed_charge_months/grid_serving_months als frozenset,
     Setter async_set_timed_charge_month/async_set_grid_serving_month).
-    Default (const.ALL_MONTHS, DEFAULT_MONTH_ENABLED=True): alle 12 Monate
+    Default (beide Sets initial set(const.ALL_MONTHS)): alle 12 Monate
     aktiv, damit sich bestehende Konfigurationen nach diesem Update
     unverändert verhalten, bis der Anwender einzelne Monate bewusst
     abwählt. Ist für ein Feature kein einziger Monat ausgewählt, ist es

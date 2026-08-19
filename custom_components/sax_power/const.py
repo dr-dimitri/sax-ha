@@ -56,7 +56,6 @@ DEFAULT_GRID_SERVING_ENABLED = False
 # einzelne Monate bewusst abwählt. Sind für ein Feature gar keine Monate
 # ausgewählt, ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
 ALL_MONTHS = frozenset(range(1, 13))
-DEFAULT_MONTH_ENABLED = True
 
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
@@ -248,7 +247,6 @@ READ_BLOCK_EXT_COUNT = REG_SUN_BATTERY_CELL_VOLTAGE_SF - REG_SUN_ID + 1  # 115
 # Immediate-Controls-Wertebereiche (modbus.pdf: "-100*SF bis +100*SF", SF=-2)
 MIN_IC_POWER_SETPOINT_PCT = -100.0
 MAX_IC_POWER_SETPOINT_PCT = 100.0
-MAX_IC_TIMEOUT_SECONDS = 300
 
 # Steuermodus-Werte für Register 40051 (siehe REG_SUN_IC_CONTROL_MODE oben
 # sowie CONTROL_MODE_LABELS unten).
@@ -342,12 +340,15 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # "Immediate Controls", Register 40051 Steuermodus auf Sollwertvorgabe +
 # Register 40049 Leistungsvorgabe in Prozent der Referenz-Maximalleistung),
 # NICHT über den Basic-Mode-P-Sollwert (Register 41) - siehe
-# SaxPowerCoordinator._async_enforce_timed_charge.
+# SaxPowerCoordinator._async_enforce_grid_charge.
 #
-# Nutzt den zentralen "Max. Ladeleistung"-Grenzwert (Register 44) als Leistung
-# sowie "Max. SOC" (Fallback MAX_SOC oben) als Ziel-SOC. Keine
-# eigenen Einstellungen dafür - siehe anforderung.yaml,
-# REQ-TIMED-SOC-CHARGE.
+# Nutzt den zentralen "Max. Netzladeleistung"-Grenzwert (Register 44
+# einmalig vorbelegt) als Leistung sowie "Max. SOC" (Fallback MAX_SOC oben)
+# als oberes Ziel - beide gemeinsam mit netzdienlichem Laden genutzt, keine
+# eigenen Einstellungen dafür. Der untere Start-Schwellwert "Netzladung
+# Min. SOC" ist dagegen eine reine, featurespezifische Netzladung-
+# Einstellung (number.py, SaxPowerTimedChargeMinSocNumber) - siehe
+# anforderung.yaml, REQ-TIMED-SOC-CHARGE.
 #
 # Zusätzlicher Abbruchgrund neben Zeitfenster/Max-SOC: Sobald am Smart Meter
 # (data["smartmeter_power"], Register 40072 "Summenwirkleistung Netz", siehe

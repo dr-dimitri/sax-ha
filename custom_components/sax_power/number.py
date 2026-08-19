@@ -153,7 +153,7 @@ class SaxPowerChargeLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
 class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
     """Unterer SOC-Schwellwert ("Min. SOC"), unterhalb dessen die Netzladung
-    starten darf - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE-MIN-SOC und
+    starten darf - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE und
     coordinator.SaxPowerCoordinator._async_enforce_grid_charge
     (_timed_charge_armed) für die Hysterese-Logik: einmal unterschritten,
     lädt die Netzladung bis "Max. SOC" durch, statt bei jedem erneuten

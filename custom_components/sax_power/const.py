@@ -264,23 +264,17 @@ DATA_COORDINATOR = "coordinator"
 
 ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 
-# -- Zeitgesteuertes Laden & manuelle Netzladung ---------------------------
-# Beides Software-Logik (kein natives Geräteregister für die Aktivierung
-# selbst): Lädt den Speicher aktiv aus dem Netz, unabhängig von
-# PV-Überschuss. Beide Wege teilen sich denselben Hintergrund-Task
-# (SaxPowerCoordinator._sun_charge_task) und schreiben über den SunSpec-
-# Modus (Slave-ID 100, "Immediate Controls", Register 40051 Steuermodus auf
-# Sollwertvorgabe + Register 40049 Leistungsvorgabe in Prozent der
-# Referenz-Maximalleistung), NICHT mehr über den Basic-Mode-P-Sollwert
-# (Register 41) - siehe SaxPowerCoordinator._async_enforce_grid_charge.
+# -- Zeitgesteuertes Laden -------------------------------------------------
+# Software-Logik (kein natives Geräteregister für die Aktivierung selbst):
+# Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv aus
+# dem Netz auf einen Ziel-SOC, unabhängig von PV-Überschuss (z. B. für
+# günstige Nachtstromtarife). Schreibt über den SunSpec-Modus (Slave-ID 100,
+# "Immediate Controls", Register 40051 Steuermodus auf Sollwertvorgabe +
+# Register 40049 Leistungsvorgabe in Prozent der Referenz-Maximalleistung),
+# NICHT über den Basic-Mode-P-Sollwert (Register 41) - siehe
+# SaxPowerCoordinator._async_enforce_timed_charge.
 #
-# - "Zeitgesteuertes Laden" lädt nur innerhalb eines konfigurierbaren
-#   Zeitfensters bis zu einem Ziel-SOC (z. B. für günstige
-#   Nachtstromtarife).
-# - "Netzladung" (manueller Schalter) lädt unabhängig von Zeitfenster und
-#   Ziel-SOC, solange der Schalter aktiv ist.
-#
-# Beide nutzen den zentralen Ladeleistungsgrenzwert (Register 44) als
-# Leistung; "Zeitgesteuertes Laden" zusätzlich "Maximaler Lade-SOC"
-# (Fallback MAX_SOC oben) als Ziel-SOC. Keine eigenen Einstellungen dafür -
-# siehe anforderung.yaml, REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS.
+# Nutzt den zentralen "Max. Ladeleistung"-Grenzwert (Register 44) als Leistung
+# sowie "Max. SOC" (Fallback MAX_SOC oben) als Ziel-SOC. Keine
+# eigenen Einstellungen dafür - siehe anforderung.yaml,
+# REQ-TIMED-SOC-CHARGE.

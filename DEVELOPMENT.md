@@ -29,9 +29,8 @@ custom_components/sax_power/
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
 ├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
-├── number.py              Max-SOC (auch Ziel-SOC für Zeitfenster), Lade-/Entladeleistungsgrenzwert
-├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
-│                          manuelle Netzladung ein/aus
+├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Lade-/Entladeleistung
+├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes Laden
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
@@ -57,7 +56,7 @@ schreibt Änderungen über `coordinator.async_write_register(...)` bzw.
 `coordinator.async_write_extended_register(...)` (SunSpec-Modus, Slave-ID
 `self.slave_id_extended`).
 
-**Maximaler Lade-SOC:** Kein natives Geräteregister. Der
+**Max. SOC:** Kein natives Geräteregister. Der
 `DataUpdateCoordinator` vergleicht bei jedem Poll den aktuellen SOC
 (Register 46) mit dem gesetzten Zielwert: wird er erreicht/überschritten,
 schreibt der Coordinator `0` in das Ladelimit-Register (44) und merkt sich
@@ -65,19 +64,17 @@ den zuvor gelesenen Wert; sinkt der SOC wieder darunter, wird der
 ursprüngliche Wert zurückgeschrieben. Siehe
 `SaxPowerCoordinator._async_enforce_max_soc`.
 
-**Zeitgesteuertes Laden & manuelle Netzladung:** Reine Software-Logik,
-umgesetzt in `SaxPowerCoordinator._async_enforce_grid_charge`, bei jedem
-Poll-Zyklus sowie bei jeder Einstellungsänderung neu ausgewertet. Beide
-teilen sich denselben Hintergrund-Task
-(`SaxPowerCoordinator._async_sun_charge_loop`), der über den SunSpec-Modus
-schreibt: erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann
-Register 40049 (Leistungsvorgabe %, aus dem zentralen
-Ladeleistungsgrenzwert in Watt umgerechnet über
-`_watts_to_ic_setpoint_raw`). Das Wiederholungsintervall
-(`_sun_ic_write_interval`) leitet sich aus dem vom Gerät gemeldeten Timeout
-(Register 40050) ab, gedeckelt auf 30s. Beim Stoppen wird Register 40051
-aktiv auf 0 zurückgesetzt statt nur passiv auf den Timeout zu warten (siehe
-`SaxPowerCoordinator.async_stop_sun_charge`).
+**Zeitgesteuertes Laden:** Reine Software-Logik, umgesetzt in
+`SaxPowerCoordinator._async_enforce_timed_charge`, bei jedem Poll-Zyklus
+sowie bei jeder Einstellungsänderung neu ausgewertet. Nutzt einen
+Hintergrund-Task (`SaxPowerCoordinator._async_sun_charge_loop`), der über
+den SunSpec-Modus schreibt: erst Register 40051 (Steuermodus) auf
+Sollwertvorgabe, dann Register 40049 (Leistungsvorgabe %, aus "Max.
+Ladeleistung" in Watt umgerechnet über `_watts_to_ic_setpoint_raw`). Das
+Wiederholungsintervall (`_sun_ic_write_interval`) leitet sich aus dem vom
+Gerät gemeldeten Timeout (Register 40050) ab, gedeckelt auf 30s. Beim
+Stoppen wird Register 40051 aktiv auf 0 zurückgesetzt statt nur passiv auf
+den Timeout zu warten (siehe `SaxPowerCoordinator.async_stop_sun_charge`).
 
 Der ältere Basic-Mode-P-Sollwert-Pfad (Register 41,
 `_async_grid_charge_loop`, alle 30s fest) bleibt ausschließlich für den
@@ -139,9 +136,9 @@ tests/
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
 │                                  Max-SOC-Klemmung, Fehlerbehandlung bei Modbus-Schreibfehlern,
 │                                  Parsing des kompletten SunSpec-Modus-Blocks (gemockt),
-│                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden und
-│                                  manuelle Netzladung (SunSpec-Modus-Register 40049/40051),
-│                                  Watt-zu-Prozent-Umrechnung, Schreibintervall aus Register 40050
+│                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden
+│                                  (SunSpec-Modus-Register 40049/40051), Watt-zu-Prozent-
+│                                  Umrechnung, Schreibintervall aus Register 40050
 ├── test_config_flow.py            Unit-Tests: erfolgreicher Config Flow, "cannot_connect"-Fehler
 │                                  (gemockter AsyncModbusTcpClient)
 ├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~56 Sensor-Beschreibungen:
@@ -152,8 +149,8 @@ tests/
 │                                  Config Entry → Coordinator → Entities → echtes Wire-Protokoll,
 │                                  inkl. Regressionstest für den Resilienz-Fall (SunSpec-Modus
 │                                  nicht erreichbar → Basic-Mode-Sensoren bleiben da) sowie
-│                                  End-to-End-Tests für zeitgesteuertes Laden und die manuelle
-│                                  Netzladung (beide über SunSpec-Modus-Register 40049/40051)
+│                                  einen End-to-End-Test für zeitgesteuertes Laden
+│                                  (SunSpec-Modus-Register 40049/40051)
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

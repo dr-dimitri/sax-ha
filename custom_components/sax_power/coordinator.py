@@ -190,7 +190,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
-        self._manual_grid_charge_enabled = False
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -244,7 +243,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data.update(await self._async_read_extended())
 
         await self._async_enforce_max_soc(data)
-        await self._async_enforce_grid_charge(data)
+        await self._async_enforce_timed_charge(data)
         data["timed_charge_active"] = self._timed_charge_active
         return data
 
@@ -542,14 +541,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set (or clear with None) the software-side max charge SOC.
 
         Wird auch als Ziel-SOC für das zeitgesteuerte Laden verwendet
-        (siehe Abschnitt "Zeitgesteuertes Laden & manuelle Netzladung"
-        unten) - deshalb hier zusätzlich _async_enforce_grid_charge neu
-        auswerten.
+        (siehe Abschnitt "Zeitgesteuertes Laden" unten) - deshalb hier
+        zusätzlich _async_enforce_timed_charge neu auswerten.
         """
         self._max_soc = max_soc
         if self.data is not None:
             await self._async_enforce_max_soc(self.data)
-            await self._async_enforce_grid_charge(self.data)
+            await self._async_enforce_timed_charge(self.data)
             self.data["timed_charge_active"] = self._timed_charge_active
             self.async_set_updated_data(self.data)
 
@@ -576,8 +574,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     #
     # Ausschließlich noch für den manuellen start_grid_charge/stop_grid_charge-
     # Service (absoluter Watt-Sollwert, freie Vorzeichenwahl). Zeitgesteuertes
-    # Laden und die manuelle Netzladung nutzen stattdessen den SunSpec-Modus-
-    # Pfad weiter unten (_async_sun_charge_loop), siehe dort.
+    # Laden nutzt stattdessen den SunSpec-Modus-Pfad weiter unten
+    # (_async_sun_charge_loop), siehe dort.
 
     @property
     def grid_charge_active(self) -> bool:
@@ -615,9 +613,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
 
     # -- Netzladung (SunSpec-Modus, Immediate Controls) ----------------------
-    # Schreibpfad für zeitgesteuertes Laden und die manuelle Netzladung
-    # (siehe Abschnitt weiter unten): SunSpec-Modus (Slave-ID
-    # self.slave_id_extended), Modell 123 "Immediate Controls".
+    # Schreibpfad für zeitgesteuertes Laden (siehe Abschnitt weiter unten):
+    # SunSpec-Modus (Slave-ID self.slave_id_extended), Modell 123
+    # "Immediate Controls".
     #
     # Ablauf laut modbus.pdf/modbus_llm.yaml: Erst Register 40051
     # (Steuermodus) auf 1 (Sollwertvorgabe) setzen, danach kann Register
@@ -729,31 +727,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             raise
 
-    # -- Zeitgesteuertes Laden & manuelle Netzladung -------------------------
-    # Beide lädt den Speicher aktiv aus dem Netz über den SunSpec-Modus-Pfad
-    # oben (_async_sun_charge_loop), unabhängig von PV-Überschuss:
+    # -- Zeitgesteuertes Laden ------------------------------------------------
+    # Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv
+    # auf einen Ziel-SOC, unabhängig von PV-Überschuss (z. B. für günstige
+    # Nachtstromtarife), über den SunSpec-Modus-Pfad oben
+    # (_async_sun_charge_loop).
     #
-    # - Zeitgesteuertes Laden: nur innerhalb eines konfigurierbaren
-    #   Zeitfensters, bis zu einem Ziel-SOC (z. B. für günstige
-    #   Nachtstromtarife).
-    # - Manuelle Netzladung (Schalter "Netzladung"): unabhängig von
-    #   Zeitfenster und Ziel-SOC, solange der Schalter aktiv ist - z. B. um
-    #   sofort aus dem Netz zu laden, ohne das zeitgesteuerte Laden zu
-    #   aktivieren.
-    #
-    # Beide sind bewusst KEINE eigenen Leistungseinstellungen: Sie nutzen
-    # den zentralen Ladeleistungsgrenzwert (data["charge_limit"], Register
-    # 44). Der Ziel-SOC für das zeitgesteuerte Laden nutzt denselben Wert
-    # wie "Maximaler Lade-SOC" (self._max_soc, siehe Max-SOC-Abschnitt oben)
-    # - fehlt dieser (None), wird MAX_SOC (100 %) als Ziel angenommen. Das
-    # vermeidet redundante Einstellmöglichkeiten (siehe anforderung.yaml,
-    # REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
-    #
-    # Beide teilen sich denselben Hintergrund-Task (_sun_charge_task): Ist
-    # mindestens eine der beiden Bedingungen erfüllt, läuft die Schleife;
-    # der Diagnose-Sensor "Zeitgesteuertes Laden aktiv" spiegelt dabei
-    # ausschließlich die zeitgesteuerte Bedingung wider, nicht den manuellen
-    # Schalter.
+    # Bewusst KEINE eigene Leistungseinstellung: nutzt den zentralen "Max.
+    # Ladeleistung"-Grenzwert (data["charge_limit"], Register 44). Der
+    # Ziel-SOC nutzt denselben Wert wie "Max. SOC" (self._max_soc,
+    # siehe Max-SOC-Abschnitt oben) - fehlt dieser (None), wird MAX_SOC
+    # (100 %) als Ziel angenommen. Das vermeidet redundante
+    # Einstellmöglichkeiten (siehe anforderung.yaml,
+    # REQ-TIMED-SOC-CHARGE).
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -767,32 +753,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def timed_charge_end(self) -> dt_time | None:
         return self._timed_charge_end
 
-    @property
-    def manual_grid_charge_enabled(self) -> bool:
-        return self._manual_grid_charge_enabled
-
     async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
         self._timed_charge_enabled = enabled
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_timed_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
         self._timed_charge_start = value
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_timed_charge_change()
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
         self._timed_charge_end = value
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_timed_charge_change()
 
-    async def async_set_manual_grid_charge_enabled(self, enabled: bool) -> None:
-        self._manual_grid_charge_enabled = enabled
-        await self._async_apply_grid_charge_change()
-
-    async def _async_apply_grid_charge_change(self) -> None:
-        """Re-evaluate Zeitfenster/manuellen Schalter sofort nach einer
-        Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
-        warten."""
+    async def _async_apply_timed_charge_change(self) -> None:
+        """Re-evaluate das Zeitfenster sofort nach einer Einstellungsänderung,
+        statt bis zum nächsten Poll-Intervall zu warten."""
         if self.data is not None:
-            await self._async_enforce_grid_charge(self.data)
+            await self._async_enforce_timed_charge(self.data)
             self.data["timed_charge_active"] = self._timed_charge_active
             self.async_set_updated_data(self.data)
 
@@ -810,21 +787,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start <= now < end
         return now >= start or now < end
 
-    async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
+    async def _async_enforce_timed_charge(self, data: dict[str, Any]) -> None:
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
-        timed_should_charge = (
+        should_charge = (
             self._timed_charge_enabled
             and self._is_time_in_window(dt_util.now().time())
             and data["soc"] < target_soc
         )
-        should_charge = self._manual_grid_charge_enabled or timed_should_charge
 
         if should_charge:
             await self.async_start_sun_charge(-data["charge_limit"])
         elif self.sun_charge_active:
             await self.async_stop_sun_charge()
 
-        self._timed_charge_active = timed_should_charge
+        self._timed_charge_active = should_charge
 
     async def async_shutdown(self) -> None:
         await self.async_stop_grid_charge()

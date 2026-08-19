@@ -283,7 +283,7 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         await hass.async_block_till_done()
         assert hass.states.get(switch_id).state == "off"
 
-        # -- Ladeleistungsgrenzwert setzen --
+        # -- Max. Ladeleistung setzen --
         await hass.services.async_call(
             "number",
             "set_value",
@@ -404,11 +404,11 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     über den SunSpec-Modus (Slave-ID 100, "Immediate Controls") auslösen:
     erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
     40049 (Leistungsvorgabe %, negativ = Laden). Sowohl die Ladeleistung
-    (zentraler Ladeleistungsgrenzwert, Register 44, hier per
+    (zentraler "Max. Ladeleistung"-Grenzwert, Register 44, hier per
     _build_basic_registers()-Default 3000W) als auch der Ziel-SOC (zentrales
-    "Maximaler Lade-SOC", Register 46 als Vergleichswert) sind bewusst keine
+    "Max. SOC", Register 46 als Vergleichswert) sind bewusst keine
     eigenen Einstellungen, siehe anforderung.yaml
-    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+    REQ-TIMED-SOC-CHARGE."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_registers = _build_basic_registers()
@@ -500,7 +500,7 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             )
             verify_client.close()
             assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
-            # -3000 W (negativer Ladeleistungsgrenzwert, Register 44) / 4600 W
+            # -3000 W (negativer "Max. Ladeleistung"-Grenzwert, Register 44) / 4600 W
             # Referenz-Maximalleistung (Register 40053, _build_extended_registers()-
             # Default) * 100 = -65.217...%, skaliert mit sunssf -2 -> -6522.
             assert to_signed16(setpoint_result.registers[0]) == -6522
@@ -520,83 +520,5 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         )
         verify_client.close()
         assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
-    finally:
-        await server.shutdown()
-
-
-async def test_live_manual_grid_charge_switch_ignores_time_window(
-    hass, socket_enabled
-) -> None:
-    """End-to-End-Test für die manuelle Netzladung (Schalter "Netzladung"):
-    Einschalten muss unabhängig von Zeitfenster/Ziel-SOC einen echten Write
-    über den SunSpec-Modus auslösen (derselbe Mechanismus wie zeitgesteuertes
-    Laden)."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 3))
-    await server.serve_forever(background=True)
-
-    try:
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={
-                "host": "127.0.0.1",
-                "port": TEST_PORT + 3,
-                "slave_id_basic": SLAVE_ID_BASIC,
-                "slave_id_extended": SLAVE_ID_EXTENDED,
-                "scan_interval": 3600,
-            },
-        )
-        entry.add_to_hass(hass)
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-
-        registry = er.async_get(hass)
-        manual_id = _entity_id(registry, entry.entry_id, "manual_grid_charge_enabled")
-        active_text_id = _entity_id(
-            registry, entry.entry_id, "timed_charge_active_text"
-        )
-        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-
-        try:
-            # Bewusst kein Zeitfenster gesetzt und kein zeitgesteuertes Laden
-            # aktiviert - die manuelle Netzladung ist davon unabhängig.
-            await hass.services.async_call(
-                "switch", "turn_on", {"entity_id": manual_id}, blocking=True
-            )
-            await hass.async_block_till_done()
-            await asyncio.sleep(0.2)
-
-            assert hass.states.get(manual_id).state == "on"
-            assert coordinator.sun_charge_active is True
-            # Der Diagnose-Sensor für zeitgesteuertes Laden bleibt unberührt.
-            assert hass.states.get(active_text_id).state == "Inaktiv"
-
-            verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 3)
-            await verify_client.connect()
-            control_mode_result = await verify_client.read_holding_registers(
-                address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
-            )
-            verify_client.close()
-            assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
-
-            await hass.services.async_call(
-                "switch", "turn_off", {"entity_id": manual_id}, blocking=True
-            )
-            await hass.async_block_till_done()
-
-            assert coordinator.sun_charge_active is False
-        finally:
-            await coordinator.async_stop_sun_charge()
     finally:
         await server.shutdown()

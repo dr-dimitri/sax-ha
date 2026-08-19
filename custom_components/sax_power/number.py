@@ -45,8 +45,7 @@ class SaxPowerMaxSocNumber(SaxPowerEntity, NumberEntity):
     auf 0 und gibt es beim Unterschreiten wieder frei (siehe
     coordinator.SaxPowerCoordinator._async_enforce_max_soc). Dient
     zusätzlich als Ziel-SOC für das zeitgesteuerte Laden (keine eigene
-    Einstellung dafür, siehe anforderung.yaml
-    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS).
+    Einstellung dafür, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE).
     """
 
     _attr_translation_key = "max_soc"

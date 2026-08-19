@@ -212,32 +212,29 @@
     },
     "number": {
       "max_soc": {
-        "name": "Maximaler Lade-SOC"
+        "name": "Max. SOC"
       },
       "charge_limit": {
-        "name": "Ladeleistungsgrenzwert"
+        "name": "Max. Ladeleistung"
       },
       "discharge_limit": {
-        "name": "Entladeleistungsgrenzwert"
+        "name": "Max. Entladeleistung"
       }
     },
     "switch": {
       "storage": {
-        "name": "Speicher"
+        "name": "Speicher On/Off"
       },
       "timed_charge_enabled": {
-        "name": "Zeitgesteuertes Laden"
-      },
-      "manual_grid_charge_enabled": {
-        "name": "Netzladung"
+        "name": "Netzladung aktiv"
       }
     },
     "time": {
       "timed_charge_start": {
-        "name": "Beginn Zeitfenster"
+        "name": "Netzladung Start"
       },
       "timed_charge_end": {
-        "name": "Ende Zeitfenster"
+        "name": "Netzladung Ende"
       }
     }
   },

@@ -855,6 +855,107 @@ async def test_set_windows_with_non_overlapping_times_succeeds(hass) -> None:
     assert coordinator.grid_serving_end == dt_time(14, 0)
 
 
+async def test_set_grid_serving_window_rejects_genuine_overlap(hass) -> None:
+    """async_set_grid_serving_window prüft wie die Einzel-Setter das
+    tatsächliche Ziel-Fenster - eine echte Überschneidung wird weiterhin mit
+    HomeAssistantError abgelehnt."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(12, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(14, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(15, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(20, 0))
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_grid_serving_window(dt_time(13, 0), dt_time(16, 0))
+
+    # Die abgelehnte Änderung darf nicht übernommen worden sein.
+    assert coordinator.grid_serving_start == dt_time(15, 0)
+    assert coordinator.grid_serving_end == dt_time(20, 0)
+
+
+async def test_set_grid_serving_window_succeeds_for_non_overlapping_target(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(12, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(14, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(15, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(20, 0))
+
+    await coordinator.async_set_grid_serving_window(dt_time(8, 0), dt_time(11, 0))
+
+    assert coordinator.grid_serving_start == dt_time(8, 0)
+    assert coordinator.grid_serving_end == dt_time(11, 0)
+
+
+async def test_set_grid_serving_window_avoids_false_positive_from_stale_intermediate_state(
+    hass,
+) -> None:
+    """Regressionstest für den gemeldeten Bug: Verschiebt man das
+    Zeitfenster des netzdienlichen Ladens über die einzelnen Start-/
+    Ende-Entities (async_set_grid_serving_start gefolgt von
+    async_set_grid_serving_end), kann ein rein durch die getrennte
+    Bearbeitung entstehender Zwischenzustand (neuer Start + noch alter
+    Ende-Wert) fälschlich als Überschneidung mit der Netzladung erkannt
+    werden, obwohl weder das alte noch das neue Ziel-Fenster tatsächlich
+    überlappen. async_set_grid_serving_window setzt beide Werte atomar und
+    validiert nur das echte Ziel-Fenster, wodurch dieser Zwischenzustand gar
+    nicht erst entsteht."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(12, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(14, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(15, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(20, 0))
+
+    # Der Zwischenzustand (neuer Start 08:00 + noch nicht aktualisiertes
+    # altes Ende 20:00) würde die Netzladung (12:00-14:00) überlappen und
+    # von async_set_grid_serving_start allein abgelehnt werden.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_grid_serving_start(dt_time(8, 0))
+    assert coordinator.grid_serving_start == dt_time(15, 0)
+
+    # Das tatsächliche Ziel-Fenster (08:00-11:00) überlappt die Netzladung
+    # nicht und wird über den atomaren Setter akzeptiert.
+    await coordinator.async_set_grid_serving_window(dt_time(8, 0), dt_time(11, 0))
+    assert coordinator.grid_serving_start == dt_time(8, 0)
+    assert coordinator.grid_serving_end == dt_time(11, 0)
+
+
+async def test_set_timed_charge_window_rejects_genuine_overlap(hass) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_timed_charge_window(dt_time(2, 0), dt_time(11, 0))
+
+    assert coordinator.timed_charge_start == dt_time(1, 0)
+    assert coordinator.timed_charge_end == dt_time(5, 0)
+
+
+async def test_set_timed_charge_window_succeeds_for_non_overlapping_target(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+
+    await coordinator.async_set_timed_charge_window(dt_time(20, 0), dt_time(23, 0))
+
+    assert coordinator.timed_charge_start == dt_time(20, 0)
+    assert coordinator.timed_charge_end == dt_time(23, 0)
+
+
 # -- Netzdienliches Laden: Ladeverhalten -------------------------------------
 
 

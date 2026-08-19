@@ -490,31 +490,50 @@ requirement_grid_serving_charge:
     Laufen beide Fenster nur in disjunkten Monaten, dürfen sich die
     Tageszeiten beliebig überlappen, da die Fenster nie gleichzeitig aktiv
     sein können (siehe Beispiel oben). SaxPowerCoordinator.
-    _assert_windows_dont_overlap (aufgerufen aus allen sechs relevanten
-    Settern: async_set_timed_charge_start/-end/-month,
-    async_set_grid_serving_start/-end/-month) lehnt eine Änderung, die zu
-    einer echten Überschneidung führen würde, mit HomeAssistantError ab -
-    unabhängig davon, welche der beiden Entitäten-Gruppen gerade geändert
-    wird. Der Fehler wird über den auslösenden Service-Call an das Frontend
-    durchgereicht und dem Anwender damit direkt als Fehlermeldung angezeigt.
+    _assert_windows_dont_overlap (aufgerufen aus allen acht relevanten
+    Settern: async_set_timed_charge_start/-end/-month/-window,
+    async_set_grid_serving_start/-end/-month/-window) lehnt eine Änderung,
+    die zu einer echten Überschneidung führen würde, mit HomeAssistantError
+    ab - unabhängig davon, welche der beiden Entitäten-Gruppen gerade
+    geändert wird. Der Fehler wird über den auslösenden Service-Call an das
+    Frontend durchgereicht und dem Anwender damit direkt als Fehlermeldung
+    angezeigt.
     Die eigentliche Zeitfenster-Überlappungsprüfung
     (coordinator.windows_overlap) unterstützt wie _is_time_in_window über
     Mitternacht laufende Fenster sowie unvollständige Fenster (mindestens
     eine der vier Zeiten fehlt - gelten als nie überlappend); die
     Monatsprüfung ist eine einfache Set-Schnittmenge (months_a & months_b).
     Bedingt durch die unabhängigen Start-/Ende-/Monats-Entities pro Feature
-    kann das kurzzeitige Bearbeiten nur einer der beiden Zeit-Grenzen eines
-    bereits über Mitternacht laufenden Fensters in seltenen Fällen einen
-    ungewöhnlich großen Zwischenzustand ergeben und dadurch abgelehnt
-    werden, obwohl das beabsichtigte Endergebnis nicht überlappen würde -
-    betrifft nur Anwender, die für beide Features zusätzlich noch über
-    Mitternacht laufende Fenster einsetzen. Aus demselben Grund kann das
-    schrittweise Umstellen von überlappenden Tageszeiten auf disjunkte
-    Monate in ungünstiger Reihenfolge zwischenzeitlich abgelehnt werden -
-    empfohlen wird, zunächst beide Monats-Auswahlen anzupassen (wirkt sich
-    dabei so lange nicht überlappend aus, wie mindestens eines der beiden
-    Zeitfenster noch beim - nicht überlappenden - Default steht) und erst
-    danach die Zeiten zu ändern.
+    kann das getrennte Bearbeiten von Start- und Endzeit über die
+    Uhrzeit-Entities (zwei einzelne time/set_value-Service-Calls) einen nur
+    kurzzeitig gültigen Zwischenzustand erzeugen (neue Grenze + noch nicht
+    aktualisierte andere Grenze), der zu Unrecht als Überschneidung erkannt
+    wird, obwohl das beabsichtigte Endergebnis nicht überlappen würde - je
+    nachdem, ob zuerst Start oder Ende geändert wird. Das betrifft nicht nur
+    über Mitternacht laufende Fenster, sondern jedes Verschieben eines
+    Zeitfensters über die einzelnen Uhrzeit-Entities. Abhilfe: die Services
+    set_timed_charge_window/set_grid_serving_window (siehe unten) setzen
+    Start und Ende atomar in einem Aufruf und validieren dabei ausschließlich
+    das tatsächliche Ziel-Fenster, ohne einen solchen Zwischenzustand zu
+    durchlaufen - empfohlen für jede Änderung, bei der sich sowohl Start als
+    auch Ende ändern sollen. Aus einem analogen Grund kann das schrittweise
+    Umstellen von überlappenden Tageszeiten auf disjunkte Monate in
+    ungünstiger Reihenfolge zwischenzeitlich abgelehnt werden - empfohlen
+    wird, zunächst beide Monats-Auswahlen anzupassen (wirkt sich dabei so
+    lange nicht überlappend aus, wie mindestens eines der beiden Zeitfenster
+    noch beim - nicht überlappenden - Default steht) und erst danach die
+    Zeiten zu ändern.
+
+    Services set_timed_charge_window/set_grid_serving_window
+    (SaxPowerCoordinator.async_set_timed_charge_window/
+    async_set_grid_serving_window, services.yaml): Setzen Start und Ende
+    eines Zeitfensters atomar in einem einzigen Aufruf (Felder device_id,
+    start, end). Die Überlappungsprüfung läuft dabei genau einmal gegen das
+    fertige Ziel-Fenster - anders als bei den beiden einzelnen
+    Uhrzeit-Entities entsteht kein zwischenzeitlich ungültiger Zustand, der
+    fälschlich abgelehnt werden könnte. Die einzelnen Start-/Ende-Entities
+    (time.py) bleiben unverändert bestehen und eignen sich weiterhin für das
+    Verschieben nur einer einzelnen Zeitgrenze.
 
     Die Monats-Setter unterstützen zusätzlich einen validate-Parameter
     (Default True): SaxPowerMonthSwitch.async_added_to_hass ruft sie beim
@@ -549,6 +568,15 @@ requirement_grid_serving_charge:
        start/-end/-month, async_set_grid_serving_start/-end/-month) mit
        HomeAssistantError ab - inklusive des Falls, dass identische
        Tageszeiten bei disjunkten aktiven Monaten NICHT abgelehnt werden."
+    - "tests/test_coordinator.py deckt async_set_timed_charge_window/
+       async_set_grid_serving_window ab: Ablehnung eines echt überlappenden
+       Ziel-Fensters mit HomeAssistantError (ohne dass Start oder Ende
+       übernommen werden), erfolgreiches atomares Setzen eines nicht
+       überlappenden Ziel-Fensters, sowie der Fall, dass ein Ziel-Fenster
+       akzeptiert wird, obwohl ein durch getrenntes Setzen von Start und Ende
+       über die einzelnen Uhrzeit-Entities entstehender Zwischenzustand
+       überlappen würde (die eigentliche Motivation für die atomaren
+       Services)."
     - "tests/test_coordinator.py deckt das Ladeverhalten von netzdienlichem
        Laden ab: Start nur mit PV-Überschuss über dem Schwellwert, Deckelung
        auf min(Max. Netzladeleistung, PV-Überschuss), kein Start ohne

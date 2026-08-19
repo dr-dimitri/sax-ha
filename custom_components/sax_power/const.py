@@ -323,8 +323,12 @@ SUN_IC_MIN_WRITE_INTERVAL = 5  # Sekunden, Untergrenze gegen zu enges Polling
 
 SERVICE_START_GRID_CHARGE = "start_grid_charge"
 SERVICE_STOP_GRID_CHARGE = "stop_grid_charge"
+SERVICE_SET_TIMED_CHARGE_WINDOW = "set_timed_charge_window"
+SERVICE_SET_GRID_SERVING_WINDOW = "set_grid_serving_window"
 ATTR_POWER = "power"
 ATTR_DEVICE_ID = "device_id"
+ATTR_START = "start"
+ATTR_END = "end"
 
 DATA_COORDINATOR = "coordinator"
 

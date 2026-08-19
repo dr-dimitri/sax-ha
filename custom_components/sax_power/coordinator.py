@@ -854,6 +854,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_end = value
         await self._async_apply_grid_charge_change()
 
+    async def async_set_timed_charge_window(
+        self, start: dt_time, end: dt_time
+    ) -> None:
+        """Setzt Start und Ende der Netzladung atomar in einem Aufruf.
+
+        Anders als async_set_timed_charge_start/-end (die je nur eine der
+        beiden Zeit-Entities bedienen und dabei zwangsläufig gegen den noch
+        alten Wert der jeweils anderen Grenze validieren) prüft dies direkt
+        das tatsächliche Ziel-Fenster (start, end) - ein durch die
+        Zwei-Schritt-Bearbeitung nur kurzzeitig entstehendes, in Wahrheit gar
+        nicht beabsichtigtes Zwischenfenster kann die Prüfung dadurch nicht
+        mehr fälschlich ablehnen (siehe anforderung.yaml,
+        REQ-GRID-SERVING-CHARGE)."""
+        self._assert_windows_dont_overlap(
+            start,
+            end,
+            self._timed_charge_months,
+            self._grid_serving_start,
+            self._grid_serving_end,
+            self._grid_serving_months,
+        )
+        self._timed_charge_start = start
+        self._timed_charge_end = end
+        await self._async_apply_grid_charge_change()
+
     async def async_set_timed_charge_month(
         self, month: int, enabled: bool, validate: bool = True
     ) -> None:
@@ -1112,6 +1137,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_months,
         )
         self._grid_serving_end = value
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_grid_serving_window(
+        self, start: dt_time, end: dt_time
+    ) -> None:
+        """Analog zu async_set_timed_charge_window, für das netzdienliche
+        Laden - siehe dort für den Hintergrund (Vermeidung falscher
+        Ablehnungen durch Zwischenzustände beim getrennten Setzen von Start-
+        und Ende-Entity)."""
+        self._assert_windows_dont_overlap(
+            start,
+            end,
+            self._grid_serving_months,
+            self._timed_charge_start,
+            self._timed_charge_end,
+            self._timed_charge_months,
+        )
+        self._grid_serving_start = start
+        self._grid_serving_end = end
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_month(

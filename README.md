@@ -133,13 +133,16 @@ unberührt.
 | Max. Netzladeleistung | Ziel-Leistung für die Netzladung (W) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung einmalig mit dem beim Start gelesenen Ladeleistungsgrenzwert (Register 44) vorbelegt |
 | Netzladung Min. SOC | Unterer SOC-Schwellwert (0–100 %), unterhalb dessen die Netzladung startet – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
 
-Es gibt bewusst keine eigene Ziel-SOC-/Leistungseinstellung für
-zeitgesteuertes Laden – "Max. SOC" (oberes Ziel) und "Max.
-Netzladeleistung" sind die zentralen Einstellungen oben, gemeinsam mit
-netzdienlichem Laden genutzt. "Netzladung Min. SOC" (unterer Schwellwert,
-siehe unten) ist dagegen bewusst eine reine Netzladung-Einstellung, da nur
-die Netzladung – anders als netzdienliches Laden – aktiv aus dem Netz
-lädt und daher einen Schwellwert braucht, ab dem sich das lohnt.
+Es gibt bewusst keine eigene Ziel-SOC-Einstellung für zeitgesteuertes
+Laden – "Max. SOC" (oberes Ziel) ist die zentrale Einstellung oben,
+gemeinsam mit netzdienlichem Laden genutzt (dort als Grenze für die
+Max-SOC-Sperre). "Max. Netzladeleistung" wird dagegen nur von der
+Netzladung selbst benötigt, da nur diese – anders als netzdienliches
+Laden – tatsächlich mit einem Sollwert > 0 lädt. "Netzladung Min. SOC"
+(unterer Schwellwert, siehe unten) ist ebenfalls eine reine
+Netzladung-Einstellung, da nur die Netzladung – anders als netzdienliches
+Laden – aktiv aus dem Netz lädt und daher einen Schwellwert braucht, ab
+dem sich das lohnt.
 
 ### Schalter
 
@@ -245,10 +248,13 @@ zeitgesteuerten Laden, mit eigenem Hintergrund-Task.
 ### Netzdienliches Laden
 
 Eigenständiges Feature, das den Speicher innerhalb eines **eigenen**
-Zeitfensters lädt – im Unterschied zur Netzladung aber **ausschließlich mit
-PV-Überschuss**, nie aus dem Netz. Gedacht für Zeiträume, in denen der
-Speicher netzdienlich (d. h. Einspeisung ins Netz reduzierend) geladen
-werden soll, ohne dafür Netzstrom zu beziehen.
+Zeitfensters **nicht lädt, sondern aktiv am Laden hindert**, sobald PV-
+Überschuss über der Schwelle gemessen wird. Gedacht für Zeiträume, in denen
+der Speicher den PV-Überschuss netzdienlich (d. h. einspeisungsreduzierend)
+NICHT selbst verbrauchen soll, damit das Laden des Speichers stattdessen in
+die Zeit mit dem höchsten PV-Ertrag verschoben wird. Sinkt der Überschuss
+innerhalb des Fensters wieder ab oder endet das Zeitfenster, wird die
+Blockade aufgehoben und der Speicher fällt zurück in den Normalmodus.
 
 **Entitäten** (unter "Steuerung" am Gerät):
 
@@ -258,25 +264,23 @@ werden soll, ohne dafür Netzstrom zu beziehen.
 | Netzdienliches Laden Start | Startzeit (HH:MM) |
 | Netzdienliches Laden Ende | Endzeit (HH:MM) |
 | Netzdienliches Laden aktiv im Januar … Dezember | 12 Schalter, legen fest, in welchen Kalendermonaten das Zeitfenster überhaupt wirksam ist (siehe unten) |
-| Netzdienliches Laden aktiv (Sensor) | Diagnose-Sensor, zeigt ob gerade aktiv netzdienlich geladen wird |
+| Netzdienliches Laden aktiv (Sensor) | Diagnose-Sensor, zeigt ob das Laden gerade aktiv blockiert wird |
 
-Genutzt werden dieselben zentralen Einstellungen wie beim zeitgesteuerten
-Laden – "Max. SOC" als Ziel-SOC und "Max. Netzladeleistung" als
-Leistungsobergrenze; es gibt keine eigene Leistungseinstellung. Der
-tatsächlich geschriebene Sollwert wird zusätzlich auf den gerade am Smart
-Meter gemessenen PV-Überschuss gedeckelt (`min(Max. Netzladeleistung,
-PV-Überschuss)`) und sinkt mit fallendem Überschuss im selben
-Poll-Zyklus mit – es wird also nie mehr geladen, als gerade an Überschuss
-zur Verfügung steht. Ist kein Smart-Meter-Wert bekannt (z. B. SunSpec-Modus
-nicht erreichbar) oder liegt der gemessene Wert nicht über 200 W
-Überschuss (`SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`), startet netzdienliches
-Laden nicht – im Gegensatz zur Netzladung, die in diesem Fall unbeeinflusst
+Genutzt wird dieselbe zentrale Einstellung wie beim zeitgesteuerten Laden –
+"Max. SOC" als Ziel-SOC für die Max-SOC-Sperre. "Max. Netzladeleistung" wird
+dagegen nicht benötigt, da netzdienliches Laden nie einen Sollwert > 0
+schreibt, sondern immer nur 0 % (Laden aktiv unterbunden). Ist kein
+Smart-Meter-Wert bekannt (z. B. SunSpec-Modus nicht erreichbar) oder liegt
+der gemessene Wert nicht über 200 W Überschuss
+(`SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`), blockiert netzdienliches Laden
+nicht – im Gegensatz zur Netzladung, die in diesem Fall unbeeinflusst
 weiterläuft.
 
 Die Max-SOC-Sperre (siehe [oben](#zeitgesteuertes-laden)) gilt unverändert
-auch für netzdienliches Laden. Zeitgesteuertes und netzdienliches Laden
-schließen sich bereits über die entgegengesetzte PV-Überschuss-Bedingung
-gegenseitig aus und können nie gleichzeitig einen Ladesollwert schreiben.
+auch für netzdienliches Laden. Zeitgesteuertes Laden und die netzdienliche
+Blockade schließen sich bereits über die entgegengesetzte
+PV-Überschuss-Bedingung gegenseitig aus und können nie gleichzeitig einen
+Ladesollwert schreiben.
 
 **Aktive Monate:** Wie bei der Netzladung legen 12 Schalter ("Netzdienliches
 Laden aktiv im Januar" … "im Dezember") fest, in welchen Kalendermonaten

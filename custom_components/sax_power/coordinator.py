@@ -1175,26 +1175,32 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
-           eigenen aktiven Monat, mit gesetzter "Max. Netzladeleistung" UND
-           mit PV-Überschuss über
-           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) kann parallel zu Schritt 2
-           ausgewertet werden, da beide Bedingungen sich bereits über
-           pv_surplus_active gegenseitig ausschließen (zeitgesteuertes Laden
-           verlangt KEINEN, netzdienliches Laden verlangt EINEN
-           PV-Überschuss) - die genau umgekehrte PV-Bedingung zum
-           zeitgesteuerten Laden. Das Feature lädt bewusst NIE aus dem Netz,
-           sondern ausschließlich mit dem gerade am Smart Meter gemessenen
-           PV-Überschuss, auf "Max. Netzladeleistung" gedeckelt
-           (min(max_charge_power, smartmeter_power)) - sinkt der Überschuss,
-           sinkt der Sollwert im selben Poll-Zyklus mit, es wird also nie
-           mehr geladen als gerade an Überschuss verfügbar ist. Die
-           Zeitfenster von zeitgesteuertem und netzdienlichem Laden dürfen
-           sich zusätzlich nicht überschneiden (siehe
-           _windows_overlap_with_months/_notify_time_window_overlap) - das
-           ist eine reine Konfigurationsregel für den Anwender, keine
+           eigenen aktiven Monat) kann parallel zu Schritt 2 ausgewertet
+           werden, da beide Bedingungen sich bereits über pv_surplus_active
+           gegenseitig ausschließen (zeitgesteuertes Laden verlangt KEINEN,
+           netzdienliches Laden verlangt EINEN PV-Überschuss über
+           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) - die genau umgekehrte
+           PV-Bedingung zum zeitgesteuerten Laden. Das Feature LÄDT dabei
+           NICHT, sondern blockiert aktiv das Laden (Sollwert 0 %,
+           analog zur Max-SOC-Sperre oben): Sobald innerhalb des Zeitfensters
+           PV-Überschuss über der Schwelle gemessen wird, soll der Speicher
+           diesen Überschuss NICHT selbst verbrauchen, damit er stattdessen
+           für die Zeit mit dem höchsten PV-Ertrag zur Verfügung steht bzw.
+           netzdienlich (einspeisungsreduzierend) wirkt - das Laden des
+           Speichers wird also aus dem Zeitfenster heraus verschoben statt
+           dort stattzufinden. Sinkt der Überschuss innerhalb des Fensters
+           wieder auf/unter die Schwelle oder endet das Zeitfenster, wird die
+           Blockade aufgehoben und der Speicher fällt zurück in den
+           Normalmodus (Register 40051 aktiv auf 0, SmartMeter-Nullregelung -
+           siehe Schritt 4). Die Zeitfenster von zeitgesteuertem und
+           netzdienlichem Laden dürfen sich zusätzlich nicht überschneiden
+           (siehe _windows_overlap_with_months/_notify_time_window_overlap) -
+           das ist eine reine Konfigurationsregel für den Anwender, keine
            Voraussetzung für sicheren Betrieb.
-        4. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
-           Nullregelung) gesetzt.
+        4. Andernfalls (außerhalb jedes Zeitfensters, falscher Monat, PV-
+           Überschuss innerhalb des netzdienlichen Fensters auf/unter die
+           Schwelle gefallen, oder Feature deaktiviert) wird Register 40051
+           zurück auf 0 (SmartMeter-Nullregelung, Normalmodus) gesetzt.
 
         PV-Überschuss-Erkennung: data["smartmeter_power"] (Register 40072,
         siehe REG_SUN_METER_POWER_ACTIVE_SUM) ist bereits derselbe,
@@ -1206,9 +1212,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wird hier bewusst der bereits umgerechnete Anzeigewert ausgewertet,
         nicht das Rohregister. Fehlt der Wert (z. B. SunSpec-Modus gerade
         nicht erreichbar), blockiert das die Netzladung nicht, verhindert
-        aber netzdienliches Laden (siehe unten - ohne bekannten Überschuss
-        kann nicht sichergestellt werden, dass nicht aus dem Netz geladen
-        wird).
+        aber die netzdienliche Blockade (siehe unten - ohne bekannten
+        Überschuss kann nicht erkannt werden, ob die 200-W-Schwelle
+        überschritten ist).
 
         Aktive Monate: Zusätzlich zum Zeitfenster hat jedes Feature 12
         Monats-Schalter (switch.SaxPowerMonthSwitch, "aktiv im Januar" ...
@@ -1247,7 +1253,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._timed_charge_min_soc is not None
             and self._timed_charge_armed
         )
-        grid_serving_should_charge = (
+        grid_serving_should_block = (
             not soc_reached
             and pv_surplus_active
             and self._grid_serving_enabled
@@ -1255,7 +1261,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._is_time_in_window(
                 now_time, self._grid_serving_start, self._grid_serving_end
             )
-            and self._max_charge_power is not None
         )
 
         max_soc_clamped_now = False
@@ -1305,28 +1310,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._max_soc_hold_is_window_bound = False
             if timed_should_charge:
                 await self.async_start_sun_charge(-self._max_charge_power)
-            elif grid_serving_should_charge:
-                # smartmeter_power ist hier != None (sonst wäre
-                # pv_surplus_active False) und >
-                # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT > 0.
-                charge_power = min(self._max_charge_power, round(smartmeter_power))
-                await self.async_start_sun_charge(-charge_power)
+            elif grid_serving_should_block:
+                # PV-Überschuss innerhalb des netzdienlichen Zeitfensters:
+                # Laden aktiv unterbinden (Sollwert 0 %), damit der Speicher
+                # den Überschuss nicht selbst verbraucht - das Laden soll
+                # dadurch in die Zeit mit dem höchsten PV-Ertrag verschoben
+                # werden, statt bereits hier stattzufinden.
+                await self.async_start_sun_charge(0)
             elif self.sun_charge_active:
                 await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
-        self._grid_serving_active = grid_serving_should_charge
+        self._grid_serving_active = grid_serving_should_block
         self._max_soc_clamped = max_soc_clamped_now
 
     # -- Netzdienliches Laden --------------------------------------------------
     # Eigenständiges, zum zeitgesteuerten Laden oben zeitlich exklusives
-    # Feature (siehe _assert_windows_dont_overlap): lädt den Speicher
-    # innerhalb eines eigenen Zeitfensters, aber NUR mit PV-Überschuss - nie
-    # aus dem Netz. Teilt sich mit zeitgesteuertem Laden denselben
-    # SunSpec-Modus-Schreibpfad sowie die Max-SOC-Sperre und "Max.
-    # Netzladeleistung" (self._max_charge_power) als Leistungsobergrenze -
-    # siehe _async_enforce_grid_charge für die Priorisierung und
-    # anforderung.yaml, REQ-GRID-SERVING-CHARGE.
+    # Feature (siehe _assert_windows_dont_overlap): blockiert das Laden des
+    # Speichers innerhalb eines eigenen Zeitfensters aktiv, sobald PV-
+    # Überschuss über der Schwelle gemessen wird, damit das Laden in die Zeit
+    # mit dem höchsten PV-Ertrag verschoben wird, statt bereits im Fenster
+    # stattzufinden. Teilt sich mit zeitgesteuertem Laden denselben
+    # SunSpec-Modus-Schreibpfad sowie die Max-SOC-Sperre - "Max.
+    # Netzladeleistung" wird hier NICHT benötigt, da nie tatsächlich mit
+    # einem Sollwert > 0 geladen wird - siehe _async_enforce_grid_charge für
+    # die Priorisierung und anforderung.yaml, REQ-GRID-SERVING-CHARGE.
 
     @property
     def grid_serving_enabled(self) -> bool:

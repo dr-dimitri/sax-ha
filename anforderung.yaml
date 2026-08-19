@@ -476,37 +476,41 @@ requirement_timed_soc_charge:
 # ==============================================================================
 requirement_grid_serving_charge:
   id: REQ-GRID-SERVING-CHARGE
-  title: "Netzdienliches Laden: Speicher innerhalb eines eigenen Zeitfensters mit eigenen aktiven Monaten ausschließlich mit PV-Überschuss laden"
+  title: "Netzdienliches Laden: Speicher innerhalb eines eigenen Zeitfensters mit eigenen aktiven Monaten bei PV-Überschuss vom Laden abhalten, um das Laden in die ertragsreichste Zeit zu verschieben"
   status: done
   description: >
     Eigenständiges Software-Feature (Schalter "Netzdienliches Laden aktiv",
     switch.py, sowie Zeitfenster "Netzdienliches Laden Start"/"Ende",
     time.py), das sich mit zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE) den
-    SunSpec-Modus-Schreibpfad (_async_sun_charge_loop), die zentralen
-    Einstellungen "Max. SOC" (Ziel-SOC) und "Max. Netzladeleistung"
-    (Leistungsobergrenze) sowie die Max-SOC-Sperre teilt - siehe
+    SunSpec-Modus-Schreibpfad (_async_sun_charge_loop), die zentrale
+    Einstellung "Max. SOC" (Ziel-SOC) sowie die Max-SOC-Sperre teilt - siehe
     SaxPowerCoordinator._async_enforce_grid_charge. Im Unterschied zum
-    zeitgesteuerten Laden lädt netzdienliches Laden bewusst NIE aus dem
-    Netz, sondern ausschließlich mit dem gerade am Smart Meter gemessenen
-    PV-Überschuss (data["smartmeter_power"] > SMARTMETER_PV_SURPLUS_
-    THRESHOLD_WATT, dieselbe Schwelle wie beim PV-Überschuss-Abbruch der
-    Netzladung, nur mit umgekehrter Bedingung) - der geschriebene Sollwert
-    wird dabei auf min("Max. Netzladeleistung", aktueller PV-Überschuss)
-    gedeckelt und sinkt mit fallendem Überschuss im selben Poll-Zyklus mit.
-    Fehlt der Smart-Meter-Wert (z. B. SunSpec-Modus nicht erreichbar), darf
-    netzdienliches Laden NICHT starten (im Gegensatz zum zeitgesteuerten
-    Laden, das in diesem Fall unbeeinflusst weiterläuft) - ohne bekannten
-    Überschuss kann nicht sichergestellt werden, dass nicht aus dem Netz
-    geladen wird.
+    zeitgesteuerten Laden LÄDT netzdienliches Laden NICHT, sondern blockiert
+    das Laden aktiv (Sollwert 0 %, Register 40049), sobald innerhalb seines
+    Zeitfensters PV-Überschuss über der Schwelle gemessen wird
+    (data["smartmeter_power"] > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (200 W),
+    dieselbe Schwelle wie beim PV-Überschuss-Abbruch der Netzladung, nur mit
+    umgekehrter Bedingung). Zweck: der Speicher soll den PV-Überschuss
+    während dieses Zeitfensters NICHT selbst verbrauchen, damit das Laden des
+    Speichers stattdessen in die Zeit mit dem höchsten PV-Ertrag verschoben
+    wird - "Max. Netzladeleistung" wird dafür nicht benötigt, da nie mit
+    einem Sollwert > 0 geladen wird. Sinkt der Überschuss innerhalb des
+    Fensters wieder auf/unter die Schwelle oder endet das Zeitfenster, wird
+    die Blockade aktiv aufgehoben (Register 40051 zurück auf 0, SmartMeter-
+    Nullregelung) und der Speicher fällt in den Normalmodus zurück. Fehlt der
+    Smart-Meter-Wert (z. B. SunSpec-Modus nicht erreichbar), blockiert
+    netzdienliches Laden NICHT (im Gegensatz zum zeitgesteuerten Laden, das
+    in diesem Fall unbeeinflusst weiterläuft) - ohne bekannten Überschuss
+    kann nicht erkannt werden, ob die Schwelle überschritten ist.
 
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
     ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
     unverändert für beide Lademodi), 2. zeitgesteuertes Laden, 3.
-    netzdienliches Laden. Zeitgesteuertes und netzdienliches Laden
-    schließen sich dabei bereits über die PV-Überschuss-Bedingung
-    gegenseitig aus (kein Überschuss vs. Überschuss) und können nie
-    gleichzeitig einen Ladesollwert schreiben.
+    netzdienliches Laden (Blockade). Zeitgesteuertes Laden und die
+    netzdienliche Blockade schließen sich dabei bereits über die
+    PV-Überschuss-Bedingung gegenseitig aus (kein Überschuss vs. Überschuss)
+    und können nie gleichzeitig einen Ladesollwert schreiben.
 
     Aktive Monate: Zusätzlich zum Zeitfenster hat jedes der beiden Features
     (Netzladung UND netzdienliches Laden) 12 Monats-Schalter

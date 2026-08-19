@@ -178,6 +178,18 @@ die Defaults (deaktiviert, 00:00–00:05). Das wirkt sich nur auf den
 allerersten Start eines neu eingerichteten Eintrags aus – danach gilt
 ausschließlich der zuletzt über die Entitäten gesetzte Wert.
 
+**PV-Überschuss-Abbruch:** Neben dem Fensterende beendet der Coordinator die
+Netzladung auch aktiv, sobald am Smart Meter mehr als 200 W PV-Überschuss
+gemessen werden (Konstante `SMARTMETER_PV_SURPLUS_THRESHOLD_WATT` in
+`const.py`) – mitten im Zeitfenster, sobald das beim nächsten Poll-Zyklus
+erkannt wird, nicht erst am konfigurierten Ende. Grundlage ist der Sensor
+"Smart Meter Leistung" (`smartmeter_power`, Register 40072): ein **positiver**
+Anzeigewert bedeutet Überschuss aus der Dachphotovoltaik, ein negativer Wert
+Netzbezug – das Vorzeichen des rohen Modbus-Registers kann davon abweichen,
+maßgeblich ist der bereits umgerechnete Anzeigewert. Ist der Wert (noch)
+nicht verfügbar, z. B. weil der SunSpec-Modus gerade nicht erreichbar ist,
+blockiert das die Netzladung nicht.
+
 **Max-SOC-Sperre:** Unabhängig davon, ob zeitgesteuertes Laden aktiviert
 ist, hält der Coordinator den Speicher aktiv auf 0 % Leistungsvorgabe
 (Register 40051 weiterhin Sollwertvorgabe, Register 40049 = 0 %), sobald

@@ -319,3 +319,16 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # sowie "Max. SOC" (Fallback MAX_SOC oben) als Ziel-SOC. Keine
 # eigenen Einstellungen dafür - siehe anforderung.yaml,
 # REQ-TIMED-SOC-CHARGE.
+#
+# Zusätzlicher Abbruchgrund neben Zeitfenster/Max-SOC: Sobald am Smart Meter
+# (data["smartmeter_power"], Register 40072 "Summenwirkleistung Netz", siehe
+# REG_SUN_METER_POWER_ACTIVE_SUM) mehr als dieser Schwellwert an PV-Überschuss
+# gemessen wird, wird die Netzladung beendet - siehe
+# SaxPowerCoordinator._async_enforce_grid_charge, REQ-TIMED-SOC-CHARGE.
+# Vorzeichenkonvention laut Anwender: ein POSITIVER Anzeigewert steht für
+# Überschuss aus der Dachphotovoltaik (Einspeisung), der Rohregisterwert kann
+# davon abweichen - siehe apply_sunssf/to_signed16 für die Umrechnung. Als
+# eigene Konstante ausgelagert, da der Schwellwert absehbar auch an anderer
+# Stelle benötigt wird (z. B. für eine PV-Überschuss-Erkennung außerhalb der
+# Netzladung).
+SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 200

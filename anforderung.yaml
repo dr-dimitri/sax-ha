@@ -296,13 +296,36 @@ requirement_timed_soc_charge:
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
-       Ende", HH:MM, darf über Mitternacht laufen) und "Max.
-       Netzladeleistung" (number.py) gesetzt, wird Register 40049 auf einen
-       negativen, aus "Max. Netzladeleistung" umgerechneten Sollwert
-       gesetzt.
+       Ende", HH:MM, darf über Mitternacht laufen), "Max.
+       Netzladeleistung" (number.py) gesetzt UND kein PV-Überschuss über
+       SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py, 200 W) am Smart Meter
+       gemessen, wird Register 40049 auf einen negativen, aus "Max.
+       Netzladeleistung" umgerechneten Sollwert gesetzt.
     3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
        auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
-       geräteseitigen Timeout zu warten.
+       geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
+       Deaktivierung/fehlender Max.-Netzladeleistung auch den Fall, dass
+       während eines laufenden Zeitfensters PV-Überschuss über dem
+       Schwellwert erkannt wird - die Netzladung wird dann beim nächsten
+       Poll-Zyklus (nicht erst am Fensterende) beendet, weil in diesem Fall
+       die geräteeigene SmartMeter-Nullregelung den PV-Überschuss ohnehin
+       bereits selbst zum Laden nutzt.
+
+    PV-Überschuss-Prüfung: Grundlage ist data["smartmeter_power"] (SunSpec-
+    Modus, Register 40072 "Summenwirkleistung Netz", REG_SUN_METER_
+    POWER_ACTIVE_SUM) - derselbe, bereits vorzeichenrichtig umgerechnete Wert
+    (apply_sunssf/to_signed16), der auch im Sensor "Smart Meter Leistung"
+    angezeigt wird (sensor.py, unverändert via _direct). Vorzeichenkonvention
+    (Anwenderangabe, nicht offiziell in modbus.pdf dokumentiert): ein
+    POSITIVER Anzeigewert bedeutet Überschuss aus der Dachphotovoltaik
+    (Einspeisung ins Netz); der rohe Registerinhalt selbst kann davon
+    abweichende Vorzeichen tragen, deshalb wertet die Prüfung bewusst den
+    bereits umgerechneten Anzeigewert aus, nicht das Rohregister direkt.
+    Ist der Wert (noch) nicht verfügbar (z. B. SunSpec-Modus nicht
+    erreichbar), blockiert das die Netzladung nicht. Der Schwellwert
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) ist bewusst als eigene,
+    wiederverwendbare Konstante ausgelagert (200 W), da er absehbar auch an
+    anderer Stelle für eine PV-Überschuss-Erkennung benötigt wird.
 
     Schreibmechanismus (SunSpec-Modus, Slave-ID 100, Modell 123
     "Immediate Controls", siehe modbus_llm.yaml): Erst Register 40051 auf 1
@@ -371,6 +394,14 @@ requirement_timed_soc_charge:
        bei Zielerreichung, Freigabe beim Unterschreiten), die
        Watt-zu-Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
        Schreibintervall (_sun_ic_write_interval) ab."
+    - "tests/test_coordinator.py deckt zusätzlich die PV-Überschuss-Prüfung
+       ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
+       smartmeter_power über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, aktives
+       Beenden einer bereits laufenden Netzladung, sobald der Schwellwert
+       mitten im Zeitfenster überschritten wird, normales Laden bei
+       smartmeter_power auf/unter dem Schwellwert (inkl. negativer Werte =
+       Netzbezug) sowie unveränderter Ablauf, wenn smartmeter_power fehlt
+       (SunSpec-Modus nicht erreichbar)."
     - "tests/test_integration_live.py enthält End-to-End-Tests, die über
        echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren des
        zeitgesteuerten Ladens innerhalb des Zeitfensters Register 40051 auf

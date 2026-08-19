@@ -344,7 +344,7 @@ async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
     """Zeitgesteuertes Laden schreibt über den SunSpec-Modus (Slave-ID 100):
     erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
     40049 (Leistungsvorgabe %) - siehe anforderung.yaml,
-    REQ-DISCHARGE-BUTTON-DEDUP-SETTINGS."""
+    REQ-TIMED-SOC-CHARGE."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -362,7 +362,7 @@ async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
     }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Maximaler Lade-SOC"
+    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
 
     try:
         with _patched_now(2):
@@ -413,14 +413,14 @@ async def test_enforce_timed_charge_stops_when_target_soc_reached(hass) -> None:
     }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Maximaler Lade-SOC"
+    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
     coordinator._timed_charge_active = True
     # Echter (cancelbarer) Task statt MagicMock, da async_stop_sun_charge die
     # Cancellation awaitet, bevor es den Steuermodus zurücksetzt.
     coordinator._sun_charge_task = asyncio.create_task(asyncio.sleep(3600))
 
     with _patched_now(2):
-        await coordinator._async_enforce_grid_charge({"soc": 90, "charge_limit": 3000})
+        await coordinator._async_enforce_timed_charge({"soc": 90, "charge_limit": 3000})
 
     assert coordinator._timed_charge_active is False
     assert coordinator.sun_charge_active is False
@@ -430,11 +430,11 @@ async def test_enforce_timed_charge_inactive_outside_window(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Maximaler Lade-SOC"
+    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
     await coordinator.async_set_timed_charge_enabled(True)
 
     with _patched_now(12):
-        await coordinator._async_enforce_grid_charge({"soc": 10, "charge_limit": 3000})
+        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
 
     assert coordinator._timed_charge_active is False
     assert coordinator.sun_charge_active is False
@@ -444,75 +444,13 @@ async def test_enforce_timed_charge_inactive_when_disabled(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Maximaler Lade-SOC"
+    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
     # timed_charge_enabled bleibt False (Default)
 
     with _patched_now(2):
-        await coordinator._async_enforce_grid_charge({"soc": 10, "charge_limit": 3000})
+        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
 
     assert coordinator._timed_charge_active is False
-    assert coordinator.sun_charge_active is False
-
-
-# -- Manuelle Netzladung (Schalter) -------------------------------------------
-
-
-async def test_manual_grid_charge_ignores_time_window(hass) -> None:
-    """Die manuelle Netzladung lädt unabhängig vom Zeitfenster des
-    zeitgesteuerten Ladens, solange der Schalter aktiv ist."""
-    client = _make_client()
-    write_result = MagicMock()
-    write_result.isError.return_value = False
-    client.write_register = AsyncMock(return_value=write_result)
-
-    coordinator = _make_coordinator(hass, client)
-    coordinator.data = {
-        "soc": 50,
-        "charge_limit": 3000,
-        "ic_max_power_reference": 4600,
-        "ic_timeout": 300,
-    }
-
-    try:
-        # Bewusst kein Zeitfenster gesetzt/aktiviert und keine
-        # _patched_now - die manuelle Netzladung ist davon unabhängig.
-        await coordinator.async_set_manual_grid_charge_enabled(True)
-        await asyncio.sleep(0.1)
-
-        assert coordinator.sun_charge_active is True
-        # Der Diagnose-Sensor "Zeitgesteuertes Laden aktiv" bleibt False -
-        # er spiegelt nur die zeitgesteuerte Bedingung, nicht den manuellen
-        # Schalter.
-        assert coordinator._timed_charge_active is False
-        client.write_register.assert_any_await(
-            address=REG_SUN_IC_CONTROL_MODE,
-            value=SUN_IC_CONTROL_MODE_SETPOINT,
-            device_id=100,
-        )
-    finally:
-        await coordinator.async_stop_sun_charge()
-
-
-async def test_manual_grid_charge_turn_off_stops_charging(hass) -> None:
-    client = _make_client()
-    write_result = MagicMock()
-    write_result.isError.return_value = False
-    client.write_register = AsyncMock(return_value=write_result)
-
-    coordinator = _make_coordinator(hass, client)
-    coordinator.data = {
-        "soc": 50,
-        "charge_limit": 3000,
-        "ic_max_power_reference": 4600,
-        "ic_timeout": 300,
-    }
-
-    await coordinator.async_set_manual_grid_charge_enabled(True)
-    await asyncio.sleep(0.1)
-    assert coordinator.sun_charge_active is True
-
-    await coordinator.async_set_manual_grid_charge_enabled(False)
-
     assert coordinator.sun_charge_active is False
 
 

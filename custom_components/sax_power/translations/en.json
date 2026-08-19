@@ -212,32 +212,29 @@
     },
     "number": {
       "max_soc": {
-        "name": "Maximum charge SOC"
+        "name": "Max. SOC"
       },
       "charge_limit": {
-        "name": "Charge power limit"
+        "name": "Max. charge power"
       },
       "discharge_limit": {
-        "name": "Discharge power limit"
+        "name": "Max. discharge power"
       }
     },
     "switch": {
       "storage": {
-        "name": "Storage"
+        "name": "Storage on/off"
       },
       "timed_charge_enabled": {
-        "name": "Timed charge"
-      },
-      "manual_grid_charge_enabled": {
-        "name": "Grid charge"
+        "name": "Grid charge active"
       }
     },
     "time": {
       "timed_charge_start": {
-        "name": "Time window start"
+        "name": "Grid charge start"
       },
       "timed_charge_end": {
-        "name": "Time window end"
+        "name": "Grid charge end"
       }
     }
   },

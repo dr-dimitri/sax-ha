@@ -74,9 +74,9 @@
 #   Mechanismus aktiv ist, da der Speicher einen nicht periodisch
 #   aufgefrischten Sollwert nach einem Timeout verwirft: Basic-Mode-Netzladung
 #   (start_grid_charge-Service, Register 41) alle 30s fest; zeitgesteuertes
-#   Laden/manuelle Netzladung (SunSpec-Modus, Register 40049/40051) mit einem
-#   aus dem geräteseitig gemeldeten Timeout (Register 40050) abgeleiteten
-#   Intervall (die Hälfte des Timeouts, gedeckelt auf 30s, mindestens 5s).
+#   Laden (SunSpec-Modus, Register 40049/40051) mit einem aus dem
+#   geräteseitig gemeldeten Timeout (Register 40050) abgeleiteten Intervall
+#   (die Hälfte des Timeouts, gedeckelt auf 30s, mindestens 5s).
 #
 # ==============================================================================
 # ENTWICKLUNGSUMGEBUNG (DEVCONTAINER)
@@ -234,9 +234,9 @@ requirement_sunspec_mode_correction:
     enthält einen zusammenhängenden Block aus fünf SunSpec-Modellen:
     Common (Geräteidentität), "3Ph Inverter" (103, Speicherelektronik),
     "Immediate Controls" (123, Sollwertvorgabe - Register 40049/40051
-    zusätzlich als Schreibpfad für zeitgesteuertes Laden und die manuelle
-    Netzladung, siehe REQ-MANUAL-GRID-CHARGE-SWITCH), "WYE Connect 3Ph
-    Meter" (203, Netz/Smart Meter) und "Battery Base" (802, Akkuzellen).
+    zusätzlich als Schreibpfad für zeitgesteuertes Laden, siehe
+    REQ-TIMED-SOC-CHARGE), "WYE Connect 3Ph Meter" (203, Netz/Smart Meter)
+    und "Battery Base" (802, Akkuzellen).
 
     Entlade-/Ladeleistung (discharge_power/charge_power) werden aus
     Register 40029 ("Wirkleistung Speicher Summe") abgeleitet, die
@@ -253,7 +253,7 @@ requirement_sunspec_mode_correction:
     Der Basic-Mode-P-Sollwert (Register 41, Slave 64, absoluter
     Watt-Sollwert) bleibt ausschließlich für den manuellen
     start_grid_charge/stop_grid_charge-Service in Verwendung, siehe
-    REQ-MANUAL-GRID-CHARGE-SWITCH.
+    REQ-TIMED-SOC-CHARGE.
 
     PV-Leistung (Register 40045) und das komplette Meter-Modell 203 sind
     laut modbus.pdf nur mit dem Smartmeter ADW200 vollständig verfügbar.
@@ -277,61 +277,17 @@ requirement_timed_soc_charge:
   title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden"
   status: done
   description: >
-    Software-Logik (kein natives Geräteregister), umgesetzt in
-    SaxPowerCoordinator._async_enforce_grid_charge und bei jedem
-    Poll-Zyklus sowie bei jeder Einstellungsänderung neu ausgewertet: Ist
-    das Feature aktiviert (switch.py, "Zeitgesteuertes Laden"), die
-    aktuelle Uhrzeit innerhalb des konfigurierten Zeitfensters
-    (time.py, "Beginn Zeitfenster"/"Ende Zeitfenster", HH:MM, darf über
-    Mitternacht laufen) und der SOC unter dem Ziel-SOC, startet der
-    Coordinator die SunSpec-Modus-Netzladung (siehe
-    REQ-MANUAL-GRID-CHARGE-SWITCH für den Schreibmechanismus) mit einem
-    negativen Sollwert in Höhe des zentralen Ladeleistungsgrenzwerts
+    Software-Logik (kein natives Geräteregister für die Aktivierung
+    selbst), umgesetzt in SaxPowerCoordinator._async_enforce_timed_charge
+    und bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
+    ausgewertet: Ist das Feature aktiviert (switch.py, "Netzladung
+    aktiv"), die aktuelle Uhrzeit innerhalb des konfigurierten
+    Zeitfensters (time.py, "Netzladung Start"/"Netzladung Ende", HH:MM,
+    darf über Mitternacht laufen) und der SOC unter dem Ziel-SOC, startet
+    der Coordinator die SunSpec-Modus-Netzladung mit einem negativen
+    Sollwert in Höhe des zentralen "Max. Ladeleistung"-Grenzwerts
     (Register 44). Wird der Ziel-SOC erreicht, das Zeitfenster verlassen
-    oder das Feature deaktiviert, stoppt die Netzladung automatisch -
-    außer die manuelle Netzladung (Schalter "Netzladung") hält sie
-    weiterhin aktiv.
-
-    Als Ziel-SOC dient die bereits vorhandene "Maximaler Lade-SOC"-Entity
-    (number.py); ist kein Wert gesetzt, gilt ersatzweise 100 %. Es gibt
-    keine eigene Ziel-SOC- oder Leistungseinstellung für dieses Feature.
-    Eine Änderung des Ziel-SOC wirkt sofort (async_set_max_soc wertet
-    _async_enforce_grid_charge unmittelbar neu aus statt erst beim
-    nächsten Poll-Zyklus).
-
-    Aktiviert-Zustand sowie Start-/Endzeit werden über RestoreEntity
-    über Neustarts hinweg persistiert. Zusätzlich zeigt ein
-    Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv
-    nachgeladen wird - er spiegelt ausschließlich die zeitgesteuerte
-    Bedingung wider, nicht die manuelle Netzladung.
-  acceptance_criteria:
-    - "tests/test_coordinator.py deckt _is_time_in_window (normales
-       Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
-       Fenster) sowie _async_enforce_grid_charge (Start/Stop bei
-       Zielerreichung/Fensterende/Deaktivierung) ab."
-    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
-       über echte Modbus-TCP-Kommunikation verifiziert, dass Aktivieren
-       des Features innerhalb des Zeitfensters einen echten Write auf
-       die SunSpec-Modus-Register 40049/40051 auslöst."
-
-# ==============================================================================
-# ANFORDERUNG: MANUELLE NETZLADUNG (SCHALTER) ÜBER DEN SUNSPEC-MODUS;
-# KEINE REDUNDANTEN LEISTUNGSEINSTELLUNGEN
-# ==============================================================================
-requirement_manual_grid_charge_switch:
-  id: REQ-MANUAL-GRID-CHARGE-SWITCH
-  title: "Schalter für manuelle Netzladung über SunSpec-Modus-Register 40049/40051; keine redundanten Leistungseinstellungen"
-  status: done
-  description: >
-    switch.py exponiert die SwitchEntity "Netzladung" unter "Steuerung".
-    Eingeschaltet lädt sie den Speicher direkt aus dem Netz, unabhängig
-    von Zeitfenster und Ziel-SOC des zeitgesteuerten Ladens (siehe
-    REQ-TIMED-SOC-CHARGE) - z. B. um sofort aus dem Netz zu laden, ohne
-    das zeitgesteuerte Laden aktivieren zu müssen. Beide Wege teilen sich
-    denselben Hintergrund-Task (SaxPowerCoordinator._sun_charge_task,
-    _async_enforce_grid_charge) und lesen den Sollwert aus der bereits
-    vorhandenen "Ladeleistungsgrenzwert"-Entity (Register 44) statt eine
-    eigene Leistungseinstellung anzubieten.
+    oder das Feature deaktiviert, stoppt die Netzladung automatisch.
 
     Schreibmechanismus (SunSpec-Modus, Slave-ID 100, Modell 123
     "Immediate Controls", siehe modbus_llm.yaml): Erst wird Register 40051
@@ -345,22 +301,36 @@ requirement_manual_grid_charge_switch:
     _sun_ic_write_interval: die Hälfte des von Register 40050 gemeldeten
     Timeouts, gedeckelt auf 30s, mindestens alle 5s), da das Gerät den
     Sollwert sonst nach Ablauf des Timeouts verwirft. Wird die Netzladung
-    beendet (Zielerreichung, Fensterende, Deaktivierung beider Schalter),
-    setzt der Coordinator Register 40051 aktiv zurück auf 0
+    gestoppt, setzt der Coordinator Register 40051 aktiv zurück auf 0
     (SmartMeter-Nullregelung), statt nur passiv auf den Timeout zu warten.
+    Der ältere Basic-Mode-P-Sollwert (Register 41) bleibt ausschließlich
+    für den manuellen start_grid_charge/stop_grid_charge-Service erhalten
+    (absoluter Watt-Sollwert, freie Vorzeichenwahl, eigener
+    Hintergrund-Task).
 
-    Ersetzt den früheren, gleichnamig als Basic-Mode-P-Sollwert (Register
-    41) umgesetzten Weg für zeitgesteuertes Laden. Der Basic-Mode-Weg
-    (Register 41) bleibt ausschließlich für den manuellen
-    start_grid_charge/stop_grid_charge-Service erhalten (absoluter
-    Watt-Sollwert, freie Vorzeichenwahl, eigener Hintergrund-Task).
+    Als Ziel-SOC dient die bereits vorhandene "Max. SOC"-Entity
+    (number.py); ist kein Wert gesetzt, gilt ersatzweise 100 %. Es gibt
+    keine eigene Ziel-SOC- oder Leistungseinstellung für dieses Feature.
+    Eine Änderung des Ziel-SOC wirkt sofort (async_set_max_soc wertet
+    _async_enforce_timed_charge unmittelbar neu aus statt erst beim
+    nächsten Poll-Zyklus).
+
+    Aktiviert-Zustand sowie Start-/Endzeit werden über RestoreEntity
+    über Neustarts hinweg persistiert. Zusätzlich zeigt ein
+    Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv
+    nachgeladen wird.
   acceptance_criteria:
+    - "tests/test_coordinator.py deckt _is_time_in_window (normales
+       Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
+       Fenster), _async_enforce_timed_charge (Start/Stop bei
+       Zielerreichung/Fensterende/Deaktivierung), die
+       Watt-zu-Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
+       Schreibintervall (_sun_ic_write_interval) ab."
+    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
+       über echte Modbus-TCP-Kommunikation verifiziert, dass Aktivieren
+       des Features innerhalb des Zeitfensters Register 40051 auf
+       Sollwertvorgabe und Register 40049 auf den erwarteten Sollwert
+       setzt, und dass Deaktivieren Register 40051 wieder auf
+       SmartMeter-Nullregelung zurücksetzt."
     - "number.py enthält keine featurespezifische Leistungseinstellung
-       für zeitgesteuertes Laden oder die manuelle Netzladung."
-    - "tests/test_coordinator.py deckt die Watt-zu-Prozent-Umrechnung
-       (inkl. Klemmung auf ±100 %), das Schreibintervall
-       (_sun_ic_write_interval) sowie Start/Stop beider Schalter ab."
-    - "tests/test_integration_live.py enthält End-to-End-Tests, die über
-       echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren
-       jeweils Register 40051 auf Sollwertvorgabe setzt und Deaktivieren
-       es wieder auf SmartMeter-Nullregelung zurücksetzt."
+       für zeitgesteuertes Laden."

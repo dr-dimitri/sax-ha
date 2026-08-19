@@ -2,7 +2,7 @@
 
 Start-/Endzeit des Zeitfensters für das zeitgesteuerte Laden (Software-
 Logik, kein Register). Siehe
-coordinator.SaxPowerCoordinator._async_enforce_grid_charge.
+coordinator.SaxPowerCoordinator._async_enforce_timed_charge.
 """
 
 from __future__ import annotations

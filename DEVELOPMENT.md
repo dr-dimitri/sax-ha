@@ -80,13 +80,13 @@ Priorität in `_async_enforce_grid_charge`:
    Verhindert dauerhaftes Volladen auf 100 % (Batterie-Lebensdauer); der
    Speicher entlädt sich währenddessen nicht automatisch zur
    Eigenverbrauchsdeckung.
-2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + kein
-   PV-Überschuss + "Max. Netzladeleistung" gesetzt**
+2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + im
+   aktiven Monat + kein PV-Überschuss + "Max. Netzladeleistung" gesetzt**
    (`timed_should_charge`): Leistungsvorgabe = `-max_charge_power` (negativ
    = Laden).
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
-   PV-Überschuss + "Max. Netzladeleistung" gesetzt**
-   (`grid_serving_should_charge`): Leistungsvorgabe =
+   im eigenen aktiven Monat + PV-Überschuss + "Max. Netzladeleistung"
+   gesetzt** (`grid_serving_should_charge`): Leistungsvorgabe =
    `-min(max_charge_power, smartmeter_power)` - auf den tatsächlich
    verfügbaren Überschuss gedeckelt, es wird also nie aus dem Netz geladen.
    Schließt sich mit Schritt 2 bereits über die entgegengesetzte
@@ -94,15 +94,30 @@ Priorität in `_async_enforce_grid_charge`:
 4. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
    (SmartMeter-Nullregelung).
 
-**Zeitfenster-Überlappung:** `SaxPowerCoordinator._assert_windows_dont_overlap`
-(aufgerufen aus den vier Zeit-Settern `async_set_timed_charge_start/-end`,
-`async_set_grid_serving_start/-end`) lehnt eine Änderung, die zu einer
+**Aktive Monate:** Beide Features haben zusätzlich je 12 Monats-Schalter
+(`switch.SaxPowerMonthSwitch`, eine generische Klasse für beide Features und
+alle 12 Monate, parametrisiert über `is_month_active`/`async_set_month_active`
+-Callables), die in `SaxPowerCoordinator._timed_charge_months`/
+`_grid_serving_months` (je ein `set[int]`, Default alle 12 Monate) verwaltet
+werden. `_async_enforce_grid_charge` prüft zusätzlich `now.month in
+self._timed_charge_months` bzw. `self._grid_serving_months`.
+
+**Zeitfenster-Überlappung (Tageszeit UND Monat):**
+`SaxPowerCoordinator._assert_windows_dont_overlap` (aufgerufen aus den vier
+Zeit-Settern `async_set_timed_charge_start/-end`/`async_set_grid_serving_
+start/-end` sowie den beiden Monats-Settern `async_set_timed_charge_month`/
+`async_set_grid_serving_month`) lehnt eine Änderung, die zu einer
 Überschneidung der beiden Zeitfenster führen würde, mit
-`HomeAssistantError` ab. Die eigentliche Prüfung
-(`coordinator.windows_overlap`, modulweite Funktion) zerlegt beide Fenster
-in Sekunden-Intervalle seit Mitternacht (`_window_intervals`, unterstützt
-über Mitternacht laufende Fenster analog zu `_is_time_in_window`) und prüft
-sie paarweise auf Überschneidung.
+`HomeAssistantError` ab - aber NUR, wenn sich sowohl die Tageszeiten
+(`coordinator.windows_overlap`, modulweite Funktion, zerlegt beide Fenster
+in Sekunden-Intervalle seit Mitternacht via `_window_intervals`, unterstützt
+über Mitternacht laufende Fenster analog zu `_is_time_in_window`) ALS AUCH
+die aktiven Monate (einfache Set-Schnittmenge) überschneiden. Die beiden
+Monats-Setter akzeptieren zusätzlich `validate: bool = True` -
+`SaxPowerMonthSwitch.async_added_to_hass` ruft sie beim Restaurieren mit
+`validate=False` auf (vermeidet False-Positives durch sequentielles
+Restaurieren mehrerer Monats-Entities, die beide bei "alle Monate"
+starten), Live-Änderungen über den Schalter validieren immer.
 
 Beide Register werden periodisch neu geschrieben (Intervall aus dem
 geräteseitig gemeldeten Timeout, Register 40050, abgeleitet via
@@ -206,7 +221,9 @@ tests/
 │                                  40049/40051, auch unabhängig voneinander), Watt-zu-Prozent-
 │                                  Umrechnung, Schreibintervall aus Register 40050,
 │                                  Zeitfenster-Überlappungsprüfung (windows_overlap,
-│                                  Ablehnung überlappender Änderungen)
+│                                  Ablehnung überlappender Änderungen), aktive Monate
+│                                  (Enforcement, Default "alle Monate", Überlappungsprüfung
+│                                  inkl. erlaubter Zeitfenster-Überlappung bei disjunkten Monaten)
 ├── test_config_flow.py            Unit-Tests: erfolgreicher zweistufiger Config Flow
 │                                  (Verbindung + optionale Netzladung-Vorbelegung inkl.
 │                                  Defaults bei leerem zweiten Schritt), "cannot_connect"-Fehler

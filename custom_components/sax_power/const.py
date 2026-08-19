@@ -47,6 +47,17 @@ DEFAULT_GRID_SERVING_START = "00:00:00"
 DEFAULT_GRID_SERVING_END = "00:00:00"
 DEFAULT_GRID_SERVING_ENABLED = False
 
+# Aktive Monate für Netzladung/netzdienliches Laden (siehe anforderung.yaml,
+# REQ-GRID-SERVING-CHARGE): je Feature 12 Monats-Schalter (switch.py), die
+# festlegen, in welchen Kalendermonaten das jeweilige Zeitfenster überhaupt
+# wirksam ist (z. B. Netzladung nur November-Januar, netzdienliches Laden
+# nur Mai-August). Default: alle Monate aktiv, damit sich bestehende
+# Konfigurationen nach einem Update unverändert verhalten, bis der Anwender
+# einzelne Monate bewusst abwählt. Sind für ein Feature gar keine Monate
+# ausgewählt, ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
+ALL_MONTHS = frozenset(range(1, 13))
+DEFAULT_MONTH_ENABLED = True
+
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
 # Alle benötigten Register liegen zusammenhängend in einem Block (41-46),

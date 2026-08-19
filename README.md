@@ -164,6 +164,7 @@ abgeleitet), da das Gerät den Sollwert sonst verwirft.
 | Netzladung aktiv | Ein-/Ausschalten des Features |
 | Netzladung Start | Startzeit (HH:MM) |
 | Netzladung Ende | Endzeit (HH:MM) |
+| Netzladung aktiv im Januar … Dezember | 12 Schalter, legen fest, in welchen Kalendermonaten das Zeitfenster überhaupt wirksam ist (siehe unten) |
 | Zeitgesteuertes Laden aktiv | Diagnose-Sensor, zeigt ob gerade aktiv nachgeladen wird |
 
 Genutzt wird der bereits vorhandene "Max. SOC" als Ziel (siehe
@@ -173,6 +174,15 @@ Ladeleistung – es gibt keine eigenen Einstellungen dafür.
 Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
 05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
 Fenster als leer – es wird dann nie geladen.
+
+**Aktive Monate:** Zusätzlich zum Zeitfenster legen 12 Schalter ("Netzladung
+aktiv im Januar" … "im Dezember") fest, in welchen Kalendermonaten die
+Netzladung überhaupt wirksam ist – z. B. nur in den Monaten November,
+Dezember und Januar zwischen 1 und 5 Uhr, für eine im Winter günstige
+Nachtstromzeit. Default: alle 12 Monate aktiv, sodass sich bestehende
+Konfigurationen nach einem Update unverändert verhalten. Ist kein einziger
+Monat ausgewählt, ist das Feature ganzjährig inaktiv (analog zu einem
+leeren Zeitfenster).
 
 Vorbelegt werden können alle drei Werte optional bereits im zweiten Schritt
 der Ersteinrichtung (siehe [Einrichtung](#einrichtung)); ohne Angabe gelten
@@ -228,6 +238,7 @@ werden soll, ohne dafür Netzstrom zu beziehen.
 | Netzdienliches Laden aktiv | Ein-/Ausschalten des Features |
 | Netzdienliches Laden Start | Startzeit (HH:MM) |
 | Netzdienliches Laden Ende | Endzeit (HH:MM) |
+| Netzdienliches Laden aktiv im Januar … Dezember | 12 Schalter, legen fest, in welchen Kalendermonaten das Zeitfenster überhaupt wirksam ist (siehe unten) |
 | Netzdienliches Laden aktiv (Sensor) | Diagnose-Sensor, zeigt ob gerade aktiv netzdienlich geladen wird |
 
 Genutzt werden dieselben zentralen Einstellungen wie beim zeitgesteuerten
@@ -248,21 +259,36 @@ auch für netzdienliches Laden. Zeitgesteuertes und netzdienliches Laden
 schließen sich bereits über die entgegengesetzte PV-Überschuss-Bedingung
 gegenseitig aus und können nie gleichzeitig einen Ladesollwert schreiben.
 
+**Aktive Monate:** Wie bei der Netzladung legen 12 Schalter ("Netzdienliches
+Laden aktiv im Januar" … "im Dezember") fest, in welchen Kalendermonaten
+das Zeitfenster wirksam ist – z. B. nur in den Monaten Mai, Juni, Juli und
+August zwischen 11 und 14 Uhr. Default: alle 12 Monate aktiv.
+
 **Zeitfenster dürfen sich nicht überschneiden:** Das Zeitfenster des
 netzdienlichen Ladens darf sich nicht mit dem Zeitfenster der Netzladung
-überlappen. Ein Änderungsversuch, der zu einer Überschneidung führen würde
-– egal ob an der Netzladung- oder der Netzdienlich-Zeit vorgenommen –, wird
-abgelehnt und im Frontend als Fehler angezeigt. Da Start und Ende jeweils
-eigene Entitäten sind, kann das kurzzeitige Bearbeiten nur einer der beiden
-Grenzen eines bereits über Mitternacht laufenden Fensters in seltenen
-Fällen einen ungewöhnlich großen Zwischenzustand ergeben und dadurch
-abgelehnt werden, obwohl das beabsichtigte Endergebnis nicht überlappen
-würde – betroffen sind nur Konfigurationen, bei denen zusätzlich auch ein
-über Mitternacht laufendes Fenster verwendet wird.
+überlappen – dabei zählen Tageszeit UND aktive Monate zusammen: Laufen
+beide Zeitfenster nur in disjunkten Monaten (wie im Beispiel oben –
+Netzladung nur November/Dezember/Januar, netzdienliches Laden nur
+Mai–August), dürfen sich die Tageszeiten beliebig überlappen, da die
+Fenster nie im selben Monat aktiv sind. Ein Änderungsversuch an Zeit ODER
+Monat, der zu einer echten Überschneidung (gleiche Tageszeit UND
+gemeinsamer Monat) führen würde – egal an welcher der Netzladung- oder
+Netzdienlich-Entitäten vorgenommen –, wird abgelehnt und im Frontend als
+Fehler angezeigt. Da Start und Ende jeweils eigene Entitäten sind, kann das
+kurzzeitige Bearbeiten nur einer der beiden Grenzen eines bereits über
+Mitternacht laufenden Fensters in seltenen Fällen einen ungewöhnlich
+großen Zwischenzustand ergeben und dadurch abgelehnt werden, obwohl das
+beabsichtigte Endergebnis nicht überlappen würde – betroffen sind nur
+Konfigurationen, bei denen zusätzlich auch ein über Mitternacht laufendes
+Fenster verwendet wird. Aus demselben Grund empfiehlt es sich, beim
+nachträglichen Umstellen auf disjunkte Monate mit bereits überlappenden
+Zeitfenstern zunächst die Monate beider Features anzupassen und erst
+danach die Zeiten zu ändern (oder umgekehrt), statt beides gleichzeitig
+schrittweise zu verschieben.
 
-Aktiviert-Zustand sowie Start-/Endzeit bleiben über Neustarts hinweg
-erhalten (analog zum zeitgesteuerten Laden). Es gibt dafür keinen
-Vorbelegungsschritt im Config Flow – das Feature wird ausschließlich über
+Aktiviert-Zustand, Start-/Endzeit sowie die aktiven Monate bleiben über
+Neustarts hinweg erhalten (analog zum zeitgesteuerten Laden). Es gibt dafür
+keinen Vorbelegungsschritt im Config Flow – das Feature wird ausschließlich über
 die Entitäten nach der Ersteinrichtung konfiguriert und ist per Default
 deaktiviert.
 

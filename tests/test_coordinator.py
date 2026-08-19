@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.sax_power.const import (
+    ALL_MONTHS,
     GRID_CHARGE_WRITE_INTERVAL,
     READ_BLOCK_COUNT,
     READ_BLOCK_START,
@@ -288,7 +289,7 @@ def test_is_time_in_window_unset_is_never_active(hass) -> None:
     assert coordinator._is_time_in_window(dt_time(3, 0), None, None) is False
 
 
-def _patched_now(hour: int, minute: int = 0):
+def _patched_now(hour: int, minute: int = 0, *, month: int = 1):
     """Patcht dt_util.now() auf einen festen Zeitpunkt.
 
     Bewusst statt der `freezer`-Fixture (freezegun): freezegun friert auch
@@ -299,7 +300,7 @@ def _patched_now(hour: int, minute: int = 0):
     """
     return patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, hour, minute),
+        return_value=datetime(2024, month, 1, hour, minute),
     )
 
 
@@ -1119,3 +1120,252 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
             assert coordinator.grid_serving_active is True
     finally:
         await coordinator.async_stop_sun_charge()
+
+
+# -- Aktive Monate: Zustand und Enforcement ----------------------------------
+
+
+def test_months_default_to_all_months(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    assert coordinator.timed_charge_months == frozenset(ALL_MONTHS)
+    assert coordinator.grid_serving_months == frozenset(ALL_MONTHS)
+
+
+async def test_set_timed_charge_month_toggles_membership(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_month(5, False)
+    assert 5 not in coordinator.timed_charge_months
+    assert coordinator.timed_charge_months == frozenset(ALL_MONTHS - {5})
+
+    await coordinator.async_set_timed_charge_month(5, True)
+    assert coordinator.timed_charge_months == frozenset(ALL_MONTHS)
+
+
+async def test_set_grid_serving_month_toggles_membership(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_grid_serving_month(11, False)
+    assert coordinator.grid_serving_months == frozenset(ALL_MONTHS - {11})
+
+
+async def test_enforce_grid_charge_timed_charge_inactive_outside_active_month(
+    hass,
+) -> None:
+    """ "Netzladung im November, Dezember und Januar zwischen 1 und 5 Uhr" -
+    außerhalb der ausgewählten Monate darf trotz passendem Zeitfenster nicht
+    geladen werden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in (11, 12, 1):
+        await coordinator.async_set_timed_charge_month(month, True)
+    for month in set(ALL_MONTHS) - {11, 12, 1}:
+        await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    # Im Zeitfenster (2 Uhr), aber im Juli - nicht in den aktiven Monaten.
+    with _patched_now(2, month=7):
+        await coordinator._async_enforce_grid_charge(
+            {"soc": 10, "ic_max_power_reference": 4600, "ic_timeout": 300}
+        )
+    assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_timed_charge_active_in_active_month(hass) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 10, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in set(ALL_MONTHS) - {11, 12, 1}:
+        await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    try:
+        # Im Zeitfenster (2 Uhr) UND im Dezember - einer der aktiven Monate.
+        with _patched_now(2, month=12):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+        await asyncio.sleep(0.1)
+
+        assert coordinator._timed_charge_active is True
+        assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_grid_serving_respects_active_months(hass) -> None:
+    """ "Netzdienliches Laden in Mai, Juni, Juli und August zwischen 11 und 14
+    Uhr" - außerhalb dieser Monate darf trotz PV-Überschuss und passendem
+    Zeitfenster nicht geladen werden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(11, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
+        await coordinator.async_set_grid_serving_month(month, False)
+    await coordinator.async_set_grid_serving_enabled(True)
+
+    # Im Zeitfenster (12 Uhr), aber im Oktober - nicht in den aktiven Monaten.
+    with _patched_now(12, month=10):
+        await coordinator._async_enforce_grid_charge(coordinator.data)
+    assert coordinator.grid_serving_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(11, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
+        await coordinator.async_set_grid_serving_month(month, False)
+    await coordinator.async_set_grid_serving_enabled(True)
+
+    try:
+        with _patched_now(12, month=7):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_inactive_when_all_months_deselected(hass) -> None:
+    """Sind für ein Feature gar keine Monate ausgewählt, ist es ganzjährig
+    inaktiv - analog zu einem leeren Zeitfenster."""
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in ALL_MONTHS:
+        await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    assert coordinator.timed_charge_months == frozenset()
+    with _patched_now(2, month=1):
+        await coordinator._async_enforce_grid_charge(
+            {"soc": 10, "ic_max_power_reference": 4600, "ic_timeout": 300}
+        )
+    assert coordinator._timed_charge_active is False
+
+
+# -- Aktive Monate: Überlappungsprüfung berücksichtigt Monate ---------------
+
+
+async def test_overlapping_times_with_disjoint_months_are_allowed(hass) -> None:
+    """ "Netzdienliches Laden in Mai-August, Netzladung in November-Januar" -
+    die Tageszeiten dürfen sich beliebig überlappen, weil die Fenster nie im
+    selben Monat aktiv sind.
+
+    Monate zunächst direkt gesetzt (umgeht Setter-Validierung) - das
+    entspricht dem realistischen Bedienpfad, bei dem der Anwender zuerst
+    beide Monatsauswahlen auf disjunkte Werte einstellt (unproblematisch,
+    solange noch keines der beiden Zeitfenster das andere überlappt - siehe
+    Kommentar in der Netzdienlich-Sektion zu den leeren Default-Zeiten) und
+    danach beide Zeitfenster ändert."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_months = {11, 12, 1}
+    coordinator._grid_serving_months = {5, 6, 7, 8}
+
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    # Gleiches Zeitfenster wie die Netzladung, aber disjunkte Monate - darf
+    # nicht abgelehnt werden.
+    await coordinator.async_set_grid_serving_start(dt_time(1, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(5, 0))
+
+    assert coordinator.timed_charge_start == dt_time(1, 0)
+    assert coordinator.grid_serving_start == dt_time(1, 0)
+
+
+async def test_set_timed_charge_month_rejects_overlap_with_grid_serving(hass) -> None:
+    """Fügt man einen Monat hinzu, der die Netzladung wieder in dieselben
+    Monate wie das netzdienliche Laden bringt (bei gleichzeitig
+    überlappenden Zeitfenstern), muss das abgelehnt werden."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = dt_time(1, 0)
+    coordinator._timed_charge_end = dt_time(5, 0)
+    coordinator._timed_charge_months = {11, 12, 1}
+    coordinator._grid_serving_start = dt_time(3, 0)
+    coordinator._grid_serving_end = dt_time(6, 0)
+    coordinator._grid_serving_months = {6, 7}
+
+    # Zeitfenster überschneiden sich bereits (3-5 Uhr), Monate sind aktuell
+    # disjunkt (Netzladung Nov/Dez/Jan vs. netzdienlich Jun/Jul) - erlaubt.
+    # Erweitert man die Netzladung nun auf Juni, überschneiden sich auch die
+    # Monate -> muss abgelehnt werden.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_timed_charge_month(6, True)
+
+    assert 6 not in coordinator.timed_charge_months
+
+
+async def test_set_grid_serving_month_rejects_overlap_with_timed_charge(hass) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = dt_time(1, 0)
+    coordinator._timed_charge_end = dt_time(5, 0)
+    coordinator._timed_charge_months = {6, 7}
+    coordinator._grid_serving_start = dt_time(3, 0)
+    coordinator._grid_serving_end = dt_time(6, 0)
+    coordinator._grid_serving_months = {11, 12, 1}
+
+    # Zeitfenster überschneiden sich bereits (3-5 Uhr), Monate sind aktuell
+    # disjunkt - erweitert man netzdienliches Laden nun auf Juni,
+    # überschneiden sich auch die Monate -> muss abgelehnt werden.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_grid_serving_month(6, True)
+
+    assert 6 not in coordinator.grid_serving_months
+
+
+async def test_month_restore_does_not_validate_overlap(hass) -> None:
+    """validate=False (Restaurieren beim Start, siehe SaxPowerMonthSwitch)
+    muss auch überlappende Zwischenzustände klaglos übernehmen - die
+    Validierung ist ausschließlich für explizite Nutzeränderungen gedacht."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = dt_time(1, 0)
+    coordinator._timed_charge_end = dt_time(5, 0)
+    coordinator._grid_serving_start = dt_time(3, 0)
+    coordinator._grid_serving_end = dt_time(6, 0)
+
+    # Beide Fenster überschneiden sich (3-5 Uhr) und starten mit "alle
+    # Monate" (Default) - ohne validate=False würde das hier ablehnen.
+    await coordinator.async_set_timed_charge_month(6, True, validate=False)
+    await coordinator.async_set_grid_serving_month(6, True, validate=False)
+
+    assert 6 in coordinator.timed_charge_months
+    assert 6 in coordinator.grid_serving_months

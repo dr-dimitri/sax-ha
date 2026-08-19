@@ -293,6 +293,20 @@ requirement_timed_soc_charge:
        Speicher). Das verhindert dauerhaftes Volladen auf 100 % zugunsten
        der Batterie-Lebensdauer; der Speicher entlädt sich währenddessen
        nicht automatisch zur Eigenverbrauchsdeckung.
+
+       Wurde der Ziel-SOC dabei INNERHALB des Netzladung- oder des
+       netzdienlichen Zeitfensters erreicht (_max_soc_hold_is_window_bound),
+       gilt die Sperre nur bis zum Ende genau dieses Zeitfensters: Register
+       40051 wird bis dahin periodisch auf 1 nachgeschrieben (Timeout siehe
+       Register 40050/REG_SUN_IC_TIMEOUT), danach aktiv auf 0 zurückgesetzt,
+       damit der Speicher wieder von der geräteeigenen SmartMeter-
+       Nullregelung gesteuert wird - ohne diesen aktiven Rücksprung bliebe
+       die Sperre unbegrenzt bestehen, da ein gehaltener 0-%-Sollwert den
+       SOC nie von selbst unter den Zielwert fallen lässt. Wurde der
+       Ziel-SOC dagegen AUSSERHALB jedes Zeitfensters erreicht (z. B. rein
+       durch PV-Überschuss via Nullregelung, ohne aktives zeitgesteuertes
+       oder netzdienliches Laden), gilt die Sperre weiterhin unbegrenzt, wie
+       oben beschrieben.
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung

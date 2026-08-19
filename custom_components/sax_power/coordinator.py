@@ -261,6 +261,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
+        self._max_soc_hold_is_window_bound = False
         self._max_charge_power: int | None = None
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
@@ -629,6 +630,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # darüber hinaus weitergeladen oder unterhalb des Zielwerts
     # leergefahren zu werden. Fällt der SOC wieder unter den Zielwert,
     # wird Register 40051 zurück auf 0 gesetzt.
+    #
+    # Wurde die Sperre dagegen INNERHALB eines Netzlade- oder netzdienlich-
+    # Zeitfensters ausgelöst (_max_soc_hold_is_window_bound), gilt sie nur
+    # bis zum Ende genau dieses Zeitfensters: solange das Fenster noch läuft,
+    # wird Register 40051 periodisch auf 1 nachgeschrieben (sonst fällt das
+    # Gerät nach Ablauf des Timeouts, Register 40050, von selbst auf
+    # Nullregelung zurück); ist das Fenster vorbei, wird Register 40051
+    # aktiv auf 0 zurückgesetzt, statt den Speicher unbegrenzt (bis SOC
+    # unter den Zielwert fällt, was bei gehaltenem 0-%-Sollwert nie von
+    # selbst passiert) im Sollwertmodus zu halten - siehe
+    # _async_enforce_grid_charge.
 
     @property
     def max_soc(self) -> int | None:
@@ -1138,7 +1150,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            Vorrang: Register 40051 bleibt/wird auf Sollwertvorgabe gesetzt
            und Register 40049 auf 0 % gehalten (siehe Max-SOC-Abschnitt
            oben) - unabhängig davon, ob zeitgesteuertes oder netzdienliches
-           Laden aktiviert ist.
+           Laden aktiviert ist. Wurde die Sperre INNERHALB eines der beiden
+           Zeitfenster ausgelöst, gilt sie nur bis zu dessen Ende - danach
+           wird Register 40051 aktiv auf 0 (Nullregelung) zurückgesetzt.
+           Außerhalb jedes Zeitfensters (z. B. bei einem rein durch
+           PV-Überschuss via Nullregelung vollen Speicher) gilt die Sperre
+           dagegen unbegrenzt (siehe _max_soc_hold_is_window_bound).
         2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
            Laden (falls aktiviert, im Zeitfenster, im aktiven Monat - siehe
            "Aktive Monate"-Schalter unten -, mit gesetzter "Max.
@@ -1241,21 +1258,65 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._max_charge_power is not None
         )
 
+        max_soc_clamped_now = False
         if soc_reached:
-            await self.async_start_sun_charge(0)
-        elif timed_should_charge:
-            await self.async_start_sun_charge(-self._max_charge_power)
-        elif grid_serving_should_charge:
-            # smartmeter_power ist hier != None (sonst wäre pv_surplus_active
-            # False) und > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT > 0.
-            charge_power = min(self._max_charge_power, round(smartmeter_power))
-            await self.async_start_sun_charge(-charge_power)
-        elif self.sun_charge_active:
-            await self.async_stop_sun_charge()
+            in_timed_window = (
+                self._timed_charge_enabled
+                and now.month in self._timed_charge_months
+                and self._is_time_in_window(
+                    now_time, self._timed_charge_start, self._timed_charge_end
+                )
+            )
+            in_grid_serving_window = (
+                self._grid_serving_enabled
+                and now.month in self._grid_serving_months
+                and self._is_time_in_window(
+                    now_time, self._grid_serving_start, self._grid_serving_end
+                )
+            )
+            if in_timed_window or in_grid_serving_window:
+                # Ziel-SOC wurde innerhalb eines Netzlade-/netzdienlich-
+                # Zeitfensters erreicht (oder die Sperre läuft von einem
+                # solchen Fenster weiter) - Sperre bleibt gebunden an dieses
+                # Fenster, damit sie spätestens an dessen Ende aktiv
+                # aufgehoben wird, statt wie die geräteunabhängige
+                # Max-SOC-Sperre unten unbegrenzt zu halten.
+                self._max_soc_hold_is_window_bound = True
+                await self.async_start_sun_charge(0)
+                max_soc_clamped_now = True
+            elif self._max_soc_hold_is_window_bound:
+                # Das Zeitfenster, während dessen die Sperre ausgelöst wurde,
+                # ist vorbei - Register 40051 aktiv zurück auf 0 (SmartMeter-
+                # Nullregelung) setzen, statt passiv auf den Timeout
+                # (Register 40050) zu warten, damit der Speicher wieder im
+                # normalen Betriebsmodus arbeitet.
+                if self.sun_charge_active:
+                    await self.async_stop_sun_charge()
+                self._max_soc_hold_is_window_bound = False
+            else:
+                # Geräteunabhängige Max-SOC-Sperre (siehe Abschnitt oben):
+                # SOC wurde außerhalb jedes Netzlade-/netzdienlich-
+                # Zeitfensters erreicht/überschritten (z. B. durch die
+                # geräteeigene Nullregelung bei PV-Überschuss) - Sperre gilt
+                # unbegrenzt, unabhängig von einem Zeitfenster.
+                await self.async_start_sun_charge(0)
+                max_soc_clamped_now = True
+        else:
+            self._max_soc_hold_is_window_bound = False
+            if timed_should_charge:
+                await self.async_start_sun_charge(-self._max_charge_power)
+            elif grid_serving_should_charge:
+                # smartmeter_power ist hier != None (sonst wäre
+                # pv_surplus_active False) und >
+                # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT > 0.
+                charge_power = min(self._max_charge_power, round(smartmeter_power))
+                await self.async_start_sun_charge(-charge_power)
+            elif self.sun_charge_active:
+                await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
         self._grid_serving_active = grid_serving_should_charge
-        self._max_soc_clamped = soc_reached
+        self._max_soc_clamped = max_soc_clamped_now
 
     # -- Netzdienliches Laden --------------------------------------------------
     # Eigenständiges, zum zeitgesteuerten Laden oben zeitlich exklusives

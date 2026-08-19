@@ -603,6 +603,88 @@ async def test_enforce_grid_charge_releases_max_soc_clamp_below_target(hass) -> 
     )
 
 
+async def test_enforce_grid_charge_max_soc_clamp_stays_within_charge_window(
+    hass,
+) -> None:
+    """Wird der Ziel-SOC INNERHALB des Netzladung-Zeitfensters erreicht,
+    bleibt Register 40051 (Steuermodus) auf Sollwertvorgabe und Register
+    40049 auf 0 % gehalten - die Sperre ist an dieses Zeitfenster gebunden
+    (_max_soc_hold_is_window_bound), siehe
+    test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_ends
+    für die Freigabe am Fensterende."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 90, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    try:
+        with _patched_now(2):
+            await coordinator._async_enforce_grid_charge({"soc": 90})
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+        assert coordinator._max_soc_hold_is_window_bound is True
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_ends(
+    hass,
+) -> None:
+    """Wurde die Max-SOC-Sperre WÄHREND des Netzladung-Zeitfensters
+    ausgelöst, muss sie spätestens am Fensterende aktiv aufgehoben werden
+    (Register 40051 zurück auf SmartMeter-Nullregelung), statt unbegrenzt
+    im Sollwertmodus zu bleiben - auch wenn der SOC weiterhin >= Max. SOC
+    ist (was bei gehaltenem 0-%-Sollwert nie von selbst der Fall wäre)."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 90, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    try:
+        with _patched_now(2):
+            await coordinator._async_enforce_grid_charge({"soc": 90})
+        await asyncio.sleep(0.1)
+        assert coordinator._max_soc_hold_is_window_bound is True
+
+        with _patched_now(6):  # nach Fensterende (Netzladung Ende = 5:00)
+            await coordinator._async_enforce_grid_charge({"soc": 90})
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is False
+        assert coordinator.sun_charge_active is False
+        assert coordinator._max_soc_hold_is_window_bound is False
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 # -- PV-Überschuss-Prüfung (zusätzlich zum Zeitfenster) ----------------------
 
 
@@ -1049,7 +1131,7 @@ async def test_set_grid_serving_window_succeeds_for_non_overlapping_target(
     assert coordinator.grid_serving_end == dt_time(11, 0)
 
 
-async def test_set_grid_serving_window_avoids_false_positive_from_stale_intermediate_state(
+async def test_set_grid_serving_window_avoids_stale_intermediate_false_positive(
     hass,
 ) -> None:
     """Regressionstest für den gemeldeten Bug: Verschiebt man das

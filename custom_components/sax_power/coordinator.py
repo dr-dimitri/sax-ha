@@ -9,6 +9,7 @@ from datetime import time as dt_time
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
@@ -184,6 +185,42 @@ def windows_overlap(
         for a_start, a_end in _window_intervals(start_a, end_a)
         for b_start, b_end in _window_intervals(start_b, end_b)
     )
+
+
+_MONTH_NAMES_DE = {
+    1: "Januar",
+    2: "Februar",
+    3: "März",
+    4: "April",
+    5: "Mai",
+    6: "Juni",
+    7: "Juli",
+    8: "August",
+    9: "September",
+    10: "Oktober",
+    11: "November",
+    12: "Dezember",
+}
+
+
+def _format_window_for_message(
+    start: dt_time | None, end: dt_time | None, months: set[int]
+) -> str:
+    """Menschenlesbare Beschreibung eines Zeitfensters (Tageszeit + aktive
+    Monate) für die Überschneidungs-Benachrichtigung (siehe
+    SaxPowerCoordinator._notify_time_window_overlap)."""
+    if start is None or end is None:
+        return "kein Zeitfenster gesetzt"
+    time_part = f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}"
+    if months >= ALL_MONTHS:
+        months_part = "ganzjährig"
+    elif not months:
+        months_part = "keine aktiven Monate"
+    else:
+        months_part = "aktiv: " + ", ".join(
+            _MONTH_NAMES_DE[month] for month in sorted(months)
+        )
+    return f"{time_part} ({months_part})"
 
 
 def decode_ascii_registers(registers: list[int]) -> str:
@@ -831,27 +868,51 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             value,
             self._timed_charge_end,
             self._timed_charge_months,
             self._grid_serving_start,
             self._grid_serving_end,
             self._grid_serving_months,
-        )
-        self._timed_charge_start = value
+        ):
+            self._notify_time_window_overlap(
+                "Netzladung",
+                value,
+                self._timed_charge_end,
+                self._timed_charge_months,
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                self._grid_serving_end,
+                self._grid_serving_months,
+            )
+            self._timed_charge_start = None
+        else:
+            self._timed_charge_start = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             self._timed_charge_start,
             value,
             self._timed_charge_months,
             self._grid_serving_start,
             self._grid_serving_end,
             self._grid_serving_months,
-        )
-        self._timed_charge_end = value
+        ):
+            self._notify_time_window_overlap(
+                "Netzladung",
+                self._timed_charge_start,
+                value,
+                self._timed_charge_months,
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                self._grid_serving_end,
+                self._grid_serving_months,
+            )
+            self._timed_charge_end = None
+        else:
+            self._timed_charge_end = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_window(
@@ -865,18 +926,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         das tatsächliche Ziel-Fenster (start, end) - ein durch die
         Zwei-Schritt-Bearbeitung nur kurzzeitig entstehendes, in Wahrheit gar
         nicht beabsichtigtes Zwischenfenster kann die Prüfung dadurch nicht
-        mehr fälschlich ablehnen (siehe anforderung.yaml,
+        mehr fälschlich als Überschneidung erkennen (siehe anforderung.yaml,
         REQ-GRID-SERVING-CHARGE)."""
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             start,
             end,
             self._timed_charge_months,
             self._grid_serving_start,
             self._grid_serving_end,
             self._grid_serving_months,
-        )
-        self._timed_charge_start = start
-        self._timed_charge_end = end
+        ):
+            self._notify_time_window_overlap(
+                "Netzladung",
+                start,
+                end,
+                self._timed_charge_months,
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                self._grid_serving_end,
+                self._grid_serving_months,
+            )
+            self._timed_charge_start = None
+            self._timed_charge_end = None
+        else:
+            self._timed_charge_start = start
+            self._timed_charge_end = end
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_month(
@@ -939,6 +1013,28 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start <= now < end
         return now >= start or now < end
 
+    @staticmethod
+    def _windows_overlap_with_months(
+        start_a: dt_time | None,
+        end_a: dt_time | None,
+        months_a: set[int],
+        start_b: dt_time | None,
+        end_b: dt_time | None,
+        months_b: set[int],
+    ) -> bool:
+        """True, wenn sich zwei Zeitfenster (Netzladung/netzdienliches Laden)
+        sowohl in ihrer Tageszeit (windows_overlap) ALS AUCH in ihren aktiven
+        Monaten (months_a/months_b, je ein Set aus 1-12, siehe
+        switch.SaxPowerMonthSwitch) überschneiden - siehe anforderung.yaml,
+        REQ-GRID-SERVING-CHARGE. Laufen beide Fenster nur in disjunkten
+        Monaten (z. B. Netzladung nur November-Januar, netzdienliches Laden
+        nur Mai-August), gelten sie NICHT als überlappend, egal wie sehr
+        sich die Tageszeiten überschneiden, da die Fenster nie gleichzeitig
+        aktiv sein können."""
+        return bool(
+            windows_overlap(start_a, end_a, start_b, end_b) and (months_a & months_b)
+        )
+
     def _assert_windows_dont_overlap(
         self,
         start_a: dt_time | None,
@@ -948,29 +1044,73 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         end_b: dt_time | None,
         months_b: set[int],
     ) -> None:
-        """Bricht mit HomeAssistantError ab, statt ein Zeitfenster (Netzladung
-        oder netzdienliches Laden) zu übernehmen, das sich mit dem jeweils
-        anderen Fenster überschneiden würde - siehe anforderung.yaml,
-        REQ-GRID-SERVING-CHARGE. Zwei Fenster gelten nur dann als
-        überlappend, wenn sich sowohl ihre Tageszeiten (windows_overlap) ALS
-        AUCH ihre aktiven Monate (months_a/months_b, je ein Set aus 1-12,
-        siehe switch.SaxPowerMonthSwitch) überschneiden - laufen beide
-        Fenster nur in disjunkten Monaten (z. B. Netzladung nur
-        November-Januar, netzdienliches Laden nur Mai-August), dürfen sich
-        die Tageszeiten beliebig überlappen, da die Fenster nie gleichzeitig
-        aktiv sein können. Der Fehler wird von den Time-/Monats-Entity-
-        Settern (async_set_timed_charge_start/-end/-month,
-        async_set_grid_serving_start/-end/-month) an den aufrufenden
-        Service-Call durchgereicht und dadurch dem Anwender im Frontend als
-        Fehler angezeigt - unabhängig davon, welches der beiden Fenster
-        gerade geändert wird."""
-        if windows_overlap(start_a, end_a, start_b, end_b) and (months_a & months_b):
+        """Bricht mit HomeAssistantError ab, statt eine Monats-Auswahl
+        (Netzladung oder netzdienliches Laden) zu übernehmen, die dazu
+        führen würde, dass sich ihr Zeitfenster (siehe
+        _windows_overlap_with_months) mit dem des jeweils anderen Lademodus
+        überschneidet - siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE. Der
+        Fehler wird von den Monats-Settern (async_set_timed_charge_month,
+        async_set_grid_serving_month) an den aufrufenden Service-Call
+        durchgereicht und dadurch dem Anwender im Frontend als Fehler
+        angezeigt - unabhängig davon, welche der beiden Monats-Auswahlen
+        gerade geändert wird. Die Zeit-Setter (async_set_timed_charge_
+        start/-end/-window, async_set_grid_serving_start/-end/-window)
+        nutzen _windows_overlap_with_months direkt und lehnen eine
+        Überschneidung NICHT mehr mit einem Fehler ab, sondern zeigen eine
+        Benachrichtigung und leeren die soeben geänderte Zeit (siehe
+        _notify_time_window_overlap) - eine Zeit-Entity lässt sich anders
+        als ein Monats-Schalter beim Ablehnen nicht sinnvoll auf einen
+        vorherigen Wert zurücksetzen, ohne den Anwender zu verwirren, welcher
+        von zwei möglicherweise gerade beide bearbeiteten Werten nun gilt."""
+        if self._windows_overlap_with_months(
+            start_a, end_a, months_a, start_b, end_b, months_b
+        ):
             raise HomeAssistantError(
                 "Das Zeitfenster überschneidet sich (Tageszeit UND aktive "
                 "Monate) mit dem Zeitfenster des jeweils anderen Lademodus "
-                "(Netzladung/netzdienliches Laden). Bitte ein nicht "
-                "überlappendes Zeitfenster oder andere aktive Monate wählen."
+                "(Netzladung/netzdienliches Laden). Bitte andere aktive "
+                "Monate wählen."
             )
+
+    def _notify_time_window_overlap(
+        self,
+        feature_label: str,
+        start: dt_time | None,
+        end: dt_time | None,
+        months: set[int],
+        other_label: str,
+        other_start: dt_time | None,
+        other_end: dt_time | None,
+        other_months: set[int],
+    ) -> None:
+        """Zeigt dem Anwender eine Persistent Notification mit beiden
+        Zeitfenstern (Tageszeit + aktive Monate) an, statt die Änderung wie
+        früher mit HomeAssistantError abzulehnen - siehe anforderung.yaml,
+        REQ-GRID-SERVING-CHARGE. Wird ausschließlich von den Zeit-Settern
+        (async_set_timed_charge_start/-end/-window,
+        async_set_grid_serving_start/-end/-window) aufgerufen, unmittelbar
+        bevor diese die soeben geänderte(n) Zeit(en) auf None (leer) setzen
+        - eine leere Start- oder Endzeit bewirkt immer, dass das jeweilige
+        Feature nicht ausgeführt wird (siehe _is_time_in_window/
+        windows_overlap, die ein unvollständiges Fenster als nie aktiv bzw.
+        nie überlappend behandeln)."""
+        message = (
+            f"Das soeben geänderte Zeitfenster für {feature_label} "
+            f"({_format_window_for_message(start, end, months)}) überschneidet "
+            f"sich mit dem Zeitfenster für {other_label} "
+            f"({_format_window_for_message(other_start, other_end, other_months)}). "
+            "Die soeben geänderte Zeit wurde geleert, damit das Feature nicht "
+            "mit einer widersprüchlichen Konfiguration weiterläuft - bitte "
+            "ein nicht überlappendes Zeitfenster oder andere aktive Monate "
+            "wählen."
+        )
+        _LOGGER.warning(message)
+        persistent_notification.async_create(
+            self.hass,
+            message,
+            title="SAX Power: Zeitfenster überschneidet sich",
+            notification_id=f"{DOMAIN}_{self.entry_id}_window_overlap",
+        )
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
         """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden und
@@ -1007,9 +1147,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            mehr geladen als gerade an Überschuss verfügbar ist. Die
            Zeitfenster von zeitgesteuertem und netzdienlichem Laden dürfen
            sich zusätzlich nicht überschneiden (siehe
-           _assert_windows_dont_overlap) - das ist eine reine
-           Konfigurationsregel für den Anwender, keine Voraussetzung für
-           sicheren Betrieb.
+           _windows_overlap_with_months/_notify_time_window_overlap) - das
+           ist eine reine Konfigurationsregel für den Anwender, keine
+           Voraussetzung für sicheren Betrieb.
         4. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
            Nullregelung) gesetzt.
 
@@ -1116,27 +1256,51 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_start(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             value,
             self._grid_serving_end,
             self._grid_serving_months,
             self._timed_charge_start,
             self._timed_charge_end,
             self._timed_charge_months,
-        )
-        self._grid_serving_start = value
+        ):
+            self._notify_time_window_overlap(
+                "netzdienliches Laden",
+                value,
+                self._grid_serving_end,
+                self._grid_serving_months,
+                "Netzladung",
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_charge_months,
+            )
+            self._grid_serving_start = None
+        else:
+            self._grid_serving_start = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_end(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             self._grid_serving_start,
             value,
             self._grid_serving_months,
             self._timed_charge_start,
             self._timed_charge_end,
             self._timed_charge_months,
-        )
-        self._grid_serving_end = value
+        ):
+            self._notify_time_window_overlap(
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                value,
+                self._grid_serving_months,
+                "Netzladung",
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_charge_months,
+            )
+            self._grid_serving_end = None
+        else:
+            self._grid_serving_end = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_window(
@@ -1144,18 +1308,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Analog zu async_set_timed_charge_window, für das netzdienliche
         Laden - siehe dort für den Hintergrund (Vermeidung falscher
-        Ablehnungen durch Zwischenzustände beim getrennten Setzen von Start-
-        und Ende-Entity)."""
-        self._assert_windows_dont_overlap(
+        Erkennung einer Überschneidung durch Zwischenzustände beim
+        getrennten Setzen von Start- und Ende-Entity)."""
+        if self._windows_overlap_with_months(
             start,
             end,
             self._grid_serving_months,
             self._timed_charge_start,
             self._timed_charge_end,
             self._timed_charge_months,
-        )
-        self._grid_serving_start = start
-        self._grid_serving_end = end
+        ):
+            self._notify_time_window_overlap(
+                "netzdienliches Laden",
+                start,
+                end,
+                self._grid_serving_months,
+                "Netzladung",
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_charge_months,
+            )
+            self._grid_serving_start = None
+            self._grid_serving_end = None
+        else:
+            self._grid_serving_start = start
+            self._grid_serving_end = end
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_month(

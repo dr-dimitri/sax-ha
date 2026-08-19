@@ -8,6 +8,7 @@ from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components import persistent_notification
 
 from custom_components.sax_power.const import (
     ALL_MONTHS,
@@ -760,15 +761,29 @@ def test_windows_overlap_incomplete_window_never_overlaps(
     assert windows_overlap(start_a, end_a, start_b, end_b) is False
 
 
-async def test_set_timed_charge_start_rejects_overlap_with_grid_serving_window(
+def _overlap_notifications(hass) -> list[dict]:
+    """Persistent Notifications mit "window_overlap" in der ID - siehe
+    SaxPowerCoordinator._notify_time_window_overlap. persistent_notification
+    legt dafür keine hass.states-Entity mehr an, sondern verwaltet die
+    Notifications intern in hass.data[persistent_notification.DOMAIN]
+    (siehe homeassistant.components.persistent_notification.async_create)."""
+    notifications = hass.data.get(persistent_notification.DOMAIN, {})
+    return [
+        notification
+        for notification_id, notification in notifications.items()
+        if "window_overlap" in notification_id
+    ]
+
+
+async def test_set_timed_charge_start_clears_on_overlap_with_grid_serving_window(
     hass,
 ) -> None:
     """Der Anwender muss informiert werden, wenn er die Netzladezeiten so
     ändert, dass sie in den netzdienlichen Zeitraum fallen würden - siehe
-    anforderung.yaml, REQ-GRID-SERVING-CHARGE. Die Ablehnung über
-    HomeAssistantError erscheint im Frontend als Fehler beim Service-Call."""
-    from homeassistant.exceptions import HomeAssistantError
-
+    anforderung.yaml, REQ-GRID-SERVING-CHARGE. Statt die Änderung mit
+    HomeAssistantError abzulehnen (altes Verhalten), zeigt der Coordinator
+    eine Persistent Notification mit beiden Zeitfenstern/Monaten und leert
+    die soeben geänderte Startzeit."""
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -778,21 +793,23 @@ async def test_set_timed_charge_start_rejects_overlap_with_grid_serving_window(
     # Verschiebt die Netzladung so, dass sie in den netzdienlichen Zeitraum
     # hineinreicht (neues Fenster 12:00-05:00, über Mitternacht laufend,
     # überschneidet sich mit 10:00-14:00 im Abschnitt 12:00-14:00).
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_timed_charge_start(dt_time(12, 0))
+    await coordinator.async_set_timed_charge_start(dt_time(12, 0))
+    await hass.async_block_till_done()
 
-    # Die abgelehnte Änderung darf nicht übernommen worden sein.
-    assert coordinator.timed_charge_start == dt_time(1, 0)
+    assert coordinator.timed_charge_start is None
+    assert coordinator.timed_charge_end == dt_time(5, 0)
+    notifications = _overlap_notifications(hass)
+    assert len(notifications) == 1
+    assert "10:00" in notifications[0]["message"]
+    assert "12:00" in notifications[0]["message"]
 
 
-async def test_set_grid_serving_start_rejects_overlap_with_timed_charge_window(
+async def test_set_grid_serving_start_clears_on_overlap_with_timed_charge_window(
     hass,
 ) -> None:
     """Umgekehrter Fall: Der Anwender wird auch beim Einrichten des
     netzdienlichen Ladens selbst informiert, wenn dessen Zeitfenster in den
     Netzladung-Zeitraum fallen würde."""
-    from homeassistant.exceptions import HomeAssistantError
-
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
@@ -802,17 +819,17 @@ async def test_set_grid_serving_start_rejects_overlap_with_timed_charge_window(
     # Verschiebt das netzdienliche Fenster so, dass es in die Netzladung
     # hineinreicht (neues Fenster 3:00-14:00 überschneidet sich mit 1:00-5:00
     # im Abschnitt 3:00-5:00).
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_grid_serving_start(dt_time(3, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(3, 0))
+    await hass.async_block_till_done()
 
-    assert coordinator.grid_serving_start == dt_time(10, 0)
+    assert coordinator.grid_serving_start is None
+    assert coordinator.grid_serving_end == dt_time(14, 0)
+    assert len(_overlap_notifications(hass)) == 1
 
 
-async def test_set_timed_charge_end_rejects_overlap(hass) -> None:
+async def test_set_timed_charge_end_clears_on_overlap(hass) -> None:
     """Die Überlappungsprüfung greift auch für die Endzeit, nicht nur für die
     Startzeit."""
-    from homeassistant.exceptions import HomeAssistantError
-
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_grid_serving_start(dt_time(3, 0))
     await coordinator.async_set_grid_serving_end(dt_time(8, 0))
@@ -820,15 +837,15 @@ async def test_set_timed_charge_end_rejects_overlap(hass) -> None:
     await coordinator.async_set_timed_charge_end(dt_time(2, 0))
 
     # Neues Fenster 1:00-4:00 überschneidet sich mit 3:00-8:00.
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_timed_charge_end(dt_time(4, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(4, 0))
+    await hass.async_block_till_done()
 
-    assert coordinator.timed_charge_end == dt_time(2, 0)
+    assert coordinator.timed_charge_start == dt_time(1, 0)
+    assert coordinator.timed_charge_end is None
+    assert len(_overlap_notifications(hass)) == 1
 
 
-async def test_set_grid_serving_end_rejects_overlap(hass) -> None:
-    from homeassistant.exceptions import HomeAssistantError
-
+async def test_set_grid_serving_end_clears_on_overlap(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_timed_charge_start(dt_time(8, 0))
     await coordinator.async_set_timed_charge_end(dt_time(10, 0))
@@ -836,10 +853,27 @@ async def test_set_grid_serving_end_rejects_overlap(hass) -> None:
     await coordinator.async_set_grid_serving_end(dt_time(6, 30))
 
     # Neues Fenster 6:00-9:00 überschneidet sich mit 8:00-10:00.
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_grid_serving_end(dt_time(9, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(9, 0))
+    await hass.async_block_till_done()
 
-    assert coordinator.grid_serving_end == dt_time(6, 30)
+    assert coordinator.grid_serving_start == dt_time(6, 0)
+    assert coordinator.grid_serving_end is None
+    assert len(_overlap_notifications(hass)) == 1
+
+
+async def test_empty_start_or_end_never_activates_feature(hass) -> None:
+    """Eine leere (None) Start- oder Endzeit - egal ob durch das Löschen der
+    Überlappungs-Benachrichtigung oder anderweitig entstanden - bewirkt
+    immer, dass das jeweilige Feature nicht ausgeführt wird (siehe
+    SaxPowerCoordinator._is_time_in_window)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    assert (
+        coordinator._is_time_in_window(dt_time(12, 0), None, dt_time(14, 0)) is False
+    )
+    assert (
+        coordinator._is_time_in_window(dt_time(12, 0), dt_time(10, 0), None) is False
+    )
+    assert coordinator._is_time_in_window(dt_time(12, 0), None, None) is False
 
 
 async def test_set_windows_with_non_overlapping_times_succeeds(hass) -> None:
@@ -855,24 +889,24 @@ async def test_set_windows_with_non_overlapping_times_succeeds(hass) -> None:
     assert coordinator.grid_serving_end == dt_time(14, 0)
 
 
-async def test_set_grid_serving_window_rejects_genuine_overlap(hass) -> None:
+async def test_set_grid_serving_window_clears_on_genuine_overlap(hass) -> None:
     """async_set_grid_serving_window prüft wie die Einzel-Setter das
-    tatsächliche Ziel-Fenster - eine echte Überschneidung wird weiterhin mit
-    HomeAssistantError abgelehnt."""
-    from homeassistant.exceptions import HomeAssistantError
-
+    tatsächliche Ziel-Fenster - eine echte Überschneidung wird weiterhin
+    erkannt, führt aber (wie bei den Einzel-Settern) zu einer
+    Benachrichtigung statt zu HomeAssistantError, und beide soeben
+    übergebenen Werte werden geleert."""
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_timed_charge_start(dt_time(12, 0))
     await coordinator.async_set_timed_charge_end(dt_time(14, 0))
     await coordinator.async_set_grid_serving_start(dt_time(15, 0))
     await coordinator.async_set_grid_serving_end(dt_time(20, 0))
 
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_grid_serving_window(dt_time(13, 0), dt_time(16, 0))
+    await coordinator.async_set_grid_serving_window(dt_time(13, 0), dt_time(16, 0))
+    await hass.async_block_till_done()
 
-    # Die abgelehnte Änderung darf nicht übernommen worden sein.
-    assert coordinator.grid_serving_start == dt_time(15, 0)
-    assert coordinator.grid_serving_end == dt_time(20, 0)
+    assert coordinator.grid_serving_start is None
+    assert coordinator.grid_serving_end is None
+    assert len(_overlap_notifications(hass)) == 1
 
 
 async def test_set_grid_serving_window_succeeds_for_non_overlapping_target(
@@ -903,8 +937,6 @@ async def test_set_grid_serving_window_avoids_false_positive_from_stale_intermed
     überlappen. async_set_grid_serving_window setzt beide Werte atomar und
     validiert nur das echte Ziel-Fenster, wodurch dieser Zwischenzustand gar
     nicht erst entsteht."""
-    from homeassistant.exceptions import HomeAssistantError
-
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_timed_charge_start(dt_time(12, 0))
     await coordinator.async_set_timed_charge_end(dt_time(14, 0))
@@ -913,10 +945,11 @@ async def test_set_grid_serving_window_avoids_false_positive_from_stale_intermed
 
     # Der Zwischenzustand (neuer Start 08:00 + noch nicht aktualisiertes
     # altes Ende 20:00) würde die Netzladung (12:00-14:00) überlappen und
-    # von async_set_grid_serving_start allein abgelehnt werden.
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_grid_serving_start(dt_time(8, 0))
-    assert coordinator.grid_serving_start == dt_time(15, 0)
+    # von async_set_grid_serving_start allein als Überschneidung erkannt -
+    # der Start wird dadurch geleert statt auf 08:00 übernommen.
+    await coordinator.async_set_grid_serving_start(dt_time(8, 0))
+    await hass.async_block_till_done()
+    assert coordinator.grid_serving_start is None
 
     # Das tatsächliche Ziel-Fenster (08:00-11:00) überlappt die Netzladung
     # nicht und wird über den atomaren Setter akzeptiert.
@@ -925,20 +958,19 @@ async def test_set_grid_serving_window_avoids_false_positive_from_stale_intermed
     assert coordinator.grid_serving_end == dt_time(11, 0)
 
 
-async def test_set_timed_charge_window_rejects_genuine_overlap(hass) -> None:
-    from homeassistant.exceptions import HomeAssistantError
-
+async def test_set_timed_charge_window_clears_on_genuine_overlap(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
 
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_set_timed_charge_window(dt_time(2, 0), dt_time(11, 0))
+    await coordinator.async_set_timed_charge_window(dt_time(2, 0), dt_time(11, 0))
+    await hass.async_block_till_done()
 
-    assert coordinator.timed_charge_start == dt_time(1, 0)
-    assert coordinator.timed_charge_end == dt_time(5, 0)
+    assert coordinator.timed_charge_start is None
+    assert coordinator.timed_charge_end is None
+    assert len(_overlap_notifications(hass)) == 1
 
 
 async def test_set_timed_charge_window_succeeds_for_non_overlapping_target(

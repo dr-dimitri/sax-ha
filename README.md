@@ -270,21 +270,43 @@ netzdienlichen Ladens darf sich nicht mit dem Zeitfenster der Netzladung
 beide Zeitfenster nur in disjunkten Monaten (wie im Beispiel oben –
 Netzladung nur November/Dezember/Januar, netzdienliches Laden nur
 Mai–August), dürfen sich die Tageszeiten beliebig überlappen, da die
-Fenster nie im selben Monat aktiv sind. Ein Änderungsversuch an Zeit ODER
-Monat, der zu einer echten Überschneidung (gleiche Tageszeit UND
-gemeinsamer Monat) führen würde – egal an welcher der Netzladung- oder
-Netzdienlich-Entitäten vorgenommen –, wird abgelehnt und im Frontend als
-Fehler angezeigt. Da Start und Ende jeweils eigene Entitäten sind, kann das
-kurzzeitige Bearbeiten nur einer der beiden Grenzen eines bereits über
-Mitternacht laufenden Fensters in seltenen Fällen einen ungewöhnlich
-großen Zwischenzustand ergeben und dadurch abgelehnt werden, obwohl das
-beabsichtigte Endergebnis nicht überlappen würde – betroffen sind nur
-Konfigurationen, bei denen zusätzlich auch ein über Mitternacht laufendes
-Fenster verwendet wird. Aus demselben Grund empfiehlt es sich, beim
-nachträglichen Umstellen auf disjunkte Monate mit bereits überlappenden
-Zeitfenstern zunächst die Monate beider Features anzupassen und erst
-danach die Zeiten zu ändern (oder umgekehrt), statt beides gleichzeitig
-schrittweise zu verschieben.
+Fenster nie im selben Monat aktiv sind.
+
+- Ein Änderungsversuch an einer der beiden **Monats-Auswahlen**, der zu
+  einer echten Überschneidung (gleiche Tageszeit UND gemeinsamer Monat)
+  führen würde, wird abgelehnt und im Frontend als Fehler angezeigt – die
+  bisherige Monats-Auswahl bleibt dabei unverändert bestehen.
+- Ein Änderungsversuch an einer der beiden **Start-/Endzeit-Entitäten**
+  ("Netzladung Start"/"Ende" bzw. "Netzdienliches Laden Start"/"Ende"), der
+  zu einer echten Überschneidung führen würde, wird dagegen NICHT
+  abgelehnt: Stattdessen erscheint eine Benachrichtigung (Home Assistant →
+  Einstellungen → Benachrichtigungen bzw. im Benachrichtigungs-Verlauf) mit
+  beiden betroffenen Zeitfenstern (Tageszeit + aktive Monate), und die
+  soeben geänderte Zeit (nur Start ODER nur Ende, je nachdem welche
+  Entität geändert wurde) wird geleert. Eine leere Start- oder Endzeit
+  bewirkt immer, dass das jeweilige Feature nicht ausgeführt wird (siehe
+  oben, "leeres Zeitfenster") – ein geleertes Feld muss also anschließend
+  bewusst neu gesetzt werden, damit das Feature wieder aktiv wird.
+
+  Hintergrund: Start und Ende sind zwei getrennte Entitäten. Ändert man ein
+  Zeitfenster in zwei Schritten (z. B. erst Start, dann Ende), validiert
+  Home Assistant jeden Schritt einzeln gegen den zu diesem Zeitpunkt noch
+  alten Wert der jeweils anderen Grenze – ein rein durch diese Zwischenzeit
+  entstehender, in Wahrheit gar nicht beabsichtigter Zwischenzustand könnte
+  sonst fälschlich als Überschneidung erkannt und die Änderung dauerhaft
+  mit dem alten (möglicherweise ebenfalls nicht mehr gewollten) Wert
+  blockiert werden. Das Leeren statt Zurücksetzen auf den alten Wert
+  vermeidet diese Verwirrung. Um ein komplettes Zeitfenster ohne
+  Zwischenschritt zu verschieben, siehe die Services
+  `sax_power.set_timed_charge_window` / `sax_power.set_grid_serving_window`
+  unten – sie setzen Start und Ende atomar in einem Aufruf und prüfen dabei
+  ausschließlich das tatsächliche Ziel-Fenster.
+
+  Aus einem verwandten Grund empfiehlt es sich, beim nachträglichen
+  Umstellen auf disjunkte Monate bei bereits überlappenden Zeitfenstern
+  zunächst die Monate beider Features anzupassen und erst danach die Zeiten
+  zu ändern (oder umgekehrt), statt beides gleichzeitig schrittweise zu
+  verschieben.
 
 Aktiviert-Zustand, Start-/Endzeit sowie die aktiven Monate bleiben über
 Neustarts hinweg erhalten (analog zum zeitgesteuerten Laden). Es gibt dafür
@@ -309,8 +331,29 @@ deaktiviert.
   | --- | --- |
   | `device_id` | SAX Power Gerät |
 
-Beide Services werden über einen `device_id`-Parameter an das jeweilige SAX
-Power Gerät adressiert (relevant, falls mehrere Speicher eingerichtet sind).
+- **`sax_power.set_timed_charge_window`** – setzt Start- und Endzeit des
+  Netzladung-Zeitfensters atomar in einem Aufruf, statt über die einzelnen
+  Start-/Ende-Entitäten (siehe ["Zeitfenster dürfen sich nicht
+  überschneiden"](#netzdienliches-laden) oben für den Hintergrund).
+
+  | Feld | Beschreibung |
+  | --- | --- |
+  | `device_id` | SAX Power Gerät |
+  | `start` | Startzeit des Zeitfensters |
+  | `end` | Endzeit des Zeitfensters |
+
+- **`sax_power.set_grid_serving_window`** – analog zu
+  `set_timed_charge_window`, für das netzdienliche Laden.
+
+  | Feld | Beschreibung |
+  | --- | --- |
+  | `device_id` | SAX Power Gerät |
+  | `start` | Startzeit des Zeitfensters |
+  | `end` | Endzeit des Zeitfensters |
+
+Alle vier Services werden über einen `device_id`-Parameter an das jeweilige
+SAX Power Gerät adressiert (relevant, falls mehrere Speicher eingerichtet
+sind).
 
 ## IP-Adresse nachträglich ändern
 

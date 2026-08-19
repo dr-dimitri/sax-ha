@@ -16,9 +16,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DATA_COORDINATOR, DOMAIN
+from .const import (
+    CONF_TIMED_CHARGE_END,
+    CONF_TIMED_CHARGE_START,
+    DATA_COORDINATOR,
+    DEFAULT_TIMED_CHARGE_END,
+    DEFAULT_TIMED_CHARGE_START,
+    DOMAIN,
+)
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerEntity
+from .entity import SaxPowerEntity, initial_config_value
 
 
 async def async_setup_entry(
@@ -48,11 +55,19 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
         await super().async_added_to_hass()
         if self.coordinator.timed_charge_start is not None:
             return
-        if (last_state := await self.async_get_last_state()) is None:
-            return
-        if (value := dt_util.parse_time(last_state.state)) is None:
-            return
-        await self.coordinator.async_set_timed_charge_start(value)
+        if (last_state := await self.async_get_last_state()) is not None:
+            if (value := dt_util.parse_time(last_state.state)) is not None:
+                await self.coordinator.async_set_timed_charge_start(value)
+                return
+        # Kein zuvor gespeicherter Zustand (allererster Start eines neu
+        # eingerichteten Eintrags) - Vorgabewert aus der Ersteinrichtung
+        # nutzen, sonst den Hard-Default (siehe const.py).
+        initial = initial_config_value(
+            self.hass, self._entry_id, CONF_TIMED_CHARGE_START
+        )
+        value = dt_util.parse_time(initial or DEFAULT_TIMED_CHARGE_START)
+        if value is not None:
+            await self.coordinator.async_set_timed_charge_start(value)
 
     @property
     def native_value(self) -> dt_time | None:
@@ -76,11 +91,14 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
         await super().async_added_to_hass()
         if self.coordinator.timed_charge_end is not None:
             return
-        if (last_state := await self.async_get_last_state()) is None:
-            return
-        if (value := dt_util.parse_time(last_state.state)) is None:
-            return
-        await self.coordinator.async_set_timed_charge_end(value)
+        if (last_state := await self.async_get_last_state()) is not None:
+            if (value := dt_util.parse_time(last_state.state)) is not None:
+                await self.coordinator.async_set_timed_charge_end(value)
+                return
+        initial = initial_config_value(self.hass, self._entry_id, CONF_TIMED_CHARGE_END)
+        value = dt_util.parse_time(initial or DEFAULT_TIMED_CHARGE_END)
+        if value is not None:
+            await self.coordinator.async_set_timed_charge_end(value)
 
     @property
     def native_value(self) -> dt_time | None:

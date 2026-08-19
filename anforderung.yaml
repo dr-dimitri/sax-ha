@@ -33,7 +33,9 @@
 # - Einrichtung ausschließlich über den GUI-Config-Flow (config_flow.py):
 #   IP-Adresse, Port (Default 502), Slave-ID Basic Mode (Default 64),
 #   Slave-ID SunSpec-Modus (Default 100), Aktualisierungsintervall
-#   (Default 10s). Keine YAML-Konfiguration.
+#   (Default 10s); danach optional ein zweiter Schritt mit Vorbelegung für
+#   das zeitgesteuerte Laden (siehe REQ-TIMED-SOC-CHARGE). Keine
+#   YAML-Konfiguration.
 # - Entitätstypen: Lese-Register -> SensorEntity (sensor.py); schreibbare
 #   Leistungswerte/Limits -> NumberEntity (number.py); Schalter ->
 #   SwitchEntity (switch.py); Zeitfenster -> TimeEntity (time.py).
@@ -309,16 +311,35 @@ requirement_timed_soc_charge:
     Hintergrund-Task).
 
     Als Ziel-SOC dient die bereits vorhandene "Max. SOC"-Entity
-    (number.py); ist kein Wert gesetzt, gilt ersatzweise 100 %. Es gibt
-    keine eigene Ziel-SOC- oder Leistungseinstellung für dieses Feature.
-    Eine Änderung des Ziel-SOC wirkt sofort (async_set_max_soc wertet
-    _async_enforce_timed_charge unmittelbar neu aus statt erst beim
-    nächsten Poll-Zyklus).
+    (number.py). Es gibt keine eigene Ziel-SOC- oder Leistungseinstellung
+    für dieses Feature. Eine Änderung des Ziel-SOC wirkt sofort
+    (async_set_max_soc wertet _async_enforce_timed_charge unmittelbar neu
+    aus statt erst beim nächsten Poll-Zyklus).
 
-    Aktiviert-Zustand sowie Start-/Endzeit werden über RestoreEntity
-    über Neustarts hinweg persistiert. Zusätzlich zeigt ein
-    Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv
-    nachgeladen wird.
+    "Max. SOC" ist eine RestoreEntity und persistiert über Neustarts
+    hinweg; gibt es (z. B. direkt nach der Ersteinrichtung) noch keinen
+    gespeicherten Zustand, setzt sie sich explizit auf MAX_SOC (100 %)
+    statt "unbekannt"/0 zu bleiben (SaxPowerMaxSocNumber.async_added_to_hass).
+
+    Aktiviert-Zustand sowie Start-/Endzeit ("Netzladung aktiv"/"Netzladung
+    Start"/"Netzladung Ende") werden ebenfalls über RestoreEntity über
+    Neustarts hinweg persistiert. Zusätzlich zeigt ein Diagnose-Sensor
+    ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv nachgeladen wird.
+
+    Vorbelegung beim allerersten Start eines neuen Eintrags: Der
+    Ersteinrichtungs-Dialog (config_flow.py) fragt nach der
+    Verbindungsvalidierung einen zweiten, optionalen Schritt
+    ("grid_charge") ab - Zeitfenster-Start/-Ende und Aktiviert-Status,
+    alle Felder optional. Werden sie nicht ausgefüllt, gelten die Defaults
+    DEFAULT_TIMED_CHARGE_START ("00:00:00"), DEFAULT_TIMED_CHARGE_END
+    ("00:05:00") und DEFAULT_TIMED_CHARGE_ENABLED (False). Die im Config
+    Entry gespeicherten Werte wirken sich über
+    entity.initial_config_value ausschließlich dann aus, wenn die
+    jeweilige RestoreEntity noch keinen gespeicherten Vorzustand hat (siehe
+    SaxPowerTimedChargeSwitch/-StartTime/-EndTime.async_added_to_hass) -
+    ein späterer Reconfigure-Flow (der diese Schlüssel nicht im Config
+    Entry aktualisiert) hat darauf keinen Einfluss mehr, sobald einmal ein
+    echter Zustand gespeichert wurde.
   acceptance_criteria:
     - "tests/test_coordinator.py deckt _is_time_in_window (normales
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
@@ -331,6 +352,12 @@ requirement_timed_soc_charge:
        des Features innerhalb des Zeitfensters Register 40051 auf
        Sollwertvorgabe und Register 40049 auf den erwarteten Sollwert
        setzt, und dass Deaktivieren Register 40051 wieder auf
-       SmartMeter-Nullregelung zurücksetzt."
+       SmartMeter-Nullregelung zurücksetzt; zusätzlich Tests für die
+       Vorbelegung aus dem Config Entry beim allerersten Start (mit und
+       ohne hinterlegte Netzladung-Werte) sowie für den Max.-SOC-Default
+       (100 statt 0/unbekannt)."
+    - "tests/test_config_flow.py deckt den zweistufigen Ersteinrichtungs-
+       Flow ab: Defaults bei leerem zweiten Schritt sowie explizit
+       angegebene Werte."
     - "number.py enthält keine featurespezifische Leistungseinstellung
        für zeitgesteuertes Laden."

@@ -61,6 +61,11 @@ YAML-Konfiguration nötig.
 
 3. Die Verbindung wird vor dem Abschluss geprüft. Bei Verbindungsfehlern
    IP-Adresse, Port und Netzwerkerreichbarkeit prüfen.
+4. Danach folgt ein zweiter, **optionaler** Schritt "Netzladung": Vorbelegung
+   für "Netzladung aktiv", "Netzladung Start" und "Netzladung Ende" (siehe
+   [Zeitgesteuertes Laden](#zeitgesteuertes-laden)). Ohne Änderungen gelten
+   die Defaults – deaktiviert, Zeitfenster 00:00–00:05. Alle drei Werte
+   lassen sich später jederzeit über die entsprechenden Entitäten ändern.
 
 ## Funktionen
 
@@ -123,13 +128,12 @@ unberührt.
 
 | Entität | Beschreibung |
 | --- | --- |
-| Max. SOC | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird – zentrale Einstellung, auch als Ziel-SOC für zeitgesteuertes Laden |
-| Max. Ladeleistung | Direkt schreibbares Leistungslimit für die Ladung (W) – zentrale Einstellung, auch für zeitgesteuertes Laden |
+| Max. SOC | Ziel-SOC (0–100 %), ab dem die Ladung gestoppt wird – zentrale Einstellung, auch als Ziel-SOC für zeitgesteuertes Laden. Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
+| Max. Ladeleistung | Direkt schreibbares Leistungslimit für die Ladung (W) – zentrale Einstellung, auch für zeitgesteuertes Laden. Spiegelt immer den aktuellen Geräte-Registerwert |
 | Max. Entladeleistung | Direkt schreibbares Leistungslimit für die Entladung (W) |
 
 Es gibt bewusst keine eigene Ziel-SOC-/Leistungseinstellung für
-zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben. Ist
-"Max. SOC" nicht gesetzt, gilt ersatzweise 100 % als Ziel.
+zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben.
 
 ### Schalter
 
@@ -170,6 +174,12 @@ es gibt keine eigenen Einstellungen dafür.
 Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
 05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
 Fenster als leer – es wird dann nie geladen.
+
+Vorbelegt werden können alle drei Werte optional bereits im zweiten Schritt
+der Ersteinrichtung (siehe [Einrichtung](#einrichtung)); ohne Angabe gelten
+die Defaults (deaktiviert, 00:00–00:05). Das wirkt sich nur auf den
+allerersten Start eines neu eingerichteten Eintrags aus – danach gilt
+ausschließlich der zuletzt über die Entitäten gesetzte Wert.
 
 Aktiviert-Zustand sowie Start-/Endzeit bleiben über Neustarts hinweg
 erhalten, ein einmal eingerichteter Zeitplan muss also nicht nach jedem

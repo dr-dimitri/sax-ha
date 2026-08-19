@@ -22,11 +22,13 @@ Benutzerdokumentation siehe [README.md](README.md).
 custom_components/sax_power/
 ├── manifest.json      Metadaten, Requirements (pymodbus>=3.10.0), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
-├── config_flow.py       GUI-Einrichtung, Verbindungsvalidierung
+├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
+│                          Netzladung-Vorbelegung), Verbindungsvalidierung
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
 │                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
 │                          zeitgesteuertes Laden
-├── entity.py             Basisklasse mit gemeinsamer DeviceInfo
+├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
+│                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
 ├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
 ├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Lade-/Entladeleistung
@@ -42,7 +44,11 @@ tests/                Siehe Abschnitt "Tests"
 `config_flow.py` implementiert sowohl `async_step_user` (Ersteinrichtung) als
 auch `async_step_reconfigure` (spätere Änderung, z. B. der IP-Adresse) über
 eine gemeinsame Methode (`_async_step_connection`). Beide validieren die
-Verbindung mit demselben Testread, bevor die Daten gespeichert werden.
+Verbindung mit demselben Testread, bevor die Daten gespeichert werden. Nur
+`async_step_user` verzweigt bei Erfolg zusätzlich in einen zweiten,
+optionalen Schritt (`async_step_grid_charge`, siehe `STEP_GRID_CHARGE_SCHEMA`)
+für die Vorbelegung des zeitgesteuerten Ladens, bevor der Eintrag angelegt
+wird - `async_step_reconfigure` überspringt diesen Schritt.
 
 ## Datenfluss
 
@@ -62,7 +68,10 @@ schreibt Änderungen über `coordinator.async_write_register(...)` bzw.
 schreibt der Coordinator `0` in das Ladelimit-Register (44) und merkt sich
 den zuvor gelesenen Wert; sinkt der SOC wieder darunter, wird der
 ursprüngliche Wert zurückgeschrieben. Siehe
-`SaxPowerCoordinator._async_enforce_max_soc`.
+`SaxPowerCoordinator._async_enforce_max_soc`. Die zugehörige NumberEntity
+(`SaxPowerMaxSocNumber`) ist eine `RestoreEntity` und setzt sich bei
+fehlendem Vorzustand (z. B. direkt nach der Ersteinrichtung) explizit auf
+`MAX_SOC` (100), statt "unbekannt" zu bleiben.
 
 **Zeitgesteuertes Laden:** Reine Software-Logik, umgesetzt in
 `SaxPowerCoordinator._async_enforce_timed_charge`, bei jedem Poll-Zyklus
@@ -74,11 +83,29 @@ Ladeleistung" in Watt umgerechnet über `_watts_to_ic_setpoint_raw`). Das
 Wiederholungsintervall (`_sun_ic_write_interval`) leitet sich aus dem vom
 Gerät gemeldeten Timeout (Register 40050) ab, gedeckelt auf 30s. Beim
 Stoppen wird Register 40051 aktiv auf 0 zurückgesetzt statt nur passiv auf
-den Timeout zu warten (siehe `SaxPowerCoordinator.async_stop_sun_charge`).
+den Timeout zu warten (siehe `SaxPowerCoordinator.async_stop_sun_charge`) -
+dabei werden sowohl `asyncio.CancelledError` als auch `HomeAssistantError`
+beim Awaiten des abgebrochenen Tasks abgefangen, da pymodbus eine
+Cancellation, die einen laufenden Write trifft, als `ModbusIOException`
+(und damit als `HomeAssistantError`) statt als reine `CancelledError`
+durchreicht.
 
 Der ältere Basic-Mode-P-Sollwert-Pfad (Register 41,
 `_async_grid_charge_loop`, alle 30s fest) bleibt ausschließlich für den
 manuellen `start_grid_charge`/`stop_grid_charge`-Service in Verwendung.
+
+**Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
+sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils
+`RestoreEntity`) fragen beim Start in dieser Reihenfolge: (1) hat der
+Coordinator bereits einen Wert (z. B. durch eine andere Entity in dieser
+Session)? (2) gibt es einen über RestoreEntity gespeicherten Vorzustand aus
+einem früheren Lauf? (3) steht ein Wert aus dem zweiten
+Ersteinrichtungs-Schritt im Config Entry (`entity.initial_config_value`)? (4)
+sonst der Hard-Default aus `const.py`. Stufe 3 kommt dadurch effektiv nur
+beim allerersten Start eines neuen Eintrags zum Tragen - sobald einmal ein
+echter Zustand über RestoreEntity gespeichert wurde, hat der stets Vorrang,
+auch nach einem späteren `Reconfigure` (der die Netzladung-Schlüssel nicht
+im Config Entry aktualisiert).
 
 ## Register-Mapping
 
@@ -139,7 +166,9 @@ tests/
 │                                  Zeitfenster-Logik + Enforcement für zeitgesteuertes Laden
 │                                  (SunSpec-Modus-Register 40049/40051), Watt-zu-Prozent-
 │                                  Umrechnung, Schreibintervall aus Register 40050
-├── test_config_flow.py            Unit-Tests: erfolgreicher Config Flow, "cannot_connect"-Fehler
+├── test_config_flow.py            Unit-Tests: erfolgreicher zweistufiger Config Flow
+│                                  (Verbindung + optionale Netzladung-Vorbelegung inkl.
+│                                  Defaults bei leerem zweiten Schritt), "cannot_connect"-Fehler
 │                                  (gemockter AsyncModbusTcpClient)
 ├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~56 Sensor-Beschreibungen:
 │                                  eindeutige Keys, vollständige DE/EN-Übersetzungen,
@@ -148,9 +177,11 @@ tests/
 │                                  Modbus-TCP-Server (kein Mock) – prüft den kompletten Weg
 │                                  Config Entry → Coordinator → Entities → echtes Wire-Protokoll,
 │                                  inkl. Regressionstest für den Resilienz-Fall (SunSpec-Modus
-│                                  nicht erreichbar → Basic-Mode-Sensoren bleiben da) sowie
-│                                  einen End-to-End-Test für zeitgesteuertes Laden
-│                                  (SunSpec-Modus-Register 40049/40051)
+│                                  nicht erreichbar → Basic-Mode-Sensoren bleiben da), einen
+│                                  End-to-End-Test für zeitgesteuertes Laden (SunSpec-Modus-
+│                                  Register 40049/40051) sowie Tests für die Vorbelegung aus
+│                                  dem Config Entry beim allerersten Start (mit und ohne im
+│                                  Entry hinterlegte Netzladung-Werte)
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

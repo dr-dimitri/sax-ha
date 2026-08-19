@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DATA_COORDINATOR,
@@ -37,7 +38,7 @@ async def async_setup_entry(
     )
 
 
-class SaxPowerMaxSocNumber(SaxPowerEntity, NumberEntity):
+class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
     """Software-seitiges Maximal-SOC für die Ladung.
 
     Der SAX Speicher besitzt kein natives Max-SOC-Register. Der Coordinator
@@ -46,6 +47,11 @@ class SaxPowerMaxSocNumber(SaxPowerEntity, NumberEntity):
     coordinator.SaxPowerCoordinator._async_enforce_max_soc). Dient
     zusätzlich als Ziel-SOC für das zeitgesteuerte Laden (keine eigene
     Einstellung dafür, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE).
+
+    Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
+    es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
+    Zustand, wird MAX_SOC (100 %) als Vorgabewert gesetzt statt "unbekannt"
+    zu bleiben - andernfalls würde der Schieberegler optisch bei 0 stehen.
     """
 
     _attr_translation_key = "max_soc"
@@ -58,6 +64,20 @@ class SaxPowerMaxSocNumber(SaxPowerEntity, NumberEntity):
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
         self._attr_unique_id = f"{entry_id}_max_soc"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.max_soc is not None:
+            return
+        restored_value: int | None = None
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                restored_value = int(float(last_state.state))
+            except (TypeError, ValueError):
+                restored_value = None
+        await self.coordinator.async_set_max_soc(
+            restored_value if restored_value is not None else MAX_SOC
+        )
 
     @property
     def native_value(self) -> int | None:

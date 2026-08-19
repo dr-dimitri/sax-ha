@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import selector
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
@@ -16,10 +17,16 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
     CONF_SLAVE_ID_EXTENDED,
+    CONF_TIMED_CHARGE_ENABLED,
+    CONF_TIMED_CHARGE_END,
+    CONF_TIMED_CHARGE_START,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID_BASIC,
     DEFAULT_SLAVE_ID_EXTENDED,
+    DEFAULT_TIMED_CHARGE_ENABLED,
+    DEFAULT_TIMED_CHARGE_END,
+    DEFAULT_TIMED_CHARGE_START,
     DOMAIN,
     REG_SOC,
 )
@@ -43,6 +50,26 @@ STEP_CONNECTION_SCHEMA = vol.Schema(
         vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=5, max=3600)
         ),
+    }
+)
+
+# Zweiter, optionaler Schritt der Ersteinrichtung (siehe async_step_grid_charge):
+# Vorbelegung für das zeitgesteuerte Laden (switch.py/time.py). Alle Felder
+# sind optional - wird das Formular ohne Änderungen abgeschickt, gelten die
+# hier hinterlegten Defaults (deaktiviert, Zeitfenster 00:00-00:05). Nur für
+# den allerersten Start eines neuen Eintrags relevant, siehe
+# entity.initial_config_value.
+STEP_GRID_CHARGE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(
+            CONF_TIMED_CHARGE_ENABLED, default=DEFAULT_TIMED_CHARGE_ENABLED
+        ): cv.boolean,
+        vol.Optional(
+            CONF_TIMED_CHARGE_START, default=DEFAULT_TIMED_CHARGE_START
+        ): selector.TimeSelector(),
+        vol.Optional(
+            CONF_TIMED_CHARGE_END, default=DEFAULT_TIMED_CHARGE_END
+        ): selector.TimeSelector(),
     }
 )
 
@@ -87,6 +114,8 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SAX Power."""
 
     VERSION = 1
+
+    _connection_data: dict[str, Any]
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -141,7 +170,11 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                         data=user_input,
                         unique_id=f"{host}:{port}",
                     )
-                return self.async_create_entry(title="SAX Power Home", data=user_input)
+                # Ersteinrichtung: Verbindungsdaten merken und weiter zum
+                # optionalen Netzladung-Schritt, bevor der Eintrag angelegt
+                # wird (siehe async_step_grid_charge).
+                self._connection_data = user_input
+                return await self.async_step_grid_charge()
 
         suggested_values = user_input or (
             reconfigure_entry.data if reconfigure_entry is not None else None
@@ -150,3 +183,26 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
             STEP_CONNECTION_SCHEMA, suggested_values
         )
         return self.async_show_form(step_id=step_id, data_schema=schema, errors=errors)
+
+    async def async_step_grid_charge(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Optionale Vorbelegung für das zeitgesteuerte Laden (zweiter Schritt
+        der Ersteinrichtung, nur nach erfolgreich validierter Verbindung
+        erreichbar - siehe _async_step_connection).
+
+        Alle Felder sind optional (siehe STEP_GRID_CHARGE_SCHEMA); wird das
+        Formular unverändert abgeschickt, gelten die dort hinterlegten
+        Defaults (deaktiviert, Zeitfenster 00:00-00:05). Die Werte wirken
+        sich nur auf den allerersten Start dieses Eintrags aus - siehe
+        entity.initial_config_value sowie anforderung.yaml,
+        REQ-TIMED-SOC-CHARGE.
+        """
+        if user_input is not None:
+            return self.async_create_entry(
+                title="SAX Power Home",
+                data={**self._connection_data, **user_input},
+            )
+        return self.async_show_form(
+            step_id="grid_charge", data_schema=STEP_GRID_CHARGE_SCHEMA
+        )

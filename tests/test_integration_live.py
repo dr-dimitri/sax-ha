@@ -276,6 +276,10 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         setpoint_power_id = _entity_id(registry, entry.entry_id, "setpoint_power")
         assert hass.states.get(setpoint_power_id).state == "0"
 
+        # -- Max. SOC zeigt ohne vorherige Einstellung/Config-Flow-Vorgabe
+        #    100 statt 0/unbekannt (siehe SaxPowerMaxSocNumber.async_added_to_hass) --
+        assert hass.states.get(max_soc_id).state == "100"
+
         # -- Speicher ausschalten (echter Write über TCP) --
         await hass.services.async_call(
             "switch", "turn_off", {"entity_id": switch_id}, blocking=True
@@ -520,5 +524,121 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         )
         verify_client.close()
         assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
+    finally:
+        await server.shutdown()
+
+
+async def test_live_grid_charge_seeded_from_config_entry_on_first_setup(
+    hass, socket_enabled
+) -> None:
+    """Werte aus dem optionalen zweiten Ersteinrichtungs-Schritt
+    (config_flow.async_step_grid_charge) müssen beim allerersten Start eines
+    neu eingerichteten Eintrags die "Netzladung Start"/"Netzladung
+    Ende"/"Netzladung aktiv"-Entities vorbelegen, siehe
+    entity.initial_config_value."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 4))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 4,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+                "timed_charge_enabled": True,
+                "timed_charge_start": "22:00:00",
+                "timed_charge_end": "06:00:00",
+            },
+        )
+        entry.add_to_hass(hass)
+        # Zeit außerhalb des unten gesetzten 22:00-06:00-Fensters patchen,
+        # damit das Seeding selbst nicht bereits eine echte Netzladung
+        # auslöst - hier geht es nur um die vorbelegten Entity-Zustände.
+        with patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2024, 1, 1, 12, 0),
+        ):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
+        end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
+        enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+
+        assert hass.states.get(start_id).state == "22:00:00"
+        assert hass.states.get(end_id).state == "06:00:00"
+        assert hass.states.get(enabled_id).state == "on"
+
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        assert coordinator.sun_charge_active is False
+        await coordinator.async_stop_sun_charge()
+    finally:
+        await server.shutdown()
+
+
+async def test_live_grid_charge_falls_back_to_hard_defaults_without_config_entry_values(
+    hass, socket_enabled
+) -> None:
+    """Fehlen die optionalen Netzladung-Werte im Config Entry (z. B. ein vor
+    Einführung dieses Schritts angelegter Eintrag, oder weil das Formular
+    unverändert abgeschickt wurde), müssen die Entities die Hard-Defaults aus
+    const.py zeigen (deaktiviert, 00:00-00:05) statt "unbekannt"."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 5))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 5,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+                # Bewusst keine timed_charge_*-Schlüssel - simuliert einen
+                # Eintrag, der vor Einführung des zweiten Ersteinrichtungs-
+                # Schritts angelegt wurde.
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
+        end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
+        enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+
+        assert hass.states.get(start_id).state == "00:00:00"
+        assert hass.states.get(end_id).state == "00:05:00"
+        assert hass.states.get(enabled_id).state == "off"
     finally:
         await server.shutdown()

@@ -693,6 +693,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._sun_charge_task
         except asyncio.CancelledError:
             pass
+        except HomeAssistantError:
+            # Trifft die Cancellation einen gerade laufenden Modbus-Write,
+            # wandelt pymodbus sie in eine ModbusIOException um statt eine
+            # reine CancelledError durchzureichen - async_write_register
+            # daraus wiederum in HomeAssistantError. Der Task ist damit
+            # trotzdem beendet, nur eben nicht über den CancelledError-Pfad.
+            pass
         self._sun_charge_task = None
         try:
             await self.async_write_extended_register(

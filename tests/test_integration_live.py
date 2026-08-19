@@ -674,3 +674,172 @@ async def test_live_grid_charge_falls_back_to_hard_defaults_without_config_entry
         assert hass.states.get(enabled_id).state == "off"
     finally:
         await server.shutdown()
+
+
+async def test_live_manual_discharge_interrupts_and_releases_timed_charge(
+    hass, socket_enabled
+) -> None:
+    """End-to-End-Test für die manuelle Entladung: Wird sie während einer
+    laufenden zeitgesteuerten Netzladung eingeschaltet, muss der Speicher
+    sofort (nicht erst nach Ablauf des Schreibintervalls) auf einen
+    positiven Sollwert (Entladen) umschalten - Netzladung und manuelle
+    Entladung dürfen sich dabei nicht in ihren jeweiligen Einstellungen
+    beeinflussen (siehe anforderung.yaml, REQ-MANUAL-DISCHARGE). Wird sie
+    wieder ausgeschaltet, muss die Netzladung von selbst weiterlaufen, da
+    Zeitfenster/Max-SOC/"Max. Netzladeleistung" unverändert weiter
+    zutreffen."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_registers = _build_basic_registers()
+        basic_registers[46] = 50  # SOC 50%, unterhalb des unten gesetzten Ziel-SOC
+        basic_hr = ModbusSequentialDataBlock(1, basic_registers)
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 3))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 3,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
+        start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
+        end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
+        timed_enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+        active_text_id = _entity_id(
+            registry, entry.entry_id, "timed_charge_active_text"
+        )
+        manual_discharge_id = _entity_id(registry, entry.entry_id, "manual_discharge")
+        discharge_power_id = _entity_id(
+            registry, entry.entry_id, "discharge_power_setpoint"
+        )
+
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": max_soc_id, "value": 90},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "time",
+            "set_value",
+            {"entity_id": start_id, "time": "01:00:00"},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "time",
+            "set_value",
+            {"entity_id": end_id, "time": "05:00:00"},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": discharge_power_id, "value": 500},
+            blocking=True,
+        )
+
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 3)
+        await verify_client.connect()
+        try:
+            with patch(
+                "custom_components.sax_power.coordinator.dt_util.now",
+                return_value=datetime(2024, 1, 1, 2, 0),
+            ):
+                # -- Netzladung startet innerhalb des Zeitfensters --
+                await hass.services.async_call(
+                    "switch",
+                    "turn_on",
+                    {"entity_id": timed_enabled_id},
+                    blocking=True,
+                )
+                await hass.async_block_till_done()
+                await asyncio.sleep(0.2)
+                assert coordinator.sun_charge_active is True
+                assert coordinator._timed_charge_active is True
+                assert hass.states.get(active_text_id).state == "Aktiv"
+
+                setpoint_result = await verify_client.read_holding_registers(
+                    address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                    count=1,
+                    device_id=SLAVE_ID_EXTENDED,
+                )
+                # -3000 W ("Max. Netzladeleistung", einmalig aus Register 44
+                # vorbelegt, Default 3000 in _build_basic_registers()) / 4600 W
+                # Referenz-Maximalleistung * 100 = -65.217...%, skaliert mit
+                # sunssf -2 -> -6522.
+                assert to_signed16(setpoint_result.registers[0]) == -6522
+
+                # -- Manuelle Entladung unterbricht die laufende Netzladung
+                #    sofort, ohne "Netzladung aktiv"/Zeitfenster/"Max.
+                #    Netzladeleistung" zu verändern --
+                await hass.services.async_call(
+                    "switch",
+                    "turn_on",
+                    {"entity_id": manual_discharge_id},
+                    blocking=True,
+                )
+                await hass.async_block_till_done()
+                await asyncio.sleep(0.2)
+
+                assert hass.states.get(timed_enabled_id).state == "on"
+                assert coordinator._timed_charge_active is False
+                assert coordinator.sun_charge_active is True
+                assert hass.states.get(active_text_id).state == "Inaktiv"
+
+                setpoint_result = await verify_client.read_holding_registers(
+                    address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                    count=1,
+                    device_id=SLAVE_ID_EXTENDED,
+                )
+                # 500 W ("Entladeleistung") / 4600 W * 100 = ~10.87%, POSITIV
+                # (Entladen) statt negativ (Laden).
+                assert to_signed16(setpoint_result.registers[0]) == 1087
+
+                # -- Ausschalten der manuellen Entladung: Netzladung läuft von
+                #    selbst weiter, da Zeitfenster/Max-SOC/Netzladeleistung
+                #    unverändert weiter zutreffen --
+                await hass.services.async_call(
+                    "switch",
+                    "turn_off",
+                    {"entity_id": manual_discharge_id},
+                    blocking=True,
+                )
+                await hass.async_block_till_done()
+                await asyncio.sleep(0.2)
+
+                assert coordinator._timed_charge_active is True
+                assert coordinator.sun_charge_active is True
+                assert hass.states.get(active_text_id).state == "Aktiv"
+
+                setpoint_result = await verify_client.read_holding_registers(
+                    address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                    count=1,
+                    device_id=SLAVE_ID_EXTENDED,
+                )
+                assert to_signed16(setpoint_result.registers[0]) == -6522
+        finally:
+            verify_client.close()
+            await coordinator.async_stop_sun_charge()
+    finally:
+        await server.shutdown()

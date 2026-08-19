@@ -15,6 +15,7 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
   - [Zahlenfelder](#zahlenfelder)
   - [Schalter](#schalter)
   - [Zeitgesteuertes Laden](#zeitgesteuertes-laden)
+  - [Netzdienliches Laden](#netzdienliches-laden)
   - [Services](#services)
 - [IP-Adresse nachträglich ändern](#ip-adresse-nachträglich-ändern)
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
@@ -140,6 +141,7 @@ zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben.
 | --- | --- |
 | Speicher On/Off | Schaltet den Speicher ein/aus |
 | Netzladung aktiv | Aktiviert/deaktiviert das zeitgesteuerte Laden, siehe [unten](#zeitgesteuertes-laden) |
+| Netzdienliches Laden aktiv | Aktiviert/deaktiviert das netzdienliche Laden, siehe [unten](#netzdienliches-laden) |
 
 ### Zeitgesteuertes Laden
 
@@ -210,6 +212,59 @@ Home-Assistant-Neustart neu gesetzt werden.
 schreibt weiterhin über den älteren Basic-Mode-Weg (Register 41, absoluter
 Watt-Sollwert, freie Vorzeichenwahl) und läuft unabhängig vom
 zeitgesteuerten Laden, mit eigenem Hintergrund-Task.
+
+### Netzdienliches Laden
+
+Eigenständiges Feature, das den Speicher innerhalb eines **eigenen**
+Zeitfensters lädt – im Unterschied zur Netzladung aber **ausschließlich mit
+PV-Überschuss**, nie aus dem Netz. Gedacht für Zeiträume, in denen der
+Speicher netzdienlich (d. h. Einspeisung ins Netz reduzierend) geladen
+werden soll, ohne dafür Netzstrom zu beziehen.
+
+**Entitäten** (unter "Steuerung" am Gerät):
+
+| Entität | Beschreibung |
+| --- | --- |
+| Netzdienliches Laden aktiv | Ein-/Ausschalten des Features |
+| Netzdienliches Laden Start | Startzeit (HH:MM) |
+| Netzdienliches Laden Ende | Endzeit (HH:MM) |
+| Netzdienliches Laden aktiv (Sensor) | Diagnose-Sensor, zeigt ob gerade aktiv netzdienlich geladen wird |
+
+Genutzt werden dieselben zentralen Einstellungen wie beim zeitgesteuerten
+Laden – "Max. SOC" als Ziel-SOC und "Max. Netzladeleistung" als
+Leistungsobergrenze; es gibt keine eigene Leistungseinstellung. Der
+tatsächlich geschriebene Sollwert wird zusätzlich auf den gerade am Smart
+Meter gemessenen PV-Überschuss gedeckelt (`min(Max. Netzladeleistung,
+PV-Überschuss)`) und sinkt mit fallendem Überschuss im selben
+Poll-Zyklus mit – es wird also nie mehr geladen, als gerade an Überschuss
+zur Verfügung steht. Ist kein Smart-Meter-Wert bekannt (z. B. SunSpec-Modus
+nicht erreichbar) oder liegt der gemessene Wert nicht über 200 W
+Überschuss (`SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`), startet netzdienliches
+Laden nicht – im Gegensatz zur Netzladung, die in diesem Fall unbeeinflusst
+weiterläuft.
+
+Die Max-SOC-Sperre (siehe [oben](#zeitgesteuertes-laden)) gilt unverändert
+auch für netzdienliches Laden. Zeitgesteuertes und netzdienliches Laden
+schließen sich bereits über die entgegengesetzte PV-Überschuss-Bedingung
+gegenseitig aus und können nie gleichzeitig einen Ladesollwert schreiben.
+
+**Zeitfenster dürfen sich nicht überschneiden:** Das Zeitfenster des
+netzdienlichen Ladens darf sich nicht mit dem Zeitfenster der Netzladung
+überlappen. Ein Änderungsversuch, der zu einer Überschneidung führen würde
+– egal ob an der Netzladung- oder der Netzdienlich-Zeit vorgenommen –, wird
+abgelehnt und im Frontend als Fehler angezeigt. Da Start und Ende jeweils
+eigene Entitäten sind, kann das kurzzeitige Bearbeiten nur einer der beiden
+Grenzen eines bereits über Mitternacht laufenden Fensters in seltenen
+Fällen einen ungewöhnlich großen Zwischenzustand ergeben und dadurch
+abgelehnt werden, obwohl das beabsichtigte Endergebnis nicht überlappen
+würde – betroffen sind nur Konfigurationen, bei denen zusätzlich auch ein
+über Mitternacht laufendes Fenster verwendet wird.
+
+Aktiviert-Zustand sowie Start-/Endzeit bleiben über Neustarts hinweg
+erhalten (analog zum zeitgesteuerten Laden). Es gibt dafür keinen
+Vorbelegungsschritt im Config Flow – das Feature wird ausschließlich über
+die Entitäten nach der Ersteinrichtung konfiguriert und ist per Default
+deaktiviert.
 
 ### Services
 

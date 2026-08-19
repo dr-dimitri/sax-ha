@@ -26,14 +26,17 @@ custom_components/sax_power/
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
 │                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
-│                          zeitgesteuertes Laden
+│                          zeitgesteuertes Laden, netzdienliches Laden,
+│                          Zeitfenster-Überlappungsprüfung
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
 ├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
 ├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Netzladeleistung
-├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus
-├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes Laden
+├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
+│                          netzdienliches Laden ein/aus
+├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes und
+│                          netzdienliches Laden
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -62,8 +65,8 @@ schreibt Änderungen über `coordinator.async_write_register(...)` bzw.
 `coordinator.async_write_extended_register(...)` (SunSpec-Modus, Slave-ID
 `self.slave_id_extended`).
 
-**Max-SOC-Sperre & zeitgesteuertes Laden:** Kein natives Max-SOC-Register.
-Beide teilen sich eine zentrale Auswertung
+**Max-SOC-Sperre, zeitgesteuertes Laden & netzdienliches Laden:** Kein
+natives Max-SOC-Register. Alle drei teilen sich eine zentrale Auswertung
 (`SaxPowerCoordinator._async_enforce_grid_charge`, bei jedem Poll-Zyklus
 sowie bei jeder Einstellungsänderung neu ausgewertet) und denselben
 Hintergrund-Task (`SaxPowerCoordinator._async_sun_charge_loop`), der über
@@ -72,15 +75,34 @@ Sollwertvorgabe, dann Register 40049 (Leistungsvorgabe %). Reihenfolge/
 Priorität in `_async_enforce_grid_charge`:
 
 1. **SOC ≥ "Max. SOC"** (`soc_reached`): Leistungsvorgabe wird auf 0 %
-   gehalten - unabhängig davon, ob zeitgesteuertes Laden aktiviert ist (z. B.
-   auch bei einem durch PV-Überschuss vollen Speicher). Verhindert
-   dauerhaftes Volladen auf 100 % (Batterie-Lebensdauer); der Speicher
-   entlädt sich währenddessen nicht automatisch zur Eigenverbrauchsdeckung.
-2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + "Max.
-   Netzladeleistung" gesetzt** (`timed_should_charge`): Leistungsvorgabe =
-   `-max_charge_power` (negativ = Laden).
-3. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
+   gehalten - unabhängig davon, ob zeitgesteuertes oder netzdienliches Laden
+   aktiviert ist (z. B. auch bei einem durch PV-Überschuss vollen Speicher).
+   Verhindert dauerhaftes Volladen auf 100 % (Batterie-Lebensdauer); der
+   Speicher entlädt sich währenddessen nicht automatisch zur
+   Eigenverbrauchsdeckung.
+2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + kein
+   PV-Überschuss + "Max. Netzladeleistung" gesetzt**
+   (`timed_should_charge`): Leistungsvorgabe = `-max_charge_power` (negativ
+   = Laden).
+3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
+   PV-Überschuss + "Max. Netzladeleistung" gesetzt**
+   (`grid_serving_should_charge`): Leistungsvorgabe =
+   `-min(max_charge_power, smartmeter_power)` - auf den tatsächlich
+   verfügbaren Überschuss gedeckelt, es wird also nie aus dem Netz geladen.
+   Schließt sich mit Schritt 2 bereits über die entgegengesetzte
+   PV-Überschuss-Bedingung gegenseitig aus (siehe `pv_surplus_active`).
+4. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
    (SmartMeter-Nullregelung).
+
+**Zeitfenster-Überlappung:** `SaxPowerCoordinator._assert_windows_dont_overlap`
+(aufgerufen aus den vier Zeit-Settern `async_set_timed_charge_start/-end`,
+`async_set_grid_serving_start/-end`) lehnt eine Änderung, die zu einer
+Überschneidung der beiden Zeitfenster führen würde, mit
+`HomeAssistantError` ab. Die eigentliche Prüfung
+(`coordinator.windows_overlap`, modulweite Funktion) zerlegt beide Fenster
+in Sekunden-Intervalle seit Mitternacht (`_window_intervals`, unterstützt
+über Mitternacht laufende Fenster analog zu `_is_time_in_window`) und prüft
+sie paarweise auf Überschneidung.
 
 Beide Register werden periodisch neu geschrieben (Intervall aus dem
 geräteseitig gemeldeten Timeout, Register 40050, abgeleitet via
@@ -179,10 +201,12 @@ tests/
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
 │                                  Fehlerbehandlung bei Modbus-Schreibfehlern, Parsing des
 │                                  kompletten SunSpec-Modus-Blocks (gemockt), Zeitfenster-Logik +
-│                                  Enforcement für zeitgesteuertes Laden und die Max-SOC-Sperre
-│                                  (beide über SunSpec-Modus-Register 40049/40051, auch
-│                                  unabhängig voneinander), Watt-zu-Prozent-Umrechnung,
-│                                  Schreibintervall aus Register 40050
+│                                  Enforcement für zeitgesteuertes Laden, netzdienliches Laden
+│                                  und die Max-SOC-Sperre (alle über SunSpec-Modus-Register
+│                                  40049/40051, auch unabhängig voneinander), Watt-zu-Prozent-
+│                                  Umrechnung, Schreibintervall aus Register 40050,
+│                                  Zeitfenster-Überlappungsprüfung (windows_overlap,
+│                                  Ablehnung überlappender Änderungen)
 ├── test_config_flow.py            Unit-Tests: erfolgreicher zweistufiger Config Flow
 │                                  (Verbindung + optionale Netzladung-Vorbelegung inkl.
 │                                  Defaults bei leerem zweiten Schritt), "cannot_connect"-Fehler

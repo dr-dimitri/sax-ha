@@ -426,6 +426,96 @@ requirement_timed_soc_charge:
        Nutzerwert (hat Vorrang)."
 
 # ==============================================================================
+# ANFORDERUNG: NETZDIENLICHES LADEN (NUR MIT PV-ÜBERSCHUSS)
+# ==============================================================================
+requirement_grid_serving_charge:
+  id: REQ-GRID-SERVING-CHARGE
+  title: "Netzdienliches Laden: Speicher innerhalb eines eigenen Zeitfensters ausschließlich mit PV-Überschuss laden"
+  status: done
+  description: >
+    Eigenständiges Software-Feature (Schalter "Netzdienliches Laden aktiv",
+    switch.py, sowie Zeitfenster "Netzdienliches Laden Start"/"Ende",
+    time.py), das sich mit zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE) den
+    SunSpec-Modus-Schreibpfad (_async_sun_charge_loop), die zentralen
+    Einstellungen "Max. SOC" (Ziel-SOC) und "Max. Netzladeleistung"
+    (Leistungsobergrenze) sowie die Max-SOC-Sperre teilt - siehe
+    SaxPowerCoordinator._async_enforce_grid_charge. Im Unterschied zum
+    zeitgesteuerten Laden lädt netzdienliches Laden bewusst NIE aus dem
+    Netz, sondern ausschließlich mit dem gerade am Smart Meter gemessenen
+    PV-Überschuss (data["smartmeter_power"] > SMARTMETER_PV_SURPLUS_
+    THRESHOLD_WATT, dieselbe Schwelle wie beim PV-Überschuss-Abbruch der
+    Netzladung, nur mit umgekehrter Bedingung) - der geschriebene Sollwert
+    wird dabei auf min("Max. Netzladeleistung", aktueller PV-Überschuss)
+    gedeckelt und sinkt mit fallendem Überschuss im selben Poll-Zyklus mit.
+    Fehlt der Smart-Meter-Wert (z. B. SunSpec-Modus nicht erreichbar), darf
+    netzdienliches Laden NICHT starten (im Gegensatz zum zeitgesteuerten
+    Laden, das in diesem Fall unbeeinflusst weiterläuft) - ohne bekannten
+    Überschuss kann nicht sichergestellt werden, dass nicht aus dem Netz
+    geladen wird.
+
+    Priorität (höchste zuerst, siehe
+    SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
+    ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
+    unverändert für beide Lademodi), 2. zeitgesteuertes Laden, 3.
+    netzdienliches Laden. Zeitgesteuertes und netzdienliches Laden
+    schließen sich dabei bereits über die PV-Überschuss-Bedingung
+    gegenseitig aus (kein Überschuss vs. Überschuss) und können nie
+    gleichzeitig einen Ladesollwert schreiben.
+
+    Zeitfenster-Nichtüberlappung: Das Zeitfenster des netzdienlichen Ladens
+    darf sich nicht mit dem Zeitfenster der Netzladung überschneiden.
+    SaxPowerCoordinator._assert_windows_dont_overlap (aufgerufen aus allen
+    vier Zeit-Settern: async_set_timed_charge_start/-end,
+    async_set_grid_serving_start/-end) lehnt eine Änderung, die zu einer
+    Überschneidung führen würde, mit HomeAssistantError ab - unabhängig
+    davon, welches der beiden Zeitfenster gerade geändert wird. Der Fehler
+    wird über den auslösenden Service-Call an das Frontend durchgereicht und
+    dem Anwender damit direkt als Fehlermeldung angezeigt. Die eigentliche
+    Überlappungsprüfung (coordinator.windows_overlap) unterstützt wie
+    _is_time_in_window über Mitternacht laufende Fenster sowie unvollständige
+    Fenster (mindestens eine der vier Zeiten fehlt - gelten als nie
+    überlappend). Bedingt durch die zwei unabhängigen Time-Entities pro
+    Fenster (Start/Ende einzeln über die Oberfläche änderbar) kann das
+    kurzzeitige Bearbeiten nur einer der beiden Grenzen eines bereits über
+    Mitternacht laufenden Fensters in seltenen Fällen einen ungewöhnlich
+    großen Zwischenzustand ergeben und dadurch abgelehnt werden, obwohl das
+    beabsichtigte Endergebnis nicht überlappen würde - betrifft nur Anwender,
+    die für beide Features zusätzlich noch über Mitternacht laufende Fenster
+    einsetzen.
+
+    Diagnose-Sensor "Netzdienliches Laden aktiv" (sensor.py,
+    grid_serving_active_text, analog zu "Zeitgesteuertes Laden aktiv") zeigt
+    an, ob der Speicher gerade aktiv netzdienlich lädt - das informiert den
+    Anwender laufend über den Aktivzustand des Features.
+
+    Aktiviert-Zustand sowie Start-/Endzeit werden über RestoreEntity über
+    Neustarts hinweg persistiert (analog zum zeitgesteuerten Laden). Ohne
+    zuvor gespeicherten Zustand gelten die Defaults
+    DEFAULT_GRID_SERVING_ENABLED (False) sowie DEFAULT_GRID_SERVING_START/
+    -END (const.py) - bewusst identisch (Start == Ende), damit das
+    Default-Zeitfenster leer ist und nie mit dem (beliebig konfigurierten)
+    Zeitfenster der Netzladung überlappen kann. Kein Vorbelegungsschritt im
+    Config Flow (im Unterschied zu REQ-TIMED-SOC-CHARGE) - das Feature wird
+    ausschließlich über die Entitäten nach der Ersteinrichtung konfiguriert.
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
+       über Mitternacht laufendes Fenster, berührende statt überlappende
+       Fenster, unvollständige Fenster) sowie die Ablehnung überlappender
+       Änderungen an allen vier Zeit-Settern (async_set_timed_charge_start/
+       -end, async_set_grid_serving_start/-end) mit HomeAssistantError ab."
+    - "tests/test_coordinator.py deckt das Ladeverhalten von netzdienlichem
+       Laden ab: Start nur mit PV-Überschuss über dem Schwellwert, Deckelung
+       auf min(Max. Netzladeleistung, PV-Überschuss), kein Start ohne
+       Überschuss/außerhalb des Zeitfensters/deaktiviert/ohne bekannten
+       Smart-Meter-Wert, sowie Vorrang der Max-SOC-Sperre und die
+       gegenseitige Ausschlusslogik zu zeitgesteuertem Laden über die
+       PV-Überschuss-Bedingung."
+    - "switch.py/time.py/sensor.py enthalten keine eigene
+       Leistungseinstellung für netzdienliches Laden - es nutzt dieselben
+       zentralen Einstellungen wie zeitgesteuertes Laden ('Max. SOC', 'Max.
+       Netzladeleistung')."
+
+# ==============================================================================
 # ANFORDERUNG: MANUELLE ENTLADUNG (VERWORFEN)
 # ==============================================================================
 requirement_manual_discharge:

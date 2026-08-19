@@ -33,6 +33,20 @@ DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"
 DEFAULT_TIMED_CHARGE_ENABLED = False
 
+# Netzdienliches Laden (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE):
+# eigenes, zum zeitgesteuerten Laden (oben) nicht überlappendes Zeitfenster,
+# in dem der Speicher ausschließlich mit PV-Überschuss geladen wird (nie aus
+# dem Netz). Default-Fenster bewusst leer (Start == Ende, siehe
+# coordinator._window_intervals/windows_overlap) statt eines echten
+# Zeitraums wie beim zeitgesteuerten Laden oben: Ein leeres Fenster kann per
+# Definition nie mit dem (beliebig vom Anwender konfigurierten) Fenster des
+# zeitgesteuerten Ladens überlappen, auch nicht während eines Zwischenschritts
+# beim Bearbeiten dessen Start-/Endzeit (über Mitternacht laufende Fenster
+# können sonst kurzzeitig einen Großteil des Tages abdecken).
+DEFAULT_GRID_SERVING_START = "00:00:00"
+DEFAULT_GRID_SERVING_END = "00:00:00"
+DEFAULT_GRID_SERVING_ENABLED = False
+
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
 # Alle benötigten Register liegen zusammenhängend in einem Block (41-46),

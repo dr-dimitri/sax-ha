@@ -20,6 +20,8 @@ from .const import (
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
     DATA_COORDINATOR,
+    DEFAULT_GRID_SERVING_END,
+    DEFAULT_GRID_SERVING_START,
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
     DOMAIN,
@@ -38,6 +40,8 @@ async def async_setup_entry(
         [
             SaxPowerTimedChargeStartTime(coordinator, entry.entry_id),
             SaxPowerTimedChargeEndTime(coordinator, entry.entry_id),
+            SaxPowerGridServingStartTime(coordinator, entry.entry_id),
+            SaxPowerGridServingEndTime(coordinator, entry.entry_id),
         ]
     )
 
@@ -106,4 +110,74 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     async def async_set_value(self, value: dt_time) -> None:
         await self.coordinator.async_set_timed_charge_end(value)
+        self.async_write_ha_state()
+
+
+class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
+    """Beginn des Zeitfensters für das netzdienliche Laden.
+
+    Darf sich nicht mit dem Zeitfenster des zeitgesteuerten Ladens
+    überschneiden - ein überlappender Wert wird von
+    SaxPowerCoordinator.async_set_grid_serving_start mit HomeAssistantError
+    abgelehnt (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE), was dem
+    Anwender im Frontend als Fehler angezeigt wird.
+    """
+
+    _attr_translation_key = "grid_serving_start"
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_grid_serving_start"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.grid_serving_start is not None:
+            return
+        if (last_state := await self.async_get_last_state()) is not None:
+            if (value := dt_util.parse_time(last_state.state)) is not None:
+                await self.coordinator.async_set_grid_serving_start(value)
+                return
+        value = dt_util.parse_time(DEFAULT_GRID_SERVING_START)
+        if value is not None:
+            await self.coordinator.async_set_grid_serving_start(value)
+
+    @property
+    def native_value(self) -> dt_time | None:
+        return self.coordinator.grid_serving_start
+
+    async def async_set_value(self, value: dt_time) -> None:
+        await self.coordinator.async_set_grid_serving_start(value)
+        self.async_write_ha_state()
+
+
+class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
+    """Ende des Zeitfensters für das netzdienliche Laden.
+
+    Siehe SaxPowerGridServingStartTime zur Nicht-Überlappungs-Prüfung.
+    """
+
+    _attr_translation_key = "grid_serving_end"
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_grid_serving_end"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.grid_serving_end is not None:
+            return
+        if (last_state := await self.async_get_last_state()) is not None:
+            if (value := dt_util.parse_time(last_state.state)) is not None:
+                await self.coordinator.async_set_grid_serving_end(value)
+                return
+        value = dt_util.parse_time(DEFAULT_GRID_SERVING_END)
+        if value is not None:
+            await self.coordinator.async_set_grid_serving_end(value)
+
+    @property
+    def native_value(self) -> dt_time | None:
+        return self.coordinator.grid_serving_end
+
+    async def async_set_value(self, value: dt_time) -> None:
+        await self.coordinator.async_set_grid_serving_end(value)
         self.async_write_ha_state()

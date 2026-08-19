@@ -62,6 +62,9 @@
       "timed_charge_active_text": {
         "name": "Zeitgesteuertes Laden aktiv"
       },
+      "grid_serving_active_text": {
+        "name": "Netzdienliches Laden aktiv"
+      },
       "setpoint_power": {
         "name": "Sollwert Leistung P"
       },
@@ -233,6 +236,9 @@
       },
       "timed_charge_enabled": {
         "name": "Netzladung aktiv"
+      },
+      "grid_serving_enabled": {
+        "name": "Netzdienliches Laden aktiv"
       }
     },
     "time": {
@@ -241,6 +247,12 @@
       },
       "timed_charge_end": {
         "name": "Netzladung Ende"
+      },
+      "grid_serving_start": {
+        "name": "Netzdienliches Laden Start"
+      },
+      "grid_serving_end": {
+        "name": "Netzdienliches Laden Ende"
       }
     }
   },

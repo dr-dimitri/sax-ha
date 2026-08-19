@@ -62,6 +62,9 @@
       "timed_charge_active_text": {
         "name": "Timed charge active"
       },
+      "grid_serving_active_text": {
+        "name": "Grid-serving charge active"
+      },
       "setpoint_power": {
         "name": "Setpoint power P"
       },
@@ -233,6 +236,9 @@
       },
       "timed_charge_enabled": {
         "name": "Grid charge active"
+      },
+      "grid_serving_enabled": {
+        "name": "Grid-serving charge active"
       }
     },
     "time": {
@@ -241,6 +247,12 @@
       },
       "timed_charge_end": {
         "name": "Grid charge end"
+      },
+      "grid_serving_start": {
+        "name": "Grid-serving charge start"
+      },
+      "grid_serving_end": {
+        "name": "Grid-serving charge end"
       }
     }
   },

@@ -674,4 +674,3 @@ async def test_live_grid_charge_falls_back_to_hard_defaults_without_config_entry
         assert hass.states.get(enabled_id).state == "off"
     finally:
         await server.shutdown()
-

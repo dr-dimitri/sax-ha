@@ -13,6 +13,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import (
     CONF_TIMED_CHARGE_ENABLED,
     DATA_COORDINATOR,
+    DEFAULT_GRID_SERVING_ENABLED,
     DEFAULT_TIMED_CHARGE_ENABLED,
     DOMAIN,
     REG_SWITCH_STATE,
@@ -34,6 +35,7 @@ async def async_setup_entry(
         [
             SaxPowerStorageSwitch(coordinator, entry.entry_id),
             SaxPowerTimedChargeSwitch(coordinator, entry.entry_id),
+            SaxPowerGridServingSwitch(coordinator, entry.entry_id),
         ]
     )
 
@@ -107,4 +109,46 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_timed_charge_enabled(False)
+        self.async_write_ha_state()
+
+
+class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+    """Aktiviert/deaktiviert das netzdienliche Laden (Software-Logik).
+
+    Lädt - anders als "Netzladung aktiv" - ausschließlich mit PV-Überschuss,
+    nie aus dem Netz, in einem eigenen, zur Netzladung nicht überlappenden
+    Zeitfenster. Siehe SaxPowerCoordinator._async_enforce_grid_charge sowie
+    die zugehörigen Time-Entities (time.py) und anforderung.yaml,
+    REQ-GRID-SERVING-CHARGE.
+    """
+
+    _attr_translation_key = "grid_serving_enabled"
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_grid_serving_enabled"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.grid_serving_enabled:
+            return
+        if (last_state := await self.async_get_last_state()) is not None:
+            await self.coordinator.async_set_grid_serving_enabled(
+                last_state.state == "on"
+            )
+            return
+        await self.coordinator.async_set_grid_serving_enabled(
+            DEFAULT_GRID_SERVING_ENABLED
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.grid_serving_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_grid_serving_enabled(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_grid_serving_enabled(False)
         self.async_write_ha_state()

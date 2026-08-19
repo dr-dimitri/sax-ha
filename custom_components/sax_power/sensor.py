@@ -145,6 +145,14 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         ),
     ),
     SaxPowerSensorEntityDescription(
+        key="grid_serving_active_text",
+        translation_key="grid_serving_active_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_bool_text(
+            "grid_serving_active", true_text="Aktiv", false_text="Inaktiv"
+        ),
+    ),
+    SaxPowerSensorEntityDescription(
         key="setpoint_power",
         translation_key="setpoint_power",
         device_class=SensorDeviceClass.POWER,

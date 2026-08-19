@@ -33,6 +33,31 @@ DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"
 DEFAULT_TIMED_CHARGE_ENABLED = False
 
+# Netzdienliches Laden (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE):
+# eigenes, zum zeitgesteuerten Laden (oben) nicht überlappendes Zeitfenster,
+# in dem der Speicher ausschließlich mit PV-Überschuss geladen wird (nie aus
+# dem Netz). Default-Fenster bewusst leer (Start == Ende, siehe
+# coordinator._window_intervals/windows_overlap) statt eines echten
+# Zeitraums wie beim zeitgesteuerten Laden oben: Ein leeres Fenster kann per
+# Definition nie mit dem (beliebig vom Anwender konfigurierten) Fenster des
+# zeitgesteuerten Ladens überlappen, auch nicht während eines Zwischenschritts
+# beim Bearbeiten dessen Start-/Endzeit (über Mitternacht laufende Fenster
+# können sonst kurzzeitig einen Großteil des Tages abdecken).
+DEFAULT_GRID_SERVING_START = "00:00:00"
+DEFAULT_GRID_SERVING_END = "00:00:00"
+DEFAULT_GRID_SERVING_ENABLED = False
+
+# Aktive Monate für Netzladung/netzdienliches Laden (siehe anforderung.yaml,
+# REQ-GRID-SERVING-CHARGE): je Feature 12 Monats-Schalter (switch.py), die
+# festlegen, in welchen Kalendermonaten das jeweilige Zeitfenster überhaupt
+# wirksam ist (z. B. Netzladung nur November-Januar, netzdienliches Laden
+# nur Mai-August). Default: alle Monate aktiv, damit sich bestehende
+# Konfigurationen nach einem Update unverändert verhalten, bis der Anwender
+# einzelne Monate bewusst abwählt. Sind für ein Feature gar keine Monate
+# ausgewählt, ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
+ALL_MONTHS = frozenset(range(1, 13))
+DEFAULT_MONTH_ENABLED = True
+
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
 # Alle benötigten Register liegen zusammenhängend in einem Block (41-46),

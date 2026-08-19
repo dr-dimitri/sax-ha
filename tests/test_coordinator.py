@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.sax_power.const import (
+    ALL_MONTHS,
     GRID_CHARGE_WRITE_INTERVAL,
     READ_BLOCK_COUNT,
     READ_BLOCK_START,
@@ -26,6 +27,7 @@ from custom_components.sax_power.coordinator import (
     apply_sunssf,
     to_signed16,
     to_unsigned16,
+    windows_overlap,
 )
 
 
@@ -279,17 +281,15 @@ def test_is_time_in_window(
     hass, start: dt_time, end: dt_time, now: dt_time, expected: bool
 ) -> None:
     coordinator = _make_coordinator(hass, _make_client())
-    coordinator._timed_charge_start = start
-    coordinator._timed_charge_end = end
-    assert coordinator._is_time_in_window(now) is expected
+    assert coordinator._is_time_in_window(now, start, end) is expected
 
 
 def test_is_time_in_window_unset_is_never_active(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
-    assert coordinator._is_time_in_window(dt_time(3, 0)) is False
+    assert coordinator._is_time_in_window(dt_time(3, 0), None, None) is False
 
 
-def _patched_now(hour: int, minute: int = 0):
+def _patched_now(hour: int, minute: int = 0, *, month: int = 1):
     """Patcht dt_util.now() auf einen festen Zeitpunkt.
 
     Bewusst statt der `freezer`-Fixture (freezegun): freezegun friert auch
@@ -300,7 +300,7 @@ def _patched_now(hour: int, minute: int = 0):
     """
     return patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, hour, minute),
+        return_value=datetime(2024, month, 1, hour, minute),
     )
 
 
@@ -688,3 +688,684 @@ def test_sun_ic_write_interval(
     if ic_timeout is not None:
         coordinator.data = {"ic_timeout": ic_timeout}
     assert coordinator._sun_ic_write_interval() == expected_interval
+
+
+# -- Netzdienliches Laden: Zeitfenster-Überlappung ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("start_a", "end_a", "start_b", "end_b", "expected"),
+    [
+        (dt_time(1, 0), dt_time(5, 0), dt_time(6, 0), dt_time(7, 0), False),  # getrennt
+        (
+            dt_time(1, 0),
+            dt_time(5, 0),
+            dt_time(4, 0),
+            dt_time(8, 0),
+            True,
+        ),  # überlappend
+        (
+            dt_time(1, 0),
+            dt_time(5, 0),
+            dt_time(5, 0),
+            dt_time(6, 0),
+            False,
+        ),  # berühren sich (Ende exklusiv)
+        (
+            dt_time(1, 0),
+            dt_time(5, 0),
+            dt_time(2, 0),
+            dt_time(3, 0),
+            True,
+        ),  # b liegt vollständig in a
+        # Fenster a läuft über Mitternacht (23:00-05:00), b liegt im Nacht-Teil
+        (dt_time(23, 0), dt_time(5, 0), dt_time(1, 0), dt_time(2, 0), True),
+        # Fenster a läuft über Mitternacht, b liegt tagsüber -> keine Überlappung
+        (dt_time(23, 0), dt_time(5, 0), dt_time(12, 0), dt_time(13, 0), False),
+        # beide Fenster laufen über Mitternacht und überlappen sich im Abend-Teil
+        (dt_time(22, 0), dt_time(2, 0), dt_time(23, 0), dt_time(3, 0), True),
+        (
+            dt_time(1, 0),
+            dt_time(1, 0),
+            dt_time(0, 0),
+            dt_time(23, 59),
+            False,
+        ),  # a leer (Start==Ende)
+    ],
+)
+def test_windows_overlap(
+    start_a: dt_time,
+    end_a: dt_time,
+    start_b: dt_time,
+    end_b: dt_time,
+    expected: bool,
+) -> None:
+    assert windows_overlap(start_a, end_a, start_b, end_b) is expected
+    # Symmetrisch: Reihenfolge der beiden Fenster darf keine Rolle spielen.
+    assert windows_overlap(start_b, end_b, start_a, end_a) is expected
+
+
+@pytest.mark.parametrize(
+    ("start_a", "end_a", "start_b", "end_b"),
+    [
+        (None, dt_time(5, 0), dt_time(1, 0), dt_time(2, 0)),
+        (dt_time(1, 0), None, dt_time(1, 0), dt_time(2, 0)),
+        (dt_time(1, 0), dt_time(5, 0), None, dt_time(2, 0)),
+        (dt_time(1, 0), dt_time(5, 0), dt_time(1, 0), None),
+    ],
+)
+def test_windows_overlap_incomplete_window_never_overlaps(
+    start_a, end_a, start_b, end_b
+) -> None:
+    assert windows_overlap(start_a, end_a, start_b, end_b) is False
+
+
+async def test_set_timed_charge_start_rejects_overlap_with_grid_serving_window(
+    hass,
+) -> None:
+    """Der Anwender muss informiert werden, wenn er die Netzladezeiten so
+    ändert, dass sie in den netzdienlichen Zeitraum fallen würden - siehe
+    anforderung.yaml, REQ-GRID-SERVING-CHARGE. Die Ablehnung über
+    HomeAssistantError erscheint im Frontend als Fehler beim Service-Call."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+
+    # Verschiebt die Netzladung so, dass sie in den netzdienlichen Zeitraum
+    # hineinreicht (neues Fenster 12:00-05:00, über Mitternacht laufend,
+    # überschneidet sich mit 10:00-14:00 im Abschnitt 12:00-14:00).
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_timed_charge_start(dt_time(12, 0))
+
+    # Die abgelehnte Änderung darf nicht übernommen worden sein.
+    assert coordinator.timed_charge_start == dt_time(1, 0)
+
+
+async def test_set_grid_serving_start_rejects_overlap_with_timed_charge_window(
+    hass,
+) -> None:
+    """Umgekehrter Fall: Der Anwender wird auch beim Einrichten des
+    netzdienlichen Ladens selbst informiert, wenn dessen Zeitfenster in den
+    Netzladung-Zeitraum fallen würde."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+
+    # Verschiebt das netzdienliche Fenster so, dass es in die Netzladung
+    # hineinreicht (neues Fenster 3:00-14:00 überschneidet sich mit 1:00-5:00
+    # im Abschnitt 3:00-5:00).
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_grid_serving_start(dt_time(3, 0))
+
+    assert coordinator.grid_serving_start == dt_time(10, 0)
+
+
+async def test_set_timed_charge_end_rejects_overlap(hass) -> None:
+    """Die Überlappungsprüfung greift auch für die Endzeit, nicht nur für die
+    Startzeit."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_grid_serving_start(dt_time(3, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(8, 0))
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(2, 0))
+
+    # Neues Fenster 1:00-4:00 überschneidet sich mit 3:00-8:00.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_timed_charge_end(dt_time(4, 0))
+
+    assert coordinator.timed_charge_end == dt_time(2, 0)
+
+
+async def test_set_grid_serving_end_rejects_overlap(hass) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(8, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(6, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(6, 30))
+
+    # Neues Fenster 6:00-9:00 überschneidet sich mit 8:00-10:00.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_grid_serving_end(dt_time(9, 0))
+
+    assert coordinator.grid_serving_end == dt_time(6, 30)
+
+
+async def test_set_windows_with_non_overlapping_times_succeeds(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+
+    assert coordinator.timed_charge_start == dt_time(1, 0)
+    assert coordinator.timed_charge_end == dt_time(5, 0)
+    assert coordinator.grid_serving_start == dt_time(10, 0)
+    assert coordinator.grid_serving_end == dt_time(14, 0)
+
+
+# -- Netzdienliches Laden: Ladeverhalten -------------------------------------
+
+
+async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window(
+    hass,
+) -> None:
+    """Netzdienliches Laden startet nur MIT PV-Überschuss (nie aus dem
+    Netz) - die genau umgekehrte Bedingung zum zeitgesteuerten Laden. Der
+    Sollwert wird dabei auf den tatsächlich verfügbaren Überschuss gedeckelt,
+    nicht auf "Max. Netzladeleistung", falls dieser kleiner ist."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,  # 500 W
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)  # deutlich über dem Überschuss
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        assert coordinator._timed_charge_active is False
+        assert coordinator.sun_charge_active is True
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        )
+        # -500 W (gedeckelt auf den Überschuss, nicht auf "Max.
+        # Netzladeleistung") / 4600 W Referenz * 100 = -10.869...%, skaliert
+        # mit sunssf -2 -> -1087.
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=to_unsigned16(-1087),
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -> None:
+    """Übersteigt der PV-Überschuss "Max. Netzladeleistung", wird trotzdem nur
+    mit "Max. Netzladeleistung" geladen."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 4000,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(1000)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        # -1000 W / 4600 W Referenz * 100 = -21.739...%, skaliert mit
+        # sunssf -2 -> -2174.
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=to_unsigned16(-2174),
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_grid_serving_inactive_without_pv_surplus(
+    hass,
+) -> None:
+    """Netzdienliches Laden darf innerhalb seines Zeitfensters nicht starten,
+    solange kein PV-Überschuss über dem Schwellwert gemessen wird - das
+    Feature soll nie aus dem Netz laden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    with _patched_now(12):
+        await coordinator.async_set_grid_serving_enabled(True)
+        await asyncio.sleep(0.1)
+
+    assert coordinator.grid_serving_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_grid_serving_inactive_when_smartmeter_power_missing(
+    hass,
+) -> None:
+    """Ohne bekannten Smart-Meter-Wert kann nicht sichergestellt werden, dass
+    nicht aus dem Netz geladen wird - im Gegensatz zum zeitgesteuerten Laden
+    (das in diesem Fall unbeeinflusst weiterläuft) darf netzdienliches Laden
+    hier NICHT starten."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    with _patched_now(12):
+        await coordinator.async_set_grid_serving_enabled(True)
+        await asyncio.sleep(0.1)
+
+    assert coordinator.grid_serving_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_grid_serving_inactive_outside_window(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    with _patched_now(20):
+        await coordinator.async_set_grid_serving_enabled(True)
+        await asyncio.sleep(0.1)
+
+    assert coordinator.grid_serving_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_grid_serving_inactive_when_disabled(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    # grid_serving_enabled bleibt False (Default)
+
+    with _patched_now(12):
+        await coordinator._async_enforce_grid_charge(coordinator.data)
+
+    assert coordinator.grid_serving_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_max_soc_lock_takes_priority_over_grid_serving(
+    hass,
+) -> None:
+    """Die Max-SOC-Sperre hat auch gegenüber netzdienlichem Laden Vorrang -
+    "Auch der angegebene SOC muss berücksichtigt werden"."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 95,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.grid_serving_active is False
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_exclusive(
+    hass,
+) -> None:
+    """Selbst wenn beide Zeitfenster (z. B. durch einen über ein Update
+    restaurierten Altzustand, unter Umgehung der Setter-Validierung)
+    überlappend gespeichert sind, können zeitgesteuertes und netzdienliches
+    Laden nie gleichzeitig aktiv werden: Sie verlangen exakt entgegengesetzte
+    PV-Überschuss-Bedingungen (kein Überschuss vs. Überschuss), was sich
+    gegenseitig ausschließt, unabhängig vom Zeitfenster."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    # Überlappende Fenster direkt gesetzt (umgeht die Setter-Validierung).
+    coordinator._timed_charge_start = dt_time(10, 0)
+    coordinator._timed_charge_end = dt_time(14, 0)
+    coordinator._timed_charge_enabled = True
+    coordinator._grid_serving_start = dt_time(10, 0)
+    coordinator._grid_serving_end = dt_time(14, 0)
+    coordinator._grid_serving_enabled = True
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(12):
+            # Kein PV-Überschuss -> nur zeitgesteuertes Laden kann greifen.
+            await coordinator._async_enforce_grid_charge(
+                {**coordinator.data, "smartmeter_power": 0}
+            )
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is True
+            assert coordinator.grid_serving_active is False
+
+            # PV-Überschuss -> nur netzdienliches Laden kann greifen.
+            await coordinator._async_enforce_grid_charge(
+                {
+                    **coordinator.data,
+                    "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+                }
+            )
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is False
+            assert coordinator.grid_serving_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+# -- Aktive Monate: Zustand und Enforcement ----------------------------------
+
+
+def test_months_default_to_all_months(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    assert coordinator.timed_charge_months == frozenset(ALL_MONTHS)
+    assert coordinator.grid_serving_months == frozenset(ALL_MONTHS)
+
+
+async def test_set_timed_charge_month_toggles_membership(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_month(5, False)
+    assert 5 not in coordinator.timed_charge_months
+    assert coordinator.timed_charge_months == frozenset(ALL_MONTHS - {5})
+
+    await coordinator.async_set_timed_charge_month(5, True)
+    assert coordinator.timed_charge_months == frozenset(ALL_MONTHS)
+
+
+async def test_set_grid_serving_month_toggles_membership(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_grid_serving_month(11, False)
+    assert coordinator.grid_serving_months == frozenset(ALL_MONTHS - {11})
+
+
+async def test_enforce_grid_charge_timed_charge_inactive_outside_active_month(
+    hass,
+) -> None:
+    """ "Netzladung im November, Dezember und Januar zwischen 1 und 5 Uhr" -
+    außerhalb der ausgewählten Monate darf trotz passendem Zeitfenster nicht
+    geladen werden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in (11, 12, 1):
+        await coordinator.async_set_timed_charge_month(month, True)
+    for month in set(ALL_MONTHS) - {11, 12, 1}:
+        await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    # Im Zeitfenster (2 Uhr), aber im Juli - nicht in den aktiven Monaten.
+    with _patched_now(2, month=7):
+        await coordinator._async_enforce_grid_charge(
+            {"soc": 10, "ic_max_power_reference": 4600, "ic_timeout": 300}
+        )
+    assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_timed_charge_active_in_active_month(hass) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 10, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in set(ALL_MONTHS) - {11, 12, 1}:
+        await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    try:
+        # Im Zeitfenster (2 Uhr) UND im Dezember - einer der aktiven Monate.
+        with _patched_now(2, month=12):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+        await asyncio.sleep(0.1)
+
+        assert coordinator._timed_charge_active is True
+        assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_grid_serving_respects_active_months(hass) -> None:
+    """ "Netzdienliches Laden in Mai, Juni, Juli und August zwischen 11 und 14
+    Uhr" - außerhalb dieser Monate darf trotz PV-Überschuss und passendem
+    Zeitfenster nicht geladen werden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(11, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
+        await coordinator.async_set_grid_serving_month(month, False)
+    await coordinator.async_set_grid_serving_enabled(True)
+
+    # Im Zeitfenster (12 Uhr), aber im Oktober - nicht in den aktiven Monaten.
+    with _patched_now(12, month=10):
+        await coordinator._async_enforce_grid_charge(coordinator.data)
+    assert coordinator.grid_serving_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(11, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
+        await coordinator.async_set_grid_serving_month(month, False)
+    await coordinator.async_set_grid_serving_enabled(True)
+
+    try:
+        with _patched_now(12, month=7):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_inactive_when_all_months_deselected(hass) -> None:
+    """Sind für ein Feature gar keine Monate ausgewählt, ist es ganzjährig
+    inaktiv - analog zu einem leeren Zeitfenster."""
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    for month in ALL_MONTHS:
+        await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    assert coordinator.timed_charge_months == frozenset()
+    with _patched_now(2, month=1):
+        await coordinator._async_enforce_grid_charge(
+            {"soc": 10, "ic_max_power_reference": 4600, "ic_timeout": 300}
+        )
+    assert coordinator._timed_charge_active is False
+
+
+# -- Aktive Monate: Überlappungsprüfung berücksichtigt Monate ---------------
+
+
+async def test_overlapping_times_with_disjoint_months_are_allowed(hass) -> None:
+    """ "Netzdienliches Laden in Mai-August, Netzladung in November-Januar" -
+    die Tageszeiten dürfen sich beliebig überlappen, weil die Fenster nie im
+    selben Monat aktiv sind.
+
+    Monate zunächst direkt gesetzt (umgeht Setter-Validierung) - das
+    entspricht dem realistischen Bedienpfad, bei dem der Anwender zuerst
+    beide Monatsauswahlen auf disjunkte Werte einstellt (unproblematisch,
+    solange noch keines der beiden Zeitfenster das andere überlappt - siehe
+    Kommentar in der Netzdienlich-Sektion zu den leeren Default-Zeiten) und
+    danach beide Zeitfenster ändert."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_months = {11, 12, 1}
+    coordinator._grid_serving_months = {5, 6, 7, 8}
+
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    # Gleiches Zeitfenster wie die Netzladung, aber disjunkte Monate - darf
+    # nicht abgelehnt werden.
+    await coordinator.async_set_grid_serving_start(dt_time(1, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(5, 0))
+
+    assert coordinator.timed_charge_start == dt_time(1, 0)
+    assert coordinator.grid_serving_start == dt_time(1, 0)
+
+
+async def test_set_timed_charge_month_rejects_overlap_with_grid_serving(hass) -> None:
+    """Fügt man einen Monat hinzu, der die Netzladung wieder in dieselben
+    Monate wie das netzdienliche Laden bringt (bei gleichzeitig
+    überlappenden Zeitfenstern), muss das abgelehnt werden."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = dt_time(1, 0)
+    coordinator._timed_charge_end = dt_time(5, 0)
+    coordinator._timed_charge_months = {11, 12, 1}
+    coordinator._grid_serving_start = dt_time(3, 0)
+    coordinator._grid_serving_end = dt_time(6, 0)
+    coordinator._grid_serving_months = {6, 7}
+
+    # Zeitfenster überschneiden sich bereits (3-5 Uhr), Monate sind aktuell
+    # disjunkt (Netzladung Nov/Dez/Jan vs. netzdienlich Jun/Jul) - erlaubt.
+    # Erweitert man die Netzladung nun auf Juni, überschneiden sich auch die
+    # Monate -> muss abgelehnt werden.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_timed_charge_month(6, True)
+
+    assert 6 not in coordinator.timed_charge_months
+
+
+async def test_set_grid_serving_month_rejects_overlap_with_timed_charge(hass) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = dt_time(1, 0)
+    coordinator._timed_charge_end = dt_time(5, 0)
+    coordinator._timed_charge_months = {6, 7}
+    coordinator._grid_serving_start = dt_time(3, 0)
+    coordinator._grid_serving_end = dt_time(6, 0)
+    coordinator._grid_serving_months = {11, 12, 1}
+
+    # Zeitfenster überschneiden sich bereits (3-5 Uhr), Monate sind aktuell
+    # disjunkt - erweitert man netzdienliches Laden nun auf Juni,
+    # überschneiden sich auch die Monate -> muss abgelehnt werden.
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_set_grid_serving_month(6, True)
+
+    assert 6 not in coordinator.grid_serving_months
+
+
+async def test_month_restore_does_not_validate_overlap(hass) -> None:
+    """validate=False (Restaurieren beim Start, siehe SaxPowerMonthSwitch)
+    muss auch überlappende Zwischenzustände klaglos übernehmen - die
+    Validierung ist ausschließlich für explizite Nutzeränderungen gedacht."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_start = dt_time(1, 0)
+    coordinator._timed_charge_end = dt_time(5, 0)
+    coordinator._grid_serving_start = dt_time(3, 0)
+    coordinator._grid_serving_end = dt_time(6, 0)
+
+    # Beide Fenster überschneiden sich (3-5 Uhr) und starten mit "alle
+    # Monate" (Default) - ohne validate=False würde das hier ablehnen.
+    await coordinator.async_set_timed_charge_month(6, True, validate=False)
+    await coordinator.async_set_grid_serving_month(6, True, validate=False)
+
+    assert 6 in coordinator.timed_charge_months
+    assert 6 in coordinator.grid_serving_months

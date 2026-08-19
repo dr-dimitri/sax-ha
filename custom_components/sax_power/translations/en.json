@@ -62,6 +62,9 @@
       "timed_charge_active_text": {
         "name": "Timed charge active"
       },
+      "grid_serving_active_text": {
+        "name": "Grid-serving charge active"
+      },
       "setpoint_power": {
         "name": "Setpoint power P"
       },
@@ -233,6 +236,81 @@
       },
       "timed_charge_enabled": {
         "name": "Grid charge active"
+      },
+      "grid_serving_enabled": {
+        "name": "Grid-serving charge active"
+      },
+      "timed_charge_month_1": {
+        "name": "Grid charge active in January"
+      },
+      "timed_charge_month_2": {
+        "name": "Grid charge active in February"
+      },
+      "timed_charge_month_3": {
+        "name": "Grid charge active in March"
+      },
+      "timed_charge_month_4": {
+        "name": "Grid charge active in April"
+      },
+      "timed_charge_month_5": {
+        "name": "Grid charge active in May"
+      },
+      "timed_charge_month_6": {
+        "name": "Grid charge active in June"
+      },
+      "timed_charge_month_7": {
+        "name": "Grid charge active in July"
+      },
+      "timed_charge_month_8": {
+        "name": "Grid charge active in August"
+      },
+      "timed_charge_month_9": {
+        "name": "Grid charge active in September"
+      },
+      "timed_charge_month_10": {
+        "name": "Grid charge active in October"
+      },
+      "timed_charge_month_11": {
+        "name": "Grid charge active in November"
+      },
+      "timed_charge_month_12": {
+        "name": "Grid charge active in December"
+      },
+      "grid_serving_month_1": {
+        "name": "Grid-serving charge active in January"
+      },
+      "grid_serving_month_2": {
+        "name": "Grid-serving charge active in February"
+      },
+      "grid_serving_month_3": {
+        "name": "Grid-serving charge active in March"
+      },
+      "grid_serving_month_4": {
+        "name": "Grid-serving charge active in April"
+      },
+      "grid_serving_month_5": {
+        "name": "Grid-serving charge active in May"
+      },
+      "grid_serving_month_6": {
+        "name": "Grid-serving charge active in June"
+      },
+      "grid_serving_month_7": {
+        "name": "Grid-serving charge active in July"
+      },
+      "grid_serving_month_8": {
+        "name": "Grid-serving charge active in August"
+      },
+      "grid_serving_month_9": {
+        "name": "Grid-serving charge active in September"
+      },
+      "grid_serving_month_10": {
+        "name": "Grid-serving charge active in October"
+      },
+      "grid_serving_month_11": {
+        "name": "Grid-serving charge active in November"
+      },
+      "grid_serving_month_12": {
+        "name": "Grid-serving charge active in December"
       }
     },
     "time": {
@@ -241,6 +319,12 @@
       },
       "timed_charge_end": {
         "name": "Grid charge end"
+      },
+      "grid_serving_start": {
+        "name": "Grid-serving charge start"
+      },
+      "grid_serving_end": {
+        "name": "Grid-serving charge end"
       }
     }
   },

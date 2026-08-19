@@ -62,6 +62,9 @@
       "timed_charge_active_text": {
         "name": "Zeitgesteuertes Laden aktiv"
       },
+      "grid_serving_active_text": {
+        "name": "Netzdienliches Laden aktiv"
+      },
       "setpoint_power": {
         "name": "Sollwert Leistung P"
       },
@@ -233,6 +236,81 @@
       },
       "timed_charge_enabled": {
         "name": "Netzladung aktiv"
+      },
+      "grid_serving_enabled": {
+        "name": "Netzdienliches Laden aktiv"
+      },
+      "timed_charge_month_1": {
+        "name": "Netzladung aktiv im Januar"
+      },
+      "timed_charge_month_2": {
+        "name": "Netzladung aktiv im Februar"
+      },
+      "timed_charge_month_3": {
+        "name": "Netzladung aktiv im März"
+      },
+      "timed_charge_month_4": {
+        "name": "Netzladung aktiv im April"
+      },
+      "timed_charge_month_5": {
+        "name": "Netzladung aktiv im Mai"
+      },
+      "timed_charge_month_6": {
+        "name": "Netzladung aktiv im Juni"
+      },
+      "timed_charge_month_7": {
+        "name": "Netzladung aktiv im Juli"
+      },
+      "timed_charge_month_8": {
+        "name": "Netzladung aktiv im August"
+      },
+      "timed_charge_month_9": {
+        "name": "Netzladung aktiv im September"
+      },
+      "timed_charge_month_10": {
+        "name": "Netzladung aktiv im Oktober"
+      },
+      "timed_charge_month_11": {
+        "name": "Netzladung aktiv im November"
+      },
+      "timed_charge_month_12": {
+        "name": "Netzladung aktiv im Dezember"
+      },
+      "grid_serving_month_1": {
+        "name": "Netzdienliches Laden aktiv im Januar"
+      },
+      "grid_serving_month_2": {
+        "name": "Netzdienliches Laden aktiv im Februar"
+      },
+      "grid_serving_month_3": {
+        "name": "Netzdienliches Laden aktiv im März"
+      },
+      "grid_serving_month_4": {
+        "name": "Netzdienliches Laden aktiv im April"
+      },
+      "grid_serving_month_5": {
+        "name": "Netzdienliches Laden aktiv im Mai"
+      },
+      "grid_serving_month_6": {
+        "name": "Netzdienliches Laden aktiv im Juni"
+      },
+      "grid_serving_month_7": {
+        "name": "Netzdienliches Laden aktiv im Juli"
+      },
+      "grid_serving_month_8": {
+        "name": "Netzdienliches Laden aktiv im August"
+      },
+      "grid_serving_month_9": {
+        "name": "Netzdienliches Laden aktiv im September"
+      },
+      "grid_serving_month_10": {
+        "name": "Netzdienliches Laden aktiv im Oktober"
+      },
+      "grid_serving_month_11": {
+        "name": "Netzdienliches Laden aktiv im November"
+      },
+      "grid_serving_month_12": {
+        "name": "Netzdienliches Laden aktiv im Dezember"
       }
     },
     "time": {
@@ -241,6 +319,12 @@
       },
       "timed_charge_end": {
         "name": "Netzladung Ende"
+      },
+      "grid_serving_start": {
+        "name": "Netzdienliches Laden Start"
+      },
+      "grid_serving_end": {
+        "name": "Netzdienliches Laden Ende"
       }
     }
   },

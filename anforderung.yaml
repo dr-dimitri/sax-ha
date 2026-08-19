@@ -426,6 +426,146 @@ requirement_timed_soc_charge:
        Nutzerwert (hat Vorrang)."
 
 # ==============================================================================
+# ANFORDERUNG: NETZDIENLICHES LADEN (NUR MIT PV-ÜBERSCHUSS)
+# ==============================================================================
+requirement_grid_serving_charge:
+  id: REQ-GRID-SERVING-CHARGE
+  title: "Netzdienliches Laden: Speicher innerhalb eines eigenen Zeitfensters mit eigenen aktiven Monaten ausschließlich mit PV-Überschuss laden"
+  status: done
+  description: >
+    Eigenständiges Software-Feature (Schalter "Netzdienliches Laden aktiv",
+    switch.py, sowie Zeitfenster "Netzdienliches Laden Start"/"Ende",
+    time.py), das sich mit zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE) den
+    SunSpec-Modus-Schreibpfad (_async_sun_charge_loop), die zentralen
+    Einstellungen "Max. SOC" (Ziel-SOC) und "Max. Netzladeleistung"
+    (Leistungsobergrenze) sowie die Max-SOC-Sperre teilt - siehe
+    SaxPowerCoordinator._async_enforce_grid_charge. Im Unterschied zum
+    zeitgesteuerten Laden lädt netzdienliches Laden bewusst NIE aus dem
+    Netz, sondern ausschließlich mit dem gerade am Smart Meter gemessenen
+    PV-Überschuss (data["smartmeter_power"] > SMARTMETER_PV_SURPLUS_
+    THRESHOLD_WATT, dieselbe Schwelle wie beim PV-Überschuss-Abbruch der
+    Netzladung, nur mit umgekehrter Bedingung) - der geschriebene Sollwert
+    wird dabei auf min("Max. Netzladeleistung", aktueller PV-Überschuss)
+    gedeckelt und sinkt mit fallendem Überschuss im selben Poll-Zyklus mit.
+    Fehlt der Smart-Meter-Wert (z. B. SunSpec-Modus nicht erreichbar), darf
+    netzdienliches Laden NICHT starten (im Gegensatz zum zeitgesteuerten
+    Laden, das in diesem Fall unbeeinflusst weiterläuft) - ohne bekannten
+    Überschuss kann nicht sichergestellt werden, dass nicht aus dem Netz
+    geladen wird.
+
+    Priorität (höchste zuerst, siehe
+    SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
+    ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
+    unverändert für beide Lademodi), 2. zeitgesteuertes Laden, 3.
+    netzdienliches Laden. Zeitgesteuertes und netzdienliches Laden
+    schließen sich dabei bereits über die PV-Überschuss-Bedingung
+    gegenseitig aus (kein Überschuss vs. Überschuss) und können nie
+    gleichzeitig einen Ladesollwert schreiben.
+
+    Aktive Monate: Zusätzlich zum Zeitfenster hat jedes der beiden Features
+    (Netzladung UND netzdienliches Laden) 12 Monats-Schalter
+    (switch.SaxPowerMonthSwitch, generische Klasse für beide Features/alle
+    12 Monate; translation_key timed_charge_month_1..12 bzw.
+    grid_serving_month_1..12, "Netzladung/Netzdienliches Laden aktiv im
+    Januar" ... "im Dezember"), die festlegen, in welchen Kalendermonaten
+    das jeweilige Zeitfenster überhaupt wirksam ist - z. B. Netzladung nur
+    November-Januar zwischen 1 und 5 Uhr, netzdienliches Laden nur
+    Mai-August zwischen 11 und 14 Uhr (SaxPowerCoordinator.
+    _timed_charge_months/_grid_serving_months, je ein set[int] aus 1-12,
+    Properties timed_charge_months/grid_serving_months als frozenset,
+    Setter async_set_timed_charge_month/async_set_grid_serving_month).
+    Default (const.ALL_MONTHS, DEFAULT_MONTH_ENABLED=True): alle 12 Monate
+    aktiv, damit sich bestehende Konfigurationen nach diesem Update
+    unverändert verhalten, bis der Anwender einzelne Monate bewusst
+    abwählt. Ist für ein Feature kein einziger Monat ausgewählt, ist es
+    ganzjährig inaktiv (analog zu einem leeren Zeitfenster) -
+    SaxPowerCoordinator._async_enforce_grid_charge prüft zusätzlich zum
+    Zeitfenster now.month in self._timed_charge_months bzw.
+    self._grid_serving_months.
+
+    Zeitfenster-Nichtüberlappung (Tageszeit UND Monat): Das Zeitfenster des
+    netzdienlichen Ladens darf sich nicht mit dem Zeitfenster der Netzladung
+    überschneiden - zwei Fenster gelten dabei NUR dann als überlappend, wenn
+    sich sowohl ihre Tageszeiten ALS AUCH ihre aktiven Monate überschneiden.
+    Laufen beide Fenster nur in disjunkten Monaten, dürfen sich die
+    Tageszeiten beliebig überlappen, da die Fenster nie gleichzeitig aktiv
+    sein können (siehe Beispiel oben). SaxPowerCoordinator.
+    _assert_windows_dont_overlap (aufgerufen aus allen sechs relevanten
+    Settern: async_set_timed_charge_start/-end/-month,
+    async_set_grid_serving_start/-end/-month) lehnt eine Änderung, die zu
+    einer echten Überschneidung führen würde, mit HomeAssistantError ab -
+    unabhängig davon, welche der beiden Entitäten-Gruppen gerade geändert
+    wird. Der Fehler wird über den auslösenden Service-Call an das Frontend
+    durchgereicht und dem Anwender damit direkt als Fehlermeldung angezeigt.
+    Die eigentliche Zeitfenster-Überlappungsprüfung
+    (coordinator.windows_overlap) unterstützt wie _is_time_in_window über
+    Mitternacht laufende Fenster sowie unvollständige Fenster (mindestens
+    eine der vier Zeiten fehlt - gelten als nie überlappend); die
+    Monatsprüfung ist eine einfache Set-Schnittmenge (months_a & months_b).
+    Bedingt durch die unabhängigen Start-/Ende-/Monats-Entities pro Feature
+    kann das kurzzeitige Bearbeiten nur einer der beiden Zeit-Grenzen eines
+    bereits über Mitternacht laufenden Fensters in seltenen Fällen einen
+    ungewöhnlich großen Zwischenzustand ergeben und dadurch abgelehnt
+    werden, obwohl das beabsichtigte Endergebnis nicht überlappen würde -
+    betrifft nur Anwender, die für beide Features zusätzlich noch über
+    Mitternacht laufende Fenster einsetzen. Aus demselben Grund kann das
+    schrittweise Umstellen von überlappenden Tageszeiten auf disjunkte
+    Monate in ungünstiger Reihenfolge zwischenzeitlich abgelehnt werden -
+    empfohlen wird, zunächst beide Monats-Auswahlen anzupassen (wirkt sich
+    dabei so lange nicht überlappend aus, wie mindestens eines der beiden
+    Zeitfenster noch beim - nicht überlappenden - Default steht) und erst
+    danach die Zeiten zu ändern.
+
+    Die Monats-Setter unterstützen zusätzlich einen validate-Parameter
+    (Default True): SaxPowerMonthSwitch.async_added_to_hass ruft sie beim
+    Restaurieren eines gespeicherten Zustands mit validate=False auf, um
+    False-Positives durch das sequentielle Restaurieren mehrerer
+    Monats-Entities zu vermeiden (beide Monats-Sets starten intern bei
+    "alle Monate", ein während der Restaurierung zwischenzeitlich noch
+    voller Satz auf der jeweils anderen Seite würde sonst fälschlich als
+    Überlappung erkannt). Live-Änderungen über den Schalter
+    (async_turn_on/-off) validieren dagegen immer.
+
+    Diagnose-Sensor "Netzdienliches Laden aktiv" (sensor.py,
+    grid_serving_active_text, analog zu "Zeitgesteuertes Laden aktiv") zeigt
+    an, ob der Speicher gerade aktiv netzdienlich lädt - das informiert den
+    Anwender laufend über den Aktivzustand des Features.
+
+    Aktiviert-Zustand, Start-/Endzeit sowie die aktiven Monate werden über
+    RestoreEntity über Neustarts hinweg persistiert (analog zum
+    zeitgesteuerten Laden). Ohne zuvor gespeicherten Zustand gelten die
+    Defaults DEFAULT_GRID_SERVING_ENABLED (False) sowie
+    DEFAULT_GRID_SERVING_START/-END (const.py) - bewusst identisch (Start ==
+    Ende), damit das Default-Zeitfenster leer ist und nie mit dem (beliebig
+    konfigurierten) Zeitfenster der Netzladung überlappen kann. Kein
+    Vorbelegungsschritt im Config Flow (im Unterschied zu
+    REQ-TIMED-SOC-CHARGE) - das Feature wird ausschließlich über die
+    Entitäten nach der Ersteinrichtung konfiguriert.
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
+       über Mitternacht laufendes Fenster, berührende statt überlappende
+       Fenster, unvollständige Fenster) sowie die Ablehnung überlappender
+       Änderungen an den Zeit- und Monats-Settern (async_set_timed_charge_
+       start/-end/-month, async_set_grid_serving_start/-end/-month) mit
+       HomeAssistantError ab - inklusive des Falls, dass identische
+       Tageszeiten bei disjunkten aktiven Monaten NICHT abgelehnt werden."
+    - "tests/test_coordinator.py deckt das Ladeverhalten von netzdienlichem
+       Laden ab: Start nur mit PV-Überschuss über dem Schwellwert, Deckelung
+       auf min(Max. Netzladeleistung, PV-Überschuss), kein Start ohne
+       Überschuss/außerhalb des Zeitfensters/außerhalb der aktiven
+       Monate/deaktiviert/ohne bekannten Smart-Meter-Wert, sowie Vorrang der
+       Max-SOC-Sperre und die gegenseitige Ausschlusslogik zu
+       zeitgesteuertem Laden über die PV-Überschuss-Bedingung. Ebenso deckt
+       es das analoge Monats-Verhalten für zeitgesteuertes Laden ab
+       (inaktiv außerhalb der ausgewählten Monate, aktiv innerhalb) sowie
+       den Fall, dass ein Feature bei keinem ausgewählten Monat ganzjährig
+       inaktiv bleibt."
+    - "switch.py/time.py/sensor.py enthalten keine eigene
+       Leistungseinstellung für netzdienliches Laden - es nutzt dieselben
+       zentralen Einstellungen wie zeitgesteuertes Laden ('Max. SOC', 'Max.
+       Netzladeleistung')."
+
+# ==============================================================================
 # ANFORDERUNG: MANUELLE ENTLADUNG (VERWORFEN)
 # ==============================================================================
 requirement_manual_discharge:

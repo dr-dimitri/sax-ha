@@ -276,6 +276,10 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         setpoint_power_id = _entity_id(registry, entry.entry_id, "setpoint_power")
         assert hass.states.get(setpoint_power_id).state == "0"
 
+        # -- Max. SOC zeigt ohne vorherige Einstellung/Config-Flow-Vorgabe
+        #    100 statt 0/unbekannt (siehe SaxPowerMaxSocNumber.async_added_to_hass) --
+        assert hass.states.get(max_soc_id).state == "100"
+
         # -- Speicher ausschalten (echter Write über TCP) --
         await hass.services.async_call(
             "switch", "turn_off", {"entity_id": switch_id}, blocking=True
@@ -283,7 +287,8 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         await hass.async_block_till_done()
         assert hass.states.get(switch_id).state == "off"
 
-        # -- Max. Ladeleistung setzen --
+        # -- Max. Netzladeleistung setzen: reiner Software-Zustand, kein
+        #    Register-Write mehr (siehe SaxPowerChargeLimitNumber) --
         await hass.services.async_call(
             "number",
             "set_value",
@@ -293,8 +298,12 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         await hass.async_block_till_done()
         assert hass.states.get(charge_limit_id).state == "1500"
 
-        # -- Max-SOC unterhalb des aktuellen SOC (55%) setzen:
-        #    Coordinator muss das Ladelimit-Register auf 0 klemmen --
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+
+        # -- Max-SOC unterhalb des aktuellen SOC (55%) setzen: Coordinator
+        #    muss die Max-SOC-Sperre aktivieren - Register 40051 auf
+        #    Sollwertvorgabe, Register 40049 auf 0 % (siehe anforderung.yaml,
+        #    REQ-TIMED-SOC-CHARGE) --
         await hass.services.async_call(
             "number",
             "set_value",
@@ -302,7 +311,33 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
             blocking=True,
         )
         await hass.async_block_till_done()
-        assert hass.states.get(charge_limit_id).state == "0"
+        await asyncio.sleep(0.2)
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+
+        verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT)
+        await verify_client.connect()
+        control_mode_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
+        )
+        setpoint_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT, count=1, device_id=SLAVE_ID_EXTENDED
+        )
+        verify_client.close()
+        assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
+        assert setpoint_result.registers[0] == 0
+
+        await coordinator.async_stop_sun_charge()
+        # Ziel-SOC wieder über den aktuellen SOC setzen, damit die
+        # Max-SOC-Sperre den nachfolgenden Netzladung-Test nicht erneut
+        # auslöst.
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": max_soc_id, "value": 90},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
 
         # -- Netzladung starten: periodischer Sollwert-Write auf Register 41 --
         switch_entry = registry.async_get(switch_id)
@@ -317,7 +352,6 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         )
         await asyncio.sleep(0.2)
 
-        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
         assert coordinator.grid_charge_active is True
 
         verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT)
@@ -403,12 +437,13 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     muss innerhalb des Zeitfensters bei SOC < Ziel-SOC einen echten Write
     über den SunSpec-Modus (Slave-ID 100, "Immediate Controls") auslösen:
     erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
-    40049 (Leistungsvorgabe %, negativ = Laden). Sowohl die Ladeleistung
-    (zentraler "Max. Ladeleistung"-Grenzwert, Register 44, hier per
-    _build_basic_registers()-Default 3000W) als auch der Ziel-SOC (zentrales
-    "Max. SOC", Register 46 als Vergleichswert) sind bewusst keine
-    eigenen Einstellungen, siehe anforderung.yaml
-    REQ-TIMED-SOC-CHARGE."""
+    40049 (Leistungsvorgabe %, negativ = Laden). "Max. Netzladeleistung"
+    wird hier absichtlich NICHT explizit gesetzt, um zusätzlich den
+    einmaligen Vorgabewert aus dem beim Start gelesenen Register 44
+    (_build_basic_registers()-Default 3000W) zu verifizieren (siehe
+    SaxPowerChargeLimitNumber.async_added_to_hass). Der Ziel-SOC (zentrales
+    "Max. SOC", Register 46 als Vergleichswert) ist bewusst keine eigene
+    Einstellung, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_registers = _build_basic_registers()
@@ -500,9 +535,10 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             )
             verify_client.close()
             assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
-            # -3000 W (negativer "Max. Ladeleistung"-Grenzwert, Register 44) / 4600 W
-            # Referenz-Maximalleistung (Register 40053, _build_extended_registers()-
-            # Default) * 100 = -65.217...%, skaliert mit sunssf -2 -> -6522.
+            # -3000 W (negative "Max. Netzladeleistung", einmalig aus Register 44
+            # vorbelegt) / 4600 W Referenz-Maximalleistung (Register 40053,
+            # _build_extended_registers()-Default) * 100 = -65.217...%, skaliert
+            # mit sunssf -2 -> -6522.
             assert to_signed16(setpoint_result.registers[0]) == -6522
 
             await hass.async_block_till_done()
@@ -520,5 +556,121 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         )
         verify_client.close()
         assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
+    finally:
+        await server.shutdown()
+
+
+async def test_live_grid_charge_seeded_from_config_entry_on_first_setup(
+    hass, socket_enabled
+) -> None:
+    """Werte aus dem optionalen zweiten Ersteinrichtungs-Schritt
+    (config_flow.async_step_grid_charge) müssen beim allerersten Start eines
+    neu eingerichteten Eintrags die "Netzladung Start"/"Netzladung
+    Ende"/"Netzladung aktiv"-Entities vorbelegen, siehe
+    entity.initial_config_value."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 4))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 4,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+                "timed_charge_enabled": True,
+                "timed_charge_start": "22:00:00",
+                "timed_charge_end": "06:00:00",
+            },
+        )
+        entry.add_to_hass(hass)
+        # Zeit außerhalb des unten gesetzten 22:00-06:00-Fensters patchen,
+        # damit das Seeding selbst nicht bereits eine echte Netzladung
+        # auslöst - hier geht es nur um die vorbelegten Entity-Zustände.
+        with patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2024, 1, 1, 12, 0),
+        ):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
+        end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
+        enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+
+        assert hass.states.get(start_id).state == "22:00:00"
+        assert hass.states.get(end_id).state == "06:00:00"
+        assert hass.states.get(enabled_id).state == "on"
+
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        assert coordinator.sun_charge_active is False
+        await coordinator.async_stop_sun_charge()
+    finally:
+        await server.shutdown()
+
+
+async def test_live_grid_charge_falls_back_to_hard_defaults_without_config_entry_values(
+    hass, socket_enabled
+) -> None:
+    """Fehlen die optionalen Netzladung-Werte im Config Entry (z. B. ein vor
+    Einführung dieses Schritts angelegter Eintrag, oder weil das Formular
+    unverändert abgeschickt wurde), müssen die Entities die Hard-Defaults aus
+    const.py zeigen (deaktiviert, 00:00-00:05) statt "unbekannt"."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 5))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 5,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+                # Bewusst keine timed_charge_*-Schlüssel - simuliert einen
+                # Eintrag, der vor Einführung des zweiten Ersteinrichtungs-
+                # Schritts angelegt wurde.
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
+        end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
+        enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+
+        assert hass.states.get(start_id).state == "00:00:00"
+        assert hass.states.get(end_id).state == "00:05:00"
+        assert hass.states.get(enabled_id).state == "off"
     finally:
         await server.shutdown()

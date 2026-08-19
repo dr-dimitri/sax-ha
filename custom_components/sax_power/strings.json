@@ -22,6 +22,15 @@
           "slave_id_extended": "Slave-ID (SunSpec-Modus)",
           "scan_interval": "Aktualisierungsintervall (Sekunden)"
         }
+      },
+      "grid_charge": {
+        "title": "Netzladung (optional)",
+        "description": "Vorbelegung für das zeitgesteuerte Laden - kann später jederzeit über die Entitäten \"Netzladung aktiv\", \"Netzladung Start\" und \"Netzladung Ende\" geändert werden. Alle Felder sind optional.",
+        "data": {
+          "timed_charge_enabled": "Netzladung aktiv",
+          "timed_charge_start": "Netzladung Start",
+          "timed_charge_end": "Netzladung Ende"
+        }
       }
     },
     "error": {
@@ -215,10 +224,7 @@
         "name": "Max. SOC"
       },
       "charge_limit": {
-        "name": "Max. Ladeleistung"
-      },
-      "discharge_limit": {
-        "name": "Max. Entladeleistung"
+        "name": "Max. Netzladeleistung"
       }
     },
     "switch": {

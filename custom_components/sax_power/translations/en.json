@@ -22,6 +22,15 @@
           "slave_id_extended": "Slave ID (SunSpec mode)",
           "scan_interval": "Update interval (seconds)"
         }
+      },
+      "grid_charge": {
+        "title": "Grid charging (optional)",
+        "description": "Initial values for timed grid charging - can be changed later at any time via the \"Grid charge active\", \"Grid charge start\" and \"Grid charge end\" entities. All fields are optional.",
+        "data": {
+          "timed_charge_enabled": "Grid charge active",
+          "timed_charge_start": "Grid charge start",
+          "timed_charge_end": "Grid charge end"
+        }
       }
     },
     "error": {
@@ -215,10 +224,7 @@
         "name": "Max. SOC"
       },
       "charge_limit": {
-        "name": "Max. charge power"
-      },
-      "discharge_limit": {
-        "name": "Max. discharge power"
+        "name": "Max. grid charge power"
       }
     },
     "switch": {

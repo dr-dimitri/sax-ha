@@ -8,6 +8,16 @@ CONF_SLAVE_ID_BASIC = "slave_id_basic"
 CONF_SLAVE_ID_EXTENDED = "slave_id_extended"
 CONF_SCAN_INTERVAL = "scan_interval"
 
+# Optionale Vorbelegung für das zeitgesteuerte Laden (Zeitfenster + aktiv),
+# abgefragt im zweiten Schritt der Ersteinrichtung (config_flow.py). Wirkt
+# sich nur auf den allerersten Start eines neu eingerichteten Eintrags aus:
+# sobald die zugehörigen Entities (time.py/switch.py) einmal einen echten
+# Zustand über RestoreEntity gespeichert haben, hat dieser stets Vorrang -
+# siehe entity.initial_config_value.
+CONF_TIMED_CHARGE_START = "timed_charge_start"
+CONF_TIMED_CHARGE_END = "timed_charge_end"
+CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
+
 DEFAULT_PORT = 502
 DEFAULT_SLAVE_ID_BASIC = 64
 # SunSpec-Modus (siehe modbus.pdf, offizielle sax-power.net-Dokumentation):
@@ -18,6 +28,10 @@ DEFAULT_SLAVE_ID_BASIC = 64
 # REQ-SUNSPEC-MODE-CORRECTION.
 DEFAULT_SLAVE_ID_EXTENDED = 100
 DEFAULT_SCAN_INTERVAL = 10
+
+DEFAULT_TIMED_CHARGE_START = "00:00:00"
+DEFAULT_TIMED_CHARGE_END = "00:05:00"
+DEFAULT_TIMED_CHARGE_ENABLED = False
 
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
@@ -33,7 +47,13 @@ DEFAULT_SCAN_INTERVAL = 10
 # anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 REG_SETPOINT_POWER = 41  # Write - W - Sollwert Leistung P (P-Sollwert-Modus)
 REG_SETPOINT_COSPHI = 42  # Write - Sollwert cos(phi)
+# Register 43 ("Leistungsgrenzwert Entladung") wird von der Integration
+# nicht mehr genutzt (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE) - hier
+# nur zur Vollständigkeit der Registerkarte dokumentiert.
 REG_LIMIT_DISCHARGE = 43  # Write - W - Leistungsgrenzwert Entladung
+# Register 44 wird nur noch einmalig gelesen, um "Max. Netzladeleistung"
+# (number.py) beim allerersten Start mit dem aktuellen Geräte-Registerwert
+# vorzubelegen - die Integration schreibt dieses Register nicht mehr.
 REG_LIMIT_CHARGE = 44  # Write - W - Leistungsgrenzwert Ladung
 REG_SWITCH_STATE = 45  # Read/Write - Schaltzustand des Speichers
 REG_SOC = 46  # Read - % - SOC des Speichers

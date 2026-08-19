@@ -11,7 +11,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    CONF_TIMED_CHARGE_ENABLED,
     DATA_COORDINATOR,
+    DEFAULT_TIMED_CHARGE_ENABLED,
     DOMAIN,
     REG_SWITCH_STATE,
     SWITCH_STATE_CONNECTED,
@@ -19,7 +21,7 @@ from .const import (
     SWITCH_STATE_ON,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerEntity
+from .entity import SaxPowerEntity, initial_config_value
 
 
 async def async_setup_entry(
@@ -80,9 +82,20 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
         await super().async_added_to_hass()
         if self.coordinator.timed_charge_enabled:
             return
-        if (last_state := await self.async_get_last_state()) is None:
+        if (last_state := await self.async_get_last_state()) is not None:
+            await self.coordinator.async_set_timed_charge_enabled(
+                last_state.state == "on"
+            )
             return
-        await self.coordinator.async_set_timed_charge_enabled(last_state.state == "on")
+        # Kein zuvor gespeicherter Zustand (allererster Start eines neu
+        # eingerichteten Eintrags) - Vorgabewert aus der Ersteinrichtung
+        # nutzen, sonst den Hard-Default (siehe const.py).
+        initial = initial_config_value(
+            self.hass, self._entry_id, CONF_TIMED_CHARGE_ENABLED
+        )
+        await self.coordinator.async_set_timed_charge_enabled(
+            bool(initial) if initial is not None else DEFAULT_TIMED_CHARGE_ENABLED
+        )
 
     @property
     def is_on(self) -> bool:

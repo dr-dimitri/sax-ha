@@ -20,6 +20,10 @@ VALID_INPUT = {
 
 
 async def test_user_flow_success(hass) -> None:
+    """Ersteinrichtung: Nach erfolgreicher Verbindungsvalidierung folgt der
+    zweite, optionale Schritt "grid_charge" - wird er unverändert (leer)
+    abgeschickt, gelten die Hard-Defaults aus const.py (deaktiviert,
+    Zeitfenster 00:00-00:05), siehe anforderung.yaml REQ-TIMED-SOC-CHARGE."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -45,13 +49,60 @@ async def test_user_flow_success(hass) -> None:
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
         assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "user"
 
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"], VALID_INPUT
         )
-        assert result2["type"] == FlowResultType.CREATE_ENTRY
-        assert result2["title"] == "SAX Power Home"
-        assert result2["data"]["host"] == "192.168.1.50"
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "grid_charge"
+
+        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["title"] == "SAX Power Home"
+        assert result3["data"]["host"] == "192.168.1.50"
+        assert result3["data"]["timed_charge_enabled"] is False
+        assert result3["data"]["timed_charge_start"] == "00:00:00"
+        assert result3["data"]["timed_charge_end"] == "00:05:00"
+
+
+async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
+    """Werden im zweiten Schritt explizite Werte angegeben, landen sie
+    unverändert in den Config-Entry-Daten."""
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+    read_result = MagicMock()
+    read_result.isError.return_value = False
+    read_result.registers = [50] * 115
+    client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.close = MagicMock()
+
+    with (
+        patch(
+            "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+            return_value=client,
+        ),
+        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"],
+            {
+                "timed_charge_enabled": True,
+                "timed_charge_start": "22:00:00",
+                "timed_charge_end": "06:00:00",
+            },
+        )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"]["timed_charge_enabled"] is True
+        assert result3["data"]["timed_charge_start"] == "22:00:00"
+        assert result3["data"]["timed_charge_end"] == "06:00:00"
 
 
 async def test_user_flow_cannot_connect(hass) -> None:

@@ -33,7 +33,6 @@ from .const import (
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
     REG_LIMIT_CHARGE,
-    REG_LIMIT_DISCHARGE,
     REG_SETPOINT_COSPHI,
     REG_SETPOINT_POWER,
     REG_SOC,
@@ -183,7 +182,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
-        self._pre_clamp_charge_limit = 0
+        self._max_charge_power: int | None = None
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
         self._timed_charge_enabled = False
@@ -236,14 +235,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "setpoint_power": to_signed16(basic_reg(REG_SETPOINT_POWER)),
             "setpoint_cosphi": to_signed16(basic_reg(REG_SETPOINT_COSPHI)),
             "soc": basic_reg(REG_SOC),
-            "discharge_limit": basic_reg(REG_LIMIT_DISCHARGE),
+            # Nur noch als einmaliger Vorgabewert für "Max. Netzladeleistung"
+            # relevant (siehe SaxPowerChargeLimitNumber.async_added_to_hass) -
+            # die Integration schreibt Register 44 nicht mehr.
             "charge_limit": basic_reg(REG_LIMIT_CHARGE),
         }
 
         data.update(await self._async_read_extended())
 
-        await self._async_enforce_max_soc(data)
-        await self._async_enforce_timed_charge(data)
+        await self._async_enforce_grid_charge(data)
         data["timed_charge_active"] = self._timed_charge_active
         return data
 
@@ -528,44 +528,32 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
 
     # -- Max-SOC -----------------------------------------------------------
-    # SAX kennt kein natives Max-SOC-Register. Stattdessen setzt der
-    # Coordinator bei Erreichen des Ziel-SOC das Ladelimit-Register (44) auf
-    # 0 und stellt beim Unterschreiten den zuvor gelesenen Wert wieder her
-    # (siehe anforderung.yaml, Abschnitt 3 "Max. SOC Einstellung").
+    # SAX kennt kein natives Max-SOC-Register. Der Coordinator erzwingt den
+    # Zielwert stattdessen über denselben SunSpec-Modus-Pfad wie das
+    # zeitgesteuerte Laden weiter unten (_async_enforce_grid_charge,
+    # _async_sun_charge_loop): Register 40051 (Steuermodus) auf 1
+    # (Sollwertvorgabe) und Register 40049 (Leistungsvorgabe) auf 0 %,
+    # sobald der SOC den Zielwert erreicht/überschreitet - bewusst
+    # unabhängig davon, ob gerade zeitgesteuert geladen wird (siehe
+    # anforderung.yaml, REQ-TIMED-SOC-CHARGE): so wird z. B. auch ein durch
+    # PV-Überschuss auf den Zielwert geladener Speicher aktiv dort gehalten,
+    # statt durch die geräteeigene Automatik (SmartMeter-Nullregelung)
+    # darüber hinaus weitergeladen oder unterhalb des Zielwerts
+    # leergefahren zu werden. Fällt der SOC wieder unter den Zielwert,
+    # wird Register 40051 zurück auf 0 gesetzt.
 
     @property
     def max_soc(self) -> int | None:
         return self._max_soc
 
+    @property
+    def max_soc_clamped(self) -> bool:
+        return self._max_soc_clamped
+
     async def async_set_max_soc(self, max_soc: int | None) -> None:
-        """Set (or clear with None) the software-side max charge SOC.
-
-        Wird auch als Ziel-SOC für das zeitgesteuerte Laden verwendet
-        (siehe Abschnitt "Zeitgesteuertes Laden" unten) - deshalb hier
-        zusätzlich _async_enforce_timed_charge neu auswerten.
-        """
+        """Set (or clear with None) the software-side max charge SOC."""
         self._max_soc = max_soc
-        if self.data is not None:
-            await self._async_enforce_max_soc(self.data)
-            await self._async_enforce_timed_charge(self.data)
-            self.data["timed_charge_active"] = self._timed_charge_active
-            self.async_set_updated_data(self.data)
-
-    async def _async_enforce_max_soc(self, data: dict[str, Any]) -> None:
-        if self._max_soc is None:
-            return
-
-        if data["soc"] >= self._max_soc and not self._max_soc_clamped:
-            self._pre_clamp_charge_limit = data["charge_limit"]
-            await self.async_write_register(REG_LIMIT_CHARGE, 0)
-            self._max_soc_clamped = True
-            data["charge_limit"] = 0
-        elif data["soc"] < self._max_soc and self._max_soc_clamped:
-            await self.async_write_register(
-                REG_LIMIT_CHARGE, self._pre_clamp_charge_limit
-            )
-            self._max_soc_clamped = False
-            data["charge_limit"] = self._pre_clamp_charge_limit
+        await self._async_apply_grid_charge_change()
 
     # -- Netzladung (Grid Charge, Basic Mode) --------------------------------
     # Das Schreiben von Register 41 versetzt den Speicher laut Doku implizit
@@ -738,15 +726,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv
     # auf einen Ziel-SOC, unabhängig von PV-Überschuss (z. B. für günstige
     # Nachtstromtarife), über den SunSpec-Modus-Pfad oben
-    # (_async_sun_charge_loop).
-    #
-    # Bewusst KEINE eigene Leistungseinstellung: nutzt den zentralen "Max.
-    # Ladeleistung"-Grenzwert (data["charge_limit"], Register 44). Der
-    # Ziel-SOC nutzt denselben Wert wie "Max. SOC" (self._max_soc,
-    # siehe Max-SOC-Abschnitt oben) - fehlt dieser (None), wird MAX_SOC
-    # (100 %) als Ziel angenommen. Das vermeidet redundante
-    # Einstellmöglichkeiten (siehe anforderung.yaml,
-    # REQ-TIMED-SOC-CHARGE).
+    # (_async_sun_charge_loop). Nutzt "Max. Netzladeleistung"
+    # (self._max_charge_power) als Leistung - ein reiner Software-Zustand
+    # (kein direkter Register-Write mehr auf das Basic-Mode-Register 44),
+    # der vom Speicher nur berücksichtigt wird, während Register 40051 auf
+    # Sollwertvorgabe steht (siehe SaxPowerChargeLimitNumber). Der Ziel-SOC
+    # nutzt denselben Wert wie "Max. SOC" (self._max_soc, siehe
+    # Max-SOC-Abschnitt oben) - fehlt dieser (None), wird MAX_SOC (100 %)
+    # als Ziel angenommen. Das vermeidet redundante Einstellmöglichkeiten
+    # (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE).
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -760,23 +748,33 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def timed_charge_end(self) -> dt_time | None:
         return self._timed_charge_end
 
+    @property
+    def max_charge_power(self) -> int | None:
+        return self._max_charge_power
+
     async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
         self._timed_charge_enabled = enabled
-        await self._async_apply_timed_charge_change()
+        await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
         self._timed_charge_start = value
-        await self._async_apply_timed_charge_change()
+        await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
         self._timed_charge_end = value
-        await self._async_apply_timed_charge_change()
+        await self._async_apply_grid_charge_change()
 
-    async def _async_apply_timed_charge_change(self) -> None:
-        """Re-evaluate das Zeitfenster sofort nach einer Einstellungsänderung,
-        statt bis zum nächsten Poll-Intervall zu warten."""
+    async def async_set_max_charge_power(self, value: int | None) -> None:
+        """Set the software-side target power (Watt) for "Max. Netzladeleistung"."""
+        self._max_charge_power = value
+        await self._async_apply_grid_charge_change()
+
+    async def _async_apply_grid_charge_change(self) -> None:
+        """Re-evaluate Zeitfenster/Max-SOC/Netzladeleistung sofort nach einer
+        Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
+        warten."""
         if self.data is not None:
-            await self._async_enforce_timed_charge(self.data)
+            await self._async_enforce_grid_charge(self.data)
             self.data["timed_charge_active"] = self._timed_charge_active
             self.async_set_updated_data(self.data)
 
@@ -794,20 +792,38 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start <= now < end
         return now >= start or now < end
 
-    async def _async_enforce_timed_charge(self, data: dict[str, Any]) -> None:
+    async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
+        """Zentrale Auswertung für Max-SOC-Sperre und zeitgesteuertes Laden -
+        beide teilen sich den SunSpec-Modus-Schreibpfad (_sun_charge_task).
+
+        Ist der Ziel-SOC erreicht/überschritten, hat die Max-SOC-Sperre
+        Vorrang: Register 40051 bleibt/wird auf Sollwertvorgabe gesetzt und
+        Register 40049 auf 0 % gehalten (siehe Max-SOC-Abschnitt oben) -
+        unabhängig davon, ob zeitgesteuertes Laden aktiviert ist. Erst wenn
+        der SOC wieder unter den Ziel-SOC fällt, kann zeitgesteuertes Laden
+        (falls aktiviert, im Zeitfenster und mit gesetzter "Max.
+        Netzladeleistung") die Schleife mit einem echten Sollwert
+        übernehmen; andernfalls wird Register 40051 zurück auf 0
+        (SmartMeter-Nullregelung) gesetzt.
+        """
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
-        should_charge = (
+        soc_reached = data["soc"] >= target_soc
+        timed_should_charge = (
             self._timed_charge_enabled
             and self._is_time_in_window(dt_util.now().time())
-            and data["soc"] < target_soc
+            and not soc_reached
+            and self._max_charge_power is not None
         )
+        should_run = timed_should_charge or soc_reached
 
-        if should_charge:
-            await self.async_start_sun_charge(-data["charge_limit"])
+        if should_run:
+            power = 0 if soc_reached else -self._max_charge_power
+            await self.async_start_sun_charge(power)
         elif self.sun_charge_active:
             await self.async_stop_sun_charge()
 
-        self._timed_charge_active = should_charge
+        self._timed_charge_active = timed_should_charge
+        self._max_soc_clamped = soc_reached
 
     async def async_shutdown(self) -> None:
         await self.async_stop_grid_charge()

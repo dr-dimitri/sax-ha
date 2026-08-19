@@ -224,10 +224,7 @@
         "name": "Max. SOC"
       },
       "charge_limit": {
-        "name": "Max. Ladeleistung"
-      },
-      "discharge_limit": {
-        "name": "Max. Entladeleistung"
+        "name": "Max. Netzladeleistung"
       }
     },
     "switch": {

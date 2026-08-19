@@ -276,55 +276,74 @@ requirement_sunspec_mode_correction:
 # ==============================================================================
 requirement_timed_soc_charge:
   id: REQ-TIMED-SOC-CHARGE
-  title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden"
+  title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden, plus geräteunabhängige Max-SOC-Sperre"
   status: done
   description: >
-    Software-Logik (kein natives Geräteregister für die Aktivierung
-    selbst), umgesetzt in SaxPowerCoordinator._async_enforce_timed_charge
-    und bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
-    ausgewertet: Ist das Feature aktiviert (switch.py, "Netzladung
-    aktiv"), die aktuelle Uhrzeit innerhalb des konfigurierten
-    Zeitfensters (time.py, "Netzladung Start"/"Netzladung Ende", HH:MM,
-    darf über Mitternacht laufen) und der SOC unter dem Ziel-SOC, startet
-    der Coordinator die SunSpec-Modus-Netzladung mit einem negativen
-    Sollwert in Höhe des zentralen "Max. Ladeleistung"-Grenzwerts
-    (Register 44). Wird der Ziel-SOC erreicht, das Zeitfenster verlassen
-    oder das Feature deaktiviert, stoppt die Netzladung automatisch.
+    Zeitgesteuertes Laden und die Max-SOC-Sperre sind Software-Logik (kein
+    natives Geräteregister für die Aktivierung selbst) und teilen sich eine
+    zentrale Auswertung (SaxPowerCoordinator._async_enforce_grid_charge,
+    bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
+    ausgewertet) sowie denselben SunSpec-Modus-Schreibpfad
+    (_async_sun_charge_loop). Priorität pro Auswertung:
+
+    1. Ist der SOC >= "Max. SOC" (number.py), hält der Coordinator Register
+       40051 (Steuermodus) auf 1 (Sollwertvorgabe) und Register 40049
+       (Leistungsvorgabe) auf 0 % - UNABHÄNGIG davon, ob zeitgesteuertes
+       Laden aktiviert ist (z. B. auch bei einem durch PV-Überschuss vollen
+       Speicher). Das verhindert dauerhaftes Volladen auf 100 % zugunsten
+       der Batterie-Lebensdauer; der Speicher entlädt sich währenddessen
+       nicht automatisch zur Eigenverbrauchsdeckung.
+    2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
+       "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
+       konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
+       Ende", HH:MM, darf über Mitternacht laufen) und "Max.
+       Netzladeleistung" (number.py) gesetzt, wird Register 40049 auf einen
+       negativen, aus "Max. Netzladeleistung" umgerechneten Sollwert
+       gesetzt.
+    3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
+       auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
+       geräteseitigen Timeout zu warten.
 
     Schreibmechanismus (SunSpec-Modus, Slave-ID 100, Modell 123
-    "Immediate Controls", siehe modbus_llm.yaml): Erst wird Register 40051
-    (Steuermodus) auf 1 (Sollwertvorgabe) gesetzt, danach Register 40049
-    (Leistungsvorgabe, Prozent der Referenz-Maximalleistung Register
-    40053) auf den aus Watt umgerechneten Sollwert
-    (SaxPowerCoordinator._watts_to_ic_setpoint_raw; negativ=Laden,
-    positiv=Entladen - Vorzeichenkonvention laut modbus.pdf nicht
-    dokumentiert, hier analog zum Basic-Mode-P-Sollwert angenommen). Beide
-    Register werden periodisch neu geschrieben (SaxPowerCoordinator.
-    _sun_ic_write_interval: die Hälfte des von Register 40050 gemeldeten
-    Timeouts, gedeckelt auf 30s, mindestens alle 5s), da das Gerät den
-    Sollwert sonst nach Ablauf des Timeouts verwirft. Wird die Netzladung
-    gestoppt, setzt der Coordinator Register 40051 aktiv zurück auf 0
-    (SmartMeter-Nullregelung), statt nur passiv auf den Timeout zu warten.
+    "Immediate Controls", siehe modbus_llm.yaml): Erst Register 40051 auf 1
+    (Sollwertvorgabe), danach Register 40049 (Leistungsvorgabe, Prozent der
+    Referenz-Maximalleistung Register 40053; SaxPowerCoordinator.
+    _watts_to_ic_setpoint_raw; negativ=Laden, positiv=Entladen -
+    Vorzeichenkonvention laut modbus.pdf nicht dokumentiert, hier analog
+    zum Basic-Mode-P-Sollwert angenommen). Beide Register werden periodisch
+    neu geschrieben (SaxPowerCoordinator._sun_ic_write_interval: die Hälfte
+    des von Register 40050 gemeldeten Timeouts, gedeckelt auf 30s,
+    mindestens alle 5s), da das Gerät den Sollwert sonst nach Ablauf des
+    Timeouts verwirft.
+
     Der ältere Basic-Mode-P-Sollwert (Register 41) bleibt ausschließlich
     für den manuellen start_grid_charge/stop_grid_charge-Service erhalten
     (absoluter Watt-Sollwert, freie Vorzeichenwahl, eigener
-    Hintergrund-Task).
+    Hintergrund-Task). Die Integration schreibt die Basic-Mode-Register
+    43/44 (Ent-/Ladeleistungsgrenzwert) nicht mehr; Register 43 wird gar
+    nicht mehr gelesen, Register 44 nur noch einmalig als Vorgabewert (s.
+    u.).
 
-    Als Ziel-SOC dient die bereits vorhandene "Max. SOC"-Entity
-    (number.py). Es gibt keine eigene Ziel-SOC- oder Leistungseinstellung
-    für dieses Feature. Eine Änderung des Ziel-SOC wirkt sofort
-    (async_set_max_soc wertet _async_enforce_timed_charge unmittelbar neu
-    aus statt erst beim nächsten Poll-Zyklus).
+    "Max. SOC" und "Max. Netzladeleistung" sind reine Software-Zustände
+    (RestoreEntity, number.py) - keine eigenen Ziel-SOC-/
+    Leistungseinstellungen für die beiden Features. Eine Änderung wirkt
+    sofort (async_set_max_soc/async_set_max_charge_power werten
+    _async_enforce_grid_charge unmittelbar neu aus statt erst beim
+    nächsten Poll-Zyklus). Persistieren über Neustarts hinweg; gibt es
+    (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
+    Zustand, setzen sie sich explizit auf einen Vorgabewert statt
+    "unbekannt"/0 zu bleiben: "Max. SOC" auf MAX_SOC (100 %,
+    SaxPowerMaxSocNumber.async_added_to_hass), "Max. Netzladeleistung" auf
+    den zu diesem Zeitpunkt vom Gerät gelesenen Wert von Basic-Mode-Register
+    44 (SaxPowerChargeLimitNumber.async_added_to_hass) - danach rein
+    Software-seitig, kein weiterer Register-Write.
 
-    "Max. SOC" ist eine RestoreEntity und persistiert über Neustarts
-    hinweg; gibt es (z. B. direkt nach der Ersteinrichtung) noch keinen
-    gespeicherten Zustand, setzt sie sich explizit auf MAX_SOC (100 %)
-    statt "unbekannt"/0 zu bleiben (SaxPowerMaxSocNumber.async_added_to_hass).
-
-    Aktiviert-Zustand sowie Start-/Endzeit ("Netzladung aktiv"/"Netzladung
-    Start"/"Netzladung Ende") werden ebenfalls über RestoreEntity über
-    Neustarts hinweg persistiert. Zusätzlich zeigt ein Diagnose-Sensor
-    ("Zeitgesteuertes Laden aktiv") an, ob gerade aktiv nachgeladen wird.
+    Aktiviert-Zustand sowie Start-/Endzeit des zeitgesteuerten Ladens
+    ("Netzladung aktiv"/"Netzladung Start"/"Netzladung Ende") werden
+    ebenfalls über RestoreEntity über Neustarts hinweg persistiert.
+    Zusätzlich zeigt ein Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an,
+    ob gerade zeitgesteuert nachgeladen wird - unabhängig von der
+    Max-SOC-Sperre.
 
     Vorbelegung beim allerersten Start eines neuen Eintrags: Der
     Ersteinrichtungs-Dialog (config_flow.py) fragt nach der
@@ -343,21 +362,26 @@ requirement_timed_soc_charge:
   acceptance_criteria:
     - "tests/test_coordinator.py deckt _is_time_in_window (normales
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
-       Fenster), _async_enforce_timed_charge (Start/Stop bei
-       Zielerreichung/Fensterende/Deaktivierung), die
+       Fenster), _async_enforce_grid_charge (Start/Stop des
+       zeitgesteuerten Ladens bei Zielerreichung/Fensterende/
+       Deaktivierung/fehlender Max.-Netzladeleistung SOWIE die
+       Max-SOC-Sperre unabhängig vom zeitgesteuerten Laden - Aktivierung
+       bei Zielerreichung, Freigabe beim Unterschreiten), die
        Watt-zu-Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
        Schreibintervall (_sun_ic_write_interval) ab."
-    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
-       über echte Modbus-TCP-Kommunikation verifiziert, dass Aktivieren
-       des Features innerhalb des Zeitfensters Register 40051 auf
+    - "tests/test_integration_live.py enthält End-to-End-Tests, die über
+       echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren des
+       zeitgesteuerten Ladens innerhalb des Zeitfensters Register 40051 auf
        Sollwertvorgabe und Register 40049 auf den erwarteten Sollwert
-       setzt, und dass Deaktivieren Register 40051 wieder auf
-       SmartMeter-Nullregelung zurücksetzt; zusätzlich Tests für die
+       setzt (und Deaktivieren Register 40051 wieder auf
+       SmartMeter-Nullregelung zurücksetzt), dass die Max-SOC-Sperre
+       unabhängig davon Register 40049 auf 0 % hält, sowie Tests für die
        Vorbelegung aus dem Config Entry beim allerersten Start (mit und
-       ohne hinterlegte Netzladung-Werte) sowie für den Max.-SOC-Default
-       (100 statt 0/unbekannt)."
+       ohne hinterlegte Netzladung-Werte) und für die Max.-SOC-/
+       Max.-Netzladeleistung-Defaults."
     - "tests/test_config_flow.py deckt den zweistufigen Ersteinrichtungs-
        Flow ab: Defaults bei leerem zweiten Schritt sowie explizit
        angegebene Werte."
     - "number.py enthält keine featurespezifische Leistungseinstellung
-       für zeitgesteuertes Laden."
+       für zeitgesteuertes Laden und keine Entladeleistungseinstellung
+       mehr."

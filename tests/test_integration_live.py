@@ -287,7 +287,8 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         await hass.async_block_till_done()
         assert hass.states.get(switch_id).state == "off"
 
-        # -- Max. Ladeleistung setzen --
+        # -- Max. Netzladeleistung setzen: reiner Software-Zustand, kein
+        #    Register-Write mehr (siehe SaxPowerChargeLimitNumber) --
         await hass.services.async_call(
             "number",
             "set_value",
@@ -297,8 +298,12 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         await hass.async_block_till_done()
         assert hass.states.get(charge_limit_id).state == "1500"
 
-        # -- Max-SOC unterhalb des aktuellen SOC (55%) setzen:
-        #    Coordinator muss das Ladelimit-Register auf 0 klemmen --
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+
+        # -- Max-SOC unterhalb des aktuellen SOC (55%) setzen: Coordinator
+        #    muss die Max-SOC-Sperre aktivieren - Register 40051 auf
+        #    Sollwertvorgabe, Register 40049 auf 0 % (siehe anforderung.yaml,
+        #    REQ-TIMED-SOC-CHARGE) --
         await hass.services.async_call(
             "number",
             "set_value",
@@ -306,7 +311,33 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
             blocking=True,
         )
         await hass.async_block_till_done()
-        assert hass.states.get(charge_limit_id).state == "0"
+        await asyncio.sleep(0.2)
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+
+        verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT)
+        await verify_client.connect()
+        control_mode_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
+        )
+        setpoint_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT, count=1, device_id=SLAVE_ID_EXTENDED
+        )
+        verify_client.close()
+        assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
+        assert setpoint_result.registers[0] == 0
+
+        await coordinator.async_stop_sun_charge()
+        # Ziel-SOC wieder über den aktuellen SOC setzen, damit die
+        # Max-SOC-Sperre den nachfolgenden Netzladung-Test nicht erneut
+        # auslöst.
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": max_soc_id, "value": 90},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
 
         # -- Netzladung starten: periodischer Sollwert-Write auf Register 41 --
         switch_entry = registry.async_get(switch_id)
@@ -321,7 +352,6 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         )
         await asyncio.sleep(0.2)
 
-        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
         assert coordinator.grid_charge_active is True
 
         verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT)
@@ -407,12 +437,13 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     muss innerhalb des Zeitfensters bei SOC < Ziel-SOC einen echten Write
     über den SunSpec-Modus (Slave-ID 100, "Immediate Controls") auslösen:
     erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
-    40049 (Leistungsvorgabe %, negativ = Laden). Sowohl die Ladeleistung
-    (zentraler "Max. Ladeleistung"-Grenzwert, Register 44, hier per
-    _build_basic_registers()-Default 3000W) als auch der Ziel-SOC (zentrales
-    "Max. SOC", Register 46 als Vergleichswert) sind bewusst keine
-    eigenen Einstellungen, siehe anforderung.yaml
-    REQ-TIMED-SOC-CHARGE."""
+    40049 (Leistungsvorgabe %, negativ = Laden). "Max. Netzladeleistung"
+    wird hier absichtlich NICHT explizit gesetzt, um zusätzlich den
+    einmaligen Vorgabewert aus dem beim Start gelesenen Register 44
+    (_build_basic_registers()-Default 3000W) zu verifizieren (siehe
+    SaxPowerChargeLimitNumber.async_added_to_hass). Der Ziel-SOC (zentrales
+    "Max. SOC", Register 46 als Vergleichswert) ist bewusst keine eigene
+    Einstellung, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_registers = _build_basic_registers()
@@ -504,9 +535,10 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             )
             verify_client.close()
             assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
-            # -3000 W (negativer "Max. Ladeleistung"-Grenzwert, Register 44) / 4600 W
-            # Referenz-Maximalleistung (Register 40053, _build_extended_registers()-
-            # Default) * 100 = -65.217...%, skaliert mit sunssf -2 -> -6522.
+            # -3000 W (negative "Max. Netzladeleistung", einmalig aus Register 44
+            # vorbelegt) / 4600 W Referenz-Maximalleistung (Register 40053,
+            # _build_extended_registers()-Default) * 100 = -65.217...%, skaliert
+            # mit sunssf -2 -> -6522.
             assert to_signed16(setpoint_result.registers[0]) == -6522
 
             await hass.async_block_till_done()

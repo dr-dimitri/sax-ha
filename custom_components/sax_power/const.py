@@ -47,7 +47,13 @@ DEFAULT_TIMED_CHARGE_ENABLED = False
 # anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 REG_SETPOINT_POWER = 41  # Write - W - Sollwert Leistung P (P-Sollwert-Modus)
 REG_SETPOINT_COSPHI = 42  # Write - Sollwert cos(phi)
+# Register 43 ("Leistungsgrenzwert Entladung") wird von der Integration
+# nicht mehr genutzt (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE) - hier
+# nur zur Vollständigkeit der Registerkarte dokumentiert.
 REG_LIMIT_DISCHARGE = 43  # Write - W - Leistungsgrenzwert Entladung
+# Register 44 wird nur noch einmalig gelesen, um "Max. Netzladeleistung"
+# (number.py) beim allerersten Start mit dem aktuellen Geräte-Registerwert
+# vorzubelegen - die Integration schreibt dieses Register nicht mehr.
 REG_LIMIT_CHARGE = 44  # Write - W - Leistungsgrenzwert Ladung
 REG_SWITCH_STATE = 45  # Read/Write - Schaltzustand des Speichers
 REG_SOC = 46  # Read - % - SOC des Speichers

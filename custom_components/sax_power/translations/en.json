@@ -224,10 +224,7 @@
         "name": "Max. SOC"
       },
       "charge_limit": {
-        "name": "Max. charge power"
-      },
-      "discharge_limit": {
-        "name": "Max. discharge power"
+        "name": "Max. grid charge power"
       }
     },
     "switch": {

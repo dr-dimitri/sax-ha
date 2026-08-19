@@ -75,41 +75,6 @@ def _make_coordinator(hass, client: MagicMock) -> SaxPowerCoordinator:
     )
 
 
-async def test_enforce_max_soc_clamps_charge_limit(hass) -> None:
-    client = _make_client()
-    write_result = MagicMock()
-    write_result.isError.return_value = False
-    client.write_register = AsyncMock(return_value=write_result)
-
-    coordinator = _make_coordinator(hass, client)
-    await coordinator.async_set_max_soc(80)
-
-    data = {"soc": 85, "charge_limit": 3000}
-    await coordinator._async_enforce_max_soc(data)
-
-    assert data["charge_limit"] == 0
-    client.write_register.assert_awaited_once()
-    assert coordinator._max_soc_clamped is True
-
-
-async def test_enforce_max_soc_restores_charge_limit(hass) -> None:
-    client = _make_client()
-    write_result = MagicMock()
-    write_result.isError.return_value = False
-    client.write_register = AsyncMock(return_value=write_result)
-
-    coordinator = _make_coordinator(hass, client)
-    coordinator._max_soc = 80
-    coordinator._max_soc_clamped = True
-    coordinator._pre_clamp_charge_limit = 3000
-
-    data = {"soc": 70, "charge_limit": 0}
-    await coordinator._async_enforce_max_soc(data)
-
-    assert data["charge_limit"] == 3000
-    assert coordinator._max_soc_clamped is False
-
-
 async def test_async_write_register_raises_on_modbus_error(hass) -> None:
     from homeassistant.exceptions import HomeAssistantError
 
@@ -338,7 +303,7 @@ def _patched_now(hour: int, minute: int = 0):
     )
 
 
-async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
+async def test_enforce_grid_charge_starts_timed_charge_when_enabled_in_window(
     hass,
 ) -> None:
     """Zeitgesteuertes Laden schreibt über den SunSpec-Modus (Slave-ID 100):
@@ -356,13 +321,13 @@ async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
     # unten übergebenen data-Dict - siehe SaxPowerCoordinator._sun_ic_write_interval.
     coordinator.data = {
         "soc": 50,
-        "charge_limit": 3000,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
     }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
+    await coordinator.async_set_max_charge_power(3000)  # "Max. Netzladeleistung"
 
     try:
         with _patched_now(2):
@@ -398,60 +363,117 @@ async def test_enforce_timed_charge_starts_when_enabled_in_window_below_target(
     )
 
 
-async def test_enforce_timed_charge_stops_when_target_soc_reached(hass) -> None:
+async def test_enforce_grid_charge_inactive_outside_window(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    with _patched_now(12):
+        await coordinator._async_enforce_grid_charge({"soc": 10})
+
+    assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_inactive_when_disabled(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
+    await coordinator.async_set_max_charge_power(3000)
+    # timed_charge_enabled bleibt False (Default)
+
+    with _patched_now(2):
+        await coordinator._async_enforce_grid_charge({"soc": 10})
+
+    assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_inactive_without_max_charge_power(hass) -> None:
+    """Ohne gesetzte "Max. Netzladeleistung" darf zeitgesteuertes Laden nicht
+    starten (kein sinnvoller Sollwert berechenbar)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_timed_charge_enabled(True)
+    # max_charge_power bleibt None (Default)
+
+    with _patched_now(2):
+        await coordinator._async_enforce_grid_charge({"soc": 10})
+
+    assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+# -- Max-SOC-Sperre (unabhängig vom zeitgesteuerten Laden) -------------------
+
+
+async def test_enforce_grid_charge_clamps_at_max_soc_even_without_timed_charge(
+    hass,
+) -> None:
+    """Die Max-SOC-Sperre greift auch ohne aktiviertes zeitgesteuertes Laden
+    (z. B. bei einem durch PV-Überschuss vollen Speicher): Register 40051
+    wird auf Sollwertvorgabe gesetzt, Register 40049 auf 0 % gehalten -
+    siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
     client.write_register = AsyncMock(return_value=write_result)
 
     coordinator = _make_coordinator(hass, client)
-    coordinator.data = {
-        "soc": 90,
-        "charge_limit": 3000,
-        "ic_max_power_reference": 4600,
-        "ic_timeout": 300,
-    }
-    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
-    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
-    coordinator._timed_charge_active = True
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    # timed_charge_enabled bleibt False (Default)
+
+    try:
+        await coordinator._async_enforce_grid_charge({"soc": 85})
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+        assert coordinator._timed_charge_active is False
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        )
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_releases_max_soc_clamp_below_target(hass) -> None:
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    coordinator._max_soc_clamped = True
     # Echter (cancelbarer) Task statt MagicMock, da async_stop_sun_charge die
     # Cancellation awaitet, bevor es den Steuermodus zurücksetzt.
     coordinator._sun_charge_task = asyncio.create_task(asyncio.sleep(3600))
 
-    with _patched_now(2):
-        await coordinator._async_enforce_timed_charge({"soc": 90, "charge_limit": 3000})
+    await coordinator._async_enforce_grid_charge({"soc": 70})
 
-    assert coordinator._timed_charge_active is False
+    assert coordinator.max_soc_clamped is False
     assert coordinator.sun_charge_active is False
-
-
-async def test_enforce_timed_charge_inactive_outside_window(hass) -> None:
-    coordinator = _make_coordinator(hass, _make_client())
-    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
-    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
-    await coordinator.async_set_timed_charge_enabled(True)
-
-    with _patched_now(12):
-        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
-
-    assert coordinator._timed_charge_active is False
-    assert coordinator.sun_charge_active is False
-
-
-async def test_enforce_timed_charge_inactive_when_disabled(hass) -> None:
-    coordinator = _make_coordinator(hass, _make_client())
-    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
-    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
-    # timed_charge_enabled bleibt False (Default)
-
-    with _patched_now(2):
-        await coordinator._async_enforce_timed_charge({"soc": 10, "charge_limit": 3000})
-
-    assert coordinator._timed_charge_active is False
-    assert coordinator.sun_charge_active is False
+    client.write_register.assert_awaited_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
 
 
 async def test_stop_sun_charge_is_noop_when_not_running(hass) -> None:

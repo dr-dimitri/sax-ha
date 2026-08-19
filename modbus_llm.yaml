@@ -88,14 +88,16 @@ register_maps:
         unit: "Watt"
         datatype: "uint16"
         access: "Write"
-        notes: "Nur nach Freischaltung verfügbar."
+        status: "Von der Integration nicht mehr genutzt"
+        notes: "Nur nach Freischaltung verfügbar. Siehe anforderung.yaml REQ-TIMED-SOC-CHARGE: die zugehörige Number-Entity ('Max. Entladeleistung') wurde entfernt, die Integration liest/schreibt dieses Register nicht mehr."
       - protocol_addr: 40045
         internal_addr: 44
         name: "Leistungsgrenzwert für Ladung"
         unit: "Watt"
         datatype: "uint16"
         access: "Write"
-        notes: "Nur nach Freischaltung verfügbar."
+        status: "Von der Integration nur noch einmalig gelesen"
+        notes: "Nur nach Freischaltung verfügbar. Die Integration schreibt dieses Register nicht mehr; es wird nur noch beim allerersten Start als Vorgabewert für die Software-Einstellung 'Max. Netzladeleistung' gelesen, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE."
       - protocol_addr: 40046
         internal_addr: 45
         name: "Schaltzustand des Speichers"

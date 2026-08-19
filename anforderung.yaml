@@ -284,9 +284,7 @@ requirement_timed_soc_charge:
     zentrale Auswertung (SaxPowerCoordinator._async_enforce_grid_charge,
     bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
     ausgewertet) sowie denselben SunSpec-Modus-Schreibpfad
-    (_async_sun_charge_loop) - zusammen mit der manuellen Entladung (siehe
-    REQ-MANUAL-DISCHARGE), die dort die höchste Priorität hat. Priorität
-    pro Auswertung (nach der manuellen Entladung):
+    (_async_sun_charge_loop). Priorität pro Auswertung:
 
     1. Ist der SOC >= "Max. SOC" (number.py), hält der Coordinator Register
        40051 (Steuermodus) auf 1 (Sollwertvorgabe) und Register 40049
@@ -310,9 +308,11 @@ requirement_timed_soc_charge:
     "Immediate Controls", siehe modbus_llm.yaml): Erst Register 40051 auf 1
     (Sollwertvorgabe), danach Register 40049 (Leistungsvorgabe, Prozent der
     Referenz-Maximalleistung Register 40053; SaxPowerCoordinator.
-    _watts_to_ic_setpoint_raw; negativ=Laden, positiv=Entladen -
-    Vorzeichenkonvention laut modbus.pdf nicht dokumentiert, hier analog
-    zum Basic-Mode-P-Sollwert angenommen). Beide Register werden periodisch
+    _watts_to_ic_setpoint_raw; negativ=Laden - Vorzeichenkonvention laut
+    modbus.pdf nicht dokumentiert, hier analog zum Basic-Mode-P-Sollwert
+    angenommen. Die Integration schreibt hier bewusst nur negative
+    Sollwerte - siehe REQ-MANUAL-DISCHARGE zum Befund bei positiven
+    (entladenden) Sollwerten). Beide Register werden periodisch
     neu geschrieben (SaxPowerCoordinator._sun_ic_write_interval: die Hälfte
     des von Register 40050 gemeldeten Timeouts, gedeckelt auf 30s,
     mindestens alle 5s), da das Gerät den Sollwert sonst nach Ablauf des
@@ -385,10 +385,8 @@ requirement_timed_soc_charge:
        Flow ab: Defaults bei leerem zweiten Schritt sowie explizit
        angegebene Werte."
     - "number.py enthält keine featurespezifische Leistungseinstellung für
-       zeitgesteuertes Laden. Die einzige zusätzliche Leistungseinstellung
-       ist "Entladeleistung" für die manuelle Entladung, siehe
-       REQ-MANUAL-DISCHARGE - keine eigene Einstellung für zeitgesteuertes
-       Laden selbst."
+       zeitgesteuertes Laden - es nutzt ausschließlich die zentralen
+       Einstellungen 'Max. SOC' und 'Max. Netzladeleistung'."
     - "tests/test_number.py deckt die Vorbelegungslogik von "Max.
        Netzladeleistung" ab: allererster Start (Vorbelegung aus Register 44),
        ein restaurierter 0-Wert (fällt ebenfalls auf Register 44 zurück -
@@ -397,68 +395,41 @@ requirement_timed_soc_charge:
        Nutzerwert (hat Vorrang)."
 
 # ==============================================================================
-# ANFORDERUNG: MANUELLE ENTLADUNG
+# ANFORDERUNG: MANUELLE ENTLADUNG (VERWORFEN)
 # ==============================================================================
 requirement_manual_discharge:
   id: REQ-MANUAL-DISCHARGE
-  title: "Speicher manuell mit fester Leistung entladen, mit klar definierter Priorität gegenüber Netzladung/Max-SOC-Sperre"
-  status: done
+  title: "Speicher manuell mit fester Leistung entladen - verworfen, da vom Hersteller nicht vorgesehen"
+  status: verworfen
   description: >
-    Software-Logik (kein natives Geräteregister für die Aktivierung selbst),
-    analog zu zeitgesteuertem Laden und der Max-SOC-Sperre: schaltet den
-    Speicher über denselben SunSpec-Modus-Schreibpfad (Slave-ID 100,
-    "Immediate Controls", Register 40051 Sollwertvorgabe + Register 40049)
-    in eine aktive Entladung, hier mit POSITIVEM statt negativem Sollwert
-    (Vorzeichenkonvention: negativ = Laden, positiv = Entladen, siehe
-    REQ-TIMED-SOC-CHARGE).
+    Ursprünglich implementiert als Software-Logik analog zu zeitgesteuertem
+    Laden/Max-SOC-Sperre: Schalter "Manuelle Entladung" (switch.py) +
+    Zahlenfeld "Entladeleistung" (number.py), geschrieben über denselben
+    SunSpec-Modus-Pfad (Register 40051 Sollwertvorgabe + Register 40049),
+    hier mit POSITIVEM statt negativem Sollwert (Vorzeichenkonvention:
+    negativ = Laden, positiv = Entladen, siehe REQ-TIMED-SOC-CHARGE).
 
-    Entitäten: Schalter "Manuelle Entladung" (switch.py, aktiviert/
-    deaktiviert die Funktion) und Zahlenfeld "Entladeleistung" (number.py,
-    Sollwert in Watt, Default 100 W - reiner Software-Zustand ohne
-    analoges Geräteregister als Vorbelegung, RestoreEntity). "Manuelle
-    Entladung" ist bewusst KEIN RestoreEntity: sie setzt sich nach jedem
-    Home-Assistant-Neustart auf "aus" zurück, damit eine manuell gestartete
-    Entladung nicht unbeaufsichtigt über einen Neustart hinweg weiterläuft.
-    "Entladeleistung" bleibt dagegen wie "Max. Netzladeleistung" über
-    Neustarts erhalten.
+    Live-Tests gegen echte Hardware (tests/test_real_hardware.py, siehe
+    Git-Historie) zeigten, dass weder dieser SunSpec-Weg noch alternativ
+    der ältere Basic-Mode-P-Sollwert (Register 41, ebenfalls positiv) eine
+    tatsächliche Entladung auslösten - auch nicht nach Umstellung der
+    geräteseitigen Betriebsart auf "P-Sollwert (TCP)" (siehe
+    modbus_llm.yaml, operation_modes). Beide Wege schrieben die Register
+    nachweislich korrekt (Rücklesen stimmte), das Gerät reagierte aber
+    nicht mit realer Leistungsabgabe. Auf Rückfrage hat der Hersteller
+    bestätigt: eine ferngesteuerte manuelle Entladung ist auf diesem Weg
+    nicht vorgesehen.
 
-    Priorität in SaxPowerCoordinator._async_enforce_grid_charge (höchste
-    zuerst), gemeinsam mit Max-SOC-Sperre und zeitgesteuertem Laden aus
-    REQ-TIMED-SOC-CHARGE ausgewertet, da der Speicher nicht gleichzeitig
-    laden und entladen kann:
-      1. Manuelle Entladung: ist sie eingeschaltet, wird IMMER entladen -
-         unabhängig von Max-SOC-Sperre und zeitgesteuertem Laden. Ein
-         Entladen des bereits vollen Speichers widerspricht nicht dem Zweck
-         der Max-SOC-Sperre (die nur Überladen verhindert), daher kein
-         Konflikt. Wird die manuelle Entladung wieder ausgeschaltet, greift
-         ab der nächsten Auswertung sofort wieder, was ohne sie gelten
-         würde (Max-SOC-Sperre bzw. zeitgesteuertes Laden, sofern weiterhin
-         zutreffend) - keine der beiden Einstellungen wird dabei verändert.
-      2. Max-SOC-Sperre (wie in REQ-TIMED-SOC-CHARGE).
-      3. Zeitgesteuertes Laden (wie in REQ-TIMED-SOC-CHARGE).
-      4. Sonst: Register 40051 zurück auf 0 (SmartMeter-Nullregelung).
-
-    Ändert sich der Sollwert, während die Schreib-Schleife bereits für einen
-    anderen Sollwert läuft (z. B. weil die manuelle Entladung eine laufende
-    Netzladung unterbricht, oder weil sie beendet wird und die Netzladung
-    wieder übernimmt), schreibt SaxPowerCoordinator.async_start_sun_charge
-    den neuen Sollwert sofort einmalig, statt bis zur nächsten planmäßigen
-    Wiederholung der Schleife zu warten (bis zu GRID_CHARGE_WRITE_INTERVAL
-    Sekunden später) - eine manuelle Aktion muss unmittelbar wirken.
+    Die Funktionalität (Schalter, Zahlenfeld, Priorisierung in
+    SaxPowerCoordinator._async_enforce_grid_charge, Übersetzungen) wurde
+    deshalb wieder vollständig entfernt. Warnende Kommentare bei
+    REG_SETPOINT_POWER und REG_SUN_IC_POWER_SETPOINT_PCT (const.py)
+    erinnern bei einer späteren Umsetzung an diesen Befund - vor einem
+    erneuten Versuch unbedingt zuerst erneut beim Hersteller nachfragen,
+    ob sich daran etwas geändert hat.
   acceptance_criteria:
-    - "tests/test_coordinator.py deckt die Prioritätsreihenfolge ab:
-       manuelle Entladung unterbricht eine laufende zeitgesteuerte
-       Netzladung sofort (positiver statt negativer Sollwert), die
-       Netzladung läuft nach dem Ausschalten der manuellen Entladung von
-       selbst weiter (sofern Zeitfenster/Max-SOC/Max.-Netzladeleistung
-       weiter zutreffen), manuelle Entladung überschreibt auch eine
-       bereits aktive Max-SOC-Sperre und diese greift nach dem Ausschalten
-       wieder, sowie eine fehlende "Entladeleistung" führt zu einem
-       0%-Sollwert statt eines Fehlers."
-    - "tests/test_integration_live.py enthält einen End-to-End-Test, der
-       über echte Modbus-TCP-Kommunikation verifiziert, dass Einschalten
-       der manuellen Entladung während einer laufenden zeitgesteuerten
-       Netzladung sofort auf einen positiven Sollwert umschaltet, ohne
-       'Netzladung aktiv'/Zeitfenster/'Max. Netzladeleistung' zu
-       verändern, und dass die Netzladung nach dem Ausschalten von selbst
-       mit demselben Sollwert wie zuvor weiterläuft."
+    - "Keine Entitäten/Code-Pfade für manuelle Entladung mehr vorhanden
+       (switch.py, number.py, coordinator.py, Übersetzungen)."
+    - "const.py enthält bei REG_SETPOINT_POWER und
+       REG_SUN_IC_POWER_SETPOINT_PCT einen Kommentar mit diesem Befund für
+       spätere Umsetzungsversuche."

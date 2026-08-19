@@ -33,11 +33,6 @@ DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"
 DEFAULT_TIMED_CHARGE_ENABLED = False
 
-# Hard-Default für "Entladeleistung" (number.py, manuelle Entladung), da es
-# dafür kein analoges Geräteregister als Vorbelegung gibt (anders als "Max.
-# Netzladeleistung", siehe SaxPowerChargeLimitNumber).
-DEFAULT_DISCHARGE_POWER = 100
-
 # Basic Mode (Slave-ID 64) Holding-Register.
 # Interne Adresse = Protokolladresse - 40001 (siehe modbus_llm.yaml).
 # Alle benötigten Register liegen zusammenhängend in einem Block (41-46),
@@ -50,6 +45,11 @@ DEFAULT_DISCHARGE_POWER = 100
 # stattdessen zuverlässig aus dem SunSpec-Modus gelesen (REG_SUN_STORAGE_
 # POWER_ACTIVE bzw. REG_SUN_METER_POWER_ACTIVE_SUM unten), siehe
 # anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
+# ACHTUNG für spätere Umsetzungen ("manuelle Entladung" o. Ä.): positive
+# (entladende) Sollwerte auf diesem Register wurden gegen echte Hardware
+# getestet und wirkungslos befunden - siehe ausführlichen Kommentar bei
+# REG_SUN_IC_POWER_SETPOINT_PCT unten. Die Integration schreibt dieses
+# Register nur noch mit negativen (Lade-)Sollwerten (start_grid_charge).
 REG_SETPOINT_POWER = 41  # Write - W - Sollwert Leistung P (P-Sollwert-Modus)
 REG_SETPOINT_COSPHI = 42  # Write - Sollwert cos(phi)
 # Register 43 ("Leistungsgrenzwert Entladung") wird von der Integration
@@ -127,6 +127,22 @@ REG_SUN_PV_POWER_SF = 46  # Read - sunssf, wellknown 1
 # -- SunSpec Model 123 "Immediate Controls" ----------------------------------
 REG_SUN_IC_MODEL_ID = 47  # Read - wellknown 123
 REG_SUN_IC_LENGTH = 48  # Read - wellknown 7
+# ACHTUNG für spätere Umsetzungen ("manuelle Entladung" o. Ä.): Positive
+# Sollwerte auf REG_SUN_IC_POWER_SETPOINT_PCT (Entladung laut angenommener
+# Vorzeichenkonvention, negativ = Laden) wurden gegen echte Hardware
+# getestet - sowohl direkt als Prozentwert hier als auch alternativ als
+# Watt-Wert auf dem älteren Basic-Mode-P-Sollwert (REG_SETPOINT_POWER oben),
+# jeweils inkl. vorheriger Aktivierung von REG_SUN_IC_CONTROL_MODE =
+# SUN_IC_CONTROL_MODE_SETPOINT. In beiden Fällen wurden die Register
+# nachweislich korrekt geschrieben und zurückgelesen, auch nach Umstellung
+# der geräteseitigen Betriebsart auf "P-Sollwert (TCP)" (siehe
+# modbus_llm.yaml, operation_modes) - der Speicher hat in keinem Fall
+# tatsächlich entladen. Auf Rückfrage hat der Hersteller bestätigt, dass
+# eine ferngesteuerte manuelle Entladung so nicht vorgesehen ist. Die
+# zugehörigen Entities ("Manuelle Entladung"-Schalter, "Entladeleistung"-
+# Number) wurden deshalb wieder entfernt - siehe anforderung.yaml,
+# REQ-MANUAL-DISCHARGE (Status: verworfen). Vor einem erneuten Versuch
+# unbedingt zuerst erneut beim Hersteller nachfragen.
 REG_SUN_IC_POWER_SETPOINT_PCT = 49  # Read/Write - % - Leistungsvorgabe
 REG_SUN_IC_TIMEOUT = 50  # Read/Write - s - Timeout Leistungsvorgabe, max. 300
 REG_SUN_IC_CONTROL_MODE = 51  # Read/Write - 0:SmartMeter-Nullregelung 1:Sollwertvorgabe

@@ -34,7 +34,6 @@ async def async_setup_entry(
         [
             SaxPowerStorageSwitch(coordinator, entry.entry_id),
             SaxPowerTimedChargeSwitch(coordinator, entry.entry_id),
-            SaxPowerManualDischargeSwitch(coordinator, entry.entry_id),
         ]
     )
 
@@ -108,44 +107,4 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_timed_charge_enabled(False)
-        self.async_write_ha_state()
-
-
-class SaxPowerManualDischargeSwitch(SaxPowerEntity, SwitchEntity):
-    """Manuelle Entladung (Software-Logik, SunSpec-Modus).
-
-    Schaltet den Speicher über denselben SunSpec-Modus-Schreibpfad wie
-    Netzladung/Max-SOC-Sperre (Register 40051 Sollwertvorgabe + Register
-    40049, hier mit positivem Sollwert = Entladen) in eine aktive Entladung
-    mit der in number.py ("Entladeleistung") eingestellten Leistung - siehe
-    SaxPowerCoordinator._async_enforce_grid_charge. Hat dort die höchste
-    Priorität: unterbricht sowohl eine laufende Netzladung (zeitgesteuert
-    oder Max-SOC-Sperre) als auch eine bereits erreichte Max-SOC-Sperre, da
-    ein Entladen des vollen Speichers keinen Konflikt mit deren Zweck
-    darstellt. Wird die manuelle Entladung wieder ausgeschaltet, übernimmt
-    sofort wieder, was ansonsten gelten würde (Max-SOC-Sperre bzw.
-    zeitgesteuertes Laden, sofern weiterhin zutreffend).
-
-    Bewusst KEIN RestoreEntity - anders als "Netzladung aktiv" setzt sich
-    dieser Schalter nach jedem Neustart auf "aus" zurück, damit eine manuell
-    gestartete Entladung nicht unbeaufsichtigt über einen Home-Assistant-
-    Neustart hinweg weiterläuft.
-    """
-
-    _attr_translation_key = "manual_discharge"
-
-    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_manual_discharge"
-
-    @property
-    def is_on(self) -> bool:
-        return self.coordinator.manual_discharge_enabled
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_manual_discharge_enabled(True)
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_manual_discharge_enabled(False)
         self.async_write_ha_state()

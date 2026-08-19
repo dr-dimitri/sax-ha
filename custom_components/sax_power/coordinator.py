@@ -189,8 +189,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
-        self._manual_discharge_enabled = False
-        self._discharge_power: int | None = None
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -622,8 +620,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Vorzeichenkonvention für Register 40049 laut modbus.pdf nicht
     # dokumentiert. Hier analog zum Basic-Mode-P-Sollwert (Register 41) und
     # zur gemessenen Wirkleistung (Register 40029, "positiv = Entladung")
-    # angenommen: negativ = Laden, positiv = Entladen. Vor Produktiveinsatz
-    # gegen echte Hardware verifizieren.
+    # angenommen: negativ = Laden. Die Integration schreibt hier bewusst nur
+    # negative (Lade-)Sollwerte - siehe REG_SUN_IC_POWER_SETPOINT_PCT in
+    # const.py für den Hintergrund (frühere, vom Hersteller als nicht
+    # vorgesehen bestätigte "manuelle Entladung" mit positiven Sollwerten).
 
     @property
     def sun_charge_active(self) -> bool:
@@ -661,13 +661,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         writes (Register 40049/40051).
 
         Ändert sich der Sollwert, während bereits eine Schleife für einen
-        ANDEREN Sollwert läuft (z. B. wechselt der Sollwert von Laden auf
-        Entladen, weil die manuelle Entladung eine laufende Netzladung
-        unterbricht - siehe SaxPowerCoordinator._async_enforce_grid_charge),
-        wird sofort einmalig geschrieben, statt bis zur nächsten planmäßigen
+        ANDEREN Sollwert läuft (z. B. springt die Max-SOC-Sperre an und
+        setzt die laufende Netzladung auf 0 % - siehe
+        SaxPowerCoordinator._async_enforce_grid_charge), wird sofort
+        einmalig geschrieben, statt bis zur nächsten planmäßigen
         Wiederholung der Schleife zu warten (bis zu
-        GRID_CHARGE_WRITE_INTERVAL Sekunden später) - eine manuelle Aktion
-        soll unmittelbar wirken.
+        GRID_CHARGE_WRITE_INTERVAL Sekunden später) - eine Einstellungs-
+        änderung soll unmittelbar wirken.
         """
         if not MIN_SETPOINT_POWER <= power <= MAX_SETPOINT_POWER:
             raise HomeAssistantError(
@@ -790,30 +790,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_charge_power = value
         await self._async_apply_grid_charge_change()
 
-    # -- Manuelle Entladung ----------------------------------------------------
-    # Entlädt den Speicher auf Zuruf mit einer festen Leistung ("Entladeleistung",
-    # number.py), über denselben SunSpec-Modus-Pfad wie Netzladung/Max-SOC-Sperre
-    # (_async_sun_charge_loop), nur mit positivem statt negativem Sollwert (siehe
-    # Vorzeichenkonvention oben: negativ = Laden, positiv = Entladen). Hat in
-    # _async_enforce_grid_charge die höchste Priorität - siehe dort.
-
-    @property
-    def manual_discharge_enabled(self) -> bool:
-        return self._manual_discharge_enabled
-
-    @property
-    def discharge_power(self) -> int | None:
-        return self._discharge_power
-
-    async def async_set_manual_discharge_enabled(self, enabled: bool) -> None:
-        self._manual_discharge_enabled = enabled
-        await self._async_apply_grid_charge_change()
-
-    async def async_set_discharge_power(self, value: int | None) -> None:
-        """Set the software-side target power (Watt) for "Entladeleistung"."""
-        self._discharge_power = value
-        await self._async_apply_grid_charge_change()
-
     async def _async_apply_grid_charge_change(self) -> None:
         """Re-evaluate Zeitfenster/Max-SOC/Netzladeleistung sofort nach einer
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
@@ -838,50 +814,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return now >= start or now < end
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
-        """Zentrale Auswertung für manuelle Entladung, Max-SOC-Sperre und
-        zeitgesteuertes Laden - alle drei teilen sich den SunSpec-Modus-
-        Schreibpfad (_sun_charge_task), da der Speicher nicht gleichzeitig
-        laden und entladen kann. Priorität (höchste zuerst):
+        """Zentrale Auswertung für Max-SOC-Sperre und zeitgesteuertes Laden -
+        beide teilen sich den SunSpec-Modus-Schreibpfad (_sun_charge_task).
+        Priorität (höchste zuerst):
 
-        1. Manuelle Entladung (switch.py "Manuelle Entladung"): ist sie
-           eingeschaltet, wird IMMER entladen, mit einem positiven Sollwert
-           in Höhe von "Entladeleistung" (number.py) - unabhängig von
-           Max-SOC-Sperre und zeitgesteuertem Laden. Ein Entladen des
-           bereits vollen Speichers steht nicht im Widerspruch zum Zweck
-           der Max-SOC-Sperre (verhindert nur Überladen, nicht Entladen),
-           daher hier bewusst kein Konflikt. Das ist die einzige Aktion, die
-           direkt und ausschließlich durch einen expliziten Schalter-Klick
-           ausgelöst wird ("das zuletzt gewählte hat Vorrang") - Netzladung
-           läuft dagegen automatisch innerhalb eines Zeitfensters, ohne
-           dass der Nutzer jedes Mal aktiv eingreift. Wird die manuelle
-           Entladung wieder ausgeschaltet, greift ab der nächsten Auswertung
-           sofort wieder, was ohne sie gelten würde (Punkt 2 oder 3) - siehe
-           anforderung.yaml, REQ-MANUAL-DISCHARGE.
-        2. Ist der Ziel-SOC erreicht/überschritten, hat die Max-SOC-Sperre
+        1. Ist der Ziel-SOC erreicht/überschritten, hat die Max-SOC-Sperre
            Vorrang: Register 40051 bleibt/wird auf Sollwertvorgabe gesetzt
            und Register 40049 auf 0 % gehalten (siehe Max-SOC-Abschnitt
            oben) - unabhängig davon, ob zeitgesteuertes Laden aktiviert ist.
-        3. Erst wenn weder manuelle Entladung noch die Max-SOC-Sperre
-           greifen, kann zeitgesteuertes Laden (falls aktiviert, im
-           Zeitfenster und mit gesetzter "Max. Netzladeleistung") die
-           Schleife mit einem echten Ladesollwert übernehmen.
-        4. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
+        2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
+           Laden (falls aktiviert, im Zeitfenster und mit gesetzter "Max.
+           Netzladeleistung") die Schleife mit einem echten Ladesollwert
+           übernehmen.
+        3. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
            Nullregelung) gesetzt.
         """
-        manual_discharge_should_run = self._manual_discharge_enabled
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
         soc_reached = data["soc"] >= target_soc
         timed_should_charge = (
-            not manual_discharge_should_run
-            and not soc_reached
+            not soc_reached
             and self._timed_charge_enabled
             and self._is_time_in_window(dt_util.now().time())
             and self._max_charge_power is not None
         )
 
-        if manual_discharge_should_run:
-            await self.async_start_sun_charge(self._discharge_power or 0)
-        elif soc_reached:
+        if soc_reached:
             await self.async_start_sun_charge(0)
         elif timed_should_charge:
             await self.async_start_sun_charge(-self._max_charge_power)
@@ -889,7 +846,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
-        self._max_soc_clamped = soc_reached and not manual_discharge_should_run
+        self._max_soc_clamped = soc_reached
 
     async def async_shutdown(self) -> None:
         # super().async_shutdown() (DataUpdateCoordinator) storniert den

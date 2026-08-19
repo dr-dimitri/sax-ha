@@ -15,10 +15,7 @@ import pytest
 from homeassistant.core import State
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
-from custom_components.sax_power.number import (
-    SaxPowerChargeLimitNumber,
-    SaxPowerDischargePowerNumber,
-)
+from custom_components.sax_power.number import SaxPowerChargeLimitNumber
 
 
 @pytest.fixture
@@ -103,30 +100,3 @@ async def test_charge_limit_restores_a_genuine_nonzero_value(hass, coordinator) 
     await entity.async_added_to_hass()
 
     assert coordinator.max_charge_power == 1500
-
-
-async def test_discharge_power_defaults_to_100w_on_fresh_install(
-    hass, coordinator
-) -> None:
-    """ "Entladeleistung" (manuelle Entladung) hat keinen analogen
-    Geräte-Register-Vorgabewert - Hard-Default ist 100 W."""
-    entity = SaxPowerDischargePowerNumber(coordinator, "test_entry_id")
-    _prepare_entity(entity, hass, "number.test_discharge_power", None)
-
-    await entity.async_added_to_hass()
-
-    assert coordinator.discharge_power == 100
-
-
-async def test_discharge_power_restores_previous_value(hass, coordinator) -> None:
-    entity = SaxPowerDischargePowerNumber(coordinator, "test_entry_id")
-    _prepare_entity(
-        entity,
-        hass,
-        "number.test_discharge_power",
-        State("number.test_discharge_power", "250"),
-    )
-
-    await entity.async_added_to_hass()
-
-    assert coordinator.discharge_power == 250

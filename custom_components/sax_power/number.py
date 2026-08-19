@@ -11,7 +11,6 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DATA_COORDINATOR,
-    DEFAULT_DISCHARGE_POWER,
     DOMAIN,
     MAX_POWER_LIMIT,
     MAX_SOC,
@@ -32,7 +31,6 @@ async def async_setup_entry(
         [
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerChargeLimitNumber(coordinator, entry.entry_id),
-            SaxPowerDischargePowerNumber(coordinator, entry.entry_id),
         ]
     )
 
@@ -149,52 +147,4 @@ class SaxPowerChargeLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_max_charge_power(int(value))
-        self.async_write_ha_state()
-
-
-class SaxPowerDischargePowerNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
-    """Sollwert-Leistung für die "Manuelle Entladung" (switch.py), in Watt.
-
-    Reiner Software-Zustand, analog zu SaxPowerChargeLimitNumber - wird vom
-    Speicher nur berücksichtigt, während die "Manuelle Entladung"
-    eingeschaltet ist (siehe
-    coordinator.SaxPowerCoordinator._async_enforce_grid_charge). Anders als
-    "Max. Netzladeleistung" gibt es hierfür kein analoges Basic-Mode-
-    Register, das als Vorgabewert dienen könnte - daher ein fester
-    Hard-Default (DEFAULT_DISCHARGE_POWER, 100 W), analog zu "Max. SOC".
-
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert.
-    """
-
-    _attr_translation_key = "discharge_power_setpoint"
-    _attr_native_min_value = MIN_POWER_LIMIT
-    _attr_native_max_value = MAX_POWER_LIMIT
-    _attr_native_step = 50
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_mode = NumberMode.BOX
-
-    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_discharge_power_setpoint"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if self.coordinator.discharge_power is not None:
-            return
-        restored_value: int | None = None
-        if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = int(float(last_state.state))
-            except (TypeError, ValueError):
-                restored_value = None
-        await self.coordinator.async_set_discharge_power(
-            restored_value if restored_value is not None else DEFAULT_DISCHARGE_POWER
-        )
-
-    @property
-    def native_value(self) -> int | None:
-        return self.coordinator.discharge_power
-
-    async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_discharge_power(int(value))
         self.async_write_ha_state()

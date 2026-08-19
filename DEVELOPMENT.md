@@ -146,9 +146,12 @@ Adressen. Die vollständigen, aktuell gültigen Anforderungen an die
 Integration stehen in `anforderung.yaml`.
 
 Der P-Sollwert (Register 41) wird als vorzeichenbehafteter 16-Bit-Wert im
-Zweierkomplement übertragen: positive Werte entsprechen Entladung (Watt
-direkt als Ganzzahl), negative Werte (Laden) werden vor dem Schreiben als
-`65536 + Sollwert` codiert (`coordinator.to_unsigned16`/`to_signed16`).
+Zweierkomplement übertragen: negative Werte (Laden) werden vor dem
+Schreiben als `65536 + Sollwert` codiert
+(`coordinator.to_unsigned16`/`to_signed16`). Positive Werte sollten laut
+Encoding-Konvention Entladung bedeuten, haben gegen echte Hardware getestet
+aber keine Wirkung gezeigt - siehe Kommentar bei `REG_SETPOINT_POWER`
+(const.py) sowie anforderung.yaml REQ-MANUAL-DISCHARGE.
 
 ## SunSpec-Skalierung
 
@@ -287,6 +290,17 @@ bereits vorinstalliert – dort reicht direkt `pytest -v` ohne eigenes venv.
 `tests/test_real_hardware.py` liest – anders als `test_integration_live.py`
 (simulierter Server) – Werte direkt von einem echten SAX Power Home (Plus)
 im lokalen Netz. Rein lesend, kein Schreibzugriff.
+
+> Frühere Versionen dieser Datei enthielten zusätzlich schreibende Live-
+> Tests für eine "manuelle Entladung" (positiver Sollwert auf Register
+> 40049 bzw. dem älteren Basic-Mode-Register 41). Damit wurde live
+> nachgewiesen, dass beide Wege die Register zwar korrekt schreiben, der
+> reale Speicher aber in keinem Fall tatsächlich entladen hat - der
+> Hersteller hat auf Rückfrage bestätigt, dass eine ferngesteuerte manuelle
+> Entladung nicht vorgesehen ist. Die Funktion (Entities, Coordinator-Logik,
+> Tests) wurde deshalb wieder entfernt, siehe anforderung.yaml
+> REQ-MANUAL-DISCHARGE sowie die Kommentare bei REG_SETPOINT_POWER/
+> REG_SUN_IC_POWER_SETPOINT_PCT in const.py.
 
 Die Ziel-IP steht in `tests/real_device.yaml` (im Repository abgelegt):
 

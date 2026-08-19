@@ -12,6 +12,13 @@ Rein lesend, kein Schreibzugriff auf ein reales, ggf. produktives
 Speichersystem. Überspringt sich automatisch (pytest.skip), wenn keine IP
 hinterlegt oder der Speicher gerade nicht erreichbar ist - läuft also weder
 in CI noch auf Entwicklerrechnern ohne physischen Zugriff auf die Hardware.
+
+Frühere Versionen dieser Datei enthielten zusätzlich schreibende Tests für
+eine "manuelle Entladung" (positiver Sollwert auf Register 40049 bzw.
+Register 41). Diese Funktion wurde nach Rückfrage beim Hersteller wieder
+entfernt (nicht vorgesehen, siehe anforderung.yaml REQ-MANUAL-DISCHARGE
+sowie die Kommentare bei REG_SETPOINT_POWER/REG_SUN_IC_POWER_SETPOINT_PCT
+in const.py) - die zugehörigen Tests entsprechend auch.
 """
 
 from __future__ import annotations

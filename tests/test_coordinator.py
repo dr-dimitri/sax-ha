@@ -16,6 +16,7 @@ from custom_components.sax_power.const import (
     REG_SOC,
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
@@ -474,6 +475,155 @@ async def test_enforce_grid_charge_releases_max_soc_clamp_below_target(hass) -> 
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
         device_id=100,
     )
+
+
+# -- PV-Überschuss-Prüfung (zusätzlich zum Zeitfenster) ----------------------
+
+
+async def test_enforce_grid_charge_does_not_start_with_pv_surplus_above_threshold(
+    hass,
+) -> None:
+    """Auch innerhalb des Zeitfensters darf zeitgesteuertes Laden nicht
+    starten, sobald am Smart Meter mehr PV-Überschuss als
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gemessen wird (positiver
+    Anzeigewert = Überschuss aus der Dachphotovoltaik) - siehe
+    anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 10,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+    }
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    with _patched_now(2):
+        await coordinator.async_set_timed_charge_enabled(True)
+        await asyncio.sleep(0.1)
+
+    assert coordinator._timed_charge_active is False
+    assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_window(
+    hass,
+) -> None:
+    """Eine bereits laufende Netzladung wird beendet, sobald der PV-
+    Überschuss während des Zeitfensters über den Schwellwert steigt - beim
+    nächsten Poll-Zyklus, nicht erst am konfigurierten Fensterende."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+    }
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            await asyncio.sleep(0.1)
+            assert coordinator.sun_charge_active is True
+
+            # Simuliert den nächsten Poll-Zyklus (_async_update_data), bei
+            # dem der Smart Meter nun PV-Überschuss über dem Schwellwert
+            # meldet.
+            coordinator.data["smartmeter_power"] = (
+                SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
+            )
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+            assert coordinator._timed_charge_active is False
+            assert coordinator.sun_charge_active is False
+            client.write_register.assert_awaited_with(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                device_id=100,
+            )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+@pytest.mark.parametrize(
+    "smartmeter_power",
+    [
+        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,  # genau auf dem Schwellwert (nicht >)
+        0,
+        -500,  # Netzbezug statt PV-Überschuss
+    ],
+)
+async def test_enforce_grid_charge_starts_at_or_below_pv_surplus_threshold(
+    hass, smartmeter_power: float
+) -> None:
+    """Der Schwellwert greift erst bei Überschreitung (>) - ein Wert genau
+    auf dem Schwellwert sowie Netzbezug (negativer Anzeigewert) blockieren
+    das zeitgesteuerte Laden nicht."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": smartmeter_power,
+    }
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            await asyncio.sleep(0.1)
+
+            assert coordinator._timed_charge_active is True
+            assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_starts_when_smartmeter_power_missing(hass) -> None:
+    """Fehlt der Smart-Meter-Wert (z. B. weil der SunSpec-Modus gerade nicht
+    erreichbar ist), darf das zeitgesteuerte Laden dadurch nicht blockiert
+    werden."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            await asyncio.sleep(0.1)
+
+            assert coordinator._timed_charge_active is True
+            assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
 
 
 async def test_stop_sun_charge_is_noop_when_not_running(hass) -> None:

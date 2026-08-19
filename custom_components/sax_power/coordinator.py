@@ -110,6 +110,7 @@ from .const import (
     REG_SUN_VERSION_GATEWAY,
     REG_SUN_VERSION_MASTER,
     REG_SWITCH_STATE,
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
     STORAGE_EVENT_LABELS,
     STORAGE_STATE_LABELS,
     SUN_IC_CONTROL_MODE_SETPOINT,
@@ -823,16 +824,36 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            und Register 40049 auf 0 % gehalten (siehe Max-SOC-Abschnitt
            oben) - unabhängig davon, ob zeitgesteuertes Laden aktiviert ist.
         2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
-           Laden (falls aktiviert, im Zeitfenster und mit gesetzter "Max.
-           Netzladeleistung") die Schleife mit einem echten Ladesollwert
-           übernehmen.
+           Laden (falls aktiviert, im Zeitfenster, mit gesetzter "Max.
+           Netzladeleistung" UND ohne PV-Überschuss über
+           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die Schleife mit einem
+           echten Ladesollwert übernehmen. Ein PV-Überschuss beendet die
+           Netzladung dabei auch mitten im Zeitfenster, sobald er beim
+           nächsten Poll-Zyklus erkannt wird - nicht erst am Fensterende.
         3. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
            Nullregelung) gesetzt.
+
+        PV-Überschuss-Erkennung: data["smartmeter_power"] (Register 40072,
+        siehe REG_SUN_METER_POWER_ACTIVE_SUM) ist bereits derselbe,
+        vorzeichenrichtig umgerechnete Wert, der auch im "Smart Meter
+        Leistung"-Sensor angezeigt wird (sensor.py, _direct). Laut Anwender
+        bedeutet ein POSITIVER Anzeigewert Überschuss aus der
+        Dachphotovoltaik - der rohe Registerinhalt selbst kann davon
+        abweichende Vorzeichen haben (siehe apply_sunssf/to_signed16), daher
+        wird hier bewusst der bereits umgerechnete Anzeigewert ausgewertet,
+        nicht das Rohregister. Fehlt der Wert (z. B. SunSpec-Modus gerade
+        nicht erreichbar), blockiert das die Netzladung nicht.
         """
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
         soc_reached = data["soc"] >= target_soc
+        smartmeter_power = data.get("smartmeter_power")
+        pv_surplus_active = (
+            smartmeter_power is not None
+            and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+        )
         timed_should_charge = (
             not soc_reached
+            and not pv_surplus_active
             and self._timed_charge_enabled
             and self._is_time_in_window(dt_util.now().time())
             and self._max_charge_power is not None

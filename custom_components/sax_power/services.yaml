@@ -37,3 +37,60 @@ stop_grid_charge:
       selector:
         device:
           integration: sax_power
+
+set_timed_charge_window:
+  name: Netzladung-Zeitfenster setzen
+  description: >-
+    Setzt Start- und Endzeit des Zeitfensters für die zeitgesteuerte
+    Netzladung atomar in einem Aufruf. Im Unterschied zum einzelnen Ändern
+    der Start-/Ende-Uhrzeit-Entities wird dabei nur das tatsächliche
+    Ziel-Fenster auf Überschneidung mit dem netzdienlichen Laden geprüft -
+    ein rein durch die getrennte Bearbeitung beider Entities entstehendes,
+    nicht beabsichtigtes Zwischenfenster kann die Änderung dadurch nicht
+    mehr fälschlich blockieren.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    start:
+      name: Start
+      description: Beginn des Zeitfensters.
+      required: true
+      selector:
+        time:
+    end:
+      name: Ende
+      description: Ende des Zeitfensters.
+      required: true
+      selector:
+        time:
+
+set_grid_serving_window:
+  name: Netzdienliches-Laden-Zeitfenster setzen
+  description: >-
+    Setzt Start- und Endzeit des Zeitfensters für das netzdienliche Laden
+    atomar in einem Aufruf - siehe set_timed_charge_window.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    start:
+      name: Start
+      description: Beginn des Zeitfensters.
+      required: true
+      selector:
+        time:
+    end:
+      name: Ende
+      description: Ende des Zeitfensters.
+      required: true
+      selector:
+        time:

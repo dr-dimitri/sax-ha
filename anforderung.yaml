@@ -293,14 +293,56 @@ requirement_timed_soc_charge:
        Speicher). Das verhindert dauerhaftes Volladen auf 100 % zugunsten
        der Batterie-Lebensdauer; der Speicher entlädt sich währenddessen
        nicht automatisch zur Eigenverbrauchsdeckung.
+
+       Wurde der Ziel-SOC dabei INNERHALB des Netzladung- oder des
+       netzdienlichen Zeitfensters erreicht (_max_soc_hold_is_window_bound),
+       gilt die Sperre nur bis zum Ende genau dieses Zeitfensters: Register
+       40051 wird bis dahin periodisch auf 1 nachgeschrieben (Timeout siehe
+       Register 40050/REG_SUN_IC_TIMEOUT), danach aktiv auf 0 zurückgesetzt,
+       damit der Speicher wieder von der geräteeigenen SmartMeter-
+       Nullregelung gesteuert wird - ohne diesen aktiven Rücksprung bliebe
+       die Sperre unbegrenzt bestehen, da ein gehaltener 0-%-Sollwert den
+       SOC nie von selbst unter den Zielwert fallen lässt. Wurde der
+       Ziel-SOC dagegen AUSSERHALB jedes Zeitfensters erreicht (z. B. rein
+       durch PV-Überschuss via Nullregelung, ohne aktives zeitgesteuertes
+       oder netzdienliches Laden), gilt die Sperre weiterhin unbegrenzt, wie
+       oben beschrieben.
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
-       Ende", HH:MM, darf über Mitternacht laufen), "Max.
-       Netzladeleistung" (number.py) gesetzt UND kein PV-Überschuss über
+       Ende", HH:MM, darf über Mitternacht laufen), im aktiven Monat, "Max.
+       Netzladeleistung" (number.py) gesetzt, "Netzladung Min. SOC"
+       (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
+       zuvor unterschritten und noch nicht bis "Max. SOC" durchgeladen -
+       siehe Hysterese unten) UND kein PV-Überschuss über
        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py, 200 W) am Smart Meter
        gemessen, wird Register 40049 auf einen negativen, aus "Max.
        Netzladeleistung" umgerechneten Sollwert gesetzt.
+
+       "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
+       SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
+       unterhalb dessen die Netzladung starten darf - im Unterschied zu
+       "Max. SOC" (oberes, geräteunabhängiges Ziel, s. o., von Netzladung
+       UND netzdienlichem Laden gemeinsam genutzt) eine reine
+       Netzladung-Einstellung, da nur Netzladung aktiv aus dem Netz lädt und
+       daher einen Schwellwert braucht, ab dem sich das lohnt.
+       SaxPowerCoordinator._timed_charge_armed hält als Hysterese fest, ob
+       der Schwellwert bereits unterschritten wurde: sobald current_soc <
+       "Netzladung Min. SOC", wird _timed_charge_armed auf True gesetzt und
+       bleibt es (auch wenn der SOC danach wieder über "Netzladung Min.
+       SOC" steigt), bis der SOC "Max. SOC" erreicht/überschreitet (dann
+       zurück auf False) - Netzladung lädt also einmal gestartet bis "Max.
+       SOC" durch, statt bei jedem erneuten Überschreiten von "Netzladung
+       Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
+       B. direkt nach der Ersteinrichtung) steht der Wert auf MAX_SOC
+       (100 %, SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt
+       auf 0 oder "unbekannt" - andernfalls würde diese neu eingeführte
+       Einstellung bestehende Konfigurationen brechen (SOC wäre praktisch
+       nie < 0 %, Netzladung würde nie mehr armen); mit dem 100-%-Default
+       verhält sich Netzladung dagegen wie vor Einführung dieser Einstellung
+       (SOC ist praktisch immer < 100 %, der Schwellwert blockiert also
+       zunächst nichts), bis der Anwender bewusst einen niedrigeren Wert
+       setzt.
     3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
        auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
        geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
@@ -349,18 +391,22 @@ requirement_timed_soc_charge:
     nicht mehr gelesen, Register 44 nur noch einmalig als Vorgabewert (s.
     u.).
 
-    "Max. SOC" und "Max. Netzladeleistung" sind reine Software-Zustände
-    (RestoreEntity, number.py) - keine eigenen Ziel-SOC-/
-    Leistungseinstellungen für die beiden Features. Eine Änderung wirkt
-    sofort (async_set_max_soc/async_set_max_charge_power werten
-    _async_enforce_grid_charge unmittelbar neu aus statt erst beim
-    nächsten Poll-Zyklus). Persistieren über Neustarts hinweg; gibt es
-    (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
-    Zustand, setzen sie sich explizit auf einen Vorgabewert statt
-    "unbekannt"/0 zu bleiben: "Max. SOC" auf MAX_SOC (100 %,
-    SaxPowerMaxSocNumber.async_added_to_hass), "Max. Netzladeleistung" auf
-    den zu diesem Zeitpunkt vom Gerät gelesenen Wert von Basic-Mode-Register
-    44 (SaxPowerChargeLimitNumber.async_added_to_hass) - danach rein
+    "Max. SOC", "Max. Netzladeleistung" und "Netzladung Min. SOC" sind reine
+    Software-Zustände (RestoreEntity, number.py) - "Max. SOC"/"Max.
+    Netzladeleistung" sind dabei zentrale, von Netzladung UND
+    netzdienlichem Laden gemeinsam genutzte Einstellungen, "Netzladung Min.
+    SOC" ist eine reine Netzladung-Einstellung (siehe oben). Eine Änderung
+    wirkt jeweils sofort (async_set_max_soc/async_set_max_charge_power/
+    async_set_timed_charge_min_soc werten _async_enforce_grid_charge
+    unmittelbar neu aus statt erst beim nächsten Poll-Zyklus). Alle drei
+    persistieren über Neustarts hinweg; gibt es (z. B. direkt nach der
+    Ersteinrichtung) noch keinen gespeicherten Zustand, setzen sie sich
+    explizit auf einen Vorgabewert statt "unbekannt"/0 zu bleiben: "Max.
+    SOC" UND "Netzladung Min. SOC" auf MAX_SOC (100 %,
+    SaxPowerMaxSocNumber/SaxPowerTimedChargeMinSocNumber.
+    async_added_to_hass), "Max. Netzladeleistung" auf den zu diesem
+    Zeitpunkt vom Gerät gelesenen Wert von Basic-Mode-Register 44
+    (SaxPowerChargeLimitNumber.async_added_to_hass) - danach rein
     Software-seitig, kein weiterer Register-Write.
 
     Aktiviert-Zustand sowie Start-/Endzeit des zeitgesteuerten Ladens
@@ -474,7 +520,7 @@ requirement_grid_serving_charge:
     _timed_charge_months/_grid_serving_months, je ein set[int] aus 1-12,
     Properties timed_charge_months/grid_serving_months als frozenset,
     Setter async_set_timed_charge_month/async_set_grid_serving_month).
-    Default (const.ALL_MONTHS, DEFAULT_MONTH_ENABLED=True): alle 12 Monate
+    Default (beide Sets initial set(const.ALL_MONTHS)): alle 12 Monate
     aktiv, damit sich bestehende Konfigurationen nach diesem Update
     unverändert verhalten, bis der Anwender einzelne Monate bewusst
     abwählt. Ist für ein Feature kein einziger Monat ausgewählt, ist es
@@ -490,31 +536,69 @@ requirement_grid_serving_charge:
     Laufen beide Fenster nur in disjunkten Monaten, dürfen sich die
     Tageszeiten beliebig überlappen, da die Fenster nie gleichzeitig aktiv
     sein können (siehe Beispiel oben). SaxPowerCoordinator.
-    _assert_windows_dont_overlap (aufgerufen aus allen sechs relevanten
-    Settern: async_set_timed_charge_start/-end/-month,
-    async_set_grid_serving_start/-end/-month) lehnt eine Änderung, die zu
-    einer echten Überschneidung führen würde, mit HomeAssistantError ab -
-    unabhängig davon, welche der beiden Entitäten-Gruppen gerade geändert
-    wird. Der Fehler wird über den auslösenden Service-Call an das Frontend
-    durchgereicht und dem Anwender damit direkt als Fehlermeldung angezeigt.
-    Die eigentliche Zeitfenster-Überlappungsprüfung
-    (coordinator.windows_overlap) unterstützt wie _is_time_in_window über
-    Mitternacht laufende Fenster sowie unvollständige Fenster (mindestens
-    eine der vier Zeiten fehlt - gelten als nie überlappend); die
-    Monatsprüfung ist eine einfache Set-Schnittmenge (months_a & months_b).
-    Bedingt durch die unabhängigen Start-/Ende-/Monats-Entities pro Feature
-    kann das kurzzeitige Bearbeiten nur einer der beiden Zeit-Grenzen eines
-    bereits über Mitternacht laufenden Fensters in seltenen Fällen einen
-    ungewöhnlich großen Zwischenzustand ergeben und dadurch abgelehnt
-    werden, obwohl das beabsichtigte Endergebnis nicht überlappen würde -
-    betrifft nur Anwender, die für beide Features zusätzlich noch über
-    Mitternacht laufende Fenster einsetzen. Aus demselben Grund kann das
-    schrittweise Umstellen von überlappenden Tageszeiten auf disjunkte
-    Monate in ungünstiger Reihenfolge zwischenzeitlich abgelehnt werden -
-    empfohlen wird, zunächst beide Monats-Auswahlen anzupassen (wirkt sich
-    dabei so lange nicht überlappend aus, wie mindestens eines der beiden
-    Zeitfenster noch beim - nicht überlappenden - Default steht) und erst
-    danach die Zeiten zu ändern.
+    _windows_overlap_with_months kapselt diese Prüfung (Tageszeit über
+    coordinator.windows_overlap - unterstützt wie _is_time_in_window über
+    Mitternacht laufende sowie unvollständige Fenster, mindestens eine der
+    vier Zeiten fehlt gilt als nie überlappend; Monatsprüfung als einfache
+    Set-Schnittmenge months_a & months_b). Wie darauf reagiert wird,
+    unterscheidet sich je nach betroffener Entitäts-Gruppe:
+
+    - Monats-Setter (async_set_timed_charge_month/async_set_grid_serving_
+      month): _assert_windows_dont_overlap lehnt eine Änderung, die zu einer
+      echten Überschneidung führen würde, weiterhin mit HomeAssistantError
+      ab - die bisherige Monats-Auswahl bleibt dabei unverändert. Der Fehler
+      wird über den auslösenden Service-Call an das Frontend durchgereicht
+      und dem Anwender direkt als Fehlermeldung angezeigt.
+    - Zeit-Setter (async_set_timed_charge_start/-end/-window,
+      async_set_grid_serving_start/-end/-window): Eine echte Überschneidung
+      wird NICHT mehr mit HomeAssistantError abgelehnt. Stattdessen zeigt
+      _notify_time_window_overlap eine Persistent Notification
+      (homeassistant.components.persistent_notification, notification_id
+      f"{DOMAIN}_{entry_id}_window_overlap") mit beiden betroffenen
+      Zeitfenstern (Tageszeit + aktive Monate, formatiert über
+      _format_window_for_message) an, und die soeben geänderte Zeit wird auf
+      None (leer) gesetzt - bei async_set_timed_charge_start/-end bzw.
+      async_set_grid_serving_start/-end nur die jeweils eine geänderte
+      Grenze, bei den beiden -window-Settern (siehe unten) beide Grenzen.
+      Eine leere Start- oder Endzeit bewirkt immer, dass das jeweilige
+      Feature nicht ausgeführt wird (_is_time_in_window/windows_overlap
+      behandeln ein unvollständiges Fenster als nie aktiv bzw. nie
+      überlappend) - eine geleerte Zeit muss also bewusst neu gesetzt
+      werden, damit das Feature wieder aktiv wird.
+
+    Begründung für die unterschiedliche Behandlung: Bei einem Monats-Schalter
+    lässt sich eine Ablehnung sauber auf den vorherigen (binären) Zustand
+    zurücksetzen. Eine Zeit-Entity dagegen bedient typischerweise nur EINE
+    von zwei Grenzen eines Zeitfensters (Start und Ende sind getrennte
+    Entities) - würde man eine überlappende Änderung stattdessen komplett
+    ablehnen (alten Wert beibehalten), könnte ein rein durch das getrennte
+    Bearbeiten von Start und Ende entstehender, in Wahrheit gar nicht
+    beabsichtigter Zwischenzustand (neue Grenze + noch nicht aktualisierte
+    andere Grenze) fälschlich als Überschneidung erkannt werden, obwohl das
+    beabsichtigte Endergebnis nicht überlappen würde - je nachdem, ob zuerst
+    Start oder Ende geändert wird. Das Leeren statt Beibehalten des alten
+    Werts vermeidet diese Verwirrung, ohne die Nichtüberlappungs-Regel
+    aufzuweichen (ein leeres Fenster kann per Definition nie überlappen).
+
+    Services set_timed_charge_window/set_grid_serving_window
+    (SaxPowerCoordinator.async_set_timed_charge_window/
+    async_set_grid_serving_window, services.yaml): Setzen Start und Ende
+    eines Zeitfensters atomar in einem einzigen Aufruf (Felder device_id,
+    start, end) - die Überlappungsprüfung läuft dabei genau einmal gegen das
+    fertige Ziel-Fenster, ohne den oben beschriebenen Zwischenzustand zu
+    durchlaufen; bei einer echten Überschneidung werden ebenfalls beide
+    übergebenen Werte geleert (siehe oben). Empfohlen für jede Änderung, bei
+    der sich sowohl Start als auch Ende ändern sollen. Die einzelnen
+    Start-/Ende-Entities (time.py) bleiben unverändert bestehen und eignen
+    sich weiterhin für das Verschieben nur einer einzelnen Zeitgrenze. Aus
+    einem verwandten Grund kann das schrittweise Umstellen von
+    überlappenden Tageszeiten auf disjunkte Monate in ungünstiger
+    Reihenfolge zwischenzeitlich eine Zeit leeren, obwohl das beabsichtigte
+    Endergebnis nicht überlappen würde - empfohlen wird, zunächst beide
+    Monats-Auswahlen anzupassen (wirkt sich dabei so lange nicht
+    überlappend aus, wie mindestens eines der beiden Zeitfenster noch beim
+    - nicht überlappenden - Default steht) und erst danach die Zeiten zu
+    ändern.
 
     Die Monats-Setter unterstützen zusätzlich einen validate-Parameter
     (Default True): SaxPowerMonthSwitch.async_added_to_hass ruft sie beim
@@ -544,11 +628,26 @@ requirement_grid_serving_charge:
   acceptance_criteria:
     - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
        über Mitternacht laufendes Fenster, berührende statt überlappende
-       Fenster, unvollständige Fenster) sowie die Ablehnung überlappender
-       Änderungen an den Zeit- und Monats-Settern (async_set_timed_charge_
-       start/-end/-month, async_set_grid_serving_start/-end/-month) mit
-       HomeAssistantError ab - inklusive des Falls, dass identische
-       Tageszeiten bei disjunkten aktiven Monaten NICHT abgelehnt werden."
+       Fenster, unvollständige Fenster) ab - inklusive des Falls, dass
+       identische Tageszeiten bei disjunkten aktiven Monaten NICHT als
+       überlappend gelten."
+    - "tests/test_coordinator.py deckt die Ablehnung überlappender
+       Änderungen an den Monats-Settern (async_set_timed_charge_month,
+       async_set_grid_serving_month) mit HomeAssistantError ab (bisherige
+       Monats-Auswahl bleibt unverändert), sowie für die Zeit-Setter
+       (async_set_timed_charge_start/-end/-window, async_set_grid_serving_
+       start/-end/-window) das neue Verhalten bei echter Überschneidung:
+       kein HomeAssistantError mehr, stattdessen eine Persistent
+       Notification (hass.data[persistent_notification.DOMAIN], Eintrag mit
+       'window_overlap' in der notification_id) mit beiden Zeitfenstern
+       sowie eine geleerte (None) soeben geänderte Zeit - bei den
+       -start/-end-Settern nur die jeweils geänderte Grenze, bei den
+       -window-Settern beide Grenzen. Ein Regressionstest reproduziert den
+       ursprünglich gemeldeten Bug direkt: ein durch getrenntes Setzen von
+       Start und Ende über die einzelnen Uhrzeit-Entities entstehender,
+       nicht beabsichtigter Zwischenzustand führt zum Leeren der Zeit,
+       während der atomare -window-Service dasselbe Ziel-Fenster
+       akzeptiert."
     - "tests/test_coordinator.py deckt das Ladeverhalten von netzdienlichem
        Laden ab: Start nur mit PV-Überschuss über dem Schwellwert, Deckelung
        auf min(Max. Netzladeleistung, PV-Überschuss), kein Start ohne

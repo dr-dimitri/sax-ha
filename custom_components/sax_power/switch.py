@@ -94,8 +94,9 @@ class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
 class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
     """Aktiviert/deaktiviert das zeitgesteuerte Laden (Software-Logik).
 
-    Siehe SaxPowerCoordinator._async_enforce_timed_charge sowie die
-    zugehörigen Number-/Time-Entities (Ziel-SOC, Zeitfenster, Ladeleistung).
+    Siehe SaxPowerCoordinator._async_enforce_grid_charge sowie die
+    zugehörigen Number-/Time-Entities (Ziel-SOC, Min. SOC, Zeitfenster,
+    Ladeleistung).
     """
 
     _attr_translation_key = "timed_charge_enabled"

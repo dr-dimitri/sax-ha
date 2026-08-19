@@ -31,6 +31,7 @@ async def async_setup_entry(
         [
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerChargeLimitNumber(coordinator, entry.entry_id),
+            SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
         ]
     )
 
@@ -147,4 +148,55 @@ class SaxPowerChargeLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_max_charge_power(int(value))
+        self.async_write_ha_state()
+
+
+class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+    """Unterer SOC-Schwellwert ("Min. SOC"), unterhalb dessen die Netzladung
+    starten darf - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE und
+    coordinator.SaxPowerCoordinator._async_enforce_grid_charge
+    (_timed_charge_armed) für die Hysterese-Logik: einmal unterschritten,
+    lädt die Netzladung bis "Max. SOC" durch, statt bei jedem erneuten
+    Überschreiten von "Min. SOC" sofort wieder abzubrechen.
+
+    Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
+    es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
+    Zustand, wird MAX_SOC (100 %) als Vorgabewert gesetzt - dadurch verhält
+    sich die Netzladung für bestehende Konfigurationen nach diesem Update
+    unverändert (SOC ist praktisch immer < 100 %, "Min. SOC" blockiert also
+    zunächst nichts), bis der Anwender bewusst einen niedrigeren Schwellwert
+    setzt.
+    """
+
+    _attr_translation_key = "timed_charge_min_soc"
+    _attr_native_min_value = MIN_SOC
+    _attr_native_max_value = MAX_SOC
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_timed_charge_min_soc"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.timed_charge_min_soc is not None:
+            return
+        restored_value: int | None = None
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                restored_value = int(float(last_state.state))
+            except (TypeError, ValueError):
+                restored_value = None
+        await self.coordinator.async_set_timed_charge_min_soc(
+            restored_value if restored_value is not None else MAX_SOC
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.timed_charge_min_soc
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_timed_charge_min_soc(int(value))
         self.async_write_ha_state()

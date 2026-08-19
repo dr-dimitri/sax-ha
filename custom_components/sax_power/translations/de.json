@@ -228,6 +228,9 @@
       },
       "charge_limit": {
         "name": "Max. Netzladeleistung"
+      },
+      "timed_charge_min_soc": {
+        "name": "Netzladung Min. SOC"
       }
     },
     "switch": {
@@ -356,6 +359,42 @@
         "device_id": {
           "name": "Gerät",
           "description": "Das SAX Power Gerät."
+        }
+      }
+    },
+    "set_timed_charge_window": {
+      "name": "Netzladung-Zeitfenster setzen",
+      "description": "Setzt Start- und Endzeit des Zeitfensters für die zeitgesteuerte Netzladung atomar in einem Aufruf, statt mit den einzelnen Start-/Ende-Uhrzeit-Entities.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Beginn des Zeitfensters."
+        },
+        "end": {
+          "name": "Ende",
+          "description": "Ende des Zeitfensters."
+        }
+      }
+    },
+    "set_grid_serving_window": {
+      "name": "Netzdienliches-Laden-Zeitfenster setzen",
+      "description": "Setzt Start- und Endzeit des Zeitfensters für das netzdienliche Laden atomar in einem Aufruf, statt mit den einzelnen Start-/Ende-Uhrzeit-Entities.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Beginn des Zeitfensters."
+        },
+        "end": {
+          "name": "Ende",
+          "description": "Ende des Zeitfensters."
         }
       }
     }

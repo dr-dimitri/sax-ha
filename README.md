@@ -131,9 +131,15 @@ unberührt.
 | --- | --- |
 | Max. SOC | Ziel-SOC (0–100 %) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
 | Max. Netzladeleistung | Ziel-Leistung für die Netzladung (W) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung einmalig mit dem beim Start gelesenen Ladeleistungsgrenzwert (Register 44) vorbelegt |
+| Netzladung Min. SOC | Unterer SOC-Schwellwert (0–100 %), unterhalb dessen die Netzladung startet – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
 
 Es gibt bewusst keine eigene Ziel-SOC-/Leistungseinstellung für
-zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben.
+zeitgesteuertes Laden – "Max. SOC" (oberes Ziel) und "Max.
+Netzladeleistung" sind die zentralen Einstellungen oben, gemeinsam mit
+netzdienlichem Laden genutzt. "Netzladung Min. SOC" (unterer Schwellwert,
+siehe unten) ist dagegen bewusst eine reine Netzladung-Einstellung, da nur
+die Netzladung – anders als netzdienliches Laden – aktiv aus dem Netz
+lädt und daher einen Schwellwert braucht, ab dem sich das lohnt.
 
 ### Schalter
 
@@ -148,7 +154,7 @@ zeitgesteuertes Laden: Es nutzt die zentralen Einstellungen oben.
 Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv aus
 dem Netz auf einen Ziel-SOC – unabhängig von PV-Überschuss, z. B. für
 günstige Nachtstromtarife ("Lade auf 90 %, wenn es zwischen 1 und 5 Uhr
-ist").
+ist und der SOC unter 40 % liegt").
 
 Schreibt über den SunSpec-Modus (Slave-ID 100, "Immediate Controls"):
 Register 40051 (Steuermodus) auf Sollwertvorgabe, danach Register 40049
@@ -164,16 +170,29 @@ abgeleitet), da das Gerät den Sollwert sonst verwirft.
 | Netzladung aktiv | Ein-/Ausschalten des Features |
 | Netzladung Start | Startzeit (HH:MM) |
 | Netzladung Ende | Endzeit (HH:MM) |
+| Netzladung Min. SOC | Unterer SOC-Schwellwert (0–100 %, siehe [Zahlenfelder](#zahlenfelder)), unterhalb dessen die Netzladung startet |
 | Netzladung aktiv im Januar … Dezember | 12 Schalter, legen fest, in welchen Kalendermonaten das Zeitfenster überhaupt wirksam ist (siehe unten) |
 | Zeitgesteuertes Laden aktiv | Diagnose-Sensor, zeigt ob gerade aktiv nachgeladen wird |
 
-Genutzt wird der bereits vorhandene "Max. SOC" als Ziel (siehe
+Genutzt wird der bereits vorhandene "Max. SOC" als oberes Ziel (siehe
 [Zahlenfelder](#zahlenfelder)) sowie "Max. Netzladeleistung" als
-Ladeleistung – es gibt keine eigenen Einstellungen dafür.
+Ladeleistung – dafür gibt es keine eigenen Einstellungen.
 
 Das Zeitfenster darf über Mitternacht laufen (z. B. Start 23:00, Ende
 05:00). Ist Start = Ende (oder eines von beiden nicht gesetzt), gilt das
 Fenster als leer – es wird dann nie geladen.
+
+**Start-Bedingung "Netzladung Min. SOC":** Netzladung startet nur, wenn
+zusätzlich zu Zeitfenster/aktivem Monat/aktiviertem Feature der aktuelle
+SOC unter "Netzladung Min. SOC" liegt. Einmal unterschritten, lädt die
+Netzladung durch bis "Max. SOC" erreicht ist – auch wenn der SOC dabei
+zwischenzeitlich wieder über "Netzladung Min. SOC" steigt (Hysterese: das
+erneute Überschreiten von "Min. SOC" allein beendet die Ladung nicht mehr,
+erst das Erreichen von "Max. SOC" tut das). Ohne vorherige Einstellung
+steht "Netzladung Min. SOC" auf 100 % – die Netzladung verhält sich dann
+wie vor Einführung dieser Einstellung (SOC ist praktisch immer unter
+100 %, der Schwellwert blockiert also zunächst nichts), bis bewusst ein
+niedrigerer Wert gesetzt wird.
 
 **Aktive Monate:** Zusätzlich zum Zeitfenster legen 12 Schalter ("Netzladung
 aktiv im Januar" … "im Dezember") fest, in welchen Kalendermonaten die
@@ -270,21 +289,43 @@ netzdienlichen Ladens darf sich nicht mit dem Zeitfenster der Netzladung
 beide Zeitfenster nur in disjunkten Monaten (wie im Beispiel oben –
 Netzladung nur November/Dezember/Januar, netzdienliches Laden nur
 Mai–August), dürfen sich die Tageszeiten beliebig überlappen, da die
-Fenster nie im selben Monat aktiv sind. Ein Änderungsversuch an Zeit ODER
-Monat, der zu einer echten Überschneidung (gleiche Tageszeit UND
-gemeinsamer Monat) führen würde – egal an welcher der Netzladung- oder
-Netzdienlich-Entitäten vorgenommen –, wird abgelehnt und im Frontend als
-Fehler angezeigt. Da Start und Ende jeweils eigene Entitäten sind, kann das
-kurzzeitige Bearbeiten nur einer der beiden Grenzen eines bereits über
-Mitternacht laufenden Fensters in seltenen Fällen einen ungewöhnlich
-großen Zwischenzustand ergeben und dadurch abgelehnt werden, obwohl das
-beabsichtigte Endergebnis nicht überlappen würde – betroffen sind nur
-Konfigurationen, bei denen zusätzlich auch ein über Mitternacht laufendes
-Fenster verwendet wird. Aus demselben Grund empfiehlt es sich, beim
-nachträglichen Umstellen auf disjunkte Monate mit bereits überlappenden
-Zeitfenstern zunächst die Monate beider Features anzupassen und erst
-danach die Zeiten zu ändern (oder umgekehrt), statt beides gleichzeitig
-schrittweise zu verschieben.
+Fenster nie im selben Monat aktiv sind.
+
+- Ein Änderungsversuch an einer der beiden **Monats-Auswahlen**, der zu
+  einer echten Überschneidung (gleiche Tageszeit UND gemeinsamer Monat)
+  führen würde, wird abgelehnt und im Frontend als Fehler angezeigt – die
+  bisherige Monats-Auswahl bleibt dabei unverändert bestehen.
+- Ein Änderungsversuch an einer der beiden **Start-/Endzeit-Entitäten**
+  ("Netzladung Start"/"Ende" bzw. "Netzdienliches Laden Start"/"Ende"), der
+  zu einer echten Überschneidung führen würde, wird dagegen NICHT
+  abgelehnt: Stattdessen erscheint eine Benachrichtigung (Home Assistant →
+  Einstellungen → Benachrichtigungen bzw. im Benachrichtigungs-Verlauf) mit
+  beiden betroffenen Zeitfenstern (Tageszeit + aktive Monate), und die
+  soeben geänderte Zeit (nur Start ODER nur Ende, je nachdem welche
+  Entität geändert wurde) wird geleert. Eine leere Start- oder Endzeit
+  bewirkt immer, dass das jeweilige Feature nicht ausgeführt wird (siehe
+  oben, "leeres Zeitfenster") – ein geleertes Feld muss also anschließend
+  bewusst neu gesetzt werden, damit das Feature wieder aktiv wird.
+
+  Hintergrund: Start und Ende sind zwei getrennte Entitäten. Ändert man ein
+  Zeitfenster in zwei Schritten (z. B. erst Start, dann Ende), validiert
+  Home Assistant jeden Schritt einzeln gegen den zu diesem Zeitpunkt noch
+  alten Wert der jeweils anderen Grenze – ein rein durch diese Zwischenzeit
+  entstehender, in Wahrheit gar nicht beabsichtigter Zwischenzustand könnte
+  sonst fälschlich als Überschneidung erkannt und die Änderung dauerhaft
+  mit dem alten (möglicherweise ebenfalls nicht mehr gewollten) Wert
+  blockiert werden. Das Leeren statt Zurücksetzen auf den alten Wert
+  vermeidet diese Verwirrung. Um ein komplettes Zeitfenster ohne
+  Zwischenschritt zu verschieben, siehe die Services
+  `sax_power.set_timed_charge_window` / `sax_power.set_grid_serving_window`
+  unten – sie setzen Start und Ende atomar in einem Aufruf und prüfen dabei
+  ausschließlich das tatsächliche Ziel-Fenster.
+
+  Aus einem verwandten Grund empfiehlt es sich, beim nachträglichen
+  Umstellen auf disjunkte Monate bei bereits überlappenden Zeitfenstern
+  zunächst die Monate beider Features anzupassen und erst danach die Zeiten
+  zu ändern (oder umgekehrt), statt beides gleichzeitig schrittweise zu
+  verschieben.
 
 Aktiviert-Zustand, Start-/Endzeit sowie die aktiven Monate bleiben über
 Neustarts hinweg erhalten (analog zum zeitgesteuerten Laden). Es gibt dafür
@@ -309,8 +350,29 @@ deaktiviert.
   | --- | --- |
   | `device_id` | SAX Power Gerät |
 
-Beide Services werden über einen `device_id`-Parameter an das jeweilige SAX
-Power Gerät adressiert (relevant, falls mehrere Speicher eingerichtet sind).
+- **`sax_power.set_timed_charge_window`** – setzt Start- und Endzeit des
+  Netzladung-Zeitfensters atomar in einem Aufruf, statt über die einzelnen
+  Start-/Ende-Entitäten (siehe ["Zeitfenster dürfen sich nicht
+  überschneiden"](#netzdienliches-laden) oben für den Hintergrund).
+
+  | Feld | Beschreibung |
+  | --- | --- |
+  | `device_id` | SAX Power Gerät |
+  | `start` | Startzeit des Zeitfensters |
+  | `end` | Endzeit des Zeitfensters |
+
+- **`sax_power.set_grid_serving_window`** – analog zu
+  `set_timed_charge_window`, für das netzdienliche Laden.
+
+  | Feld | Beschreibung |
+  | --- | --- |
+  | `device_id` | SAX Power Gerät |
+  | `start` | Startzeit des Zeitfensters |
+  | `end` | Endzeit des Zeitfensters |
+
+Alle vier Services werden über einen `device_id`-Parameter an das jeweilige
+SAX Power Gerät adressiert (relevant, falls mehrere Speicher eingerichtet
+sind).
 
 ## IP-Adresse nachträglich ändern
 

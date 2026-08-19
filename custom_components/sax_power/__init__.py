@@ -15,7 +15,9 @@ from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
     ATTR_DEVICE_ID,
+    ATTR_END,
     ATTR_POWER,
+    ATTR_START,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
     CONF_SLAVE_ID_EXTENDED,
@@ -25,6 +27,8 @@ from .const import (
     DOMAIN,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
+    SERVICE_SET_GRID_SERVING_WINDOW,
+    SERVICE_SET_TIMED_CHARGE_WINDOW,
     SERVICE_START_GRID_CHARGE,
     SERVICE_STOP_GRID_CHARGE,
 )
@@ -48,6 +52,13 @@ SERVICE_GRID_CHARGE_SCHEMA = vol.Schema(
     }
 )
 SERVICE_STOP_SCHEMA = vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string})
+SERVICE_SET_WINDOW_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_START): cv.time,
+        vol.Required(ATTR_END): cv.time,
+    }
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -123,6 +134,18 @@ def _async_register_services(hass: HomeAssistant) -> None:
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_stop_grid_charge()
 
+    async def _async_set_timed_charge_window(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.async_set_timed_charge_window(
+            call.data[ATTR_START], call.data[ATTR_END]
+        )
+
+    async def _async_set_grid_serving_window(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.async_set_grid_serving_window(
+            call.data[ATTR_START], call.data[ATTR_END]
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_GRID_CHARGE,
@@ -134,4 +157,16 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_STOP_GRID_CHARGE,
         _async_stop_grid_charge,
         schema=SERVICE_STOP_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_TIMED_CHARGE_WINDOW,
+        _async_set_timed_charge_window,
+        schema=SERVICE_SET_WINDOW_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_GRID_SERVING_WINDOW,
+        _async_set_grid_serving_window,
+        schema=SERVICE_SET_WINDOW_SCHEMA,
     )

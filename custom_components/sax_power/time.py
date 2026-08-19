@@ -2,7 +2,7 @@
 
 Start-/Endzeit des Zeitfensters für das zeitgesteuerte Laden (Software-
 Logik, kein Register). Siehe
-coordinator.SaxPowerCoordinator._async_enforce_timed_charge.
+coordinator.SaxPowerCoordinator._async_enforce_grid_charge.
 """
 
 from __future__ import annotations
@@ -117,10 +117,12 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
     """Beginn des Zeitfensters für das netzdienliche Laden.
 
     Darf sich nicht mit dem Zeitfenster des zeitgesteuerten Ladens
-    überschneiden - ein überlappender Wert wird von
-    SaxPowerCoordinator.async_set_grid_serving_start mit HomeAssistantError
-    abgelehnt (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE), was dem
-    Anwender im Frontend als Fehler angezeigt wird.
+    überschneiden (Tageszeit UND aktive Monate) - ein Wert, der zu einer
+    echten Überschneidung führen würde, wird von
+    SaxPowerCoordinator.async_set_grid_serving_start NICHT abgelehnt,
+    sondern über eine Persistent Notification gemeldet und anschließend
+    geleert (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE,
+    SaxPowerCoordinator._notify_time_window_overlap).
     """
 
     _attr_translation_key = "grid_serving_start"

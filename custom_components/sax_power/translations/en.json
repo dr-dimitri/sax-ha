@@ -228,6 +228,9 @@
       },
       "charge_limit": {
         "name": "Max. grid charge power"
+      },
+      "timed_charge_min_soc": {
+        "name": "Grid charge min. SOC"
       }
     },
     "switch": {
@@ -356,6 +359,42 @@
         "device_id": {
           "name": "Device",
           "description": "The SAX Power device."
+        }
+      }
+    },
+    "set_timed_charge_window": {
+      "name": "Set timed charge window",
+      "description": "Sets the start and end time of the timed grid charge window atomically in a single call, instead of using the individual start/end time entities.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Start of the time window."
+        },
+        "end": {
+          "name": "End",
+          "description": "End of the time window."
+        }
+      }
+    },
+    "set_grid_serving_window": {
+      "name": "Set grid-serving charge window",
+      "description": "Sets the start and end time of the grid-serving charge window atomically in a single call, instead of using the individual start/end time entities.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Start of the time window."
+        },
+        "end": {
+          "name": "End",
+          "description": "End of the time window."
         }
       }
     }

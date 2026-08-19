@@ -9,6 +9,7 @@ from datetime import time as dt_time
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
@@ -186,6 +187,42 @@ def windows_overlap(
     )
 
 
+_MONTH_NAMES_DE = {
+    1: "Januar",
+    2: "Februar",
+    3: "März",
+    4: "April",
+    5: "Mai",
+    6: "Juni",
+    7: "Juli",
+    8: "August",
+    9: "September",
+    10: "Oktober",
+    11: "November",
+    12: "Dezember",
+}
+
+
+def _format_window_for_message(
+    start: dt_time | None, end: dt_time | None, months: set[int]
+) -> str:
+    """Menschenlesbare Beschreibung eines Zeitfensters (Tageszeit + aktive
+    Monate) für die Überschneidungs-Benachrichtigung (siehe
+    SaxPowerCoordinator._notify_time_window_overlap)."""
+    if start is None or end is None:
+        return "kein Zeitfenster gesetzt"
+    time_part = f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}"
+    if months >= ALL_MONTHS:
+        months_part = "ganzjährig"
+    elif not months:
+        months_part = "keine aktiven Monate"
+    else:
+        months_part = "aktiv: " + ", ".join(
+            _MONTH_NAMES_DE[month] for month in sorted(months)
+        )
+    return f"{time_part} ({months_part})"
+
+
 def decode_ascii_registers(registers: list[int]) -> str:
     """Decode SunSpec "str (encoded uint16)" registers into ASCII-Text.
 
@@ -224,6 +261,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
+        self._max_soc_hold_is_window_bound = False
         self._max_charge_power: int | None = None
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
@@ -232,6 +270,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
         self._timed_charge_months: set[int] = set(ALL_MONTHS)
+        self._timed_charge_min_soc: int | None = None
+        self._timed_charge_armed = False
         self._grid_serving_enabled = False
         self._grid_serving_start: dt_time | None = None
         self._grid_serving_end: dt_time | None = None
@@ -590,6 +630,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # darüber hinaus weitergeladen oder unterhalb des Zielwerts
     # leergefahren zu werden. Fällt der SOC wieder unter den Zielwert,
     # wird Register 40051 zurück auf 0 gesetzt.
+    #
+    # Wurde die Sperre dagegen INNERHALB eines Netzlade- oder netzdienlich-
+    # Zeitfensters ausgelöst (_max_soc_hold_is_window_bound), gilt sie nur
+    # bis zum Ende genau dieses Zeitfensters: solange das Fenster noch läuft,
+    # wird Register 40051 periodisch auf 1 nachgeschrieben (sonst fällt das
+    # Gerät nach Ablauf des Timeouts, Register 40050, von selbst auf
+    # Nullregelung zurück); ist das Fenster vorbei, wird Register 40051
+    # aktiv auf 0 zurückgesetzt, statt den Speicher unbegrenzt (bis SOC
+    # unter den Zielwert fällt, was bei gehaltenem 0-%-Sollwert nie von
+    # selbst passiert) im Sollwertmodus zu halten - siehe
+    # _async_enforce_grid_charge.
 
     @property
     def max_soc(self) -> int | None:
@@ -823,6 +874,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return frozenset(self._timed_charge_months)
 
     @property
+    def timed_charge_min_soc(self) -> int | None:
+        return self._timed_charge_min_soc
+
+    @property
     def max_charge_power(self) -> int | None:
         return self._max_charge_power
 
@@ -830,28 +885,100 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_enabled = enabled
         await self._async_apply_grid_charge_change()
 
+    async def async_set_timed_charge_min_soc(self, value: int | None) -> None:
+        """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
+        unterhalb dessen die Netzladung starten darf - siehe
+        _async_enforce_grid_charge/_timed_charge_armed für die
+        Hysterese-Logik (einmal unterschritten, wird bis zum "Max. SOC"
+        durchgeladen, statt bei jedem Überschreiten von Min. SOC sofort
+        wieder abzubrechen)."""
+        self._timed_charge_min_soc = value
+        await self._async_apply_grid_charge_change()
+
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             value,
             self._timed_charge_end,
             self._timed_charge_months,
             self._grid_serving_start,
             self._grid_serving_end,
             self._grid_serving_months,
-        )
-        self._timed_charge_start = value
+        ):
+            self._notify_time_window_overlap(
+                "Netzladung",
+                value,
+                self._timed_charge_end,
+                self._timed_charge_months,
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                self._grid_serving_end,
+                self._grid_serving_months,
+            )
+            self._timed_charge_start = None
+        else:
+            self._timed_charge_start = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             self._timed_charge_start,
             value,
             self._timed_charge_months,
             self._grid_serving_start,
             self._grid_serving_end,
             self._grid_serving_months,
-        )
-        self._timed_charge_end = value
+        ):
+            self._notify_time_window_overlap(
+                "Netzladung",
+                self._timed_charge_start,
+                value,
+                self._timed_charge_months,
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                self._grid_serving_end,
+                self._grid_serving_months,
+            )
+            self._timed_charge_end = None
+        else:
+            self._timed_charge_end = value
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_timed_charge_window(
+        self, start: dt_time, end: dt_time
+    ) -> None:
+        """Setzt Start und Ende der Netzladung atomar in einem Aufruf.
+
+        Anders als async_set_timed_charge_start/-end (die je nur eine der
+        beiden Zeit-Entities bedienen und dabei zwangsläufig gegen den noch
+        alten Wert der jeweils anderen Grenze validieren) prüft dies direkt
+        das tatsächliche Ziel-Fenster (start, end) - ein durch die
+        Zwei-Schritt-Bearbeitung nur kurzzeitig entstehendes, in Wahrheit gar
+        nicht beabsichtigtes Zwischenfenster kann die Prüfung dadurch nicht
+        mehr fälschlich als Überschneidung erkennen (siehe anforderung.yaml,
+        REQ-GRID-SERVING-CHARGE)."""
+        if self._windows_overlap_with_months(
+            start,
+            end,
+            self._timed_charge_months,
+            self._grid_serving_start,
+            self._grid_serving_end,
+            self._grid_serving_months,
+        ):
+            self._notify_time_window_overlap(
+                "Netzladung",
+                start,
+                end,
+                self._timed_charge_months,
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                self._grid_serving_end,
+                self._grid_serving_months,
+            )
+            self._timed_charge_start = None
+            self._timed_charge_end = None
+        else:
+            self._timed_charge_start = start
+            self._timed_charge_end = end
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_month(
@@ -914,6 +1041,28 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start <= now < end
         return now >= start or now < end
 
+    @staticmethod
+    def _windows_overlap_with_months(
+        start_a: dt_time | None,
+        end_a: dt_time | None,
+        months_a: set[int],
+        start_b: dt_time | None,
+        end_b: dt_time | None,
+        months_b: set[int],
+    ) -> bool:
+        """True, wenn sich zwei Zeitfenster (Netzladung/netzdienliches Laden)
+        sowohl in ihrer Tageszeit (windows_overlap) ALS AUCH in ihren aktiven
+        Monaten (months_a/months_b, je ein Set aus 1-12, siehe
+        switch.SaxPowerMonthSwitch) überschneiden - siehe anforderung.yaml,
+        REQ-GRID-SERVING-CHARGE. Laufen beide Fenster nur in disjunkten
+        Monaten (z. B. Netzladung nur November-Januar, netzdienliches Laden
+        nur Mai-August), gelten sie NICHT als überlappend, egal wie sehr
+        sich die Tageszeiten überschneiden, da die Fenster nie gleichzeitig
+        aktiv sein können."""
+        return bool(
+            windows_overlap(start_a, end_a, start_b, end_b) and (months_a & months_b)
+        )
+
     def _assert_windows_dont_overlap(
         self,
         start_a: dt_time | None,
@@ -923,29 +1072,73 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         end_b: dt_time | None,
         months_b: set[int],
     ) -> None:
-        """Bricht mit HomeAssistantError ab, statt ein Zeitfenster (Netzladung
-        oder netzdienliches Laden) zu übernehmen, das sich mit dem jeweils
-        anderen Fenster überschneiden würde - siehe anforderung.yaml,
-        REQ-GRID-SERVING-CHARGE. Zwei Fenster gelten nur dann als
-        überlappend, wenn sich sowohl ihre Tageszeiten (windows_overlap) ALS
-        AUCH ihre aktiven Monate (months_a/months_b, je ein Set aus 1-12,
-        siehe switch.SaxPowerMonthSwitch) überschneiden - laufen beide
-        Fenster nur in disjunkten Monaten (z. B. Netzladung nur
-        November-Januar, netzdienliches Laden nur Mai-August), dürfen sich
-        die Tageszeiten beliebig überlappen, da die Fenster nie gleichzeitig
-        aktiv sein können. Der Fehler wird von den Time-/Monats-Entity-
-        Settern (async_set_timed_charge_start/-end/-month,
-        async_set_grid_serving_start/-end/-month) an den aufrufenden
-        Service-Call durchgereicht und dadurch dem Anwender im Frontend als
-        Fehler angezeigt - unabhängig davon, welches der beiden Fenster
-        gerade geändert wird."""
-        if windows_overlap(start_a, end_a, start_b, end_b) and (months_a & months_b):
+        """Bricht mit HomeAssistantError ab, statt eine Monats-Auswahl
+        (Netzladung oder netzdienliches Laden) zu übernehmen, die dazu
+        führen würde, dass sich ihr Zeitfenster (siehe
+        _windows_overlap_with_months) mit dem des jeweils anderen Lademodus
+        überschneidet - siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE. Der
+        Fehler wird von den Monats-Settern (async_set_timed_charge_month,
+        async_set_grid_serving_month) an den aufrufenden Service-Call
+        durchgereicht und dadurch dem Anwender im Frontend als Fehler
+        angezeigt - unabhängig davon, welche der beiden Monats-Auswahlen
+        gerade geändert wird. Die Zeit-Setter (async_set_timed_charge_
+        start/-end/-window, async_set_grid_serving_start/-end/-window)
+        nutzen _windows_overlap_with_months direkt und lehnen eine
+        Überschneidung NICHT mehr mit einem Fehler ab, sondern zeigen eine
+        Benachrichtigung und leeren die soeben geänderte Zeit (siehe
+        _notify_time_window_overlap) - eine Zeit-Entity lässt sich anders
+        als ein Monats-Schalter beim Ablehnen nicht sinnvoll auf einen
+        vorherigen Wert zurücksetzen, ohne den Anwender zu verwirren, welcher
+        von zwei möglicherweise gerade beide bearbeiteten Werten nun gilt."""
+        if self._windows_overlap_with_months(
+            start_a, end_a, months_a, start_b, end_b, months_b
+        ):
             raise HomeAssistantError(
                 "Das Zeitfenster überschneidet sich (Tageszeit UND aktive "
                 "Monate) mit dem Zeitfenster des jeweils anderen Lademodus "
-                "(Netzladung/netzdienliches Laden). Bitte ein nicht "
-                "überlappendes Zeitfenster oder andere aktive Monate wählen."
+                "(Netzladung/netzdienliches Laden). Bitte andere aktive "
+                "Monate wählen."
             )
+
+    def _notify_time_window_overlap(
+        self,
+        feature_label: str,
+        start: dt_time | None,
+        end: dt_time | None,
+        months: set[int],
+        other_label: str,
+        other_start: dt_time | None,
+        other_end: dt_time | None,
+        other_months: set[int],
+    ) -> None:
+        """Zeigt dem Anwender eine Persistent Notification mit beiden
+        Zeitfenstern (Tageszeit + aktive Monate) an, statt die Änderung wie
+        früher mit HomeAssistantError abzulehnen - siehe anforderung.yaml,
+        REQ-GRID-SERVING-CHARGE. Wird ausschließlich von den Zeit-Settern
+        (async_set_timed_charge_start/-end/-window,
+        async_set_grid_serving_start/-end/-window) aufgerufen, unmittelbar
+        bevor diese die soeben geänderte(n) Zeit(en) auf None (leer) setzen
+        - eine leere Start- oder Endzeit bewirkt immer, dass das jeweilige
+        Feature nicht ausgeführt wird (siehe _is_time_in_window/
+        windows_overlap, die ein unvollständiges Fenster als nie aktiv bzw.
+        nie überlappend behandeln)."""
+        message = (
+            f"Das soeben geänderte Zeitfenster für {feature_label} "
+            f"({_format_window_for_message(start, end, months)}) überschneidet "
+            f"sich mit dem Zeitfenster für {other_label} "
+            f"({_format_window_for_message(other_start, other_end, other_months)}). "
+            "Die soeben geänderte Zeit wurde geleert, damit das Feature nicht "
+            "mit einer widersprüchlichen Konfiguration weiterläuft - bitte "
+            "ein nicht überlappendes Zeitfenster oder andere aktive Monate "
+            "wählen."
+        )
+        _LOGGER.warning(message)
+        persistent_notification.async_create(
+            self.hass,
+            message,
+            title="SAX Power: Zeitfenster überschneidet sich",
+            notification_id=f"{DOMAIN}_{self.entry_id}_window_overlap",
+        )
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
         """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden und
@@ -957,15 +1150,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            Vorrang: Register 40051 bleibt/wird auf Sollwertvorgabe gesetzt
            und Register 40049 auf 0 % gehalten (siehe Max-SOC-Abschnitt
            oben) - unabhängig davon, ob zeitgesteuertes oder netzdienliches
-           Laden aktiviert ist.
+           Laden aktiviert ist. Wurde die Sperre INNERHALB eines der beiden
+           Zeitfenster ausgelöst, gilt sie nur bis zu dessen Ende - danach
+           wird Register 40051 aktiv auf 0 (Nullregelung) zurückgesetzt.
+           Außerhalb jedes Zeitfensters (z. B. bei einem rein durch
+           PV-Überschuss via Nullregelung vollen Speicher) gilt die Sperre
+           dagegen unbegrenzt (siehe _max_soc_hold_is_window_bound).
         2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
            Laden (falls aktiviert, im Zeitfenster, im aktiven Monat - siehe
            "Aktive Monate"-Schalter unten -, mit gesetzter "Max.
-           Netzladeleistung" UND ohne PV-Überschuss über
-           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die Schleife mit einem
-           echten Ladesollwert übernehmen. Ein PV-Überschuss beendet die
-           Netzladung dabei auch mitten im Zeitfenster, sobald er beim
-           nächsten Poll-Zyklus erkannt wird - nicht erst am Fensterende.
+           Netzladeleistung", mit gesetztem "Min. SOC" (siehe unten) UND
+           ohne PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die
+           Schleife mit einem echten Ladesollwert übernehmen. Ein
+           PV-Überschuss beendet die Netzladung dabei auch mitten im
+           Zeitfenster, sobald er beim nächsten Poll-Zyklus erkannt wird -
+           nicht erst am Fensterende.
+
+           "Min. SOC" (self._timed_charge_min_soc, NumberEntity analog zu
+           "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
+           Schwellwert unterschritten hat - _timed_charge_armed hält diesen
+           "unterschritten"-Zustand als Hysterese fest, damit einmal
+           gestartetes Laden bis zum Erreichen von "Max. SOC" durchläuft,
+           statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
+           wieder abzubrechen (siehe unten, vor der Berechnung von
+           timed_should_charge).
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat, mit gesetzter "Max. Netzladeleistung" UND
            mit PV-Überschuss über
@@ -982,9 +1190,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            mehr geladen als gerade an Überschuss verfügbar ist. Die
            Zeitfenster von zeitgesteuertem und netzdienlichem Laden dürfen
            sich zusätzlich nicht überschneiden (siehe
-           _assert_windows_dont_overlap) - das ist eine reine
-           Konfigurationsregel für den Anwender, keine Voraussetzung für
-           sicheren Betrieb.
+           _windows_overlap_with_months/_notify_time_window_overlap) - das
+           ist eine reine Konfigurationsregel für den Anwender, keine
+           Voraussetzung für sicheren Betrieb.
         4. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
            Nullregelung) gesetzt.
 
@@ -1011,7 +1219,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
-        soc_reached = data["soc"] >= target_soc
+        current_soc = data["soc"]
+        soc_reached = current_soc >= target_soc
+        if soc_reached:
+            self._timed_charge_armed = False
+        elif (
+            self._timed_charge_min_soc is not None
+            and current_soc < self._timed_charge_min_soc
+        ):
+            self._timed_charge_armed = True
         smartmeter_power = data.get("smartmeter_power")
         pv_surplus_active = (
             smartmeter_power is not None
@@ -1028,6 +1244,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 now_time, self._timed_charge_start, self._timed_charge_end
             )
             and self._max_charge_power is not None
+            and self._timed_charge_min_soc is not None
+            and self._timed_charge_armed
         )
         grid_serving_should_charge = (
             not soc_reached
@@ -1040,21 +1258,65 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._max_charge_power is not None
         )
 
+        max_soc_clamped_now = False
         if soc_reached:
-            await self.async_start_sun_charge(0)
-        elif timed_should_charge:
-            await self.async_start_sun_charge(-self._max_charge_power)
-        elif grid_serving_should_charge:
-            # smartmeter_power ist hier != None (sonst wäre pv_surplus_active
-            # False) und > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT > 0.
-            charge_power = min(self._max_charge_power, round(smartmeter_power))
-            await self.async_start_sun_charge(-charge_power)
-        elif self.sun_charge_active:
-            await self.async_stop_sun_charge()
+            in_timed_window = (
+                self._timed_charge_enabled
+                and now.month in self._timed_charge_months
+                and self._is_time_in_window(
+                    now_time, self._timed_charge_start, self._timed_charge_end
+                )
+            )
+            in_grid_serving_window = (
+                self._grid_serving_enabled
+                and now.month in self._grid_serving_months
+                and self._is_time_in_window(
+                    now_time, self._grid_serving_start, self._grid_serving_end
+                )
+            )
+            if in_timed_window or in_grid_serving_window:
+                # Ziel-SOC wurde innerhalb eines Netzlade-/netzdienlich-
+                # Zeitfensters erreicht (oder die Sperre läuft von einem
+                # solchen Fenster weiter) - Sperre bleibt gebunden an dieses
+                # Fenster, damit sie spätestens an dessen Ende aktiv
+                # aufgehoben wird, statt wie die geräteunabhängige
+                # Max-SOC-Sperre unten unbegrenzt zu halten.
+                self._max_soc_hold_is_window_bound = True
+                await self.async_start_sun_charge(0)
+                max_soc_clamped_now = True
+            elif self._max_soc_hold_is_window_bound:
+                # Das Zeitfenster, während dessen die Sperre ausgelöst wurde,
+                # ist vorbei - Register 40051 aktiv zurück auf 0 (SmartMeter-
+                # Nullregelung) setzen, statt passiv auf den Timeout
+                # (Register 40050) zu warten, damit der Speicher wieder im
+                # normalen Betriebsmodus arbeitet.
+                if self.sun_charge_active:
+                    await self.async_stop_sun_charge()
+                self._max_soc_hold_is_window_bound = False
+            else:
+                # Geräteunabhängige Max-SOC-Sperre (siehe Abschnitt oben):
+                # SOC wurde außerhalb jedes Netzlade-/netzdienlich-
+                # Zeitfensters erreicht/überschritten (z. B. durch die
+                # geräteeigene Nullregelung bei PV-Überschuss) - Sperre gilt
+                # unbegrenzt, unabhängig von einem Zeitfenster.
+                await self.async_start_sun_charge(0)
+                max_soc_clamped_now = True
+        else:
+            self._max_soc_hold_is_window_bound = False
+            if timed_should_charge:
+                await self.async_start_sun_charge(-self._max_charge_power)
+            elif grid_serving_should_charge:
+                # smartmeter_power ist hier != None (sonst wäre
+                # pv_surplus_active False) und >
+                # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT > 0.
+                charge_power = min(self._max_charge_power, round(smartmeter_power))
+                await self.async_start_sun_charge(-charge_power)
+            elif self.sun_charge_active:
+                await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
         self._grid_serving_active = grid_serving_should_charge
-        self._max_soc_clamped = soc_reached
+        self._max_soc_clamped = max_soc_clamped_now
 
     # -- Netzdienliches Laden --------------------------------------------------
     # Eigenständiges, zum zeitgesteuerten Laden oben zeitlich exklusives
@@ -1091,27 +1353,83 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_start(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             value,
             self._grid_serving_end,
             self._grid_serving_months,
             self._timed_charge_start,
             self._timed_charge_end,
             self._timed_charge_months,
-        )
-        self._grid_serving_start = value
+        ):
+            self._notify_time_window_overlap(
+                "netzdienliches Laden",
+                value,
+                self._grid_serving_end,
+                self._grid_serving_months,
+                "Netzladung",
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_charge_months,
+            )
+            self._grid_serving_start = None
+        else:
+            self._grid_serving_start = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_end(self, value: dt_time) -> None:
-        self._assert_windows_dont_overlap(
+        if self._windows_overlap_with_months(
             self._grid_serving_start,
             value,
             self._grid_serving_months,
             self._timed_charge_start,
             self._timed_charge_end,
             self._timed_charge_months,
-        )
-        self._grid_serving_end = value
+        ):
+            self._notify_time_window_overlap(
+                "netzdienliches Laden",
+                self._grid_serving_start,
+                value,
+                self._grid_serving_months,
+                "Netzladung",
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_charge_months,
+            )
+            self._grid_serving_end = None
+        else:
+            self._grid_serving_end = value
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_grid_serving_window(
+        self, start: dt_time, end: dt_time
+    ) -> None:
+        """Analog zu async_set_timed_charge_window, für das netzdienliche
+        Laden - siehe dort für den Hintergrund (Vermeidung falscher
+        Erkennung einer Überschneidung durch Zwischenzustände beim
+        getrennten Setzen von Start- und Ende-Entity)."""
+        if self._windows_overlap_with_months(
+            start,
+            end,
+            self._grid_serving_months,
+            self._timed_charge_start,
+            self._timed_charge_end,
+            self._timed_charge_months,
+        ):
+            self._notify_time_window_overlap(
+                "netzdienliches Laden",
+                start,
+                end,
+                self._grid_serving_months,
+                "Netzladung",
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_charge_months,
+            )
+            self._grid_serving_start = None
+            self._grid_serving_end = None
+        else:
+            self._grid_serving_start = start
+            self._grid_serving_end = end
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_month(

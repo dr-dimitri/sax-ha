@@ -228,6 +228,9 @@
       },
       "charge_limit": {
         "name": "Max. grid charge power"
+      },
+      "timed_charge_min_soc": {
+        "name": "Grid charge min. SOC"
       }
     },
     "switch": {

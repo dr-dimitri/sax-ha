@@ -296,11 +296,39 @@ requirement_timed_soc_charge:
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
-       Ende", HH:MM, darf über Mitternacht laufen), "Max.
-       Netzladeleistung" (number.py) gesetzt UND kein PV-Überschuss über
+       Ende", HH:MM, darf über Mitternacht laufen), im aktiven Monat, "Max.
+       Netzladeleistung" (number.py) gesetzt, "Netzladung Min. SOC"
+       (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
+       zuvor unterschritten und noch nicht bis "Max. SOC" durchgeladen -
+       siehe Hysterese unten) UND kein PV-Überschuss über
        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py, 200 W) am Smart Meter
        gemessen, wird Register 40049 auf einen negativen, aus "Max.
        Netzladeleistung" umgerechneten Sollwert gesetzt.
+
+       "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
+       SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
+       unterhalb dessen die Netzladung starten darf - im Unterschied zu
+       "Max. SOC" (oberes, geräteunabhängiges Ziel, s. o., von Netzladung
+       UND netzdienlichem Laden gemeinsam genutzt) eine reine
+       Netzladung-Einstellung, da nur Netzladung aktiv aus dem Netz lädt und
+       daher einen Schwellwert braucht, ab dem sich das lohnt.
+       SaxPowerCoordinator._timed_charge_armed hält als Hysterese fest, ob
+       der Schwellwert bereits unterschritten wurde: sobald current_soc <
+       "Netzladung Min. SOC", wird _timed_charge_armed auf True gesetzt und
+       bleibt es (auch wenn der SOC danach wieder über "Netzladung Min.
+       SOC" steigt), bis der SOC "Max. SOC" erreicht/überschreitet (dann
+       zurück auf False) - Netzladung lädt also einmal gestartet bis "Max.
+       SOC" durch, statt bei jedem erneuten Überschreiten von "Netzladung
+       Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
+       B. direkt nach der Ersteinrichtung) steht der Wert auf MAX_SOC
+       (100 %, SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt
+       auf 0 oder "unbekannt" - andernfalls würde diese neu eingeführte
+       Einstellung bestehende Konfigurationen brechen (SOC wäre praktisch
+       nie < 0 %, Netzladung würde nie mehr armen); mit dem 100-%-Default
+       verhält sich Netzladung dagegen wie vor Einführung dieser Einstellung
+       (SOC ist praktisch immer < 100 %, der Schwellwert blockiert also
+       zunächst nichts), bis der Anwender bewusst einen niedrigeren Wert
+       setzt.
     3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
        auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
        geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
@@ -349,18 +377,22 @@ requirement_timed_soc_charge:
     nicht mehr gelesen, Register 44 nur noch einmalig als Vorgabewert (s.
     u.).
 
-    "Max. SOC" und "Max. Netzladeleistung" sind reine Software-Zustände
-    (RestoreEntity, number.py) - keine eigenen Ziel-SOC-/
-    Leistungseinstellungen für die beiden Features. Eine Änderung wirkt
-    sofort (async_set_max_soc/async_set_max_charge_power werten
-    _async_enforce_grid_charge unmittelbar neu aus statt erst beim
-    nächsten Poll-Zyklus). Persistieren über Neustarts hinweg; gibt es
-    (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
-    Zustand, setzen sie sich explizit auf einen Vorgabewert statt
-    "unbekannt"/0 zu bleiben: "Max. SOC" auf MAX_SOC (100 %,
-    SaxPowerMaxSocNumber.async_added_to_hass), "Max. Netzladeleistung" auf
-    den zu diesem Zeitpunkt vom Gerät gelesenen Wert von Basic-Mode-Register
-    44 (SaxPowerChargeLimitNumber.async_added_to_hass) - danach rein
+    "Max. SOC", "Max. Netzladeleistung" und "Netzladung Min. SOC" sind reine
+    Software-Zustände (RestoreEntity, number.py) - "Max. SOC"/"Max.
+    Netzladeleistung" sind dabei zentrale, von Netzladung UND
+    netzdienlichem Laden gemeinsam genutzte Einstellungen, "Netzladung Min.
+    SOC" ist eine reine Netzladung-Einstellung (siehe oben). Eine Änderung
+    wirkt jeweils sofort (async_set_max_soc/async_set_max_charge_power/
+    async_set_timed_charge_min_soc werten _async_enforce_grid_charge
+    unmittelbar neu aus statt erst beim nächsten Poll-Zyklus). Alle drei
+    persistieren über Neustarts hinweg; gibt es (z. B. direkt nach der
+    Ersteinrichtung) noch keinen gespeicherten Zustand, setzen sie sich
+    explizit auf einen Vorgabewert statt "unbekannt"/0 zu bleiben: "Max.
+    SOC" UND "Netzladung Min. SOC" auf MAX_SOC (100 %,
+    SaxPowerMaxSocNumber/SaxPowerTimedChargeMinSocNumber.
+    async_added_to_hass), "Max. Netzladeleistung" auf den zu diesem
+    Zeitpunkt vom Gerät gelesenen Wert von Basic-Mode-Register 44
+    (SaxPowerChargeLimitNumber.async_added_to_hass) - danach rein
     Software-seitig, kein weiterer Register-Write.
 
     Aktiviert-Zustand sowie Start-/Endzeit des zeitgesteuerten Ladens

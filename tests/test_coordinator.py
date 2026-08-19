@@ -13,6 +13,7 @@ from homeassistant.components import persistent_notification
 from custom_components.sax_power.const import (
     ALL_MONTHS,
     GRID_CHARGE_WRITE_INTERVAL,
+    MAX_SOC,
     READ_BLOCK_COUNT,
     READ_BLOCK_START,
     REG_SOC,
@@ -69,7 +70,7 @@ def _make_client() -> MagicMock:
 
 
 def _make_coordinator(hass, client: MagicMock) -> SaxPowerCoordinator:
-    return SaxPowerCoordinator(
+    coordinator = SaxPowerCoordinator(
         hass,
         client,
         slave_id=64,
@@ -77,6 +78,13 @@ def _make_coordinator(hass, client: MagicMock) -> SaxPowerCoordinator:
         scan_interval=10,
         entry_id="test_entry_id",
     )
+    # Entspricht dem Vorgabewert, den SaxPowerTimedChargeMinSocNumber beim
+    # allerersten Start setzt (siehe number.py) - ohne diesen Default würde
+    # jeder Test, der zeitgesteuertes Laden auslösen will, zusätzlich
+    # async_set_timed_charge_min_soc aufrufen müssen, obwohl ein echter
+    # Coordinator diesen Wert längst über die Number-Entity gesetzt hätte.
+    coordinator._timed_charge_min_soc = MAX_SOC
+    return coordinator
 
 
 async def test_async_write_register_raises_on_modbus_error(hass) -> None:
@@ -409,6 +417,123 @@ async def test_enforce_grid_charge_inactive_without_max_charge_power(hass) -> No
         await coordinator._async_enforce_grid_charge({"soc": 10})
 
     assert coordinator._timed_charge_active is False
+
+
+async def test_enforce_grid_charge_inactive_without_min_soc(hass) -> None:
+    """Ohne gesetztes "Netzladung Min. SOC" darf zeitgesteuertes Laden nicht
+    starten - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._timed_charge_min_soc = None  # explizit ungesetzt
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    with _patched_now(2):
+        await coordinator._async_enforce_grid_charge({"soc": 10})
+
+    assert coordinator._timed_charge_active is False
+
+
+async def test_enforce_grid_charge_inactive_when_soc_at_or_above_min_soc(hass) -> None:
+    """Solange der SOC "Netzladung Min. SOC" nicht unterschritten hat, darf
+    zeitgesteuertes Laden nicht starten, auch wenn alle anderen Bedingungen
+    erfüllt sind."""
+    coordinator = _make_coordinator(hass, _make_client())
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_min_soc(40)
+    await coordinator.async_set_timed_charge_enabled(True)
+
+    with _patched_now(2):
+        await coordinator._async_enforce_grid_charge({"soc": 40})  # == min_soc
+
+    assert coordinator._timed_charge_active is False
+
+
+async def test_enforce_grid_charge_starts_when_soc_below_min_soc(hass) -> None:
+    """Unterschreitet der SOC "Netzladung Min. SOC", startet zeitgesteuertes
+    Laden (bei erfüllten übrigen Bedingungen)."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 39,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_min_soc(40)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+        await asyncio.sleep(0.1)
+
+        assert coordinator._timed_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_timed_charge_min_soc_hysteresis_continues_until_max_soc(hass) -> None:
+    """Regressionstest für die geforderte Hysterese: Einmal unterhalb
+    "Netzladung Min. SOC" gestartet, lädt die Netzladung bis "Max. SOC"
+    durch - auch wenn der SOC dabei zwischenzeitlich wieder über "Netzladung
+    Min. SOC" (aber unterhalb "Max. SOC") steigt -, statt bei jedem erneuten
+    Überschreiten von "Netzladung Min. SOC" sofort abzubrechen."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 39,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+    await coordinator.async_set_timed_charge_min_soc(40)
+
+    try:
+        with _patched_now(2):
+            # SOC unterschreitet 40 % -> startet und armt die Hysterese.
+            await coordinator.async_set_timed_charge_enabled(True)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is True
+
+            # SOC steigt wieder über 40 %, ist aber noch unter "Max. SOC"
+            # (90 %) -> lädt dank Hysterese unverändert weiter.
+            coordinator.data["soc"] = 60
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is True
+
+            # SOC erreicht "Max. SOC" -> Ladung endet, Hysterese wird
+            # zurückgesetzt.
+            coordinator.data["soc"] = 90
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is False
+
+            # SOC fällt wieder unter "Max. SOC", bleibt aber über
+            # "Netzladung Min. SOC" -> kein Neustart, bis der SOC erneut
+            # unter 40 % fällt.
+            coordinator.data["soc"] = 60
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is False
+    finally:
+        await coordinator.async_stop_sun_charge()
     assert coordinator.sun_charge_active is False
 
 

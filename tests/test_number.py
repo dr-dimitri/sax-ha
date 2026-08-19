@@ -14,8 +14,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import State
 
+from custom_components.sax_power.const import MAX_SOC
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
-from custom_components.sax_power.number import SaxPowerChargeLimitNumber
+from custom_components.sax_power.number import (
+    SaxPowerChargeLimitNumber,
+    SaxPowerTimedChargeMinSocNumber,
+)
 
 
 @pytest.fixture
@@ -100,3 +104,35 @@ async def test_charge_limit_restores_a_genuine_nonzero_value(hass, coordinator) 
     await entity.async_added_to_hass()
 
     assert coordinator.max_charge_power == 1500
+
+
+async def test_timed_charge_min_soc_seeds_to_max_soc_on_fresh_install(
+    hass, coordinator
+) -> None:
+    """Allererster Start (kein RestoreEntity-Zustand): "Netzladung Min. SOC"
+    muss mit MAX_SOC (100 %) vorbelegt werden statt bei "unbekannt"/0 zu
+    bleiben - andernfalls würde diese neu eingeführte Einstellung
+    bestehende Netzladung-Konfigurationen ohne bewusstes Zutun des Anwenders
+    blockieren (SOC wäre praktisch nie < 0 %)."""
+    entity = SaxPowerTimedChargeMinSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_timed_charge_min_soc", None)
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.timed_charge_min_soc == MAX_SOC
+
+
+async def test_timed_charge_min_soc_restores_a_genuine_value(hass, coordinator) -> None:
+    """Ein echter, zuvor vom Nutzer gesetzter Wert hat Vorrang vor dem
+    100-%-Vorgabewert."""
+    entity = SaxPowerTimedChargeMinSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_timed_charge_min_soc",
+        State("number.test_timed_charge_min_soc", "40"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.timed_charge_min_soc == 40

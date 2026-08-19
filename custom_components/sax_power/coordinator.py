@@ -269,6 +269,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
         self._timed_charge_months: set[int] = set(ALL_MONTHS)
+        self._timed_charge_min_soc: int | None = None
+        self._timed_charge_armed = False
         self._grid_serving_enabled = False
         self._grid_serving_start: dt_time | None = None
         self._grid_serving_end: dt_time | None = None
@@ -860,11 +862,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return frozenset(self._timed_charge_months)
 
     @property
+    def timed_charge_min_soc(self) -> int | None:
+        return self._timed_charge_min_soc
+
+    @property
     def max_charge_power(self) -> int | None:
         return self._max_charge_power
 
     async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
         self._timed_charge_enabled = enabled
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_timed_charge_min_soc(self, value: int | None) -> None:
+        """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
+        unterhalb dessen die Netzladung starten darf - siehe
+        _async_enforce_grid_charge/_timed_charge_armed für die
+        Hysterese-Logik (einmal unterschritten, wird bis zum "Max. SOC"
+        durchgeladen, statt bei jedem Überschreiten von Min. SOC sofort
+        wieder abzubrechen)."""
+        self._timed_charge_min_soc = value
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
@@ -1126,11 +1142,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
            Laden (falls aktiviert, im Zeitfenster, im aktiven Monat - siehe
            "Aktive Monate"-Schalter unten -, mit gesetzter "Max.
-           Netzladeleistung" UND ohne PV-Überschuss über
-           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die Schleife mit einem
-           echten Ladesollwert übernehmen. Ein PV-Überschuss beendet die
-           Netzladung dabei auch mitten im Zeitfenster, sobald er beim
-           nächsten Poll-Zyklus erkannt wird - nicht erst am Fensterende.
+           Netzladeleistung", mit gesetztem "Min. SOC" (siehe unten) UND
+           ohne PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die
+           Schleife mit einem echten Ladesollwert übernehmen. Ein
+           PV-Überschuss beendet die Netzladung dabei auch mitten im
+           Zeitfenster, sobald er beim nächsten Poll-Zyklus erkannt wird -
+           nicht erst am Fensterende.
+
+           "Min. SOC" (self._timed_charge_min_soc, NumberEntity analog zu
+           "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
+           Schwellwert unterschritten hat - _timed_charge_armed hält diesen
+           "unterschritten"-Zustand als Hysterese fest, damit einmal
+           gestartetes Laden bis zum Erreichen von "Max. SOC" durchläuft,
+           statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
+           wieder abzubrechen (siehe unten, vor der Berechnung von
+           timed_should_charge).
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat, mit gesetzter "Max. Netzladeleistung" UND
            mit PV-Überschuss über
@@ -1176,7 +1202,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
-        soc_reached = data["soc"] >= target_soc
+        current_soc = data["soc"]
+        soc_reached = current_soc >= target_soc
+        if soc_reached:
+            self._timed_charge_armed = False
+        elif (
+            self._timed_charge_min_soc is not None
+            and current_soc < self._timed_charge_min_soc
+        ):
+            self._timed_charge_armed = True
         smartmeter_power = data.get("smartmeter_power")
         pv_surplus_active = (
             smartmeter_power is not None
@@ -1193,6 +1227,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 now_time, self._timed_charge_start, self._timed_charge_end
             )
             and self._max_charge_power is not None
+            and self._timed_charge_min_soc is not None
+            and self._timed_charge_armed
         )
         grid_serving_should_charge = (
             not soc_reached

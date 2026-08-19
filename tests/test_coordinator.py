@@ -1198,13 +1198,15 @@ async def test_set_timed_charge_window_succeeds_for_non_overlapping_target(
 # -- Netzdienliches Laden: Ladeverhalten -------------------------------------
 
 
-async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window(
+async def test_enforce_grid_charge_blocks_grid_serving_with_pv_surplus_in_window(
     hass,
 ) -> None:
-    """Netzdienliches Laden startet nur MIT PV-Überschuss (nie aus dem
-    Netz) - die genau umgekehrte Bedingung zum zeitgesteuerten Laden. Der
-    Sollwert wird dabei auf den tatsächlich verfügbaren Überschuss gedeckelt,
-    nicht auf "Max. Netzladeleistung", falls dieser kleiner ist."""
+    """Netzdienliches Laden LÄDT nicht, sondern blockiert das Laden aktiv
+    (Sollwert 0 %), sobald innerhalb seines Zeitfensters PV-Überschuss über
+    dem Schwellwert gemessen wird - die genau umgekehrte Bedingung zum
+    zeitgesteuerten Laden. Zweck: das Laden des Speichers in die Zeit mit dem
+    höchsten PV-Ertrag verschieben, statt es bereits hier stattfinden zu
+    lassen."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1220,7 +1222,6 @@ async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)  # deutlich über dem Überschuss
 
     try:
         with _patched_now(12):
@@ -1235,21 +1236,22 @@ async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window
             value=SUN_IC_CONTROL_MODE_SETPOINT,
             device_id=100,
         )
-        # -500 W (gedeckelt auf den Überschuss, nicht auf "Max.
-        # Netzladeleistung") / 4600 W Referenz * 100 = -10.869...%, skaliert
-        # mit sunssf -2 -> -1087.
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=to_unsigned16(-1087),
+            value=0,
             device_id=100,
         )
     finally:
         await coordinator.async_stop_sun_charge()
 
 
-async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -> None:
-    """Übersteigt der PV-Überschuss "Max. Netzladeleistung", wird trotzdem nur
-    mit "Max. Netzladeleistung" geladen."""
+async def test_enforce_grid_charge_grid_serving_blocks_without_max_charge_power_set(
+    hass,
+) -> None:
+    """Die Blockade schreibt immer nur den Sollwert 0 % - anders als beim
+    zeitgesteuerten Laden wird dafür kein Sollwert aus "Max. Netzladeleistung"
+    berechnet, das Feature funktioniert daher auch ohne gesetzte "Max.
+    Netzladeleistung"."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1265,7 +1267,7 @@ async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(1000)
+    # "Max. Netzladeleistung" bewusst ungesetzt.
 
     try:
         with _patched_now(12):
@@ -1273,11 +1275,9 @@ async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -
         await asyncio.sleep(0.1)
 
         assert coordinator.grid_serving_active is True
-        # -1000 W / 4600 W Referenz * 100 = -21.739...%, skaliert mit
-        # sunssf -2 -> -2174.
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=to_unsigned16(-2174),
+            value=0,
             device_id=100,
         )
     finally:
@@ -1287,9 +1287,9 @@ async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -
 async def test_enforce_grid_charge_grid_serving_inactive_without_pv_surplus(
     hass,
 ) -> None:
-    """Netzdienliches Laden darf innerhalb seines Zeitfensters nicht starten,
-    solange kein PV-Überschuss über dem Schwellwert gemessen wird - das
-    Feature soll nie aus dem Netz laden."""
+    """Netzdienliches Laden blockiert innerhalb seines Zeitfensters nicht,
+    solange kein PV-Überschuss über dem Schwellwert gemessen wird - der
+    Speicher bleibt im Normalmodus."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.data = {
         "soc": 50,
@@ -1300,7 +1300,6 @@ async def test_enforce_grid_charge_grid_serving_inactive_without_pv_surplus(
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     with _patched_now(12):
         await coordinator.async_set_grid_serving_enabled(True)
@@ -1313,16 +1312,15 @@ async def test_enforce_grid_charge_grid_serving_inactive_without_pv_surplus(
 async def test_enforce_grid_charge_grid_serving_inactive_when_smartmeter_power_missing(
     hass,
 ) -> None:
-    """Ohne bekannten Smart-Meter-Wert kann nicht sichergestellt werden, dass
-    nicht aus dem Netz geladen wird - im Gegensatz zum zeitgesteuerten Laden
-    (das in diesem Fall unbeeinflusst weiterläuft) darf netzdienliches Laden
-    hier NICHT starten."""
+    """Ohne bekannten Smart-Meter-Wert kann nicht erkannt werden, ob die
+    200-W-Schwelle überschritten ist - im Gegensatz zum zeitgesteuerten Laden
+    (das in diesem Fall unbeeinflusst weiterläuft) blockiert netzdienliches
+    Laden hier NICHT."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     with _patched_now(12):
         await coordinator.async_set_grid_serving_enabled(True)

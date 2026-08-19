@@ -85,10 +85,11 @@ Priorität in `_async_enforce_grid_charge`:
    (`timed_should_charge`): Leistungsvorgabe = `-max_charge_power` (negativ
    = Laden).
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
-   im eigenen aktiven Monat + PV-Überschuss + "Max. Netzladeleistung"
-   gesetzt** (`grid_serving_should_charge`): Leistungsvorgabe =
-   `-min(max_charge_power, smartmeter_power)` - auf den tatsächlich
-   verfügbaren Überschuss gedeckelt, es wird also nie aus dem Netz geladen.
+   im eigenen aktiven Monat + PV-Überschuss** (`grid_serving_should_block`):
+   Leistungsvorgabe = 0 % - es wird NICHT geladen, sondern das Laden aktiv
+   blockiert, damit der Speicher den PV-Überschuss nicht selbst verbraucht
+   und das Laden stattdessen in die Zeit mit dem höchsten PV-Ertrag
+   verschoben wird. "Max. Netzladeleistung" wird dafür nicht benötigt.
    Schließt sich mit Schritt 2 bereits über die entgegengesetzte
    PV-Überschuss-Bedingung gegenseitig aus (siehe `pv_surplus_active`).
 4. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0

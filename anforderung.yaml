@@ -292,7 +292,8 @@ requirement_timed_soc_charge:
        Laden aktiviert ist (z. B. auch bei einem durch PV-Überschuss vollen
        Speicher). Das verhindert dauerhaftes Volladen auf 100 % zugunsten
        der Batterie-Lebensdauer; der Speicher entlädt sich währenddessen
-       nicht automatisch zur Eigenverbrauchsdeckung.
+       nicht automatisch zur Eigenverbrauchsdeckung, da Register 40049 = 0 %
+       Netto-Leistungsfluss = 0 (weder Laden noch Entladen) erzwingt.
 
        Wurde der Ziel-SOC dabei INNERHALB des Netzladung- oder des
        netzdienlichen Zeitfensters erreicht (_max_soc_hold_is_window_bound),
@@ -302,11 +303,29 @@ requirement_timed_soc_charge:
        damit der Speicher wieder von der geräteeigenen SmartMeter-
        Nullregelung gesteuert wird - ohne diesen aktiven Rücksprung bliebe
        die Sperre unbegrenzt bestehen, da ein gehaltener 0-%-Sollwert den
-       SOC nie von selbst unter den Zielwert fallen lässt. Wurde der
-       Ziel-SOC dagegen AUSSERHALB jedes Zeitfensters erreicht (z. B. rein
-       durch PV-Überschuss via Nullregelung, ohne aktives zeitgesteuertes
-       oder netzdienliches Laden), gilt die Sperre weiterhin unbegrenzt, wie
-       oben beschrieben.
+       SOC nie von selbst unter den Zielwert fallen lässt.
+
+       Wurde der Ziel-SOC dagegen AUSSERHALB jedes Zeitfensters erreicht
+       (z. B. rein durch PV-Überschuss via Nullregelung, ohne aktives
+       zeitgesteuertes oder netzdienliches Laden), gilt die Sperre
+       grundsätzlich unbegrenzt - ABER: da ein gehaltener 0-%-Sollwert auch
+       hier den SOC im Normalfall nie von selbst unter den Zielwert fallen
+       lässt (der Speicher deckt den Hausverbrauch währenddessen nicht mit,
+       siehe oben), wertet der Coordinator zusätzlich am Smart Meter
+       gemessenen Netzbezug (data["smartmeter_power"] <
+       -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 200 W Bezug) als
+       weiteren Freigabe-Trigger aus, mit einer Zyklen-Hysterese
+       (self._max_soc_grid_import_wait_cycles, Schwellwert 2, analog zu
+       self._grid_serving_wait_cycles) gegen kurze Lastspitzen: erst wenn
+       zwei aufeinanderfolgende Aufrufe von _async_enforce_grid_charge
+       Netzbezug über dem Schwellwert melden, wird Register 40051 aktiv auf
+       0 zurückgesetzt. Ohne diesen Trigger würde die Sperre in diesem Fall
+       de facto dauerhaft bestehen bleiben und der Hausverbrauch dauerhaft
+       aus dem Netz statt aus dem Speicher gedeckt, bis der Nutzer manuell
+       eingreift (z. B. "Max. SOC" ändert). Der Zähler wird bei fehlendem
+       oder unter dem Schwellwert liegendem smartmeter_power sowie beim
+       Verlassen dieses Zweigs (SOC unter Zielwert, Wechsel in einen
+       zeitfenstergebundenen Zustand) auf 0 zurückgesetzt.
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
@@ -440,6 +459,14 @@ requirement_timed_soc_charge:
        bei Zielerreichung, Freigabe beim Unterschreiten), die
        Watt-zu-Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
        Schreibintervall (_sun_ic_write_interval) ab."
+    - "tests/test_coordinator.py deckt zusätzlich den Netzbezug-Freigabe-
+       Trigger der geräteunabhängigen (nicht zeitfenstergebundenen)
+       Max-SOC-Sperre ab: keine Freigabe bei nur einem Zyklus Netzbezug über
+       dem Schwellwert (Hysterese hält die Sperre), Freigabe erst nach zwei
+       aufeinanderfolgenden Zyklen, Zurücksetzen des Zählers bei einem
+       Zyklus ohne (oder mit zu geringem) Netzbezug zwischen zwei
+       Netzbezug-Zyklen, sowie unveränderter Ablauf (Sperre bleibt
+       unbegrenzt bestehen) bei fehlendem smartmeter_power."
     - "tests/test_coordinator.py deckt zusätzlich die PV-Überschuss-Prüfung
        ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
        smartmeter_power über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, aktives

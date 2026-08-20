@@ -827,6 +827,145 @@ async def test_enforce_grid_charge_releases_max_soc_clamp_below_target(hass) -> 
     )
 
 
+async def test_enforce_grid_charge_max_soc_clamp_holds_on_single_grid_import_cycle(
+    hass,
+) -> None:
+    """Netzbezug über der Schwelle in nur einem Zyklus reicht nicht - die
+    Hysterese (2 Zyklen) hält die geräteunabhängige Max-SOC-Sperre weiter
+    aktiv, siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 85, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+
+    try:
+        await coordinator._async_enforce_grid_charge(
+            {
+                "soc": 85,
+                "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+            }
+        )
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+        assert coordinator._max_soc_grid_import_wait_cycles == 1
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_max_soc_clamp_releases_after_two_grid_import_cycles(
+    hass,
+) -> None:
+    """Netzbezug über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT über zwei
+    aufeinanderfolgende Zyklen hebt die geräteunabhängige Max-SOC-Sperre
+    aktiv auf (Register 40051 zurück auf SmartMeter-Nullregelung), obwohl
+    der SOC weiterhin >= Max. SOC ist - siehe anforderung.yaml,
+    REQ-TIMED-SOC-CHARGE."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 85, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+
+    grid_import_data = {
+        "soc": 85,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    try:
+        await coordinator._async_enforce_grid_charge(grid_import_data)
+        await asyncio.sleep(0.1)
+        assert coordinator.max_soc_clamped is True
+
+        await coordinator._async_enforce_grid_charge(grid_import_data)
+        await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is False
+        assert coordinator.sun_charge_active is False
+        assert coordinator._max_soc_grid_import_wait_cycles == 0
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_max_soc_clamp_resets_grid_import_counter(
+    hass,
+) -> None:
+    """Fällt der gemessene Netzbezug zwischen zwei Zyklen wieder unter die
+    Schwelle, wird der Hysterese-Zähler zurückgesetzt statt weiterzuzählen -
+    die Sperre bleibt bestehen, bis erneut zwei aufeinanderfolgende Zyklen
+    mit ausreichend Netzbezug gemessen werden."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 85, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+
+    grid_import_data = {
+        "soc": 85,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    no_import_data = {"soc": 85, "smartmeter_power": 0}
+
+    try:
+        await coordinator._async_enforce_grid_charge(grid_import_data)
+        await asyncio.sleep(0.1)
+        assert coordinator._max_soc_grid_import_wait_cycles == 1
+
+        await coordinator._async_enforce_grid_charge(no_import_data)
+        await asyncio.sleep(0.1)
+        assert coordinator._max_soc_grid_import_wait_cycles == 0
+        assert coordinator.max_soc_clamped is True
+
+        await coordinator._async_enforce_grid_charge(grid_import_data)
+        await asyncio.sleep(0.1)
+        assert coordinator._max_soc_grid_import_wait_cycles == 1
+        assert coordinator.max_soc_clamped is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_max_soc_clamp_ignores_missing_smartmeter_power(
+    hass,
+) -> None:
+    """Fehlt data["smartmeter_power"] (z. B. SunSpec-Modus nicht erreichbar),
+    bleibt die geräteunabhängige Max-SOC-Sperre unverändert unbegrenzt
+    bestehen - kein Freigabe-Trigger ohne Messwert."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 85, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+
+    try:
+        for _ in range(3):
+            await coordinator._async_enforce_grid_charge({"soc": 85})
+            await asyncio.sleep(0.1)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+        assert coordinator._max_soc_grid_import_wait_cycles == 0
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_enforce_grid_charge_max_soc_clamp_stays_within_charge_window(
     hass,
 ) -> None:

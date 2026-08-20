@@ -243,10 +243,26 @@ der SOC "Max. SOC" erreicht oder überschreitet – auch wenn er z. B. durch
 PV-Überschuss vollgeladen wurde. Das verhindert dauerhaftes Volladen auf
 100 % (Batterie-Lebensdauer) und geht über die reine Ladebegrenzung hinaus:
 Solange die Sperre aktiv ist, entlädt sich der Speicher nicht automatisch
-zur Eigenverbrauchsdeckung. Erst wenn der SOC wieder unter den Zielwert
-fällt, wird Register 40051 zurück auf 0 (SmartMeter-Nullregelung) gesetzt
-und die normale Automatik (bzw. zeitgesteuertes Laden, falls zutreffend)
-übernimmt wieder.
+zur Eigenverbrauchsdeckung, da Register 40049 = 0 % einen Netto-
+Leistungsfluss von 0 (weder Laden noch Entladen) erzwingt.
+
+Damit die Sperre in diesem Zustand nicht dauerhaft bestehen bleibt – ein
+gehaltener 0-%-Sollwert lässt den SOC im Normalfall nie von selbst unter
+den Zielwert fallen, da der Hausverbrauch währenddessen nicht aus dem
+Speicher gedeckt wird –, gibt es zwei Freigabe-Bedingungen: Fällt der SOC
+(z. B. durch geringe Selbstentladung) wieder unter den Zielwert, wird
+Register 40051 sofort zurück auf 0 (SmartMeter-Nullregelung) gesetzt.
+Zusätzlich hebt der Coordinator die Sperre auch aktiv auf, sobald am Smart
+Meter über zwei aufeinanderfolgende Poll-Zyklen hinweg Netzbezug von mehr
+als 200 W gemessen wird (derselbe Schwellwert wie beim netzdienlichen
+Laden, `SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`) – so übernimmt die
+geräteeigene SmartMeter-Nullregelung wieder rechtzeitig die
+Eigenverbrauchsdeckung aus dem Speicher, statt den Hausverbrauch dauerhaft
+aus dem Netz zu decken. Wurde der Ziel-SOC dagegen INNERHALB eines
+Netzladung- oder netzdienlich-Zeitfensters erreicht, bleibt die Sperre wie
+gehabt an dieses Zeitfenster gebunden und wird spätestens an dessen Ende
+aufgehoben (siehe unten). In allen Fällen übernimmt danach die normale
+Automatik (bzw. zeitgesteuertes Laden, falls zutreffend) wieder.
 
 Aktiviert-Zustand sowie Start-/Endzeit bleiben über Neustarts hinweg
 erhalten, ein einmal eingerichteter Zeitplan muss also nicht nach jedem

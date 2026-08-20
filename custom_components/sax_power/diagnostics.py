@@ -51,7 +51,6 @@ async def async_get_config_entry_diagnostics(
             "price_charge_status": coordinator.price_charge_status,
             "price_charge_max_price": coordinator.price_charge_max_price,
             "price_charge_hours": coordinator.price_charge_hours_raw,
-            "price_charge_target_soc": coordinator.price_charge_target_soc,
         },
         # Ladeplan inkl. der ausgewerteten Preis-/Prognosewerte - der
         # häufigste Grund für Rückfragen zum preisoptimierten Laden ist ein

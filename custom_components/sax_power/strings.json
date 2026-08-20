@@ -255,9 +255,6 @@
       },
       "price_charge_hours": {
         "name": "Preisoptimiertes Laden Anzahl Stunden"
-      },
-      "price_charge_target_soc": {
-        "name": "Preisoptimiertes Laden Ziel-SOC"
       }
     },
     "switch": {

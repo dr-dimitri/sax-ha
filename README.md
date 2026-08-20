@@ -202,7 +202,6 @@ Hochrechnung für diese Zeit, statt sie später fälschlich nachzuholen.
 | Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 100 % |
 | Preisoptimiertes Laden Preisgrenze | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
 | Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
-| Preisoptimiertes Laden Ziel-SOC | 0–100 % | Ladestand, bis zu dem preisoptimiert geladen wird. Standard 80 % |
 
 Alle Werte bleiben über Neustarts hinweg erhalten.
 
@@ -226,10 +225,11 @@ Alle Werte bleiben über Neustarts hinweg erhalten.
 
 **Warum gibt es nicht für jede Automatik eigene Werte?** "Max. SOC" und
 "Max. Netzladeleistung" werden bewusst geteilt, damit es keine zwei
-konkurrierenden Obergrenzen gibt. Nur dort, wo eine Automatik wirklich etwas
-Eigenes braucht, gibt es eine eigene Einstellung: "Netzladung Min. SOC" (nur die
-Netzladung braucht eine Startschwelle) und "Preisoptimiertes Laden Ziel-SOC"
-(hier will man meist nur so viel einkaufen wie nötig, nicht bis "Max. SOC").
+konkurrierenden Obergrenzen gibt - "Max. SOC" ist die einzige SOC-Einstellung
+der Integration und damit auch das Ziel des preisoptimierten Ladens. Nur
+dort, wo eine Automatik wirklich etwas Eigenes braucht, gibt es eine eigene
+Einstellung: "Netzladung Min. SOC" (nur die Netzladung braucht eine
+Startschwelle).
 
 ## Die drei Lade-Automatiken
 
@@ -466,7 +466,7 @@ nächsten 24 Stunden.
 
 **So rechnet "Smart":**
 
-1. Fehlende Energie = (Ziel-SOC − aktueller Ladestand) × Speicherkapazität
+1. Fehlende Energie = ("Max. SOC" − aktueller Ladestand) × Speicherkapazität
 2. minus nutzbarer Anteil der PV-Prognose
 3. Rest geteilt durch "Max. Netzladeleistung" = benötigte Ladestunden
 4. Genau so viele der günstigsten Stunden werden eingeplant
@@ -477,24 +477,19 @@ Deckt die Prognose den Bedarf vollständig, wird gar kein Netzstrom eingekauft
 Kapazität, Ladestand oder Ladeleistung gerade unbekannt (z. B. SunSpec-Modus
 nicht erreichbar), verhält sich "Smart" wie "Relativ".
 
-> **Beispiel:** Ziel-SOC 80 %, aktuell 40 %, 10 kWh Speicher → 4 kWh fehlen. Die
-> Prognose meldet für morgen 8 kWh, davon gelten 80 % als nutzbar → 6,4 kWh. Der
-> Bedarf ist gedeckt, es wird nachts nichts zugekauft.
+> **Beispiel:** "Max. SOC" 80 %, aktuell 40 %, 10 kWh Speicher → 4 kWh fehlen.
+> Die Prognose meldet für morgen 8 kWh, davon gelten 80 % als nutzbar → 6,4 kWh.
+> Der Bedarf ist gedeckt, es wird nachts nichts zugekauft.
 
 ### Leistung, Ziel-SOC und Abbruchgründe
 
 Geladen wird mit **"Max. Netzladeleistung"** – derselben Einstellung wie bei der
 Netzladung, damit es keine zwei konkurrierenden Leistungswerte gibt.
 
-Der **Ziel-SOC ist dagegen eigenständig** ("Preisoptimiertes Laden Ziel-SOC"):
-Meist willst du nur so viel günstig einkaufen, wie bis zum nächsten günstigen
-Fenster gebraucht wird, während "Max. SOC" die geräteweite Obergrenze bleibt.
-
-- **Eigener Ziel-SOC erreicht** → die Netzladung endet, der Speicher bleibt aber
-  im normalen Nullregelungsbetrieb und kann die eingekaufte Energie wieder
-  abgeben.
-- **"Max. SOC" erreicht** → zusätzlich greift die
-  [Max-SOC-Sperre](#max-soc-sperre), der Speicher wird bei 0 % gehalten.
+Der **Ziel-SOC ist derselbe Wert wie "Max. SOC"** – keine eigene Einstellung.
+Ist er erreicht, endet die Netzladung UND zusätzlich greift die
+[Max-SOC-Sperre](#max-soc-sperre), der Speicher wird bei 0 % gehalten – genau
+wie bei der Netzladung.
 
 Weitere Abbruchgründe, jeweils sofort wirksam (nicht erst im nächsten
 60-Sekunden-Takt):
@@ -526,7 +521,6 @@ das aktuelle Verhalten:
 | Keine Preisdaten | Kein Sensor konfiguriert, oder seine Attribute lassen sich nicht auswerten |
 | Warten auf Preisabfall | Alles bereit, aber der aktuelle Zeitraum gehört nicht zu den ausgewählten Fenstern |
 | Lade aus Netz | Die Zwangsladung läuft |
-| Ziel-SOC erreicht | Der eigene Ziel-SOC ist erreicht |
 | PV-Prognose deckt Bedarf | Strategie "Smart": morgen kommt genug Sonne, es wird nichts zugekauft |
 | Pausiert (PV-Überschuss) | Am Smart Meter wird Einspeisung gemessen |
 | Pausiert (Max. SOC) | Die übergeordnete Max-SOC-Sperre greift |

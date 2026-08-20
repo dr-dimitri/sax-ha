@@ -42,8 +42,10 @@ custom_components/sax_power/
 ├── sensor.py              ~60 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
 │                          plus zwei RestoreEntity-Energiezähler (energy_charged/
 │                          energy_discharged) fürs Energy-Dashboard
-├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Netzladeleistung,
-│                          Preisgrenze/Anzahl Stunden/Ziel-SOC (preisoptimiertes Laden)
+├── number.py              Max. SOC (einzige SOC-Einstellung, auch Ziel-SOC für
+│                          Zeitfenster- und preisoptimiertes Laden), Max.
+│                          Netzladeleistung, Preisgrenze/Anzahl Stunden
+│                          (preisoptimiertes Laden)
 ├── select.py              Strategie des preisoptimierten Ladens
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
 │                          netzdienliches Laden ein/aus, preisoptimiertes Laden ein/aus

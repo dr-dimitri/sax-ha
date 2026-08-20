@@ -108,6 +108,14 @@
 # black.
 
 # ==============================================================================
+# GIT-WORKFLOW
+# ==============================================================================
+# Änderungen werden nie direkt auf main vorgenommen, sondern immer auf einem
+# eigenen Branch (Pull Request gegen main). Vor dem Erstellen eines neuen
+# Branches wird main zuerst aktualisiert (git fetch/pull), damit der neue
+# Branch auf dem aktuellen Stand basiert.
+
+# ==============================================================================
 # ANFORDERUNG: ALLE MODBUS-REGISTER LESBAR
 # ==============================================================================
 requirement_all_registers_readable:
@@ -313,19 +321,20 @@ requirement_timed_soc_charge:
        lässt (der Speicher deckt den Hausverbrauch währenddessen nicht mit,
        siehe oben), wertet der Coordinator zusätzlich am Smart Meter
        gemessenen Netzbezug (data["smartmeter_power"] <
-       -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 200 W Bezug) als
-       weiteren Freigabe-Trigger aus, mit einer Zyklen-Hysterese
-       (self._max_soc_grid_import_wait_cycles, Schwellwert 2, analog zu
-       self._grid_serving_wait_cycles) gegen kurze Lastspitzen: erst wenn
-       zwei aufeinanderfolgende Aufrufe von _async_enforce_grid_charge
-       Netzbezug über dem Schwellwert melden, wird Register 40051 aktiv auf
-       0 zurückgesetzt. Ohne diesen Trigger würde die Sperre in diesem Fall
-       de facto dauerhaft bestehen bleiben und der Hausverbrauch dauerhaft
-       aus dem Netz statt aus dem Speicher gedeckt, bis der Nutzer manuell
-       eingreift (z. B. "Max. SOC" ändert). Der Zähler wird bei fehlendem
-       oder unter dem Schwellwert liegendem smartmeter_power sowie beim
-       Verlassen dieses Zweigs (SOC unter Zielwert, Wechsel in einen
-       zeitfenstergebundenen Zustand) auf 0 zurückgesetzt.
+       -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 50 W Bezug) als
+       weiteren Freigabe-Trigger aus, mit derselben einheitlichen
+       Zyklen-Hysterese (self._max_soc_grid_import_wait_cycles, siehe unten
+       "PV-Überschuss-Prüfung") gegen kurze Lastspitzen: erst wenn
+       PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Aufrufe von
+       _async_enforce_grid_charge Netzbezug über dem Schwellwert melden,
+       wird Register 40051 aktiv auf 0 zurückgesetzt. Ohne diesen Trigger
+       würde die Sperre in diesem Fall de facto dauerhaft bestehen bleiben
+       und der Hausverbrauch dauerhaft aus dem Netz statt aus dem Speicher
+       gedeckt, bis der Nutzer manuell eingreift (z. B. "Max. SOC" ändert).
+       Der Zähler wird bei fehlendem oder unter dem Schwellwert liegendem
+       smartmeter_power sowie beim Verlassen dieses Zweigs (SOC unter
+       Zielwert, Wechsel in einen zeitfenstergebundenen Zustand) auf 0
+       zurückgesetzt.
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
@@ -333,10 +342,12 @@ requirement_timed_soc_charge:
        Netzladeleistung" (number.py) gesetzt, "Netzladung Min. SOC"
        (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
        zuvor unterschritten und noch nicht bis "Max. SOC" durchgeladen -
-       siehe Hysterese unten) UND kein PV-Überschuss über
-       SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py, 200 W) am Smart Meter
-       gemessen, wird Register 40049 auf einen negativen, aus "Max.
-       Netzladeleistung" umgerechneten Sollwert gesetzt.
+       siehe Hysterese unten) UND kein über die einheitliche
+       Zyklen-Hysterese (siehe unten "PV-Überschuss-Prüfung") bestätigter
+       PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py,
+       50 W) am Smart Meter gemessen, wird Register 40049 auf einen
+       negativen, aus "Max. Netzladeleistung" umgerechneten Sollwert
+       gesetzt.
 
        "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
        SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
@@ -367,8 +378,9 @@ requirement_timed_soc_charge:
        geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
        Deaktivierung/fehlender Max.-Netzladeleistung auch den Fall, dass
        während eines laufenden Zeitfensters PV-Überschuss über dem
-       Schwellwert erkannt wird - die Netzladung wird dann beim nächsten
-       Poll-Zyklus (nicht erst am Fensterende) beendet, weil in diesem Fall
+       Schwellwert über die einheitliche Zyklen-Hysterese (siehe unten)
+       bestätigt wird - die Netzladung wird dann innerhalb weniger
+       Poll-Zyklen (nicht erst am Fensterende) beendet, weil in diesem Fall
        die geräteeigene SmartMeter-Nullregelung den PV-Überschuss ohnehin
        bereits selbst zum Laden nutzt.
 
@@ -385,8 +397,27 @@ requirement_timed_soc_charge:
     Ist der Wert (noch) nicht verfügbar (z. B. SunSpec-Modus nicht
     erreichbar), blockiert das die Netzladung nicht. Der Schwellwert
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) ist bewusst als eigene,
-    wiederverwendbare Konstante ausgelagert (200 W), da er absehbar auch an
+    wiederverwendbare Konstante ausgelagert (50 W), da er absehbar auch an
     anderer Stelle für eine PV-Überschuss-Erkennung benötigt wird.
+
+    Zyklen-Hysterese (einheitlich): JEDER Vergleich gegen
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - hier der PV-Überschuss-Check von
+    Punkt 2/3 sowie der Netzbezug-Freigabe-Trigger der Max-SOC-Sperre von
+    Punkt 1, außerdem (siehe REQ-GRID-SERVING-CHARGE) Schritt a und b der
+    Zustandsmaschine für netzdienliches Laden - läuft über dieselbe
+    wiederverwendbare Hilfsmethode SaxPowerCoordinator._cycles_confirmed und
+    dieselbe Konstante PV_SURPLUS_HYSTERESIS_CYCLES (const.py, 2): eine
+    Schwellwert-Über-/Unterschreitung zählt erst als bestätigt, nachdem sie
+    in so vielen aufeinanderfolgenden Poll-Zyklen in Folge vorlag; ein
+    einzelner gegenteiliger Messwert setzt den jeweiligen Zähler (je
+    Verwendungsstelle ein eigenes self-Attribut, z. B.
+    self._timed_charge_pv_surplus_cycles,
+    self._max_soc_grid_import_wait_cycles,
+    self._grid_serving_charge_confirm_cycles,
+    self._grid_serving_release_confirm_cycles) sofort auf 0 zurück. Schützt
+    einheitlich gegen kurze Lastspitzen/Messausreißer am Smart Meter, statt
+    dass jede Verwendungsstelle unmittelbar auf einen einzelnen Messwert
+    reagiert.
 
     Schreibmechanismus (SunSpec-Modus, Slave-ID 100, Modell 123
     "Immediate Controls", siehe modbus_llm.yaml): Erst Register 40051 auf 1
@@ -471,10 +502,13 @@ requirement_timed_soc_charge:
        ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
        smartmeter_power über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, aktives
        Beenden einer bereits laufenden Netzladung, sobald der Schwellwert
-       mitten im Zeitfenster überschritten wird, normales Laden bei
-       smartmeter_power auf/unter dem Schwellwert (inkl. negativer Werte =
-       Netzbezug) sowie unveränderter Ablauf, wenn smartmeter_power fehlt
-       (SunSpec-Modus nicht erreichbar)."
+       über PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Zyklen mitten
+       im Zeitfenster überschritten wird (ein einzelner Zyklus reicht noch
+       nicht, Zurücksetzen des Zählers bei einem Zyklus ohne Überschreitung
+       zwischendurch), normales Laden bei smartmeter_power auf/unter dem
+       Schwellwert (inkl. negativer Werte = Netzbezug) sowie unveränderter
+       Ablauf, wenn smartmeter_power fehlt (SunSpec-Modus nicht
+       erreichbar)."
     - "tests/test_integration_live.py enthält End-to-End-Tests, die über
        echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren des
        zeitgesteuerten Ladens innerhalb des Zeitfensters Register 40051 auf
@@ -528,23 +562,30 @@ requirement_grid_serving_charge:
     a. Ohne aktiven Sollwertvorgabemodus wird die tatsächliche Ladeleistung
        des SAX geprüft (negativer Anteil von data["storage_power_active"],
        siehe sensor.py "SAX Ladeleistung"/_negative_part). Erreicht oder
-       überschreitet sie SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (200 W, Beweis,
-       dass die Nullregelung bereits mit nennenswertem Überschuss lädt),
-       wechselt der Speicher aktiv in den Sollwertvorgabemodus UND die
-       Ladung wird in demselben Aufruf auf 0 % gestoppt (Register 40049,
-       async_start_sun_charge(0)). Danach werden einmalig zwei
-       Aktualisierungszyklen abgewartet (self._grid_serving_wait_cycles),
-       bevor Schritt b ausgewertet wird, damit sich Moduswechsel und
-       gestoppter Sollwert am Gerät setzen können.
+       überschreitet sie SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (50 W, Beweis,
+       dass die Nullregelung bereits mit nennenswertem Überschuss lädt) über
+       PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Zyklen (dieselbe
+       einheitliche Zyklen-Hysterese wie bei REQ-TIMED-SOC-CHARGE, siehe
+       dort "PV-Überschuss-Prüfung"; self._grid_serving_charge_confirm_
+       cycles), wechselt der Speicher aktiv in den Sollwertvorgabemodus UND
+       die Ladung wird in demselben Aufruf auf 0 % gestoppt (Register 40049,
+       async_start_sun_charge(0)). Danach werden zusätzlich einmalig
+       PV_SURPLUS_HYSTERESIS_CYCLES weitere Aktualisierungszyklen abgewartet
+       (self._grid_serving_wait_cycles), bevor Schritt b ausgewertet wird,
+       damit sich Moduswechsel und gestoppter Sollwert am Gerät setzen
+       können.
     b. Erst mit aktivem Sollwertvorgabemodus (Wartezyklen abgelaufen) wird
        die am Smart Meter gemessene Netzeinspeisung
-       (data["smartmeter_power"]) gegen denselben Schwellwert geprüft.
-       Fällt sie darunter, wird der Speicher aktiv zurück in die
-       SmartMeter-Nullregelung gesetzt (async_stop_sun_charge, Register
-       40051 zurück auf 0). Bleibt die Einspeisung mindestens beim
-       Schwellwert (oder ist der Messwert gerade nicht bekannt), bleibt die
-       Ladung bewusst bei 0 % gehalten - der Speicher soll hier gezielt erst
-       wieder laden, sobald ein Zeitpunkt mit gefallener Einspeisung
+       (data["smartmeter_power"]) gegen denselben Schwellwert geprüft,
+       ebenfalls über dieselbe Zyklen-Hysterese
+       (self._grid_serving_release_confirm_cycles). Fällt sie über so viele
+       aufeinanderfolgende Zyklen darunter, wird der Speicher aktiv zurück
+       in die SmartMeter-Nullregelung gesetzt (async_stop_sun_charge,
+       Register 40051 zurück auf 0). Bleibt die Einspeisung mindestens beim
+       Schwellwert (oder ist der Messwert gerade nicht bekannt, oder reißt
+       die Unterschreitung zwischendurch wieder ab), bleibt die Ladung
+       bewusst bei 0 % gehalten - der Speicher soll hier gezielt erst wieder
+       laden, sobald ein Zeitpunkt mit dauerhaft gefallener Einspeisung
        erreicht ist, statt fortlaufend mit dem Überschuss mitzulaufen.
 
     Fehlt data["storage_power_active"], kann Schritt a nicht auslösen
@@ -710,13 +751,16 @@ requirement_grid_serving_charge:
        netzdienlichem Laden (_async_step_grid_serving) ab: Schritt a
        wechselt erst in den Sollwertvorgabemodus und stoppt die Ladung auf
        0 %, wenn die tatsächliche SAX-Ladeleistung
-       (data['storage_power_active']) den Schwellwert erreicht, und setzt
-       danach zwei Wartezyklen; während dieser Wartezyklen bleibt Schritt b
+       (data['storage_power_active']) den Schwellwert über
+       PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Zyklen erreicht (ein
+       einzelner Zyklus reicht noch nicht), und setzt danach zusätzlich
+       zwei Wartezyklen; während dieser Wartezyklen bleibt Schritt b
        unterdrückt, selbst wenn die Netzeinspeisung zwischenzeitlich unter
        den Schwellwert fällt; nach Ablauf der Wartezyklen bleibt die Ladung
        bei weiterhin hoher Einspeisung bewusst bei 0 % gehalten (kein
        Wiederanstieg des Sollwerts mehr, im Unterschied zum alten
-       Verhalten), Schritt b setzt erst bei Einspeisung unter dem
+       Verhalten), Schritt b setzt erst bei über ebenso viele
+       aufeinanderfolgende Zyklen bestätigter Einspeisung unter dem
        Schwellwert aktiv in die SmartMeter-Nullregelung zurück; ohne
        bekannte SAX-Ladeleistung kann Schritt a nicht auslösen, ohne
        bekannte Netzeinspeisung nach dem Auslösen bleibt Schritt b

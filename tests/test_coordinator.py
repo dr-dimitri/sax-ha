@@ -14,6 +14,7 @@ from custom_components.sax_power.const import (
     ALL_MONTHS,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_SOC,
+    PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
     READ_BLOCK_EXT_LOW1_START,
@@ -1084,7 +1085,8 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
 ) -> None:
     """Eine bereits laufende Netzladung wird beendet, sobald der PV-
     Überschuss während des Zeitfensters über den Schwellwert steigt - beim
-    nächsten Poll-Zyklus, nicht erst am konfigurierten Fensterende."""
+    übernächsten Poll-Zyklus (Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES),
+    nicht erst am konfigurierten Fensterende."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1110,10 +1112,20 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
 
             # Simuliert den nächsten Poll-Zyklus (_async_update_data), bei
             # dem der Smart Meter nun PV-Überschuss über dem Schwellwert
-            # meldet.
+            # meldet. Ein einzelner Zyklus reicht wegen der Hysterese noch
+            # nicht, um die Netzladung zu beenden.
             coordinator.data["smartmeter_power"] = (
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
             )
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+            assert coordinator._timed_charge_active is True
+            assert coordinator.sun_charge_active is True
+
+            # Erst der zweite aufeinanderfolgende Zyklus mit PV-Überschuss
+            # über dem Schwellwert bestätigt die Hysterese und beendet die
+            # Netzladung.
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -1124,6 +1136,52 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
                 value=SUN_IC_CONTROL_MODE_SMARTMETER,
                 device_id=100,
             )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_pv_surplus_hysteresis_resets_on_drop(
+    hass,
+) -> None:
+    """Fällt der PV-Überschuss zwischen zwei Zyklen wieder auf/unter den
+    Schwellwert, wird der Hysterese-Zähler zurückgesetzt statt weiterzuzählen
+    - die Netzladung läuft weiter, bis erneut zwei aufeinanderfolgende Zyklen
+    mit Überschuss über dem Schwellwert gemessen werden."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+    }
+    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            await asyncio.sleep(0.1)
+
+            coordinator.data["smartmeter_power"] = (
+                SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
+            )
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_pv_surplus_cycles == 1
+
+            coordinator.data["smartmeter_power"] = 0
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_pv_surplus_cycles == 0
+            assert coordinator._timed_charge_active is True
+            assert coordinator.sun_charge_active is True
     finally:
         await coordinator.async_stop_sun_charge()
 
@@ -1561,12 +1619,14 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
     hass,
 ) -> None:
     """Schritt a: Erst wenn der Speicher selbst (über die geräteeigene
-    SmartMeter-Nullregelung) bereits mit mindestens
+    SmartMeter-Nullregelung) so viele Zyklen in Folge wie
+    PV_SURPLUS_HYSTERESIS_CYCLES bereits mit mindestens
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT lädt (negativer Anteil von
     data["storage_power_active"]), übernimmt netzdienliches Laden aktiv die
     Kontrolle: Wechsel in den Sollwertvorgabemodus UND Ladung sofort auf
     0 % gestoppt, in einem Aufruf (async_start_sun_charge(0)), danach
-    zweimal warten (_grid_serving_wait_cycles)."""
+    zusätzlich zweimal warten (_grid_serving_wait_cycles). Ein einzelner
+    Zyklus reicht wegen der Hysterese noch nicht aus."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1588,12 +1648,20 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
     try:
         with _patched_now(12):
             await coordinator.async_set_grid_serving_enabled(True)
+            await asyncio.sleep(0.1)
+
+            assert coordinator.grid_serving_active is False
+            assert coordinator.sun_charge_active is False
+            assert coordinator._grid_serving_charge_confirm_cycles == 1
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
         await asyncio.sleep(0.1)
 
         assert coordinator.grid_serving_active is True
         assert coordinator._timed_charge_active is False
         assert coordinator.sun_charge_active is True
-        assert coordinator._grid_serving_wait_cycles == 2
+        assert coordinator._grid_serving_wait_cycles == PV_SURPLUS_HYSTERESIS_CYCLES
+        assert coordinator._grid_serving_charge_confirm_cycles == 0
         client.write_register.assert_any_await(
             address=REG_SUN_IC_CONTROL_MODE,
             value=SUN_IC_CONTROL_MODE_SETPOINT,
@@ -1636,9 +1704,13 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
     try:
         with _patched_now(12):
             await coordinator.async_set_grid_serving_enabled(True)
+            # Schritt a braucht selbst PV_SURPLUS_HYSTERESIS_CYCLES
+            # aufeinanderfolgende Zyklen mit ausreichender SAX-Ladeleistung,
+            # bevor der Sollwertvorgabemodus überhaupt aktiv wird.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._grid_serving_setpoint_active is True
-            assert coordinator._grid_serving_wait_cycles == 2
+            assert coordinator._grid_serving_wait_cycles == PV_SURPLUS_HYSTERESIS_CYCLES
 
             # Netzeinspeisung fällt bereits während der Wartezeit unter den
             # Schwellwert - darf noch nicht zur Rückkehr in die
@@ -1652,6 +1724,14 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
 
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_wait_cycles == 0
+            assert coordinator.grid_serving_active is True
+            assert coordinator.sun_charge_active is True
+
+            # Erst jetzt wertet Schritt b die Netzeinspeisung wieder aus -
+            # auch dort greift dieselbe Zyklen-Hysterese, ein einzelner
+            # Aufruf unter dem Schwellwert reicht noch nicht.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
 
@@ -1692,6 +1772,9 @@ async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high
     try:
         with _patched_now(12):
             await coordinator.async_set_grid_serving_enabled(True)
+            # Zweiter Zyklus bestätigt Schritt a (Zyklen-Hysterese) und
+            # löst den Sollwertvorgabemodus tatsächlich aus.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             write_count_after_trigger = client.write_register.await_count
 
@@ -1719,8 +1802,9 @@ async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_th
     hass,
 ) -> None:
     """Schritt b: Ist der Sollwertvorgabemodus aktiv (Wartezyklen bereits
-    abgelaufen) und fällt die Netzeinspeisung unter den Schwellwert, wird
-    der Speicher aktiv zurück in die SmartMeter-Nullregelung gesetzt."""
+    abgelaufen) und fällt die Netzeinspeisung so viele Zyklen in Folge wie
+    PV_SURPLUS_HYSTERESIS_CYCLES vorgibt unter den Schwellwert, wird der
+    Speicher aktiv zurück in die SmartMeter-Nullregelung gesetzt."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1745,6 +1829,13 @@ async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_th
             coordinator._grid_serving_wait_cycles = 0
             await coordinator.async_start_sun_charge(0)
             await asyncio.sleep(0.1)
+
+            # Ein einzelner Zyklus unter dem Schwellwert reicht wegen der
+            # Hysterese noch nicht aus.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is True
+            assert coordinator.sun_charge_active is True
 
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
@@ -1942,10 +2033,12 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
     Laden nie gleichzeitig aktiv werden: grid_serving_eligible verlangt
     explizit "not timed_should_charge" (siehe _async_enforce_grid_charge) -
     solange zeitgesteuertes Laden mit den gegebenen Bedingungen (kein
-    PV-Überschuss) aktiv ist, kann netzdienliches Laden für denselben Zyklus
-    nicht greifen; erst wenn PV-Überschuss vorliegt, wird zeitgesteuertes
-    Laden selbst inaktiv und netzdienliches Laden kann - bei ausreichender
-    tatsächlicher SAX-Ladeleistung - übernehmen."""
+    bestätigter PV-Überschuss) aktiv ist, kann netzdienliches Laden für
+    denselben Zyklus nicht greifen; erst wenn PV-Überschuss über
+    PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Zyklen bestätigt ist,
+    wird zeitgesteuertes Laden selbst inaktiv, und erst danach kann
+    netzdienliches Laden - nach seiner eigenen, ebenso vielzyklischen
+    Bestätigung ausreichender tatsächlicher SAX-Ladeleistung - übernehmen."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1963,6 +2056,12 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
     await coordinator.async_set_max_soc(90)
     await coordinator.async_set_max_charge_power(3000)
 
+    grid_serving_data = {
+        **coordinator.data,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+
     try:
         with _patched_now(12):
             # Kein PV-Überschuss -> nur zeitgesteuertes Laden kann greifen.
@@ -1973,17 +2072,27 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
             assert coordinator._timed_charge_active is True
             assert coordinator.grid_serving_active is False
 
-            # PV-Überschuss UND ausreichende tatsächliche SAX-Ladeleistung ->
-            # nur netzdienliches Laden kann greifen.
-            await coordinator._async_enforce_grid_charge(
-                {
-                    **coordinator.data,
-                    "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
-                    "storage_power_active": -(
-                        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
-                    ),
-                }
-            )
+            # Erster Zyklus mit PV-Überschuss reicht wegen der
+            # Zyklen-Hysterese noch nicht, um zeitgesteuertes Laden zu
+            # beenden.
+            await coordinator._async_enforce_grid_charge(grid_serving_data)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is True
+            assert coordinator.grid_serving_active is False
+
+            # Zweiter aufeinanderfolgender Zyklus bestätigt den
+            # PV-Überschuss: zeitgesteuertes Laden wird inaktiv, und
+            # netzdienliches Laden beginnt selbst mit Schritt a seine
+            # eigene Hysterese (noch nicht bestätigt).
+            await coordinator._async_enforce_grid_charge(grid_serving_data)
+            await asyncio.sleep(0.1)
+            assert coordinator._timed_charge_active is False
+            assert coordinator.grid_serving_active is False
+
+            # Zweiter aufeinanderfolgender Zyklus mit ausreichender
+            # SAX-Ladeleistung bestätigt Schritt a - netzdienliches Laden
+            # übernimmt aktiv.
+            await coordinator._async_enforce_grid_charge(grid_serving_data)
             await asyncio.sleep(0.1)
             assert coordinator._timed_charge_active is False
             assert coordinator.grid_serving_active is True
@@ -2121,6 +2230,9 @@ async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -
 
     try:
         with _patched_now(12, month=7):
+            # Zwei aufeinanderfolgende Zyklen wegen der Zyklen-Hysterese
+            # von Schritt a (PV_SURPLUS_HYSTERESIS_CYCLES).
+            await coordinator._async_enforce_grid_charge(coordinator.data)
             await coordinator._async_enforce_grid_charge(coordinator.data)
         await asyncio.sleep(0.1)
 

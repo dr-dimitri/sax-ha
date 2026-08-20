@@ -416,4 +416,12 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # Ladeleistung des SAX, negativer Anteil von data["storage_power_active"])
 # sowie als Rückkehr-Kriterium in die SmartMeter-Nullregelung (Netzeinspeisung
 # data["smartmeter_power"] unter diesem Wert).
-SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 200
+SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50
+
+# Zyklen-Hysterese für JEDEN Vergleich gegen SMARTMETER_PV_SURPLUS_THRESHOLD_
+# WATT (Max-SOC-Freigabe-Trigger, zeitgesteuertes Laden, netzdienliches Laden
+# Schritt a+b): eine Schwellwert-Über-/Unterschreitung zählt erst nach so
+# vielen aufeinanderfolgenden Poll-Zyklen als bestätigt, siehe
+# SaxPowerCoordinator._cycles_confirmed. Schützt einheitlich gegen kurze
+# Lastspitzen/Messausreißer am Smart Meter.
+PV_SURPLUS_HYSTERESIS_CYCLES = 2

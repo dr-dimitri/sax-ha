@@ -31,6 +31,7 @@ from .const import (
     MAX_SOC,
     MIN_IC_POWER_SETPOINT_PCT,
     MIN_SETPOINT_POWER,
+    PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
@@ -290,6 +291,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_months: set[int] = set(ALL_MONTHS)
         self._timed_charge_min_soc: int | None = None
         self._timed_charge_armed = False
+        self._timed_charge_pv_surplus_cycles = 0
         self._grid_serving_enabled = False
         self._grid_serving_start: dt_time | None = None
         self._grid_serving_end: dt_time | None = None
@@ -297,6 +299,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_months: set[int] = set(ALL_MONTHS)
         self._grid_serving_setpoint_active = False
         self._grid_serving_wait_cycles = 0
+        self._grid_serving_charge_confirm_cycles = 0
+        self._grid_serving_release_confirm_cycles = 0
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -835,9 +839,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # selbst unter den Zielwert. Deshalb wertet _async_enforce_grid_charge in
     # diesem Fall zusätzlich am Smart Meter gemessenen Netzbezug
     # (smartmeter_power < -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) als
-    # Freigabe-Trigger aus - mit Zyklen-Hysterese
-    # (_max_soc_grid_import_wait_cycles, analog zu
-    # _grid_serving_wait_cycles), damit kurze Lastspitzen die Sperre nicht
+    # Freigabe-Trigger aus - mit derselben Zyklen-Hysterese
+    # (_cycles_confirmed/_max_soc_grid_import_wait_cycles,
+    # PV_SURPLUS_HYSTERESIS_CYCLES) wie an den drei anderen Stellen, die
+    # diesen Schwellwert auswerten, damit kurze Lastspitzen die Sperre nicht
     # sofort aufheben. Register 40051 wird dann aktiv auf 0
     # (SmartMeter-Nullregelung) zurückgesetzt, damit die geräteeigene
     # Automatik den Hausverbrauch wieder aus dem Speicher decken kann.
@@ -1223,6 +1228,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.data["grid_serving_active"] = self._grid_serving_active
             self.async_set_updated_data(self.data)
 
+    def _cycles_confirmed(self, counter_attr: str, condition: bool) -> bool:
+        """Zyklen-Hysterese für Vergleiche gegen
+        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT: `condition` gilt erst als
+        bestätigt (True), nachdem sie in PV_SURPLUS_HYSTERESIS_CYCLES
+        aufeinanderfolgenden Aufrufen True war. Ein einzelner False-Wert
+        setzt den in `counter_attr` (self-Attribut) gehaltenen Zähler sofort
+        zurück, damit kurze Lastspitzen/Messausreißer am Smart Meter keinen
+        Zustandswechsel auslösen - siehe const.PV_SURPLUS_HYSTERESIS_CYCLES
+        sowie anforderung.yaml, REQ-TIMED-SOC-CHARGE/REQ-GRID-SERVING-CHARGE.
+        Von allen vier Stellen genutzt, die SMARTMETER_PV_SURPLUS_THRESHOLD_
+        WATT auswerten, damit sie sich einheitlich verhalten.
+        """
+        count = getattr(self, counter_attr) + 1 if condition else 0
+        setattr(self, counter_attr, count)
+        return count >= PV_SURPLUS_HYSTERESIS_CYCLES
+
     @staticmethod
     def _is_time_in_window(
         now: dt_time, start: dt_time | None, end: dt_time | None
@@ -1362,10 +1383,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            "Aktive Monate"-Schalter unten -, mit gesetzter "Max.
            Netzladeleistung", mit gesetztem "Min. SOC" (siehe unten) UND
            ohne PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die
-           Schleife mit einem echten Ladesollwert übernehmen. Ein
-           PV-Überschuss beendet die Netzladung dabei auch mitten im
-           Zeitfenster, sobald er beim nächsten Poll-Zyklus erkannt wird -
-           nicht erst am Fensterende.
+           Schleife mit einem echten Ladesollwert übernehmen. Der
+           PV-Überschuss-Check läuft dabei über dieselbe Zyklen-Hysterese
+           wie die drei anderen Stellen, die diesen Schwellwert auswerten
+           (self._cycles_confirmed, self._timed_charge_pv_surplus_cycles,
+           PV_SURPLUS_HYSTERESIS_CYCLES): erst wenn der Smart Meter so viele
+           Zyklen in Folge PV-Überschuss über dem Schwellwert meldet, beendet
+           das die Netzladung - auch mitten im Zeitfenster, nicht erst am
+           Fensterende. Ein einzelner Wert unter dem Schwellwert setzt die
+           Bestätigung sofort zurück.
 
            "Min. SOC" (self._timed_charge_min_soc, NumberEntity analog zu
            "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
@@ -1393,29 +1419,38 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
               Zeitfenster eingetreten): Sobald die tatsächliche Ladeleistung
               des SAX (negativer Anteil von data["storage_power_active"],
               siehe sensor.py _negative_part("storage_power_active"), "SAX
-              Ladeleistung") SMARTMETER_PV_SURPLUS_THRESHOLD_WATT erreicht
-              oder überschreitet, wechselt der Speicher aktiv in den
+              Ladeleistung") SMARTMETER_PV_SURPLUS_THRESHOLD_WATT so viele
+              Zyklen in Folge erreicht oder überschreitet wie
+              PV_SURPLUS_HYSTERESIS_CYCLES vorgibt
+              (self._grid_serving_charge_confirm_cycles, dieselbe
+              Zyklen-Hysterese wie bei den anderen drei Stellen, die diesen
+              Schwellwert auswerten), wechselt der Speicher aktiv in den
               Sollwertvorgabemodus (Register 40051 = 1) UND die Ladung wird
               sofort auf 0 % gestoppt (async_start_sun_charge(0) - macht
-              beides in einem Aufruf). Danach wird einmalig
-              self._grid_serving_wait_cycles = 2 gesetzt: die folgenden zwei
-              Aufrufe von _async_enforce_grid_charge tun nichts weiter außer
-              den Zähler herunterzuzählen, damit der Moduswechsel/Stopp sich
-              setzen kann, bevor Schritt b neu bewertet wird.
+              beides in einem Aufruf). Danach wird zusätzlich einmalig
+              self._grid_serving_wait_cycles = PV_SURPLUS_HYSTERESIS_CYCLES
+              gesetzt: die folgenden Aufrufe von _async_enforce_grid_charge
+              tun in dieser Anzahl nichts weiter außer den Zähler
+              herunterzuzählen, damit der Moduswechsel/Stopp sich setzen
+              kann, bevor Schritt b neu bewertet wird.
            b. Erst wenn der Sollwertvorgabemodus aktiv ist (Schritt a
               ausgelöst UND die Wartezyklen abgelaufen sind) wird geprüft, ob
               die am Smart Meter gemessene Netzeinspeisung
-              (data["smartmeter_power"]) unter
-              SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gefallen ist. Ist das der
-              Fall, wird der Speicher aktiv zurück in die SmartMeter-
-              Nullregelung gesetzt (async_stop_sun_charge, Register 40051 =
-              0) - danach kann Schritt a beim nächsten Anstieg der
-              SAX-Ladeleistung erneut greifen. Bleibt die Einspeisung
-              weiterhin bei mindestens SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
-              (oder fehlt der Messwert), bleibt die Ladung bewusst bei 0 %
-              gehalten - der Speicher wird an dieser Stelle erst wieder
-              geladen, sobald ein Zeitpunkt mit gefallener Einspeisung
-              erreicht ist, das ist der eigentliche Zweck der Funktion.
+              (data["smartmeter_power"]) so viele Zyklen in Folge unter
+              SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gefallen ist
+              (self._grid_serving_release_confirm_cycles, dieselbe
+              Zyklen-Hysterese). Ist das der Fall, wird der Speicher aktiv
+              zurück in die SmartMeter-Nullregelung gesetzt
+              (async_stop_sun_charge, Register 40051 = 0) - danach kann
+              Schritt a beim nächsten Anstieg der SAX-Ladeleistung erneut
+              greifen. Bleibt die Einspeisung weiterhin bei mindestens
+              SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (oder fehlt der Messwert,
+              oder reißt die Unterschreitung zwischendurch wieder ab - ein
+              einzelner Wert über dem Schwellwert setzt die Bestätigung
+              sofort zurück), bleibt die Ladung bewusst bei 0 % gehalten -
+              der Speicher wird an dieser Stelle erst wieder geladen, sobald
+              ein Zeitpunkt mit dauerhaft gefallener Einspeisung erreicht
+              ist, das ist der eigentliche Zweck der Funktion.
 
            Beide Prüfungen sind exklusiv (a nur ohne, b nur mit aktivem
            Sollwertvorgabemodus) - siehe _async_step_grid_serving.
@@ -1444,9 +1479,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             self._timed_charge_armed = True
         smartmeter_power = data.get("smartmeter_power")
-        pv_surplus_active = (
+        pv_surplus_raw = (
             smartmeter_power is not None
             and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+        )
+        pv_surplus_active = self._cycles_confirmed(
+            "_timed_charge_pv_surplus_cycles", pv_surplus_raw
         )
         now = dt_util.now()
         now_time = now.time()
@@ -1475,6 +1513,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not grid_serving_eligible:
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
+            self._grid_serving_charge_confirm_cycles = 0
+            self._grid_serving_release_confirm_cycles = 0
 
         max_soc_clamped_now = False
         if soc_reached:
@@ -1524,15 +1564,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Smart Meter als Freigabe-Trigger auswerten, mit
                 # Zyklen-Hysterese gegen kurze Lastspitzen.
                 smartmeter_power = data.get("smartmeter_power")
-                grid_import_active = (
+                grid_import_raw = (
                     smartmeter_power is not None
                     and smartmeter_power < -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
                 )
-                if grid_import_active:
-                    self._max_soc_grid_import_wait_cycles += 1
-                else:
-                    self._max_soc_grid_import_wait_cycles = 0
-                if self._max_soc_grid_import_wait_cycles >= 2:
+                grid_import_confirmed = self._cycles_confirmed(
+                    "_max_soc_grid_import_wait_cycles", grid_import_raw
+                )
+                if grid_import_confirmed:
                     if self.sun_charge_active:
                         await self.async_stop_sun_charge()
                     self._max_soc_grid_import_wait_cycles = 0
@@ -1570,25 +1609,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tatsächliche Ladeleistung des SAX (negativer Anteil von
         data["storage_power_active"], siehe sensor.py
         _negative_part("storage_power_active")) gegen
-        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - erst wenn der Speicher selbst
-        (über die geräteeigene SmartMeter-Nullregelung) bereits mit
-        mindestens diesem Wert lädt, übernimmt die Software aktiv die
+        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, mit derselben
+        Zyklen-Hysterese wie die drei anderen Stellen, die diesen
+        Schwellwert auswerten (self._cycles_confirmed,
+        PV_SURPLUS_HYSTERESIS_CYCLES) - erst wenn der Speicher selbst (über
+        die geräteeigene SmartMeter-Nullregelung) so viele Zyklen in Folge
+        mit mindestens diesem Wert lädt, übernimmt die Software aktiv die
         Kontrolle (Sollwertvorgabemodus + Ladung auf 0 % gestoppt in einem
-        Aufruf, async_start_sun_charge(0)) und wartet danach einmalig zwei
-        Aufrufe dieser Methode ab (self._grid_serving_wait_cycles), bevor
-        Schritt b greift - Register 40051 und der gestoppte Sollwert sollen
-        sich setzen können, bevor erneut ausgewertet wird.
+        Aufruf, async_start_sun_charge(0)) und wartet danach zusätzlich
+        einmalig PV_SURPLUS_HYSTERESIS_CYCLES Aufrufe dieser Methode ab
+        (self._grid_serving_wait_cycles), bevor Schritt b greift - Register
+        40051 und der gestoppte Sollwert sollen sich setzen können, bevor
+        erneut ausgewertet wird.
 
         Schritt b (mit aktivem Sollwertvorgabemodus, nach Ablauf der
         Wartezyklen): Prüft die am Smart Meter gemessene Netzeinspeisung
-        (data["smartmeter_power"]) gegen denselben Schwellwert. Erst wenn
-        sie unter den Schwellwert fällt, wird der Speicher aktiv zurück in
-        die SmartMeter-Nullregelung gesetzt (async_stop_sun_charge). Bleibt
-        die Einspeisung mindestens beim Schwellwert (oder ist der Messwert
-        gerade nicht bekannt), bleibt die Ladung bewusst bei 0 % gehalten -
-        das ist der eigentliche Zweck der Funktion: der Speicher soll erst
-        wieder laden, sobald ein Zeitpunkt mit gefallener Einspeisung
-        erreicht ist, nicht fortlaufend mit dem Überschuss mitlaufen.
+        (data["smartmeter_power"]) gegen denselben Schwellwert, ebenfalls
+        mit dieser Zyklen-Hysterese. Erst wenn sie so viele Zyklen in Folge
+        unter den Schwellwert fällt, wird der Speicher aktiv zurück in die
+        SmartMeter-Nullregelung gesetzt (async_stop_sun_charge). Bleibt die
+        Einspeisung mindestens beim Schwellwert (oder ist der Messwert
+        gerade nicht bekannt, oder reißt die Unterschreitung zwischendurch
+        wieder ab), bleibt die Ladung bewusst bei 0 % gehalten - das ist der
+        eigentliche Zweck der Funktion: der Speicher soll erst wieder laden,
+        sobald ein Zeitpunkt mit gefallener Einspeisung erreicht ist, nicht
+        fortlaufend mit dem Überschuss mitlaufen.
         """
         if not self._grid_serving_setpoint_active:
             storage_power_active = data.get("storage_power_active")
@@ -1597,10 +1642,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if storage_power_active is not None and storage_power_active < 0
                 else 0
             )
-            if sax_charge_power >= SMARTMETER_PV_SURPLUS_THRESHOLD_WATT:
+            charge_confirmed = self._cycles_confirmed(
+                "_grid_serving_charge_confirm_cycles",
+                sax_charge_power >= SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
+            )
+            if charge_confirmed:
                 await self.async_start_sun_charge(0)
                 self._grid_serving_setpoint_active = True
-                self._grid_serving_wait_cycles = 2
+                self._grid_serving_wait_cycles = PV_SURPLUS_HYSTERESIS_CYCLES
+                self._grid_serving_charge_confirm_cycles = 0
             return self._grid_serving_setpoint_active
 
         if self._grid_serving_wait_cycles > 0:
@@ -1608,13 +1658,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return True
 
         smartmeter_power = data.get("smartmeter_power")
-        if (
+        release_confirmed = self._cycles_confirmed(
+            "_grid_serving_release_confirm_cycles",
             smartmeter_power is not None
-            and smartmeter_power < SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
-        ):
+            and smartmeter_power < SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
+        )
+        if release_confirmed:
             if self.sun_charge_active:
                 await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
+            self._grid_serving_release_confirm_cycles = 0
             return False
 
         return True

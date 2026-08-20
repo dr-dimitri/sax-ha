@@ -44,6 +44,8 @@
 # REQ-MANUAL-DISCHARGE            verworfen  Manuelle Entladung mit fester Leistung - vom Hersteller nicht vorgesehen
 # REQ-LOW-INTERVAL-REGISTERS      done       Statische SunSpec-Register seltener abfragen als Messwerte
 # REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
+# REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
+# REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # ==============================================================================
 
 # ==============================================================================
@@ -883,3 +885,82 @@ requirement_high_interval_registers:
     - "tests/test_integration_live.py (Storage-On/Off-Schalter, echter
        TCP-Read/Write-Zyklus) bleibt grün - der Schalter-Zustand spiegelt
        nach dem Schreiben sofort den neuen Wert."
+
+# ==============================================================================
+# ANFORDERUNG: ENERGY-DASHBOARD-KOMPATIBILITÄT
+# ==============================================================================
+requirement_energy_dashboard_compatibility:
+  id: REQ-ENERGY-DASHBOARD
+  title: "Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard"
+  status: done
+  description: >
+    Der SAX Speicher besitzt keine Energiezähler-Register, nur
+    Momentanleistung (storage_power_active, SunSpec-Modus). Ohne einen
+    monoton steigenden kWh-Sensor (state_class total_increasing) kann der
+    Speicher nicht als Batterie-Ladung/-Entladung im Home-Assistant-Energy-
+    Dashboard ausgewählt werden.
+
+    SaxPowerCoordinator akkumuliert deshalb selbst zwei laufende kWh-Zähler
+    (_energy_charged_kwh, _energy_discharged_kwh) aus storage_power_active
+    per gehaltener Riemann-Summe (Wert seit dem letzten
+    _async_update_data-Tick × verstrichene Zeit,
+    SaxPowerCoordinator._accumulate_energy) - kein zusätzlicher
+    Konfigurationsaufwand (z. B. ein manuell anzulegender
+    "Integration"-Helfer) für den Nutzer nötig.
+
+    Beide Zähler starten als None ("nicht initialisiert") und akkumulieren
+    erst, sobald sensor.SaxPowerEnergySensor (RestoreEntity) beim Start per
+    coordinator.restore_energy_charged/restore_energy_discharged einen
+    zuvor gespeicherten Zustand (oder 0.0 beim allerersten Start)
+    eingespielt hat - das verhindert, dass der erste, bereits vor dem
+    Plattform-Setup laufende Coordinator-Update-Zyklus einen später
+    restaurierten Zählerstand überschreibt. Ist storage_power_active
+    zwischenzeitlich unbekannt (SunSpec-Modus nicht erreichbar, siehe
+    REQ-EXTENDED-MODE-RESILIENCE), wird die betroffene Zeitspanne
+    übersprungen statt mit 0 W verbucht, damit nach Wiederkehr kein
+    Nachhol-Sprung entsteht.
+  requirements:
+    - "Zwei neue Sensoren 'energy_charged'/'energy_discharged'
+       (device_class energy, state_class total_increasing, Einheit kWh),
+       über Neustarts hinweg per RestoreEntity persistiert."
+    - "Kein Akkumulieren vor Abschluss des Restores und während
+       storage_power_active unbekannt ist."
+    - "Negative storage_power_active (Ladung) fließt ausschließlich in
+       energy_charged, positive (Entladung) ausschließlich in
+       energy_discharged."
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt ab: kein Akkumulieren vor Restore,
+       Akkumulation über mehrere Ticks mit bekannter Leistung, Vorzeichen-
+       Split zwischen Lade-/Entlade-Zähler, kein Nachhol-Sprung nach einer
+       Zeitspanne mit unbekannter Leistung, Fortsetzung ab einem
+       restaurierten Zählerstand."
+    - "Beide Sensoren lassen sich in der Home-Assistant-UI im
+       Energy-Dashboard als Batterie-Ladung/-Entladung auswählen."
+
+# ==============================================================================
+# ANFORDERUNG: DIAGNOSEFUNKTION
+# ==============================================================================
+requirement_diagnostics:
+  id: REQ-DIAGNOSTICS
+  title: "Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)"
+  status: done
+  description: >
+    diagnostics.py implementiert async_get_config_entry_diagnostics - Home
+    Assistant bietet dadurch automatisch "Diagnose herunterladen" auf der
+    Geräteseite an (keine eigene Registrierung nötig). Für Support-/
+    Bugreport-Zwecke werden neben den redigierten Config-Entry-Daten auch
+    coordinator.data (alle aktuellen Messwerte) sowie der relevante interne
+    Coordinator-Zustand exportiert (Max-SOC-Sperre, Max. Netzladeleistung,
+    Netzladung/SunSpec-Netzladung aktiv, zeitgesteuertes/netzdienliches
+    Laden, SunSpec-Modus-Erreichbarkeit) - reine Aggregation bereits
+    vorhandener Coordinator-Properties, keine neue Business-Logik.
+
+    Die IP-Adresse (CONF_HOST) ist die einzige potenziell identifizierende
+    Information in entry.data (lokales Modbus TCP ohne Cloud-Auth, siehe
+    AGENTS.md "Security considerations") und wird über
+    homeassistant.components.diagnostics.async_redact_data redigiert; Port
+    und Slave-IDs sind keine Geheimnisse und bleiben sichtbar.
+  acceptance_criteria:
+    - "tests/test_diagnostics.py deckt ab: CONF_HOST ist im Ergebnis
+       redigiert, Port bleibt unverändert sichtbar, coordinator_data und
+       die relevanten state-Felder sind befüllt."

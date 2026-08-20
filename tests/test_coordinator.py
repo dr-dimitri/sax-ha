@@ -2370,3 +2370,168 @@ async def test_month_restore_does_not_validate_overlap(hass) -> None:
 
     assert 6 in coordinator.timed_charge_months
     assert 6 in coordinator.grid_serving_months
+
+
+# -- Energy-Dashboard-Kompatibilität (REQ-ENERGY-DASHBOARD) ------------------
+
+
+def test_accumulate_energy_stays_none_before_restore(hass) -> None:
+    """Ohne vorherigen restore_energy_charged/-discharged-Aufruf (d. h. vor
+    Abschluss des RestoreEntity-Restores, siehe sensor.SaxPowerEnergySensor)
+    bleibt der Zählerstand None, selbst über mehrere Ticks mit bekannter
+    Leistung hinweg - siehe SaxPowerCoordinator._accumulate_energy."""
+    coordinator = _make_coordinator(hass, _make_client())
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {"storage_power_active": -1000}
+        coordinator._accumulate_energy(data)
+    assert data["energy_charged"] is None
+    assert data["energy_discharged"] is None
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": -1000}
+        coordinator._accumulate_energy(data)
+    assert data["energy_charged"] is None
+    assert data["energy_discharged"] is None
+
+
+def test_accumulate_energy_first_tick_establishes_baseline_only(hass) -> None:
+    """Der erste Tick nach dem Restore darf noch keine (unbekannte)
+    Vor-Leistung verbuchen, sondern nur die Zeitbasis für den nächsten Tick
+    setzen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {"storage_power_active": -1000}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 0.0
+    assert data["energy_discharged"] == 0.0
+
+
+def test_accumulate_energy_charging_splits_into_charged_kwh(hass) -> None:
+    """1000 W Ladeleistung (storage_power_active negativ) über 3600s ergibt
+    1 kWh im Lade-Zähler, der Entlade-Zähler bleibt bei 0."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": -1000}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 1.0
+    assert data["energy_discharged"] == 0.0
+
+
+def test_accumulate_energy_discharging_splits_into_discharged_kwh(hass) -> None:
+    """Analog zu test_accumulate_energy_charging_splits_into_charged_kwh für
+    positive Leistung (Entladung)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": 2000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=2800.0
+    ):
+        data = {"storage_power_active": 2000}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 0.0
+    assert data["energy_discharged"] == 1.0
+
+
+def test_accumulate_energy_skips_interval_when_power_unknown(hass) -> None:
+    """Wird der SunSpec-Modus-Block zwischenzeitlich nicht erreichbar
+    (storage_power_active None, siehe REQ-EXTENDED-MODE-RESILIENCE), darf
+    weder die Lücke selbst noch die Zeit davor nach Wiederkehr fälschlich
+    als Energie verbucht werden - _energy_last_ts wird trotzdem
+    fortgeschrieben, damit kein "Nachhol"-Sprung entsteht."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    # SunSpec-Modus fällt für eine lange Zeitspanne aus.
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": None})
+
+    # Wieder erreichbar, kurz danach.
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100010.0
+    ):
+        data = {"storage_power_active": -1000}
+        coordinator._accumulate_energy(data)
+
+    # Nur die 10s seit der Wiederkehr fließen ein (1000W * 10/3600/1000 kWh),
+    # nicht die ~99000s Ausfallzeit davor.
+    assert data["energy_charged"] == round(1000 * (10 / 3600) / 1000, 3)
+
+
+def test_restore_energy_charged_and_discharged_continue_from_saved_value(
+    hass,
+) -> None:
+    """restore_energy_charged/-discharged setzen einen zuvor gespeicherten
+    Zählerstand (siehe sensor.SaxPowerEnergySensor.async_added_to_hass) -
+    nachfolgende Akkumulation baut darauf auf, statt bei 0 neu zu starten."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(12.5)
+    coordinator.restore_energy_discharged(7.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": -1000}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 13.5
+    assert data["energy_discharged"] == 7.0
+
+
+def test_restore_energy_clamps_negative_values(hass) -> None:
+    """Ein (eigentlich nicht erwarteter) negativer restaurierter Zustand
+    wird auf 0 geklemmt statt übernommen zu werden, analog zu _clamp_int an
+    anderen Restore-Stellen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(-5.0)
+    coordinator.restore_energy_discharged(-3.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {"storage_power_active": 0}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 0.0
+    assert data["energy_discharged"] == 0.0

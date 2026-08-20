@@ -1198,13 +1198,16 @@ async def test_set_timed_charge_window_succeeds_for_non_overlapping_target(
 # -- Netzdienliches Laden: Ladeverhalten -------------------------------------
 
 
-async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window(
+async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_charge(
     hass,
 ) -> None:
-    """Netzdienliches Laden startet nur MIT PV-Überschuss (nie aus dem
-    Netz) - die genau umgekehrte Bedingung zum zeitgesteuerten Laden. Der
-    Sollwert wird dabei auf den tatsächlich verfügbaren Überschuss gedeckelt,
-    nicht auf "Max. Netzladeleistung", falls dieser kleiner ist."""
+    """Schritt a: Erst wenn der Speicher selbst (über die geräteeigene
+    SmartMeter-Nullregelung) bereits mit mindestens
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT lädt (negativer Anteil von
+    data["storage_power_active"]), übernimmt netzdienliches Laden aktiv die
+    Kontrolle: Wechsel in den Sollwertvorgabemodus UND Ladung sofort auf
+    0 % gestoppt, in einem Aufruf (async_start_sun_charge(0)), danach
+    zweimal warten (_grid_serving_wait_cycles)."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1215,12 +1218,13 @@ async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window
         "soc": 50,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
-        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,  # 500 W
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)  # deutlich über dem Überschuss
+    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -1230,26 +1234,28 @@ async def test_enforce_grid_charge_starts_grid_serving_with_pv_surplus_in_window
         assert coordinator.grid_serving_active is True
         assert coordinator._timed_charge_active is False
         assert coordinator.sun_charge_active is True
+        assert coordinator._grid_serving_wait_cycles == 2
         client.write_register.assert_any_await(
             address=REG_SUN_IC_CONTROL_MODE,
             value=SUN_IC_CONTROL_MODE_SETPOINT,
             device_id=100,
         )
-        # -500 W (gedeckelt auf den Überschuss, nicht auf "Max.
-        # Netzladeleistung") / 4600 W Referenz * 100 = -10.869...%, skaliert
-        # mit sunssf -2 -> -1087.
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=to_unsigned16(-1087),
+            value=0,
             device_id=100,
         )
     finally:
         await coordinator.async_stop_sun_charge()
 
 
-async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -> None:
-    """Übersteigt der PV-Überschuss "Max. Netzladeleistung", wird trotzdem nur
-    mit "Max. Netzladeleistung" geladen."""
+async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -> None:
+    """Nach dem Auslösen von Schritt a wird Schritt b (Rückkehr in die
+    SmartMeter-Nullregelung bei Netzeinspeisung unter dem Schwellwert) für
+    die nächsten zwei Aufrufe von _async_enforce_grid_charge unterdrückt,
+    selbst wenn die Netzeinspeisung in der Zwischenzeit bereits unter den
+    Schwellwert fällt - erst der dritte Aufruf nach dem Trigger wertet
+    Schritt b wieder aus."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1260,42 +1266,155 @@ async def test_enforce_grid_charge_grid_serving_caps_at_max_charge_power(hass) -
         "soc": 50,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
-        "smartmeter_power": 4000,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(1000)
+    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
             await coordinator.async_set_grid_serving_enabled(True)
-        await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1)
+            assert coordinator._grid_serving_setpoint_active is True
+            assert coordinator._grid_serving_wait_cycles == 2
 
-        assert coordinator.grid_serving_active is True
-        # -1000 W / 4600 W Referenz * 100 = -21.739...%, skaliert mit
-        # sunssf -2 -> -2174.
+            # Netzeinspeisung fällt bereits während der Wartezeit unter den
+            # Schwellwert - darf noch nicht zur Rückkehr in die
+            # Nullregelung führen.
+            coordinator.data["smartmeter_power"] = 0
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._grid_serving_wait_cycles == 1
+            assert coordinator.grid_serving_active is True
+            assert coordinator.sun_charge_active is True
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._grid_serving_wait_cycles == 0
+            assert coordinator.grid_serving_active is True
+            assert coordinator.sun_charge_active is True
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is False
+            assert coordinator.sun_charge_active is False
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high(
+    hass,
+) -> None:
+    """Solange die Netzeinspeisung nach Ablauf der Wartezyklen weiterhin
+    mindestens beim Schwellwert liegt, bleibt die Ladung bewusst bei 0 %
+    gehalten - der Speicher lädt erst wieder, sobald ein Zeitpunkt mit
+    gefallener Einspeisung erreicht ist, statt (wie vor dieser Änderung)
+    fortlaufend mit dem gemessenen Überschuss weiterzuladen."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await asyncio.sleep(0.1)
+            write_count_after_trigger = client.write_register.await_count
+
+            for _ in range(3):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+            assert coordinator.grid_serving_active is True
+            assert coordinator.sun_charge_active is True
+            # Solange sich am Zustand nichts ändert, schreibt Schritt b
+            # selbst nichts erneut - nur der ohnehin laufende periodische
+            # Refresh (weit außerhalb der 0.1s Sleep-Zeit hier) würde den
+            # gehaltenen 0-%-Sollwert erneut schreiben.
+            assert client.write_register.await_count == write_count_after_trigger
+            client.write_register.assert_any_await(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                value=0,
+                device_id=100,
+            )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_threshold(
+    hass,
+) -> None:
+    """Schritt b: Ist der Sollwertvorgabemodus aktiv (Wartezyklen bereits
+    abgelaufen) und fällt die Netzeinspeisung unter den Schwellwert, wird
+    der Speicher aktiv zurück in die SmartMeter-Nullregelung gesetzt."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - 1,
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._grid_serving_setpoint_active = True
+            coordinator._grid_serving_wait_cycles = 0
+            await coordinator.async_start_sun_charge(0)
+            await asyncio.sleep(0.1)
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is False
+        assert coordinator.sun_charge_active is False
+        assert coordinator._grid_serving_setpoint_active is False
         client.write_register.assert_awaited_with(
-            address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=to_unsigned16(-2174),
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
             device_id=100,
         )
     finally:
         await coordinator.async_stop_sun_charge()
 
 
-async def test_enforce_grid_charge_grid_serving_inactive_without_pv_surplus(
+async def test_enforce_grid_charge_grid_serving_inactive_without_sax_charge_power(
     hass,
 ) -> None:
-    """Netzdienliches Laden darf innerhalb seines Zeitfensters nicht starten,
-    solange kein PV-Überschuss über dem Schwellwert gemessen wird - das
-    Feature soll nie aus dem Netz laden."""
+    """Netzdienliches Laden darf innerhalb seines Zeitfensters nicht in den
+    Sollwertvorgabemodus wechseln, solange der Speicher selbst (SmartMeter-
+    Nullregelung) noch nicht mit mindestens dem Schwellwert lädt."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.data = {
         "soc": 50,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
-        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - 1),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -1310,15 +1429,19 @@ async def test_enforce_grid_charge_grid_serving_inactive_without_pv_surplus(
     assert coordinator.sun_charge_active is False
 
 
-async def test_enforce_grid_charge_grid_serving_inactive_when_smartmeter_power_missing(
+async def test_enforce_grid_charge_grid_serving_inactive_when_storage_power_missing(
     hass,
 ) -> None:
-    """Ohne bekannten Smart-Meter-Wert kann nicht sichergestellt werden, dass
-    nicht aus dem Netz geladen wird - im Gegensatz zum zeitgesteuerten Laden
-    (das in diesem Fall unbeeinflusst weiterläuft) darf netzdienliches Laden
-    hier NICHT starten."""
+    """Ohne bekannte tatsächliche Ladeleistung des SAX (z. B. weil der
+    SunSpec-Modus gerade nicht erreichbar ist) kann Schritt a nicht
+    auslösen - der Speicher bleibt in der SmartMeter-Nullregelung."""
     coordinator = _make_coordinator(hass, _make_client())
-    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+    }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
@@ -1330,6 +1453,42 @@ async def test_enforce_grid_charge_grid_serving_inactive_when_smartmeter_power_m
 
     assert coordinator.grid_serving_active is False
     assert coordinator.sun_charge_active is False
+
+
+async def test_enforce_grid_charge_grid_serving_holds_when_feed_in_unknown(
+    hass,
+) -> None:
+    """Ist der Sollwertvorgabemodus bereits aktiv und fehlt anschließend der
+    Smart-Meter-Messwert (z. B. SunSpec-Modus vorübergehend nicht
+    erreichbar), darf Schritt b nicht ungeprüft in die Nullregelung
+    zurückschalten - ohne bekannten Wert bleibt die Ladung gehalten."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_max_charge_power(3000)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._grid_serving_setpoint_active = True
+            coordinator._grid_serving_wait_cycles = 0
+            await coordinator.async_start_sun_charge(0)
+            await asyncio.sleep(0.1)
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
 
 
 async def test_enforce_grid_charge_grid_serving_inactive_outside_window(hass) -> None:
@@ -1339,6 +1498,7 @@ async def test_enforce_grid_charge_grid_serving_inactive_outside_window(hass) ->
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -1360,6 +1520,7 @@ async def test_enforce_grid_charge_grid_serving_inactive_when_disabled(hass) -> 
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -1390,6 +1551,7 @@ async def test_enforce_grid_charge_max_soc_lock_takes_priority_over_grid_serving
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -1418,9 +1580,13 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
     """Selbst wenn beide Zeitfenster (z. B. durch einen über ein Update
     restaurierten Altzustand, unter Umgehung der Setter-Validierung)
     überlappend gespeichert sind, können zeitgesteuertes und netzdienliches
-    Laden nie gleichzeitig aktiv werden: Sie verlangen exakt entgegengesetzte
-    PV-Überschuss-Bedingungen (kein Überschuss vs. Überschuss), was sich
-    gegenseitig ausschließt, unabhängig vom Zeitfenster."""
+    Laden nie gleichzeitig aktiv werden: grid_serving_eligible verlangt
+    explizit "not timed_should_charge" (siehe _async_enforce_grid_charge) -
+    solange zeitgesteuertes Laden mit den gegebenen Bedingungen (kein
+    PV-Überschuss) aktiv ist, kann netzdienliches Laden für denselben Zyklus
+    nicht greifen; erst wenn PV-Überschuss vorliegt, wird zeitgesteuertes
+    Laden selbst inaktiv und netzdienliches Laden kann - bei ausreichender
+    tatsächlicher SAX-Ladeleistung - übernehmen."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1448,11 +1614,15 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
             assert coordinator._timed_charge_active is True
             assert coordinator.grid_serving_active is False
 
-            # PV-Überschuss -> nur netzdienliches Laden kann greifen.
+            # PV-Überschuss UND ausreichende tatsächliche SAX-Ladeleistung ->
+            # nur netzdienliches Laden kann greifen.
             await coordinator._async_enforce_grid_charge(
                 {
                     **coordinator.data,
                     "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+                    "storage_power_active": -(
+                        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
+                    ),
                 }
             )
             await asyncio.sleep(0.1)
@@ -1551,6 +1721,7 @@ async def test_enforce_grid_charge_grid_serving_respects_active_months(hass) -> 
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(11, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -1579,6 +1750,7 @@ async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(11, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))

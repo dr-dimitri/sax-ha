@@ -277,6 +277,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_end: dt_time | None = None
         self._grid_serving_active = False
         self._grid_serving_months: set[int] = set(ALL_MONTHS)
+        self._grid_serving_setpoint_active = False
+        self._grid_serving_wait_cycles = 0
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -1176,39 +1178,54 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            timed_should_charge).
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat, mit gesetzter "Max. Netzladeleistung" UND
-           mit PV-Überschuss über
-           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) kann parallel zu Schritt 2
-           ausgewertet werden, da beide Bedingungen sich bereits über
-           pv_surplus_active gegenseitig ausschließen (zeitgesteuertes Laden
-           verlangt KEINEN, netzdienliches Laden verlangt EINEN
-           PV-Überschuss) - die genau umgekehrte PV-Bedingung zum
-           zeitgesteuerten Laden. Das Feature lädt bewusst NIE aus dem Netz,
-           sondern ausschließlich mit dem gerade am Smart Meter gemessenen
-           PV-Überschuss, auf "Max. Netzladeleistung" gedeckelt
-           (min(max_charge_power, smartmeter_power)) - sinkt der Überschuss,
-           sinkt der Sollwert im selben Poll-Zyklus mit, es wird also nie
-           mehr geladen als gerade an Überschuss verfügbar ist. Die
+           nicht bereits durch zeitgesteuertes Laden beansprucht - die
            Zeitfenster von zeitgesteuertem und netzdienlichem Laden dürfen
-           sich zusätzlich nicht überschneiden (siehe
-           _windows_overlap_with_months/_notify_time_window_overlap) - das
-           ist eine reine Konfigurationsregel für den Anwender, keine
-           Voraussetzung für sicheren Betrieb.
-        4. Andernfalls wird Register 40051 zurück auf 0 (SmartMeter-
-           Nullregelung) gesetzt.
+           sich zusätzlich nicht überschneiden, siehe
+           _windows_overlap_with_months/_notify_time_window_overlap) läuft
+           als eigene Zustandsmaschine über _async_step_grid_serving, NICHT
+           über einen aus dem Smart-Meter-Überschuss berechneten
+           Ladesollwert wie zuvor. Das Feature lädt bewusst NIE aktiv aus
+           dem Netz, sondern überlässt die eigentliche Ladung der
+           geräteeigenen SmartMeter-Nullregelung (Register 40051 = 0), die
+           von sich aus nur mit echtem PV-Überschuss lädt:
 
-        PV-Überschuss-Erkennung: data["smartmeter_power"] (Register 40072,
-        siehe REG_SUN_METER_POWER_ACTIVE_SUM) ist bereits derselbe,
-        vorzeichenrichtig umgerechnete Wert, der auch im "Smart Meter
-        Leistung"-Sensor angezeigt wird (sensor.py, _direct). Laut Anwender
-        bedeutet ein POSITIVER Anzeigewert Überschuss aus der
-        Dachphotovoltaik - der rohe Registerinhalt selbst kann davon
-        abweichende Vorzeichen haben (siehe apply_sunssf/to_signed16), daher
-        wird hier bewusst der bereits umgerechnete Anzeigewert ausgewertet,
-        nicht das Rohregister. Fehlt der Wert (z. B. SunSpec-Modus gerade
-        nicht erreichbar), blockiert das die Netzladung nicht, verhindert
-        aber netzdienliches Laden (siehe unten - ohne bekannten Überschuss
-        kann nicht sichergestellt werden, dass nicht aus dem Netz geladen
-        wird).
+           a. Solange KEIN Eingriff läuft (self._grid_serving_setpoint_active
+              False, Speicher in SmartMeter-Nullregelung oder gerade erst ins
+              Zeitfenster eingetreten): Sobald die tatsächliche Ladeleistung
+              des SAX (negativer Anteil von data["storage_power_active"],
+              siehe sensor.py _negative_part("storage_power_active"), "SAX
+              Ladeleistung") SMARTMETER_PV_SURPLUS_THRESHOLD_WATT erreicht
+              oder überschreitet, wechselt der Speicher aktiv in den
+              Sollwertvorgabemodus (Register 40051 = 1) UND die Ladung wird
+              sofort auf 0 % gestoppt (async_start_sun_charge(0) - macht
+              beides in einem Aufruf). Danach wird einmalig
+              self._grid_serving_wait_cycles = 2 gesetzt: die folgenden zwei
+              Aufrufe von _async_enforce_grid_charge tun nichts weiter außer
+              den Zähler herunterzuzählen, damit der Moduswechsel/Stopp sich
+              setzen kann, bevor Schritt b neu bewertet wird.
+           b. Erst wenn der Sollwertvorgabemodus aktiv ist (Schritt a
+              ausgelöst UND die Wartezyklen abgelaufen sind) wird geprüft, ob
+              die am Smart Meter gemessene Netzeinspeisung
+              (data["smartmeter_power"]) unter
+              SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gefallen ist. Ist das der
+              Fall, wird der Speicher aktiv zurück in die SmartMeter-
+              Nullregelung gesetzt (async_stop_sun_charge, Register 40051 =
+              0) - danach kann Schritt a beim nächsten Anstieg der
+              SAX-Ladeleistung erneut greifen. Bleibt die Einspeisung
+              weiterhin bei mindestens SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+              (oder fehlt der Messwert), bleibt die Ladung bewusst bei 0 %
+              gehalten - der Speicher wird an dieser Stelle erst wieder
+              geladen, sobald ein Zeitpunkt mit gefallener Einspeisung
+              erreicht ist, das ist der eigentliche Zweck der Funktion.
+
+           Beide Prüfungen sind exklusiv (a nur ohne, b nur mit aktivem
+           Sollwertvorgabemodus) - siehe _async_step_grid_serving.
+        4. Andernfalls (Feature deaktiviert, außerhalb Zeitfenster/Monat,
+           "Max. Netzladeleistung" nicht gesetzt oder SOC erreicht) wird
+           Register 40051 zurück auf 0 (SmartMeter-Nullregelung) gesetzt und
+           der Zustand der netzdienlichen Zustandsmaschine
+           (_grid_serving_setpoint_active/_grid_serving_wait_cycles)
+           zurückgesetzt.
 
         Aktive Monate: Zusätzlich zum Zeitfenster hat jedes Feature 12
         Monats-Schalter (switch.SaxPowerMonthSwitch, "aktiv im Januar" ...
@@ -1247,16 +1264,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._timed_charge_min_soc is not None
             and self._timed_charge_armed
         )
-        grid_serving_should_charge = (
-            not soc_reached
-            and pv_surplus_active
-            and self._grid_serving_enabled
+        grid_serving_window_active = (
+            self._grid_serving_enabled
             and now.month in self._grid_serving_months
             and self._is_time_in_window(
                 now_time, self._grid_serving_start, self._grid_serving_end
             )
             and self._max_charge_power is not None
         )
+        grid_serving_eligible = (
+            not soc_reached and grid_serving_window_active and not timed_should_charge
+        )
+        if not grid_serving_eligible:
+            self._grid_serving_setpoint_active = False
+            self._grid_serving_wait_cycles = 0
 
         max_soc_clamped_now = False
         if soc_reached:
@@ -1301,22 +1322,84 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # unbegrenzt, unabhängig von einem Zeitfenster.
                 await self.async_start_sun_charge(0)
                 max_soc_clamped_now = True
+            grid_serving_active_now = False
         else:
             self._max_soc_hold_is_window_bound = False
             if timed_should_charge:
                 await self.async_start_sun_charge(-self._max_charge_power)
-            elif grid_serving_should_charge:
-                # smartmeter_power ist hier != None (sonst wäre
-                # pv_surplus_active False) und >
-                # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT > 0.
-                charge_power = min(self._max_charge_power, round(smartmeter_power))
-                await self.async_start_sun_charge(-charge_power)
-            elif self.sun_charge_active:
-                await self.async_stop_sun_charge()
+                grid_serving_active_now = False
+            elif grid_serving_eligible:
+                grid_serving_active_now = await self._async_step_grid_serving(data)
+            else:
+                grid_serving_active_now = False
+                if self.sun_charge_active:
+                    await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
-        self._grid_serving_active = grid_serving_should_charge
+        self._grid_serving_active = grid_serving_active_now
         self._max_soc_clamped = max_soc_clamped_now
+
+    async def _async_step_grid_serving(self, data: dict[str, Any]) -> bool:
+        """Ein Schritt der unter _async_enforce_grid_charge (Punkt 3)
+        beschriebenen Zustandsmaschine für netzdienliches Laden. Nur
+        aufgerufen, wenn grid_serving_eligible dort bereits True ist (SOC
+        nicht erreicht, Zeitfenster/Monat/Schalter aktiv, kein Vorrang für
+        zeitgesteuertes Laden). Gibt zurück, ob netzdienliches Laden gerade
+        aktiv in den Sollwertvorgabemodus eingreift (entspricht
+        self._grid_serving_setpoint_active nach diesem Aufruf).
+
+        Schritt a (ohne aktiven Sollwertvorgabemodus): Prüft die
+        tatsächliche Ladeleistung des SAX (negativer Anteil von
+        data["storage_power_active"], siehe sensor.py
+        _negative_part("storage_power_active")) gegen
+        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - erst wenn der Speicher selbst
+        (über die geräteeigene SmartMeter-Nullregelung) bereits mit
+        mindestens diesem Wert lädt, übernimmt die Software aktiv die
+        Kontrolle (Sollwertvorgabemodus + Ladung auf 0 % gestoppt in einem
+        Aufruf, async_start_sun_charge(0)) und wartet danach einmalig zwei
+        Aufrufe dieser Methode ab (self._grid_serving_wait_cycles), bevor
+        Schritt b greift - Register 40051 und der gestoppte Sollwert sollen
+        sich setzen können, bevor erneut ausgewertet wird.
+
+        Schritt b (mit aktivem Sollwertvorgabemodus, nach Ablauf der
+        Wartezyklen): Prüft die am Smart Meter gemessene Netzeinspeisung
+        (data["smartmeter_power"]) gegen denselben Schwellwert. Erst wenn
+        sie unter den Schwellwert fällt, wird der Speicher aktiv zurück in
+        die SmartMeter-Nullregelung gesetzt (async_stop_sun_charge). Bleibt
+        die Einspeisung mindestens beim Schwellwert (oder ist der Messwert
+        gerade nicht bekannt), bleibt die Ladung bewusst bei 0 % gehalten -
+        das ist der eigentliche Zweck der Funktion: der Speicher soll erst
+        wieder laden, sobald ein Zeitpunkt mit gefallener Einspeisung
+        erreicht ist, nicht fortlaufend mit dem Überschuss mitlaufen.
+        """
+        if not self._grid_serving_setpoint_active:
+            storage_power_active = data.get("storage_power_active")
+            sax_charge_power = (
+                -storage_power_active
+                if storage_power_active is not None and storage_power_active < 0
+                else 0
+            )
+            if sax_charge_power >= SMARTMETER_PV_SURPLUS_THRESHOLD_WATT:
+                await self.async_start_sun_charge(0)
+                self._grid_serving_setpoint_active = True
+                self._grid_serving_wait_cycles = 2
+            return self._grid_serving_setpoint_active
+
+        if self._grid_serving_wait_cycles > 0:
+            self._grid_serving_wait_cycles -= 1
+            return True
+
+        smartmeter_power = data.get("smartmeter_power")
+        if (
+            smartmeter_power is not None
+            and smartmeter_power < SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+        ):
+            if self.sun_charge_active:
+                await self.async_stop_sun_charge()
+            self._grid_serving_setpoint_active = False
+            return False
+
+        return True
 
     # -- Netzdienliches Laden --------------------------------------------------
     # Eigenständiges, zum zeitgesteuerten Laden oben zeitlich exklusives

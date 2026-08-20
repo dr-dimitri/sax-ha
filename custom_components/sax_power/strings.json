@@ -53,6 +53,12 @@
       "charge_power": {
         "name": "Ladeleistung"
       },
+      "energy_charged": {
+        "name": "Geladene Energie (gesamt)"
+      },
+      "energy_discharged": {
+        "name": "Entladene Energie (gesamt)"
+      },
       "smartmeter_power": {
         "name": "Smart Meter Leistung (Basic Mode)"
       },

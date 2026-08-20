@@ -344,6 +344,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._battery_power_sf_raw = 0
         self._battery_soc_sf_raw = 0
         self._battery_cell_voltage_sf_raw = 0
+        # Energy-Dashboard-Kompatibilität (siehe anforderung.yaml,
+        # REQ-ENERGY-DASHBOARD): laufende kWh-Zähler, aus der Momentanleistung
+        # (storage_power_active) per gehaltener Riemann-Summe akkumuliert, da
+        # der Speicher selbst keine Energiezähler-Register besitzt. None =
+        # "noch nicht initialisiert" (wartet auf restore_energy_charged/
+        # restore_energy_discharged über RestoreEntity, siehe sensor.py) -
+        # unterscheidet sich damit bewusst von 0.0, siehe _accumulate_energy.
+        self._energy_charged_kwh: float | None = None
+        self._energy_discharged_kwh: float | None = None
+        self._energy_last_ts: float | None = None
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -359,11 +369,70 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         data = dict(await self._async_read_basic())
         data.update(await self._async_read_extended())
+        self._accumulate_energy(data)
 
         await self._async_enforce_grid_charge(data)
         data["timed_charge_active"] = self._timed_charge_active
         data["grid_serving_active"] = self._grid_serving_active
         return data
+
+    def _accumulate_energy(self, data: dict[str, Any]) -> None:
+        """Akkumuliert geladene/entladene Energie (kWh) aus der aktuell
+        bekannten storage_power_active (positiv = Entladung, negativ =
+        Ladung, siehe Kommentar bei _watts_to_ic_setpoint_raw) per gehaltener
+        Riemann-Summe (Wert seit dem letzten Tick × verstrichene Zeit) - der
+        Speicher selbst besitzt keine Energiezähler-Register (siehe
+        anforderung.yaml, REQ-ENERGY-DASHBOARD).
+
+        self._energy_last_ts wird unabhängig vom Akkumulieren selbst bei
+        jedem Tick als Baseline für den nächsten Aufruf aktualisiert. Beim
+        ersten Tick (last_ts is None) sowie während der SunSpec-Modus nicht
+        erreichbar ist (power is None, siehe REQ-EXTENDED-MODE-RESILIENCE)
+        wird dagegen NICHT akkumuliert, um weder eine unbekannte
+        Vor-Leistung noch eine Zeitspanne ohne Leistungswert fälschlich als
+        Energie zu verbuchen.
+
+        self._energy_charged_kwh/_energy_discharged_kwh bleiben zusätzlich
+        so lange None (statt bei 0.0 zu starten), bis sensor.
+        SaxPowerEnergySensor.async_added_to_hass einen zuvor gespeicherten
+        Zählerstand per restore_energy_charged/restore_energy_discharged
+        eingespielt hat - sonst würde der allererste Update-Lauf (passiert
+        in __init__.py bereits vor dem Plattform-Setup, also vor jedem
+        RestoreEntity-Restore) einen später restaurierten Zählerstand
+        überschreiben."""
+        now = monotonic()
+        power = data.get("storage_power_active")
+        last_ts = self._energy_last_ts
+        self._energy_last_ts = now
+
+        if last_ts is not None and power is not None:
+            elapsed_hours = (now - last_ts) / 3600
+            if self._energy_charged_kwh is not None:
+                charge_w = -power if power < 0 else 0
+                self._energy_charged_kwh += charge_w * elapsed_hours / 1000
+            if self._energy_discharged_kwh is not None:
+                discharge_w = power if power > 0 else 0
+                self._energy_discharged_kwh += discharge_w * elapsed_hours / 1000
+
+        data["energy_charged"] = (
+            round(self._energy_charged_kwh, 3)
+            if self._energy_charged_kwh is not None
+            else None
+        )
+        data["energy_discharged"] = (
+            round(self._energy_discharged_kwh, 3)
+            if self._energy_discharged_kwh is not None
+            else None
+        )
+
+    def restore_energy_charged(self, value_kwh: float) -> None:
+        """Initialisiert den Zähler für geladene Energie mit einem zuvor
+        gespeicherten Zustand (siehe sensor.SaxPowerEnergySensor)."""
+        self._energy_charged_kwh = max(0.0, value_kwh)
+
+    def restore_energy_discharged(self, value_kwh: float) -> None:
+        """Analog zu restore_energy_charged für entladene Energie."""
+        self._energy_discharged_kwh = max(0.0, value_kwh)
 
     async def _async_read_basic(self) -> dict[str, Any]:
         """Liest den NORMAL-Block (Basic Mode, Slave-ID self.slave_id) nur
@@ -435,6 +504,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = dict(await self._async_read_low_block())
         data.update(await self._async_read_high_block())
         return data
+
+    @property
+    def extended_available(self) -> bool:
+        """Ob der SunSpec-Modus-Block zuletzt erreichbar war (siehe
+        anforderung.yaml, REQ-EXTENDED-MODE-RESILIENCE) - u. a. für
+        diagnostics.py."""
+        return self._extended_available
 
     async def _async_read_high_block(self) -> dict[str, Any]:
         """Read+parse den HIGH-Block (dynamische Mess-/Zustandswerte) des

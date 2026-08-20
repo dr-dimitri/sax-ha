@@ -53,6 +53,12 @@
       "charge_power": {
         "name": "Charge power"
       },
+      "energy_charged": {
+        "name": "Total energy charged"
+      },
+      "energy_discharged": {
+        "name": "Total energy discharged"
+      },
       "smartmeter_power": {
         "name": "Smart meter power"
       },

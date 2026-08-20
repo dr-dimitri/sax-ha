@@ -1,0 +1,49 @@
+"""Diagnostics support for the SAX Power integration.
+
+Siehe anforderung.yaml, REQ-DIAGNOSTICS. Home Assistant bietet den
+Diagnose-Download über die Geräteseite automatisch an, sobald diese Datei
+existiert - keine weitere Registrierung nötig.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST
+from homeassistant.core import HomeAssistant
+
+from .const import DATA_COORDINATOR, DOMAIN
+from .coordinator import SaxPowerCoordinator
+
+# IP-Adresse ist die einzige potenziell identifizierende Information in
+# entry.data (lokales Modbus TCP ohne Cloud-Auth, siehe AGENTS.md "Security
+# considerations") - Port/Slave-IDs sind keine Geheimnisse.
+TO_REDACT = {CONF_HOST}
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> dict[str, Any]:
+    """Return diagnostics for a config entry."""
+    coordinator: SaxPowerCoordinator = hass.data[DOMAIN][entry.entry_id][
+        DATA_COORDINATOR
+    ]
+    return {
+        "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
+        "entry_options": dict(entry.options),
+        "coordinator_data": coordinator.data,
+        "state": {
+            "max_soc": coordinator.max_soc,
+            "max_soc_clamped": coordinator.max_soc_clamped,
+            "max_charge_power": coordinator.max_charge_power,
+            "grid_charge_active": coordinator.grid_charge_active,
+            "sun_charge_active": coordinator.sun_charge_active,
+            "extended_available": coordinator.extended_available,
+            "timed_charge_enabled": coordinator.timed_charge_enabled,
+            "timed_charge_active": (coordinator.data or {}).get("timed_charge_active"),
+            "grid_serving_enabled": coordinator.grid_serving_enabled,
+            "grid_serving_active": (coordinator.data or {}).get("grid_serving_active"),
+        },
+    }

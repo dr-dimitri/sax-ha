@@ -1,0 +1,85 @@
+"""Tests für die Diagnosefunktion (diagnostics.py, siehe anforderung.yaml,
+REQ-DIAGNOSTICS).
+
+Baut Coordinator + Config Entry direkt zusammen (wie test_coordinator.py),
+statt über einen echten Modbus-Server (test_integration_live.py) - die
+Diagnosefunktion selbst enthält keine Modbus-Logik, sondern aggregiert nur
+bereits vorhandene Coordinator-Properties.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
+from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.diagnostics import (
+    TO_REDACT,
+    async_get_config_entry_diagnostics,
+)
+
+
+def _make_entry_with_coordinator(hass) -> tuple[MockConfigEntry, SaxPowerCoordinator]:
+    client = MagicMock()
+    client.connected = True
+    client.connect = AsyncMock(return_value=True)
+    coordinator = SaxPowerCoordinator(
+        hass,
+        client,
+        slave_id=64,
+        slave_id_extended=100,
+        scan_interval=10,
+        entry_id="test_entry_id",
+    )
+    coordinator.data = {"soc": 42, "storage_power_active": -500}
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="test_entry_id",
+        data={
+            "host": "192.168.1.42",
+            "port": 502,
+            "slave_id_basic": 64,
+            "slave_id_extended": 100,
+        },
+    )
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
+    return entry, coordinator
+
+
+async def test_diagnostics_redacts_host(hass) -> None:
+    """Die IP-Adresse (CONF_HOST) ist die einzige potenziell
+    identifizierende Information in entry.data und muss redigiert werden."""
+    entry, _coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["entry_data"]["host"] == "**REDACTED**"
+    assert "host" in TO_REDACT
+    # Port ist kein Geheimnis und bleibt unverändert sichtbar.
+    assert diagnostics["entry_data"]["port"] == 502
+
+
+async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
+    """Diagnostics müssen sowohl die aktuellen Messwerte (coordinator.data)
+    als auch den relevanten internen Zustand (Max-SOC-Sperre,
+    zeitgesteuertes/netzdienliches Laden, SunSpec-Erreichbarkeit) enthalten
+    - das ist der eigentliche Mehrwert gegenüber einem reinen
+    Sensor-Snapshot für Support-/Bugreport-Zwecke."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+    await coordinator.async_set_max_soc(80)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    # async_set_max_soc löst intern _async_apply_grid_charge_change aus, das
+    # coordinator.data um timed_charge_active/grid_serving_active ergänzt -
+    # hier interessieren nur die ursprünglich gesetzten Messwerte.
+    assert diagnostics["coordinator_data"]["soc"] == 42
+    assert diagnostics["coordinator_data"]["storage_power_active"] == -500
+    assert diagnostics["state"]["max_soc"] == 80
+    assert diagnostics["state"]["extended_available"] is True
+    assert diagnostics["state"]["grid_charge_active"] is False
+    assert diagnostics["state"]["sun_charge_active"] is False

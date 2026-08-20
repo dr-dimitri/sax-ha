@@ -34,6 +34,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 
 from .const import DATA_COORDINATOR, DOMAIN
@@ -561,10 +562,31 @@ async def async_setup_entry(
     coordinator: SaxPowerCoordinator = hass.data[DOMAIN][entry.entry_id][
         DATA_COORDINATOR
     ]
-    async_add_entities(
+    entities: list[SensorEntity] = [
         SaxPowerSensor(coordinator, entry.entry_id, description)
         for description in SENSOR_DESCRIPTIONS
+    ]
+    entities.append(
+        SaxPowerEnergySensor(
+            coordinator,
+            entry.entry_id,
+            key="energy_charged",
+            translation_key="energy_charged",
+            data_key="energy_charged",
+            restore_fn=coordinator.restore_energy_charged,
+        )
     )
+    entities.append(
+        SaxPowerEnergySensor(
+            coordinator,
+            entry.entry_id,
+            key="energy_discharged",
+            translation_key="energy_discharged",
+            data_key="energy_discharged",
+            restore_fn=coordinator.restore_energy_discharged,
+        )
+    )
+    async_add_entities(entities)
 
 
 class SaxPowerSensor(SaxPowerEntity, SensorEntity):
@@ -587,3 +609,52 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
+    """Energy-Dashboard-kompatibler kWh-Zähler (geladen/entladen), siehe
+    anforderung.yaml REQ-ENERGY-DASHBOARD.
+
+    Anders als SaxPowerSensor oben nicht beschreibungsbasiert: der
+    Zählerstand wird nicht nur gelesen, sondern muss über Neustarts hinweg
+    per RestoreEntity in den Coordinator zurückgespielt werden (dieser
+    akkumuliert selbst, siehe SaxPowerCoordinator._accumulate_energy) -
+    analog zum RestoreEntity-Muster in number.py (z. B.
+    SaxPowerMaxSocNumber.async_added_to_hass -> coordinator.
+    async_set_max_soc(restored_value))."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(
+        self,
+        coordinator: SaxPowerCoordinator,
+        entry_id: str,
+        *,
+        key: str,
+        translation_key: str,
+        data_key: str,
+        restore_fn: Callable[[float], None],
+    ) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_translation_key = translation_key
+        self._attr_unique_id = f"{entry_id}_{key}"
+        self._data_key = data_key
+        self._restore_fn = restore_fn
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        restored_value = 0.0
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                restored_value = float(last_state.state)
+            except (TypeError, ValueError):
+                restored_value = 0.0
+        self._restore_fn(restored_value)
+
+    @property
+    def native_value(self) -> StateType:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.get(self._data_key)

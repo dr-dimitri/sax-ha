@@ -34,12 +34,16 @@ custom_components/sax_power/
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
-├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste)
+├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
+│                          plus zwei RestoreEntity-Energiezähler (energy_charged/
+│                          energy_discharged) fürs Energy-Dashboard
 ├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Netzladeleistung
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
 │                          netzdienliches Laden ein/aus
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes und
 │                          netzdienliches Laden
+├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
+│                          + coordinator.data, IP-Adresse redigiert
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 

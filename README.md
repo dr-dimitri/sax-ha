@@ -58,7 +58,7 @@ YAML-Konfiguration nötig.
    | Port | Modbus-TCP-Port | 502 |
    | Slave-ID (Basic Mode) | Slave-ID für Grundfunktionen (SOC, Schalter, Leistungslimits) | 64 |
    | Slave-ID (SunSpec-Modus) | Slave-ID für erweiterte Mess- und Diagnosewerte | 100 |
-   | Aktualisierungsintervall | Abfrageintervall in Sekunden | 10 |
+   | Aktualisierungsintervall | Abfrageintervall in Sekunden für die Basic-Mode-Sensoren (Ladezustand, Schaltzustand, Sollwerte) – die dynamischen SunSpec-Modus-Messwerte (Leistungen, Ströme, Spannungen, Zustände) werden unabhängig davon alle 2 Sekunden aktualisiert, siehe [Hinweis unten](#sensoren) | 10 |
 
 3. Die Verbindung wird vor dem Abschluss geprüft. Bei Verbindungsfehlern
    IP-Adresse, Port und Netzwerkerreichbarkeit prüfen.
@@ -120,12 +120,17 @@ ADW200 vollständig verfügbar. Mit anderen Smartmetern (z. B. ADL400) sind
 die Netz-Register (Ströme, Spannungen, Leistungen) in der Regel dennoch
 plausibel befüllt; PV-Leistung kann dann dauerhaft 0 bleiben.
 
-**Hinweis Aktualisierungsfrequenz:** Geräteidentität (Hersteller,
-Gerätemodell, Softwareversion, Seriennummer) sowie die intern verwendeten
-Skalierungsfaktoren der Akku-Werte ändern sich im laufenden Betrieb
-praktisch nie und werden deshalb nur einmal pro Stunde statt bei jedem
-Aktualisierungsintervall abgefragt – alle übrigen Sensoren folgen weiterhin
-dem oben eingestellten Intervall.
+**Hinweis Aktualisierungsfrequenz:** Die SunSpec-Modus-Sensoren werden
+nicht alle im selben Rhythmus abgefragt: dynamische Mess-/Zustandswerte
+(Leistungen, Ströme, Spannungen, Zustände, Fehlercodes) alle 2 Sekunden,
+fest und unabhängig vom oben eingestellten Aktualisierungsintervall – u. a.
+damit netzdienliches Laden zügig auf die tatsächliche Ladeleistung
+reagiert. Geräteidentität (Hersteller, Gerätemodell, Softwareversion,
+Seriennummer) sowie die intern verwendeten Skalierungsfaktoren der
+Akku-Werte ändern sich im laufenden Betrieb dagegen praktisch nie und
+werden deshalb nur einmal pro Stunde abgefragt. Nur die Basic-Mode-Sensoren
+(Ladezustand, Schaltzustand, Sollwerte) folgen dem oben eingestellten
+Aktualisierungsintervall.
 
 Ist der SunSpec-Modus nicht erreichbar (siehe
 [Bekannte Einschränkungen](#bekannte-einschränkungen)), zeigen alle Sensoren

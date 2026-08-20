@@ -33,6 +33,7 @@ from .const import (
     MIN_SETPOINT_POWER,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
+    READ_BLOCK_EXT_HIGH_INTERVAL,
     READ_BLOCK_EXT_LOW1_COUNT,
     READ_BLOCK_EXT_LOW1_START,
     READ_BLOCK_EXT_LOW2_COUNT,
@@ -254,16 +255,26 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         scan_interval: int,
         entry_id: str,
     ) -> None:
+        # Der Coordinator-Timer läuft mit dem kürzeren der beiden Intervalle,
+        # damit weder der feste HIGH- noch der nutzerkonfigurierte
+        # NORMAL-Poll-Zyklus verpasst wird - _async_read_basic/
+        # _async_read_extended prüfen anschließend jeweils eigenständig
+        # (per Zeitstempel), ob ihr Teilblock auf einem gegebenen Tick
+        # tatsächlich fällig ist. Siehe const.READ_BLOCK_EXT_HIGH_INTERVAL
+        # sowie anforderung.yaml, REQ-HIGH-INTERVAL-REGISTERS.
         super().__init__(
             hass,
             _LOGGER,
             name="SAX Power",
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=timedelta(
+                seconds=min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL)
+            ),
         )
         self.client = client
         self.slave_id = slave_id
         self.slave_id_extended = slave_id_extended
         self.entry_id = entry_id
+        self._scan_interval = scan_interval
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
@@ -288,6 +299,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
+        # Cache für den NORMAL-Block (Basic Mode): _async_read_basic befüllt
+        # ihn nur alle self._scan_interval Sekunden neu, unabhängig vom
+        # (i. d. R. kürzeren) Coordinator-Timer oben.
+        self._basic_data: dict[str, Any] = {}
+        self._basic_last_read: float | None = None
+        # Cache für den HIGH-Block (SunSpec-Modus, dynamische Werte):
+        # _async_read_extended befüllt ihn nur alle
+        # READ_BLOCK_EXT_HIGH_INTERVAL Sekunden neu.
+        self._high_data: dict[str, Any] = {}
+        self._high_last_read: float | None = None
         # Cache für die LOW-Intervall-Register (siehe anforderung.yaml,
         # REQ-LOW-INTERVAL-REGISTERS): _async_read_low_block befüllt sie nur
         # alle READ_BLOCK_EXT_LOW_INTERVAL Sekunden neu, _parse_extended
@@ -312,6 +333,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._extended_available = True
 
     async def _async_update_data(self) -> dict[str, Any]:
+        data = dict(await self._async_read_basic())
+        data.update(await self._async_read_extended())
+
+        await self._async_enforce_grid_charge(data)
+        data["timed_charge_active"] = self._timed_charge_active
+        data["grid_serving_active"] = self._grid_serving_active
+        return data
+
+    async def _async_read_basic(self) -> dict[str, Any]:
+        """Liest den NORMAL-Block (Basic Mode, Slave-ID self.slave_id) nur
+        alle self._scan_interval Sekunden neu ein - unabhängig vom (durch
+        READ_BLOCK_EXT_HIGH_INTERVAL vorgegebenen, i. d. R. kürzeren)
+        Coordinator-Timer, siehe __init__ sowie anforderung.yaml,
+        REQ-HIGH-INTERVAL-REGISTERS. Anders als beim LOW-Block
+        (_async_read_low_block) lässt ein fehlgeschlagener Read weiterhin
+        das gesamte Update fehlschlagen (UpdateFailed) - Basic Mode bleibt
+        die Mindestanforderung für jede Funktion der Integration."""
+        now = monotonic()
+        if (
+            self._basic_data
+            and self._basic_last_read is not None
+            and now - self._basic_last_read < self._scan_interval
+        ):
+            return self._basic_data
+
         try:
             if not self.client.connected:
                 await self.client.connect()
@@ -334,7 +380,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return basic_regs[address - READ_BLOCK_START]
 
         switch_state = basic_reg(REG_SWITCH_STATE)
-        data: dict[str, Any] = {
+        self._basic_data = {
             "switch_state": switch_state,
             "switch_state_text": SWITCH_STATE_LABELS.get(
                 switch_state, SWITCH_STATE_UNKNOWN_LABEL
@@ -347,22 +393,40 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # die Integration schreibt Register 44 nicht mehr.
             "charge_limit": basic_reg(REG_LIMIT_CHARGE),
         }
-
-        data.update(await self._async_read_extended())
-
-        await self._async_enforce_grid_charge(data)
-        data["timed_charge_active"] = self._timed_charge_active
-        data["grid_serving_active"] = self._grid_serving_active
-        return data
+        self._basic_last_read = now
+        return self._basic_data
 
     async def _async_read_extended(self) -> dict[str, Any]:
-        """Read+parse den HIGH-Intervall-Teil des SunSpec-Modus-Blocks
-        (Slave-ID self.slave_id_extended, Default 100), ohne bei Fehlern das
-        gesamte Update scheitern zu lassen (siehe Kommentar in __init__).
-        Die beiden statischen LOW-Intervall-Teilbereiche (Geräteidentität,
-        Battery-Skalierungsfaktoren) werden separat über
-        _async_read_low_block geholt - siehe anforderung.yaml,
-        REQ-LOW-INTERVAL-REGISTERS."""
+        """Orchestriert HIGH- und LOW-Intervall-Teile des SunSpec-Modus-Blocks
+        (Slave-ID self.slave_id_extended, Default 100). Der LOW-Block
+        (_async_read_low_block) hat sein eigenes, unabhängiges Intervall
+        (READ_BLOCK_EXT_LOW_INTERVAL) und wird deshalb bei jedem Tick
+        geprüft; der HIGH-Block (_async_read_high_block) wird nur alle
+        READ_BLOCK_EXT_HIGH_INTERVAL Sekunden tatsächlich neu vom Gerät
+        gelesen. Muss der LOW-Block VOR dem HIGH-Block laufen: Letzterer
+        verwendet die dort aktualisierten self._battery_*_sf_raw-Werte,
+        statt sie selbst aus dem (inzwischen kleineren) HIGH-Block zu lesen
+        - siehe anforderung.yaml, REQ-LOW-INTERVAL-REGISTERS/
+        REQ-HIGH-INTERVAL-REGISTERS."""
+        data = dict(await self._async_read_low_block())
+        data.update(await self._async_read_high_block())
+        return data
+
+    async def _async_read_high_block(self) -> dict[str, Any]:
+        """Read+parse den HIGH-Block (dynamische Mess-/Zustandswerte) des
+        SunSpec-Modus, ohne bei Fehlern das gesamte Update scheitern zu
+        lassen (siehe Kommentar in __init__). Wird nur alle
+        READ_BLOCK_EXT_HIGH_INTERVAL Sekunden tatsächlich neu vom Gerät
+        gelesen, unabhängig vom nutzerkonfigurierten NORMAL-Intervall -
+        siehe anforderung.yaml, REQ-HIGH-INTERVAL-REGISTERS."""
+        now = monotonic()
+        if (
+            self._high_data
+            and self._high_last_read is not None
+            and now - self._high_last_read < READ_BLOCK_EXT_HIGH_INTERVAL
+        ):
+            return self._high_data
+
         try:
             extended_result = await self.client.read_holding_registers(
                 address=READ_BLOCK_EXT_START,
@@ -392,6 +456,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     translation_placeholders={"slave_id": str(self.slave_id_extended)},
                 )
             self._extended_available = False
+            self._high_data = {}
             return {}
 
         if not self._extended_available:
@@ -409,12 +474,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def ext_reg(address: int) -> int:
             return ext_regs[address - READ_BLOCK_EXT_START]
 
-        # Muss vor _parse_extended laufen: _parse_extended verwendet die
-        # dort aktualisierten self._battery_*_sf_raw-Werte, statt sie selbst
-        # aus dem (inzwischen kleineren) HIGH-Block zu lesen.
-        data = dict(await self._async_read_low_block())
-        data.update(self._parse_extended(ext_reg))
-        return data
+        self._high_data = self._parse_extended(ext_reg)
+        self._high_last_read = now
+        return self._high_data
 
     async def _async_read_low_block(self) -> dict[str, Any]:
         """Liest die beiden statischen LOW-Intervall-Teilbereiche des
@@ -703,8 +765,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_write_register(self, address: int, value: int) -> None:
         """Write a single Basic-Mode holding register (Slave-ID self.slave_id),
-        raising HomeAssistantError on failure."""
+        raising HomeAssistantError on failure. Erzwingt beim nächsten
+        _async_read_basic-Aufruf einen echten Read, unabhängig vom
+        NORMAL-Intervall-Throttle - sonst könnte ein direkt nach dem
+        Schreiben ausgelöster coordinator.async_refresh() (siehe
+        switch.SaxPowerStorageSwitch) kurzzeitig noch den alten,
+        gecachten Wert liefern (siehe DEVELOPMENT.md, "Refresh-Verhalten")."""
         await self._async_write_register(address, value, device_id=self.slave_id)
+        self._basic_last_read = None
 
     async def async_write_extended_register(self, address: int, value: int) -> None:
         """Write a single SunSpec-Modus holding register (Slave-ID

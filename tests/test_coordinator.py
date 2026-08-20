@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,6 +15,7 @@ from custom_components.sax_power.const import (
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_SOC,
     READ_BLOCK_COUNT,
+    READ_BLOCK_EXT_HIGH_INTERVAL,
     READ_BLOCK_EXT_LOW1_START,
     READ_BLOCK_EXT_LOW2_START,
     READ_BLOCK_EXT_LOW_INTERVAL,
@@ -105,6 +106,56 @@ async def test_async_write_register_raises_on_modbus_error(hass) -> None:
         await coordinator.async_write_register(41, 1000)
 
 
+def test_update_interval_matches_high_interval(hass) -> None:
+    """Der Coordinator-Timer läuft mit dem kürzeren der beiden Intervalle
+    (siehe __init__) - da das config_flow-Minimum für scan_interval (5s)
+    immer über READ_BLOCK_EXT_HIGH_INTERVAL (2s) liegt, ist das faktisch
+    immer Letzteres, siehe anforderung.yaml, REQ-HIGH-INTERVAL-REGISTERS."""
+    coordinator = _make_coordinator(hass, _make_client())  # scan_interval=10
+    assert coordinator.update_interval == timedelta(
+        seconds=READ_BLOCK_EXT_HIGH_INTERVAL
+    )
+
+
+async def test_write_register_forces_fresh_basic_read(hass) -> None:
+    """Ein Schreibzugriff auf ein Basic-Mode-Register (z. B. über den
+    Storage-On/Off-Schalter) muss beim direkt danach ausgelösten
+    coordinator.async_refresh() einen echten Read liefern, nicht den vor dem
+    Schreiben gecachten NORMAL-Wert - siehe DEVELOPMENT.md, Abschnitt
+    "Refresh-Verhalten", sowie switch.SaxPowerStorageSwitch."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=False)
+    )
+    coordinator = _make_coordinator(hass, client)
+
+    def basic_read_count() -> int:
+        return sum(
+            1
+            for call in client.read_holding_registers.call_args_list
+            if call.kwargs["device_id"] == 64
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        await coordinator._async_read_basic()  # initialer Read füllt den Cache
+    assert basic_read_count() == 1
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.5
+    ):
+        # Ohne den Schreibzugriff wäre dies innerhalb des scan_interval
+        # (10s) - der Cache würde greifen und den alten Wert liefern.
+        await coordinator.async_write_register(45, 2)
+        await coordinator._async_read_basic()
+    assert basic_read_count() == 2
+
+
 def _make_read_side_effect(basic_registers: list[int], *, extended_error: bool):
     """Simuliert unterschiedliche read_holding_registers-Antworten je nach
     device_id, wie sie der Coordinator für Basic-Mode- (Slave 64) bzw.
@@ -159,6 +210,64 @@ async def test_update_data_recovers_when_extended_becomes_available(hass) -> Non
 
     assert data["storage_power_active"] == 0
     assert coordinator._extended_available is True
+
+
+async def test_normal_block_throttled_high_block_follows_own_interval(hass) -> None:
+    """Der NORMAL-Block (Basic Mode) wird trotz des jetzt kürzeren
+    Coordinator-Timers (siehe READ_BLOCK_EXT_HIGH_INTERVAL) weiterhin nur
+    alle self._scan_interval Sekunden tatsächlich neu gelesen; der
+    HIGH-Block dagegen bei jedem Tick, sobald sein eigenes (kürzeres)
+    Intervall abgelaufen ist - siehe anforderung.yaml,
+    REQ-HIGH-INTERVAL-REGISTERS."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    basic_registers[REG_SOC - READ_BLOCK_START] = 55
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=False)
+    )
+    coordinator = _make_coordinator(hass, client)  # scan_interval=10
+
+    def basic_read_count() -> int:
+        return sum(
+            1
+            for call in client.read_holding_registers.call_args_list
+            if call.kwargs["device_id"] == 64
+        )
+
+    def high_read_count() -> int:
+        return sum(
+            1
+            for call in client.read_holding_registers.call_args_list
+            if call.kwargs["address"] == READ_BLOCK_EXT_START
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        await coordinator._async_update_data()
+    assert basic_read_count() == 1  # erster Poll: beide Blöcke fällig
+    assert high_read_count() == 1
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1001.0
+    ):
+        await coordinator._async_update_data()
+    assert basic_read_count() == 1  # < scan_interval (10s): kein Reread
+    assert high_read_count() == 1  # < READ_BLOCK_EXT_HIGH_INTERVAL (2s)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
+    ):
+        await coordinator._async_update_data()
+    assert basic_read_count() == 1  # weiterhin < scan_interval
+    assert high_read_count() == 2  # >= HIGH-Intervall seit t=1000 -> Reread
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1011.0
+    ):
+        await coordinator._async_update_data()
+    assert basic_read_count() == 2  # >= scan_interval seit t=1000 -> Reread
+    assert high_read_count() == 3  # >= HIGH-Intervall seit t=1003 -> Reread
 
 
 async def test_low_block_read_only_once_per_interval(hass) -> None:

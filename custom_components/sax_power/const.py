@@ -27,7 +27,26 @@ DEFAULT_SLAVE_ID_BASIC = 64
 # Target Device Failed to Respond"). Siehe anforderung.yaml,
 # REQ-SUNSPEC-MODE-CORRECTION.
 DEFAULT_SLAVE_ID_EXTENDED = 100
-DEFAULT_SCAN_INTERVAL = 10
+DEFAULT_SCAN_INTERVAL = 10  # Steuert nur noch NORMAL (Basic Mode), siehe unten
+
+# Drei-Stufen-Aktualisierung des SunSpec-Modus-Blocks (siehe anforderung.yaml,
+# REQ-LOW-INTERVAL-REGISTERS/REQ-HIGH-INTERVAL-REGISTERS):
+#   NORMAL - Basic Mode (Slave-ID 64): folgt dem oben konfigurierbaren
+#            CONF_SCAN_INTERVAL/DEFAULT_SCAN_INTERVAL (Default 10s).
+#   HIGH   - SunSpec-Modus, dynamische Mess-/Zustandswerte: fest und
+#            unabhängig vom nutzerkonfigurierten NORMAL-Intervall, siehe
+#            READ_BLOCK_EXT_HIGH_INTERVAL unten - u. a. relevant für eine
+#            zügige Reaktion des netzdienlichen Ladens auf die tatsächliche
+#            Ladeleistung (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE).
+#   LOW    - SunSpec-Modus, statische Werte (Identität, Skalierungsfaktoren):
+#            READ_BLOCK_EXT_LOW_INTERVAL weiter unten.
+# SaxPowerCoordinator.__init__ setzt den internen Coordinator-Timer auf
+# min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL) und lässt
+# _async_read_basic/_async_read_extended jeweils eigenständig prüfen, ob ihr
+# Teilblock auf einem gegebenen Tick tatsächlich fällig ist - das
+# config_flow-Minimum für scan_interval (5s) liegt dabei immer über
+# READ_BLOCK_EXT_HIGH_INTERVAL, der Timer läuft also faktisch immer mit 2s.
+READ_BLOCK_EXT_HIGH_INTERVAL = 2  # Sekunden
 
 DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"

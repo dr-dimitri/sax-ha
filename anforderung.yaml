@@ -792,3 +792,69 @@ requirement_low_interval_registers:
        Ablauf) als auch die Fehlerresilienz des LOW-Blocks ab."
     - "DEVELOPMENT.md beschreibt die Drei-Block-Struktur des SunSpec-Modus
        (HIGH + zwei LOW-Teilbereiche) im Abschnitt Register-Mapping."
+
+# ==============================================================================
+# ANFORDERUNG: EIGENES, FESTES HIGH-INTERVALL FÜR DYNAMISCHE SUNSPEC-MODUS-REGISTER
+# ==============================================================================
+requirement_high_interval_registers:
+  id: REQ-HIGH-INTERVAL-REGISTERS
+  title: "Dynamische SunSpec-Modus-Register (HIGH-Block) mit eigenem, festem 2s-Intervall statt gemeinsam mit Basic Mode (NORMAL)"
+  status: done
+  description: >
+    Vor dieser Anforderung teilten sich der HIGH-Block (siehe
+    REQ-LOW-INTERVAL-REGISTERS) und der Basic-Mode-Block (NORMAL, Slave-ID
+    64) denselben Coordinator-Timer und damit dasselbe, über
+    CONF_SCAN_INTERVAL/DEFAULT_SCAN_INTERVAL nutzerkonfigurierbare
+    Intervall (Default 10s) - die Unterscheidung HIGH/NORMAL war rein
+    begrifflich, ohne technische Konsequenz.
+
+    Der HIGH-Block enthält u. a. die tatsächliche Lade-/Entladeleistung
+    (storage_power_active, Register 40029) und die Netzleistung
+    (smartmeter_power, Register 40072), die den Trigger für netzdienliches
+    Laden bilden (siehe REQ-GRID-SERVING-CHARGE) - eine zügige Reaktion
+    hängt hier direkt an der Poll-Frequenz. NORMAL (Basic Mode: SOC,
+    Schaltzustand) hat dagegen keinen vergleichbaren Bedarf an einer
+    kürzeren, festen Frequenz und soll über das bestehende
+    Config-Flow-Feld "Aktualisierungsintervall" einstellbar bleiben.
+
+    READ_BLOCK_EXT_HIGH_INTERVAL (fest, 2 Sekunden, nicht über die
+    Oberfläche konfigurierbar) entkoppelt den HIGH-Block deshalb vom
+    NORMAL-Intervall: SaxPowerCoordinator.__init__ setzt den internen
+    Coordinator-Timer (update_interval) auf
+    min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL) - da das
+    config_flow-Minimum für scan_interval (5s) immer über
+    READ_BLOCK_EXT_HIGH_INTERVAL liegt, läuft der Timer damit faktisch
+    immer mit 2s. _async_read_basic (NORMAL) und _async_read_high_block
+    (HIGH) prüfen anschließend jeweils per eigenem Zeitstempel-Cache
+    (analog zum LOW-Block), ob ihr Teilblock auf einem gegebenen Tick
+    tatsächlich fällig ist, und liefern sonst den zuletzt gelesenen Wert.
+
+    Ein Schreibzugriff auf ein Basic-Mode-Register
+    (SaxPowerCoordinator.async_write_register, z. B. über den
+    Storage-On/Off-Schalter) invalidiert den NORMAL-Cache explizit, damit
+    ein direkt danach ausgelöster coordinator.async_refresh() (siehe
+    DEVELOPMENT.md, "Refresh-Verhalten") nicht kurzzeitig noch den alten,
+    gecachten Wert liefert.
+  requirements:
+    - "NORMAL (Basic Mode) bleibt über das bestehende Config-Flow-Feld
+       'Aktualisierungsintervall' einstellbar (min. 5s, max. 3600s) - keine
+       Änderung an config_flow.py/UI nötig."
+    - "HIGH-Block-Register werden unabhängig vom NORMAL-Intervall
+       spätestens alle READ_BLOCK_EXT_HIGH_INTERVAL Sekunden neu gelesen."
+    - "Ein Schreibzugriff auf ein Basic-Mode-Register erzwingt beim nächsten
+       _async_read_basic-Aufruf einen echten Read, unabhängig vom
+       NORMAL-Intervall-Cache."
+    - "Sicherheitsrelevante Fehlerresilienz bleibt unverändert: scheitert
+       ausschließlich der (fällige) HIGH-Read, schlägt das Update nicht
+       fehl (siehe REQ-EXTENDED-MODE-RESILIENCE); scheitert der (fällige)
+       NORMAL-Read, schlägt das Update weiterhin komplett fehl
+       (UpdateFailed), da Basic Mode die Mindestanforderung ist."
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt ab: update_interval entspricht
+       min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL); NORMAL wird
+       innerhalb des scan_interval nicht erneut gelesen, HIGH dagegen
+       gemäß seines eigenen (kürzeren) Intervalls; ein Basic-Mode-Write
+       erzwingt einen frischen NORMAL-Read trotz aktivem Cache."
+    - "tests/test_integration_live.py (Storage-On/Off-Schalter, echter
+       TCP-Read/Write-Zyklus) bleibt grün - der Schalter-Zustand spiegelt
+       nach dem Schreiben sofort den neuen Wert."

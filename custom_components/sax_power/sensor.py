@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -44,9 +45,16 @@ from .entity import SaxPowerEntity
 
 @dataclass(frozen=True, kw_only=True)
 class SaxPowerSensorEntityDescription(SensorEntityDescription):
-    """Sensor-Beschreibung mit Zugriffsfunktion auf coordinator.data."""
+    """Sensor-Beschreibung mit Zugriffsfunktion auf coordinator.data.
 
-    value_fn: Callable[[dict[str, Any]], StateType]
+    `attributes_fn` ist optional und liefert zusätzliche Attribute für
+    Sensoren, deren Zustand allein die Nachvollziehbarkeit nicht hergibt -
+    aktuell nur der Status des preisoptimierten Ladens, der damit die
+    zugrundeliegenden Preise und geplanten Zeitfenster mitliefert.
+    """
+
+    value_fn: Callable[[dict[str, Any]], StateType | datetime]
+    attributes_fn: Callable[[SaxPowerCoordinator], dict[str, Any]] | None = None
 
 
 def _direct(key: str) -> Callable[[dict[str, Any]], StateType]:
@@ -152,6 +160,38 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_bool_text(
             "grid_serving_active", true_text="Aktiv", false_text="Inaktiv"
         ),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="price_charge_active_text",
+        translation_key="price_charge_active_text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_bool_text(
+            "price_charge_active", true_text="Aktiv", false_text="Inaktiv"
+        ),
+    ),
+    # Klartextstatus des preisoptimierten Ladens (siehe const.PRICE_STATUS_*
+    # sowie anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE). Bewusst kein
+    # entity_category=DIAGNOSTIC: das ist die Entity, an der der Anwender im
+    # Alltag abliest, was die Automatik gerade tut.
+    SaxPowerSensorEntityDescription(
+        key="price_charge_status_text",
+        translation_key="price_charge_status_text",
+        value_fn=_direct("price_charge_status"),
+        attributes_fn=lambda coordinator: coordinator.price_planner.plan_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
+        key="price_charge_next_start",
+        translation_key="price_charge_next_start",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=_direct("price_charge_next_start"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="price_charge_current_price",
+        translation_key="price_charge_current_price",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/kWh",
+        suggested_display_precision=4,
+        value_fn=_direct("price_charge_current_price"),
     ),
     SaxPowerSensorEntityDescription(
         key="setpoint_power",
@@ -605,10 +645,16 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         self._attr_unique_id = f"{entry_id}_{description.key}"
 
     @property
-    def native_value(self) -> StateType:
+    def native_value(self) -> StateType | datetime:
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if (attributes_fn := self.entity_description.attributes_fn) is None:
+            return None
+        return attributes_fn(self.coordinator)
 
 
 class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):

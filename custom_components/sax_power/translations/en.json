@@ -226,6 +226,18 @@
       },
       "battery_cell_voltage_avg": {
         "name": "Average cell voltage"
+      },
+      "price_charge_active_text": {
+        "name": "Price-optimised charging active"
+      },
+      "price_charge_status_text": {
+        "name": "Price-optimised charging status"
+      },
+      "price_charge_next_start": {
+        "name": "Price-optimised charging next start"
+      },
+      "price_charge_current_price": {
+        "name": "Current electricity price"
       }
     },
     "number": {
@@ -237,6 +249,15 @@
       },
       "timed_charge_min_soc": {
         "name": "Grid charge min. SOC"
+      },
+      "price_charge_max_price": {
+        "name": "Price-optimised charging price limit"
+      },
+      "price_charge_hours": {
+        "name": "Price-optimised charging hours"
+      },
+      "price_charge_target_soc": {
+        "name": "Price-optimised charging target SOC"
       }
     },
     "switch": {
@@ -320,6 +341,9 @@
       },
       "grid_serving_month_12": {
         "name": "Grid-serving charge active in December"
+      },
+      "price_charge_enabled": {
+        "name": "Price-optimised charging active"
       }
     },
     "time": {
@@ -335,12 +359,53 @@
       "grid_serving_end": {
         "name": "Grid-serving charge end"
       }
+    },
+    "select": {
+      "price_charge_strategy": {
+        "name": "Price-optimised charging strategy",
+        "state": {
+          "off": "Manual / off",
+          "absolute": "Absolute price",
+          "relative": "Relative / cheapest hours",
+          "smart": "Smart / PV-optimised"
+        }
+      }
     }
   },
   "issues": {
     "extended_mode_unavailable": {
       "title": "SAX SunSpec mode unreachable",
       "description": "The SunSpec mode register block (slave ID {slave_id}) of the SAX storage system is unreachable. Sensors that depend on it (storage detail values, grid/smart meter values, battery values) show \"unknown\" until the connection is restored. Basic Mode sensors (state of charge, switch, power limits) are not affected. Please check whether the configured slave ID (SunSpec mode, default: 100) is correct and whether the device runs firmware combination Master V61/Gateway V54 or newer."
+    },
+    "price_charge_conflict": {
+      "title": "Price-optimised charging and grid charging both active",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Turn off grid charging for price-optimised charging?",
+            "description": "Price-optimised charging was switched on while grid charging (timed charging) is active. Both charge actively from the grid through the same write path and cannot run at the same time.\n\n**Confirm**: Grid charging is turned off and price-optimised charging is activated.\n**Cancel**: Nothing changes, price-optimised charging stays off.",
+            "menu_options": {
+              "confirm": "Confirm - turn off grid charging",
+              "cancel": "Cancel - leave everything unchanged"
+            }
+          }
+        }
+      }
+    },
+    "timed_charge_conflict": {
+      "title": "Grid charging and price-optimised charging both active",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Turn off price-optimised charging for grid charging?",
+            "description": "Grid charging (timed charging) was switched on while price-optimised charging is active. Both charge actively from the grid through the same write path and cannot run at the same time.\n\n**Confirm**: Price-optimised charging is turned off and grid charging is activated.\n**Cancel**: Nothing changes, grid charging stays off.",
+            "menu_options": {
+              "confirm": "Confirm - turn off price-optimised charging",
+              "cancel": "Cancel - leave everything unchanged"
+            }
+          }
+        }
+      }
     }
   },
   "services": {
@@ -402,6 +467,74 @@
           "name": "End",
           "description": "End of the time window."
         }
+      }
+    },
+    "refresh_price_plan": {
+      "name": "Recalculate charge plan",
+      "description": "Recalculates and applies the price-optimised charging plan immediately instead of waiting for the next regular check (every 60 seconds).",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        }
+      }
+    },
+    "set_price_charge_enabled": {
+      "name": "Switch price-optimised charging",
+      "description": "Turns price-optimised charging on or off. If grid charging blocks activation the call fails - with “force” it is turned off without asking instead.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        },
+        "enabled": {
+          "name": "Active",
+          "description": "Turn price-optimised charging on or off."
+        },
+        "force": {
+          "name": "Force",
+          "description": "Turns off an active grid charging without asking."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Price-optimised charging",
+        "description": "Sources and base settings for price-optimised charging. The integration does not fetch electricity prices itself, it uses an existing sensor entity (e.g. Tibber, Nordpool, EPEX Spot, ENTSO-e, Awattar). The day-to-day controls - strategy, price limit, number of hours, target SOC - are entities on the SAX device.",
+        "data": {
+          "price_sensor": "Electricity price sensor",
+          "price_attribute": "Attribute holding the price forecast (optional)",
+          "price_unit": "Price unit",
+          "price_strategy": "Default strategy (first start only)",
+          "pv_forecast_sensor": "PV forecast sensor (optional)",
+          "pv_forecast_factor": "Usable share of the PV forecast (%)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor holding the current energy price. The windows for the “relative” and “smart” strategies are derived from its price forecast attributes.",
+          "price_attribute": "Only needed if auto-detection fails - e.g. “raw_today”, “data” or “forecast”.",
+          "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh is converted to EUR/kWh internally.",
+          "pv_forecast_sensor": "Sensor with the expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or the Solcast equivalent. Only required for the “smart” strategy.",
+          "pv_forecast_factor": "How much of the forecast is expected to actually end up in the battery - covers self-consumption, weather uncertainty and losses."
+        }
+      }
+    }
+  },
+  "selector": {
+    "price_unit": {
+      "options": {
+        "auto": "Automatic (from the sensor)",
+        "eur_kwh": "EUR/kWh",
+        "ct_kwh": "ct/kWh"
+      }
+    },
+    "price_charge_strategy": {
+      "options": {
+        "off": "Manual / off",
+        "absolute": "Absolute price",
+        "relative": "Relative / cheapest hours",
+        "smart": "Smart / PV-optimised"
       }
     }
   }

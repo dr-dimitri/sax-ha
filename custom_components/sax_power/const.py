@@ -425,3 +425,123 @@ SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50
 # SaxPowerCoordinator._cycles_confirmed. Schützt einheitlich gegen kurze
 # Lastspitzen/Messausreißer am Smart Meter.
 PV_SURPLUS_HYSTERESIS_CYCLES = 2
+
+# ==========================================================================
+# Preisoptimiertes Laden (siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE)
+# ==========================================================================
+# Reine Software-Logik oberhalb des vorhandenen SunSpec-Schreibpfads
+# (Register 40051/40049, siehe _async_sun_charge_loop): lädt den Speicher
+# aus dem Netz, wenn der Strompreis günstig ist. Die Preisdaten kommen
+# ausschließlich aus einer beliebigen, vom Anwender im Options Flow
+# ausgewählten Home-Assistant-Sensor-Entity (Tibber, Nordpool, EPEX Spot,
+# ENTSO-e, Awattar, ...) - die Integration ruft selbst keine Preise ab.
+
+# -- Options-Flow-Schlüssel (config_flow.SaxPowerOptionsFlow) --------------
+CONF_PRICE_SENSOR = "price_sensor"
+CONF_PRICE_ATTRIBUTE = "price_attribute"
+CONF_PRICE_UNIT = "price_unit"
+CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
+CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
+CONF_PRICE_STRATEGY = "price_strategy"
+
+# Preis-Einheit des ausgewählten Sensors. "auto" leitet sie aus dessen
+# unit_of_measurement ab (alles mit "ct"/"cent" wird durch 100 geteilt),
+# die beiden anderen Werte erzwingen die jeweilige Interpretation - nötig
+# für Sensoren ohne (oder mit irreführender) Einheit.
+PRICE_UNIT_AUTO = "auto"
+PRICE_UNIT_EUR_KWH = "eur_kwh"
+PRICE_UNIT_CT_KWH = "ct_kwh"
+PRICE_UNITS = (PRICE_UNIT_AUTO, PRICE_UNIT_EUR_KWH, PRICE_UNIT_CT_KWH)
+DEFAULT_PRICE_UNIT = PRICE_UNIT_AUTO
+
+# -- Strategien (select.SaxPowerPriceStrategySelect) -----------------------
+# "off" ist zusätzlich zum Hauptschalter vorhanden, damit sich die Automatik
+# stilllegen lässt, ohne die restliche Konfiguration (Preisgrenze, Stunden,
+# Ziel-SOC) zu verlieren - wirksam ist preisoptimiertes Laden nur, wenn der
+# Hauptschalter an UND die Strategie ungleich "off" ist.
+PRICE_STRATEGY_OFF = "off"
+PRICE_STRATEGY_ABSOLUTE = "absolute"
+PRICE_STRATEGY_RELATIVE = "relative"
+PRICE_STRATEGY_SMART = "smart"
+PRICE_STRATEGIES = (
+    PRICE_STRATEGY_OFF,
+    PRICE_STRATEGY_ABSOLUTE,
+    PRICE_STRATEGY_RELATIVE,
+    PRICE_STRATEGY_SMART,
+)
+DEFAULT_PRICE_STRATEGY = PRICE_STRATEGY_OFF
+
+DEFAULT_PRICE_CHARGE_ENABLED = False
+
+# Preisgrenze (Modus "Absoluter Preis") in EUR/kWh. Der negative Bereich ist
+# bewusst zugelassen: an Börsenstrom gekoppelte Tarife weisen zeitweise
+# negative Arbeitspreise aus, und genau dann soll geladen werden dürfen.
+MIN_PRICE_LIMIT = -1.0
+MAX_PRICE_LIMIT = 2.0
+PRICE_LIMIT_STEP = 0.001
+DEFAULT_PRICE_LIMIT = 0.20
+
+# Anzahl der günstigsten Stunden (Modi "Relativ" und "Smart"). Im
+# Smart-Modus zusätzlich Obergrenze für die aus dem Energiebedarf
+# errechnete Stundenzahl.
+MIN_PRICE_HOURS = 1
+MAX_PRICE_HOURS = 24
+DEFAULT_PRICE_HOURS = 3
+
+# Eigener Ziel-SOC für das preisoptimierte Laden (unabhängig von "Max. SOC",
+# das als geräteweite Obergrenze zusätzlich darüber liegt).
+DEFAULT_PRICE_TARGET_SOC = 80
+
+# Anteil der PV-Prognose, der als tatsächlich im Speicher landender Ertrag
+# eingerechnet wird (Modus "Smart"). < 100 % deckt Eigenverbrauch,
+# Wetterunsicherheit und Wandlungsverluste ab.
+MIN_PV_FORECAST_FACTOR = 0
+MAX_PV_FORECAST_FACTOR = 100
+DEFAULT_PV_FORECAST_FACTOR = 80
+
+# Prüfintervall der Ladebedingungen (REQ-DYNAMIC-PRICE-CHARGE). Der
+# Coordinator-Timer läuft deutlich schneller (siehe
+# READ_BLOCK_EXT_HIGH_INTERVAL); der Ladeplan selbst wird nur in diesem
+# Intervall (sowie sofort bei jeder Einstellungsänderung und jedem
+# Zustandswechsel des Preis-Sensors) neu berechnet.
+PRICE_EVAL_INTERVAL = 60  # Sekunden
+
+# Planungshorizont: nur Preis-Slots, die innerhalb dieser Zeitspanne ab
+# "jetzt" beginnen, gehen in die Auswahl der günstigsten Stunden ein. Damit
+# ist die Auswahl ein gleitendes 24-Stunden-Fenster über die jeweils
+# bekannten Preisdaten (Rest von heute + ggf. bereits veröffentlichtes
+# Morgen), nicht der Kalendertag.
+PRICE_PLAN_HORIZON_HOURS = 24
+
+# Fallback-Länge eines Preis-Slots, wenn sie sich weder aus einem
+# "end"-Feld noch aus dem Abstand zum nächsten Slot ableiten lässt.
+DEFAULT_PRICE_SLOT_MINUTES = 60
+
+# Statustexte des Sensors "Preisoptimiertes Laden Status". Bewusst deutsche
+# Klartexte statt übersetzbarer Enum-Zustände - identisch zum bestehenden
+# Muster der übrigen *_text-Sensoren (STORAGE_STATE_LABELS oben).
+PRICE_STATUS_OFF = "Aus"
+PRICE_STATUS_NO_PRICE_DATA = "Keine Preisdaten"
+PRICE_STATUS_WAITING = "Warten auf Preisabfall"
+PRICE_STATUS_CHARGING = "Lade aus Netz"
+PRICE_STATUS_TARGET_REACHED = "Ziel-SOC erreicht"
+PRICE_STATUS_PV_FORECAST_COVERS = "PV-Prognose deckt Bedarf"
+PRICE_STATUS_PAUSED_PV_SURPLUS = "Pausiert (PV-Überschuss)"
+PRICE_STATUS_PAUSED_MAX_SOC = "Pausiert (Max. SOC)"
+PRICE_STATUS_PAUSED_NO_POWER = "Pausiert (Max. Netzladeleistung fehlt)"
+PRICE_STATUS_PAUSED_TIMED_CHARGE = "Pausiert (Netzladung aktiv)"
+
+# -- Konflikt zwischen Netzladung und preisoptimiertem Laden --------------
+# Beide Features laden aktiv aus dem Netz über denselben Schreibpfad und
+# dürfen deshalb nicht gleichzeitig aktiv sein. Statt die Aktivierung
+# kommentarlos abzulehnen, legt der Coordinator ein reparierbares Issue an
+# (repairs.py) - der Anwender bestätigt darin, dass das jeweils andere
+# Feature abgeschaltet werden soll, oder bricht ab.
+ISSUE_PRICE_CHARGE_CONFLICT = "price_charge_conflict"
+ISSUE_TIMED_CHARGE_CONFLICT = "timed_charge_conflict"
+CHARGE_CONFLICT_ISSUES = (ISSUE_PRICE_CHARGE_CONFLICT, ISSUE_TIMED_CHARGE_CONFLICT)
+
+SERVICE_REFRESH_PRICE_PLAN = "refresh_price_plan"
+SERVICE_SET_PRICE_CHARGE_ENABLED = "set_price_charge_enabled"
+ATTR_ENABLED = "enabled"
+ATTR_FORCE = "force"

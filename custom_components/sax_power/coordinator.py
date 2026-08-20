@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import time as dt_time
 from datetime import timedelta
 from time import monotonic
@@ -22,18 +22,38 @@ from pymodbus.exceptions import ModbusException
 from .const import (
     ALL_MONTHS,
     BATTERY_EVENT_LABELS,
+    CHARGE_CONFLICT_ISSUES,
     CONTROL_MODE_LABELS,
+    DEFAULT_PRICE_HOURS,
+    DEFAULT_PRICE_STRATEGY,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
+    ISSUE_PRICE_CHARGE_CONFLICT,
+    ISSUE_TIMED_CHARGE_CONFLICT,
     MAX_IC_POWER_SETPOINT_PCT,
     MAX_POWER_LIMIT,
+    MAX_PRICE_HOURS,
+    MAX_PRICE_LIMIT,
     MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_IC_POWER_SETPOINT_PCT,
     MIN_POWER_LIMIT,
+    MIN_PRICE_HOURS,
+    MIN_PRICE_LIMIT,
     MIN_SETPOINT_POWER,
     MIN_SOC,
+    PRICE_STATUS_CHARGING,
+    PRICE_STATUS_NO_PRICE_DATA,
+    PRICE_STATUS_OFF,
+    PRICE_STATUS_PAUSED_MAX_SOC,
+    PRICE_STATUS_PAUSED_NO_POWER,
+    PRICE_STATUS_PAUSED_PV_SURPLUS,
+    PRICE_STATUS_PAUSED_TIMED_CHARGE,
+    PRICE_STATUS_PV_FORECAST_COVERS,
+    PRICE_STATUS_TARGET_REACHED,
+    PRICE_STRATEGIES,
+    PRICE_STRATEGY_OFF,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
@@ -133,6 +153,7 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
+from .price_optimizer import PricePlan, SaxPricePlanner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,6 +193,16 @@ def _clamp_int(value: int | None, min_value: int, max_value: int) -> int | None:
     if value is None:
         return None
     return max(min_value, min(max_value, value))
+
+
+def _clamp_float(
+    value: float | None, min_value: float, max_value: float
+) -> float | None:
+    """Wie _clamp_int, für die Preisgrenze des preisoptimierten Ladens
+    (EUR/kWh, siehe async_set_price_charge_max_price)."""
+    if value is None:
+        return None
+    return max(min_value, min(max_value, float(value)))
 
 
 def _time_to_seconds(value: dt_time) -> int:
@@ -274,6 +305,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         slave_id_extended: int,
         scan_interval: int,
         entry_id: str,
+        options: Mapping[str, Any] | None = None,
     ) -> None:
         # Der Coordinator-Timer läuft mit dem kürzeren der beiden Intervalle,
         # damit weder der feste HIGH- noch der nutzerkonfigurierte
@@ -294,6 +326,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.slave_id = slave_id
         self.slave_id_extended = slave_id_extended
         self.entry_id = entry_id
+        # Options-Flow-Konfiguration (Strompreis-/PV-Prognose-Sensor, siehe
+        # config_flow.SaxPowerOptionsFlow). Nur lesend genutzt; nach einer
+        # Änderung lädt __init__.async_update_options den Config Entry neu,
+        # sodass hier immer der aktuelle Stand steht.
+        self.options: Mapping[str, Any] = dict(options or {})
         self._scan_interval = scan_interval
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
@@ -320,6 +357,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_wait_cycles = 0
         self._grid_serving_charge_confirm_cycles = 0
         self._grid_serving_release_confirm_cycles = 0
+        # Preisoptimiertes Laden (siehe anforderung.yaml,
+        # REQ-DYNAMIC-PRICE-CHARGE): nutzt denselben SunSpec-Schreibpfad
+        # (_sun_charge_task) wie zeitgesteuertes/netzdienliches Laden. Der
+        # eigentliche Ladeplan liegt im Planner (price_optimizer.py), hier
+        # stehen nur die vom Anwender gesetzten Stellgrößen.
+        self._price_charge_enabled = False
+        self._price_charge_strategy = DEFAULT_PRICE_STRATEGY
+        self._price_charge_max_price: float | None = None
+        self._price_charge_hours: int | None = None
+        self._price_charge_target_soc: int | None = None
+        self._price_charge_active = False
+        self._price_charge_status = PRICE_STATUS_OFF
+        self.price_planner = SaxPricePlanner(hass, self)
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -372,9 +422,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._accumulate_energy(data)
 
         await self._async_enforce_grid_charge(data)
+        self._publish_charge_state(data)
+        return data
+
+    def _publish_charge_state(self, data: dict[str, Any]) -> None:
+        """Übernimmt die Zustände der drei Lade-Automatiken in coordinator.data,
+        damit die zugehörigen Sensoren (sensor.py) sie wie jeden anderen
+        Messwert lesen können."""
+        plan = self.price_planner.plan
         data["timed_charge_active"] = self._timed_charge_active
         data["grid_serving_active"] = self._grid_serving_active
-        return data
+        data["price_charge_active"] = self._price_charge_active
+        data["price_charge_status"] = self._price_charge_status
+        data["price_charge_next_start"] = plan.next_start
+        data["price_charge_current_price"] = plan.current_price
 
     def _accumulate_energy(self, data: dict[str, Any]) -> None:
         """Akkumuliert geladene/entladene Energie (kWh) aus der aktuell
@@ -1187,9 +1248,39 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def max_charge_power(self) -> int | None:
         return self._max_charge_power
 
-    async def async_set_timed_charge_enabled(self, enabled: bool) -> None:
+    async def async_set_timed_charge_enabled(
+        self, enabled: bool, *, force: bool = False
+    ) -> bool:
+        """Netzladung ein-/ausschalten. Gibt zurück, ob die Änderung
+        übernommen wurde.
+
+        Netzladung und preisoptimiertes Laden (siehe Abschnitt weiter unten)
+        laden beide aktiv über denselben SunSpec-Schreibpfad aus dem Netz
+        und dürfen deshalb nicht gleichzeitig aktiv sein. Wird die
+        Netzladung eingeschaltet, während preisoptimiertes Laden läuft, wird
+        die Änderung NICHT stillschweigend ausgeführt, sondern als
+        reparierbares Issue zur Bestätigung vorgelegt (siehe
+        _async_create_charge_conflict_issue/repairs.py) und hier mit False
+        abgelehnt - der Anwender kann dort bestätigen (dann wird
+        preisoptimiertes Laden abgeschaltet) oder abbrechen.
+
+        `force=True` überspringt diese Rückfrage und schaltet das jeweils
+        andere Feature direkt ab - genutzt vom Bestätigungsdialog selbst,
+        vom Service set_price_charge_enabled (nicht-interaktiver
+        Automationspfad) sowie beim Restaurieren des gespeicherten Zustands
+        beim Start (switch.py), wo per Definition nie beide Features
+        gleichzeitig aktiv gespeichert sein können.
+        """
+        if enabled and self._price_charge_enabled:
+            if not force:
+                self._async_create_charge_conflict_issue(ISSUE_TIMED_CHARGE_CONFLICT)
+                return False
+            self._price_charge_enabled = False
         self._timed_charge_enabled = enabled
+        self.async_dismiss_charge_conflict()
+        self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
+        return True
 
     async def async_set_timed_charge_min_soc(self, value: int | None) -> None:
         """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
@@ -1330,8 +1421,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         warten."""
         if self.data is not None:
             await self._async_enforce_grid_charge(self.data)
-            self.data["timed_charge_active"] = self._timed_charge_active
-            self.data["grid_serving_active"] = self._grid_serving_active
+            self._publish_charge_state(self.data)
             self.async_set_updated_data(self.data)
 
     def _cycles_confirmed(self, counter_attr: str, condition: bool) -> bool:
@@ -1466,10 +1556,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
-        """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden und
-        netzdienliches Laden - alle drei teilen sich den
-        SunSpec-Modus-Schreibpfad (_sun_charge_task). Priorität (höchste
-        zuerst):
+        """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden,
+        preisoptimiertes Laden und netzdienliches Laden - alle vier teilen
+        sich den SunSpec-Modus-Schreibpfad (_sun_charge_task). Priorität
+        (höchste zuerst):
 
         1. Ist der Ziel-SOC erreicht/überschritten, hat die Max-SOC-Sperre
            Vorrang: Register 40051 bleibt/wird auf Sollwertvorgabe gesetzt
@@ -1507,9 +1597,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
+        2b. Preisoptimiertes Laden (siehe eigenen Abschnitt weiter unten
+           sowie anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) lädt mit
+           derselben "Max. Netzladeleistung" aus dem Netz, sobald der vom
+           Planner (price_optimizer.py) berechnete Ladeplan für den
+           aktuellen Zeitpunkt ein ausgewähltes Preisfenster meldet. Es
+           steht hinter dem zeitgesteuerten Laden zurück (das per
+           Bestätigungsdialog ohnehin nicht gleichzeitig aktiv sein kann,
+           siehe async_set_timed_charge_enabled) und bricht - wie dieses -
+           bei bestätigtem PV-Überschuss sofort ab. Zusätzlich zum
+           geräteweiten "Max. SOC" gilt der eigene Ziel-SOC
+           (self._price_charge_target_soc): ist er erreicht, wird nicht mehr
+           aus dem Netz geladen, der Speicher bleibt aber - anders als bei
+           der Max-SOC-Sperre - im normalen Nullregelungsbetrieb, damit die
+           günstig eingekaufte Energie den Hausverbrauch decken kann.
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat UND nicht bereits durch zeitgesteuertes
-           Laden beansprucht - die Zeitfenster von zeitgesteuertem und
+           oder preisoptimiertes Laden beansprucht - die Zeitfenster von
+           zeitgesteuertem und
            netzdienlichem Laden dürfen sich zusätzlich nicht überschneiden,
            siehe _windows_overlap_with_months/_notify_time_window_overlap)
            läuft als eigene Zustandsmaschine über _async_step_grid_serving,
@@ -1606,6 +1711,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._timed_charge_min_soc is not None
             and self._timed_charge_armed
         )
+        # Preisoptimiertes Laden (Punkt 2b, siehe Docstring): teilt sich
+        # Ladeleistung, Max-SOC-Sperre und PV-Überschuss-Hysterese mit dem
+        # zeitgesteuerten Laden, hat aber einen eigenen Ziel-SOC. Der
+        # Ladeplan selbst kommt aus dem Planner (price_optimizer.py) und
+        # wird dort nur alle PRICE_EVAL_INTERVAL Sekunden neu berechnet -
+        # die hier zusätzlich geprüften Abbruchgründe (Ziel-SOC erreicht,
+        # PV-Überschuss, Max-SOC-Sperre) greifen dagegen sofort bei jedem
+        # Poll-Zyklus.
+        price_plan = self.price_planner.plan
+        price_target_soc = (
+            self._price_charge_target_soc
+            if self._price_charge_target_soc is not None
+            else MAX_SOC
+        )
+        price_target_reached = current_soc >= price_target_soc
+        price_should_charge = (
+            not soc_reached
+            and not price_target_reached
+            and not pv_surplus_active
+            and not timed_should_charge
+            and self._price_charge_enabled
+            and self._price_charge_strategy != PRICE_STRATEGY_OFF
+            and price_plan.charge_now
+            and bool(self._max_charge_power)
+        )
         grid_serving_window_active = (
             self._grid_serving_enabled
             and now.month in self._grid_serving_months
@@ -1614,7 +1744,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         )
         grid_serving_eligible = (
-            not soc_reached and grid_serving_window_active and not timed_should_charge
+            not soc_reached
+            and grid_serving_window_active
+            and not timed_should_charge
+            and not price_should_charge
         )
         if not grid_serving_eligible:
             self._grid_serving_setpoint_active = False
@@ -1688,7 +1821,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._max_soc_hold_is_window_bound = False
             self._max_soc_grid_import_wait_cycles = 0
-            if timed_should_charge:
+            if timed_should_charge or price_should_charge:
                 await self.async_start_sun_charge(-self._max_charge_power)
                 grid_serving_active_now = False
             elif grid_serving_eligible:
@@ -1700,6 +1833,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._timed_charge_active = timed_should_charge
         self._grid_serving_active = grid_serving_active_now
+        self._price_charge_active = price_should_charge and not soc_reached
+        self._price_charge_status = self._price_charge_status_text(
+            price_plan,
+            charging=self._price_charge_active,
+            soc_reached=soc_reached,
+            target_reached=price_target_reached,
+            pv_surplus_active=pv_surplus_active,
+            timed_should_charge=timed_should_charge,
+        )
         self._max_soc_clamped = max_soc_clamped_now
 
     async def _async_step_grid_serving(self, data: dict[str, Any]) -> bool:
@@ -1914,12 +2056,231 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_months = new_months
         await self._async_apply_grid_charge_change()
 
+    # -- Preisoptimiertes Laden ------------------------------------------------
+    # Dritte Lade-Automatik neben zeitgesteuertem und netzdienlichem Laden
+    # (siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE). Lädt den Speicher
+    # aus dem Netz, wenn der Strompreis günstig ist, und überlässt ihn in
+    # teuren Phasen der normalen SmartMeter-Nullregelung, sodass die dort
+    # gespeicherte Energie den Hausverbrauch deckt.
+    #
+    # Arbeitsteilung: price_optimizer.SaxPricePlanner liest den vom Anwender
+    # ausgewählten Strompreis-Sensor (plus optional eine PV-Prognose) und
+    # berechnet daraus alle PRICE_EVAL_INTERVAL Sekunden einen Ladeplan -
+    # ohne jeden Modbus-Zugriff. Der Coordinator wertet diesen Plan bei jedem
+    # Poll-Zyklus in _async_enforce_grid_charge aus und setzt ihn über
+    # denselben SunSpec-Schreibpfad (_sun_charge_task, Register 40051/40049)
+    # um wie die beiden anderen Automatiken - inklusive derselben
+    # Max-SOC-Sperre und derselben PV-Überschuss-Hysterese.
+    #
+    # Leistung: "Max. Netzladeleistung" (self._max_charge_power), gemeinsam
+    # mit dem zeitgesteuerten Laden genutzt. Ziel-SOC: eigener Wert
+    # (self._price_charge_target_soc), da er sich fachlich vom generellen
+    # "Max. SOC" unterscheidet - man möchte typischerweise nur so weit
+    # günstig einkaufen, wie man bis zum nächsten günstigen Fenster braucht,
+    # während "Max. SOC" weiterhin die geräteweite Obergrenze bleibt.
+
+    @property
+    def price_charge_enabled(self) -> bool:
+        return self._price_charge_enabled
+
+    @property
+    def price_charge_strategy(self) -> str:
+        return self._price_charge_strategy
+
+    @property
+    def price_charge_max_price(self) -> float | None:
+        return self._price_charge_max_price
+
+    @property
+    def price_charge_hours(self) -> int:
+        return (
+            self._price_charge_hours
+            if self._price_charge_hours is not None
+            else DEFAULT_PRICE_HOURS
+        )
+
+    @property
+    def price_charge_hours_raw(self) -> int | None:
+        """Wie price_charge_hours, aber ohne Fallback - für die NumberEntity,
+        die zwischen "noch nicht restauriert" (None) und einem echten Wert
+        unterscheiden muss (siehe number.SaxPowerPriceChargeHoursNumber)."""
+        return self._price_charge_hours
+
+    @property
+    def price_charge_target_soc(self) -> int | None:
+        return self._price_charge_target_soc
+
+    @property
+    def price_charge_active(self) -> bool:
+        return self._price_charge_active
+
+    @property
+    def price_charge_status(self) -> str:
+        return self._price_charge_status
+
+    @property
+    def price_plan(self) -> PricePlan:
+        return self.price_planner.plan
+
+    async def async_set_price_charge_enabled(
+        self, enabled: bool, *, force: bool = False
+    ) -> bool:
+        """Preisoptimiertes Laden ein-/ausschalten. Gibt zurück, ob die
+        Änderung übernommen wurde - siehe async_set_timed_charge_enabled für
+        die gemeinsame Konfliktbehandlung mit der Netzladung."""
+        if enabled and self._timed_charge_enabled:
+            if not force:
+                self._async_create_charge_conflict_issue(ISSUE_PRICE_CHARGE_CONFLICT)
+                return False
+            self._timed_charge_enabled = False
+        self._price_charge_enabled = enabled
+        self.async_dismiss_charge_conflict()
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+        return True
+
+    async def async_set_price_charge_strategy(self, strategy: str) -> None:
+        if strategy not in PRICE_STRATEGIES:
+            raise HomeAssistantError(
+                f"Unbekannte Strategie {strategy!r} - erlaubt sind: "
+                f"{', '.join(PRICE_STRATEGIES)}"
+            )
+        self._price_charge_strategy = strategy
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_price_charge_max_price(self, value: float | None) -> None:
+        """Preisgrenze für den Modus "Absoluter Preis" (EUR/kWh).
+
+        Klemmt auf [MIN_PRICE_LIMIT, MAX_PRICE_LIMIT], siehe async_set_max_soc
+        für die Begründung (RestoreEntity-Pfad ohne NumberEntity-Validierung).
+        """
+        self._price_charge_max_price = _clamp_float(
+            value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
+        )
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_price_charge_hours(self, value: int | None) -> None:
+        self._price_charge_hours = _clamp_int(value, MIN_PRICE_HOURS, MAX_PRICE_HOURS)
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_price_charge_target_soc(self, value: int | None) -> None:
+        self._price_charge_target_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+
+    async def async_apply_price_plan(self) -> None:
+        """Vom Planner nach jeder periodischen Neuberechnung aufgerufen -
+        wendet das Ergebnis sofort auf das Gerät an, statt bis zum nächsten
+        Poll-Zyklus zu warten."""
+        await self._async_apply_grid_charge_change()
+
+    def _price_charge_status_text(
+        self,
+        plan: PricePlan,
+        *,
+        charging: bool,
+        soc_reached: bool,
+        target_reached: bool,
+        pv_surplus_active: bool,
+        timed_should_charge: bool,
+    ) -> str:
+        """Anzeigetext für den Sensor "Preisoptimiertes Laden Status".
+
+        Der Planner kennt nur die Preisseite ("Warten auf Preisabfall",
+        "Keine Preisdaten", ...). Hier kommen die Gründe dazu, die das Laden
+        unabhängig vom Preis verhindern - in der Reihenfolge, in der
+        _async_enforce_grid_charge sie tatsächlich auswertet, damit der
+        angezeigte Grund immer der wirksame ist.
+        """
+        strategy_off = self._price_charge_strategy == PRICE_STRATEGY_OFF
+        if not self._price_charge_enabled or strategy_off:
+            return PRICE_STATUS_OFF
+        if plan.status in (PRICE_STATUS_NO_PRICE_DATA, PRICE_STATUS_PV_FORECAST_COVERS):
+            return plan.status
+        if charging:
+            return PRICE_STATUS_CHARGING
+        if soc_reached:
+            return PRICE_STATUS_PAUSED_MAX_SOC
+        if target_reached:
+            return PRICE_STATUS_TARGET_REACHED
+        if timed_should_charge:
+            return PRICE_STATUS_PAUSED_TIMED_CHARGE
+        if pv_surplus_active:
+            return PRICE_STATUS_PAUSED_PV_SURPLUS
+        if not self._max_charge_power:
+            return PRICE_STATUS_PAUSED_NO_POWER
+        return plan.status
+
+    # -- Konflikt Netzladung <-> preisoptimiertes Laden ------------------------
+    def _async_create_charge_conflict_issue(self, issue_key: str) -> None:
+        """Legt den Bestätigungsdialog an, statt die Aktivierung des zweiten
+        netzladenden Features stillschweigend abzulehnen.
+
+        Home Assistant kennt für Entity-Aktionen keinen synchronen
+        Bestätigungsdialog; ein reparierbares Issue (repairs.py) ist der
+        native Weg zu einem echten Ja/Nein-Dialog. Zusätzlich wird eine
+        Persistent Notification erzeugt, damit der Anwender die Rückfrage
+        sofort sieht und nicht erst beim nächsten Blick auf
+        Einstellungen -> Reparaturen. Beide werden gemeinsam wieder entfernt
+        (async_dismiss_charge_conflict).
+        """
+        if issue_key == ISSUE_PRICE_CHARGE_CONFLICT:
+            message = (
+                "Preisoptimiertes Laden wurde eingeschaltet, während die "
+                "Netzladung (zeitgesteuertes Laden) aktiv ist. Beide laden "
+                "aktiv aus dem Netz und können nicht gleichzeitig laufen. "
+                "Unter Einstellungen -> Geräte & Dienste -> Reparaturen kann "
+                "bestätigt werden, dass die Netzladung dafür abgeschaltet "
+                "wird - oder der Vorgang abgebrochen werden. Bis dahin "
+                "bleibt preisoptimiertes Laden ausgeschaltet."
+            )
+        else:
+            message = (
+                "Die Netzladung (zeitgesteuertes Laden) wurde eingeschaltet, "
+                "während preisoptimiertes Laden aktiv ist. Beide laden aktiv "
+                "aus dem Netz und können nicht gleichzeitig laufen. Unter "
+                "Einstellungen -> Geräte & Dienste -> Reparaturen kann "
+                "bestätigt werden, dass preisoptimiertes Laden dafür "
+                "abgeschaltet wird - oder der Vorgang abgebrochen werden. Bis "
+                "dahin bleibt die Netzladung ausgeschaltet."
+            )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"{issue_key}_{self.entry_id}",
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=issue_key,
+            data={"entry_id": self.entry_id, "issue_key": issue_key},
+        )
+        persistent_notification.async_create(
+            self.hass,
+            message,
+            title="SAX Power: Bestätigung erforderlich",
+            notification_id=f"{DOMAIN}_{self.entry_id}_charge_conflict",
+        )
+
+    def async_dismiss_charge_conflict(self) -> None:
+        """Entfernt Bestätigungsdialog und Benachrichtigung - sowohl nach
+        einer Bestätigung als auch nach einem Abbruch, und immer dann, wenn
+        eine der beiden Einstellungen erfolgreich geändert wurde (der
+        Konflikt ist dann per Definition nicht mehr aktuell)."""
+        for issue_key in CHARGE_CONFLICT_ISSUES:
+            ir.async_delete_issue(self.hass, DOMAIN, f"{issue_key}_{self.entry_id}")
+        persistent_notification.async_dismiss(
+            self.hass, f"{DOMAIN}_{self.entry_id}_charge_conflict"
+        )
+
     async def async_shutdown(self) -> None:
         # super().async_shutdown() (DataUpdateCoordinator) storniert den
         # periodischen Poll-Timer sowie den Debounced-Refresh - ohne diesen
         # Aufruf lief der Timer beim Entladen des Config Entry (siehe
         # __init__.async_unload_entry) unbemerkt im Hintergrund weiter.
         await super().async_shutdown()
+        self.price_planner.async_shutdown()
         await self.async_stop_grid_charge()
         await self.async_stop_sun_charge()
         ir.async_delete_issue(

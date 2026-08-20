@@ -17,6 +17,7 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
   - [Schalter](#schalter)
   - [Zeitgesteuertes Laden](#zeitgesteuertes-laden)
   - [Netzdienliches Laden](#netzdienliches-laden)
+  - [Preisoptimiertes Laden](#preisoptimiertes-laden)
   - [Services](#services)
 - [IP-Adresse nachträglich ändern](#ip-adresse-nachträglich-ändern)
 - [Diagnose](#diagnose)
@@ -27,7 +28,8 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
 
 Die Integration verbindet sich per Modbus TCP mit dem SAX Power Home (Plus)
 und stellt dessen Messwerte sowie Steuermöglichkeiten (Lade-/Entladelimits,
-Ein/Aus, zeitgesteuertes Laden) als Home-Assistant-Entitäten bereit. Die
+Ein/Aus, zeitgesteuertes Laden, preisoptimiertes Laden nach dynamischem
+Strompreis) als Home-Assistant-Entitäten bereit. Die
 Einrichtung erfolgt vollständig über die grafische Oberfläche, es ist keine
 YAML-Konfiguration nötig.
 
@@ -165,6 +167,9 @@ er wieder verfügbar ist.
 | Max. SOC | Ziel-SOC (0–100 %) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
 | Max. Netzladeleistung | Ziel-Leistung für die Netzladung (W) – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung einmalig mit dem beim Start gelesenen Ladeleistungsgrenzwert (Register 44) vorbelegt |
 | Netzladung Min. SOC | Unterer SOC-Schwellwert (0–100 %), unterhalb dessen die Netzladung startet – siehe [unten](#zeitgesteuertes-laden). Ohne vorherige Einstellung 100 % (nicht 0), bleibt über Neustarts hinweg erhalten |
+| Preisoptimiertes Laden Preisgrenze | Arbeitspreis in EUR/kWh, bis zu dem im Modus "Absoluter Preis" geladen wird – siehe [unten](#preisoptimiertes-laden). Negative Werte sind zulässig. Ohne vorherige Einstellung 0,20 EUR/kWh |
+| Preisoptimiertes Laden Anzahl Stunden | Anzahl der günstigsten Stunden (1–24) in den Modi "Relativ" und "Smart" – siehe [unten](#preisoptimiertes-laden). Ohne vorherige Einstellung 3 |
+| Preisoptimiertes Laden Ziel-SOC | Ladestand (0–100 %), bis zu dem preisoptimiert aus dem Netz geladen wird – siehe [unten](#preisoptimiertes-laden). Ohne vorherige Einstellung 80 % |
 
 Es gibt bewusst keine eigene Ziel-SOC-Einstellung für zeitgesteuertes
 Laden – "Max. SOC" (oberes Ziel) ist die zentrale Einstellung oben,
@@ -184,6 +189,12 @@ dem sich das lohnt.
 | Speicher On/Off | Schaltet den Speicher ein/aus |
 | Netzladung aktiv | Aktiviert/deaktiviert das zeitgesteuerte Laden, siehe [unten](#zeitgesteuertes-laden) |
 | Netzdienliches Laden aktiv | Aktiviert/deaktiviert das netzdienliche Laden, siehe [unten](#netzdienliches-laden) |
+| Preisoptimiertes Laden aktiv | Hauptschalter für das preisoptimierte Laden, siehe [unten](#preisoptimiertes-laden) |
+
+Zusätzlich gibt es das Auswahlfeld **Preisoptimiertes Laden Strategie**
+(`select`) mit den Optionen "Manuell / Aus", "Absoluter Preis",
+"Relativ / Günstigste Stunden" und "Smart / PV-optimiert" – siehe
+[unten](#preisoptimiertes-laden).
 
 ### Zeitgesteuertes Laden
 
@@ -391,6 +402,149 @@ keinen Vorbelegungsschritt im Config Flow – das Feature wird ausschließlich �
 die Entitäten nach der Ersteinrichtung konfiguriert und ist per Default
 deaktiviert.
 
+### Preisoptimiertes Laden
+
+Lädt den Speicher automatisch dann aus dem Netz, wenn der Strom günstig ist,
+und lässt ihn in teuren Phasen den Hausverbrauch decken – vergleichbar mit
+dem, was EVCC oder cleverPV für dynamische Tarife machen.
+
+Die Integration ruft **keine Strompreise selbst ab**. Sie nutzt eine bereits
+vorhandene Sensor-Entität aus deinem Home Assistant – Tibber, Nordpool, EPEX
+Spot, ENTSO-e, Awattar oder ein eigener Template-Sensor. Erkannt werden die
+üblichen Vorschau-Attribute (`raw_today`/`raw_tomorrow`, `today`/`tomorrow`,
+`data`, `forecast`, `prices`), sowohl als Liste von Zeitfenstern als auch als
+reine Zahlenliste für einen Kalendertag, in stündlicher wie
+viertelstündlicher Auflösung. Preise in ct/kWh werden anhand der Einheit des
+Sensors automatisch in EUR/kWh umgerechnet.
+
+#### Einrichtung
+
+**Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
+
+| Feld | Beschreibung |
+| --- | --- |
+| Strompreis-Sensor | Sensor mit dem aktuellen Arbeitspreis. Aus seinen Vorschau-Attributen werden die Zeitfenster der Modi "Relativ" und "Smart" ermittelt |
+| Attribut mit der Preisvorschau | Optional. Nur nötig, wenn die automatische Erkennung bei deinem Sensor danebenliegt – dann hier den Attributnamen eintragen (z. B. `raw_today`) |
+| Preis-Einheit | "Automatisch" leitet sie aus dem Sensor ab. EUR/kWh bzw. ct/kWh erzwingen die Interpretation, falls der Sensor keine (oder eine irreführende) Einheit hat |
+| Vorgabe-Strategie | Gilt nur beim allerersten Start. Danach zählt das Auswahlfeld "Preisoptimiertes Laden Strategie" am Gerät |
+| PV-Prognose-Sensor | Optional, nur für den Modus "Smart". Erwartet die erwartete Erzeugung als Energie, z. B. `sensor.energy_production_tomorrow` (Forecast.Solar) oder das Solcast-Pendant |
+| Nutzbarer Anteil der PV-Prognose | Wie viel der Prognose tatsächlich im Speicher landen dürfte (Standard 80 %) – deckt Eigenverbrauch, Wetterunsicherheit und Wandlungsverluste ab |
+
+Alles Weitere wird über die Entitäten am SAX-Gerät gesteuert und ist damit
+automatisierbar und in Dashboards nutzbar. Der Hauptschalter
+**"Preisoptimiertes Laden aktiv"** schaltet die Automatik ein; per Default
+ist sie aus.
+
+#### Strategien
+
+| Strategie | Verhalten |
+| --- | --- |
+| **Manuell / Aus** | Automatik stillgelegt, ohne die übrigen Einstellungen zu verlieren |
+| **Absoluter Preis** | Lädt, solange der Arbeitspreis "Preisoptimiertes Laden Preisgrenze" nicht überschreitet – z. B. "lade, wenn der Strom unter 15 ct/kWh kostet" |
+| **Relativ / Günstigste Stunden** | Lädt in den X günstigsten Stunden – z. B. "lade in den 3 billigsten Stunden". Die Auswahl erfolgt vorausschauend über die bekannten Preise |
+| **Smart / PV-optimiert** | Wie "Relativ", ermittelt die Stundenzahl aber aus dem tatsächlichen Bedarf abzüglich der PV-Prognose |
+
+Der Planungshorizont ist ein gleitendes **24-Stunden-Fenster** über die
+jeweils bekannten Preise (Rest von heute plus – sobald veröffentlicht –
+morgen), nicht der Kalendertag. "Die 3 günstigsten Stunden" heißt also: die
+drei günstigsten der nächsten 24 Stunden.
+
+Der Modus **Smart** rechnet so: Aus Ziel-SOC, aktuellem Ladestand und der
+Speicherkapazität ergibt sich der fehlende Energiebedarf. Davon wird der
+nutzbare Anteil der PV-Prognose abgezogen; was übrig bleibt, geteilt durch
+"Max. Netzladeleistung", ergibt die benötigten Ladestunden – und genau so
+viele der günstigsten Stunden werden eingeplant. Deckt die Prognose den
+Bedarf vollständig, wird gar kein Netzstrom eingekauft (Status
+"PV-Prognose deckt Bedarf"). "Anzahl Stunden" bleibt dabei die Obergrenze,
+sodass nie mehr eingekauft wird, als du zugelassen hast. Sind Kapazität, SOC
+oder Ladeleistung gerade nicht bekannt (z. B. SunSpec-Modus nicht
+erreichbar), verhält sich "Smart" wie "Relativ".
+
+**Beispiel:** Ziel-SOC 80 %, aktuell 40 %, 10 kWh Speicher → 4 kWh fehlen.
+Die Prognose für morgen meldet 8 kWh, davon gelten 80 % als nutzbar → 6,4
+kWh. Der Bedarf ist damit gedeckt, es wird nachts nichts zugekauft.
+
+#### Leistung, Ziel-SOC und Zusammenspiel
+
+Geladen wird mit **"Max. Netzladeleistung"** – derselben Einstellung wie beim
+[zeitgesteuerten Laden](#zeitgesteuertes-laden), damit es keine zwei
+konkurrierenden Leistungswerte gibt. Der **Ziel-SOC ist dagegen eigenständig**
+("Preisoptimiertes Laden Ziel-SOC"): Typischerweise willst du nur so viel
+günstig einkaufen, wie bis zum nächsten günstigen Fenster gebraucht wird,
+während "Max. SOC" die geräteweite Obergrenze bleibt.
+
+Wird der eigene Ziel-SOC erreicht, endet die Netzladung – der Speicher bleibt
+aber im normalen Nullregelungsbetrieb und kann die eingekaufte Energie wieder
+abgeben. Wird dagegen "Max. SOC" erreicht, greift zusätzlich die
+[Max-SOC-Sperre](#zeitgesteuertes-laden) und hält den Speicher aktiv auf 0 %
+Leistungsvorgabe.
+
+Weitere Abbruchgründe, jeweils sofort wirksam (nicht erst beim nächsten
+60-Sekunden-Takt):
+
+- **PV-Überschuss** am Smart Meter – die eigene Sonne ist immer günstiger als
+  Netzstrom (gleiche Zyklen-Hysterese wie beim zeitgesteuerten Laden).
+- **Netzladung aktiv** – das zeitgesteuerte Laden hat Vorrang.
+- **Keine "Max. Netzladeleistung" gesetzt** – ohne Leistung gibt es keinen
+  Sollwert zum Schreiben.
+
+Die Bedingungen werden **alle 60 Sekunden** neu geprüft, zusätzlich sofort bei
+jeder Einstellungsänderung und jedem Zustandswechsel des Preis- oder
+Prognose-Sensors. Ist die Bedingung erfüllt, wird über den SunSpec-Modus die
+Zwangsladung aus dem Netz aktiviert (Register 40051 auf Sollwertvorgabe,
+Register 40049 auf die gewünschte Ladeleistung); ist sie nicht erfüllt, geht
+der Speicher zurück in die normale SmartMeter-Nullregelung.
+
+#### Statusanzeige
+
+Der Sensor **"Preisoptimiertes Laden Status"** zeigt in Klartext, was gerade
+passiert:
+
+| Status | Bedeutung |
+| --- | --- |
+| Aus | Hauptschalter aus oder Strategie "Manuell / Aus" |
+| Keine Preisdaten | Kein Sensor konfiguriert, oder seine Attribute lassen sich nicht auswerten |
+| Warten auf Preisabfall | Alles bereit, aber der aktuelle Zeitraum gehört nicht zu den ausgewählten Fenstern |
+| Lade aus Netz | Zwangsladung läuft |
+| Ziel-SOC erreicht | Der eigene Ziel-SOC ist erreicht |
+| PV-Prognose deckt Bedarf | Modus "Smart": morgen kommt genug Sonne, es wird nichts zugekauft |
+| Pausiert (PV-Überschuss) | Am Smart Meter wird Einspeisung gemessen |
+| Pausiert (Max. SOC) | Die übergeordnete Max-SOC-Sperre greift |
+| Pausiert (Max. Netzladeleistung fehlt) | "Max. Netzladeleistung" steht auf 0 |
+| Pausiert (Netzladung aktiv) | Das zeitgesteuerte Laden hat gerade Vorrang |
+
+Die Attribute dieses Sensors führen zusätzlich Strategie, aktuellen Preis,
+wirksame Preisgrenze, benötigte Stunden, eingerechnete PV-Prognose, die
+konfigurierten Quell-Sensoren und alle geplanten Zeitfenster mit – hilfreich,
+wenn eine Entscheidung mal nicht nachvollziehbar erscheint.
+
+Ergänzend zeigt **"Preisoptimiertes Laden nächster Start"** als Zeitstempel,
+wann das nächste geplante Ladefenster beginnt (bzw. wann das laufende
+begonnen hat), und **"Aktueller Strompreis"** den Preis des aktuellen
+Zeitfensters in EUR/kWh.
+
+#### Netzladung und preisoptimiertes Laden schließen sich aus
+
+Beide laden aktiv aus dem Netz über denselben Schreibpfad und dürfen deshalb
+nicht gleichzeitig laufen. Schaltest du eines ein, während das andere aktiv
+ist, passiert **nichts sofort**: Der Schalter springt zurück, und du bekommst
+eine Rückfrage – als Benachrichtigung sowie als Eintrag unter
+**Einstellungen → Geräte & Dienste → Reparaturen**.
+
+Dort stehen zwei Möglichkeiten zur Wahl:
+
+- **Bestätigen** – das jeweils andere Feature wird abgeschaltet und das
+  gewünschte aktiviert.
+- **Abbrechen** – es ändert sich nichts, alles bleibt wie vorher.
+
+Das gilt in beide Richtungen: sowohl beim Einschalten von "Preisoptimiertes
+Laden aktiv" bei laufender Netzladung als auch beim Einschalten von
+"Netzladung aktiv" bei laufendem preisoptimiertem Laden.
+
+Für **Automationen**, die auf keinen Dialog antworten können, gibt es den
+Service `sax_power.set_price_charge_enabled` mit dem Feld `force` – damit
+wird die Netzladung ohne Rückfrage abgeschaltet.
+
 ### Services
 
 - **`sax_power.start_grid_charge`** – startet die Netzladung mit einem
@@ -428,7 +582,26 @@ deaktiviert.
   | `start` | Startzeit des Zeitfensters |
   | `end` | Endzeit des Zeitfensters |
 
-Alle vier Services werden über einen `device_id`-Parameter an das jeweilige
+- **`sax_power.refresh_price_plan`** – berechnet den Ladeplan des
+  [preisoptimierten Ladens](#preisoptimiertes-laden) sofort neu und wendet ihn
+  an, statt bis zur nächsten regulären Prüfung (alle 60 Sekunden) zu warten.
+
+  | Feld | Beschreibung |
+  | --- | --- |
+  | `device_id` | SAX Power Gerät |
+
+- **`sax_power.set_price_charge_enabled`** – schaltet das preisoptimierte
+  Laden ein oder aus. Nicht-interaktiver Gegenpart zum Schalter: Steht die
+  Netzladung dem Einschalten im Weg, schlägt der Aufruf mit einem Fehler fehl –
+  mit `force: true` wird sie stattdessen ohne Rückfrage abgeschaltet.
+
+  | Feld | Beschreibung |
+  | --- | --- |
+  | `device_id` | SAX Power Gerät |
+  | `enabled` | Ein- (`true`) oder ausschalten (`false`) |
+  | `force` | Optional. Schaltet eine gleichzeitig aktive Netzladung ohne Rückfrage ab (Standard `false`) |
+
+Alle Services werden über einen `device_id`-Parameter an das jeweilige
 SAX Power Gerät adressiert (relevant, falls mehrere Speicher eingerichtet
 sind).
 
@@ -482,10 +655,20 @@ gefahrlos geteilt werden.
   Firmware – Master V61/Gateway V54 oder neuer erforderlich), bleiben die
   Basic-Mode-Sensoren (SOC, Schalter) trotzdem verfügbar; nur die
   SunSpec-Sensoren zeigen "unbekannt", bis der Block wieder lesbar ist.
-  Zeitgesteuertes Laden und die Max-SOC-Sperre benötigen den SunSpec-Modus
-  zwingend (Schreibpfad) und können in diesem Zustand nicht greifen. Ein
-  dauerhafter Ausfall wird zusätzlich als Home-Assistant-Repair-Issue
-  angezeigt.
+  Zeitgesteuertes, preisoptimiertes Laden und die Max-SOC-Sperre benötigen
+  den SunSpec-Modus zwingend (Schreibpfad) und können in diesem Zustand nicht
+  greifen. Ein dauerhafter Ausfall wird zusätzlich als
+  Home-Assistant-Repair-Issue angezeigt.
+- **Preisoptimiertes Laden hängt an der Datenqualität des gewählten
+  Strompreis-Sensors.** Liefert dieser keine Vorschau-Attribute, sondern nur
+  den aktuellen Preis, funktioniert der Modus "Absoluter Preis" weiterhin,
+  die Modi "Relativ" und "Smart" können mangels Zukunftsdaten aber keine
+  Fenster planen (Status "Keine Preisdaten"). Der Diagnose-Export enthält den
+  ausgewerteten Ladeplan – hilfreich, um ein nicht erkanntes Attributformat
+  zu identifizieren.
+- **Der Modus "Smart" braucht die Speicherkapazität** (SunSpec-Register
+  40097) und einen PV-Prognose-Sensor. Fehlt eines von beidem, verhält er
+  sich wie "Relativ".
 
 ## Weiterführende Dokumentation
 

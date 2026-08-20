@@ -8,7 +8,16 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power.const import DOMAIN
+from custom_components.sax_power.const import (
+    CONF_PRICE_SENSOR,
+    CONF_PRICE_STRATEGY,
+    CONF_PRICE_UNIT,
+    CONF_PV_FORECAST_FACTOR,
+    CONF_PV_FORECAST_SENSOR,
+    DOMAIN,
+    PRICE_STRATEGY_SMART,
+    PRICE_UNIT_CT_KWH,
+)
 
 VALID_INPUT = {
     "host": "192.168.1.50",
@@ -190,3 +199,55 @@ async def test_reconfigure_flow_cannot_connect(hass) -> None:
         assert result2["type"] == FlowResultType.FORM
         assert result2["errors"] == {"base": "cannot_connect"}
         assert entry.data["host"] == "192.168.1.50"
+
+
+async def test_options_flow_stores_price_configuration(hass) -> None:
+    """Options Flow: Auswahl von Strompreis-/PV-Prognose-Sensor und deren
+    Interpretation, siehe anforderung.yaml REQ-DYNAMIC-PRICE-CHARGE."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=VALID_INPUT, unique_id="192.168.1.50:502"
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_PRICE_UNIT: PRICE_UNIT_CT_KWH,
+            CONF_PRICE_STRATEGY: PRICE_STRATEGY_SMART,
+            CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen",
+            CONF_PV_FORECAST_FACTOR: 70,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_PRICE_SENSOR] == "sensor.strompreis"
+    assert entry.options[CONF_PRICE_UNIT] == PRICE_UNIT_CT_KWH
+    assert entry.options[CONF_PRICE_STRATEGY] == PRICE_STRATEGY_SMART
+    assert entry.options[CONF_PV_FORECAST_FACTOR] == 70
+
+
+async def test_options_flow_is_prefilled_with_current_options(hass) -> None:
+    """Beim erneuten Öffnen sind die gespeicherten Werte vorbelegt, damit
+    eine kleine Änderung nicht das ganze Formular neu ausfüllen muss."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options={CONF_PRICE_SENSOR: "sensor.strompreis"},
+        unique_id="192.168.1.50:502",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    suggested = {
+        key.schema: key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if isinstance(key.description, dict) and "suggested_value" in key.description
+    }
+    assert suggested[CONF_PRICE_SENSOR] == "sensor.strompreis"

@@ -60,7 +60,7 @@
         "name": "Entladene Energie (gesamt)"
       },
       "smartmeter_power": {
-        "name": "Smart Meter Leistung (Basic Mode)"
+        "name": "Smart Meter Leistung"
       },
       "switch_state_text": {
         "name": "Speicher Schaltzustand (Text)"

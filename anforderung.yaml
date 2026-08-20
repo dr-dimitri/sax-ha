@@ -162,8 +162,9 @@ requirement_real_hardware_tests:
   acceptance_criteria:
     - "pytest läuft ohne hinterlegte IP vollständig durch (betroffene
        Tests werden übersprungen, keine Fehler)."
-    - "README.md beschreibt tests/real_device.yaml und wie der
-       Live-Hardware-Test aktiviert wird."
+    - "DEVELOPMENT.md (Abschnitt 'Test gegen echte Hardware') beschreibt
+       tests/real_device.yaml und wie der Live-Hardware-Test aktiviert
+       wird - als Entwickler-, nicht als Benutzerdokumentation."
 
 # ==============================================================================
 # ANFORDERUNG: SUNSPEC-MODUS-REGISTERKARTE (SLAVE-ID 100)
@@ -474,8 +475,8 @@ requirement_timed_soc_charge:
     - "number.py enthält keine featurespezifische Leistungseinstellung für
        zeitgesteuertes Laden - es nutzt ausschließlich die zentralen
        Einstellungen 'Max. SOC' und 'Max. Netzladeleistung'."
-    - "tests/test_number.py deckt die Vorbelegungslogik von "Max.
-       Netzladeleistung" ab: allererster Start (Vorbelegung aus Register 44),
+    - "tests/test_number.py deckt die Vorbelegungslogik von 'Max.
+       Netzladeleistung' ab: allererster Start (Vorbelegung aus Register 44),
        ein restaurierter 0-Wert (fällt ebenfalls auf Register 44 zurück -
        Regressionstest für eine zuvor gemeldete Fehlvorbelegung bei
        bestehenden Config Entries) sowie ein echter, zuvor gesetzter

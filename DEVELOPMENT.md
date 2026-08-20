@@ -85,14 +85,30 @@ Priorität in `_async_enforce_grid_charge`:
    (`timed_should_charge`): Leistungsvorgabe = `-max_charge_power` (negativ
    = Laden).
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
-   im eigenen aktiven Monat + PV-Überschuss + "Max. Netzladeleistung"
-   gesetzt** (`grid_serving_should_charge`): Leistungsvorgabe =
-   `-min(max_charge_power, smartmeter_power)` - auf den tatsächlich
-   verfügbaren Überschuss gedeckelt, es wird also nie aus dem Netz geladen.
-   Schließt sich mit Schritt 2 bereits über die entgegengesetzte
-   PV-Überschuss-Bedingung gegenseitig aus (siehe `pv_surplus_active`).
+   im eigenen aktiven Monat + nicht bereits durch zeitgesteuertes Laden
+   beansprucht** (`grid_serving_eligible`): eigene Zustandsmaschine
+   (`SaxPowerCoordinator._async_step_grid_serving`), NICHT über einen aus
+   dem PV-Überschuss berechneten Sollwert. "Max. Netzladeleistung" wird
+   dafür nicht benötigt, es wird nie ein Sollwert > 0 geschrieben:
+   - **Schritt a** (ohne aktiven Sollwertvorgabemodus): Erreicht die
+     tatsächliche Ladeleistung des SAX (negativer Anteil von
+     `data["storage_power_active"]`) `SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`
+     (Beweis, dass die geräteeigene SmartMeter-Nullregelung bereits mit
+     Überschuss lädt), wechselt der Speicher in einem Aufruf in den
+     Sollwertvorgabemodus UND die Ladung wird auf 0 % gestoppt
+     (`async_start_sun_charge(0)`), danach zwei Wartezyklen
+     (`_grid_serving_wait_cycles`).
+   - **Schritt b** (mit aktivem Sollwertvorgabemodus, nach Ablauf der
+     Wartezyklen): Fällt die am Smart Meter gemessene Netzeinspeisung
+     (`data["smartmeter_power"]`) unter denselben Schwellwert, wird der
+     Speicher aktiv zurück in die SmartMeter-Nullregelung gesetzt
+     (`async_stop_sun_charge`). Bleibt sie mindestens beim Schwellwert (oder
+     fehlt der Messwert), bleibt die Ladung bewusst bei 0 % gehalten.
+
+   Schließt sich mit Schritt 2 bereits strukturell über
+   `not timed_should_charge` aus.
 4. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
-   (SmartMeter-Nullregelung).
+   (SmartMeter-Nullregelung), Zustandsmaschine zurückgesetzt.
 
 **Aktive Monate:** Beide Features haben zusätzlich je 12 Monats-Schalter
 (`switch.SaxPowerMonthSwitch`, eine generische Klasse für beide Features und

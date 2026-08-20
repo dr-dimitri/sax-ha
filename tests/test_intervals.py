@@ -10,9 +10,11 @@ from custom_components.sax_power.const import (
     IntervalType,
 )
 from custom_components.sax_power.intervals import (
+    SLOW_DATA_KEYS,
     TASK_INTERVALS,
     TASK_READ_BASIC,
     TASK_READ_EXTENDED,
+    TASK_READ_SLOW_DATA,
     TASK_WRITE_GRID_CHARGE,
     TASK_WRITE_SUN_CHARGE,
     resolve_interval_seconds,
@@ -56,10 +58,9 @@ def test_task_interval_seconds_unknown_task_defaults_to_normal() -> None:
     assert task_interval_seconds("does_not_exist", normal_interval_seconds=17) == 17
 
 
-def test_all_existing_tasks_default_to_normal() -> None:
-    """Initial müssen alle vorhandenen periodischen Lese-/Schreib-Tasks
-    (Basic-/SunSpec-Modus-Read, Netzladung-/SunSpec-Netzladung-Write) dem
-    Intervalltyp NORMAL zugeordnet sein - siehe anforderung.yaml."""
+def test_normal_tasks_default_to_normal() -> None:
+    """Basic-/SunSpec-Modus-Read sowie beide periodischen Schreib-Tasks
+    sind dem Intervalltyp NORMAL zugeordnet - siehe anforderung.yaml."""
     for task in (
         TASK_READ_BASIC,
         TASK_READ_EXTENDED,
@@ -67,6 +68,30 @@ def test_all_existing_tasks_default_to_normal() -> None:
         TASK_WRITE_SUN_CHARGE,
     ):
         assert TASK_INTERVALS[task] is IntervalType.NORMAL
+
+
+def test_slow_data_task_is_low() -> None:
+    """Die trägen SunSpec-Felder (SLOW_DATA_KEYS) sind dem Intervalltyp LOW
+    zugeordnet - siehe anforderung.yaml."""
+    assert TASK_INTERVALS[TASK_READ_SLOW_DATA] is IntervalType.LOW
+
+
+def test_slow_data_keys_cover_the_requested_fields() -> None:
+    """SLOW_DATA_KEYS muss genau die neun trägen SunSpec-Felder abdecken,
+    die dem LOW-Intervall zugeordnet werden sollen (siehe
+    translations/de.json für die Zuordnung Anzeigename -> Key)."""
+    assert SLOW_DATA_KEYS == {
+        "sun_manufacturer",  # Hersteller
+        "sun_model",  # Gerätemodell
+        "sun_version_master",  # Softwareversion Master
+        "sun_version_gateway",  # Softwareversion Gateway
+        "sun_serial_number",  # Seriennummer
+        "ic_max_power_reference",  # Referenzwert Maximalleistung
+        "battery_capacity",  # Speicherkapazität
+        "battery_discharge_depth",  # Entladetiefe
+        "battery_charging_active",  # Ladestatus Akku
+        "battery_cell_voltage_avg",  # Durchschnittliche Zellspannung
+    }
 
 
 @pytest.mark.parametrize(

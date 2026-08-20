@@ -33,7 +33,11 @@ from custom_components.sax_power.coordinator import (
     windows_overlap,
 )
 from custom_components.sax_power.intervals import (
+    SLOW_DATA_KEYS,
     TASK_INTERVALS,
+    TASK_READ_BASIC,
+    TASK_READ_EXTENDED,
+    TASK_READ_SLOW_DATA,
     TASK_WRITE_GRID_CHARGE,
     TASK_WRITE_SUN_CHARGE,
 )
@@ -917,16 +921,28 @@ def test_sun_ic_write_interval(
 
 # -- Intervalltypen (dynamische/asynchrone Intervalle) -----------------------
 # Siehe intervals.py: HIGH (fest, 2s), NORMAL (konfigurierbar, Default 10s),
-# LOW (fest, 10 Minuten). Initial sind alle vorhandenen Lese- und
-# Schreiboperationen dem Typ NORMAL zugeordnet (siehe anforderung.yaml).
+# LOW (fest, 10 Minuten). Basic-/SunSpec-Modus-Read sowie beide periodischen
+# Schreib-Tasks stehen auf NORMAL; die trägen SunSpec-Felder
+# (TASK_READ_SLOW_DATA, siehe SLOW_DATA_KEYS) auf LOW (siehe
+# anforderung.yaml).
 
 
-def test_all_existing_tasks_default_to_normal_interval(hass) -> None:
-    """Initial müssen alle vorhandenen periodischen Lese-/Schreib-Tasks
-    (Basic-/SunSpec-Modus-Read, Netzladung-/SunSpec-Netzladung-Write) den
-    Intervalltyp NORMAL haben - siehe TASK_INTERVALS."""
-    for interval_type in TASK_INTERVALS.values():
-        assert interval_type is IntervalType.NORMAL
+def test_normal_tasks_default_to_normal_interval(hass) -> None:
+    """Basic-/SunSpec-Modus-Read sowie beide periodischen Schreib-Tasks
+    haben den Intervalltyp NORMAL - siehe TASK_INTERVALS."""
+    for task in (
+        TASK_READ_BASIC,
+        TASK_READ_EXTENDED,
+        TASK_WRITE_GRID_CHARGE,
+        TASK_WRITE_SUN_CHARGE,
+    ):
+        assert TASK_INTERVALS[task] is IntervalType.NORMAL
+
+
+def test_slow_data_task_has_low_interval(hass) -> None:
+    """Die trägen SunSpec-Felder (TASK_READ_SLOW_DATA, siehe
+    SLOW_DATA_KEYS) haben den Intervalltyp LOW - siehe TASK_INTERVALS."""
+    assert TASK_INTERVALS[TASK_READ_SLOW_DATA] is IntervalType.LOW
 
 
 def test_coordinator_poll_interval_matches_configured_normal_interval(hass) -> None:
@@ -1044,6 +1060,117 @@ async def test_modbus_lock_serializes_concurrent_read_and_write(hass) -> None:
     )
 
     assert max_in_flight == 1
+
+
+# -- Träge SunSpec-Felder (LOW-Intervall) -------------------------------------
+# Hersteller, Gerätemodell, Softwareversion Master/Gateway, Seriennummer,
+# Referenzwert Maximalleistung, Speicherkapazität, Entladetiefe, Ladestatus
+# Akku und Durchschnittliche Zellspannung (siehe intervals.SLOW_DATA_KEYS)
+# liegen physisch im selben SunSpec-Modus-Block wie die schnell benötigten
+# Werte und werden deshalb weiterhin bei jedem NORMAL-Zyklus mitgelesen -
+# ihre Übernahme in coordinator.data wird aber auf das LOW-Intervall (fest
+# 10 Minuten) gedrosselt, siehe SaxPowerCoordinator._apply_slow_data_throttle.
+
+
+def _make_slow_data_read_side_effect(basic_registers: list[int], battery_capacity: int):
+    """Wie _make_read_side_effect, liefert aber im SunSpec-Modus-Block einen
+    einstellbaren Wert für Register 97 (battery_capacity, Index 97 relativ
+    zu READ_BLOCK_EXT_START=0) - stellvertretend für ein träges Feld, um
+    dessen Drosselung zu testen."""
+
+    def _side_effect(*, address: int, count: int, device_id: int):
+        result = MagicMock()
+        if device_id != 100:
+            result.isError.return_value = False
+            result.registers = basic_registers
+            return result
+        result.isError.return_value = False
+        registers = [0] * count
+        registers[97] = battery_capacity
+        result.registers = registers
+        return result
+
+    return _side_effect
+
+
+async def test_slow_data_keys_populated_on_first_successful_read(hass) -> None:
+    """Beim allerersten erfolgreichen SunSpec-Modus-Read werden die trägen
+    Felder sofort mit dem frisch gelesenen Wert befüllt, nicht erst nach
+    Ablauf des LOW-Intervalls."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_slow_data_read_side_effect(basic_registers, 1000)
+    )
+    coordinator = _make_coordinator(hass, client)
+
+    data = await coordinator._async_update_data()
+
+    assert data["battery_capacity"] == 1000
+    assert SLOW_DATA_KEYS <= data.keys()
+
+
+async def test_slow_data_keys_keep_cached_value_before_low_interval_elapses(
+    hass,
+) -> None:
+    """Ändert sich der zugrunde liegende Rohwert eines trägen Feldes
+    zwischen zwei Reads, bevor das LOW-Intervall (10 Minuten) abgelaufen
+    ist, bleibt in coordinator.data der zuvor übernommene Wert erhalten -
+    obwohl der darunterliegende Modbus-Read den neuen Wert bereits liefert."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    coordinator = _make_coordinator(hass, client)
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=datetime(2024, 1, 1, 0, 0, 0),
+    ):
+        client.read_holding_registers = AsyncMock(
+            side_effect=_make_slow_data_read_side_effect(basic_registers, 1000)
+        )
+        data_first = await coordinator._async_update_data()
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=datetime(2024, 1, 1, 0, 5, 0),  # +5 Minuten < LOW-Intervall
+    ):
+        client.read_holding_registers = AsyncMock(
+            side_effect=_make_slow_data_read_side_effect(basic_registers, 2000)
+        )
+        data_second = await coordinator._async_update_data()
+
+    assert data_first["battery_capacity"] == 1000
+    assert data_second["battery_capacity"] == 1000
+
+
+async def test_slow_data_keys_refresh_after_low_interval_elapses(hass) -> None:
+    """Nach Ablauf des LOW-Intervalls (10 Minuten) wird der zuletzt vom
+    Modbus-Read gelieferte Wert eines trägen Feldes in coordinator.data
+    übernommen."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    coordinator = _make_coordinator(hass, client)
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=datetime(2024, 1, 1, 0, 0, 0),
+    ):
+        client.read_holding_registers = AsyncMock(
+            side_effect=_make_slow_data_read_side_effect(basic_registers, 1000)
+        )
+        data_first = await coordinator._async_update_data()
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=datetime(2024, 1, 1, 0, 10, 0),  # +10 Minuten = LOW-Intervall
+    ):
+        client.read_holding_registers = AsyncMock(
+            side_effect=_make_slow_data_read_side_effect(basic_registers, 2000)
+        )
+        data_second = await coordinator._async_update_data()
+
+    assert data_first["battery_capacity"] == 1000
+    assert data_second["battery_capacity"] == 2000
 
 
 # -- Netzdienliches Laden: Zeitfenster-Überlappung ---------------------------

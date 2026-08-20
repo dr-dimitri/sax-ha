@@ -109,6 +109,14 @@ Die Sensoren stammen aus zwei Registerkarten mit unterschiedlicher Slave-ID:
 | Ladestatus Akku / Akku Ereignis | Klartext (Diagnose) |
 | Durchschnittliche Zellspannung | in mV (Diagnose) |
 
+**Hinweis Aktualisierungsintervall:** Hersteller, Gerätemodell,
+Softwareversion Master/Gateway, Seriennummer, Referenzwert
+Maximalleistung, Speicherkapazität, Entladetiefe, Ladestatus Akku und
+Durchschnittliche Zellspannung ändern sich praktisch nie und werden
+deshalb nur alle 10 Minuten aktualisiert, unabhängig vom konfigurierten
+Aktualisierungsintervall. Alle übrigen Sensoren folgen weiterhin dem bei
+der Einrichtung konfigurierten Intervall (Default 10 Sekunden).
+
 **Hinweis Einheit "var":** Blindleistung (reaktive Leistung) wird korrekt in
 **var** (Volt-Ampere reaktiv) angegeben, nicht in Watt – analog zu
 Scheinleistung in VA. Das ist dieselbe Konvention wie bei jedem anderen

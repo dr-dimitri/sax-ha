@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from datetime import time as dt_time
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -123,7 +123,9 @@ from .const import (
     UNKNOWN_LABEL,
 )
 from .intervals import (
+    SLOW_DATA_KEYS,
     TASK_READ_BASIC,
+    TASK_READ_SLOW_DATA,
     TASK_WRITE_GRID_CHARGE,
     TASK_WRITE_SUN_CHARGE,
     task_interval_seconds,
@@ -318,6 +320,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # erreichbarer Extended-Mode-Block dazu, dass ConfigEntryNotReady
         # ausgelöst wurde und die Integration gar keine Entities anlegte.
         self._extended_available = True
+        # Zuletzt übernommene Werte der trägen SunSpec-Felder (siehe
+        # intervals.SLOW_DATA_KEYS) sowie deren letzter Übernahmezeitpunkt -
+        # siehe _apply_slow_data_throttle.
+        self._slow_data_cache: dict[str, Any] = {}
+        self._slow_data_last_updated: datetime | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -415,7 +422,40 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def ext_reg(address: int) -> int:
             return ext_regs[address - READ_BLOCK_EXT_START]
 
-        return self._parse_extended(ext_reg)
+        parsed = self._parse_extended(ext_reg)
+        self._apply_slow_data_throttle(parsed)
+        return parsed
+
+    def _apply_slow_data_throttle(self, parsed: dict[str, Any]) -> None:
+        """Drosselt die Übernahme der trägen SunSpec-Felder (siehe
+        intervals.SLOW_DATA_KEYS) in `parsed` auf das Intervall von
+        TASK_READ_SLOW_DATA (LOW, fest 10 Minuten) - dazwischen werden die
+        zuletzt übernommenen Werte beibehalten, statt den frisch gelesenen
+        (aber i. d. R. unveränderten) Wert jeden NORMAL-Zyklus neu zu
+        übernehmen. Der zugrunde liegende Modbus-Read läuft unverändert bei
+        jedem NORMAL-Zyklus weiter - die trägen Register liegen zwischen den
+        schnell benötigten Werten im selben zusammenhängenden SunSpec-Modus-
+        Block (siehe _async_read_extended) und können deshalb nicht separat
+        gelesen werden, ohne zusätzliche Modbus-Anfragen einzuführen.
+
+        Verändert `parsed` in-place (überschreibt die frisch geparsten
+        SLOW_DATA_KEYS-Werte bei noch nicht abgelaufenem Intervall mit dem
+        Cache-Stand)."""
+        now = dt_util.utcnow()
+        interval = task_interval_seconds(
+            TASK_READ_SLOW_DATA, normal_interval_seconds=self._normal_interval_seconds
+        )
+        due = (
+            self._slow_data_last_updated is None
+            or (now - self._slow_data_last_updated).total_seconds() >= interval
+        )
+        if due:
+            self._slow_data_cache = {
+                key: parsed[key] for key in SLOW_DATA_KEYS if key in parsed
+            }
+            self._slow_data_last_updated = now
+        else:
+            parsed.update(self._slow_data_cache)
 
     def _parse_extended(self, ext_reg: Callable[[int], int]) -> dict[str, Any]:
         """Parse den SunSpec-Modus-Registerblock (Slave-ID 100, modbus.pdf).

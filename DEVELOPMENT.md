@@ -233,21 +233,35 @@ Intervalltypen (`const.IntervalType`) zu:
   Default 10s). Bestimmt sowohl den Poll-Timer des Coordinators
   (`update_interval`, über `TASK_READ_BASIC` aufgelöst) als auch die Basis
   für die periodischen Schreib-Tasks.
-- **LOW** – fest, 10 Minuten. Für träge Systemdaten vorgesehen (z. B.
-  Seriennummer, Firmware-Version), aktuell keinem Task zugeordnet.
+- **LOW** – fest, 10 Minuten. Trägt den Task `TASK_READ_SLOW_DATA` (siehe
+  `intervals.SLOW_DATA_KEYS`): Hersteller, Gerätemodell, Softwareversion
+  Master/Gateway, Seriennummer, Referenzwert Maximalleistung,
+  Speicherkapazität, Entladetiefe, Ladestatus Akku und Durchschnittliche
+  Zellspannung – Werte, die sich praktisch nie/nur sehr selten ändern.
 
 `TASK_INTERVALS` (`intervals.py`) ist die einzige Stelle, die einem Task
-seinen Intervalltyp zuordnet - initial stehen alle vier vorhandenen Tasks
-(`TASK_READ_BASIC`, `TASK_READ_EXTENDED`, `TASK_WRITE_GRID_CHARGE`,
-`TASK_WRITE_SUN_CHARGE`) auf NORMAL. Ein Task fragt sein Intervall nie
-direkt aus `TASK_INTERVALS`, sondern über `intervals.task_interval_seconds()`
-bzw. `SaxPowerCoordinator._resolved_write_interval()` ab; eine Umstufung
+seinen Intervalltyp zuordnet. Ein Task fragt sein Intervall nie direkt aus
+`TASK_INTERVALS`, sondern über `intervals.task_interval_seconds()` bzw.
+`SaxPowerCoordinator._resolved_write_interval()` ab; eine Umstufung
 erfordert deshalb nur eine Änderung der Zuordnung, keine Änderung am
 Task-Code. `_resolved_write_interval()` deckelt das aufgelöste Intervall
 zusätzlich auf `[SUN_IC_MIN_WRITE_INTERVAL, GRID_CHARGE_WRITE_INTERVAL]`
 (Hersteller-Doku: "alle 5s bis 5min"), damit ein sehr klein oder sehr groß
 konfiguriertes NORMAL-Intervall nicht zu einem für den Speicher unsicheren
 Schreibrhythmus der beiden Netzladung-Pfade führt.
+
+Die `TASK_READ_SLOW_DATA`-Felder liegen im selben zusammenhängenden
+SunSpec-Modus-Block wie die schnell benötigten Werte (Register 4–14, 53,
+97–109) und werden deshalb physisch weiterhin bei jedem NORMAL-Zyklus
+mitgelesen – eine separate, selteneres Lesen dieser Register würde
+zusätzliche Modbus-Anfragen erfordern. Stattdessen drosselt
+`SaxPowerCoordinator._apply_slow_data_throttle` (aufgerufen aus
+`_async_read_extended`) ausschließlich die *Übernahme* dieser Felder in
+`coordinator.data` auf das LOW-Intervall: Der zuletzt übernommene Wert
+bleibt zwischen zwei Übernahmen erhalten, selbst wenn der frisch gelesene
+Rohwert bereits abweicht. Beim allerersten erfolgreichen SunSpec-Modus-Read
+wird sofort der frisch gelesene Wert übernommen, damit die betroffenen
+Sensoren nicht erst nach 10 Minuten einen Wert zeigen.
 
 Sämtliche Zugriffe auf den gemeinsam genutzten `AsyncModbusTcpClient` -
 Reads (`_async_update_data`, `_async_read_extended`) UND Writes
@@ -286,10 +300,13 @@ tests/
 │                                  Intervalltyp-Auflösung inkl. Deckelung bei sehr klein/groß
 │                                  konfiguriertem scan_interval, Regressionstest für den
 │                                  Modbus-Lock (gleichzeitiger Read/Write greift nie überlappend
-│                                  auf den Client zu)
+│                                  auf den Client zu), Drosselverhalten der trägen SunSpec-Felder
+│                                  (sofortige Übernahme beim ersten Read, unveränderter Wert vor
+│                                  Ablauf des LOW-Intervalls, Übernahme nach Ablauf)
 ├── test_intervals.py               Unit-Tests für intervals.py: HIGH/LOW sind fest, NORMAL folgt
 │                                  dem konfigurierten Intervall, unbekannte Tasks gelten als
-│                                  NORMAL, initial sind alle vier vorhandenen Tasks auf NORMAL
+│                                  NORMAL, NORMAL-/LOW-Zuordnung der vorhandenen Tasks,
+│                                  SLOW_DATA_KEYS deckt genau die neun trägen Felder ab
 ├── test_config_flow.py            Unit-Tests: erfolgreicher zweistufiger Config Flow
 │                                  (Verbindung + optionale Netzladung-Vorbelegung inkl.
 │                                  Defaults bei leerem zweiten Schritt), "cannot_connect"-Fehler

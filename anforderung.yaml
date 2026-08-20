@@ -765,12 +765,19 @@ requirement_tiered_intervals_modbus_lock:
     _resolved_write_interval() ab und muss bei einer Umstufung nicht
     verändert werden.
 
-    Aktuell zugeordnete Tasks (alle auf NORMAL, siehe TASK_INTERVALS):
-    Basic-Mode-Read (TASK_READ_BASIC), SunSpec-Modus-Read
-    (TASK_READ_EXTENDED), periodischer Netzladung-Schreibvorgang
-    (TASK_WRITE_GRID_CHARGE, SaxPowerCoordinator._async_grid_charge_loop)
-    und periodischer SunSpec-Netzladung-Schreibvorgang
-    (TASK_WRITE_SUN_CHARGE, SaxPowerCoordinator._async_sun_charge_loop).
+    Zugeordnete Tasks (siehe TASK_INTERVALS): NORMAL - Basic-Mode-Read
+    (TASK_READ_BASIC), SunSpec-Modus-Read (TASK_READ_EXTENDED),
+    periodischer Netzladung-Schreibvorgang (TASK_WRITE_GRID_CHARGE,
+    SaxPowerCoordinator._async_grid_charge_loop) und periodischer
+    SunSpec-Netzladung-Schreibvorgang (TASK_WRITE_SUN_CHARGE,
+    SaxPowerCoordinator._async_sun_charge_loop). LOW - träge SunSpec-Felder
+    (TASK_READ_SLOW_DATA, siehe intervals.SLOW_DATA_KEYS: Hersteller,
+    Gerätemodell, Softwareversion Master/Gateway, Seriennummer, Referenzwert
+    Maximalleistung, Speicherkapazität, Entladetiefe, Ladestatus Akku,
+    Durchschnittliche Zellspannung). HIGH ist aktuell keinem Task
+    zugeordnet (vorgesehen für künftige dringende Tasks wie einen
+    Pilot-Modus-Zählerwert-Push).
+
     Der Poll-Timer des Coordinators (update_interval) wird über
     TASK_READ_BASIC/NORMAL aufgelöst und entspricht damit unverändert dem
     konfigurierten scan_interval. Die beiden Schreib-Tasks lösen ihr
@@ -779,6 +786,19 @@ requirement_tiered_intervals_modbus_lock:
     (Hersteller-Doku: "alle 5s bis 5min"), damit ein sehr klein oder sehr
     groß konfiguriertes NORMAL-Intervall nicht zu einem für den Speicher
     unsicheren Schreibrhythmus führt.
+
+    Die TASK_READ_SLOW_DATA zugeordneten Felder liegen im selben
+    zusammenhängenden SunSpec-Modus-Registerblock wie die schnell
+    benötigten Werte (Register 4-14, 53, 97-109) und können deshalb nicht
+    separat gelesen werden, ohne zusätzliche Modbus-Anfragen einzuführen -
+    der zugrunde liegende Read läuft unverändert bei jedem NORMAL-Zyklus.
+    Stattdessen drosselt SaxPowerCoordinator._apply_slow_data_throttle die
+    Übernahme dieser Felder in coordinator.data auf das LOW-Intervall (fest
+    10 Minuten): Zwischen zwei Übernahmen bleibt der zuletzt übernommene
+    Wert erhalten, auch wenn der frisch gelesene Rohwert bereits abweicht.
+    Beim allerersten erfolgreichen SunSpec-Modus-Read wird sofort der
+    frisch gelesene Wert übernommen (kein Warten auf das erste
+    LOW-Intervall).
 
     Sämtliche Modbus-Zugriffe auf den gemeinsam genutzten
     AsyncModbusTcpClient - sowohl die periodischen Reads
@@ -793,12 +813,15 @@ requirement_tiered_intervals_modbus_lock:
     - "tests/test_intervals.py deckt resolve_interval_seconds (HIGH/LOW
        fest, NORMAL folgt dem übergebenen Intervall), die
        Task-zu-Intervalltyp-Auflösung inkl. Default NORMAL für unbekannte
-       Tasks sowie ab, dass initial alle vier vorhandenen Tasks auf NORMAL
-       stehen."
+       Tasks, die NORMAL-/LOW-Zuordnung der vorhandenen Tasks sowie ab, dass
+       SLOW_DATA_KEYS genau die neun trägen Felder abdeckt."
     - "tests/test_coordinator.py deckt ab: update_interval des Coordinators
        entspricht dem konfigurierten scan_interval,
        _resolved_write_interval() deckelt korrekt bei sehr klein/groß
        konfiguriertem scan_interval, _async_grid_charge_loop schläft um das
-       aufgelöste (nicht mehr das fest verdrahtete) Intervall, sowie ein
+       aufgelöste (nicht mehr das fest verdrahtete) Intervall, ein
        Regressionstest, der belegt, dass ein gleichzeitiger Coordinator-Read
-       und ein Write niemals überlappend auf den Modbus-Client zugreifen."
+       und ein Write niemals überlappend auf den Modbus-Client zugreifen,
+       sowie das Drosselverhalten der trägen SunSpec-Felder (sofortige
+       Übernahme beim ersten Read, unveränderter Wert vor Ablauf des
+       LOW-Intervalls, Übernahme des neuen Werts nach Ablauf)."

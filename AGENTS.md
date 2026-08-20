@@ -15,7 +15,7 @@ TCP to a SAX Power home battery storage system. It reads ~56 registers
 (Basic Mode + optional SunSpec Mode) into sensors and exposes writable
 limits/switches/time windows for charge control logic (timed charging to a
 target SOC, grid-serving charging, a device-independent max-SOC lock).
-
+We will create the best SAX Integration for Homeassistant ever. 
 ## Tech stack
 
 - Python 3.12, `pymodbus>=3.10.0` (`AsyncModbusTcpClient`), fully async I/O.

@@ -2,7 +2,28 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 DOMAIN = "sax_power"
+
+
+class IntervalType(StrEnum):
+    """Intervalltyp für einen periodischen Lese-/Schreib-Task (siehe
+    intervals.py, TASK_INTERVALS): HIGH (fest, dringend), NORMAL
+    (konfigurierbar, Standard-Polling) oder LOW (fest, träge Daten)."""
+
+    HIGH = "high"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+# HIGH und LOW sind bewusst fest (nicht konfigurierbar) - HIGH für dringende
+# Tasks (z. B. ein künftiger Pilot-Modus-Zählerwert-Push), LOW für träge
+# Systemdaten (Seriennummer, Firmware, o. Ä.), die sich praktisch nie
+# ändern. Das NORMAL-Intervall bleibt weiterhin CONF_SCAN_INTERVAL/
+# DEFAULT_SCAN_INTERVAL unten (bei der Einrichtung konfigurierbar).
+INTERVAL_SECONDS_HIGH = 2  # Sekunden
+INTERVAL_SECONDS_LOW = 600  # Sekunden (10 Minuten)
 
 CONF_SLAVE_ID_BASIC = "slave_id_basic"
 CONF_SLAVE_ID_EXTENDED = "slave_id_extended"

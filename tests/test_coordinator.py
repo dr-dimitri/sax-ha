@@ -23,6 +23,7 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
+    IntervalType,
 )
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
@@ -31,6 +32,16 @@ from custom_components.sax_power.coordinator import (
     to_unsigned16,
     windows_overlap,
 )
+from custom_components.sax_power.intervals import (
+    TASK_INTERVALS,
+    TASK_WRITE_GRID_CHARGE,
+    TASK_WRITE_SUN_CHARGE,
+)
+
+# _make_coordinator (unten) legt den Coordinator immer mit scan_interval=10
+# an - das NORMAL-Intervall (siehe const.IntervalType) entspricht in allen
+# Tests unten also diesem Wert.
+DEFAULT_NORMAL_INTERVAL = 10
 
 
 @pytest.mark.parametrize(
@@ -883,8 +894,14 @@ def test_watts_to_ic_setpoint_raw_raises_without_max_power_reference(hass) -> No
 @pytest.mark.parametrize(
     ("ic_timeout", "expected_interval"),
     [
-        (None, GRID_CHARGE_WRITE_INTERVAL),  # noch kein Timeout bekannt -> Fallback
-        (300, GRID_CHARGE_WRITE_INTERVAL),  # Geräte-Default (modbus.pdf) -> gedeckelt
+        # Kein Timeout bekannt -> Fallback auf das über TASK_WRITE_SUN_CHARGE
+        # aufgelöste Intervall (NORMAL/scan_interval=10, siehe
+        # DEFAULT_NORMAL_INTERVAL), NICHT mehr auf GRID_CHARGE_WRITE_INTERVAL
+        # (30) direkt.
+        (None, DEFAULT_NORMAL_INTERVAL),
+        # Geräte-Default (modbus.pdf, 300s) -> weiterhin auf denselben
+        # Basiswert gedeckelt (hier kleiner als GRID_CHARGE_WRITE_INTERVAL).
+        (300, DEFAULT_NORMAL_INTERVAL),
         (20, 10),  # Hälfte des gemeldeten Timeouts
         (4, SUN_IC_MIN_WRITE_INTERVAL),  # sehr kurzer Timeout -> Untergrenze
     ],
@@ -896,6 +913,137 @@ def test_sun_ic_write_interval(
     if ic_timeout is not None:
         coordinator.data = {"ic_timeout": ic_timeout}
     assert coordinator._sun_ic_write_interval() == expected_interval
+
+
+# -- Intervalltypen (dynamische/asynchrone Intervalle) -----------------------
+# Siehe intervals.py: HIGH (fest, 2s), NORMAL (konfigurierbar, Default 10s),
+# LOW (fest, 10 Minuten). Initial sind alle vorhandenen Lese- und
+# Schreiboperationen dem Typ NORMAL zugeordnet (siehe anforderung.yaml).
+
+
+def test_all_existing_tasks_default_to_normal_interval(hass) -> None:
+    """Initial müssen alle vorhandenen periodischen Lese-/Schreib-Tasks
+    (Basic-/SunSpec-Modus-Read, Netzladung-/SunSpec-Netzladung-Write) den
+    Intervalltyp NORMAL haben - siehe TASK_INTERVALS."""
+    for interval_type in TASK_INTERVALS.values():
+        assert interval_type is IntervalType.NORMAL
+
+
+def test_coordinator_poll_interval_matches_configured_normal_interval(hass) -> None:
+    """Der Poll-Timer des Coordinators (update_interval) wird über
+    TASK_READ_BASIC/NORMAL aufgelöst und entspricht deshalb weiterhin dem
+    bei der Einrichtung konfigurierten scan_interval, solange dieser Task
+    auf NORMAL steht."""
+    coordinator = _make_coordinator(hass, _make_client())
+    assert coordinator.update_interval.total_seconds() == DEFAULT_NORMAL_INTERVAL
+
+
+@pytest.mark.parametrize(
+    ("scan_interval", "expected"),
+    [
+        (DEFAULT_NORMAL_INTERVAL, DEFAULT_NORMAL_INTERVAL),  # Standardfall
+        (2, SUN_IC_MIN_WRITE_INTERVAL),  # sehr kurz konfiguriert -> Untergrenze greift
+        (3600, GRID_CHARGE_WRITE_INTERVAL),  # sehr lang -> Obergrenze greift
+    ],
+)
+def test_resolved_write_interval_is_clamped_to_safe_range(
+    hass, scan_interval: int, expected: int
+) -> None:
+    """_resolved_write_interval() deckelt das über NORMAL/scan_interval
+    aufgelöste Intervall auf [SUN_IC_MIN_WRITE_INTERVAL,
+    GRID_CHARGE_WRITE_INTERVAL] (Hersteller-Doku: 'alle 5s bis 5min'),
+    unabhängig davon, wie klein oder groß scan_interval konfiguriert ist."""
+    coordinator = SaxPowerCoordinator(
+        hass,
+        _make_client(),
+        slave_id=64,
+        slave_id_extended=100,
+        scan_interval=scan_interval,
+        entry_id="test_entry_id",
+    )
+    assert coordinator._resolved_write_interval(TASK_WRITE_GRID_CHARGE) == expected
+    assert coordinator._resolved_write_interval(TASK_WRITE_SUN_CHARGE) == expected
+
+
+async def test_grid_charge_loop_sleeps_for_resolved_write_interval(hass) -> None:
+    """_async_grid_charge_loop schläft zwischen den Schreibzyklen um das über
+    TASK_WRITE_GRID_CHARGE aufgelöste Intervall, nicht mehr um die feste
+    GRID_CHARGE_WRITE_INTERVAL-Konstante direkt.
+
+    `custom_components.sax_power.coordinator.asyncio` ist dasselbe
+    Modulobjekt wie das globale `asyncio` (kein lokaler Alias) - ein Patch
+    von `.sleep` wirkt sich deshalb auf JEDEN `asyncio.sleep`-Aufruf im
+    Prozess aus, auch auf den des Tests selbst. Die Original-Funktion wird
+    daher vor dem Patch als `real_sleep` gesichert und für die eigene
+    Steuerung des Tests verwendet, statt erneut über das (dann gepatchte)
+    Attribut `asyncio.sleep` zuzugreifen."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+    coordinator = _make_coordinator(hass, client)
+
+    real_sleep = asyncio.sleep
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(seconds: float, *args, **kwargs) -> None:
+        sleep_calls.append(seconds)
+        raise asyncio.CancelledError
+
+    with patch(
+        "custom_components.sax_power.coordinator.asyncio.sleep", new=_fake_sleep
+    ):
+        await coordinator.async_start_grid_charge(1000)
+        await real_sleep(0.05)
+
+    assert sleep_calls == [DEFAULT_NORMAL_INTERVAL]
+
+
+async def test_modbus_lock_serializes_concurrent_read_and_write(hass) -> None:
+    """Reads (_async_update_data, inkl. _async_read_extended) und Writes
+    (_async_write_register) dürfen niemals gleichzeitig auf den gemeinsam
+    genutzten Modbus-Client zugreifen - siehe SaxPowerCoordinator.
+    _modbus_lock. Ohne Lock-Schutz auf der Lese-Seite können ein
+    periodischer Coordinator-Poll und ein paralleler Hintergrund-Schreib-
+    Task (z. B. _async_grid_charge_loop) gleichzeitig Anfragen an den
+    Speicher senden, was auf echter Hardware zu 'Connection Refused' führen
+    kann."""
+    client = _make_client()
+    in_flight = 0
+    max_in_flight = 0
+
+    async def _read_side_effect(*, address: int, count: int, device_id: int):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        result = MagicMock()
+        result.isError.return_value = False
+        result.registers = [0] * count
+        return result
+
+    async def _write_side_effect(*, address: int, value: int, device_id: int):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        result = MagicMock()
+        result.isError.return_value = False
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=_read_side_effect)
+    client.write_register = AsyncMock(side_effect=_write_side_effect)
+
+    coordinator = _make_coordinator(hass, client)
+
+    await asyncio.gather(
+        coordinator._async_update_data(),
+        coordinator.async_write_register(41, 1000),
+    )
+
+    assert max_in_flight == 1
 
 
 # -- Netzdienliches Laden: Zeitfenster-Überlappung ---------------------------

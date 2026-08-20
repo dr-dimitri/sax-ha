@@ -9,6 +9,7 @@ Benutzerdokumentation siehe [README.md](README.md).
 - [Datenfluss](#datenfluss)
 - [Register-Mapping](#register-mapping)
 - [SunSpec-Skalierung](#sunspec-skalierung)
+- [Intervalltypen & Modbus-Lock](#intervalltypen--modbus-lock)
 - [Refresh-Verhalten](#refresh-verhalten)
 - [Tests](#tests)
   - [Manuelle Testausführung](#manuelle-testausführung)
@@ -21,10 +22,14 @@ Benutzerdokumentation siehe [README.md](README.md).
 ```
 custom_components/sax_power/
 ├── manifest.json      Metadaten, Requirements (pymodbus>=3.10.0), Domain
-├── const.py            Register-/Konfigurationskonstanten, Defaults
+├── const.py            Register-/Konfigurationskonstanten, Defaults,
+│                          IntervalType (HIGH/NORMAL/LOW)
+├── intervals.py         Zuordnung periodischer Tasks zu Intervalltypen
+│                          (TASK_INTERVALS), Auflösung in Sekunden
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
+│                          gemeinsamer Modbus-Lock für Reads+Writes,
 │                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
 │                          zeitgesteuertes Laden, netzdienliches Laden,
 │                          Zeitfenster-Überlappungsprüfung
@@ -137,9 +142,10 @@ starten), Live-Änderungen über den Schalter validieren immer.
 
 Beide Register werden periodisch neu geschrieben (Intervall aus dem
 geräteseitig gemeldeten Timeout, Register 40050, abgeleitet via
-`_sun_ic_write_interval`, gedeckelt auf 30s), da das Gerät den Sollwert
-sonst verwirft. Beim Stoppen wird Register 40051 aktiv auf 0 zurückgesetzt
-statt nur passiv auf den Timeout zu warten (siehe
+`_sun_ic_write_interval`, gedeckelt auf das über `TASK_WRITE_SUN_CHARGE`
+aufgelöste Intervall - siehe Abschnitt "Intervalltypen & Modbus-Lock"),
+da das Gerät den Sollwert sonst verwirft. Beim Stoppen wird Register 40051
+aktiv auf 0 zurückgesetzt statt nur passiv auf den Timeout zu warten (siehe
 `SaxPowerCoordinator.async_stop_sun_charge`) - dabei werden sowohl
 `asyncio.CancelledError` als auch `HomeAssistantError` beim Awaiten des
 abgebrochenen Tasks abgefangen, da pymodbus eine Cancellation, die einen
@@ -147,8 +153,9 @@ laufenden Write trifft, als `ModbusIOException` (und damit als
 `HomeAssistantError`) statt als reine `CancelledError` durchreicht.
 
 Der ältere Basic-Mode-P-Sollwert-Pfad (Register 41,
-`_async_grid_charge_loop`, alle 30s fest) bleibt ausschließlich für den
-manuellen `start_grid_charge`/`stop_grid_charge`-Service in Verwendung; die
+`_async_grid_charge_loop`, Intervall über `TASK_WRITE_GRID_CHARGE`
+aufgelöst) bleibt ausschließlich für den manuellen
+`start_grid_charge`/`stop_grid_charge`-Service in Verwendung; die
 Integration schreibt die Basic-Mode-Register 43/44 (Ent-/Ladeleistungs-
 grenzwert) nicht mehr.
 
@@ -215,6 +222,42 @@ SunSpec-Modus-Block aus (Common/Inverter/Immediate Controls/Meter/Battery)
 und dekodiert zusätzlich die als ASCII-Zeichenpaare codierten
 Hersteller-/Modell-Register (`coordinator.decode_ascii_registers`).
 
+## Intervalltypen & Modbus-Lock
+
+`intervals.py` ordnet jedem periodischen Lese-/Schreib-Task einen von drei
+Intervalltypen (`const.IntervalType`) zu:
+
+- **HIGH** – fest, 2 Sekunden. Für künftige dringende Tasks (z. B. ein
+  Pilot-Modus-Zählerwert-Push) vorgesehen, aktuell keinem Task zugeordnet.
+- **NORMAL** – bei der Einrichtung konfigurierbar (`CONF_SCAN_INTERVAL`,
+  Default 10s). Bestimmt sowohl den Poll-Timer des Coordinators
+  (`update_interval`, über `TASK_READ_BASIC` aufgelöst) als auch die Basis
+  für die periodischen Schreib-Tasks.
+- **LOW** – fest, 10 Minuten. Für träge Systemdaten vorgesehen (z. B.
+  Seriennummer, Firmware-Version), aktuell keinem Task zugeordnet.
+
+`TASK_INTERVALS` (`intervals.py`) ist die einzige Stelle, die einem Task
+seinen Intervalltyp zuordnet - initial stehen alle vier vorhandenen Tasks
+(`TASK_READ_BASIC`, `TASK_READ_EXTENDED`, `TASK_WRITE_GRID_CHARGE`,
+`TASK_WRITE_SUN_CHARGE`) auf NORMAL. Ein Task fragt sein Intervall nie
+direkt aus `TASK_INTERVALS`, sondern über `intervals.task_interval_seconds()`
+bzw. `SaxPowerCoordinator._resolved_write_interval()` ab; eine Umstufung
+erfordert deshalb nur eine Änderung der Zuordnung, keine Änderung am
+Task-Code. `_resolved_write_interval()` deckelt das aufgelöste Intervall
+zusätzlich auf `[SUN_IC_MIN_WRITE_INTERVAL, GRID_CHARGE_WRITE_INTERVAL]`
+(Hersteller-Doku: "alle 5s bis 5min"), damit ein sehr klein oder sehr groß
+konfiguriertes NORMAL-Intervall nicht zu einem für den Speicher unsicheren
+Schreibrhythmus der beiden Netzladung-Pfade führt.
+
+Sämtliche Zugriffe auf den gemeinsam genutzten `AsyncModbusTcpClient` -
+Reads (`_async_update_data`, `_async_read_extended`) UND Writes
+(`_async_write_register`) - laufen durch denselben
+`SaxPowerCoordinator._modbus_lock` (`asyncio.Lock`). Ohne diesen Schutz auf
+der Lese-Seite konnten ein periodischer Coordinator-Poll und ein paralleler
+Hintergrund-Schreib-Task (Netzladung/SunSpec-Netzladung) gleichzeitig
+Anfragen an den Speicher senden, was auf echter Hardware zu "Connection
+Refused" führen kann.
+
 ## Refresh-Verhalten
 
 Nutzerausgelöste Schreibaktionen (Switch, Number) rufen nach dem Schreiben
@@ -239,7 +282,14 @@ tests/
 │                                  Zeitfenster-Überlappungsprüfung (windows_overlap,
 │                                  Ablehnung überlappender Änderungen), aktive Monate
 │                                  (Enforcement, Default "alle Monate", Überlappungsprüfung
-│                                  inkl. erlaubter Zeitfenster-Überlappung bei disjunkten Monaten)
+│                                  inkl. erlaubter Zeitfenster-Überlappung bei disjunkten Monaten),
+│                                  Intervalltyp-Auflösung inkl. Deckelung bei sehr klein/groß
+│                                  konfiguriertem scan_interval, Regressionstest für den
+│                                  Modbus-Lock (gleichzeitiger Read/Write greift nie überlappend
+│                                  auf den Client zu)
+├── test_intervals.py               Unit-Tests für intervals.py: HIGH/LOW sind fest, NORMAL folgt
+│                                  dem konfigurierten Intervall, unbekannte Tasks gelten als
+│                                  NORMAL, initial sind alle vier vorhandenen Tasks auf NORMAL
 ├── test_config_flow.py            Unit-Tests: erfolgreicher zweistufiger Config Flow
 │                                  (Verbindung + optionale Netzladung-Vorbelegung inkl.
 │                                  Defaults bei leerem zweiten Schritt), "cannot_connect"-Fehler

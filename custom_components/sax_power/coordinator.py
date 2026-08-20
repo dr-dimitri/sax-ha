@@ -122,6 +122,12 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
+from .intervals import (
+    TASK_READ_BASIC,
+    TASK_WRITE_GRID_CHARGE,
+    TASK_WRITE_SUN_CHARGE,
+    task_interval_seconds,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -248,17 +254,36 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         scan_interval: int,
         entry_id: str,
     ) -> None:
+        # Das bei der Einrichtung konfigurierte Intervall entspricht dem
+        # Intervalltyp NORMAL (siehe intervals.py, TASK_INTERVALS) - HIGH und
+        # LOW sind fest und werden nicht hierüber gesteuert. Der eigentliche
+        # Poll-Timer des Coordinators (update_interval) wird über
+        # TASK_READ_BASIC aufgelöst, ist initial also identisch zu
+        # scan_interval, solange dieser Task auf NORMAL steht.
+        self._normal_interval_seconds = scan_interval
         super().__init__(
             hass,
             _LOGGER,
             name="SAX Power",
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=timedelta(
+                seconds=task_interval_seconds(
+                    TASK_READ_BASIC, normal_interval_seconds=scan_interval
+                )
+            ),
         )
         self.client = client
         self.slave_id = slave_id
         self.slave_id_extended = slave_id_extended
         self.entry_id = entry_id
-        self._write_lock = asyncio.Lock()
+        # Schützt sämtliche Modbus-Zugriffe (Reads UND Writes) auf den
+        # gemeinsam genutzten TCP-Client vor gegenseitiger Überlappung -
+        # ohne diesen Schutz auf der Lese-Seite konnten der periodische
+        # Coordinator-Poll und ein paralleler Hintergrund-Schreib-Task
+        # (_async_grid_charge_loop/_async_sun_charge_loop) gleichzeitig
+        # Anfragen an den Speicher senden, was auf echter Hardware zu
+        # "Connection Refused" führen kann (siehe _async_update_data,
+        # _async_read_extended, _async_write_register).
+        self._modbus_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
@@ -296,13 +321,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            if not self.client.connected:
-                await self.client.connect()
-            basic_result = await self.client.read_holding_registers(
-                address=READ_BLOCK_START,
-                count=READ_BLOCK_COUNT,
-                device_id=self.slave_id,
-            )
+            async with self._modbus_lock:
+                if not self.client.connected:
+                    await self.client.connect()
+                basic_result = await self.client.read_holding_registers(
+                    address=READ_BLOCK_START,
+                    count=READ_BLOCK_COUNT,
+                    device_id=self.slave_id,
+                )
         except (TimeoutError, ModbusException) as err:
             raise UpdateFailed(
                 f"Fehler bei der Kommunikation mit dem SAX Speicher (Basic Mode, "
@@ -343,11 +369,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Default 100), ohne bei Fehlern das gesamte Update scheitern zu lassen
         (siehe Kommentar in __init__)."""
         try:
-            extended_result = await self.client.read_holding_registers(
-                address=READ_BLOCK_EXT_START,
-                count=READ_BLOCK_EXT_COUNT,
-                device_id=self.slave_id_extended,
-            )
+            async with self._modbus_lock:
+                extended_result = await self.client.read_holding_registers(
+                    address=READ_BLOCK_EXT_START,
+                    count=READ_BLOCK_EXT_COUNT,
+                    device_id=self.slave_id_extended,
+                )
             if extended_result.isError():
                 raise ModbusException(
                     f"Modbus-Fehlerantwort (SunSpec-Modus): {extended_result}"
@@ -600,7 +627,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_write_register(
         self, address: int, value: int, *, device_id: int
     ) -> None:
-        async with self._write_lock:
+        async with self._modbus_lock:
             try:
                 if not self.client.connected:
                     await self.client.connect()
@@ -695,7 +722,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.async_write_register(
                     REG_SETPOINT_POWER, self._grid_charge_power
                 )
-                await asyncio.sleep(GRID_CHARGE_WRITE_INTERVAL)
+                await asyncio.sleep(
+                    self._resolved_write_interval(TASK_WRITE_GRID_CHARGE)
+                )
         except asyncio.CancelledError:
             raise
         except HomeAssistantError:
@@ -746,17 +775,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return to_unsigned16(round(percent / (10**scale_factor)))
 
+    def _resolved_write_interval(self, task: str) -> int:
+        """Löst das Intervall eines periodischen Schreib-Tasks über die
+        Intervalltyp-Zuordnung auf (siehe intervals.TASK_INTERVALS -
+        initial sind alle Schreib-Tasks auf NORMAL/scan_interval gesetzt),
+        gedeckelt auf [SUN_IC_MIN_WRITE_INTERVAL, GRID_CHARGE_WRITE_INTERVAL]
+        (Hersteller-Doku: "alle 5s bis 5min"), damit auch ein sehr klein
+        oder sehr groß konfiguriertes NORMAL-Intervall nicht zu einem für
+        den Speicher unsicheren Schreibrhythmus führt."""
+        resolved = task_interval_seconds(
+            task, normal_interval_seconds=self._normal_interval_seconds
+        )
+        return max(SUN_IC_MIN_WRITE_INTERVAL, min(resolved, GRID_CHARGE_WRITE_INTERVAL))
+
     def _sun_ic_write_interval(self) -> int:
         """Wiederholungsintervall für die Schleife: die Hälfte des vom Gerät
-        gemeldeten Timeouts (Register 40050), gedeckelt auf
-        GRID_CHARGE_WRITE_INTERVAL und SUN_IC_MIN_WRITE_INTERVAL, solange
-        kein aktueller Timeout-Wert bekannt ist."""
+        gemeldeten Timeouts (Register 40050), gedeckelt auf das über
+        _resolved_write_interval(TASK_WRITE_SUN_CHARGE) aufgelöste Intervall
+        und SUN_IC_MIN_WRITE_INTERVAL, solange kein aktueller Timeout-Wert
+        bekannt ist."""
+        base_cap = self._resolved_write_interval(TASK_WRITE_SUN_CHARGE)
         timeout = self.data.get("ic_timeout") if self.data is not None else None
         if not timeout:
-            return GRID_CHARGE_WRITE_INTERVAL
-        return max(
-            SUN_IC_MIN_WRITE_INTERVAL, min(timeout // 2, GRID_CHARGE_WRITE_INTERVAL)
-        )
+            return base_cap
+        return max(SUN_IC_MIN_WRITE_INTERVAL, min(timeout // 2, base_cap))
 
     async def async_start_sun_charge(self, power: int) -> None:
         """Start (or update the setpoint of) periodic SunSpec-Modus grid-charge

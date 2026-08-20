@@ -745,3 +745,60 @@ requirement_manual_discharge:
     - "const.py enthält bei REG_SETPOINT_POWER und
        REG_SUN_IC_POWER_SETPOINT_PCT einen Kommentar mit diesem Befund für
        spätere Umsetzungsversuche."
+
+# ==============================================================================
+# ANFORDERUNG: DYNAMISCHE INTERVALLTYPEN & MODBUS-LOCK FÜR READS UND WRITES
+# ==============================================================================
+requirement_tiered_intervals_modbus_lock:
+  id: REQ-TIERED-INTERVALS-MODBUS-LOCK
+  title: "Periodische Tasks über konfigurierbare Intervalltypen statt starrer Einzelintervalle, Modbus-Client-Zugriff durchgängig durch einen Lock geschützt"
+  status: done
+  description: >
+    intervals.py definiert drei Intervalltypen (const.IntervalType): HIGH
+    (fest, 2 Sekunden, für künftige dringende Tasks wie einen Pilot-Modus-
+    Zählerwert-Push), NORMAL (bei der Einrichtung konfigurierbar über
+    CONF_SCAN_INTERVAL, Default 10 Sekunden) und LOW (fest, 10 Minuten, für
+    träge Systemdaten wie Seriennummer/Firmware). Welchem Intervalltyp ein
+    periodischer Task zugeordnet ist, steht ausschließlich in der
+    Zuordnungstabelle TASK_INTERVALS (intervals.py) - ein Task fragt sein
+    Intervall stets über task_interval_seconds()/SaxPowerCoordinator.
+    _resolved_write_interval() ab und muss bei einer Umstufung nicht
+    verändert werden.
+
+    Aktuell zugeordnete Tasks (alle auf NORMAL, siehe TASK_INTERVALS):
+    Basic-Mode-Read (TASK_READ_BASIC), SunSpec-Modus-Read
+    (TASK_READ_EXTENDED), periodischer Netzladung-Schreibvorgang
+    (TASK_WRITE_GRID_CHARGE, SaxPowerCoordinator._async_grid_charge_loop)
+    und periodischer SunSpec-Netzladung-Schreibvorgang
+    (TASK_WRITE_SUN_CHARGE, SaxPowerCoordinator._async_sun_charge_loop).
+    Der Poll-Timer des Coordinators (update_interval) wird über
+    TASK_READ_BASIC/NORMAL aufgelöst und entspricht damit unverändert dem
+    konfigurierten scan_interval. Die beiden Schreib-Tasks lösen ihr
+    Intervall über SaxPowerCoordinator._resolved_write_interval() auf,
+    gedeckelt auf [SUN_IC_MIN_WRITE_INTERVAL, GRID_CHARGE_WRITE_INTERVAL]
+    (Hersteller-Doku: "alle 5s bis 5min"), damit ein sehr klein oder sehr
+    groß konfiguriertes NORMAL-Intervall nicht zu einem für den Speicher
+    unsicheren Schreibrhythmus führt.
+
+    Sämtliche Modbus-Zugriffe auf den gemeinsam genutzten
+    AsyncModbusTcpClient - sowohl die periodischen Reads
+    (_async_update_data, _async_read_extended) als auch alle Writes
+    (_async_write_register) - laufen durch denselben
+    SaxPowerCoordinator._modbus_lock (asyncio.Lock). Vorher schützte der
+    Lock nur Writes gegeneinander; ein paralleler Coordinator-Poll und ein
+    Hintergrund-Schreib-Task (Netzladung/SunSpec-Netzladung) konnten
+    dadurch gleichzeitig Anfragen an den Speicher senden, was auf echter
+    Hardware zu "Connection Refused" führen kann.
+  acceptance_criteria:
+    - "tests/test_intervals.py deckt resolve_interval_seconds (HIGH/LOW
+       fest, NORMAL folgt dem übergebenen Intervall), die
+       Task-zu-Intervalltyp-Auflösung inkl. Default NORMAL für unbekannte
+       Tasks sowie ab, dass initial alle vier vorhandenen Tasks auf NORMAL
+       stehen."
+    - "tests/test_coordinator.py deckt ab: update_interval des Coordinators
+       entspricht dem konfigurierten scan_interval,
+       _resolved_write_interval() deckelt korrekt bei sehr klein/groß
+       konfiguriertem scan_interval, _async_grid_charge_loop schläft um das
+       aufgelöste (nicht mehr das fest verdrahtete) Intervall, sowie ein
+       Regressionstest, der belegt, dass ein gleichzeitiger Coordinator-Read
+       und ein Write niemals überlappend auf den Modbus-Client zugreifen."

@@ -12,12 +12,14 @@ an Home Assistant über die Modbus-TCP-Schnittstelle.
 - [Einrichtung](#einrichtung)
 - [Funktionen](#funktionen)
   - [Sensoren](#sensoren)
+  - [Energiezähler (Energy-Dashboard)](#energiezähler-energy-dashboard)
   - [Zahlenfelder](#zahlenfelder)
   - [Schalter](#schalter)
   - [Zeitgesteuertes Laden](#zeitgesteuertes-laden)
   - [Netzdienliches Laden](#netzdienliches-laden)
   - [Services](#services)
 - [IP-Adresse nachträglich ändern](#ip-adresse-nachträglich-ändern)
+- [Diagnose](#diagnose)
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
 - [Weiterführende Dokumentation](#weiterführende-dokumentation)
 
@@ -136,6 +138,25 @@ Ist der SunSpec-Modus nicht erreichbar (siehe
 [Bekannte Einschränkungen](#bekannte-einschränkungen)), zeigen alle Sensoren
 aus dieser Tabelle "unbekannt"; die Basic-Mode-Sensoren bleiben davon
 unberührt.
+
+### Energiezähler (Energy-Dashboard)
+
+| Entität | Beschreibung |
+| --- | --- |
+| Geladene Energie (gesamt) | Kumulierte, in den Speicher geladene Energie in kWh |
+| Entladene Energie (gesamt) | Kumulierte, aus dem Speicher entladene Energie in kWh |
+
+Der SAX Speicher besitzt selbst keine Energiezähler-Register, sondern nur
+Momentanleistung. Die Integration rechnet diese beiden kWh-Zähler deshalb
+selbst aus der Lade-/Entladeleistung hoch (fortlaufende Aufsummierung,
+alle paar Sekunden) und speichert den jeweiligen Stand über Neustarts
+hinweg. Damit lassen sich beide Sensoren direkt und ohne zusätzliche
+Konfiguration in **Einstellungen → Dashboards → Energie** unter
+"Batteriesysteme" als Ladung/Entladung des Speichers auswählen.
+
+Ist der SunSpec-Modus zwischenzeitlich nicht erreichbar, pausiert die
+Hochrechnung für diese Zeitspanne, statt sie fälschlich nachzuholen, sobald
+er wieder verfügbar ist.
 
 ### Zahlenfelder
 
@@ -422,6 +443,19 @@ SAX Speichers ändert:
 Das Formular ist mit den aktuell gespeicherten Werten vorbelegt. Die neue
 Verbindung wird vor dem Speichern geprüft; bei Erfolg werden die Werte
 gespeichert und die Integration lädt automatisch mit den neuen Daten neu.
+
+## Diagnose
+
+Für Fehlerberichte oder Support-Anfragen lässt sich ein Diagnose-Export
+herunterladen:
+
+**Einstellungen → Geräte & Dienste → SAX Power Home → ⋮ (Gerät) → Diagnose herunterladen**
+
+Die Datei enthält den aktuellen Zustand des Coordinators (alle Messwerte,
+Max-SOC-Sperre, zeitgesteuertes/netzdienliches Laden, SunSpec-Modus-
+Erreichbarkeit). Die IP-Adresse des Speichers wird darin automatisch
+unkenntlich gemacht, bevor die Datei heruntergeladen wird – sie kann daher
+gefahrlos geteilt werden.
 
 ## Bekannte Einschränkungen
 

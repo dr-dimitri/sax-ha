@@ -15,6 +15,10 @@ from custom_components.sax_power.const import (
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_SOC,
     READ_BLOCK_COUNT,
+    READ_BLOCK_EXT_LOW1_START,
+    READ_BLOCK_EXT_LOW2_START,
+    READ_BLOCK_EXT_LOW_INTERVAL,
+    READ_BLOCK_EXT_START,
     READ_BLOCK_START,
     REG_SOC,
     REG_SUN_IC_CONTROL_MODE,
@@ -157,34 +161,148 @@ async def test_update_data_recovers_when_extended_becomes_available(hass) -> Non
     assert coordinator._extended_available is True
 
 
+async def test_low_block_read_only_once_per_interval(hass) -> None:
+    """Die LOW-Intervall-Register (Common Model + Battery-Skalierungsfaktoren,
+    Register 40000-40016/40110-40114) werden nur beim ersten Poll sowie nach
+    Ablauf von READ_BLOCK_EXT_LOW_INTERVAL Sekunden neu gelesen, nicht bei
+    jedem regulären Poll - siehe anforderung.yaml,
+    REQ-LOW-INTERVAL-REGISTERS."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    basic_registers[REG_SOC - READ_BLOCK_START] = 55
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=False)
+    )
+    coordinator = _make_coordinator(hass, client)
+
+    low_block_addresses = (READ_BLOCK_EXT_LOW1_START, READ_BLOCK_EXT_LOW2_START)
+
+    def low_block_read_count() -> int:
+        return sum(
+            1
+            for call in client.read_holding_registers.call_args_list
+            if call.kwargs["address"] in low_block_addresses
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        await coordinator._async_update_data()
+    assert low_block_read_count() == 2  # LOW1 + LOW2 beim allerersten Poll
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1001.0
+    ):
+        await coordinator._async_update_data()
+    assert low_block_read_count() == 2  # innerhalb des Intervalls: kein Reread
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic",
+        return_value=1000.0 + READ_BLOCK_EXT_LOW_INTERVAL + 1,
+    ):
+        await coordinator._async_update_data()
+    assert low_block_read_count() == 4  # Intervall abgelaufen -> erneuter Read
+
+
+async def test_low_block_failure_does_not_fail_update(hass) -> None:
+    """Scheitert ausschließlich der LOW-Intervall-Read (der HIGH-Block bleibt
+    lesbar), darf das Update nicht fehlschlagen - nur die zugehörigen
+    Diagnose-Sensoren bleiben bis zum nächsten erfolgreichen Refresh ohne
+    Wert, analog zu REQ-EXTENDED-MODE-RESILIENCE für den gesamten
+    SunSpec-Modus-Block."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    basic_registers[REG_SOC - READ_BLOCK_START] = 55
+
+    def _side_effect(*, address: int, count: int, device_id: int):
+        result = MagicMock()
+        if device_id != 100:
+            result.isError.return_value = False
+            result.registers = basic_registers
+        elif address == READ_BLOCK_EXT_START:
+            result.isError.return_value = False
+            result.registers = [0] * count
+        else:
+            result.isError.return_value = True
+            result.registers = []
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=_side_effect)
+    coordinator = _make_coordinator(hass, client)
+
+    data = await coordinator._async_update_data()
+
+    assert data["soc"] == 55
+    assert data["storage_power_active"] == 0
+    assert "sun_manufacturer" not in data
+
+
+def test_parse_low_block_decodes_identity_and_caches_battery_sf(hass) -> None:
+    """Parst den LOW-Intervall-Block (SunSpec Common Model + Inverter-
+    Modellkopf, Battery-Skalierungsfaktoren) - siehe anforderung.yaml,
+    REQ-LOW-INTERVAL-REGISTERS. Die Battery-Skalierungsfaktoren werden dabei
+    zusätzlich als self._battery_*_sf_raw zwischengespeichert, da
+    _parse_extended sie nicht mehr selbst aus dem HIGH-Block liest."""
+    coordinator = _make_coordinator(hass, _make_client())
+
+    low1 = {
+        0: 21365,  # SunS (Hi)
+        1: 28243,  # SunS (Lo)
+        4: 21313,  # Hersteller "SA"
+        5: 22608,  # "XP"
+        6: 20311,  # "OW"
+        7: 17746,  # "ER" -> "SAXPOWER"
+        8: 18511,  # Gerätemodell "HO"
+        9: 19781,  # "ME"
+        10: to_unsigned16(0),  # kein "PL"-Suffix -> "SAX Power Home"
+        11: 23,  # Version Master
+        12: 56,  # Version Gateway
+        13: 15448,  # Seriennummer Hi
+        14: 97,  # Seriennummer Lo
+        15: 103,  # Inverter Model-ID
+        16: 32,  # Inverter Länge
+    }
+    low2 = {
+        110: to_unsigned16(-1),  # Scalefaktor Kapazität
+        111: 0,  # Scalefaktor Lade/Entladeleistung
+        112: 0,  # Scalefaktor SoC
+        113: 0,  # Reserve
+        114: 0,  # Scalefaktor Zellspannung
+    }
+
+    data = coordinator._parse_low_block(low1.__getitem__, low2.__getitem__)
+
+    assert data["sun_manufacturer"] == "SAXPOWER"
+    assert data["sun_model"] == "HOME"
+    assert data["sun_version_master"] == 23
+    assert data["sun_version_gateway"] == 56
+    assert data["sun_serial_number"] == (15448 << 16) | 97
+
+    assert coordinator._battery_capacity_sf_raw == to_unsigned16(-1)
+    assert coordinator._battery_power_sf_raw == 0
+    assert coordinator._battery_soc_sf_raw == 0
+    assert coordinator._battery_cell_voltage_sf_raw == 0
+
+
 def test_parse_extended_decodes_sunspec_block(hass) -> None:
-    """Parst den kompletten SunSpec-Modus-Block (Slave-ID 100, siehe
-    modbus.pdf) - Common, 3Ph Inverter (103), Immediate Controls (123),
-    Meter (203) und Battery (802). Siehe anforderung.yaml,
-    REQ-SUNSPEC-MODE-CORRECTION."""
+    """Parst den HIGH-Intervall-Teil des SunSpec-Modus-Blocks (Slave-ID 100,
+    siehe modbus.pdf) - 3Ph Inverter (103), Immediate Controls (123), Meter
+    (203) und Battery (802). Siehe anforderung.yaml,
+    REQ-SUNSPEC-MODE-CORRECTION sowie REQ-LOW-INTERVAL-REGISTERS (Common
+    Model + Battery-Skalierungsfaktoren werden separat getestet, siehe
+    test_parse_low_block_decodes_identity_and_caches_battery_sf)."""
     client = _make_client()
     coordinator = _make_coordinator(hass, client)
 
-    # Alle 115 Register (Adresse 0-114) auf 0 vorbelegen, damit fehlende
-    # Overrides unten nicht zu KeyError führen, und dann die für den Test
-    # relevanten Werte überschreiben. sf-Register = 0 (Faktor 1), damit
-    # skalierte Werte den Rohwerten entsprechen.
-    raw = dict.fromkeys(range(115), 0)
+    # Alle Register im HIGH-Block (Adresse 17-109) auf 0 vorbelegen, damit
+    # fehlende Overrides unten nicht zu KeyError führen, und dann die für
+    # den Test relevanten Werte überschreiben. sf-Register = 0 (Faktor 1),
+    # damit skalierte Werte den Rohwerten entsprechen. Die
+    # Battery-Skalierungsfaktoren kommen inzwischen aus dem LOW-Block
+    # (self._battery_*_sf_raw, hier auf ihrem __init__-Default 0 belassen).
+    raw = dict.fromkeys(range(17, 110), 0)
     raw.update(
         {
-            0: 21365,  # SunS (Hi)
-            1: 28243,  # SunS (Lo)
-            4: 21313,  # Hersteller "SA"
-            5: 22608,  # "XP"
-            6: 20311,  # "OW"
-            7: 17746,  # "ER" -> "SAXPOWER"
-            8: 18511,  # Gerätemodell "HO"
-            9: 19781,  # "ME"
-            10: to_unsigned16(0),  # kein "PL"-Suffix -> "SAX Power Home"
-            11: 23,  # Version Master
-            12: 56,  # Version Gateway
-            13: 15448,  # Seriennummer Hi
-            14: 97,  # Seriennummer Lo
             17: 30,  # Speicher Stromsumme
             18: 5,
             19: 6,
@@ -231,10 +349,7 @@ def test_parse_extended_decodes_sunspec_block(hass) -> None:
 
     data = coordinator._parse_extended(ext_reg)
 
-    assert data["sun_manufacturer"] == "SAXPOWER"
-    assert data["sun_model"] == "HOME"
-    assert data["sun_version_master"] == 23
-    assert data["sun_serial_number"] == (15448 << 16) | 97
+    assert "sun_manufacturer" not in data  # jetzt Teil des LOW-Blocks
 
     assert data["storage_current_sum"] == 30
     assert data["storage_current_a"] == 5
@@ -1074,12 +1189,8 @@ async def test_empty_start_or_end_never_activates_feature(hass) -> None:
     immer, dass das jeweilige Feature nicht ausgeführt wird (siehe
     SaxPowerCoordinator._is_time_in_window)."""
     coordinator = _make_coordinator(hass, _make_client())
-    assert (
-        coordinator._is_time_in_window(dt_time(12, 0), None, dt_time(14, 0)) is False
-    )
-    assert (
-        coordinator._is_time_in_window(dt_time(12, 0), dt_time(10, 0), None) is False
-    )
+    assert coordinator._is_time_in_window(dt_time(12, 0), None, dt_time(14, 0)) is False
+    assert coordinator._is_time_in_window(dt_time(12, 0), dt_time(10, 0), None) is False
     assert coordinator._is_time_in_window(dt_time(12, 0), None, None) is False
 
 

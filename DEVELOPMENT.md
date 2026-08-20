@@ -175,13 +175,38 @@ im Config Entry aktualisiert).
 
 ## Register-Mapping
 
-Der Coordinator liest pro Poll-Intervall zwei zusammenhängende
-Register-Blöcke auf zwei unterschiedlichen Slave-IDs mit je einem
-`read_holding_registers`-Aufruf: Basic Mode (Slave-ID 64, Register 41–46,
-`READ_BLOCK_START`/`READ_BLOCK_COUNT`, Adress-Offset `-40001`) und
-SunSpec-Modus (Slave-ID 100, Register 40000–40114,
-`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`, Adress-Offset `-40000` –
-anderer Offset als Basic Mode).
+Der Coordinator liest pro Poll-Intervall einen zusammenhängenden
+Register-Block auf Slave-ID 64 (Basic Mode, Register 41–46,
+`READ_BLOCK_START`/`READ_BLOCK_COUNT`, Adress-Offset `-40001`) sowie – auf
+Slave-ID 100 – den zusammenhängenden SunSpec-Modus-Block (Register
+40000–40114, Adress-Offset `-40000`, anderer Offset als Basic Mode). Der
+SunSpec-Modus-Block wird dabei nicht mit einem einzigen
+`read_holding_registers`-Aufruf gelesen, sondern in drei Teilblöcken mit
+unterschiedlicher Aktualisierungsfrequenz (siehe anforderung.yaml,
+REQ-LOW-INTERVAL-REGISTERS):
+
+- **HIGH** (`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`, Register
+  40017–40109, 93 Register): bei jedem Poll – dynamische Mess-/Zustands-
+  werte (Ströme, Spannungen, Leistungen, SOC, Fehlercodes, Smart-Meter-
+  Leistung).
+- **LOW1** (`READ_BLOCK_EXT_LOW1_START`/`READ_BLOCK_EXT_LOW1_COUNT`,
+  Register 40000–40016, 17 Register): SunSpec Common Model + Modellkopf
+  von "3Ph Inverter" – Hersteller, Gerätemodell, Firmware-Version,
+  Seriennummer, Modell-ID/Länge.
+- **LOW2** (`READ_BLOCK_EXT_LOW2_START`/`READ_BLOCK_EXT_LOW2_COUNT`,
+  Register 40110–40114, 5 Register): Battery-Skalierungsfaktoren.
+
+LOW1/LOW2 werden von `SaxPowerCoordinator._async_read_low_block` nur alle
+`READ_BLOCK_EXT_LOW_INTERVAL` Sekunden (1 Stunde) per eigenem
+`read_holding_registers`-Aufruf neu gelesen, da beide Teilbereiche laut
+`modbus_llm.yaml` ausschließlich "wellknown" fixe bzw. sich im laufenden
+Betrieb praktisch nie ändernde Werte enthalten. Zwischen den Refreshs
+liefert `_async_read_low_block` die zuletzt gelesenen Werte aus dem Cache
+zurück; die Battery-Skalierungsfaktoren landen zusätzlich in
+`self._battery_*_sf_raw`, da `_parse_extended` (HIGH-Block) sie für die
+Skalierung der Battery-Messwerte benötigt. Scheitert ausschließlich der
+LOW-Read, schlägt das Update nicht fehl – die betroffenen Diagnose-Sensoren
+behalten ihren letzten Wert.
 
 Innerhalb eines Blocks gilt "alles oder nichts": Schlägt der
 Basic-Mode-Read fehl, schlägt das gesamte Update fehl (`UpdateFailed`), da
@@ -210,10 +235,12 @@ aber keine Wirkung gezeigt - siehe Kommentar bei `REG_SETPOINT_POWER`
 
 `coordinator.apply_sunssf(raw_value, raw_scale_factor)` wendet
 `Wert × 10^sunssf` an (beide Rohwerte signed 16-Bit).
-`SaxPowerCoordinator._parse_extended` wertet damit den kompletten
-SunSpec-Modus-Block aus (Common/Inverter/Immediate Controls/Meter/Battery)
-und dekodiert zusätzlich die als ASCII-Zeichenpaare codierten
-Hersteller-/Modell-Register (`coordinator.decode_ascii_registers`).
+`SaxPowerCoordinator._parse_extended` wertet damit den HIGH-Block aus
+(Inverter/Immediate Controls/Meter/Battery), `_parse_low_block` den LOW1-/
+LOW2-Block (Common Model, Battery-Skalierungsfaktoren) - siehe
+Register-Mapping oben. `_parse_low_block` dekodiert außerdem die als
+ASCII-Zeichenpaare codierten Hersteller-/Modell-Register
+(`coordinator.decode_ascii_registers`).
 
 ## Refresh-Verhalten
 

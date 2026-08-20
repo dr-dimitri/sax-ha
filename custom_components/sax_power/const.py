@@ -99,7 +99,11 @@ READ_BLOCK_COUNT = REG_SOC - REG_SETPOINT_POWER + 1
 # modbus.pdf gegen echte Hardware (siehe anforderung.yaml,
 # REQ-SUNSPEC-MODE-CORRECTION). Der komplette Block 40000-40114 (115
 # Register: Common + 3Ph Inverter + Immediate Controls + Meter + Battery)
-# liegt zusammenhängend, ein einzelner read_holding_registers-Aufruf genügt.
+# liegt zusammenhängend. Gelesen wird er nicht mehr mit einem einzelnen
+# read_holding_registers-Aufruf, sondern in drei Teilblöcken mit
+# unterschiedlicher Aktualisierungsfrequenz - siehe READ_BLOCK_EXT_START/
+# READ_BLOCK_EXT_LOW1_START/READ_BLOCK_EXT_LOW2_START unten sowie
+# anforderung.yaml, REQ-LOW-INTERVAL-REGISTERS.
 
 # -- SunSpec Common Model (ID 1) -------------------------------------------
 REG_SUN_ID = 0  # Read - SunSpec-Kennung Hi-Word, wellknown 21365
@@ -241,8 +245,35 @@ REG_SUN_BATTERY_SOC_SF = 112  # Read - sunssf, wellknown 0
 # 113: Reserve
 REG_SUN_BATTERY_CELL_VOLTAGE_SF = 114  # Read - sunssf, wellknown 0
 
-READ_BLOCK_EXT_START = REG_SUN_ID
-READ_BLOCK_EXT_COUNT = REG_SUN_BATTERY_CELL_VOLTAGE_SF - REG_SUN_ID + 1  # 115
+# -- LOW-Intervall (siehe anforderung.yaml, REQ-LOW-INTERVAL-REGISTERS) -----
+# Zwei Teilbereiche des obigen Blocks enthalten laut modbus_llm.yaml
+# ausschließlich "wellknown" fixe bzw. sich im laufenden Betrieb praktisch
+# nie ändernde Werte (Geräteidentität/Firmware-Version bzw.
+# Skalierungsfaktoren) und liegen jeweils direkt am Rand des Blocks -
+# SaxPowerCoordinator._async_read_low_block liest sie deshalb per eigenem
+# read_holding_registers-Aufruf nur alle READ_BLOCK_EXT_LOW_INTERVAL
+# Sekunden statt bei jedem Poll. Der reguläre (HIGH-)Block schrumpft
+# dadurch von 115 auf 93 Register, ohne dass dafür im Normalbetrieb
+# zusätzliche Requests nötig sind.
+READ_BLOCK_EXT_LOW_INTERVAL = 3600  # Sekunden
+
+# Teilbereich 1: SunSpec Common Model (Hersteller, Modell, Firmware-Version,
+# Seriennummer) + Modellkopf von "3Ph Inverter" (Modell-ID/Länge) - direkt
+# angrenzend an REG_SUN_STORAGE_CURRENT_SUM, dem ersten dynamischen Messwert.
+READ_BLOCK_EXT_LOW1_START = REG_SUN_ID
+READ_BLOCK_EXT_LOW1_COUNT = REG_SUN_INVERTER_LENGTH - REG_SUN_ID + 1  # 17
+
+READ_BLOCK_EXT_START = REG_SUN_STORAGE_CURRENT_SUM
+READ_BLOCK_EXT_COUNT = (
+    REG_SUN_BATTERY_CELL_VOLTAGE_AVG - REG_SUN_STORAGE_CURRENT_SUM + 1
+)  # 93
+
+# Teilbereich 2: Battery-Skalierungsfaktoren (alle laut modbus_llm.yaml
+# "wellknown" mit fixem Wert 0) - liegen am Ende des Blocks.
+READ_BLOCK_EXT_LOW2_START = REG_SUN_BATTERY_CAPACITY_SF
+READ_BLOCK_EXT_LOW2_COUNT = (
+    REG_SUN_BATTERY_CELL_VOLTAGE_SF - REG_SUN_BATTERY_CAPACITY_SF + 1
+)  # 5
 
 # Immediate-Controls-Wertebereiche (modbus.pdf: "-100*SF bis +100*SF", SF=-2)
 MIN_IC_POWER_SETPOINT_PCT = -100.0

@@ -745,3 +745,50 @@ requirement_manual_discharge:
     - "const.py enthält bei REG_SETPOINT_POWER und
        REG_SUN_IC_POWER_SETPOINT_PCT einen Kommentar mit diesem Befund für
        spätere Umsetzungsversuche."
+
+# ==============================================================================
+# ANFORDERUNG: LOW-INTERVALL FÜR STATISCHE SUNSPEC-MODUS-REGISTER
+# ==============================================================================
+requirement_low_interval_registers:
+  id: REQ-LOW-INTERVAL-REGISTERS
+  title: "Statische SunSpec-Modus-Register (Geräteidentität, Skalierungsfaktoren) seltener abfragen als Messwerte"
+  status: done
+  description: >
+    Der SunSpec-Modus-Block (Slave-ID 100, Register 40000-40114, siehe
+    REQ-SUNSPEC-MODE-CORRECTION) enthält zwei zusammenhängende
+    Teilbereiche, die laut modbus_llm.yaml ausschließlich "wellknown" fixe
+    bzw. sich im laufenden Betrieb praktisch nie ändernde Werte enthalten:
+    das SunSpec Common Model + den Modellkopf von "3Ph Inverter"
+    (Hersteller, Gerätemodell, Firmware-Version, Seriennummer,
+    Modell-ID/Länge; Register 40000-40016) sowie die
+    Battery-Skalierungsfaktoren (Register 40110-40114). Beide Teilbereiche
+    liegen direkt am Rand des Gesamtblocks und lassen sich deshalb ohne
+    zusätzliche Requests im regulären Poll-Zyklus abtrennen.
+
+    SaxPowerCoordinator._async_read_low_block liest diese beiden
+    Teilbereiche per eigenem read_holding_registers-Aufruf nur alle
+    READ_BLOCK_EXT_LOW_INTERVAL Sekunden (1 Stunde) neu ein, statt bei
+    jedem regulären Poll. Der reguläre (HIGH-)Block
+    (READ_BLOCK_EXT_START/READ_BLOCK_EXT_COUNT) schrumpft dadurch von 115
+    auf 93 Register. Zwischen den Refreshs werden die zuletzt gelesenen
+    Werte weiterverwendet (self._low_block_data bzw. die
+    self._battery_*_sf_raw-Caches, die _parse_extended für die
+    Battery-Messwerte des HIGH-Blocks verwendet); ein Scheitern des
+    LOW-Reads lässt das Update nicht fehlschlagen, analog zu
+    REQ-EXTENDED-MODE-RESILIENCE.
+  requirements:
+    - "Die beiden LOW-Intervall-Teilbereiche werden beim allerersten Poll
+       sofort mitgelesen, damit die zugehörigen Diagnose-Sensoren nicht bis
+       zum Ablauf des ersten Intervalls 'unbekannt' zeigen."
+    - "Ein Scheitern des LOW-Intervall-Reads (bei ansonsten erreichbarem
+       SunSpec-Modus) lässt das Update nicht fehlschlagen - die zuletzt
+       gelesenen Werte bleiben erhalten, bis der nächste Refresh gelingt."
+    - "Sicherheits-/steuerungsrelevante Register (SOC, Zustände,
+       Fehlercodes, Smart-Meter-Leistung) bleiben ausdrücklich im
+       HIGH-Block und werden weiterhin bei jedem Poll gelesen."
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt sowohl das Refresh-Intervall
+       (kein Reread innerhalb von READ_BLOCK_EXT_LOW_INTERVAL, Reread nach
+       Ablauf) als auch die Fehlerresilienz des LOW-Blocks ab."
+    - "DEVELOPMENT.md beschreibt die Drei-Block-Struktur des SunSpec-Modus
+       (HIGH + zwei LOW-Teilbereiche) im Abschnitt Register-Mapping."

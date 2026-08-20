@@ -120,6 +120,13 @@ ADW200 vollständig verfügbar. Mit anderen Smartmetern (z. B. ADL400) sind
 die Netz-Register (Ströme, Spannungen, Leistungen) in der Regel dennoch
 plausibel befüllt; PV-Leistung kann dann dauerhaft 0 bleiben.
 
+**Hinweis Aktualisierungsfrequenz:** Geräteidentität (Hersteller,
+Gerätemodell, Softwareversion, Seriennummer) sowie die intern verwendeten
+Skalierungsfaktoren der Akku-Werte ändern sich im laufenden Betrieb
+praktisch nie und werden deshalb nur einmal pro Stunde statt bei jedem
+Aktualisierungsintervall abgefragt – alle übrigen Sensoren folgen weiterhin
+dem oben eingestellten Intervall.
+
 Ist der SunSpec-Modus nicht erreichbar (siehe
 [Bekannte Einschränkungen](#bekannte-einschränkungen)), zeigen alle Sensoren
 aus dieser Tabelle "unbekannt"; die Basic-Mode-Sensoren bleiben davon

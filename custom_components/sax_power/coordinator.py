@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from datetime import time as dt_time
 from datetime import timedelta
+from time import monotonic
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -32,6 +33,11 @@ from .const import (
     MIN_SETPOINT_POWER,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
+    READ_BLOCK_EXT_LOW1_COUNT,
+    READ_BLOCK_EXT_LOW1_START,
+    READ_BLOCK_EXT_LOW2_COUNT,
+    READ_BLOCK_EXT_LOW2_START,
+    READ_BLOCK_EXT_LOW_INTERVAL,
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
     REG_LIMIT_CHARGE,
@@ -282,6 +288,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
+        # Cache für die LOW-Intervall-Register (siehe anforderung.yaml,
+        # REQ-LOW-INTERVAL-REGISTERS): _async_read_low_block befüllt sie nur
+        # alle READ_BLOCK_EXT_LOW_INTERVAL Sekunden neu, _parse_extended
+        # verwendet die Battery-Skalierungsfaktoren aus den zuletzt gelesenen
+        # Werten statt sie bei jedem Poll erneut zu lesen.
+        self._low_block_data: dict[str, Any] = {}
+        self._low_block_last_read: float | None = None
+        self._battery_capacity_sf_raw = 0
+        self._battery_power_sf_raw = 0
+        self._battery_soc_sf_raw = 0
+        self._battery_cell_voltage_sf_raw = 0
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -339,9 +356,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return data
 
     async def _async_read_extended(self) -> dict[str, Any]:
-        """Read+parse den SunSpec-Modus-Block (Slave-ID self.slave_id_extended,
-        Default 100), ohne bei Fehlern das gesamte Update scheitern zu lassen
-        (siehe Kommentar in __init__)."""
+        """Read+parse den HIGH-Intervall-Teil des SunSpec-Modus-Blocks
+        (Slave-ID self.slave_id_extended, Default 100), ohne bei Fehlern das
+        gesamte Update scheitern zu lassen (siehe Kommentar in __init__).
+        Die beiden statischen LOW-Intervall-Teilbereiche (Geräteidentität,
+        Battery-Skalierungsfaktoren) werden separat über
+        _async_read_low_block geholt - siehe anforderung.yaml,
+        REQ-LOW-INTERVAL-REGISTERS."""
         try:
             extended_result = await self.client.read_holding_registers(
                 address=READ_BLOCK_EXT_START,
@@ -388,16 +409,123 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         def ext_reg(address: int) -> int:
             return ext_regs[address - READ_BLOCK_EXT_START]
 
-        return self._parse_extended(ext_reg)
+        # Muss vor _parse_extended laufen: _parse_extended verwendet die
+        # dort aktualisierten self._battery_*_sf_raw-Werte, statt sie selbst
+        # aus dem (inzwischen kleineren) HIGH-Block zu lesen.
+        data = dict(await self._async_read_low_block())
+        data.update(self._parse_extended(ext_reg))
+        return data
+
+    async def _async_read_low_block(self) -> dict[str, Any]:
+        """Liest die beiden statischen LOW-Intervall-Teilbereiche des
+        SunSpec-Modus-Blocks (Geräteidentität + Inverter-Modellkopf,
+        Battery-Skalierungsfaktoren) nur alle READ_BLOCK_EXT_LOW_INTERVAL
+        Sekunden per eigenem read_holding_registers-Aufruf neu ein, statt bei
+        jedem regulären Poll - beide Teilbereiche enthalten laut
+        modbus_llm.yaml ausschließlich "wellknown" fixe bzw. sich im
+        laufenden Betrieb praktisch nie ändernde Werte (siehe
+        anforderung.yaml, REQ-LOW-INTERVAL-REGISTERS). Zwischen den
+        Refreshs werden die zuletzt gelesenen Werte weiterverwendet; ein
+        Scheitern des Refreshs lässt das Update deshalb nicht fehlschlagen."""
+        now = monotonic()
+        if (
+            self._low_block_data
+            and self._low_block_last_read is not None
+            and now - self._low_block_last_read < READ_BLOCK_EXT_LOW_INTERVAL
+        ):
+            return self._low_block_data
+
+        try:
+            low1_result = await self.client.read_holding_registers(
+                address=READ_BLOCK_EXT_LOW1_START,
+                count=READ_BLOCK_EXT_LOW1_COUNT,
+                device_id=self.slave_id_extended,
+            )
+            low2_result = await self.client.read_holding_registers(
+                address=READ_BLOCK_EXT_LOW2_START,
+                count=READ_BLOCK_EXT_LOW2_COUNT,
+                device_id=self.slave_id_extended,
+            )
+            if low1_result.isError() or low2_result.isError():
+                raise ModbusException(
+                    "Modbus-Fehlerantwort (LOW-Intervall-Register): "
+                    f"{low1_result if low1_result.isError() else low2_result}"
+                )
+        except (TimeoutError, ModbusException) as err:
+            if self._low_block_data:
+                _LOGGER.debug(
+                    "LOW-Intervall-Register (Slave-ID %s) nicht lesbar - "
+                    "vorherige Werte werden beibehalten: %s",
+                    self.slave_id_extended,
+                    err,
+                )
+            else:
+                _LOGGER.warning(
+                    "LOW-Intervall-Register (Slave-ID %s) nicht lesbar - "
+                    "zugehörige Sensoren zeigen bis zum ersten erfolgreichen "
+                    "Refresh 'unbekannt': %s",
+                    self.slave_id_extended,
+                    err,
+                )
+            return self._low_block_data
+
+        low1_regs = low1_result.registers
+        low2_regs = low2_result.registers
+
+        def low1_reg(address: int) -> int:
+            return low1_regs[address - READ_BLOCK_EXT_LOW1_START]
+
+        def low2_reg(address: int) -> int:
+            return low2_regs[address - READ_BLOCK_EXT_LOW2_START]
+
+        self._low_block_data = self._parse_low_block(low1_reg, low2_reg)
+        self._low_block_last_read = now
+        return self._low_block_data
+
+    def _parse_low_block(
+        self,
+        low1_reg: Callable[[int], int],
+        low2_reg: Callable[[int], int],
+    ) -> dict[str, Any]:
+        """Parse die beiden LOW-Intervall-Teilbereiche (siehe
+        _async_read_low_block). Aktualisiert nebenbei die
+        self._battery_*_sf_raw-Caches, die _parse_extended für die
+        Battery-Messwerte des HIGH-Blocks verwendet - analog zu
+        self._ic_power_setpoint_sf_raw in _parse_extended."""
+        self._battery_capacity_sf_raw = low2_reg(REG_SUN_BATTERY_CAPACITY_SF)
+        self._battery_power_sf_raw = low2_reg(REG_SUN_BATTERY_POWER_SF)
+        self._battery_soc_sf_raw = low2_reg(REG_SUN_BATTERY_SOC_SF)
+        self._battery_cell_voltage_sf_raw = low2_reg(REG_SUN_BATTERY_CELL_VOLTAGE_SF)
+
+        return {
+            "sun_manufacturer": decode_ascii_registers(
+                [low1_reg(REG_SUN_MANUFACTURER + i) for i in range(4)]
+            ),
+            "sun_model": decode_ascii_registers(
+                [low1_reg(REG_SUN_MODEL + i) for i in range(3)]
+            ),
+            "sun_version_master": low1_reg(REG_SUN_VERSION_MASTER),
+            "sun_version_gateway": low1_reg(REG_SUN_VERSION_GATEWAY),
+            "sun_serial_number": (low1_reg(REG_SUN_SERIAL_HI) << 16)
+            | low1_reg(REG_SUN_SERIAL_LO),
+        }
 
     def _parse_extended(self, ext_reg: Callable[[int], int]) -> dict[str, Any]:
-        """Parse den SunSpec-Modus-Registerblock (Slave-ID 100, modbus.pdf).
+        """Parse den HIGH-Intervall-Teil des SunSpec-Modus-Registerblocks
+        (Slave-ID 100, modbus.pdf).
 
-        Deckt SunSpec Common-, "3Ph Inverter"- (103, Speicherelektronik),
-        "Immediate Controls"- (123), "WYE Connect 3Ph Meter"- (203, Netz/
-        Smart Meter) und "Battery Base"-Modell (802, Akkuzellen) ab. Siehe
+        Deckt "3Ph Inverter"- (103, Speicherelektronik), "Immediate
+        Controls"- (123), "WYE Connect 3Ph Meter"- (203, Netz/Smart Meter)
+        und "Battery Base"-Modell (802, Akkuzellen) ab. Siehe
         anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION: löst die zuvor
         angenommene, auf realer Hardware nicht existente Slave-ID 40 ab.
+
+        Das SunSpec-Common-Modell (Geräteidentität) sowie die
+        Battery-Skalierungsfaktoren liegen inzwischen im separaten
+        LOW-Intervall-Block (siehe _async_read_low_block/
+        REQ-LOW-INTERVAL-REGISTERS) - Battery-Werte werden deshalb mit den
+        zuletzt dort gelesenen self._battery_*_sf_raw skaliert statt mit
+        einem eigenen ext_reg-Zugriff.
         """
         storage_current_sf = ext_reg(REG_SUN_STORAGE_CURRENT_SF)
         storage_voltage_sf = ext_reg(REG_SUN_STORAGE_VOLTAGE_SF)
@@ -413,23 +541,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         meter_voltage_sf = ext_reg(REG_SUN_METER_VOLTAGE_SF)
         meter_power_active_sf = ext_reg(REG_SUN_METER_POWER_ACTIVE_SF)
 
-        battery_capacity_sf = ext_reg(REG_SUN_BATTERY_CAPACITY_SF)
-        battery_power_sf = ext_reg(REG_SUN_BATTERY_POWER_SF)
-        battery_soc_sf = ext_reg(REG_SUN_BATTERY_SOC_SF)
+        battery_capacity_sf = self._battery_capacity_sf_raw
+        battery_power_sf = self._battery_power_sf_raw
+        battery_soc_sf = self._battery_soc_sf_raw
         battery_event = ext_reg(REG_SUN_BATTERY_EVENT)
 
         return {
-            # -- SunSpec Common (Identität, Diagnose) --
-            "sun_manufacturer": decode_ascii_registers(
-                [ext_reg(REG_SUN_MANUFACTURER + i) for i in range(4)]
-            ),
-            "sun_model": decode_ascii_registers(
-                [ext_reg(REG_SUN_MODEL + i) for i in range(3)]
-            ),
-            "sun_version_master": ext_reg(REG_SUN_VERSION_MASTER),
-            "sun_version_gateway": ext_reg(REG_SUN_VERSION_GATEWAY),
-            "sun_serial_number": (ext_reg(REG_SUN_SERIAL_HI) << 16)
-            | ext_reg(REG_SUN_SERIAL_LO),
             # -- Model 103: 3Ph Inverter (Speicherelektronik) --
             "storage_current_sum": apply_sunssf(
                 ext_reg(REG_SUN_STORAGE_CURRENT_SUM), storage_current_sf
@@ -580,7 +697,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "battery_cell_voltage_avg": apply_sunssf(
                 ext_reg(REG_SUN_BATTERY_CELL_VOLTAGE_AVG),
-                ext_reg(REG_SUN_BATTERY_CELL_VOLTAGE_SF),
+                self._battery_cell_voltage_sf_raw,
             ),
         }
 
@@ -945,9 +1062,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_end = value
         await self._async_apply_grid_charge_change()
 
-    async def async_set_timed_charge_window(
-        self, start: dt_time, end: dt_time
-    ) -> None:
+    async def async_set_timed_charge_window(self, start: dt_time, end: dt_time) -> None:
         """Setzt Start und Ende der Netzladung atomar in einem Aufruf.
 
         Anders als async_set_timed_charge_start/-end (die je nur eine der
@@ -1483,9 +1598,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_end = value
         await self._async_apply_grid_charge_change()
 
-    async def async_set_grid_serving_window(
-        self, start: dt_time, end: dt_time
-    ) -> None:
+    async def async_set_grid_serving_window(self, start: dt_time, end: dt_time) -> None:
         """Analog zu async_set_timed_charge_window, für das netzdienliche
         Laden - siehe dort für den Hintergrund (Vermeidung falscher
         Erkennung einer Überschneidung durch Zwischenzustände beim

@@ -1020,7 +1020,7 @@ requirement_dynamic_price_charge:
                  damit "3 günstigste Stunden" auch bei einer Berechnung
                  mitten in einem Slot drei nutzbare Stunden ergibt.
       smart    - wie relative, leitet die Stundenzahl aber aus dem noch
-                 fehlenden Energiebedarf ab: (Ziel-SOC - SOC) × Kapazität
+                 fehlenden Energiebedarf ab: ("Max. SOC" - SOC) × Kapazität
                  (SunSpec-Register 40097) abzüglich des nutzbaren Anteils
                  der PV-Prognose, geteilt durch "Max. Netzladeleistung".
                  Deckt die Prognose den Bedarf vollständig, wird gar kein
@@ -1034,12 +1034,11 @@ requirement_dynamic_price_charge:
     Kalendertag.
 
     Leistung: "Max. Netzladeleistung" (gemeinsam mit dem zeitgesteuerten
-    Laden genutzt, keine zusätzliche Einstellung). Ziel-SOC: eigener Wert
-    (number "Preisoptimiertes Laden Ziel-SOC") - fachlich etwas anderes als
-    "Max. SOC": man kauft nur so viel günstig ein, wie bis zum nächsten
-    günstigen Fenster gebraucht wird, während "Max. SOC" die geräteweite
-    Obergrenze bleibt und beim Erreichen zusätzlich die Max-SOC-Sperre
-    auslöst.
+    Laden genutzt, keine zusätzliche Einstellung). Ziel-SOC: derselbe Wert
+    wie "Max. SOC" - keine eigene Einstellung, sondern die einzige,
+    geräteweite SOC-Obergrenze; ist sie erreicht, endet die Netzladung UND
+    löst zusätzlich die Max-SOC-Sperre aus (genau wie beim zeitgesteuerten
+    Laden).
 
     Vorrang innerhalb von _async_enforce_grid_charge: Max-SOC-Sperre >
     zeitgesteuertes Laden > preisoptimiertes Laden > netzdienliches Laden.
@@ -1070,23 +1069,22 @@ requirement_dynamic_price_charge:
     - "Entities am bestehenden SAX-Gerät: switch 'Preisoptimiertes Laden
        aktiv' (Hauptschalter), select 'Preisoptimiertes Laden Strategie',
        number 'Preisoptimiertes Laden Preisgrenze' (EUR/kWh), number
-       'Preisoptimiertes Laden Anzahl Stunden' (1-24), number
-       'Preisoptimiertes Laden Ziel-SOC' (0-100 %), sensor
+       'Preisoptimiertes Laden Anzahl Stunden' (1-24), sensor
        'Preisoptimiertes Laden nächster Start' (device_class timestamp),
        sensor 'Preisoptimiertes Laden Status' (Klartext), sensor
        'Preisoptimiertes Laden aktiv' (Diagnose) sowie sensor 'Aktueller
-       Strompreis'."
+       Strompreis'. Kein eigenes Ziel-SOC - number 'Max. SOC' ist die
+       einzige SOC-Einstellung der Integration, siehe REQ-TIMED-SOC-CHARGE."
     - "Alle Stellgrößen werden per RestoreEntity über Neustarts hinweg
        persistiert; ohne gespeicherten Zustand gelten die Defaults aus
        const.py (bzw. die Vorgabestrategie aus dem Options Flow)."
     - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
-       Preisdaten, Warten auf Preisabfall, Lade aus Netz, Ziel-SOC
-       erreicht, PV-Prognose deckt Bedarf, Pausiert (PV-Überschuss),
-       Pausiert (Max. SOC), Pausiert (Max. Netzladeleistung fehlt),
-       Pausiert (Netzladung aktiv). Seine Attribute führen Strategie,
-       aktuellen Preis, wirksame Preisgrenze, benötigte Stunden,
-       eingerechnete PV-Prognose, die konfigurierten Quell-Sensoren und die
-       geplanten Zeitfenster mit."
+       Preisdaten, Warten auf Preisabfall, Lade aus Netz, PV-Prognose deckt
+       Bedarf, Pausiert (PV-Überschuss), Pausiert (Max. SOC), Pausiert
+       (Max. Netzladeleistung fehlt), Pausiert (Netzladung aktiv). Seine
+       Attribute führen Strategie, aktuellen Preis, wirksame Preisgrenze,
+       benötigte Stunden, eingerechnete PV-Prognose, die konfigurierten
+       Quell-Sensoren und die geplanten Zeitfenster mit."
     - "Services: sax_power.refresh_price_plan (sofortige Neuberechnung) und
        sax_power.set_price_charge_enabled (nicht-interaktives Schalten mit
        optionalem force)."
@@ -1098,12 +1096,12 @@ requirement_dynamic_price_charge:
        Daten), Planberechnung je Strategie inkl. Planungshorizont,
        Smart-Modus mit und ohne ausreichende PV-Prognose sowie ohne
        Kapazität, Schreibpfad und Rückkehr in die Nullregelung, Abbruch bei
-       eigenem Ziel-SOC/Max-SOC/PV-Überschuss/fehlender Ladeleistung,
-       Vorrang des zeitgesteuerten Ladens, Konfliktdialog (Anlegen,
-       Bestätigen, Abbrechen, force) und das Restore-Verhalten der
-       Select-/Switch-Entities."
-    - "tests/test_number.py deckt die Vorbelegung und Klemmung der drei
-       neuen Number-Entities ab."
+       Max-SOC/PV-Überschuss/fehlender Ladeleistung, Vorrang des
+       zeitgesteuerten Ladens, Konfliktdialog (Anlegen, Bestätigen,
+       Abbrechen, force) und das Restore-Verhalten der Select-/
+       Switch-Entities."
+    - "tests/test_number.py deckt die Vorbelegung und Klemmung der beiden
+       neuen Number-Entities (Preisgrenze, Anzahl Stunden) ab."
     - "tests/test_config_flow.py deckt den Options Flow ab (Speichern und
        Vorbelegung)."
     - "README.md beschreibt Einrichtung, Strategien und Zusammenspiel mit

@@ -37,7 +37,6 @@ from custom_components.sax_power.const import (
     PRICE_STATUS_PAUSED_PV_SURPLUS,
     PRICE_STATUS_PAUSED_TIMED_CHARGE,
     PRICE_STATUS_PV_FORECAST_COVERS,
-    PRICE_STATUS_TARGET_REACHED,
     PRICE_STATUS_WAITING,
     PRICE_STRATEGY_ABSOLUTE,
     PRICE_STRATEGY_OFF,
@@ -446,7 +445,7 @@ def _waiting_plan() -> PricePlan:
 
 async def _enable_price_charge(coordinator: SaxPowerCoordinator) -> None:
     await coordinator.async_set_price_charge_strategy(PRICE_STRATEGY_RELATIVE)
-    await coordinator.async_set_price_charge_target_soc(80)
+    await coordinator.async_set_max_soc(80)
     await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_price_charge_enabled(True)
 
@@ -496,27 +495,12 @@ async def test_price_charge_idle_returns_to_zero_feed_in_mode(hass) -> None:
     assert coordinator.price_charge_status == PRICE_STATUS_WAITING
 
 
-async def test_price_charge_stops_at_own_target_soc(hass) -> None:
-    """Der eigene Ziel-SOC beendet die Netzladung, ohne den Speicher wie die
-    Max-SOC-Sperre auf 0 % festzuhalten."""
-    coordinator = _make_coordinator(hass)
-    coordinator.data = {"soc": 85, "ic_max_power_reference": 4600}
-    await _enable_price_charge(coordinator)
-    coordinator.price_planner.plan = _charging_plan()
-
-    await coordinator._async_enforce_grid_charge({"soc": 85})
-
-    assert coordinator.price_charge_active is False
-    assert coordinator.sun_charge_active is False
-    assert coordinator.price_charge_status == PRICE_STATUS_TARGET_REACHED
-
-
 async def test_price_charge_paused_by_max_soc_lock(hass) -> None:
-    """ "Max. SOC" bleibt die übergeordnete Grenze."""
+    """ "Max. SOC" ist der einzige Ziel-SOC und beendet die Netzladung, sobald
+    er erreicht ist."""
     coordinator = _make_coordinator(hass)
     coordinator.data = {"soc": 95, "ic_max_power_reference": 4600, "ic_timeout": 300}
     await _enable_price_charge(coordinator)
-    await coordinator.async_set_price_charge_target_soc(100)
     await coordinator.async_set_max_soc(90)
     coordinator.price_planner.plan = _charging_plan()
 
@@ -551,7 +535,6 @@ async def test_price_charge_paused_without_charge_power(hass) -> None:
     coordinator = _make_coordinator(hass)
     coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
     await coordinator.async_set_price_charge_strategy(PRICE_STRATEGY_RELATIVE)
-    await coordinator.async_set_price_charge_target_soc(80)
     await coordinator.async_set_price_charge_enabled(True)
     coordinator.price_planner.plan = _charging_plan()
 
@@ -571,7 +554,6 @@ async def test_timed_charge_takes_priority_over_price_charge(hass) -> None:
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_price_charge_strategy(PRICE_STRATEGY_RELATIVE)
-    await coordinator.async_set_price_charge_target_soc(80)
     coordinator._price_charge_enabled = True
     coordinator._timed_charge_enabled = True
     coordinator.price_planner.plan = _charging_plan()

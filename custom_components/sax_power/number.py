@@ -13,7 +13,6 @@ from .const import (
     DATA_COORDINATOR,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
-    DEFAULT_PRICE_TARGET_SOC,
     DOMAIN,
     MAX_POWER_LIMIT,
     MAX_PRICE_HOURS,
@@ -42,7 +41,6 @@ async def async_setup_entry(
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
             SaxPowerPriceChargeHoursNumber(coordinator, entry.entry_id),
-            SaxPowerPriceChargeTargetSocNumber(coordinator, entry.entry_id),
         ]
     )
 
@@ -55,8 +53,9 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
     40051/40049), sowohl während des zeitgesteuerten Ladens als auch
     unabhängig davon - z. B. auch bei einem durch PV-Überschuss vollen
     Speicher (siehe coordinator.SaxPowerCoordinator._async_enforce_grid_charge).
-    Dient zusätzlich als Ziel-SOC für das zeitgesteuerte Laden (keine eigene
-    Einstellung dafür, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE).
+    Dient zusätzlich als Ziel-SOC für das zeitgesteuerte und das
+    preisoptimierte Laden (keine eigenen Einstellungen dafür, siehe
+    anforderung.yaml REQ-TIMED-SOC-CHARGE und REQ-DYNAMIC-PRICE-CHARGE).
 
     Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
     es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
@@ -303,53 +302,4 @@ class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerEntity, NumberEntity
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_price_charge_hours(int(value))
-        self.async_write_ha_state()
-
-
-class SaxPowerPriceChargeTargetSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
-    """Ziel-Akkustand, bis zu dem preisoptimiert aus dem Netz geladen wird.
-
-    Bewusst eine eigene Einstellung neben "Max. SOC": "Max. SOC" ist die
-    geräteweite Obergrenze (und hält den Speicher beim Erreichen aktiv auf
-    0 % Leistungsvorgabe), während dieser Wert nur festlegt, wie weit man
-    günstigen Netzstrom einkaufen möchte. Ist er erreicht, endet die
-    Netzladung, der Speicher bleibt aber im normalen
-    SmartMeter-Nullregelungsbetrieb und kann die eingekaufte Energie
-    wieder abgeben - siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
-
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert; ohne
-    gespeicherten Zustand gilt DEFAULT_PRICE_TARGET_SOC.
-    """
-
-    _attr_translation_key = "price_charge_target_soc"
-    _attr_native_min_value = MIN_SOC
-    _attr_native_max_value = MAX_SOC
-    _attr_native_step = 1
-    _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_mode = NumberMode.SLIDER
-
-    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_price_charge_target_soc"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if self.coordinator.price_charge_target_soc is not None:
-            return
-        restored_value: int | None = None
-        if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = int(float(last_state.state))
-            except (TypeError, ValueError):
-                restored_value = None
-        await self.coordinator.async_set_price_charge_target_soc(
-            restored_value if restored_value is not None else DEFAULT_PRICE_TARGET_SOC
-        )
-
-    @property
-    def native_value(self) -> int | None:
-        return self.coordinator.price_charge_target_soc
-
-    async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_price_charge_target_soc(int(value))
         self.async_write_ha_state()

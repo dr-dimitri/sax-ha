@@ -255,9 +255,6 @@
       },
       "price_charge_hours": {
         "name": "Price-optimised charging hours"
-      },
-      "price_charge_target_soc": {
-        "name": "Price-optimised charging target SOC"
       }
     },
     "switch": {

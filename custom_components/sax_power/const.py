@@ -456,8 +456,8 @@ DEFAULT_PRICE_UNIT = PRICE_UNIT_AUTO
 
 # -- Strategien (select.SaxPowerPriceStrategySelect) -----------------------
 # "off" ist zusätzlich zum Hauptschalter vorhanden, damit sich die Automatik
-# stilllegen lässt, ohne die restliche Konfiguration (Preisgrenze, Stunden,
-# Ziel-SOC) zu verlieren - wirksam ist preisoptimiertes Laden nur, wenn der
+# stilllegen lässt, ohne die restliche Konfiguration (Preisgrenze, Stunden)
+# zu verlieren - wirksam ist preisoptimiertes Laden nur, wenn der
 # Hauptschalter an UND die Strategie ungleich "off" ist.
 PRICE_STRATEGY_OFF = "off"
 PRICE_STRATEGY_ABSOLUTE = "absolute"
@@ -487,10 +487,6 @@ DEFAULT_PRICE_LIMIT = 0.20
 MIN_PRICE_HOURS = 1
 MAX_PRICE_HOURS = 24
 DEFAULT_PRICE_HOURS = 3
-
-# Eigener Ziel-SOC für das preisoptimierte Laden (unabhängig von "Max. SOC",
-# das als geräteweite Obergrenze zusätzlich darüber liegt).
-DEFAULT_PRICE_TARGET_SOC = 80
 
 # Anteil der PV-Prognose, der als tatsächlich im Speicher landender Ertrag
 # eingerechnet wird (Modus "Smart"). < 100 % deckt Eigenverbrauch,
@@ -524,7 +520,6 @@ PRICE_STATUS_OFF = "Aus"
 PRICE_STATUS_NO_PRICE_DATA = "Keine Preisdaten"
 PRICE_STATUS_WAITING = "Warten auf Preisabfall"
 PRICE_STATUS_CHARGING = "Lade aus Netz"
-PRICE_STATUS_TARGET_REACHED = "Ziel-SOC erreicht"
 PRICE_STATUS_PV_FORECAST_COVERS = "PV-Prognose deckt Bedarf"
 PRICE_STATUS_PAUSED_PV_SURPLUS = "Pausiert (PV-Überschuss)"
 PRICE_STATUS_PAUSED_MAX_SOC = "Pausiert (Max. SOC)"

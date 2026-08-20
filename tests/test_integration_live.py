@@ -759,7 +759,6 @@ async def test_live_price_charge_writes_setpoint_in_cheapest_hour(
 
         registry = er.async_get(hass)
         strategy_id = _entity_id(registry, entry.entry_id, "price_charge_strategy")
-        target_soc_id = _entity_id(registry, entry.entry_id, "price_charge_target_soc")
         enabled_id = _entity_id(registry, entry.entry_id, "price_charge_enabled")
         status_id = _entity_id(registry, entry.entry_id, "price_charge_status_text")
         next_start_id = _entity_id(registry, entry.entry_id, "price_charge_next_start")
@@ -770,12 +769,6 @@ async def test_live_price_charge_writes_setpoint_in_cheapest_hour(
             "select",
             "select_option",
             {"entity_id": strategy_id, "option": PRICE_STRATEGY_RELATIVE},
-            blocking=True,
-        )
-        await hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": target_soc_id, "value": 80},
             blocking=True,
         )
 

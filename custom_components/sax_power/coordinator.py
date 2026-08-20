@@ -51,7 +51,6 @@ from .const import (
     PRICE_STATUS_PAUSED_PV_SURPLUS,
     PRICE_STATUS_PAUSED_TIMED_CHARGE,
     PRICE_STATUS_PV_FORECAST_COVERS,
-    PRICE_STATUS_TARGET_REACHED,
     PRICE_STRATEGIES,
     PRICE_STRATEGY_OFF,
     PV_SURPLUS_HYSTERESIS_CYCLES,
@@ -366,7 +365,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_strategy = DEFAULT_PRICE_STRATEGY
         self._price_charge_max_price: float | None = None
         self._price_charge_hours: int | None = None
-        self._price_charge_target_soc: int | None = None
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
@@ -1605,12 +1603,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            steht hinter dem zeitgesteuerten Laden zurück (das per
            Bestätigungsdialog ohnehin nicht gleichzeitig aktiv sein kann,
            siehe async_set_timed_charge_enabled) und bricht - wie dieses -
-           bei bestätigtem PV-Überschuss sofort ab. Zusätzlich zum
-           geräteweiten "Max. SOC" gilt der eigene Ziel-SOC
-           (self._price_charge_target_soc): ist er erreicht, wird nicht mehr
-           aus dem Netz geladen, der Speicher bleibt aber - anders als bei
-           der Max-SOC-Sperre - im normalen Nullregelungsbetrieb, damit die
-           günstig eingekaufte Energie den Hausverbrauch decken kann.
+           bei bestätigtem PV-Überschuss sofort ab. Ziel-SOC ist derselbe
+           Wert wie "Max. SOC" (keine eigene Einstellung) - ist er erreicht,
+           greift dieselbe Max-SOC-Sperre wie bei den anderen beiden
+           Lademodi.
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat UND nicht bereits durch zeitgesteuertes
            oder preisoptimiertes Laden beansprucht - die Zeitfenster von
@@ -1712,23 +1708,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._timed_charge_armed
         )
         # Preisoptimiertes Laden (Punkt 2b, siehe Docstring): teilt sich
-        # Ladeleistung, Max-SOC-Sperre und PV-Überschuss-Hysterese mit dem
-        # zeitgesteuerten Laden, hat aber einen eigenen Ziel-SOC. Der
+        # Ladeleistung, Ziel-SOC ("Max. SOC"), Max-SOC-Sperre und
+        # PV-Überschuss-Hysterese mit dem zeitgesteuerten Laden. Der
         # Ladeplan selbst kommt aus dem Planner (price_optimizer.py) und
         # wird dort nur alle PRICE_EVAL_INTERVAL Sekunden neu berechnet -
-        # die hier zusätzlich geprüften Abbruchgründe (Ziel-SOC erreicht,
-        # PV-Überschuss, Max-SOC-Sperre) greifen dagegen sofort bei jedem
-        # Poll-Zyklus.
+        # die hier zusätzlich geprüften Abbruchgründe (Max-SOC-Sperre,
+        # PV-Überschuss) greifen dagegen sofort bei jedem Poll-Zyklus.
         price_plan = self.price_planner.plan
-        price_target_soc = (
-            self._price_charge_target_soc
-            if self._price_charge_target_soc is not None
-            else MAX_SOC
-        )
-        price_target_reached = current_soc >= price_target_soc
         price_should_charge = (
             not soc_reached
-            and not price_target_reached
             and not pv_surplus_active
             and not timed_should_charge
             and self._price_charge_enabled
@@ -1838,7 +1826,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             price_plan,
             charging=self._price_charge_active,
             soc_reached=soc_reached,
-            target_reached=price_target_reached,
             pv_surplus_active=pv_surplus_active,
             timed_should_charge=timed_should_charge,
         )
@@ -2073,11 +2060,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Max-SOC-Sperre und derselben PV-Überschuss-Hysterese.
     #
     # Leistung: "Max. Netzladeleistung" (self._max_charge_power), gemeinsam
-    # mit dem zeitgesteuerten Laden genutzt. Ziel-SOC: eigener Wert
-    # (self._price_charge_target_soc), da er sich fachlich vom generellen
-    # "Max. SOC" unterscheidet - man möchte typischerweise nur so weit
-    # günstig einkaufen, wie man bis zum nächsten günstigen Fenster braucht,
-    # während "Max. SOC" weiterhin die geräteweite Obergrenze bleibt.
+    # mit dem zeitgesteuerten Laden genutzt. Ziel-SOC: derselbe Wert wie
+    # "Max. SOC" (self._max_soc) - keine eigene Einstellung, siehe
+    # number.SaxPowerMaxSocNumber.
 
     @property
     def price_charge_enabled(self) -> bool:
@@ -2105,10 +2090,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         die zwischen "noch nicht restauriert" (None) und einem echten Wert
         unterscheiden muss (siehe number.SaxPowerPriceChargeHoursNumber)."""
         return self._price_charge_hours
-
-    @property
-    def price_charge_target_soc(self) -> int | None:
-        return self._price_charge_target_soc
 
     @property
     def price_charge_active(self) -> bool:
@@ -2166,11 +2147,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
-    async def async_set_price_charge_target_soc(self, value: int | None) -> None:
-        self._price_charge_target_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
-        self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
-
     async def async_apply_price_plan(self) -> None:
         """Vom Planner nach jeder periodischen Neuberechnung aufgerufen -
         wendet das Ergebnis sofort auf das Gerät an, statt bis zum nächsten
@@ -2183,7 +2159,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         charging: bool,
         soc_reached: bool,
-        target_reached: bool,
         pv_surplus_active: bool,
         timed_should_charge: bool,
     ) -> str:
@@ -2204,8 +2179,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return PRICE_STATUS_CHARGING
         if soc_reached:
             return PRICE_STATUS_PAUSED_MAX_SOC
-        if target_reached:
-            return PRICE_STATUS_TARGET_REACHED
         if timed_should_charge:
             return PRICE_STATUS_PAUSED_TIMED_CHARGE
         if pv_surplus_active:

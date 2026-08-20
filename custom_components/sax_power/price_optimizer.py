@@ -387,8 +387,9 @@ def _cheapest_slots(
 def _smart_required_hours(ctx: PriceChargeContext) -> tuple[float | None, float]:
     """(benötigte Ladestunden, eingerechnete PV-Prognose in kWh).
 
-    Rechnet den noch fehlenden Energiebedarf bis zum Ziel-SOC aus und zieht
-    davon den Teil der PV-Prognose ab, der laut Konfiguration tatsächlich
+    Rechnet den noch fehlenden Energiebedarf bis zu ctx.target_soc ("Max.
+    SOC", keine eigene Einstellung) aus und zieht davon den Teil der
+    PV-Prognose ab, der laut Konfiguration tatsächlich
     im Speicher landen dürfte. Bleibt nichts übrig, wird gar nicht aus dem
     Netz geladen (Rückgabe 0.0) - genau das ist der Zweck des Smart-Modus:
     nachts keinen teuren Netzstrom kaufen, wenn morgen genug kostenlose
@@ -620,9 +621,7 @@ class SaxPricePlanner:
             max_price=coordinator.price_charge_max_price,
             hours=coordinator.price_charge_hours,
             target_soc=(
-                coordinator.price_charge_target_soc
-                if coordinator.price_charge_target_soc is not None
-                else MAX_SOC
+                coordinator.max_soc if coordinator.max_soc is not None else MAX_SOC
             ),
             current_soc=data.get("soc"),
             capacity_kwh=None if not capacity_wh else float(capacity_wh) / 1000,

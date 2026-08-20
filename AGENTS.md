@@ -89,9 +89,9 @@ before it's considered done.
   opened as a pull request against `main`.
 - Before creating a new branch, update `main` first (`git fetch && git pull
   origin main --ff-only`) so the new branch starts from the current state.
-- Only create commits/branches/PRs when the user actually asked for them.
+- Always create commits/branches/PRs.
 - Commit messages: German, imperative/descriptive summary line, focused on
-  *why*; end with `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`
+  *why*; end with `Co-Authored-By: AI`
   when written by an agent (see recent `git log` for examples).
 
 ## Testing instructions

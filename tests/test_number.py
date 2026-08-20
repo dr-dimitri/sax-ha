@@ -17,7 +17,6 @@ from homeassistant.core import State
 from custom_components.sax_power.const import (
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
-    DEFAULT_PRICE_TARGET_SOC,
     MAX_POWER_LIMIT,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
@@ -29,7 +28,6 @@ from custom_components.sax_power.number import (
     SaxPowerChargeLimitNumber,
     SaxPowerMaxSocNumber,
     SaxPowerPriceChargeHoursNumber,
-    SaxPowerPriceChargeTargetSocNumber,
     SaxPowerPriceLimitNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
@@ -291,14 +289,3 @@ async def test_price_charge_hours_restore_clamps_out_of_range_value(
     await entity.async_added_to_hass()
 
     assert coordinator.price_charge_hours == MAX_PRICE_HOURS
-
-
-async def test_price_charge_target_soc_defaults_on_fresh_install(
-    hass, coordinator
-) -> None:
-    entity = SaxPowerPriceChargeTargetSocNumber(coordinator, "test_entry_id")
-    _prepare_entity(entity, hass, "number.test_price_target_soc", None)
-
-    await entity.async_added_to_hass()
-
-    assert coordinator.price_charge_target_soc == DEFAULT_PRICE_TARGET_SOC

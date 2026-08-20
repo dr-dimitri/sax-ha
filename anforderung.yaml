@@ -108,6 +108,14 @@
 # black.
 
 # ==============================================================================
+# GIT-WORKFLOW
+# ==============================================================================
+# Änderungen werden nie direkt auf main vorgenommen, sondern immer auf einem
+# eigenen Branch (Pull Request gegen main). Vor dem Erstellen eines neuen
+# Branches wird main zuerst aktualisiert (git fetch/pull), damit der neue
+# Branch auf dem aktuellen Stand basiert.
+
+# ==============================================================================
 # ANFORDERUNG: ALLE MODBUS-REGISTER LESBAR
 # ==============================================================================
 requirement_all_registers_readable:
@@ -313,7 +321,7 @@ requirement_timed_soc_charge:
        lässt (der Speicher deckt den Hausverbrauch währenddessen nicht mit,
        siehe oben), wertet der Coordinator zusätzlich am Smart Meter
        gemessenen Netzbezug (data["smartmeter_power"] <
-       -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 200 W Bezug) als
+       -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 50 W Bezug) als
        weiteren Freigabe-Trigger aus, mit einer Zyklen-Hysterese
        (self._max_soc_grid_import_wait_cycles, Schwellwert 2, analog zu
        self._grid_serving_wait_cycles) gegen kurze Lastspitzen: erst wenn
@@ -334,7 +342,7 @@ requirement_timed_soc_charge:
        (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
        zuvor unterschritten und noch nicht bis "Max. SOC" durchgeladen -
        siehe Hysterese unten) UND kein PV-Überschuss über
-       SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py, 200 W) am Smart Meter
+       SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py, 50 W) am Smart Meter
        gemessen, wird Register 40049 auf einen negativen, aus "Max.
        Netzladeleistung" umgerechneten Sollwert gesetzt.
 
@@ -385,7 +393,7 @@ requirement_timed_soc_charge:
     Ist der Wert (noch) nicht verfügbar (z. B. SunSpec-Modus nicht
     erreichbar), blockiert das die Netzladung nicht. Der Schwellwert
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) ist bewusst als eigene,
-    wiederverwendbare Konstante ausgelagert (200 W), da er absehbar auch an
+    wiederverwendbare Konstante ausgelagert (50 W), da er absehbar auch an
     anderer Stelle für eine PV-Überschuss-Erkennung benötigt wird.
 
     Schreibmechanismus (SunSpec-Modus, Slave-ID 100, Modell 123
@@ -528,7 +536,7 @@ requirement_grid_serving_charge:
     a. Ohne aktiven Sollwertvorgabemodus wird die tatsächliche Ladeleistung
        des SAX geprüft (negativer Anteil von data["storage_power_active"],
        siehe sensor.py "SAX Ladeleistung"/_negative_part). Erreicht oder
-       überschreitet sie SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (200 W, Beweis,
+       überschreitet sie SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (50 W, Beweis,
        dass die Nullregelung bereits mit nennenswertem Überschuss lädt),
        wechselt der Speicher aktiv in den Sollwertvorgabemodus UND die
        Ladung wird in demselben Aufruf auf 0 % gestoppt (Register 40049,

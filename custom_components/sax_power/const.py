@@ -416,4 +416,4 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # Ladeleistung des SAX, negativer Anteil von data["storage_power_active"])
 # sowie als Rückkehr-Kriterium in die SmartMeter-Nullregelung (Netzeinspeisung
 # data["smartmeter_power"] unter diesem Wert).
-SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 200
+SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50

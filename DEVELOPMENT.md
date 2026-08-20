@@ -1,7 +1,10 @@
 # Entwicklerdokumentation
 
 Interna zur Implementierung der SAX-Power-Home-Integration. Für die
-Benutzerdokumentation siehe [README.md](README.md).
+Benutzerdokumentation siehe [README.md](README.md). Für KI-Coding-Agenten
+siehe [AGENTS.md](AGENTS.md) (Setup-/Test-/Lint-Befehle, Code-Stil,
+Git-Workflow) sowie [anforderung.yaml](anforderung.yaml) (feature-bezogene
+Ist-Zustand-Anforderungen je REQ-ID).
 
 ## Inhaltsverzeichnis
 

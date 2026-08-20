@@ -745,3 +745,116 @@ requirement_manual_discharge:
     - "const.py enthält bei REG_SETPOINT_POWER und
        REG_SUN_IC_POWER_SETPOINT_PCT einen Kommentar mit diesem Befund für
        spätere Umsetzungsversuche."
+
+# ==============================================================================
+# ANFORDERUNG: LOW-INTERVALL FÜR STATISCHE SUNSPEC-MODUS-REGISTER
+# ==============================================================================
+requirement_low_interval_registers:
+  id: REQ-LOW-INTERVAL-REGISTERS
+  title: "Statische SunSpec-Modus-Register (Geräteidentität, Skalierungsfaktoren) seltener abfragen als Messwerte"
+  status: done
+  description: >
+    Der SunSpec-Modus-Block (Slave-ID 100, Register 40000-40114, siehe
+    REQ-SUNSPEC-MODE-CORRECTION) enthält zwei zusammenhängende
+    Teilbereiche, die laut modbus_llm.yaml ausschließlich "wellknown" fixe
+    bzw. sich im laufenden Betrieb praktisch nie ändernde Werte enthalten:
+    das SunSpec Common Model + den Modellkopf von "3Ph Inverter"
+    (Hersteller, Gerätemodell, Firmware-Version, Seriennummer,
+    Modell-ID/Länge; Register 40000-40016) sowie die
+    Battery-Skalierungsfaktoren (Register 40110-40114). Beide Teilbereiche
+    liegen direkt am Rand des Gesamtblocks und lassen sich deshalb ohne
+    zusätzliche Requests im regulären Poll-Zyklus abtrennen.
+
+    SaxPowerCoordinator._async_read_low_block liest diese beiden
+    Teilbereiche per eigenem read_holding_registers-Aufruf nur alle
+    READ_BLOCK_EXT_LOW_INTERVAL Sekunden (1 Stunde) neu ein, statt bei
+    jedem regulären Poll. Der reguläre (HIGH-)Block
+    (READ_BLOCK_EXT_START/READ_BLOCK_EXT_COUNT) schrumpft dadurch von 115
+    auf 93 Register. Zwischen den Refreshs werden die zuletzt gelesenen
+    Werte weiterverwendet (self._low_block_data bzw. die
+    self._battery_*_sf_raw-Caches, die _parse_extended für die
+    Battery-Messwerte des HIGH-Blocks verwendet); ein Scheitern des
+    LOW-Reads lässt das Update nicht fehlschlagen, analog zu
+    REQ-EXTENDED-MODE-RESILIENCE.
+  requirements:
+    - "Die beiden LOW-Intervall-Teilbereiche werden beim allerersten Poll
+       sofort mitgelesen, damit die zugehörigen Diagnose-Sensoren nicht bis
+       zum Ablauf des ersten Intervalls 'unbekannt' zeigen."
+    - "Ein Scheitern des LOW-Intervall-Reads (bei ansonsten erreichbarem
+       SunSpec-Modus) lässt das Update nicht fehlschlagen - die zuletzt
+       gelesenen Werte bleiben erhalten, bis der nächste Refresh gelingt."
+    - "Sicherheits-/steuerungsrelevante Register (SOC, Zustände,
+       Fehlercodes, Smart-Meter-Leistung) bleiben ausdrücklich im
+       HIGH-Block und werden weiterhin bei jedem Poll gelesen."
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt sowohl das Refresh-Intervall
+       (kein Reread innerhalb von READ_BLOCK_EXT_LOW_INTERVAL, Reread nach
+       Ablauf) als auch die Fehlerresilienz des LOW-Blocks ab."
+    - "DEVELOPMENT.md beschreibt die Drei-Block-Struktur des SunSpec-Modus
+       (HIGH + zwei LOW-Teilbereiche) im Abschnitt Register-Mapping."
+
+# ==============================================================================
+# ANFORDERUNG: EIGENES, FESTES HIGH-INTERVALL FÜR DYNAMISCHE SUNSPEC-MODUS-REGISTER
+# ==============================================================================
+requirement_high_interval_registers:
+  id: REQ-HIGH-INTERVAL-REGISTERS
+  title: "Dynamische SunSpec-Modus-Register (HIGH-Block) mit eigenem, festem 2s-Intervall statt gemeinsam mit Basic Mode (NORMAL)"
+  status: done
+  description: >
+    Vor dieser Anforderung teilten sich der HIGH-Block (siehe
+    REQ-LOW-INTERVAL-REGISTERS) und der Basic-Mode-Block (NORMAL, Slave-ID
+    64) denselben Coordinator-Timer und damit dasselbe, über
+    CONF_SCAN_INTERVAL/DEFAULT_SCAN_INTERVAL nutzerkonfigurierbare
+    Intervall (Default 10s) - die Unterscheidung HIGH/NORMAL war rein
+    begrifflich, ohne technische Konsequenz.
+
+    Der HIGH-Block enthält u. a. die tatsächliche Lade-/Entladeleistung
+    (storage_power_active, Register 40029) und die Netzleistung
+    (smartmeter_power, Register 40072), die den Trigger für netzdienliches
+    Laden bilden (siehe REQ-GRID-SERVING-CHARGE) - eine zügige Reaktion
+    hängt hier direkt an der Poll-Frequenz. NORMAL (Basic Mode: SOC,
+    Schaltzustand) hat dagegen keinen vergleichbaren Bedarf an einer
+    kürzeren, festen Frequenz und soll über das bestehende
+    Config-Flow-Feld "Aktualisierungsintervall" einstellbar bleiben.
+
+    READ_BLOCK_EXT_HIGH_INTERVAL (fest, 2 Sekunden, nicht über die
+    Oberfläche konfigurierbar) entkoppelt den HIGH-Block deshalb vom
+    NORMAL-Intervall: SaxPowerCoordinator.__init__ setzt den internen
+    Coordinator-Timer (update_interval) auf
+    min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL) - da das
+    config_flow-Minimum für scan_interval (5s) immer über
+    READ_BLOCK_EXT_HIGH_INTERVAL liegt, läuft der Timer damit faktisch
+    immer mit 2s. _async_read_basic (NORMAL) und _async_read_high_block
+    (HIGH) prüfen anschließend jeweils per eigenem Zeitstempel-Cache
+    (analog zum LOW-Block), ob ihr Teilblock auf einem gegebenen Tick
+    tatsächlich fällig ist, und liefern sonst den zuletzt gelesenen Wert.
+
+    Ein Schreibzugriff auf ein Basic-Mode-Register
+    (SaxPowerCoordinator.async_write_register, z. B. über den
+    Storage-On/Off-Schalter) invalidiert den NORMAL-Cache explizit, damit
+    ein direkt danach ausgelöster coordinator.async_refresh() (siehe
+    DEVELOPMENT.md, "Refresh-Verhalten") nicht kurzzeitig noch den alten,
+    gecachten Wert liefert.
+  requirements:
+    - "NORMAL (Basic Mode) bleibt über das bestehende Config-Flow-Feld
+       'Aktualisierungsintervall' einstellbar (min. 5s, max. 3600s) - keine
+       Änderung an config_flow.py/UI nötig."
+    - "HIGH-Block-Register werden unabhängig vom NORMAL-Intervall
+       spätestens alle READ_BLOCK_EXT_HIGH_INTERVAL Sekunden neu gelesen."
+    - "Ein Schreibzugriff auf ein Basic-Mode-Register erzwingt beim nächsten
+       _async_read_basic-Aufruf einen echten Read, unabhängig vom
+       NORMAL-Intervall-Cache."
+    - "Sicherheitsrelevante Fehlerresilienz bleibt unverändert: scheitert
+       ausschließlich der (fällige) HIGH-Read, schlägt das Update nicht
+       fehl (siehe REQ-EXTENDED-MODE-RESILIENCE); scheitert der (fällige)
+       NORMAL-Read, schlägt das Update weiterhin komplett fehl
+       (UpdateFailed), da Basic Mode die Mindestanforderung ist."
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt ab: update_interval entspricht
+       min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL); NORMAL wird
+       innerhalb des scan_interval nicht erneut gelesen, HIGH dagegen
+       gemäß seines eigenen (kürzeren) Intervalls; ein Basic-Mode-Write
+       erzwingt einen frischen NORMAL-Read trotz aktivem Cache."
+    - "tests/test_integration_live.py (Storage-On/Off-Schalter, echter
+       TCP-Read/Write-Zyklus) bleibt grün - der Schalter-Zustand spiegelt
+       nach dem Schreiben sofort den neuen Wert."

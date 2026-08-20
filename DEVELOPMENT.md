@@ -175,23 +175,59 @@ im Config Entry aktualisiert).
 
 ## Register-Mapping
 
-Der Coordinator liest pro Poll-Intervall zwei zusammenhängende
-Register-Blöcke auf zwei unterschiedlichen Slave-IDs mit je einem
-`read_holding_registers`-Aufruf: Basic Mode (Slave-ID 64, Register 41–46,
-`READ_BLOCK_START`/`READ_BLOCK_COUNT`, Adress-Offset `-40001`) und
-SunSpec-Modus (Slave-ID 100, Register 40000–40114,
-`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`, Adress-Offset `-40000` –
-anderer Offset als Basic Mode).
+Der Coordinator liest drei Register-Teilblöcke mit jeweils eigenem
+Aktualisierungsintervall (siehe anforderung.yaml,
+REQ-LOW-INTERVAL-REGISTERS/REQ-HIGH-INTERVAL-REGISTERS):
 
-Innerhalb eines Blocks gilt "alles oder nichts": Schlägt der
-Basic-Mode-Read fehl, schlägt das gesamte Update fehl (`UpdateFailed`), da
-Basic Mode die Mindestanforderung für jede Funktion der Integration ist.
-Schlägt dagegen nur der SunSpec-Modus-Read fehl (z. B. weil Slave-ID 100 auf
-dem SAX-Gateway nicht erreichbar ist oder die Firmware zu alt ist), bleiben
-die Basic-Mode-Sensoren unverändert verfügbar und lediglich die
-SunSpec-Sensoren zeigen "unbekannt", bis der Block wieder lesbar ist
-(`SaxPowerCoordinator._async_read_extended`). Ein dauerhafter Ausfall wird
-zusätzlich als Home-Assistant-Repair-Issue angezeigt.
+- **NORMAL** (`READ_BLOCK_START`/`READ_BLOCK_COUNT`, Slave-ID 64, Register
+  41–46, Adress-Offset `-40001`): Basic Mode – SOC, Schaltzustand,
+  P-/cos(phi)-Sollwert. Folgt dem über das Config-Flow-Feld
+  "Aktualisierungsintervall" einstellbaren `scan_interval`
+  (`CONF_SCAN_INTERVAL`/`DEFAULT_SCAN_INTERVAL`, Default 10s, min. 5s,
+  max. 3600s).
+- **HIGH** (`READ_BLOCK_EXT_START`/`READ_BLOCK_EXT_COUNT`, Slave-ID 100,
+  Register 40017–40109, 93 Register, Adress-Offset `-40000`): SunSpec-Modus
+  – dynamische Mess-/Zustandswerte (Ströme, Spannungen, Leistungen,
+  Battery-SOC, Fehlercodes, Smart-Meter-Leistung). Fest
+  `READ_BLOCK_EXT_HIGH_INTERVAL` (2s), unabhängig vom NORMAL-Intervall –
+  u. a. relevant für eine zügige Reaktion des netzdienlichen Ladens auf
+  die tatsächliche Ladeleistung (`storage_power_active`,
+  `smartmeter_power`, siehe REQ-GRID-SERVING-CHARGE).
+- **LOW1**/**LOW2** (`READ_BLOCK_EXT_LOW1_START`/`READ_BLOCK_EXT_LOW1_COUNT`,
+  Register 40000–40016, 17 Register – bzw.
+  `READ_BLOCK_EXT_LOW2_START`/`READ_BLOCK_EXT_LOW2_COUNT`, Register
+  40110–40114, 5 Register): SunSpec Common Model + Modellkopf "3Ph
+  Inverter" (Hersteller, Gerätemodell, Firmware-Version, Seriennummer)
+  bzw. Battery-Skalierungsfaktoren. Fest `READ_BLOCK_EXT_LOW_INTERVAL`
+  (1 Stunde), da laut `modbus_llm.yaml` ausschließlich "wellknown" fixe
+  bzw. sich im laufenden Betrieb praktisch nie ändernde Werte.
+
+Der interne Coordinator-Timer (`update_interval`, `SaxPowerCoordinator.
+__init__`) läuft mit `min(scan_interval, READ_BLOCK_EXT_HIGH_INTERVAL)` –
+da das config_flow-Minimum für `scan_interval` (5s) immer über
+`READ_BLOCK_EXT_HIGH_INTERVAL` (2s) liegt, ist das faktisch immer 2s.
+`SaxPowerCoordinator._async_read_basic` (NORMAL), `_async_read_high_block`
+(HIGH) und `_async_read_low_block` (LOW1/LOW2) prüfen bei jedem Tick
+jeweils eigenständig per Zeitstempel-Cache, ob ihr Teilblock tatsächlich
+fällig ist, und liefern sonst den zuletzt gelesenen Wert zurück – nur ein
+fälliger Teilblock löst einen echten `read_holding_registers`-Aufruf aus.
+Ein Schreibzugriff auf ein Basic-Mode-Register
+(`SaxPowerCoordinator.async_write_register`) invalidiert den NORMAL-Cache
+explizit, damit ein direkt danach ausgelöster `coordinator.async_refresh()`
+(siehe Storage-On/Off-Schalter, Abschnitt "Refresh-Verhalten" unten) nicht
+kurzzeitig noch den alten, gecachten Wert liefert.
+
+Für den HIGH-Block gilt "alles oder nichts": Scheitert ein fälliger
+NORMAL-Read, schlägt das gesamte Update fehl (`UpdateFailed`), da Basic
+Mode die Mindestanforderung für jede Funktion der Integration ist.
+Scheitert dagegen ein fälliger HIGH-Read (z. B. weil Slave-ID 100 auf dem
+SAX-Gateway nicht erreichbar ist oder die Firmware zu alt ist), bleiben die
+Basic-Mode-Sensoren unverändert verfügbar und lediglich die
+SunSpec-HIGH-Sensoren zeigen "unbekannt", bis der Block wieder lesbar ist
+(`SaxPowerCoordinator._async_read_high_block`). Ein LOW-Read-Fehler lässt
+das Update ebenfalls nicht fehlschlagen – die betroffenen
+Diagnose-Sensoren behalten ihren letzten Wert. Ein dauerhafter
+HIGH-Ausfall wird zusätzlich als Home-Assistant-Repair-Issue angezeigt.
 
 Die genaue Zuordnung Protokolladresse ↔ interne Adresse ↔ Bedeutung steht in
 `modbus_llm.yaml`; `const.py` referenziert nur die intern verwendeten
@@ -210,10 +246,12 @@ aber keine Wirkung gezeigt - siehe Kommentar bei `REG_SETPOINT_POWER`
 
 `coordinator.apply_sunssf(raw_value, raw_scale_factor)` wendet
 `Wert × 10^sunssf` an (beide Rohwerte signed 16-Bit).
-`SaxPowerCoordinator._parse_extended` wertet damit den kompletten
-SunSpec-Modus-Block aus (Common/Inverter/Immediate Controls/Meter/Battery)
-und dekodiert zusätzlich die als ASCII-Zeichenpaare codierten
-Hersteller-/Modell-Register (`coordinator.decode_ascii_registers`).
+`SaxPowerCoordinator._parse_extended` wertet damit den HIGH-Block aus
+(Inverter/Immediate Controls/Meter/Battery), `_parse_low_block` den LOW1-/
+LOW2-Block (Common Model, Battery-Skalierungsfaktoren) - siehe
+Register-Mapping oben. `_parse_low_block` dekodiert außerdem die als
+ASCII-Zeichenpaare codierten Hersteller-/Modell-Register
+(`coordinator.decode_ascii_registers`).
 
 ## Refresh-Verhalten
 
@@ -223,6 +261,15 @@ Coordinator-Methode. `async_request_refresh()` (debounced) wird bewusst
 vermieden, da bei schnell aufeinanderfolgenden Aktionen sonst ein
 verzögerter/verworfener Refresh dazu führen kann, dass die UI kurzzeitig
 einen veralteten Wert zeigt.
+
+Der einzige Fall, in dem eine Entity direkt nach einem Write auf einen per
+`async_refresh()` sofort aktualisierten Zustand angewiesen ist, ist der
+Storage-On/Off-Schalter (Basic-Mode-Register 45). Da der NORMAL-Block seit
+REQ-HIGH-INTERVAL-REGISTERS eigenständig gecacht wird (siehe
+Register-Mapping oben), invalidiert `async_write_register` den NORMAL-Cache
+explizit - ohne das würde der direkt danach ausgelöste `async_refresh()`
+sonst innerhalb des `scan_interval`-Fensters den alten, gecachten Wert
+liefern statt den soeben geschriebenen.
 
 ## Tests
 

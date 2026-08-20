@@ -14,10 +14,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import State
 
-from custom_components.sax_power.const import MAX_SOC
+from custom_components.sax_power.const import MAX_POWER_LIMIT, MAX_SOC, MIN_SOC
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.number import (
     SaxPowerChargeLimitNumber,
+    SaxPowerMaxSocNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
 
@@ -136,3 +137,78 @@ async def test_timed_charge_min_soc_restores_a_genuine_value(hass, coordinator) 
     await entity.async_added_to_hass()
 
     assert coordinator.timed_charge_min_soc == 40
+
+
+async def test_timed_charge_min_soc_restore_clamps_out_of_range_value(
+    hass, coordinator
+) -> None:
+    """Ein wiederhergestellter Wert außerhalb [MIN_SOC, MAX_SOC] (z. B. ein
+    korrupter oder aus einer künftigen Version stammender Zustand) wird
+    geklemmt statt ungeprüft übernommen zu werden - dieser Restaurierungspfad
+    ruft den Coordinator-Setter direkt auf, ohne die sonst greifende
+    NumberEntity-Min/Max-Validierung des regulären Service-Call-Pfads."""
+    entity = SaxPowerTimedChargeMinSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_timed_charge_min_soc",
+        State("number.test_timed_charge_min_soc", "150"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.timed_charge_min_soc == MAX_SOC
+
+
+async def test_max_soc_restores_a_genuine_value(hass, coordinator) -> None:
+    entity = SaxPowerMaxSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity, hass, "number.test_max_soc", State("number.test_max_soc", "80")
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.max_soc == 80
+
+
+async def test_max_soc_restore_clamps_out_of_range_value(hass, coordinator) -> None:
+    """Analog zu test_timed_charge_min_soc_restore_clamps_out_of_range_value,
+    hier für "Max. SOC" - ein negativer wiederhergestellter Wert wird auf
+    MIN_SOC geklemmt statt als ungültiger (negativer) Wert gespeichert und
+    z. B. im Zahlenfeld angezeigt zu werden. current_soc (50) liegt bei
+    diesem Beispiel sowohl über dem unklemmten als auch dem geklemmten Wert,
+    die Max-SOC-Sperre greift dadurch in beiden Fällen - daher wird
+    async_start_sun_charge hier real ausgelöst und der Modbus-Write gemockt."""
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    coordinator.client.write_register = AsyncMock(return_value=write_result)
+    coordinator.data["ic_max_power_reference"] = 4600
+    coordinator.data["ic_timeout"] = 300
+    entity = SaxPowerMaxSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity, hass, "number.test_max_soc", State("number.test_max_soc", "-20")
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.max_soc == MIN_SOC
+
+
+async def test_charge_limit_restore_clamps_out_of_range_value(
+    hass, coordinator
+) -> None:
+    """Ein wiederhergestellter Wert über MAX_POWER_LIMIT wird geklemmt statt
+    ungeprüft übernommen zu werden (siehe
+    test_timed_charge_min_soc_restore_clamps_out_of_range_value)."""
+    coordinator.data["charge_limit"] = 3000
+    entity = SaxPowerChargeLimitNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_charge_limit",
+        State("number.test_charge_limit", "99999"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.max_charge_power == MAX_POWER_LIMIT

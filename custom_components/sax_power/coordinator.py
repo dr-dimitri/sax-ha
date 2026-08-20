@@ -27,10 +27,13 @@ from .const import (
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
     MAX_IC_POWER_SETPOINT_PCT,
+    MAX_POWER_LIMIT,
     MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_IC_POWER_SETPOINT_PCT,
+    MIN_POWER_LIMIT,
     MIN_SETPOINT_POWER,
+    MIN_SOC,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
@@ -153,6 +156,22 @@ def apply_sunssf(raw_value: int, raw_scale_factor: int) -> float:
     value = to_signed16(raw_value)
     scale_factor = to_signed16(raw_scale_factor)
     return round(value * (10**scale_factor), 3)
+
+
+def _clamp_int(value: int | None, min_value: int, max_value: int) -> int | None:
+    """Klemmt einen Software-seitigen Einstellungswert auf [min_value,
+    max_value]; None (= "keine Einstellung") bleibt unverändert.
+
+    NumberEntity validiert min/max bereits selbst beim regulären
+    async_set_native_value-Aufruf (Service-Call-Pfad über
+    native_min_value/native_max_value) - dieser Clamp schützt zusätzlich den
+    RestoreEntity-Pfad (async_added_to_hass), der einen zuvor gespeicherten
+    Zustand direkt an den Coordinator durchreicht, ohne diese Validierung zu
+    durchlaufen (siehe number.py, z. B. SaxPowerMaxSocNumber).
+    """
+    if value is None:
+        return None
+    return max(min_value, min(max_value, value))
 
 
 def _time_to_seconds(value: dt_time) -> int:
@@ -856,8 +875,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._max_soc_clamped
 
     async def async_set_max_soc(self, max_soc: int | None) -> None:
-        """Set (or clear with None) the software-side max charge SOC."""
-        self._max_soc = max_soc
+        """Set (or clear with None) the software-side max charge SOC.
+
+        Klemmt auf [MIN_SOC, MAX_SOC] statt den Wert ungeprüft zu
+        übernehmen - number.SaxPowerMaxSocNumber ruft dies auch beim
+        Restaurieren eines gespeicherten Zustands auf (async_added_to_hass),
+        ohne die sonst greifende NumberEntity-Min/Max-Validierung des
+        regulären Service-Call-Pfads."""
+        self._max_soc = _clamp_int(max_soc, MIN_SOC, MAX_SOC)
         await self._async_apply_grid_charge_change()
 
     # -- Netzladung (Grid Charge, Basic Mode) --------------------------------
@@ -1096,8 +1121,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _async_enforce_grid_charge/_timed_charge_armed für die
         Hysterese-Logik (einmal unterschritten, wird bis zum "Max. SOC"
         durchgeladen, statt bei jedem Überschreiten von Min. SOC sofort
-        wieder abzubrechen)."""
-        self._timed_charge_min_soc = value
+        wieder abzubrechen). Klemmt auf [MIN_SOC, MAX_SOC], siehe
+        async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
+        NumberEntity-Validierung)."""
+        self._timed_charge_min_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
@@ -1214,8 +1241,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_apply_grid_charge_change()
 
     async def async_set_max_charge_power(self, value: int | None) -> None:
-        """Set the software-side target power (Watt) for "Max. Netzladeleistung"."""
-        self._max_charge_power = value
+        """Set the software-side target power (Watt) for "Max. Netzladeleistung".
+
+        Klemmt auf [MIN_POWER_LIMIT, MAX_POWER_LIMIT], siehe async_set_max_soc
+        für die Begründung (RestoreEntity-Pfad ohne NumberEntity-Validierung)."""
+        self._max_charge_power = _clamp_int(value, MIN_POWER_LIMIT, MAX_POWER_LIMIT)
         await self._async_apply_grid_charge_change()
 
     async def _async_apply_grid_charge_change(self) -> None:

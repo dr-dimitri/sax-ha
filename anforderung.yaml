@@ -234,6 +234,21 @@ requirement_timed_soc_charge:
        nicht automatisch zur Eigenverbrauchsdeckung, da Register 40049 = 0 %
        Netto-Leistungsfluss = 0 (weder Laden noch Entladen) erzwingt.
 
+       Alle drei Software-Einstellungen dieses Abschnitts ("Max. SOC",
+       "Netzladung Min. SOC", "Max. Netzladeleistung") werden von ihrem
+       jeweiligen Coordinator-Setter (async_set_max_soc/
+       async_set_timed_charge_min_soc/async_set_max_charge_power,
+       coordinator._clamp_int) auf ihren gültigen Bereich geklemmt (0-100 %
+       bzw. MIN_POWER_LIMIT-MAX_POWER_LIMIT), nicht nur vom
+       NumberEntity-Schieberegler in der Oberfläche - der reguläre
+       Service-Call-Pfad (async_set_native_value) ist dadurch zwar bereits
+       über native_min_value/native_max_value abgesichert, der
+       RestoreEntity-Pfad beim Neustart (async_added_to_hass) ruft den
+       Coordinator-Setter jedoch direkt mit dem gespeicherten Zustand auf,
+       ohne diese Validierung zu durchlaufen - ein korrupter oder aus einer
+       künftigen Version mit engeren Grenzen stammender gespeicherter Wert
+       würde sonst ungeprüft übernommen.
+
        Wurde der Ziel-SOC dabei INNERHALB des Netzladung- oder des
        netzdienlichen Zeitfensters erreicht (_max_soc_hold_is_window_bound),
        gilt die Sperre nur bis zum Ende genau dieses Zeitfensters: Register
@@ -462,6 +477,14 @@ requirement_timed_soc_charge:
        Regressionstest für eine zuvor gemeldete Fehlvorbelegung bei
        bestehenden Config Entries) sowie ein echter, zuvor gesetzter
        Nutzerwert (hat Vorrang)."
+    - "tests/test_coordinator.py deckt coordinator._clamp_int isoliert ab
+       (Wert innerhalb/genau auf den Grenzen/außerhalb in beide Richtungen/
+       None bleibt None). tests/test_number.py deckt zusätzlich den
+       RestoreEntity-Regressionsfall für alle drei betroffenen Einstellungen
+       ab: ein außerhalb [MIN_SOC, MAX_SOC] bzw.
+       [MIN_POWER_LIMIT, MAX_POWER_LIMIT] liegender wiederhergestellter Wert
+       wird beim Neustart auf die jeweilige Grenze geklemmt statt ungeprüft
+       übernommen zu werden."
 
 # ==============================================================================
 # ANFORDERUNG: NETZDIENLICHES LADEN (NUR MIT PV-ÜBERSCHUSS)

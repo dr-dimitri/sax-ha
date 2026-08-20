@@ -16,13 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.util import dt as dt_util
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.datastore import (
     ModbusDeviceContext,
@@ -33,8 +35,15 @@ from pymodbus.server import ModbusTcpServer
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
+    CONF_PRICE_SENSOR,
+    CONF_PRICE_UNIT,
     DATA_COORDINATOR,
     DOMAIN,
+    ISSUE_PRICE_CHARGE_CONFLICT,
+    PRICE_STATUS_CHARGING,
+    PRICE_STATUS_OFF,
+    PRICE_STRATEGY_RELATIVE,
+    PRICE_UNIT_AUTO,
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
     SUN_IC_CONTROL_MODE_SETPOINT,
@@ -172,7 +181,7 @@ def _build_extended_registers(**overrides: int) -> list[int]:
 
 def _entity_id(registry: er.EntityRegistry, entry_id: str, suffix: str) -> str:
     unique_id = f"{entry_id}_{suffix}"
-    for platform in ("sensor", "number", "switch", "time"):
+    for platform in ("sensor", "number", "select", "switch", "time"):
         found = registry.async_get_entity_id(platform, DOMAIN, unique_id)
         if found:
             return found
@@ -672,5 +681,203 @@ async def test_live_grid_charge_falls_back_to_hard_defaults_without_config_entry
         assert hass.states.get(start_id).state == "00:00:00"
         assert hass.states.get(end_id).state == "00:05:00"
         assert hass.states.get(enabled_id).state == "off"
+    finally:
+        await server.shutdown()
+
+
+async def test_live_price_charge_writes_setpoint_in_cheapest_hour(
+    hass, socket_enabled
+) -> None:
+    """End-to-End-Test für das preisoptimierte Laden (anforderung.yaml,
+    REQ-DYNAMIC-PRICE-CHARGE): Strompreis-Sensor per Options Flow
+    hinterlegen, Strategie "Günstigste Stunden" wählen, Hauptschalter
+    einschalten - liegt die aktuelle Stunde in den günstigsten, muss das
+    einen echten Write über den SunSpec-Modus auslösen (Register 40051
+    Steuermodus, Register 40049 Leistungsvorgabe).
+
+    Der Preis-Sensor ist bewusst ein simpler Zustand mit `raw_today`-Attribut
+    (Nordpool-/EPEX-Format) statt einer echten Preis-Integration - genau so
+    sieht die Integration ihn im Betrieb auch.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_registers = _build_basic_registers()
+        basic_registers[46] = 50  # SOC 50 %, unter dem Ziel-SOC
+        basic_hr = ModbusSequentialDataBlock(1, basic_registers)
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 5))
+    await server.serve_forever(background=True)
+
+    try:
+        now = dt_util.now()
+        hour_start = now.replace(minute=0, second=0, microsecond=0)
+        hass.states.async_set(
+            "sensor.strompreis",
+            "0.05",
+            {
+                "unit_of_measurement": "EUR/kWh",
+                "raw_today": [
+                    {
+                        "start": hour_start.isoformat(),
+                        "end": (hour_start + timedelta(hours=1)).isoformat(),
+                        "value": 0.05,
+                    },
+                    {
+                        "start": (hour_start + timedelta(hours=1)).isoformat(),
+                        "end": (hour_start + timedelta(hours=2)).isoformat(),
+                        "value": 0.42,
+                    },
+                ],
+            },
+        )
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 5,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+            options={
+                CONF_PRICE_SENSOR: "sensor.strompreis",
+                CONF_PRICE_UNIT: PRICE_UNIT_AUTO,
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        strategy_id = _entity_id(registry, entry.entry_id, "price_charge_strategy")
+        target_soc_id = _entity_id(registry, entry.entry_id, "price_charge_target_soc")
+        enabled_id = _entity_id(registry, entry.entry_id, "price_charge_enabled")
+        status_id = _entity_id(registry, entry.entry_id, "price_charge_status_text")
+        next_start_id = _entity_id(registry, entry.entry_id, "price_charge_next_start")
+
+        assert hass.states.get(status_id).state == PRICE_STATUS_OFF
+
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {"entity_id": strategy_id, "option": PRICE_STRATEGY_RELATIVE},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": target_soc_id, "value": 80},
+            blocking=True,
+        )
+
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        try:
+            await hass.services.async_call(
+                "switch", "turn_on", {"entity_id": enabled_id}, blocking=True
+            )
+            await hass.async_block_till_done()
+
+            assert hass.states.get(enabled_id).state == "on"
+            assert coordinator.sun_charge_active is True
+            await asyncio.sleep(0.2)
+
+            verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 5)
+            await verify_client.connect()
+            control_mode_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
+            )
+            setpoint_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                count=1,
+                device_id=SLAVE_ID_EXTENDED,
+            )
+            verify_client.close()
+            assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
+            # "Max. Netzladeleistung" ist einmalig aus Register 44 (3000 W)
+            # vorbelegt; -3000 W / 4600 W * 100 = -65.217 %, sunssf -2.
+            assert to_signed16(setpoint_result.registers[0]) == -6522
+
+            await hass.async_block_till_done()
+            assert hass.states.get(status_id).state == PRICE_STATUS_CHARGING
+            # Timestamp-Sensoren werden von Home Assistant grundsätzlich in
+            # UTC dargestellt, unabhängig von der lokalen Zeitzone.
+            assert (
+                hass.states.get(next_start_id).state
+                == dt_util.as_utc(hour_start).isoformat()
+            )
+        finally:
+            await coordinator.async_stop_sun_charge()
+    finally:
+        await server.shutdown()
+
+
+async def test_live_price_charge_conflicts_with_timed_charge(
+    hass, socket_enabled
+) -> None:
+    """Netzladung und preisoptimiertes Laden schließen sich aus: Der Schalter
+    springt zurück und es erscheint ein reparierbarer Bestätigungsdialog,
+    statt beide Automatiken gleichzeitig laufen zu lassen."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
+        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
+        context = ModbusServerContext(
+            devices={
+                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
+                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
+            },
+            single=False,
+        )
+
+    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 6))
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 6,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        timed_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+        price_id = _entity_id(registry, entry.entry_id, "price_charge_enabled")
+
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": timed_id}, blocking=True
+        )
+        await hass.async_block_till_done()
+        assert hass.states.get(timed_id).state == "on"
+
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": price_id}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+        assert hass.states.get(price_id).state == "off"
+        assert hass.states.get(timed_id).state == "on"
+        assert (
+            ir.async_get(hass).async_get_issue(
+                DOMAIN, f"{ISSUE_PRICE_CHARGE_CONFLICT}_{entry.entry_id}"
+            )
+            is not None
+        )
     finally:
         await server.shutdown()

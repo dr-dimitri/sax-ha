@@ -15,7 +15,9 @@ from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
     ATTR_DEVICE_ID,
+    ATTR_ENABLED,
     ATTR_END,
+    ATTR_FORCE,
     ATTR_POWER,
     ATTR_START,
     CONF_SCAN_INTERVAL,
@@ -27,7 +29,9 @@ from .const import (
     DOMAIN,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
+    SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_SET_GRID_SERVING_WINDOW,
+    SERVICE_SET_PRICE_CHARGE_ENABLED,
     SERVICE_SET_TIMED_CHARGE_WINDOW,
     SERVICE_START_GRID_CHARGE,
     SERVICE_STOP_GRID_CHARGE,
@@ -39,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.NUMBER,
+    Platform.SELECT,
     Platform.SWITCH,
     Platform.TIME,
 ]
@@ -57,6 +62,16 @@ SERVICE_SET_WINDOW_SCHEMA = vol.Schema(
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_START): cv.time,
         vol.Required(ATTR_END): cv.time,
+    }
+)
+# `force` überspringt den Bestätigungsdialog für den Konflikt zwischen
+# Netzladung und preisoptimiertem Laden (siehe repairs.py) - Automationen
+# haben keine Möglichkeit, auf einen Repair-Dialog zu antworten.
+SERVICE_SET_PRICE_CHARGE_ENABLED_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_ENABLED): cv.boolean,
+        vol.Optional(ATTR_FORCE, default=False): cv.boolean,
     }
 )
 
@@ -85,6 +100,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         entry_id=entry.entry_id,
+        options=entry.options,
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -93,8 +109,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
+    # sofort einmal aus und braucht dafür die von den Entities (select.py/
+    # number.py, RestoreEntity) wiederhergestellten Einstellungen.
+    coordinator.price_planner.async_setup()
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
+
     _async_register_services(hass)
     return True
+
+
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Config Entry nach einer Änderung im Options Flow neu laden.
+
+    Die Optionen (Strompreis-/PV-Prognose-Sensor) bestimmen, welche
+    Entities der Planner beobachtet - ein Neuladen ist der einfachste Weg,
+    diese Beobachter sauber neu aufzusetzen, statt sie zur Laufzeit
+    umzuhängen."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -146,6 +178,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data[ATTR_START], call.data[ATTR_END]
         )
 
+    async def _async_refresh_price_plan(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        coordinator.price_planner.evaluate()
+        await coordinator.async_apply_price_plan()
+
+    async def _async_set_price_charge_enabled(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        applied = await coordinator.async_set_price_charge_enabled(
+            call.data[ATTR_ENABLED], force=call.data[ATTR_FORCE]
+        )
+        if not applied:
+            raise HomeAssistantError(
+                "Preisoptimiertes Laden konnte nicht eingeschaltet werden, weil "
+                "die Netzladung (zeitgesteuertes Laden) aktiv ist. Entweder die "
+                "Rückfrage unter Einstellungen -> Reparaturen bestätigen oder "
+                "den Service mit force: true aufrufen."
+            )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_GRID_CHARGE,
@@ -169,4 +219,16 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_GRID_SERVING_WINDOW,
         _async_set_grid_serving_window,
         schema=SERVICE_SET_WINDOW_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REFRESH_PRICE_PLAN,
+        _async_refresh_price_plan,
+        schema=SERVICE_STOP_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_PRICE_CHARGE_ENABLED,
+        _async_set_price_charge_enabled,
+        schema=SERVICE_SET_PRICE_CHARGE_ENABLED_SCHEMA,
     )

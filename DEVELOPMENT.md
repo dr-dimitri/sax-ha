@@ -26,24 +26,33 @@ custom_components/sax_power/
 ├── manifest.json      Metadaten, Requirements (pymodbus>=3.10.0), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
-│                          Netzladung-Vorbelegung), Verbindungsvalidierung
+│                          Netzladung-Vorbelegung), Verbindungsvalidierung,
+│                          Options Flow (preisoptimiertes Laden)
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
 │                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
 │                          zeitgesteuertes Laden, netzdienliches Laden,
+│                          preisoptimiertes Laden (Anwendung des Ladeplans),
 │                          Zeitfenster-Überlappungsprüfung
+├── price_optimizer.py    Preisoptimiertes Laden: Einlesen der Preisdaten aus
+│                          einer beliebigen Preis-Sensor-Entity, Ladeplanung je
+│                          Strategie, 60-Sekunden-Takt - ohne Modbus-Zugriff
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
-├── sensor.py              ~56 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
+├── sensor.py              ~60 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
 │                          plus zwei RestoreEntity-Energiezähler (energy_charged/
 │                          energy_discharged) fürs Energy-Dashboard
-├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Netzladeleistung
+├── number.py              Max. SOC (auch Ziel-SOC für Zeitfenster), Max. Netzladeleistung,
+│                          Preisgrenze/Anzahl Stunden/Ziel-SOC (preisoptimiertes Laden)
+├── select.py              Strategie des preisoptimierten Ladens
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
-│                          netzdienliches Laden ein/aus
+│                          netzdienliches Laden ein/aus, preisoptimiertes Laden ein/aus
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes und
 │                          netzdienliches Laden
+├── repairs.py             Bestätigungsdialog für den Konflikt zwischen Netzladung
+│                          und preisoptimiertem Laden
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
-│                          + coordinator.data, IP-Adresse redigiert
+│                          + coordinator.data + Ladeplan, IP-Adresse redigiert
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -59,6 +68,13 @@ Verbindung mit demselben Testread, bevor die Daten gespeichert werden. Nur
 optionalen Schritt (`async_step_grid_charge`, siehe `STEP_GRID_CHARGE_SCHEMA`)
 für die Vorbelegung des zeitgesteuerten Ladens, bevor der Eintrag angelegt
 wird - `async_step_reconfigure` überspringt diesen Schritt.
+
+Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
+preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als
+Entity abbilden lassen (Auswahl der Quell-Sensoren und deren Interpretation);
+die im Alltag veränderlichen Stellgrößen sind echte Entities am SAX-Gerät.
+Eine Änderung löst über `async_update_options` einen Reload des Config Entry
+aus, damit die Zustandsbeobachter des Planners sauber neu aufgesetzt werden.
 
 ## Datenfluss
 
@@ -310,6 +326,13 @@ tests/
 │                                  Register 40049/40051) sowie Tests für die Vorbelegung aus
 │                                  dem Config Entry beim allerersten Start (mit und ohne im
 │                                  Entry hinterlegte Netzladung-Werte)
+├── test_price_optimizer.py         Preisoptimiertes Laden: Einlesen der Attributformate
+│                                  verbreiteter Strompreis-Integrationen, Planberechnung je
+│                                  Strategie (inkl. Planungshorizont und PV-Prognose im
+│                                  Smart-Modus), Schreibpfad und Abbruchgründe im Coordinator,
+│                                  Vorrang des zeitgesteuerten Ladens sowie der
+│                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
+│                                  Automatiken (repairs.py)
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

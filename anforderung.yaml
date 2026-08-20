@@ -46,6 +46,7 @@
 # REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
+# REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # ==============================================================================
 
 # ==============================================================================
@@ -161,8 +162,9 @@ requirement_real_hardware_tests:
   acceptance_criteria:
     - "pytest läuft ohne hinterlegte IP vollständig durch (betroffene
        Tests werden übersprungen, keine Fehler)."
-    - "README.md beschreibt tests/real_device.yaml und wie der
-       Live-Hardware-Test aktiviert wird."
+    - "DEVELOPMENT.md (Abschnitt 'Test gegen echte Hardware') beschreibt
+       tests/real_device.yaml und wie der Live-Hardware-Test aktiviert
+       wird - als Entwickler-, nicht als Benutzerdokumentation."
 
 # ==============================================================================
 # ANFORDERUNG: SUNSPEC-MODUS-REGISTERKARTE (SLAVE-ID 100)
@@ -473,8 +475,8 @@ requirement_timed_soc_charge:
     - "number.py enthält keine featurespezifische Leistungseinstellung für
        zeitgesteuertes Laden - es nutzt ausschließlich die zentralen
        Einstellungen 'Max. SOC' und 'Max. Netzladeleistung'."
-    - "tests/test_number.py deckt die Vorbelegungslogik von "Max.
-       Netzladeleistung" ab: allererster Start (Vorbelegung aus Register 44),
+    - "tests/test_number.py deckt die Vorbelegungslogik von 'Max.
+       Netzladeleistung' ab: allererster Start (Vorbelegung aus Register 44),
        ein restaurierter 0-Wert (fällt ebenfalls auf Register 44 zurück -
        Regressionstest für eine zuvor gemeldete Fehlvorbelegung bei
        bestehenden Config Entries) sowie ein echter, zuvor gesetzter
@@ -964,3 +966,145 @@ requirement_diagnostics:
     - "tests/test_diagnostics.py deckt ab: CONF_HOST ist im Ergebnis
        redigiert, Port bleibt unverändert sichtbar, coordinator_data und
        die relevanten state-Felder sind befüllt."
+
+# ==============================================================================
+# ANFORDERUNG: PREISOPTIMIERTES LADEN
+# ==============================================================================
+requirement_dynamic_price_charge:
+  id: REQ-DYNAMIC-PRICE-CHARGE
+  title: "Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)"
+  status: done
+  description: >
+    Dritte Lade-Automatik neben zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE)
+    und netzdienlichem Laden (REQ-GRID-SERVING-CHARGE): Der Speicher wird
+    automatisch dann aus dem Netz geladen, wenn der Strompreis günstig ist,
+    und bleibt in teuren Phasen in der geräteeigenen
+    SmartMeter-Nullregelung, sodass die günstig eingekaufte Energie den
+    Hausverbrauch deckt.
+
+    Die Integration ruft selbst keine Strompreise ab. Sie wertet
+    stattdessen eine beliebige, vom Anwender im Options Flow ausgewählte
+    Home-Assistant-Sensor-Entity aus (Tibber, Nordpool, EPEX Spot, ENTSO-e,
+    Awattar, eigene Template-Sensoren). price_optimizer.parse_price_slots
+    erkennt die verbreiteten Attributformate selbstständig - Listen von
+    Dicts mit Start-/Preisfeldern ebenso wie reine Zahlenlisten für einen
+    Kalendertag - und normalisiert sie auf eine Liste aus
+    (Start, Ende, Preis in EUR/kWh). Stunden- und Viertelstunden-Auflösung
+    werden gleichermaßen unterstützt; ct/kWh wird anhand der Sensor-Einheit
+    (oder einer expliziten Vorgabe) auf EUR/kWh umgerechnet.
+
+    Arbeitsteilung: price_optimizer.SaxPricePlanner berechnet ohne jeden
+    Modbus-Zugriff alle PRICE_EVAL_INTERVAL Sekunden (60s) einen Ladeplan
+    aus Preisdaten, gewählter Strategie und optionaler PV-Prognose -
+    zusätzlich sofort bei jeder Einstellungsänderung und jedem
+    Zustandswechsel der beobachteten Quell-Sensoren.
+    SaxPowerCoordinator._async_enforce_grid_charge wertet diesen Plan bei
+    jedem Poll-Zyklus aus und setzt ihn über denselben
+    SunSpec-Schreibpfad um wie die beiden anderen Automatiken
+    (_async_sun_charge_loop, Register 40051 Steuermodus + Register 40049
+    Leistungsvorgabe). Ist die Bedingung nicht (mehr) erfüllt, wird
+    Register 40051 aktiv auf 0 (SmartMeter-Nullregelung) zurückgesetzt.
+    SOC-abhängige Abbrüche greifen dadurch sofort und nicht erst beim
+    nächsten 60-Sekunden-Takt.
+
+    Strategien (select.SaxPowerPriceStrategySelect, jederzeit im laufenden
+    Betrieb umschaltbar):
+      off      - Automatik stillgelegt, ohne die übrigen Einstellungen zu
+                 verlieren (entspricht "Manuell / Aus").
+      absolute - lädt, solange der Arbeitspreis des aktuellen Slots die
+                 Preisgrenze (number "Preisoptimiertes Laden Preisgrenze",
+                 EUR/kWh, negative Werte zugelassen) nicht überschreitet.
+      relative - lädt in den X günstigsten Stunden des Planungshorizonts
+                 (number "Preisoptimiertes Laden Anzahl Stunden", 1-24).
+                 Aufsummiert wird die noch verbleibende Dauer je Slot,
+                 damit "3 günstigste Stunden" auch bei einer Berechnung
+                 mitten in einem Slot drei nutzbare Stunden ergibt.
+      smart    - wie relative, leitet die Stundenzahl aber aus dem noch
+                 fehlenden Energiebedarf ab: (Ziel-SOC - SOC) × Kapazität
+                 (SunSpec-Register 40097) abzüglich des nutzbaren Anteils
+                 der PV-Prognose, geteilt durch "Max. Netzladeleistung".
+                 Deckt die Prognose den Bedarf vollständig, wird gar kein
+                 Netzstrom eingekauft (Status "PV-Prognose deckt Bedarf").
+                 "Anzahl Stunden" bleibt dabei Obergrenze. Fehlen Kapazität,
+                 SOC oder Ladeleistung, verhält sich smart wie relative.
+
+    Planungshorizont ist ein gleitendes Fenster von
+    PRICE_PLAN_HORIZON_HOURS (24 h) über die jeweils bekannten Preisdaten
+    (Rest von heute plus ggf. bereits veröffentlichtes Morgen), nicht der
+    Kalendertag.
+
+    Leistung: "Max. Netzladeleistung" (gemeinsam mit dem zeitgesteuerten
+    Laden genutzt, keine zusätzliche Einstellung). Ziel-SOC: eigener Wert
+    (number "Preisoptimiertes Laden Ziel-SOC") - fachlich etwas anderes als
+    "Max. SOC": man kauft nur so viel günstig ein, wie bis zum nächsten
+    günstigen Fenster gebraucht wird, während "Max. SOC" die geräteweite
+    Obergrenze bleibt und beim Erreichen zusätzlich die Max-SOC-Sperre
+    auslöst.
+
+    Vorrang innerhalb von _async_enforce_grid_charge: Max-SOC-Sperre >
+    zeitgesteuertes Laden > preisoptimiertes Laden > netzdienliches Laden.
+    Preisoptimiertes Laden bricht - wie das zeitgesteuerte Laden - bei
+    bestätigtem PV-Überschuss am Smart Meter sofort ab (dieselbe
+    Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES).
+
+    Gegenseitiger Ausschluss mit der Netzladung: Beide laden aktiv aus dem
+    Netz über denselben Schreibpfad und dürfen nicht gleichzeitig aktiv
+    sein. Wird eines eingeschaltet, während das andere läuft, wird die
+    Änderung NICHT stillschweigend ausgeführt: Der Coordinator lehnt sie
+    zunächst ab (Setter geben False zurück, der Schalter springt zurück)
+    und legt ein reparierbares Issue mit Bestätigen/Abbrechen-Dialog an
+    (repairs.ChargeConflictRepairFlow) sowie eine Persistent Notification
+    für die sofortige Sichtbarkeit. Bestätigen schaltet das jeweils andere
+    Feature ab und aktiviert das gewünschte; Abbrechen lässt alles
+    unverändert. Beide Artefakte werden gemeinsam entfernt, sobald der
+    Konflikt auf irgendeinem Weg aufgelöst ist. Der Restore-Pfad beim Start
+    sowie der Service set_price_charge_enabled (force) umgehen die
+    Rückfrage bewusst - eine Automation kann auf keinen Dialog antworten,
+    und beim Restaurieren hat der Anwender gerade nichts angeklickt.
+  requirements:
+    - "Options Flow (config_flow.SaxPowerOptionsFlow): Auswahl des
+       Strompreis-Sensors, optionales Attribut-Override, Preis-Einheit
+       (automatisch/EUR/ct), Vorgabestrategie für den ersten Start,
+       optionaler PV-Prognose-Sensor sowie dessen nutzbarer Anteil in
+       Prozent. Keine YAML-Konfiguration."
+    - "Entities am bestehenden SAX-Gerät: switch 'Preisoptimiertes Laden
+       aktiv' (Hauptschalter), select 'Preisoptimiertes Laden Strategie',
+       number 'Preisoptimiertes Laden Preisgrenze' (EUR/kWh), number
+       'Preisoptimiertes Laden Anzahl Stunden' (1-24), number
+       'Preisoptimiertes Laden Ziel-SOC' (0-100 %), sensor
+       'Preisoptimiertes Laden nächster Start' (device_class timestamp),
+       sensor 'Preisoptimiertes Laden Status' (Klartext), sensor
+       'Preisoptimiertes Laden aktiv' (Diagnose) sowie sensor 'Aktueller
+       Strompreis'."
+    - "Alle Stellgrößen werden per RestoreEntity über Neustarts hinweg
+       persistiert; ohne gespeicherten Zustand gelten die Defaults aus
+       const.py (bzw. die Vorgabestrategie aus dem Options Flow)."
+    - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
+       Preisdaten, Warten auf Preisabfall, Lade aus Netz, Ziel-SOC
+       erreicht, PV-Prognose deckt Bedarf, Pausiert (PV-Überschuss),
+       Pausiert (Max. SOC), Pausiert (Max. Netzladeleistung fehlt),
+       Pausiert (Netzladung aktiv). Seine Attribute führen Strategie,
+       aktuellen Preis, wirksame Preisgrenze, benötigte Stunden,
+       eingerechnete PV-Prognose, die konfigurierten Quell-Sensoren und die
+       geplanten Zeitfenster mit."
+    - "Services: sax_power.refresh_price_plan (sofortige Neuberechnung) und
+       sax_power.set_price_charge_enabled (nicht-interaktives Schalten mit
+       optionalem force)."
+    - "Die Prüfung der Ladebedingungen läuft mindestens alle 60 Sekunden."
+  acceptance_criteria:
+    - "tests/test_price_optimizer.py deckt ab: Einlesen der Attributformate
+       (raw_today/raw_tomorrow, Zahlenlisten, data/start_time,
+       Viertelstunden, ct-Umrechnung, Attribut-Override, unbrauchbare
+       Daten), Planberechnung je Strategie inkl. Planungshorizont,
+       Smart-Modus mit und ohne ausreichende PV-Prognose sowie ohne
+       Kapazität, Schreibpfad und Rückkehr in die Nullregelung, Abbruch bei
+       eigenem Ziel-SOC/Max-SOC/PV-Überschuss/fehlender Ladeleistung,
+       Vorrang des zeitgesteuerten Ladens, Konfliktdialog (Anlegen,
+       Bestätigen, Abbrechen, force) und das Restore-Verhalten der
+       Select-/Switch-Entities."
+    - "tests/test_number.py deckt die Vorbelegung und Klemmung der drei
+       neuen Number-Entities ab."
+    - "tests/test_config_flow.py deckt den Options Flow ab (Speichern und
+       Vorbelegung)."
+    - "README.md beschreibt Einrichtung, Strategien und Zusammenspiel mit
+       den übrigen Lademodi."

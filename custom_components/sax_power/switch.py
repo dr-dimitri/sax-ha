@@ -17,6 +17,7 @@ from .const import (
     CONF_TIMED_CHARGE_ENABLED,
     DATA_COORDINATOR,
     DEFAULT_GRID_SERVING_ENABLED,
+    DEFAULT_PRICE_CHARGE_ENABLED,
     DEFAULT_TIMED_CHARGE_ENABLED,
     DOMAIN,
     REG_SWITCH_STATE,
@@ -38,6 +39,7 @@ async def async_setup_entry(
         SaxPowerStorageSwitch(coordinator, entry.entry_id),
         SaxPowerTimedChargeSwitch(coordinator, entry.entry_id),
         SaxPowerGridServingSwitch(coordinator, entry.entry_id),
+        SaxPowerPriceChargeSwitch(coordinator, entry.entry_id),
     ]
     entities.extend(
         SaxPowerMonthSwitch(
@@ -110,8 +112,15 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
         if self.coordinator.timed_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
+            # force=True: Der Konfliktdialog (siehe
+            # SaxPowerCoordinator.async_set_timed_charge_enabled) ist beim
+            # Restaurieren fehl am Platz - er würde den Anwender zu einer
+            # Entscheidung auffordern, die er gar nicht ausgelöst hat. Da
+            # der Dialog verhindert, dass Netzladung und preisoptimiertes
+            # Laden jemals gemeinsam eingeschaltet sind, kann auch nie ein
+            # widersprüchliches Paar gespeicherter Zustände entstehen.
             await self.coordinator.async_set_timed_charge_enabled(
-                last_state.state == "on"
+                last_state.state == "on", force=True
             )
             return
         # Kein zuvor gespeicherter Zustand (allererster Start eines neu
@@ -121,7 +130,8 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
             self.hass, self._entry_id, CONF_TIMED_CHARGE_ENABLED
         )
         await self.coordinator.async_set_timed_charge_enabled(
-            bool(initial) if initial is not None else DEFAULT_TIMED_CHARGE_ENABLED
+            bool(initial) if initial is not None else DEFAULT_TIMED_CHARGE_ENABLED,
+            force=True,
         )
 
     @property
@@ -234,4 +244,55 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._async_set_month_active(self._month, False, True)
+        self.async_write_ha_state()
+
+
+class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+    """Hauptschalter für das preisoptimierte Laden (Software-Logik).
+
+    Lädt den Speicher aus dem Netz, wenn der Strompreis günstig ist - nach
+    der über die Select-Entity "Preisoptimiertes Laden Strategie"
+    gewählten Strategie. Siehe coordinator.SaxPowerCoordinator (Abschnitt
+    "Preisoptimiertes Laden"), price_optimizer.py und anforderung.yaml,
+    REQ-DYNAMIC-PRICE-CHARGE.
+
+    Einschalten, während die Netzladung ("Netzladung aktiv") läuft, wird
+    nicht sofort ausgeführt: beide Features laden aktiv aus dem Netz über
+    denselben Schreibpfad. Der Coordinator legt in diesem Fall einen
+    Bestätigungsdialog an (repairs.py) und lehnt die Änderung zunächst ab -
+    der Schalter springt dadurch wieder auf "aus" zurück, bis der Anwender
+    bestätigt hat.
+    """
+
+    _attr_translation_key = "price_charge_enabled"
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._attr_unique_id = f"{entry_id}_price_charge_enabled"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.price_charge_enabled:
+            return
+        if (last_state := await self.async_get_last_state()) is not None:
+            # force=True beim Restaurieren, siehe
+            # SaxPowerTimedChargeSwitch.async_added_to_hass.
+            await self.coordinator.async_set_price_charge_enabled(
+                last_state.state == "on", force=True
+            )
+            return
+        await self.coordinator.async_set_price_charge_enabled(
+            DEFAULT_PRICE_CHARGE_ENABLED, force=True
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.price_charge_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_price_charge_enabled(True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_price_charge_enabled(False)
         self.async_write_ha_state()

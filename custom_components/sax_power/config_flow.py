@@ -6,14 +6,26 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    CONF_PRICE_ATTRIBUTE,
+    CONF_PRICE_SENSOR,
+    CONF_PRICE_STRATEGY,
+    CONF_PRICE_UNIT,
+    CONF_PV_FORECAST_FACTOR,
+    CONF_PV_FORECAST_SENSOR,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
     CONF_SLAVE_ID_EXTENDED,
@@ -21,6 +33,9 @@ from .const import (
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
     DEFAULT_PORT,
+    DEFAULT_PRICE_STRATEGY,
+    DEFAULT_PRICE_UNIT,
+    DEFAULT_PV_FORECAST_FACTOR,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID_BASIC,
     DEFAULT_SLAVE_ID_EXTENDED,
@@ -28,6 +43,10 @@ from .const import (
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
     DOMAIN,
+    MAX_PV_FORECAST_FACTOR,
+    MIN_PV_FORECAST_FACTOR,
+    PRICE_STRATEGIES,
+    PRICE_UNITS,
     REG_SOC,
 )
 
@@ -116,6 +135,11 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     _connection_data: dict[str, Any]
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SaxPowerOptionsFlow:
+        return SaxPowerOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -206,3 +230,72 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="grid_charge", data_schema=STEP_GRID_CHARGE_SCHEMA
         )
+
+
+# Options Flow (siehe SaxPowerOptionsFlow): Konfiguration des
+# preisoptimierten Ladens. Bewusst NICHT Teil der Ersteinrichtung - die
+# Integration ist ohne Strompreis-Sensor voll funktionsfähig, und der
+# passende Sensor existiert bei einer frischen Home-Assistant-Installation
+# oft noch gar nicht. Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
+STEP_OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_PRICE_SENSOR): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        ),
+        vol.Optional(CONF_PRICE_ATTRIBUTE): selector.TextSelector(),
+        vol.Required(CONF_PRICE_UNIT, default=DEFAULT_PRICE_UNIT): (
+            selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(PRICE_UNITS),
+                    translation_key="price_unit",
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+        ),
+        vol.Required(CONF_PRICE_STRATEGY, default=DEFAULT_PRICE_STRATEGY): (
+            selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(PRICE_STRATEGIES),
+                    translation_key="price_charge_strategy",
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+        ),
+        vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        ),
+        vol.Required(
+            CONF_PV_FORECAST_FACTOR, default=DEFAULT_PV_FORECAST_FACTOR
+        ): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_PV_FORECAST_FACTOR, max=MAX_PV_FORECAST_FACTOR),
+        ),
+    }
+)
+
+
+class SaxPowerOptionsFlow(OptionsFlow):
+    """Konfiguration des preisoptimierten Ladens über die Oberfläche.
+
+    Hier stehen nur die Dinge, die sich nicht sinnvoll als Entity abbilden
+    lassen (Auswahl der Quell-Sensoren und deren Interpretation). Die im
+    Alltag veränderlichen Stellgrößen - Strategie, Preisgrenze, Anzahl
+    Stunden, Ziel-SOC - sind dagegen echte Entities am SAX-Gerät
+    (select.py/number.py) und damit automatisierbar und in Dashboards
+    nutzbar.
+
+    CONF_PRICE_STRATEGY ist hier nur die Vorgabe für den allerersten Start;
+    sobald die Select-Entity einmal einen Zustand gespeichert hat, hat
+    dieser Vorrang (analog zu CONF_TIMED_CHARGE_* in der Ersteinrichtung,
+    siehe entity.initial_config_value).
+    """
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+        schema = self.add_suggested_values_to_schema(
+            STEP_OPTIONS_SCHEMA, dict(self.config_entry.options)
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

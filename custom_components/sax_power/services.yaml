@@ -94,3 +94,51 @@ set_grid_serving_window:
       required: true
       selector:
         time:
+
+refresh_price_plan:
+  name: Ladeplan neu berechnen
+  description: >-
+    Berechnet den Ladeplan des preisoptimierten Ladens sofort neu und wendet
+    ihn an, statt bis zur nächsten regulären Prüfung (alle 60 Sekunden) zu
+    warten. Nützlich in Automationen, die den Strompreis-Sensor selbst
+    aktualisieren.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+
+set_price_charge_enabled:
+  name: Preisoptimiertes Laden schalten
+  description: >-
+    Schaltet das preisoptimierte Laden ein oder aus. Nicht-interaktiver
+    Gegenpart zum Schalter "Preisoptimiertes Laden aktiv": Steht die
+    Netzladung (zeitgesteuertes Laden) dem Einschalten im Weg, schlägt der
+    Aufruf mit einem Fehler fehl - mit "force" wird die Netzladung
+    stattdessen ohne Rückfrage abgeschaltet.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    enabled:
+      name: Aktiv
+      description: Preisoptimiertes Laden ein- (true) oder ausschalten (false).
+      required: true
+      selector:
+        boolean:
+    force:
+      name: Erzwingen
+      description: >-
+        Schaltet eine gleichzeitig aktive Netzladung ohne Rückfrage ab, statt
+        den Aufruf abzulehnen.
+      required: false
+      default: false
+      selector:
+        boolean:

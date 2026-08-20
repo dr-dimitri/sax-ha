@@ -60,7 +60,7 @@
         "name": "Entladene Energie (gesamt)"
       },
       "smartmeter_power": {
-        "name": "Smart Meter Leistung (Basic Mode)"
+        "name": "Smart Meter Leistung"
       },
       "switch_state_text": {
         "name": "Speicher Schaltzustand (Text)"
@@ -226,6 +226,18 @@
       },
       "battery_cell_voltage_avg": {
         "name": "Durchschnittliche Zellspannung"
+      },
+      "price_charge_active_text": {
+        "name": "Preisoptimiertes Laden aktiv"
+      },
+      "price_charge_status_text": {
+        "name": "Preisoptimiertes Laden Status"
+      },
+      "price_charge_next_start": {
+        "name": "Preisoptimiertes Laden nächster Start"
+      },
+      "price_charge_current_price": {
+        "name": "Aktueller Strompreis"
       }
     },
     "number": {
@@ -237,6 +249,15 @@
       },
       "timed_charge_min_soc": {
         "name": "Netzladung Min. SOC"
+      },
+      "price_charge_max_price": {
+        "name": "Preisoptimiertes Laden Preisgrenze"
+      },
+      "price_charge_hours": {
+        "name": "Preisoptimiertes Laden Anzahl Stunden"
+      },
+      "price_charge_target_soc": {
+        "name": "Preisoptimiertes Laden Ziel-SOC"
       }
     },
     "switch": {
@@ -320,6 +341,9 @@
       },
       "grid_serving_month_12": {
         "name": "Netzdienliches Laden aktiv im Dezember"
+      },
+      "price_charge_enabled": {
+        "name": "Preisoptimiertes Laden aktiv"
       }
     },
     "time": {
@@ -335,12 +359,53 @@
       "grid_serving_end": {
         "name": "Netzdienliches Laden Ende"
       }
+    },
+    "select": {
+      "price_charge_strategy": {
+        "name": "Preisoptimiertes Laden Strategie",
+        "state": {
+          "off": "Manuell / Aus",
+          "absolute": "Absoluter Preis",
+          "relative": "Relativ / Günstigste Stunden",
+          "smart": "Smart / PV-optimiert"
+        }
+      }
     }
   },
   "issues": {
     "extended_mode_unavailable": {
       "title": "SAX SunSpec-Modus nicht erreichbar",
       "description": "Der SunSpec-Modus-Registerblock (Slave-ID {slave_id}) des SAX Speichers ist nicht erreichbar. Die davon abhängigen Sensoren (Speicher-Detailwerte, Netz-/Smart-Meter-Werte, Akkuwerte) zeigen \"unbekannt\", bis die Verbindung wiederhergestellt ist. Die Basic-Mode-Sensoren (Ladezustand, Schalter, Leistungsgrenzwerte) sind davon nicht betroffen. Bitte prüfen, ob die konfigurierte Slave-ID (SunSpec-Modus, Standard: 100) korrekt ist und ob das Gerät die Firmwarekombination Master V61/Gateway V54 oder neuer verwendet."
+    },
+    "price_charge_conflict": {
+      "title": "Preisoptimiertes Laden und Netzladung gleichzeitig aktiv",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Netzladung für preisoptimiertes Laden abschalten?",
+            "description": "Preisoptimiertes Laden wurde eingeschaltet, während die Netzladung (zeitgesteuertes Laden) aktiv ist. Beide laden aktiv aus dem Netz über denselben Schreibpfad und können deshalb nicht gleichzeitig laufen.\n\n**Bestätigen**: Die Netzladung wird abgeschaltet und preisoptimiertes Laden aktiviert.\n**Abbrechen**: Es ändert sich nichts, preisoptimiertes Laden bleibt aus.",
+            "menu_options": {
+              "confirm": "Bestätigen - Netzladung abschalten",
+              "cancel": "Abbrechen - alles unverändert lassen"
+            }
+          }
+        }
+      }
+    },
+    "timed_charge_conflict": {
+      "title": "Netzladung und preisoptimiertes Laden gleichzeitig aktiv",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Preisoptimiertes Laden für die Netzladung abschalten?",
+            "description": "Die Netzladung (zeitgesteuertes Laden) wurde eingeschaltet, während preisoptimiertes Laden aktiv ist. Beide laden aktiv aus dem Netz über denselben Schreibpfad und können deshalb nicht gleichzeitig laufen.\n\n**Bestätigen**: Preisoptimiertes Laden wird abgeschaltet und die Netzladung aktiviert.\n**Abbrechen**: Es ändert sich nichts, die Netzladung bleibt aus.",
+            "menu_options": {
+              "confirm": "Bestätigen - preisoptimiertes Laden abschalten",
+              "cancel": "Abbrechen - alles unverändert lassen"
+            }
+          }
+        }
+      }
     }
   },
   "services": {
@@ -402,6 +467,74 @@
           "name": "Ende",
           "description": "Ende des Zeitfensters."
         }
+      }
+    },
+    "refresh_price_plan": {
+      "name": "Ladeplan neu berechnen",
+      "description": "Berechnet den Ladeplan des preisoptimierten Ladens sofort neu und wendet ihn an, statt bis zur nächsten regulären Prüfung (alle 60 Sekunden) zu warten.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        }
+      }
+    },
+    "set_price_charge_enabled": {
+      "name": "Preisoptimiertes Laden schalten",
+      "description": "Schaltet das preisoptimierte Laden ein oder aus. Steht die Netzladung dem Einschalten im Weg, schlägt der Aufruf fehl - mit „Erzwingen“ wird sie stattdessen ohne Rückfrage abgeschaltet.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        },
+        "enabled": {
+          "name": "Aktiv",
+          "description": "Preisoptimiertes Laden ein- oder ausschalten."
+        },
+        "force": {
+          "name": "Erzwingen",
+          "description": "Schaltet eine gleichzeitig aktive Netzladung ohne Rückfrage ab."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Preisoptimiertes Laden",
+        "description": "Quellen und Grundeinstellungen für das preisoptimierte Laden. Die Integration ruft selbst keine Strompreise ab, sondern nutzt eine bereits vorhandene Sensor-Entity (z. B. Tibber, Nordpool, EPEX Spot, ENTSO-e, Awattar). Die im Alltag veränderlichen Stellgrößen - Strategie, Preisgrenze, Anzahl Stunden, Ziel-SOC - sind eigene Entitäten am SAX-Gerät.",
+        "data": {
+          "price_sensor": "Strompreis-Sensor",
+          "price_attribute": "Attribut mit der Preisvorschau (optional)",
+          "price_unit": "Preis-Einheit",
+          "price_strategy": "Vorgabe-Strategie (nur beim ersten Start)",
+          "pv_forecast_sensor": "PV-Prognose-Sensor (optional)",
+          "pv_forecast_factor": "Nutzbarer Anteil der PV-Prognose (%)"
+        },
+        "data_description": {
+          "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Die Zeitfenster der Modi „Relativ“ und „Smart“ werden aus dessen Preisvorschau-Attributen ermittelt.",
+          "price_attribute": "Nur ausfüllen, wenn die automatische Erkennung fehlschlägt - z. B. „raw_today“, „data“ oder „forecast“.",
+          "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh wird intern in EUR/kWh umgerechnet.",
+          "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Nur für den Modus „Smart“ nötig.",
+          "pv_forecast_factor": "Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab."
+        }
+      }
+    }
+  },
+  "selector": {
+    "price_unit": {
+      "options": {
+        "auto": "Automatisch (aus dem Sensor)",
+        "eur_kwh": "EUR/kWh",
+        "ct_kwh": "ct/kWh"
+      }
+    },
+    "price_charge_strategy": {
+      "options": {
+        "off": "Manuell / Aus",
+        "absolute": "Absoluter Preis",
+        "relative": "Relativ / Günstigste Stunden",
+        "smart": "Smart / PV-optimiert"
       }
     }
   }

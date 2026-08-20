@@ -14,11 +14,23 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import State
 
-from custom_components.sax_power.const import MAX_POWER_LIMIT, MAX_SOC, MIN_SOC
+from custom_components.sax_power.const import (
+    DEFAULT_PRICE_HOURS,
+    DEFAULT_PRICE_LIMIT,
+    DEFAULT_PRICE_TARGET_SOC,
+    MAX_POWER_LIMIT,
+    MAX_PRICE_HOURS,
+    MAX_PRICE_LIMIT,
+    MAX_SOC,
+    MIN_SOC,
+)
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.number import (
     SaxPowerChargeLimitNumber,
     SaxPowerMaxSocNumber,
+    SaxPowerPriceChargeHoursNumber,
+    SaxPowerPriceChargeTargetSocNumber,
+    SaxPowerPriceLimitNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
 
@@ -212,3 +224,81 @@ async def test_charge_limit_restore_clamps_out_of_range_value(
     await entity.async_added_to_hass()
 
     assert coordinator.max_charge_power == MAX_POWER_LIMIT
+
+
+# -- Preisoptimiertes Laden (anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) ----
+async def test_price_limit_defaults_on_fresh_install(hass, coordinator) -> None:
+    """Ohne gespeicherten Zustand steht die Preisgrenze auf dem Vorgabewert
+    statt auf 0 EUR/kWh (dabei würde nie geladen)."""
+    entity = SaxPowerPriceLimitNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_price_limit", None)
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_max_price == pytest.approx(DEFAULT_PRICE_LIMIT)
+
+
+async def test_price_limit_restores_negative_value(hass, coordinator) -> None:
+    """Negative Arbeitspreise sind ein gültiger Schwellwert und dürfen beim
+    Restaurieren nicht auf 0 geklemmt werden."""
+    entity = SaxPowerPriceLimitNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_price_limit",
+        State("number.test_price_limit", "-0.05"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_max_price == pytest.approx(-0.05)
+
+
+async def test_price_limit_restore_clamps_out_of_range_value(hass, coordinator) -> None:
+    entity = SaxPowerPriceLimitNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_price_limit",
+        State("number.test_price_limit", "99"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_max_price == pytest.approx(MAX_PRICE_LIMIT)
+
+
+async def test_price_charge_hours_defaults_on_fresh_install(hass, coordinator) -> None:
+    entity = SaxPowerPriceChargeHoursNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_price_hours", None)
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_hours == DEFAULT_PRICE_HOURS
+
+
+async def test_price_charge_hours_restore_clamps_out_of_range_value(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerPriceChargeHoursNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_price_hours",
+        State("number.test_price_hours", "48"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_hours == MAX_PRICE_HOURS
+
+
+async def test_price_charge_target_soc_defaults_on_fresh_install(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerPriceChargeTargetSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_price_target_soc", None)
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_target_soc == DEFAULT_PRICE_TARGET_SOC

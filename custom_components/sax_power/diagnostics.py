@@ -45,5 +45,17 @@ async def async_get_config_entry_diagnostics(
             "timed_charge_active": (coordinator.data or {}).get("timed_charge_active"),
             "grid_serving_enabled": coordinator.grid_serving_enabled,
             "grid_serving_active": (coordinator.data or {}).get("grid_serving_active"),
+            "price_charge_enabled": coordinator.price_charge_enabled,
+            "price_charge_strategy": coordinator.price_charge_strategy,
+            "price_charge_active": coordinator.price_charge_active,
+            "price_charge_status": coordinator.price_charge_status,
+            "price_charge_max_price": coordinator.price_charge_max_price,
+            "price_charge_hours": coordinator.price_charge_hours_raw,
+            "price_charge_target_soc": coordinator.price_charge_target_soc,
         },
+        # Ladeplan inkl. der ausgewerteten Preis-/Prognosewerte - der
+        # häufigste Grund für Rückfragen zum preisoptimierten Laden ist ein
+        # Preis-Sensor, dessen Attributformat nicht erkannt wurde (siehe
+        # price_optimizer.parse_price_slots).
+        "price_plan": coordinator.price_planner.plan_attributes,
     }

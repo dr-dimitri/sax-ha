@@ -248,13 +248,21 @@ zeitgesteuerten Laden, mit eigenem Hintergrund-Task.
 ### Netzdienliches Laden
 
 Eigenständiges Feature, das den Speicher innerhalb eines **eigenen**
-Zeitfensters **nicht lädt, sondern aktiv am Laden hindert**, sobald PV-
-Überschuss über der Schwelle gemessen wird. Gedacht für Zeiträume, in denen
-der Speicher den PV-Überschuss netzdienlich (d. h. einspeisungsreduzierend)
-NICHT selbst verbrauchen soll, damit das Laden des Speichers stattdessen in
-die Zeit mit dem höchsten PV-Ertrag verschoben wird. Sinkt der Überschuss
-innerhalb des Fensters wieder ab oder endet das Zeitfenster, wird die
-Blockade aufgehoben und der Speicher fällt zurück in den Normalmodus.
+Zeitfensters **nicht selbst lädt, sondern gezielt am Laden hindert**, sobald
+der Speicher über die geräteeigene SmartMeter-Nullregelung von sich aus
+bereits mit nennenswertem PV-Überschuss zu laden beginnt. Gedacht für
+Zeiträume, in denen der Speicher den PV-Überschuss NICHT selbst verbrauchen
+soll, damit das Laden stattdessen in die Zeit mit dem höchsten PV-Ertrag
+verschoben wird:
+
+- Erreicht die **tatsächliche Ladeleistung des SAX** mindestens 200 W (der
+  Speicher lädt also bereits von selbst mit Überschuss), wechselt er aktiv
+  in den Sollwertvorgabemodus und die Ladung wird sofort auf 0 % gestoppt.
+- Solange die am Smart Meter gemessene **Netzeinspeisung** danach weiterhin
+  mindestens 200 W beträgt, bleibt die Ladung bewusst bei 0 % gehalten.
+- Fällt die Netzeinspeisung unter 200 W, wird der Speicher wieder in die
+  SmartMeter-Nullregelung zurückgesetzt und kann von selbst erneut zu laden
+  beginnen (wodurch der obige Ablauf erneut greifen kann).
 
 **Entitäten** (unter "Steuerung" am Gerät):
 
@@ -269,18 +277,15 @@ Blockade aufgehoben und der Speicher fällt zurück in den Normalmodus.
 Genutzt wird dieselbe zentrale Einstellung wie beim zeitgesteuerten Laden –
 "Max. SOC" als Ziel-SOC für die Max-SOC-Sperre. "Max. Netzladeleistung" wird
 dagegen nicht benötigt, da netzdienliches Laden nie einen Sollwert > 0
-schreibt, sondern immer nur 0 % (Laden aktiv unterbunden). Ist kein
-Smart-Meter-Wert bekannt (z. B. SunSpec-Modus nicht erreichbar) oder liegt
-der gemessene Wert nicht über 200 W Überschuss
-(`SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`), blockiert netzdienliches Laden
-nicht – im Gegensatz zur Netzladung, die in diesem Fall unbeeinflusst
-weiterläuft.
+schreibt, sondern immer nur 0 % (Laden aktiv unterbunden). Ist die
+tatsächliche SAX-Ladeleistung noch nicht bekannt, kann die Blockade nicht
+auslösen; ist die Netzeinspeisung nach dem Auslösen nicht bekannt, bleibt
+die Ladung konservativ gehalten statt zurückzuschalten – im Gegensatz zur
+Netzladung, die in diesem Fall unbeeinflusst weiterläuft.
 
 Die Max-SOC-Sperre (siehe [oben](#zeitgesteuertes-laden)) gilt unverändert
-auch für netzdienliches Laden. Zeitgesteuertes Laden und die netzdienliche
-Blockade schließen sich bereits über die entgegengesetzte
-PV-Überschuss-Bedingung gegenseitig aus und können nie gleichzeitig einen
-Ladesollwert schreiben.
+auch für netzdienliches Laden. Zeitgesteuertes Laden und netzdienliches
+Laden können nie gleichzeitig einen Ladesollwert schreiben.
 
 **Aktive Monate:** Wie bei der Netzladung legen 12 Schalter ("Netzdienliches
 Laden aktiv im Januar" … "im Dezember") fest, in welchen Kalendermonaten

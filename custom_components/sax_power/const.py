@@ -357,8 +357,13 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # SaxPowerCoordinator._async_enforce_grid_charge, REQ-TIMED-SOC-CHARGE.
 # Vorzeichenkonvention laut Anwender: ein POSITIVER Anzeigewert steht für
 # Überschuss aus der Dachphotovoltaik (Einspeisung), der Rohregisterwert kann
-# davon abweichen - siehe apply_sunssf/to_signed16 für die Umrechnung. Als
-# eigene Konstante ausgelagert, da der Schwellwert absehbar auch an anderer
-# Stelle benötigt wird (z. B. für eine PV-Überschuss-Erkennung außerhalb der
-# Netzladung).
+# davon abweichen - siehe apply_sunssf/to_signed16 für die Umrechnung.
+#
+# Wird außerdem von der Zustandsmaschine für netzdienliches Laden
+# (SaxPowerCoordinator._async_step_grid_serving, REQ-GRID-SERVING-CHARGE) für
+# zwei unterschiedliche Signale mit demselben Schwellwert genutzt: als
+# Auslöser für den Wechsel in den Sollwertvorgabemodus (tatsächliche
+# Ladeleistung des SAX, negativer Anteil von data["storage_power_active"])
+# sowie als Rückkehr-Kriterium in die SmartMeter-Nullregelung (Netzeinspeisung
+# data["smartmeter_power"] unter diesem Wert).
 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 200

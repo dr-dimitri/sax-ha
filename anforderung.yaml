@@ -476,7 +476,7 @@ requirement_timed_soc_charge:
 # ==============================================================================
 requirement_grid_serving_charge:
   id: REQ-GRID-SERVING-CHARGE
-  title: "Netzdienliches Laden: Speicher innerhalb eines eigenen Zeitfensters mit eigenen aktiven Monaten bei PV-Überschuss vom Laden abhalten, um das Laden in die ertragsreichste Zeit zu verschieben"
+  title: "Netzdienliches Laden: Speicher innerhalb eines eigenen Zeitfensters mit eigenen aktiven Monaten bei einsetzendem PV-Laden aktiv stoppen, um das Laden in die ertragsreichste Zeit zu verschieben"
   status: done
   description: >
     Eigenständiges Software-Feature (Schalter "Netzdienliches Laden aktiv",
@@ -484,33 +484,56 @@ requirement_grid_serving_charge:
     time.py), das sich mit zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE) den
     SunSpec-Modus-Schreibpfad (_async_sun_charge_loop), die zentrale
     Einstellung "Max. SOC" (Ziel-SOC) sowie die Max-SOC-Sperre teilt - siehe
-    SaxPowerCoordinator._async_enforce_grid_charge. Im Unterschied zum
-    zeitgesteuerten Laden LÄDT netzdienliches Laden NICHT, sondern blockiert
-    das Laden aktiv (Sollwert 0 %, Register 40049), sobald innerhalb seines
-    Zeitfensters PV-Überschuss über der Schwelle gemessen wird
-    (data["smartmeter_power"] > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (200 W),
-    dieselbe Schwelle wie beim PV-Überschuss-Abbruch der Netzladung, nur mit
-    umgekehrter Bedingung). Zweck: der Speicher soll den PV-Überschuss
-    während dieses Zeitfensters NICHT selbst verbrauchen, damit das Laden des
-    Speichers stattdessen in die Zeit mit dem höchsten PV-Ertrag verschoben
-    wird - "Max. Netzladeleistung" wird dafür nicht benötigt, da nie mit
-    einem Sollwert > 0 geladen wird. Sinkt der Überschuss innerhalb des
-    Fensters wieder auf/unter die Schwelle oder endet das Zeitfenster, wird
-    die Blockade aktiv aufgehoben (Register 40051 zurück auf 0, SmartMeter-
-    Nullregelung) und der Speicher fällt in den Normalmodus zurück. Fehlt der
-    Smart-Meter-Wert (z. B. SunSpec-Modus nicht erreichbar), blockiert
-    netzdienliches Laden NICHT (im Gegensatz zum zeitgesteuerten Laden, das
-    in diesem Fall unbeeinflusst weiterläuft) - ohne bekannten Überschuss
-    kann nicht erkannt werden, ob die Schwelle überschritten ist.
+    SaxPowerCoordinator._async_enforce_grid_charge/_async_step_grid_serving.
+    "Max. Netzladeleistung" wird dafür NICHT benötigt, da netzdienliches
+    Laden nie einen Sollwert > 0 schreibt. Im Unterschied zum
+    zeitgesteuerten Laden schreibt netzdienliches Laden selbst NIE einen aus
+    dem PV-Überschuss berechneten Ladesollwert, sondern überlässt die
+    eigentliche Ladung der geräteeigenen SmartMeter-Nullregelung (Register
+    40051 = 0), die von sich aus nur mit echtem PV-Überschuss lädt. Die
+    Software greift als eigene Zustandsmaschine (_async_step_grid_serving)
+    nur ein, um die Ladung innerhalb des konfigurierten Zeitfensters gezielt
+    zu unterbrechen, sobald ein Ladevorgang erkannt wurde - Zweck: der
+    Speicher soll den PV-Überschuss während dieses Zeitfensters NICHT selbst
+    verbrauchen, damit das Laden stattdessen in die Zeit mit dem höchsten
+    PV-Ertrag verschoben wird:
+
+    a. Ohne aktiven Sollwertvorgabemodus wird die tatsächliche Ladeleistung
+       des SAX geprüft (negativer Anteil von data["storage_power_active"],
+       siehe sensor.py "SAX Ladeleistung"/_negative_part). Erreicht oder
+       überschreitet sie SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (200 W, Beweis,
+       dass die Nullregelung bereits mit nennenswertem Überschuss lädt),
+       wechselt der Speicher aktiv in den Sollwertvorgabemodus UND die
+       Ladung wird in demselben Aufruf auf 0 % gestoppt (Register 40049,
+       async_start_sun_charge(0)). Danach werden einmalig zwei
+       Aktualisierungszyklen abgewartet (self._grid_serving_wait_cycles),
+       bevor Schritt b ausgewertet wird, damit sich Moduswechsel und
+       gestoppter Sollwert am Gerät setzen können.
+    b. Erst mit aktivem Sollwertvorgabemodus (Wartezyklen abgelaufen) wird
+       die am Smart Meter gemessene Netzeinspeisung
+       (data["smartmeter_power"]) gegen denselben Schwellwert geprüft.
+       Fällt sie darunter, wird der Speicher aktiv zurück in die
+       SmartMeter-Nullregelung gesetzt (async_stop_sun_charge, Register
+       40051 zurück auf 0). Bleibt die Einspeisung mindestens beim
+       Schwellwert (oder ist der Messwert gerade nicht bekannt), bleibt die
+       Ladung bewusst bei 0 % gehalten - der Speicher soll hier gezielt erst
+       wieder laden, sobald ein Zeitpunkt mit gefallener Einspeisung
+       erreicht ist, statt fortlaufend mit dem Überschuss mitzulaufen.
+
+    Fehlt data["storage_power_active"], kann Schritt a nicht auslösen
+    (Speicher bleibt in der Nullregelung); fehlt data["smartmeter_power"]
+    nach dem Auslösen, kann Schritt b nicht zurückschalten (Ladung bleibt
+    konservativ gehalten) - in beiden Fällen ohne bekannten Messwert keine
+    aktive Entscheidung.
 
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
     ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
     unverändert für beide Lademodi), 2. zeitgesteuertes Laden, 3.
-    netzdienliches Laden (Blockade). Zeitgesteuertes Laden und die
-    netzdienliche Blockade schließen sich dabei bereits über die
-    PV-Überschuss-Bedingung gegenseitig aus (kein Überschuss vs. Überschuss)
-    und können nie gleichzeitig einen Ladesollwert schreiben.
+    netzdienliches Laden. grid_serving_eligible verlangt explizit "not
+    timed_should_charge", zusätzlich zur strukturellen if/elif-
+    Priorisierung - beide können daher nie im selben Zyklus einen
+    Ladesollwert schreiben.
 
     Aktive Monate: Zusätzlich zum Zeitfenster hat jedes der beiden Features
     (Netzladung UND netzdienliches Laden) 12 Monats-Schalter
@@ -616,8 +639,12 @@ requirement_grid_serving_charge:
 
     Diagnose-Sensor "Netzdienliches Laden aktiv" (sensor.py,
     grid_serving_active_text, analog zu "Zeitgesteuertes Laden aktiv") zeigt
-    an, ob der Speicher gerade aktiv netzdienlich lädt - das informiert den
-    Anwender laufend über den Aktivzustand des Features.
+    an, ob netzdienliches Laden gerade aktiv in den Sollwertvorgabemodus
+    eingreift, also die Ladung gezielt bei 0 % hält
+    (self._grid_serving_setpoint_active) - nicht, ob der Speicher gerade
+    über die geräteeigene Nullregelung mit PV-Überschuss lädt (dafür siehe
+    Sensor "SAX Ladeleistung"). Das informiert den Anwender laufend über
+    den Aktivzustand des Eingriffs.
 
     Aktiviert-Zustand, Start-/Endzeit sowie die aktiven Monate werden über
     RestoreEntity über Neustarts hinweg persistiert (analog zum
@@ -652,17 +679,28 @@ requirement_grid_serving_charge:
        nicht beabsichtigter Zwischenzustand führt zum Leeren der Zeit,
        während der atomare -window-Service dasselbe Ziel-Fenster
        akzeptiert."
-    - "tests/test_coordinator.py deckt das Ladeverhalten von netzdienlichem
-       Laden ab: Start nur mit PV-Überschuss über dem Schwellwert, Deckelung
-       auf min(Max. Netzladeleistung, PV-Überschuss), kein Start ohne
-       Überschuss/außerhalb des Zeitfensters/außerhalb der aktiven
-       Monate/deaktiviert/ohne bekannten Smart-Meter-Wert, sowie Vorrang der
-       Max-SOC-Sperre und die gegenseitige Ausschlusslogik zu
-       zeitgesteuertem Laden über die PV-Überschuss-Bedingung. Ebenso deckt
-       es das analoge Monats-Verhalten für zeitgesteuertes Laden ab
-       (inaktiv außerhalb der ausgewählten Monate, aktiv innerhalb) sowie
-       den Fall, dass ein Feature bei keinem ausgewählten Monat ganzjährig
-       inaktiv bleibt."
+    - "tests/test_coordinator.py deckt die Zustandsmaschine von
+       netzdienlichem Laden (_async_step_grid_serving) ab: Schritt a
+       wechselt erst in den Sollwertvorgabemodus und stoppt die Ladung auf
+       0 %, wenn die tatsächliche SAX-Ladeleistung
+       (data['storage_power_active']) den Schwellwert erreicht, und setzt
+       danach zwei Wartezyklen; während dieser Wartezyklen bleibt Schritt b
+       unterdrückt, selbst wenn die Netzeinspeisung zwischenzeitlich unter
+       den Schwellwert fällt; nach Ablauf der Wartezyklen bleibt die Ladung
+       bei weiterhin hoher Einspeisung bewusst bei 0 % gehalten (kein
+       Wiederanstieg des Sollwerts mehr, im Unterschied zum alten
+       Verhalten), Schritt b setzt erst bei Einspeisung unter dem
+       Schwellwert aktiv in die SmartMeter-Nullregelung zurück; ohne
+       bekannte SAX-Ladeleistung kann Schritt a nicht auslösen, ohne
+       bekannte Netzeinspeisung nach dem Auslösen bleibt Schritt b
+       konservativ gehalten statt zurückzuschalten. Zusätzlich deckt es ab:
+       kein Eingriff außerhalb des Zeitfensters/außerhalb der aktiven
+       Monate/deaktiviert, Vorrang der Max-SOC-Sperre sowie die
+       Ausschlusslogik zu zeitgesteuertem Laden über grid_serving_eligible
+       (not timed_should_charge). Ebenso deckt es das analoge
+       Monats-Verhalten für zeitgesteuertes Laden ab (inaktiv außerhalb der
+       ausgewählten Monate, aktiv innerhalb) sowie den Fall, dass ein
+       Feature bei keinem ausgewählten Monat ganzjährig inaktiv bleibt."
     - "switch.py/time.py/sensor.py enthalten keine eigene
        Leistungseinstellung für netzdienliches Laden - es nutzt dieselben
        zentralen Einstellungen wie zeitgesteuertes Laden ('Max. SOC', 'Max.

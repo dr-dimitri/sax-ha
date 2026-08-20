@@ -458,4 +458,7 @@ gespeichert und die Integration lädt automatisch mit den neuen Daten neu.
 Interna wie Datenfluss, Register-Mapping, Testausführung und lokale
 Entwicklung (DevContainer) sind in [DEVELOPMENT.md](DEVELOPMENT.md)
 beschrieben. Die vollständigen, aktuell gültigen Anforderungen an die
-Integration stehen in [anforderung.yaml](anforderung.yaml).
+Integration stehen in [anforderung.yaml](anforderung.yaml). Für KI-Coding-
+Agenten (Claude Code, Codex, Cursor, ...) gibt es zusätzlich
+[AGENTS.md](AGENTS.md) mit Setup-/Test-/Lint-Befehlen, Code-Stil und
+Git-Workflow.

@@ -20,100 +20,31 @@
 # Beim Hinzufügen neuer oder Ändern bestehender Anforderungen: überholte
 # Formulierungen ERSETZEN statt ergänzen. Diese Datei bildet immer nur den
 # aktuellen Zustand ab, nie den Weg dorthin.
+#
+# Diese Datei enthält AUSSCHLIESSLICH feature-bezogene Ist-Zustand-
+# Anforderungen (die requirement_*-Blöcke unten, ein Block je REQ-ID).
+# Allgemeine, funktionsübergreifende Hinweise (Architektur, Home-Assistant-
+# Standards, Modbus-Grundlagen, Entwicklungsumgebung, Git-Workflow, Test-/
+# Lint-Befehle) stehen in AGENTS.md im Repo-Root - dort zuerst nachsehen, bei
+# funktionsspezifischen Detailfragen von dort per REQ-ID (z. B.
+# REQ-TIMED-SOC-CHARGE) hierher verzweigen.
 # ==============================================================================
 
 # ==============================================================================
-# ARCHITEKTUR & HOME ASSISTANT STANDARDS
+# INDEX (siehe jeweiligen requirement_*-Block unten für Details; per REQ-ID
+# grep-bar, z. B. `grep -n "REQ-GRID-SERVING-CHARGE" anforderung.yaml`)
 # ==============================================================================
-# - Asynchrone Architektur: Sämtlicher I/O-Code läuft vollständig asynchron
-#   (async/await) über pymodbus.client.AsyncModbusTcpClient.
-# - Ein zentraler DataUpdateCoordinator (coordinator.py) bündelt alle Reads/
-#   Writes; sämtliche Entitäten beziehen ihre Daten ausschließlich aus
-#   coordinator.data (kein eigenes Polling einzelner Entitäten).
-# - Einrichtung ausschließlich über den GUI-Config-Flow (config_flow.py):
-#   IP-Adresse, Port (Default 502), Slave-ID Basic Mode (Default 64),
-#   Slave-ID SunSpec-Modus (Default 100), Aktualisierungsintervall
-#   (Default 10s); danach optional ein zweiter Schritt mit Vorbelegung für
-#   das zeitgesteuerte Laden (siehe REQ-TIMED-SOC-CHARGE). Keine
-#   YAML-Konfiguration.
-# - Entitätstypen: Lese-Register -> SensorEntity (sensor.py); schreibbare
-#   Leistungswerte/Limits -> NumberEntity (number.py); Schalter ->
-#   SwitchEntity (switch.py); Zeitfenster -> TimeEntity (time.py).
-# - Typisierung & Linting: durchgängige Type Hints (PEP 484), Konformität
-#   mit Ruff/Black und PEP 8.
-# - Fehlerbehandlung: ModbusException und asyncio.TimeoutError werden
-#   abgefangen und auf UpdateFailed bzw. ConfigEntryNotReady gemappt.
-# - Security: Transaktions- und Wertebereichsprüfung (Range Validation) vor
-#   jedem Schreibzugriff.
-#
-# Ordnerstruktur:
-#   .devcontainer/                DevContainer für lokale Entwicklung
-#   custom_components/sax_power/
-#     manifest.json                Metadaten, Requirements (pymodbus>=3.10.0), Domain
-#     const.py                     Register-/Konfigurationskonstanten, Defaults
-#     config_flow.py                GUI-Einrichtung + Reconfigure-Flow
-#     coordinator.py                DataUpdateCoordinator: Reads, Writes, Software-Logik
-#     entity.py                     Basisklasse mit gemeinsamer DeviceInfo
-#     __init__.py                   Setup/Teardown des Config Entry, Services
-#     sensor.py / number.py / switch.py / time.py   Plattformen
-#     services.yaml                 Service-Schema für die UI
-#     translations/                 DE/EN-Übersetzungen
-#   tests/                         Testfälle (siehe README.md, Abschnitt Tests)
-#
+# REQ-ALL-REGISTERS-READABLE      done       Alle Modbus-Register lesbar über Home Assistant + berechnete Phasensummen
+# REQ-IP-CONFIGURABLE-UI          done       IP-Adresse über die Oberfläche eintragbar, persistiert, jederzeit änderbar
+# REQ-EXTENDED-MODE-RESILIENCE    done       Nicht erreichbarer SunSpec-Modus-Block darf nicht alle Sensoren lahmlegen
+# REQ-REAL-HARDWARE-TESTS         done       Testfälle lesen echte Werte von einem physischen SAX Speicher
+# REQ-SUNSPEC-MODE-CORRECTION     done       SunSpec-Modus-Registerkarte (Slave-ID 100) als alleinige Quelle für Speicher-/Netz-/Akkudetails
+# REQ-TIMED-SOC-CHARGE            done       Zeitgesteuertes Laden auf Ziel-SOC + geräteunabhängige Max-SOC-Sperre + PV-Überschuss-Hysterese
+# REQ-GRID-SERVING-CHARGE         done       Netzdienliches Laden: PV-Ladevorgang im eigenen Zeitfenster aktiv unterbrechen
+# REQ-MANUAL-DISCHARGE            verworfen  Manuelle Entladung mit fester Leistung - vom Hersteller nicht vorgesehen
+# REQ-LOW-INTERVAL-REGISTERS      done       Statische SunSpec-Register seltener abfragen als Messwerte
+# REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
 # ==============================================================================
-# MODBUS-REGISTER & BERECHNUNGEN
-# ==============================================================================
-# - Basic Mode (Slave-ID 64): interne Registeradresse = Protokolladresse -
-#   40001.
-# - SunSpec-Modus (Slave-ID 100): interne Registeradresse = Protokolladresse
-#   - 40000 (anderer Offset als Basic Mode).
-# - SunSpec-Skalierung (sunssf): Wert * 10^sunssf (Exponent vorzeichen-
-#   behaftet), siehe coordinator.apply_sunssf.
-# - Die vollständige Registerzuordnung (Protokolladresse <-> interne Adresse
-#   <-> Bedeutung) steht in modbus_llm.yaml, verifiziert gegen die
-#   offizielle sax-power.net-Dokumentation modbus.pdf.
-# - Periodische Sollwert-Writes werden wiederholt, solange der jeweilige
-#   Mechanismus aktiv ist, da der Speicher einen nicht periodisch
-#   aufgefrischten Sollwert nach einem Timeout verwirft: Basic-Mode-Netzladung
-#   (start_grid_charge-Service, Register 41) alle 30s fest; zeitgesteuertes
-#   Laden (SunSpec-Modus, Register 40049/40051) mit einem aus dem
-#   geräteseitig gemeldeten Timeout (Register 40050) abgeleiteten Intervall
-#   (die Hälfte des Timeouts, gedeckelt auf 30s, mindestens 5s).
-#
-# ==============================================================================
-# ENTWICKLUNGSUMGEBUNG (DEVCONTAINER)
-# ==============================================================================
-# .devcontainer/devcontainer.json:
-#
-# {
-#   "name": "Home Assistant Dev Environment",
-#   "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bullseye",
-#   "customizations": {
-#     "vscode": {
-#       "extensions": [
-#         "ms-python.python",
-#         "ms-python.vscode-pylance",
-#         "charliermarsh.ruff",
-#         "ms-python.black-formatter",
-#         "redhat.vscode-yaml"
-#       ]
-#     }
-#   },
-#   "postCreateCommand": "pip install homeassistant pytest-homeassistant-custom-component ruff black pymodbus",
-#   "forwardPorts": [8123]
-# }
-#
-# Im Container steht `hass -c config` bereit (lokale Home-Assistant-Instanz
-# mit verlinkter Custom Component, Port 8123), außerdem pytest, ruff und
-# black.
-
-# ==============================================================================
-# GIT-WORKFLOW
-# ==============================================================================
-# Änderungen werden nie direkt auf main vorgenommen, sondern immer auf einem
-# eigenen Branch (Pull Request gegen main). Vor dem Erstellen eines neuen
-# Branches wird main zuerst aktualisiert (git fetch/pull), damit der neue
-# Branch auf dem aktuellen Stand basiert.
 
 # ==============================================================================
 # ANFORDERUNG: ALLE MODBUS-REGISTER LESBAR

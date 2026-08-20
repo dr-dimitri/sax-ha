@@ -32,6 +32,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
+    _clamp_int,
     apply_sunssf,
     to_signed16,
     to_unsigned16,
@@ -66,6 +67,23 @@ def test_to_unsigned16(value: int, expected: int) -> None:
 )
 def test_apply_sunssf(raw_value: int, raw_sf: int, expected: float) -> None:
     assert apply_sunssf(raw_value, raw_sf) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "min_value", "max_value", "expected"),
+    [
+        (50, 0, 100, 50),  # innerhalb des Bereichs -> unverändert
+        (0, 0, 100, 0),  # genau auf der unteren Grenze -> unverändert
+        (100, 0, 100, 100),  # genau auf der oberen Grenze -> unverändert
+        (-20, 0, 100, 0),  # unterschreitet -> auf min_value geklemmt
+        (500, 0, 100, 100),  # überschreitet -> auf max_value geklemmt
+        (None, 0, 100, None),  # "keine Einstellung" bleibt unverändert
+    ],
+)
+def test_clamp_int(
+    value: int | None, min_value: int, max_value: int, expected: int | None
+) -> None:
+    assert _clamp_int(value, min_value, max_value) == expected
 
 
 def _make_client() -> MagicMock:

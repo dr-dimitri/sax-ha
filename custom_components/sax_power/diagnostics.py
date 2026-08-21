@@ -37,7 +37,6 @@ async def async_get_config_entry_diagnostics(
         "state": {
             "max_soc": coordinator.max_soc,
             "max_soc_clamped": coordinator.max_soc_clamped,
-            "max_charge_power": coordinator.max_charge_power,
             "grid_charge_active": coordinator.grid_charge_active,
             "sun_charge_active": coordinator.sun_charge_active,
             "extended_available": coordinator.extended_available,

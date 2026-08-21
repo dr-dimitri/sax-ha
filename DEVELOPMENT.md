@@ -43,8 +43,8 @@ custom_components/sax_power/
 │                          plus zwei RestoreEntity-Energiezähler (energy_charged/
 │                          energy_discharged) fürs Energy-Dashboard
 ├── number.py              Max. SOC (einzige SOC-Einstellung, auch Ziel-SOC für
-│                          Zeitfenster- und preisoptimiertes Laden), Max.
-│                          Netzladeleistung, Preisgrenze/Anzahl Stunden
+│                          Zeitfenster- und preisoptimiertes Laden), Netzladung
+│                          Min. SOC, Preisgrenze/Anzahl Stunden
 │                          (preisoptimiertes Laden)
 ├── select.py              Strategie des preisoptimierten Ladens
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
@@ -109,15 +109,18 @@ Priorität in `_async_enforce_grid_charge`:
    Speicher entlädt sich währenddessen nicht automatisch zur
    Eigenverbrauchsdeckung.
 2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + im
-   aktiven Monat + kein PV-Überschuss + "Max. Netzladeleistung" gesetzt**
-   (`timed_should_charge`): Leistungsvorgabe = `-max_charge_power` (negativ
-   = Laden).
+   aktiven Monat + kein PV-Überschuss** (`timed_should_charge`):
+   Leistungsvorgabe = `MIN_SETPOINT_POWER` (sättigt in
+   `_watts_to_ic_setpoint_raw` auf -100 %, maximal mögliche Ladeleistung -
+   eine frühere, konfigurierbare "Max. Netzladeleistung" wurde entfernt,
+   weil der eingestellte Watt-Wert in der Praxis keinen Einfluss auf die
+   tatsächliche Ladeleistung hatte).
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
    im eigenen aktiven Monat + nicht bereits durch zeitgesteuertes Laden
    beansprucht** (`grid_serving_eligible`): eigene Zustandsmaschine
    (`SaxPowerCoordinator._async_step_grid_serving`), NICHT über einen aus
-   dem PV-Überschuss berechneten Sollwert. "Max. Netzladeleistung" wird
-   dafür nicht benötigt, es wird nie ein Sollwert > 0 geschrieben:
+   dem PV-Überschuss berechneten Sollwert - es wird nie ein Sollwert > 0
+   geschrieben:
    - **Schritt a** (ohne aktiven Sollwertvorgabemodus): Erreicht die
      tatsächliche Ladeleistung des SAX (negativer Anteil von
      `data["storage_power_active"]`) `SMARTMETER_PV_SURPLUS_THRESHOLD_WATT`
@@ -177,16 +180,14 @@ laufenden Write trifft, als `ModbusIOException` (und damit als
 Der ältere Basic-Mode-P-Sollwert-Pfad (Register 41,
 `_async_grid_charge_loop`, alle 30s fest) bleibt ausschließlich für den
 manuellen `start_grid_charge`/`stop_grid_charge`-Service in Verwendung; die
-Integration schreibt die Basic-Mode-Register 43/44 (Ent-/Ladeleistungs-
-grenzwert) nicht mehr.
+Integration liest/schreibt die Basic-Mode-Register 43/44 (Ent-/Ladeleistungs-
+grenzwert) nicht mehr - eine frühere Software-Einstellung "Max.
+Netzladeleistung" (`SaxPowerChargeLimitNumber`), die Register 44 einmalig
+als Vorgabewert gelesen hat, wurde entfernt (siehe unten).
 
-**"Max. SOC" und "Max. Netzladeleistung"** (`SaxPowerMaxSocNumber`/
-`SaxPowerChargeLimitNumber`, jeweils `RestoreEntity`) setzen sich bei
+**"Max. SOC"** (`SaxPowerMaxSocNumber`, `RestoreEntity`) setzt sich bei
 fehlendem Vorzustand (z. B. direkt nach der Ersteinrichtung) explizit auf
-einen Vorgabewert statt "unbekannt"/0 zu bleiben: "Max. SOC" auf `MAX_SOC`
-(100), "Max. Netzladeleistung" auf den beim Start einmalig gelesenen Wert
-von Basic-Mode-Register 44 (`coordinator.data["charge_limit"]`, danach nur
-noch Software-Zustand, kein weiterer Register-Write).
+`MAX_SOC` (100) statt "unbekannt"/0 zu bleiben.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils

@@ -72,7 +72,6 @@ def _full_data(hass) -> dict:
         "setpoint_power": 0,
         "setpoint_cosphi": 0,
         "soc": 55,
-        "charge_limit": 3000,
         "timed_charge_active": False,
     }
     return {**basic, **extended}
@@ -98,7 +97,6 @@ def test_value_fn_handles_missing_extended_data() -> None:
         "setpoint_power": 0,
         "setpoint_cosphi": 0,
         "soc": 55,
-        "charge_limit": 3000,
         "timed_charge_active": False,
     }
 

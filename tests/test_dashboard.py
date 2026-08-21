@@ -85,9 +85,12 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
     assert price_switch_entity_id in price_entities
 
 
-async def test_build_dashboard_config_soc_uses_gauge_card_with_severity(hass) -> None:
+async def test_build_dashboard_config_soc_uses_gauge_card_with_segments(hass) -> None:
     """Der Ladezustand wird als Gauge-Karte mit Nadel dargestellt: grün ab
-    50 % SOC, orange ab 20 % SOC, darunter rot."""
+    50 % SOC, gelb ab 20 % SOC, darunter rot. Über "segments" statt
+    "severity", damit rot/grün exakt dieselbe Farbe wie bei der
+    Zelltemperatur-Gauge ergeben (siehe _gauge_card-Docstring in
+    dashboard.py)."""
     soc_entity_id = _register(hass, "sensor", "soc")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
@@ -100,7 +103,11 @@ async def test_build_dashboard_config_soc_uses_gauge_card_with_severity(hass) ->
     assert len(gauge_cards) == 1
     gauge = gauge_cards[0]
     assert gauge["needle"] is True
-    assert gauge["severity"] == {"red": 0, "yellow": 20, "green": 50}
+    assert gauge["segments"] == [
+        {"from": 0, "color": "red"},
+        {"from": 20, "color": "yellow"},
+        {"from": 50, "color": "green"},
+    ]
 
 
 async def test_build_dashboard_config_temperature_uses_gauge_card_with_segments(
@@ -108,8 +115,8 @@ async def test_build_dashboard_config_temperature_uses_gauge_card_with_segments(
 ) -> None:
     """Die Zelltemperatur wird ebenfalls als Gauge mit Nadel dargestellt:
     0-5 °C rot (zu kalt), 5-32 °C grün (normal), 32-40 °C rot (zu heiß) -
-    ein nicht-monotones Farbmuster, das das einfache severity-Mapping nicht
-    abbilden kann, deshalb "segments" statt "severity"."""
+    ein nicht-monotones Farbmuster, das ein einfaches severity-Mapping
+    nicht abbilden kann."""
     temp_entity_id = _register(hass, "sensor", "storage_max_cell_temp")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
@@ -129,6 +136,27 @@ async def test_build_dashboard_config_temperature_uses_gauge_card_with_segments(
         {"from": 5, "color": "green"},
         {"from": 32, "color": "red"},
     ]
+
+
+async def test_build_dashboard_config_soc_and_temperature_gauges_share_red_and_green(
+    hass,
+) -> None:
+    """Beide Gauges verwenden für rot/grün exakt dieselbe Farbangabe -
+    ansonsten würde dieselbe Farbe je nach Gauge unterschiedlich aussehen
+    (severity- vs. segments-Rendering, siehe _gauge_card-Docstring)."""
+    soc_entity_id = _register(hass, "sensor", "soc")
+    temp_entity_id = _register(hass, "sensor", "storage_max_cell_temp")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    gauges = {
+        card["entity"]: card
+        for card in _iter_cards(config["views"][0]["cards"])
+        if card["type"] == "gauge"
+    }
+    for entity_id in (soc_entity_id, temp_entity_id):
+        colors = {segment["color"] for segment in gauges[entity_id]["segments"]}
+        assert {"red", "green"} <= colors
 
 
 async def test_build_dashboard_config_entity_names_drop_device_prefix(hass) -> None:
@@ -215,7 +243,6 @@ async def test_build_dashboard_config_charging_view(hass) -> None:
     timed_charge_start = _register(hass, "time", "timed_charge_start")
     timed_charge_end = _register(hass, "time", "timed_charge_end")
     timed_charge_min_soc = _register(hass, "number", "timed_charge_min_soc")
-    charge_limit = _register(hass, "number", "charge_limit")
     max_soc = _register(hass, "number", "max_soc")
     timed_charge_active_text = _register(hass, "sensor", "timed_charge_active_text")
     month_switches = [
@@ -233,7 +260,6 @@ async def test_build_dashboard_config_charging_view(hass) -> None:
     assert timed_charge_start in entities
     assert timed_charge_end in entities
     assert timed_charge_min_soc in entities
-    assert charge_limit in entities
     assert entities.issuperset(month_switches)
     assert max_soc not in entities
     assert timed_charge_active_text not in entities

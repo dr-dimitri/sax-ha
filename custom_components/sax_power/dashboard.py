@@ -145,33 +145,32 @@ def _gauge_card(
     *,
     min_value: float,
     max_value: float,
-    severity: dict[str, float] | None = None,
-    segments: list[dict[str, Any]] | None = None,
+    segments: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Baut eine "gauge"-Karte statt einer Listenzeile - macht kritische
     Bereiche (z. B. Speicher fast leer, Zelltemperatur zu niedrig/hoch) auf
-    einen Blick sichtbar. `segments` (Liste beliebiger, auch nicht
-    monoton steigender Farbbereiche) wird gegenüber `severity` (feste
-    Schlüssel green/yellow/red, nur eine Stufe je Farbe) bevorzugt, wenn
-    beide angegeben sind - z. B. für "kalt -> rot, normal -> grün, heiß ->
-    rot" reicht ein einfaches severity-Mapping nicht aus. Immer im
-    Nadel-Stil (needle), passend zum modernisierten Dashboard."""
+    einen Blick sichtbar. Immer über `segments` (Liste beliebiger, auch
+    nicht monoton steigender Farbbereiche) statt über das alternative
+    `severity`-Mapping (feste Schlüssel green/yellow/red): Home Assistants
+    Gauge-Karte färbt `severity`-Farben über die Theme-Variablen
+    (--success-/--warning-/--error-color), `segments`-Farben dagegen als
+    wörtliche CSS-Farbnamen - dieselbe Zeichenkette "red"/"green" sieht
+    dadurch in den beiden Modi unterschiedlich aus. Ausschließlich
+    `segments` zu verwenden hält alle Gauge-Karten des Dashboards farblich
+    konsistent. Immer im Nadel-Stil (needle), passend zum modernisierten
+    Dashboard."""
     entity_id = _entity_id(hass, entity_domain, f"{entry_id}_{suffix}")
     if entity_id is None:
         return None
-    card: dict[str, Any] = {
+    return {
         "type": "gauge",
         "entity": entity_id,
         "name": _entity_name(translations, entity_domain, suffix),
         "min": min_value,
         "max": max_value,
         "needle": True,
+        "segments": segments,
     }
-    if segments is not None:
-        card["segments"] = segments
-    elif severity is not None:
-        card["severity"] = severity
-    return card
 
 
 def _grid_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
@@ -218,7 +217,13 @@ async def async_build_dashboard_config(
                         translations,
                         min_value=0,
                         max_value=100,
-                        severity={"red": 0, "yellow": 20, "green": 50},
+                        # Dieselben Farben wie die Zelltemperatur-Gauge
+                        # unten (rot/grün) - siehe _gauge_card-Docstring.
+                        segments=[
+                            {"from": 0, "color": "red"},
+                            {"from": 20, "color": "yellow"},
+                            {"from": 50, "color": "green"},
+                        ],
                     ),
                     _gauge_card(
                         hass,
@@ -230,8 +235,7 @@ async def async_build_dashboard_config(
                         max_value=40,
                         # 0-5 °C zu kalt, 5-32 °C normaler Betriebsbereich,
                         # 32-40 °C zu heiß - kein einfaches "je höher desto
-                        # kritischer" wie beim SOC, deshalb segments statt
-                        # severity (siehe _gauge_card-Docstring).
+                        # kritischer" wie beim SOC.
                         segments=[
                             {"from": 0, "color": "red"},
                             {"from": 5, "color": "green"},
@@ -302,7 +306,6 @@ async def async_build_dashboard_config(
                 "Einstellungen",
                 [
                     ("number", "timed_charge_min_soc"),
-                    ("number", "charge_limit"),
                 ],
                 translations,
             ),

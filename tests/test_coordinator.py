@@ -580,7 +580,6 @@ async def test_enforce_grid_charge_starts_timed_charge_when_enabled_in_window(
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
-    await coordinator.async_set_max_charge_power(3000)  # "Max. Netzladeleistung"
 
     try:
         with _patched_now(2):
@@ -596,12 +595,12 @@ async def test_enforce_grid_charge_starts_timed_charge_when_enabled_in_window(
             value=SUN_IC_CONTROL_MODE_SETPOINT,
             device_id=100,
         )
-        # -3000 W / 4600 W Referenz-Maximalleistung * 100 = -65.217...%,
-        # skaliert mit sunssf -2 (Default-Annahme, siehe
-        # SaxPowerCoordinator._watts_to_ic_setpoint_raw) -> -6522.
+        # Lädt immer mit maximal möglicher Leistung (MIN_SETPOINT_POWER
+        # sättigt in _watts_to_ic_setpoint_raw auf -100 %), sunssf -2
+        # (Default-Annahme) -> -10000.
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=to_unsigned16(-6522),
+            value=to_unsigned16(-10000),
             device_id=100,
         )
     finally:
@@ -621,7 +620,6 @@ async def test_enforce_grid_charge_inactive_outside_window(hass) -> None:
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_enabled(True)
 
     with _patched_now(12):
@@ -636,7 +634,6 @@ async def test_enforce_grid_charge_inactive_when_disabled(hass) -> None:
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)  # Ziel-SOC = "Max. SOC"
-    await coordinator.async_set_max_charge_power(3000)
     # timed_charge_enabled bleibt False (Default)
 
     with _patched_now(2):
@@ -644,22 +641,6 @@ async def test_enforce_grid_charge_inactive_when_disabled(hass) -> None:
 
     assert coordinator._timed_charge_active is False
     assert coordinator.sun_charge_active is False
-
-
-async def test_enforce_grid_charge_inactive_without_max_charge_power(hass) -> None:
-    """Ohne gesetzte "Max. Netzladeleistung" darf zeitgesteuertes Laden nicht
-    starten (kein sinnvoller Sollwert berechenbar)."""
-    coordinator = _make_coordinator(hass, _make_client())
-    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
-    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
-    await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_timed_charge_enabled(True)
-    # max_charge_power bleibt None (Default)
-
-    with _patched_now(2):
-        await coordinator._async_enforce_grid_charge({"soc": 10})
-
-    assert coordinator._timed_charge_active is False
 
 
 async def test_enforce_grid_charge_inactive_without_min_soc(hass) -> None:
@@ -670,7 +651,6 @@ async def test_enforce_grid_charge_inactive_without_min_soc(hass) -> None:
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_enabled(True)
 
     with _patched_now(2):
@@ -687,7 +667,6 @@ async def test_enforce_grid_charge_inactive_when_soc_at_or_above_min_soc(hass) -
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_min_soc(40)
     await coordinator.async_set_timed_charge_enabled(True)
 
@@ -714,7 +693,6 @@ async def test_enforce_grid_charge_starts_when_soc_below_min_soc(hass) -> None:
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_min_soc(40)
 
     try:
@@ -747,7 +725,6 @@ async def test_timed_charge_min_soc_hysteresis_continues_until_max_soc(hass) -> 
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_min_soc(40)
 
     try:
@@ -1004,7 +981,6 @@ async def test_enforce_grid_charge_max_soc_clamp_stays_within_charge_window(
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_enabled(True)
 
     try:
@@ -1042,7 +1018,6 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_en
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_timed_charge_enabled(True)
 
     try:
@@ -1088,7 +1063,6 @@ async def test_enforce_grid_charge_does_not_start_with_pv_surplus_above_threshol
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     with _patched_now(2):
         await coordinator.async_set_timed_charge_enabled(True)
@@ -1120,7 +1094,6 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(2):
@@ -1180,7 +1153,6 @@ async def test_enforce_grid_charge_pv_surplus_hysteresis_resets_on_drop(
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(2):
@@ -1233,7 +1205,6 @@ async def test_enforce_grid_charge_starts_at_or_below_pv_surplus_threshold(
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(2):
@@ -1260,7 +1231,6 @@ async def test_enforce_grid_charge_starts_when_smartmeter_power_missing(hass) ->
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(2):
@@ -1661,7 +1631,6 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -1717,7 +1686,6 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -1785,7 +1753,6 @@ async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -1838,7 +1805,6 @@ async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_th
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -1887,7 +1853,6 @@ async def test_enforce_grid_charge_grid_serving_inactive_without_sax_charge_powe
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     with _patched_now(12):
         await coordinator.async_set_grid_serving_enabled(True)
@@ -1913,7 +1878,6 @@ async def test_enforce_grid_charge_grid_serving_inactive_when_storage_power_miss
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     with _patched_now(12):
         await coordinator.async_set_grid_serving_enabled(True)
@@ -1940,7 +1904,6 @@ async def test_enforce_grid_charge_grid_serving_holds_when_feed_in_unknown(
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -1971,7 +1934,6 @@ async def test_enforce_grid_charge_grid_serving_inactive_outside_window(hass) ->
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     with _patched_now(20):
         await coordinator.async_set_grid_serving_enabled(True)
@@ -1993,7 +1955,6 @@ async def test_enforce_grid_charge_grid_serving_inactive_when_disabled(hass) -> 
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     # grid_serving_enabled bleibt False (Default)
 
     with _patched_now(12):
@@ -2024,7 +1985,6 @@ async def test_enforce_grid_charge_max_soc_lock_takes_priority_over_grid_serving
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     try:
         with _patched_now(12):
@@ -2072,7 +2032,6 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
     coordinator._grid_serving_end = dt_time(14, 0)
     coordinator._grid_serving_enabled = True
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
 
     grid_serving_data = {
         **coordinator.data,
@@ -2153,7 +2112,6 @@ async def test_enforce_grid_charge_timed_charge_inactive_outside_active_month(
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     for month in (11, 12, 1):
         await coordinator.async_set_timed_charge_month(month, True)
     for month in set(ALL_MONTHS) - {11, 12, 1}:
@@ -2180,7 +2138,6 @@ async def test_enforce_grid_charge_timed_charge_active_in_active_month(hass) -> 
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     for month in set(ALL_MONTHS) - {11, 12, 1}:
         await coordinator.async_set_timed_charge_month(month, False)
     await coordinator.async_set_timed_charge_enabled(True)
@@ -2212,7 +2169,6 @@ async def test_enforce_grid_charge_grid_serving_respects_active_months(hass) -> 
     await coordinator.async_set_grid_serving_start(dt_time(11, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
         await coordinator.async_set_grid_serving_month(month, False)
     await coordinator.async_set_grid_serving_enabled(True)
@@ -2241,7 +2197,6 @@ async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -
     await coordinator.async_set_grid_serving_start(dt_time(11, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
         await coordinator.async_set_grid_serving_month(month, False)
     await coordinator.async_set_grid_serving_enabled(True)
@@ -2267,7 +2222,6 @@ async def test_enforce_grid_charge_inactive_when_all_months_deselected(hass) -> 
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_max_charge_power(3000)
     for month in ALL_MONTHS:
         await coordinator.async_set_timed_charge_month(month, False)
     await coordinator.async_set_timed_charge_enabled(True)

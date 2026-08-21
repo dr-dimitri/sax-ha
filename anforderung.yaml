@@ -239,13 +239,11 @@ requirement_timed_soc_charge:
        nicht automatisch zur Eigenverbrauchsdeckung, da Register 40049 = 0 %
        Netto-Leistungsfluss = 0 (weder Laden noch Entladen) erzwingt.
 
-       Alle drei Software-Einstellungen dieses Abschnitts ("Max. SOC",
-       "Netzladung Min. SOC", "Max. Netzladeleistung") werden von ihrem
-       jeweiligen Coordinator-Setter (async_set_max_soc/
-       async_set_timed_charge_min_soc/async_set_max_charge_power,
-       coordinator._clamp_int) auf ihren gültigen Bereich geklemmt (0-100 %
-       bzw. MIN_POWER_LIMIT-MAX_POWER_LIMIT), nicht nur vom
-       NumberEntity-Schieberegler in der Oberfläche - der reguläre
+       Beide Software-Einstellungen dieses Abschnitts ("Max. SOC",
+       "Netzladung Min. SOC") werden von ihrem jeweiligen Coordinator-Setter
+       (async_set_max_soc/async_set_timed_charge_min_soc,
+       coordinator._clamp_int) auf ihren gültigen Bereich geklemmt (0-100 %),
+       nicht nur vom NumberEntity-Schieberegler in der Oberfläche - der reguläre
        Service-Call-Pfad (async_set_native_value) ist dadurch zwar bereits
        über native_min_value/native_max_value abgesichert, der
        RestoreEntity-Pfad beim Neustart (async_added_to_hass) ruft den
@@ -288,17 +286,20 @@ requirement_timed_soc_charge:
        zurückgesetzt.
     2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
-       konfigurierten Zeitfensters (time.py, "Netzladung Start"/"Netzladung
-       Ende", HH:MM, darf über Mitternacht laufen), im aktiven Monat, "Max.
-       Netzladeleistung" (number.py) gesetzt, "Netzladung Min. SOC"
+       konfigurierten Zeitfensters (time.py, "Start"/"Ende", HH:MM, darf
+       über Mitternacht laufen), im aktiven Monat, "Netzladung Min. SOC"
        (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
        zuvor unterschritten und noch nicht bis "Max. SOC" durchgeladen -
        siehe Hysterese unten) UND kein über die einheitliche
        Zyklen-Hysterese (siehe unten "PV-Überschuss-Prüfung") bestätigter
        PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py,
-       50 W) am Smart Meter gemessen, wird Register 40049 auf einen
-       negativen, aus "Max. Netzladeleistung" umgerechneten Sollwert
-       gesetzt.
+       50 W) am Smart Meter gemessen, wird Register 40049 auf den maximal
+       möglichen negativen Sollwert gesetzt (MIN_SETPOINT_POWER, sättigt in
+       _watts_to_ic_setpoint_raw auf -100 %) - eine frühere, konfigurierbare
+       "Max. Netzladeleistung" (number.py, SaxPowerChargeLimitNumber) wurde
+       entfernt, weil der eingestellte Watt-Wert in der Praxis keinen
+       Einfluss auf die tatsächliche Ladeleistung hatte (er sättigte
+       ohnehin fast immer auf denselben Prozentwert).
 
        "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
        SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
@@ -327,7 +328,7 @@ requirement_timed_soc_charge:
     3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
        auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
        geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
-       Deaktivierung/fehlender Max.-Netzladeleistung auch den Fall, dass
+       Deaktivierung auch den Fall, dass
        während eines laufenden Zeitfensters PV-Überschuss über dem
        Schwellwert über die einheitliche Zyklen-Hysterese (siehe unten)
        bestätigt wird - die Netzladung wird dann innerhalb weniger
@@ -387,32 +388,31 @@ requirement_timed_soc_charge:
     Der ältere Basic-Mode-P-Sollwert (Register 41) bleibt ausschließlich
     für den manuellen start_grid_charge/stop_grid_charge-Service erhalten
     (absoluter Watt-Sollwert, freie Vorzeichenwahl, eigener
-    Hintergrund-Task). Die Integration schreibt die Basic-Mode-Register
-    43/44 (Ent-/Ladeleistungsgrenzwert) nicht mehr; Register 43 wird gar
-    nicht mehr gelesen, Register 44 nur noch einmalig als Vorgabewert (s.
-    u.).
+    Hintergrund-Task). Die Integration liest/schreibt die Basic-Mode-
+    Register 43/44 (Ent-/Ladeleistungsgrenzwert) nicht mehr - eine frühere
+    Software-Einstellung "Max. Netzladeleistung" (number.py,
+    SaxPowerChargeLimitNumber), die Register 44 einmalig als Vorgabewert
+    gelesen hat, wurde entfernt: der eingestellte Watt-Wert hatte in der
+    Praxis keinen Einfluss auf die tatsächliche Ladeleistung. Zeitgesteuertes
+    und preisoptimiertes Laden fordern stattdessen immer die maximal
+    mögliche Ladeleistung an (siehe Punkt 2 oben).
 
-    "Max. SOC", "Max. Netzladeleistung" und "Netzladung Min. SOC" sind reine
-    Software-Zustände (RestoreEntity, number.py) - "Max. SOC"/"Max.
-    Netzladeleistung" sind dabei zentrale, von Netzladung UND
-    netzdienlichem Laden gemeinsam genutzte Einstellungen, "Netzladung Min.
-    SOC" ist eine reine Netzladung-Einstellung (siehe oben). Eine Änderung
-    wirkt jeweils sofort (async_set_max_soc/async_set_max_charge_power/
+    "Max. SOC" und "Netzladung Min. SOC" sind reine Software-Zustände
+    (RestoreEntity, number.py) - "Max. SOC" ist dabei eine zentrale, von
+    Netzladung UND netzdienlichem Laden gemeinsam genutzte Einstellung,
+    "Netzladung Min. SOC" ist eine reine Netzladung-Einstellung (siehe
+    oben). Eine Änderung wirkt jeweils sofort (async_set_max_soc/
     async_set_timed_charge_min_soc werten _async_enforce_grid_charge
-    unmittelbar neu aus statt erst beim nächsten Poll-Zyklus). Alle drei
+    unmittelbar neu aus statt erst beim nächsten Poll-Zyklus). Beide
     persistieren über Neustarts hinweg; gibt es (z. B. direkt nach der
     Ersteinrichtung) noch keinen gespeicherten Zustand, setzen sie sich
-    explizit auf einen Vorgabewert statt "unbekannt"/0 zu bleiben: "Max.
-    SOC" UND "Netzladung Min. SOC" auf MAX_SOC (100 %,
+    explizit auf MAX_SOC (100 %,
     SaxPowerMaxSocNumber/SaxPowerTimedChargeMinSocNumber.
-    async_added_to_hass), "Max. Netzladeleistung" auf den zu diesem
-    Zeitpunkt vom Gerät gelesenen Wert von Basic-Mode-Register 44
-    (SaxPowerChargeLimitNumber.async_added_to_hass) - danach rein
-    Software-seitig, kein weiterer Register-Write.
+    async_added_to_hass) statt "unbekannt"/0 zu bleiben.
 
     Aktiviert-Zustand sowie Start-/Endzeit des zeitgesteuerten Ladens
-    ("Netzladung aktiv"/"Netzladung Start"/"Netzladung Ende") werden
-    ebenfalls über RestoreEntity über Neustarts hinweg persistiert.
+    ("Netzladung aktiv"/"Start"/"Ende", time.py) werden ebenfalls über
+    RestoreEntity über Neustarts hinweg persistiert.
     Zusätzlich zeigt ein Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an,
     ob gerade zeitgesteuert nachgeladen wird - unabhängig von der
     Max-SOC-Sperre.
@@ -436,11 +436,11 @@ requirement_timed_soc_charge:
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
        Fenster), _async_enforce_grid_charge (Start/Stop des
        zeitgesteuerten Ladens bei Zielerreichung/Fensterende/
-       Deaktivierung/fehlender Max.-Netzladeleistung SOWIE die
-       Max-SOC-Sperre unabhängig vom zeitgesteuerten Laden - Aktivierung
-       bei Zielerreichung, Freigabe beim Unterschreiten), die
-       Watt-zu-Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
-       Schreibintervall (_sun_ic_write_interval) ab."
+       Deaktivierung SOWIE die Max-SOC-Sperre unabhängig vom
+       zeitgesteuerten Laden - Aktivierung bei Zielerreichung, Freigabe
+       beim Unterschreiten), die Watt-zu-Prozent-Umrechnung (inkl.
+       Klemmung auf ±100 %) sowie das Schreibintervall
+       (_sun_ic_write_interval) ab."
     - "tests/test_coordinator.py deckt zusätzlich den Netzbezug-Freigabe-
        Trigger der geräteunabhängigen (nicht zeitfenstergebundenen)
        Max-SOC-Sperre ab: keine Freigabe bei nur einem Zyklus Netzbezug über
@@ -463,33 +463,26 @@ requirement_timed_soc_charge:
     - "tests/test_integration_live.py enthält End-to-End-Tests, die über
        echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren des
        zeitgesteuerten Ladens innerhalb des Zeitfensters Register 40051 auf
-       Sollwertvorgabe und Register 40049 auf den erwarteten Sollwert
-       setzt (und Deaktivieren Register 40051 wieder auf
-       SmartMeter-Nullregelung zurücksetzt), dass die Max-SOC-Sperre
+       Sollwertvorgabe und Register 40049 auf den erwarteten (maximal
+       möglichen) Sollwert setzt (und Deaktivieren Register 40051 wieder
+       auf SmartMeter-Nullregelung zurücksetzt), dass die Max-SOC-Sperre
        unabhängig davon Register 40049 auf 0 % hält, sowie Tests für die
        Vorbelegung aus dem Config Entry beim allerersten Start (mit und
-       ohne hinterlegte Netzladung-Werte) und für die Max.-SOC-/
-       Max.-Netzladeleistung-Defaults."
+       ohne hinterlegte Netzladung-Werte) und für den Max.-SOC-Default."
     - "tests/test_config_flow.py deckt den zweistufigen Ersteinrichtungs-
        Flow ab: Defaults bei leerem zweiten Schritt sowie explizit
        angegebene Werte."
     - "number.py enthält keine featurespezifische Leistungseinstellung für
-       zeitgesteuertes Laden - es nutzt ausschließlich die zentralen
-       Einstellungen 'Max. SOC' und 'Max. Netzladeleistung'."
-    - "tests/test_number.py deckt die Vorbelegungslogik von 'Max.
-       Netzladeleistung' ab: allererster Start (Vorbelegung aus Register 44),
-       ein restaurierter 0-Wert (fällt ebenfalls auf Register 44 zurück -
-       Regressionstest für eine zuvor gemeldete Fehlvorbelegung bei
-       bestehenden Config Entries) sowie ein echter, zuvor gesetzter
-       Nutzerwert (hat Vorrang)."
+       zeitgesteuertes Laden - weder eine eigene Watt-Einstellung (Ladung
+       erfolgt immer mit maximal möglicher Leistung) noch eine eigene
+       Ziel-SOC-Einstellung (nutzt die zentrale 'Max. SOC')."
     - "tests/test_coordinator.py deckt coordinator._clamp_int isoliert ab
        (Wert innerhalb/genau auf den Grenzen/außerhalb in beide Richtungen/
        None bleibt None). tests/test_number.py deckt zusätzlich den
-       RestoreEntity-Regressionsfall für alle drei betroffenen Einstellungen
-       ab: ein außerhalb [MIN_SOC, MAX_SOC] bzw.
-       [MIN_POWER_LIMIT, MAX_POWER_LIMIT] liegender wiederhergestellter Wert
-       wird beim Neustart auf die jeweilige Grenze geklemmt statt ungeprüft
-       übernommen zu werden."
+       RestoreEntity-Regressionsfall für beide betroffenen Einstellungen
+       ab: ein außerhalb [MIN_SOC, MAX_SOC] liegender wiederhergestellter
+       Wert wird beim Neustart auf die jeweilige Grenze geklemmt statt
+       ungeprüft übernommen zu werden."
 
 # ==============================================================================
 # ANFORDERUNG: NETZDIENLICHES LADEN (NUR MIT PV-ÜBERSCHUSS)
@@ -500,13 +493,12 @@ requirement_grid_serving_charge:
   status: done
   description: >
     Eigenständiges Software-Feature (Schalter "Netzdienliches Laden aktiv",
-    switch.py, sowie Zeitfenster "Netzdienliches Laden Start"/"Ende",
-    time.py), das sich mit zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE) den
-    SunSpec-Modus-Schreibpfad (_async_sun_charge_loop), die zentrale
-    Einstellung "Max. SOC" (Ziel-SOC) sowie die Max-SOC-Sperre teilt - siehe
+    switch.py, sowie Zeitfenster "Start"/"Ende", time.py), das sich mit
+    zeitgesteuertem Laden (REQ-TIMED-SOC-CHARGE) den SunSpec-Modus-
+    Schreibpfad (_async_sun_charge_loop), die zentrale Einstellung "Max.
+    SOC" (Ziel-SOC) sowie die Max-SOC-Sperre teilt - siehe
     SaxPowerCoordinator._async_enforce_grid_charge/_async_step_grid_serving.
-    "Max. Netzladeleistung" wird dafür NICHT benötigt, da netzdienliches
-    Laden nie einen Sollwert > 0 schreibt. Im Unterschied zum
+    Netzdienliches Laden schreibt nie einen Sollwert > 0. Im Unterschied zum
     zeitgesteuerten Laden schreibt netzdienliches Laden selbst NIE einen aus
     dem PV-Überschuss berechneten Ladesollwert, sondern überlässt die
     eigentliche Ladung der geräteeigenen SmartMeter-Nullregelung (Register
@@ -732,9 +724,9 @@ requirement_grid_serving_charge:
        ausgewählten Monate, aktiv innerhalb) sowie den Fall, dass ein
        Feature bei keinem ausgewählten Monat ganzjährig inaktiv bleibt."
     - "switch.py/time.py/sensor.py enthalten keine eigene
-       Leistungseinstellung für netzdienliches Laden - es nutzt dieselben
-       zentralen Einstellungen wie zeitgesteuertes Laden ('Max. SOC', 'Max.
-       Netzladeleistung')."
+       Leistungseinstellung für netzdienliches Laden - es schreibt nie
+       einen Sollwert > 0 und nutzt nur die zentrale Einstellung 'Max.
+       SOC' wie zeitgesteuertes Laden."
 
 # ==============================================================================
 # ANFORDERUNG: MANUELLE ENTLADUNG (VERWORFEN)
@@ -953,7 +945,7 @@ requirement_diagnostics:
     Geräteseite an (keine eigene Registrierung nötig). Für Support-/
     Bugreport-Zwecke werden neben den redigierten Config-Entry-Daten auch
     coordinator.data (alle aktuellen Messwerte) sowie der relevante interne
-    Coordinator-Zustand exportiert (Max-SOC-Sperre, Max. Netzladeleistung,
+    Coordinator-Zustand exportiert (Max-SOC-Sperre,
     Netzladung/SunSpec-Netzladung aktiv, zeitgesteuertes/netzdienliches
     Laden, SunSpec-Modus-Erreichbarkeit) - reine Aggregation bereits
     vorhandener Coordinator-Properties, keine neue Business-Logik.
@@ -1023,23 +1015,28 @@ requirement_dynamic_price_charge:
       smart    - wie relative, leitet die Stundenzahl aber aus dem noch
                  fehlenden Energiebedarf ab: ("Max. SOC" - SOC) × Kapazität
                  (SunSpec-Register 40097) abzüglich des nutzbaren Anteils
-                 der PV-Prognose, geteilt durch "Max. Netzladeleistung".
-                 Deckt die Prognose den Bedarf vollständig, wird gar kein
-                 Netzstrom eingekauft (Status "PV-Prognose deckt Bedarf").
-                 "Anzahl Stunden" bleibt dabei Obergrenze. Fehlen Kapazität,
-                 SOC oder Ladeleistung, verhält sich smart wie relative.
+                 der PV-Prognose, geteilt durch die angenommene Ladeleistung
+                 ("ic_max_power_reference", Register 40053 - der vom Gerät
+                 selbst gemeldete Bezugspunkt, seit dem Wegfall von "Max.
+                 Netzladeleistung" die realistischere Grundlage, siehe
+                 REQ-TIMED-SOC-CHARGE). Deckt die Prognose den Bedarf
+                 vollständig, wird gar kein Netzstrom eingekauft (Status
+                 "PV-Prognose deckt Bedarf"). "Anzahl Stunden" bleibt dabei
+                 Obergrenze. Fehlen Kapazität, SOC oder Ladeleistung,
+                 verhält sich smart wie relative.
 
     Planungshorizont ist ein gleitendes Fenster von
     PRICE_PLAN_HORIZON_HOURS (24 h) über die jeweils bekannten Preisdaten
     (Rest von heute plus ggf. bereits veröffentlichtes Morgen), nicht der
     Kalendertag.
 
-    Leistung: "Max. Netzladeleistung" (gemeinsam mit dem zeitgesteuerten
-    Laden genutzt, keine zusätzliche Einstellung). Ziel-SOC: derselbe Wert
-    wie "Max. SOC" - keine eigene Einstellung, sondern die einzige,
-    geräteweite SOC-Obergrenze; ist sie erreicht, endet die Netzladung UND
-    löst zusätzlich die Max-SOC-Sperre aus (genau wie beim zeitgesteuerten
-    Laden).
+    Leistung: lädt wie das zeitgesteuerte Laden immer mit maximal möglicher
+    Leistung, keine eigene (oder geteilte) Watt-Einstellung (siehe
+    REQ-TIMED-SOC-CHARGE zum Wegfall von "Max. Netzladeleistung"). Ziel-SOC:
+    derselbe Wert wie "Max. SOC" - keine eigene Einstellung, sondern die
+    einzige, geräteweite SOC-Obergrenze; ist sie erreicht, endet die
+    Netzladung UND löst zusätzlich die Max-SOC-Sperre aus (genau wie beim
+    zeitgesteuerten Laden).
 
     Vorrang innerhalb von _async_enforce_grid_charge: Max-SOC-Sperre >
     zeitgesteuertes Laden > preisoptimiertes Laden > netzdienliches Laden.
@@ -1082,7 +1079,7 @@ requirement_dynamic_price_charge:
     - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
        Preisdaten, Warten auf Preisabfall, Lade aus Netz, PV-Prognose deckt
        Bedarf, Pausiert (PV-Überschuss), Pausiert (Max. SOC), Pausiert
-       (Max. Netzladeleistung fehlt), Pausiert (Netzladung aktiv). Seine
+       (Netzladung aktiv). Seine
        Attribute führen Strategie, aktuellen Preis, wirksame Preisgrenze,
        benötigte Stunden, eingerechnete PV-Prognose, die konfigurierten
        Quell-Sensoren und die geplanten Zeitfenster mit."
@@ -1097,10 +1094,9 @@ requirement_dynamic_price_charge:
        Daten), Planberechnung je Strategie inkl. Planungshorizont,
        Smart-Modus mit und ohne ausreichende PV-Prognose sowie ohne
        Kapazität, Schreibpfad und Rückkehr in die Nullregelung, Abbruch bei
-       Max-SOC/PV-Überschuss/fehlender Ladeleistung, Vorrang des
-       zeitgesteuerten Ladens, Konfliktdialog (Anlegen, Bestätigen,
-       Abbrechen, force) und das Restore-Verhalten der Select-/
-       Switch-Entities."
+       Max-SOC/PV-Überschuss, Vorrang des zeitgesteuerten Ladens,
+       Konfliktdialog (Anlegen, Bestätigen, Abbrechen, force) und das
+       Restore-Verhalten der Select-/Switch-Entities."
     - "tests/test_number.py deckt die Vorbelegung und Klemmung der beiden
        neuen Number-Entities (Preisgrenze, Anzahl Stunden) ab."
     - "tests/test_config_flow.py deckt den Options Flow ab (Speichern und
@@ -1140,8 +1136,8 @@ requirement_bundled_dashboard:
     einheitlich nur noch der reine Monatsname ist (z. B. "Januar" statt
     "Netzladung aktiv im Januar"). Bei "Ladeautomatik" steckt zusätzlich
     eine dritte Karte "Einstellungen" dazwischen (Mindest-SOC für den
-    Ladestart, Ladeleistungsbegrenzung) - "Netzdienliches Laden" braucht
-    diese Einstellungen nicht. Weder die geräteweite Max-SOC-Sperre (die
+    Ladestart) - "Netzdienliches Laden" braucht diese Einstellung nicht.
+    Weder die geräteweite Max-SOC-Sperre (die
     ist mechanismus-übergreifend und gehört fachlich nicht in einen
     einzelnen Automatik-Tab) noch die reinen Status-Textanzeigen
     ("Zeitgesteuertes/Netzdienliches Laden aktiv") sind in den beiden Tabs
@@ -1151,13 +1147,21 @@ requirement_bundled_dashboard:
     Tab die wichtigsten Ein/Aus-Schalter (Speicher, zeitgesteuertes/
     netzdienliches/preisoptimiertes Laden) als "tile"-Karten statt als
     Listenzeile. Ladezustand und Zelltemperatur erscheinen nebeneinander
-    als Gauge-Karten mit Nadel (_gauge_card, `needle: true`): SOC über
-    `severity` (grün ab 50 %, orange ab 20 %, sonst rot - ein einfaches,
-    monoton steigendes Farbmapping reicht hier); Zelltemperatur über
-    `segments` statt `severity`, weil das Farbmuster nicht monoton ist
-    (0-5 °C rot/zu kalt, 5-32 °C grün/normal, 32-40 °C rot/zu heiß - mit nur
-    den drei festen severity-Schlüsseln green/yellow/red nicht abbildbar,
-    "red" könnte sonst nur einmal vorkommen). Alle Kartenbeschriftungen
+    als Gauge-Karten mit Nadel (_gauge_card, `needle: true`), beide
+    ausschließlich über `segments` (nicht über das alternative
+    `severity`-Mapping): SOC rot ab 0 %, gelb ab 20 %, grün ab 50 %;
+    Zelltemperatur 0-5 °C rot/zu kalt, 5-32 °C grün/normal, 32-40 °C
+    rot/zu heiß (ein nicht-monotones Farbmuster, mit den drei festen
+    severity-Schlüsseln green/yellow/red ohnehin nicht abbildbar, "red"
+    könnte dort nur einmal vorkommen). `_gauge_card` unterstützt bewusst
+    nur noch `segments`, nicht mehr zusätzlich `severity`: Home Assistants
+    Gauge-Karte färbt `severity`-Farben über die Theme-Variablen
+    (--success-/--warning-/--error-color), `segments`-Farben dagegen als
+    wörtliche CSS-Farbnamen - dieselbe Zeichenkette "red"/"green" sah in
+    den beiden Modi unterschiedlich aus, wenn eine Gauge severity und die
+    andere segments verwendete. Beide Gauges verwenden deshalb identische
+    Farbwerte ("red"/"yellow"/"green") über denselben Mechanismus. Alle
+    Kartenbeschriftungen
     verwenden nur den reinen, übersetzten Entity-Namen (z. B.
     "Ladezustand") statt des vollen, geräteweiten Anzeigenamens ("SAX Power
     Home Ladezustand") - async_build_dashboard_config lädt dazu dieselben
@@ -1240,8 +1244,9 @@ requirement_bundled_dashboard:
        end-to-end ab (Geräte-Lookup, Aufruf von async_create_dashboard mit
        force=False bzw. force=True)."
     - "tests/test_dashboard.py deckt die beiden Gauge-Karten ab (SOC:
-       Entity, needle, severity-Schwellwerte 50/20 %; Zelltemperatur:
-       Entity, needle, min/max, nicht-monotone segments 0/5/32), sowie
-       dass Kartenzeilen den geräteprefix-freien, übersetzten Namen
-       verwenden, und dass force=True ein bereits bestehendes Dashboard
-       überschreibt, ohne das Panel erneut zu registrieren."
+       Entity, needle, segments-Schwellwerte 0/20/50 %; Zelltemperatur:
+       Entity, needle, min/max, nicht-monotone segments 0/5/32; beide
+       verwenden identische red/green-Farbwerte), sowie dass Kartenzeilen
+       den geräteprefix-freien, übersetzten Namen verwenden, und dass
+       force=True ein bereits bestehendes Dashboard überschreibt, ohne das
+       Panel erneut zu registrieren."

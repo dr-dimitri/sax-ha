@@ -231,12 +231,15 @@ Hochrechnung für diese Zeit, statt sie später fälschlich nachzuholen.
 | Entität | Bereich | Beschreibung |
 | --- | --- | --- |
 | Max. SOC | 0–100 % | Ziel-Ladestand für die [Max-SOC-Sperre](#max-soc-sperre); gleichzeitig oberes Ziel der Netzladung. Ohne vorherige Einstellung 100 % (nicht 0) |
-| Max. Netzladeleistung | 0–10 000 W (Schritt 50 W) | Ladeleistung für Netzladung und preisoptimiertes Laden. Beim allerersten Start mit dem Ladeleistungsgrenzwert des Geräts (Register 44) vorbelegt |
 | Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 100 % |
 | Preisoptimiertes Laden Preisgrenze | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
 | Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
 
-Alle Werte bleiben über Neustarts hinweg erhalten.
+Alle Werte bleiben über Neustarts hinweg erhalten. Netzladung und
+preisoptimiertes Laden laden dabei immer mit der maximal möglichen
+Leistung - eine eigene Watt-Einstellung dafür gibt es bewusst nicht mehr,
+weil sie in der Praxis keinen messbaren Einfluss auf die tatsächliche
+Ladeleistung hatte.
 
 **Schalter:**
 
@@ -256,13 +259,12 @@ für das netzdienliche Laden (jeweils HH:MM).
 "Manuell / Aus", "Absoluter Preis", "Relativ / Günstigste Stunden" und
 "Smart / PV-optimiert".
 
-**Warum gibt es nicht für jede Automatik eigene Werte?** "Max. SOC" und
-"Max. Netzladeleistung" werden bewusst geteilt, damit es keine zwei
-konkurrierenden Obergrenzen gibt - "Max. SOC" ist die einzige SOC-Einstellung
-der Integration und damit auch das Ziel des preisoptimierten Ladens. Nur
-dort, wo eine Automatik wirklich etwas Eigenes braucht, gibt es eine eigene
-Einstellung: "Netzladung Min. SOC" (nur die Netzladung braucht eine
-Startschwelle).
+**Warum gibt es nicht für jede Automatik eigene Werte?** "Max. SOC" wird
+bewusst geteilt, damit es keine zwei konkurrierenden Obergrenzen gibt - "Max.
+SOC" ist die einzige SOC-Einstellung der Integration und damit auch das Ziel
+des preisoptimierten Ladens. Nur dort, wo eine Automatik wirklich etwas
+Eigenes braucht, gibt es eine eigene Einstellung: "Netzladung Min. SOC" (nur
+die Netzladung braucht eine Startschwelle).
 
 ## Die drei Lade-Automatiken
 
@@ -355,10 +357,10 @@ von PV-Überschuss. Typischer Anwendungsfall: *"Lade auf 90 %, wenn es zwischen
 | Netzladung Min. SOC | Startschwelle: erst unterhalb dieses Ladestands wird geladen |
 | Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt |
 | Max. SOC | Ziel, bis zu dem geladen wird (geteilte Einstellung) |
-| Max. Netzladeleistung | Ladeleistung (geteilte Einstellung) |
 
 Alle Werte bleiben über Neustarts hinweg erhalten; ein eingerichteter Zeitplan
-muss also nicht nach jedem Neustart neu gesetzt werden.
+muss also nicht nach jedem Neustart neu gesetzt werden. Geladen wird immer
+mit der maximal möglichen Leistung.
 
 ### Wann geladen wird
 
@@ -369,8 +371,7 @@ Geladen wird nur, wenn **alle** Bedingungen zutreffen:
 - die Uhrzeit liegt im Zeitfenster,
 - der Ladestand liegt unter "Netzladung Min. SOC" (siehe Hysterese unten),
 - "Max. SOC" ist noch nicht erreicht,
-- am Smart Meter liegt kein PV-Überschuss über 50 W an,
-- "Max. Netzladeleistung" ist gesetzt.
+- am Smart Meter liegt kein PV-Überschuss über 50 W an.
 
 **Zeitfenster über Mitternacht** sind erlaubt (z. B. 23:00–05:00). Sind Start
 und Ende gleich – oder ist eines von beiden leer –, gilt das Fenster als leer
@@ -399,10 +400,10 @@ niedrigerer Wert gesetzt wird.
 
 > **Technischer Hintergrund:** Geschrieben wird über den SunSpec-Modus
 > ("Immediate Controls"): Register 40051 auf Sollwertvorgabe, dann Register
-> 40049 mit der aus "Max. Netzladeleistung" errechneten Leistung in Prozent der
-> Referenz-Maximalleistung. Beide Register werden periodisch neu geschrieben
-> (abgeleitet aus dem geräteseitig gemeldeten Timeout, Register 40050), weil das
-> Gerät einen alten Sollwert sonst verwirft.
+> 40049 auf den maximal möglichen negativen Sollwert (sättigt auf -100 % der
+> Referenz-Maximalleistung). Beide Register werden periodisch neu
+> geschrieben (abgeleitet aus dem geräteseitig gemeldeten Timeout, Register
+> 40050), weil das Gerät einen alten Sollwert sonst verwirft.
 >
 > Der manuelle Service `start_grid_charge`/`stop_grid_charge` benutzt einen
 > **anderen** Weg (Basic-Mode-Register 41, absoluter Watt-Sollwert) und läuft
@@ -443,8 +444,8 @@ Messwert weiterläuft).
 | Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt – z. B. nur Mai bis August, 11–14 Uhr |
 | Max. SOC | Ziel für die Max-SOC-Sperre (geteilte Einstellung) |
 
-"Max. Netzladeleistung" wird hier **nicht** gebraucht, weil netzdienliches Laden
-nie einen Sollwert größer 0 schreibt.
+Eine eigene Leistungseinstellung wird hier **nicht** gebraucht, weil
+netzdienliches Laden nie einen Sollwert größer 0 schreibt.
 
 Es gibt keinen Vorbelegungsschritt bei der Ersteinrichtung – die Automatik ist
 ab Werk aus und wird ausschließlich über diese Entitäten konfiguriert. Alle
@@ -501,7 +502,8 @@ nächsten 24 Stunden.
 
 1. Fehlende Energie = ("Max. SOC" − aktueller Ladestand) × Speicherkapazität
 2. minus nutzbarer Anteil der PV-Prognose
-3. Rest geteilt durch "Max. Netzladeleistung" = benötigte Ladestunden
+3. Rest geteilt durch die vom Gerät gemeldete Referenz-Maximalleistung =
+   benötigte Ladestunden
 4. Genau so viele der günstigsten Stunden werden eingeplant
 
 Deckt die Prognose den Bedarf vollständig, wird gar kein Netzstrom eingekauft
@@ -516,8 +518,9 @@ nicht erreichbar), verhält sich "Smart" wie "Relativ".
 
 ### Leistung, Ziel-SOC und Abbruchgründe
 
-Geladen wird mit **"Max. Netzladeleistung"** – derselben Einstellung wie bei der
-Netzladung, damit es keine zwei konkurrierenden Leistungswerte gibt.
+Geladen wird wie bei der Netzladung immer mit der **maximal möglichen
+Leistung** – eine eigene (oder geteilte) Watt-Einstellung dafür gibt es
+nicht.
 
 Der **Ziel-SOC ist derselbe Wert wie "Max. SOC"** – keine eigene Einstellung.
 Ist er erreicht, endet die Netzladung UND zusätzlich greift die
@@ -530,8 +533,6 @@ Weitere Abbruchgründe, jeweils sofort wirksam (nicht erst im nächsten
 - **PV-Überschuss** über 50 W am Smart Meter – die eigene Sonne ist immer
   günstiger als Netzstrom.
 - **Netzladung aktiv** – das zeitgesteuerte Laden hat Vorrang.
-- **"Max. Netzladeleistung" steht auf 0** – ohne Leistung gibt es keinen
-  Sollwert zu schreiben.
 
 Der Ladeplan wird **alle 60 Sekunden** neu berechnet, zusätzlich sofort bei jeder
 Einstellungsänderung und bei jedem Zustandswechsel des Preis- oder
@@ -539,9 +540,9 @@ Prognose-Sensors. Die oben genannten Abbruchgründe werden dagegen bei **jedem**
 Abfragezyklus geprüft, greifen also ohne Verzögerung.
 
 > **Technischer Hintergrund:** Geladen wird über denselben SunSpec-Schreibpfad
-> wie bei der Netzladung (Register 40051 auf Sollwertvorgabe, Register 40049 auf
-> die gewünschte Ladeleistung). Ist die Bedingung nicht erfüllt, geht der
-> Speicher in die SmartMeter-Nullregelung zurück.
+> wie bei der Netzladung (Register 40051 auf Sollwertvorgabe, Register 40049
+> auf den maximal möglichen negativen Sollwert). Ist die Bedingung nicht
+> erfüllt, geht der Speicher in die SmartMeter-Nullregelung zurück.
 
 ### Statusanzeige
 
@@ -557,7 +558,6 @@ das aktuelle Verhalten:
 | PV-Prognose deckt Bedarf | Strategie "Smart": morgen kommt genug Sonne, es wird nichts zugekauft |
 | Pausiert (PV-Überschuss) | Am Smart Meter wird Einspeisung gemessen |
 | Pausiert (Max. SOC) | Die übergeordnete Max-SOC-Sperre greift |
-| Pausiert (Max. Netzladeleistung fehlt) | "Max. Netzladeleistung" steht auf 0 |
 | Pausiert (Netzladung aktiv) | Das zeitgesteuerte Laden hat gerade Vorrang |
 
 Die Attribute dieses Sensors zeigen zusätzlich Strategie, aktuellen Preis,

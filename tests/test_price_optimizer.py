@@ -33,7 +33,6 @@ from custom_components.sax_power.const import (
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
     PRICE_STATUS_PAUSED_MAX_SOC,
-    PRICE_STATUS_PAUSED_NO_POWER,
     PRICE_STATUS_PAUSED_PV_SURPLUS,
     PRICE_STATUS_PAUSED_TIMED_CHARGE,
     PRICE_STATUS_PV_FORECAST_COVERS,
@@ -443,10 +442,22 @@ def _waiting_plan() -> PricePlan:
     )
 
 
+def test_context_uses_ic_max_power_reference_as_charge_power(hass) -> None:
+    """ "Max. Netzladeleistung" wurde entfernt (siehe anforderung.yaml,
+    REQ-TIMED-SOC-CHARGE) - die Bedarfsrechnung im Smart-Modus nimmt
+    stattdessen "ic_max_power_reference" (Register 40053, vom Gerät selbst
+    gemeldet) als angenommene Ladeleistung."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
+
+    ctx = coordinator.price_planner._context()
+
+    assert ctx.charge_power_w == 4600
+
+
 async def _enable_price_charge(coordinator: SaxPowerCoordinator) -> None:
     await coordinator.async_set_price_charge_strategy(PRICE_STRATEGY_RELATIVE)
     await coordinator.async_set_max_soc(80)
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_price_charge_enabled(True)
 
 
@@ -471,10 +482,12 @@ async def test_price_charge_writes_setpoint_when_plan_says_charge(hass) -> None:
             value=SUN_IC_CONTROL_MODE_SETPOINT,
             device_id=100,
         )
-        # -3000 W von 4600 W Referenz = -65.217 %, sunssf -2 -> -6522.
+        # Lädt immer mit maximal möglicher Leistung (MIN_SETPOINT_POWER
+        # sättigt in _watts_to_ic_setpoint_raw auf -100 %), sunssf -2 ->
+        # -10000.
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=to_unsigned16(-6522),
+            value=to_unsigned16(-10000),
             device_id=100,
         )
     finally:
@@ -530,26 +543,11 @@ async def test_price_charge_paused_by_pv_surplus(hass) -> None:
     assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_PV_SURPLUS
 
 
-async def test_price_charge_paused_without_charge_power(hass) -> None:
-    """Ohne "Max. Netzladeleistung" gibt es keinen Sollwert zum Schreiben."""
-    coordinator = _make_coordinator(hass)
-    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
-    await coordinator.async_set_price_charge_strategy(PRICE_STRATEGY_RELATIVE)
-    await coordinator.async_set_price_charge_enabled(True)
-    coordinator.price_planner.plan = _charging_plan()
-
-    await coordinator._async_enforce_grid_charge({"soc": 50})
-
-    assert coordinator.price_charge_active is False
-    assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_NO_POWER
-
-
 async def test_timed_charge_takes_priority_over_price_charge(hass) -> None:
     """Beide zugleich (nur über force herstellbar): die Netzladung gewinnt,
     der Status des preisoptimierten Ladens benennt den Grund."""
     coordinator = _make_coordinator(hass)
     coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
-    await coordinator.async_set_max_charge_power(3000)
     await coordinator.async_set_max_soc(90)
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))

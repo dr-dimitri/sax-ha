@@ -988,6 +988,14 @@ requirement_dynamic_price_charge:
     werden gleichermaßen unterstützt; ct/kWh wird anhand der Sensor-Einheit
     (oder einer expliziten Vorgabe) auf EUR/kWh umgerechnet.
 
+    Der Sensor "Aktueller Preis" (price_charge_current_price) liest den
+    Preis des gerade laufenden Slots unabhängig von Strategie und
+    Enabled-Schalter aus - er ist eine reine Info-Anzeige und bleibt daher
+    auch bei Strategie "off" oder deaktivierter Automatik gefüllt, solange
+    der konfigurierte Preis-Sensor auswertbare Daten für "jetzt" liefert
+    (price_optimizer.SaxPricePlanner._evaluate_price_charge berechnet ihn
+    deshalb vor den Enabled-/Strategie-Prüfungen).
+
     Arbeitsteilung: price_optimizer.SaxPricePlanner berechnet ohne jeden
     Modbus-Zugriff alle PRICE_EVAL_INTERVAL Sekunden (60s) einen Ladeplan
     aus Preisdaten, gewählter Strategie und optionaler PV-Prognose -

@@ -663,12 +663,18 @@ class SaxPricePlanner:
         self, now: datetime, slots: Sequence[PriceSlot], entity_id: str | None
     ) -> PricePlan:
         ctx = self._context()
+        # Der aktuelle Preis ist eine reine Info-Anzeige (price_charge_-
+        # current_price-Sensor) und wird deshalb schon vor den Enabled-/
+        # Strategie-Prüfungen ermittelt - sonst zeigt der Sensor "unbekannt",
+        # obwohl der Preis-Sensor korrekt konfiguriert ist, nur weil die
+        # Lade-Automatik (noch) ausgeschaltet ist.
+        price_now = current_price(slots, now)
         if not ctx.enabled or ctx.strategy == PRICE_STRATEGY_OFF:
-            return PricePlan(status=PRICE_STATUS_OFF)
+            return PricePlan(status=PRICE_STATUS_OFF, current_price=price_now)
         if not entity_id:
             # Feature eingeschaltet, aber im Options Flow ist (noch) kein
             # Preis-Sensor hinterlegt - ohne Preise gibt es nichts zu planen.
-            return PricePlan(status=PRICE_STATUS_NO_PRICE_DATA)
+            return PricePlan(status=PRICE_STATUS_NO_PRICE_DATA, current_price=price_now)
         return compute_plan(now, slots, ctx)
 
     @property

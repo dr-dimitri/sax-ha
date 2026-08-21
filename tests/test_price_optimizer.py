@@ -24,6 +24,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
 from custom_components.sax_power.const import (
+    CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
     DOMAIN,
     ISSUE_PRICE_CHARGE_CONFLICT,
@@ -453,6 +454,42 @@ def test_context_uses_ic_max_power_reference_as_charge_power(hass) -> None:
     ctx = coordinator.price_planner._context()
 
     assert ctx.charge_power_w == 4600
+
+
+def test_evaluate_reports_current_price_even_when_price_charge_disabled(
+    hass,
+) -> None:
+    """price_charge_current_price ist eine reine Info-Anzeige und darf nicht
+    an der Lade-Automatik hängen - sonst zeigt sie "unbekannt", obwohl der
+    Preis-Sensor korrekt konfiguriert ist und aktuelle Daten liefert (siehe
+    anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE)."""
+    hass.states.async_set(
+        "sensor.epex_spot_data_market_price",
+        "0.179",
+        {
+            "unit_of_measurement": "EUR/kWh",
+            "data": [
+                {
+                    "start_time": _local(12).isoformat(),
+                    "end_time": _local(13).isoformat(),
+                    "price_per_kwh": 0.179,
+                }
+            ],
+        },
+    )
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_PRICE_SENSOR: "sensor.epex_spot_data_market_price"}
+    coordinator.data = {}
+
+    with patch(
+        "custom_components.sax_power.price_optimizer.dt_util.now",
+        return_value=_local(12, 30),
+    ):
+        plan = coordinator.price_planner.evaluate()
+
+    assert coordinator.price_charge_enabled is False
+    assert plan.status == PRICE_STATUS_OFF
+    assert plan.current_price == pytest.approx(0.179)
 
 
 async def _enable_price_charge(coordinator: SaxPowerCoordinator) -> None:

@@ -20,6 +20,7 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .const import (
+    CONF_CREATE_DASHBOARD,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_STRATEGY,
@@ -32,6 +33,7 @@ from .const import (
     CONF_TIMED_CHARGE_ENABLED,
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
+    DEFAULT_CREATE_DASHBOARD,
     DEFAULT_PORT,
     DEFAULT_PRICE_STRATEGY,
     DEFAULT_PRICE_UNIT,
@@ -92,6 +94,16 @@ STEP_GRID_CHARGE_SCHEMA = vol.Schema(
     }
 )
 
+# Dritter, optionaler Schritt der Ersteinrichtung (siehe async_step_dashboard):
+# bietet an, das mitgelieferte Lovelace-Dashboard anzulegen (dashboard.py).
+STEP_DASHBOARD_SCHEMA = vol.Schema(
+    {
+        vol.Optional(
+            CONF_CREATE_DASHBOARD, default=DEFAULT_CREATE_DASHBOARD
+        ): cv.boolean,
+    }
+)
+
 
 class CannotConnect(Exception):
     """TCP-Verbindung zum SAX Speicher (Basic Mode) konnte nicht hergestellt werden."""
@@ -135,6 +147,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     _connection_data: dict[str, Any]
+    _grid_charge_data: dict[str, Any]
 
     @staticmethod
     @callback
@@ -223,12 +236,35 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         REQ-TIMED-SOC-CHARGE.
         """
         if user_input is not None:
-            return self.async_create_entry(
-                title="SAX Power Home",
-                data={**self._connection_data, **user_input},
-            )
+            self._grid_charge_data = user_input
+            return await self.async_step_dashboard()
         return self.async_show_form(
             step_id="grid_charge", data_schema=STEP_GRID_CHARGE_SCHEMA
+        )
+
+    async def async_step_dashboard(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Dritter, optionaler Schritt der Ersteinrichtung: bietet an, das
+        mitgelieferte Lovelace-Dashboard anzulegen (siehe dashboard.py).
+
+        Das Dashboard selbst kann hier noch nicht gebaut werden - dafür
+        müssen die Entities erst existieren, was erst nach Anlage dieses
+        Eintrags und Weiterleitung an die Plattformen der Fall ist. Dieser
+        Schritt merkt nur die Entscheidung des Anwenders vor;
+        __init__.async_setup_entry führt sie anschließend aus.
+        """
+        if user_input is not None:
+            return self.async_create_entry(
+                title="SAX Power Home",
+                data={
+                    **self._connection_data,
+                    **self._grid_charge_data,
+                    **user_input,
+                },
+            )
+        return self.async_show_form(
+            step_id="dashboard", data_schema=STEP_DASHBOARD_SCHEMA
         )
 
 

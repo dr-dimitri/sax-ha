@@ -18,6 +18,20 @@ CONF_TIMED_CHARGE_START = "timed_charge_start"
 CONF_TIMED_CHARGE_END = "timed_charge_end"
 CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
 
+# Dritter, optionaler Schritt der Ersteinrichtung (siehe async_step_dashboard
+# in config_flow.py sowie dashboard.py): legt bei Zustimmung einmalig das
+# mitgelieferte Lovelace-Dashboard an. __init__.async_setup_entry setzt
+# diesen Wert nach dem (Versuch des) Anlegens wieder auf False zurück -
+# absichtlich VOR der Registrierung des Options-Update-Listeners, damit
+# dieser interne Reset nicht selbst einen ungewollten Reload der gesamten
+# Integration auslöst. Ohne den Reset würde jeder spätere Reload/Neustart
+# versuchen, das Dashboard erneut anzulegen - dashboard.py ist zwar
+# idempotent (legt es nur an, falls es nicht schon existiert), ein vom
+# Anwender bewusst gelöschtes Dashboard würde sonst aber ungewollt wieder
+# auftauchen. Siehe anforderung.yaml REQ-BUNDLED-DASHBOARD.
+CONF_CREATE_DASHBOARD = "create_dashboard"
+DEFAULT_CREATE_DASHBOARD = True
+
 DEFAULT_PORT = 502
 DEFAULT_SLAVE_ID_BASIC = 64
 # SunSpec-Modus (siehe modbus.pdf, offizielle sax-power.net-Dokumentation):

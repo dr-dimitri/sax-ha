@@ -32,7 +32,10 @@ async def test_user_flow_success(hass) -> None:
     """Ersteinrichtung: Nach erfolgreicher Verbindungsvalidierung folgt der
     zweite, optionale Schritt "grid_charge" - wird er unverändert (leer)
     abgeschickt, gelten die Hard-Defaults aus const.py (deaktiviert,
-    Zeitfenster 00:00-00:05), siehe anforderung.yaml REQ-TIMED-SOC-CHARGE."""
+    Zeitfenster 00:00-00:05), siehe anforderung.yaml REQ-TIMED-SOC-CHARGE.
+    Danach folgt der dritte, optionale Schritt "dashboard" (siehe
+    anforderung.yaml REQ-BUNDLED-DASHBOARD) - unverändert abgeschickt bleibt
+    dessen Default (Dashboard anlegen) aktiv."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -67,12 +70,17 @@ async def test_user_flow_success(hass) -> None:
         assert result2["step_id"] == "grid_charge"
 
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
-        assert result3["type"] == FlowResultType.CREATE_ENTRY
-        assert result3["title"] == "SAX Power Home"
-        assert result3["data"]["host"] == "192.168.1.50"
-        assert result3["data"]["timed_charge_enabled"] is False
-        assert result3["data"]["timed_charge_start"] == "00:00:00"
-        assert result3["data"]["timed_charge_end"] == "00:05:00"
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "dashboard"
+
+        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
+        assert result4["type"] == FlowResultType.CREATE_ENTRY
+        assert result4["title"] == "SAX Power Home"
+        assert result4["data"]["host"] == "192.168.1.50"
+        assert result4["data"]["timed_charge_enabled"] is False
+        assert result4["data"]["timed_charge_start"] == "00:00:00"
+        assert result4["data"]["timed_charge_end"] == "00:05:00"
+        assert result4["data"]["create_dashboard"] is True
 
 
 async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
@@ -108,10 +116,48 @@ async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
                 "timed_charge_end": "06:00:00",
             },
         )
-        assert result3["type"] == FlowResultType.CREATE_ENTRY
-        assert result3["data"]["timed_charge_enabled"] is True
-        assert result3["data"]["timed_charge_start"] == "22:00:00"
-        assert result3["data"]["timed_charge_end"] == "06:00:00"
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "dashboard"
+
+        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
+        assert result4["type"] == FlowResultType.CREATE_ENTRY
+        assert result4["data"]["timed_charge_enabled"] is True
+        assert result4["data"]["timed_charge_start"] == "22:00:00"
+        assert result4["data"]["timed_charge_end"] == "06:00:00"
+
+
+async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
+    """Der dritte Schritt ("dashboard") lässt sich abwählen - der Wert landet
+    dann als False im Config Entry, siehe anforderung.yaml
+    REQ-BUNDLED-DASHBOARD."""
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+    read_result = MagicMock()
+    read_result.isError.return_value = False
+    read_result.registers = [50] * 115
+    client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.close = MagicMock()
+
+    with (
+        patch(
+            "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+            return_value=client,
+        ),
+        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
+        result4 = await hass.config_entries.flow.async_configure(
+            result3["flow_id"], {"create_dashboard": False}
+        )
+        assert result4["type"] == FlowResultType.CREATE_ENTRY
+        assert result4["data"]["create_dashboard"] is False
 
 
 async def test_user_flow_cannot_connect(hass) -> None:

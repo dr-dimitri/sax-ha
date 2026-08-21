@@ -43,6 +43,9 @@ lokal mit dem Speicher.
   dynamischem Strompreis.
 - **Akku schonen:** eine geräteunabhängige Max-SOC-Sperre, die auch dann greift,
   wenn der Speicher von selbst mit PV-Überschuss volllädt.
+- **Fertiges Dashboard:** optional in der Ersteinrichtung anlegbar, mit den
+  wichtigsten Informationen in drei Tabs (siehe
+  [Schritt 3: Dashboard anlegen](#schritt-3-dashboard-anlegen-optional)).
 
 ## Installation
 
@@ -95,6 +98,16 @@ Das preisoptimierte Laden wird **nicht** hier, sondern später über
 **Konfigurieren** eingerichtet (siehe
 [Preisoptimiertes Laden](#preisoptimiertes-laden)) – ein passender
 Strompreis-Sensor existiert bei einer frischen Installation oft noch gar nicht.
+
+### Schritt 3: Dashboard anlegen (optional)
+
+Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
+anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in drei
+Tabs: **Allgemeine Informationen**, **Ladeautomatik** (Netzladung und
+netzdienliches Laden) sowie **Dynamisches Laden** (preisoptimiertes Laden).
+Die Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
+der Sidebar und lässt sich jederzeit unter **Einstellungen → Dashboards**
+anpassen oder wieder entfernen.
 
 ## Entitäten im Überblick
 

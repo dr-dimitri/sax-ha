@@ -31,6 +31,13 @@
           "timed_charge_start": "Netzladung Start",
           "timed_charge_end": "Netzladung Ende"
         }
+      },
+      "dashboard": {
+        "title": "Dashboard (optional)",
+        "description": "Legt ein vorbereitetes Dashboard \"SAX Power\" mit den wichtigsten Sensoren und Einstellungen an, gegliedert in die Tabs \"Allgemeine Informationen\", \"Ladeautomatik\" und \"Dynamisches Laden\". Kann jederzeit unter Einstellungen -> Dashboards wieder entfernt werden.",
+        "data": {
+          "create_dashboard": "Dashboard anlegen"
+        }
       }
     },
     "error": {

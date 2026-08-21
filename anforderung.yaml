@@ -1121,17 +1121,28 @@ requirement_bundled_dashboard:
     Views): "Allgemeine Informationen" (Speicher-Schalter, SOC,
     Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten - die
     reine Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-
-    Schalter bleibt), "Ladeautomatik" (nur noch zeitgesteuertes Laden mit
-    Zeitfenster/Status), "Netzdienliches Laden" (eigener Tab: Start-/
-    Endezeit, der Schalter "Netzdienliches Laden aktiv" - die separate
-    Status-Textanzeige entfällt, weil der Schalter deren Zustand bereits
-    zeigt - sowie eine eigene Karte "Aktive Monate" mit den zwölf
-    Monats-Schaltern, mit denen sich netzdienliches Laden je Kalendermonat
-    ein-/ausschalten lässt) sowie "Dynamisches Laden" (preisoptimiertes
-    Laden: Strategie, Preisgrenze, Stundenzahl, Status). Die zwölf
-    Monats-Schalter der zeitgesteuerten Netzladung sind weiterhin bewusst
-    nicht enthalten (Feinkonfiguration, nicht Tagesgeschäft) - dafür bleibt
-    die Geräteseite zuständig.
+    Schalter bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie
+    "Dynamisches Laden" (preisoptimiertes Laden: Strategie, Preisgrenze,
+    Stundenzahl, Status).
+
+    "Ladeautomatik" und "Netzdienliches Laden" sind bewusst identisch
+    aufgebaut, damit der Anwender beim Wechsel zwischen den beiden Tabs
+    nicht umdenken muss: oben der jeweilige Hauptschalter als Tile-Karte
+    ("Netzladung aktiv" / "Netzdienliches Laden aktiv"), darunter eine
+    Karte "Zeitfenster" mit nur den beiden Zeit-Entities - deren Namen
+    lauten in beiden Tabs einheitlich "Start"/"Ende" statt tabspezifisch
+    "Netzladung Start"/"Netzdienliches Laden Start" - und am Ende eine
+    Karte "Aktive Monate" mit den zwölf Monats-Schaltern des jeweiligen
+    Mechanismus, deren Label ebenfalls in beiden Tabs einheitlich nur noch
+    der reine Monatsname ist (z. B. "Januar" statt "Netzladung aktiv im
+    Januar"). Bei "Ladeautomatik" steckt zusätzlich eine dritte Karte
+    "Einstellungen" dazwischen (Mindest-SOC für den Ladestart,
+    Ladeleistungsbegrenzung) - "Netzdienliches Laden" braucht diese
+    Einstellungen nicht. Weder die geräteweite Max-SOC-Sperre (die ist
+    mechanismus-übergreifend und gehört fachlich nicht in einen einzelnen
+    Automatik-Tab) noch die reinen Status-Textanzeigen
+    ("Zeitgesteuertes/Netzdienliches Laden aktiv") sind in den beiden Tabs
+    enthalten - der jeweilige Hauptschalter zeigt den Zustand bereits an.
 
     Für einen moderneren, auf einen Blick erfassbaren Einstieg zeigt jeder
     Tab die wichtigsten Ein/Aus-Schalter (Speicher, zeitgesteuertes/

@@ -25,11 +25,11 @@
       },
       "grid_charge": {
         "title": "Netzladung (optional)",
-        "description": "Vorbelegung für das zeitgesteuerte Laden - kann später jederzeit über die Entitäten \"Netzladung aktiv\", \"Netzladung Start\" und \"Netzladung Ende\" geändert werden. Alle Felder sind optional.",
+        "description": "Vorbelegung für das zeitgesteuerte Laden - kann später jederzeit über die Entitäten \"Netzladung aktiv\", \"Start\" und \"Ende\" geändert werden. Alle Felder sind optional.",
         "data": {
           "timed_charge_enabled": "Netzladung aktiv",
-          "timed_charge_start": "Netzladung Start",
-          "timed_charge_end": "Netzladung Ende"
+          "timed_charge_start": "Start",
+          "timed_charge_end": "Ende"
         }
       },
       "dashboard": {
@@ -275,76 +275,76 @@
         "name": "Netzdienliches Laden aktiv"
       },
       "timed_charge_month_1": {
-        "name": "Netzladung aktiv im Januar"
+        "name": "Januar"
       },
       "timed_charge_month_2": {
-        "name": "Netzladung aktiv im Februar"
+        "name": "Februar"
       },
       "timed_charge_month_3": {
-        "name": "Netzladung aktiv im März"
+        "name": "März"
       },
       "timed_charge_month_4": {
-        "name": "Netzladung aktiv im April"
+        "name": "April"
       },
       "timed_charge_month_5": {
-        "name": "Netzladung aktiv im Mai"
+        "name": "Mai"
       },
       "timed_charge_month_6": {
-        "name": "Netzladung aktiv im Juni"
+        "name": "Juni"
       },
       "timed_charge_month_7": {
-        "name": "Netzladung aktiv im Juli"
+        "name": "Juli"
       },
       "timed_charge_month_8": {
-        "name": "Netzladung aktiv im August"
+        "name": "August"
       },
       "timed_charge_month_9": {
-        "name": "Netzladung aktiv im September"
+        "name": "September"
       },
       "timed_charge_month_10": {
-        "name": "Netzladung aktiv im Oktober"
+        "name": "Oktober"
       },
       "timed_charge_month_11": {
-        "name": "Netzladung aktiv im November"
+        "name": "November"
       },
       "timed_charge_month_12": {
-        "name": "Netzladung aktiv im Dezember"
+        "name": "Dezember"
       },
       "grid_serving_month_1": {
-        "name": "Netzdienliches Laden aktiv im Januar"
+        "name": "Januar"
       },
       "grid_serving_month_2": {
-        "name": "Netzdienliches Laden aktiv im Februar"
+        "name": "Februar"
       },
       "grid_serving_month_3": {
-        "name": "Netzdienliches Laden aktiv im März"
+        "name": "März"
       },
       "grid_serving_month_4": {
-        "name": "Netzdienliches Laden aktiv im April"
+        "name": "April"
       },
       "grid_serving_month_5": {
-        "name": "Netzdienliches Laden aktiv im Mai"
+        "name": "Mai"
       },
       "grid_serving_month_6": {
-        "name": "Netzdienliches Laden aktiv im Juni"
+        "name": "Juni"
       },
       "grid_serving_month_7": {
-        "name": "Netzdienliches Laden aktiv im Juli"
+        "name": "Juli"
       },
       "grid_serving_month_8": {
-        "name": "Netzdienliches Laden aktiv im August"
+        "name": "August"
       },
       "grid_serving_month_9": {
-        "name": "Netzdienliches Laden aktiv im September"
+        "name": "September"
       },
       "grid_serving_month_10": {
-        "name": "Netzdienliches Laden aktiv im Oktober"
+        "name": "Oktober"
       },
       "grid_serving_month_11": {
-        "name": "Netzdienliches Laden aktiv im November"
+        "name": "November"
       },
       "grid_serving_month_12": {
-        "name": "Netzdienliches Laden aktiv im Dezember"
+        "name": "Dezember"
       },
       "price_charge_enabled": {
         "name": "Preisoptimiertes Laden aktiv"
@@ -352,16 +352,16 @@
     },
     "time": {
       "timed_charge_start": {
-        "name": "Netzladung Start"
+        "name": "Start"
       },
       "timed_charge_end": {
-        "name": "Netzladung Ende"
+        "name": "Ende"
       },
       "grid_serving_start": {
-        "name": "Netzdienliches Laden Start"
+        "name": "Start"
       },
       "grid_serving_end": {
-        "name": "Netzdienliches Laden Ende"
+        "name": "Ende"
       }
     },
     "select": {

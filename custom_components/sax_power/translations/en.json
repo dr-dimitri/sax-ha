@@ -25,11 +25,11 @@
       },
       "grid_charge": {
         "title": "Grid charging (optional)",
-        "description": "Initial values for timed grid charging - can be changed later at any time via the \"Grid charge active\", \"Grid charge start\" and \"Grid charge end\" entities. All fields are optional.",
+        "description": "Initial values for timed grid charging - can be changed later at any time via the \"Grid charge active\", \"Start\" and \"End\" entities. All fields are optional.",
         "data": {
           "timed_charge_enabled": "Grid charge active",
-          "timed_charge_start": "Grid charge start",
-          "timed_charge_end": "Grid charge end"
+          "timed_charge_start": "Start",
+          "timed_charge_end": "End"
         }
       },
       "dashboard": {
@@ -275,76 +275,76 @@
         "name": "Grid-serving charge active"
       },
       "timed_charge_month_1": {
-        "name": "Grid charge active in January"
+        "name": "January"
       },
       "timed_charge_month_2": {
-        "name": "Grid charge active in February"
+        "name": "February"
       },
       "timed_charge_month_3": {
-        "name": "Grid charge active in March"
+        "name": "March"
       },
       "timed_charge_month_4": {
-        "name": "Grid charge active in April"
+        "name": "April"
       },
       "timed_charge_month_5": {
-        "name": "Grid charge active in May"
+        "name": "May"
       },
       "timed_charge_month_6": {
-        "name": "Grid charge active in June"
+        "name": "June"
       },
       "timed_charge_month_7": {
-        "name": "Grid charge active in July"
+        "name": "July"
       },
       "timed_charge_month_8": {
-        "name": "Grid charge active in August"
+        "name": "August"
       },
       "timed_charge_month_9": {
-        "name": "Grid charge active in September"
+        "name": "September"
       },
       "timed_charge_month_10": {
-        "name": "Grid charge active in October"
+        "name": "October"
       },
       "timed_charge_month_11": {
-        "name": "Grid charge active in November"
+        "name": "November"
       },
       "timed_charge_month_12": {
-        "name": "Grid charge active in December"
+        "name": "December"
       },
       "grid_serving_month_1": {
-        "name": "Grid-serving charge active in January"
+        "name": "January"
       },
       "grid_serving_month_2": {
-        "name": "Grid-serving charge active in February"
+        "name": "February"
       },
       "grid_serving_month_3": {
-        "name": "Grid-serving charge active in March"
+        "name": "March"
       },
       "grid_serving_month_4": {
-        "name": "Grid-serving charge active in April"
+        "name": "April"
       },
       "grid_serving_month_5": {
-        "name": "Grid-serving charge active in May"
+        "name": "May"
       },
       "grid_serving_month_6": {
-        "name": "Grid-serving charge active in June"
+        "name": "June"
       },
       "grid_serving_month_7": {
-        "name": "Grid-serving charge active in July"
+        "name": "July"
       },
       "grid_serving_month_8": {
-        "name": "Grid-serving charge active in August"
+        "name": "August"
       },
       "grid_serving_month_9": {
-        "name": "Grid-serving charge active in September"
+        "name": "September"
       },
       "grid_serving_month_10": {
-        "name": "Grid-serving charge active in October"
+        "name": "October"
       },
       "grid_serving_month_11": {
-        "name": "Grid-serving charge active in November"
+        "name": "November"
       },
       "grid_serving_month_12": {
-        "name": "Grid-serving charge active in December"
+        "name": "December"
       },
       "price_charge_enabled": {
         "name": "Price-optimised charging active"
@@ -352,16 +352,16 @@
     },
     "time": {
       "timed_charge_start": {
-        "name": "Grid charge start"
+        "name": "Start"
       },
       "timed_charge_end": {
-        "name": "Grid charge end"
+        "name": "End"
       },
       "grid_serving_start": {
-        "name": "Grid-serving charge start"
+        "name": "Start"
       },
       "grid_serving_end": {
-        "name": "Grid-serving charge end"
+        "name": "End"
       }
     },
     "select": {

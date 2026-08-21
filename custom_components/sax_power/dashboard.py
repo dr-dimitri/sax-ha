@@ -289,15 +289,28 @@ async def async_build_dashboard_config(
             _entities_card(
                 hass,
                 entry_id,
-                "Netzladung (zeitgesteuert)",
+                "Zeitfenster",
                 [
                     ("time", "timed_charge_start"),
                     ("time", "timed_charge_end"),
-                    ("number", "timed_charge_min_soc"),
-                    ("number", "max_soc"),
-                    ("number", "charge_limit"),
-                    ("sensor", "timed_charge_active_text"),
                 ],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
+                "Einstellungen",
+                [
+                    ("number", "timed_charge_min_soc"),
+                    ("number", "charge_limit"),
+                ],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
+                "Aktive Monate",
+                [("switch", f"timed_charge_month_{month}") for month in range(1, 13)],
                 translations,
             ),
         ],

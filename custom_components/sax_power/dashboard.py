@@ -325,7 +325,7 @@ async def async_build_dashboard_config(
             _entities_card(
                 hass,
                 entry_id,
-                "Zeitfenster",
+                "Ladepause",
                 [
                     ("time", "grid_serving_start"),
                     ("time", "grid_serving_end"),
@@ -375,12 +375,12 @@ async def async_create_dashboard(
 ) -> None:
     """Legt das mitgelieferte SAX-Power-Dashboard an, falls es noch nicht existiert.
 
-    `force=True` (Reinstall-Button, siehe button.py) überschreibt zusätzlich
-    ein bereits vorhandenes Dashboard mit der aktuell aus den Views/Karten
-    gebauten Konfiguration - z. B. um es nach manuellen Änderungen wieder
-    auf den Auslieferungszustand zurückzusetzen. Panel-Registrierung/
-    Sidebar-Eintrag bleiben dabei unangetastet, es wird nur der Karteninhalt
-    neu geschrieben.
+    `force=True` (Service sax_power.reinstall_dashboard, siehe __init__.py)
+    überschreibt zusätzlich ein bereits vorhandenes Dashboard mit der
+    aktuell aus den Views/Karten gebauten Konfiguration - z. B. um es nach
+    manuellen Änderungen wieder auf den Auslieferungszustand
+    zurückzusetzen. Panel-Registrierung/Sidebar-Eintrag bleiben dabei
+    unangetastet, es wird nur der Karteninhalt neu geschrieben.
 
     Rein optionale Komfortfunktion, die auf nicht-öffentlichen Lovelace-
     Interna aufbaut (siehe Modul-Docstring) - jeder Fehler wird deshalb nur

@@ -32,6 +32,7 @@ from .const import (
     MIN_SETPOINT_POWER,
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
+    SERVICE_REINSTALL_DASHBOARD,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
     SERVICE_SET_TIMED_CHARGE_WINDOW,
@@ -49,7 +50,6 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.SWITCH,
     Platform.TIME,
-    Platform.BUTTON,
 ]
 
 SERVICE_GRID_CHARGE_SCHEMA = vol.Schema(
@@ -229,6 +229,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
         await async_create_dashboard(hass, entry)
 
+    async def _async_reinstall_dashboard_service(call: ServiceCall) -> None:
+        entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await async_create_dashboard(hass, entry, force=True)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_GRID_CHARGE,
@@ -269,5 +273,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_CREATE_DASHBOARD,
         _async_create_dashboard_service,
+        schema=SERVICE_STOP_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REINSTALL_DASHBOARD,
+        _async_reinstall_dashboard_service,
         schema=SERVICE_STOP_SCHEMA,
     )

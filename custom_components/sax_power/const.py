@@ -561,3 +561,11 @@ ATTR_FORCE = "force"
 # wurde (siehe anforderung.yaml, REQ-BUNDLED-DASHBOARD). Idempotent: legt es
 # nur an, falls es nicht schon existiert.
 SERVICE_CREATE_DASHBOARD = "create_dashboard"
+
+# Setzt ein ggf. bereits vorhandenes Dashboard auf den Auslieferungszustand
+# zurück (dashboard.async_create_dashboard mit force=True) - z. B. nach
+# manuellen Änderungen. Ersetzt den früheren Reinstall-Button (button.py):
+# ButtonEntities auf der Geräteseite wurden vom Anwender nicht zuverlässig
+# gefunden; ein über Entwicklertools -> Aktionen aufrufbarer Service ist in
+# Home Assistant der robustere, immer sichtbare Weg dafür.
+SERVICE_REINSTALL_DASHBOARD = "reinstall_dashboard"

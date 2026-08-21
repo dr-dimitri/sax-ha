@@ -374,11 +374,6 @@
           "smart": "Smart / PV-optimised"
         }
       }
-    },
-    "button": {
-      "reinstall_dashboard": {
-        "name": "Reinstall dashboard"
-      }
     }
   },
   "issues": {
@@ -509,6 +504,16 @@
     "create_dashboard": {
       "name": "Create dashboard",
       "description": "Creates the bundled \"SAX Power\" dashboard after the fact - e.g. if it was declined during initial setup or deleted later. Does nothing if it already exists.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        }
+      }
+    },
+    "reinstall_dashboard": {
+      "name": "Reinstall dashboard",
+      "description": "Resets the \"SAX Power\" dashboard to its default state - overwrites an existing dashboard with the currently built configuration, or recreates it if it was deleted in the meantime.",
       "fields": {
         "device_id": {
           "name": "Device",

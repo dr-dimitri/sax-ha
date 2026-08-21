@@ -70,30 +70,6 @@ _TRANSLATION_KEY_OVERRIDES: dict[tuple[str, str], str] = {
     ("switch", "storage_switch"): "storage",
 }
 
-# Markdown-Karte statt Zeile in der "Leistung"-entities-Karte, siehe
-# _smartmeter_power_card: Label und Farbe sollen vom Vorzeichen des
-# aktuellen Werts abhängen (Netzbezug/rot bei negativ, Einspeisung/grün bei
-# >= 0, siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE, "PV-Überschuss-
-# Prüfung" zur Vorzeichenkonvention) - das kann die "entities"-Karte nicht,
-# die "markdown"-Karte (Core-Bestandteil, kein card-mod/HACS nötig) aber
-# über Jinja2-Templating. __ENTITY_ID__ wird beim Kartenbau einmalig durch
-# die tatsächliche, zu diesem Zeitpunkt aufgelöste entity_id ersetzt (siehe
-# _smartmeter_power_card) - eine f-String-Interpolation würde hier mit den
-# doppelten geschweiften Klammern der Jinja-Syntax kollidieren.
-_SMARTMETER_POWER_TEMPLATE = """\
-{% set v = states('__ENTITY_ID__') %}
-{% if v in ['unknown', 'unavailable', 'none', none] %}
-**Smart Meter Leistung:** unbekannt
-{% else %}
-{% set is_import = v | float < 0 %}
-{% set value = (v | float | abs | round(0) | int) %}
-{% set unit = state_attr('__ENTITY_ID__', 'unit_of_measurement') or 'W' %}
-{% set color = 'red' if is_import else 'green' %}
-{% set label = 'Netzbezug' if is_import else 'Einspeisung' %}
-**{{ label }}:** <span style="color: {{ color }}">{{ value }} {{ unit }}</span>
-{% endif %}
-"""
-
 
 def _entity_id(hass: HomeAssistant, entity_domain: str, unique_id: str) -> str | None:
     return er.async_get(hass).async_get_entity_id(entity_domain, DOMAIN, unique_id)
@@ -197,22 +173,6 @@ def _gauge_card(
     }
 
 
-def _smartmeter_power_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:
-    """Baut die Markdown-Karte für "Smart Meter Leistung" mit vom Vorzeichen
-    abhängigem Label/Farbe - siehe _SMARTMETER_POWER_TEMPLATE. Der
-    angezeigte Zahlenwert ist immer positiv (Betrag), das Vorzeichen drückt
-    sich ausschließlich über Label ("Netzbezug"/"Einspeisung") und Farbe
-    aus, der zugrunde liegende Sensorwert bleibt intern vorzeichenbehaftet.
-    """
-    entity_id = _entity_id(hass, "sensor", f"{entry_id}_smartmeter_power")
-    if entity_id is None:
-        return None
-    return {
-        "type": "markdown",
-        "content": _SMARTMETER_POWER_TEMPLATE.replace("__ENTITY_ID__", entity_id),
-    }
-
-
 def _grid_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     """Reiht mehrere Tile-Karten nebeneinander an - fehlende Entities werden
     wie bei _entities_card stillschweigend ausgelassen; bleibt am Ende
@@ -293,10 +253,10 @@ async def async_build_dashboard_config(
                     ("number", "max_soc"),
                     ("sensor", "charge_power"),
                     ("sensor", "discharge_power"),
+                    ("sensor", "smartmeter_power"),
                 ],
                 translations,
             ),
-            _smartmeter_power_card(hass, entry_id),
             _entities_card(
                 hass,
                 entry_id,

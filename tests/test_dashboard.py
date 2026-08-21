@@ -11,6 +11,7 @@ from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import template as ha_template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
@@ -186,38 +187,79 @@ async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None
         assert view["cards"] == []
 
 
-async def test_build_dashboard_config_status_card_contains_binary_sensors(
-    hass,
-) -> None:
-    """Die neue Karte "Status" im Tab "Allgemeine Informationen" zeigt nur die
-    Lade-/Automatik-binary_sensor-Entities aus REQ-BINARY-SENSORS - "Max-SOC
-    Sperre aktiv" und "Speicherproblem" wurden entfernt, weil sie dort keinen
-    Mehrwert boten (der Speicherzustand ist mechanismus-übergreifend, kein
-    reiner Ladestatus)."""
-    entity_ids = {
-        suffix: _register(hass, "binary_sensor", suffix)
-        for suffix in (
-            "battery_charging",
-            "timed_charge_active",
-            "price_charge_active",
-            "grid_serving_active",
-        )
-    }
-    max_soc_clamped = _register(hass, "binary_sensor", "max_soc_clamped")
-    battery_problem = _register(hass, "binary_sensor", "battery_problem")
+async def test_build_dashboard_config_status_card_removed(hass) -> None:
+    """Die frühere Karte "Status" im Tab "Allgemeine Informationen" wurde
+    entfernt - die zugrunde liegenden binary_sensor-Entities existieren
+    weiterhin (REQ-BINARY-SENSORS), landen aber in keiner Karte mehr."""
+    battery_charging = _register(hass, "binary_sensor", "battery_charging")
+    timed_charge_active = _register(hass, "binary_sensor", "timed_charge_active")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
-    status_card = next(
-        card for card in config["views"][0]["cards"] if card.get("title") == "Status"
+    assert not any(
+        card.get("title") == "Status" for card in config["views"][0]["cards"]
     )
-    status_entities = {
+    general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
+    assert battery_charging not in general_entities
+    assert timed_charge_active not in general_entities
+
+
+async def test_build_dashboard_config_smartmeter_power_not_in_leistung_card(
+    hass,
+) -> None:
+    """ "Smart Meter Leistung" ist keine Zeile mehr in der "Leistung"-Karte -
+    stattdessen eine eigene Markdown-Karte mit dynamischem Label/Farbe,
+    siehe test_smartmeter_power_card_uses_dynamic_label_and_color."""
+    smartmeter_power = _register(hass, "sensor", "smartmeter_power")
+    charge_power = _register(hass, "sensor", "charge_power")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    leistung_card = next(
+        card for card in config["views"][0]["cards"] if card.get("title") == "Leistung"
+    )
+    leistung_entities = {
         row["entity"] if isinstance(row, dict) else row
-        for row in status_card["entities"]
+        for row in leistung_card["entities"]
     }
-    assert status_entities == set(entity_ids.values())
-    assert max_soc_clamped not in status_entities
-    assert battery_problem not in status_entities
+    assert charge_power in leistung_entities
+    assert smartmeter_power not in leistung_entities
+
+
+async def test_smartmeter_power_card_uses_dynamic_label_and_color(hass) -> None:
+    """Die Markdown-Karte für "Smart Meter Leistung" zeigt bei negativem Wert
+    das Label "Netzbezug" in Rot, bei Wert >= 0 das Label "Einspeisung" in
+    Grün - der angezeigte Zahlenwert ist in beiden Fällen positiv (Betrag),
+    auch wenn der zugrunde liegende Sensorwert intern vorzeichenbehaftet
+    bleibt (Vorzeichenkonvention siehe anforderung.yaml,
+    REQ-TIMED-SOC-CHARGE, "PV-Überschuss-Prüfung")."""
+    entity_id = _register(hass, "sensor", "smartmeter_power")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    markdown_cards = [
+        card for card in config["views"][0]["cards"] if card["type"] == "markdown"
+    ]
+    assert len(markdown_cards) == 1
+    content = markdown_cards[0]["content"]
+
+    hass.states.async_set(entity_id, "-150", {"unit_of_measurement": "W"})
+    rendered = ha_template.Template(content, hass).async_render()
+    assert "Netzbezug" in rendered
+    assert "150 W" in rendered
+    assert "-150" not in rendered
+    assert "color: red" in rendered
+
+    hass.states.async_set(entity_id, "200", {"unit_of_measurement": "W"})
+    rendered = ha_template.Template(content, hass).async_render()
+    assert "Einspeisung" in rendered
+    assert "200 W" in rendered
+    assert "color: green" in rendered
+
+    hass.states.async_set(entity_id, "0", {"unit_of_measurement": "W"})
+    rendered = ha_template.Template(content, hass).async_render()
+    assert "Einspeisung" in rendered
+    assert "0 W" in rendered
 
 
 async def test_build_dashboard_config_geraet_card_drops_manufacturer_and_model(

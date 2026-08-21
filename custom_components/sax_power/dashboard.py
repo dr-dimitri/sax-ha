@@ -1,11 +1,11 @@
 """Mitgeliefertes Lovelace-Dashboard für SAX Power (siehe anforderung.yaml,
 REQ-BUNDLED-DASHBOARD).
 
-Baut ein dreiteiliges Storage-Dashboard ("Allgemeine Informationen",
-"Ladeautomatik", "Dynamisches Laden") und legt es - wenn der Anwender das in
-der Ersteinrichtung ausgewählt hat (config_flow.py, CONF_CREATE_DASHBOARD) -
-direkt in Home Assistants Lovelace-Speicher an, damit es sofort ohne
-Neustart in der Sidebar erscheint.
+Baut ein vierteiliges Storage-Dashboard ("Allgemeine Informationen",
+"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden") und legt es -
+wenn der Anwender das in der Ersteinrichtung ausgewählt hat (config_flow.py,
+CONF_CREATE_DASHBOARD) - direkt in Home Assistants Lovelace-Speicher an,
+damit es sofort ohne Neustart in der Sidebar erscheint.
 
 Home Assistant selbst nutzt für sein eigenes Onboarding-Kartendashboard
 denselben Weg (homeassistant.components.lovelace._create_map_dashboard):
@@ -198,7 +198,7 @@ def _view(
 async def async_build_dashboard_config(
     hass: HomeAssistant, entry_id: str
 ) -> dict[str, Any]:
-    """Baut die komplette Lovelace-Konfiguration (drei Tabs) für einen Entry."""
+    """Baut die komplette Lovelace-Konfiguration (vier Tabs) für einen Entry."""
     translations = await translation.async_get_translations(
         hass, hass.config.language, "entity", integrations=[DOMAIN]
     )
@@ -240,16 +240,7 @@ async def async_build_dashboard_config(
                     ),
                 ]
             ),
-            _grid_card(
-                [
-                    _tile_card(
-                        hass, entry_id, "switch", "storage_switch", translations
-                    ),
-                    _tile_card(
-                        hass, entry_id, "sensor", "storage_state_text", translations
-                    ),
-                ]
-            ),
+            _tile_card(hass, entry_id, "switch", "storage_switch", translations),
             _entities_card(
                 hass,
                 entry_id,
@@ -294,16 +285,7 @@ async def async_build_dashboard_config(
         "ladeautomatik",
         "mdi:transmission-tower",
         [
-            _grid_card(
-                [
-                    _tile_card(
-                        hass, entry_id, "switch", "timed_charge_enabled", translations
-                    ),
-                    _tile_card(
-                        hass, entry_id, "switch", "grid_serving_enabled", translations
-                    ),
-                ]
-            ),
+            _tile_card(hass, entry_id, "switch", "timed_charge_enabled", translations),
             _entities_card(
                 hass,
                 entry_id,
@@ -318,15 +300,30 @@ async def async_build_dashboard_config(
                 ],
                 translations,
             ),
+        ],
+    )
+
+    grid_serving_view = _view(
+        "Netzdienliches Laden",
+        "netzdienliches-laden",
+        "mdi:transmission-tower-export",
+        [
+            _tile_card(hass, entry_id, "switch", "grid_serving_enabled", translations),
             _entities_card(
                 hass,
                 entry_id,
-                "Netzdienliches Laden",
+                "Zeitfenster",
                 [
                     ("time", "grid_serving_start"),
                     ("time", "grid_serving_end"),
-                    ("sensor", "grid_serving_active_text"),
                 ],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
+                "Aktive Monate",
+                [("switch", f"grid_serving_month_{month}") for month in range(1, 13)],
                 translations,
             ),
         ],
@@ -357,7 +354,7 @@ async def async_build_dashboard_config(
         ],
     )
 
-    return {"views": [general_view, charging_view, price_view]}
+    return {"views": [general_view, charging_view, grid_serving_view, price_view]}
 
 
 async def async_create_dashboard(

@@ -55,7 +55,7 @@ custom_components/sax_power/
 │                          und preisoptimiertem Laden
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan, IP-Adresse redigiert
-├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (3 Tabs), optional in
+├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
 │                          REQ-BUNDLED-DASHBOARD
 ├── services.yaml           Service-Schema für die UI

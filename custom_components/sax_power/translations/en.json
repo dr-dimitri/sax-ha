@@ -136,7 +136,7 @@
         "name": "Grid frequency (storage)"
       },
       "storage_max_cell_temp": {
-        "name": "Maximum cell temperature"
+        "name": "Cell temperature"
       },
       "storage_state_text": {
         "name": "Storage state"

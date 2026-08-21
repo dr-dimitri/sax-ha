@@ -256,8 +256,6 @@ async def async_build_dashboard_config(
                     ("binary_sensor", "price_charge_active"),
                     ("binary_sensor", "grid_serving_active"),
                     ("binary_sensor", "discharge_block_active"),
-                    ("binary_sensor", "max_soc_clamped"),
-                    ("binary_sensor", "battery_problem"),
                 ],
                 translations,
             ),
@@ -288,8 +286,6 @@ async def async_build_dashboard_config(
                 entry_id,
                 "Gerät",
                 [
-                    ("sensor", "sun_manufacturer"),
-                    ("sensor", "sun_model"),
                     ("sensor", "sun_version_master"),
                     ("sensor", "sun_version_gateway"),
                     ("sensor", "sun_serial_number"),

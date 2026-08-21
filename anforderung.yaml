@@ -1116,17 +1116,36 @@ requirement_bundled_dashboard:
   description: >
     dashboard.py baut ein vierteiliges Storage-Dashboard mit den
     wichtigsten Sensoren/Einstellungen, gegliedert in vier Tabs (Lovelace-
-    Views): "Allgemeine Informationen" (Speicher-Schalter, eine Karte
-    "Status" mit den Lade-/Automatik-binary_sensor-Entities aus
-    REQ-BINARY-SENSORS ("Max-SOC Sperre aktiv" und "Speicherproblem" sind
-    dort bewusst nicht enthalten - der Speicherzustand ist mechanismus-
-    übergreifend, kein reiner Ladestatus), SOC, Lade-/Entladeleistung,
-    Netzleistung, Energiezähler, Gerätedaten (ohne die fest bekannten
-    "Hersteller"/"Gerätemodell" - beide boten dort keinen Mehrwert) - die
-    reine Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-
-    Schalter bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie
-    "Dynamisches Laden" (preisoptimiertes Laden: Strategie, Preisgrenze,
-    Stundenzahl, Status).
+    Views): "Allgemeine Informationen" (Speicher-Schalter, SOC, Lade-/
+    Entladeleistung, Netzleistung (siehe eigener Absatz unten zur Karte
+    "Smart Meter Leistung"), Energiezähler, Gerätedaten (ohne die fest
+    bekannten "Hersteller"/"Gerätemodell" - beide boten dort keinen
+    Mehrwert) - die reine Textanzeige "Speicher Zustand" wurde entfernt,
+    der Speicher-Schalter bleibt), "Ladeautomatik" und "Netzdienliches
+    Laden" sowie "Dynamisches Laden" (preisoptimiertes Laden: Strategie,
+    Preisgrenze, Stundenzahl, Status). Die frühere Karte "Status" mit den
+    vier Lade-/Automatik-binary_sensor-Entities (REQ-BINARY-SENSORS) wurde
+    aus "Allgemeine Informationen" entfernt, ohne Ersatz - die Entities
+    selbst bleiben unverändert bestehen (z. B. für eigene Automationen),
+    erscheinen aber in keiner Karte des mitgelieferten Dashboards mehr.
+
+    "Smart Meter Leistung" ist keine Zeile der "Leistung"-entities-Karte
+    mehr, sondern eine eigene, direkt darunter platzierte "markdown"-Karte
+    (_smartmeter_power_card, Template siehe _SMARTMETER_POWER_TEMPLATE):
+    Label und Farbe hängen vom Vorzeichen des aktuellen Werts ab (positiv/
+    Überschuss = Einspeisung ins Netz, negativ = Netzbezug, siehe
+    REQ-TIMED-SOC-CHARGE, Abschnitt "PV-Überschuss-Prüfung", zur
+    Vorzeichenkonvention) - unter 0 W zeigt sie das Label "Netzbezug" in
+    Rot, ab 0 W "Einspeisung" in Grün; der angezeigte Zahlenwert ist in
+    beiden Fällen der Betrag (immer positiv), der zugrunde liegende
+    Sensorwert bleibt intern vorzeichenbehaftet. Home Assistants
+    "entities"-Karte kann Label/Farbe einer Zeile nicht vom aktuellen
+    Zustand abhängig machen; die "markdown"-Karte (Core-Bestandteil, kein
+    card-mod/HACS nötig) unterstützt dafür volles Jinja2-Templating. Die
+    entity_id wird einmalig beim Kartenbau (async_build_dashboard_config)
+    fest ins Template eingesetzt - seit REQ-STABLE-DEVICE-IDENTITY bleibt
+    sie auch über ein späteres Umbenennen des Geräts hinweg stabil, das
+    Template muss die Auflösung deshalb nicht zur Anzeigezeit wiederholen.
 
     "Ladeautomatik" und "Netzdienliches Laden" sind bewusst identisch
     aufgebaut, damit der Anwender beim Wechsel zwischen den beiden Tabs
@@ -1257,6 +1276,17 @@ requirement_bundled_dashboard:
        den geräteprefix-freien, übersetzten Namen verwenden, und dass
        force=True ein bereits bestehendes Dashboard überschreibt, ohne das
        Panel erneut zu registrieren."
+    - "tests/test_dashboard.py deckt ab, dass Tab \"Allgemeine
+       Informationen\" keine Karte mit dem Titel \"Status\" mehr enthält
+       und die vier zuvor dort gezeigten binary_sensor-Entities in keiner
+       Karte mehr referenziert werden."
+    - "tests/test_dashboard.py deckt ab, dass \"smartmeter_power\" keine
+       Zeile der \"Leistung\"-Karte mehr ist, sondern über eine eigene
+       markdown-Karte gerendert wird - inklusive echtem Rendering des
+       Jinja-Templates (homeassistant.helpers.template.Template) für
+       negative, positive und Nullwerte: korrektes Label (\"Netzbezug\"/
+       \"Einspeisung\"), korrekte Farbe (\"color: red\"/\"color: green\")
+       und ein stets positiver angezeigter Zahlenwert."
 
 # ==============================================================================
 # ANFORDERUNG: BINARY_SENSOR-PLATTFORM
@@ -1300,14 +1330,13 @@ requirement_binary_sensors:
     REQ-EXTENDED-MODE-RESILIENCE).
 
     __init__.PLATFORMS enthält Platform.BINARY_SENSOR. Das mitgelieferte
-    Dashboard (REQ-BUNDLED-DASHBOARD) zeigt in einer neuen Karte "Status" im
-    Tab "Allgemeine Informationen" nur die vier Lade-/Automatik-Entities
-    ("battery_charging", "timed_charge_active", "price_charge_active",
-    "grid_serving_active") - "max_soc_clamped"
-    und "battery_problem" sind dort trotz fehlender diagnostic-Kategorie
-    bewusst nicht enthalten (der Speicherzustand ist mechanismus-
-    übergreifend, kein reiner Ladestatus), "extended_mode_available"
-    ohnehin nicht (rein diagnostisch).
+    Dashboard (REQ-BUNDLED-DASHBOARD) zeigt keine dieser sieben Entities
+    (mehr) an - die frühere Karte "Status" im Tab "Allgemeine
+    Informationen" mit den vier Lade-/Automatik-Entities ("battery_
+    charging", "timed_charge_active", "price_charge_active",
+    "grid_serving_active") wurde ersatzlos entfernt. Die Entities selbst
+    bleiben unverändert bestehen (z. B. für eigene Anwender-Automationen),
+    nur die Dashboard-Karte fällt weg.
   acceptance_criteria:
     - "tests/test_binary_sensor.py deckt jede der sieben is_on_fn-Funktionen
        ab: erwarteter Zustand bei vorhandenen Daten, None bei fehlendem
@@ -1316,11 +1345,10 @@ requirement_binary_sensors:
     - "tests/test_binary_sensor.py stellt sicher, dass alle Entity-Keys
        eindeutig sind und jeder Key in strings.json sowie
        translations/de.json und translations/en.json eine Übersetzung hat."
-    - "tests/test_dashboard.py deckt ab, dass die neue Statuskarte im Tab
-       Allgemeine Informationen nur die vier Lade-/Automatik-
-       binary_sensor-Entities enthält, sofern sie in der Entity Registry
-       vorhanden sind, und dass max_soc_clamped/battery_problem dort auch
-       bei vorhandener Registrierung nicht auftauchen."
+    - "tests/test_dashboard.py deckt ab, dass Tab Allgemeine Informationen
+       keine Karte mit dem Titel \"Status\" mehr enthält und keine der
+       vier Lade-/Automatik-binary_sensor-Entities mehr referenziert, auch
+       wenn sie in der Entity Registry vorhanden sind."
 
 # ==============================================================================
 # ANFORDERUNG: ABSCHLUSSSEITE DER ERSTEINRICHTUNG

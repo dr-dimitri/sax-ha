@@ -88,8 +88,8 @@ nicht.
 
 ### Schritt 2: Netzladung vorbelegen (optional)
 
-Der zweite Schritt belegt die Netzladung vor: "Netzladung aktiv", "Netzladung
-Start" und "Netzladung Ende". Ohne Änderung gelten die Standardwerte
+Der zweite Schritt belegt die Netzladung vor: "Netzladung aktiv", "Start"
+und "Ende". Ohne Änderung gelten die Standardwerte
 (deaktiviert, Zeitfenster 00:00–00:05). Diese Vorgaben wirken nur beim
 allerersten Start – danach zählt ausschließlich das, was an den Entitäten
 eingestellt ist.
@@ -103,9 +103,10 @@ Strompreis-Sensor existiert bei einer frischen Installation oft noch gar nicht.
 
 Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
 anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in vier
-Tabs: **Allgemeine Informationen**, **Ladeautomatik** (zeitgesteuerte
-Netzladung), **Netzdienliches Laden** (Zeitfenster, Hauptschalter und die
-zwölf Monats-Schalter als eigene Karte) sowie **Dynamisches Laden**
+Tabs: **Allgemeine Informationen**, **Ladeautomatik** sowie **Netzdienliches
+Laden** (beide bewusst gleich aufgebaut: Hauptschalter, Zeitfenster mit den
+einheitlich benannten Entities "Start"/"Ende" und eine eigene Karte "Aktive
+Monate" mit den zwölf Monats-Schaltern) und **Dynamisches Laden**
 (preisoptimiertes Laden). Der Ladezustand erscheint dabei als Gauge (grün ab
 50 % SOC, orange ab 20 %, darunter rot), die wichtigsten Ein/Aus-Schalter als
 große Kacheln. Die
@@ -244,11 +245,11 @@ Alle Werte bleiben über Neustarts hinweg erhalten.
 | Netzladung aktiv | Hauptschalter der [Netzladung](#netzladung-zeitgesteuertes-laden) |
 | Netzdienliches Laden aktiv | Hauptschalter des [netzdienlichen Ladens](#netzdienliches-laden) |
 | Preisoptimiertes Laden aktiv | Hauptschalter des [preisoptimierten Ladens](#preisoptimiertes-laden) |
-| Netzladung aktiv im Januar … Dezember | 12 Schalter: in welchen Monaten das Netzladungs-Zeitfenster gilt |
-| Netzdienliches Laden aktiv im Januar … Dezember | 12 Schalter, analog für das netzdienliche Laden |
+| Netzladung: 12 Monats-Schalter (Label je Schalter nur der Monatsname, z. B. "Januar") | In welchen Monaten das Netzladungs-Zeitfenster gilt |
+| Netzdienliches Laden: 12 Monats-Schalter (Label ebenfalls nur der Monatsname) | Analog für das netzdienliche Laden |
 
-**Zeiten:** "Netzladung Start/Ende" und "Netzdienliches Laden Start/Ende"
-(jeweils HH:MM).
+**Zeiten:** je zwei Entitäten "Start"/"Ende" - eine für die Netzladung, eine
+für das netzdienliche Laden (jeweils HH:MM).
 
 **Auswahl:** "Preisoptimiertes Laden Strategie" mit den Optionen
 "Manuell / Aus", "Absoluter Preis", "Relativ / Günstigste Stunden" und
@@ -349,9 +350,9 @@ von PV-Überschuss. Typischer Anwendungsfall: *"Lade auf 90 %, wenn es zwischen
 | Entität | Beschreibung |
 | --- | --- |
 | Netzladung aktiv | Ein-/Ausschalten |
-| Netzladung Start / Ende | Zeitfenster (HH:MM) |
+| Start / Ende | Zeitfenster (HH:MM) |
 | Netzladung Min. SOC | Startschwelle: erst unterhalb dieses Ladestands wird geladen |
-| Netzladung aktiv im Januar … Dezember | In welchen Monaten das Zeitfenster gilt |
+| Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt |
 | Max. SOC | Ziel, bis zu dem geladen wird (geteilte Einstellung) |
 | Max. Netzladeleistung | Ladeleistung (geteilte Einstellung) |
 
@@ -437,8 +438,8 @@ Messwert weiterläuft).
 | Entität | Beschreibung |
 | --- | --- |
 | Netzdienliches Laden aktiv | Ein-/Ausschalten |
-| Netzdienliches Laden Start / Ende | Zeitfenster (HH:MM) |
-| Netzdienliches Laden aktiv im Januar … Dezember | In welchen Monaten das Zeitfenster gilt – z. B. nur Mai bis August, 11–14 Uhr |
+| Start / Ende | Zeitfenster (HH:MM) |
+| Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt – z. B. nur Mai bis August, 11–14 Uhr |
 | Max. SOC | Ziel für die Max-SOC-Sperre (geteilte Einstellung) |
 
 "Max. Netzladeleistung" wird hier **nicht** gebraucht, weil netzdienliches Laden

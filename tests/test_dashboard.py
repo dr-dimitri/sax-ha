@@ -202,12 +202,25 @@ async def test_build_dashboard_config_grid_serving_view(hass) -> None:
     assert {row["entity"] for row in months_card["entities"]} == set(month_switches)
 
 
-async def test_build_dashboard_config_charging_view_without_grid_serving(hass) -> None:
-    """Der Tab "Ladeautomatik" enthält keine netzdienlichen Entities mehr -
-    die sind jetzt im eigenen Tab."""
+async def test_build_dashboard_config_charging_view(hass) -> None:
+    """Der Tab "Ladeautomatik" ist analog zu "Netzdienliches Laden"
+    aufgebaut (Schalter, Zeitfenster-Karte, "Aktive Monate"-Karte), enthält
+    aber weder die Max-SOC-Einstellung noch die Status-Textanzeige - der
+    Schalter deckt deren Zustand bereits ab. Netzdienliche Entities landen
+    nicht mehr in diesem Tab, die sind jetzt im eigenen Tab."""
     grid_serving_switch = _register(hass, "switch", "grid_serving_enabled")
     grid_serving_start = _register(hass, "time", "grid_serving_start")
     timed_charge_switch = _register(hass, "switch", "timed_charge_enabled")
+    timed_charge_start = _register(hass, "time", "timed_charge_start")
+    timed_charge_end = _register(hass, "time", "timed_charge_end")
+    timed_charge_min_soc = _register(hass, "number", "timed_charge_min_soc")
+    charge_limit = _register(hass, "number", "charge_limit")
+    max_soc = _register(hass, "number", "max_soc")
+    timed_charge_active_text = _register(hass, "sensor", "timed_charge_active_text")
+    month_switches = [
+        _register(hass, "switch", f"timed_charge_month_{month}")
+        for month in range(1, 13)
+    ]
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -216,8 +229,72 @@ async def test_build_dashboard_config_charging_view_without_grid_serving(hass) -
     )
     entities = set(_iter_entity_ids(charging_view["cards"]))
     assert timed_charge_switch in entities
+    assert timed_charge_start in entities
+    assert timed_charge_end in entities
+    assert timed_charge_min_soc in entities
+    assert charge_limit in entities
+    assert entities.issuperset(month_switches)
+    assert max_soc not in entities
+    assert timed_charge_active_text not in entities
     assert grid_serving_switch not in entities
     assert grid_serving_start not in entities
+
+    months_card = next(
+        card for card in charging_view["cards"] if card.get("title") == "Aktive Monate"
+    )
+    assert {row["entity"] for row in months_card["entities"]} == set(month_switches)
+
+
+async def test_build_dashboard_config_start_end_labels_are_generic(hass) -> None:
+    """Die Zeitfenster-Entities heißen in beiden Tabs immer "Start" bzw.
+    "Ende" (bzw. "Start"/"End" in der englischen Test-Sprache) statt
+    tabspezifisch "Netzladung Start" oder "Netzdienliches Laden Start" -
+    damit sehen beide Tabs vergleichbar aus."""
+    _register(hass, "time", "timed_charge_start")
+    _register(hass, "time", "timed_charge_end")
+    _register(hass, "time", "grid_serving_start")
+    _register(hass, "time", "grid_serving_end")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    charging_view = next(
+        view for view in config["views"] if view["path"] == "ladeautomatik"
+    )
+    grid_serving_view = next(
+        view for view in config["views"] if view["path"] == "netzdienliches-laden"
+    )
+
+    for view in (charging_view, grid_serving_view):
+        zeitfenster_card = next(
+            card for card in view["cards"] if card.get("title") == "Zeitfenster"
+        )
+        names = {row["entity"]: row["name"] for row in zeitfenster_card["entities"]}
+        assert set(names.values()) == {"Start", "End"}
+
+
+async def test_build_dashboard_config_month_switch_labels_are_bare_month_names(
+    hass,
+) -> None:
+    """Die Monats-Schalter zeigen nur noch den Monatsnamen (z. B. "January")
+    statt "Netzladung aktiv im Januar" / "Netzdienliches Laden aktiv im
+    Januar" - gilt für beide Tabs."""
+    _register(hass, "switch", "timed_charge_month_1")
+    _register(hass, "switch", "grid_serving_month_1")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    charging_view = next(
+        view for view in config["views"] if view["path"] == "ladeautomatik"
+    )
+    grid_serving_view = next(
+        view for view in config["views"] if view["path"] == "netzdienliches-laden"
+    )
+
+    for view in (charging_view, grid_serving_view):
+        months_card = next(
+            card for card in view["cards"] if card.get("title") == "Aktive Monate"
+        )
+        assert months_card["entities"][0]["name"] == "January"
 
 
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:

@@ -18,6 +18,7 @@ lokal mit dem Speicher.
   - [Messwerte (Sensoren)](#messwerte-sensoren)
   - [Energiezähler fürs Energy-Dashboard](#energiezähler-fürs-energy-dashboard)
   - [Statusanzeigen der Lade-Automatiken](#statusanzeigen-der-lade-automatiken)
+  - [Binäre Statusanzeigen](#binäre-statusanzeigen)
   - [Einstellungen und Schalter](#einstellungen-und-schalter)
 - [Die drei Lade-Automatiken](#die-drei-lade-automatiken)
 - [Max-SOC-Sperre](#max-soc-sperre)
@@ -223,6 +224,28 @@ Hochrechnung für diese Zeit, statt sie später fälschlich nachzuholen.
 | Preisoptimiertes Laden Status | Klartext-Status mit dem *Grund* – siehe [Statusanzeige](#statusanzeige) |
 | Preisoptimiertes Laden nächster Start | Zeitstempel des nächsten geplanten Ladefensters (bzw. Beginn des laufenden) |
 | Aktueller Strompreis | Preis des aktuellen Zeitfensters in EUR/kWh |
+
+### Binäre Statusanzeigen
+
+Zusätzlich zu den Klartext-Sensoren oben gibt es dieselben (und ein paar
+weitere) Zustände als `binary_sensor`-Entities mit echtem Ein/Aus-Zustand,
+Icon und Zustandsfarbe – praktisch für Automationen (kein String-Vergleich
+gegen deutsche Klartexte nötig) und fürs Dashboard. Die Klartext-Sensoren
+bleiben unverändert bestehen, beide Varianten existieren nebeneinander.
+
+| Entität | Beschreibung |
+| --- | --- |
+| Akku wird geladen | Ein, solange der Speicher gerade lädt |
+| Zeitgesteuertes Laden aktiv | Wie oben, als binärer Zustand |
+| Preisoptimiertes Laden aktiv | Wie oben, als binärer Zustand |
+| Netzdienliches Laden aktiv | Wie oben, als binärer Zustand |
+| Max-SOC-Sperre aktiv | Ein, solange die [Max-SOC-Sperre](#max-soc-sperre) den Speicher aktiv hält |
+| SunSpec-Modus erreichbar | Diagnose-Entität; Aus, wenn Slave-ID 100 gerade nicht antwortet (siehe [Bekannte Einschränkungen](#bekannte-einschränkungen)) |
+| Speicherproblem | Diagnose-Entität; Ein, sobald Speicher oder Akku ein Ereignis außerhalb des Normalbetriebs melden |
+
+Ist der SunSpec-Modus gerade nicht erreichbar, zeigen "Akku wird geladen" und
+"Speicherproblem" konsequent "nicht verfügbar" statt eines falschen "Aus" –
+wie alle anderen von diesem Block abhängigen Entities auch.
 
 ### Einstellungen und Schalter
 

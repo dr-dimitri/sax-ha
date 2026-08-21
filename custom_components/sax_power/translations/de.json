@@ -50,6 +50,29 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "battery_charging": {
+        "name": "Akku wird geladen"
+      },
+      "timed_charge_active": {
+        "name": "Zeitgesteuertes Laden aktiv"
+      },
+      "price_charge_active": {
+        "name": "Preisoptimiertes Laden aktiv"
+      },
+      "grid_serving_active": {
+        "name": "Netzdienliches Laden aktiv"
+      },
+      "max_soc_clamped": {
+        "name": "Max-SOC-Sperre aktiv"
+      },
+      "extended_mode_available": {
+        "name": "SunSpec-Modus erreichbar"
+      },
+      "battery_problem": {
+        "name": "Speicherproblem"
+      }
+    },
     "sensor": {
       "soc": {
         "name": "Ladezustand"

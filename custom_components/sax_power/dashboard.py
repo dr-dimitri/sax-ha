@@ -248,6 +248,20 @@ async def async_build_dashboard_config(
             _entities_card(
                 hass,
                 entry_id,
+                "Status",
+                [
+                    ("binary_sensor", "battery_charging"),
+                    ("binary_sensor", "timed_charge_active"),
+                    ("binary_sensor", "price_charge_active"),
+                    ("binary_sensor", "grid_serving_active"),
+                    ("binary_sensor", "max_soc_clamped"),
+                    ("binary_sensor", "battery_problem"),
+                ],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
                 "Leistung",
                 [
                     ("number", "max_soc"),

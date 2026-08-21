@@ -186,6 +186,35 @@ async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None
         assert view["cards"] == []
 
 
+async def test_build_dashboard_config_status_card_contains_binary_sensors(
+    hass,
+) -> None:
+    """Die neue Karte "Status" im Tab "Allgemeine Informationen" zeigt die
+    binary_sensor-Entities aus REQ-BINARY-SENSORS (nicht die diagnostische
+    "SunSpec-Modus erreichbar"-Entity)."""
+    entity_ids = {
+        suffix: _register(hass, "binary_sensor", suffix)
+        for suffix in (
+            "battery_charging",
+            "timed_charge_active",
+            "price_charge_active",
+            "grid_serving_active",
+            "max_soc_clamped",
+            "battery_problem",
+        )
+    }
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    status_card = next(
+        card for card in config["views"][0]["cards"] if card.get("title") == "Status"
+    )
+    assert {
+        row["entity"] if isinstance(row, dict) else row
+        for row in status_card["entities"]
+    } == set(entity_ids.values())
+
+
 async def test_build_dashboard_config_storage_state_dropped_switch_kept(hass) -> None:
     """Die reine Zustands-Anzeige "Speicher Zustand" wird nicht mehr
     dargestellt, der Speicher-Schalter bleibt aber erhalten."""

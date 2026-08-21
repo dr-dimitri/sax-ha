@@ -48,6 +48,7 @@
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # ==============================================================================
 
 # ==============================================================================
@@ -1114,7 +1115,8 @@ requirement_bundled_dashboard:
   description: >
     dashboard.py baut ein vierteiliges Storage-Dashboard mit den
     wichtigsten Sensoren/Einstellungen, gegliedert in vier Tabs (Lovelace-
-    Views): "Allgemeine Informationen" (Speicher-Schalter, SOC,
+    Views): "Allgemeine Informationen" (Speicher-Schalter, eine Karte
+    "Status" mit den binary_sensor-Entities aus REQ-BINARY-SENSORS, SOC,
     Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten - die
     reine Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-
     Schalter bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie
@@ -1250,3 +1252,61 @@ requirement_bundled_dashboard:
        den geräteprefix-freien, übersetzten Namen verwenden, und dass
        force=True ein bereits bestehendes Dashboard überschreibt, ohne das
        Panel erneut zu registrieren."
+
+# ==============================================================================
+# ANFORDERUNG: BINARY_SENSOR-PLATTFORM
+# ==============================================================================
+requirement_binary_sensors:
+  id: REQ-BINARY-SENSORS
+  title: "binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext"
+  status: done
+  description: >
+    binary_sensor.py ergänzt die bestehenden deutschen Klartext-Sensoren
+    (sensor.py, *_active_text) um sieben beschreibungsbasierte
+    binary_sensor-Entities mit echter device_class-Semantik (Icon,
+    Zustandsfarbe, maschinenlesbarer on/off-Zustand statt Sprachvergleich).
+    Rein additiv - die Text-Sensoren bleiben unverändert bestehen, weil sie
+    in bestehenden Anwender-Automationen und im mitgelieferten Dashboard
+    stehen.
+
+    Entities (unique_id-Suffix = translation_key):
+      - "battery_charging" (device_class BATTERY_CHARGING): storage_power_
+        active < 0 (negativ = Ladung, siehe _watts_to_ic_setpoint_raw).
+      - "timed_charge_active", "price_charge_active", "grid_serving_active"
+        (device_class RUNNING): dieselben, bereits in coordinator.data
+        veröffentlichten Flags (SaxPowerCoordinator._publish_charge_state),
+        die auch die gleichnamigen *_active_text-Sensoren speisen.
+      - "max_soc_clamped" (kein device_class): coordinator.max_soc_clamped.
+      - "extended_mode_available" (device_class CONNECTIVITY,
+        entity_category diagnostic): coordinator.extended_available, siehe
+        REQ-EXTENDED-MODE-RESILIENCE.
+      - "battery_problem" (device_class PROBLEM, entity_category
+        diagnostic): True, sobald storage_event oder battery_event einen
+        von 0 (Normalbetrieb) abweichenden Rohcode melden - vergleicht
+        bewusst die Rohcodes, nicht die übersetzten storage_event_text/
+        battery_event_text-Werte, damit ein künftig geändertes Label die
+        Logik nicht bricht.
+
+    Fehlende Werte werden konsistent zum Rest der Integration als "nicht
+    verfügbar" (is_on = None) abgebildet, nie fälschlich als False - gilt
+    für alle sieben Entities, solange coordinator.data noch nicht befüllt
+    ist, sowie zusätzlich für "battery_charging" und "battery_problem",
+    solange der SunSpec-Modus-Block nicht erreichbar ist (siehe
+    REQ-EXTENDED-MODE-RESILIENCE).
+
+    __init__.PLATFORMS enthält Platform.BINARY_SENSOR. Das mitgelieferte
+    Dashboard (REQ-BUNDLED-DASHBOARD) zeigt alle Entities außer
+    "extended_mode_available" (rein diagnostisch) in einer neuen Karte
+    "Status" im Tab "Allgemeine Informationen".
+  acceptance_criteria:
+    - "tests/test_binary_sensor.py deckt jede der sieben is_on_fn-Funktionen
+       ab: erwarteter Zustand bei vorhandenen Daten, None bei fehlendem
+       SunSpec-Modus-Block (battery_charging, battery_problem) sowie None,
+       solange coordinator.data noch None ist (vor dem ersten Update)."
+    - "tests/test_binary_sensor.py stellt sicher, dass alle Entity-Keys
+       eindeutig sind und jeder Key in strings.json sowie
+       translations/de.json und translations/en.json eine Übersetzung hat."
+    - "tests/test_dashboard.py deckt ab, dass die neue Statuskarte im Tab
+       Allgemeine Informationen die sechs nicht-diagnostischen
+       binary_sensor-Entities enthält, sofern sie in der Entity Registry
+       vorhanden sind."

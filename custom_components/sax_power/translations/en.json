@@ -50,6 +50,29 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "battery_charging": {
+        "name": "Battery charging"
+      },
+      "timed_charge_active": {
+        "name": "Timed charge active"
+      },
+      "price_charge_active": {
+        "name": "Price-optimised charging active"
+      },
+      "grid_serving_active": {
+        "name": "Grid-serving charge active"
+      },
+      "max_soc_clamped": {
+        "name": "Max SOC lock active"
+      },
+      "extended_mode_available": {
+        "name": "SunSpec mode reachable"
+      },
+      "battery_problem": {
+        "name": "Battery problem"
+      }
+    },
     "sensor": {
       "soc": {
         "name": "State of charge"

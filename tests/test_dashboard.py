@@ -35,13 +35,21 @@ def _register(hass, entity_domain: str, suffix: str) -> str:
     return entry.entity_id
 
 
-def _iter_entity_ids(cards: list[dict[str, Any]]):
-    """Sammelt alle referenzierten Entity-IDs aus einer beliebigen Mischung
-    aus entities-/tile-/gauge-/grid-Karten (siehe dashboard.py)."""
+def _iter_cards(cards: list[dict[str, Any]]):
+    """Läuft rekursiv durch eine beliebige Mischung aus entities-/tile-/
+    gauge-/grid-Karten (siehe dashboard.py) und liefert jede Blattkarte
+    (also nicht die grid-Container selbst)."""
     for card in cards:
         if card["type"] == "grid":
-            yield from _iter_entity_ids(card["cards"])
-        elif card["type"] == "entities":
+            yield from _iter_cards(card["cards"])
+        else:
+            yield card
+
+
+def _iter_entity_ids(cards: list[dict[str, Any]]):
+    """Sammelt alle referenzierten Entity-IDs."""
+    for card in _iter_cards(cards):
+        if card["type"] == "entities":
             for row in card["entities"]:
                 yield row["entity"] if isinstance(row, dict) else row
         elif "entity" in card:
@@ -72,19 +80,49 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
 
 
 async def test_build_dashboard_config_soc_uses_gauge_card_with_severity(hass) -> None:
-    """Der Ladezustand wird als Gauge-Karte dargestellt: grün ab 50 % SOC,
-    orange ab 20 % SOC, darunter rot."""
+    """Der Ladezustand wird als Gauge-Karte mit Nadel dargestellt: grün ab
+    50 % SOC, orange ab 20 % SOC, darunter rot."""
     soc_entity_id = _register(hass, "sensor", "soc")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     gauge_cards = [
-        card for card in config["views"][0]["cards"] if card["type"] == "gauge"
+        card
+        for card in _iter_cards(config["views"][0]["cards"])
+        if card["type"] == "gauge" and card["entity"] == soc_entity_id
     ]
     assert len(gauge_cards) == 1
     gauge = gauge_cards[0]
-    assert gauge["entity"] == soc_entity_id
+    assert gauge["needle"] is True
     assert gauge["severity"] == {"red": 0, "yellow": 20, "green": 50}
+
+
+async def test_build_dashboard_config_temperature_uses_gauge_card_with_segments(
+    hass,
+) -> None:
+    """Die Zelltemperatur wird ebenfalls als Gauge mit Nadel dargestellt:
+    0-5 °C rot (zu kalt), 5-32 °C grün (normal), 32-40 °C rot (zu heiß) -
+    ein nicht-monotones Farbmuster, das das einfache severity-Mapping nicht
+    abbilden kann, deshalb "segments" statt "severity"."""
+    temp_entity_id = _register(hass, "sensor", "storage_max_cell_temp")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    gauge_cards = [
+        card
+        for card in _iter_cards(config["views"][0]["cards"])
+        if card["type"] == "gauge" and card["entity"] == temp_entity_id
+    ]
+    assert len(gauge_cards) == 1
+    gauge = gauge_cards[0]
+    assert gauge["needle"] is True
+    assert gauge["min"] == 0
+    assert gauge["max"] == 40
+    assert gauge["segments"] == [
+        {"from": 0, "color": "red"},
+        {"from": 5, "color": "green"},
+        {"from": 32, "color": "red"},
+    ]
 
 
 async def test_build_dashboard_config_entity_names_drop_device_prefix(hass) -> None:

@@ -1,0 +1,41 @@
+name: Automated Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main # Ersetze dies durch 'master', falls dein Haupt-Branch so heißt
+
+jobs:
+  release:
+    # Der Workflow läuft nur, wenn der PR tatsächlich gemergt wurde
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Erlaubt das Erstellen von Tags und Releases
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Lädt alle vergangenen Tags für die korrekte Versionsberechnung
+
+      - name: Erhöhe Versionsnummer (Tag)
+        id: bump_version
+        uses: anothrNick/github-tag-action@1.71.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch # Erhöht standardmäßig die letzte Stelle (z. B. v1.0.1 -> v1.0.2)
+          WITH_V: true        # Fügt ein "v" vor die Version (z. B. v1.0.0)
+
+      - name: Erstelle GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump_version.outputs.new_tag }}
+          name: Release ${{ steps.bump_version.outputs.new_tag }}
+          # Kombiniert die PR-Beschreibung (oben) mit den automatischen GitHub-Notizen (unten)
+          body: |
+            ## 📝 Pull Request Beschreibung
+            ${{ github.event.pull_request.body }}
+          generate_release_notes: true 
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

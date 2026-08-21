@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -34,10 +33,13 @@ class SaxPowerReinstallDashboardButton(SaxPowerEntity, ButtonEntity):
     werden können: Home Assistant bietet keine Möglichkeit, dessen
     eingebautes Diagnose-Download-Menü um eigene Einträge zu erweitern,
     ein eigener Button auf der Geräteseite ist der dafür vorgesehene Weg.
+    Bewusst ohne entity_category (weder CONFIG noch DIAGNOSTIC): Home
+    Assistant blendet solche Entities auf der Geräteseite standardmäßig in
+    einem eingeklappten "Konfiguration"-Abschnitt aus - der Button soll
+    aber direkt in der Steuerungs-Liste sichtbar sein.
     """
 
     _attr_translation_key = "reinstall_dashboard"
-    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:view-dashboard-edit-outline"
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:

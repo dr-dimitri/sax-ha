@@ -712,6 +712,7 @@ gemacht – die Datei kann also gefahrlos geteilt werden.
 | Preisoptimiertes Laden meldet "Keine Preisdaten" | Der Sensor liefert keine auswertbare Vorschau | Attributnamen im Options-Dialog fest vorgeben; Diagnose-Export zeigt den ausgewerteten Plan |
 | Speicher lädt und entlädt gar nicht mehr | Die [Max-SOC-Sperre](#max-soc-sperre) hält ihn bei 0 % | "Max. SOC" höher setzen oder Netzbezug abwarten |
 | Zeit lässt sich nicht setzen / wurde geleert | Überschneidung der Zeitfenster | Siehe [Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden) |
+| "Ladestatus Akku" (oder andere Klartext-Sensoren) erzeugt viele Einträge im Protokoll/in der Aktivität | Der Wert wird alle 2 s abgefragt und kann entsprechend oft wechseln; Home Assistant blendet nur Sensoren mit Einheit/state_class automatisch aus dem Logbuch aus – für reine Klartext-Sensoren geht das nicht, ohne sie kaputt zu machen | Entity-ID in Entwicklertools → Zustände nachschlagen und gezielt ausschließen: `logbook:` → `exclude:` → `entities:` in der `configuration.yaml` (siehe [Logbuch-Dokumentation](https://www.home-assistant.io/integrations/logbook/#exclude)) |
 
 ## Bekannte Einschränkungen
 

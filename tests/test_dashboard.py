@@ -58,9 +58,10 @@ def _iter_entity_ids(cards: list[dict[str, Any]]):
 
 async def test_build_dashboard_config_resolves_registered_entities(hass) -> None:
     """Nur tatsächlich in der Entity Registry vorhandene Entities landen in
-    den Karten; die drei Tabs (Views) sind immer vorhanden."""
+    den Karten; die vier Tabs (Views) sind immer vorhanden."""
     soc_entity_id = _register(hass, "sensor", "soc")
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
+    grid_serving_switch_entity_id = _register(hass, "switch", "grid_serving_enabled")
     price_switch_entity_id = _register(hass, "switch", "price_charge_enabled")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
@@ -68,6 +69,7 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
     assert [view["path"] for view in config["views"]] == [
         "allgemein",
         "ladeautomatik",
+        "netzdienliches-laden",
         "dynamisches-laden",
     ]
 
@@ -75,7 +77,10 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
     assert soc_entity_id in general_entities
     assert storage_switch_entity_id in general_entities
 
-    price_entities = set(_iter_entity_ids(config["views"][2]["cards"]))
+    grid_serving_entities = set(_iter_entity_ids(config["views"][2]["cards"]))
+    assert grid_serving_switch_entity_id in grid_serving_entities
+
+    price_entities = set(_iter_entity_ids(config["views"][3]["cards"]))
     assert price_switch_entity_id in price_entities
 
 
@@ -143,13 +148,76 @@ async def test_build_dashboard_config_entity_names_drop_device_prefix(hass) -> N
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
-    """Ohne jede registrierte Entity bleiben alle drei Views vorhanden, aber
+    """Ohne jede registrierte Entity bleiben alle vier Views vorhanden, aber
     ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
     config = await async_build_dashboard_config(hass, "unbekannter_entry")
 
-    assert len(config["views"]) == 3
+    assert len(config["views"]) == 4
     for view in config["views"]:
         assert view["cards"] == []
+
+
+async def test_build_dashboard_config_storage_state_dropped_switch_kept(hass) -> None:
+    """Die reine Zustands-Anzeige "Speicher Zustand" wird nicht mehr
+    dargestellt, der Speicher-Schalter bleibt aber erhalten."""
+    storage_state_entity_id = _register(hass, "sensor", "storage_state_text")
+    storage_switch_entity_id = _register(hass, "switch", "storage_switch")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
+    assert storage_switch_entity_id in general_entities
+    assert storage_state_entity_id not in general_entities
+
+
+async def test_build_dashboard_config_grid_serving_view(hass) -> None:
+    """Der neue Tab "Netzdienliches Laden" enthält Start-/Endezeit, den
+    Schalter "Netzdienliches Laden aktiv" und die zwölf Monats-Schalter in
+    einer eigenen Karte - die reine Status-Textanzeige entfällt, weil der
+    Schalter deren Zustand bereits zeigt."""
+    grid_serving_switch = _register(hass, "switch", "grid_serving_enabled")
+    grid_serving_start = _register(hass, "time", "grid_serving_start")
+    grid_serving_end = _register(hass, "time", "grid_serving_end")
+    month_switches = [
+        _register(hass, "switch", f"grid_serving_month_{month}")
+        for month in range(1, 13)
+    ]
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    grid_serving_view = next(
+        view for view in config["views"] if view["path"] == "netzdienliches-laden"
+    )
+    entities = set(_iter_entity_ids(grid_serving_view["cards"]))
+    assert grid_serving_switch in entities
+    assert grid_serving_start in entities
+    assert grid_serving_end in entities
+    assert entities.issuperset(month_switches)
+
+    months_card = next(
+        card
+        for card in grid_serving_view["cards"]
+        if card.get("title") == "Aktive Monate"
+    )
+    assert {row["entity"] for row in months_card["entities"]} == set(month_switches)
+
+
+async def test_build_dashboard_config_charging_view_without_grid_serving(hass) -> None:
+    """Der Tab "Ladeautomatik" enthält keine netzdienlichen Entities mehr -
+    die sind jetzt im eigenen Tab."""
+    grid_serving_switch = _register(hass, "switch", "grid_serving_enabled")
+    grid_serving_start = _register(hass, "time", "grid_serving_start")
+    timed_charge_switch = _register(hass, "switch", "timed_charge_enabled")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    charging_view = next(
+        view for view in config["views"] if view["path"] == "ladeautomatik"
+    )
+    entities = set(_iter_entity_ids(charging_view["cards"]))
+    assert timed_charge_switch in entities
+    assert grid_serving_switch not in entities
+    assert grid_serving_start not in entities
 
 
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:
@@ -185,7 +253,7 @@ async def test_create_dashboard_registers_panel_and_is_idempotent(hass) -> None:
         assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards
         dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 3
+        assert len(saved_config["views"]) == 4
         mock_register_panel.assert_called_once()
         assert (
             mock_register_panel.call_args.kwargs["frontend_url_path"]
@@ -221,7 +289,7 @@ async def test_create_dashboard_force_overwrites_existing_config(hass) -> None:
         await async_create_dashboard(hass, entry, force=True)
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 3
+        assert len(saved_config["views"]) == 4
         mock_register_panel.assert_called_once()  # weiterhin kein zweiter Panel-Aufruf
 
 

@@ -44,7 +44,7 @@ lokal mit dem Speicher.
 - **Akku schonen:** eine geräteunabhängige Max-SOC-Sperre, die auch dann greift,
   wenn der Speicher von selbst mit PV-Überschuss volllädt.
 - **Fertiges Dashboard:** optional in der Ersteinrichtung anlegbar, mit den
-  wichtigsten Informationen in drei Tabs (siehe
+  wichtigsten Informationen in vier Tabs (siehe
   [Schritt 3: Dashboard anlegen](#schritt-3-dashboard-anlegen-optional)).
 
 ## Installation
@@ -102,11 +102,13 @@ Strompreis-Sensor existiert bei einer frischen Installation oft noch gar nicht.
 ### Schritt 3: Dashboard anlegen (optional)
 
 Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
-anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in drei
-Tabs: **Allgemeine Informationen**, **Ladeautomatik** (Netzladung und
-netzdienliches Laden) sowie **Dynamisches Laden** (preisoptimiertes Laden).
-Der Ladezustand erscheint dabei als Gauge (grün ab 50 % SOC, orange ab 20 %,
-darunter rot), die wichtigsten Ein/Aus-Schalter als große Kacheln. Die
+anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in vier
+Tabs: **Allgemeine Informationen**, **Ladeautomatik** (zeitgesteuerte
+Netzladung), **Netzdienliches Laden** (Zeitfenster, Hauptschalter und die
+zwölf Monats-Schalter als eigene Karte) sowie **Dynamisches Laden**
+(preisoptimiertes Laden). Der Ladezustand erscheint dabei als Gauge (grün ab
+50 % SOC, orange ab 20 %, darunter rot), die wichtigsten Ein/Aus-Schalter als
+große Kacheln. Die
 Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
 der Sidebar und lässt sich jederzeit unter **Einstellungen → Dashboards**
 anpassen oder wieder entfernen.
@@ -153,7 +155,7 @@ unterschiedlicher Slave-ID.
 | Wirk-, Schein-, Blindleistung Speicher Summe | in W / VA / var (Diagnose) |
 | Leistungsfaktor Speicher Summe | dimensionslos |
 | Netzfrequenz (Speicher) | in Hz |
-| Maximale Zelltemperatur | in °C |
+| Zelltemperatur | in °C |
 | Speicher Zustand / Speicher Ereignis | Klartext (Diagnose) |
 | PV-Leistung | in W – nur mit Smartmeter ADW200 verfügbar (siehe Hinweis unten) |
 | Leistungsvorgabe / Timeout Leistungsvorgabe / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte. Leistungsvorgabe und Steuermodus werden von den Lade-Automatiken auch selbst geschrieben |

@@ -47,7 +47,7 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
-# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (3 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar
 # ==============================================================================
 
 # ==============================================================================
@@ -1113,28 +1113,34 @@ requirement_dynamic_price_charge:
 # ==============================================================================
 requirement_bundled_dashboard:
   id: REQ-BUNDLED-DASHBOARD
-  title: "Mitgeliefertes Lovelace-Dashboard (3 Tabs), optional in der Ersteinrichtung anlegbar"
+  title: "Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar"
   status: done
   description: >
-    dashboard.py baut ein dreiteiliges Storage-Dashboard mit den
-    wichtigsten Sensoren/Einstellungen, gegliedert in drei Tabs (Lovelace-
-    Views): "Allgemeine Informationen" (Speicher-Schalter, SOC, Zustand,
-    Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten),
-    "Ladeautomatik" (zeitgesteuertes Laden und netzdienliches Laden mit
-    jeweiligem Zeitfenster/Status) sowie "Dynamisches Laden"
-    (preisoptimiertes Laden: Strategie, Preisgrenze, Stundenzahl, Status).
-    Die zwölf Monats-Schalter je Automatik sind bewusst nicht enthalten
-    (Feinkonfiguration, nicht Tagesgeschäft) - dafür bleibt die Geräteseite
-    zuständig.
+    dashboard.py baut ein vierteiliges Storage-Dashboard mit den
+    wichtigsten Sensoren/Einstellungen, gegliedert in vier Tabs (Lovelace-
+    Views): "Allgemeine Informationen" (Speicher-Schalter, SOC,
+    Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten - die
+    reine Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-
+    Schalter bleibt), "Ladeautomatik" (nur noch zeitgesteuertes Laden mit
+    Zeitfenster/Status), "Netzdienliches Laden" (eigener Tab: Start-/
+    Endezeit, der Schalter "Netzdienliches Laden aktiv" - die separate
+    Status-Textanzeige entfällt, weil der Schalter deren Zustand bereits
+    zeigt - sowie eine eigene Karte "Aktive Monate" mit den zwölf
+    Monats-Schaltern, mit denen sich netzdienliches Laden je Kalendermonat
+    ein-/ausschalten lässt) sowie "Dynamisches Laden" (preisoptimiertes
+    Laden: Strategie, Preisgrenze, Stundenzahl, Status). Die zwölf
+    Monats-Schalter der zeitgesteuerten Netzladung sind weiterhin bewusst
+    nicht enthalten (Feinkonfiguration, nicht Tagesgeschäft) - dafür bleibt
+    die Geräteseite zuständig.
 
     Für einen moderneren, auf einen Blick erfassbaren Einstieg zeigt jeder
     Tab die wichtigsten Ein/Aus-Schalter (Speicher, zeitgesteuertes/
     netzdienliches/preisoptimiertes Laden) als "tile"-Karten statt als
-    Listenzeile. Ladezustand und maximale Zelltemperatur erscheinen
-    nebeneinander als Gauge-Karten mit Nadel (_gauge_card, `needle: true`):
-    SOC über `severity` (grün ab 50 %, orange ab 20 %, sonst rot - ein
-    einfaches, monoton steigendes Farbmapping reicht hier); Zelltemperatur
-    über `segments` statt `severity`, weil das Farbmuster nicht monoton ist
+    Listenzeile. Ladezustand und Zelltemperatur erscheinen nebeneinander
+    als Gauge-Karten mit Nadel (_gauge_card, `needle: true`): SOC über
+    `severity` (grün ab 50 %, orange ab 20 %, sonst rot - ein einfaches,
+    monoton steigendes Farbmapping reicht hier); Zelltemperatur über
+    `segments` statt `severity`, weil das Farbmuster nicht monoton ist
     (0-5 °C rot/zu kalt, 5-32 °C grün/normal, 32-40 °C rot/zu heiß - mit nur
     den drei festen severity-Schlüsseln green/yellow/red nicht abbildbar,
     "red" könnte sonst nur einmal vorkommen). Alle Kartenbeschriftungen

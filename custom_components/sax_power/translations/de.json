@@ -136,7 +136,7 @@
         "name": "Netzfrequenz (Speicher)"
       },
       "storage_max_cell_temp": {
-        "name": "Maximale Zelltemperatur"
+        "name": "Zelltemperatur"
       },
       "storage_state_text": {
         "name": "Speicher Zustand"

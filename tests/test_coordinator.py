@@ -231,6 +231,56 @@ async def test_update_data_recovers_when_extended_becomes_available(hass) -> Non
     assert coordinator._extended_available is True
 
 
+async def test_extended_unavailable_since_set_on_the_edge(hass) -> None:
+    """_extended_unavailable_since (Grundlage für die Eskalation
+    ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE, siehe anforderung.yaml,
+    REQ-SELF-DIAGNOSIS-REPAIRS) wird nur beim ERSTEN Ausfall gesetzt, nicht
+    bei jedem weiteren Poll-Zyklus, in dem der Block weiterhin nicht
+    erreichbar ist."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=True)
+    )
+    coordinator = _make_coordinator(hass, client)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        await coordinator._async_update_data()
+    assert coordinator._extended_unavailable_since == 1000.0
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=2000.0
+    ):
+        await coordinator._async_update_data()
+    assert coordinator._extended_unavailable_since == 1000.0
+
+
+async def test_extended_unavailable_since_cleared_on_recovery(hass) -> None:
+    """Wird der SunSpec-Modus-Block wieder erreichbar, muss der Zeitstempel
+    zurückgesetzt werden - sonst würde ein späterer, neuer Ausfall
+    fälschlich sofort als "schon lange andauernd" gewertet."""
+    client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=True)
+    )
+    coordinator = _make_coordinator(hass, client)
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        await coordinator._async_update_data()
+    assert coordinator._extended_unavailable_since == 1000.0
+
+    client.read_holding_registers = AsyncMock(
+        side_effect=_make_read_side_effect(basic_registers, extended_error=False)
+    )
+    await coordinator._async_update_data()
+
+    assert coordinator._extended_unavailable_since is None
+
+
 async def test_normal_block_throttled_high_block_follows_own_interval(hass) -> None:
     """Der NORMAL-Block (Basic Mode) wird trotz des jetzt kürzeren
     Coordinator-Timers (siehe READ_BLOCK_EXT_HIGH_INTERVAL) weiterhin nur

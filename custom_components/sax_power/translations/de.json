@@ -434,6 +434,26 @@
           }
         }
       }
+    },
+    "price_sensor_missing": {
+      "title": "Preisoptimiertes Laden: Preis-Sensor liefert keine Daten",
+      "description": "Preisoptimiertes Laden ist aktiv, aber der Preis-Sensor {price_sensor} liefert seit über 6 Stunden keine auswertbaren Preisdaten (Entity existiert nicht mehr, keine Preisvorschau oder falsches Attribut). Es wird derzeit nicht aus dem Netz geladen. Bitte den Preis-Sensor unter \"Konfigurieren\" bei dieser Integration prüfen."
+    },
+    "sunspec_persistently_unavailable": {
+      "title": "SAX SunSpec-Modus dauerhaft nicht erreichbar",
+      "description": "Slave-ID {slave_id} ist seit über einer Stunde ununterbrochen nicht erreichbar. Speicherdetails, Netz-/Smart-Meter-Werte und alle drei Lade-Automatiken (zeitgesteuertes, netzdienliches und preisoptimiertes Laden) sind ohne diesen Registerblock funktionslos. Bitte Netzwerkverbindung und die konfigurierte Slave-ID (SunSpec-Modus, Standard: 100) prüfen."
+    },
+    "max_soc_below_min_soc": {
+      "title": "Ziel-SOC liegt unter dem Nachlade-Schwellwert",
+      "description": "\"Max. SOC\" ({max_soc} %) liegt unter \"Netzladung Min. SOC\" ({min_soc} %) - das zeitgesteuerte Laden kann so nie starten, weil der Ladestart erst unterhalb von Min. SOC ausgelöst wird, die Max-SOC-Sperre aber schon vorher greift. Bitte Max. SOC auf mindestens den Wert von Min. SOC anheben."
+    },
+    "empty_charge_window": {
+      "title": "Zeitfenster ist leer",
+      "description": "Das Zeitfenster für \"{feature}\" ist leer (Start- und Endzeit sind identisch) - die Automatik läuft dadurch nie. Bitte Start- oder Endzeit anpassen."
+    },
+    "no_active_months": {
+      "title": "Kein Monat ausgewählt",
+      "description": "Für \"{feature}\" ist kein einziger Monat aktiviert - das Feature ist dadurch ganzjährig inaktiv. Bitte mindestens einen Monat aktivieren."
     }
   },
   "services": {

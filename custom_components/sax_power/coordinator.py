@@ -28,8 +28,13 @@ from .const import (
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
+    ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
+    ISSUE_MAX_SOC_BELOW_MIN_SOC,
+    ISSUE_NO_ACTIVE_MONTHS,
     ISSUE_PRICE_CHARGE_CONFLICT,
+    ISSUE_PRICE_SENSOR_MISSING,
+    ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
     ISSUE_TIMED_CHARGE_CONFLICT,
     MAX_IC_POWER_SETPOINT_PCT,
     MAX_PRICE_HOURS,
@@ -41,6 +46,7 @@ from .const import (
     MIN_PRICE_LIMIT,
     MIN_SETPOINT_POWER,
     MIN_SOC,
+    PRICE_SENSOR_MISSING_GRACE_PERIOD,
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
@@ -144,6 +150,7 @@ from .const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
+    SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
     SWITCH_STATE_LABELS,
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
@@ -408,6 +415,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # erreichbarer Extended-Mode-Block dazu, dass ConfigEntryNotReady
         # ausgelöst wurde und die Integration gar keine Entities anlegte.
         self._extended_available = True
+        # Zeitpunkt (monotonic), seit dem der SunSpec-Modus-Block
+        # ununterbrochen nicht erreichbar ist - None, solange er erreichbar
+        # ist. Von _async_read_high_block auf der Zustandsflanke gesetzt/
+        # zurückgesetzt, von _check_sunspec_persistently_unavailable
+        # unten ausgewertet (siehe anforderung.yaml,
+        # REQ-SELF-DIAGNOSIS-REPAIRS).
+        self._extended_unavailable_since: float | None = None
+        # Selbstdiagnose (siehe anforderung.yaml, REQ-SELF-DIAGNOSIS-
+        # REPAIRS): self._price_sensor_missing_since hält analog zu
+        # self._extended_unavailable_since fest, seit wann der Preis-Sensor
+        # ununterbrochen keine auswertbaren Preisdaten liefert. Die
+        # *_issue_active-Flags/-Dicts verhindern, dass
+        # _async_check_self_diagnostics dasselbe Issue bei jedem Poll-Zyklus
+        # erneut anlegt (ir.async_create_issue ist zwar idempotent über die
+        # issue_id, ein wiederholter Aufruf wäre aber unnötig).
+        self._price_sensor_missing_since: float | None = None
+        self._price_sensor_issue_active = False
+        self._sunspec_persistent_issue_active = False
+        self._max_soc_below_min_soc_issue_active = False
+        self._empty_window_issue_active: dict[str, bool] = {}
+        self._no_active_months_issue_active: dict[str, bool] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         data = dict(await self._async_read_basic())
@@ -416,6 +444,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._async_enforce_grid_charge(data)
         self._publish_charge_state(data)
+        self._async_check_self_diagnostics()
         return data
 
     def _publish_charge_state(self, data: dict[str, Any]) -> None:
@@ -605,6 +634,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     translation_key=ISSUE_EXTENDED_MODE_UNAVAILABLE,
                     translation_placeholders={"slave_id": str(self.slave_id_extended)},
                 )
+                self._extended_unavailable_since = monotonic()
             self._extended_available = False
             self._high_data = {}
             return {}
@@ -617,6 +647,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ir.async_delete_issue(
                 self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
             )
+            self._extended_unavailable_since = None
         self._extended_available = True
 
         ext_regs = extended_result.registers
@@ -2227,6 +2258,213 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         persistent_notification.async_dismiss(
             self.hass, f"{DOMAIN}_{self.entry_id}_charge_conflict"
         )
+
+    # -- Selbstdiagnose (siehe anforderung.yaml, REQ-SELF-DIAGNOSIS-REPAIRS) --
+    def _async_check_self_diagnostics(self) -> None:
+        """Weitere Selbstdiagnose-Prüfungen über den Ladekonflikt
+        (_async_create_charge_conflict_issue) und die sofortige SunSpec-
+        Nichterreichbarkeits-Warnung (_async_read_high_block) hinaus.
+
+        Bei jedem Poll-Zyklus aus _async_update_data aufgerufen; jede
+        einzelne Prüfung legt ihr Issue aber nur auf einer Zustandsflanke
+        an bzw. entfernt es wieder, statt es bei jedem Aufruf neu
+        anzulegen (ir.async_create_issue wäre zwar idempotent über die
+        issue_id, ein wiederholter Aufruf ist aber unnötig)."""
+        self._check_price_sensor_missing()
+        self._check_sunspec_persistently_unavailable()
+        self._check_max_soc_below_min_soc()
+        self._check_empty_charge_window(
+            "timed_charge",
+            self._timed_charge_enabled,
+            self._timed_charge_start,
+            self._timed_charge_end,
+            "Netzladung (zeitgesteuertes Laden)",
+        )
+        self._check_empty_charge_window(
+            "grid_serving",
+            self._grid_serving_enabled,
+            self._grid_serving_start,
+            self._grid_serving_end,
+            "Netzdienliches Laden",
+        )
+        self._check_no_active_months(
+            "timed_charge",
+            self._timed_charge_enabled,
+            self._timed_charge_months,
+            "Netzladung (zeitgesteuertes Laden)",
+        )
+        self._check_no_active_months(
+            "grid_serving",
+            self._grid_serving_enabled,
+            self._grid_serving_months,
+            "Netzdienliches Laden",
+        )
+
+    def _check_price_sensor_missing(self) -> None:
+        """Preisoptimiertes Laden ist aktiv, aber der konfigurierte
+        Preis-Sensor existiert nicht (mehr) oder liefert seit über
+        PRICE_SENSOR_MISSING_GRACE_PERIOD keine auswertbaren Preisdaten
+        mehr (price_planner.plan.status == PRICE_STATUS_NO_PRICE_DATA
+        impliziert bereits price_charge_enabled UND Strategie != "off",
+        siehe price_optimizer.evaluate/compute_plan)."""
+        issue_id = f"{ISSUE_PRICE_SENSOR_MISSING}_{self.entry_id}"
+        missing = self.price_planner.plan.status == PRICE_STATUS_NO_PRICE_DATA
+        if not missing:
+            self._price_sensor_missing_since = None
+            if self._price_sensor_issue_active:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                self._price_sensor_issue_active = False
+            return
+
+        now = monotonic()
+        if self._price_sensor_missing_since is None:
+            self._price_sensor_missing_since = now
+        if (
+            not self._price_sensor_issue_active
+            and now - self._price_sensor_missing_since
+            >= PRICE_SENSOR_MISSING_GRACE_PERIOD
+        ):
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_PRICE_SENSOR_MISSING,
+                translation_placeholders={
+                    "price_sensor": self.price_planner.price_entity_id or "?"
+                },
+            )
+            self._price_sensor_issue_active = True
+
+    def _check_sunspec_persistently_unavailable(self) -> None:
+        """Eskalation von ISSUE_EXTENDED_MODE_UNAVAILABLE (das schon bei der
+        ersten Nichterreichbarkeit angelegt wird): hält der Ausfall länger
+        als SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD an, betrifft das
+        nicht mehr nur die SunSpec-Sensoren, sondern macht auch alle drei
+        Lade-Automatiken funktionslos - das verdient eine dringlichere,
+        ausführlichere Meldung."""
+        issue_id = f"{ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE}_{self.entry_id}"
+        if self._extended_available or self._extended_unavailable_since is None:
+            if self._sunspec_persistent_issue_active:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                self._sunspec_persistent_issue_active = False
+            return
+
+        if (
+            not self._sunspec_persistent_issue_active
+            and monotonic() - self._extended_unavailable_since
+            >= SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD
+        ):
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
+                translation_placeholders={"slave_id": str(self.slave_id_extended)},
+            )
+            self._sunspec_persistent_issue_active = True
+
+    def _check_max_soc_below_min_soc(self) -> None:
+        """ "Max. SOC" ist gleichzeitig das Ziel-SOC des zeitgesteuerten
+        Ladens - liegt es unter "Min. SOC" (dem unteren Start-Schwellwert),
+        kann die Netzladung nie starten: der Ladestart wird erst unterhalb
+        von Min. SOC ausgelöst, die Max-SOC-Sperre greift aber schon
+        vorher. Kein Zustandsflanken-Timer nötig, da es sich um eine
+        statische Einstellungskombination statt eines transienten
+        Messwerts handelt."""
+        issue_id = f"{ISSUE_MAX_SOC_BELOW_MIN_SOC}_{self.entry_id}"
+        problem = (
+            self._max_soc is not None
+            and self._timed_charge_min_soc is not None
+            and self._max_soc < self._timed_charge_min_soc
+        )
+        if not problem:
+            if self._max_soc_below_min_soc_issue_active:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                self._max_soc_below_min_soc_issue_active = False
+            return
+        if self._max_soc_below_min_soc_issue_active:
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_MAX_SOC_BELOW_MIN_SOC,
+            translation_placeholders={
+                "max_soc": str(self._max_soc),
+                "min_soc": str(self._timed_charge_min_soc),
+            },
+        )
+        self._max_soc_below_min_soc_issue_active = True
+
+    def _check_empty_charge_window(
+        self,
+        feature_key: str,
+        enabled: bool,
+        start: dt_time | None,
+        end: dt_time | None,
+        feature_label: str,
+    ) -> None:
+        """Automatik aktiv, aber Start- und Endzeit ihres Zeitfensters sind
+        identisch (siehe _window_intervals: start == end gilt als leeres
+        Fenster) - die Automatik läuft dadurch nie, ohne dass das an der
+        Entity selbst erkennbar wäre."""
+        issue_id = f"{ISSUE_EMPTY_CHARGE_WINDOW}_{feature_key}_{self.entry_id}"
+        problem = enabled and start is not None and end is not None and start == end
+        active = self._empty_window_issue_active.get(feature_key, False)
+        if not problem:
+            if active:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                self._empty_window_issue_active[feature_key] = False
+            return
+        if active:
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_EMPTY_CHARGE_WINDOW,
+            translation_placeholders={"feature": feature_label},
+        )
+        self._empty_window_issue_active[feature_key] = True
+
+    def _check_no_active_months(
+        self,
+        feature_key: str,
+        enabled: bool,
+        months: frozenset[int],
+        feature_label: str,
+    ) -> None:
+        """Automatik aktiv, aber kein einziger Monats-Schalter (switch.py)
+        aktiviert - das Feature ist dadurch ganzjährig inaktiv (siehe
+        _async_enforce_grid_charge, Abschnitt "Aktive Monate")."""
+        issue_id = f"{ISSUE_NO_ACTIVE_MONTHS}_{feature_key}_{self.entry_id}"
+        problem = enabled and not months
+        active = self._no_active_months_issue_active.get(feature_key, False)
+        if not problem:
+            if active:
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                self._no_active_months_issue_active[feature_key] = False
+            return
+        if active:
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_NO_ACTIVE_MONTHS,
+            translation_placeholders={"feature": feature_label},
+        )
+        self._no_active_months_issue_active[feature_key] = True
 
     async def async_shutdown(self) -> None:
         # super().async_shutdown() (DataUpdateCoordinator) storniert den

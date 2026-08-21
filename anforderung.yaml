@@ -51,6 +51,7 @@
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
+# REQ-STABLE-DEVICE-IDENTITY      done       Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen
 # ==============================================================================
 
 # ==============================================================================
@@ -1492,3 +1493,52 @@ requirement_self_diagnosis_repairs:
        wird (nicht bei jedem weiteren Poll-Zyklus mit weiterhin nicht
        erreichbarem SunSpec-Modus-Block) und bei Wiedererreichbarkeit
        zurückgesetzt wird."
+
+# ==============================================================================
+# ANFORDERUNG: STABILE GERÄTE-/ENTITY-IDENTITÄT
+# ==============================================================================
+requirement_stable_device_identity:
+  id: REQ-STABLE-DEVICE-IDENTITY
+  title: "Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen"
+  status: done
+  description: >
+    Das Gerät (DeviceInfo in entity.py) sowie sämtliche Entity-unique_ids
+    (durchgängig f"{entry_id}_{suffix}", siehe switch.py/number.py/time.py/
+    select.py/binary_sensor.py) werden ausschließlich aus der von Home
+    Assistant beim Anlegen des Config Entry vergebenen, intern
+    feststehenden entry_id gebildet - niemals aus einem vom Anwender
+    änderbaren Namen. Im Einzelnen:
+
+    - Der Gerätename in DeviceInfo ist eine feste Code-Konstante ("SAX
+      Power Home"); die Ersteinrichtung (config_flow.py) fragt keinen
+      Gerätenamen ab, der in diesen Wert einfließen würde - der Titel des
+      Config Entry wird bei async_create_entry() ebenfalls fest auf
+      "SAX Power Home" gesetzt, nicht vom Anwender erfragt.
+    - entry.title wird nirgendwo im Code gelesen (kein Zugriff darauf
+      außerhalb von config_flow.py/repairs.py, wo er nur beim Anlegen
+      gesetzt wird) - ein späteres Umbenennen des Eintrags über
+      "Einstellungen -> Geräte & Dienste -> Umbenennen" hat daher keinerlei
+      Auswirkung auf Gerät, Entities oder das mitgelieferte Dashboard.
+    - Ein Umbenennen des Geräts selbst (Home Assistants eigene
+      Gerätebearbeitung, "name_by_user") ändert nur die Anzeige, nie die
+      device_registry-identifiers ({(DOMAIN, entry_id)}) oder die
+      unique_ids der Entities - beide bleiben stabil.
+    - dashboard.py (siehe REQ-BUNDLED-DASHBOARD) löst alle
+      Kartenreferenzen ausschließlich über diese stabilen
+      unique_id-Suffixe auf, nie über einen aus dem (änderbaren) Namen
+      abgeleiteten Entity-ID-String - ein umbenanntes Gerät/Entry findet
+      das mitgelieferte Dashboard deshalb unverändert wieder.
+
+    Sollte ein künftiger Ersteinrichtungsschritt einen frei wählbaren
+    Gerätenamen anbieten, darf dieser ausschließlich den Anzeigenamen
+    (DeviceInfo.name bzw. den Entry-Titel) setzen - niemals die
+    device_registry-identifiers oder einen Bestandteil einer unique_id.
+  acceptance_criteria:
+    - "tests/test_entity.py deckt ab, dass DeviceInfo.name die feste
+       Konstante \"SAX Power Home\" bleibt und identifiers bei
+       {(DOMAIN, entry_id)} bleibt, auch wenn der zugehörige Config Entry
+       einen davon abweichenden Titel trägt."
+    - "tests/test_dashboard.py deckt ab, dass die Kartenauflösung
+       ausschließlich über die unique_id erfolgt (siehe
+       REQ-BUNDLED-DASHBOARD) und damit unabhängig vom Gerätenamen
+       funktioniert."

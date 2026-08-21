@@ -554,3 +554,10 @@ SERVICE_REFRESH_PRICE_PLAN = "refresh_price_plan"
 SERVICE_SET_PRICE_CHARGE_ENABLED = "set_price_charge_enabled"
 ATTR_ENABLED = "enabled"
 ATTR_FORCE = "force"
+
+# Legt das mitgelieferte Dashboard nachträglich an (dashboard.py) - für
+# Anwender, die es in der Ersteinrichtung abgewählt haben, es versehentlich
+# gelöscht haben, oder deren Eintrag vor Einführung dieses Features angelegt
+# wurde (siehe anforderung.yaml, REQ-BUNDLED-DASHBOARD). Idempotent: legt es
+# nur an, falls es nicht schon existiert.
+SERVICE_CREATE_DASHBOARD = "create_dashboard"

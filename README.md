@@ -109,6 +109,12 @@ Die Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
 der Sidebar und lässt sich jederzeit unter **Einstellungen → Dashboards**
 anpassen oder wieder entfernen.
 
+Wurde die Checkbox abgewählt, das Dashboard später gelöscht, oder wurde die
+Integration schon vor Einführung dieses Features eingerichtet: Der Service
+**`sax_power.create_dashboard`** (siehe [Services](#services-für-automationen))
+legt es jederzeit nachträglich an – aufrufbar unter **Entwicklertools →
+Aktionen**. Existiert das Dashboard bereits, passiert nichts.
+
 ## Entitäten im Überblick
 
 ### Messwerte (Sensoren)
@@ -654,6 +660,15 @@ stattdessen ohne Rückfrage abgeschaltet.
 | `device_id` | SAX Power Gerät |
 | `enabled` | Ein- (`true`) oder ausschalten (`false`) |
 | `force` | Optional, Standard `false`. Schaltet eine aktive Netzladung ohne Rückfrage ab |
+
+**`sax_power.create_dashboard`** – legt das mitgelieferte Dashboard "SAX Power"
+nachträglich an (siehe [Schritt 3](#schritt-3-dashboard-anlegen-optional)) –
+z. B. wenn es bei der Ersteinrichtung abgewählt oder später gelöscht wurde.
+Existiert es bereits, passiert nichts.
+
+| Feld | Beschreibung |
+| --- | --- |
+| `device_id` | SAX Power Gerät |
 
 ## Verbindungsdaten nachträglich ändern
 

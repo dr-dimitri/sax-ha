@@ -30,6 +30,7 @@ from .const import (
     DOMAIN,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
+    SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
@@ -155,18 +156,30 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-def _coordinator_for_device(hass: HomeAssistant, device_id: str) -> SaxPowerCoordinator:
+def _entry_id_for_device(hass: HomeAssistant, device_id: str) -> str:
     device_registry = dr.async_get(hass)
     device = device_registry.async_get(device_id)
     if device is None:
         raise HomeAssistantError(f"Unbekanntes Gerät: {device_id}")
     for entry_id in device.config_entries:
-        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        if entry_data is not None:
-            return entry_data[DATA_COORDINATOR]
+        if entry_id in hass.data.get(DOMAIN, {}):
+            return entry_id
     raise HomeAssistantError(
-        f"Kein SAX Power Coordinator für Gerät {device_id} gefunden"
+        f"Kein geladener SAX Power Config Entry für Gerät {device_id} gefunden"
     )
+
+
+def _coordinator_for_device(hass: HomeAssistant, device_id: str) -> SaxPowerCoordinator:
+    entry_id = _entry_id_for_device(hass, device_id)
+    return hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
+
+
+def _entry_for_device(hass: HomeAssistant, device_id: str) -> ConfigEntry:
+    entry_id = _entry_id_for_device(hass, device_id)
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None:
+        raise HomeAssistantError(f"Kein Config Entry {entry_id} gefunden")
+    return entry
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
@@ -211,6 +224,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "den Service mit force: true aufrufen."
             )
 
+    async def _async_create_dashboard_service(call: ServiceCall) -> None:
+        entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await async_create_dashboard(hass, entry)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_GRID_CHARGE,
@@ -246,4 +263,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_PRICE_CHARGE_ENABLED,
         _async_set_price_charge_enabled,
         schema=SERVICE_SET_PRICE_CHARGE_ENABLED_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_DASHBOARD,
+        _async_create_dashboard_service,
+        schema=SERVICE_STOP_SCHEMA,
     )

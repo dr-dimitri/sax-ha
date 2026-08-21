@@ -20,6 +20,7 @@ from .const import (
     ATTR_FORCE,
     ATTR_POWER,
     ATTR_START,
+    CONF_CREATE_DASHBOARD,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
     CONF_SLAVE_ID_EXTENDED,
@@ -37,6 +38,7 @@ from .const import (
     SERVICE_STOP_GRID_CHARGE,
 )
 from .coordinator import SaxPowerCoordinator
+from .dashboard import async_create_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -108,6 +110,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    if entry.data.get(CONF_CREATE_DASHBOARD):
+        # Braucht die soeben registrierten Entities, deshalb erst nach dem
+        # Plattform-Setup möglich. Absichtlich VOR der Registrierung des
+        # Update-Listeners direkt unten: hass.config_entries.async_update_entry
+        # löst dessen Reload-Listener aus, sobald er registriert ist - hier
+        # ist er das noch nicht, der Reset dieses einmaligen Flags soll aber
+        # gerade keinen zusätzlichen Reload direkt nach der Ersteinrichtung
+        # auslösen. Siehe const.py, CONF_CREATE_DASHBOARD.
+        await async_create_dashboard(hass, entry)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_CREATE_DASHBOARD: False}
+        )
 
     # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
     # sofort einmal aus und braucht dafür die von den Entities (select.py/

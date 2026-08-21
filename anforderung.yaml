@@ -47,6 +47,7 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
+# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (3 Tabs), optional in der Ersteinrichtung anlegbar
 # ==============================================================================
 
 # ==============================================================================
@@ -1106,3 +1107,66 @@ requirement_dynamic_price_charge:
        Vorbelegung)."
     - "README.md beschreibt Einrichtung, Strategien und Zusammenspiel mit
        den übrigen Lademodi."
+
+# ==============================================================================
+# ANFORDERUNG: MITGELIEFERTES DASHBOARD
+# ==============================================================================
+requirement_bundled_dashboard:
+  id: REQ-BUNDLED-DASHBOARD
+  title: "Mitgeliefertes Lovelace-Dashboard (3 Tabs), optional in der Ersteinrichtung anlegbar"
+  status: done
+  description: >
+    dashboard.py baut ein dreiteiliges Storage-Dashboard mit den
+    wichtigsten Sensoren/Einstellungen, gegliedert in drei Tabs (Lovelace-
+    Views): "Allgemeine Informationen" (Speicher-Schalter, SOC, Zustand,
+    Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten),
+    "Ladeautomatik" (zeitgesteuertes Laden und netzdienliches Laden mit
+    jeweiligem Zeitfenster/Status) sowie "Dynamisches Laden"
+    (preisoptimiertes Laden: Strategie, Preisgrenze, Stundenzahl, Status).
+    Die zwölf Monats-Schalter je Automatik sind bewusst nicht enthalten
+    (Feinkonfiguration, nicht Tagesgeschäft) - dafür bleibt die Geräteseite
+    zuständig.
+
+    Dritter, optionaler Schritt der Ersteinrichtung
+    (config_flow.async_step_dashboard, Checkbox "Dashboard anlegen",
+    Standard: aktiv). Die Entscheidung landet als CONF_CREATE_DASHBOARD im
+    Config Entry; __init__.async_setup_entry legt das Dashboard danach an -
+    erst nach dem Plattform-Setup möglich, weil die Kartenreferenzen echte
+    Entity-IDs brauchen (Auflösung über die Entity Registry anhand der
+    stabilen unique_id-Suffixe je Entity, nicht über feste Entity-ID-
+    Strings). Anschließend wird CONF_CREATE_DASHBOARD im Entry auf False
+    zurückgesetzt - bewusst VOR der Registrierung des Options-Update-
+    Listeners, damit dieser interne Reset nicht selbst einen Reload direkt
+    nach der Ersteinrichtung auslöst. Ohne den Reset würde jeder spätere
+    Reload/Neustart versuchen, das Dashboard erneut anzulegen; ein vom
+    Anwender bewusst gelöschtes Dashboard würde dadurch ungewollt wieder
+    auftauchen. Über async_step_reconfigure (spätere IP-Änderung) wird
+    dieser Schritt nicht erneut durchlaufen.
+
+    dashboard.async_create_dashboard baut auf zwei öffentlichen, aber
+    sonst nur intern innerhalb von homeassistant.components.lovelace
+    verdrahteten Bausteinen auf: eine eigene
+    lovelace.dashboard.DashboardsCollection-Instanz (liest/schreibt
+    denselben Speicher wie die von Home Assistant selbst verwaltete
+    Instanz, prüft dabei zugleich auf einen bereits vorhandenen Eintrag -
+    idempotent über Neustarts hinweg) sowie eine manuell angelegte
+    lovelace.dashboard.LovelaceStorage-Instanz zusammen mit
+    frontend.async_register_built_in_panel, damit das Dashboard sofort
+    ohne Neustart in der Sidebar erscheint (dieselbe Sichtbarkeit, die bei
+    Home Assistants eigenem Onboarding-Kartendashboard sonst über einen
+    nur dort erreichbaren Listener automatisch entsteht). Rein optionale
+    Komfortfunktion: Jeder Fehler beim Anlegen (z. B. weil eine künftige
+    Home-Assistant-Version diese Interna ändert, oder weil Lovelace/
+    Frontend gar nicht geladen ist) wird nur geloggt, niemals als
+    ConfigEntryNotReady durchgereicht - die eigentliche Integration darf
+    davon nie blockiert werden.
+  acceptance_criteria:
+    - "tests/test_dashboard.py deckt ab: async_build_dashboard_config
+       erzeugt immer alle drei Views, löst nur tatsächlich in der Entity
+       Registry vorhandene Entities auf und lässt Karten ohne jede
+       aufgelöste Entity komplett weg. async_create_dashboard überspringt
+       sauber, wenn Lovelace nicht geladen ist, registriert Panel und
+       Storage-Eintrag korrekt, ist idempotent bei wiederholtem Aufruf und
+       schluckt unerwartete Fehler, statt sie durchzureichen."
+    - "tests/test_config_flow.py deckt den dritten Ersteinrichtungsschritt
+       ab (Default aktiv, explizite Abwahl)."

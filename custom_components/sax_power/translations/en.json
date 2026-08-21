@@ -31,6 +31,13 @@
           "timed_charge_start": "Grid charge start",
           "timed_charge_end": "Grid charge end"
         }
+      },
+      "dashboard": {
+        "title": "Dashboard (optional)",
+        "description": "Creates a ready-made \"SAX Power\" dashboard with the most important sensors and settings, organized into the \"General information\", \"Automatic charging\" and \"Dynamic price charging\" tabs. Can be removed again at any time under Settings -> Dashboards.",
+        "data": {
+          "create_dashboard": "Create dashboard"
+        }
       }
     },
     "error": {

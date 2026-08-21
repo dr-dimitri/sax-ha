@@ -94,7 +94,7 @@
         "name": "Entladene Energie (gesamt)"
       },
       "smartmeter_power": {
-        "name": "Smart Meter Leistung"
+        "name": "Netzleistung"
       },
       "switch_state_text": {
         "name": "Speicher Schaltzustand (Text)"
@@ -262,13 +262,13 @@
         "name": "Durchschnittliche Zellspannung"
       },
       "price_charge_active_text": {
-        "name": "Preisoptimiertes Laden aktiv"
+        "name": "Aktiv"
       },
       "price_charge_status_text": {
-        "name": "Preisoptimiertes Laden Status"
+        "name": "Status"
       },
       "price_charge_next_start": {
-        "name": "Preisoptimiertes Laden nächster Start"
+        "name": "Nächster Start"
       },
       "price_charge_current_price": {
         "name": "Aktueller Strompreis"
@@ -282,10 +282,10 @@
         "name": "Netzladung Min. SOC"
       },
       "price_charge_max_price": {
-        "name": "Preisoptimiertes Laden Preisgrenze"
+        "name": "Preisgrenze"
       },
       "price_charge_hours": {
-        "name": "Preisoptimiertes Laden Anzahl Stunden"
+        "name": "Anzahl Stunden"
       }
     },
     "switch": {
@@ -390,7 +390,7 @@
     },
     "select": {
       "price_charge_strategy": {
-        "name": "Preisoptimiertes Laden Strategie",
+        "name": "Strategie",
         "state": {
           "off": "Manuell / Aus",
           "absolute": "Absoluter Preis",

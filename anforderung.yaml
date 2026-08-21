@@ -1117,35 +1117,34 @@ requirement_bundled_dashboard:
     dashboard.py baut ein vierteiliges Storage-Dashboard mit den
     wichtigsten Sensoren/Einstellungen, gegliedert in vier Tabs (Lovelace-
     Views): "Allgemeine Informationen" (Speicher-Schalter, SOC, Lade-/
-    Entladeleistung, Netzleistung (siehe eigener Absatz unten zur Karte
-    "Smart Meter Leistung"), Energiezähler, Gerätedaten (ohne die fest
-    bekannten "Hersteller"/"Gerätemodell" - beide boten dort keinen
-    Mehrwert) - die reine Textanzeige "Speicher Zustand" wurde entfernt,
-    der Speicher-Schalter bleibt), "Ladeautomatik" und "Netzdienliches
-    Laden" sowie "Dynamisches Laden" (preisoptimiertes Laden: Strategie,
-    Preisgrenze, Stundenzahl, Status). Die frühere Karte "Status" mit den
-    vier Lade-/Automatik-binary_sensor-Entities (REQ-BINARY-SENSORS) wurde
-    aus "Allgemeine Informationen" entfernt, ohne Ersatz - die Entities
-    selbst bleiben unverändert bestehen (z. B. für eigene Automationen),
-    erscheinen aber in keiner Karte des mitgelieferten Dashboards mehr.
+    Entladeleistung, Netzleistung (translation_key smartmeter_power - der
+    Sensor selbst heißt weiterhin smartmeter_power/unique_id-Suffix
+    "smartmeter_power", nur das angezeigte Label wurde von "Smart Meter
+    Leistung" auf "Netzleistung" verkürzt, siehe translations/de.json),
+    Energiezähler, Gerätedaten (ohne die fest bekannten "Hersteller"/
+    "Gerätemodell" - beide boten dort keinen Mehrwert) - die reine
+    Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-Schalter
+    bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie "Dynamisches
+    Laden" (preisoptimiertes Laden: Strategie, Preisgrenze, Stundenzahl,
+    Status). Die frühere Karte "Status" mit den vier Lade-/Automatik-
+    binary_sensor-Entities (REQ-BINARY-SENSORS) wurde aus "Allgemeine
+    Informationen" entfernt, ohne Ersatz - die Entities selbst bleiben
+    unverändert bestehen (z. B. für eigene Automationen), erscheinen aber
+    in keiner Karte des mitgelieferten Dashboards mehr.
 
-    "Smart Meter Leistung" ist keine Zeile der "Leistung"-entities-Karte
-    mehr, sondern eine eigene, direkt darunter platzierte "markdown"-Karte
-    (_smartmeter_power_card, Template siehe _SMARTMETER_POWER_TEMPLATE):
-    Label und Farbe hängen vom Vorzeichen des aktuellen Werts ab (positiv/
-    Überschuss = Einspeisung ins Netz, negativ = Netzbezug, siehe
-    REQ-TIMED-SOC-CHARGE, Abschnitt "PV-Überschuss-Prüfung", zur
-    Vorzeichenkonvention) - unter 0 W zeigt sie das Label "Netzbezug" in
-    Rot, ab 0 W "Einspeisung" in Grün; der angezeigte Zahlenwert ist in
-    beiden Fällen der Betrag (immer positiv), der zugrunde liegende
-    Sensorwert bleibt intern vorzeichenbehaftet. Home Assistants
-    "entities"-Karte kann Label/Farbe einer Zeile nicht vom aktuellen
-    Zustand abhängig machen; die "markdown"-Karte (Core-Bestandteil, kein
-    card-mod/HACS nötig) unterstützt dafür volles Jinja2-Templating. Die
-    entity_id wird einmalig beim Kartenbau (async_build_dashboard_config)
-    fest ins Template eingesetzt - seit REQ-STABLE-DEVICE-IDENTITY bleibt
-    sie auch über ein späteres Umbenennen des Geräts hinweg stabil, das
-    Template muss die Auflösung deshalb nicht zur Anzeigezeit wiederholen.
+    Die Kartenzeilen der "Preisoptimiertes Laden"-Karte (Tab "Dynamisches
+    Laden") tragen keinen "Preisoptimiertes Laden"-Präfix im Label mehr -
+    der Kartentitel gibt den Kontext bereits vor: price_charge_strategy
+    heißt nur noch "Strategie", price_charge_max_price "Preisgrenze",
+    price_charge_hours "Anzahl Stunden", price_charge_active_text "Aktiv",
+    price_charge_status_text "Status", price_charge_next_start "Nächster
+    Start" (jeweils translations/de.json). price_charge_current_price
+    ("Aktueller Strompreis") und max_soc ("Max. SOC") trugen nie einen
+    solchen Präfix und bleiben unverändert. Der Hauptschalter außerhalb
+    dieser Karte (switch.price_charge_enabled, Tile-Karte oberhalb der
+    "Preisoptimiertes Laden"-Karte) behält bewusst sein volles Label
+    "Preisoptimiertes Laden aktiv" - er steht nicht innerhalb der Karte,
+    die den Kontext liefert.
 
     "Ladeautomatik" und "Netzdienliches Laden" sind bewusst identisch
     aufgebaut, damit der Anwender beim Wechsel zwischen den beiden Tabs
@@ -1280,13 +1279,13 @@ requirement_bundled_dashboard:
        Informationen\" keine Karte mit dem Titel \"Status\" mehr enthält
        und die vier zuvor dort gezeigten binary_sensor-Entities in keiner
        Karte mehr referenziert werden."
-    - "tests/test_dashboard.py deckt ab, dass \"smartmeter_power\" keine
-       Zeile der \"Leistung\"-Karte mehr ist, sondern über eine eigene
-       markdown-Karte gerendert wird - inklusive echtem Rendering des
-       Jinja-Templates (homeassistant.helpers.template.Template) für
-       negative, positive und Nullwerte: korrektes Label (\"Netzbezug\"/
-       \"Einspeisung\"), korrekte Farbe (\"color: red\"/\"color: green\")
-       und ein stets positiver angezeigter Zahlenwert."
+    - "tests/test_dashboard.py deckt ab, dass \"smartmeter_power\" eine
+       ganz normale Zeile der \"Leistung\"-Karte ist (wie jede andere
+       Sensor-Entity dort auch) und das Label \"Netzleistung\" trägt."
+    - "tests/test_dashboard.py deckt ab, dass keine Kartenzeile der
+       \"Preisoptimiertes Laden\"-Karte (Tab \"Dynamisches Laden\") noch
+       den Präfix \"Preisoptimiertes Laden\"/\"Price-optimised charging\"
+       im Label trägt."
 
 # ==============================================================================
 # ANFORDERUNG: BINARY_SENSOR-PLATTFORM

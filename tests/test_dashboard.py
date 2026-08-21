@@ -11,7 +11,6 @@ from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers import template as ha_template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
@@ -177,6 +176,40 @@ async def test_build_dashboard_config_entity_names_drop_device_prefix(hass) -> N
     assert "SAX Power Home" not in row["name"]
 
 
+async def test_build_dashboard_config_price_charge_card_labels_drop_prefix(
+    hass,
+) -> None:
+    """Kartenzeilen der "Preisoptimiertes Laden"-Karte (Tab "Dynamisches
+    Laden") tragen nicht mehr den Präfix "Preisoptimiertes Laden"/"Price-
+    optimised charging" im Label - der Kartentitel gibt den Kontext bereits
+    vor. Betrifft price_charge_strategy, price_charge_max_price,
+    price_charge_hours, price_charge_active_text, price_charge_status_text
+    und price_charge_next_start; price_charge_current_price und max_soc
+    hatten nie einen solchen Präfix."""
+    _register(hass, "select", "price_charge_strategy")
+    _register(hass, "number", "price_charge_max_price")
+    _register(hass, "number", "price_charge_hours")
+    _register(hass, "sensor", "price_charge_active_text")
+    _register(hass, "sensor", "price_charge_status_text")
+    _register(hass, "sensor", "price_charge_next_start")
+    _register(hass, "sensor", "price_charge_current_price")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    price_view = next(
+        view for view in config["views"] if view["path"] == "dynamisches-laden"
+    )
+    price_card = next(
+        card
+        for card in price_view["cards"]
+        if card.get("title") == "Preisoptimiertes Laden"
+    )
+    names = [row["name"] for row in price_card["entities"] if isinstance(row, dict)]
+    assert names  # es gibt tatsächlich aufgelöste Zeilen zu prüfen
+    for name in names:
+        assert "price-optimised charging" not in name.lower()
+
+
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
     """Ohne jede registrierte Entity bleiben alle vier Views vorhanden, aber
     ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
@@ -204,12 +237,12 @@ async def test_build_dashboard_config_status_card_removed(hass) -> None:
     assert timed_charge_active not in general_entities
 
 
-async def test_build_dashboard_config_smartmeter_power_not_in_leistung_card(
+async def test_build_dashboard_config_smartmeter_power_uses_netzleistung_label(
     hass,
 ) -> None:
-    """ "Smart Meter Leistung" ist keine Zeile mehr in der "Leistung"-Karte -
-    stattdessen eine eigene Markdown-Karte mit dynamischem Label/Farbe,
-    siehe test_smartmeter_power_card_uses_dynamic_label_and_color."""
+    """ "Netzleistung" (bisher "Smart Meter Leistung") ist eine ganz normale
+    Zeile der "Leistung"-Karte, wie jede andere Sensor-Entity dort auch -
+    kein Sonderfall mehr (siehe REQ-BUNDLED-DASHBOARD)."""
     smartmeter_power = _register(hass, "sensor", "smartmeter_power")
     charge_power = _register(hass, "sensor", "charge_power")
 
@@ -223,43 +256,14 @@ async def test_build_dashboard_config_smartmeter_power_not_in_leistung_card(
         for row in leistung_card["entities"]
     }
     assert charge_power in leistung_entities
-    assert smartmeter_power not in leistung_entities
+    assert smartmeter_power in leistung_entities
 
-
-async def test_smartmeter_power_card_uses_dynamic_label_and_color(hass) -> None:
-    """Die Markdown-Karte für "Smart Meter Leistung" zeigt bei negativem Wert
-    das Label "Netzbezug" in Rot, bei Wert >= 0 das Label "Einspeisung" in
-    Grün - der angezeigte Zahlenwert ist in beiden Fällen positiv (Betrag),
-    auch wenn der zugrunde liegende Sensorwert intern vorzeichenbehaftet
-    bleibt (Vorzeichenkonvention siehe anforderung.yaml,
-    REQ-TIMED-SOC-CHARGE, "PV-Überschuss-Prüfung")."""
-    entity_id = _register(hass, "sensor", "smartmeter_power")
-
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
-
-    markdown_cards = [
-        card for card in config["views"][0]["cards"] if card["type"] == "markdown"
-    ]
-    assert len(markdown_cards) == 1
-    content = markdown_cards[0]["content"]
-
-    hass.states.async_set(entity_id, "-150", {"unit_of_measurement": "W"})
-    rendered = ha_template.Template(content, hass).async_render()
-    assert "Netzbezug" in rendered
-    assert "150 W" in rendered
-    assert "-150" not in rendered
-    assert "color: red" in rendered
-
-    hass.states.async_set(entity_id, "200", {"unit_of_measurement": "W"})
-    rendered = ha_template.Template(content, hass).async_render()
-    assert "Einspeisung" in rendered
-    assert "200 W" in rendered
-    assert "color: green" in rendered
-
-    hass.states.async_set(entity_id, "0", {"unit_of_measurement": "W"})
-    rendered = ha_template.Template(content, hass).async_render()
-    assert "Einspeisung" in rendered
-    assert "0 W" in rendered
+    row = next(
+        row
+        for row in leistung_card["entities"]
+        if isinstance(row, dict) and row["entity"] == smartmeter_power
+    )
+    assert row["name"] == "Grid power"  # hass-Testfixture: Sprache "en"
 
 
 async def test_build_dashboard_config_geraet_card_drops_manufacturer_and_model(

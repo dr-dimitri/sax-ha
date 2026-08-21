@@ -94,7 +94,7 @@
         "name": "Total energy discharged"
       },
       "smartmeter_power": {
-        "name": "Smart meter power"
+        "name": "Grid power"
       },
       "switch_state_text": {
         "name": "Storage switch state (text)"
@@ -262,13 +262,13 @@
         "name": "Average cell voltage"
       },
       "price_charge_active_text": {
-        "name": "Price-optimised charging active"
+        "name": "Active"
       },
       "price_charge_status_text": {
-        "name": "Price-optimised charging status"
+        "name": "Status"
       },
       "price_charge_next_start": {
-        "name": "Price-optimised charging next start"
+        "name": "Next start"
       },
       "price_charge_current_price": {
         "name": "Current electricity price"
@@ -282,10 +282,10 @@
         "name": "Grid charge min. SOC"
       },
       "price_charge_max_price": {
-        "name": "Price-optimised charging price limit"
+        "name": "Price limit"
       },
       "price_charge_hours": {
-        "name": "Price-optimised charging hours"
+        "name": "Hours"
       }
     },
     "switch": {
@@ -390,7 +390,7 @@
     },
     "select": {
       "price_charge_strategy": {
-        "name": "Price-optimised charging strategy",
+        "name": "Strategy",
         "state": {
           "off": "Manual / off",
           "absolute": "Absolute price",

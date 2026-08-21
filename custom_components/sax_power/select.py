@@ -62,7 +62,7 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_price_charge_strategy"
+        self._assign_ids("select", "price_charge_strategy")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

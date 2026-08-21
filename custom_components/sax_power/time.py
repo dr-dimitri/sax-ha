@@ -53,7 +53,7 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_timed_charge_start"
+        self._assign_ids("time", "timed_charge_start")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -89,7 +89,7 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_timed_charge_end"
+        self._assign_ids("time", "timed_charge_end")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -129,7 +129,7 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_grid_serving_start"
+        self._assign_ids("time", "grid_serving_start")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -162,7 +162,7 @@ class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_grid_serving_end"
+        self._assign_ids("time", "grid_serving_end")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

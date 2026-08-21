@@ -73,7 +73,7 @@ class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_storage_switch"
+        self._assign_ids("switch", "storage_switch")
 
     @property
     def is_on(self) -> bool | None:
@@ -105,7 +105,7 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_timed_charge_enabled"
+        self._assign_ids("switch", "timed_charge_enabled")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -161,7 +161,7 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_grid_serving_enabled"
+        self._assign_ids("switch", "grid_serving_enabled")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -222,7 +222,7 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
         self._is_month_active = is_month_active
         self._async_set_month_active = async_set_month_active
         self._attr_translation_key = translation_key
-        self._attr_unique_id = f"{entry_id}_{translation_key}"
+        self._assign_ids("switch", translation_key)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -268,7 +268,7 @@ class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_price_charge_enabled"
+        self._assign_ids("switch", "price_charge_enabled")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

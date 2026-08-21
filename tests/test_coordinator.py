@@ -102,11 +102,13 @@ def _make_coordinator(hass, client: MagicMock) -> SaxPowerCoordinator:
         scan_interval=10,
         entry_id="test_entry_id",
     )
-    # Entspricht dem Vorgabewert, den SaxPowerTimedChargeMinSocNumber beim
-    # allerersten Start setzt (siehe number.py) - ohne diesen Default würde
-    # jeder Test, der zeitgesteuertes Laden auslösen will, zusätzlich
-    # async_set_timed_charge_min_soc aufrufen müssen, obwohl ein echter
-    # Coordinator diesen Wert längst über die Number-Entity gesetzt hätte.
+    # Bewusst MAX_SOC statt des tatsächlichen Number-Entity-Vorgabewerts
+    # (DEFAULT_TIMED_CHARGE_MIN_SOC, siehe number.py) - hält Netzladung in
+    # den meisten Tests unabhängig vom jeweils verwendeten current_soc
+    # "armed", ohne dass jeder Test, der zeitgesteuertes Laden auslösen
+    # will, zusätzlich async_set_timed_charge_min_soc aufrufen muss. Tests,
+    # die den echten Vorgabewert selbst prüfen wollen, setzen ihn explizit
+    # (siehe tests/test_number.py).
     coordinator._timed_charge_min_soc = MAX_SOC
     return coordinator
 

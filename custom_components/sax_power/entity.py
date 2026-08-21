@@ -45,3 +45,22 @@ class SaxPowerEntity(CoordinatorEntity[SaxPowerCoordinator]):
             manufacturer="SAX Power",
             model="Home (Plus)",
         )
+
+    def _assign_ids(self, platform_domain: str, suffix: str) -> None:
+        """Setzt unique_id und entity_id anhand eines stabilen Suffixes.
+
+        `entity_id` wird hier bewusst explizit vorgegeben, statt es Home
+        Assistant über has_entity_name automatisch aus Gerätename +
+        Entity-Name ableiten zu lassen (siehe anforderung.yaml,
+        REQ-STABLE-ENTITY-ID): Bietet Home Assistant nach der
+        Ersteinrichtung an, das Gerät umzubenennen/einem Bereich
+        zuzuordnen, und aktiviert der Anwender dabei "Entity-IDs
+        aktualisieren", würde sich sonst auch die entity_id ändern - das
+        mitgelieferte Dashboard (dashboard.py) referenziert zu diesem
+        Zeitpunkt aber bereits die ursprüngliche entity_id fest und würde
+        die Entity nicht mehr finden. Ein expliziter `self.entity_id` wird
+        von Home Assistant unverändert als Vorschlag übernommen und bleibt
+        über spätere Umbenennungen des Geräts hinweg stabil.
+        """
+        self._attr_unique_id = f"{self._entry_id}_{suffix}"
+        self.entity_id = f"{platform_domain}.sax_power_{suffix}"

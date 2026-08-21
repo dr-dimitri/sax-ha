@@ -17,6 +17,7 @@ from homeassistant.core import State
 from custom_components.sax_power.const import (
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
+    DEFAULT_TIMED_CHARGE_MIN_SOC,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SOC,
@@ -63,25 +64,24 @@ def _prepare_entity(entity, hass, entity_id: str, last_state: State | None) -> N
     entity.async_get_last_state = AsyncMock(return_value=last_state)
 
 
-async def test_timed_charge_min_soc_seeds_to_max_soc_on_fresh_install(
+async def test_timed_charge_min_soc_seeds_to_default_on_fresh_install(
     hass, coordinator
 ) -> None:
     """Allererster Start (kein RestoreEntity-Zustand): "Netzladung Min. SOC"
-    muss mit MAX_SOC (100 %) vorbelegt werden statt bei "unbekannt"/0 zu
-    bleiben - andernfalls würde diese neu eingeführte Einstellung
-    bestehende Netzladung-Konfigurationen ohne bewusstes Zutun des Anwenders
-    blockieren (SOC wäre praktisch nie < 0 %)."""
+    muss mit DEFAULT_TIMED_CHARGE_MIN_SOC (20 %) vorbelegt werden statt bei
+    "unbekannt"/0 zu bleiben - andernfalls würde Netzladung bei der
+    Ersteinrichtung nie von selbst armen (SOC wäre praktisch nie < 0 %)."""
     entity = SaxPowerTimedChargeMinSocNumber(coordinator, "test_entry_id")
     _prepare_entity(entity, hass, "number.test_timed_charge_min_soc", None)
 
     await entity.async_added_to_hass()
 
-    assert coordinator.timed_charge_min_soc == MAX_SOC
+    assert coordinator.timed_charge_min_soc == DEFAULT_TIMED_CHARGE_MIN_SOC
 
 
 async def test_timed_charge_min_soc_restores_a_genuine_value(hass, coordinator) -> None:
     """Ein echter, zuvor vom Nutzer gesetzter Wert hat Vorrang vor dem
-    100-%-Vorgabewert."""
+    Vorgabewert."""
     entity = SaxPowerTimedChargeMinSocNumber(coordinator, "test_entry_id")
     _prepare_entity(
         entity,

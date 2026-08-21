@@ -434,6 +434,26 @@
           }
         }
       }
+    },
+    "price_sensor_missing": {
+      "title": "Price-optimised charging: price sensor delivers no data",
+      "description": "Price-optimised charging is active, but the price sensor {price_sensor} has delivered no usable price data for over 6 hours (entity no longer exists, no price forecast, or wrong attribute). No grid charging is happening at the moment. Please check the price sensor under \"Configure\" on this integration."
+    },
+    "sunspec_persistently_unavailable": {
+      "title": "SAX SunSpec mode persistently unreachable",
+      "description": "Slave ID {slave_id} has been continuously unreachable for over an hour. Storage detail values, grid/smart meter values and all three charging automations (timed, grid-serving and price-optimised charging) are non-functional without this register block. Please check the network connection and the configured slave ID (SunSpec mode, default: 100)."
+    },
+    "max_soc_below_min_soc": {
+      "title": "Target SOC is below the recharge threshold",
+      "description": "\"Max. SOC\" ({max_soc} %) is below \"Grid charge min. SOC\" ({min_soc} %) - timed charging can therefore never start, because charging only starts once the SOC drops below min. SOC, while the max. SOC lock already kicks in before that. Please raise max. SOC to at least the value of min. SOC."
+    },
+    "empty_charge_window": {
+      "title": "Time window is empty",
+      "description": "The time window for \"{feature}\" is empty (start and end time are identical) - the automation therefore never runs. Please adjust the start or end time."
+    },
+    "no_active_months": {
+      "title": "No month selected",
+      "description": "No month at all is enabled for \"{feature}\" - the feature is therefore inactive all year round. Please enable at least one month."
     }
   },
   "services": {

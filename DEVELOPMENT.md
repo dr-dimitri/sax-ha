@@ -52,7 +52,10 @@ custom_components/sax_power/
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes und
 │                          netzdienliches Laden
 ├── repairs.py             Bestätigungsdialog für den Konflikt zwischen Netzladung
-│                          und preisoptimiertem Laden
+│                          und preisoptimiertem Laden; fünf weitere, rein
+│                          informative Selbstdiagnose-Issues sitzen dagegen direkt
+│                          in coordinator.py (_async_check_self_diagnostics), siehe
+│                          anforderung.yaml REQ-SELF-DIAGNOSIS-REPAIRS
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan, IP-Adresse redigiert
 ├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in
@@ -349,6 +352,11 @@ tests/
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)
+├── test_repairs.py                 Fünf Selbstdiagnose-Issues (coordinator.
+│                                  _async_check_self_diagnostics): Auslösen nach Karenzzeit,
+│                                  Idempotenz (kein erneutes Anlegen bei unverändertem
+│                                  Problemzustand), Selbstheilung sobald die Ursache behoben
+│                                  ist - siehe anforderung.yaml REQ-SELF-DIAGNOSIS-REPAIRS
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

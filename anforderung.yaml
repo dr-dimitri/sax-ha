@@ -50,6 +50,7 @@
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
+# REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
 # ==============================================================================
 
 # ==============================================================================
@@ -1380,3 +1381,104 @@ requirement_setup_finish_summary:
        korrekt mit allen zuvor gesammelten Daten (Verbindung,
        Netzladung-Vorbelegung, Dashboard-Entscheidung) angelegt wird,
        jetzt aber erst nach Bestätigung der Abschlussseite."
+
+# ==============================================================================
+# ANFORDERUNG: SELBSTDIAGNOSE / ERWEITERTE REPAIRS
+# ==============================================================================
+requirement_self_diagnosis_repairs:
+  id: REQ-SELF-DIAGNOSIS-REPAIRS
+  title: "Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen"
+  status: done
+  description: >
+    repairs.py deckte bisher nur den Ladekonflikt zwischen Netzladung und
+    preisoptimiertem Laden ab (ChargeConflictRepairFlow,
+    ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT). Fünf weitere,
+    rein informative (is_fixable=False) Issues über
+    SaxPowerCoordinator._async_check_self_diagnostics erkennen zusätzlich
+    Konfigurationen, die still fehlschlagen - eine Automatik, die
+    eingeschaltet ist, aber nie greift, fällt sonst nur am unerwartet
+    ausbleibenden Ladeverhalten auf, nicht an einer sichtbaren Fehlermeldung.
+    Anders als der Ladekonflikt-Dialog liegen diese fünf Prüfungen direkt in
+    coordinator.py statt in repairs.py, weil keine von ihnen einen
+    Bestätigungs-Fix-Flow braucht (kein RepairsFlow-Eintrag nötig) - sie
+    heilen sich stattdessen automatisch (ir.async_delete_issue), sobald ihre
+    jeweilige Ursache behoben ist, analog zum bestehenden Muster von
+    ISSUE_EXTENDED_MODE_UNAVAILABLE (_async_read_high_block).
+
+    _async_check_self_diagnostics wird am Ende jedes _async_update_data-
+    Zyklus aufgerufen (nach _publish_charge_state) und läuft damit bei jedem
+    Poll-Tick - jede der fünf Einzelprüfungen legt ihr Issue aber nur auf
+    einer Zustandsflanke an bzw. entfernt es wieder (je ein *_issue_active-
+    Flag/-Dict), statt es bei jedem Aufruf neu anzulegen. Die beiden
+    zeitdauerabhängigen Prüfungen (1 und 2) verwenden dafür denselben
+    monotonic()-Zeitstempel-Ansatz wie self._energy_last_ts/
+    self._basic_last_read (nicht die zyklenbasierte Hysterese von
+    _cycles_confirmed/PV_SURPLUS_HYSTERESIS_CYCLES, die an den Scan-
+    Intervall gekoppelt ist statt an echte Wanduhrzeit):
+
+    1. ISSUE_PRICE_SENSOR_MISSING ("Preisoptimiertes Laden: Preis-Sensor
+       liefert keine Daten"): price_planner.plan.status ==
+       PRICE_STATUS_NO_PRICE_DATA impliziert bereits price_charge_enabled
+       UND Strategie != "off" (siehe price_optimizer.evaluate/compute_plan)
+       - deckt sowohl eine gelöschte/nie existierende CONF_PRICE_SENSOR-
+       Entity (hass.states.get liefert None, parse_price_slots daraus eine
+       leere Slot-Liste) als auch einen technisch vorhandenen, aber leeren
+       Sensor ab. self._price_sensor_missing_since hält fest, seit wann der
+       Zustand ununterbrochen anhält; erst nach
+       PRICE_SENSOR_MISSING_GRACE_PERIOD (6 Stunden) wird das Issue angelegt,
+       damit ein einzelner verpasster 60-Sekunden-Preis-Update-Zyklus nicht
+       sofort ein Issue erzeugt. translation_placeholders: price_sensor
+       (price_planner.price_entity_id).
+    2. ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE ("SAX SunSpec-Modus dauerhaft
+       nicht erreichbar"): Eskalation von ISSUE_EXTENDED_MODE_UNAVAILABLE
+       (das schon bei der ERSTEN Nichterreichbarkeit ein eigenes, weniger
+       dringliches Warn-Issue anlegt, siehe REQ-EXTENDED-MODE-RESILIENCE) -
+       hält der Ausfall länger als SUNSPEC_PERSISTENTLY_UNAVAILABLE_
+       GRACE_PERIOD (1 Stunde) an, macht das nicht mehr nur die
+       SunSpec-Sensoren "unbekannt", sondern auch alle drei Lade-Automatiken
+       funktionslos - eine dringlichere, ausführlichere Meldung.
+       self._extended_unavailable_since wird von _async_read_high_block auf
+       derselben Zustandsflanke gesetzt/zurückgesetzt wie das bestehende
+       Issue. translation_placeholders: slave_id.
+    3. ISSUE_MAX_SOC_BELOW_MIN_SOC ("Ziel-SOC liegt unter dem
+       Nachlade-Schwellwert"): max_soc < timed_charge_min_soc - "Max. SOC"
+       ist zugleich das Ziel-SOC des zeitgesteuerten Ladens, "Min. SOC" der
+       untere Start-Schwellwert; liegt Ersteres darunter, greift die
+       Max-SOC-Sperre schon, bevor der Ladestart überhaupt ausgelöst würde.
+       Kein Zustandsflanken-Timer nötig (statische Einstellungskombination,
+       kein transienter Messwert) - schlägt sofort an.
+       translation_placeholders: max_soc, min_soc.
+    4. ISSUE_EMPTY_CHARGE_WINDOW ("Zeitfenster ist leer"): eine der beiden
+       zeitfenstergesteuerten Automatiken (zeitgesteuertes Laden ODER
+       netzdienliches Laden, je eigene issue_id mit Suffix "timed_charge"/
+       "grid_serving") ist aktiv, aber ihre Start- und Endzeit sind
+       identisch (siehe _window_intervals: start == end gilt als leeres
+       Fenster) - die Automatik läuft dadurch nie, ohne dass das an der
+       Entity selbst erkennbar wäre. translation_placeholders: feature
+       (voll ausgeschriebener Anzeigename der Automatik).
+    5. ISSUE_NO_ACTIVE_MONTHS ("Kein Monat ausgewählt"): analog zu Punkt 4,
+       aber für die zwölf Monats-Schalter je Automatik (switch.py) - ist
+       aktiv, aber kein einziger Monat ausgewählt, ist das Feature
+       ganzjährig inaktiv (siehe _async_enforce_grid_charge, Abschnitt
+       "Aktive Monate"). Ebenfalls je Automatik eine eigene issue_id.
+
+    Sprache aller fünf Meldungstexte: deutsch (strings.json/translations),
+    konsistent zum Rest der Integration.
+  acceptance_criteria:
+    - "tests/test_repairs.py deckt für jede der fünf Prüfungen drei
+       Aspekte ab: Auslösen (nach Ablauf der jeweiligen Karenzzeit, sofern
+       vorhanden), Idempotenz (ir.async_create_issue wird bei mehrfachem
+       Aufruf von _async_check_self_diagnostics mit unverändertem
+       Problemzustand nur einmal aufgerufen) und Selbstheilung (Issue
+       verschwindet automatisch, sobald die jeweilige Ursache behoben ist -
+       Preisdaten kehren zurück, SunSpec-Modus wieder erreichbar, Max. SOC
+       angehoben, Zeitfenster/Monatsauswahl korrigiert, oder die Automatik
+       abgeschaltet wird)."
+    - "tests/test_repairs.py deckt zusätzlich ab, dass eine unauffällige
+       Standardkonfiguration (alles deaktiviert bzw. in Ordnung) keines der
+       fünf Issues erzeugt."
+    - "tests/test_coordinator.py deckt ab, dass
+       self._extended_unavailable_since nur auf der Zustandsflanke gesetzt
+       wird (nicht bei jedem weiteren Poll-Zyklus mit weiterhin nicht
+       erreichbarem SunSpec-Modus-Block) und bei Wiedererreichbarkeit
+       zurückgesetzt wird."

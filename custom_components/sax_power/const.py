@@ -566,3 +566,33 @@ SERVICE_CREATE_DASHBOARD = "create_dashboard"
 # gefunden; ein über Entwicklertools -> Aktionen aufrufbarer Service ist in
 # Home Assistant der robustere, immer sichtbare Weg dafür.
 SERVICE_REINSTALL_DASHBOARD = "reinstall_dashboard"
+
+# ==========================================================================
+# Selbstdiagnose / erweiterte Repairs (siehe anforderung.yaml,
+# REQ-SELF-DIAGNOSIS-REPAIRS)
+# ==========================================================================
+# Weitere reparierbare Issues über den Ladekonflikt
+# (ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT oben) und die
+# sofortige SunSpec-Nichterreichbarkeits-Warnung (ISSUE_EXTENDED_MODE_
+# UNAVAILABLE) hinaus: erkennen still fehlschlagende Konfigurationen, die
+# sonst nur an unerwartet ausbleibendem Ladeverhalten auffallen würden.
+# Alle fünf sind rein informativ (is_fixable=False) und heilen sich selbst
+# (SaxPowerCoordinator._async_check_self_diagnostics, hinter einer
+# Zustandsflanke je Prüfung, damit weder Log noch Issue Registry bei jedem
+# Poll-Zyklus neu befüllt werden), sobald ihre jeweilige Ursache behoben
+# ist - analog zum Muster von ISSUE_EXTENDED_MODE_UNAVAILABLE.
+ISSUE_PRICE_SENSOR_MISSING = "price_sensor_missing"
+ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE = "sunspec_persistently_unavailable"
+ISSUE_MAX_SOC_BELOW_MIN_SOC = "max_soc_below_min_soc"
+ISSUE_EMPTY_CHARGE_WINDOW = "empty_charge_window"
+ISSUE_NO_ACTIVE_MONTHS = "no_active_months"
+
+# Mindestdauer eines fortbestehenden Problemzustands, bevor die jeweilige
+# Prüfung anschlägt - kurze Aussetzer (ein einzelner verpasster
+# Preis-Update-Zyklus, ein kurzer Netzwerk-Hänger) sollen kein Issue
+# erzeugen. ISSUE_EXTENDED_MODE_UNAVAILABLE selbst legt schon bei der
+# ERSTEN Nichterreichbarkeit sein eigenes, weniger dringliches Warn-Issue
+# an - ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE eskaliert erst, wenn der
+# Zustand tatsächlich anhält.
+PRICE_SENSOR_MISSING_GRACE_PERIOD = 6 * 3600  # Sekunden
+SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD = 3600  # Sekunden

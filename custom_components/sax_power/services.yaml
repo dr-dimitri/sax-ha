@@ -142,3 +142,18 @@ set_price_charge_enabled:
       default: false
       selector:
         boolean:
+
+create_dashboard:
+  name: Dashboard anlegen
+  description: >-
+    Legt das mitgelieferte Dashboard "SAX Power" nachträglich an - z. B. wenn
+    es bei der Ersteinrichtung abgewählt oder später gelöscht wurde. Tut
+    nichts, wenn es bereits existiert.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power

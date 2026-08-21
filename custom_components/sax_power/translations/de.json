@@ -500,6 +500,16 @@
           "description": "Schaltet eine gleichzeitig aktive Netzladung ohne Rückfrage ab."
         }
       }
+    },
+    "create_dashboard": {
+      "name": "Dashboard anlegen",
+      "description": "Legt das mitgelieferte Dashboard \"SAX Power\" nachträglich an - z. B. wenn es bei der Ersteinrichtung abgewählt oder später gelöscht wurde. Tut nichts, wenn es bereits existiert.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        }
+      }
     }
   },
   "options": {

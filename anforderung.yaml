@@ -1143,6 +1143,16 @@ requirement_bundled_dashboard:
     auftauchen. Über async_step_reconfigure (spätere IP-Änderung) wird
     dieser Schritt nicht erneut durchlaufen.
 
+    Nachträgliches Anlegen: Der Ersteinrichtungsschritt läuft nur einmal
+    durch - wer ihn abgewählt hat, das Dashboard später gelöscht hat, oder
+    dessen Eintrag vor Einführung dieses Features angelegt wurde, hat sonst
+    keine Möglichkeit mehr, es erneut zu erzeugen. Der Service
+    sax_power.create_dashboard (SERVICE_CREATE_DASHBOARD, Schema wie
+    stop_grid_charge: nur device_id) ruft dashboard.async_create_dashboard
+    direkt auf und ist über Entwicklertools -> Aktionen aufrufbar; wie die
+    Funktion selbst idempotent (tut nichts, wenn das Dashboard schon
+    existiert).
+
     dashboard.async_create_dashboard baut auf zwei öffentlichen, aber
     sonst nur intern innerhalb von homeassistant.components.lovelace
     verdrahteten Bausteinen auf: eine eigene
@@ -1170,3 +1180,6 @@ requirement_bundled_dashboard:
        schluckt unerwartete Fehler, statt sie durchzureichen."
     - "tests/test_config_flow.py deckt den dritten Ersteinrichtungsschritt
        ab (Default aktiv, explizite Abwahl)."
+    - "tests/test_dashboard.py deckt zusätzlich den Service
+       sax_power.create_dashboard end-to-end ab (Geräte-Lookup, Aufruf von
+       async_create_dashboard)."

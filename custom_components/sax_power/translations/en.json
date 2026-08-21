@@ -500,6 +500,16 @@
           "description": "Turns off an active grid charging without asking."
         }
       }
+    },
+    "create_dashboard": {
+      "name": "Create dashboard",
+      "description": "Creates the bundled \"SAX Power\" dashboard after the fact - e.g. if it was declined during initial setup or deleted later. Does nothing if it already exists.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        }
+      }
     }
   },
   "options": {

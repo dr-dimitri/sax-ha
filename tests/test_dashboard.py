@@ -8,10 +8,16 @@ from unittest.mock import patch
 
 from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power.const import DOMAIN
+from custom_components import sax_power
+from custom_components.sax_power.const import (
+    DATA_COORDINATOR,
+    DOMAIN,
+    SERVICE_CREATE_DASHBOARD,
+)
 from custom_components.sax_power.dashboard import (
     DASHBOARD_URL_PATH,
     async_build_dashboard_config,
@@ -132,3 +138,35 @@ async def test_create_dashboard_swallows_unexpected_errors(hass) -> None:
         side_effect=RuntimeError("Lovelace-Interna haben sich geändert"),
     ):
         await async_create_dashboard(hass, entry)  # darf nicht raisen
+
+
+async def test_create_dashboard_service_creates_dashboard_for_device(hass) -> None:
+    """Der Service sax_power.create_dashboard erlaubt, das Dashboard
+    nachträglich anzulegen - z. B. wenn es in der Ersteinrichtung abgewählt
+    wurde oder der Eintrag vor Einführung dieses Features angelegt wurde."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[ENTRY_ID] = {DATA_COORDINATOR: object()}
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=ENTRY_ID, identifiers={(DOMAIN, ENTRY_ID)}
+    )
+
+    hass.data[LOVELACE_DATA] = LovelaceData(
+        resource_mode="storage",
+        dashboards={},
+        resources=None,
+        yaml_dashboards={},
+    )
+    sax_power._async_register_services(hass)
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_CREATE_DASHBOARD,
+            {"device_id": device.id},
+            blocking=True,
+        )
+
+    assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards

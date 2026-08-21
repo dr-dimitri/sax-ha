@@ -282,10 +282,10 @@
         "name": "Grid charge min. SOC"
       },
       "price_charge_max_price": {
-        "name": "Price limit"
+        "name": "Grid draw and charging up to"
       },
       "price_charge_neutral_price": {
-        "name": "Neutral price"
+        "name": "Grid draw without charging up to"
       },
       "price_charge_hours": {
         "name": "Hours"

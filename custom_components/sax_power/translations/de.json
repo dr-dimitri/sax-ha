@@ -282,10 +282,10 @@
         "name": "Netzladung Min. SOC"
       },
       "price_charge_max_price": {
-        "name": "Preisgrenze"
+        "name": "Netzbezug und laden bis"
       },
       "price_charge_neutral_price": {
-        "name": "Neutralpreis"
+        "name": "Netzbezug ohne laden bis"
       },
       "price_charge_hours": {
         "name": "Anzahl Stunden"

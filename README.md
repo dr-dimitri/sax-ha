@@ -255,8 +255,8 @@ wie alle anderen von diesem Block abhängigen Entities auch.
 | --- | --- | --- |
 | Max. SOC | 0–100 % | Ziel-Ladestand für die [Max-SOC-Sperre](#max-soc-sperre); gleichzeitig oberes Ziel der Netzladung. Ohne vorherige Einstellung 100 % (nicht 0) |
 | Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 100 % |
-| Preisoptimiertes Laden Preisgrenze | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
-| Preisoptimiertes Laden Neutralpreis | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Muss über der Preisgrenze liegen (sonst Reparaturhinweis). Zwischen Preisgrenze und Neutralpreis wird der Speicher pausiert (siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone)). Standard 0,30 EUR/kWh |
+| Preisoptimiertes Laden Netzbezug und laden bis (Preisgrenze) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
+| Preisoptimiertes Laden Netzbezug ohne laden bis (Neutralpreis) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Muss über der Preisgrenze liegen (sonst Reparaturhinweis). Zwischen Preisgrenze und Neutralpreis wird der Speicher pausiert (siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone)). Standard 0,30 EUR/kWh |
 | Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
 
 Alle Werte bleiben über Neustarts hinweg erhalten. Netzladung und

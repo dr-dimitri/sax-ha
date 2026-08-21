@@ -19,7 +19,9 @@ from homeassistant.helpers import selector
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
+from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
+    ALL_MONTHS,
     CONF_CREATE_DASHBOARD,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
@@ -49,10 +51,48 @@ from .const import (
     MIN_PV_FORECAST_FACTOR,
     PRICE_STRATEGIES,
     PRICE_UNITS,
+    READ_BLOCK_EXT_LOW1_COUNT,
+    READ_BLOCK_EXT_LOW1_START,
     REG_SOC,
+    REG_SUN_MANUFACTURER,
+    REG_SUN_MODEL,
+    REG_SUN_SERIAL_HI,
+    REG_SUN_SERIAL_LO,
+    REG_SUN_VERSION_GATEWAY,
+    REG_SUN_VERSION_MASTER,
 )
+from .coordinator import decode_ascii_registers
+from .sensor import SENSOR_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
+
+# Feste Entity-Anzahl je Plattform für die Zusammenfassung auf der
+# Abschlussseite der Ersteinrichtung (async_step_finish). sensor.py/
+# binary_sensor.py und die zwölf Monats-Schalter je Automatik in switch.py
+# wachsen am ehesten künftig weiter und werden deshalb dynamisch über die
+# jeweiligen Beschreibungslisten/ALL_MONTHS gezählt; number.py, select.py,
+# time.py sowie die vier nicht-monatsbezogenen Schalter in switch.py legen
+# dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
+# async_setup_entry-Funktionen.
+_ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
+_ENTITY_COUNT_NUMBER = 4
+_ENTITY_COUNT_SELECT = 1
+_ENTITY_COUNT_TIME = 4
+_ENTITY_COUNT_SWITCH_FIXED = 4
+
+
+def _expected_entity_count() -> int:
+    return (
+        len(SENSOR_DESCRIPTIONS)
+        + _ENTITY_COUNT_SENSOR_FIXED
+        + len(BINARY_SENSOR_DESCRIPTIONS)
+        + _ENTITY_COUNT_NUMBER
+        + _ENTITY_COUNT_SELECT
+        + _ENTITY_COUNT_TIME
+        + _ENTITY_COUNT_SWITCH_FIXED
+        + 2 * len(ALL_MONTHS)
+    )
+
 
 # Gemeinsames Schema für Ersteinrichtung (async_step_user) und spätere
 # IP-/Verbindungsänderung (async_step_reconfigure). Vorbelegungen für den
@@ -141,6 +181,65 @@ async def _async_validate_connection(host: str, port: int, slave_id: int) -> Non
         client.close()
 
 
+async def _async_read_finish_summary(
+    host: str, port: int, slave_id_extended: int
+) -> dict[str, Any]:
+    """Liest Hersteller/Modell/Firmware/Seriennummer für die Abschlussseite
+    der Ersteinrichtung (async_step_finish).
+
+    Rein informativ, siehe anforderung.yaml REQ-SETUP-FINISH-SUMMARY: die
+    Basic-Mode-Verbindung wurde bereits in _async_step_connection validiert,
+    ein hier fehlschlagender SunSpec-Modus-Block (analog zu
+    REQ-EXTENDED-MODE-RESILIENCE) darf die Ersteinrichtung deshalb nicht
+    blockieren - er wird nur als "nicht erreichbar" ausgewiesen.
+    """
+    summary: dict[str, Any] = {
+        "sunspec_available": False,
+        "sun_manufacturer": None,
+        "sun_model": None,
+        "sun_version_master": None,
+        "sun_version_gateway": None,
+        "sun_serial_number": None,
+    }
+    client = AsyncModbusTcpClient(host=host, port=port)
+    try:
+        try:
+            if not await client.connect():
+                return summary
+        except (ModbusException, OSError):
+            return summary
+
+        try:
+            result = await client.read_holding_registers(
+                address=READ_BLOCK_EXT_LOW1_START,
+                count=READ_BLOCK_EXT_LOW1_COUNT,
+                device_id=slave_id_extended,
+            )
+        except (ModbusException, OSError):
+            return summary
+        if result.isError():
+            return summary
+
+        def reg(address: int) -> int:
+            return result.registers[address - READ_BLOCK_EXT_LOW1_START]
+
+        summary["sunspec_available"] = True
+        summary["sun_manufacturer"] = decode_ascii_registers(
+            [reg(REG_SUN_MANUFACTURER + i) for i in range(4)]
+        )
+        summary["sun_model"] = decode_ascii_registers(
+            [reg(REG_SUN_MODEL + i) for i in range(3)]
+        )
+        summary["sun_version_master"] = reg(REG_SUN_VERSION_MASTER)
+        summary["sun_version_gateway"] = reg(REG_SUN_VERSION_GATEWAY)
+        summary["sun_serial_number"] = (reg(REG_SUN_SERIAL_HI) << 16) | reg(
+            REG_SUN_SERIAL_LO
+        )
+    finally:
+        client.close()
+    return summary
+
+
 class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SAX Power."""
 
@@ -148,6 +247,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
 
     _connection_data: dict[str, Any]
     _grid_charge_data: dict[str, Any]
+    _dashboard_data: dict[str, Any]
 
     @staticmethod
     @callback
@@ -249,10 +349,29 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         mitgelieferte Lovelace-Dashboard anzulegen (siehe dashboard.py).
 
         Das Dashboard selbst kann hier noch nicht gebaut werden - dafür
-        müssen die Entities erst existieren, was erst nach Anlage dieses
+        müssen die Entities erst existieren, was erst nach Anlage des
         Eintrags und Weiterleitung an die Plattformen der Fall ist. Dieser
         Schritt merkt nur die Entscheidung des Anwenders vor;
-        __init__.async_setup_entry führt sie anschließend aus.
+        __init__.async_setup_entry führt sie später aus. Der Eintrag selbst
+        wird erst im nächsten, abschließenden Schritt angelegt (siehe
+        async_step_finish).
+        """
+        if user_input is not None:
+            self._dashboard_data = user_input
+            return await self.async_step_finish()
+        return self.async_show_form(
+            step_id="dashboard", data_schema=STEP_DASHBOARD_SCHEMA
+        )
+
+    async def async_step_finish(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Vierter, abschließender Schritt der Ersteinrichtung: reine
+        Zusammenfassung ohne eigene Eingabefelder (siehe anforderung.yaml,
+        REQ-SETUP-FINISH-SUMMARY). Der Config Entry wird erst hier angelegt,
+        nachdem die Zusammenfassung feststeht - vorher (async_step_dashboard)
+        existiert er noch nicht, ein zwischenzeitlicher Abbruch des Flows
+        legt also keinen unvollständigen Eintrag an.
         """
         if user_input is not None:
             return self.async_create_entry(
@@ -260,11 +379,36 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 data={
                     **self._connection_data,
                     **self._grid_charge_data,
-                    **user_input,
+                    **self._dashboard_data,
                 },
             )
+
+        summary = await _async_read_finish_summary(
+            self._connection_data[CONF_HOST],
+            self._connection_data[CONF_PORT],
+            self._connection_data[CONF_SLAVE_ID_EXTENDED],
+        )
+        if summary["sunspec_available"]:
+            firmware = (
+                f"Master V{summary['sun_version_master']} / "
+                f"Gateway V{summary['sun_version_gateway']}"
+            )
+            serial_number = str(summary["sun_serial_number"])
+            sunspec_status = "Erreichbar"
+        else:
+            firmware = "Nicht verfügbar (SunSpec-Modus nicht erreichbar)"
+            serial_number = "Nicht verfügbar (SunSpec-Modus nicht erreichbar)"
+            sunspec_status = "Nicht erreichbar"
+
         return self.async_show_form(
-            step_id="dashboard", data_schema=STEP_DASHBOARD_SCHEMA
+            step_id="finish",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "firmware": firmware,
+                "serial_number": serial_number,
+                "sunspec_status": sunspec_status,
+                "entity_count": str(_expected_entity_count()),
+            },
         )
 
 

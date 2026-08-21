@@ -175,3 +175,31 @@ reinstall_dashboard:
       selector:
         device:
           integration: sax_power
+
+set_discharge_block_window:
+  name: Entladesperre-Zeitfenster setzen
+  description: >-
+    Setzt Start- und Endzeit des Sperrfensters der Entladesperre (Modus
+    "Zeitfenster") atomar in einem Aufruf - siehe set_timed_charge_window.
+    Das Sperrfenster unterliegt keiner Überschneidungsprüfung mit den beiden
+    Ladefenstern: die Entladesperre weicht ohnehin jeder Ladeautomatik.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    start:
+      name: Start
+      description: Beginn des Sperrfensters.
+      required: true
+      selector:
+        time:
+    end:
+      name: Ende
+      description: Ende des Sperrfensters.
+      required: true
+      selector:
+        time:

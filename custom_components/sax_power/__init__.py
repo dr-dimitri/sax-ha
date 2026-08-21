@@ -33,6 +33,7 @@ from .const import (
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_REINSTALL_DASHBOARD,
+    SERVICE_SET_DISCHARGE_BLOCK_WINDOW,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
     SERVICE_SET_TIMED_CHARGE_WINDOW,
@@ -208,6 +209,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data[ATTR_START], call.data[ATTR_END]
         )
 
+    async def _async_set_discharge_block_window(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.async_set_discharge_block_window(
+            call.data[ATTR_START], call.data[ATTR_END]
+        )
+
     async def _async_refresh_price_plan(call: ServiceCall) -> None:
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         coordinator.price_planner.evaluate()
@@ -256,6 +263,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_SET_GRID_SERVING_WINDOW,
         _async_set_grid_serving_window,
+        schema=SERVICE_SET_WINDOW_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_DISCHARGE_BLOCK_WINDOW,
+        _async_set_discharge_block_window,
         schema=SERVICE_SET_WINDOW_SCHEMA,
     )
     hass.services.async_register(

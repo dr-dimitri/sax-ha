@@ -47,10 +47,11 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
-# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
+# REQ-DISCHARGE-BLOCK             done       Entladesperre: Speicher für teure Stunden aufsparen (Zeitfenster oder preisgesteuert)
 # ==============================================================================
 
 # ==============================================================================
@@ -1112,18 +1113,27 @@ requirement_dynamic_price_charge:
 # ==============================================================================
 requirement_bundled_dashboard:
   id: REQ-BUNDLED-DASHBOARD
-  title: "Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar"
+  title: "Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar"
   status: done
   description: >
-    dashboard.py baut ein vierteiliges Storage-Dashboard mit den
-    wichtigsten Sensoren/Einstellungen, gegliedert in vier Tabs (Lovelace-
+    dashboard.py baut ein fünfteiliges Storage-Dashboard mit den
+    wichtigsten Sensoren/Einstellungen, gegliedert in fünf Tabs (Lovelace-
     Views): "Allgemeine Informationen" (Speicher-Schalter, eine Karte
     "Status" mit den binary_sensor-Entities aus REQ-BINARY-SENSORS, SOC,
     Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten - die
     reine Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-
-    Schalter bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie
+    Schalter bleibt), "Ladeautomatik" und "Netzdienliches Laden",
     "Dynamisches Laden" (preisoptimiertes Laden: Strategie, Preisgrenze,
-    Stundenzahl, Status).
+    Stundenzahl, Status) sowie "Entladesperre" (REQ-DISCHARGE-BLOCK).
+
+    "Entladesperre" ist wie "Netzdienliches Laden" aufgebaut, oben aber
+    eine Tile-Karte mit der Betriebsart-Select statt eines Hauptschalters
+    (die Entladesperre hat drei statt zwei Zustände): darunter die Karte
+    "Sperrzeit" mit den beiden Zeit-Entities, die Karte "Einstellungen"
+    (Mindest-SOC, Preisschwelle, Statusanzeige) und am Ende "Aktive
+    Monate". Eigener Tab statt einer Karte in "Dynamisches Laden", weil die
+    Entladesperre die einzige entladeseitige Automatik ist und im Modus
+    "window" völlig preisunabhängig arbeitet.
 
     "Ladeautomatik" und "Netzdienliches Laden" sind bewusst identisch
     aufgebaut, damit der Anwender beim Wechsel zwischen den beiden Tabs
@@ -1264,7 +1274,7 @@ requirement_binary_sensors:
   status: done
   description: >
     binary_sensor.py ergänzt die bestehenden deutschen Klartext-Sensoren
-    (sensor.py, *_active_text) um sieben beschreibungsbasierte
+    (sensor.py, *_active_text) um acht beschreibungsbasierte
     binary_sensor-Entities mit echter device_class-Semantik (Icon,
     Zustandsfarbe, maschinenlesbarer on/off-Zustand statt Sprachvergleich).
     Rein additiv - die Text-Sensoren bleiben unverändert bestehen, weil sie
@@ -1274,10 +1284,11 @@ requirement_binary_sensors:
     Entities (unique_id-Suffix = translation_key):
       - "battery_charging" (device_class BATTERY_CHARGING): storage_power_
         active < 0 (negativ = Ladung, siehe _watts_to_ic_setpoint_raw).
-      - "timed_charge_active", "price_charge_active", "grid_serving_active"
-        (device_class RUNNING): dieselben, bereits in coordinator.data
-        veröffentlichten Flags (SaxPowerCoordinator._publish_charge_state),
-        die auch die gleichnamigen *_active_text-Sensoren speisen.
+      - "timed_charge_active", "price_charge_active", "grid_serving_active",
+        "discharge_block_active" (device_class RUNNING): dieselben, bereits
+        in coordinator.data veröffentlichten Flags
+        (SaxPowerCoordinator._publish_charge_state), die auch die
+        gleichnamigen Text-Sensoren speisen.
       - "max_soc_clamped" (kein device_class): coordinator.max_soc_clamped.
       - "extended_mode_available" (device_class CONNECTIVITY,
         entity_category diagnostic): coordinator.extended_available, siehe
@@ -1291,7 +1302,7 @@ requirement_binary_sensors:
 
     Fehlende Werte werden konsistent zum Rest der Integration als "nicht
     verfügbar" (is_on = None) abgebildet, nie fälschlich als False - gilt
-    für alle sieben Entities, solange coordinator.data noch nicht befüllt
+    für alle acht Entities, solange coordinator.data noch nicht befüllt
     ist, sowie zusätzlich für "battery_charging" und "battery_problem",
     solange der SunSpec-Modus-Block nicht erreichbar ist (siehe
     REQ-EXTENDED-MODE-RESILIENCE).
@@ -1301,7 +1312,7 @@ requirement_binary_sensors:
     "extended_mode_available" (rein diagnostisch) in einer neuen Karte
     "Status" im Tab "Allgemeine Informationen".
   acceptance_criteria:
-    - "tests/test_binary_sensor.py deckt jede der sieben is_on_fn-Funktionen
+    - "tests/test_binary_sensor.py deckt jede der acht is_on_fn-Funktionen
        ab: erwarteter Zustand bei vorhandenen Daten, None bei fehlendem
        SunSpec-Modus-Block (battery_charging, battery_problem) sowie None,
        solange coordinator.data noch None ist (vor dem ersten Update)."
@@ -1482,3 +1493,193 @@ requirement_self_diagnosis_repairs:
        wird (nicht bei jedem weiteren Poll-Zyklus mit weiterhin nicht
        erreichbarem SunSpec-Modus-Block) und bei Wiedererreichbarkeit
        zurückgesetzt wird."
+
+# ==============================================================================
+# ANFORDERUNG: ENTLADESPERRE / PREISGESTEUERTES AUFSPAREN
+# ==============================================================================
+requirement_discharge_block:
+  id: REQ-DISCHARGE-BLOCK
+  title: "Entladesperre: Speicher in billigen Stunden aktiv auf 0 W halten, damit seine Energie für die teuren Stunden übrig bleibt"
+  status: done
+  description: >
+    Vierte Automatik neben zeitgesteuertem (REQ-TIMED-SOC-CHARGE),
+    preisoptimiertem (REQ-DYNAMIC-PRICE-CHARGE) und netzdienlichem Laden
+    (REQ-GRID-SERVING-CHARGE) - und die einzige ENTLADEseitige: Sie hält
+    den Speicher auf einem 0-W-Sollwert, statt ihn den Hausverbrauch decken
+    zu lassen. Der Hausverbrauch geht währenddessen ans Netz, weil der
+    Strom in diesem Moment billig ist; die gespeicherte Energie bleibt für
+    die teuren Stunden übrig. Ohne sie hebt die Integration nur die Hälfte
+    des Potenzials eines dynamischen Tarifs: bei diesem ist der
+    Entladezeitpunkt genauso wertvoll wie der Ladezeitpunkt.
+
+    Drei Betriebsarten (select "Entladesperre Modus",
+    select.SaxPowerDischargeBlockModeSelect, jederzeit im laufenden Betrieb
+    umschaltbar, DISCHARGE_BLOCK_MODES in const.py):
+      off    - Automatik aus, das Gerät regelt wie bisher (geräteeigene
+               SmartMeter-Nullregelung deckt den Hausverbrauch aus dem
+               Speicher).
+      window - Entladen ist innerhalb eines festen Zeitfensters gesperrt
+               (time "Start"/"Ende" plus 12 Monats-Schalter, aufgebaut wie
+               bei REQ-GRID-SERVING-CHARGE).
+      price  - Entladen ist gesperrt, solange der aktuelle Preis-Slot
+               UNTER der Schwelle (number "Entladesperre Preisschwelle",
+               EUR/kWh) liegt - der Speicher spart sich damit automatisch
+               für die Abendspitze auf.
+
+    Schreibpfad: bewusst KEINE neue Registerlogik. Es ist exakt derselbe
+    gehaltene 0-%-Sollwert, den die Max-SOC-Sperre schon verwendet
+    (async_start_sun_charge(0): Register 40051 Steuermodus auf
+    Sollwertvorgabe + Register 40049 Leistungsvorgabe auf 0 %), inklusive
+    derselben periodischen Auffrischung durch _async_sun_charge_loop - ohne
+    die verwürfe das Gerät den Sollwert nach Ablauf seines Timeouts
+    (Register 40050, max. 300 s). Die Entladesperre macht deshalb keine
+    eigene Schleife auf, sondern entscheidet ausschließlich in
+    SaxPowerCoordinator._async_enforce_grid_charge; zwei konkurrierende
+    Schreiber auf 40049/40051 kann es dadurch nicht geben. Das Geräterisiko
+    ist gering, weil 0 vorzeichenneutral ist: die undokumentierte
+    Vorzeichenkonvention von Register 40049 spielt hier keine Rolle.
+
+    Erweiterte Vorrangkette in _async_enforce_grid_charge (höchste zuerst):
+      1. Max-SOC-Sperre
+      2. zeitgesteuertes Laden
+      3. preisoptimiertes Laden
+      4. netzdienliches Laden
+      5. Entladesperre
+      6. sonst: geräteeigene Nullregelung (Register 40051 = 0)
+    Stufe 5 greift nur, wenn alle folgenden Bedingungen gleichzeitig
+    gelten (_discharge_block_eligible):
+      - Modus != off,
+      - keine der Stufen 1-4 beansprucht den Schreibpfad (über die
+        Verzweigungsstruktur der Methode sichergestellt, nicht über
+        zusätzliche Flags),
+      - SOC > "Entladesperre Mindest-SOC",
+      - modusabhängig: window -> jetzt im Sperrfenster UND aktueller Monat
+        aktiviert; price -> price_planner.discharge_block_plan.block_now,
+      - KEIN bestätigter PV-Überschuss.
+    Ist sie erfüllt, wird async_start_sun_charge(0) aufgerufen; ist sie
+    nicht (mehr) erfüllt, wird Register 40051 aktiv auf 0 zurückgesetzt
+    (async_stop_sun_charge) - dieser Zweig setzt den Sollwert unverändert
+    zum bisherigen Verhalten bedingungslos zurück, weil dort auch ein
+    gerade beendetes zeitgesteuertes/preisoptimiertes Laden landet.
+
+    PV-Überschuss hebt die Sperre auf: ein gehaltener 0-W-Sollwert bedeutet,
+    dass der Speicher auch KEINE PV-Energie mehr aufnimmt - ohne diese
+    Freigabe würde die Sperre bei Sonnenschein PV-Ertrag ins Netz drücken
+    statt in den Speicher, also genau das Gegenteil des Ziels. Ausgewertet
+    wird dafür dasselbe, in _async_enforce_grid_charge ohnehin bei JEDEM
+    Zyklus berechnete pv_surplus_active (data["smartmeter_power"] >
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT mit
+    PV_SURPLUS_HYSTERESIS_CYCLES-Hysterese, Vorzeichen: positiv =
+    Einspeisung, negativ = Netzbezug) - bewusst kein eigener Zähler, der
+    nur in den Zyklen hochliefe, in denen Stufe 5 überhaupt ausgewertet
+    wird, und dadurch eine andere Hysterese ergäbe.
+
+    Zusammenspiel mit netzdienlichem Laden (REQ-GRID-SERVING-CHARGE): Tritt
+    dessen Zeitfenster in Kraft, während die Entladesperre einen 0-%-
+    Sollwert hält, wird dieser aktiv freigegeben
+    (_async_release_discharge_block, gesteuert über
+    _discharge_block_setpoint_active). Ohne diese Freigabe käme die
+    tatsächliche Ladeleistung des Geräts nie über die Erkennungsschwelle
+    von Schritt a - die Zustandsmaschine des netzdienlichen Ladens bliebe
+    stehen, während der Sollwert weiterliefe. _async_release_discharge_block
+    rührt einen von einer anderen Stufe gehaltenen Sollwert bewusst nicht
+    an. Ein Flattern von Register 40051 zwischen 0 und 1 in
+    aufeinanderfolgenden Zyklen entsteht dadurch nicht: innerhalb des
+    netzdienlich-Fensters wird die Entladesperre gar nicht ausgewertet, und
+    bei erreichtem Ziel-SOC (Stufe 1) entscheidet ausschließlich die
+    Max-SOC-Sperre über den Sollwert.
+
+    Sauberer Ausstieg ist Pflicht: bleibt ein 0-%-Sollwert stehen, ist der
+    Speicher für den Anwender unerklärlich tot - ein "stuck zero"-Setpoint
+    mit derselben Wirkung wie der in AGENTS.md ("Security considerations")
+    beschriebene stehengebliebene Sollwert. Register 40051 wird deshalb
+    aktiv auf 0 zurückgesetzt beim Umschalten auf "off", beim Unterschreiten
+    des Mindest-SOC, bei bestätigtem PV-Überschuss, beim Verlassen des
+    Sperr-/Preisfensters sowie in async_shutdown - und damit auch beim
+    Entladen bzw. Neuladen des Config Entry (__init__.async_unload_entry).
+    Jede Einstellungsänderung wirkt über _async_apply_grid_charge_change
+    sofort, nicht erst beim nächsten Poll-Zyklus.
+
+    Preislogik (Modus "price"): price_optimizer.compute_discharge_block_plan
+    neben compute_plan - dasselbe PriceSlot-Datenmodell, dieselbe
+    Einlese-Logik (parse_price_slots/current_price) und derselbe gleitende
+    Planungshorizont (PRICE_PLAN_HORIZON_HOURS, 24 h). Keine eigene
+    Preis-Parsing-Logik. SaxPricePlanner.evaluate() liest die Preis-Slots
+    genau einmal ein und berechnet daraus beide Pläne (self.plan für das
+    preisoptimierte Laden, self.discharge_block_plan für die Entladesperre).
+    Ohne gesetzte Preisschwelle wird nie gesperrt, statt eine Schwelle zu
+    raten; ohne konfigurierten Preis-Sensor bzw. ohne auswertbare Slots im
+    Horizont lautet der Status "Keine Preisdaten" und es wird nicht
+    gesperrt.
+
+    Wirtschaftlichkeitsgrenze: Aufsparen lohnt nur, wenn die Preisdifferenz
+    zwischen Sperr- und Nutzungsstunde größer ist als die Speicherverluste
+    (Round-Trip-Wirkungsgrad grob 85-90 %) und der zusätzliche Zyklus die
+    Alterung wert ist. Bei einem Festpreistarif ist der Modus "price"
+    wertlos - dort ist "window" die passende Betriebsart. README.md und die
+    Docstrings von select.SaxPowerDischargeBlockModeSelect/
+    number.SaxPowerDischargeBlockMaxPriceNumber benennen das ausdrücklich.
+
+    Keine Nichtüberlappungs-Prüfung: Anders als die beiden Ladefenster
+    (REQ-GRID-SERVING-CHARGE) unterliegt das Sperrfenster keiner
+    Überschneidungsregel und keiner Persistent-Notification-Behandlung. Es
+    konkurriert nicht um den Schreibpfad, weil die Entladesperre als
+    unterste Stufe der Vorrangkette ohnehin jeder Ladeautomatik weicht.
+    async_set_discharge_block_month nimmt den validate-Parameter nur der
+    einheitlichen Signatur von switch.SaxPowerMonthSwitch wegen entgegen
+    und wertet ihn nicht aus.
+  requirements:
+    - "Entities am bestehenden SAX-Gerät (unique_id-Suffix =
+       translation_key): select 'Entladesperre Modus' (off/window/price),
+       number 'Entladesperre Mindest-SOC' (%), number 'Entladesperre
+       Preisschwelle' (EUR/kWh), time 'Start'/'Ende'
+       (discharge_block_start/-end), 12 switch
+       'discharge_block_month_1..12', sensor 'Entladesperre Status'
+       (Klartext, mit Attributen) sowie binary_sensor 'Entladesperre aktiv'
+       (device_class RUNNING)."
+    - "Alle Stellgrößen werden per RestoreEntity über Neustarts hinweg
+       persistiert; ohne gespeicherten Zustand gelten
+       DEFAULT_DISCHARGE_BLOCK_MODE (off), DEFAULT_DISCHARGE_BLOCK_MIN_SOC
+       (20 %), DEFAULT_DISCHARGE_BLOCK_MAX_PRICE (0,20 EUR/kWh) und ein
+       leeres Sperrfenster (DEFAULT_DISCHARGE_BLOCK_START ==
+       DEFAULT_DISCHARGE_BLOCK_END), sodass sich bestehende Installationen
+       nach dem Update unverändert verhalten."
+    - "Der Status-Sensor benennt den jeweils wirksamen Grund in genau der
+       Reihenfolge, in der _async_enforce_grid_charge ihn auswertet: Aus,
+       Entladen gesperrt, Pausiert (Max-SOC-Sperre), Pausiert
+       (Ladeautomatik aktiv), Pausiert (PV-Überschuss), Pausiert
+       (Mindest-SOC), Außerhalb Sperrzeit, Preis über Schwelle, Keine
+       Preisdaten. Seine Attribute führen Modus, aktuellen Preis,
+       Preisschwelle, Mindest-SOC, nächsten Sperrbeginn, den konfigurierten
+       Preis-Sensor und die geplanten Sperrfenster mit."
+    - "Service sax_power.set_discharge_block_window (Felder device_id,
+       start, end) setzt beide Grenzen des Sperrfensters atomar - analog zu
+       set_timed_charge_window/set_grid_serving_window, aber ohne
+       Überschneidungsprüfung."
+    - "Werte werden vor jeder Übernahme geklemmt: Mindest-SOC auf
+       [MIN_SOC, MAX_SOC], Preisschwelle auf [MIN_PRICE_LIMIT,
+       MAX_PRICE_LIMIT] - auch auf dem RestoreEntity-Pfad, der die
+       NumberEntity-Validierung nicht durchläuft. Ein unbekannter Modus
+       wird mit HomeAssistantError abgelehnt."
+  acceptance_criteria:
+    - "tests/test_discharge_block.py deckt compute_discharge_block_plan ab:
+       Sperren unter der Schwelle, Freigabe darüber (inkl. next_start),
+       fehlende Preisschwelle, fehlende Preisdaten, Slots außerhalb des
+       Planungshorizonts sowie Modus != price."
+    - "tests/test_discharge_block.py deckt den Schreibpfad ab: die Sperre
+       schreibt Register 40051 = Sollwertvorgabe UND Register 40049 = 0,
+       und der Ausstieg (Modus off, Unterschreiten des Mindest-SOC,
+       bestätigter PV-Überschuss, Verlassen des Fensters, async_shutdown)
+       schreibt Register 40051 aktiv auf SmartMeter-Nullregelung zurück."
+    - "tests/test_discharge_block.py deckt ab, dass jede der drei
+       Lade-Automatiken sowie die Max-SOC-Sperre gegen die Entladesperre
+       gewinnt - inklusive der aktiven Sollwert-Freigabe beim Eintritt in
+       das Zeitfenster des netzdienlichen Ladens."
+    - "tests/test_discharge_block.py deckt beide Betriebsarten einzeln ab
+       (window inkl. Monatslogik und Zeiten außerhalb des Fensters, price
+       über den Sperrplan des Planners) sowie die PV-Überschuss-Hysterese
+       inklusive ihres Zurücksetzens bei einem einzelnen Wert unter dem
+       Schwellwert."
+    - "tests/test_dashboard.py deckt den fünften Tab 'Entladesperre' ab."
+    - "README.md beschreibt Betriebsarten, Zusammenspiel mit den drei
+       Lade-Automatiken und die Wirtschaftlichkeitsgrenze."

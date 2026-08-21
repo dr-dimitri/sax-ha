@@ -34,7 +34,7 @@
       },
       "dashboard": {
         "title": "Dashboard (optional)",
-        "description": "Legt ein vorbereitetes Dashboard \"SAX Power\" mit den wichtigsten Sensoren und Einstellungen an, gegliedert in die Tabs \"Allgemeine Informationen\", \"Ladeautomatik\" und \"Dynamisches Laden\". Kann jederzeit unter Einstellungen -> Dashboards wieder entfernt werden.",
+        "description": "Legt ein vorbereitetes Dashboard \"SAX Power\" mit den wichtigsten Sensoren und Einstellungen an, gegliedert in die Tabs \"Allgemeine Informationen\", \"Ladeautomatik\", \"Netzdienliches Laden\", \"Dynamisches Laden\" und \"Entladesperre\". Kann jederzeit unter Einstellungen -> Dashboards wieder entfernt werden.",
         "data": {
           "create_dashboard": "Dashboard anlegen"
         }
@@ -75,6 +75,9 @@
       },
       "battery_problem": {
         "name": "Speicherproblem"
+      },
+      "discharge_block_active": {
+        "name": "Entladesperre aktiv"
       }
     },
     "sensor": {
@@ -272,6 +275,9 @@
       },
       "price_charge_current_price": {
         "name": "Aktueller Strompreis"
+      },
+      "discharge_block_status_text": {
+        "name": "Entladesperre Status"
       }
     },
     "number": {
@@ -286,6 +292,12 @@
       },
       "price_charge_hours": {
         "name": "Preisoptimiertes Laden Anzahl Stunden"
+      },
+      "discharge_block_min_soc": {
+        "name": "Entladesperre Mindest-SOC"
+      },
+      "discharge_block_max_price": {
+        "name": "Entladesperre Preisschwelle"
       }
     },
     "switch": {
@@ -372,6 +384,42 @@
       },
       "price_charge_enabled": {
         "name": "Preisoptimiertes Laden aktiv"
+      },
+      "discharge_block_month_1": {
+        "name": "Januar"
+      },
+      "discharge_block_month_2": {
+        "name": "Februar"
+      },
+      "discharge_block_month_3": {
+        "name": "März"
+      },
+      "discharge_block_month_4": {
+        "name": "April"
+      },
+      "discharge_block_month_5": {
+        "name": "Mai"
+      },
+      "discharge_block_month_6": {
+        "name": "Juni"
+      },
+      "discharge_block_month_7": {
+        "name": "Juli"
+      },
+      "discharge_block_month_8": {
+        "name": "August"
+      },
+      "discharge_block_month_9": {
+        "name": "September"
+      },
+      "discharge_block_month_10": {
+        "name": "Oktober"
+      },
+      "discharge_block_month_11": {
+        "name": "November"
+      },
+      "discharge_block_month_12": {
+        "name": "Dezember"
       }
     },
     "time": {
@@ -386,6 +434,12 @@
       },
       "grid_serving_end": {
         "name": "Ende"
+      },
+      "discharge_block_start": {
+        "name": "Start"
+      },
+      "discharge_block_end": {
+        "name": "Ende"
       }
     },
     "select": {
@@ -396,6 +450,14 @@
           "absolute": "Absoluter Preis",
           "relative": "Relativ / Günstigste Stunden",
           "smart": "Smart / PV-optimiert"
+        }
+      },
+      "discharge_block_mode": {
+        "name": "Entladesperre Modus",
+        "state": {
+          "off": "Aus",
+          "window": "Zeitfenster",
+          "price": "Preisgesteuert"
         }
       }
     }
@@ -564,6 +626,24 @@
           "description": "Das SAX Power Gerät."
         }
       }
+    },
+    "set_discharge_block_window": {
+      "name": "Entladesperre-Zeitfenster setzen",
+      "description": "Setzt Start- und Endzeit des Sperrfensters der Entladesperre atomar in einem Aufruf, statt mit den einzelnen Start-/Ende-Uhrzeit-Entities.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        },
+        "start": {
+          "name": "Start",
+          "description": "Beginn des Sperrfensters."
+        },
+        "end": {
+          "name": "Ende",
+          "description": "Ende des Sperrfensters."
+        }
+      }
     }
   },
   "options": {
@@ -603,6 +683,13 @@
         "absolute": "Absoluter Preis",
         "relative": "Relativ / Günstigste Stunden",
         "smart": "Smart / PV-optimiert"
+      }
+    },
+    "discharge_block_mode": {
+      "options": {
+        "off": "Aus",
+        "window": "Zeitfenster",
+        "price": "Preisgesteuert"
       }
     }
   }

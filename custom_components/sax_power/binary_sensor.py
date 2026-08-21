@@ -119,6 +119,12 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[SaxPowerBinarySensorEntityDescription, ...] = 
         is_on_fn=_data_flag("grid_serving_active"),
     ),
     SaxPowerBinarySensorEntityDescription(
+        key="discharge_block_active",
+        translation_key="discharge_block_active",
+        device_class=BinarySensorDeviceClass.RUNNING,
+        is_on_fn=_data_flag("discharge_block_active"),
+    ),
+    SaxPowerBinarySensorEntityDescription(
         key="max_soc_clamped",
         translation_key="max_soc_clamped",
         is_on_fn=_coordinator_property(lambda coordinator: coordinator.max_soc_clamped),

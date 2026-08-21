@@ -68,17 +68,20 @@ _LOGGER = logging.getLogger(__name__)
 
 # Feste Entity-Anzahl je Plattform für die Zusammenfassung auf der
 # Abschlussseite der Ersteinrichtung (async_step_finish). sensor.py/
-# binary_sensor.py und die zwölf Monats-Schalter je Automatik in switch.py
+# binary_sensor.py und die zwölf Monats-Schalter je Mechanismus in switch.py
 # wachsen am ehesten künftig weiter und werden deshalb dynamisch über die
 # jeweiligen Beschreibungslisten/ALL_MONTHS gezählt; number.py, select.py,
 # time.py sowie die vier nicht-monatsbezogenen Schalter in switch.py legen
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
-_ENTITY_COUNT_NUMBER = 4
-_ENTITY_COUNT_SELECT = 1
-_ENTITY_COUNT_TIME = 4
+_ENTITY_COUNT_NUMBER = 6
+_ENTITY_COUNT_SELECT = 2
+_ENTITY_COUNT_TIME = 6
 _ENTITY_COUNT_SWITCH_FIXED = 4
+# Monats-Schalter-Sätze in switch.py: zeitgesteuertes Laden, netzdienliches
+# Laden, Entladesperre (siehe REQ-GRID-SERVING-CHARGE/REQ-DISCHARGE-BLOCK).
+_ENTITY_COUNT_MONTH_SWITCH_SETS = 3
 
 
 def _expected_entity_count() -> int:
@@ -90,7 +93,7 @@ def _expected_entity_count() -> int:
         + _ENTITY_COUNT_SELECT
         + _ENTITY_COUNT_TIME
         + _ENTITY_COUNT_SWITCH_FIXED
-        + 2 * len(ALL_MONTHS)
+        + _ENTITY_COUNT_MONTH_SWITCH_SETS * len(ALL_MONTHS)
     )
 
 

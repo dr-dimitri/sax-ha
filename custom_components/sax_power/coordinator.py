@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 from datetime import time as dt_time
-from datetime import timedelta
 from time import monotonic
 from typing import Any
 
@@ -24,8 +24,19 @@ from .const import (
     BATTERY_EVENT_LABELS,
     CHARGE_CONFLICT_ISSUES,
     CONTROL_MODE_LABELS,
+    DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_STRATEGY,
+    DISCHARGE_BLOCK_MODE_OFF,
+    DISCHARGE_BLOCK_MODE_WINDOW,
+    DISCHARGE_BLOCK_MODES,
+    DISCHARGE_BLOCK_STATUS_BLOCKING,
+    DISCHARGE_BLOCK_STATUS_OFF,
+    DISCHARGE_BLOCK_STATUS_PAUSED_CHARGING,
+    DISCHARGE_BLOCK_STATUS_PAUSED_MAX_SOC,
+    DISCHARGE_BLOCK_STATUS_PAUSED_MIN_SOC,
+    DISCHARGE_BLOCK_STATUS_PAUSED_PV_SURPLUS,
+    DISCHARGE_BLOCK_STATUS_WAITING_WINDOW,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_EMPTY_CHARGE_WINDOW,
@@ -155,7 +166,7 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
-from .price_optimizer import PricePlan, SaxPricePlanner
+from .price_optimizer import DischargeBlockPlan, PricePlan, SaxPricePlanner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -369,6 +380,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_hours: int | None = None
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
+        # Entladesperre (siehe anforderung.yaml, REQ-DISCHARGE-BLOCK): teilt
+        # sich den SunSpec-Schreibpfad (_sun_charge_task) mit den drei
+        # Lade-Automatiken und steht als unterste Stufe der Vorrangkette
+        # hinter allen dreien zurück. _discharge_block_setpoint_active hält
+        # fest, dass der aktuell gehaltene 0-%-Sollwert von der
+        # Entladesperre stammt - nur dann darf eine höhere Stufe ihn
+        # freigeben (siehe _async_release_discharge_block).
+        self._discharge_block_mode = DEFAULT_DISCHARGE_BLOCK_MODE
+        self._discharge_block_start: dt_time | None = None
+        self._discharge_block_end: dt_time | None = None
+        self._discharge_block_months: set[int] = set(ALL_MONTHS)
+        self._discharge_block_min_soc: int | None = None
+        self._discharge_block_max_price: float | None = None
+        self._discharge_block_active = False
+        self._discharge_block_setpoint_active = False
+        self._discharge_block_status = DISCHARGE_BLOCK_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
         self._sun_charge_task: asyncio.Task | None = None
         self._sun_charge_power = 0
@@ -448,9 +475,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return data
 
     def _publish_charge_state(self, data: dict[str, Any]) -> None:
-        """Übernimmt die Zustände der drei Lade-Automatiken in coordinator.data,
-        damit die zugehörigen Sensoren (sensor.py) sie wie jeden anderen
-        Messwert lesen können."""
+        """Übernimmt die Zustände der drei Lade-Automatiken sowie der
+        Entladesperre in coordinator.data, damit die zugehörigen Sensoren
+        (sensor.py/binary_sensor.py) sie wie jeden anderen Messwert lesen
+        können."""
         plan = self.price_planner.plan
         data["timed_charge_active"] = self._timed_charge_active
         data["grid_serving_active"] = self._grid_serving_active
@@ -458,6 +486,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_status"] = self._price_charge_status
         data["price_charge_next_start"] = plan.next_start
         data["price_charge_current_price"] = plan.current_price
+        data["discharge_block_active"] = self._discharge_block_active
+        data["discharge_block_status"] = self._discharge_block_status
 
     def _accumulate_energy(self, data: dict[str, Any]) -> None:
         """Akkumuliert geladene/entladene Energie (kWh) aus der aktuell
@@ -1566,9 +1596,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
         """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden,
-        preisoptimiertes Laden und netzdienliches Laden - alle vier teilen
-        sich den SunSpec-Modus-Schreibpfad (_sun_charge_task). Priorität
-        (höchste zuerst):
+        preisoptimiertes Laden, netzdienliches Laden und Entladesperre -
+        alle fünf teilen sich den SunSpec-Modus-Schreibpfad
+        (_sun_charge_task). Priorität (höchste zuerst):
 
         1. Ist der Ziel-SOC erreicht/überschritten, hat die Max-SOC-Sperre
            Vorrang: Register 40051 bleibt/wird auf Sollwertvorgabe gesetzt
@@ -1672,10 +1702,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
            Beide Prüfungen sind exklusiv (a nur ohne, b nur mit aktivem
            Sollwertvorgabemodus) - siehe _async_step_grid_serving.
-        4. Andernfalls (Feature deaktiviert, außerhalb Zeitfenster/Monat oder
-           SOC erreicht) wird Register 40051 zurück auf 0 (SmartMeter-
-           Nullregelung) gesetzt und der Zustand der netzdienlichen
-           Zustandsmaschine (_grid_serving_setpoint_active/
+        4. Entladesperre (siehe eigenen Abschnitt weiter unten sowie
+           anforderung.yaml, REQ-DISCHARGE-BLOCK): greift nur, wenn keine
+           der Stufen 1-3 den Schreibpfad beansprucht. Sie hält den
+           Speicher über denselben gehaltenen 0-%-Sollwert wie die
+           Max-SOC-Sperre (async_start_sun_charge(0)) davon ab, den
+           Hausverbrauch zu decken, damit seine Energie für die teuren
+           Stunden übrig bleibt. Bedingungen und Freigabegründe siehe
+           _discharge_block_eligible/_async_step_discharge_block.
+        5. Andernfalls (alle Features deaktiviert, außerhalb Zeitfenster/
+           Monat oder SOC erreicht) wird Register 40051 zurück auf 0
+           (SmartMeter-Nullregelung) gesetzt und der Zustand der
+           netzdienlichen Zustandsmaschine (_grid_serving_setpoint_active/
            _grid_serving_wait_cycles) zurückgesetzt.
 
         Aktive Monate: Zusätzlich zum Zeitfenster hat jedes Feature 12
@@ -1815,6 +1853,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self.async_start_sun_charge(0)
                     max_soc_clamped_now = True
             grid_serving_active_now = False
+            # Die Max-SOC-Sperre (Stufe 1) hat den Sollwert übernommen bzw.
+            # ihn bewusst freigegeben - in beiden Fällen hält ihn nicht mehr
+            # die Entladesperre.
+            self._discharge_block_setpoint_active = False
+            discharge_block_now = False
         else:
             self._max_soc_hold_is_window_bound = False
             self._max_soc_grid_import_wait_cycles = 0
@@ -1823,15 +1866,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # auf MIN_IC_POWER_SETPOINT_PCT (-100 %, maximale
                 # Ladeleistung) - siehe Kommentar am Abschnittsanfang
                 # "Zeitgesteuertes Laden" zur entfernten "Max.
-                # Netzladeleistung".
+                # Netzladeleistung". Ein zuvor von der Entladesperre
+                # gehaltener 0-%-Sollwert wird dabei im selben Aufruf
+                # überschrieben (async_start_sun_charge schreibt bei
+                # geändertem Sollwert sofort), muss also nicht erst
+                # gestoppt werden.
+                self._discharge_block_setpoint_active = False
                 await self.async_start_sun_charge(MIN_SETPOINT_POWER)
                 grid_serving_active_now = False
+                discharge_block_now = False
             elif grid_serving_eligible:
+                # Anders als oben MUSS ein von der Entladesperre gehaltener
+                # Sollwert hier aktiv freigegeben werden: netzdienliches
+                # Laden erkennt seinen Einstiegspunkt an der tatsächlichen
+                # Ladeleistung des Geräts (Schritt a), die bei gehaltenen
+                # 0 % nie zustande käme - die Zustandsmaschine bliebe
+                # stehen, während der Sollwert weiterläuft.
+                await self._async_release_discharge_block()
                 grid_serving_active_now = await self._async_step_grid_serving(data)
+                discharge_block_now = False
             else:
                 grid_serving_active_now = False
-                if self.sun_charge_active:
-                    await self.async_stop_sun_charge()
+                discharge_block_now = await self._async_step_discharge_block(
+                    current_soc, now, pv_surplus_active
+                )
 
         self._timed_charge_active = timed_should_charge
         self._grid_serving_active = grid_serving_active_now
@@ -1842,6 +1900,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             soc_reached=soc_reached,
             pv_surplus_active=pv_surplus_active,
             timed_should_charge=timed_should_charge,
+        )
+        self._discharge_block_active = discharge_block_now
+        self._discharge_block_status = self._discharge_block_status_text(
+            blocking=discharge_block_now,
+            soc_reached=soc_reached,
+            charging=(
+                timed_should_charge or price_should_charge or grid_serving_eligible
+            ),
+            pv_surplus_active=pv_surplus_active,
+            current_soc=current_soc,
+            now=now,
         )
         self._max_soc_clamped = max_soc_clamped_now
 
@@ -1920,6 +1989,261 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
 
         return True
+
+    # -- Entladesperre / preisgesteuertes Aufsparen ---------------------------
+    # Vierte, ENTLADEseitige Automatik (siehe anforderung.yaml,
+    # REQ-DISCHARGE-BLOCK): hält den Speicher auf einem 0-W-Sollwert, statt
+    # ihn den Hausverbrauch decken zu lassen - der Hausverbrauch geht
+    # währenddessen ans Netz, weil der Strom in diesem Moment billig ist,
+    # und die gespeicherte Energie bleibt für die teuren Stunden übrig.
+    #
+    # Bewusst KEINE neue Registerlogik: es ist exakt derselbe Schreibpfad,
+    # den die Max-SOC-Sperre schon hält (async_start_sun_charge(0), Register
+    # 40051 = 1 + Register 40049 = 0 %), inklusive derselben periodischen
+    # Auffrischung durch _async_sun_charge_loop - ohne die verwürfe das
+    # Gerät den Sollwert nach Ablauf seines Timeouts (Register 40050). Die
+    # Entladesperre macht deshalb auch keine eigene Schleife auf, sondern
+    # entscheidet in _async_enforce_grid_charge als unterste Stufe der
+    # Vorrangkette. Das Geräterisiko ist gering, weil 0 vorzeichenneutral
+    # ist: die undokumentierte Vorzeichenkonvention von Register 40049
+    # (siehe REG_SUN_IC_POWER_SETPOINT_PCT in const.py) spielt hier keine
+    # Rolle.
+    #
+    # Sauberer Ausstieg ist Pflicht: bleibt ein 0-%-Sollwert stehen, ist der
+    # Speicher für den Anwender unerklärlich tot (ein "stuck zero"-Setpoint
+    # mit derselben Wirkung wie der in AGENTS.md beschriebene stehengebliebene
+    # Sollwert). Register 40051 wird deshalb aktiv auf 0 zurückgesetzt, sobald
+    # die Sperre nicht mehr gilt (Modus aus, Mindest-SOC unterschritten,
+    # PV-Überschuss, Zeitfenster/Preisfenster vorbei) sowie in
+    # async_shutdown - und damit auch beim Entladen/Neuladen des Config
+    # Entry (__init__.async_unload_entry).
+    #
+    # Wirtschaftlichkeitsgrenze: Aufsparen lohnt nur, wenn die Preisdifferenz
+    # zwischen Sperr- und Nutzungsstunde größer ist als die Speicherverluste
+    # (Round-Trip-Wirkungsgrad grob 85-90 %) und der zusätzliche Zyklus die
+    # Alterung wert ist. Bei einem Festpreistarif ist der Modus "price"
+    # wertlos - dort ist "window" die passende Betriebsart (siehe README.md).
+
+    @property
+    def discharge_block_mode(self) -> str:
+        return self._discharge_block_mode
+
+    @property
+    def discharge_block_start(self) -> dt_time | None:
+        return self._discharge_block_start
+
+    @property
+    def discharge_block_end(self) -> dt_time | None:
+        return self._discharge_block_end
+
+    @property
+    def discharge_block_months(self) -> frozenset[int]:
+        return frozenset(self._discharge_block_months)
+
+    @property
+    def discharge_block_min_soc(self) -> int | None:
+        return self._discharge_block_min_soc
+
+    @property
+    def discharge_block_max_price(self) -> float | None:
+        return self._discharge_block_max_price
+
+    @property
+    def discharge_block_active(self) -> bool:
+        return self._discharge_block_active
+
+    @property
+    def discharge_block_status(self) -> str:
+        return self._discharge_block_status
+
+    @property
+    def discharge_block_plan(self) -> DischargeBlockPlan:
+        return self.price_planner.discharge_block_plan
+
+    @property
+    def _discharge_block_min_soc_effective(self) -> int:
+        """Mindest-SOC der Entladesperre, solange die zugehörige
+        NumberEntity ihren gespeicherten Zustand noch nicht eingespielt hat
+        (siehe number.SaxPowerDischargeBlockMinSocNumber): MIN_SOC, also
+        keine Reserve - die Sperre selbst entlädt nichts, ein zu niedriger
+        Schwellwert kann den Speicher daher nicht leerlaufen lassen."""
+        return (
+            self._discharge_block_min_soc
+            if self._discharge_block_min_soc is not None
+            else MIN_SOC
+        )
+
+    async def async_set_discharge_block_mode(self, mode: str) -> None:
+        """Betriebsart der Entladesperre setzen (off/window/price).
+
+        Ein Wechsel auf "off" gibt einen gerade gehaltenen 0-%-Sollwert über
+        _async_apply_grid_charge_change sofort wieder frei, statt bis zum
+        nächsten Poll-Zyklus zu warten."""
+        if mode not in DISCHARGE_BLOCK_MODES:
+            raise HomeAssistantError(
+                f"Unbekannter Entladesperre-Modus {mode!r} - erlaubt sind: "
+                f"{', '.join(DISCHARGE_BLOCK_MODES)}"
+            )
+        self._discharge_block_mode = mode
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_discharge_block_min_soc(self, value: int | None) -> None:
+        """Reserve, unterhalb derer nie gesperrt wird. Klemmt auf
+        [MIN_SOC, MAX_SOC], siehe async_set_max_soc für die Begründung
+        (RestoreEntity-Pfad ohne NumberEntity-Validierung)."""
+        self._discharge_block_min_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_discharge_block_max_price(self, value: float | None) -> None:
+        """Preisschwelle des Modus "price" (EUR/kWh) - unterhalb dieses
+        Arbeitspreises wird das Entladen gesperrt. Teilt sich Wertebereich
+        und Klemmung mit der Preisgrenze des preisoptimierten Ladens."""
+        self._discharge_block_max_price = _clamp_float(
+            value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
+        )
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_discharge_block_start(self, value: dt_time) -> None:
+        self._discharge_block_start = value
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_discharge_block_end(self, value: dt_time) -> None:
+        self._discharge_block_end = value
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_discharge_block_window(
+        self, start: dt_time, end: dt_time
+    ) -> None:
+        """Setzt Start und Ende des Sperrfensters atomar in einem Aufruf -
+        Gegenstück zu async_set_timed_charge_window/
+        async_set_grid_serving_window (Service set_discharge_block_window)."""
+        self._discharge_block_start = start
+        self._discharge_block_end = end
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_discharge_block_month(
+        self, month: int, enabled: bool, validate: bool = True
+    ) -> None:
+        """Analog zu async_set_timed_charge_month, für die Entladesperre.
+
+        `validate` bleibt der einheitlichen Signatur von
+        switch.SaxPowerMonthSwitch wegen erhalten, wird hier aber nicht
+        ausgewertet: das Sperrfenster unterliegt - anders als die beiden
+        Ladefenster - keiner Nichtüberlappungs-Regel, weil die Entladesperre
+        als unterste Stufe der Vorrangkette ohnehin jeder Ladeautomatik
+        weicht (siehe _async_enforce_grid_charge)."""
+        new_months = set(self._discharge_block_months)
+        if enabled:
+            new_months.add(month)
+        else:
+            new_months.discard(month)
+        self._discharge_block_months = new_months
+        await self._async_apply_grid_charge_change()
+
+    def _discharge_block_eligible(
+        self, current_soc: int, now: datetime, pv_surplus_active: bool
+    ) -> bool:
+        """Alle Bedingungen der Stufe 5 außer der Vorrangkette selbst (die
+        prüft _async_enforce_grid_charge über die Verzweigungsstruktur).
+
+        Der PV-Überschuss-Check nutzt bewusst dasselbe, bereits in
+        _async_enforce_grid_charge bei JEDEM Zyklus berechnete
+        pv_surplus_active (self._timed_charge_pv_surplus_cycles,
+        PV_SURPLUS_HYSTERESIS_CYCLES) statt eines eigenen Zählers: ein
+        zweiter Zähler würde nur in den Zyklen hochlaufen, in denen die
+        Entladesperre überhaupt ausgewertet wird, und dadurch eine andere
+        (falsche) Hysterese ergeben. Sachlich ist er hier besonders
+        wichtig - ein gehaltener 0-W-Sollwert bedeutet, dass der Speicher
+        auch KEINE PV-Energie mehr aufnimmt; ohne diese Freigabe würde die
+        Sperre bei Sonnenschein PV-Ertrag ins Netz drücken statt in den
+        Speicher (Vorzeichen: positiv = Einspeisung, negativ = Netzbezug).
+        """
+        if self._discharge_block_mode == DISCHARGE_BLOCK_MODE_OFF:
+            return False
+        if pv_surplus_active:
+            return False
+        if current_soc <= self._discharge_block_min_soc_effective:
+            return False
+        if self._discharge_block_mode == DISCHARGE_BLOCK_MODE_WINDOW:
+            return now.month in self._discharge_block_months and (
+                self._is_time_in_window(
+                    now.time(), self._discharge_block_start, self._discharge_block_end
+                )
+            )
+        return self.price_planner.discharge_block_plan.block_now
+
+    async def _async_step_discharge_block(
+        self, current_soc: int, now: datetime, pv_surplus_active: bool
+    ) -> bool:
+        """Ein Schritt der Entladesperre (Stufe 5 der Vorrangkette).
+
+        Nur aus dem Zweig von _async_enforce_grid_charge aufgerufen, in dem
+        keine der vier höheren Stufen den Schreibpfad beansprucht. Gibt
+        zurück, ob gerade gesperrt wird.
+
+        Der Nicht-Sperr-Fall setzt Register 40051 unverändert zum bisherigen
+        Verhalten dieses Zweigs bedingungslos zurück (nicht nur, wenn die
+        Entladesperre selbst den Sollwert hielt): hier landet auch ein
+        gerade beendetes zeitgesteuertes/preisoptimiertes Laden, dessen
+        Ladesollwert sonst weiterliefe.
+        """
+        if self._discharge_block_eligible(current_soc, now, pv_surplus_active):
+            await self.async_start_sun_charge(0)
+            self._discharge_block_setpoint_active = True
+            return True
+        self._discharge_block_setpoint_active = False
+        if self.sun_charge_active:
+            await self.async_stop_sun_charge()
+        return False
+
+    async def _async_release_discharge_block(self) -> None:
+        """Gibt einen von der Entladesperre gehaltenen 0-%-Sollwert frei,
+        ohne einen von einer anderen Stufe gehaltenen anzutasten - für
+        Zweige der Vorrangkette, die den Sollwert bewusst NICHT
+        bedingungslos zurücksetzen (siehe _async_enforce_grid_charge,
+        netzdienliches Laden)."""
+        if not self._discharge_block_setpoint_active:
+            return
+        if self.sun_charge_active:
+            await self.async_stop_sun_charge()
+        self._discharge_block_setpoint_active = False
+
+    def _discharge_block_status_text(
+        self,
+        *,
+        blocking: bool,
+        soc_reached: bool,
+        charging: bool,
+        pv_surplus_active: bool,
+        current_soc: int,
+        now: datetime,
+    ) -> str:
+        """Anzeigetext für den Sensor "Entladesperre Status".
+
+        Die Reihenfolge entspricht der, in der _async_enforce_grid_charge/
+        _discharge_block_eligible die Gründe tatsächlich auswerten, damit
+        der angezeigte Grund immer der wirksame ist (analog zu
+        _price_charge_status_text).
+        """
+        if self._discharge_block_mode == DISCHARGE_BLOCK_MODE_OFF:
+            return DISCHARGE_BLOCK_STATUS_OFF
+        if blocking:
+            return DISCHARGE_BLOCK_STATUS_BLOCKING
+        if soc_reached:
+            return DISCHARGE_BLOCK_STATUS_PAUSED_MAX_SOC
+        if charging:
+            return DISCHARGE_BLOCK_STATUS_PAUSED_CHARGING
+        if pv_surplus_active:
+            return DISCHARGE_BLOCK_STATUS_PAUSED_PV_SURPLUS
+        if current_soc <= self._discharge_block_min_soc_effective:
+            return DISCHARGE_BLOCK_STATUS_PAUSED_MIN_SOC
+        if self._discharge_block_mode == DISCHARGE_BLOCK_MODE_WINDOW:
+            return DISCHARGE_BLOCK_STATUS_WAITING_WINDOW
+        # Modus "price": der rein preisseitige Status des Planners
+        # ("Preis über Schwelle" bzw. "Keine Preisdaten").
+        return self.price_planner.discharge_block_plan.status
 
     # -- Netzdienliches Laden --------------------------------------------------
     # Eigenständiges, zum zeitgesteuerten Laden oben zeitlich exklusives

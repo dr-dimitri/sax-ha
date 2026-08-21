@@ -356,6 +356,7 @@ async def async_build_dashboard_config(
                 [
                     ("select", "price_charge_strategy"),
                     ("number", "price_charge_max_price"),
+                    ("number", "price_charge_neutral_price"),
                     ("number", "price_charge_hours"),
                     ("number", "max_soc"),
                     ("sensor", "price_charge_active_text"),

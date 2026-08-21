@@ -17,6 +17,7 @@ from homeassistant.core import State
 from custom_components.sax_power.const import (
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
+    DEFAULT_PRICE_NEUTRAL,
     DEFAULT_TIMED_CHARGE_MIN_SOC,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
@@ -28,6 +29,7 @@ from custom_components.sax_power.number import (
     SaxPowerMaxSocNumber,
     SaxPowerPriceChargeHoursNumber,
     SaxPowerPriceLimitNumber,
+    SaxPowerPriceNeutralPriceNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
 
@@ -190,6 +192,49 @@ async def test_price_limit_restore_clamps_out_of_range_value(hass, coordinator) 
     await entity.async_added_to_hass()
 
     assert coordinator.price_charge_max_price == pytest.approx(MAX_PRICE_LIMIT)
+
+
+async def test_price_neutral_price_defaults_on_fresh_install(hass, coordinator) -> None:
+    """Ohne gespeicherten Zustand steht der Neutralpreis auf dem Vorgabewert
+    statt auf 0 EUR/kWh."""
+    entity = SaxPowerPriceNeutralPriceNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_price_neutral", None)
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_neutral_price == pytest.approx(
+        DEFAULT_PRICE_NEUTRAL
+    )
+
+
+async def test_price_neutral_price_restores_a_genuine_value(hass, coordinator) -> None:
+    entity = SaxPowerPriceNeutralPriceNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_price_neutral",
+        State("number.test_price_neutral", "0.42"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_neutral_price == pytest.approx(0.42)
+
+
+async def test_price_neutral_price_restore_clamps_out_of_range_value(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerPriceNeutralPriceNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_price_neutral",
+        State("number.test_price_neutral", "99"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.price_charge_neutral_price == pytest.approx(MAX_PRICE_LIMIT)
 
 
 async def test_price_charge_hours_defaults_on_fresh_install(hass, coordinator) -> None:

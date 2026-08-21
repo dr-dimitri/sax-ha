@@ -284,6 +284,9 @@
       "price_charge_max_price": {
         "name": "Preisgrenze"
       },
+      "price_charge_neutral_price": {
+        "name": "Neutralpreis"
+      },
       "price_charge_hours": {
         "name": "Anzahl Stunden"
       }
@@ -454,6 +457,10 @@
     "no_active_months": {
       "title": "Kein Monat ausgewählt",
       "description": "Für \"{feature}\" ist kein einziger Monat aktiviert - das Feature ist dadurch ganzjährig inaktiv. Bitte mindestens einen Monat aktivieren."
+    },
+    "price_neutral_below_limit": {
+      "title": "Neutralpreis liegt nicht über der Preisgrenze",
+      "description": "\"Neutralpreis\" ({neutral_price} EUR/kWh) liegt nicht über \"Preisgrenze\" ({max_price} EUR/kWh) - die Pause-Zone des preisoptimierten Ladens (Laden und Entladen gestoppt zwischen diesen beiden Werten) kann dadurch nie greifen, der Speicher verhält sich außerhalb der Ladephasen wie vor Einführung des Neutralpreises. Bitte den Neutralpreis auf einen Wert über der Preisgrenze anheben."
     }
   },
   "services": {

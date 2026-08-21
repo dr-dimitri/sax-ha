@@ -1054,6 +1054,49 @@ requirement_dynamic_price_charge:
     bestätigtem PV-Überschuss am Smart Meter sofort ab (dieselbe
     Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES).
 
+    Neutralpreis-Pausezone: number "Preisoptimiertes Laden Neutralpreis"
+    (EUR/kWh, muss über der Preisgrenze liegen, siehe Reparaturhinweis
+    unten) erweitert das preisoptimierte Laden um einen dritten Preisbereich
+    - unabhängig von der aktiven Strategie (absolute/relativ/smart), aber
+    nur wenn preisoptimiertes Laden aktiv ist. Lädt die Automatik gerade
+    NICHT aus dem Netz (price_should_charge in
+    SaxPowerCoordinator._async_enforce_grid_charge ist False, z. B. weil der
+    aktuelle Preis über der Preisgrenze liegt), aber der aktuelle Preis
+    (price_planner.plan.current_price) liegt noch unterhalb des
+    Neutralpreises, wird der Speicher NICHT der geräteeigenen
+    SmartMeter-Nullregelung überlassen, sondern aktiv in den manuellen
+    Sollwertmodus mit Sollwert 0 geschaltet (price_should_pause,
+    async_start_sun_charge(0), Status "Pausiert (Preisband)") - Laden UND
+    Entladen bleiben gestoppt, der komplette Hausverbrauch läuft über das
+    Netz. Zweck: verhindert, dass die im Speicher gespeicherte, günstig
+    eingekaufte Energie durch die Speicherverluste beim Entladen teurer wird
+    als der direkte Netzbezug in diesem mittleren Preisband. Erst ab dem
+    Neutralpreis lohnt sich die Entladung wieder trotz Speicherverlusten -
+    der Speicher geht dann zurück in die normale SmartMeter-Nullregelung,
+    die die Entladung wieder übernimmt (identisch zum bisherigen
+    Rückfallverhalten, wenn kein gültiges Preisgrenze/Neutralpreis-Paar
+    vorliegt). Die Pausezone teilt sich dieselben Ausschlussgründe wie
+    price_should_charge (Max-SOC-Sperre, PV-Überschuss, Vorrang des
+    zeitgesteuerten Ladens - insbesondere weicht sie sofort einem
+    bestätigten PV-Überschuss, damit freie PV-Energie weiterhin ungehindert
+    in den Speicher fließen kann) und hat dieselbe Priorität wie aktives
+    preisoptimiertes Laden selbst: sie blockiert netzdienliches Laden
+    genauso (grid_serving_eligible schließt price_should_pause mit aus).
+    Fehlt eine der beiden Preis-Einstellungen (noch nicht restauriert), oder
+    liegt der Neutralpreis nicht über der Preisgrenze, bleibt
+    price_should_pause bewusst False - unverändertes Verhalten wie vor
+    Einführung des Neutralpreises, statt einer stillen Annahme.
+
+    Reparaturhinweis ISSUE_PRICE_NEUTRAL_BELOW_LIMIT
+    (coordinator._check_price_neutral_below_limit, aufgerufen aus
+    _async_check_self_diagnostics wie die fünf Prüfungen aus
+    REQ-SELF-DIAGNOSIS-REPAIRS): liegt der Neutralpreis nicht über der
+    Preisgrenze (<=), legt der Coordinator ein rein informatives
+    (is_fixable=False), sich selbst heilendes Issue an - statische
+    Einstellungskombination wie ISSUE_MAX_SOC_BELOW_MIN_SOC, kein
+    Zustandsflanken-Timer nötig, schlägt sofort an.
+    translation_placeholders: max_price, neutral_price.
+
     Gegenseitiger Ausschluss mit der Netzladung: Beide laden aktiv aus dem
     Netz über denselben Schreibpfad und dürfen nicht gleichzeitig aktiv
     sein. Wird eines eingeschaltet, während das andere läuft, wird die
@@ -1077,22 +1120,24 @@ requirement_dynamic_price_charge:
     - "Entities am bestehenden SAX-Gerät: switch 'Preisoptimiertes Laden
        aktiv' (Hauptschalter), select 'Preisoptimiertes Laden Strategie',
        number 'Preisoptimiertes Laden Preisgrenze' (EUR/kWh), number
-       'Preisoptimiertes Laden Anzahl Stunden' (1-24), sensor
-       'Preisoptimiertes Laden nächster Start' (device_class timestamp),
-       sensor 'Preisoptimiertes Laden Status' (Klartext), sensor
-       'Preisoptimiertes Laden aktiv' (Diagnose) sowie sensor 'Aktueller
-       Strompreis'. Kein eigenes Ziel-SOC - number 'Max. SOC' ist die
-       einzige SOC-Einstellung der Integration, siehe REQ-TIMED-SOC-CHARGE."
+       'Preisoptimiertes Laden Neutralpreis' (EUR/kWh, muss über der
+       Preisgrenze liegen), number 'Preisoptimiertes Laden Anzahl Stunden'
+       (1-24), sensor 'Preisoptimiertes Laden nächster Start' (device_class
+       timestamp), sensor 'Preisoptimiertes Laden Status' (Klartext),
+       sensor 'Preisoptimiertes Laden aktiv' (Diagnose) sowie sensor
+       'Aktueller Strompreis'. Kein eigenes Ziel-SOC - number 'Max. SOC' ist
+       die einzige SOC-Einstellung der Integration, siehe
+       REQ-TIMED-SOC-CHARGE."
     - "Alle Stellgrößen werden per RestoreEntity über Neustarts hinweg
        persistiert; ohne gespeicherten Zustand gelten die Defaults aus
        const.py (bzw. die Vorgabestrategie aus dem Options Flow)."
     - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
        Preisdaten, Warten auf Preisabfall, Lade aus Netz, PV-Prognose deckt
        Bedarf, Pausiert (PV-Überschuss), Pausiert (Max. SOC), Pausiert
-       (Netzladung aktiv). Seine
+       (Netzladung aktiv), Pausiert (Preisband). Seine
        Attribute führen Strategie, aktuellen Preis, wirksame Preisgrenze,
-       benötigte Stunden, eingerechnete PV-Prognose, die konfigurierten
-       Quell-Sensoren und die geplanten Zeitfenster mit."
+       Neutralpreis, benötigte Stunden, eingerechnete PV-Prognose, die
+       konfigurierten Quell-Sensoren und die geplanten Zeitfenster mit."
     - "Services: sax_power.refresh_price_plan (sofortige Neuberechnung) und
        sax_power.set_price_charge_enabled (nicht-interaktives Schalten mit
        optionalem force)."
@@ -1105,12 +1150,23 @@ requirement_dynamic_price_charge:
        Smart-Modus mit und ohne ausreichende PV-Prognose sowie ohne
        Kapazität, Schreibpfad und Rückkehr in die Nullregelung, Abbruch bei
        Max-SOC/PV-Überschuss, Vorrang des zeitgesteuerten Ladens,
-       Konfliktdialog (Anlegen, Bestätigen, Abbrechen, force) und das
-       Restore-Verhalten der Select-/Switch-Entities."
-    - "tests/test_number.py deckt die Vorbelegung und Klemmung der beiden
-       neuen Number-Entities (Preisgrenze, Anzahl Stunden) ab."
+       Konfliktdialog (Anlegen, Bestätigen, Abbrechen, force), das
+       Restore-Verhalten der Select-/Switch-Entities sowie die
+       Neutralpreis-Pausezone: manueller Sollwertmodus mit Sollwert 0
+       zwischen Preisgrenze und Neutralpreis, Rückkehr in die Nullregelung
+       ab dem Neutralpreis, Vorrang von PV-Überschuss vor der Pausezone,
+       unverändertes Verhalten ohne gültige Preisgrenze/Neutralpreis-
+       Kombination sowie Blockade von netzdienlichem Laden durch die
+       Pausezone (dieselbe Priorität wie aktives preisoptimiertes Laden)."
+    - "tests/test_number.py deckt die Vorbelegung und Klemmung der drei
+       neuen Number-Entities (Preisgrenze, Neutralpreis, Anzahl Stunden)
+       ab."
     - "tests/test_config_flow.py deckt den Options Flow ab (Speichern und
        Vorbelegung)."
+    - "tests/test_repairs.py deckt ISSUE_PRICE_NEUTRAL_BELOW_LIMIT ab:
+       sofortiges Auslösen bei Neutralpreis <= Preisgrenze (auch bei
+       Gleichheit), Idempotenz und Selbstheilung, sobald der Neutralpreis
+       wieder über der Preisgrenze liegt."
     - "README.md beschreibt Einrichtung, Strategien und Zusammenspiel mit
        den übrigen Lademodi."
 
@@ -1133,8 +1189,8 @@ requirement_bundled_dashboard:
     "Gerätemodell" - beide boten dort keinen Mehrwert) - die reine
     Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-Schalter
     bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie "Dynamisches
-    Laden" (preisoptimiertes Laden: Strategie, Preisgrenze, Stundenzahl,
-    Status). Die frühere Karte "Status" mit den vier Lade-/Automatik-
+    Laden" (preisoptimiertes Laden: Strategie, Preisgrenze, Neutralpreis,
+    Stundenzahl, Status). Die frühere Karte "Status" mit den vier Lade-/Automatik-
     binary_sensor-Entities (REQ-BINARY-SENSORS) wurde aus "Allgemeine
     Informationen" entfernt, ohne Ersatz - die Entities selbst bleiben
     unverändert bestehen (z. B. für eigene Automationen), erscheinen aber

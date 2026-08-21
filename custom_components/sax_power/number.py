@@ -13,6 +13,7 @@ from .const import (
     DATA_COORDINATOR,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
+    DEFAULT_PRICE_NEUTRAL,
     DEFAULT_TIMED_CHARGE_MIN_SOC,
     DOMAIN,
     MAX_PRICE_HOURS,
@@ -38,6 +39,7 @@ async def async_setup_entry(
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
+            SaxPowerPriceNeutralPriceNumber(coordinator, entry.entry_id),
             SaxPowerPriceChargeHoursNumber(coordinator, entry.entry_id),
         ]
     )
@@ -192,6 +194,57 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_price_charge_max_price(value)
+        self.async_write_ha_state()
+
+
+class SaxPowerPriceNeutralPriceNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+    """Neutralpreis für das preisoptimierte Laden, in EUR/kWh - siehe
+    anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
+
+    Muss über der Preisgrenze liegen (sonst reparierbares Issue
+    ISSUE_PRICE_NEUTRAL_BELOW_LIMIT, siehe
+    coordinator._check_price_neutral_below_limit). Liegt der aktuelle Preis
+    zwischen Preisgrenze und Neutralpreis, schaltet der Coordinator den
+    Speicher in den manuellen Sollwertmodus mit Sollwert 0 (Laden UND
+    Entladen gestoppt) statt ihn der SmartMeter-Nullregelung zu überlassen -
+    ab dem Neutralpreis lohnt sich die Entladung wieder trotz
+    Speicherverlusten, siehe coordinator._async_enforce_grid_charge.
+
+    Zustand wird über RestoreEntity über Neustarts hinweg persistiert; ohne
+    gespeicherten Zustand gilt DEFAULT_PRICE_NEUTRAL.
+    """
+
+    _attr_translation_key = "price_charge_neutral_price"
+    _attr_native_min_value = MIN_PRICE_LIMIT
+    _attr_native_max_value = MAX_PRICE_LIMIT
+    _attr_native_step = PRICE_LIMIT_STEP
+    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._assign_ids("number", "price_charge_neutral_price")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.price_charge_neutral_price is not None:
+            return
+        restored_value: float | None = None
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                restored_value = float(last_state.state)
+            except (TypeError, ValueError):
+                restored_value = None
+        await self.coordinator.async_set_price_charge_neutral_price(
+            restored_value if restored_value is not None else DEFAULT_PRICE_NEUTRAL
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.price_charge_neutral_price
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_price_charge_neutral_price(value)
         self.async_write_ha_state()
 
 

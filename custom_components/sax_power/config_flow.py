@@ -75,7 +75,7 @@ _LOGGER = logging.getLogger(__name__)
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
-_ENTITY_COUNT_NUMBER = 4
+_ENTITY_COUNT_NUMBER = 5
 _ENTITY_COUNT_SELECT = 1
 _ENTITY_COUNT_TIME = 4
 _ENTITY_COUNT_SWITCH_FIXED = 4

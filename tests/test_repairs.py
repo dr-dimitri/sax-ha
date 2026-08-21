@@ -23,6 +23,7 @@ from custom_components.sax_power.const import (
     ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_MAX_SOC_BELOW_MIN_SOC,
     ISSUE_NO_ACTIVE_MONTHS,
+    ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
     ISSUE_PRICE_SENSOR_MISSING,
     ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
     MAX_SOC,
@@ -237,6 +238,65 @@ async def test_max_soc_below_min_soc_issue_clears_once_raised(hass) -> None:
 
 
 # ===========================================================================
+# 3b. Neutralpreis nicht über der Preisgrenze (REQ-DYNAMIC-PRICE-CHARGE)
+# ===========================================================================
+async def test_price_neutral_below_limit_issue_triggers_immediately(hass) -> None:
+    """Statische Einstellungskombination wie Prüfung 3 - kein
+    Karenzzeit-Timer nötig."""
+    coordinator = _make_coordinator(hass)
+    coordinator._price_charge_max_price = 0.30
+    coordinator._price_charge_neutral_price = 0.20
+
+    coordinator._async_check_self_diagnostics()
+
+    issue = _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT)
+    assert issue is not None
+    assert issue.translation_placeholders == {
+        "max_price": "0.3",
+        "neutral_price": "0.2",
+    }
+
+
+async def test_price_neutral_below_limit_issue_triggers_on_equal_values(hass) -> None:
+    """Gleichheit zählt ebenfalls als Problem - die Pause-Zone braucht ein
+    echtes Preisband zwischen den beiden Werten."""
+    coordinator = _make_coordinator(hass)
+    coordinator._price_charge_max_price = 0.30
+    coordinator._price_charge_neutral_price = 0.30
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is not None
+
+
+async def test_price_neutral_below_limit_issue_not_recreated_every_cycle(hass) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator._price_charge_max_price = 0.30
+    coordinator._price_charge_neutral_price = 0.20
+
+    with patch(
+        "custom_components.sax_power.coordinator.ir.async_create_issue"
+    ) as mock_create:
+        coordinator._async_check_self_diagnostics()
+        coordinator._async_check_self_diagnostics()
+
+    assert mock_create.call_count == 1
+
+
+async def test_price_neutral_below_limit_issue_clears_once_raised(hass) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator._price_charge_max_price = 0.30
+    coordinator._price_charge_neutral_price = 0.20
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is not None
+
+    coordinator._price_charge_neutral_price = 0.40
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is None
+
+
+# ===========================================================================
 # 4. Leeres Zeitfenster (je Automatik: zeitgesteuertes/netzdienliches Laden)
 # ===========================================================================
 async def test_empty_timed_charge_window_issue_triggers(hass) -> None:
@@ -379,6 +439,7 @@ async def test_no_issues_created_for_a_healthy_default_configuration(hass) -> No
     assert _get_issue(hass, ISSUE_PRICE_SENSOR_MISSING) is None
     assert _get_issue(hass, ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE) is None
     assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is None
+    assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is None
     assert _get_issue(hass, f"{ISSUE_EMPTY_CHARGE_WINDOW}_timed_charge") is None
     assert _get_issue(hass, f"{ISSUE_EMPTY_CHARGE_WINDOW}_grid_serving") is None
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_timed_charge") is None

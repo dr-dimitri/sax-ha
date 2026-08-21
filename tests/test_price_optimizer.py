@@ -34,6 +34,7 @@ from custom_components.sax_power.const import (
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
     PRICE_STATUS_PAUSED_MAX_SOC,
+    PRICE_STATUS_PAUSED_NEUTRAL_BAND,
     PRICE_STATUS_PAUSED_PV_SURPLUS,
     PRICE_STATUS_PAUSED_TIMED_CHARGE,
     PRICE_STATUS_PV_FORECAST_COVERS,
@@ -70,6 +71,16 @@ def _local(hour: int, minute: int = 0, day: int = 15) -> datetime:
     Importzeit ausgewerteter Wert läge noch in UTC.
     """
     return datetime(2024, 1, day, hour, minute, tzinfo=dt_util.DEFAULT_TIME_ZONE)
+
+
+def _patched_now(hour: int, minute: int = 0):
+    """Patcht dt_util.now() auf einen festen Zeitpunkt - siehe
+    tests/test_coordinator.py für die Begründung (freezegun würde den
+    Hintergrund-Task für die Netzladung/netzdienliches Laden einfrieren)."""
+    return patch(
+        "custom_components.sax_power.coordinator.dt_util.now",
+        return_value=datetime(2024, 1, 1, hour, minute),
+    )
 
 
 def _now() -> datetime:
@@ -578,6 +589,144 @@ async def test_price_charge_paused_by_pv_surplus(hass) -> None:
 
     assert coordinator.price_charge_active is False
     assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_PV_SURPLUS
+
+
+async def test_price_charge_pauses_in_neutral_band(hass) -> None:
+    """Preis liegt über der Preisgrenze, aber unterhalb des Neutralpreises:
+    manueller Sollwertmodus mit Sollwert 0 statt Nullregelung - Laden UND
+    Entladen bleiben gestoppt (siehe anforderung.yaml,
+    REQ-DYNAMIC-PRICE-CHARGE, Abschnitt Neutralpreis-Pausezone)."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_price_charge_max_price(0.20)
+    await coordinator.async_set_price_charge_neutral_price(0.40)
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.30
+    )
+
+    try:
+        await coordinator._async_enforce_grid_charge({"soc": 50, "smartmeter_power": 0})
+        await asyncio.sleep(0.1)
+
+        assert coordinator.price_charge_active is False
+        assert coordinator.sun_charge_active is True
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_NEUTRAL_BAND
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        )
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_price_charge_returns_to_nullregelung_above_neutral_price(hass) -> None:
+    """Ab dem Neutralpreis lohnt sich die Entladung wieder - der Speicher
+    geht zurück in die geräteeigene SmartMeter-Nullregelung, das Smart
+    Meter regelt die Entladung."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_price_charge_max_price(0.20)
+    await coordinator.async_set_price_charge_neutral_price(0.40)
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.45
+    )
+
+    await coordinator._async_enforce_grid_charge({"soc": 50, "smartmeter_power": 0})
+
+    assert coordinator.sun_charge_active is False
+    assert coordinator.price_charge_status == PRICE_STATUS_WAITING
+
+
+async def test_price_charge_neutral_band_yields_to_pv_surplus(hass) -> None:
+    """PV-Überschuss hat auch gegenüber der Neutralpreis-Pausezone Vorrang -
+    sonst würde der manuelle Sollwertmodus freie PV-Energie am Nachladen in
+    den Speicher hindern."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_price_charge_max_price(0.20)
+    await coordinator.async_set_price_charge_neutral_price(0.40)
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.30
+    )
+
+    data = {"soc": 50, "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500}
+    for _ in range(5):
+        await coordinator._async_enforce_grid_charge(data)
+
+    assert coordinator.sun_charge_active is False
+    assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_PV_SURPLUS
+
+
+async def test_price_charge_neutral_band_inactive_without_neutral_price_configured(
+    hass,
+) -> None:
+    """Fehlt der Neutralpreis (noch nicht restauriert), bleibt das Verhalten
+    unverändert wie vor Einführung des Features - keine stille Annahme
+    irgendeines Vorgabewerts."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_price_charge_max_price(0.20)
+    assert coordinator.price_charge_neutral_price is None
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.30
+    )
+
+    await coordinator._async_enforce_grid_charge({"soc": 50, "smartmeter_power": 0})
+
+    assert coordinator.sun_charge_active is False
+    assert coordinator.price_charge_status == PRICE_STATUS_WAITING
+
+
+async def test_price_charge_neutral_band_blocks_grid_serving(hass) -> None:
+    """Die Neutralpreis-Pausezone hat dieselbe Priorität wie aktives
+    preisoptimiertes Laden selbst (siehe anforderung.yaml,
+    REQ-DYNAMIC-PRICE-CHARGE) und blockiert netzdienliches Laden genauso -
+    _async_step_grid_serving darf während der Pausezone gar nicht erst
+    aufgerufen werden, sonst würde dessen eigene Zustandsmaschine
+    (_grid_serving_charge_confirm_cycles) unnötig mitlaufen."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        # smartmeter_power bewusst unterhalb des Schwellwerts (kein
+        # bestätigter PV-Überschuss, der auch die Pausezone selbst
+        # ausbremsen würde) - storage_power_active allein würde
+        # netzdienliches Laden in Schritt a auslösen (siehe
+        # _async_step_grid_serving), wenn die Pausezone das nicht verhindert.
+        "smartmeter_power": 0,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_price_charge_max_price(0.20)
+    await coordinator.async_set_price_charge_neutral_price(0.40)
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.30
+    )
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is False
+        assert coordinator.sun_charge_active is True
+        assert coordinator._grid_serving_charge_confirm_cycles == 0
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_NEUTRAL_BAND
+    finally:
+        await coordinator.async_stop_sun_charge()
 
 
 async def test_timed_charge_takes_priority_over_price_charge(hass) -> None:

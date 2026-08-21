@@ -56,7 +56,7 @@
   "entity": {
     "binary_sensor": {
       "battery_charging": {
-        "name": "Akku wird geladen"
+        "name": "Ladestatus"
       },
       "timed_charge_active": {
         "name": "Zeitgesteuertes Laden aktiv"

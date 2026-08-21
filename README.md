@@ -242,7 +242,7 @@ bleiben unverändert bestehen, beide Varianten existieren nebeneinander.
 
 | Entität | Beschreibung |
 | --- | --- |
-| Akku wird geladen | Ein, solange der Speicher gerade lädt |
+| Ladestatus | Ein, solange der Speicher gerade lädt |
 | Zeitgesteuertes Laden aktiv | Wie oben, als binärer Zustand |
 | Preisoptimiertes Laden aktiv | Wie oben, als binärer Zustand |
 | Netzdienliches Laden aktiv | Wie oben, als binärer Zustand |
@@ -251,7 +251,7 @@ bleiben unverändert bestehen, beide Varianten existieren nebeneinander.
 | SunSpec-Modus erreichbar | Diagnose-Entität; Aus, wenn Slave-ID 100 gerade nicht antwortet (siehe [Bekannte Einschränkungen](#bekannte-einschränkungen)) |
 | Speicherproblem | Diagnose-Entität; Ein, sobald Speicher oder Akku ein Ereignis außerhalb des Normalbetriebs melden |
 
-Ist der SunSpec-Modus gerade nicht erreichbar, zeigen "Akku wird geladen" und
+Ist der SunSpec-Modus gerade nicht erreichbar, zeigen "Ladestatus" und
 "Speicherproblem" konsequent "nicht verfügbar" statt eines falschen "Aus" –
 wie alle anderen von diesem Block abhängigen Entities auch.
 

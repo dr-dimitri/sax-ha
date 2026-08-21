@@ -1119,8 +1119,12 @@ requirement_bundled_dashboard:
     dashboard.py baut ein fünfteiliges Storage-Dashboard mit den
     wichtigsten Sensoren/Einstellungen, gegliedert in fünf Tabs (Lovelace-
     Views): "Allgemeine Informationen" (Speicher-Schalter, eine Karte
-    "Status" mit den binary_sensor-Entities aus REQ-BINARY-SENSORS, SOC,
-    Lade-/Entladeleistung, Netzleistung, Energiezähler, Gerätedaten - die
+    "Status" mit den Lade-/Automatik-binary_sensor-Entities aus
+    REQ-BINARY-SENSORS ("Max-SOC Sperre aktiv" und "Speicherproblem" sind
+    dort bewusst nicht enthalten - der Speicherzustand ist mechanismus-
+    übergreifend, kein reiner Ladestatus), SOC, Lade-/Entladeleistung,
+    Netzleistung, Energiezähler, Gerätedaten (ohne die fest bekannten
+    "Hersteller"/"Gerätemodell" - beide boten dort keinen Mehrwert) - die
     reine Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-
     Schalter bleibt), "Ladeautomatik" und "Netzdienliches Laden",
     "Dynamisches Laden" (preisoptimiertes Laden: Strategie, Preisgrenze,
@@ -1308,9 +1312,14 @@ requirement_binary_sensors:
     REQ-EXTENDED-MODE-RESILIENCE).
 
     __init__.PLATFORMS enthält Platform.BINARY_SENSOR. Das mitgelieferte
-    Dashboard (REQ-BUNDLED-DASHBOARD) zeigt alle Entities außer
-    "extended_mode_available" (rein diagnostisch) in einer neuen Karte
-    "Status" im Tab "Allgemeine Informationen".
+    Dashboard (REQ-BUNDLED-DASHBOARD) zeigt in einer neuen Karte "Status" im
+    Tab "Allgemeine Informationen" nur die fünf Lade-/Automatik-Entities
+    ("battery_charging", "timed_charge_active", "price_charge_active",
+    "grid_serving_active", "discharge_block_active") - "max_soc_clamped"
+    und "battery_problem" sind dort trotz fehlender diagnostic-Kategorie
+    bewusst nicht enthalten (der Speicherzustand ist mechanismus-
+    übergreifend, kein reiner Ladestatus), "extended_mode_available"
+    ohnehin nicht (rein diagnostisch).
   acceptance_criteria:
     - "tests/test_binary_sensor.py deckt jede der acht is_on_fn-Funktionen
        ab: erwarteter Zustand bei vorhandenen Daten, None bei fehlendem
@@ -1320,9 +1329,10 @@ requirement_binary_sensors:
        eindeutig sind und jeder Key in strings.json sowie
        translations/de.json und translations/en.json eine Übersetzung hat."
     - "tests/test_dashboard.py deckt ab, dass die neue Statuskarte im Tab
-       Allgemeine Informationen die sechs nicht-diagnostischen
+       Allgemeine Informationen nur die fünf Lade-/Automatik-
        binary_sensor-Entities enthält, sofern sie in der Entity Registry
-       vorhanden sind."
+       vorhanden sind, und dass max_soc_clamped/battery_problem dort auch
+       bei vorhandener Registrierung nicht auftauchen."
 
 # ==============================================================================
 # ANFORDERUNG: ABSCHLUSSSEITE DER ERSTEINRICHTUNG

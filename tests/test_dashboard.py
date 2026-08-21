@@ -196,9 +196,11 @@ async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None
 async def test_build_dashboard_config_status_card_contains_binary_sensors(
     hass,
 ) -> None:
-    """Die neue Karte "Status" im Tab "Allgemeine Informationen" zeigt die
-    binary_sensor-Entities aus REQ-BINARY-SENSORS (nicht die diagnostische
-    "SunSpec-Modus erreichbar"-Entity)."""
+    """Die neue Karte "Status" im Tab "Allgemeine Informationen" zeigt nur die
+    Lade-/Automatik-binary_sensor-Entities aus REQ-BINARY-SENSORS - "Max-SOC
+    Sperre aktiv" und "Speicherproblem" wurden entfernt, weil sie dort keinen
+    Mehrwert boten (der Speicherzustand ist mechanismus-übergreifend, kein
+    reiner Ladestatus)."""
     entity_ids = {
         suffix: _register(hass, "binary_sensor", suffix)
         for suffix in (
@@ -207,20 +209,47 @@ async def test_build_dashboard_config_status_card_contains_binary_sensors(
             "price_charge_active",
             "grid_serving_active",
             "discharge_block_active",
-            "max_soc_clamped",
-            "battery_problem",
         )
     }
+    max_soc_clamped = _register(hass, "binary_sensor", "max_soc_clamped")
+    battery_problem = _register(hass, "binary_sensor", "battery_problem")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     status_card = next(
         card for card in config["views"][0]["cards"] if card.get("title") == "Status"
     )
-    assert {
+    status_entities = {
         row["entity"] if isinstance(row, dict) else row
         for row in status_card["entities"]
-    } == set(entity_ids.values())
+    }
+    assert status_entities == set(entity_ids.values())
+    assert max_soc_clamped not in status_entities
+    assert battery_problem not in status_entities
+
+
+async def test_build_dashboard_config_geraet_card_drops_manufacturer_and_model(
+    hass,
+) -> None:
+    """Die Karte "Gerät" zeigt "Hersteller" und "Gerätemodell" nicht mehr an -
+    beide sind fest bekannt (SAX Power Home) und boten dort keinen
+    Mehrwert."""
+    sun_manufacturer = _register(hass, "sensor", "sun_manufacturer")
+    sun_model = _register(hass, "sensor", "sun_model")
+    sun_version_master = _register(hass, "sensor", "sun_version_master")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    geraet_card = next(
+        card for card in config["views"][0]["cards"] if card.get("title") == "Gerät"
+    )
+    geraet_entities = {
+        row["entity"] if isinstance(row, dict) else row
+        for row in geraet_card["entities"]
+    }
+    assert sun_manufacturer not in geraet_entities
+    assert sun_model not in geraet_entities
+    assert sun_version_master in geraet_entities
 
 
 async def test_build_dashboard_config_storage_state_dropped_switch_kept(hass) -> None:

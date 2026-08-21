@@ -374,6 +374,11 @@
           "smart": "Smart / PV-optimiert"
         }
       }
+    },
+    "button": {
+      "reinstall_dashboard": {
+        "name": "Dashboard neu installieren"
+      }
     }
   },
   "issues": {

@@ -1125,6 +1125,30 @@ requirement_bundled_dashboard:
     (preisoptimiertes Laden: Strategie, Preisgrenze, Stundenzahl, Status).
     Die zwölf Monats-Schalter je Automatik sind bewusst nicht enthalten
     (Feinkonfiguration, nicht Tagesgeschäft) - dafür bleibt die Geräteseite
+
+    Für einen moderneren, auf einen Blick erfassbaren Einstieg zeigt jeder
+    Tab die wichtigsten Ein/Aus-Schalter (Speicher, zeitgesteuertes/
+    netzdienliches/preisoptimiertes Laden) als "tile"-Karten statt als
+    Listenzeile; der Ladezustand erscheint als "gauge"-Karte mit farbigen
+    Bereichen (grün ab 50 % SOC, orange ab 20 % SOC, darunter rot). Alle
+    Kartenbeschriftungen verwenden nur den reinen, übersetzten Entity-Namen
+    (z. B. "Ladezustand") statt des vollen, geräteweiten Anzeigenamens
+    ("SAX Power Home Ladezustand") - async_build_dashboard_config lädt dazu
+    dieselben Übersetzungen (component.sax_power.entity.<domain>.
+    <translation_key>.name), die auch die Entity Registry selbst verwendet,
+    und ist deshalb async.
+
+    button.py stellt zusätzlich eine ButtonEntity
+    (SaxPowerReinstallDashboardButton, translation_key
+    "reinstall_dashboard") bereit, die dashboard.async_create_dashboard mit
+    force=True aufruft und damit ein bereits bestehendes Dashboard auf den
+    aktuell gebauten Auslieferungszustand zurücksetzt (überschreibt nur den
+    Karteninhalt, Panel-Registrierung/Sidebar-Sichtbarkeit bleiben
+    unangetastet). Der Button erscheint auf der Geräteseite der Integration
+    - derselben Seite, auf der über diagnostics.py auch die Diagnosedaten
+    heruntergeladen werden können, da Home Assistant keine Möglichkeit
+    bietet, dessen eingebautes Diagnose-Menü um eigene Einträge zu
+    erweitern.
     zuständig.
 
     Dritter, optionaler Schritt der Ersteinrichtung
@@ -1183,3 +1207,12 @@ requirement_bundled_dashboard:
     - "tests/test_dashboard.py deckt zusätzlich den Service
        sax_power.create_dashboard end-to-end ab (Geräte-Lookup, Aufruf von
        async_create_dashboard)."
+    - "tests/test_dashboard.py deckt die Gauge-Karte (Entity, Schwellwerte
+       50/20 %) sowie ab, dass Kartenzeilen den geräteprefix-freien,
+       übersetzten Namen verwenden, und dass force=True ein bereits
+       bestehendes Dashboard überschreibt, ohne das Panel erneut zu
+       registrieren."
+    - "tests/test_button.py deckt SaxPowerReinstallDashboardButton ab:
+       async_press ruft async_create_dashboard mit force=True für den
+       eigenen Config Entry auf; fehlt der Entry, wird ein
+       HomeAssistantError ausgelöst statt eines stillen No-Ops."

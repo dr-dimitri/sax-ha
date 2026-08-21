@@ -4,6 +4,7 @@ anforderung.yaml, REQ-BUNDLED-DASHBOARD).
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 from homeassistant.components.lovelace import LovelaceData
@@ -34,6 +35,19 @@ def _register(hass, entity_domain: str, suffix: str) -> str:
     return entry.entity_id
 
 
+def _iter_entity_ids(cards: list[dict[str, Any]]):
+    """Sammelt alle referenzierten Entity-IDs aus einer beliebigen Mischung
+    aus entities-/tile-/gauge-/grid-Karten (siehe dashboard.py)."""
+    for card in cards:
+        if card["type"] == "grid":
+            yield from _iter_entity_ids(card["cards"])
+        elif card["type"] == "entities":
+            for row in card["entities"]:
+                yield row["entity"] if isinstance(row, dict) else row
+        elif "entity" in card:
+            yield card["entity"]
+
+
 async def test_build_dashboard_config_resolves_registered_entities(hass) -> None:
     """Nur tatsächlich in der Entity Registry vorhandene Entities landen in
     den Karten; die drei Tabs (Views) sind immer vorhanden."""
@@ -41,7 +55,7 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
     price_switch_entity_id = _register(hass, "switch", "price_charge_enabled")
 
-    config = async_build_dashboard_config(hass, ENTRY_ID)
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     assert [view["path"] for view in config["views"]] == [
         "allgemein",
@@ -49,26 +63,51 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
         "dynamisches-laden",
     ]
 
-    general_entities = {
-        entity_id
-        for card in config["views"][0]["cards"]
-        for entity_id in card["entities"]
-    }
+    general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
     assert soc_entity_id in general_entities
     assert storage_switch_entity_id in general_entities
 
-    price_entities = {
-        entity_id
-        for card in config["views"][2]["cards"]
-        for entity_id in card["entities"]
-    }
+    price_entities = set(_iter_entity_ids(config["views"][2]["cards"]))
     assert price_switch_entity_id in price_entities
+
+
+async def test_build_dashboard_config_soc_uses_gauge_card_with_severity(hass) -> None:
+    """Der Ladezustand wird als Gauge-Karte dargestellt: grün ab 50 % SOC,
+    orange ab 20 % SOC, darunter rot."""
+    soc_entity_id = _register(hass, "sensor", "soc")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    gauge_cards = [
+        card for card in config["views"][0]["cards"] if card["type"] == "gauge"
+    ]
+    assert len(gauge_cards) == 1
+    gauge = gauge_cards[0]
+    assert gauge["entity"] == soc_entity_id
+    assert gauge["severity"] == {"red": 0, "yellow": 20, "green": 50}
+
+
+async def test_build_dashboard_config_entity_names_drop_device_prefix(hass) -> None:
+    """Kartenzeilen zeigen nur den reinen Entity-Namen ("Ladezustand"),
+    nicht den vollen, geräteweiten Anzeigenamen ("SAX Power Home
+    Ladezustand")."""
+    _register(hass, "sensor", "energy_charged")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    energy_card = next(
+        card for card in config["views"][0]["cards"] if card.get("title") == "Energie"
+    )
+    row = energy_card["entities"][0]
+    assert isinstance(row, dict)
+    assert row["name"] == "Total energy charged"  # hass-Testfixture: Sprache "en"
+    assert "SAX Power Home" not in row["name"]
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
     """Ohne jede registrierte Entity bleiben alle drei Views vorhanden, aber
     ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
-    config = async_build_dashboard_config(hass, "unbekannter_entry")
+    config = await async_build_dashboard_config(hass, "unbekannter_entry")
 
     assert len(config["views"]) == 3
     for view in config["views"]:
@@ -117,6 +156,35 @@ async def test_create_dashboard_registers_panel_and_is_idempotent(hass) -> None:
 
         await async_create_dashboard(hass, entry)
         mock_register_panel.assert_called_once()  # kein zweiter Aufruf
+
+
+async def test_create_dashboard_force_overwrites_existing_config(hass) -> None:
+    """force=True (Reinstall-Button, siehe button.py) überschreibt ein
+    bereits bestehendes Dashboard mit der aktuell gebauten Konfiguration,
+    registriert das Panel dabei aber nicht erneut."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+
+    hass.data[LOVELACE_DATA] = LovelaceData(
+        resource_mode="storage",
+        dashboards={},
+        resources=None,
+        yaml_dashboards={},
+    )
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ) as mock_register_panel:
+        await async_create_dashboard(hass, entry)
+        dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
+        await dashboard_storage.async_save({"views": []})  # simuliert manuelle Änderung
+
+        await async_create_dashboard(hass, entry, force=True)
+
+        saved_config = await dashboard_storage.async_load(False)
+        assert len(saved_config["views"]) == 3
+        mock_register_panel.assert_called_once()  # weiterhin kein zweiter Panel-Aufruf
 
 
 async def test_create_dashboard_swallows_unexpected_errors(hass) -> None:

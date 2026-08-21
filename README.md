@@ -105,7 +105,9 @@ Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
 anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in drei
 Tabs: **Allgemeine Informationen**, **Ladeautomatik** (Netzladung und
 netzdienliches Laden) sowie **Dynamisches Laden** (preisoptimiertes Laden).
-Die Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
+Der Ladezustand erscheint dabei als Gauge (grün ab 50 % SOC, orange ab 20 %,
+darunter rot), die wichtigsten Ein/Aus-Schalter als große Kacheln. Die
+Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
 der Sidebar und lässt sich jederzeit unter **Einstellungen → Dashboards**
 anpassen oder wieder entfernen.
 
@@ -114,6 +116,14 @@ Integration schon vor Einführung dieses Features eingerichtet: Der Service
 **`sax_power.create_dashboard`** (siehe [Services](#services-für-automationen))
 legt es jederzeit nachträglich an – aufrufbar unter **Entwicklertools →
 Aktionen**. Existiert das Dashboard bereits, passiert nichts.
+
+Um ein bereits vorhandenes Dashboard auf diesen Auslieferungszustand
+zurückzusetzen (z. B. nach eigenen Anpassungen), gibt es zusätzlich den
+Button **"Dashboard neu installieren"** auf der Geräteseite der Integration
+(**Einstellungen → Geräte & Dienste → SAX Power Home**, dieselbe Seite wie
+der Diagnose-Export, siehe [Diagnose und
+Fehlersuche](#diagnose-und-fehlersuche)) – im Unterschied zum Service
+überschreibt er auch ein bereits bestehendes Dashboard.
 
 ## Entitäten im Überblick
 

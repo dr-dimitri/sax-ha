@@ -49,6 +49,7 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.SWITCH,
     Platform.TIME,
+    Platform.BUTTON,
 ]
 
 SERVICE_GRID_CHARGE_SCHEMA = vol.Schema(

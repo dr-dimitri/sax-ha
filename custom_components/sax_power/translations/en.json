@@ -374,6 +374,11 @@
           "smart": "Smart / PV-optimised"
         }
       }
+    },
+    "button": {
+      "reinstall_dashboard": {
+        "name": "Reinstall dashboard"
+      }
     }
   },
   "issues": {

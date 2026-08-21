@@ -65,6 +65,11 @@ READ_BLOCK_EXT_HIGH_INTERVAL = 2  # Sekunden
 DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"
 DEFAULT_TIMED_CHARGE_ENABLED = False
+# Vorgabewert für "Netzladung Min. SOC" (number.py,
+# SaxPowerTimedChargeMinSocNumber) beim allerersten Start eines neu
+# eingerichteten Eintrags - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE, für
+# die Abwägung gegenüber dem früheren 100-%-Default.
+DEFAULT_TIMED_CHARGE_MIN_SOC = 20
 
 # Netzdienliches Laden (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE):
 # eigenes, zum zeitgesteuerten Laden (oben) nicht überlappendes Zeitfenster,

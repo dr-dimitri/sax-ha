@@ -642,7 +642,7 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, entry_id)
         self.entity_description = description
-        self._attr_unique_id = f"{entry_id}_{description.key}"
+        self._assign_ids("sensor", description.key)
 
     @property
     def native_value(self) -> StateType | datetime:
@@ -685,7 +685,7 @@ class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator, entry_id)
         self._attr_translation_key = translation_key
-        self._attr_unique_id = f"{entry_id}_{key}"
+        self._assign_ids("sensor", key)
         self._data_key = data_key
         self._restore_fn = restore_fn
 

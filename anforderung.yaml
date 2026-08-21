@@ -320,15 +320,13 @@ requirement_timed_soc_charge:
        zurück auf False) - Netzladung lädt also einmal gestartet bis "Max.
        SOC" durch, statt bei jedem erneuten Überschreiten von "Netzladung
        Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
-       B. direkt nach der Ersteinrichtung) steht der Wert auf MAX_SOC
-       (100 %, SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt
-       auf 0 oder "unbekannt" - andernfalls würde diese neu eingeführte
-       Einstellung bestehende Konfigurationen brechen (SOC wäre praktisch
-       nie < 0 %, Netzladung würde nie mehr armen); mit dem 100-%-Default
-       verhält sich Netzladung dagegen wie vor Einführung dieser Einstellung
-       (SOC ist praktisch immer < 100 %, der Schwellwert blockiert also
-       zunächst nichts), bis der Anwender bewusst einen niedrigeren Wert
-       setzt.
+       B. direkt nach der Ersteinrichtung) steht der Wert auf
+       DEFAULT_TIMED_CHARGE_MIN_SOC (const.py, 20 %,
+       SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt auf 0
+       oder "unbekannt" - ein bereits sinnvoll nutzbarer Schwellwert statt
+       eines faktisch inaktiven 100-%-Defaults, mit dem Netzladung bei der
+       Ersteinrichtung nie von selbst armt, bis der Anwender ihn bewusst
+       ändert.
     3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
        auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
        geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
@@ -1528,11 +1526,29 @@ requirement_stable_device_identity:
       unique_id-Suffixe auf, nie über einen aus dem (änderbaren) Namen
       abgeleiteten Entity-ID-String - ein umbenanntes Gerät/Entry findet
       das mitgelieferte Dashboard deshalb unverändert wieder.
+    - Die entity_id selbst (nicht nur die unique_id) wird über
+      SaxPowerEntity._assign_ids (entity.py) für jede Entity explizit
+      vorgegeben ("<platform>.sax_power_<suffix>"), statt sie Home
+      Assistant über has_entity_name automatisch aus Gerätename +
+      Entity-Name ableiten zu lassen. Grund: bietet Home Assistant nach
+      der Ersteinrichtung an, das neu angelegte Gerät umzubenennen/einem
+      Bereich zuzuordnen, und aktiviert der Anwender dabei zusätzlich
+      "Entity-IDs aktualisieren", regeneriert Home Assistant sonst auch
+      bereits vergebene entity_ids neu aus dem (jetzt geänderten)
+      Gerätenamen (homeassistant.helpers.entity_registry.
+      async_regenerate_entity_id) - das bereits angelegte, mitgelieferte
+      Dashboard referenziert zu diesem Zeitpunkt aber schon die
+      ursprüngliche entity_id fest und würde die Entity nicht mehr
+      finden. Ein von der Integration explizit gesetzter `entity_id`
+      wird von Home Assistant unverändert als Vorschlag übernommen
+      (entity_platform._async_derive_object_ids) und bleibt dadurch auch
+      über eine solche Umbenennung hinweg stabil - unabhängig vom
+      Anzeigenamen des Geräts.
 
     Sollte ein künftiger Ersteinrichtungsschritt einen frei wählbaren
     Gerätenamen anbieten, darf dieser ausschließlich den Anzeigenamen
     (DeviceInfo.name bzw. den Entry-Titel) setzen - niemals die
-    device_registry-identifiers oder einen Bestandteil einer unique_id.
+    device_registry-identifiers, eine unique_id oder eine entity_id.
   acceptance_criteria:
     - "tests/test_entity.py deckt ab, dass DeviceInfo.name die feste
        Konstante \"SAX Power Home\" bleibt und identifiers bei
@@ -1542,3 +1558,8 @@ requirement_stable_device_identity:
        ausschließlich über die unique_id erfolgt (siehe
        REQ-BUNDLED-DASHBOARD) und damit unabhängig vom Gerätenamen
        funktioniert."
+    - "tests/test_entity.py deckt ab, dass ein tatsächliches Umbenennen
+       des Geräts (device_registry.async_update_device, name_by_user) die
+       bereits vergebene entity_id nicht verändert, auch nicht nach
+       async_regenerate_entity_id (dem Mechanismus hinter der
+       \"Entity-IDs aktualisieren\"-Option im Umbenennen-Dialog)."

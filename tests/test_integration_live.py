@@ -473,6 +473,7 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
 
         registry = er.async_get(hass)
         max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
+        min_soc_id = _entity_id(registry, entry.entry_id, "timed_charge_min_soc")
         start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
         end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
         enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
@@ -486,6 +487,16 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             "number",
             "set_value",
             {"entity_id": max_soc_id, "value": 90},
+            blocking=True,
+        )
+        # "Netzladung Min. SOC" muss über dem simulierten SOC (50 %) liegen,
+        # damit Netzladung armt - der Vorgabewert (DEFAULT_TIMED_CHARGE_MIN_SOC,
+        # 20 %) reicht dafür bewusst nicht, siehe anforderung.yaml,
+        # REQ-TIMED-SOC-CHARGE.
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": min_soc_id, "value": 60},
             blocking=True,
         )
         await hass.services.async_call(

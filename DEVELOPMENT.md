@@ -37,6 +37,9 @@ custom_components/sax_power/
 │                          einer beliebigen Preis-Sensor-Entity, Ladeplanung je
 │                          Strategie, 60-Sekunden-Takt - ohne Modbus-Zugriff
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
+│                          _assign_ids() (unique_id + vom Gerätenamen
+│                          unabhängige entity_id, siehe
+│                          REQ-STABLE-DEVICE-IDENTITY),
 │                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
 ├── sensor.py              ~60 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),

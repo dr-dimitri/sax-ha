@@ -13,6 +13,7 @@ from .const import (
     DATA_COORDINATOR,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
+    DEFAULT_TIMED_CHARGE_MIN_SOC,
     DOMAIN,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
@@ -69,7 +70,7 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_max_soc"
+        self._assign_ids("number", "max_soc")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -104,11 +105,10 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
 
     Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
     es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
-    Zustand, wird MAX_SOC (100 %) als Vorgabewert gesetzt - dadurch verhält
-    sich die Netzladung für bestehende Konfigurationen nach diesem Update
-    unverändert (SOC ist praktisch immer < 100 %, "Min. SOC" blockiert also
-    zunächst nichts), bis der Anwender bewusst einen niedrigeren Schwellwert
-    setzt.
+    Zustand, wird DEFAULT_TIMED_CHARGE_MIN_SOC (20 %) als Vorgabewert
+    gesetzt statt "unbekannt"/0 zu bleiben - ein bereits sinnvoll nutzbarer
+    Schwellwert statt eines faktisch inaktiven 100-%-Defaults, mit dem
+    Netzladung bei der Ersteinrichtung nie von selbst armt.
     """
 
     _attr_translation_key = "timed_charge_min_soc"
@@ -120,7 +120,7 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_timed_charge_min_soc"
+        self._assign_ids("number", "timed_charge_min_soc")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -133,7 +133,9 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
             except (TypeError, ValueError):
                 restored_value = None
         await self.coordinator.async_set_timed_charge_min_soc(
-            restored_value if restored_value is not None else MAX_SOC
+            restored_value
+            if restored_value is not None
+            else DEFAULT_TIMED_CHARGE_MIN_SOC
         )
 
     @property
@@ -168,7 +170,7 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_price_charge_max_price"
+        self._assign_ids("number", "price_charge_max_price")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -213,7 +215,7 @@ class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerEntity, NumberEntity
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
         super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_price_charge_hours"
+        self._assign_ids("number", "price_charge_hours")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

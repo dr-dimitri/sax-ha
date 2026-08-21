@@ -75,13 +75,13 @@ _LOGGER = logging.getLogger(__name__)
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
-_ENTITY_COUNT_NUMBER = 6
-_ENTITY_COUNT_SELECT = 2
-_ENTITY_COUNT_TIME = 6
+_ENTITY_COUNT_NUMBER = 4
+_ENTITY_COUNT_SELECT = 1
+_ENTITY_COUNT_TIME = 4
 _ENTITY_COUNT_SWITCH_FIXED = 4
 # Monats-Schalter-Sätze in switch.py: zeitgesteuertes Laden, netzdienliches
-# Laden, Entladesperre (siehe REQ-GRID-SERVING-CHARGE/REQ-DISCHARGE-BLOCK).
-_ENTITY_COUNT_MONTH_SWITCH_SETS = 3
+# Laden (siehe REQ-GRID-SERVING-CHARGE).
+_ENTITY_COUNT_MONTH_SWITCH_SETS = 2
 
 
 def _expected_entity_count() -> int:

@@ -63,17 +63,6 @@ async def async_setup_entry(
         )
         for month in ALL_MONTHS
     )
-    entities.extend(
-        SaxPowerMonthSwitch(
-            coordinator,
-            entry.entry_id,
-            month=month,
-            translation_key=f"discharge_block_month_{month}",
-            is_month_active=lambda m: m in coordinator.discharge_block_months,
-            async_set_month_active=coordinator.async_set_discharge_block_month,
-        )
-        for month in ALL_MONTHS
-    )
     async_add_entities(entities)
 
 
@@ -201,19 +190,17 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
 
 class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
-    """Legt fest, ob Netzladung, netzdienliches Laden bzw. die
-    Entladesperre in einem bestimmten Kalendermonat überhaupt wirksam sein
-    dürfen (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE und
-    REQ-DISCHARGE-BLOCK) - z. B. Netzladung nur November-Januar,
-    netzdienliches Laden nur Mai-August. Generische Klasse für alle drei
-    Features und alle 12 Monate; welches Feature betroffen ist, steuern die
-    im Konstruktor übergebenen Callables
-    (SaxPowerCoordinator.timed_charge_months/async_set_timed_charge_month,
-    .grid_serving_months/async_set_grid_serving_month bzw.
-    .discharge_block_months/async_set_discharge_block_month).
+    """Legt fest, ob Netzladung bzw. netzdienliches Laden in einem
+    bestimmten Kalendermonat überhaupt wirksam sein dürfen (siehe
+    anforderung.yaml, REQ-GRID-SERVING-CHARGE) - z. B. Netzladung nur
+    November-Januar, netzdienliches Laden nur Mai-August. Generische Klasse
+    für beide Features und alle 12 Monate; welches Feature betroffen ist,
+    steuern die im Konstruktor übergebenen Callables
+    (SaxPowerCoordinator.timed_charge_months/async_set_timed_charge_month
+    bzw. .grid_serving_months/async_set_grid_serving_month).
 
     Default (kein zuvor gespeicherter Zustand): aktiv - der Coordinator
-    initialisiert alle drei Monats-Sets bereits mit allen 12 Monaten, sodass
+    initialisiert beide Monats-Sets bereits mit allen 12 Monaten, sodass
     sich bestehende Konfigurationen nach einem Update unverändert verhalten,
     bis der Anwender einzelne Monate bewusst abwählt.
     """

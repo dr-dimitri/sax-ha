@@ -1,10 +1,9 @@
 """Mitgeliefertes Lovelace-Dashboard für SAX Power (siehe anforderung.yaml,
 REQ-BUNDLED-DASHBOARD).
 
-Baut ein fünfteiliges Storage-Dashboard ("Allgemeine Informationen",
-"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden",
-"Entladesperre") und legt es - wenn der Anwender das in der
-Ersteinrichtung ausgewählt hat (config_flow.py,
+Baut ein vierteiliges Storage-Dashboard ("Allgemeine Informationen",
+"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden") und legt es -
+wenn der Anwender das in der Ersteinrichtung ausgewählt hat (config_flow.py,
 CONF_CREATE_DASHBOARD) - direkt in Home Assistants Lovelace-Speicher an,
 damit es sofort ohne Neustart in der Sidebar erscheint.
 
@@ -198,7 +197,7 @@ def _view(
 async def async_build_dashboard_config(
     hass: HomeAssistant, entry_id: str
 ) -> dict[str, Any]:
-    """Baut die komplette Lovelace-Konfiguration (fünf Tabs) für einen Entry."""
+    """Baut die komplette Lovelace-Konfiguration (vier Tabs) für einen Entry."""
     translations = await translation.async_get_translations(
         hass, hass.config.language, "entity", integrations=[DOMAIN]
     )
@@ -255,7 +254,6 @@ async def async_build_dashboard_config(
                     ("binary_sensor", "timed_charge_active"),
                     ("binary_sensor", "price_charge_active"),
                     ("binary_sensor", "grid_serving_active"),
-                    ("binary_sensor", "discharge_block_active"),
                 ],
                 translations,
             ),
@@ -382,59 +380,12 @@ async def async_build_dashboard_config(
         ],
     )
 
-    # Eigener Tab statt einer Karte in "Dynamisches Laden": die Entladesperre
-    # ist die einzige ENTLADEseitige Automatik und im Modus "window" völlig
-    # preisunabhängig - inhaltlich steht sie deshalb neben, nicht in den
-    # Lademodi (siehe anforderung.yaml, REQ-DISCHARGE-BLOCK). Aufbau bewusst
-    # wie "Netzdienliches Laden": oben die Betriebsart, darunter Sperrzeit
-    # und aktive Monate.
-    discharge_block_view = _view(
-        "Entladesperre",
-        "entladesperre",
-        "mdi:battery-lock",
-        [
-            _tile_card(hass, entry_id, "select", "discharge_block_mode", translations),
-            _entities_card(
-                hass,
-                entry_id,
-                "Sperrzeit",
-                [
-                    ("time", "discharge_block_start"),
-                    ("time", "discharge_block_end"),
-                ],
-                translations,
-            ),
-            _entities_card(
-                hass,
-                entry_id,
-                "Einstellungen",
-                [
-                    ("number", "discharge_block_min_soc"),
-                    ("number", "discharge_block_max_price"),
-                    ("sensor", "discharge_block_status_text"),
-                ],
-                translations,
-            ),
-            _entities_card(
-                hass,
-                entry_id,
-                "Aktive Monate",
-                [
-                    ("switch", f"discharge_block_month_{month}")
-                    for month in range(1, 13)
-                ],
-                translations,
-            ),
-        ],
-    )
-
     return {
         "views": [
             general_view,
             charging_view,
             grid_serving_view,
             price_view,
-            discharge_block_view,
         ]
     }
 

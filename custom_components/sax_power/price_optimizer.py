@@ -8,12 +8,7 @@ einen PV-Prognose-Sensor - und leitet daraus ab, ob und wann aus dem Netz
 geladen werden soll. Der Coordinator übernimmt diese Entscheidung und
 setzt sie über den vorhandenen SunSpec-Schreibpfad um.
 
-Aus denselben Preisdaten (und mit demselben PriceSlot-Datenmodell sowie
-demselben Planungshorizont) leitet compute_discharge_block_plan zusätzlich
-ab, wann der Speicher gerade NICHT entladen werden soll, damit seine
-Energie für die teuren Stunden übrig bleibt.
-
-Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE und REQ-DISCHARGE-BLOCK.
+Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 """
 
 from __future__ import annotations
@@ -42,12 +37,6 @@ from .const import (
     DEFAULT_PRICE_SLOT_MINUTES,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
-    DISCHARGE_BLOCK_MODE_OFF,
-    DISCHARGE_BLOCK_MODE_PRICE,
-    DISCHARGE_BLOCK_STATUS_BLOCKING,
-    DISCHARGE_BLOCK_STATUS_NO_PRICE_DATA,
-    DISCHARGE_BLOCK_STATUS_OFF,
-    DISCHARGE_BLOCK_STATUS_WAITING_PRICE,
     MAX_SOC,
     PRICE_EVAL_INTERVAL,
     PRICE_PLAN_HORIZON_HOURS,
@@ -172,39 +161,6 @@ class PricePlan:
 
 
 EMPTY_PLAN = PricePlan()
-
-
-@dataclass(frozen=True)
-class DischargeBlockContext:
-    """Eingangsgrößen der Entladesperren-Planung (Modus "price").
-
-    Reines Datenobjekt wie PriceChargeContext - macht
-    compute_discharge_block_plan() ohne Home-Assistant-Instanz testbar.
-    """
-
-    mode: str
-    max_price: float | None
-
-
-@dataclass(frozen=True)
-class DischargeBlockPlan:
-    """Ergebnis einer Entladesperren-Planung (Modus "price").
-
-    Beschreibt ausschließlich die Preisseite. Ob tatsächlich gesperrt wird,
-    entscheidet der Coordinator zusätzlich anhand von Vorrangkette,
-    Mindest-SOC und PV-Überschuss - siehe
-    SaxPowerCoordinator._async_step_discharge_block.
-    """
-
-    status: str = DISCHARGE_BLOCK_STATUS_OFF
-    block_now: bool = False
-    next_start: datetime | None = None
-    slots: tuple[PriceSlot, ...] = ()
-    current_price: float | None = None
-    threshold: float | None = None
-
-
-EMPTY_DISCHARGE_BLOCK_PLAN = DischargeBlockPlan()
 
 
 # --------------------------------------------------------------------------
@@ -536,58 +492,6 @@ def compute_plan(
     )
 
 
-def compute_discharge_block_plan(
-    now: datetime, slots: Sequence[PriceSlot], ctx: DischargeBlockContext
-) -> DischargeBlockPlan:
-    """Sperrplan der Entladesperre im Modus "price" (REQ-DISCHARGE-BLOCK).
-
-    Gesperrt wird, solange der aktuelle Preis-Slot UNTER der Schwelle liegt:
-    billige Stunden deckt das Netz, die gespeicherte Energie bleibt für die
-    teuren Stunden übrig. Bewusst dasselbe PriceSlot-Datenmodell, derselbe
-    Planungshorizont (PRICE_PLAN_HORIZON_HOURS) und dieselbe
-    Einlese-Logik (parse_price_slots) wie compute_plan - die Entladesperre
-    bringt keine eigene Preis-Parsing-Logik mit.
-
-    `next_start` ist - analog zu PricePlan - der Beginn des gerade laufenden
-    bzw. des nächsten Sperrfensters innerhalb des Planungshorizonts.
-    """
-    price_now = current_price(slots, now)
-    if ctx.mode != DISCHARGE_BLOCK_MODE_PRICE:
-        return DischargeBlockPlan(
-            status=DISCHARGE_BLOCK_STATUS_OFF, current_price=price_now
-        )
-
-    horizon_end = now + timedelta(hours=PRICE_PLAN_HORIZON_HOURS)
-    future = [slot for slot in slots if slot.end > now and slot.start < horizon_end]
-    if not future:
-        return DischargeBlockPlan(
-            status=DISCHARGE_BLOCK_STATUS_NO_PRICE_DATA, current_price=price_now
-        )
-
-    threshold = ctx.max_price
-    selected = (
-        [] if threshold is None else [slot for slot in future if slot.price < threshold]
-    )
-    block_now = any(slot.overlaps(now) for slot in selected)
-    if block_now:
-        next_start = next(slot.start for slot in selected if slot.overlaps(now))
-    else:
-        next_start = next((slot.start for slot in selected if slot.start > now), None)
-
-    return DischargeBlockPlan(
-        status=(
-            DISCHARGE_BLOCK_STATUS_BLOCKING
-            if block_now
-            else DISCHARGE_BLOCK_STATUS_WAITING_PRICE
-        ),
-        block_now=block_now,
-        next_start=next_start,
-        slots=tuple(selected),
-        current_price=price_now,
-        threshold=threshold,
-    )
-
-
 # --------------------------------------------------------------------------
 # Anbindung an Home Assistant
 # --------------------------------------------------------------------------
@@ -606,7 +510,6 @@ class SaxPricePlanner:
         self.hass = hass
         self.coordinator = coordinator
         self.plan: PricePlan = EMPTY_PLAN
-        self.discharge_block_plan: DischargeBlockPlan = EMPTY_DISCHARGE_BLOCK_PLAN
         self._unsub: list[Any] = []
 
     # -- Konfiguration aus dem Options Flow --------------------------------
@@ -735,23 +638,9 @@ class SaxPricePlanner:
             pv_factor=self.pv_factor,
         )
 
-    def _discharge_block_context(self) -> DischargeBlockContext:
-        return DischargeBlockContext(
-            mode=self.coordinator.discharge_block_mode,
-            max_price=self.coordinator.discharge_block_max_price,
-        )
-
     @callback
     def evaluate(self) -> PricePlan:
-        """Lade- UND Entladesperrplan neu berechnen und zwischenspeichern.
-
-        Beide Pläne stammen aus derselben, nur einmal eingelesenen Slot-Liste
-        (parse_price_slots) - preisoptimiertes Laden und Entladesperre
-        (REQ-DISCHARGE-BLOCK) werten dieselben Preisdaten aus, nur mit
-        umgekehrtem Vorzeichen der Entscheidung. Gibt weiterhin nur den
-        Ladeplan zurück; der Sperrplan liegt unter
-        self.discharge_block_plan.
-        """
+        """Ladeplan neu berechnen und zwischenspeichern."""
         entity_id = self.price_entity_id
         now = dt_util.now()
         slots: list[PriceSlot] = []
@@ -768,9 +657,6 @@ class SaxPricePlanner:
                     entity_id,
                 )
         self.plan = self._evaluate_price_charge(now, slots, entity_id)
-        self.discharge_block_plan = self._evaluate_discharge_block(
-            now, slots, entity_id
-        )
         return self.plan
 
     def _evaluate_price_charge(
@@ -784,20 +670,6 @@ class SaxPricePlanner:
             # Preis-Sensor hinterlegt - ohne Preise gibt es nichts zu planen.
             return PricePlan(status=PRICE_STATUS_NO_PRICE_DATA)
         return compute_plan(now, slots, ctx)
-
-    def _evaluate_discharge_block(
-        self, now: datetime, slots: Sequence[PriceSlot], entity_id: str | None
-    ) -> DischargeBlockPlan:
-        ctx = self._discharge_block_context()
-        if ctx.mode == DISCHARGE_BLOCK_MODE_OFF:
-            return DischargeBlockPlan(status=DISCHARGE_BLOCK_STATUS_OFF)
-        if not entity_id:
-            # Auch im Modus "window" bleibt der Sperrplan hier stehen: der
-            # Coordinator wertet ihn dort gar nicht aus (siehe
-            # _async_step_discharge_block), der Status kommt dann aus der
-            # Zeitfensterprüfung.
-            return DischargeBlockPlan(status=DISCHARGE_BLOCK_STATUS_NO_PRICE_DATA)
-        return compute_discharge_block_plan(now, slots, ctx)
 
     @property
     def plan_attributes(self) -> dict[str, Any]:
@@ -818,26 +690,4 @@ class SaxPricePlanner:
             "preis_sensor": self.price_entity_id,
             "pv_prognose_sensor": self.pv_forecast_entity_id,
             "geplante_fenster": [slot.as_dict() for slot in plan.slots],
-        }
-
-    @property
-    def discharge_block_attributes(self) -> dict[str, Any]:
-        """Zusatzattribute für den Sensor "Entladesperre Status" - analog zu
-        plan_attributes (siehe anforderung.yaml, REQ-DISCHARGE-BLOCK)."""
-        coordinator = self.coordinator
-        plan = self.discharge_block_plan
-        return {
-            "modus": coordinator.discharge_block_mode,
-            "aktueller_preis": (
-                None if plan.current_price is None else round(plan.current_price, 5)
-            ),
-            "preisschwelle": (
-                None if plan.threshold is None else round(plan.threshold, 5)
-            ),
-            "mindest_soc": coordinator.discharge_block_min_soc,
-            "naechste_sperre": (
-                None if plan.next_start is None else plan.next_start.isoformat()
-            ),
-            "preis_sensor": self.price_entity_id,
-            "gesperrte_fenster": [slot.as_dict() for slot in plan.slots],
         }

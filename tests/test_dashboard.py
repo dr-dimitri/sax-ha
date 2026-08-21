@@ -59,12 +59,11 @@ def _iter_entity_ids(cards: list[dict[str, Any]]):
 
 async def test_build_dashboard_config_resolves_registered_entities(hass) -> None:
     """Nur tatsächlich in der Entity Registry vorhandene Entities landen in
-    den Karten; die fünf Tabs (Views) sind immer vorhanden."""
+    den Karten; die vier Tabs (Views) sind immer vorhanden."""
     soc_entity_id = _register(hass, "sensor", "soc")
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
     grid_serving_switch_entity_id = _register(hass, "switch", "grid_serving_enabled")
     price_switch_entity_id = _register(hass, "switch", "price_charge_enabled")
-    discharge_block_select_id = _register(hass, "select", "discharge_block_mode")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -73,7 +72,6 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
         "ladeautomatik",
         "netzdienliches-laden",
         "dynamisches-laden",
-        "entladesperre",
     ]
 
     general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
@@ -85,11 +83,6 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
 
     price_entities = set(_iter_entity_ids(config["views"][3]["cards"]))
     assert price_switch_entity_id in price_entities
-
-    # Entladesperre (REQ-DISCHARGE-BLOCK) hat einen eigenen Tab, nicht nur
-    # eine Karte im Tab "Dynamisches Laden".
-    discharge_block_entities = set(_iter_entity_ids(config["views"][4]["cards"]))
-    assert discharge_block_select_id in discharge_block_entities
 
 
 async def test_build_dashboard_config_soc_uses_gauge_card_with_segments(hass) -> None:
@@ -184,11 +177,11 @@ async def test_build_dashboard_config_entity_names_drop_device_prefix(hass) -> N
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
-    """Ohne jede registrierte Entity bleiben alle fünf Views vorhanden, aber
+    """Ohne jede registrierte Entity bleiben alle vier Views vorhanden, aber
     ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
     config = await async_build_dashboard_config(hass, "unbekannter_entry")
 
-    assert len(config["views"]) == 5
+    assert len(config["views"]) == 4
     for view in config["views"]:
         assert view["cards"] == []
 
@@ -208,7 +201,6 @@ async def test_build_dashboard_config_status_card_contains_binary_sensors(
             "timed_charge_active",
             "price_charge_active",
             "grid_serving_active",
-            "discharge_block_active",
         )
     }
     max_soc_clamped = _register(hass, "binary_sensor", "max_soc_clamped")
@@ -427,7 +419,7 @@ async def test_create_dashboard_registers_panel_and_is_idempotent(hass) -> None:
         assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards
         dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 5
+        assert len(saved_config["views"]) == 4
         mock_register_panel.assert_called_once()
         assert (
             mock_register_panel.call_args.kwargs["frontend_url_path"]
@@ -463,7 +455,7 @@ async def test_create_dashboard_force_overwrites_existing_config(hass) -> None:
         await async_create_dashboard(hass, entry, force=True)
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 5
+        assert len(saved_config["views"]) == 4
         mock_register_panel.assert_called_once()  # weiterhin kein zweiter Panel-Aufruf
 
 
@@ -563,5 +555,5 @@ async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
         )
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 5
+        assert len(saved_config["views"]) == 4
         mock_register_panel.assert_called_once()  # kein zweiter Panel-Aufruf

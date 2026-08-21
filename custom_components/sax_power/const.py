@@ -113,9 +113,13 @@ REG_SETPOINT_COSPHI = 42  # Write - Sollwert cos(phi)
 # nicht mehr genutzt (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE) - hier
 # nur zur Vollständigkeit der Registerkarte dokumentiert.
 REG_LIMIT_DISCHARGE = 43  # Write - W - Leistungsgrenzwert Entladung
-# Register 44 wird nur noch einmalig gelesen, um "Max. Netzladeleistung"
-# (number.py) beim allerersten Start mit dem aktuellen Geräte-Registerwert
-# vorzubelegen - die Integration schreibt dieses Register nicht mehr.
+# Register 44 ("Leistungsgrenzwert Ladung") wird von der Integration nicht
+# mehr genutzt (weder gelesen noch geschrieben) - die frühere
+# Software-Einstellung "Max. Netzladeleistung" (number.py) wurde entfernt,
+# weil der eingestellte Watt-Wert in der Praxis keinen Einfluss auf die
+# tatsächliche Ladeleistung hatte (siehe anforderung.yaml,
+# REQ-TIMED-SOC-CHARGE) - hier nur zur Vollständigkeit der Registerkarte
+# dokumentiert, analog zu REG_LIMIT_DISCHARGE.
 REG_LIMIT_CHARGE = 44  # Write - W - Leistungsgrenzwert Ladung
 REG_SWITCH_STATE = 45  # Read/Write - Schaltzustand des Speichers
 REG_SOC = 46  # Read - % - SOC des Speichers
@@ -358,12 +362,6 @@ SWITCH_STATE_UNKNOWN_LABEL = UNKNOWN_LABEL
 MIN_SOC = 0
 MAX_SOC = 100
 
-# Nicht dokumentierte Annahme: Leistungsgrenzwerte werden in dieser
-# Bandbreite erwartet. Bitte an das jeweilige SAX-Power-Modell anpassen,
-# falls die tatsächliche Nennleistung abweicht.
-MIN_POWER_LIMIT = 0
-MAX_POWER_LIMIT = 10000
-
 # Sollwert Leistung P (Register 41) ist ein signed 16-bit Register.
 MIN_SETPOINT_POWER = -32768
 MAX_SETPOINT_POWER = 32767
@@ -537,7 +535,6 @@ PRICE_STATUS_CHARGING = "Lade aus Netz"
 PRICE_STATUS_PV_FORECAST_COVERS = "PV-Prognose deckt Bedarf"
 PRICE_STATUS_PAUSED_PV_SURPLUS = "Pausiert (PV-Überschuss)"
 PRICE_STATUS_PAUSED_MAX_SOC = "Pausiert (Max. SOC)"
-PRICE_STATUS_PAUSED_NO_POWER = "Pausiert (Max. Netzladeleistung fehlt)"
 PRICE_STATUS_PAUSED_TIMED_CHARGE = "Pausiert (Netzladung aktiv)"
 
 # -- Konflikt zwischen Netzladung und preisoptimiertem Laden --------------

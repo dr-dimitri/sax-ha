@@ -233,7 +233,6 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         charge_id = _entity_id(registry, entry.entry_id, "charge_power")
         switch_id = _entity_id(registry, entry.entry_id, "storage_switch")
         max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
-        charge_limit_id = _entity_id(registry, entry.entry_id, "charge_limit")
 
         # -- Initiale Basic-Mode-Werte, gelesen über echtes TCP --
         assert hass.states.get(soc_id).state == "55"
@@ -295,17 +294,6 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         )
         await hass.async_block_till_done()
         assert hass.states.get(switch_id).state == "off"
-
-        # -- Max. Netzladeleistung setzen: reiner Software-Zustand, kein
-        #    Register-Write mehr (siehe SaxPowerChargeLimitNumber) --
-        await hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": charge_limit_id, "value": 1500},
-            blocking=True,
-        )
-        await hass.async_block_till_done()
-        assert hass.states.get(charge_limit_id).state == "1500"
 
         coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
 
@@ -446,13 +434,11 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     muss innerhalb des Zeitfensters bei SOC < Ziel-SOC einen echten Write
     über den SunSpec-Modus (Slave-ID 100, "Immediate Controls") auslösen:
     erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
-    40049 (Leistungsvorgabe %, negativ = Laden). "Max. Netzladeleistung"
-    wird hier absichtlich NICHT explizit gesetzt, um zusätzlich den
-    einmaligen Vorgabewert aus dem beim Start gelesenen Register 44
-    (_build_basic_registers()-Default 3000W) zu verifizieren (siehe
-    SaxPowerChargeLimitNumber.async_added_to_hass). Der Ziel-SOC (zentrales
-    "Max. SOC", Register 46 als Vergleichswert) ist bewusst keine eigene
-    Einstellung, siehe anforderung.yaml REQ-TIMED-SOC-CHARGE."""
+    40049 (Leistungsvorgabe %, negativ = Laden, immer maximal möglich -
+    siehe anforderung.yaml REQ-TIMED-SOC-CHARGE zum Wegfall von "Max.
+    Netzladeleistung"). Der Ziel-SOC (zentrales "Max. SOC", Register 46 als
+    Vergleichswert) ist bewusst keine eigene Einstellung, siehe
+    anforderung.yaml REQ-TIMED-SOC-CHARGE."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         basic_registers = _build_basic_registers()
@@ -544,11 +530,10 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             )
             verify_client.close()
             assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
-            # -3000 W (negative "Max. Netzladeleistung", einmalig aus Register 44
-            # vorbelegt) / 4600 W Referenz-Maximalleistung (Register 40053,
-            # _build_extended_registers()-Default) * 100 = -65.217...%, skaliert
-            # mit sunssf -2 -> -6522.
-            assert to_signed16(setpoint_result.registers[0]) == -6522
+            # Lädt immer mit maximal möglicher Leistung (MIN_SETPOINT_POWER
+            # sättigt in _watts_to_ic_setpoint_raw auf -100 %), skaliert mit
+            # sunssf -2 (_build_extended_registers()-Default) -> -10000.
+            assert to_signed16(setpoint_result.registers[0]) == -10000
 
             await hass.async_block_till_done()
             assert hass.states.get(active_text_id).state == "Aktiv"
@@ -795,9 +780,9 @@ async def test_live_price_charge_writes_setpoint_in_cheapest_hour(
             )
             verify_client.close()
             assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
-            # "Max. Netzladeleistung" ist einmalig aus Register 44 (3000 W)
-            # vorbelegt; -3000 W / 4600 W * 100 = -65.217 %, sunssf -2.
-            assert to_signed16(setpoint_result.registers[0]) == -6522
+            # Lädt immer mit maximal möglicher Leistung (MIN_SETPOINT_POWER
+            # sättigt in _watts_to_ic_setpoint_raw auf -100 %), sunssf -2.
+            assert to_signed16(setpoint_result.registers[0]) == -10000
 
             await hass.async_block_till_done()
             assert hass.states.get(status_id).state == PRICE_STATUS_CHARGING

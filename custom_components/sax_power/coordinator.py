@@ -32,13 +32,11 @@ from .const import (
     ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_TIMED_CHARGE_CONFLICT,
     MAX_IC_POWER_SETPOINT_PCT,
-    MAX_POWER_LIMIT,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_IC_POWER_SETPOINT_PCT,
-    MIN_POWER_LIMIT,
     MIN_PRICE_HOURS,
     MIN_PRICE_LIMIT,
     MIN_SETPOINT_POWER,
@@ -47,7 +45,6 @@ from .const import (
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
     PRICE_STATUS_PAUSED_MAX_SOC,
-    PRICE_STATUS_PAUSED_NO_POWER,
     PRICE_STATUS_PAUSED_PV_SURPLUS,
     PRICE_STATUS_PAUSED_TIMED_CHARGE,
     PRICE_STATUS_PV_FORECAST_COVERS,
@@ -64,7 +61,6 @@ from .const import (
     READ_BLOCK_EXT_LOW_INTERVAL,
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
-    REG_LIMIT_CHARGE,
     REG_SETPOINT_COSPHI,
     REG_SETPOINT_POWER,
     REG_SOC,
@@ -336,7 +332,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
         self._max_soc_grid_import_wait_cycles = 0
-        self._max_charge_power: int | None = None
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
         self._timed_charge_enabled = False
@@ -540,10 +535,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "setpoint_power": to_signed16(basic_reg(REG_SETPOINT_POWER)),
             "setpoint_cosphi": to_signed16(basic_reg(REG_SETPOINT_COSPHI)),
             "soc": basic_reg(REG_SOC),
-            # Nur noch als einmaliger Vorgabewert für "Max. Netzladeleistung"
-            # relevant (siehe SaxPowerChargeLimitNumber.async_added_to_hass) -
-            # die Integration schreibt Register 44 nicht mehr.
-            "charge_limit": basic_reg(REG_LIMIT_CHARGE),
         }
         self._basic_last_read = now
         return self._basic_data
@@ -1212,15 +1203,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Lädt den Speicher innerhalb eines konfigurierbaren Zeitfensters aktiv
     # auf einen Ziel-SOC, unabhängig von PV-Überschuss (z. B. für günstige
     # Nachtstromtarife), über den SunSpec-Modus-Pfad oben
-    # (_async_sun_charge_loop). Nutzt "Max. Netzladeleistung"
-    # (self._max_charge_power) als Leistung - ein reiner Software-Zustand
-    # (kein direkter Register-Write mehr auf das Basic-Mode-Register 44),
-    # der vom Speicher nur berücksichtigt wird, während Register 40051 auf
-    # Sollwertvorgabe steht (siehe SaxPowerChargeLimitNumber). Der Ziel-SOC
-    # nutzt denselben Wert wie "Max. SOC" (self._max_soc, siehe
-    # Max-SOC-Abschnitt oben) - fehlt dieser (None), wird MAX_SOC (100 %)
-    # als Ziel angenommen. Das vermeidet redundante Einstellmöglichkeiten
-    # (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE).
+    # (_async_sun_charge_loop). Lädt immer mit maximal möglicher Leistung
+    # (MIN_SETPOINT_POWER, sättigt in _watts_to_ic_setpoint_raw auf
+    # MIN_IC_POWER_SETPOINT_PCT) - eine frühere, konfigurierbare "Max.
+    # Netzladeleistung" (SaxPowerChargeLimitNumber) wurde entfernt: der
+    # eingestellte Watt-Wert hatte in der Praxis keinen Einfluss auf die
+    # tatsächliche Ladeleistung, weil er ohnehin fast immer auf 100 %
+    # sättigte. Der Ziel-SOC nutzt denselben Wert wie "Max. SOC"
+    # (self._max_soc, siehe Max-SOC-Abschnitt oben) - fehlt dieser (None),
+    # wird MAX_SOC (100 %) als Ziel angenommen. Das vermeidet redundante
+    # Einstellmöglichkeiten (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE).
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -1241,10 +1233,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def timed_charge_min_soc(self) -> int | None:
         return self._timed_charge_min_soc
-
-    @property
-    def max_charge_power(self) -> int | None:
-        return self._max_charge_power
 
     async def async_set_timed_charge_enabled(
         self, enabled: bool, *, force: bool = False
@@ -1403,14 +1391,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._grid_serving_months,
             )
         self._timed_charge_months = new_months
-        await self._async_apply_grid_charge_change()
-
-    async def async_set_max_charge_power(self, value: int | None) -> None:
-        """Set the software-side target power (Watt) for "Max. Netzladeleistung".
-
-        Klemmt auf [MIN_POWER_LIMIT, MAX_POWER_LIMIT], siehe async_set_max_soc
-        für die Begründung (RestoreEntity-Pfad ohne NumberEntity-Validierung)."""
-        self._max_charge_power = _clamp_int(value, MIN_POWER_LIMIT, MAX_POWER_LIMIT)
         await self._async_apply_grid_charge_change()
 
     async def _async_apply_grid_charge_change(self) -> None:
@@ -1574,9 +1554,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            Max-SOC-Abschnitt oben zum Netzbezug-Freigabe-Trigger).
         2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
            Laden (falls aktiviert, im Zeitfenster, im aktiven Monat - siehe
-           "Aktive Monate"-Schalter unten -, mit gesetzter "Max.
-           Netzladeleistung", mit gesetztem "Min. SOC" (siehe unten) UND
-           ohne PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die
+           "Aktive Monate"-Schalter unten -, mit gesetztem "Min. SOC"
+           (siehe unten) UND ohne PV-Überschuss über
+           SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) die
            Schleife mit einem echten Ladesollwert übernehmen. Der
            PV-Überschuss-Check läuft dabei über dieselbe Zyklen-Hysterese
            wie die drei anderen Stellen, die diesen Schwellwert auswerten
@@ -1596,10 +1576,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
         2b. Preisoptimiertes Laden (siehe eigenen Abschnitt weiter unten
-           sowie anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) lädt mit
-           derselben "Max. Netzladeleistung" aus dem Netz, sobald der vom
-           Planner (price_optimizer.py) berechnete Ladeplan für den
-           aktuellen Zeitpunkt ein ausgewähltes Preisfenster meldet. Es
+           sowie anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) lädt aus dem
+           Netz, sobald der vom Planner (price_optimizer.py) berechnete
+           Ladeplan für den aktuellen Zeitpunkt ein ausgewähltes
+           Preisfenster meldet. Es
            steht hinter dem zeitgesteuerten Laden zurück (das per
            Bestätigungsdialog ohnehin nicht gleichzeitig aktiv sein kann,
            siehe async_set_timed_charge_enabled) und bricht - wie dieses -
@@ -1615,9 +1595,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            siehe _windows_overlap_with_months/_notify_time_window_overlap)
            läuft als eigene Zustandsmaschine über _async_step_grid_serving,
            NICHT über einen aus dem Smart-Meter-Überschuss berechneten
-           Ladesollwert. "Max. Netzladeleistung" wird dafür NICHT benötigt,
-           da nie ein Sollwert > 0 geschrieben wird. Das Feature lädt
-           bewusst NIE aktiv aus dem Netz, sondern überlässt die eigentliche
+           Ladesollwert - es wird nie ein Sollwert > 0 geschrieben. Das
+           Feature lädt bewusst NIE aktiv aus dem Netz, sondern überlässt
+           die eigentliche
            Ladung der geräteeigenen SmartMeter-Nullregelung (Register 40051
            = 0), die von sich aus nur mit echtem PV-Überschuss lädt:
 
@@ -1703,7 +1683,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._is_time_in_window(
                 now_time, self._timed_charge_start, self._timed_charge_end
             )
-            and self._max_charge_power is not None
             and self._timed_charge_min_soc is not None
             and self._timed_charge_armed
         )
@@ -1722,7 +1701,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._price_charge_enabled
             and self._price_charge_strategy != PRICE_STRATEGY_OFF
             and price_plan.charge_now
-            and bool(self._max_charge_power)
         )
         grid_serving_window_active = (
             self._grid_serving_enabled
@@ -1810,7 +1788,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._max_soc_hold_is_window_bound = False
             self._max_soc_grid_import_wait_cycles = 0
             if timed_should_charge or price_should_charge:
-                await self.async_start_sun_charge(-self._max_charge_power)
+                # MIN_SETPOINT_POWER sättigt in _watts_to_ic_setpoint_raw
+                # auf MIN_IC_POWER_SETPOINT_PCT (-100 %, maximale
+                # Ladeleistung) - siehe Kommentar am Abschnittsanfang
+                # "Zeitgesteuertes Laden" zur entfernten "Max.
+                # Netzladeleistung".
+                await self.async_start_sun_charge(MIN_SETPOINT_POWER)
                 grid_serving_active_now = False
             elif grid_serving_eligible:
                 grid_serving_active_now = await self._async_step_grid_serving(data)
@@ -2059,10 +2042,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # um wie die beiden anderen Automatiken - inklusive derselben
     # Max-SOC-Sperre und derselben PV-Überschuss-Hysterese.
     #
-    # Leistung: "Max. Netzladeleistung" (self._max_charge_power), gemeinsam
-    # mit dem zeitgesteuerten Laden genutzt. Ziel-SOC: derselbe Wert wie
-    # "Max. SOC" (self._max_soc) - keine eigene Einstellung, siehe
-    # number.SaxPowerMaxSocNumber.
+    # Lädt wie das zeitgesteuerte Laden immer mit maximal möglicher
+    # Leistung (siehe Kommentar am Abschnittsanfang "Zeitgesteuertes
+    # Laden"). Ziel-SOC: derselbe Wert wie "Max. SOC" (self._max_soc) -
+    # keine eigene Einstellung, siehe number.SaxPowerMaxSocNumber.
 
     @property
     def price_charge_enabled(self) -> bool:
@@ -2183,8 +2166,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return PRICE_STATUS_PAUSED_TIMED_CHARGE
         if pv_surplus_active:
             return PRICE_STATUS_PAUSED_PV_SURPLUS
-        if not self._max_charge_power:
-            return PRICE_STATUS_PAUSED_NO_POWER
         return plan.status
 
     # -- Konflikt Netzladung <-> preisoptimiertes Laden ------------------------

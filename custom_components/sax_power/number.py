@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -14,11 +14,9 @@ from .const import (
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
     DOMAIN,
-    MAX_POWER_LIMIT,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SOC,
-    MIN_POWER_LIMIT,
     MIN_PRICE_HOURS,
     MIN_PRICE_LIMIT,
     MIN_SOC,
@@ -37,7 +35,6 @@ async def async_setup_entry(
     async_add_entities(
         [
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
-            SaxPowerChargeLimitNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
             SaxPowerPriceChargeHoursNumber(coordinator, entry.entry_id),
@@ -94,70 +91,6 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_max_soc(int(value))
-        self.async_write_ha_state()
-
-
-class SaxPowerChargeLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
-    """Ziel-Leistung für die Netzladung ("Max. Netzladeleistung"), in Watt.
-
-    Reiner Software-Zustand (kein direkter Register-Write mehr auf das
-    Basic-Mode-Leistungsgrenzwert-Register 44) - wird vom Speicher nur
-    berücksichtigt, während Register 40051 (Steuermodus) auf 1
-    (Sollwertvorgabe) steht, siehe
-    coordinator.SaxPowerCoordinator._async_enforce_grid_charge/
-    ._async_sun_charge_loop.
-
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
-    es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
-    Zustand, wird der zu diesem Zeitpunkt vom Gerät gelesene Wert von
-    Register 44 als einmaliger Vorgabewert übernommen.
-
-    Ein restaurierter Wert von genau 0 W wird dabei wie "kein gespeicherter
-    Zustand" behandelt (fällt also ebenfalls auf den Register-44-Wert
-    zurück): 0 W ist als bewusste Nutzereinstellung für diese Größe
-    sinnlos (Netzladung wäre dann wirkungslos) und tritt in der Praxis nur
-    auf, wenn RestoreEntity einen alten, vor Einführung dieser Vorbelegung
-    gespeicherten Zustand findet (z. B. nach einem Update der Integration
-    auf einem bestehenden Config Entry) - ohne diesen Fallback würde die
-    Entity dauerhaft bei 0 W hängen bleiben, statt den tatsächlichen
-    Geräte-Registerwert zu übernehmen.
-    """
-
-    _attr_translation_key = "charge_limit"
-    _attr_native_min_value = MIN_POWER_LIMIT
-    _attr_native_max_value = MAX_POWER_LIMIT
-    _attr_native_step = 50
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_mode = NumberMode.BOX
-
-    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_charge_limit"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if self.coordinator.max_charge_power is not None:
-            return
-        restored_value: int | None = None
-        if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = int(float(last_state.state))
-            except (TypeError, ValueError):
-                restored_value = None
-        if not restored_value and self.coordinator.data is not None:
-            # Kein (sinnvoller) zuvor gespeicherter Zustand (allererster
-            # Start, oder ein restaurierter 0-Wert, siehe Klassen-Docstring)
-            # - mit dem aktuell vom Gerät gelesenen Register-44-Wert
-            # vorbelegen.
-            restored_value = self.coordinator.data.get("charge_limit")
-        await self.coordinator.async_set_max_charge_power(restored_value or 0)
-
-    @property
-    def native_value(self) -> int | None:
-        return self.coordinator.max_charge_power
-
-    async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_max_charge_power(int(value))
         self.async_write_ha_state()
 
 

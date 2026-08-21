@@ -251,9 +251,6 @@
       "max_soc": {
         "name": "Max. SOC"
       },
-      "charge_limit": {
-        "name": "Max. Netzladeleistung"
-      },
       "timed_charge_min_soc": {
         "name": "Netzladung Min. SOC"
       },

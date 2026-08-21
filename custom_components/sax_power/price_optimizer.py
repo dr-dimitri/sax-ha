@@ -625,7 +625,15 @@ class SaxPricePlanner:
             ),
             current_soc=data.get("soc"),
             capacity_kwh=None if not capacity_wh else float(capacity_wh) / 1000,
-            charge_power_w=coordinator.max_charge_power,
+            # Seit dem Wegfall der Software-Einstellung "Max.
+            # Netzladeleistung" (siehe anforderung.yaml,
+            # REQ-TIMED-SOC-CHARGE) lädt die Integration immer mit
+            # maximal möglicher Leistung - "ic_max_power_reference"
+            # (Register 40053, "Referenzwert Maximalleistung") ist der vom
+            # Gerät selbst gemeldete Bezugspunkt dafür und damit die
+            # realistischere Grundlage für die Bedarfsrechnung als der
+            # frühere, in der Praxis wirkungslose Nutzerwert.
+            charge_power_w=data.get("ic_max_power_reference"),
             pv_forecast_kwh=self._forecast_kwh(),
             pv_factor=self.pv_factor,
         )

@@ -18,6 +18,7 @@ from custom_components.sax_power.const import (
     DATA_COORDINATOR,
     DOMAIN,
     SERVICE_CREATE_DASHBOARD,
+    SERVICE_REINSTALL_DASHBOARD,
 )
 from custom_components.sax_power.dashboard import (
     DASHBOARD_URL_PATH,
@@ -249,7 +250,10 @@ async def test_build_dashboard_config_start_end_labels_are_generic(hass) -> None
     """Die Zeitfenster-Entities heißen in beiden Tabs immer "Start" bzw.
     "Ende" (bzw. "Start"/"End" in der englischen Test-Sprache) statt
     tabspezifisch "Netzladung Start" oder "Netzdienliches Laden Start" -
-    damit sehen beide Tabs vergleichbar aus."""
+    damit sehen beide Tabs vergleichbar aus. Die Karte selbst heißt bei
+    "Ladeautomatik" weiterhin "Zeitfenster", bei "Netzdienliches Laden"
+    aber "Ladepause" - dort verhindert das Zeitfenster das Laden, statt es
+    auszulösen."""
     _register(hass, "time", "timed_charge_start")
     _register(hass, "time", "timed_charge_end")
     _register(hass, "time", "grid_serving_start")
@@ -264,11 +268,12 @@ async def test_build_dashboard_config_start_end_labels_are_generic(hass) -> None
         view for view in config["views"] if view["path"] == "netzdienliches-laden"
     )
 
-    for view in (charging_view, grid_serving_view):
-        zeitfenster_card = next(
-            card for card in view["cards"] if card.get("title") == "Zeitfenster"
-        )
-        names = {row["entity"]: row["name"] for row in zeitfenster_card["entities"]}
+    for view, title in (
+        (charging_view, "Zeitfenster"),
+        (grid_serving_view, "Ladepause"),
+    ):
+        window_card = next(card for card in view["cards"] if card.get("title") == title)
+        names = {row["entity"]: row["name"] for row in window_card["entities"]}
         assert set(names.values()) == {"Start", "End"}
 
 
@@ -421,3 +426,50 @@ async def test_create_dashboard_service_creates_dashboard_for_device(hass) -> No
         )
 
     assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards
+
+
+async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
+    hass,
+) -> None:
+    """Der Service sax_power.reinstall_dashboard setzt ein bereits
+    bestehendes, zwischenzeitlich manuell verändertes Dashboard auf den
+    Auslieferungszustand zurück - Ersatz für die frühere, auf der
+    Geräteseite unzuverlässig sichtbare Reinstall-ButtonEntity."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[ENTRY_ID] = {DATA_COORDINATOR: object()}
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=ENTRY_ID, identifiers={(DOMAIN, ENTRY_ID)}
+    )
+
+    hass.data[LOVELACE_DATA] = LovelaceData(
+        resource_mode="storage",
+        dashboards={},
+        resources=None,
+        yaml_dashboards={},
+    )
+    sax_power._async_register_services(hass)
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ) as mock_register_panel:
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_CREATE_DASHBOARD,
+            {"device_id": device.id},
+            blocking=True,
+        )
+        dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
+        await dashboard_storage.async_save({"views": []})  # simuliert manuelle Änderung
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_REINSTALL_DASHBOARD,
+            {"device_id": device.id},
+            blocking=True,
+        )
+
+        saved_config = await dashboard_storage.async_load(False)
+        assert len(saved_config["views"]) == 4
+        mock_register_panel.assert_called_once()  # kein zweiter Panel-Aufruf

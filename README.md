@@ -104,9 +104,11 @@ Strompreis-Sensor existiert bei einer frischen Installation oft noch gar nicht.
 Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
 anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in vier
 Tabs: **Allgemeine Informationen**, **Ladeautomatik** sowie **Netzdienliches
-Laden** (beide bewusst gleich aufgebaut: Hauptschalter, Zeitfenster mit den
-einheitlich benannten Entities "Start"/"Ende" und eine eigene Karte "Aktive
-Monate" mit den zwölf Monats-Schaltern) und **Dynamisches Laden**
+Laden** (beide bewusst gleich aufgebaut: Hauptschalter, eine Karte mit den
+einheitlich benannten Zeit-Entities "Start"/"Ende" – bei "Ladeautomatik"
+"Zeitfenster" genannt, bei "Netzdienliches Laden" "Ladepause" – und eine
+eigene Karte "Aktive Monate" mit den zwölf Monats-Schaltern) und
+**Dynamisches Laden**
 (preisoptimiertes Laden). Der Ladezustand erscheint dabei als Gauge (grün ab
 50 % SOC, orange ab 20 %, darunter rot), die wichtigsten Ein/Aus-Schalter als
 große Kacheln. Die
@@ -121,12 +123,11 @@ legt es jederzeit nachträglich an – aufrufbar unter **Entwicklertools →
 Aktionen**. Existiert das Dashboard bereits, passiert nichts.
 
 Um ein bereits vorhandenes Dashboard auf diesen Auslieferungszustand
-zurückzusetzen (z. B. nach eigenen Anpassungen), gibt es zusätzlich den
-Button **"Dashboard neu installieren"** auf der Geräteseite der Integration
-(**Einstellungen → Geräte & Dienste → SAX Power Home**, dieselbe Seite wie
-der Diagnose-Export, siehe [Diagnose und
-Fehlersuche](#diagnose-und-fehlersuche)) – im Unterschied zum Service
-überschreibt er auch ein bereits bestehendes Dashboard.
+zurückzusetzen (z. B. nach eigenen Anpassungen), gibt es den Service
+**`sax_power.reinstall_dashboard`** – ebenfalls unter **Entwicklertools →
+Aktionen** aufrufbar. Im Unterschied zu `create_dashboard` überschreibt er
+auch ein bereits bestehendes Dashboard mit dem aktuellen
+Auslieferungszustand.
 
 ## Entitäten im Überblick
 
@@ -678,6 +679,16 @@ stattdessen ohne Rückfrage abgeschaltet.
 nachträglich an (siehe [Schritt 3](#schritt-3-dashboard-anlegen-optional)) –
 z. B. wenn es bei der Ersteinrichtung abgewählt oder später gelöscht wurde.
 Existiert es bereits, passiert nichts.
+
+| Feld | Beschreibung |
+| --- | --- |
+| `device_id` | SAX Power Gerät |
+
+**`sax_power.reinstall_dashboard`** – setzt das Dashboard "SAX Power" auf den
+Auslieferungszustand zurück, z. B. nach eigenen Anpassungen. Überschreibt im
+Unterschied zu `create_dashboard` auch ein bereits bestehendes Dashboard;
+wurde es zwischenzeitlich komplett gelöscht, legt der Service es stattdessen
+neu an.
 
 | Feld | Beschreibung |
 | --- | --- |

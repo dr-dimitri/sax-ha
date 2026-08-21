@@ -1129,18 +1129,21 @@ requirement_bundled_dashboard:
     aufgebaut, damit der Anwender beim Wechsel zwischen den beiden Tabs
     nicht umdenken muss: oben der jeweilige Hauptschalter als Tile-Karte
     ("Netzladung aktiv" / "Netzdienliches Laden aktiv"), darunter eine
-    Karte "Zeitfenster" mit nur den beiden Zeit-Entities - deren Namen
-    lauten in beiden Tabs einheitlich "Start"/"Ende" statt tabspezifisch
-    "Netzladung Start"/"Netzdienliches Laden Start" - und am Ende eine
-    Karte "Aktive Monate" mit den zwölf Monats-Schaltern des jeweiligen
-    Mechanismus, deren Label ebenfalls in beiden Tabs einheitlich nur noch
-    der reine Monatsname ist (z. B. "Januar" statt "Netzladung aktiv im
-    Januar"). Bei "Ladeautomatik" steckt zusätzlich eine dritte Karte
-    "Einstellungen" dazwischen (Mindest-SOC für den Ladestart,
-    Ladeleistungsbegrenzung) - "Netzdienliches Laden" braucht diese
-    Einstellungen nicht. Weder die geräteweite Max-SOC-Sperre (die ist
-    mechanismus-übergreifend und gehört fachlich nicht in einen einzelnen
-    Automatik-Tab) noch die reinen Status-Textanzeigen
+    Karte mit nur den beiden Zeit-Entities - deren Namen lauten in beiden
+    Tabs einheitlich "Start"/"Ende" statt tabspezifisch "Netzladung
+    Start"/"Netzdienliches Laden Start". Die Karte selbst heißt bei
+    "Ladeautomatik" "Zeitfenster" (das Zeitfenster löst das Laden aus), bei
+    "Netzdienliches Laden" aber "Ladepause" (das Zeitfenster unterbricht
+    umgekehrt gerade das PV-Laden, siehe REQ-GRID-SERVING-CHARGE) - und am
+    Ende eine Karte "Aktive Monate" mit den zwölf Monats-Schaltern des
+    jeweiligen Mechanismus, deren Label ebenfalls in beiden Tabs
+    einheitlich nur noch der reine Monatsname ist (z. B. "Januar" statt
+    "Netzladung aktiv im Januar"). Bei "Ladeautomatik" steckt zusätzlich
+    eine dritte Karte "Einstellungen" dazwischen (Mindest-SOC für den
+    Ladestart, Ladeleistungsbegrenzung) - "Netzdienliches Laden" braucht
+    diese Einstellungen nicht. Weder die geräteweite Max-SOC-Sperre (die
+    ist mechanismus-übergreifend und gehört fachlich nicht in einen
+    einzelnen Automatik-Tab) noch die reinen Status-Textanzeigen
     ("Zeitgesteuertes/Netzdienliches Laden aktiv") sind in den beiden Tabs
     enthalten - der jeweilige Hauptschalter zeigt den Zustand bereits an.
 
@@ -1162,20 +1165,22 @@ requirement_bundled_dashboard:
     name), die auch die Entity Registry selbst verwendet, und ist deshalb
     async.
 
-    button.py stellt zusätzlich eine ButtonEntity
-    (SaxPowerReinstallDashboardButton, translation_key
-    "reinstall_dashboard") bereit, die dashboard.async_create_dashboard mit
-    force=True aufruft und damit ein bereits bestehendes Dashboard auf den
-    aktuell gebauten Auslieferungszustand zurücksetzt (überschreibt nur den
-    Karteninhalt, Panel-Registrierung/Sidebar-Sichtbarkeit bleiben
-    unangetastet). Der Button erscheint auf der Geräteseite der Integration
-    - derselben Seite, auf der über diagnostics.py auch die Diagnosedaten
-    heruntergeladen werden können, da Home Assistant keine Möglichkeit
-    bietet, dessen eingebautes Diagnose-Menü um eigene Einträge zu
-    erweitern. Bewusst ohne entity_category: Mit CONFIG/DIAGNOSTIC würde
-    Home Assistant den Button auf der Geräteseite in einem eingeklappten
-    Abschnitt verstecken statt ihn direkt in der Steuerungs-Liste zu
-    zeigen.
+    Der Service sax_power.reinstall_dashboard (SERVICE_REINSTALL_DASHBOARD,
+    Schema wie stop_grid_charge: nur device_id) ruft
+    dashboard.async_create_dashboard mit force=True auf und setzt damit ein
+    bereits bestehendes Dashboard auf den aktuell gebauten
+    Auslieferungszustand zurück (überschreibt nur den Karteninhalt,
+    Panel-Registrierung/Sidebar-Sichtbarkeit bleiben unangetastet) - oder
+    legt es neu an, falls es zwischenzeitlich komplett gelöscht wurde
+    (_async_create_dashboard fällt für diesen Fall auf denselben
+    Neuanlage-Pfad zurück wie force=False). Ersetzt eine frühere
+    ButtonEntity auf der Geräteseite (SaxPowerReinstallDashboardButton,
+    button.py): Anwender fanden diesen Button dort zuverlässig nicht -
+    ein über Entwicklertools -> Aktionen aufrufbarer Service ist in Home
+    Assistant der robustere, immer auffindbare Weg für so eine punktuelle,
+    selten benötigte Aktion (kein wiederkehrender Regelbetrieb wie bei den
+    Lade-Automatiken, für die eine eigene Entity mit Zustand angemessen
+    wäre).
 
     Dritter, optionaler Schritt der Ersteinrichtung
     (config_flow.async_step_dashboard, Checkbox "Dashboard anlegen",
@@ -1230,16 +1235,13 @@ requirement_bundled_dashboard:
        schluckt unerwartete Fehler, statt sie durchzureichen."
     - "tests/test_config_flow.py deckt den dritten Ersteinrichtungsschritt
        ab (Default aktiv, explizite Abwahl)."
-    - "tests/test_dashboard.py deckt zusätzlich den Service
-       sax_power.create_dashboard end-to-end ab (Geräte-Lookup, Aufruf von
-       async_create_dashboard)."
+    - "tests/test_dashboard.py deckt zusätzlich die Services
+       sax_power.create_dashboard und sax_power.reinstall_dashboard
+       end-to-end ab (Geräte-Lookup, Aufruf von async_create_dashboard mit
+       force=False bzw. force=True)."
     - "tests/test_dashboard.py deckt die beiden Gauge-Karten ab (SOC:
        Entity, needle, severity-Schwellwerte 50/20 %; Zelltemperatur:
        Entity, needle, min/max, nicht-monotone segments 0/5/32), sowie
        dass Kartenzeilen den geräteprefix-freien, übersetzten Namen
        verwenden, und dass force=True ein bereits bestehendes Dashboard
        überschreibt, ohne das Panel erneut zu registrieren."
-    - "tests/test_button.py deckt SaxPowerReinstallDashboardButton ab:
-       async_press ruft async_create_dashboard mit force=True für den
-       eigenen Config Entry auf; fehlt der Entry, wird ein
-       HomeAssistantError ausgelöst statt eines stillen No-Ops."

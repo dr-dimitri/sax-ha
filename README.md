@@ -25,7 +25,6 @@ lokal mit dem Speicher.
 - [Netzladung (zeitgesteuertes Laden)](#netzladung-zeitgesteuertes-laden)
 - [Netzdienliches Laden](#netzdienliches-laden)
 - [Preisoptimiertes Laden](#preisoptimiertes-laden)
-- [Entladesperre (Aufsparen für teure Stunden)](#entladesperre-aufsparen-für-teure-stunden)
 - [Zeitfenster dürfen sich nicht überschneiden](#zeitfenster-dürfen-sich-nicht-überschneiden)
 - [Services (für Automationen)](#services-für-automationen)
 - [Verbindungsdaten nachträglich ändern](#verbindungsdaten-nachträglich-ändern)
@@ -43,13 +42,10 @@ lokal mit dem Speicher.
 - **Automatisch laden:** drei getrennt einstellbare Automatiken – nach Zeitplan,
   netzdienlich (Laden bewusst in die Mittagsspitze verschieben) oder nach
   dynamischem Strompreis.
-- **Für teure Stunden aufsparen:** eine Entladesperre hält den Speicher in
-  billigen Stunden bewusst zurück, damit seine Energie in der Abendspitze zur
-  Verfügung steht.
 - **Akku schonen:** eine geräteunabhängige Max-SOC-Sperre, die auch dann greift,
   wenn der Speicher von selbst mit PV-Überschuss volllädt.
 - **Fertiges Dashboard:** optional in der Ersteinrichtung anlegbar, mit den
-  wichtigsten Informationen in fünf Tabs (siehe
+  wichtigsten Informationen in vier Tabs (siehe
   [Schritt 3: Dashboard anlegen](#schritt-3-dashboard-anlegen-optional)).
 
 ## Installation
@@ -107,16 +103,14 @@ Strompreis-Sensor existiert bei einer frischen Installation oft noch gar nicht.
 ### Schritt 3: Dashboard anlegen (optional)
 
 Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
-anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in fünf
+anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in vier
 Tabs: **Allgemeine Informationen**, **Ladeautomatik** sowie **Netzdienliches
 Laden** (beide bewusst gleich aufgebaut: Hauptschalter, eine Karte mit den
 einheitlich benannten Zeit-Entities "Start"/"Ende" – bei "Ladeautomatik"
 "Zeitfenster" genannt, bei "Netzdienliches Laden" "Ladepause" – und eine
-eigene Karte "Aktive Monate" mit den zwölf Monats-Schaltern),
+eigene Karte "Aktive Monate" mit den zwölf Monats-Schaltern) sowie
 **Dynamisches Laden**
-(preisoptimiertes Laden) und **Entladesperre** (gleich aufgebaut wie
-"Netzdienliches Laden", oben aber die Modus-Auswahl statt eines
-Hauptschalters). Der Ladezustand erscheint dabei als Gauge (grün ab
+(preisoptimiertes Laden). Der Ladezustand erscheint dabei als Gauge (grün ab
 50 % SOC, orange ab 20 %, darunter rot), die wichtigsten Ein/Aus-Schalter als
 große Kacheln. Die
 Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
@@ -230,7 +224,6 @@ Hochrechnung für diese Zeit, statt sie später fälschlich nachzuholen.
 | Preisoptimiertes Laden Status | Klartext-Status mit dem *Grund* – siehe [Statusanzeige](#statusanzeige) |
 | Preisoptimiertes Laden nächster Start | Zeitstempel des nächsten geplanten Ladefensters (bzw. Beginn des laufenden) |
 | Aktueller Strompreis | Preis des aktuellen Zeitfensters in EUR/kWh |
-| Entladesperre Status | Klartext-Status der [Entladesperre](#entladesperre-aufsparen-für-teure-stunden) mit dem *Grund* |
 
 ### Binäre Statusanzeigen
 
@@ -246,7 +239,6 @@ bleiben unverändert bestehen, beide Varianten existieren nebeneinander.
 | Zeitgesteuertes Laden aktiv | Wie oben, als binärer Zustand |
 | Preisoptimiertes Laden aktiv | Wie oben, als binärer Zustand |
 | Netzdienliches Laden aktiv | Wie oben, als binärer Zustand |
-| Entladesperre aktiv | Ein, solange der Speicher zum Aufsparen bewusst auf 0 W gehalten wird |
 | Max-SOC-Sperre aktiv | Ein, solange die [Max-SOC-Sperre](#max-soc-sperre) den Speicher aktiv hält |
 | SunSpec-Modus erreichbar | Diagnose-Entität; Aus, wenn Slave-ID 100 gerade nicht antwortet (siehe [Bekannte Einschränkungen](#bekannte-einschränkungen)) |
 | Speicherproblem | Diagnose-Entität; Ein, sobald Speicher oder Akku ein Ereignis außerhalb des Normalbetriebs melden |
@@ -265,8 +257,6 @@ wie alle anderen von diesem Block abhängigen Entities auch.
 | Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 100 % |
 | Preisoptimiertes Laden Preisgrenze | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
 | Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
-| Entladesperre Mindest-SOC | 0–100 % | Reserve, unterhalb derer die [Entladesperre](#entladesperre-aufsparen-für-teure-stunden) nie sperrt. Standard 20 % |
-| Entladesperre Preisschwelle | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Unterhalb dieses Preises sperrt der Modus "Preisgesteuert". Standard 0,20 EUR/kWh |
 
 Alle Werte bleiben über Neustarts hinweg erhalten. Netzladung und
 preisoptimiertes Laden laden dabei immer mit der maximal möglichen
@@ -284,18 +274,14 @@ Ladeleistung hatte.
 | Preisoptimiertes Laden aktiv | Hauptschalter des [preisoptimierten Ladens](#preisoptimiertes-laden) |
 | Netzladung: 12 Monats-Schalter (Label je Schalter nur der Monatsname, z. B. "Januar") | In welchen Monaten das Netzladungs-Zeitfenster gilt |
 | Netzdienliches Laden: 12 Monats-Schalter (Label ebenfalls nur der Monatsname) | Analog für das netzdienliche Laden |
-| Entladesperre: 12 Monats-Schalter (Label ebenfalls nur der Monatsname) | Analog für das Sperrfenster der Entladesperre |
 
-**Zeiten:** je zwei Entitäten "Start"/"Ende" - für die Netzladung, für das
-netzdienliche Laden und für die Entladesperre (jeweils HH:MM).
+**Zeiten:** je zwei Entitäten "Start"/"Ende" - für die Netzladung und für das
+netzdienliche Laden (jeweils HH:MM).
 
 **Auswahl:**
 
 - "Preisoptimiertes Laden Strategie" mit den Optionen "Manuell / Aus",
   "Absoluter Preis", "Relativ / Günstigste Stunden" und "Smart / PV-optimiert".
-- "Entladesperre Modus" mit den Optionen "Aus", "Zeitfenster" und
-  "Preisgesteuert" – siehe
-  [Entladesperre](#entladesperre-aufsparen-für-teure-stunden).
 
 **Warum gibt es nicht für jede Automatik eigene Werte?** "Max. SOC" wird
 bewusst geteilt, damit es keine zwei konkurrierenden Obergrenzen gibt - "Max.
@@ -324,13 +310,9 @@ Wichtig zum Zusammenspiel:
   überschneiden** – die Integration prüft das, siehe
   [Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden).
 - Die **[Max-SOC-Sperre](#max-soc-sperre)** steht über allen dreien.
-- Die **[Entladesperre](#entladesperre-aufsparen-für-teure-stunden)** ist keine
-  Lade-, sondern eine Entlade-Automatik und steht *unter* allen dreien: Sobald
-  eine der Lade-Automatiken den Speicher beansprucht, tritt sie zurück.
 
 Alle drei Automatiken brauchen den SunSpec-Modus, weil sie über dessen Register
-schreiben. Ist er nicht erreichbar, greift keine von ihnen – das gilt auch für
-die Entladesperre.
+schreiben. Ist er nicht erreichbar, greift keine von ihnen.
 
 ### Der 50-W-Schwellwert
 
@@ -625,117 +607,10 @@ Für **Automationen**, die keinen Dialog beantworten können, gibt es den Servic
 `sax_power.set_price_charge_enabled` mit dem Feld `force` – damit wird die
 Netzladung ohne Rückfrage abgeschaltet.
 
-## Entladesperre (Aufsparen für teure Stunden)
-
-Normalerweise entlädt der Speicher **sofort** in den Hausverbrauch – so regelt
-das Gerät von sich aus. Wirtschaftlich ist das oft falsch: Der günstig oder aus
-PV geladene Speicher wird mittags in einer Stunde für 12 ct/kWh leergefahren und
-ist abends leer, wenn Netzstrom 38 ct/kWh kostet.
-
-Die Entladesperre hält den Speicher in solchen Phasen bewusst auf **0 W**. Der
-Hausverbrauch geht währenddessen ans Netz – eben weil der Strom in diesem Moment
-billig ist –, und die gespeicherte Energie bleibt für die teuren Stunden übrig.
-
-Bei dynamischen Tarifen ist der *Entladezeitpunkt* damit genauso steuerbar wie
-der Ladezeitpunkt.
-
-### Betriebsarten
-
-Eingestellt über die Auswahl-Entität **"Entladesperre Modus"**:
-
-| Modus | Verhalten |
-| --- | --- |
-| **Aus** | Automatik aus, das Gerät regelt wie bisher |
-| **Zeitfenster** | Entladen ist innerhalb eines festen Zeitfensters gesperrt (Start/Ende + Monats-Schalter, genau wie beim [netzdienlichen Laden](#netzdienliches-laden)) |
-| **Preisgesteuert** | Entladen ist gesperrt, solange der Preis des aktuellen Zeitfensters **unter** "Entladesperre Preisschwelle" liegt |
-
-Der Modus "Preisgesteuert" nutzt denselben Strompreis-Sensor und denselben
-24-Stunden-Planungshorizont wie das
-[preisoptimierte Laden](#preisoptimiertes-laden) – er muss also einmal unter
-"Konfigurieren" eingerichtet sein. Ohne Preis-Sensor oder ohne verwertbare
-Preisvorschau wird nicht gesperrt (Status "Keine Preisdaten").
-
-### Einstellungen
-
-| Entität | Beschreibung |
-| --- | --- |
-| Entladesperre Modus | Aus / Zeitfenster / Preisgesteuert |
-| Entladesperre Mindest-SOC | Reserve: unterhalb dieses Ladestands wird **nie** gesperrt. Standard 20 % |
-| Entladesperre Preisschwelle | Nur im Modus "Preisgesteuert". Standard 0,20 EUR/kWh |
-| Start / Ende | Nur im Modus "Zeitfenster" (HH:MM, darf über Mitternacht laufen) |
-| 12 Monats-Schalter | In welchen Monaten das Sperrfenster gilt |
-
-Alle Werte bleiben über Neustarts hinweg erhalten. Ab Werk steht der Modus auf
-"Aus" und das Sperrfenster ist leer – bestehende Installationen verhalten sich
-nach dem Update also unverändert.
-
-### Wann gesperrt wird
-
-Gesperrt wird nur, wenn **alle** Bedingungen gleichzeitig gelten:
-
-- Modus ist nicht "Aus",
-- **keine** der drei Lade-Automatiken beansprucht gerade den Speicher
-  (die Entladesperre steht unter allen dreien, siehe
-  [Die drei Lade-Automatiken](#die-drei-lade-automatiken)),
-- die [Max-SOC-Sperre](#max-soc-sperre) greift gerade nicht,
-- der Ladestand liegt **über** "Entladesperre Mindest-SOC",
-- je nach Modus: aktuelle Zeit im Sperrfenster und Monat aktiviert – bzw.
-  aktueller Preis unter der Schwelle,
-- es liegt **kein** bestätigter PV-Überschuss vor.
-
-Die vollständige Rangfolge lautet damit:
-
-1. Max-SOC-Sperre
-2. Netzladung (zeitgesteuertes Laden)
-3. Preisoptimiertes Laden
-4. Netzdienliches Laden
-5. **Entladesperre**
-6. sonst: geräteeigene Nullregelung
-
-### Warum PV-Überschuss die Sperre aufhebt
-
-Ein gehaltener 0-W-Sollwert bedeutet: Der Speicher gibt nichts ab – nimmt aber
-auch **nichts auf**. Bei Sonnenschein würde die Sperre den PV-Ertrag also ins
-Netz drücken statt in den Speicher, also genau das Gegenteil des Ziels.
-
-Sobald am Smart Meter über zwei Abfragezyklen hinweg mehr als 50 W Einspeisung
-gemessen werden (derselbe
-[50-W-Schwellwert](#der-50-w-schwellwert) wie bei den Lade-Automatiken), wird die
-Sperre deshalb aufgehoben und der Speicher lädt normal mit PV weiter.
-
-### Wann die Sperre aktiv aufgehoben wird
-
-In allen folgenden Fällen wird der Speicher **aktiv** in die normale
-Geräteregelung zurückgeschaltet, statt passiv auf einen Timeout zu warten:
-
-- Modus wird auf "Aus" gestellt,
-- Ladestand fällt auf oder unter "Entladesperre Mindest-SOC",
-- bestätigter PV-Überschuss,
-- Sperrfenster bzw. günstiges Preisfenster ist vorbei,
-- eine der Lade-Automatiken übernimmt,
-- Home Assistant wird beendet oder die Integration neu geladen.
-
-Das ist bewusst so gebaut: Bliebe ein 0-W-Sollwert stehen, wirkte der Speicher
-für Außenstehende schlicht tot.
-
-### Lohnt sich das?
-
-Nicht immer. Der Umweg über den Speicher kostet je nach Gerät rund 10–15 %
-Wirkungsgrad, und jedes zusätzliche Aufsparen bedeutet einen weiteren
-Ladezyklus. Aufsparen rechnet sich nur, wenn die Preisdifferenz zwischen
-Sperr- und Nutzungsstunde diese Verluste **deutlich** übersteigt.
-
-Bei einem **Festpreistarif** ist der Modus "Preisgesteuert" wirkungslos – es
-gibt keine teuren und billigen Stunden. Sinnvoll ist dort höchstens der Modus
-"Zeitfenster", etwa um den Speicher über den Tag für einen bekannten
-Abendverbrauch zurückzuhalten.
-
 ## Zeitfenster dürfen sich nicht überschneiden
 
 Das Zeitfenster des netzdienlichen Ladens darf sich nicht mit dem der Netzladung
-überlappen. Für das Sperrfenster der
-[Entladesperre](#entladesperre-aufsparen-für-teure-stunden) gilt diese Regel
-nicht – es darf sich mit beiden überschneiden. Dabei zählen **Tageszeit UND aktive Monate zusammen**: Laufen beide
+überlappen. Dabei zählen **Tageszeit UND aktive Monate zusammen**: Laufen beide
 Fenster in verschiedenen Monaten (z. B. Netzladung nur November–Januar,
 netzdienliches Laden nur Mai–August), dürfen sich die Uhrzeiten beliebig
 überlappen – sie sind ja nie gleichzeitig aktiv.
@@ -798,17 +673,6 @@ Netzladung atomar in einem Aufruf (siehe
 | `end` | Endzeit |
 
 **`sax_power.set_grid_serving_window`** – dasselbe für das netzdienliche Laden.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-| `start` | Startzeit |
-| `end` | Endzeit |
-
-**`sax_power.set_discharge_block_window`** – dasselbe für das Sperrfenster der
-[Entladesperre](#entladesperre-aufsparen-für-teure-stunden). Dieses Fenster wird
-nicht auf Überschneidungen geprüft, weil die Entladesperre ohnehin jeder
-Lade-Automatik weicht.
 
 | Feld | Beschreibung |
 | --- | --- |
@@ -919,13 +783,6 @@ gemacht – die Datei kann also gefahrlos geteilt werden.
 - **Die Strategie "Smart" braucht die Speicherkapazität** (SunSpec-Register
   40097) und einen PV-Prognose-Sensor. Fehlt eines davon, verhält sie sich wie
   "Relativ".
-- **Der Modus "Preisgesteuert" der Entladesperre ist bei einem Festpreistarif
-  wertlos** – ohne Preisunterschiede zwischen den Stunden gibt es nichts
-  aufzusparen. Dort ist der Modus "Zeitfenster" die passende Betriebsart.
-- **Aufsparen lohnt sich nicht immer.** Der Umweg über den Speicher kostet
-  je nach Gerät rund 10–15 % Wirkungsgrad und einen zusätzlichen Ladezyklus.
-  Die Preisdifferenz zwischen Sperr- und Nutzungsstunde sollte diese Verluste
-  und die Akku-Alterung deutlich übersteigen.
 
 ## Weiterführende Dokumentation
 

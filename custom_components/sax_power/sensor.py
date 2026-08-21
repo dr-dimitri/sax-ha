@@ -49,9 +49,8 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
 
     `attributes_fn` ist optional und liefert zusätzliche Attribute für
     Sensoren, deren Zustand allein die Nachvollziehbarkeit nicht hergibt -
-    aktuell die Statussensoren des preisoptimierten Ladens und der
-    Entladesperre, die damit die zugrundeliegenden Preise und die geplanten
-    Lade- bzw. Sperrfenster mitliefern.
+    aktuell der Statussensor des preisoptimierten Ladens, der damit die
+    zugrundeliegenden Preise und die geplanten Ladefenster mitliefert.
     """
 
     value_fn: Callable[[dict[str, Any]], StateType | datetime]
@@ -193,19 +192,6 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement="EUR/kWh",
         suggested_display_precision=4,
         value_fn=_direct("price_charge_current_price"),
-    ),
-    # Klartextstatus der Entladesperre (siehe const.DISCHARGE_BLOCK_STATUS_*
-    # sowie anforderung.yaml, REQ-DISCHARGE-BLOCK). Wie beim Status des
-    # preisoptimierten Ladens bewusst kein entity_category=DIAGNOSTIC: das
-    # ist die Entity, an der der Anwender im Alltag abliest, warum der
-    # Speicher gerade nicht entlädt.
-    SaxPowerSensorEntityDescription(
-        key="discharge_block_status_text",
-        translation_key="discharge_block_status_text",
-        value_fn=_direct("discharge_block_status"),
-        attributes_fn=(
-            lambda coordinator: coordinator.price_planner.discharge_block_attributes
-        ),
     ),
     SaxPowerSensorEntityDescription(
         key="setpoint_power",

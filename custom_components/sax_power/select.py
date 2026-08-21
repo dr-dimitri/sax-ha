@@ -1,11 +1,9 @@
 """Select platform for SAX Power.
 
-Strategie-Auswahl für das preisoptimierte Laden sowie Betriebsart der
-Entladesperre (beides Software-Logik, kein Register) - siehe
-coordinator.SaxPowerCoordinator (Abschnitte "Preisoptimiertes Laden" und
-"Entladesperre"), price_optimizer.compute_plan/
-compute_discharge_block_plan sowie anforderung.yaml,
-REQ-DYNAMIC-PRICE-CHARGE und REQ-DISCHARGE-BLOCK.
+Strategie-Auswahl für das preisoptimierte Laden (Software-Logik, kein
+Register) - siehe coordinator.SaxPowerCoordinator (Abschnitt
+"Preisoptimiertes Laden"), price_optimizer.compute_plan sowie
+anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 """
 
 from __future__ import annotations
@@ -19,9 +17,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import (
     CONF_PRICE_STRATEGY,
     DATA_COORDINATOR,
-    DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_PRICE_STRATEGY,
-    DISCHARGE_BLOCK_MODES,
     DOMAIN,
     PRICE_STRATEGIES,
 )
@@ -38,7 +34,6 @@ async def async_setup_entry(
     async_add_entities(
         [
             SaxPowerPriceStrategySelect(coordinator, entry.entry_id),
-            SaxPowerDischargeBlockModeSelect(coordinator, entry.entry_id),
         ]
     )
 
@@ -86,50 +81,4 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_set_price_charge_strategy(option)
-        self.async_write_ha_state()
-
-
-class SaxPowerDischargeBlockModeSelect(RestoreEntity, SaxPowerEntity, SelectEntity):
-    """Betriebsart der Entladesperre (siehe anforderung.yaml,
-    REQ-DISCHARGE-BLOCK).
-
-    - `off`    - Automatik aus, das Gerät regelt wie bisher (Nullregelung
-                 deckt den Hausverbrauch aus dem Speicher).
-    - `window` - Entladen ist innerhalb eines festen Zeitfensters gesperrt
-                 (Start/Ende + Monats-Schalter, aufgebaut wie beim
-                 netzdienlichen Laden).
-    - `price`  - Entladen ist gesperrt, solange der aktuelle Preis-Slot
-                 unter der Schwelle "Entladesperre Preisschwelle" liegt -
-                 der Speicher spart sich damit automatisch für die
-                 Abendspitze auf. Braucht einen dynamischen Tarif; bei
-                 einem Festpreistarif ist dieser Modus wirkungslos, dort
-                 ist `window` die passende Betriebsart.
-
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert; ohne
-    gespeicherten Zustand gilt DEFAULT_DISCHARGE_BLOCK_MODE.
-    """
-
-    _attr_translation_key = "discharge_block_mode"
-    _attr_options = list(DISCHARGE_BLOCK_MODES)
-
-    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
-        super().__init__(coordinator, entry_id)
-        self._attr_unique_id = f"{entry_id}_discharge_block_mode"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state in DISCHARGE_BLOCK_MODES:
-                await self.coordinator.async_set_discharge_block_mode(last_state.state)
-                return
-        await self.coordinator.async_set_discharge_block_mode(
-            DEFAULT_DISCHARGE_BLOCK_MODE
-        )
-
-    @property
-    def current_option(self) -> str:
-        return self.coordinator.discharge_block_mode
-
-    async def async_select_option(self, option: str) -> None:
-        await self.coordinator.async_set_discharge_block_mode(option)
         self.async_write_ha_state()

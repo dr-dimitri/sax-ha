@@ -75,9 +75,6 @@
       },
       "battery_problem": {
         "name": "Battery problem"
-      },
-      "discharge_block_active": {
-        "name": "Discharge block active"
       }
     },
     "sensor": {
@@ -275,9 +272,6 @@
       },
       "price_charge_current_price": {
         "name": "Current electricity price"
-      },
-      "discharge_block_status_text": {
-        "name": "Discharge block status"
       }
     },
     "number": {
@@ -292,12 +286,6 @@
       },
       "price_charge_hours": {
         "name": "Price-optimised charging hours"
-      },
-      "discharge_block_min_soc": {
-        "name": "Discharge block minimum SOC"
-      },
-      "discharge_block_max_price": {
-        "name": "Discharge block price threshold"
       }
     },
     "switch": {
@@ -384,42 +372,6 @@
       },
       "price_charge_enabled": {
         "name": "Price-optimised charging active"
-      },
-      "discharge_block_month_1": {
-        "name": "January"
-      },
-      "discharge_block_month_2": {
-        "name": "February"
-      },
-      "discharge_block_month_3": {
-        "name": "March"
-      },
-      "discharge_block_month_4": {
-        "name": "April"
-      },
-      "discharge_block_month_5": {
-        "name": "May"
-      },
-      "discharge_block_month_6": {
-        "name": "June"
-      },
-      "discharge_block_month_7": {
-        "name": "July"
-      },
-      "discharge_block_month_8": {
-        "name": "August"
-      },
-      "discharge_block_month_9": {
-        "name": "September"
-      },
-      "discharge_block_month_10": {
-        "name": "October"
-      },
-      "discharge_block_month_11": {
-        "name": "November"
-      },
-      "discharge_block_month_12": {
-        "name": "December"
       }
     },
     "time": {
@@ -434,12 +386,6 @@
       },
       "grid_serving_end": {
         "name": "End"
-      },
-      "discharge_block_start": {
-        "name": "Start"
-      },
-      "discharge_block_end": {
-        "name": "End"
       }
     },
     "select": {
@@ -450,14 +396,6 @@
           "absolute": "Absolute price",
           "relative": "Relative / cheapest hours",
           "smart": "Smart / PV-optimised"
-        }
-      },
-      "discharge_block_mode": {
-        "name": "Discharge block mode",
-        "state": {
-          "off": "Off",
-          "window": "Time window",
-          "price": "Price controlled"
         }
       }
     }
@@ -626,24 +564,6 @@
           "description": "The SAX Power device."
         }
       }
-    },
-    "set_discharge_block_window": {
-      "name": "Set discharge block window",
-      "description": "Sets the start and end time of the discharge block window in a single atomic call instead of using the individual start/end time entities.",
-      "fields": {
-        "device_id": {
-          "name": "Device",
-          "description": "The SAX Power device."
-        },
-        "start": {
-          "name": "Start",
-          "description": "Start of the block window."
-        },
-        "end": {
-          "name": "End",
-          "description": "End of the block window."
-        }
-      }
     }
   },
   "options": {
@@ -683,13 +603,6 @@
         "absolute": "Absolute price",
         "relative": "Relative / cheapest hours",
         "smart": "Smart / PV-optimised"
-      }
-    },
-    "discharge_block_mode": {
-      "options": {
-        "off": "Off",
-        "window": "Time window",
-        "price": "Price controlled"
       }
     }
   }

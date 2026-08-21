@@ -689,6 +689,11 @@ class SaxPricePlanner:
             "preisgrenze": (
                 None if plan.threshold is None else round(plan.threshold, 5)
             ),
+            "neutralpreis": (
+                None
+                if self.coordinator.price_charge_neutral_price is None
+                else round(self.coordinator.price_charge_neutral_price, 5)
+            ),
             "benoetigte_stunden": plan.needed_hours,
             "pv_prognose_kwh": (
                 None if plan.pv_forecast_kwh is None else round(plan.pv_forecast_kwh, 2)

@@ -498,6 +498,17 @@ MAX_PRICE_LIMIT = 2.0
 PRICE_LIMIT_STEP = 0.001
 DEFAULT_PRICE_LIMIT = 0.20
 
+# Neutralpreis: zweiter, oberhalb der Preisgrenze liegender Schwellwert
+# (gleiche Einheit/Bereich/Schrittweite wie die Preisgrenze). Liegt der
+# aktuelle Preis zwischen Preisgrenze und Neutralpreis, wird der Speicher in
+# den manuellen Sollwertmodus mit Sollwert 0 geschaltet (Laden UND Entladen
+# gestoppt) statt der geräteeigenen SmartMeter-Nullregelung überlassen zu
+# werden - verhindert, dass gespeicherte, günstig eingekaufte Energie durch
+# die Speicherverluste teurer entladen wird, als der direkte Netzbezug in
+# diesem Preisband kosten würde. Erst ab dem Neutralpreis lohnt sich die
+# Entladung wieder, der Speicher geht dann zurück in die Nullregelung.
+DEFAULT_PRICE_NEUTRAL = 0.30
+
 # Anzahl der günstigsten Stunden (Modi "Relativ" und "Smart"). Im
 # Smart-Modus zusätzlich Obergrenze für die aus dem Energiebedarf
 # errechnete Stundenzahl.
@@ -541,6 +552,7 @@ PRICE_STATUS_PV_FORECAST_COVERS = "PV-Prognose deckt Bedarf"
 PRICE_STATUS_PAUSED_PV_SURPLUS = "Pausiert (PV-Überschuss)"
 PRICE_STATUS_PAUSED_MAX_SOC = "Pausiert (Max. SOC)"
 PRICE_STATUS_PAUSED_TIMED_CHARGE = "Pausiert (Netzladung aktiv)"
+PRICE_STATUS_PAUSED_NEUTRAL_BAND = "Pausiert (Preisband)"
 
 # -- Konflikt zwischen Netzladung und preisoptimiertem Laden --------------
 # Beide Features laden aktiv aus dem Netz über denselben Schreibpfad und
@@ -591,6 +603,7 @@ ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE = "sunspec_persistently_unavailable"
 ISSUE_MAX_SOC_BELOW_MIN_SOC = "max_soc_below_min_soc"
 ISSUE_EMPTY_CHARGE_WINDOW = "empty_charge_window"
 ISSUE_NO_ACTIVE_MONTHS = "no_active_months"
+ISSUE_PRICE_NEUTRAL_BELOW_LIMIT = "price_neutral_below_limit"
 
 # Mindestdauer eines fortbestehenden Problemzustands, bevor die jeweilige
 # Prüfung anschlägt - kurze Aussetzer (ein einzelner verpasster

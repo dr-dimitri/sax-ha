@@ -282,7 +282,10 @@
         "name": "Grid charge min. SOC"
       },
       "price_charge_max_price": {
-        "name": "Price limit"
+        "name": "Grid draw and charging up to"
+      },
+      "price_charge_neutral_price": {
+        "name": "Grid draw without charging up to"
       },
       "price_charge_hours": {
         "name": "Hours"
@@ -454,6 +457,10 @@
     "no_active_months": {
       "title": "No month selected",
       "description": "No month at all is enabled for \"{feature}\" - the feature is therefore inactive all year round. Please enable at least one month."
+    },
+    "price_neutral_below_limit": {
+      "title": "Neutral price is not above the price limit",
+      "description": "\"Neutral price\" ({neutral_price} EUR/kWh) is not above \"Price limit\" ({max_price} EUR/kWh) - the pause zone of price-optimised charging (charging and discharging stopped between these two values) can therefore never engage, the storage behaves outside of charging phases as it did before the neutral price was introduced. Please raise the neutral price above the price limit."
     }
   },
   "services": {

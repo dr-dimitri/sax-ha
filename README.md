@@ -255,7 +255,8 @@ wie alle anderen von diesem Block abhängigen Entities auch.
 | --- | --- | --- |
 | Max. SOC | 0–100 % | Ziel-Ladestand für die [Max-SOC-Sperre](#max-soc-sperre); gleichzeitig oberes Ziel der Netzladung. Ohne vorherige Einstellung 100 % (nicht 0) |
 | Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 100 % |
-| Preisoptimiertes Laden Preisgrenze | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
+| Preisoptimiertes Laden Netzbezug und laden bis (Preisgrenze) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
+| Preisoptimiertes Laden Netzbezug ohne laden bis (Neutralpreis) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Muss über der Preisgrenze liegen (sonst Reparaturhinweis). Zwischen Preisgrenze und Neutralpreis wird der Speicher pausiert (siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone)). Standard 0,30 EUR/kWh |
 | Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
 
 Alle Werte bleiben über Neustarts hinweg erhalten. Netzladung und
@@ -568,6 +569,34 @@ Abfragezyklus geprüft, greifen also ohne Verzögerung.
 > auf den maximal möglichen negativen Sollwert). Ist die Bedingung nicht
 > erfüllt, geht der Speicher in die SmartMeter-Nullregelung zurück.
 
+### Neutralpreis-Pausezone
+
+Lädt die Automatik gerade nicht aus dem Netz (der aktuelle Preis liegt über
+der Preisgrenze), aber unterhalb des **Neutralpreises**, wird der Speicher
+nicht der normalen SmartMeter-Nullregelung überlassen, sondern aktiv
+**pausiert** – Laden UND Entladen werden gestoppt, der gesamte Hausverbrauch
+läuft über das Netz. Grund: die im Speicher gespeicherte, günstig eingekaufte
+Energie würde durch die Speicherverluste beim Entladen teurer werden als der
+direkte Netzbezug in diesem mittleren Preisband. Erst **ab dem Neutralpreis**
+lohnt sich die Entladung wieder trotz der Verluste – der Speicher geht dann
+zurück in die normale Nullregelung, das Smart Meter übernimmt die Entladung
+wieder.
+
+```
+Preis ≤ Preisgrenze        →  Lade aus Netz
+Preisgrenze < Preis <       →  Pausiert (Preisband): Laden und Entladen gestoppt
+           Neutralpreis
+Preis ≥ Neutralpreis       →  Normale SmartMeter-Nullregelung (Entladung erlaubt)
+```
+
+Die Pausezone gilt für **alle drei Strategien** und weicht denselben
+Abbruchgründen wie die Netzladung selbst – insbesondere einem bestätigten
+PV-Überschuss, damit freie Sonnenenergie weiterhin ungehindert in den
+Speicher fließen kann. Der Neutralpreis muss über der Preisgrenze liegen;
+andernfalls erscheint ein Reparaturhinweis unter *Einstellungen → Geräte &
+Dienste → Reparaturen*, und die Pausezone bleibt inaktiv (unverändertes
+Verhalten wie vor Einführung dieser Einstellung).
+
 ### Statusanzeige
 
 Der Sensor **"Preisoptimiertes Laden Status"** nennt in Klartext den Grund für
@@ -583,11 +612,13 @@ das aktuelle Verhalten:
 | Pausiert (PV-Überschuss) | Am Smart Meter wird Einspeisung gemessen |
 | Pausiert (Max. SOC) | Die übergeordnete Max-SOC-Sperre greift |
 | Pausiert (Netzladung aktiv) | Das zeitgesteuerte Laden hat gerade Vorrang |
+| Pausiert (Preisband) | Preis liegt zwischen Preisgrenze und Neutralpreis – siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone) |
 
 Die Attribute dieses Sensors zeigen zusätzlich Strategie, aktuellen Preis,
-wirksame Preisgrenze, benötigte Stunden, eingerechnete PV-Prognose, die
-konfigurierten Quell-Sensoren und alle geplanten Zeitfenster – hilfreich, wenn
-eine Entscheidung einmal nicht nachvollziehbar erscheint.
+wirksame Preisgrenze, Neutralpreis, benötigte Stunden, eingerechnete
+PV-Prognose, die konfigurierten Quell-Sensoren und alle geplanten
+Zeitfenster – hilfreich, wenn eine Entscheidung einmal nicht nachvollziehbar
+erscheint.
 
 ### Netzladung und preisoptimiertes Laden schließen sich aus
 
@@ -748,6 +779,7 @@ gemacht – die Datei kann also gefahrlos geteilt werden.
 | Lade-Automatiken tun nichts | SunSpec-Modus nicht erreichbar – alle drei brauchen ihn zum Schreiben | wie oben |
 | Netzladung startet nicht | "Netzladung Min. SOC" zu niedrig, Monat nicht ausgewählt, Zeitfenster leer, oder PV-Überschuss über 50 W | Einstellungen prüfen, Sensor "Zeitgesteuertes Laden aktiv" beobachten |
 | Preisoptimiertes Laden meldet "Keine Preisdaten" | Der Sensor liefert keine auswertbare Vorschau | Attributnamen im Options-Dialog fest vorgeben; Diagnose-Export zeigt den ausgewerteten Plan |
+| Neutralpreis-Pausezone greift nie | "Neutralpreis" liegt nicht über "Preisgrenze" | Reparatur-Hinweis unter Einstellungen → Geräte & Dienste → Reparaturen beachten, Neutralpreis anheben |
 | Speicher lädt und entlädt gar nicht mehr | Die [Max-SOC-Sperre](#max-soc-sperre) hält ihn bei 0 % | "Max. SOC" höher setzen oder Netzbezug abwarten |
 | Zeit lässt sich nicht setzen / wurde geleert | Überschneidung der Zeitfenster | Siehe [Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden) |
 | "Ladestatus Akku" (oder andere Klartext-Sensoren) erzeugt viele Einträge im Protokoll/in der Aktivität | Der Wert wird alle 2 s abgefragt und kann entsprechend oft wechseln; Home Assistant blendet nur Sensoren mit Einheit/state_class automatisch aus dem Logbuch aus – für reine Klartext-Sensoren geht das nicht, ohne sie kaputt zu machen | Entity-ID in Entwicklertools → Zustände nachschlagen und gezielt ausschließen: `logbook:` → `exclude:` → `entities:` in der `configuration.yaml` (siehe [Logbuch-Dokumentation](https://www.home-assistant.io/integrations/logbook/#exclude)) |

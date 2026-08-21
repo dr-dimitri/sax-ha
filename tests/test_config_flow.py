@@ -8,6 +8,7 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sax_power.config_flow import _expected_entity_count
 from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
     CONF_PRICE_STRATEGY,
@@ -17,6 +18,11 @@ from custom_components.sax_power.const import (
     DOMAIN,
     PRICE_STRATEGY_SMART,
     PRICE_UNIT_CT_KWH,
+    REG_SOC,
+    REG_SUN_SERIAL_HI,
+    REG_SUN_SERIAL_LO,
+    REG_SUN_VERSION_GATEWAY,
+    REG_SUN_VERSION_MASTER,
 )
 
 VALID_INPUT = {
@@ -74,13 +80,17 @@ async def test_user_flow_success(hass) -> None:
         assert result3["step_id"] == "dashboard"
 
         result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
-        assert result4["type"] == FlowResultType.CREATE_ENTRY
-        assert result4["title"] == "SAX Power Home"
-        assert result4["data"]["host"] == "192.168.1.50"
-        assert result4["data"]["timed_charge_enabled"] is False
-        assert result4["data"]["timed_charge_start"] == "00:00:00"
-        assert result4["data"]["timed_charge_end"] == "00:05:00"
-        assert result4["data"]["create_dashboard"] is True
+        assert result4["type"] == FlowResultType.FORM
+        assert result4["step_id"] == "finish"
+
+        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
+        assert result5["type"] == FlowResultType.CREATE_ENTRY
+        assert result5["title"] == "SAX Power Home"
+        assert result5["data"]["host"] == "192.168.1.50"
+        assert result5["data"]["timed_charge_enabled"] is False
+        assert result5["data"]["timed_charge_start"] == "00:00:00"
+        assert result5["data"]["timed_charge_end"] == "00:05:00"
+        assert result5["data"]["create_dashboard"] is True
 
 
 async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
@@ -120,10 +130,14 @@ async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
         assert result3["step_id"] == "dashboard"
 
         result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
-        assert result4["type"] == FlowResultType.CREATE_ENTRY
-        assert result4["data"]["timed_charge_enabled"] is True
-        assert result4["data"]["timed_charge_start"] == "22:00:00"
-        assert result4["data"]["timed_charge_end"] == "06:00:00"
+        assert result4["type"] == FlowResultType.FORM
+        assert result4["step_id"] == "finish"
+
+        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
+        assert result5["type"] == FlowResultType.CREATE_ENTRY
+        assert result5["data"]["timed_charge_enabled"] is True
+        assert result5["data"]["timed_charge_start"] == "22:00:00"
+        assert result5["data"]["timed_charge_end"] == "06:00:00"
 
 
 async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
@@ -156,8 +170,99 @@ async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
         result4 = await hass.config_entries.flow.async_configure(
             result3["flow_id"], {"create_dashboard": False}
         )
-        assert result4["type"] == FlowResultType.CREATE_ENTRY
-        assert result4["data"]["create_dashboard"] is False
+        assert result4["type"] == FlowResultType.FORM
+        assert result4["step_id"] == "finish"
+
+        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
+        assert result5["type"] == FlowResultType.CREATE_ENTRY
+        assert result5["data"]["create_dashboard"] is False
+
+
+async def test_finish_step_shows_summary_placeholders(hass) -> None:
+    """Vierter, abschließender Schritt der Ersteinrichtung ("finish", siehe
+    anforderung.yaml REQ-SETUP-FINISH-SUMMARY): fasst Firmware, Seriennummer,
+    SunSpec-Erreichbarkeit und Entity-Anzahl als description_placeholders
+    zusammen, bevor der Config Entry angelegt wird."""
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+    read_result = MagicMock()
+    read_result.isError.return_value = False
+    registers = [50] * 115
+    registers[REG_SUN_VERSION_MASTER] = 61
+    registers[REG_SUN_VERSION_GATEWAY] = 54
+    registers[REG_SUN_SERIAL_HI] = 0
+    registers[REG_SUN_SERIAL_LO] = 12345
+    read_result.registers = registers
+    client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.close = MagicMock()
+
+    with patch(
+        "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+        return_value=client,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
+        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
+
+        assert result4["type"] == FlowResultType.FORM
+        assert result4["step_id"] == "finish"
+        placeholders = result4["description_placeholders"]
+        assert placeholders["firmware"] == "Master V61 / Gateway V54"
+        assert placeholders["serial_number"] == "12345"
+        assert placeholders["sunspec_status"] == "Erreichbar"
+        assert placeholders["entity_count"] == str(_expected_entity_count())
+
+
+async def test_finish_step_marks_sunspec_unavailable(hass) -> None:
+    """Ist der SunSpec-Modus-Block beim Abschluss-Read nicht erreichbar (z. B.
+    weil das Gerät die Slave-ID 100 ablehnt), zeigt die Abschlussseite
+    "Nicht erreichbar" statt den Flow abzubrechen - analog zu
+    REQ-EXTENDED-MODE-RESILIENCE, das dieselbe Toleranz für den laufenden
+    Betrieb vorschreibt."""
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+
+    soc_result = MagicMock()
+    soc_result.isError.return_value = False
+    soc_result.registers = [50]
+
+    extended_result = MagicMock()
+    extended_result.isError.return_value = True
+
+    async def _read_holding_registers(*, address, count, device_id):
+        if address == REG_SOC:
+            return soc_result
+        return extended_result
+
+    client.read_holding_registers = AsyncMock(side_effect=_read_holding_registers)
+    client.close = MagicMock()
+
+    with patch(
+        "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+        return_value=client,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
+        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
+
+        assert result4["type"] == FlowResultType.FORM
+        assert result4["step_id"] == "finish"
+        placeholders = result4["description_placeholders"]
+        assert placeholders["sunspec_status"] == "Nicht erreichbar"
+        assert "Nicht verfügbar" in placeholders["firmware"]
+        assert "Nicht verfügbar" in placeholders["serial_number"]
 
 
 async def test_user_flow_cannot_connect(hass) -> None:

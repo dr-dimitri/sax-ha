@@ -69,10 +69,17 @@ tests/                Siehe Abschnitt "Tests"
 auch `async_step_reconfigure` (spätere Änderung, z. B. der IP-Adresse) über
 eine gemeinsame Methode (`_async_step_connection`). Beide validieren die
 Verbindung mit demselben Testread, bevor die Daten gespeichert werden. Nur
-`async_step_user` verzweigt bei Erfolg zusätzlich in einen zweiten,
-optionalen Schritt (`async_step_grid_charge`, siehe `STEP_GRID_CHARGE_SCHEMA`)
-für die Vorbelegung des zeitgesteuerten Ladens, bevor der Eintrag angelegt
-wird - `async_step_reconfigure` überspringt diesen Schritt.
+`async_step_user` verzweigt bei Erfolg zusätzlich in drei weitere, optionale
+Schritte, bevor der Eintrag angelegt wird - `async_step_reconfigure`
+überspringt sie alle: `async_step_grid_charge` (Vorbelegung für das
+zeitgesteuerte Laden, siehe `STEP_GRID_CHARGE_SCHEMA`), `async_step_dashboard`
+(Dashboard anlegen ja/nein, siehe `STEP_DASHBOARD_SCHEMA` und
+REQ-BUNDLED-DASHBOARD) und zuletzt `async_step_finish` - eine reine
+Zusammenfassungsseite ohne eigene Eingabefelder (Firmware, Seriennummer,
+SunSpec-Erreichbarkeit, Anzahl angelegter Entities als
+`description_placeholders`, per Testread über `_async_read_finish_summary`
+ermittelt), siehe anforderung.yaml REQ-SETUP-FINISH-SUMMARY. Der Config Entry
+wird erst hier angelegt.
 
 Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
 preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als
@@ -316,10 +323,13 @@ tests/
 │                                  Ablehnung überlappender Änderungen), aktive Monate
 │                                  (Enforcement, Default "alle Monate", Überlappungsprüfung
 │                                  inkl. erlaubter Zeitfenster-Überlappung bei disjunkten Monaten)
-├── test_config_flow.py            Unit-Tests: erfolgreicher zweistufiger Config Flow
-│                                  (Verbindung + optionale Netzladung-Vorbelegung inkl.
-│                                  Defaults bei leerem zweiten Schritt), "cannot_connect"-Fehler
-│                                  (gemockter AsyncModbusTcpClient)
+├── test_config_flow.py            Unit-Tests: erfolgreicher vierstufiger Config Flow
+│                                  (Verbindung, optionale Netzladung-/Dashboard-Vorbelegung
+│                                  inkl. Defaults bei leeren Schritten, Abschlussseite mit
+│                                  Firmware/Seriennummer/SunSpec-Status/Entity-Anzahl als
+│                                  description_placeholders - auch bei nicht erreichbarem
+│                                  SunSpec-Modus), "cannot_connect"-Fehler (gemockter
+│                                  AsyncModbusTcpClient)
 ├── test_sensor_descriptions.py     Konsistenz-Tests über alle ~56 Sensor-Beschreibungen:
 │                                  eindeutige Keys, vollständige DE/EN-Übersetzungen,
 │                                  value_fn wirft für keinen Sensor eine Exception

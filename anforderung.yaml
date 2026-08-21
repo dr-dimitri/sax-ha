@@ -49,6 +49,7 @@
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
+# REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # ==============================================================================
 
 # ==============================================================================
@@ -1310,3 +1311,72 @@ requirement_binary_sensors:
        Allgemeine Informationen die sechs nicht-diagnostischen
        binary_sensor-Entities enthält, sofern sie in der Entity Registry
        vorhanden sind."
+
+# ==============================================================================
+# ANFORDERUNG: ABSCHLUSSSEITE DER ERSTEINRICHTUNG
+# ==============================================================================
+requirement_setup_finish_summary:
+  id: REQ-SETUP-FINISH-SUMMARY
+  title: "Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende"
+  status: done
+  description: >
+    Der Config Flow endete bislang nach dem dritten, optionalen Schritt
+    ("dashboard", siehe REQ-BUNDLED-DASHBOARD) direkt mit async_create_entry
+    - ohne jede Rückmeldung, was die Ersteinrichtung tatsächlich ergeben hat.
+    config_flow.async_step_finish ergänzt einen vierten, abschließenden
+    Schritt ohne eigene Eingabefelder (leeres vol.Schema({}), reiner
+    "Weiter"-Button): eine Zusammenfassung über description_placeholders
+    (strings.json/translations, Übersetzungsschlüssel "finish").
+
+    Der Config Entry selbst wird jetzt erst hier angelegt (vorher in
+    async_step_dashboard) - async_step_dashboard merkt die
+    Dashboard-Entscheidung nur noch in self._dashboard_data vor und
+    verzweigt weiter zu async_step_finish, analog zu
+    self._connection_data/self._grid_charge_data aus den vorherigen
+    Schritten. Ein Abbruch des Flows auf der Abschlussseite legt dadurch
+    keinen unvollständigen Eintrag an.
+
+    Angezeigte Werte, per _async_read_finish_summary ermittelt (eigener,
+    einmaliger Testread analog zu _async_validate_connection - Verbindung
+    zum SunSpec-Modus-Block über READ_BLOCK_EXT_LOW1_START/_COUNT,
+    Slave-ID CONF_SLAVE_ID_EXTENDED):
+      - "firmware": aus sun_version_master/sun_version_gateway
+        zusammengesetzt ("Master V<x> / Gateway V<y>"), analog zu
+        coordinator._parse_low_block.
+      - "serial_number": aus sun_serial_number (Hi-/Lo-Word kombiniert wie
+        in coordinator._parse_low_block).
+      - "sunspec_status": "Erreichbar"/"Nicht erreichbar".
+      - "entity_count": Summe der von den sechs Plattformen (sensor,
+        binary_sensor, number, select, switch, time; siehe
+        __init__.PLATFORMS) tatsächlich angelegten Entities -
+        config_flow._expected_entity_count() zählt sensor.py
+        (SENSOR_DESCRIPTIONS + zwei Energiezähler) und binary_sensor.py
+        (BINARY_SENSOR_DESCRIPTIONS) sowie die Monats-Schalter in
+        switch.py (2 * len(ALL_MONTHS)) dynamisch, die übrigen, stabilen
+        Plattform-Entity-Zahlen (number.py, select.py, time.py, die vier
+        nicht-monatsbezogenen Schalter in switch.py) als feste, dort
+        nachgeführte Konstanten - siehe Kommentar über
+        config_flow._expected_entity_count.
+
+    Fehlertoleranz: Ist der SunSpec-Modus-Block auf diesem Testread nicht
+    erreichbar (TCP-Fehler, Modbus-Fehlerantwort), blockiert das nicht die
+    Ersteinrichtung - analog zu REQ-EXTENDED-MODE-RESILIENCE zeigt die
+    Seite dann nur "Nicht erreichbar" bzw. "Nicht verfügbar" für
+    Firmware/Seriennummer, statt den Flow abzubrechen. Die Basic-Mode-
+    Verbindung selbst wurde bereits im ersten Schritt
+    (_async_step_connection) validiert.
+
+    Reine Textarbeit ohne Auswirkung auf die eigentliche Gerätesteuerung:
+    kein neues Register wird geschrieben, kein bestehender Schreibpfad
+    verändert.
+  acceptance_criteria:
+    - "tests/test_config_flow.py deckt den vierten Ersteinrichtungsschritt
+       ('finish') ab: description_placeholders enthalten korrekte
+       Firmware-/Seriennummer-/SunSpec-Status-/Entity-Anzahl-Werte bei
+       erreichbarem SunSpec-Modus-Block, sowie 'Nicht erreichbar' bzw.
+       'Nicht verfügbar' bei einem auf diesem Testread fehlschlagenden
+       SunSpec-Modus-Block."
+    - "tests/test_config_flow.py deckt ab, dass der Config Entry weiterhin
+       korrekt mit allen zuvor gesammelten Daten (Verbindung,
+       Netzladung-Vorbelegung, Dashboard-Entscheidung) angelegt wird,
+       jetzt aber erst nach Bestätigung der Abschlussseite."

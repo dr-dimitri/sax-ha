@@ -145,6 +145,8 @@ def _build_extended_registers(**overrides: int) -> list[int]:
         70: 500,  # Netzfrequenz, roh -> 50.0 Hz
         71: to_unsigned16(-1),  # Scalefaktor Frequenz
         72: to_unsigned16(-300),  # Summenwirkleistung Netz -> smartmeter_power
+        # (Rohregister negativ = Netzbezug; die Integration negiert beim
+        # Einlesen, siehe Assertion unten und const.py)
         73: 68,  # Netzleistung L1
         74: 90,  # Netzleistung L2
         75: 87,  # Netzleistung L3
@@ -262,7 +264,10 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         smartmeter_power_id = _entity_id(registry, entry.entry_id, "smartmeter_power")
         grid_current_sum_id = _entity_id(registry, entry.entry_id, "grid_current_sum")
         grid_frequency_id = _entity_id(registry, entry.entry_id, "grid_frequency")
-        assert hass.states.get(smartmeter_power_id).state == "-300"
+        # Vorzeichenkonvention: Rohregister -300 (Einspeisung) wird beim
+        # Einlesen negiert -> Anzeigewert 300 (Standarddarstellung: negativ
+        # = Einspeisung, positiv = Netzbezug, siehe const.py).
+        assert hass.states.get(smartmeter_power_id).state == "300"
         assert _state_float(hass, grid_current_sum_id) == 20
         assert _state_float(hass, grid_frequency_id) == pytest.approx(50.0)
 

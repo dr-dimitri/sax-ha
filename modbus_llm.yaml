@@ -237,10 +237,10 @@ register_maps:
       - { protocol_addr: 40069, internal_addr: 69, name: "Scalefaktor Spannung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -1" }
       - { protocol_addr: 40070, internal_addr: 70, name: "Netzfrequenz", unit: "Hz", datatype: "uint16", access: "Read" }
       - { protocol_addr: 40071, internal_addr: 71, name: "Scalefaktor Frequenz", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: -2" }
-      - { protocol_addr: 40072, internal_addr: 72, name: "Summenwirkleistung Netz", unit: "W", datatype: "int16", access: "Read", notes: "Ersetzt das unzuverlässige Basic-Mode-Register 48" }
-      - { protocol_addr: 40073, internal_addr: 73, name: "Netzleistung L1", unit: "W", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40074, internal_addr: 74, name: "Netzleistung L2", unit: "W", datatype: "int16", access: "Read" }
-      - { protocol_addr: 40075, internal_addr: 75, name: "Netzleistung L3", unit: "W", datatype: "int16", access: "Read" }
+      - { protocol_addr: 40072, internal_addr: 72, name: "Summenwirkleistung Netz", unit: "W", datatype: "int16", access: "Read", notes: "Ersetzt das unzuverlässige Basic-Mode-Register 48. Rohregister positiv = Einspeisung; die Integration negiert den Wert vor der Ablage in data[\"smartmeter_power\"], siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION - dort ist negativ = Einspeisung, positiv = Netzbezug (Standarddarstellung)." }
+      - { protocol_addr: 40073, internal_addr: 73, name: "Netzleistung L1", unit: "W", datatype: "int16", access: "Read", notes: "Dieselbe Vorzeichenkonvention wie Register 40072 (negiert beim Einlesen)." }
+      - { protocol_addr: 40074, internal_addr: 74, name: "Netzleistung L2", unit: "W", datatype: "int16", access: "Read", notes: "Dieselbe Vorzeichenkonvention wie Register 40072 (negiert beim Einlesen)." }
+      - { protocol_addr: 40075, internal_addr: 75, name: "Netzleistung L3", unit: "W", datatype: "int16", access: "Read", notes: "Dieselbe Vorzeichenkonvention wie Register 40072 (negiert beim Einlesen)." }
       - { protocol_addr: 40076, internal_addr: 76, name: "Scalefaktor Netzleistung", unit: "sunssf", datatype: "int16", access: "Read", notes: "wellknown: 1" }
       - { protocol_addr: 40077, internal_addr: 77, name: "Summenscheinleistung Netz", unit: "VA", datatype: "uint16", access: "Read" }
       - { protocol_addr: 40078, internal_addr: 78, name: "Scheinleistung Netz L1", unit: "VA", datatype: "uint16", access: "Read" }

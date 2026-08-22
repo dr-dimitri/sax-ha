@@ -588,11 +588,23 @@ requirement_grid_serving_charge:
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
     ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
-    unverändert für beide Lademodi), 2. zeitgesteuertes Laden, 3.
-    netzdienliches Laden. grid_serving_eligible verlangt explizit "not
-    timed_should_charge", zusätzlich zur strukturellen if/elif-
-    Priorisierung - beide können daher nie im selben Zyklus einen
-    Ladesollwert schreiben.
+    unverändert für alle Lademodi), 2. zeitgesteuertes Laden, 3.
+    netzdienliches Laden, 4. preisoptimiertes Laden (REQ-DYNAMIC-PRICE-CHARGE)
+    - netzdienliches Laden hat also Vorrang vor preisoptimiertem Laden, nicht
+    umgekehrt: grid_serving_eligible verlangt nur noch "not
+    timed_should_charge" (kein Ausschluss mehr durch price_should_charge/
+    price_should_pause), preisoptimiertes Laden schließt seinerseits über
+    "not grid_serving_window_active" aus, sobald das Zeitfenster des
+    netzdienlichen Ladens aktiv ist (unabhängig davon, ob dessen eigene
+    Zustandsmaschine gerade tatsächlich eingreift) - zusätzlich zur
+    strukturellen if/elif-Priorisierung, damit nie zwei Automatiken im selben
+    Zyklus um denselben Sollwertvorgabemodus konkurrieren. Begründung: ohne
+    diesen Vorrang konnten sich beide Automatiken gegenseitig ein- und
+    ausschalten, sobald ihre jeweiligen Bedingungen gleichzeitig erfüllt
+    waren (ursprünglich gemeldeter Bug); netzdienliches Laden ist zudem
+    typischerweise nur in den ertragsreichen Sommermonaten aktiv, in denen
+    ohnehin kaum oder kein Netzbezug nötig ist, sodass es sinnvollerweise vor
+    preisoptimiertem Laden entscheidet.
 
     Aktive Monate: Zusätzlich zum Zeitfenster hat jedes der beiden Features
     (Netzladung UND netzdienliches Laden) 12 Monats-Schalter
@@ -763,6 +775,14 @@ requirement_grid_serving_charge:
        Monats-Verhalten für zeitgesteuertes Laden ab (inaktiv außerhalb der
        ausgewählten Monate, aktiv innerhalb) sowie den Fall, dass ein
        Feature bei keinem ausgewählten Monat ganzjährig inaktiv bleibt."
+    - "tests/test_price_optimizer.py deckt den Vorrang von netzdienlichem vor
+       preisoptimiertem Laden ab (test_grid_serving_takes_priority_over_
+       price_charge_neutral_band, test_grid_serving_takes_priority_over_
+       price_charge_active_charging): ein aktives Zeitfenster des
+       netzdienlichen Ladens blockiert sowohl price_should_charge als auch
+       die Neutralpreis-Pausezone, nicht umgekehrt - Regressionsschutz für
+       den ursprünglich gemeldeten Bug, dass sich beide Automatiken
+       gegenseitig ein- und ausschalten konnten."
     - "switch.py/time.py/sensor.py enthalten keine eigene
        Leistungseinstellung für netzdienliches Laden - es schreibt nie
        einen Sollwert > 0 und nutzt nur die zentrale Einstellung 'Max.
@@ -1087,10 +1107,20 @@ requirement_dynamic_price_charge:
     zeitgesteuerten Laden).
 
     Vorrang innerhalb von _async_enforce_grid_charge: Max-SOC-Sperre >
-    zeitgesteuertes Laden > preisoptimiertes Laden > netzdienliches Laden.
+    zeitgesteuertes Laden > netzdienliches Laden > preisoptimiertes Laden.
     Preisoptimiertes Laden bricht - wie das zeitgesteuerte Laden - bei
     bestätigtem PV-Überschuss am Smart Meter sofort ab (dieselbe
-    Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES).
+    Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES), UND weicht zusätzlich
+    einem aktiven Zeitfenster des netzdienlichen Ladens
+    (grid_serving_window_active) - unabhängig davon, ob dessen eigene
+    Zustandsmaschine gerade tatsächlich eingreift. Siehe
+    REQ-GRID-SERVING-CHARGE für die Begründung dieses Vorrangs (netzdienliches
+    Laden läuft nur in ertragsreichen Sommermonaten mit ohnehin kaum nötigem
+    Netzbezug) sowie den ursprünglich gemeldeten Bug, den dieser Vorrang
+    behebt: ohne ihn konnten sich beide Automatiken gegenseitig ein- und
+    ausschalten, sobald ihre Bedingungen gleichzeitig erfüllt waren. Der
+    Statussensor zeigt in diesem Fall "Pausiert (Netzdienliches Laden aktiv)"
+    (PRICE_STATUS_PAUSED_GRID_SERVING).
 
     Neutralpreis-Pausezone: number "Preisoptimiertes Laden Neutralpreis"
     (EUR/kWh, muss über der Preisgrenze liegen, siehe Reparaturhinweis
@@ -1115,14 +1145,15 @@ requirement_dynamic_price_charge:
     Rückfallverhalten, wenn kein gültiges Preisgrenze/Neutralpreis-Paar
     vorliegt). Die Pausezone teilt sich dieselben Ausschlussgründe wie
     price_should_charge (Max-SOC-Sperre, PV-Überschuss, Vorrang des
-    zeitgesteuerten Ladens - insbesondere weicht sie sofort einem
-    bestätigten PV-Überschuss, damit freie PV-Energie weiterhin ungehindert
-    in den Speicher fließen kann) und hat dieselbe Priorität wie aktives
-    preisoptimiertes Laden selbst: sie blockiert netzdienliches Laden
-    genauso (grid_serving_eligible schließt price_should_pause mit aus).
-    Fehlt eine der beiden Preis-Einstellungen (noch nicht restauriert), oder
-    liegt der Neutralpreis nicht über der Preisgrenze, bleibt
-    price_should_pause bewusst False - unverändertes Verhalten wie vor
+    zeitgesteuerten UND des netzdienlichen Ladens - insbesondere weicht sie
+    sofort einem bestätigten PV-Überschuss, damit freie PV-Energie weiterhin
+    ungehindert in den Speicher fließen kann) und hat dieselbe Priorität wie
+    aktives preisoptimiertes Laden selbst: sie wird umgekehrt von
+    netzdienlichem Laden blockiert, sobald dessen Zeitfenster aktiv ist
+    (price_should_pause schließt grid_serving_window_active mit aus), NICHT
+    mehr andersherum. Fehlt eine der beiden Preis-Einstellungen (noch nicht
+    restauriert), oder liegt der Neutralpreis nicht über der Preisgrenze,
+    bleibt price_should_pause bewusst False - unverändertes Verhalten wie vor
     Einführung des Neutralpreises, statt einer stillen Annahme.
 
     Reparaturhinweis ISSUE_PRICE_NEUTRAL_BELOW_LIMIT
@@ -1194,8 +1225,12 @@ requirement_dynamic_price_charge:
        zwischen Preisgrenze und Neutralpreis, Rückkehr in die Nullregelung
        ab dem Neutralpreis, Vorrang von PV-Überschuss vor der Pausezone,
        unverändertes Verhalten ohne gültige Preisgrenze/Neutralpreis-
-       Kombination sowie Blockade von netzdienlichem Laden durch die
-       Pausezone (dieselbe Priorität wie aktives preisoptimiertes Laden)."
+       Kombination sowie Vorrang von netzdienlichem Laden vor
+       preisoptimiertem Laden (test_grid_serving_takes_priority_over_
+       price_charge_neutral_band, test_grid_serving_takes_priority_over_
+       price_charge_active_charging) - ein aktives Zeitfenster des
+       netzdienlichen Ladens blockiert sowohl das aktive preisoptimierte
+       Laden als auch dessen Pausezone, nicht umgekehrt."
     - "tests/test_number.py deckt die Vorbelegung und Klemmung der drei
        neuen Number-Entities (Preisgrenze, Neutralpreis, Anzahl Stunden)
        ab."

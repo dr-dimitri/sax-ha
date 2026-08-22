@@ -106,14 +106,14 @@ schreibt Änderungen über `coordinator.async_write_register(...)` bzw.
 `coordinator.async_write_extended_register(...)` (SunSpec-Modus, Slave-ID
 `self.slave_id_extended`).
 
-**Max-SOC-Sperre, zeitgesteuertes Laden & netzdienliches Laden:** Kein
-natives Max-SOC-Register. Alle drei teilen sich eine zentrale Auswertung
-(`SaxPowerCoordinator._async_enforce_grid_charge`, bei jedem Poll-Zyklus
-sowie bei jeder Einstellungsänderung neu ausgewertet) und denselben
-Hintergrund-Task (`SaxPowerCoordinator._async_sun_charge_loop`), der über
-den SunSpec-Modus schreibt: erst Register 40051 (Steuermodus) auf
-Sollwertvorgabe, dann Register 40049 (Leistungsvorgabe %). Reihenfolge/
-Priorität in `_async_enforce_grid_charge`:
+**Max-SOC-Sperre, zeitgesteuertes Laden, netzdienliches Laden &
+preisoptimiertes Laden:** Kein natives Max-SOC-Register. Alle vier teilen
+sich eine zentrale Auswertung (`SaxPowerCoordinator._async_enforce_grid_
+charge`, bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
+ausgewertet) und denselben Hintergrund-Task (`SaxPowerCoordinator._async_
+sun_charge_loop`), der über den SunSpec-Modus schreibt: erst Register 40051
+(Steuermodus) auf Sollwertvorgabe, dann Register 40049 (Leistungsvorgabe %).
+Reihenfolge/Priorität in `_async_enforce_grid_charge`:
 
 1. **SOC ≥ "Max. SOC"** (`soc_reached`): Leistungsvorgabe wird auf 0 %
    gehalten - unabhängig davon, ob zeitgesteuertes oder netzdienliches Laden
@@ -151,7 +151,19 @@ Priorität in `_async_enforce_grid_charge`:
 
    Schließt sich mit Schritt 2 bereits strukturell über
    `not timed_should_charge` aus.
-4. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
+4. **Sonst, falls preisoptimiertes Laden aktiviert + Ladeplan meldet
+   ausgewähltes Preisfenster** (`price_should_charge`, siehe
+   `price_optimizer.py`): Leistungsvorgabe = `MIN_SETPOINT_POWER`, gleicher
+   Schreibpfad wie Schritt 2. `price_should_charge` schließt zusätzlich
+   `grid_serving_window_active` aus - **netzdienliches Laden hat also
+   Vorrang vor preisoptimiertem Laden, nicht umgekehrt** (Regression, die
+   behoben wurde: vorher blockierte preisoptimiertes Laden stattdessen
+   netzdienliches Laden, was dazu führte, dass sich beide Automatiken
+   gegenseitig ein- und ausschalten konnten, sobald ihre Bedingungen
+   gleichzeitig erfüllt waren). Dieselbe Ausschlussregel gilt für die
+   Neutralpreis-Pausezone (`price_should_pause`, Sollwert 0 statt
+   Nullregelung zwischen Preisgrenze und Neutralpreis).
+5. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
    (SmartMeter-Nullregelung), Zustandsmaschine zurückgesetzt.
 
 **Aktive Monate:** Beide Features haben zusätzlich je 12 Monats-Schalter

@@ -556,6 +556,7 @@ PRICE_STATUS_PV_FORECAST_COVERS = "PV-Prognose deckt Bedarf"
 PRICE_STATUS_PAUSED_PV_SURPLUS = "Pausiert (PV-Überschuss)"
 PRICE_STATUS_PAUSED_MAX_SOC = "Pausiert (Max. SOC)"
 PRICE_STATUS_PAUSED_TIMED_CHARGE = "Pausiert (Netzladung aktiv)"
+PRICE_STATUS_PAUSED_GRID_SERVING = "Pausiert (Netzdienliches Laden aktiv)"
 PRICE_STATUS_PAUSED_NEUTRAL_BAND = "Pausiert (Preisband)"
 
 # -- Konflikt zwischen Netzladung und preisoptimiertem Laden --------------

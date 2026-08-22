@@ -361,6 +361,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_wait_cycles = 0
         self._grid_serving_charge_confirm_cycles = 0
         self._grid_serving_release_confirm_cycles = 0
+        self._grid_serving_import_confirm_cycles = 0
         # Preisoptimiertes Laden (siehe anforderung.yaml,
         # REQ-DYNAMIC-PRICE-CHARGE): nutzt denselben SunSpec-Schreibpfad
         # (_sun_charge_task) wie zeitgesteuertes/netzdienliches Laden. Der
@@ -1834,6 +1835,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_wait_cycles = 0
             self._grid_serving_charge_confirm_cycles = 0
             self._grid_serving_release_confirm_cycles = 0
+            self._grid_serving_import_confirm_cycles = 0
 
         max_soc_clamped_now = False
         if soc_reached:
@@ -1975,18 +1977,40 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         40051 und der gestoppte Sollwert sollen sich setzen können, bevor
         erneut ausgewertet wird.
 
+        Schritt a.1 (Netzbezugs-Schutz, mit aktivem Sollwertvorgabemodus,
+        UNABHÄNGIG von den Wartezyklen): Solange der Sollwert bei 0 % steht,
+        fließt kein Ladestrom mehr in den Speicher - deckt der Hausverbrauch
+        die PV-Erzeugung nicht mehr, entsteht dadurch Netzbezug, den die
+        Nullregelung sonst durch eigenständiges Entladen abfangen würde.
+        Deshalb wird data["smartmeter_power"] hier zusätzlich, bereits
+        während der Wartezyklen, gegen SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+        auf tatsächlichen Netzbezug geprüft (positiver Wert, siehe
+        Vorzeichenkonvention in REQ-SUNSPEC-MODE-CORRECTION), ebenfalls mit
+        der PV_SURPLUS_HYSTERESIS_CYCLES-Zyklen-Hysterese
+        (self._grid_serving_import_confirm_cycles). Bleibt der Netzbezug so
+        viele Zyklen in Folge über dem Schwellwert, wird der Speicher sofort
+        aktiv zurück in die SmartMeter-Nullregelung gesetzt
+        (async_stop_sun_charge) - der Speicher lädt dadurch weiterhin nicht
+        (kein PV-Überschuss vorhanden, sonst läge kein Netzbezug vor),
+        entlädt sich aber smartmeter-gesteuert, um den Netzbezug zu
+        vermeiden. Damit bricht dieser Schutz auch die Wartezyklen-
+        Unterdrückung, unter der Schritt b sonst steht. Fällt der Netzbezug
+        anschließend wieder unter den Schwellwert, wertet die Methode ab dem
+        nächsten Aufruf wieder regulär ab Schritt a.
+
         Schritt b (mit aktivem Sollwertvorgabemodus, nach Ablauf der
-        Wartezyklen): Prüft die am Smart Meter gemessene Netzeinspeisung
-        (data["smartmeter_power"]) gegen denselben Schwellwert, ebenfalls
-        mit dieser Zyklen-Hysterese. Erst wenn sie so viele Zyklen in Folge
-        unter den Schwellwert fällt, wird der Speicher aktiv zurück in die
-        SmartMeter-Nullregelung gesetzt (async_stop_sun_charge). Bleibt die
-        Einspeisung mindestens beim Schwellwert (oder ist der Messwert
-        gerade nicht bekannt, oder reißt die Unterschreitung zwischendurch
-        wieder ab), bleibt die Ladung bewusst bei 0 % gehalten - das ist der
-        eigentliche Zweck der Funktion: der Speicher soll erst wieder laden,
-        sobald ein Zeitpunkt mit gefallener Einspeisung erreicht ist, nicht
-        fortlaufend mit dem Überschuss mitlaufen.
+        Wartezyklen, ohne bestätigten Netzbezug): Prüft die am Smart Meter
+        gemessene Netzeinspeisung (data["smartmeter_power"]) gegen denselben
+        Schwellwert, ebenfalls mit dieser Zyklen-Hysterese. Erst wenn sie so
+        viele Zyklen in Folge unter den Schwellwert fällt, wird der Speicher
+        aktiv zurück in die SmartMeter-Nullregelung gesetzt
+        (async_stop_sun_charge). Bleibt die Einspeisung mindestens beim
+        Schwellwert (oder ist der Messwert gerade nicht bekannt, oder reißt
+        die Unterschreitung zwischendurch wieder ab), bleibt die Ladung
+        bewusst bei 0 % gehalten - das ist der eigentliche Zweck der
+        Funktion: der Speicher soll erst wieder laden, sobald ein Zeitpunkt
+        mit gefallener Einspeisung erreicht ist, nicht fortlaufend mit dem
+        Überschuss mitlaufen.
         """
         if not self._grid_serving_setpoint_active:
             storage_power_active = data.get("storage_power_active")
@@ -2006,11 +2030,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._grid_serving_charge_confirm_cycles = 0
             return self._grid_serving_setpoint_active
 
+        smartmeter_power = data.get("smartmeter_power")
+        import_confirmed = self._cycles_confirmed(
+            "_grid_serving_import_confirm_cycles",
+            smartmeter_power is not None
+            and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
+        )
+        if import_confirmed:
+            if self.sun_charge_active:
+                await self.async_stop_sun_charge()
+            self._grid_serving_setpoint_active = False
+            self._grid_serving_wait_cycles = 0
+            self._grid_serving_import_confirm_cycles = 0
+            self._grid_serving_release_confirm_cycles = 0
+            return False
+
         if self._grid_serving_wait_cycles > 0:
             self._grid_serving_wait_cycles -= 1
             return True
 
-        smartmeter_power = data.get("smartmeter_power")
         # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_SURPLUS_
         # THRESHOLD_WATT): Einspeisung (negativ) ist unter den Schwellwert
         # gefallen, sobald der Anzeigewert über -Schwellwert liegt.

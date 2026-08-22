@@ -1796,6 +1796,85 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
         await coordinator.async_stop_sun_charge()
 
 
+async def test_enforce_grid_charge_grid_serving_import_protection_overrides_wait_cycles(
+    hass,
+) -> None:
+    """Schritt a.1 (Netzbezugs-Schutz): Tritt während der Wartezyklen nach
+    Schritt a tatsächlicher Netzbezug (positiver smartmeter_power) über
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT für PV_SURPLUS_HYSTERESIS_CYCLES
+    aufeinanderfolgende Zyklen auf, bricht das die Wartezyklen-
+    Unterdrückung und schaltet sofort zurück in die SmartMeter-
+    Nullregelung, damit der Speicher smartmeter-gesteuert entladen kann
+    statt Netzbezug entstehen zu lassen. Ein einzelner Zyklus reicht wegen
+    der Hysterese noch nicht aus. Sobald der Netzbezug wieder abklingt,
+    wertet die Zustandsmaschine ab dem nächsten Zyklus wieder regulär ab
+    Schritt a - bei weiterhin hoher SAX-Ladeleistung greift Schritt a nach
+    erneuten PV_SURPLUS_HYSTERESIS_CYCLES Zyklen wieder ein ("ursprüngliche
+    Regelung greift wieder")."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator._grid_serving_setpoint_active is True
+            assert coordinator._grid_serving_wait_cycles == PV_SURPLUS_HYSTERESIS_CYCLES
+
+            # Während der Wartezyklen entsteht tatsächlicher Netzbezug.
+            coordinator.data["smartmeter_power"] = (
+                SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 1
+            )
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._grid_serving_wait_cycles == 1
+            assert coordinator.grid_serving_active is True
+            assert coordinator.sun_charge_active is True
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is False
+            assert coordinator.sun_charge_active is False
+            assert coordinator._grid_serving_setpoint_active is False
+            assert coordinator._grid_serving_wait_cycles == 0
+            client.write_register.assert_awaited_with(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                device_id=100,
+            )
+
+            # Netzbezug klingt ab - die ursprüngliche Regelung (Schritt a)
+            # greift wieder, sobald der Speicher erneut über den
+            # Schwellwert lädt.
+            coordinator.data["smartmeter_power"] = -(
+                SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300
+            )
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._grid_serving_setpoint_active is False
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator._grid_serving_setpoint_active is True
+            assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high(
     hass,
 ) -> None:

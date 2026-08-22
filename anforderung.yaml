@@ -208,6 +208,20 @@ requirement_sunspec_mode_correction:
     die Neutralpreis-Pausezone in REQ-DYNAMIC-PRICE-CHARGE - sind an diese
     Konvention angepasst.
 
+    Dieselbe Negation gilt für die drei Phasenwerte data["grid_power_active_
+    l1"/"_l2"/"_l3"] (Register 40073-40075, "Netzleistung L1/L2/L3") - sie
+    teilen sich denselben Registerblock und damit dasselbe rohe Vorzeichen
+    wie Register 40072, ihre Summe muss weiterhin data["smartmeter_power"]
+    entsprechen. data["storage_power_active"] (Register 40029, anderes
+    SunSpec-Modell "3Ph Inverter") ist davon unabhängig und folgt einer
+    eigenen, unverändert gebliebenen Konvention (positiv = Entladung,
+    negativ = Laden, siehe README.md "Bekannte Einschränkungen") -
+    storage_power_apparent/storage_power_reactive sowie grid_power_apparent_
+    sum/grid_power_reactive_sum (Schein-/Blindleistung) wurden ebenfalls
+    nicht angefasst, da ihr Vorzeichen eine andere physikalische Bedeutung
+    hat (kapazitiv/induktiv statt Einspeisung/Bezug) und nicht Teil dieser
+    Betrachtung war.
+
     Die "Immediate Controls"-Werte bleiben zusätzlich als
     Nur-Lese-Diagnosesensoren verfügbar (ic_power_setpoint_pct,
     ic_timeout, ic_control_mode_text, ic_max_power_reference) - diese

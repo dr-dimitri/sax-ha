@@ -901,13 +901,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "smartmeter_power": -apply_sunssf(
                 ext_reg(REG_SUN_METER_POWER_ACTIVE_SUM), meter_power_active_sf
             ),
-            "grid_power_active_l1": apply_sunssf(
+            # Dieselbe Negation wie bei smartmeter_power (siehe oben) - die
+            # drei Phasenwerte sind Teil desselben Registerblocks und teilen
+            # sich dessen Rohvorzeichen; ohne Negation würde ihre Summe nicht
+            # mehr zum bereits negierten smartmeter_power passen.
+            "grid_power_active_l1": -apply_sunssf(
                 ext_reg(REG_SUN_METER_POWER_ACTIVE_L1), meter_power_active_sf
             ),
-            "grid_power_active_l2": apply_sunssf(
+            "grid_power_active_l2": -apply_sunssf(
                 ext_reg(REG_SUN_METER_POWER_ACTIVE_L2), meter_power_active_sf
             ),
-            "grid_power_active_l3": apply_sunssf(
+            "grid_power_active_l3": -apply_sunssf(
                 ext_reg(REG_SUN_METER_POWER_ACTIVE_L3), meter_power_active_sf
             ),
             "grid_power_apparent_sum": apply_sunssf(

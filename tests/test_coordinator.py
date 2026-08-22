@@ -511,6 +511,9 @@ def test_parse_extended_decodes_sunspec_block(hass) -> None:
             63: 232,
             64: 233,
             72: 250,  # Summenwirkleistung Netz -> smartmeter_power
+            73: 100,  # Netzleistung L1
+            74: 80,  # Netzleistung L2
+            75: 70,  # Netzleistung L3
             97: 7680,  # Kapazität Speichersystem
             98: 0,  # Verfügbare Ladeleistung
             99: 4600,  # Verfügbare Entladeleistung
@@ -544,8 +547,13 @@ def test_parse_extended_decodes_sunspec_block(hass) -> None:
     # Vorzeichenkonvention: das Rohregister meldet positiv bei Einspeisung,
     # data["smartmeter_power"] wird beim Einlesen negiert (Standarddarstellung
     # negativ = Einspeisung, positiv = Netzbezug) - siehe const.py,
-    # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT.
+    # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT. Die drei Phasenwerte teilen sich
+    # denselben Registerblock und damit dasselbe rohe Vorzeichen, werden also
+    # ebenfalls negiert - ihre Summe entspricht weiterhin smartmeter_power.
     assert data["smartmeter_power"] == -250
+    assert data["grid_power_active_l1"] == -100
+    assert data["grid_power_active_l2"] == -80
+    assert data["grid_power_active_l3"] == -70
 
     assert data["battery_capacity"] == 7680
     assert data["battery_soc"] == 55

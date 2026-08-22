@@ -165,7 +165,7 @@ unterschiedlicher Slave-ID.
 | Netz Stromsumme / Strom L1, L2, L3 | in A |
 | Netzspannung Durchschnitt (L-N) / L1, L2, L3 | in V |
 | Netzfrequenz | in Hz |
-| Netzleistung L1, L2, L3 | in W |
+| Netzleistung L1, L2, L3 | in W. Gleiche Vorzeichenkonvention wie oben "Netzleistung": negativ = Einspeisung, positiv = Netzbezug |
 | Schein-, Blindleistung, Leistungsfaktor Netz Summe | in VA / var / dimensionslos |
 | Speicherkapazität / Verfügbare Lade- und Entladeleistung | in Wh / W (Diagnose) |
 | Maximaler und Minimaler SoC / Akku SoC (SunSpec) / Entladetiefe | in % (Diagnose) |
@@ -797,7 +797,10 @@ gemacht – die Datei kann also gefahrlos geteilt werden.
   Einspeisung. Die Integration negiert ihn beim Einlesen, damit
   `sensor.sax_power_smartmeter_power` (angezeigt als "Netzleistung") die
   Standarddarstellung zeigt: negativ = Einspeisung/PV-Überschuss, positiv =
-  Netzbezug.
+  Netzbezug. Dieselbe Negation gilt für die drei Phasenregister 40073-40075
+  ("Netzleistung L1/L2/L3"), da sie sich denselben Registerblock und damit
+  dasselbe rohe Vorzeichen teilen - ihre Summe entspricht weiterhin der
+  Netzleistung.
 - **Keine ferngesteuerte manuelle Entladung.** Positive Sollwerte auf Register
   40049 bzw. Register 41 wurden gegen echte Hardware getestet und zeigten keine
   Wirkung; der Hersteller hat bestätigt, dass das nicht vorgesehen ist.

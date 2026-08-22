@@ -332,9 +332,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.slave_id_extended = slave_id_extended
         self.entry_id = entry_id
         # Options-Flow-Konfiguration (Strompreis-/PV-Prognose-Sensor, siehe
-        # config_flow.SaxPowerOptionsFlow). Nur lesend genutzt; nach einer
-        # Änderung lädt __init__.async_update_options den Config Entry neu,
-        # sodass hier immer der aktuelle Stand steht.
+        # config_flow.SaxPowerOptionsFlow). __init__.async_update_options
+        # ersetzt dieses Mapping bei einer Änderung direkt (kein Config-
+        # Entry-Reload mehr, siehe dort) und ruft anschließend
+        # price_planner.async_setup() erneut auf, damit hier immer der
+        # aktuelle Stand steht.
         self.options: Mapping[str, Any] = dict(options or {})
         self._scan_interval = scan_interval
         self._write_lock = asyncio.Lock()

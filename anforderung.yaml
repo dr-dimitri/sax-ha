@@ -1272,6 +1272,26 @@ requirement_dynamic_price_charge:
        sax_power.set_price_charge_enabled (nicht-interaktives Schalten mit
        optionalem force)."
     - "Die Prüfung der Ladebedingungen läuft mindestens alle 60 Sekunden."
+    - "__init__.async_update_options wendet eine Options-Flow-Änderung
+       (Strompreis-/PV-Prognose-Sensor) live auf den laufenden Coordinator
+       an (coordinator.options ersetzen + price_planner.async_setup()
+       erneut aufrufen), OHNE den Config Entry per
+       hass.config_entries.async_reload neu zu laden. Ursprünglich
+       gemeldeter Bug: Ein Reload baut SaxPowerCoordinator komplett neu auf
+       - SaxPowerCoordinator.async_shutdown ruft dabei async_stop_sun_charge
+       auf, das Register 40051 aktiv auf SmartMeter-Nullregelung
+       zurücksetzt, selbst wenn netzdienliches Laden (REQ-GRID-SERVING-
+       CHARGE) gerade aktiv den Sollwert bei 0 % hält. Bei echtem
+       PV-Überschuss beginnt der Speicher dadurch sofort wieder zu laden,
+       bis die frisch erzeugte Coordinator-Instanz die
+       PV_SURPLUS_HYSTERESIS_CYCLES-Bestätigung erneut durchlaufen hat -
+       sichtbar als kurzer, ungewollter Ladevorgang direkt nach dem
+       Speichern der Options-Flow-Seite (z. B. beim erstmaligen Hinterlegen
+       des Strompreis-/PV-Prognose-Sensors), unabhängig vom preisoptimierten
+       Laden selbst. Die Options Flow betrifft ausschließlich den Preis-
+       Planner, nie Modbus-Client/Slave-IDs/Scan-Intervall (die stehen
+       unveränderlich in entry.data) - ein Reload ist für eine reine
+       Options-Änderung deshalb nicht nötig."
   acceptance_criteria:
     - "tests/test_price_optimizer.py deckt ab: Einlesen der Attributformate
        (raw_today/raw_tomorrow, Zahlenlisten, data/start_time,
@@ -1297,6 +1317,14 @@ requirement_dynamic_price_charge:
        ab."
     - "tests/test_config_flow.py deckt den Options Flow ab (Speichern und
        Vorbelegung)."
+    - "tests/test_init.py deckt async_update_options ab:
+       test_async_update_options_applies_live_without_reload verifiziert,
+       dass eine Options-Änderung NICHT mehr hass.config_entries.
+       async_reload aufruft, sondern coordinator.options ersetzt und
+       coordinator.price_planner.async_setup() aufruft (Regressionsschutz
+       für den oben beschriebenen Bug); test_async_update_options_noop_
+       without_loaded_entry deckt den Fall ab, dass der Listener feuert,
+       während der Coordinator (noch) nicht in hass.data registriert ist."
     - "tests/test_repairs.py deckt ISSUE_PRICE_NEUTRAL_BELOW_LIMIT ab:
        sofortiges Auslösen bei Neutralpreis <= Preisgrenze (auch bei
        Gleichheit), Idempotenz und Selbstheilung, sobald der Neutralpreis

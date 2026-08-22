@@ -138,13 +138,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Config Entry nach einer Änderung im Options Flow neu laden.
+    """Wendet eine Options-Flow-Änderung (Strompreis-/PV-Prognose-Sensor)
+    live auf den laufenden Coordinator an, statt den kompletten Config Entry
+    neu zu laden (ursprünglich gemeldeter Bug, siehe anforderung.yaml,
+    REQ-GRID-SERVING-CHARGE): Ein voller Reload räumt SaxPowerCoordinator
+    komplett ab und baut ihn neu auf - SaxPowerCoordinator.async_shutdown
+    ruft dabei async_stop_sun_charge auf, das Register 40051 aktiv auf
+    SmartMeter-Nullregelung zurücksetzt, selbst wenn netzdienliches Laden
+    gerade aktiv den Sollwert bei 0 % hält. Bei echtem PV-Überschuss beginnt
+    der Speicher dadurch sofort wieder zu laden, bis die frisch erzeugte
+    Coordinator-Instanz die PV_SURPLUS_HYSTERESIS_CYCLES-Bestätigung erneut
+    durchlaufen hat - ein für den Anwender sichtbarer, aber unnötiger
+    Kurz-Ladevorgang, ausgelöst durch reines Speichern der Options-Flow-Seite
+    (z. B. beim Hinzufügen des Strompreis-/PV-Prognose-Sensors), unabhängig
+    von den eigentlichen Lade-Automatiken.
 
-    Die Optionen (Strompreis-/PV-Prognose-Sensor) bestimmen, welche
-    Entities der Planner beobachtet - ein Neuladen ist der einfachste Weg,
-    diese Beobachter sauber neu aufzusetzen, statt sie zur Laufzeit
-    umzuhängen."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    Die Options Flow betrifft ausschließlich Einstellungen des Preis-
+    Planners (price_optimizer.SaxPricePlanner) - nie den Modbus-Client, die
+    Slave-IDs oder das Scan-Intervall (die stehen unveränderlich in
+    entry.data, siehe config_flow.async_step_reconfigure für deren einzigen
+    Änderungsweg). Ein Reload ist für eine reine Options-Änderung deshalb
+    nicht nötig: Die neuen Werte werden direkt in den laufenden Coordinator
+    übernommen, und der Planner wird erneut aufgesetzt -
+    SaxPricePlanner.async_setup ist bewusst idempotent (räumt seine alten
+    Zustandsbeobachter ab und registriert sie mit den aktuellen Optionen
+    neu), ohne Entities, Modbus-Verbindung oder eine laufende
+    Lade-Automatik anzutasten."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if entry_data is None:
+        return
+    coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
+    coordinator.options = dict(entry.options)
+    coordinator.price_planner.async_setup()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -91,8 +91,16 @@ Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
 preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als
 Entity abbilden lassen (Auswahl der Quell-Sensoren und deren Interpretation);
 die im Alltag veränderlichen Stellgrößen sind echte Entities am SAX-Gerät.
-Eine Änderung löst über `async_update_options` einen Reload des Config Entry
-aus, damit die Zustandsbeobachter des Planners sauber neu aufgesetzt werden.
+Eine Änderung wendet `async_update_options` direkt auf den laufenden
+Coordinator an (`coordinator.options` ersetzen + `price_planner.async_setup()`
+erneut aufrufen, idempotent) - bewusst **kein** Config-Entry-Reload mehr: Ein
+Reload hätte über `SaxPowerCoordinator.async_shutdown`/`async_stop_sun_charge`
+ein gerade aktiv gehaltenes netzdienliches Laden (Register 40051 zurück auf
+SmartMeter-Nullregelung) unterbrochen und einen kurzen, ungewollten
+Ladevorgang ausgelöst, bis die neu erzeugte Instanz die
+`PV_SURPLUS_HYSTERESIS_CYCLES`-Bestätigung erneut durchlaufen hätte -
+ursprünglich gemeldeter Bug, siehe `anforderung.yaml`,
+REQ-DYNAMIC-PRICE-CHARGE.
 
 ## Datenfluss
 

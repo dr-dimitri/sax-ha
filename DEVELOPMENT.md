@@ -147,7 +147,14 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
      (`data["smartmeter_power"]`) unter denselben Schwellwert, wird der
      Speicher aktiv zurück in die SmartMeter-Nullregelung gesetzt
      (`async_stop_sun_charge`). Bleibt sie mindestens beim Schwellwert (oder
-     fehlt der Messwert), bleibt die Ladung bewusst bei 0 % gehalten.
+     fehlt der Messwert), bleibt die Ladung bewusst bei 0 % gehalten - und
+     zwar selbstheilend: sowohl im Wartezyklen- als auch im Halte-Zweig ruft
+     die Methode zusätzlich `async_start_sun_charge(0)` erneut auf (No-Op bei
+     unverändertem, weiterhin laufendem Task), damit ein unerwartet
+     gestorbener Schreib-Task (z. B. nach einem einzelnen transienten
+     Modbus-Fehler) noch im selben Zyklus neu gestartet wird - siehe
+     `anforderung.yaml`, REQ-GRID-SERVING-CHARGE, für den ursprünglich
+     gemeldeten Bug ohne diese Selbstheilung.
 
    Schließt sich mit Schritt 2 bereits strukturell über
    `not timed_should_charge` aus.

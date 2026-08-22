@@ -1931,6 +1931,99 @@ async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high
         await coordinator.async_stop_sun_charge()
 
 
+async def test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_holding(
+    hass,
+) -> None:
+    """Regressionstest: Stirbt der periodische Schreib-Task
+    (_sun_charge_task) unerwartet, während netzdienliches Laden aktiv den
+    0-%-Sollwert hält (self._grid_serving_setpoint_active True) - z. B. weil
+    ein einzelner transienter Modbus-Fehler in _async_sun_charge_loop den
+    Task beendet, statt ihn zu retryen -, muss der nächste Aufruf von
+    _async_enforce_grid_charge den Task neu starten, solange weder Schritt
+    a.1 (Netzbezug) noch Schritt b (gefallene Einspeisung) zurückschalten.
+
+    Ursprünglich gemeldeter Bug: Ohne den erneuten async_start_sun_charge(0)
+    -Aufruf in _async_step_grid_serving (Wartezyklen- UND Halte-Zweig) blieb
+    self._grid_serving_setpoint_active dauerhaft True (Sensor "Netzdienliches
+    Laden aktiv" zeigte weiterhin "aktiv"), während Register 40049/40051
+    nach dem toten Task nie wieder neu geschrieben wurden - das Gerät fiel
+    nach seinem eigenen Timeout (Register 40050, max. 300 s) unbeaufsichtigt
+    in die SmartMeter-Nullregelung zurück und begann unbemerkt wieder mit
+    PV-Überschuss zu laden, obwohl netzdienliches Laden laut Software noch
+    aktiv eingriff."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        # Vorzeichenkonvention: negativ = Einspeisung - bleibt hoch (kein
+        # Netzbezug -> a.1 löst nicht aus, keine gefallene Einspeisung ->
+        # Schritt b gibt nicht frei), der Speicher soll durchgehend
+        # gehalten werden.
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    await coordinator.async_set_max_soc(90)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+            assert coordinator._grid_serving_setpoint_active is True
+            assert coordinator.sun_charge_active is True
+
+            # Simuliert den unkontrollierten Absturz des Schreib-Tasks
+            # (dasselbe Endergebnis wie ein re-raise nach einem transienten
+            # Modbus-Fehler in _async_sun_charge_loop) - OHNE über
+            # async_stop_sun_charge() zu laufen, damit
+            # _grid_serving_setpoint_active unverändert True bleibt.
+            coordinator._sun_charge_task.cancel()
+            try:
+                await coordinator._sun_charge_task
+            except asyncio.CancelledError:
+                pass
+            assert coordinator.sun_charge_active is False
+
+            # Wartezyklen aus Schritt a sind noch nicht abgelaufen - auch
+            # dieser Zweig muss selbstheilend neu starten.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator._grid_serving_setpoint_active is True
+            assert coordinator.sun_charge_active is True
+
+            # Wartezyklen ablaufen lassen, Task erneut sterben lassen, damit
+            # auch der Halte-Zweig (nach Ablauf der Wartezyklen) geprüft ist.
+            for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator._grid_serving_wait_cycles == 0
+
+            coordinator._sun_charge_task.cancel()
+            try:
+                await coordinator._sun_charge_task
+            except asyncio.CancelledError:
+                pass
+            assert coordinator.sun_charge_active is False
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        assert coordinator._grid_serving_setpoint_active is True
+        assert coordinator.sun_charge_active is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_threshold(
     hass,
 ) -> None:

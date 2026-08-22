@@ -2047,6 +2047,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._grid_serving_wait_cycles > 0:
             self._grid_serving_wait_cycles -= 1
+            await self.async_start_sun_charge(0)
             return True
 
         # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_SURPLUS_
@@ -2064,6 +2065,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_release_confirm_cycles = 0
             return False
 
+        # Selbstheilung: async_start_sun_charge(0) hier - statt nur beim
+        # ersten Auslösen von Schritt a - erneut aufzurufen, ist bei
+        # unverändertem Sollwert UND weiterhin laufendem _sun_charge_task ein
+        # No-Op (siehe async_start_sun_charge), stellt aber sicher, dass ein
+        # unerwartet gestorbener Task (z. B. durch einen einzelnen
+        # transienten Modbus-Fehler in _async_sun_charge_loop, der den Task
+        # beendet statt ihn zu retryen) noch in demselben Zyklus neu
+        # gestartet wird. Ohne diesen Aufruf blieb
+        # self._grid_serving_setpoint_active dauerhaft True, während
+        # Register 40049/40051 nicht mehr neu geschrieben wurden - das Gerät
+        # fiel nach seinem eigenen Timeout (Register 40050) unbeaufsichtigt
+        # in die SmartMeter-Nullregelung zurück und lud unbemerkt wieder,
+        # während der Sensor "Netzdienliches Laden aktiv" weiterhin True
+        # zeigte (ursprünglich gemeldeter Bug: SAX beginnt während
+        # netzdienlichem Laden plötzlich zu laden).
+        await self.async_start_sun_charge(0)
         return True
 
     # -- Netzdienliches Laden --------------------------------------------------

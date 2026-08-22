@@ -603,6 +603,24 @@ requirement_grid_serving_charge:
        laden, sobald ein Zeitpunkt mit dauerhaft gefallener Einspeisung
        erreicht ist, statt fortlaufend mit dem Überschuss mitzulaufen.
 
+    Selbstheilung des Schreib-Tasks: Sowohl im Wartezyklen-Zweig (nach
+    Schritt a, vor Ablauf von self._grid_serving_wait_cycles) als auch im
+    Halte-Zweig von Schritt b (Einspeisung bleibt beim/über dem Schwellwert)
+    ruft _async_step_grid_serving zusätzlich async_start_sun_charge(0) auf,
+    statt sich allein auf self._grid_serving_setpoint_active zu verlassen.
+    Bei unverändertem Sollwert UND weiterhin laufendem _sun_charge_task ist
+    das ein No-Op (siehe async_start_sun_charge) - stirbt der Task jedoch
+    unerwartet (z. B. ein einzelner transienter Modbus-Fehler in
+    _async_sun_charge_loop, der den Task per re-raise beendet statt ihn zu
+    retryen), wird er im selben Zyklus neu gestartet. Ursprünglich gemeldeter
+    Bug ohne diese Selbstheilung: self._grid_serving_setpoint_active blieb
+    dauerhaft True (Sensor "Netzdienliches Laden aktiv" zeigte weiterhin
+    "aktiv"), während Register 40049/40051 nach dem toten Task nie wieder
+    neu geschrieben wurden - das Gerät fiel nach seinem eigenen Timeout
+    (Register 40050, max. 300 s) unbeaufsichtigt in die SmartMeter-
+    Nullregelung zurück und begann unbemerkt wieder mit PV-Überschuss zu
+    laden, obwohl netzdienliches Laden laut Software noch aktiv eingriff.
+
     Fehlt data["storage_power_active"], kann Schritt a nicht auslösen
     (Speicher bleibt in der Nullregelung); fehlt data["smartmeter_power"]
     nach dem Auslösen, können weder Schritt a.1 noch Schritt b
@@ -808,7 +826,16 @@ requirement_grid_serving_charge:
        einzelner Zyklus reicht noch nicht); anschließend wertet die
        Zustandsmaschine wieder regulär ab Schritt a, sodass sie bei
        weiterhin hoher SAX-Ladeleistung nach erneuten
-       PV_SURPLUS_HYSTERESIS_CYCLES Zyklen wieder eingreift."
+       PV_SURPLUS_HYSTERESIS_CYCLES Zyklen wieder eingreift.
+       test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_
+       holding deckt die Selbstheilung des Schreib-Tasks ab (siehe oben):
+       stirbt _sun_charge_task unerwartet (simuliert durch direktes
+       Canceln außerhalb von async_stop_sun_charge, wie es ein re-raise
+       nach einem transienten Modbus-Fehler in _async_sun_charge_loop
+       bewirken würde), während self._grid_serving_setpoint_active True
+       ist - sowohl im Wartezyklen- als auch im Halte-Zweig -, startet der
+       nächste _async_enforce_grid_charge-Aufruf den Task automatisch neu,
+       statt den Speicher dauerhaft unbeaufsichtigt zu lassen."
     - "tests/test_price_optimizer.py deckt den Vorrang von netzdienlichem vor
        preisoptimiertem Laden ab (test_grid_serving_takes_priority_over_
        price_charge_neutral_band, test_grid_serving_takes_priority_over_

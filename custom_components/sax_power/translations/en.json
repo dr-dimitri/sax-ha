@@ -44,6 +44,7 @@
         "description": "Firmware: {firmware}\nSerial number: {serial_number}\nSunSpec mode: {sunspec_status}\n\n{entity_count} entities were created.\n\nThe bundled dashboard was created (or skipped) according to your previous choice, and can be created later at any time via the \"sax_power.create_dashboard\" service.\n\nPrice-optimized charging is deliberately not part of the initial setup and can be configured at any time via \"Configure\" on this integration."
       }
     },
+    "flow_title": "SAX Power Home ({host})",
     "error": {
       "cannot_connect": "Failed to connect to the SAX storage system. Check the IP address and port, and that the storage system is reachable on the network.",
       "invalid_response": "Connected to the storage system, but it replied with a Modbus error. Check the slave ID (Basic Mode)."

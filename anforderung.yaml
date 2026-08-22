@@ -565,10 +565,34 @@ requirement_grid_serving_charge:
        (self._grid_serving_wait_cycles), bevor Schritt b ausgewertet wird,
        damit sich Moduswechsel und gestoppter Sollwert am Gerät setzen
        können.
-    b. Erst mit aktivem Sollwertvorgabemodus (Wartezyklen abgelaufen) wird
-       die am Smart Meter gemessene Netzeinspeisung
-       (data["smartmeter_power"]) gegen denselben Schwellwert geprüft,
-       ebenfalls über dieselbe Zyklen-Hysterese
+    a.1 Netzbezugs-Schutz, mit aktivem Sollwertvorgabemodus, UNABHÄNGIG von
+       den Wartezyklen aus Schritt a (self._grid_serving_import_confirm_
+       cycles): Solange der Sollwert bei 0 % gehalten wird, fließt kein
+       Ladestrom mehr in den Speicher - deckt der Hausverbrauch die
+       PV-Erzeugung nicht mehr, entsteht dadurch Netzbezug, den die
+       geräteeigene Nullregelung sonst durch eigenständiges Entladen
+       abfangen würde. Deshalb wird data["smartmeter_power"] zusätzlich,
+       bereits während der Wartezyklen aus Schritt a, auf tatsächlichen
+       Netzbezug geprüft (positiver Wert über
+       SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, siehe Vorzeichenkonvention in
+       REQ-SUNSPEC-MODE-CORRECTION), ebenfalls über dieselbe
+       PV_SURPLUS_HYSTERESIS_CYCLES-Zyklen-Hysterese. Bleibt der Netzbezug
+       so viele Zyklen in Folge über dem Schwellwert, wird der Speicher
+       sofort aktiv zurück in die SmartMeter-Nullregelung gesetzt
+       (async_stop_sun_charge, Register 40051 zurück auf 0) - dieser
+       Schutz hat Vorrang vor und durchbricht dabei die Wartezyklen-
+       Unterdrückung, unter der Schritt b sonst steht. Der Speicher lädt
+       dadurch weiterhin nicht (kein PV-Überschuss vorhanden, sonst läge
+       kein Netzbezug vor), entlädt sich aber smartmeter-gesteuert über die
+       geräteeigene Nullregelung, um den Netzbezug zu vermeiden. Fällt der
+       Netzbezug anschließend wieder unter den Schwellwert, wertet die
+       Zustandsmaschine ab dem nächsten Zyklus wieder regulär ab Schritt a
+       - bei weiterhin ausreichender SAX-Ladeleistung greift Schritt a nach
+       erneuten PV_SURPLUS_HYSTERESIS_CYCLES Zyklen wieder ein.
+    b. Erst mit aktivem Sollwertvorgabemodus (Wartezyklen abgelaufen, ohne
+       durch Schritt a.1 bestätigten Netzbezug) wird die am Smart Meter
+       gemessene Netzeinspeisung (data["smartmeter_power"]) gegen denselben
+       Schwellwert geprüft, ebenfalls über dieselbe Zyklen-Hysterese
        (self._grid_serving_release_confirm_cycles). Fällt sie über so viele
        aufeinanderfolgende Zyklen darunter, wird der Speicher aktiv zurück
        in die SmartMeter-Nullregelung gesetzt (async_stop_sun_charge,
@@ -581,9 +605,9 @@ requirement_grid_serving_charge:
 
     Fehlt data["storage_power_active"], kann Schritt a nicht auslösen
     (Speicher bleibt in der Nullregelung); fehlt data["smartmeter_power"]
-    nach dem Auslösen, kann Schritt b nicht zurückschalten (Ladung bleibt
-    konservativ gehalten) - in beiden Fällen ohne bekannten Messwert keine
-    aktive Entscheidung.
+    nach dem Auslösen, können weder Schritt a.1 noch Schritt b
+    zurückschalten (Ladung bleibt konservativ gehalten) - in beiden Fällen
+    ohne bekannten Messwert keine aktive Entscheidung.
 
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
@@ -774,7 +798,17 @@ requirement_grid_serving_charge:
        (not timed_should_charge). Ebenso deckt es das analoge
        Monats-Verhalten für zeitgesteuertes Laden ab (inaktiv außerhalb der
        ausgewählten Monate, aktiv innerhalb) sowie den Fall, dass ein
-       Feature bei keinem ausgewählten Monat ganzjährig inaktiv bleibt."
+       Feature bei keinem ausgewählten Monat ganzjährig inaktiv bleibt.
+       test_enforce_grid_charge_grid_serving_import_protection_overrides_
+       wait_cycles deckt zusätzlich Schritt a.1 (Netzbezugs-Schutz) ab:
+       tatsächlicher Netzbezug (positiver data['smartmeter_power']) über
+       dem Schwellwert schaltet über dieselbe Zyklen-Hysterese aktiv zurück
+       in die SmartMeter-Nullregelung, und zwar auch während der
+       Wartezyklen aus Schritt a (durchbricht deren Unterdrückung, ein
+       einzelner Zyklus reicht noch nicht); anschließend wertet die
+       Zustandsmaschine wieder regulär ab Schritt a, sodass sie bei
+       weiterhin hoher SAX-Ladeleistung nach erneuten
+       PV_SURPLUS_HYSTERESIS_CYCLES Zyklen wieder eingreift."
     - "tests/test_price_optimizer.py deckt den Vorrang von netzdienlichem vor
        preisoptimiertem Laden ab (test_grid_serving_takes_priority_over_
        price_charge_neutral_band, test_grid_serving_takes_priority_over_

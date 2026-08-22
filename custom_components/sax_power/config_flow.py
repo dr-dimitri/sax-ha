@@ -27,7 +27,6 @@ from .const import (
     CONF_CREATE_DASHBOARD,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
-    CONF_PRICE_STRATEGY,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
@@ -39,7 +38,6 @@ from .const import (
     CONF_TIMED_CHARGE_START,
     DEFAULT_CREATE_DASHBOARD,
     DEFAULT_PORT,
-    DEFAULT_PRICE_STRATEGY,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
     DEFAULT_SCAN_INTERVAL,
@@ -51,7 +49,6 @@ from .const import (
     DOMAIN,
     MAX_PV_FORECAST_FACTOR,
     MIN_PV_FORECAST_FACTOR,
-    PRICE_STRATEGIES,
     PRICE_UNITS,
     READ_BLOCK_EXT_LOW1_COUNT,
     READ_BLOCK_EXT_LOW1_START,
@@ -463,15 +460,6 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
                 )
             )
         ),
-        vol.Required(CONF_PRICE_STRATEGY, default=DEFAULT_PRICE_STRATEGY): (
-            selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=list(PRICE_STRATEGIES),
-                    translation_key="price_charge_strategy",
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            )
-        ),
         vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
@@ -493,12 +481,12 @@ class SaxPowerOptionsFlow(OptionsFlow):
     Alltag veränderlichen Stellgrößen - Strategie, Preisgrenze, Anzahl
     Stunden, Ziel-SOC - sind dagegen echte Entities am SAX-Gerät
     (select.py/number.py) und damit automatisierbar und in Dashboards
-    nutzbar.
-
-    CONF_PRICE_STRATEGY ist hier nur die Vorgabe für den allerersten Start;
-    sobald die Select-Entity einmal einen Zustand gespeichert hat, hat
-    dieser Vorrang (analog zu CONF_TIMED_CHARGE_* in der Ersteinrichtung,
-    siehe entity.initial_config_value).
+    nutzbar. Die Strategie hat deshalb bewusst KEIN eigenes Feld hier: eine
+    im Options Flow hinterlegte Vorgabe hätte ohnehin nur beim allerersten
+    Start (vor dem ersten gespeicherten Zustand der Select-Entity)
+    überhaupt eine Wirkung gehabt und würde dem Anwender fälschlich
+    suggerieren, sie ließe sich hier jederzeit ändern - siehe
+    select.SaxPowerPriceStrategySelect.
     """
 
     async def async_step_init(

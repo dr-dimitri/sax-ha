@@ -463,7 +463,6 @@ CONF_PRICE_ATTRIBUTE = "price_attribute"
 CONF_PRICE_UNIT = "price_unit"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
 CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
-CONF_PRICE_STRATEGY = "price_strategy"
 
 # Preis-Einheit des ausgewählten Sensors. "auto" leitet sie aus dessen
 # unit_of_measurement ab (alles mit "ct"/"cent" wird durch 100 geteilt),

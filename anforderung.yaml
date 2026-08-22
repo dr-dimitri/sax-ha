@@ -1244,9 +1244,16 @@ requirement_dynamic_price_charge:
   requirements:
     - "Options Flow (config_flow.SaxPowerOptionsFlow): Auswahl des
        Strompreis-Sensors, optionales Attribut-Override, Preis-Einheit
-       (automatisch/EUR/ct), Vorgabestrategie für den ersten Start,
-       optionaler PV-Prognose-Sensor sowie dessen nutzbarer Anteil in
-       Prozent. Keine YAML-Konfiguration."
+       (automatisch/EUR/ct), optionaler PV-Prognose-Sensor sowie dessen
+       nutzbarer Anteil in Prozent. Keine YAML-Konfiguration. Bewusst KEIN
+       eigenes Feld für die Strategie (bis einschließlich Version mit
+       CONF_PRICE_STRATEGY vorhanden, seither entfernt): Ein dort
+       hinterlegter Wert hätte ohnehin nur bis zum ersten gespeicherten
+       Zustand der Select-Entity gewirkt (siehe unten,
+       select.SaxPowerPriceStrategySelect) und dem Anwender fälschlich
+       suggeriert, er ließe sich dort jederzeit ändern - vom Anwender
+       gemeldet, nachdem eine Options-Flow-Änderung der Strategie im
+       Dashboard folgenlos blieb."
     - "Entities am bestehenden SAX-Gerät: switch 'Preisoptimiertes Laden
        aktiv' (Hauptschalter), select 'Preisoptimiertes Laden Strategie',
        number 'Preisoptimiertes Laden Preisgrenze' (EUR/kWh), number
@@ -1260,7 +1267,8 @@ requirement_dynamic_price_charge:
        REQ-TIMED-SOC-CHARGE."
     - "Alle Stellgrößen werden per RestoreEntity über Neustarts hinweg
        persistiert; ohne gespeicherten Zustand gelten die Defaults aus
-       const.py (bzw. die Vorgabestrategie aus dem Options Flow)."
+       const.py - für die Strategie DEFAULT_PRICE_STRATEGY (kein
+       Options-Flow-Fallback mehr, siehe oben)."
     - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
        Preisdaten, Warten auf Preisabfall, Lade aus Netz, PV-Prognose deckt
        Bedarf, Pausiert (PV-Überschuss), Pausiert (Max. SOC), Pausiert

@@ -539,7 +539,6 @@ automatisch in EUR/kWh umgerechnet.
 | Strompreis-Sensor | Sensor mit dem aktuellen Arbeitspreis. Aus seinen Vorschau-Attributen entstehen die Ladefenster der Strategien "Relativ" und "Smart" |
 | Attribut mit der Preisvorschau | Optional. Nur nötig, wenn die automatische Erkennung bei deinem Sensor danebenliegt – dann den Attributnamen eintragen (z. B. `raw_today`) |
 | Preis-Einheit | "Automatisch" leitet sie aus dem Sensor ab. EUR/kWh bzw. ct/kWh erzwingen die Interpretation, falls der Sensor keine oder eine irreführende Einheit meldet |
-| Vorgabe-Strategie | Gilt nur beim allerersten Start. Danach zählt das Auswahlfeld "Preisoptimiertes Laden Strategie" |
 | PV-Prognose-Sensor | Optional, nur für "Smart". Erwartet die erwartete Erzeugung als Energie, z. B. `sensor.energy_production_tomorrow` (Forecast.Solar) oder das Solcast-Pendant |
 | Nutzbarer Anteil der PV-Prognose | Wie viel der Prognose tatsächlich im Speicher landen dürfte (Standard 80 %) – deckt Eigenverbrauch, Wetterunsicherheit und Wandlungsverluste ab |
 

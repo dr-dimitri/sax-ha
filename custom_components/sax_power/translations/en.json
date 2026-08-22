@@ -583,7 +583,6 @@
           "price_sensor": "Electricity price sensor",
           "price_attribute": "Attribute holding the price forecast (optional)",
           "price_unit": "Price unit",
-          "price_strategy": "Default strategy (first start only)",
           "pv_forecast_sensor": "PV forecast sensor (optional)",
           "pv_forecast_factor": "Usable share of the PV forecast (%)"
         },
@@ -603,14 +602,6 @@
         "auto": "Automatic (from the sensor)",
         "eur_kwh": "EUR/kWh",
         "ct_kwh": "ct/kWh"
-      }
-    },
-    "price_charge_strategy": {
-      "options": {
-        "off": "Manual / off",
-        "absolute": "Absolute price",
-        "relative": "Relative / cheapest hours",
-        "smart": "Smart / PV-optimised"
       }
     }
   }

@@ -583,7 +583,6 @@
           "price_sensor": "Strompreis-Sensor",
           "price_attribute": "Attribut mit der Preisvorschau (optional)",
           "price_unit": "Preis-Einheit",
-          "price_strategy": "Vorgabe-Strategie (nur beim ersten Start)",
           "pv_forecast_sensor": "PV-Prognose-Sensor (optional)",
           "pv_forecast_factor": "Nutzbarer Anteil der PV-Prognose (%)"
         },
@@ -603,14 +602,6 @@
         "auto": "Automatisch (aus dem Sensor)",
         "eur_kwh": "EUR/kWh",
         "ct_kwh": "ct/kWh"
-      }
-    },
-    "price_charge_strategy": {
-      "options": {
-        "off": "Manuell / Aus",
-        "absolute": "Absoluter Preis",
-        "relative": "Relativ / Günstigste Stunden",
-        "smart": "Smart / PV-optimiert"
       }
     }
   }

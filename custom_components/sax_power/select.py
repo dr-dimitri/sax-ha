@@ -15,7 +15,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
-    CONF_PRICE_STRATEGY,
     DATA_COORDINATOR,
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
@@ -53,8 +52,12 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
                    nachts nichts teuer nach, wenn morgen genug Sonne kommt.
 
     Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
-    es noch keinen gespeicherten Zustand, gilt die im Options Flow
-    hinterlegte Vorgabestrategie, sonst DEFAULT_PRICE_STRATEGY.
+    es noch keinen gespeicherten Zustand (allererster Start), gilt
+    DEFAULT_PRICE_STRATEGY - bewusst kein eigenes Options-Flow-Feld dafür
+    (siehe config_flow.SaxPowerOptionsFlow): Ein dort hinterlegter Wert hätte
+    nur bis zum ersten gespeicherten Zustand gewirkt und dem Anwender
+    fälschlich suggeriert, er ließe sich jederzeit dort ändern - die
+    Strategie ändert man stattdessen direkt über diese Entity.
     """
 
     _attr_translation_key = "price_charge_strategy"
@@ -70,10 +73,7 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
             if last_state.state in PRICE_STRATEGIES:
                 await self.coordinator.async_set_price_charge_strategy(last_state.state)
                 return
-        configured = self.coordinator.options.get(CONF_PRICE_STRATEGY)
-        await self.coordinator.async_set_price_charge_strategy(
-            configured if configured in PRICE_STRATEGIES else DEFAULT_PRICE_STRATEGY
-        )
+        await self.coordinator.async_set_price_charge_strategy(DEFAULT_PRICE_STRATEGY)
 
     @property
     def current_option(self) -> str:

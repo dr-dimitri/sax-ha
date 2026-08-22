@@ -137,6 +137,14 @@ Auslieferungszustand.
 Die Messwerte stammen aus zwei Registerkarten des Speichers mit
 unterschiedlicher Slave-ID.
 
+Sensoren mit "(Diagnose)" tragen `entity_category: diagnostic` und werden von
+Home Assistant standardmäßig unter "Diagnose" auf der Geräteseite eingeklappt
+sowie in manchen Karten ausgeblendet, statt direkt auf der Hauptübersicht zu
+erscheinen – das betrifft vor allem Rohwerte, Gerätekennung und die
+phasenaufgeschlüsselten Strom-/Spannungs-/Leistungswerte, während die
+Kernwerte (Ladezustand, Lade-/Entladeleistung, Netzleistung, PV-Leistung,
+Zelltemperatur) sichtbar bleiben.
+
 **Basic Mode (Slave-ID 64):**
 
 | Entität | Beschreibung |
@@ -153,20 +161,20 @@ unterschiedlicher Slave-ID.
 | Hersteller / Gerätemodell / Softwareversion Master und Gateway / Seriennummer | Geräteidentität (Diagnose) |
 | **Ladeleistung / Entladeleistung** | Aktuelle Lade- bzw. Entladeleistung des Speichers in W |
 | **Netzleistung** | Leistung am Netzanschlusspunkt. Negativ = Einspeisung/PV-Überschuss, positiv = Netzbezug |
-| Speicher Stromsumme / Strom A, B, C | in A |
-| Speicher Spannung A, B, C | in V |
+| Speicher Stromsumme / Strom A, B, C | in A (Diagnose) |
+| Speicher Spannung A, B, C | in V (Diagnose) |
 | Wirk-, Schein-, Blindleistung Speicher Summe | in W / VA / var (Diagnose) |
-| Leistungsfaktor Speicher Summe | dimensionslos |
-| Netzfrequenz (Speicher) | in Hz |
+| Leistungsfaktor Speicher Summe | dimensionslos (Diagnose) |
+| Netzfrequenz (Speicher) | in Hz (Diagnose) |
 | Zelltemperatur | in °C |
 | Speicher Zustand / Speicher Ereignis | Klartext (Diagnose) |
 | PV-Leistung | in W – nur mit Smartmeter ADW200 verfügbar (siehe Hinweis unten) |
 | Leistungsvorgabe / Timeout Leistungsvorgabe / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte. Leistungsvorgabe und Steuermodus werden von den Lade-Automatiken auch selbst geschrieben |
-| Netz Stromsumme / Strom L1, L2, L3 | in A |
-| Netzspannung Durchschnitt (L-N) / L1, L2, L3 | in V |
-| Netzfrequenz | in Hz |
-| Netzleistung L1, L2, L3 | in W. Gleiche Vorzeichenkonvention wie oben "Netzleistung": negativ = Einspeisung, positiv = Netzbezug |
-| Schein-, Blindleistung, Leistungsfaktor Netz Summe | in VA / var / dimensionslos |
+| Netz Stromsumme / Strom L1, L2, L3 | in A (Diagnose) |
+| Netzspannung Durchschnitt (L-N) / L1, L2, L3 | in V (Diagnose) |
+| Netzfrequenz | in Hz (Diagnose) |
+| Netzleistung L1, L2, L3 | in W (Diagnose). Gleiche Vorzeichenkonvention wie oben "Netzleistung": negativ = Einspeisung, positiv = Netzbezug |
+| Schein-, Blindleistung, Leistungsfaktor Netz Summe | in VA / var / dimensionslos (Diagnose) |
 | Speicherkapazität / Verfügbare Lade- und Entladeleistung | in Wh / W (Diagnose) |
 | Maximaler und Minimaler SoC / Akku SoC (SunSpec) / Entladetiefe | in % (Diagnose) |
 | Ladestatus Akku / Akku Ereignis | Klartext (Diagnose) |

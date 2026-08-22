@@ -246,6 +246,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_current_sum"),
     ),
     SaxPowerSensorEntityDescription(
@@ -254,6 +255,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_current_a"),
     ),
     SaxPowerSensorEntityDescription(
@@ -262,6 +264,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_current_b"),
     ),
     SaxPowerSensorEntityDescription(
@@ -270,6 +273,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_current_c"),
     ),
     SaxPowerSensorEntityDescription(
@@ -278,6 +282,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_voltage_a"),
     ),
     SaxPowerSensorEntityDescription(
@@ -286,6 +291,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_voltage_b"),
     ),
     SaxPowerSensorEntityDescription(
@@ -294,6 +300,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_voltage_c"),
     ),
     SaxPowerSensorEntityDescription(
@@ -311,6 +318,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.APPARENT_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfApparentPower.VOLT_AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_power_apparent"),
     ),
     SaxPowerSensorEntityDescription(
@@ -319,6 +327,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.REACTIVE_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfReactivePower.VOLT_AMPERE_REACTIVE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_power_reactive"),
     ),
     SaxPowerSensorEntityDescription(
@@ -326,6 +335,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         translation_key="storage_power_factor",
         device_class=SensorDeviceClass.POWER_FACTOR,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_power_factor"),
     ),
     SaxPowerSensorEntityDescription(
@@ -334,6 +344,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.FREQUENCY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfFrequency.HERTZ,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("storage_frequency"),
     ),
     SaxPowerSensorEntityDescription(
@@ -400,6 +411,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_current_sum"),
     ),
     SaxPowerSensorEntityDescription(
@@ -408,6 +420,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_current_l1"),
     ),
     SaxPowerSensorEntityDescription(
@@ -416,6 +429,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_current_l2"),
     ),
     SaxPowerSensorEntityDescription(
@@ -424,6 +438,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_current_l3"),
     ),
     SaxPowerSensorEntityDescription(
@@ -432,6 +447,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_voltage_ln_avg"),
     ),
     SaxPowerSensorEntityDescription(
@@ -440,6 +456,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_voltage_l1"),
     ),
     SaxPowerSensorEntityDescription(
@@ -448,6 +465,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_voltage_l2"),
     ),
     SaxPowerSensorEntityDescription(
@@ -456,6 +474,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_voltage_l3"),
     ),
     SaxPowerSensorEntityDescription(
@@ -464,6 +483,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.FREQUENCY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfFrequency.HERTZ,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_frequency"),
     ),
     SaxPowerSensorEntityDescription(
@@ -472,6 +492,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_power_active_l1"),
     ),
     SaxPowerSensorEntityDescription(
@@ -480,6 +501,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_power_active_l2"),
     ),
     SaxPowerSensorEntityDescription(
@@ -488,6 +510,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_power_active_l3"),
     ),
     SaxPowerSensorEntityDescription(
@@ -496,6 +519,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.APPARENT_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfApparentPower.VOLT_AMPERE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_power_apparent_sum"),
     ),
     SaxPowerSensorEntityDescription(
@@ -504,6 +528,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.REACTIVE_POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfReactivePower.VOLT_AMPERE_REACTIVE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_power_reactive_sum"),
     ),
     SaxPowerSensorEntityDescription(
@@ -511,6 +536,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         translation_key="grid_power_factor_sum",
         device_class=SensorDeviceClass.POWER_FACTOR,
         state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("grid_power_factor_sum"),
     ),
     # -- SunSpec-Modus: Modell 802 "Battery Base" (Akkuzellen) ---------------

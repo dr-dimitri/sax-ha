@@ -53,6 +53,7 @@
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
 # REQ-STABLE-DEVICE-IDENTITY      done       Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen
 # REQ-DHCP-DISCOVERY              done       Automatische Netzwerk-Discovery per DHCP - IP-Feld der Ersteinrichtung vorbelegt
+# REQ-DIAGNOSTIC-ENTITY-CATEGORY  done       Technische Detail-/Rohwerte als entity_category=diagnostic, Kernwerte bleiben sichtbar
 # ==============================================================================
 
 # ==============================================================================
@@ -1751,3 +1752,53 @@ requirement_dhcp_discovery:
     - "tests/test_config_flow.py deckt ab, dass ein zweiter Broadcast
        derselben MAC-Adresse während eines laufenden Discovery-Flows mit
        \"already_in_progress\" abbricht."
+
+# ==============================================================================
+# ANFORDERUNG: ENTITY-KATEGORISIERUNG (DIAGNOSTIC)
+# ==============================================================================
+requirement_diagnostic_entity_category:
+  id: REQ-DIAGNOSTIC-ENTITY-CATEGORY
+  title: "Technische Detail-/Rohwerte als entity_category=diagnostic, Kernwerte bleiben sichtbar"
+  status: done
+  description: >
+    Von den ~63 SaxPowerSensorEntityDescription-Einträgen in sensor.py trägt
+    ein Teil entity_category=EntityCategory.DIAGNOSTIC, damit Home Assistant
+    sie auf der Geräteseite unter "Diagnose" einklappt statt auf der
+    Hauptübersicht zu zeigen - die Gerätekarte vermischt sonst alltäglich
+    relevante Werte mit technischen Detailwerten. Als diagnostic markiert
+    sind: Geräteidentität (sun_manufacturer, sun_model,
+    sun_version_master/gateway, sun_serial_number), Klartext-/Rohwerte
+    (switch_state_text, storage_state_text, storage_event_text,
+    battery_event_text, timed_charge_active_text, grid_serving_active_text,
+    price_charge_active_text, battery_charging_active_text), Sollwerte/
+    Immediate-Controls-Rohwerte (setpoint_power, setpoint_cosphi,
+    ic_power_setpoint_pct, ic_timeout, ic_control_mode_text,
+    ic_max_power_reference), sämtliche Akkuzellen-Detailwerte (battery_*)
+    sowie die phasenaufgeschlüsselten bzw. abgeleiteten Speicher- und
+    Netz-Elektrowerte (storage_current_*, storage_voltage_*,
+    storage_power_apparent/reactive/factor, storage_frequency,
+    grid_current_*, grid_voltage_*, grid_frequency, grid_power_active_l1/
+    l2/l3, grid_power_apparent_sum/reactive_sum/factor_sum). Ohne
+    entity_category (sichtbar) bleiben die Kernwerte: soc, discharge_power,
+    charge_power, smartmeter_power, pv_power, storage_max_cell_temp sowie
+    die Automatik-Statuswerte des preisoptimierten Ladens
+    (price_charge_status_text, price_charge_next_start,
+    price_charge_current_price) - siehe REQ-DYNAMIC-PRICE-CHARGE.
+    number.py- und switch.py-Entities blieben unverändert: die dortigen
+    Number-Entities sind aktiv genutzte Einstellungen (kein diagnostic),
+    die Monats-Switches tragen bereits entity_category=CONFIG.
+  requirements:
+    - "Kernwerte (Ladezustand, Lade-/Entladeleistung, Netzleistung,
+       PV-Leistung, Zelltemperatur, Automatik-Status) bleiben ohne
+       entity_category, damit sie auf der Hauptübersicht sichtbar sind."
+    - "Geräteidentität, Rohwerte/Sollwerte, Klartext-Status- und
+       Ereigniswerte sowie phasenaufgeschlüsselte/abgeleitete Elektrowerte
+       (Strom, Spannung, Frequenz, Schein-/Blindleistung,
+       Leistungsfaktor) tragen entity_category=EntityCategory.DIAGNOSTIC."
+    - "README.md kennzeichnet in der Sensor-Tabelle jede diagnostic-Entity
+       mit \"(Diagnose)\", damit Anwender die Kategorisierung ohne
+       Quellcode-Lektüre nachvollziehen können."
+  acceptance_criteria:
+    - "tests/test_sensor_descriptions.py deckt stichprobenartig ab, dass
+       diagnostic-Entities entity_category=DIAGNOSTIC tragen und die
+       genannten Kernwerte entity_category=None bleiben."

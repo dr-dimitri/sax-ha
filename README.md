@@ -313,12 +313,34 @@ Wichtig zum Zusammenspiel:
   aktiv aus dem Netz. Beim Einschalten des einen bei laufendem anderen kommt
   eine Rückfrage, siehe
   [Netzladung und preisoptimiertes Laden schließen sich aus](#netzladung-und-preisoptimiertes-laden-schließen-sich-aus).
-- **Netzladung hat Vorrang vor preisoptimiertem Laden**, falls doch beides
-  gleichzeitig zutrifft.
 - **Netzladung und netzdienliches Laden dürfen sich zeitlich nicht
   überschneiden** – die Integration prüft das, siehe
   [Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden).
 - Die **[Max-SOC-Sperre](#max-soc-sperre)** steht über allen dreien.
+
+Treffen die Bedingungen mehrerer Automatiken gleichzeitig zu, entscheidet eine
+feste Rangfolge, welche davon tatsächlich läuft:
+
+```
+Max-SOC-Sperre  >  Netzladung  >  Netzdienliches Laden  >  Preisoptimiertes Laden
+```
+
+- **Netzladung hat Vorrang vor allem außer der Max-SOC-Sperre.**
+- **Netzdienliches Laden hat Vorrang vor preisoptimiertem Laden.** Ist das
+  Zeitfenster des netzdienlichen Ladens gerade aktiv, pausiert
+  preisoptimiertes Laden dafür – auch seine
+  [Neutralpreis-Pausezone](#neutralpreis-pausezone) – bis das Zeitfenster
+  endet. Der Grund für diese Reihenfolge: Netzdienliches Laden ergibt nur in
+  ertragsreichen Monaten mit reichlich PV-Überschuss Sinn (typischerweise
+  Sommer, mittags) – also gerade in Zeiten, in denen ohnehin kaum oder gar
+  kein Netzbezug nötig ist. Ohne diesen Vorrang würden sich beide Automatiken
+  gegenseitig ein- und ausschalten, sobald ihre Bedingungen zufällig
+  gleichzeitig erfüllt sind (z. B. PV-Überschuss und gleichzeitig günstiger
+  Netzstrom an einem Sommermittag) – jede würde der anderen ständig den
+  Sollwertvorgabemodus streitig machen. Mit dem Vorrang bleibt das Verhalten
+  stattdessen vorhersehbar: In den aktiven Monaten/Zeitfenstern entscheidet
+  netzdienliches Laden, außerhalb davon entscheidet preisoptimiertes Laden
+  normal weiter.
 
 Alle drei Automatiken brauchen den SunSpec-Modus, weil sie über dessen Register
 schreiben. Ist er nicht erreichbar, greift keine von ihnen.
@@ -450,6 +472,14 @@ Speicher den PV-Überschuss noch nicht einsammeln soll, damit das Laden in die
 Zeit mit dem höchsten PV-Ertrag rutscht (Mittagsspitze) und die Einspeisespitze
 geglättet wird.
 
+**Hat Vorrang vor preisoptimiertem Laden** (siehe
+[Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken)): Ist das
+Zeitfenster des netzdienlichen Ladens aktiv, pausiert preisoptimiertes Laden
+so lange dafür. Sinn ergibt netzdienliches Laden ohnehin nur in ertragsreichen
+Monaten mit reichlich PV-Überschuss – typischerweise im Sommer, mittags –, und
+gerade dann ist kaum oder gar kein Netzbezug nötig, sodass preisoptimiertes
+Laden in diesem Zeitfenster wenig verlieren würde.
+
 Ablauf im Zeitfenster:
 
 1. Der Speicher beginnt über die geräteeigene Nullregelung von selbst zu laden.
@@ -566,6 +596,11 @@ Weitere Abbruchgründe, jeweils sofort wirksam (nicht erst im nächsten
 - **PV-Überschuss** über 50 W am Smart Meter – die eigene Sonne ist immer
   günstiger als Netzstrom.
 - **Netzladung aktiv** – das zeitgesteuerte Laden hat Vorrang.
+- **Netzdienliches Laden im Zeitfenster** – siehe
+  [Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken). Solange
+  das Zeitfenster des netzdienlichen Ladens aktiv ist, pausiert
+  preisoptimiertes Laden dafür, egal ob netzdienliches Laden gerade selbst
+  eingreift oder nicht.
 
 Der Ladeplan wird **alle 60 Sekunden** neu berechnet, zusätzlich sofort bei jeder
 Einstellungsänderung und bei jedem Zustandswechsel des Preis- oder
@@ -598,9 +633,10 @@ Preis ≥ Neutralpreis       →  Normale SmartMeter-Nullregelung (Entladung erl
 ```
 
 Die Pausezone gilt für **alle drei Strategien** und weicht denselben
-Abbruchgründen wie die Netzladung selbst – insbesondere einem bestätigten
-PV-Überschuss, damit freie Sonnenenergie weiterhin ungehindert in den
-Speicher fließen kann. Der Neutralpreis muss über der Preisgrenze liegen;
+Abbruchgründen wie preisoptimiertes Laden selbst – insbesondere einem
+bestätigten PV-Überschuss sowie einem aktiven Zeitfenster des netzdienlichen
+Ladens, damit freie Sonnenenergie weiterhin ungehindert in den Speicher
+fließen kann. Der Neutralpreis muss über der Preisgrenze liegen;
 andernfalls erscheint ein Reparaturhinweis unter *Einstellungen → Geräte &
 Dienste → Reparaturen*, und die Pausezone bleibt inaktiv (unverändertes
 Verhalten wie vor Einführung dieser Einstellung).
@@ -620,6 +656,7 @@ das aktuelle Verhalten:
 | Pausiert (PV-Überschuss) | Am Smart Meter wird Einspeisung gemessen |
 | Pausiert (Max. SOC) | Die übergeordnete Max-SOC-Sperre greift |
 | Pausiert (Netzladung aktiv) | Das zeitgesteuerte Laden hat gerade Vorrang |
+| Pausiert (Netzdienliches Laden aktiv) | Das Zeitfenster des netzdienlichen Ladens ist gerade aktiv und hat Vorrang – siehe [Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken) |
 | Pausiert (Preisband) | Preis liegt zwischen Preisgrenze und Neutralpreis – siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone) |
 
 Die Attribute dieses Sensors zeigen zusätzlich Strategie, aktuellen Preis,

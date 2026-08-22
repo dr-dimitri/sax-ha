@@ -33,6 +33,7 @@ from custom_components.sax_power.const import (
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
+    PRICE_STATUS_PAUSED_GRID_SERVING,
     PRICE_STATUS_PAUSED_MAX_SOC,
     PRICE_STATUS_PAUSED_NEUTRAL_BAND,
     PRICE_STATUS_PAUSED_PV_SURPLUS,
@@ -696,22 +697,23 @@ async def test_price_charge_neutral_band_inactive_without_neutral_price_configur
     assert coordinator.price_charge_status == PRICE_STATUS_WAITING
 
 
-async def test_price_charge_neutral_band_blocks_grid_serving(hass) -> None:
-    """Die Neutralpreis-Pausezone hat dieselbe Priorität wie aktives
-    preisoptimiertes Laden selbst (siehe anforderung.yaml,
-    REQ-DYNAMIC-PRICE-CHARGE) und blockiert netzdienliches Laden genauso -
-    _async_step_grid_serving darf während der Pausezone gar nicht erst
-    aufgerufen werden, sonst würde dessen eigene Zustandsmaschine
-    (_grid_serving_charge_confirm_cycles) unnötig mitlaufen."""
+async def test_grid_serving_takes_priority_over_price_charge_neutral_band(hass) -> None:
+    """Netzdienliches Laden hat Vorrang vor preisoptimiertem Laden -
+    einschließlich dessen Neutralpreis-Pausezone (siehe anforderung.yaml,
+    REQ-DYNAMIC-PRICE-CHARGE sowie REQ-GRID-SERVING-CHARGE). Vorher blockierte
+    die Pausezone netzdienliches Laden; das führte dazu, dass sich beide
+    Automatiken gegenseitig ein- und ausschalten konnten, sobald ihre
+    Bedingungen gleichzeitig erfüllt waren - jetzt weicht die Pausezone
+    stattdessen dem aktiven Zeitfenster des netzdienlichen Ladens, und
+    _async_step_grid_serving darf normal anlaufen."""
     coordinator = _make_coordinator(hass)
     coordinator.data = {
         "soc": 50,
         "ic_max_power_reference": 4600,
         # smartmeter_power bewusst unterhalb des Schwellwerts (kein
-        # bestätigter PV-Überschuss, der auch die Pausezone selbst
-        # ausbremsen würde) - storage_power_active allein würde
-        # netzdienliches Laden in Schritt a auslösen (siehe
-        # _async_step_grid_serving), wenn die Pausezone das nicht verhindert.
+        # bestätigter PV-Überschuss, der auch netzdienliches Laden selbst
+        # ausbremsen würde) - storage_power_active löst netzdienliches Laden
+        # in Schritt a aus (siehe _async_step_grid_serving).
         "smartmeter_power": 0,
         "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
@@ -728,11 +730,57 @@ async def test_price_charge_neutral_band_blocks_grid_serving(hass) -> None:
         with _patched_now(12):
             await coordinator.async_set_grid_serving_enabled(True)
             await asyncio.sleep(0.1)
+            # Zweiter Zyklus bestätigt die Zyklen-Hysterese von Schritt a
+            # (PV_SURPLUS_HYSTERESIS_CYCLES) - der erste allein reicht noch
+            # nicht, netzdienliches Laden aktiv zu übernehmen.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
 
-        assert coordinator.grid_serving_active is False
+        assert coordinator.grid_serving_active is True
         assert coordinator.sun_charge_active is True
-        assert coordinator._grid_serving_charge_confirm_cycles == 0
-        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_NEUTRAL_BAND
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_GRID_SERVING
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_grid_serving_takes_priority_over_price_charge_active_charging(
+    hass,
+) -> None:
+    """Netzdienliches Laden hat auch dann Vorrang, wenn preisoptimiertes
+    Laden gerade aktiv aus dem Netz laden würde (price_plan.charge_now
+    True) - nicht nur gegenüber der Neutralpreis-Pausezone. Ohne diesen
+    Vorrang würde sich price_should_charge bei jedem Neuberechnungszyklus
+    des Ladeplans (alle 60 s) mit dem netzdienlichen Laden abwechseln,
+    sobald beide Bedingungen gleichzeitig erfüllt sind - z. B. an einem
+    Sommermittag mit PV-Überschuss und gleichzeitig günstigem Netzpreis."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_grid_serving_start(dt_time(10, 0))
+    await coordinator.async_set_grid_serving_end(dt_time(14, 0))
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=True, current_price=0.10
+    )
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await asyncio.sleep(0.1)
+            # Zweiter Zyklus bestätigt die Zyklen-Hysterese von Schritt a
+            # (PV_SURPLUS_HYSTERESIS_CYCLES) - der erste allein reicht noch
+            # nicht, netzdienliches Laden aktiv zu übernehmen.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_active is True
+        assert coordinator.price_charge_active is False
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_GRID_SERVING
     finally:
         await coordinator.async_stop_sun_charge()
 

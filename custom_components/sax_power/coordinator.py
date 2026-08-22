@@ -51,6 +51,7 @@ from .const import (
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
+    PRICE_STATUS_PAUSED_GRID_SERVING,
     PRICE_STATUS_PAUSED_MAX_SOC,
     PRICE_STATUS_PAUSED_NEUTRAL_BAND,
     PRICE_STATUS_PAUSED_PV_SURPLUS,
@@ -1579,7 +1580,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
         """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden,
-        preisoptimiertes Laden und netzdienliches Laden - alle vier teilen
+        netzdienliches Laden und preisoptimiertes Laden - alle vier teilen
         sich den SunSpec-Modus-Schreibpfad (_sun_charge_task). Priorität
         (höchste zuerst):
 
@@ -1619,49 +1620,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
-        2b. Preisoptimiertes Laden (siehe eigenen Abschnitt weiter unten
-           sowie anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) lädt aus dem
-           Netz, sobald der vom Planner (price_optimizer.py) berechnete
-           Ladeplan für den aktuellen Zeitpunkt ein ausgewähltes
-           Preisfenster meldet. Es
-           steht hinter dem zeitgesteuerten Laden zurück (das per
-           Bestätigungsdialog ohnehin nicht gleichzeitig aktiv sein kann,
-           siehe async_set_timed_charge_enabled) und bricht - wie dieses -
-           bei bestätigtem PV-Überschuss sofort ab. Ziel-SOC ist derselbe
-           Wert wie "Max. SOC" (keine eigene Einstellung) - ist er erreicht,
-           greift dieselbe Max-SOC-Sperre wie bei den anderen beiden
-           Lademodi.
-
-           Neutralpreis-Pausezone: lädt preisoptimiertes Laden gerade NICHT
-           (price_should_charge False, z. B. weil der aktuelle Preis über
-           der Preisgrenze liegt), aber der aktuelle Preis liegt noch
-           unterhalb des Neutralpreises (number "Preisoptimiertes Laden
-           Neutralpreis"), wird der Speicher statt der normalen
-           SmartMeter-Nullregelung aktiv in den manuellen Sollwertmodus mit
-           Sollwert 0 geschaltet (price_should_pause,
-           async_start_sun_charge(0)) - Laden UND Entladen bleiben
-           gestoppt, der komplette Hausverbrauch läuft über das Netz. Erst
-           ab dem Neutralpreis lohnt sich die Entladung wieder (die
-           Speicherverluste würden sie sonst teurer machen als der direkte
-           Netzbezug), der Speicher geht dann zurück in die Nullregelung.
-           Dieselben Ausschlussgründe wie bei price_should_charge (Max-SOC-
-           Sperre, PV-Überschuss, zeitgesteuertes Laden hat Vorrang) gelten
-           auch hier, und die Pausezone blockiert netzdienliches Laden
-           genauso wie aktives preisoptimiertes Laden. Fehlt eine der
-           beiden Preis-Einstellungen, oder liegt der Neutralpreis nicht
-           über der Preisgrenze, bleibt price_should_pause False (siehe
-           _check_price_neutral_below_limit für den zugehörigen
-           Reparaturhinweis) - Verhalten unverändert wie vor Einführung des
-           Neutralpreises.
         3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat UND nicht bereits durch zeitgesteuertes
-           oder preisoptimiertes Laden bzw. dessen Neutralpreis-Pausezone
-           beansprucht - die Zeitfenster von
-           zeitgesteuertem und
+           Laden beansprucht - die Zeitfenster von zeitgesteuertem und
            netzdienlichem Laden dürfen sich zusätzlich nicht überschneiden,
            siehe _windows_overlap_with_months/_notify_time_window_overlap)
-           läuft als eigene Zustandsmaschine über _async_step_grid_serving,
-           NICHT über einen aus dem Smart-Meter-Überschuss berechneten
+           hat Vorrang vor preisoptimiertem Laden (grid_serving_window_active
+           schließt price_should_charge/price_should_pause aus, NICHT
+           umgekehrt - siehe Punkt 4). Grund: netzdienliches Laden ist
+           typischerweise nur in den ertragsreichen Sommermonaten aktiv, in
+           denen ohnehin kaum oder gar kein Netzbezug nötig ist; ohne diesen
+           Vorrang würden sich beide Automatiken - sobald ihre jeweiligen
+           Bedingungen gleichzeitig erfüllt sind - gegenseitig ein- und
+           ausschalten, weil sie denselben Sollwertvorgabemodus für
+           unterschiedliche Zwecke beanspruchen. Netzdienliches Laden läuft
+           als eigene Zustandsmaschine über _async_step_grid_serving, NICHT
+           über einen aus dem Smart-Meter-Überschuss berechneten
            Ladesollwert - es wird nie ein Sollwert > 0 geschrieben. Das
            Feature lädt bewusst NIE aktiv aus dem Netz, sondern überlässt
            die eigentliche
@@ -1708,7 +1682,39 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
            Beide Prüfungen sind exklusiv (a nur ohne, b nur mit aktivem
            Sollwertvorgabemodus) - siehe _async_step_grid_serving.
-        4. Andernfalls (alle Features deaktiviert, außerhalb Zeitfenster/
+        4. Erst wenn weder die Max-SOC-Sperre noch zeitgesteuertes noch
+           netzdienliches Laden (dessen Zeitfenster gerade aktiv ist -
+           grid_serving_window_active) greifen, kann preisoptimiertes Laden
+           (siehe eigenen Abschnitt weiter unten sowie anforderung.yaml,
+           REQ-DYNAMIC-PRICE-CHARGE) aus dem Netz laden, sobald der vom
+           Planner (price_optimizer.py) berechnete Ladeplan für den
+           aktuellen Zeitpunkt ein ausgewähltes Preisfenster meldet. Es
+           bricht - wie zeitgesteuertes Laden - bei bestätigtem
+           PV-Überschuss sofort ab. Ziel-SOC ist derselbe Wert wie "Max.
+           SOC" (keine eigene Einstellung) - ist er erreicht, greift
+           dieselbe Max-SOC-Sperre wie bei den anderen Lademodi.
+
+           Neutralpreis-Pausezone: lädt preisoptimiertes Laden gerade NICHT
+           (price_should_charge False, z. B. weil der aktuelle Preis über
+           der Preisgrenze liegt), aber der aktuelle Preis liegt noch
+           unterhalb des Neutralpreises (number "Preisoptimiertes Laden
+           Neutralpreis"), wird der Speicher statt der normalen
+           SmartMeter-Nullregelung aktiv in den manuellen Sollwertmodus mit
+           Sollwert 0 geschaltet (price_should_pause,
+           async_start_sun_charge(0)) - Laden UND Entladen bleiben
+           gestoppt, der komplette Hausverbrauch läuft über das Netz. Erst
+           ab dem Neutralpreis lohnt sich die Entladung wieder (die
+           Speicherverluste würden sie sonst teurer machen als der direkte
+           Netzbezug), der Speicher geht dann zurück in die Nullregelung.
+           Dieselben Ausschlussgründe wie bei price_should_charge (Max-SOC-
+           Sperre, PV-Überschuss, zeitgesteuertes UND netzdienliches Laden
+           haben Vorrang) gelten auch hier. Fehlt eine der beiden
+           Preis-Einstellungen, oder liegt der Neutralpreis nicht über der
+           Preisgrenze, bleibt price_should_pause False (siehe
+           _check_price_neutral_below_limit für den zugehörigen
+           Reparaturhinweis) - Verhalten unverändert wie vor Einführung des
+           Neutralpreises.
+        5. Andernfalls (alle Features deaktiviert, außerhalb Zeitfenster/
            Monat oder SOC erreicht) wird Register 40051 zurück auf 0
            (SmartMeter-Nullregelung) gesetzt und der Zustand der
            netzdienlichen Zustandsmaschine (_grid_serving_setpoint_active/
@@ -1755,18 +1761,38 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._timed_charge_min_soc is not None
             and self._timed_charge_armed
         )
-        # Preisoptimiertes Laden (Punkt 2b, siehe Docstring): teilt sich
+        # Netzdienliches Laden (Punkt 3, siehe Docstring): das Zeitfenster
+        # allein entscheidet bereits über den Vorrang vor preisoptimiertem
+        # Laden weiter unten - unabhängig davon, ob die eigene
+        # Zustandsmaschine (_async_step_grid_serving) gerade tatsächlich
+        # eingreift.
+        grid_serving_window_active = (
+            self._grid_serving_enabled
+            and now.month in self._grid_serving_months
+            and self._is_time_in_window(
+                now_time, self._grid_serving_start, self._grid_serving_end
+            )
+        )
+        grid_serving_eligible = (
+            not soc_reached and grid_serving_window_active and not timed_should_charge
+        )
+        # Preisoptimiertes Laden (Punkt 4, siehe Docstring): teilt sich
         # Ladeleistung, Ziel-SOC ("Max. SOC"), Max-SOC-Sperre und
         # PV-Überschuss-Hysterese mit dem zeitgesteuerten Laden. Der
         # Ladeplan selbst kommt aus dem Planner (price_optimizer.py) und
         # wird dort nur alle PRICE_EVAL_INTERVAL Sekunden neu berechnet -
         # die hier zusätzlich geprüften Abbruchgründe (Max-SOC-Sperre,
-        # PV-Überschuss) greifen dagegen sofort bei jedem Poll-Zyklus.
+        # PV-Überschuss, netzdienliches Laden) greifen dagegen sofort bei
+        # jedem Poll-Zyklus. netzdienliches Laden hat Vorrang vor
+        # preisoptimiertem Laden (nicht umgekehrt) - siehe Docstring, Punkt
+        # 3: sonst würden sich beide Automatiken gegenseitig ein- und
+        # ausschalten, sobald ihre Bedingungen gleichzeitig erfüllt sind.
         price_plan = self.price_planner.plan
         price_should_charge = (
             not soc_reached
             and not pv_surplus_active
             and not timed_should_charge
+            and not grid_serving_window_active
             and self._price_charge_enabled
             and self._price_charge_strategy != PRICE_STRATEGY_OFF
             and price_plan.charge_now
@@ -1784,13 +1810,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # _check_price_neutral_below_limit) bleibt es bei der normalen
         # Nullregelung. Greift nur außerhalb der eigenen Ladefenster
         # (price_should_charge bereits False) und weicht - wie das
-        # preisoptimierte Laden selbst - sofort einem PV-Überschuss, damit
-        # freie PV-Energie weiterhin ungehindert in den Speicher fließen
-        # kann.
+        # preisoptimierte Laden selbst - sofort einem PV-Überschuss sowie
+        # einem aktiven Zeitfenster des netzdienlichen Ladens, damit freie
+        # PV-Energie weiterhin ungehindert in den Speicher fließen kann.
         price_should_pause = (
             not soc_reached
             and not pv_surplus_active
             and not timed_should_charge
+            and not grid_serving_window_active
             and not price_should_charge
             and self._price_charge_enabled
             and self._price_charge_strategy != PRICE_STRATEGY_OFF
@@ -1801,20 +1828,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._price_charge_max_price
             < price_plan.current_price
             < self._price_charge_neutral_price
-        )
-        grid_serving_window_active = (
-            self._grid_serving_enabled
-            and now.month in self._grid_serving_months
-            and self._is_time_in_window(
-                now_time, self._grid_serving_start, self._grid_serving_end
-            )
-        )
-        grid_serving_eligible = (
-            not soc_reached
-            and grid_serving_window_active
-            and not timed_should_charge
-            and not price_should_charge
-            and not price_should_pause
         )
         if not grid_serving_eligible:
             self._grid_serving_setpoint_active = False
@@ -1895,9 +1908,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # auf MIN_IC_POWER_SETPOINT_PCT (-100 %, maximale
                 # Ladeleistung) - siehe Kommentar am Abschnittsanfang
                 # "Zeitgesteuertes Laden" zur entfernten "Max.
-                # Netzladeleistung".
+                # Netzladeleistung". timed_should_charge und
+                # price_should_charge sind hier bereits gegenseitig
+                # ausschließend (price_should_charge schließt
+                # timed_should_charge aus), Reihenfolge daher unerheblich.
                 await self.async_start_sun_charge(MIN_SETPOINT_POWER)
                 grid_serving_active_now = False
+            elif grid_serving_eligible:
+                # Vorrang vor der Neutralpreis-Pausezone: netzdienliches
+                # Laden schließt price_should_pause bereits über
+                # grid_serving_window_active aus (siehe oben), daher wird
+                # dieser Zweig nie erreicht, wenn price_should_pause True
+                # ist - grid_serving_eligible steht trotzdem vor
+                # price_should_pause, damit die Priorität auch strukturell
+                # sichtbar bleibt.
+                grid_serving_active_now = await self._async_step_grid_serving(data)
             elif price_should_pause:
                 # Neutralpreis-Pausezone: manueller Sollwertmodus mit
                 # Sollwert 0 statt Nullregelung - stoppt Laden UND Entladen
@@ -1905,8 +1930,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # netzdienlichen Ladens oben).
                 await self.async_start_sun_charge(0)
                 grid_serving_active_now = False
-            elif grid_serving_eligible:
-                grid_serving_active_now = await self._async_step_grid_serving(data)
             else:
                 grid_serving_active_now = False
                 if self.sun_charge_active:
@@ -1922,6 +1945,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             soc_reached=soc_reached,
             pv_surplus_active=pv_surplus_active,
             timed_should_charge=timed_should_charge,
+            grid_serving_window_active=grid_serving_window_active,
         )
         self._max_soc_clamped = max_soc_clamped_now
 
@@ -2280,6 +2304,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         soc_reached: bool,
         pv_surplus_active: bool,
         timed_should_charge: bool,
+        grid_serving_window_active: bool,
     ) -> str:
         """Anzeigetext für den Sensor "Preisoptimiertes Laden Status".
 
@@ -2300,6 +2325,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return PRICE_STATUS_PAUSED_MAX_SOC
         if timed_should_charge:
             return PRICE_STATUS_PAUSED_TIMED_CHARGE
+        if grid_serving_window_active:
+            return PRICE_STATUS_PAUSED_GRID_SERVING
         if pv_surplus_active:
             return PRICE_STATUS_PAUSED_PV_SURPLUS
         if paused_neutral_band:

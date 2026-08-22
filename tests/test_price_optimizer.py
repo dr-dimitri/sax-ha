@@ -26,6 +26,7 @@ from homeassistant.util import dt as dt_util
 from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
+    DEFAULT_PRICE_STRATEGY,
     DOMAIN,
     ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_TIMED_CHARGE_CONFLICT,
@@ -994,12 +995,14 @@ def _prepare_entity(entity, hass, entity_id: str, last_state: State | None) -> N
     entity.async_get_last_state = AsyncMock(return_value=last_state)
 
 
-async def test_strategy_select_uses_options_default_on_fresh_install(hass) -> None:
-    """Ohne gespeicherten Zustand gilt die im Options Flow hinterlegte
-    Vorgabestrategie."""
+async def test_strategy_select_uses_default_on_fresh_install(hass) -> None:
+    """Ohne gespeicherten Zustand (allererster Start) gilt
+    DEFAULT_PRICE_STRATEGY - bewusst kein Options-Flow-Feld dafür mehr (siehe
+    config_flow.SaxPowerOptionsFlow): ein dort hinterlegter Wert hätte nur
+    bis zum ersten gespeicherten Zustand gewirkt und dem Anwender fälschlich
+    suggeriert, er ließe sich dort jederzeit ändern."""
     coordinator = _make_coordinator(hass)
     coordinator.data = {"soc": 50}
-    coordinator.options = {"price_strategy": PRICE_STRATEGY_SMART}
     entity = SaxPowerPriceStrategySelect(coordinator, "test_entry_id")
     _prepare_entity(entity, hass, "select.test_strategy", None)
 
@@ -1009,8 +1012,8 @@ async def test_strategy_select_uses_options_default_on_fresh_install(hass) -> No
     # (siehe die coordinator-Fixture in tests/test_number.py).
     await coordinator.async_shutdown()
 
-    assert coordinator.price_charge_strategy == PRICE_STRATEGY_SMART
-    assert entity.current_option == PRICE_STRATEGY_SMART
+    assert coordinator.price_charge_strategy == DEFAULT_PRICE_STRATEGY
+    assert entity.current_option == DEFAULT_PRICE_STRATEGY
 
 
 async def test_strategy_select_restores_previous_state(hass) -> None:

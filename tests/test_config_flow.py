@@ -12,12 +12,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sax_power.config_flow import _expected_entity_count
 from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
-    CONF_PRICE_STRATEGY,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
     DOMAIN,
-    PRICE_STRATEGY_SMART,
     PRICE_UNIT_CT_KWH,
     REG_SOC,
     REG_SUN_SERIAL_HI,
@@ -464,7 +462,6 @@ async def test_options_flow_stores_price_configuration(hass) -> None:
         {
             CONF_PRICE_SENSOR: "sensor.strompreis",
             CONF_PRICE_UNIT: PRICE_UNIT_CT_KWH,
-            CONF_PRICE_STRATEGY: PRICE_STRATEGY_SMART,
             CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen",
             CONF_PV_FORECAST_FACTOR: 70,
         },
@@ -474,7 +471,6 @@ async def test_options_flow_stores_price_configuration(hass) -> None:
     assert result2["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_PRICE_SENSOR] == "sensor.strompreis"
     assert entry.options[CONF_PRICE_UNIT] == PRICE_UNIT_CT_KWH
-    assert entry.options[CONF_PRICE_STRATEGY] == PRICE_STRATEGY_SMART
     assert entry.options[CONF_PV_FORECAST_FACTOR] == 70
 
 

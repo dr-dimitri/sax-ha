@@ -894,7 +894,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             # Ersetzt das früher fehlerhafte "smartmeter_power" (Basic Mode,
             # Register 48), siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION.
-            "smartmeter_power": apply_sunssf(
+            # Negiert: Standarddarstellung ist negativ = Einspeisung ins Netz
+            # (PV-Überschuss), positiv = Netzbezug - das Register selbst
+            # meldet das Gegenteil (siehe REQ-SUNSPEC-MODE-CORRECTION,
+            # Abschnitt Vorzeichenkonvention).
+            "smartmeter_power": -apply_sunssf(
                 ext_reg(REG_SUN_METER_POWER_ACTIVE_SUM), meter_power_active_sf
             ),
             "grid_power_active_l1": apply_sunssf(
@@ -1019,7 +1023,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Laden UND kein Entladen), der SOC fällt dadurch im Normalfall nie von
     # selbst unter den Zielwert. Deshalb wertet _async_enforce_grid_charge in
     # diesem Fall zusätzlich am Smart Meter gemessenen Netzbezug
-    # (smartmeter_power < -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) als
+    # (smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) als
     # Freigabe-Trigger aus - mit derselben Zyklen-Hysterese
     # (_cycles_confirmed/_max_soc_grid_import_wait_cycles,
     # PV_SURPLUS_HYSTERESIS_CYCLES) wie an den drei anderen Stellen, die
@@ -1725,9 +1729,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             self._timed_charge_armed = True
         smartmeter_power = data.get("smartmeter_power")
+        # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_SURPLUS_
+        # THRESHOLD_WATT): negativ = Einspeisung/PV-Überschuss.
         pv_surplus_raw = (
             smartmeter_power is not None
-            and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+            and smartmeter_power < -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
         )
         pv_surplus_active = self._cycles_confirmed(
             "_timed_charge_pv_surplus_cycles", pv_surplus_raw
@@ -1860,9 +1866,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Smart Meter als Freigabe-Trigger auswerten, mit
                 # Zyklen-Hysterese gegen kurze Lastspitzen.
                 smartmeter_power = data.get("smartmeter_power")
+                # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_
+                # SURPLUS_THRESHOLD_WATT): positiv = Netzbezug.
                 grid_import_raw = (
                     smartmeter_power is not None
-                    and smartmeter_power < -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+                    and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
                 )
                 grid_import_confirmed = self._cycles_confirmed(
                     "_max_soc_grid_import_wait_cycles", grid_import_raw
@@ -1975,10 +1983,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return True
 
         smartmeter_power = data.get("smartmeter_power")
+        # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_SURPLUS_
+        # THRESHOLD_WATT): Einspeisung (negativ) ist unter den Schwellwert
+        # gefallen, sobald der Anzeigewert über -Schwellwert liegt.
         release_confirmed = self._cycles_confirmed(
             "_grid_serving_release_confirm_cycles",
             smartmeter_power is not None
-            and smartmeter_power < SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
+            and smartmeter_power > -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if release_confirmed:
             if self.sun_charge_active:

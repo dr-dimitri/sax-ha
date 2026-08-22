@@ -422,9 +422,12 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # REG_SUN_METER_POWER_ACTIVE_SUM) mehr als dieser Schwellwert an PV-Überschuss
 # gemessen wird, wird die Netzladung beendet - siehe
 # SaxPowerCoordinator._async_enforce_grid_charge, REQ-TIMED-SOC-CHARGE.
-# Vorzeichenkonvention laut Anwender: ein POSITIVER Anzeigewert steht für
-# Überschuss aus der Dachphotovoltaik (Einspeisung), der Rohregisterwert kann
-# davon abweichen - siehe apply_sunssf/to_signed16 für die Umrechnung.
+# Vorzeichenkonvention (Standarddarstellung, siehe anforderung.yaml,
+# REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert steht für
+# Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
+# POSITIVER Anzeigewert für Netzbezug - der Rohregisterwert kann davon
+# abweichen, coordinator._async_read_high_block negiert apply_sunssf(...)
+# beim Einlesen entsprechend.
 #
 # Wird außerdem von der Zustandsmaschine für netzdienliches Laden
 # (SaxPowerCoordinator._async_step_grid_serving, REQ-GRID-SERVING-CHARGE) für
@@ -432,7 +435,8 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # Auslöser für den Wechsel in den Sollwertvorgabemodus (tatsächliche
 # Ladeleistung des SAX, negativer Anteil von data["storage_power_active"])
 # sowie als Rückkehr-Kriterium in die SmartMeter-Nullregelung (Netzeinspeisung
-# data["smartmeter_power"] unter diesem Wert).
+# data["smartmeter_power"] betragsmäßig unter diesem Wert gefallen, also
+# > -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, siehe Vorzeichenkonvention oben).
 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50
 
 # Zyklen-Hysterese für JEDEN Vergleich gegen SMARTMETER_PV_SURPLUS_THRESHOLD_

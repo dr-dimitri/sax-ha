@@ -194,6 +194,20 @@ requirement_sunspec_mode_correction:
     Die Basic-Mode-Register 47 ("Leistung P des Speichers") und 48
     ("Leistung des Smart Meters") werden nicht mehr gelesen.
 
+    Vorzeichenkonvention von data["smartmeter_power"] (Standarddarstellung,
+    nicht offiziell in modbus.pdf dokumentiert): NEGATIV = Einspeisung ins
+    Netz (PV-Überschuss), POSITIV = Netzbezug. Das Rohregister selbst meldet
+    das umgekehrte Vorzeichen (positiv bei Einspeisung) -
+    coordinator._async_read_high_block negiert deshalb apply_sunssf(...) vor
+    der Ablage in data["smartmeter_power"]; der Sensor "Netzleistung"
+    (sensor.py) bleibt dabei ein reiner Durchreicher (_direct) und zeigt
+    damit direkt den bereits negierten Wert. Alle Vergleiche gegen
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) - PV-Überschuss-Prüfung
+    und Netzbezug-Freigabe-Trigger der Max-SOC-Sperre in REQ-TIMED-SOC-
+    CHARGE, Schritt b der Zustandsmaschine in REQ-GRID-SERVING-CHARGE sowie
+    die Neutralpreis-Pausezone in REQ-DYNAMIC-PRICE-CHARGE - sind an diese
+    Konvention angepasst.
+
     Die "Immediate Controls"-Werte bleiben zusätzlich als
     Nur-Lese-Diagnosesensoren verfügbar (ic_power_setpoint_pct,
     ic_timeout, ic_control_mode_text, ic_max_power_reference) - diese
@@ -218,6 +232,11 @@ requirement_sunspec_mode_correction:
        tests/test_real_hardware.py laufen gegen Slave-ID 100."
     - "README.md und die Sensortabellen verwenden die aktuellen
        Sensor-Keys."
+    - "tests/test_coordinator.py deckt die Vorzeichenkonvention von
+       data[\"smartmeter_power\"] ab: ein positiver Rohregisterwert (via
+       apply_sunssf) ergibt einen negativen data-Wert (Einspeisung) und
+       umgekehrt. tests/test_integration_live.py verifiziert denselben
+       negierten Wert end-to-end am Sensorzustand."
 
 # ==============================================================================
 # ANFORDERUNG: ZEITGESTEUERTES LADEN AUF ZIEL-SOC
@@ -273,9 +292,10 @@ requirement_timed_soc_charge:
        hier den SOC im Normalfall nie von selbst unter den Zielwert fallen
        lässt (der Speicher deckt den Hausverbrauch währenddessen nicht mit,
        siehe oben), wertet der Coordinator zusätzlich am Smart Meter
-       gemessenen Netzbezug (data["smartmeter_power"] <
-       -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 50 W Bezug) als
-       weiteren Freigabe-Trigger aus, mit derselben einheitlichen
+       gemessenen Netzbezug (data["smartmeter_power"] >
+       SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, also mehr als 50 W Bezug -
+       siehe Vorzeichenkonvention weiter unten unter "PV-Überschuss-
+       Prüfung") als weiteren Freigabe-Trigger aus, mit derselben einheitlichen
        Zyklen-Hysterese (self._max_soc_grid_import_wait_cycles, siehe unten
        "PV-Überschuss-Prüfung") gegen kurze Lastspitzen: erst wenn
        PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Aufrufe von
@@ -340,16 +360,17 @@ requirement_timed_soc_charge:
 
     PV-Überschuss-Prüfung: Grundlage ist data["smartmeter_power"] (SunSpec-
     Modus, Register 40072 "Summenwirkleistung Netz", REG_SUN_METER_
-    POWER_ACTIVE_SUM) - derselbe, bereits vorzeichenrichtig umgerechnete Wert
-    (apply_sunssf/to_signed16), der auch im Sensor "Smart Meter Leistung"
+    POWER_ACTIVE_SUM) - derselbe Wert, der auch im Sensor "Netzleistung"
     angezeigt wird (sensor.py, unverändert via _direct). Vorzeichenkonvention
-    (Anwenderangabe, nicht offiziell in modbus.pdf dokumentiert): ein
-    POSITIVER Anzeigewert bedeutet Überschuss aus der Dachphotovoltaik
-    (Einspeisung ins Netz); der rohe Registerinhalt selbst kann davon
-    abweichende Vorzeichen tragen, deshalb wertet die Prüfung bewusst den
-    bereits umgerechneten Anzeigewert aus, nicht das Rohregister direkt.
-    Ist der Wert (noch) nicht verfügbar (z. B. SunSpec-Modus nicht
-    erreichbar), blockiert das die Netzladung nicht. Der Schwellwert
+    (Standarddarstellung, nicht offiziell in modbus.pdf dokumentiert, siehe
+    REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert bedeutet
+    Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
+    POSITIVER Anzeigewert Netzbezug; der rohe Registerinhalt meldet dagegen
+    das umgekehrte Vorzeichen, weshalb coordinator._async_read_high_block
+    apply_sunssf(...) beim Einlesen negiert (nicht sensor.py - der Sensor
+    bleibt ein reiner Durchreicher, siehe _direct). Ist der Wert (noch)
+    nicht verfügbar (z. B. SunSpec-Modus nicht erreichbar), blockiert das
+    die Netzladung nicht. Der Schwellwert
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) ist bewusst als eigene,
     wiederverwendbare Konstante ausgelagert (50 W), da er absehbar auch an
     anderer Stelle für eine PV-Überschuss-Erkennung benötigt wird.
@@ -453,15 +474,16 @@ requirement_timed_soc_charge:
        unbegrenzt bestehen) bei fehlendem smartmeter_power."
     - "tests/test_coordinator.py deckt zusätzlich die PV-Überschuss-Prüfung
        ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
-       smartmeter_power über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT, aktives
-       Beenden einer bereits laufenden Netzladung, sobald der Schwellwert
-       über PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Zyklen mitten
-       im Zeitfenster überschritten wird (ein einzelner Zyklus reicht noch
-       nicht, Zurücksetzen des Zählers bei einem Zyklus ohne Überschreitung
-       zwischendurch), normales Laden bei smartmeter_power auf/unter dem
-       Schwellwert (inkl. negativer Werte = Netzbezug) sowie unveränderter
-       Ablauf, wenn smartmeter_power fehlt (SunSpec-Modus nicht
-       erreichbar)."
+       smartmeter_power unter -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (negativ
+       = Einspeisung, siehe Vorzeichenkonvention oben), aktives Beenden einer
+       bereits laufenden Netzladung, sobald der Schwellwert über
+       PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Zyklen mitten im
+       Zeitfenster über-/unterschritten wird (ein einzelner Zyklus reicht
+       noch nicht, Zurücksetzen des Zählers bei einem Zyklus ohne
+       Über-/Unterschreitung zwischendurch), normales Laden bei
+       smartmeter_power auf/über -Schwellwert (inkl. positiver Werte =
+       Netzbezug) sowie unveränderter Ablauf, wenn smartmeter_power fehlt
+       (SunSpec-Modus nicht erreichbar)."
     - "tests/test_integration_live.py enthält End-to-End-Tests, die über
        echte Modbus-TCP-Kommunikation verifizieren, dass Aktivieren des
        zeitgesteuerten Ladens innerhalb des Zeitfensters Register 40051 auf

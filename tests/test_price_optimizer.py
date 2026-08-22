@@ -582,7 +582,11 @@ async def test_price_charge_paused_by_pv_surplus(hass) -> None:
     await _enable_price_charge(coordinator)
     coordinator.price_planner.plan = _charging_plan()
 
-    data = {"soc": 50, "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500}
+    # Vorzeichenkonvention: negativ = Einspeisung/PV-Überschuss.
+    data = {
+        "soc": 50,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500),
+    }
     # Zyklen-Hysterese: erst nach mehreren bestätigten Zyklen wirksam.
     for _ in range(5):
         await coordinator._async_enforce_grid_charge(data)
@@ -659,7 +663,11 @@ async def test_price_charge_neutral_band_yields_to_pv_surplus(hass) -> None:
         status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.30
     )
 
-    data = {"soc": 50, "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500}
+    # Vorzeichenkonvention: negativ = Einspeisung/PV-Überschuss.
+    data = {
+        "soc": 50,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500),
+    }
     for _ in range(5):
         await coordinator._async_enforce_grid_charge(data)
 

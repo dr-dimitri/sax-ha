@@ -541,7 +541,11 @@ def test_parse_extended_decodes_sunspec_block(hass) -> None:
     assert data["ic_max_power_reference"] == 4600
 
     assert data["grid_current_sum"] == 20
-    assert data["smartmeter_power"] == 250
+    # Vorzeichenkonvention: das Rohregister meldet positiv bei Einspeisung,
+    # data["smartmeter_power"] wird beim Einlesen negiert (Standarddarstellung
+    # negativ = Einspeisung, positiv = Netzbezug) - siehe const.py,
+    # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT.
+    assert data["smartmeter_power"] == -250
 
     assert data["battery_capacity"] == 7680
     assert data["battery_soc"] == 55
@@ -894,7 +898,8 @@ async def test_enforce_grid_charge_max_soc_clamp_holds_on_single_grid_import_cyc
         await coordinator._async_enforce_grid_charge(
             {
                 "soc": 85,
-                "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+                # Vorzeichenkonvention: positiv = Netzbezug (siehe const.py).
+                "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
             }
         )
         await asyncio.sleep(0.1)
@@ -925,7 +930,8 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_two_grid_import_
 
     grid_import_data = {
         "soc": 85,
-        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+        # Vorzeichenkonvention: positiv = Netzbezug (siehe const.py).
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
     }
     try:
         await coordinator._async_enforce_grid_charge(grid_import_data)
@@ -965,7 +971,8 @@ async def test_enforce_grid_charge_max_soc_clamp_resets_grid_import_counter(
 
     grid_import_data = {
         "soc": 85,
-        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+        # Vorzeichenkonvention: positiv = Netzbezug (siehe const.py).
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
     }
     no_import_data = {"soc": 85, "smartmeter_power": 0}
 
@@ -1102,7 +1109,7 @@ async def test_enforce_grid_charge_does_not_start_with_pv_surplus_above_threshol
 ) -> None:
     """Auch innerhalb des Zeitfensters darf zeitgesteuertes Laden nicht
     starten, sobald am Smart Meter mehr PV-Überschuss als
-    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gemessen wird (positiver
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gemessen wird (negativer
     Anzeigewert = Überschuss aus der Dachphotovoltaik) - siehe
     anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
     coordinator = _make_coordinator(hass, _make_client())
@@ -1110,7 +1117,7 @@ async def test_enforce_grid_charge_does_not_start_with_pv_surplus_above_threshol
         "soc": 10,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
-        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
@@ -1157,7 +1164,7 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
             # dem der Smart Meter nun PV-Überschuss über dem Schwellwert
             # meldet. Ein einzelner Zyklus reicht wegen der Hysterese noch
             # nicht, um die Netzladung zu beenden.
-            coordinator.data["smartmeter_power"] = (
+            coordinator.data["smartmeter_power"] = -(
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
             )
             await coordinator._async_enforce_grid_charge(coordinator.data)
@@ -1211,7 +1218,7 @@ async def test_enforce_grid_charge_pv_surplus_hysteresis_resets_on_drop(
             await coordinator.async_set_timed_charge_enabled(True)
             await asyncio.sleep(0.1)
 
-            coordinator.data["smartmeter_power"] = (
+            coordinator.data["smartmeter_power"] = -(
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
             )
             await coordinator._async_enforce_grid_charge(coordinator.data)
@@ -1231,16 +1238,16 @@ async def test_enforce_grid_charge_pv_surplus_hysteresis_resets_on_drop(
 @pytest.mark.parametrize(
     "smartmeter_power",
     [
-        SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,  # genau auf dem Schwellwert (nicht >)
+        -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,  # genau auf dem Schwellwert (nicht <)
         0,
-        -500,  # Netzbezug statt PV-Überschuss
+        500,  # Netzbezug statt PV-Überschuss
     ],
 )
 async def test_enforce_grid_charge_starts_at_or_below_pv_surplus_threshold(
     hass, smartmeter_power: float
 ) -> None:
-    """Der Schwellwert greift erst bei Überschreitung (>) - ein Wert genau
-    auf dem Schwellwert sowie Netzbezug (negativer Anzeigewert) blockieren
+    """Der Schwellwert greift erst bei Unterschreitung (<) - ein Wert genau
+    auf dem Schwellwert sowie Netzbezug (positiver Anzeigewert) blockieren
     das zeitgesteuerte Laden nicht."""
     client = _make_client()
     write_result = MagicMock()
@@ -1799,7 +1806,9 @@ async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high
         "soc": 50,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
-        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        # Vorzeichenkonvention: negativ = Einspeisung - bleibt über den
+        # gesamten Test hinweg hoch, damit Schritt b nie freigibt.
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
         "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
@@ -1852,7 +1861,10 @@ async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_th
         "soc": 50,
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
-        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - 1,
+        # Vorzeichenkonvention: negativ = Einspeisung. Knapp unter dem
+        # Schwellwert exportiert (-49 statt -50), also gerade noch im
+        # Freigabebereich (> -Schwellwert).
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - 1),
     }
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
@@ -2087,7 +2099,9 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
 
     grid_serving_data = {
         **coordinator.data,
-        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300,
+        # Vorzeichenkonvention: negativ = Einspeisung/PV-Überschuss - löst
+        # den PV-Überschuss-Abbruch des zeitgesteuerten Ladens unten aus.
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
         "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
     }
 

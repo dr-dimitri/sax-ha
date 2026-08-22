@@ -16,6 +16,8 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
+from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
@@ -251,11 +253,35 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     _connection_data: dict[str, Any]
     _grid_charge_data: dict[str, Any]
     _dashboard_data: dict[str, Any]
+    _discovered_ip: str | None = None
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> SaxPowerOptionsFlow:
         return SaxPowerOptionsFlow()
+
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """DHCP-Discovery (siehe anforderung.yaml, REQ-DHCP-DISCOVERY).
+
+        Bricht ab, wenn der Host bereits über einen bestehenden Eintrag
+        konfiguriert ist (unabhängig von Port/Slave-IDs), sowie - über die
+        MAC-Adresse als Flow-unique_id - wenn für dasselbe physische Gerät
+        bereits ein anderer Discovery-Flow läuft. Letzteres ist nötig, weil
+        Geräte ihren DHCP-Lease wiederholt broadcasten und Home Assistant
+        dafür bei jedem Broadcast erneut async_step_dhcp aufruft - ohne
+        diese Prüfung würde jede Wiederholung eine weitere
+        "Erkannt"-Karte erzeugen.
+        """
+        self._async_abort_entries_match({CONF_HOST: discovery_info.ip})
+
+        await self.async_set_unique_id(format_mac(discovery_info.macaddress))
+        self._abort_if_unique_id_configured()
+
+        self._discovered_ip = discovery_info.ip
+        self.context["title_placeholders"] = {"host": discovery_info.ip}
+        return await self.async_step_user()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -317,7 +343,9 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_grid_charge()
 
         suggested_values = user_input or (
-            reconfigure_entry.data if reconfigure_entry is not None else None
+            reconfigure_entry.data
+            if reconfigure_entry is not None
+            else ({CONF_HOST: self._discovered_ip} if self._discovered_ip else None)
         )
         schema = self.add_suggested_values_to_schema(
             STEP_CONNECTION_SCHEMA, suggested_values

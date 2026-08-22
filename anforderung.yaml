@@ -52,6 +52,7 @@
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
 # REQ-STABLE-DEVICE-IDENTITY      done       Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen
+# REQ-DHCP-DISCOVERY              done       Automatische Netzwerk-Discovery per DHCP - IP-Feld der Ersteinrichtung vorbelegt
 # ==============================================================================
 
 # ==============================================================================
@@ -1690,3 +1691,63 @@ requirement_stable_device_identity:
        bereits vergebene entity_id nicht verändert, auch nicht nach
        async_regenerate_entity_id (dem Mechanismus hinter der
        \"Entity-IDs aktualisieren\"-Option im Umbenennen-Dialog)."
+
+# ==============================================================================
+# ANFORDERUNG: NETZWERK-DISCOVERY PER DHCP
+# ==============================================================================
+requirement_dhcp_discovery:
+  id: REQ-DHCP-DISCOVERY
+  title: "Automatische Netzwerk-Discovery per DHCP statt manueller IP-Eingabe"
+  status: done
+  description: >
+    manifest.json registriert einen DHCP-Discovery-Footprint
+    (Hostname-Präfix "sax*") - sendet ein SAX Speicher einen DHCP-Lease mit
+    passendem Hostnamen, ruft Home Assistant async_step_dhcp im Config Flow
+    auf. Bewusst nur "sax*" statt zusätzlich eines generischen Musters wie
+    "inverter*" (letzteres würde auf Geräte anderer Hersteller anschlagen
+    und unbeteiligten Anwendern eine falsche "Erkannt"-Karte einblenden) -
+    sollte sich der tatsächliche DHCP-Hostname eines SAX Speichers am
+    realen Gerät als abweichend herausstellen, ist das Muster in
+    manifest.json entsprechend anzupassen.
+
+    async_step_dhcp prüft zunächst per _async_abort_entries_match, ob der
+    entdeckte Host (discovery_info.ip) bereits über einen bestehenden
+    Eintrag konfiguriert ist (unabhängig von Port/Slave-IDs) und bricht in
+    diesem Fall mit "already_configured" ab. Danach wird die MAC-Adresse
+    (normiert über homeassistant.helpers.device_registry.format_mac) als
+    Flow-unique_id gesetzt und per _abort_if_unique_id_configured
+    dedupliziert - SAX Speicher senden ihren DHCP-Lease wiederholt, ohne
+    diese Prüfung würde jeder weitere Broadcast eine zusätzliche
+    "Erkannt"-Karte für dasselbe physische Gerät erzeugen
+    ("already_in_progress").
+
+    Anschließend leitet async_step_dhcp in den normalen async_step_user
+    weiter und merkt die entdeckte IP in self._discovered_ip vor; die
+    Formular-Vorbelegung in _async_step_connection nutzt sie als
+    suggested_value für das Host-Feld, sofern kein Reconfigure-Kontext
+    vorliegt. Die restliche Ersteinrichtung (Verbindungsprüfung,
+    grid_charge/dashboard/finish-Schritte, siehe REQ-IP-CONFIGURABLE-UI,
+    REQ-TIMED-SOC-CHARGE, REQ-BUNDLED-DASHBOARD, REQ-SETUP-FINISH-SUMMARY)
+    läuft unverändert weiter - Port, Slave-IDs und Aktualisierungsintervall
+    müssen weiterhin bestätigt bzw. bei Bedarf angepasst werden, DHCP
+    liefert nur die IP-Adresse. Ein manueller Start der Ersteinrichtung
+    (ohne vorherige Discovery) bleibt unverändert möglich, das Host-Feld
+    ist dann wie bisher leer.
+  requirements:
+    - "manifest.json enthält einen dhcp-Footprint (Hostname-Präfix
+       \"sax*\")."
+    - "async_step_dhcp dedupliziert sowohl gegen bereits konfigurierte
+       Einträge (Host-Abgleich) als auch gegen parallel laufende
+       Discovery-Flows desselben Geräts (MAC-Abgleich)."
+    - "Das Host-Feld der Ersteinrichtung wird bei per DHCP ausgelöster
+       Ersteinrichtung mit der entdeckten IP vorbelegt, bleibt bei
+       manuellem Start aber leer."
+  acceptance_criteria:
+    - "tests/test_config_flow.py deckt ab, dass DHCP-Discovery in den
+       user-Schritt mit vorbelegtem Host-Feld weiterleitet und der Flow ab
+       dort normal abschließt."
+    - "tests/test_config_flow.py deckt ab, dass Discovery für einen bereits
+       konfigurierten Host mit \"already_configured\" abbricht."
+    - "tests/test_config_flow.py deckt ab, dass ein zweiter Broadcast
+       derselben MAC-Adresse während eines laufenden Discovery-Flows mit
+       \"already_in_progress\" abbricht."

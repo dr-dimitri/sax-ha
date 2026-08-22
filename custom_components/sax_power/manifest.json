@@ -3,6 +3,7 @@
   "name": "SAX Power Home",
   "codeowners": ["@dr-dimitri"],
   "config_flow": true,
+  "dhcp": [{ "hostname": "sax*" }],
   "documentation": "https://github.com/dr-dimitri/sax-ha",
   "integration_type": "hub",
   "iot_class": "local_polling",

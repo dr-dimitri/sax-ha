@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.config_flow import _expected_entity_count
@@ -282,6 +283,100 @@ async def test_user_flow_cannot_connect(hass) -> None:
         )
         assert result2["type"] == FlowResultType.FORM
         assert result2["errors"] == {"base": "cannot_connect"}
+
+
+async def test_dhcp_discovery_prefills_host(hass) -> None:
+    """DHCP-Discovery (siehe anforderung.yaml REQ-DHCP-DISCOVERY) leitet in
+    den normalen "user"-Schritt weiter und belegt dessen Host-Feld mit der
+    entdeckten IP vor; die restliche Ersteinrichtung (Verbindungsprüfung,
+    grid_charge/dashboard/finish) läuft danach unverändert weiter."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_DHCP},
+        data=DhcpServiceInfo(
+            ip="192.168.1.77",
+            hostname="sax-1234",
+            macaddress="aabbccddeeff",
+        ),
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    host_key = next(key for key in result["data_schema"].schema if key == "host")
+    assert host_key.description == {"suggested_value": "192.168.1.77"}
+
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+    read_result = MagicMock()
+    read_result.isError.return_value = False
+    read_result.registers = [50] * 115
+    client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.close = MagicMock()
+
+    with (
+        patch(
+            "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+            return_value=client,
+        ),
+        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
+    ):
+        discovered_input = {**VALID_INPUT, "host": "192.168.1.77"}
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], discovered_input
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "grid_charge"
+
+
+async def test_dhcp_discovery_aborts_if_host_already_configured(hass) -> None:
+    """Ein bereits konfigurierter Speicher darf nicht erneut als "Erkannt"
+    angezeigt werden, auch wenn Port oder Slave-IDs vom Discovery-Kontext
+    abweichen - der Abgleich erfolgt allein über den Host."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=VALID_INPUT, unique_id="192.168.1.50:502"
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_DHCP},
+        data=DhcpServiceInfo(
+            ip="192.168.1.50",
+            hostname="sax-1234",
+            macaddress="aabbccddeeff",
+        ),
+    )
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_dhcp_discovery_deduplicates_repeated_broadcasts(hass) -> None:
+    """SAX Speicher senden ihren DHCP-Lease wiederholt; ein zweiter
+    Broadcast desselben Geräts (gleiche MAC-Adresse) darf keine zweite
+    "Erkannt"-Karte erzeugen, solange der erste Discovery-Flow noch läuft."""
+    first = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_DHCP},
+        data=DhcpServiceInfo(
+            ip="192.168.1.77",
+            hostname="sax-1234",
+            macaddress="aabbccddeeff",
+        ),
+    )
+    assert first["type"] == FlowResultType.FORM
+
+    second = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_DHCP},
+        data=DhcpServiceInfo(
+            ip="192.168.1.78",
+            hostname="sax-1234",
+            macaddress="aabbccddeeff",
+        ),
+    )
+    assert second["type"] == FlowResultType.ABORT
+    assert second["reason"] == "already_in_progress"
 
 
 async def test_reconfigure_flow_updates_host(hass) -> None:

@@ -44,6 +44,7 @@
         "description": "Firmware: {firmware}\nSeriennummer: {serial_number}\nSunSpec-Modus: {sunspec_status}\n\n{entity_count} Entities wurden angelegt.\n\nDas mitgelieferte Dashboard wurde entsprechend der vorherigen Auswahl angelegt (oder übersprungen) und lässt sich jederzeit über den Service \"sax_power.create_dashboard\" nachträglich anlegen.\n\nPreisoptimiertes Laden ist bewusst nicht Teil der Ersteinrichtung und lässt sich jederzeit über \"Konfigurieren\" bei dieser Integration einrichten."
       }
     },
+    "flow_title": "SAX Power Home ({host})",
     "error": {
       "cannot_connect": "Verbindung zum SAX Speicher fehlgeschlagen. IP-Adresse und Port prüfen sowie ob der Speicher im Netzwerk erreichbar ist.",
       "invalid_response": "Verbindung zum Speicher steht, aber er hat mit einem Modbus-Fehler geantwortet. Bitte die Slave-ID (Basic Mode) prüfen."

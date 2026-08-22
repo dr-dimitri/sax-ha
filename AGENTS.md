@@ -16,6 +16,7 @@ TCP to a SAX Power home battery storage system. It reads ~56 registers
 limits/switches/time windows for charge control logic (timed charging to a
 target SOC, grid-serving charging, a device-independent max-SOC lock).
 We will create the best SAX Integration for Homeassistant ever. 
+Always talk in german to the user
 ## Tech stack
 
 - Python 3.12, `pymodbus>=3.10.0` (`AsyncModbusTcpClient`), fully async I/O.
@@ -90,8 +91,9 @@ before it's considered done.
 - Before creating a new branch, update `main` first (`git fetch && git pull
   origin main --ff-only`) so the new branch starts from the current state.
 - Always create commits/branches/PRs.
+- After the pull request change to the main branch and delete the local feature Branche
 - Commit messages: German, imperative/descriptive summary line, focused on
-  *why*; end with `Co-Authored-By: AI`
+  *why*; 
   when written by an agent (see recent `git log` for examples).
 
 ## Testing instructions

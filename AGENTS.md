@@ -19,7 +19,7 @@ We will create the best SAX Integration for Homeassistant ever.
 Always talk in german to the user
 ## Tech stack
 
-- Python 3.14, `pymodbus==3.15.0` (`AsyncModbusTcpClient`), fully async I/O.
+- Python 3.14, `pymodbus==3.13.1` (`AsyncModbusTcpClient`), fully async I/O.
 - Home Assistant custom component (`custom_components/sax_power/`):
   `DataUpdateCoordinator` + `SensorEntity`/`NumberEntity`/`SwitchEntity`/
   `TimeEntity` platforms, GUI-only `config_flow.py` (no YAML configuration).

@@ -88,7 +88,7 @@ async def real_client():
     client = AsyncModbusTcpClient(host=host, port=port, timeout=timeout)
     try:
         connected = await client.connect()
-    except (ModbusException, OSError):
+    except ModbusException, OSError:
         connected = False
     if not connected:
         pytest.skip(f"SAX Speicher unter {host}:{port} nicht erreichbar.")

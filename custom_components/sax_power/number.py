@@ -82,7 +82,7 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 restored_value = int(float(last_state.state))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 restored_value = None
         await self.coordinator.async_set_max_soc(
             restored_value if restored_value is not None else MAX_SOC
@@ -132,7 +132,7 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 restored_value = int(float(last_state.state))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 restored_value = None
         await self.coordinator.async_set_timed_charge_min_soc(
             restored_value
@@ -182,7 +182,7 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 restored_value = float(last_state.state)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 restored_value = None
         await self.coordinator.async_set_price_charge_max_price(
             restored_value if restored_value is not None else DEFAULT_PRICE_LIMIT
@@ -233,7 +233,7 @@ class SaxPowerPriceNeutralPriceNumber(RestoreEntity, SaxPowerEntity, NumberEntit
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 restored_value = float(last_state.state)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 restored_value = None
         await self.coordinator.async_set_price_charge_neutral_price(
             restored_value if restored_value is not None else DEFAULT_PRICE_NEUTRAL
@@ -278,7 +278,7 @@ class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerEntity, NumberEntity
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 restored_value = int(float(last_state.state))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 restored_value = None
         await self.coordinator.async_set_price_charge_hours(
             restored_value if restored_value is not None else DEFAULT_PRICE_HOURS

@@ -19,7 +19,7 @@ We will create the best SAX Integration for Homeassistant ever.
 Always talk in german to the user
 ## Tech stack
 
-- Python 3.12, `pymodbus>=3.10.0` (`AsyncModbusTcpClient`), fully async I/O.
+- Python 3.14, `pymodbus==3.15.0` (`AsyncModbusTcpClient`), fully async I/O.
 - Home Assistant custom component (`custom_components/sax_power/`):
   `DataUpdateCoordinator` + `SensorEntity`/`NumberEntity`/`SwitchEntity`/
   `TimeEntity` platforms, GUI-only `config_flow.py` (no YAML configuration).
@@ -59,6 +59,9 @@ before it's considered done.
 - One central `SaxPowerCoordinator` (`coordinator.py`) owns every Modbus
   read/write; entities only ever read `coordinator.data` and call
   `coordinator.async_write_register(...)` - no per-entity polling.
+- Keep `domain/` framework-independent. Charging eligibility belongs in
+  `application/charge_policy.py`; Home Assistant and pymodbus details stay at
+  the outer boundary and reach the coordinator through application ports.
 - Full type hints (PEP 484); code must stay Ruff/Black/PEP 8 clean.
 - Validate register value ranges before every write (security: no
   unchecked writes to the device).

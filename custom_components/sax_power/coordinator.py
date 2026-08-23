@@ -16,9 +16,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
+from .application.charge_policy import ChargePolicyInput, evaluate_charge_policy
+from .application.ports import ModbusClient
 from .const import (
     ALL_MONTHS,
     BATTERY_EVENT_LABELS,
@@ -28,14 +29,8 @@ from .const import (
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
-    ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
-    ISSUE_MAX_SOC_BELOW_MIN_SOC,
-    ISSUE_NO_ACTIVE_MONTHS,
     ISSUE_PRICE_CHARGE_CONFLICT,
-    ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
-    ISSUE_PRICE_SENSOR_MISSING,
-    ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
     ISSUE_TIMED_CHARGE_CONFLICT,
     MAX_IC_POWER_SETPOINT_PCT,
     MAX_PRICE_HOURS,
@@ -47,7 +42,6 @@ from .const import (
     MIN_PRICE_LIMIT,
     MIN_SETPOINT_POWER,
     MIN_SOC,
-    PRICE_SENSOR_MISSING_GRACE_PERIOD,
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
@@ -153,101 +147,23 @@ from .const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
-    SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
     SWITCH_STATE_LABELS,
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
+from .domain.registers import (
+    apply_sunssf,
+    decode_ascii_registers,
+    to_signed16,
+    to_unsigned16,
+)
+from .domain.scheduling import is_time_in_window, windows_overlap
+from .domain.validation import clamp_float as _clamp_float
+from .domain.validation import clamp_int as _clamp_int
+from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def to_signed16(value: int) -> int:
-    """Convert an unsigned 16-bit register value to its signed representation."""
-    return value - 0x10000 if value >= 0x8000 else value
-
-
-def to_unsigned16(value: int) -> int:
-    """Convert a signed value to its unsigned 16-bit register representation."""
-    return value & 0xFFFF
-
-
-def apply_sunssf(raw_value: int, raw_scale_factor: int) -> float:
-    """Apply a SunSpec scale factor register: value * 10**sunssf.
-
-    Beide Rohwerte sind vorzeichenbehaftete 16-Bit-Register (siehe
-    modbus.pdf, Abschnitt "SUNSPEC-Scalefaktoren").
-    """
-    value = to_signed16(raw_value)
-    scale_factor = to_signed16(raw_scale_factor)
-    return round(value * (10**scale_factor), 3)
-
-
-def _clamp_int(value: int | None, min_value: int, max_value: int) -> int | None:
-    """Klemmt einen Software-seitigen Einstellungswert auf [min_value,
-    max_value]; None (= "keine Einstellung") bleibt unverändert.
-
-    NumberEntity validiert min/max bereits selbst beim regulären
-    async_set_native_value-Aufruf (Service-Call-Pfad über
-    native_min_value/native_max_value) - dieser Clamp schützt zusätzlich den
-    RestoreEntity-Pfad (async_added_to_hass), der einen zuvor gespeicherten
-    Zustand direkt an den Coordinator durchreicht, ohne diese Validierung zu
-    durchlaufen (siehe number.py, z. B. SaxPowerMaxSocNumber).
-    """
-    if value is None:
-        return None
-    return max(min_value, min(max_value, value))
-
-
-def _clamp_float(
-    value: float | None, min_value: float, max_value: float
-) -> float | None:
-    """Wie _clamp_int, für die Preisgrenze des preisoptimierten Ladens
-    (EUR/kWh, siehe async_set_price_charge_max_price)."""
-    if value is None:
-        return None
-    return max(min_value, min(max_value, float(value)))
-
-
-def _time_to_seconds(value: dt_time) -> int:
-    return value.hour * 3600 + value.minute * 60 + value.second
-
-
-def _window_intervals(start: dt_time, end: dt_time) -> list[tuple[int, int]]:
-    """Zerlegt ein halboffenes Zeitfenster [start, end) in ein oder zwei
-    zusammenhängende Intervalle (Sekunden seit Mitternacht), damit ein über
-    Mitternacht laufendes Fenster (start > end) genauso wie ein normales
-    Fenster auf Überlappung mit einem zweiten Fenster geprüft werden kann
-    (siehe windows_overlap). start == end gilt als leeres Fenster, analog zu
-    SaxPowerCoordinator._is_time_in_window."""
-    start_s, end_s = _time_to_seconds(start), _time_to_seconds(end)
-    if start_s == end_s:
-        return []
-    if start_s < end_s:
-        return [(start_s, end_s)]
-    return [(start_s, 24 * 3600), (0, end_s)]
-
-
-def windows_overlap(
-    start_a: dt_time | None,
-    end_a: dt_time | None,
-    start_b: dt_time | None,
-    end_b: dt_time | None,
-) -> bool:
-    """True, wenn sich zwei (jeweils halboffene, ggf. über Mitternacht
-    laufende) Zeitfenster überschneiden - Grundlage für die
-    Nicht-Überlappungs-Prüfung zwischen Netzladung und netzdienlichem Laden
-    (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE). Ein unvollständiges
-    Fenster (mindestens eine der vier Zeiten fehlt) gilt als leer und damit
-    nie überlappend."""
-    if start_a is None or end_a is None or start_b is None or end_b is None:
-        return False
-    return any(
-        a_start < b_end and b_start < a_end
-        for a_start, a_end in _window_intervals(start_a, end_a)
-        for b_start, b_end in _window_intervals(start_b, end_b)
-    )
 
 
 _MONTH_NAMES_DE = {
@@ -286,26 +202,13 @@ def _format_window_for_message(
     return f"{time_part} ({months_part})"
 
 
-def decode_ascii_registers(registers: list[int]) -> str:
-    """Decode SunSpec "str (encoded uint16)" registers into ASCII-Text.
-
-    Jedes Register enthält zwei ASCII-Zeichen (High-Byte zuerst). Siehe
-    modbus.pdf, z. B. Hersteller-Register 40004-40007 = "SAXPOWER".
-    """
-    raw = bytearray()
-    for reg in registers:
-        raw.append((reg >> 8) & 0xFF)
-        raw.append(reg & 0xFF)
-    return raw.decode("ascii", errors="replace").strip("\x00 ")
-
-
 class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinates Modbus reads/writes for a SAX Power storage system."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        client: AsyncModbusTcpClient,
+        client: ModbusClient,
         slave_id: int,
         slave_id_extended: int,
         scan_interval: int,
@@ -429,21 +332,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # unten ausgewertet (siehe anforderung.yaml,
         # REQ-SELF-DIAGNOSIS-REPAIRS).
         self._extended_unavailable_since: float | None = None
-        # Selbstdiagnose (siehe anforderung.yaml, REQ-SELF-DIAGNOSIS-
-        # REPAIRS): self._price_sensor_missing_since hält analog zu
-        # self._extended_unavailable_since fest, seit wann der Preis-Sensor
-        # ununterbrochen keine auswertbaren Preisdaten liefert. Die
-        # *_issue_active-Flags/-Dicts verhindern, dass
-        # _async_check_self_diagnostics dasselbe Issue bei jedem Poll-Zyklus
-        # erneut anlegt (ir.async_create_issue ist zwar idempotent über die
-        # issue_id, ein wiederholter Aufruf wäre aber unnötig).
-        self._price_sensor_missing_since: float | None = None
-        self._price_sensor_issue_active = False
-        self._sunspec_persistent_issue_active = False
-        self._max_soc_below_min_soc_issue_active = False
-        self._empty_window_issue_active: dict[str, bool] = {}
-        self._no_active_months_issue_active: dict[str, bool] = {}
-        self._price_neutral_below_limit_issue_active = False
+        self._self_diagnostics = SelfDiagnostics(hass, entry_id)
 
     async def _async_update_data(self) -> dict[str, Any]:
         data = dict(await self._async_read_basic())
@@ -1476,11 +1365,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Ist start == end (oder eines der beiden nicht gesetzt), gilt das
         Fenster als leer (nie aktiv) statt als "ganztägig".
         """
-        if start is None or end is None:
-            return False
-        if start <= end:
-            return start <= now < end
-        return now >= start or now < end
+        return is_time_in_window(now, start, end)
 
     @staticmethod
     def _windows_overlap_with_months(
@@ -1733,8 +1618,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
         current_soc = data["soc"]
-        soc_reached = current_soc >= target_soc
-        if soc_reached:
+        if current_soc >= target_soc:
             self._timed_charge_armed = False
         elif (
             self._timed_charge_min_soc is not None
@@ -1752,86 +1636,39 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "_timed_charge_pv_surplus_cycles", pv_surplus_raw
         )
         now = dt_util.now()
-        now_time = now.time()
-        timed_should_charge = (
-            not soc_reached
-            and not pv_surplus_active
-            and self._timed_charge_enabled
-            and now.month in self._timed_charge_months
-            and self._is_time_in_window(
-                now_time, self._timed_charge_start, self._timed_charge_end
-            )
-            and self._timed_charge_min_soc is not None
-            and self._timed_charge_armed
-        )
-        # Netzdienliches Laden (Punkt 3, siehe Docstring): das Zeitfenster
-        # allein entscheidet bereits über den Vorrang vor preisoptimiertem
-        # Laden weiter unten - unabhängig davon, ob die eigene
-        # Zustandsmaschine (_async_step_grid_serving) gerade tatsächlich
-        # eingreift.
-        grid_serving_window_active = (
-            self._grid_serving_enabled
-            and now.month in self._grid_serving_months
-            and self._is_time_in_window(
-                now_time, self._grid_serving_start, self._grid_serving_end
-            )
-        )
-        grid_serving_eligible = (
-            not soc_reached and grid_serving_window_active and not timed_should_charge
-        )
-        # Preisoptimiertes Laden (Punkt 4, siehe Docstring): teilt sich
-        # Ladeleistung, Ziel-SOC ("Max. SOC"), Max-SOC-Sperre und
-        # PV-Überschuss-Hysterese mit dem zeitgesteuerten Laden. Der
-        # Ladeplan selbst kommt aus dem Planner (price_optimizer.py) und
-        # wird dort nur alle PRICE_EVAL_INTERVAL Sekunden neu berechnet -
-        # die hier zusätzlich geprüften Abbruchgründe (Max-SOC-Sperre,
-        # PV-Überschuss, netzdienliches Laden) greifen dagegen sofort bei
-        # jedem Poll-Zyklus. netzdienliches Laden hat Vorrang vor
-        # preisoptimiertem Laden (nicht umgekehrt) - siehe Docstring, Punkt
-        # 3: sonst würden sich beide Automatiken gegenseitig ein- und
-        # ausschalten, sobald ihre Bedingungen gleichzeitig erfüllt sind.
         price_plan = self.price_planner.plan
-        price_should_charge = (
-            not soc_reached
-            and not pv_surplus_active
-            and not timed_should_charge
-            and not grid_serving_window_active
-            and self._price_charge_enabled
-            and self._price_charge_strategy != PRICE_STRATEGY_OFF
-            and price_plan.charge_now
+        policy = evaluate_charge_policy(
+            ChargePolicyInput(
+                now=now,
+                current_soc=current_soc,
+                target_soc=target_soc,
+                pv_surplus_active=pv_surplus_active,
+                timed_enabled=self._timed_charge_enabled,
+                timed_start=self._timed_charge_start,
+                timed_end=self._timed_charge_end,
+                timed_months=self._timed_charge_months,
+                timed_min_soc=self._timed_charge_min_soc,
+                timed_armed=self._timed_charge_armed,
+                grid_serving_enabled=self._grid_serving_enabled,
+                grid_serving_start=self._grid_serving_start,
+                grid_serving_end=self._grid_serving_end,
+                grid_serving_months=self._grid_serving_months,
+                price_enabled=self._price_charge_enabled,
+                price_strategy_active=(
+                    self._price_charge_strategy != PRICE_STRATEGY_OFF
+                ),
+                price_charge_now=price_plan.charge_now,
+                current_price=price_plan.current_price,
+                price_limit=self._price_charge_max_price,
+                neutral_price=self._price_charge_neutral_price,
+            )
         )
-        # Neutralpreis-Pausezone (siehe anforderung.yaml,
-        # REQ-DYNAMIC-PRICE-CHARGE): liegt der aktuelle Strompreis über der
-        # Preisgrenze, aber noch unter dem Neutralpreis, lohnt sich weder
-        # Netzladung (zu teuer) noch eine Entladung aus dem Speicher (die
-        # Speicherverluste würden die günstig eingekaufte Energie teurer
-        # machen als der direkte Netzbezug) - der Speicher wird deshalb per
-        # manuellem Sollwertmodus mit Sollwert 0 von der geräteeigenen
-        # SmartMeter-Nullregelung getrennt, statt ihr die Entladung zu
-        # überlassen. Erst ab dem Neutralpreis (oder ohne gültige
-        # Preisgrenze/Neutralpreis-Kombination, siehe
-        # _check_price_neutral_below_limit) bleibt es bei der normalen
-        # Nullregelung. Greift nur außerhalb der eigenen Ladefenster
-        # (price_should_charge bereits False) und weicht - wie das
-        # preisoptimierte Laden selbst - sofort einem PV-Überschuss sowie
-        # einem aktiven Zeitfenster des netzdienlichen Ladens, damit freie
-        # PV-Energie weiterhin ungehindert in den Speicher fließen kann.
-        price_should_pause = (
-            not soc_reached
-            and not pv_surplus_active
-            and not timed_should_charge
-            and not grid_serving_window_active
-            and not price_should_charge
-            and self._price_charge_enabled
-            and self._price_charge_strategy != PRICE_STRATEGY_OFF
-            and price_plan.current_price is not None
-            and self._price_charge_max_price is not None
-            and self._price_charge_neutral_price is not None
-            and self._price_charge_max_price < self._price_charge_neutral_price
-            and self._price_charge_max_price
-            < price_plan.current_price
-            < self._price_charge_neutral_price
-        )
+        soc_reached = policy.soc_reached
+        timed_should_charge = policy.timed_should_charge
+        grid_serving_window_active = policy.grid_serving_window_active
+        grid_serving_eligible = policy.grid_serving_eligible
+        price_should_charge = policy.price_should_charge
+        price_should_pause = policy.price_should_pause
         if not grid_serving_eligible:
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
@@ -1841,20 +1678,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         max_soc_clamped_now = False
         if soc_reached:
-            in_timed_window = (
-                self._timed_charge_enabled
-                and now.month in self._timed_charge_months
-                and self._is_time_in_window(
-                    now_time, self._timed_charge_start, self._timed_charge_end
-                )
-            )
-            in_grid_serving_window = (
-                self._grid_serving_enabled
-                and now.month in self._grid_serving_months
-                and self._is_time_in_window(
-                    now_time, self._grid_serving_start, self._grid_serving_end
-                )
-            )
+            in_timed_window = policy.timed_window_active
+            in_grid_serving_window = policy.grid_serving_window_active
             if in_timed_window or in_grid_serving_window:
                 # Ziel-SOC wurde innerhalb eines Netzlade-/netzdienlich-
                 # Zeitfensters erreicht (oder die Sperre läuft von einem
@@ -2452,247 +2277,29 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # -- Selbstdiagnose (siehe anforderung.yaml, REQ-SELF-DIAGNOSIS-REPAIRS) --
     def _async_check_self_diagnostics(self) -> None:
-        """Weitere Selbstdiagnose-Prüfungen über den Ladekonflikt
-        (_async_create_charge_conflict_issue) und die sofortige SunSpec-
-        Nichterreichbarkeits-Warnung (_async_read_high_block) hinaus.
-
-        Bei jedem Poll-Zyklus aus _async_update_data aufgerufen; jede
-        einzelne Prüfung legt ihr Issue aber nur auf einer Zustandsflanke
-        an bzw. entfernt es wieder, statt es bei jedem Aufruf neu
-        anzulegen (ir.async_create_issue wäre zwar idempotent über die
-        issue_id, ein wiederholter Aufruf ist aber unnötig)."""
-        self._check_price_sensor_missing()
-        self._check_sunspec_persistently_unavailable()
-        self._check_max_soc_below_min_soc()
-        self._check_price_neutral_below_limit()
-        self._check_empty_charge_window(
-            "timed_charge",
-            self._timed_charge_enabled,
-            self._timed_charge_start,
-            self._timed_charge_end,
-            "Netzladung (zeitgesteuertes Laden)",
+        """Evaluate repair rules through the dedicated boundary adapter."""
+        self._self_diagnostics.check(
+            DiagnosticSnapshot(
+                price_status=self.price_planner.plan.status,
+                price_entity_id=self.price_planner.price_entity_id,
+                extended_available=self._extended_available,
+                extended_unavailable_since=self._extended_unavailable_since,
+                slave_id_extended=self.slave_id_extended,
+                max_soc=self._max_soc,
+                timed_min_soc=self._timed_charge_min_soc,
+                price_limit=self._price_charge_max_price,
+                neutral_price=self._price_charge_neutral_price,
+                timed_enabled=self._timed_charge_enabled,
+                timed_start=self._timed_charge_start,
+                timed_end=self._timed_charge_end,
+                timed_months=frozenset(self._timed_charge_months),
+                grid_serving_enabled=self._grid_serving_enabled,
+                grid_serving_start=self._grid_serving_start,
+                grid_serving_end=self._grid_serving_end,
+                grid_serving_months=frozenset(self._grid_serving_months),
+            ),
+            monotonic(),
         )
-        self._check_empty_charge_window(
-            "grid_serving",
-            self._grid_serving_enabled,
-            self._grid_serving_start,
-            self._grid_serving_end,
-            "Netzdienliches Laden",
-        )
-        self._check_no_active_months(
-            "timed_charge",
-            self._timed_charge_enabled,
-            self._timed_charge_months,
-            "Netzladung (zeitgesteuertes Laden)",
-        )
-        self._check_no_active_months(
-            "grid_serving",
-            self._grid_serving_enabled,
-            self._grid_serving_months,
-            "Netzdienliches Laden",
-        )
-
-    def _check_price_sensor_missing(self) -> None:
-        """Preisoptimiertes Laden ist aktiv, aber der konfigurierte
-        Preis-Sensor existiert nicht (mehr) oder liefert seit über
-        PRICE_SENSOR_MISSING_GRACE_PERIOD keine auswertbaren Preisdaten
-        mehr (price_planner.plan.status == PRICE_STATUS_NO_PRICE_DATA
-        impliziert bereits price_charge_enabled UND Strategie != "off",
-        siehe price_optimizer.evaluate/compute_plan)."""
-        issue_id = f"{ISSUE_PRICE_SENSOR_MISSING}_{self.entry_id}"
-        missing = self.price_planner.plan.status == PRICE_STATUS_NO_PRICE_DATA
-        if not missing:
-            self._price_sensor_missing_since = None
-            if self._price_sensor_issue_active:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-                self._price_sensor_issue_active = False
-            return
-
-        now = monotonic()
-        if self._price_sensor_missing_since is None:
-            self._price_sensor_missing_since = now
-        if (
-            not self._price_sensor_issue_active
-            and now - self._price_sensor_missing_since
-            >= PRICE_SENSOR_MISSING_GRACE_PERIOD
-        ):
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                issue_id,
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key=ISSUE_PRICE_SENSOR_MISSING,
-                translation_placeholders={
-                    "price_sensor": self.price_planner.price_entity_id or "?"
-                },
-            )
-            self._price_sensor_issue_active = True
-
-    def _check_sunspec_persistently_unavailable(self) -> None:
-        """Eskalation von ISSUE_EXTENDED_MODE_UNAVAILABLE (das schon bei der
-        ersten Nichterreichbarkeit angelegt wird): hält der Ausfall länger
-        als SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD an, betrifft das
-        nicht mehr nur die SunSpec-Sensoren, sondern macht auch alle drei
-        Lade-Automatiken funktionslos - das verdient eine dringlichere,
-        ausführlichere Meldung."""
-        issue_id = f"{ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE}_{self.entry_id}"
-        if self._extended_available or self._extended_unavailable_since is None:
-            if self._sunspec_persistent_issue_active:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-                self._sunspec_persistent_issue_active = False
-            return
-
-        if (
-            not self._sunspec_persistent_issue_active
-            and monotonic() - self._extended_unavailable_since
-            >= SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD
-        ):
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                issue_id,
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key=ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
-                translation_placeholders={"slave_id": str(self.slave_id_extended)},
-            )
-            self._sunspec_persistent_issue_active = True
-
-    def _check_max_soc_below_min_soc(self) -> None:
-        """ "Max. SOC" ist gleichzeitig das Ziel-SOC des zeitgesteuerten
-        Ladens - liegt es unter "Min. SOC" (dem unteren Start-Schwellwert),
-        kann die Netzladung nie starten: der Ladestart wird erst unterhalb
-        von Min. SOC ausgelöst, die Max-SOC-Sperre greift aber schon
-        vorher. Kein Zustandsflanken-Timer nötig, da es sich um eine
-        statische Einstellungskombination statt eines transienten
-        Messwerts handelt."""
-        issue_id = f"{ISSUE_MAX_SOC_BELOW_MIN_SOC}_{self.entry_id}"
-        problem = (
-            self._max_soc is not None
-            and self._timed_charge_min_soc is not None
-            and self._max_soc < self._timed_charge_min_soc
-        )
-        if not problem:
-            if self._max_soc_below_min_soc_issue_active:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-                self._max_soc_below_min_soc_issue_active = False
-            return
-        if self._max_soc_below_min_soc_issue_active:
-            return
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=ISSUE_MAX_SOC_BELOW_MIN_SOC,
-            translation_placeholders={
-                "max_soc": str(self._max_soc),
-                "min_soc": str(self._timed_charge_min_soc),
-            },
-        )
-        self._max_soc_below_min_soc_issue_active = True
-
-    def _check_price_neutral_below_limit(self) -> None:
-        """Der Neutralpreis muss über der Preisgrenze liegen, sonst kann die
-        in REQ-DYNAMIC-PRICE-CHARGE beschriebene Pause-Zone (Laden UND
-        Entladen gestoppt zwischen Preisgrenze und Neutralpreis) nie
-        greifen - price_should_pause in _async_enforce_grid_charge bleibt
-        in diesem Fall bewusst False, der Speicher verhält sich unverändert
-        wie vor Einführung des Neutralpreises. Statische
-        Einstellungskombination wie bei _check_max_soc_below_min_soc, kein
-        Zustandsflanken-Timer nötig."""
-        issue_id = f"{ISSUE_PRICE_NEUTRAL_BELOW_LIMIT}_{self.entry_id}"
-        problem = (
-            self._price_charge_max_price is not None
-            and self._price_charge_neutral_price is not None
-            and self._price_charge_neutral_price <= self._price_charge_max_price
-        )
-        if not problem:
-            if self._price_neutral_below_limit_issue_active:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-                self._price_neutral_below_limit_issue_active = False
-            return
-        if self._price_neutral_below_limit_issue_active:
-            return
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
-            translation_placeholders={
-                "max_price": str(self._price_charge_max_price),
-                "neutral_price": str(self._price_charge_neutral_price),
-            },
-        )
-        self._price_neutral_below_limit_issue_active = True
-
-    def _check_empty_charge_window(
-        self,
-        feature_key: str,
-        enabled: bool,
-        start: dt_time | None,
-        end: dt_time | None,
-        feature_label: str,
-    ) -> None:
-        """Automatik aktiv, aber Start- und Endzeit ihres Zeitfensters sind
-        identisch (siehe _window_intervals: start == end gilt als leeres
-        Fenster) - die Automatik läuft dadurch nie, ohne dass das an der
-        Entity selbst erkennbar wäre."""
-        issue_id = f"{ISSUE_EMPTY_CHARGE_WINDOW}_{feature_key}_{self.entry_id}"
-        problem = enabled and start is not None and end is not None and start == end
-        active = self._empty_window_issue_active.get(feature_key, False)
-        if not problem:
-            if active:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-                self._empty_window_issue_active[feature_key] = False
-            return
-        if active:
-            return
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=ISSUE_EMPTY_CHARGE_WINDOW,
-            translation_placeholders={"feature": feature_label},
-        )
-        self._empty_window_issue_active[feature_key] = True
-
-    def _check_no_active_months(
-        self,
-        feature_key: str,
-        enabled: bool,
-        months: frozenset[int],
-        feature_label: str,
-    ) -> None:
-        """Automatik aktiv, aber kein einziger Monats-Schalter (switch.py)
-        aktiviert - das Feature ist dadurch ganzjährig inaktiv (siehe
-        _async_enforce_grid_charge, Abschnitt "Aktive Monate")."""
-        issue_id = f"{ISSUE_NO_ACTIVE_MONTHS}_{feature_key}_{self.entry_id}"
-        problem = enabled and not months
-        active = self._no_active_months_issue_active.get(feature_key, False)
-        if not problem:
-            if active:
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-                self._no_active_months_issue_active[feature_key] = False
-            return
-        if active:
-            return
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=ISSUE_NO_ACTIVE_MONTHS,
-            translation_placeholders={"feature": feature_label},
-        )
-        self._no_active_months_issue_active[feature_key] = True
 
     async def async_shutdown(self) -> None:
         # super().async_shutdown() (DataUpdateCoordinator) storniert den

@@ -23,8 +23,14 @@ Ist-Zustand-Anforderungen je REQ-ID).
 
 ```
 custom_components/sax_power/
-├── manifest.json      Metadaten, Requirements (pymodbus>=3.10.0), Domain
+├── manifest.json      Metadaten, Requirements (pymodbus==3.15.0), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
+├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
+│                          Zeitfenster und Wertevalidierung
+├── application/         Use-Case-Policy für die Ladeprioritäten sowie der
+│                          injizierbare Modbus-Client-Port
+├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
+│                          Repair-Issues
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden)
@@ -55,10 +61,7 @@ custom_components/sax_power/
 ├── time.py                Zeitfenster-Start/-Ende für zeitgesteuertes und
 │                          netzdienliches Laden
 ├── repairs.py             Bestätigungsdialog für den Konflikt zwischen Netzladung
-│                          und preisoptimiertem Laden; fünf weitere, rein
-│                          informative Selbstdiagnose-Issues sitzen dagegen direkt
-│                          in coordinator.py (_async_check_self_diagnostics), siehe
-│                          anforderung.yaml REQ-SELF-DIAGNOSIS-REPAIRS
+│                          und preisoptimiertem Laden
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan, IP-Adresse redigiert
 ├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in
@@ -70,6 +73,22 @@ custom_components/sax_power/
 tests/                Siehe Abschnitt "Tests"
 .devcontainer/         VS Code DevContainer für lokale Entwicklung
 ```
+
+Die Abhängigkeiten zeigen von den Home-Assistant-Entrypoints nach innen:
+`sensor.py`/`number.py`/`switch.py`/`time.py` verwenden den Coordinator, der
+die Use-Case-Policy aus `application/` orchestriert; diese Policy verwendet
+nur die reinen Regeln aus `domain/`. Die Domain importiert weder Home
+Assistant noch pymodbus. Der konkrete `AsyncModbusTcpClient` wird beim Setup
+erzeugt und über den `application.ports.ModbusClient`-Port in den Coordinator
+injiziert. Dadurch bleibt der Coordinator der einzige Besitzer aller
+Modbus-I/O-Operationen, während die Entscheidungslogik isoliert testbar ist.
+
+Die Ladeprioritäten in `application/charge_policy.py` sind bewusst reine
+Berechnung. Hysterese-Zähler, asynchrone Zustandsübergänge, periodische
+Sollwert-Writes und Fehlerabbildung verbleiben im Coordinator, weil sie den
+laufenden Use Case und die physische Gerätekommunikation orchestrieren. Das
+erhält die extern sichtbare Funktionalität und schafft zugleich eine klare
+Naht für weitere schrittweise Extraktionen.
 
 `config_flow.py` implementiert sowohl `async_step_user` (Ersteinrichtung) als
 auch `async_step_reconfigure` (spätere Änderung, z. B. der IP-Adresse) über

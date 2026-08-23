@@ -208,7 +208,7 @@ async def _async_read_finish_summary(
         try:
             if not await client.connect():
                 return summary
-        except (ModbusException, OSError):
+        except ModbusException, OSError:
             return summary
 
         try:
@@ -217,7 +217,7 @@ async def _async_read_finish_summary(
                 count=READ_BLOCK_EXT_LOW1_COUNT,
                 device_id=slave_id_extended,
             )
-        except (ModbusException, OSError):
+        except ModbusException, OSError:
             return summary
         if result.isError():
             return summary

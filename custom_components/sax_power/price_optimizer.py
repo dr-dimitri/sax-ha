@@ -211,7 +211,7 @@ def _coerce_price(value: Any) -> float | None:
         return None
     try:
         price = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(price):
         return None
@@ -536,7 +536,7 @@ class SaxPricePlanner:
         )
         try:
             return max(0.0, min(100.0, float(percent))) / 100
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return DEFAULT_PV_FORECAST_FACTOR / 100
 
     # -- Lebenszyklus -------------------------------------------------------
@@ -600,7 +600,7 @@ class SaxPricePlanner:
             return None
         try:
             value = float(state.state)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if not math.isfinite(value):
             return None

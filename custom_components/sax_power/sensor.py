@@ -721,7 +721,7 @@ class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
         if (last_state := await self.async_get_last_state()) is not None:
             try:
                 restored_value = float(last_state.state)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 restored_value = 0.0
         self._restore_fn(restored_value)
 

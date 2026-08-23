@@ -15,7 +15,6 @@ Home Plus. Siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 from __future__ import annotations
 
 import asyncio
-import warnings
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -26,12 +25,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from pymodbus.client import AsyncModbusTcpClient
-from pymodbus.datastore import (
-    ModbusDeviceContext,
-    ModbusSequentialDataBlock,
-    ModbusServerContext,
-)
 from pymodbus.server import ModbusTcpServer
+from pymodbus.simulator import DataType, SimData, SimDevice
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
@@ -58,6 +53,41 @@ TEST_PORT = 15502
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
+def _simulator_registers(values: list[int]) -> list[int]:
+    """Adapt unsigned wire values to the pymodbus 3.13 simulator API."""
+    return [to_signed16(value) for value in values]
+
+
+def _modbus_server(
+    port: int,
+    basic_registers: list[int],
+    extended_registers: list[int] | None,
+) -> ModbusTcpServer:
+    """Create a TCP simulator with the supported SimDevice API."""
+    devices = [
+        SimDevice(
+            id=SLAVE_ID_BASIC,
+            simdata=SimData(
+                address=0,
+                values=basic_registers,
+                datatype=DataType.REGISTERS,
+            ),
+        )
+    ]
+    if extended_registers is not None:
+        devices.append(
+            SimDevice(
+                id=SLAVE_ID_EXTENDED,
+                simdata=SimData(
+                    address=0,
+                    values=extended_registers,
+                    datatype=DataType.REGISTERS,
+                ),
+            )
+        )
+    return ModbusTcpServer(devices, address=("127.0.0.1", port))
+
+
 def _build_basic_registers(**overrides: int) -> list[int]:
     values = [0] * 100
     defaults = {
@@ -71,7 +101,7 @@ def _build_basic_registers(**overrides: int) -> list[int]:
     defaults.update(overrides)
     for addr, value in defaults.items():
         values[addr] = value
-    return values
+    return _simulator_registers(values)
 
 
 def _build_extended_registers(**overrides: int) -> list[int]:
@@ -178,7 +208,7 @@ def _build_extended_registers(**overrides: int) -> list[int]:
     defaults.update(overrides)
     for addr, value in defaults.items():
         values[addr] = value
-    return values
+    return _simulator_registers(values)
 
 
 def _entity_id(registry: er.EntityRegistry, entry_id: str, suffix: str) -> str:
@@ -198,19 +228,9 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
     """Setzt die Integration gegen einen echten Modbus-Server auf und prüft
     Lese- und Schreibpfade (inkl. Max-SOC-Klemmung, Netzladung und die
     SunSpec-Modus-Register mit Skalierung) end-to-end."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT))
+    server = _modbus_server(
+        TEST_PORT, _build_basic_registers(), _build_extended_registers()
+    )
     await server.serve_forever(background=True)
 
     try:
@@ -383,18 +403,9 @@ async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
     ConfigEntryNotReady -> gar keine Entities). Basic-Mode-Sensoren müssen
     weiterhin echte Werte liefern, SunSpec-Sensoren dürfen lediglich
     "unbekannt" zeigen. Siehe anforderung.yaml, REQ-EXTENDED-MODE-RESILIENCE."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
-        # Bewusst nur Slave-ID 64 (Basic Mode) im Server-Context - simuliert
-        # ein Gateway, auf dem der SunSpec-Modus (Slave-ID 100) nicht
-        # verfügbar ist.
-        context = ModbusServerContext(
-            devices={SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr)},
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 1))
+    # Bewusst nur Slave-ID 64 (Basic Mode) - simuliert ein Gateway, auf dem
+    # der SunSpec-Modus (Slave-ID 100) nicht verfügbar ist.
+    server = _modbus_server(TEST_PORT + 1, _build_basic_registers(), None)
     await server.serve_forever(background=True)
 
     try:
@@ -444,21 +455,9 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     Netzladeleistung"). Der Ziel-SOC (zentrales "Max. SOC", Register 46 als
     Vergleichswert) ist bewusst keine eigene Einstellung, siehe
     anforderung.yaml REQ-TIMED-SOC-CHARGE."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_registers = _build_basic_registers()
-        basic_registers[46] = 50  # SOC 50%, unterhalb des unten gesetzten Ziel-SOC
-        basic_hr = ModbusSequentialDataBlock(1, basic_registers)
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 2))
+    basic_registers = _build_basic_registers()
+    basic_registers[46] = 50  # SOC 50%, unterhalb des unten gesetzten Ziel-SOC
+    server = _modbus_server(TEST_PORT + 2, basic_registers, _build_extended_registers())
     await server.serve_forever(background=True)
 
     try:
@@ -578,19 +577,9 @@ async def test_live_grid_charge_seeded_from_config_entry_on_first_setup(
     neu eingerichteten Eintrags die "Netzladung Start"/"Netzladung
     Ende"/"Netzladung aktiv"-Entities vorbelegen, siehe
     entity.initial_config_value."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 4))
+    server = _modbus_server(
+        TEST_PORT + 4, _build_basic_registers(), _build_extended_registers()
+    )
     await server.serve_forever(background=True)
 
     try:
@@ -641,19 +630,9 @@ async def test_live_grid_charge_falls_back_to_hard_defaults_without_config_entry
     Einführung dieses Schritts angelegter Eintrag, oder weil das Formular
     unverändert abgeschickt wurde), müssen die Entities die Hard-Defaults aus
     const.py zeigen (deaktiviert, 00:00-00:05) statt "unbekannt"."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 5))
+    server = _modbus_server(
+        TEST_PORT + 5, _build_basic_registers(), _build_extended_registers()
+    )
     await server.serve_forever(background=True)
 
     try:
@@ -700,21 +679,9 @@ async def test_live_price_charge_writes_setpoint_in_cheapest_hour(
     (Nordpool-/EPEX-Format) statt einer echten Preis-Integration - genau so
     sieht die Integration ihn im Betrieb auch.
     """
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_registers = _build_basic_registers()
-        basic_registers[46] = 50  # SOC 50 %, unter dem Ziel-SOC
-        basic_hr = ModbusSequentialDataBlock(1, basic_registers)
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 5))
+    basic_registers = _build_basic_registers()
+    basic_registers[46] = 50  # SOC 50 %, unter dem Ziel-SOC
+    server = _modbus_server(TEST_PORT + 5, basic_registers, _build_extended_registers())
     await server.serve_forever(background=True)
 
     try:
@@ -820,19 +787,9 @@ async def test_live_price_charge_conflicts_with_timed_charge(
     """Netzladung und preisoptimiertes Laden schließen sich aus: Der Schalter
     springt zurück und es erscheint ein reparierbarer Bestätigungsdialog,
     statt beide Automatiken gleichzeitig laufen zu lassen."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        basic_hr = ModbusSequentialDataBlock(1, _build_basic_registers())
-        extended_hr = ModbusSequentialDataBlock(1, _build_extended_registers())
-        context = ModbusServerContext(
-            devices={
-                SLAVE_ID_BASIC: ModbusDeviceContext(hr=basic_hr),
-                SLAVE_ID_EXTENDED: ModbusDeviceContext(hr=extended_hr),
-            },
-            single=False,
-        )
-
-    server = ModbusTcpServer(context, address=("127.0.0.1", TEST_PORT + 6))
+    server = _modbus_server(
+        TEST_PORT + 6, _build_basic_registers(), _build_extended_registers()
+    )
     await server.serve_forever(background=True)
 
     try:

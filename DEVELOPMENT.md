@@ -23,7 +23,7 @@ Ist-Zustand-Anforderungen je REQ-ID).
 
 ```
 custom_components/sax_power/
-├── manifest.json      Metadaten, Requirements (pymodbus==3.15.0), Domain
+├── manifest.json      Metadaten, Requirements (pymodbus==3.13.1), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          Zeitfenster und Wertevalidierung

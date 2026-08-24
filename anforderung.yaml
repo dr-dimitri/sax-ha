@@ -664,6 +664,20 @@ requirement_grid_serving_charge:
     Sensor werden vom Planner beobachtet und über async_apply_price_plan
     ohne Neustart sofort auf den Coordinator übertragen.
 
+    Jeder Übergang eines zuvor aktiven 0-%-Eingriffs auf inaktiv setzt
+    Register 40051 explizit auf SmartMeter-Nullregelung zurück - unabhängig
+    davon, ob der Hauptschalter ausgeschaltet, der aktuelle Monat abgewählt,
+    das Zeitfenster verlassen/geändert oder die Prognosefreigabe entzogen
+    wurde. Das gilt auch, wenn der periodische SunSpec-Schreib-Task zu diesem
+    Zeitpunkt bereits beendet ist: Ein vorhandener beendeter Task beweist
+    weiterhin, dass die Integration zuvor den Sollwertmodus aktiviert hat.
+    Deshalb prüft _async_enforce_grid_charge auf einen vorhandenen Task statt
+    auf sun_charge_active und ruft dann async_stop_sun_charge auf; die Stop-
+    Methode storniert einen noch laufenden Task und schreibt bei einem bereits
+    beendeten Task ebenfalls Register 40051 = 0. Nur wenn nie ein Task
+    gestartet wurde (_sun_charge_task is None), bleibt sie ein No-Op und
+    greift nicht in einen fremd gesetzten Modus ein.
+
     Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose"
     (grid_serving_forecast, kWh; bei fehlender Konfiguration oder jedem
     unbrauchbaren Wert unknown) und "Status" (grid_serving_pause_status).
@@ -844,6 +858,13 @@ requirement_grid_serving_charge:
        deckt alle priorisierten Ladepausen-Statustexte einschließlich der
        getrennten Ausgaben für größer und gleich ab; die bestehende
        Policy-Abdeckung bestätigt, dass Gleichheit die Ladepause freigibt."
+    - "tests/test_coordinator.py und tests/test_price_optimizer.py decken
+       aktive Übergänge auf inaktiv durch Hauptschalter, Monatsauswahl,
+       Zeitfenster und fallende PV-Prognose ab, nachdem der periodische
+       Schreib-Task bereits beendet wurde. In jedem Fall wird Register 40051
+       explizit mit SmartMeter-Nullregelung beschrieben; der bestehende
+       Schritt-a-Test deckt den umgekehrten Übergang in Sollwertvorgabe plus
+       0-%-Sollwert ab."
     - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
        über Mitternacht laufendes Fenster, berührende statt überlappende
        Fenster, unvollständige Fenster) ab - inklusive des Falls, dass

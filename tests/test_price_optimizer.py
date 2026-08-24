@@ -905,6 +905,14 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
                 "8 kWh."
             )
 
+            task = coordinator._sun_charge_task
+            assert task is not None
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert coordinator.sun_charge_active is False
+            client.write_register.reset_mock()
+
             coordinator.price_planner.async_setup()
             hass.states.async_set(
                 "sensor.pv_prognose_morgen",

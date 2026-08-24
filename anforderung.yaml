@@ -718,10 +718,16 @@ requirement_grid_serving_charge:
     coordinator.data/_high_data übernommen. Der Diagnose-Sensor
     "Steuermodus" und damit das HA-Aktivitätslog zeigen die Nullregelung
     deshalb bereits mit der auslösenden Einstellungsänderung statt zunächst
-    erneut den alten Cachewert zu veröffentlichen. Der folgende echte
-    Readback kann eine vom Gerät nicht übernommene oder extern überschriebene
-    Änderung weiterhin sichtbar machen und löst dann den erneuten Abgleich
-    aus.
+    erneut den alten Cachewert zu veröffentlichen. In das lokale Ergebnis
+    eines laufenden Refreshs darf dieser optimistische Wert jedoch nur dann
+    übernommen werden, wenn der Write während genau dieser Auswertung
+    quittiert wurde. Ohne neue Quittung gewinnt immer der tatsächliche
+    Readback. Wirkt 40051 = 0 bereits am Gerät, obwohl seine Modbus-Antwort
+    ausbleibt oder als Fehler ankommt, muss der folgende Read deshalb
+    "SmartMeter-Nullregelung" veröffentlichen; der offene Rücksetzauftrag
+    bleibt davon unberührt und wird weiter wiederholt. Ein echter Readback
+    kann dadurch jede vom Gerät nicht übernommene oder extern überschriebene
+    Änderung sichtbar machen und löst den erneuten Abgleich aus.
 
     Die komplette Auswertung und Anwendung einer Ladeentscheidung ist durch
     self._charge_control_lock serialisiert. Poll-Zyklus, Entity-Setter und

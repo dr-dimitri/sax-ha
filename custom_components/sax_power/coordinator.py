@@ -365,6 +365,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # leeren Python-Taskzustand fälschlich auf den Gerätezustand zu
         # schließen (REQ-GRID-SERVING-CHARGE).
         self._sun_charge_commanded_mode: int | None = None
+        self._sun_charge_command_revision = 0
         self._last_observed_ic_control_mode: int | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -1191,6 +1192,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _record_ic_control_mode(self, mode: int) -> None:
         """Übernehme einen quittierten Schreibwert sofort in den HA-Zustand."""
         self._sun_charge_commanded_mode = mode
+        self._sun_charge_command_revision += 1
         self._last_observed_ic_control_mode = mode
         label = CONTROL_MODE_LABELS.get(mode, UNKNOWN_LABEL)
         for cached_data in (self._high_data, self.data):
@@ -1832,6 +1834,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
+        command_revision_before = self._sun_charge_command_revision
+
         # Nach Reload/Neuinstallation kann der Speicher noch bis zum Ablauf
         # von Register 40050 im Sollwertmodus der vorherigen Instanz stehen,
         # obwohl deren Task und RAM-Merker nicht mehr existieren. Die echte
@@ -2025,11 +2029,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.async_stop_sun_charge()
 
         # _async_update_data arbeitet beim ersten Refresh noch mit einem
-        # lokalen Dictionary, während self.data None ist. Deshalb den soeben
-        # quittierten Sollzustand auch dort sofort veröffentlichen; der durch
-        # den Write invalidierte HIGH-Cache liefert im nächsten Takt den
-        # echten Readback vom Gerät.
-        if self._sun_charge_commanded_mode is not None:
+        # lokalen Dictionary, während self.data None ist. Nur einen in genau
+        # dieser Auswertung quittierten Write dort optimistisch übernehmen.
+        # Ohne neuen Write muss der echte Readback gewinnen; die frühere
+        # pauschale Übernahme von _sun_charge_commanded_mode konnte eine
+        # bereits wirksame Nullregelung dauerhaft als Sollwertvorgabe
+        # anzeigen, wenn die Modbus-Antwort des Rücksetzwrites ausblieb.
+        if (
+            self._sun_charge_command_revision != command_revision_before
+            and self._sun_charge_commanded_mode is not None
+        ):
             data["ic_control_mode"] = self._sun_charge_commanded_mode
             data["ic_control_mode_text"] = CONTROL_MODE_LABELS.get(
                 self._sun_charge_commanded_mode, UNKNOWN_LABEL

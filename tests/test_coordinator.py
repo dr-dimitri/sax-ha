@@ -980,6 +980,42 @@ async def test_stop_sun_charge_retries_failed_smartmeter_reset(hass) -> None:
     )
 
 
+async def test_real_smartmeter_readback_wins_when_reset_acknowledgement_fails(
+    hass,
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Wirkt Register 40051 = 0 bereits am Gerät,
+    obwohl die Modbus-Schreibantwort als Fehler zurückkommt, muss der nächste
+    echte Readback die HA-Anzeige auf Nullregelung setzen. Der alte zuletzt
+    quittierte Befehl Modus 1 darf den gelesenen Wert nicht überschreiben."""
+    client = _make_client()
+    failure = MagicMock()
+    failure.isError.return_value = True
+    client.write_register = AsyncMock(return_value=failure)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator._sun_charge_commanded_mode = SUN_IC_CONTROL_MODE_SETPOINT
+    coordinator._last_observed_ic_control_mode = SUN_IC_CONTROL_MODE_SETPOINT
+    data = {
+        "soc": 50,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SMARTMETER,
+        "ic_control_mode_text": "SmartMeter-Nullregelung",
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    coordinator.data = data
+
+    await coordinator._async_enforce_grid_charge(data)
+
+    assert data["ic_control_mode"] == SUN_IC_CONTROL_MODE_SMARTMETER
+    assert data["ic_control_mode_text"] == "SmartMeter-Nullregelung"
+    assert coordinator._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SETPOINT
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+
+
 async def test_inactive_grid_serving_retries_failed_smartmeter_reset(hass) -> None:
     """Ein inaktiver Folgetakt wiederholt das zuvor fehlgeschlagene
     Rücksetzen automatisch, obwohl der Schreib-Task bereits entfernt ist."""

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.const import EntityCategory, UnitOfEnergy
+from homeassistant.helpers import entity_registry as er
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
 from custom_components.sax_power.sensor import (
@@ -159,7 +160,9 @@ def test_grid_serving_forecast_is_kwh_or_unknown() -> None:
     assert description.value_fn({"grid_serving_forecast_kwh": None}) is None
 
 
-def test_grid_serving_forecast_name_tracks_current_date() -> None:
+def test_grid_serving_forecast_name_tracks_current_date_without_device_prefix(
+    hass,
+) -> None:
     description = _description_by_key("grid_serving_forecast")
     coordinator = MagicMock()
     entity = SaxPowerForecastSensor(coordinator, "test_entry_id", description)
@@ -175,12 +178,31 @@ def test_grid_serving_forecast_name_tracks_current_date() -> None:
 
     with patch(
         "custom_components.sax_power.sensor.dt_util.now",
-        side_effect=[datetime(2026, 8, 24), datetime(2026, 8, 25)],
+        return_value=datetime(2026, 8, 24),
     ):
         assert entity.name == "PV-Prognose 24.8."
+
+        registry_entry = er.async_get(hass).async_get_or_create(
+            "sensor",
+            "sax_power",
+            entity.unique_id,
+            device_id=None,
+            has_entity_name=entity.has_entity_name,
+            original_name=entity.name,
+            suggested_object_id="sax_power_grid_serving_forecast",
+        )
+        assert er.async_get_full_entity_name(hass, registry_entry) == (
+            "PV-Prognose 24.8."
+        )
+
+    with patch(
+        "custom_components.sax_power.sensor.dt_util.now",
+        return_value=datetime(2026, 8, 25),
+    ):
         assert entity.name == "PV-Prognose 25.8."
 
     assert entity.has_entity_name is False
+    assert entity.device_info is None
 
 
 def test_next_cell_calibration_is_a_diagnostic_timestamp() -> None:

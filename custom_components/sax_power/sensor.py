@@ -710,10 +710,21 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
 class SaxPowerForecastSensor(SaxPowerSensor):
     """PV-Prognose mit täglich aktualisiertem Datum im Anzeigenamen."""
 
-    # Das Dashboard übernimmt bei dieser Entity bewusst den Originalnamen.
-    # Ohne Entity-Namenssemantik ergänzt Home Assistant dabei nicht zusätzlich
-    # den Gerätenamen (siehe REQ-BUNDLED-DASHBOARD).
+    # Der dynamische Text ist bereits der vollständige Anzeigename und kein
+    # gerätebezogener Namensbestandteil (siehe REQ-BUNDLED-DASHBOARD).
     _attr_has_entity_name = False
+
+    def __init__(
+        self,
+        coordinator: SaxPowerCoordinator,
+        entry_id: str,
+        description: SaxPowerSensorEntityDescription,
+    ) -> None:
+        super().__init__(coordinator, entry_id, description)
+        # Diese abgeleitete Anzeige beschreibt keinen Messwert des SAX-
+        # Geräts. Ohne Gerätezuordnung übernimmt Home Assistant ihren
+        # dynamischen Namen unverändert, statt "SAX Power Home" voranzustellen.
+        self._attr_device_info = None
 
     @property
     def name(self) -> str | None:

@@ -1786,9 +1786,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         price_plan = self.price_planner.plan
         grid_serving_forecast_kwh = self.price_planner.forecast_kwh()
         grid_serving_forecast_threshold = self.grid_serving_forecast_threshold_kwh
-        grid_serving_forecast_allowed = grid_serving_forecast_threshold <= 0 or (
-            grid_serving_forecast_kwh is not None
-            and grid_serving_forecast_kwh >= grid_serving_forecast_threshold
+        grid_serving_forecast_sensor_configured = (
+            self.price_planner.pv_forecast_entity_id is not None
+        )
+        grid_serving_forecast_allowed = (
+            not grid_serving_forecast_sensor_configured
+            or grid_serving_forecast_threshold <= 0
+            or (
+                grid_serving_forecast_kwh is not None
+                and grid_serving_forecast_kwh >= grid_serving_forecast_threshold
+            )
         )
         policy = evaluate_charge_policy(
             ChargePolicyInput(
@@ -1832,9 +1839,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             start=self._grid_serving_start,
             end=self._grid_serving_end,
             months=self._grid_serving_months,
-            forecast_sensor_configured=(
-                self.price_planner.pv_forecast_entity_id is not None
-            ),
+            forecast_sensor_configured=grid_serving_forecast_sensor_configured,
             forecast_kwh=grid_serving_forecast_kwh,
             threshold_kwh=grid_serving_forecast_threshold,
         )

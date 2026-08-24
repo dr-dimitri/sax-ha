@@ -37,7 +37,6 @@ from .const import (
     DEFAULT_PRICE_SLOT_MINUTES,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
-    MAX_SOC,
     PRICE_EVAL_INTERVAL,
     PRICE_PLAN_HORIZON_HOURS,
     PRICE_STATUS_CHARGING,
@@ -620,9 +619,7 @@ class SaxPricePlanner:
             strategy=coordinator.price_charge_strategy,
             max_price=coordinator.price_charge_max_price,
             hours=coordinator.price_charge_hours,
-            target_soc=(
-                coordinator.max_soc if coordinator.max_soc is not None else MAX_SOC
-            ),
+            target_soc=coordinator.effective_max_soc,
             current_soc=data.get("soc"),
             capacity_kwh=None if not capacity_wh else float(capacity_wh) / 1000,
             # Seit dem Wegfall der Software-Einstellung "Max.

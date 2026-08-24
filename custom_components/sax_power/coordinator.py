@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 from datetime import time as dt_time
-from datetime import timedelta
 from time import monotonic
 from typing import Any
 
@@ -18,11 +18,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 
+from .application.calibration import CalibrationState, evaluate_calibration
 from .application.charge_policy import ChargePolicyInput, evaluate_charge_policy
 from .application.ports import ModbusClient
 from .const import (
     ALL_MONTHS,
     BATTERY_EVENT_LABELS,
+    CELL_CALIBRATION_INTERVAL,
     CHARGE_CONFLICT_ISSUES,
     CONTROL_MODE_LABELS,
     DEFAULT_PRICE_HOURS,
@@ -160,6 +162,7 @@ from .domain.registers import (
 from .domain.scheduling import is_time_in_window, windows_overlap
 from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
+from .infrastructure.calibration_store import CalibrationStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
 
@@ -244,6 +247,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._scan_interval = scan_interval
         self._write_lock = asyncio.Lock()
         self._max_soc: int | None = None
+        self._cell_calibration_state = CalibrationState()
+        self._cell_calibration_active = False
+        self._calibration_store = CalibrationStateStore(hass, entry_id)
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
         self._max_soc_grid_import_wait_cycles = 0
@@ -339,6 +345,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data.update(await self._async_read_extended())
         self._accumulate_energy(data)
 
+        calibration_changed = await self._async_update_cell_calibration(data["soc"])
+        if calibration_changed:
+            self.price_planner.evaluate()
         await self._async_enforce_grid_charge(data)
         self._publish_charge_state(data)
         self._async_check_self_diagnostics()
@@ -356,6 +365,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_status"] = self._price_charge_status
         data["price_charge_next_start"] = plan.next_start
         data["price_charge_current_price"] = plan.current_price
+        data["next_cell_calibration"] = self.next_cell_calibration_at
 
     def _accumulate_energy(self, data: dict[str, Any]) -> None:
         """Akkumuliert geladene/entladene Energie (kWh) aus der aktuell
@@ -931,11 +941,76 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def max_soc(self) -> int | None:
+        """Return the persistent max SOC configured by the user."""
         return self._max_soc
+
+    @property
+    def effective_max_soc(self) -> int:
+        """Return the target SOC after applying the calibration override."""
+        if self._cell_calibration_active:
+            return MAX_SOC
+        return self._max_soc if self._max_soc is not None else MAX_SOC
+
+    @property
+    def cell_calibration_active(self) -> bool:
+        return self._cell_calibration_active
+
+    @property
+    def last_full_charge_at(self) -> datetime | None:
+        return self._cell_calibration_state.last_full_charge_at
+
+    @property
+    def next_cell_calibration_at(self) -> datetime | None:
+        last_full_charge_at = self.last_full_charge_at
+        if last_full_charge_at is None:
+            return None
+        return last_full_charge_at + CELL_CALIBRATION_INTERVAL
 
     @property
     def max_soc_clamped(self) -> bool:
         return self._max_soc_clamped
+
+    async def async_load_calibration_state(self) -> None:
+        """Load the calibration schedule before the first device refresh."""
+        try:
+            state = await self._calibration_store.async_load()
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Zellkalibrierungszustand konnte nicht geladen werden; "
+                "beginne mit neuer Baseline: %s",
+                err,
+            )
+            return
+        if state is not None:
+            self._cell_calibration_state = state
+
+    async def _async_update_cell_calibration(
+        self, current_soc: int | float, *, now: datetime | None = None
+    ) -> bool:
+        """Evaluate and persist calibration edges; return active-state change."""
+        decision = evaluate_calibration(
+            now=now or dt_util.utcnow(),
+            current_soc=current_soc,
+            configured_max_soc=self._max_soc,
+            state=self._cell_calibration_state,
+            interval=CELL_CALIBRATION_INTERVAL,
+            maximum_soc=MAX_SOC,
+        )
+        active_changed = decision.calibration_active != self._cell_calibration_active
+        self._cell_calibration_state = decision.state
+        self._cell_calibration_active = decision.calibration_active
+        if decision.state_changed:
+            try:
+                await self._calibration_store.async_save(decision.state)
+            except (HomeAssistantError, OSError, ValueError) as err:
+                # REQ-PERIODIC-FULL-CALIBRATION: Ein lokaler Storage-Fehler
+                # darf die sicherheitsrelevante Modbus-Auswertung nicht
+                # abbrechen; die laufende Instanz behält den Zustand im RAM.
+                _LOGGER.warning(
+                    "Zellkalibrierungszustand konnte nicht gespeichert werden: %s",
+                    err,
+                )
+        return active_changed
 
     async def async_set_max_soc(self, max_soc: int | None) -> None:
         """Set (or clear with None) the software-side max charge SOC.
@@ -946,6 +1021,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ohne die sonst greifende NumberEntity-Min/Max-Validierung des
         regulären Service-Call-Pfads."""
         self._max_soc = _clamp_int(max_soc, MIN_SOC, MAX_SOC)
+        if self.data is not None and (current_soc := self.data.get("soc")) is not None:
+            await self._async_update_cell_calibration(current_soc)
+        self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
     # -- Netzladung (Grid Charge, Basic Mode) --------------------------------
@@ -1616,7 +1694,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
-        target_soc = self._max_soc if self._max_soc is not None else MAX_SOC
+        target_soc = self.effective_max_soc
         current_soc = data["soc"]
         if current_soc >= target_soc:
             self._timed_charge_armed = False

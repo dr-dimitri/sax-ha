@@ -232,6 +232,7 @@ Hochrechnung für diese Zeit, statt sie später fälschlich nachzuholen.
 | Preisoptimiertes Laden Status | Klartext-Status mit dem *Grund* – siehe [Statusanzeige](#statusanzeige) |
 | Preisoptimiertes Laden nächster Start | Zeitstempel des nächsten geplanten Ladefensters (bzw. Beginn des laufenden) |
 | Aktueller Strompreis | Preis des aktuellen Zeitfensters in EUR/kWh |
+| Nächste Zellkalibrierung | Diagnose-Zeitstempel, ab dem der effektive Max-SOC vorübergehend auf 100 % angehoben wird |
 
 ### Binäre Statusanzeigen
 
@@ -248,6 +249,7 @@ bleiben unverändert bestehen, beide Varianten existieren nebeneinander.
 | Preisoptimiertes Laden aktiv | Wie oben, als binärer Zustand |
 | Netzdienliches Laden aktiv | Wie oben, als binärer Zustand |
 | Max-SOC-Sperre aktiv | Ein, solange die [Max-SOC-Sperre](#max-soc-sperre) den Speicher aktiv hält |
+| Zellkalibrierung aktiv | Diagnose-Entität; Ein, solange der effektive Max-SOC vorübergehend 100 % beträgt |
 | SunSpec-Modus erreichbar | Diagnose-Entität; Aus, wenn Slave-ID 100 gerade nicht antwortet (siehe [Bekannte Einschränkungen](#bekannte-einschränkungen)) |
 | Speicherproblem | Diagnose-Entität; Ein, sobald Speicher oder Akku ein Ereignis außerhalb des Normalbetriebs melden |
 
@@ -396,6 +398,26 @@ falls deren Bedingungen erfüllt sind).
 > Register 40051 (Steuermodus) auf Sollwertvorgabe, Register 40049
 > (Leistungsvorgabe) auf 0 %. Zum Aufheben geht Register 40051 zurück auf 0
 > (SmartMeter-Nullregelung).
+
+### Periodische Volladung zur Zellkalibrierung
+
+Ist „Max. SOC“ kleiner als 100 %, erlaubt die Integration alle sieben Tage
+eine vollständige Ladung. Dafür wird nur der **effektive** Zielwert
+vorübergehend auf 100 % angehoben; die Zahleneinstellung des Benutzers bleibt
+unverändert. Erst wenn der Speicher tatsächlich 100 % meldet, startet der
+Sieben-Tage-Zeitraum neu und der zuletzt eingestellte Max-SOC gilt wieder.
+Ladepausen, Zeitfensterenden oder 0 W Ladeleistung beenden die Phase nicht.
+
+Die Funktion erzwingt keine zusätzliche Netzladung. Ohne PV oder bereits
+aktivierte Netz-/Preisautomatik wartet sie auf die nächste normale
+Lademöglichkeit. Der Zeitplan bleibt über Home-Assistant-Neustarts erhalten;
+bei der erstmaligen Aktivierung nach einem Update beginnt er mit dem ersten
+gültigen SOC-Messwert, statt sofort eine Volladung anzustoßen.
+
+Die Diagnose-Entities „Zellkalibrierung aktiv“ und „Nächste
+Zellkalibrierung“ zeigen Zustand und Fälligkeit leise auf der Geräteseite und
+stehen für eigene Automationen bereit. Es wird keine dauerhafte
+Benachrichtigung erzeugt.
 
 ## Netzladung (zeitgesteuertes Laden)
 

@@ -9,10 +9,12 @@ bereits vorhandene Coordinator-Properties.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.diagnostics import (
@@ -71,6 +73,12 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     Sensor-Snapshot für Support-/Bugreport-Zwecke."""
     entry, coordinator = _make_entry_with_coordinator(hass)
     await coordinator.async_set_max_soc(80)
+    last_full = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
+    coordinator._cell_calibration_state = CalibrationState(
+        last_full,
+        was_full=False,
+    )
+    coordinator._cell_calibration_active = True
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
@@ -80,6 +88,10 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     assert diagnostics["coordinator_data"]["soc"] == 42
     assert diagnostics["coordinator_data"]["storage_power_active"] == -500
     assert diagnostics["state"]["max_soc"] == 80
+    assert diagnostics["state"]["effective_max_soc"] == 100
+    assert diagnostics["state"]["cell_calibration_active"] is True
+    assert diagnostics["state"]["last_full_charge_at"] == last_full
+    assert diagnostics["state"]["next_cell_calibration_at"] > last_full
     assert diagnostics["state"]["extended_available"] is True
     assert diagnostics["state"]["grid_charge_active"] is False
     assert diagnostics["state"]["sun_charge_active"] is False

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power import async_update_options
+from custom_components.sax_power import async_setup_entry, async_update_options
 from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
@@ -76,3 +76,42 @@ async def test_async_update_options_noop_without_loaded_entry(hass) -> None:
     entry.add_to_hass(hass)
 
     await async_update_options(hass, entry)
+
+
+async def test_setup_loads_calibration_state_before_first_refresh(hass) -> None:
+    """REQ-PERIODIC-FULL-CALIBRATION: Ein Neustart darf die Fälligkeit
+    nicht durch einen ersten Poll mit leerem In-Memory-Zustand verschieben."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options={},
+        unique_id="192.168.1.50:502",
+    )
+    entry.add_to_hass(hass)
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    order: list[str] = []
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.sax_power.AsyncModbusTcpClient",
+            return_value=client,
+        ),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator."
+            "async_load_calibration_state",
+            new=AsyncMock(side_effect=lambda: order.append("load")),
+        ),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator."
+            "async_config_entry_first_refresh",
+            new=AsyncMock(side_effect=lambda: order.append("refresh")),
+        ),
+        patch("custom_components.sax_power.coordinator.SaxPricePlanner.async_setup"),
+    ):
+        assert await async_setup_entry(hass, entry) is True
+
+    assert order == ["load", "refresh"]
+    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    await coordinator.async_shutdown()

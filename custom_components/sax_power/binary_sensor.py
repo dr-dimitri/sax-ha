@@ -124,6 +124,15 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[SaxPowerBinarySensorEntityDescription, ...] = 
         is_on_fn=_coordinator_property(lambda coordinator: coordinator.max_soc_clamped),
     ),
     SaxPowerBinarySensorEntityDescription(
+        key="cell_calibration_active",
+        translation_key="cell_calibration_active",
+        device_class=BinarySensorDeviceClass.RUNNING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on_fn=_coordinator_property(
+            lambda coordinator: coordinator.cell_calibration_active
+        ),
+    ),
+    SaxPowerBinarySensorEntityDescription(
         key="extended_mode_available",
         translation_key="extended_mode_available",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,

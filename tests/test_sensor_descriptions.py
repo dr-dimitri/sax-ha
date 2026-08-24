@@ -134,6 +134,13 @@ def test_core_entities_have_no_entity_category() -> None:
         assert description.entity_category is None, key
 
 
+def test_next_cell_calibration_is_a_diagnostic_timestamp() -> None:
+    description = _description_by_key("next_cell_calibration")
+
+    assert description.entity_category == EntityCategory.DIAGNOSTIC
+    assert description.device_class == "timestamp"
+
+
 def test_value_fn_handles_missing_extended_data() -> None:
     """value_fn darf auch dann nicht werfen, wenn der SunSpec-Modus-Block
     fehlt (z. B. weil Slave-ID 100 gerade nicht erreichbar ist) - nur die

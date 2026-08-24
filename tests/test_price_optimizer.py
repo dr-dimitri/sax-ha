@@ -12,7 +12,7 @@ Aufgeteilt in drei Blöcke:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +23,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
+from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
+    CELL_CALIBRATION_INTERVAL,
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
     DEFAULT_PRICE_STRATEGY,
@@ -467,6 +469,23 @@ def test_context_uses_ic_max_power_reference_as_charge_power(hass) -> None:
     ctx = coordinator.price_planner._context()
 
     assert ctx.charge_power_w == 4600
+
+
+def test_context_uses_effective_calibration_target(hass) -> None:
+    coordinator = _make_coordinator(hass)
+    now = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
+    coordinator._max_soc = 80
+    coordinator._cell_calibration_state = CalibrationState(
+        now - CELL_CALIBRATION_INTERVAL,
+        was_full=False,
+    )
+    coordinator._cell_calibration_active = True
+
+    assert coordinator.price_planner._context().target_soc == 100
+
+    coordinator._cell_calibration_active = False
+    assert coordinator.price_planner._context().target_soc == 80
 
 
 def test_evaluate_reports_current_price_even_when_price_charge_disabled(

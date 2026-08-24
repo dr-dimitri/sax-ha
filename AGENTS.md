@@ -95,6 +95,10 @@ before it's considered done.
   origin main --ff-only`) so the new branch starts from the current state.
 - Always create commits/branches/PRs.
 - After the pull request change to the main branch and delete the local feature Branche
+- Before every commit and pull request, inspect
+  `.github/workflows/release.yaml`. Apply exactly one matching release label
+  (`release:major`, `release:minor`, or `release:patch`) to every pull request;
+  use `release:patch` for documentation-only changes.
 - Commit messages: German, imperative/descriptive summary line, focused on
   *why*; 
   when written by an agent (see recent `git log` for examples).

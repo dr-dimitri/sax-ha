@@ -240,8 +240,8 @@ def _grid_serving_pause_status(
 
     assert start is not None and end is not None
     active = (
-        f"Ladepause zwischen {start.strftime('%H:%M')} und "
-        f"{end.strftime('%H:%M')} im Monat {month_name} aktiv."
+        f"Ladepause ist zwischen {start.strftime('%H:%M')} Uhr und "
+        f"{end.strftime('%H:%M')} Uhr im {month_name} aktiv."
     )
     if threshold_kwh <= 0:
         return active
@@ -255,9 +255,10 @@ def _grid_serving_pause_status(
             f"{forecast_text} kWh kleiner als der Mindestwert von "
             f"{threshold_text} kWh ist."
         )
+    comparison = "gleich dem" if forecast_kwh == threshold_kwh else "größer als der"
     return (
-        f"{active} Die PV-Prognose von {forecast_text} kWh ist größer oder "
-        f"gleich dem Mindestwert von {threshold_text} kWh."
+        f"{active} Die PV-Prognose von {forecast_text} kWh ist {comparison} "
+        f"Mindestwert von {threshold_text} kWh."
     )
 
 

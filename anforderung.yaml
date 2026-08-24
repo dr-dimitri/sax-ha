@@ -632,9 +632,9 @@ requirement_grid_serving_charge:
 
     Optionale PV-Prognose-Freigabe (Issues #78/#81): number.py stellt die
     über RestoreEntity persistierte Einstellung "Mindest PV Prognose" in
-    kWh bereit (0-100 kWh, Schritt 1 kWh, Default 0). Der Coordinator rundet
+    kWh bereit (0-999 kWh, Schritt 1 kWh, Default 0). Der Coordinator rundet
     jeden Schreibwert auf volle kWh; bei genau 0,5 wird kaufmännisch
-    aufgerundet (8,5 -> 9), anschließend wird auf 0-100 begrenzt. Dadurch
+    aufgerundet (8,5 -> 9), anschließend wird auf 0-999 begrenzt. Dadurch
     werden auch aus älteren Versionen restaurierte Dezimalwerte migriert.
     0 kWh deaktiviert die Zusatzbedingung vollständig und erhält damit das
     bisherige statische Verhalten für Bestandsinstallationen. Bei einem
@@ -674,10 +674,13 @@ requirement_grid_serving_charge:
     Zeitfensters"; Mindestwert > 0 ohne konfigurierten Sensor -> "Kein PV-
     Prognosesensor eingestellt"; konfigurierter, aber ungültiger Sensor ->
     "PV-Prognose nicht verfügbar"; Prognose unter Mindestwert -> Satz mit
-    beiden kWh-Werten und inaktiver Ladepause; Prognose >= Mindestwert ->
-    aktiver Satz mit Start/Ende, aktuellem deutschen Monatsnamen und beiden
-    kWh-Werten; Mindestwert 0 -> aktiver Satz ohne Prognosezusatz. Start und
-    Ende erscheinen als HH:MM, kWh-Werte ohne unnötige Nachkommastellen.
+    beiden kWh-Werten und inaktiver Ladepause; Prognose > Mindestwert ->
+    aktiver Satz mit "größer als"; Prognose == Mindestwert -> derselbe aktive
+    Satz mit "gleich". Mindestwert 0 ergibt den aktiven Satz ohne
+    Prognosezusatz. Der Aktivsatz lautet "Ladepause ist zwischen HH:MM Uhr
+    und HH:MM Uhr im <Monat> aktiv." und verwendet immer den aktuellen
+    deutschen Monatsnamen. kWh-Werte erscheinen ohne unnötige
+    Nachkommastellen.
     is_time_in_window bleibt die gemeinsame Logik für normale,
     mitternachtsübergreifende und leere Fenster. Poll-Zyklen sowie die
     bestehenden sofortigen Setter-/Sensor-Callbacks aktualisieren beide
@@ -838,7 +841,9 @@ requirement_grid_serving_charge:
        freigegeben. tests/test_number.py deckt Default, Restore und Klemmung
        der Number-Entity sowie 1-kWh-Schritt und kaufmännische Rundung ab;
        tests/test_dashboard.py ihre Darstellung. tests/test_coordinator.py
-       deckt alle acht priorisierten Ladepausen-Statustexte ab."
+       deckt alle priorisierten Ladepausen-Statustexte einschließlich der
+       getrennten Ausgaben für größer und gleich ab; die bestehende
+       Policy-Abdeckung bestätigt, dass Gleichheit die Ladepause freigibt."
     - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
        über Mitternacht laufendes Fenster, berührende statt überlappende
        Fenster, unvollständige Fenster) ab - inklusive des Falls, dass

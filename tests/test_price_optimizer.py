@@ -847,6 +847,30 @@ async def test_grid_serving_forecast_controls_effective_window(
     assert coordinator.grid_serving_window_active is expected_allowed
 
 
+async def test_equal_forecast_keeps_grid_serving_pause_active(hass) -> None:
+    """Gleichheit erfüllt die Mindestprognose und wird als aktiv veröffentlicht."""
+    hass.states.async_set(
+        "sensor.pv_prognose_morgen", "8", {"unit_of_measurement": "kWh"}
+    )
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.data = {"soc": 50, "smartmeter_power": 0}
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
+
+    with _patched_now(12):
+        await coordinator.async_set_grid_serving_enabled(True)
+
+    assert coordinator.grid_serving_forecast_allowed is True
+    assert coordinator.grid_serving_window_active is True
+    assert coordinator.data["grid_serving_pause_status"] == (
+        "Ladepause ist zwischen 10:00 Uhr und 14:00 Uhr im Januar aktiv. Die "
+        "PV-Prognose von 8 kWh ist gleich dem Mindestwert von 8 kWh."
+    )
+
+
 async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -> None:
     """Ein Sensorwechsel unter die Schwelle beendet einen aktiven 0-%-
     Sollwert über den sicheren Rückweg in die SmartMeter-Nullregelung."""
@@ -876,9 +900,9 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
             assert coordinator.grid_serving_active is True
             assert coordinator.data["grid_serving_forecast_kwh"] == pytest.approx(10)
             assert coordinator.data["grid_serving_pause_status"] == (
-                "Ladepause zwischen 10:00 und 14:00 im Monat Januar aktiv. Die "
-                "PV-Prognose von 10 kWh ist größer oder gleich dem Mindestwert "
-                "von 8 kWh."
+                "Ladepause ist zwischen 10:00 Uhr und 14:00 Uhr im Januar aktiv. "
+                "Die PV-Prognose von 10 kWh ist größer als der Mindestwert von "
+                "8 kWh."
             )
 
             coordinator.price_planner.async_setup()

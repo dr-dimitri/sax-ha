@@ -217,11 +217,12 @@ async def test_grid_serving_forecast_threshold_restore_clamps_value(
         entity,
         hass,
         "number.test_grid_serving_forecast",
-        State("number.test_grid_serving_forecast", "999"),
+        State("number.test_grid_serving_forecast", "1200"),
     )
 
     await entity.async_added_to_hass()
 
+    assert entity.native_max_value == 999
     assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(
         MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH
     )

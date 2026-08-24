@@ -76,9 +76,18 @@ from custom_components.sax_power.coordinator import (
             True,
             12,
             10,
-            "Ladepause zwischen 11:00 und 14:00 im Monat August aktiv. Die "
-            "PV-Prognose von 12 kWh ist größer oder gleich dem Mindestwert von "
-            "10 kWh.",
+            "Ladepause ist zwischen 11:00 Uhr und 14:00 Uhr im August aktiv. Die "
+            "PV-Prognose von 12 kWh ist größer als der Mindestwert von 10 kWh.",
+        ),
+        (
+            True,
+            {8},
+            12,
+            True,
+            10,
+            10,
+            "Ladepause ist zwischen 11:00 Uhr und 14:00 Uhr im August aktiv. Die "
+            "PV-Prognose von 10 kWh ist gleich dem Mindestwert von 10 kWh.",
         ),
         (
             True,
@@ -87,7 +96,7 @@ from custom_components.sax_power.coordinator import (
             False,
             None,
             0,
-            "Ladepause zwischen 11:00 und 14:00 im Monat August aktiv.",
+            "Ladepause ist zwischen 11:00 Uhr und 14:00 Uhr im August aktiv.",
         ),
     ],
 )
@@ -100,7 +109,7 @@ def test_grid_serving_pause_status_priority(
     threshold_kwh: float,
     expected: str,
 ) -> None:
-    """REQ-GRID-SERVING-CHARGE: alle acht Statusfälle gelten priorisiert."""
+    """REQ-GRID-SERVING-CHARGE: Statusfälle und Vergleich gelten priorisiert."""
     assert (
         _grid_serving_pause_status(
             now=datetime(2024, 8, 1, hour),

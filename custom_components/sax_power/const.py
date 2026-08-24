@@ -90,7 +90,7 @@ DEFAULT_GRID_SERVING_ENABLED = False
 # deaktiviert die zusätzliche Freigabebedingung, damit Bestandsinstallationen
 # nach dem Update unverändert rein statisch über Monate/Zeitfenster arbeiten.
 MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
-MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH = 100.0
+MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH = 999.0
 GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH = 1.0
 DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
 

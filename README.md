@@ -14,6 +14,26 @@ Netzwerk mit Home Assistant. Messwerte, Einstellungen und Ladefunktionen stehen
 als Entitäten zur Verfügung und lassen sich in Dashboards und Automationen
 verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 
+## Inhaltsverzeichnis
+
+- [Funktionen](#funktionen)
+- [Voraussetzungen](#voraussetzungen)
+- [Installation](#installation)
+- [Einrichtung](#einrichtung)
+- [Wichtige Entitäten](#wichtige-entitäten)
+- [Max-SOC-Sperre](#max-soc-sperre)
+- [Ladefunktionen](#ladefunktionen)
+  - [Zeitgesteuerte Netzladung](#zeitgesteuerte-netzladung)
+  - [Netzdienliches Laden](#netzdienliches-laden)
+  - [Preisoptimiertes Laden](#preisoptimiertes-laden)
+- [Zeitfenster und Überschneidungen](#zeitfenster-und-überschneidungen)
+- [Energy-Dashboard](#energy-dashboard)
+- [Aktionen für Automationen](#aktionen-für-automationen)
+- [Verbindung nachträglich ändern](#verbindung-nachträglich-ändern)
+- [Diagnose und Fehlersuche](#diagnose-und-fehlersuche)
+- [Bekannte Einschränkungen](#bekannte-einschränkungen)
+- [Hilfe und Entwicklung](#hilfe-und-entwicklung)
+
 ## Funktionen
 
 - Ladezustand, Lade- und Entladeleistung, Netzleistung, PV-Leistung sowie
@@ -92,6 +112,10 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
 - zeitgesteuertes Laden,
 - netzdienliches Laden und
 - dynamisches Laden.
+
+![Dashboard mit allgemeinen Informationen zum SAX-Power-Speicher](docs/images/dashboard/allgemeine_information.png)
+
+*Allgemeine Informationen mit Ladezustand, Leistung, Energie und Gerätedaten.*
 
 Das Dashboard erscheint in der Seitenleiste und kann wie jedes andere
 Home-Assistant-Dashboard angepasst oder entfernt werden.
@@ -191,6 +215,10 @@ Die zeitgesteuerte Netzladung lädt den Speicher in einem festgelegten
 Zeitfenster aus dem Netz. Sie eignet sich beispielsweise für einen günstigen
 Nachttarif oder zur Vorbereitung auf einen erwarteten hohen Verbrauch.
 
+![Dashboard für die zeitgesteuerte Netzladung](docs/images/dashboard/netzladen.png)
+
+*Zeitfenster, Startschwelle und aktive Monate der Netzladung.*
+
 Benötigte Einstellungen:
 
 - **Netzladung aktiv**
@@ -213,6 +241,10 @@ die Netzladung beendet und der Speicher nutzt die Sonnenenergie.
 Das netzdienliche Laden verschiebt die Aufnahme von PV-Überschuss in ein
 späteres Zeitfenster. Dadurch bleibt morgens mehr freie Speicherkapazität für
 die ertragreiche Mittagszeit und Einspeisespitzen können reduziert werden.
+
+![Dashboard für das netzdienliche Laden](docs/images/dashboard/netzdienliches_laden.png)
+
+*Ladepause, PV-Prognose und aktive Monate des netzdienlichen Ladens.*
 
 Typische Einstellungen sind beispielsweise die Monate Mai bis August und eine
 Ladepause am Vormittag. Außerhalb der ausgewählten Monate und Zeiten arbeitet
@@ -248,6 +280,10 @@ vorhandenen Strompreis-Sensor. Die Integration selbst ruft keine Strompreise
 von einem Anbieter ab. Geeignet sind beispielsweise Sensoren von Tibber,
 Nordpool, EPEX Spot, ENTSO-E oder aWATTar sowie entsprechend aufgebaute
 Template-Sensoren.
+
+![Dashboard für das preisoptimierte Laden](docs/images/dashboard/preisoptimiertes_laden.png)
+
+*Strategie, Preisgrenzen, Status und Planung des preisoptimierten Ladens.*
 
 #### Einrichtung
 

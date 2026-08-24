@@ -288,6 +288,9 @@
       "timed_charge_min_soc": {
         "name": "Grid charge min. SOC"
       },
+      "grid_serving_forecast_threshold": {
+        "name": "Grid-serving minimum PV forecast"
+      },
       "price_charge_max_price": {
         "name": "Grid draw and charging up to"
       },
@@ -583,8 +586,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Price-optimised charging",
-        "description": "Sources and base settings for price-optimised charging. The integration does not fetch electricity prices itself, it uses an existing sensor entity (e.g. Tibber, Nordpool, EPEX Spot, ENTSO-e, Awattar). The day-to-day controls - strategy, price limit, number of hours, target SOC - are entities on the SAX device.",
+        "title": "Price-optimised charging and PV forecast",
+        "description": "Sources and base settings for price-optimised charging and the shared PV forecast. The integration does not fetch prices or forecasts itself; it uses existing sensor entities. Day-to-day controls are entities on the SAX device.",
         "data": {
           "price_sensor": "Electricity price sensor",
           "price_attribute": "Attribute holding the price forecast (optional)",
@@ -596,8 +599,8 @@
           "price_sensor": "Sensor holding the current energy price. The windows for the “relative” and “smart” strategies are derived from its price forecast attributes.",
           "price_attribute": "Only needed if auto-detection fails - e.g. “raw_today”, “data” or “forecast”.",
           "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh is converted to EUR/kWh internally.",
-          "pv_forecast_sensor": "Sensor with the expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or the Solcast equivalent. Only required for the “smart” strategy.",
-          "pv_forecast_factor": "How much of the forecast is expected to actually end up in the battery - covers self-consumption, weather uncertainty and losses."
+          "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
+          "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value."
         }
       }
     }

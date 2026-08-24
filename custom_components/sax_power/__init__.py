@@ -154,13 +154,15 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     (z. B. beim Hinzufügen des Strompreis-/PV-Prognose-Sensors), unabhängig
     von den eigentlichen Lade-Automatiken.
 
-    Die Options Flow betrifft ausschließlich Einstellungen des Preis-
-    Planners (price_optimizer.SaxPricePlanner) - nie den Modbus-Client, die
-    Slave-IDs oder das Scan-Intervall (die stehen unveränderlich in
-    entry.data, siehe config_flow.async_step_reconfigure für deren einzigen
-    Änderungsweg). Ein Reload ist für eine reine Options-Änderung deshalb
-    nicht nötig: Die neuen Werte werden direkt in den laufenden Coordinator
-    übernommen, und der Planner wird erneut aufgesetzt -
+    Der Options Flow betrifft ausschließlich Quell-Sensoren und deren
+    Interpretation im price_optimizer.SaxPricePlanner - nie den Modbus-
+    Client, die Slave-IDs oder das Scan-Intervall (die stehen unveränderlich
+    in entry.data, siehe config_flow.async_step_reconfigure für deren einzigen
+    Änderungsweg). Die gemeinsam ausgewertete PV-Prognose kann dabei auch die
+    Freigabe des netzdienlichen Ladens ändern. Ein Reload ist für eine reine
+    Options-Änderung trotzdem nicht nötig: Die neuen Werte werden direkt in
+    den laufenden Coordinator übernommen, der Planner wird erneut aufgesetzt
+    und das Ergebnis sofort angewendet -
     SaxPricePlanner.async_setup ist bewusst idempotent (räumt seine alten
     Zustandsbeobachter ab und registriert sie mit den aktuellen Optionen
     neu), ohne Entities, Modbus-Verbindung oder eine laufende
@@ -171,6 +173,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
     coordinator.options = dict(entry.options)
     coordinator.price_planner.async_setup()
+    await coordinator.async_apply_price_plan()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

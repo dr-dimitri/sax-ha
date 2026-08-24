@@ -31,6 +31,7 @@ class ChargePolicyInput:
     grid_serving_start: dt_time | None
     grid_serving_end: dt_time | None
     grid_serving_months: set[int]
+    grid_serving_forecast_allowed: bool
     price_enabled: bool
     price_strategy_active: bool
     price_charge_now: bool
@@ -69,6 +70,7 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
     )
     grid_serving_window_active = (
         inputs.grid_serving_enabled
+        and inputs.grid_serving_forecast_allowed
         and inputs.now.month in inputs.grid_serving_months
         and is_time_in_window(
             inputs.now.time(), inputs.grid_serving_start, inputs.grid_serving_end

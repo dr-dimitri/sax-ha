@@ -48,6 +48,12 @@ async def async_get_config_entry_diagnostics(
             "timed_charge_active": (coordinator.data or {}).get("timed_charge_active"),
             "grid_serving_enabled": coordinator.grid_serving_enabled,
             "grid_serving_active": (coordinator.data or {}).get("grid_serving_active"),
+            "grid_serving_window_active": coordinator.grid_serving_window_active,
+            "grid_serving_forecast_threshold_kwh": (
+                coordinator.grid_serving_forecast_threshold_kwh
+            ),
+            "grid_serving_forecast_kwh": coordinator.grid_serving_forecast_kwh,
+            "grid_serving_forecast_allowed": coordinator.grid_serving_forecast_allowed,
             "price_charge_enabled": coordinator.price_charge_enabled,
             "price_charge_strategy": coordinator.price_charge_strategy,
             "price_charge_active": coordinator.price_charge_active,

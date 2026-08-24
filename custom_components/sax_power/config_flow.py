@@ -74,7 +74,7 @@ _LOGGER = logging.getLogger(__name__)
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
-_ENTITY_COUNT_NUMBER = 5
+_ENTITY_COUNT_NUMBER = 6
 _ENTITY_COUNT_SELECT = 1
 _ENTITY_COUNT_TIME = 4
 _ENTITY_COUNT_SWITCH_FIXED = 4
@@ -474,12 +474,12 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
 
 
 class SaxPowerOptionsFlow(OptionsFlow):
-    """Konfiguration des preisoptimierten Ladens über die Oberfläche.
+    """Konfiguration von Preisautomatik und gemeinsamer PV-Prognose.
 
     Hier stehen nur die Dinge, die sich nicht sinnvoll als Entity abbilden
     lassen (Auswahl der Quell-Sensoren und deren Interpretation). Die im
     Alltag veränderlichen Stellgrößen - Strategie, Preisgrenze, Anzahl
-    Stunden, Ziel-SOC - sind dagegen echte Entities am SAX-Gerät
+    Stunden, Ziel-SOC und Mindestprognose - sind dagegen echte Entities am SAX-Gerät
     (select.py/number.py) und damit automatisierbar und in Dashboards
     nutzbar. Die Strategie hat deshalb bewusst KEIN eigenes Feld hier: eine
     im Options Flow hinterlegte Vorgabe hätte ohnehin nur beim allerersten

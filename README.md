@@ -264,7 +264,8 @@ wie alle anderen von diesem Block abhängigen Entities auch.
 | Entität | Bereich | Beschreibung |
 | --- | --- | --- |
 | Max. SOC | 0–100 % | Ziel-Ladestand für die [Max-SOC-Sperre](#max-soc-sperre); gleichzeitig oberes Ziel der Netzladung. Ohne vorherige Einstellung 100 % (nicht 0) |
-| Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 100 % |
+| Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 20 % |
+| Netzdienliches Laden Mindest-PV-Prognose | 0–100 kWh (Schritt 0,1) | Optionale Mindestprognose für die Ladepause. `0 kWh` deaktiviert die Prognoseprüfung; Standard 0 kWh |
 | Preisoptimiertes Laden Netzbezug und laden bis (Preisgrenze) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
 | Preisoptimiertes Laden Netzbezug ohne laden bis (Neutralpreis) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Muss über der Preisgrenze liegen (sonst Reparaturhinweis). Zwischen Preisgrenze und Neutralpreis wird der Speicher pausiert (siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone)). Standard 0,30 EUR/kWh |
 | Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
@@ -329,7 +330,8 @@ Max-SOC-Sperre  >  Netzladung  >  Netzdienliches Laden  >  Preisoptimiertes Lade
 
 - **Netzladung hat Vorrang vor allem außer der Max-SOC-Sperre.**
 - **Netzdienliches Laden hat Vorrang vor preisoptimiertem Laden.** Ist das
-  Zeitfenster des netzdienlichen Ladens gerade aktiv, pausiert
+  Zeitfenster des netzdienlichen Ladens gerade aktiv und die optionale
+  Mindest-PV-Prognose erfüllt, pausiert
   preisoptimiertes Laden dafür – auch seine
   [Neutralpreis-Pausezone](#neutralpreis-pausezone) – bis das Zeitfenster
   endet. Der Grund für diese Reihenfolge: Netzdienliches Laden ergibt nur in
@@ -340,9 +342,9 @@ Max-SOC-Sperre  >  Netzladung  >  Netzdienliches Laden  >  Preisoptimiertes Lade
   gleichzeitig erfüllt sind (z. B. PV-Überschuss und gleichzeitig günstiger
   Netzstrom an einem Sommermittag) – jede würde der anderen ständig den
   Sollwertvorgabemodus streitig machen. Mit dem Vorrang bleibt das Verhalten
-  stattdessen vorhersehbar: In den aktiven Monaten/Zeitfenstern entscheidet
-  netzdienliches Laden, außerhalb davon entscheidet preisoptimiertes Laden
-  normal weiter.
+  stattdessen vorhersehbar: In den wirksamen Monaten/Zeitfenstern entscheidet
+  netzdienliches Laden. Bei zu niedriger oder ungültiger Prognose sowie
+  außerhalb davon entscheidet preisoptimiertes Laden normal weiter.
 
 Alle drei Automatiken brauchen den SunSpec-Modus, weil sie über dessen Register
 schreiben. Ist er nicht erreichbar, greift keine von ihnen.
@@ -383,15 +385,20 @@ selbst kaum –, gibt es drei Wege heraus:
 
 1. **Ladestand fällt unter "Max. SOC"** (z. B. durch Selbstentladung): Der
    Speicher geht sofort zurück in die geräteeigene SmartMeter-Nullregelung.
-2. **Netzbezug über 50 W** am Smart Meter, bestätigt über zwei Zyklen: Die
-   Sperre wird aufgehoben, damit der Speicher den Hausverbrauch wieder deckt,
-   statt ihn dauerhaft aus dem Netz beziehen zu lassen.
+2. **Netzbezug über 50 W** am Smart Meter, bestätigt über zwei Zyklen: Wurde
+   die Sperre außerhalb eines Ladefensters ausgelöst, setzt die Integration
+   den Speicher aktiv zurück in die SmartMeter-Nullregelung. So kann er den
+   Hausverbrauch wieder decken, statt ihn weiter aus dem Netz zu beziehen.
 3. **Ende des Zeitfensters:** Wurde "Max. SOC" *innerhalb* eines Netzladungs-
    oder netzdienlich-Zeitfensters erreicht, bleibt die Sperre an dieses Fenster
    gebunden und wird spätestens an dessen Ende aufgehoben.
 
-Danach übernimmt wieder die normale Automatik des Geräts (bzw. die Netzladung,
-falls deren Bedingungen erfüllt sind).
+Die Freigabe über Netzbezug wird bei jedem Aktualisierungszyklus neu bewertet.
+Fällt der Bezug wieder unter die Schwelle, während der SOC weiterhin am
+Grenzwert liegt, hält die Max-SOC-Sperre den Speicher erneut bei 0 %. Innerhalb
+eines Netzladungs- oder wirksamen netzdienlichen Zeitfensters bleibt die Sperre
+dagegen bewusst bis zum Fensterende gebunden; dort gilt die Netzbezugsfreigabe
+nicht vorzeitig. Danach übernimmt wieder die normale Automatik des Geräts.
 
 > **Technischer Hintergrund:** "Max. SOC" ist kein Register des Geräts, sondern
 > Software-Logik der Integration. Geschrieben wird über den SunSpec-Modus:
@@ -496,8 +503,9 @@ geglättet wird.
 
 **Hat Vorrang vor preisoptimiertem Laden** (siehe
 [Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken)): Ist das
-Zeitfenster des netzdienlichen Ladens aktiv, pausiert preisoptimiertes Laden
-so lange dafür. Sinn ergibt netzdienliches Laden ohnehin nur in ertragsreichen
+Zeitfenster des netzdienlichen Ladens wirksam, pausiert preisoptimiertes Laden
+so lange dafür. Mit aktivierter Mindestprognose ist es nur wirksam, wenn der
+Prognosewert den Schwellwert erreicht. Sinn ergibt netzdienliches Laden ohnehin nur in ertragsreichen
 Monaten mit reichlich PV-Überschuss – typischerweise im Sommer, mittags –, und
 gerade dann ist kaum oder gar kein Netzbezug nötig, sodass preisoptimiertes
 Laden in diesem Zeitfenster wenig verlieren würde.
@@ -520,6 +528,35 @@ auslösen. Ist die Netzeinspeisung nach dem Eingriff unbekannt, bleibt die Ladun
 sicherheitshalber gestoppt (anders als bei der Netzladung, die bei fehlendem
 Messwert weiterläuft).
 
+### Optionale PV-Prognose
+
+Zusätzlich zu Schalter, Monaten und Uhrzeit kann eine Mindestprognose festgelegt
+werden. Als Quelle dient derselbe **PV-Prognose-Sensor**, der unter
+**Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren** auch für
+die Smart-Strategie des preisoptimierten Ladens ausgewählt wird. Unterstützt
+werden Energieangaben in Wh, kWh und MWh; intern vergleicht die Integration den
+auf kWh normalisierten Sensorzustand.
+
+- `0 kWh`: Prognoseprüfung aus, das bisherige statische Verhalten bleibt aktiv.
+- Prognose gleich oder über dem Mindestwert: Ladepause gilt wie bisher.
+- Prognose unter dem Mindestwert: Ladepause entfällt vollständig, damit der
+  Speicher bereits früh mit PV-Überschuss laden kann.
+- Sensor fehlt, ist `unknown`/`unavailable` oder nicht numerisch: Ladepause
+  entfällt ebenfalls (Fail-open), damit fehlende Prognosedaten keine frühe
+  PV-Ladung verhindern.
+
+Der Vergleich verwendet den unveränderten Prognosewert. Der unter
+„Konfigurieren“ einstellbare **nutzbare Anteil** gilt nur für die Bedarfsrechnung
+der preisoptimierten Smart-Strategie. Änderungen am Sensor oder Schwellwert
+werden sofort neu bewertet. Wird die Prognose während einer aktiven Ladepause
+zu niedrig oder ungültig, setzt die Integration den Speicher sicher in die
+SmartMeter-Nullregelung zurück. In diesem Fall blockiert das Zeitfenster auch
+das preisoptimierte Laden nicht.
+
+> **Beispiel:** Ladepause 08:00–13:00 Uhr, Mindestprognose 8 kWh, Prognose
+> 4 kWh wegen Wolken und Regen ab Mittag: Die Ladepause greift nicht; der
+> Speicher darf bereits morgens laden.
+
 ### Einstellungen
 
 | Entität | Beschreibung |
@@ -527,6 +564,7 @@ Messwert weiterläuft).
 | Netzdienliches Laden aktiv | Ein-/Ausschalten |
 | Start / Ende | Zeitfenster (HH:MM) |
 | Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt – z. B. nur Mai bis August, 11–14 Uhr |
+| Netzdienliches Laden Mindest-PV-Prognose | Optionaler Schwellwert in kWh; 0 deaktiviert die Prognoseprüfung |
 | Max. SOC | Ziel für die Max-SOC-Sperre (geteilte Einstellung) |
 
 Eine eigene Leistungseinstellung wird hier **nicht** gebraucht, weil
@@ -561,8 +599,8 @@ automatisch in EUR/kWh umgerechnet.
 | Strompreis-Sensor | Sensor mit dem aktuellen Arbeitspreis. Aus seinen Vorschau-Attributen entstehen die Ladefenster der Strategien "Relativ" und "Smart" |
 | Attribut mit der Preisvorschau | Optional. Nur nötig, wenn die automatische Erkennung bei deinem Sensor danebenliegt – dann den Attributnamen eintragen (z. B. `raw_today`) |
 | Preis-Einheit | "Automatisch" leitet sie aus dem Sensor ab. EUR/kWh bzw. ct/kWh erzwingen die Interpretation, falls der Sensor keine oder eine irreführende Einheit meldet |
-| PV-Prognose-Sensor | Optional, nur für "Smart". Erwartet die erwartete Erzeugung als Energie, z. B. `sensor.energy_production_tomorrow` (Forecast.Solar) oder das Solcast-Pendant |
-| Nutzbarer Anteil der PV-Prognose | Wie viel der Prognose tatsächlich im Speicher landen dürfte (Standard 80 %) – deckt Eigenverbrauch, Wetterunsicherheit und Wandlungsverluste ab |
+| PV-Prognose-Sensor | Optionale gemeinsame Quelle für "Smart" und die Mindestprognose des netzdienlichen Ladens. Erwartet die Erzeugung als Energie, z. B. `sensor.energy_production_tomorrow` (Forecast.Solar) oder das Solcast-Pendant |
+| Nutzbarer Anteil der PV-Prognose | Nur für "Smart": Wie viel der Prognose tatsächlich im Speicher landen dürfte (Standard 80 %) – deckt Eigenverbrauch, Wetterunsicherheit und Wandlungsverluste ab. Der Schwellwert des netzdienlichen Ladens verwendet den unveränderten Sensorwert |
 
 Alles Weitere läuft über Entitäten am Gerät und ist damit automatisierbar und in
 Dashboards nutzbar. Der Hauptschalter **"Preisoptimiertes Laden aktiv"** schaltet
@@ -617,11 +655,13 @@ Weitere Abbruchgründe, jeweils sofort wirksam (nicht erst im nächsten
 - **PV-Überschuss** über 50 W am Smart Meter – die eigene Sonne ist immer
   günstiger als Netzstrom.
 - **Netzladung aktiv** – das zeitgesteuerte Laden hat Vorrang.
-- **Netzdienliches Laden im Zeitfenster** – siehe
+- **Netzdienliches Laden im wirksamen Zeitfenster** – siehe
   [Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken). Solange
-  das Zeitfenster des netzdienlichen Ladens aktiv ist, pausiert
+  das Zeitfenster des netzdienlichen Ladens aktiv ist und eine konfigurierte
+  Mindestprognose erfüllt wird, pausiert
   preisoptimiertes Laden dafür, egal ob netzdienliches Laden gerade selbst
-  eingreift oder nicht.
+  eingreift oder nicht. Bei zu niedriger oder ungültiger Prognose bleibt das
+  preisoptimierte Laden freigegeben.
 
 Der Ladeplan wird **alle 60 Sekunden** neu berechnet, zusätzlich sofort bei jeder
 Einstellungsänderung und bei jedem Zustandswechsel des Preis- oder

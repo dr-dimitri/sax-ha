@@ -86,6 +86,13 @@ DEFAULT_TIMED_CHARGE_MIN_SOC = 20
 DEFAULT_GRID_SERVING_START = "00:00:00"
 DEFAULT_GRID_SERVING_END = "00:00:00"
 DEFAULT_GRID_SERVING_ENABLED = False
+# Optionaler Mindestwert der gemeinsam genutzten PV-Prognose. 0 kWh
+# deaktiviert die zusätzliche Freigabebedingung, damit Bestandsinstallationen
+# nach dem Update unverändert rein statisch über Monate/Zeitfenster arbeiten.
+MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
+MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH = 100.0
+GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH = 0.1
+DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
 
 # Aktive Monate für Netzladung/netzdienliches Laden (siehe anforderung.yaml,
 # REQ-GRID-SERVING-CHARGE): je Feature 12 Monats-Schalter (switch.py), die
@@ -455,7 +462,8 @@ SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50
 PV_SURPLUS_HYSTERESIS_CYCLES = 2
 
 # ==========================================================================
-# Preisoptimiertes Laden (siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE)
+# Preisoptimiertes Laden + gemeinsame PV-Prognose (siehe anforderung.yaml,
+# REQ-DYNAMIC-PRICE-CHARGE/REQ-GRID-SERVING-CHARGE)
 # ==========================================================================
 # Reine Software-Logik oberhalb des vorhandenen SunSpec-Schreibpfads
 # (Register 40051/40049, siehe _async_sun_charge_loop): lädt den Speicher

@@ -95,3 +95,6 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     assert diagnostics["state"]["extended_available"] is True
     assert diagnostics["state"]["grid_charge_active"] is False
     assert diagnostics["state"]["sun_charge_active"] is False
+    assert diagnostics["state"]["grid_serving_forecast_threshold_kwh"] == 0
+    assert diagnostics["state"]["grid_serving_forecast_kwh"] is None
+    assert diagnostics["state"]["grid_serving_forecast_allowed"] is True

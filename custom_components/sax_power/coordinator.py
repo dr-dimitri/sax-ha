@@ -2012,6 +2012,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # ist - grid_serving_eligible steht trotzdem vor
                 # price_should_pause, damit die Priorität auch strukturell
                 # sichtbar bleibt.
+                if not self._grid_serving_setpoint_active:
+                    # REQ-GRID-SERVING-CHARGE: Vor Schritt a muss die
+                    # SmartMeter-Nullregelung tatsächlich freigegeben sein.
+                    # Sonst kann ein 0-%-Task der zuvor höher priorisierten
+                    # Max-SOC-Sperre weiterlaufen, obwohl deren Zielwert
+                    # inzwischen angehoben wurde; Schritt a sieht dann 0 W
+                    # Ladeleistung und kann den verwaisten Task nie selbst
+                    # übernehmen oder beenden.
+                    await self.async_stop_sun_charge()
                 grid_serving_active_now = await self._async_step_grid_serving(data)
             elif price_should_pause:
                 # Neutralpreis-Pausezone: manueller Sollwertmodus mit

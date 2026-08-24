@@ -606,6 +606,19 @@ requirement_grid_serving_charge:
        laden, sobald ein Zeitpunkt mit dauerhaft gefallener Einspeisung
        erreicht ist, statt fortlaufend mit dem Überschuss mitzulaufen.
 
+    Eigentumsübergabe vor Schritt a: Ist das effektive Ladepausenfenster
+    freigegeben, self._grid_serving_setpoint_active aber noch False, setzt der
+    Coordinator den gemeinsam genutzten SunSpec-Pfad zuerst ausdrücklich in
+    die SmartMeter-Nullregelung (async_stop_sun_charge), bevor
+    _async_step_grid_serving die reale SAX-Ladeleistung auswertet. Dadurch kann
+    kein 0-%-Task einer zuvor höher priorisierten Max-SOC-Sperre ohne logischen
+    Eigentümer weiterlaufen, wenn der konfigurierte Max-SOC angehoben oder der
+    effektive Max-SOC durch die periodische Zellkalibrierung temporär auf 100 %
+    gesetzt wird. Ohne diese Freigabe bliebe storage_power_active bei 0 W,
+    Schritt a könnte nie auslösen und sowohl max_soc_clamped als auch
+    grid_serving_active wären False, obwohl Register 40051/40049 den Speicher
+    weiterhin im 0-%-Sollwertmodus hielten.
+
     Selbstheilung des Schreib-Tasks: Sowohl im Wartezyklen-Zweig (nach
     Schritt a, vor Ablauf von self._grid_serving_wait_cycles) als auch im
     Halte-Zweig von Schritt b (Einspeisung bleibt beim/über dem Schwellwert)
@@ -988,6 +1001,12 @@ requirement_grid_serving_charge:
        Monats-Verhalten für zeitgesteuertes Laden ab (inaktiv außerhalb der
        ausgewählten Monate, aktiv innerhalb) sowie den Fall, dass ein
        Feature bei keinem ausgewählten Monat ganzjährig inaktiv bleibt.
+       Zwei Regressionstests decken zusätzlich die Eigentumsübergabe von der
+       Max-SOC-Sperre an eine noch nicht ausgelöste Ladepause ab: Sowohl das
+       manuelle Anheben des konfigurierten Max-SOC als auch das automatische
+       Anheben des effektiven Max-SOC durch die Zellkalibrierung beenden den
+       alten 0-%-Task, schreiben Register 40051 auf SmartMeter-Nullregelung und
+       lassen weder max_soc_clamped noch grid_serving_active fälschlich aktiv.
        test_enforce_grid_charge_grid_serving_import_protection_overrides_
        wait_cycles deckt zusätzlich Schritt a.1 (Netzbezugs-Schutz) ab:
        tatsächlicher Netzbezug (positiver data['smartmeter_power']) über

@@ -2860,6 +2860,97 @@ async def test_enforce_grid_charge_max_soc_lock_takes_priority_over_grid_serving
         await coordinator.async_stop_sun_charge()
 
 
+async def test_grid_serving_releases_max_soc_task_when_target_is_raised(hass) -> None:
+    """REQ-GRID-SERVING-CHARGE: Wird das Max-SOC im Ladepausenfenster
+    angehoben, darf dessen alter 0-%-Task nicht ohne aktiven Eigentümer
+    weiterlaufen. Schritt a muss aus echter SmartMeter-Nullregelung starten."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 90,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+        "storage_power_active": 0,
+    }
+    coordinator._grid_serving_enabled = True
+    coordinator._grid_serving_start = dt_time(10)
+    coordinator._grid_serving_end = dt_time(14)
+    coordinator._max_soc = 90
+
+    try:
+        with _patched_now(12):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+            assert coordinator.sun_charge_active is True
+
+            client.write_register.reset_mock()
+            await coordinator.async_set_max_soc(95)
+
+        assert coordinator.max_soc_clamped is False
+        assert coordinator.grid_serving_active is False
+        assert coordinator._grid_serving_setpoint_active is False
+        assert coordinator.sun_charge_active is False
+        client.write_register.assert_awaited_once_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_grid_serving_releases_max_soc_task_when_calibration_starts(
+    hass,
+) -> None:
+    """REQ-PERIODIC-FULL-CALIBRATION/REQ-GRID-SERVING-CHARGE: Auch das
+    automatische Anheben des effektiven Max-SOC auf 100 % muss den alten
+    0-%-Task freigeben, bevor die Ladepause neue SAX-Ladung erkennen kann."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    now = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+    coordinator.data = {
+        "soc": 80,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+        "storage_power_active": 0,
+    }
+    coordinator._grid_serving_enabled = True
+    coordinator._grid_serving_start = dt_time(10)
+    coordinator._grid_serving_end = dt_time(14)
+    coordinator._max_soc = 80
+    coordinator._cell_calibration_state = CalibrationState(
+        now - CELL_CALIBRATION_INTERVAL,
+        was_full=False,
+    )
+
+    try:
+        with _patched_now(12, month=8):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+            assert coordinator.sun_charge_active is True
+
+            client.write_register.reset_mock()
+            changed = await coordinator._async_update_cell_calibration(80, now=now)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+
+        assert changed is True
+        assert coordinator.cell_calibration_active is True
+        assert coordinator.effective_max_soc == MAX_SOC
+        assert coordinator.max_soc_clamped is False
+        assert coordinator.grid_serving_active is False
+        assert coordinator._grid_serving_setpoint_active is False
+        assert coordinator.sun_charge_active is False
+        client.write_register.assert_awaited_once_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_exclusive(
     hass,
 ) -> None:

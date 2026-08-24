@@ -669,14 +669,17 @@ requirement_grid_serving_charge:
     davon, ob der Hauptschalter ausgeschaltet, der aktuelle Monat abgewählt,
     das Zeitfenster verlassen/geändert oder die Prognosefreigabe entzogen
     wurde. Das gilt auch, wenn der periodische SunSpec-Schreib-Task zu diesem
-    Zeitpunkt bereits beendet ist: Ein vorhandener beendeter Task beweist
-    weiterhin, dass die Integration zuvor den Sollwertmodus aktiviert hat.
-    Deshalb prüft _async_enforce_grid_charge auf einen vorhandenen Task statt
-    auf sun_charge_active und ruft dann async_stop_sun_charge auf; die Stop-
-    Methode storniert einen noch laufenden Task und schreibt bei einem bereits
-    beendeten Task ebenfalls Register 40051 = 0. Nur wenn nie ein Task
-    gestartet wurde (_sun_charge_task is None), bleibt sie ein No-Op und
-    greift nicht in einen fremd gesetzten Modus ein.
+    Zeitpunkt bereits beendet ist: Bereits der Startauftrag setzt
+    _sun_charge_reset_required als dauerhaften Besitznachweis, bevor der erste
+    periodische Schreibvorgang beginnt. async_stop_sun_charge storniert einen
+    noch laufenden Task und schreibt Register 40051 = 0; erst nach einem
+    erfolgreichen Rückschreiben wird der Besitznachweis gelöscht. Schlägt das
+    Rückschreiben transient fehl, bleibt der Auftrag erhalten und jeder
+    weitere inaktive Coordinator-Takt versucht die SmartMeter-Nullregelung
+    erneut, obwohl _sun_charge_task bereits None ist. Die inaktiven Pfade
+    rufen async_stop_sun_charge deshalb bei vorhandenem Task ODER offenem
+    Rücksetzauftrag auf; nur wenn beides fehlt, bleibt die Methode ein No-Op
+    und greift nicht in einen fremd gesetzten Modus ein.
 
     Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose
     <Tag>.<Monat>." (grid_serving_forecast, kWh; bei fehlender Konfiguration
@@ -866,9 +869,13 @@ requirement_grid_serving_charge:
        aktive Übergänge auf inaktiv durch Hauptschalter, Monatsauswahl,
        Zeitfenster und fallende PV-Prognose ab, nachdem der periodische
        Schreib-Task bereits beendet wurde. In jedem Fall wird Register 40051
-       explizit mit SmartMeter-Nullregelung beschrieben; der bestehende
-       Schritt-a-Test deckt den umgekehrten Übergang in Sollwertvorgabe plus
-       0-%-Sollwert ab."
+       explizit mit SmartMeter-Nullregelung beschrieben; die Prognose ist in
+       der Übergangsmatrix ausdrücklich enthalten. Weitere Tests erzwingen
+       einen transienten Fehler beim ersten Rückschreiben und belegen, dass
+       der Rücksetzauftrag erhalten bleibt und sowohl ein direkter Folgeaufruf
+       als auch der nächste inaktive Coordinator-Takt Register 40051 erneut
+       auf 0 schreibt. Der bestehende Schritt-a-Test deckt den umgekehrten
+       Übergang in Sollwertvorgabe plus 0-%-Sollwert ab."
     - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
        über Mitternacht laufendes Fenster, berührende statt überlappende
        Fenster, unvollständige Fenster) ab - inklusive des Falls, dass

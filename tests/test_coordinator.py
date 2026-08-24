@@ -14,6 +14,7 @@ from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     ALL_MONTHS,
     CELL_CALIBRATION_INTERVAL,
+    CONF_PV_FORECAST_SENSOR,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_SOC,
     PV_SURPLUS_HYSTERESIS_CYCLES,
@@ -891,6 +892,100 @@ async def test_enforce_grid_charge_starts_timed_charge_when_enabled_in_window(
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
         device_id=100,
     )
+
+
+async def test_stop_sun_charge_retries_failed_smartmeter_reset(hass) -> None:
+    """REQ-GRID-SERVING-CHARGE: Ein transient fehlgeschlagenes Rücksetzen
+    darf den Besitznachweis nicht löschen; der nächste Aufruf schreibt
+    Register 40051 erneut auf SmartMeter-Nullregelung."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    failure = MagicMock()
+    failure.isError.return_value = True
+    client.write_register = AsyncMock(return_value=success)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    await coordinator.async_start_sun_charge(0)
+    await asyncio.sleep(0.1)
+    client.write_register.reset_mock()
+    client.write_register.side_effect = [failure, success]
+
+    await coordinator.async_stop_sun_charge()
+
+    assert coordinator._sun_charge_task is None
+    assert coordinator._sun_charge_reset_required is True
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+
+    await coordinator.async_stop_sun_charge()
+
+    assert coordinator._sun_charge_reset_required is False
+    assert client.write_register.await_count == 2
+    client.write_register.assert_awaited_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+
+
+async def test_inactive_grid_serving_retries_failed_smartmeter_reset(hass) -> None:
+    """Ein inaktiver Folgetakt wiederholt das zuvor fehlgeschlagene
+    Rücksetzen automatisch, obwohl der Schreib-Task bereits entfernt ist."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    failure = MagicMock()
+    failure.isError.return_value = True
+    client.write_register = AsyncMock(return_value=success)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_max_soc(90)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is True
+
+            client.write_register.reset_mock()
+            client.write_register.side_effect = [failure, success]
+            await coordinator.async_set_grid_serving_enabled(False)
+
+            assert coordinator.grid_serving_active is False
+            assert coordinator._sun_charge_task is None
+            assert coordinator._sun_charge_reset_required is True
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+
+        assert coordinator._sun_charge_reset_required is False
+        assert client.write_register.await_count == 2
+        for write in client.write_register.await_args_list:
+            assert write.kwargs == {
+                "address": REG_SUN_IC_CONTROL_MODE,
+                "value": SUN_IC_CONTROL_MODE_SMARTMETER,
+                "device_id": 100,
+            }
+    finally:
+        await coordinator.async_stop_sun_charge()
 
 
 async def test_enforce_grid_charge_inactive_outside_window(hass) -> None:
@@ -1944,7 +2039,7 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
         await coordinator.async_stop_sun_charge()
 
 
-@pytest.mark.parametrize("deactivation", ["switch", "month", "window"])
+@pytest.mark.parametrize("deactivation", ["switch", "month", "window", "forecast"])
 async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
     hass, deactivation: str
 ) -> None:
@@ -1988,10 +2083,20 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
                 await coordinator.async_set_grid_serving_enabled(False)
             elif deactivation == "month":
                 await coordinator.async_set_grid_serving_month(1, False)
-            else:
+            elif deactivation == "window":
                 await coordinator.async_set_grid_serving_window(
                     dt_time(14), dt_time(16)
                 )
+            else:
+                hass.states.async_set(
+                    "sensor.pv_prognose_morgen",
+                    "4",
+                    {"unit_of_measurement": "kWh"},
+                )
+                coordinator.options = {
+                    CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"
+                }
+                await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
 
         assert coordinator.grid_serving_active is False
         assert coordinator._grid_serving_setpoint_active is False

@@ -347,6 +347,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
         self._sun_charge_task: asyncio.Task | None = None
+        # Bleibt bis zur erfolgreich quittierten Rückkehr in Registermodus 0
+        # gesetzt. Dadurch geht der Rücksetzauftrag nach einem transienten
+        # Modbus-Fehler nicht zusammen mit der Task-Referenz verloren
+        # (REQ-GRID-SERVING-CHARGE).
+        self._sun_charge_reset_required = False
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
         # Cache für den NORMAL-Block (Basic Mode): _async_read_basic befüllt
@@ -1164,6 +1169,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def sun_charge_active(self) -> bool:
         return self._sun_charge_task is not None and not self._sun_charge_task.done()
 
+    def _sun_charge_needs_reset(self) -> bool:
+        """Ob die Integration den SunSpec-Steuermodus wieder freigeben muss."""
+        return self._sun_charge_task is not None or self._sun_charge_reset_required
+
     def _watts_to_ic_setpoint_raw(self, power_watts: int, data: dict[str, Any]) -> int:
         max_power_reference = data.get("ic_max_power_reference")
         if not max_power_reference:
@@ -1212,6 +1221,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         power_changed = power != self._sun_charge_power
         self._sun_charge_power = power
         if self._sun_charge_task is None or self._sun_charge_task.done():
+            # Ab dem Startauftrag besitzt die Integration den SunSpec-
+            # Steuermodus und muss ihn später explizit wieder freigeben. Das
+            # gilt konservativ auch dann, wenn der erste Schreibvorgang nur
+            # teilweise beim Gerät ankommt.
+            self._sun_charge_reset_required = True
             self._sun_charge_task = self.hass.async_create_background_task(
                 self._async_sun_charge_loop(), name="sax_power_sun_charge"
             )
@@ -1232,24 +1246,26 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         eventuell vom Nutzer selbst gesetztes Register 40051 einzugreifen.
 
         Ein vorhandener, aber bereits beendeter Task gilt weiterhin als
-        zuvor aktive Netzladung: Gerade dann muss Register 40051 explizit
-        zurückgesetzt werden, weil das Gerät den zuletzt geschriebenen
-        Sollwertmodus sonst bis zu seinem eigenen Timeout beibehält."""
-        if self._sun_charge_task is None:
+        zuvor aktive Netzladung. Zusätzlich bleibt nach einem fehlgeschlagenen
+        Rückschreibversuch _sun_charge_reset_required gesetzt, damit jeder
+        weitere inaktive Coordinator-Takt Register 40051 erneut zurücksetzt,
+        statt nur den periodischen Task zu beenden."""
+        if not self._sun_charge_needs_reset():
             return
-        self._sun_charge_task.cancel()
-        try:
-            await self._sun_charge_task
-        except asyncio.CancelledError:
-            pass
-        except HomeAssistantError:
-            # Trifft die Cancellation einen gerade laufenden Modbus-Write,
-            # wandelt pymodbus sie in eine ModbusIOException um statt eine
-            # reine CancelledError durchzureichen - async_write_register
-            # daraus wiederum in HomeAssistantError. Der Task ist damit
-            # trotzdem beendet, nur eben nicht über den CancelledError-Pfad.
-            pass
-        self._sun_charge_task = None
+        if self._sun_charge_task is not None:
+            self._sun_charge_task.cancel()
+            try:
+                await self._sun_charge_task
+            except asyncio.CancelledError:
+                pass
+            except HomeAssistantError:
+                # Trifft die Cancellation einen gerade laufenden Modbus-Write,
+                # wandelt pymodbus sie in eine ModbusIOException um statt eine
+                # reine CancelledError durchzureichen - async_write_register
+                # daraus wiederum in HomeAssistantError. Der Task ist damit
+                # trotzdem beendet, nur eben nicht über den CancelledError-Pfad.
+                pass
+            self._sun_charge_task = None
         try:
             await self.async_write_extended_register(
                 REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
@@ -1261,6 +1277,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "spätestens nach Ablauf des Timeouts (Register 40050) "
                 "automatisch zurück."
             )
+        else:
+            self._sun_charge_reset_required = False
 
     async def _async_sun_charge_loop(self) -> None:
         try:
@@ -1866,7 +1884,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Nullregelung) setzen, statt passiv auf den Timeout
                 # (Register 40050) zu warten, damit der Speicher wieder im
                 # normalen Betriebsmodus arbeitet.
-                if self._sun_charge_task is not None:
+                if self._sun_charge_needs_reset():
                     await self.async_stop_sun_charge()
                 self._max_soc_hold_is_window_bound = False
                 self._max_soc_grid_import_wait_cycles = 0
@@ -1891,7 +1909,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "_max_soc_grid_import_wait_cycles", grid_import_raw
                 )
                 if grid_import_confirmed:
-                    if self._sun_charge_task is not None:
+                    if self._sun_charge_needs_reset():
                         await self.async_stop_sun_charge()
                     self._max_soc_grid_import_wait_cycles = 0
                 else:
@@ -1934,7 +1952,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # 40051 trotzdem aktiv zurücksetzen. Die frühere Prüfung
                 # über sun_charge_active ließ genau diesen sicherheits-
                 # relevanten Übergang aus (REQ-GRID-SERVING-CHARGE).
-                if self._sun_charge_task is not None:
+                if self._sun_charge_needs_reset():
                     await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
@@ -2037,7 +2055,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if import_confirmed:
-            if self._sun_charge_task is not None:
+            if self._sun_charge_needs_reset():
                 await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
@@ -2059,7 +2077,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and smartmeter_power > -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if release_confirmed:
-            if self._sun_charge_task is not None:
+            if self._sun_charge_needs_reset():
                 await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
             self._grid_serving_release_confirm_cycles = 0

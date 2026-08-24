@@ -2110,6 +2110,74 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
         await coordinator.async_stop_sun_charge()
 
 
+async def test_grid_serving_deactivation_wins_over_concurrent_activation(hass) -> None:
+    """REQ-GRID-SERVING-CHARGE: Eine bereits laufende Poll-Auswertung darf
+    die SunSpec-Sollwertvorgabe nicht nach einer neueren Deaktivierung wieder
+    einschalten. Status und Register 40051 müssen dieselbe Entscheidung
+    abbilden."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    coordinator._grid_serving_enabled = True
+    coordinator._grid_serving_start = dt_time(10)
+    coordinator._grid_serving_end = dt_time(14)
+    coordinator._max_soc = 90
+
+    start_entered = asyncio.Event()
+    allow_start = asyncio.Event()
+    original_start = coordinator.async_start_sun_charge
+
+    async def delayed_start(power: int) -> None:
+        start_entered.set()
+        await allow_start.wait()
+        await original_start(power)
+
+    try:
+        with (
+            _patched_now(12),
+            patch.object(coordinator, "async_start_sun_charge", delayed_start),
+        ):
+            # Erster Zyklus füllt nur die Hysterese; der zweite will die
+            # Ladepause einschalten und wird direkt vor dem Registerpfad
+            # kontrolliert angehalten.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            activation = asyncio.create_task(
+                coordinator._async_enforce_grid_charge(coordinator.data)
+            )
+            await start_entered.wait()
+
+            deactivation = asyncio.create_task(
+                coordinator.async_set_grid_serving_enabled(False)
+            )
+            await asyncio.sleep(0)
+            allow_start.set()
+            await asyncio.gather(activation, deactivation)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_enabled is False
+        assert coordinator.grid_serving_active is False
+        assert coordinator.data["grid_serving_pause_status"] == "Inaktiv"
+        assert coordinator.sun_charge_active is False
+        assert client.write_register.await_args_list[-1].kwargs == {
+            "address": REG_SUN_IC_CONTROL_MODE,
+            "value": SUN_IC_CONTROL_MODE_SMARTMETER,
+            "device_id": 100,
+        }
+    finally:
+        allow_start.set()
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -> None:
     """Nach dem Auslösen von Schritt a wird Schritt b (Rückkehr in die
     SmartMeter-Nullregelung bei Netzeinspeisung unter dem Schwellwert) für

@@ -569,6 +569,113 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         await server.shutdown()
 
 
+async def test_live_grid_serving_switches_sunspec_mode_both_directions(
+    hass, socket_enabled
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Die Ladepause setzt über echtes Modbus TCP
+    40051/40049 auf Sollwertvorgabe/0 % und beim Deaktivieren 40051 wieder
+    auf SmartMeter-Nullregelung."""
+    extended_registers = _build_extended_registers()
+    extended_registers[29] = -200  # Speicher lädt mit 200 W
+    extended_registers[72] = 300  # Einspeisung -> smartmeter_power -300 W
+    server = _modbus_server(TEST_PORT + 7, _build_basic_registers(), extended_registers)
+    await server.serve_forever(background=True)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 7,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        registry = er.async_get(hass)
+        enabled_id = _entity_id(registry, entry.entry_id, "grid_serving_enabled")
+        start_id = _entity_id(registry, entry.entry_id, "grid_serving_start")
+        end_id = _entity_id(registry, entry.entry_id, "grid_serving_end")
+        active_text_id = _entity_id(
+            registry, entry.entry_id, "grid_serving_active_text"
+        )
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+
+        try:
+            with patch(
+                "custom_components.sax_power.coordinator.dt_util.now",
+                return_value=datetime(2024, 1, 1, 12, 0),
+            ):
+                await hass.services.async_call(
+                    "time",
+                    "set_value",
+                    {"entity_id": start_id, "time": "10:00:00"},
+                    blocking=True,
+                )
+                await hass.services.async_call(
+                    "time",
+                    "set_value",
+                    {"entity_id": end_id, "time": "14:00:00"},
+                    blocking=True,
+                )
+                await hass.services.async_call(
+                    "switch", "turn_on", {"entity_id": enabled_id}, blocking=True
+                )
+                # Der erste Aufruf füllt die einheitliche Zweizyklen-
+                # Hysterese, der zweite bestätigt die erkannte SAX-Ladung.
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                coordinator._publish_charge_state(coordinator.data)
+                coordinator.async_set_updated_data(coordinator.data)
+                await hass.async_block_till_done()
+                await asyncio.sleep(0.2)
+
+                assert hass.states.get(active_text_id).state == "Aktiv"
+
+                verify_client = AsyncModbusTcpClient(
+                    host="127.0.0.1", port=TEST_PORT + 7
+                )
+                await verify_client.connect()
+                control_mode_result = await verify_client.read_holding_registers(
+                    address=REG_SUN_IC_CONTROL_MODE,
+                    count=1,
+                    device_id=SLAVE_ID_EXTENDED,
+                )
+                setpoint_result = await verify_client.read_holding_registers(
+                    address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                    count=1,
+                    device_id=SLAVE_ID_EXTENDED,
+                )
+                verify_client.close()
+                assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
+                assert setpoint_result.registers[0] == 0
+
+                await hass.services.async_call(
+                    "switch", "turn_off", {"entity_id": enabled_id}, blocking=True
+                )
+                await hass.async_block_till_done()
+
+            assert hass.states.get(active_text_id).state == "Inaktiv"
+            assert coordinator.sun_charge_active is False
+
+            verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 7)
+            await verify_client.connect()
+            control_mode_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_CONTROL_MODE,
+                count=1,
+                device_id=SLAVE_ID_EXTENDED,
+            )
+            verify_client.close()
+            assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
+        finally:
+            await coordinator.async_stop_sun_charge()
+    finally:
+        await server.shutdown()
+
+
 async def test_live_grid_charge_seeded_from_config_entry_on_first_setup(
     hass, socket_enabled
 ) -> None:

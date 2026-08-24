@@ -1936,6 +1936,67 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
         await coordinator.async_stop_sun_charge()
 
 
+@pytest.mark.parametrize("deactivation", ["switch", "month", "window"])
+async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
+    hass, deactivation: str
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Verliert eine laufende Ladepause durch
+    Schalter, Monat oder Zeitfenster ihre Berechtigung, muss Register 40051
+    auch dann aktiv auf Nullregelung wechseln, wenn der periodische
+    Schreib-Task bereits beendet ist."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_max_soc(90)
+
+    try:
+        with _patched_now(12, month=1):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is True
+
+            task = coordinator._sun_charge_task
+            assert task is not None
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert coordinator.sun_charge_active is False
+            client.write_register.reset_mock()
+
+            if deactivation == "switch":
+                await coordinator.async_set_grid_serving_enabled(False)
+            elif deactivation == "month":
+                await coordinator.async_set_grid_serving_month(1, False)
+            else:
+                await coordinator.async_set_grid_serving_window(
+                    dt_time(14), dt_time(16)
+                )
+
+        assert coordinator.grid_serving_active is False
+        assert coordinator._grid_serving_setpoint_active is False
+        assert coordinator.sun_charge_active is False
+        client.write_register.assert_awaited_once_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -> None:
     """Nach dem Auslösen von Schritt a wird Schritt b (Rückkehr in die
     SmartMeter-Nullregelung bei Netzeinspeisung unter dem Schwellwert) für

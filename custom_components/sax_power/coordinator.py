@@ -1231,7 +1231,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async_stop_grid_charge) - schreibt den Steuermodus deshalb nur
         zurück, wenn zuvor tatsächlich ein Lade-Task aktiv war, statt bei
         jedem Aufruf (z. B. beim Entladen des Config Entry) unbedingt in ein
-        eventuell vom Nutzer selbst gesetztes Register 40051 einzugreifen."""
+        eventuell vom Nutzer selbst gesetztes Register 40051 einzugreifen.
+
+        Ein vorhandener, aber bereits beendeter Task gilt weiterhin als
+        zuvor aktive Netzladung: Gerade dann muss Register 40051 explizit
+        zurückgesetzt werden, weil das Gerät den zuletzt geschriebenen
+        Sollwertmodus sonst bis zu seinem eigenen Timeout beibehält."""
         if self._sun_charge_task is None:
             return
         self._sun_charge_task.cancel()
@@ -1863,7 +1868,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Nullregelung) setzen, statt passiv auf den Timeout
                 # (Register 40050) zu warten, damit der Speicher wieder im
                 # normalen Betriebsmodus arbeitet.
-                if self.sun_charge_active:
+                if self._sun_charge_task is not None:
                     await self.async_stop_sun_charge()
                 self._max_soc_hold_is_window_bound = False
                 self._max_soc_grid_import_wait_cycles = 0
@@ -1888,7 +1893,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "_max_soc_grid_import_wait_cycles", grid_import_raw
                 )
                 if grid_import_confirmed:
-                    if self.sun_charge_active:
+                    if self._sun_charge_task is not None:
                         await self.async_stop_sun_charge()
                     self._max_soc_grid_import_wait_cycles = 0
                 else:
@@ -1927,7 +1932,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grid_serving_active_now = False
             else:
                 grid_serving_active_now = False
-                if self.sun_charge_active:
+                # Ein vorhandener, bereits beendeter Task muss Register
+                # 40051 trotzdem aktiv zurücksetzen. Die frühere Prüfung
+                # über sun_charge_active ließ genau diesen sicherheits-
+                # relevanten Übergang aus (REQ-GRID-SERVING-CHARGE).
+                if self._sun_charge_task is not None:
                     await self.async_stop_sun_charge()
 
         self._timed_charge_active = timed_should_charge
@@ -2030,7 +2039,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if import_confirmed:
-            if self.sun_charge_active:
+            if self._sun_charge_task is not None:
                 await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
@@ -2052,7 +2061,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and smartmeter_power > -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if release_confirmed:
-            if self.sun_charge_active:
+            if self._sun_charge_task is not None:
                 await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
             self._grid_serving_release_confirm_cycles = 0

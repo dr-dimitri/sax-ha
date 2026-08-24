@@ -679,17 +679,21 @@ requirement_grid_serving_charge:
     erfolgreichen Rückschreiben wird der Besitznachweis gelöscht. Schlägt das
     Rückschreiben transient fehl, bleibt der Auftrag erhalten und jeder
     weitere inaktive Coordinator-Takt versucht die SmartMeter-Nullregelung
-    erneut, obwohl _sun_charge_task bereits None ist. Die inaktiven Pfade
-    rufen async_stop_sun_charge deshalb bei vorhandenem Task ODER offenem
-    Rücksetzauftrag auf. Zusätzlich wird die tatsächliche Rückmeldung aus
-    Register 40051 ausgewertet: Meldet eine neue Coordinator-Instanz beim
-    ersten Read Sollwertvorgabe, obwohl ihr eigener Task noch nicht existiert,
-    übernimmt sie daraus den Rücksetzauftrag. Das ist der Zustand nach einem
-    Reload oder einer Neuinstallation innerhalb des geräteseitigen
-    300-s-Timeouts; ohne die Register-Rückmeldung blieb der verwaiste Modus
-    bis zum Timeout bestehen und ein Deaktivieren der Ladepause wirkte nicht.
-    Erst wenn weder Task/Rücksetzauftrag noch ein neu beobachteter Gerätemodus
-    1 vorliegen, bleibt async_stop_sun_charge ein No-Op.
+    erneut, obwohl _sun_charge_task bereits None ist. Jeder inaktive Pfad
+    ruft async_stop_sun_charge auf. Die Methode gleicht einen einfachen
+    Sollzustand ab: _sun_charge_commanded_mode startet mit None (noch nicht
+    synchronisiert), daher schreibt jede neue Coordinator-Instanz bei ihrer
+    ersten inaktiven Entscheidung Register 40051 genau einmal ausdrücklich
+    auf 0 - auch wenn der erste Read bereits 0 meldet und kein Task existiert.
+    Erst nach dieser quittierten Synchronisierung sind weitere unveränderte
+    inaktive Takte No-Ops. Damit hängt die Nullregelung direkt nach Reload/
+    Neuinstallation nicht mehr von einem nur im RAM vorhandenen Task- oder
+    Besitzmerker und auch nicht von einer erkannten Zustandsflanke ab.
+    Zusätzlich wird die tatsächliche Rückmeldung aus Register 40051 weiter
+    ausgewertet: Meldet das Gerät später Modus 1, obwohl der Sollzustand 0
+    ist, wird die Nullregelung erneut geschrieben. Ein transient
+    fehlgeschlagener Write lässt den Sollzustand unsynchronisiert und wird im
+    nächsten inaktiven Takt wiederholt.
 
     Das Aktivieren erzeugt nicht mehr lediglich den periodischen Task. Der
     erste Registersatz wird synchron in der dokumentierten Reihenfolge
@@ -706,6 +710,18 @@ requirement_grid_serving_charge:
     Schreibintervall zu warten. Innerhalb der Integration existiert dagegen
     kein zweiter unabhängiger Schreiber für 40049/40051: Alle vier
     Ladefunktionen verwenden denselben serialisierten SunSpec-Pfad.
+
+    Nach jedem erfolgreichen SunSpec-Write wird der HIGH-Readcache
+    invalidiert, damit der nächste Coordinator-Takt den tatsächlichen
+    Gerätewert unabhängig vom normalen Zwei-Sekunden-Intervall erneut liest.
+    Der quittierte Wert von Register 40051 wird zugleich sofort in
+    coordinator.data/_high_data übernommen. Der Diagnose-Sensor
+    "Steuermodus" und damit das HA-Aktivitätslog zeigen die Nullregelung
+    deshalb bereits mit der auslösenden Einstellungsänderung statt zunächst
+    erneut den alten Cachewert zu veröffentlichen. Der folgende echte
+    Readback kann eine vom Gerät nicht übernommene oder extern überschriebene
+    Änderung weiterhin sichtbar machen und löst dann den erneuten Abgleich
+    aus.
 
     Die komplette Auswertung und Anwendung einer Ladeentscheidung ist durch
     self._charge_control_lock serialisiert. Poll-Zyklus, Entity-Setter und

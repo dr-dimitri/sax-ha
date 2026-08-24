@@ -184,6 +184,9 @@ def _make_client() -> MagicMock:
     client = MagicMock()
     client.connected = True
     client.connect = AsyncMock(return_value=True)
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
     return client
 
 
@@ -257,7 +260,7 @@ async def test_due_cell_calibration_lifts_max_soc_without_forcing_grid_charge(
     assert coordinator.effective_max_soc == 100
     assert coordinator.max_soc_clamped is False
     coordinator.async_start_sun_charge.assert_not_awaited()
-    coordinator.async_stop_sun_charge.assert_not_awaited()
+    coordinator.async_stop_sun_charge.assert_awaited_once()
     coordinator._calibration_store.async_save.assert_not_awaited()
 
 
@@ -539,21 +542,24 @@ async def test_normal_block_throttled_high_block_follows_own_interval(hass) -> N
     ):
         await coordinator._async_update_data()
     assert basic_read_count() == 1  # < scan_interval (10s): kein Reread
-    assert high_read_count() == 1  # < READ_BLOCK_EXT_HIGH_INTERVAL (2s)
+    # Der initiale Nullregelungs-Write hat den HIGH-Cache absichtlich
+    # invalidiert; daher wird sein Readback unabhängig vom Intervall sofort
+    # beim nächsten Takt verifiziert.
+    assert high_read_count() == 2
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
     ):
         await coordinator._async_update_data()
     assert basic_read_count() == 1  # weiterhin < scan_interval
-    assert high_read_count() == 2  # >= HIGH-Intervall seit t=1000 -> Reread
+    assert high_read_count() == 3  # >= HIGH-Intervall seit t=1001 -> Reread
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1011.0
     ):
         await coordinator._async_update_data()
     assert basic_read_count() == 2  # >= scan_interval seit t=1000 -> Reread
-    assert high_read_count() == 3  # >= HIGH-Intervall seit t=1003 -> Reread
+    assert high_read_count() == 4  # >= HIGH-Intervall seit t=1003 -> Reread
 
 
 async def test_low_block_read_only_once_per_interval(hass) -> None:
@@ -1054,6 +1060,39 @@ async def test_inactive_fresh_coordinator_resets_observed_orphaned_setpoint_mode
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
         device_id=100,
     )
+
+
+async def test_inactive_fresh_coordinator_explicitly_confirms_smartmeter_mode(
+    hass,
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Auch wenn der erste Read bereits Modus 0
+    meldet, wird der inaktive Sollzustand beim Start einmal ausdrücklich
+    geschrieben. Folgetakte dürfen denselben Wert nicht fortlaufend senden."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SMARTMETER,
+        "ic_control_mode_text": "SmartMeter-Nullregelung",
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+
+    await coordinator._async_enforce_grid_charge(coordinator.data)
+
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+
+    client.write_register.reset_mock()
+    await coordinator._async_enforce_grid_charge(coordinator.data)
+    client.write_register.assert_not_awaited()
 
 
 async def test_enforce_grid_charge_inactive_outside_window(hass) -> None:
@@ -1687,16 +1726,39 @@ async def test_enforce_grid_charge_starts_when_smartmeter_power_missing(hass) ->
         await coordinator.async_stop_sun_charge()
 
 
-async def test_stop_sun_charge_is_noop_when_not_running(hass) -> None:
-    """Analog zu async_stop_grid_charge: ein Aufruf ohne laufende Ladung
-    (z. B. beim Entladen des Config Entry) darf nicht ungefragt in Register
-    40051 eingreifen."""
+async def test_stop_sun_charge_initially_reconciles_then_is_noop(hass) -> None:
+    """REQ-GRID-SERVING-CHARGE: Eine neue Coordinator-Instanz darf aus dem
+    fehlenden Python-Task nicht auf den Gerätezustand schließen. Die erste
+    inaktive Entscheidung schreibt Modus 0 genau einmal; danach ist derselbe
+    Sollzustand ein No-Op und der HA-Cache zeigt die Quittung sofort."""
     client = _make_client()
-    client.write_register = AsyncMock()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
     coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SETPOINT,
+        "ic_control_mode_text": "Sollwertvorgabe",
+    }
+    coordinator._high_data = dict(coordinator.data)
+    coordinator._high_last_read = 123.0
+    coordinator._last_observed_ic_control_mode = SUN_IC_CONTROL_MODE_SETPOINT
 
     await coordinator.async_stop_sun_charge()
 
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+    assert coordinator._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+    assert coordinator.data["ic_control_mode"] == SUN_IC_CONTROL_MODE_SMARTMETER
+    assert coordinator.data["ic_control_mode_text"] == "SmartMeter-Nullregelung"
+    assert coordinator._high_data["ic_control_mode"] == SUN_IC_CONTROL_MODE_SMARTMETER
+    assert coordinator._high_last_read is None
+
+    client.write_register.reset_mock()
+    await coordinator.async_stop_sun_charge()
     client.write_register.assert_not_awaited()
 
 

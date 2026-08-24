@@ -607,6 +607,9 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
         active_text_id = _entity_id(
             registry, entry.entry_id, "grid_serving_active_text"
         )
+        control_mode_text_id = _entity_id(
+            registry, entry.entry_id, "ic_control_mode_text"
+        )
         coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
 
         try:
@@ -614,6 +617,9 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
             # verwaisten Modus zurücksetzen; dafür existiert bewusst noch kein
             # _sun_charge_task aus dieser neuen Instanz.
             assert coordinator.sun_charge_active is False
+            assert hass.states.get(control_mode_text_id).state == (
+                "SmartMeter-Nullregelung"
+            )
             verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 7)
             await verify_client.connect()
             control_mode_result = await verify_client.read_holding_registers(
@@ -652,6 +658,9 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
                 await asyncio.sleep(0.2)
 
                 assert hass.states.get(active_text_id).state == "Aktiv"
+                assert hass.states.get(control_mode_text_id).state == (
+                    "Sollwertvorgabe"
+                )
 
                 verify_client = AsyncModbusTcpClient(
                     host="127.0.0.1", port=TEST_PORT + 7
@@ -677,6 +686,12 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
                 await hass.async_block_till_done()
 
             assert hass.states.get(active_text_id).state == "Inaktiv"
+            # Der erfolgreiche Write wird mit demselben Schalter-Service in
+            # coordinator.data veröffentlicht; dieser Assert wartet bewusst
+            # nicht auf den nächsten periodischen HIGH-Read.
+            assert hass.states.get(control_mode_text_id).state == (
+                "SmartMeter-Nullregelung"
+            )
             assert coordinator.sun_charge_active is False
 
             verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 7)

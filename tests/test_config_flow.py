@@ -51,6 +51,7 @@ async def test_user_flow_success(hass) -> None:
     # nach der Config-Flow-Validierung ausliest.
     read_result.registers = [50] * 115
     client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.write_register = AsyncMock(return_value=read_result)
     client.close = MagicMock()
 
     # Sowohl config_flow (Verbindungsvalidierung) als auch __init__
@@ -102,6 +103,7 @@ async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
     read_result.isError.return_value = False
     read_result.registers = [50] * 115
     client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.write_register = AsyncMock(return_value=read_result)
     client.close = MagicMock()
 
     with (
@@ -150,6 +152,7 @@ async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
     read_result.isError.return_value = False
     read_result.registers = [50] * 115
     client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.write_register = AsyncMock(return_value=read_result)
     client.close = MagicMock()
 
     with (

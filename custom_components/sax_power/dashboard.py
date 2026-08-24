@@ -332,14 +332,10 @@ async def async_build_dashboard_config(
                 [
                     ("time", "grid_serving_start"),
                     ("time", "grid_serving_end"),
+                    ("sensor", "grid_serving_forecast"),
+                    ("number", "grid_serving_forecast_threshold"),
+                    ("sensor", "grid_serving_pause_status"),
                 ],
-                translations,
-            ),
-            _entities_card(
-                hass,
-                entry_id,
-                "Einstellungen",
-                [("number", "grid_serving_forecast_threshold")],
                 translations,
             ),
             _entities_card(

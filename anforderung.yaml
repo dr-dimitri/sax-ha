@@ -630,9 +630,12 @@ requirement_grid_serving_charge:
     zurückschalten (Ladung bleibt konservativ gehalten) - in beiden Fällen
     ohne bekannten Messwert keine aktive Entscheidung.
 
-    Optionale PV-Prognose-Freigabe (Issue #78): number.py stellt die über
-    RestoreEntity persistierte Einstellung "Netzdienliches Laden Mindest-
-    PV-Prognose" in kWh bereit (0.0-100.0 kWh, Schritt 0.1, Default 0.0).
+    Optionale PV-Prognose-Freigabe (Issues #78/#81): number.py stellt die
+    über RestoreEntity persistierte Einstellung "Mindest PV Prognose" in
+    kWh bereit (0-100 kWh, Schritt 1 kWh, Default 0). Der Coordinator rundet
+    jeden Schreibwert auf volle kWh; bei genau 0,5 wird kaufmännisch
+    aufgerundet (8,5 -> 9), anschließend wird auf 0-100 begrenzt. Dadurch
+    werden auch aus älteren Versionen restaurierte Dezimalwerte migriert.
     0 kWh deaktiviert die Zusatzbedingung vollständig und erhält damit das
     bisherige statische Verhalten für Bestandsinstallationen. Bei einem
     Wert > 0 wird der bereits im Options Flow für REQ-DYNAMIC-PRICE-CHARGE
@@ -660,6 +663,25 @@ requirement_grid_serving_charge:
     Coordinator-Setter sofort angewendet; Zustandswechsel am gemeinsamen
     Sensor werden vom Planner beobachtet und über async_apply_price_plan
     ohne Neustart sofort auf den Coordinator übertragen.
+
+    Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose"
+    (grid_serving_forecast, kWh; bei fehlender Konfiguration oder jedem
+    unbrauchbaren Wert unknown) und "Status" (grid_serving_pause_status).
+    Der Status beschreibt bewusst das effektive Ladepausen-Fenster, nicht
+    erst den späteren Eingriff nach erkannter PV-Ladung. Die erste passende
+    Bedingung gewinnt: Hauptschalter aus -> "Inaktiv"; aktueller Monat aus
+    -> "Inaktiv im Monat <Monat>"; Uhrzeit außerhalb -> "Außerhalb des
+    Zeitfensters"; Mindestwert > 0 ohne konfigurierten Sensor -> "Kein PV-
+    Prognosesensor eingestellt"; konfigurierter, aber ungültiger Sensor ->
+    "PV-Prognose nicht verfügbar"; Prognose unter Mindestwert -> Satz mit
+    beiden kWh-Werten und inaktiver Ladepause; Prognose >= Mindestwert ->
+    aktiver Satz mit Start/Ende, aktuellem deutschen Monatsnamen und beiden
+    kWh-Werten; Mindestwert 0 -> aktiver Satz ohne Prognosezusatz. Start und
+    Ende erscheinen als HH:MM, kWh-Werte ohne unnötige Nachkommastellen.
+    is_time_in_window bleibt die gemeinsame Logik für normale,
+    mitternachtsübergreifende und leere Fenster. Poll-Zyklen sowie die
+    bestehenden sofortigen Setter-/Sensor-Callbacks aktualisieren beide
+    Anzeigen dynamisch.
 
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
@@ -814,7 +836,9 @@ requirement_grid_serving_charge:
        ein laufender 0-%-Eingriff wird sicher per SmartMeter-Nullregelung
        beendet; bei niedriger Prognose bleibt aktives preisoptimiertes Laden
        freigegeben. tests/test_number.py deckt Default, Restore und Klemmung
-       der neuen Number-Entity ab; tests/test_dashboard.py ihre Darstellung."
+       der Number-Entity sowie 1-kWh-Schritt und kaufmännische Rundung ab;
+       tests/test_dashboard.py ihre Darstellung. tests/test_coordinator.py
+       deckt alle acht priorisierten Ladepausen-Statustexte ab."
     - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
        über Mitternacht laufendes Fenster, berührende statt überlappende
        Fenster, unvollständige Fenster) ab - inklusive des Falls, dass
@@ -1427,22 +1451,24 @@ requirement_bundled_dashboard:
     "Preisoptimiertes Laden aktiv" - er steht nicht innerhalb der Karte,
     die den Kontext liefert.
 
-    "Ladeautomatik" und "Netzdienliches Laden" sind bewusst identisch
-    aufgebaut, damit der Anwender beim Wechsel zwischen den beiden Tabs
-    nicht umdenken muss: oben der jeweilige Hauptschalter als Tile-Karte
-    ("Netzladung aktiv" / "Netzdienliches Laden aktiv"), darunter eine
-    Karte mit nur den beiden Zeit-Entities - deren Namen lauten in beiden
-    Tabs einheitlich "Start"/"Ende" statt tabspezifisch "Netzladung
-    Start"/"Netzdienliches Laden Start". Die Karte selbst heißt bei
+    "Ladeautomatik" und "Netzdienliches Laden" beginnen gleichartig mit dem
+    jeweiligen Hauptschalter als Tile-Karte ("Netzladung aktiv" /
+    "Netzdienliches Laden aktiv"). Die Zeit-Entities heißen in beiden Tabs
+    einheitlich "Start"/"Ende" statt tabspezifisch "Netzladung Start" oder
+    "Netzdienliches Laden Start". Die Karte selbst heißt bei
     "Ladeautomatik" "Zeitfenster" (das Zeitfenster löst das Laden aus), bei
     "Netzdienliches Laden" aber "Ladepause" (das Zeitfenster unterbricht
-    umgekehrt gerade das PV-Laden, siehe REQ-GRID-SERVING-CHARGE) - und am
-    Ende eine Karte "Aktive Monate" mit den zwölf Monats-Schaltern des
+    umgekehrt gerade das PV-Laden, siehe REQ-GRID-SERVING-CHARGE). Diese
+    Karte enthält in fester Reihenfolge Start, Ende, "PV-Prognose" in kWh,
+    die Number-Entity "Mindest PV Prognose" und den dynamischen Status aus
+    REQ-GRID-SERVING-CHARGE. Eine separate Karte "Einstellungen" gibt es im
+    Tab "Netzdienliches Laden" nicht mehr. Am Ende folgt in beiden Tabs
+    eine Karte "Aktive Monate" mit den zwölf Monats-Schaltern des
     jeweiligen Mechanismus, deren Label ebenfalls in beiden Tabs
     einheitlich nur noch der reine Monatsname ist (z. B. "Januar" statt
     "Netzladung aktiv im Januar"). Bei "Ladeautomatik" steckt zusätzlich
     eine dritte Karte "Einstellungen" dazwischen (Mindest-SOC für den
-    Ladestart) - "Netzdienliches Laden" braucht diese Einstellung nicht.
+    Ladestart).
     Weder die geräteweite Max-SOC-Sperre (die
     ist mechanismus-übergreifend und gehört fachlich nicht in einen
     einzelnen Automatik-Tab) noch die reinen Status-Textanzeigen
@@ -1567,6 +1593,10 @@ requirement_bundled_dashboard:
        \"Preisoptimiertes Laden\"-Karte (Tab \"Dynamisches Laden\") noch
        den Präfix \"Preisoptimiertes Laden\"/\"Price-optimised charging\"
        im Label trägt."
+    - "tests/test_dashboard.py deckt ab, dass die Karte \"Ladepause\" ihre
+       fünf Zeilen in der Reihenfolge Start, Ende, PV-Prognose, Mindest PV
+       Prognose, Status enthält und im Tab \"Netzdienliches Laden\" keine
+       separate Karte \"Einstellungen\" mehr existiert."
 
 # ==============================================================================
 # ANFORDERUNG: BINARY_SENSOR-PLATTFORM

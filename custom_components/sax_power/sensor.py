@@ -162,6 +162,18 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         ),
     ),
     SaxPowerSensorEntityDescription(
+        key="grid_serving_forecast",
+        translation_key="grid_serving_forecast",
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("grid_serving_forecast_kwh"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="grid_serving_pause_status",
+        translation_key="grid_serving_pause_status",
+        value_fn=_direct("grid_serving_pause_status"),
+    ),
+    SaxPowerSensorEntityDescription(
         key="price_charge_active_text",
         translation_key="price_charge_active_text",
         entity_category=EntityCategory.DIAGNOSTIC,

@@ -183,6 +183,7 @@ async def test_grid_serving_forecast_threshold_defaults_to_disabled(
 async def test_grid_serving_forecast_threshold_restores_value(
     hass, coordinator
 ) -> None:
+    """Persistierte Dezimalwerte werden kaufmännisch auf volle kWh gerundet."""
     entity = SaxPowerGridServingForecastThresholdNumber(coordinator, "test_entry_id")
     _prepare_entity(
         entity,
@@ -193,7 +194,19 @@ async def test_grid_serving_forecast_threshold_restores_value(
 
     await entity.async_added_to_hass()
 
-    assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(8.5)
+    assert entity.native_step == 1
+    assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(9)
+
+
+async def test_grid_serving_forecast_threshold_rounds_every_write(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerGridServingForecastThresholdNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_grid_serving_forecast", None)
+
+    await entity.async_set_native_value(8.49)
+
+    assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(8)
 
 
 async def test_grid_serving_forecast_threshold_restore_clamps_value(

@@ -35,11 +35,85 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
     _clamp_int,
+    _grid_serving_pause_status,
     apply_sunssf,
     to_signed16,
     to_unsigned16,
     windows_overlap,
 )
+
+
+@pytest.mark.parametrize(
+    (
+        "enabled",
+        "months",
+        "hour",
+        "sensor_configured",
+        "forecast_kwh",
+        "threshold_kwh",
+        "expected",
+    ),
+    [
+        (False, {7}, 10, False, None, 10, "Inaktiv"),
+        (True, {7}, 10, False, None, 10, "Inaktiv im Monat August"),
+        (True, {8}, 10, False, None, 10, "Außerhalb des Zeitfensters"),
+        (True, {8}, 12, False, None, 10, "Kein PV-Prognosesensor eingestellt"),
+        (True, {8}, 12, True, None, 10, "PV-Prognose nicht verfügbar"),
+        (
+            True,
+            {8},
+            12,
+            True,
+            8,
+            10,
+            "Ladepause inaktiv, da die PV-Prognose von 8 kWh kleiner als der "
+            "Mindestwert von 10 kWh ist.",
+        ),
+        (
+            True,
+            {8},
+            12,
+            True,
+            12,
+            10,
+            "Ladepause zwischen 11:00 und 14:00 im Monat August aktiv. Die "
+            "PV-Prognose von 12 kWh ist größer oder gleich dem Mindestwert von "
+            "10 kWh.",
+        ),
+        (
+            True,
+            {8},
+            12,
+            False,
+            None,
+            0,
+            "Ladepause zwischen 11:00 und 14:00 im Monat August aktiv.",
+        ),
+    ],
+)
+def test_grid_serving_pause_status_priority(
+    enabled: bool,
+    months: set[int],
+    hour: int,
+    sensor_configured: bool,
+    forecast_kwh: float | None,
+    threshold_kwh: float,
+    expected: str,
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: alle acht Statusfälle gelten priorisiert."""
+    assert (
+        _grid_serving_pause_status(
+            now=datetime(2024, 8, 1, hour),
+            enabled=enabled,
+            start=dt_time(11),
+            end=dt_time(14),
+            months=months,
+            forecast_sensor_configured=sensor_configured,
+            forecast_kwh=forecast_kwh,
+            threshold_kwh=threshold_kwh,
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize(

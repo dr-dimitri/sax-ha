@@ -109,6 +109,12 @@
       "grid_serving_active_text": {
         "name": "Netzdienliches Laden aktiv"
       },
+      "grid_serving_forecast": {
+        "name": "PV-Prognose"
+      },
+      "grid_serving_pause_status": {
+        "name": "Status"
+      },
       "setpoint_power": {
         "name": "Sollwert Leistung P"
       },
@@ -289,7 +295,7 @@
         "name": "Netzladung Min. SOC"
       },
       "grid_serving_forecast_threshold": {
-        "name": "Netzdienliches Laden Mindest-PV-Prognose"
+        "name": "Mindest PV Prognose"
       },
       "price_charge_max_price": {
         "name": "Netzbezug und laden bis"

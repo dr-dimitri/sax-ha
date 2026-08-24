@@ -165,6 +165,7 @@ from .domain.registers import (
 from .domain.scheduling import is_time_in_window, windows_overlap
 from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
+from .domain.validation import round_half_up
 from .infrastructure.calibration_store import CalibrationStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
@@ -206,6 +207,58 @@ def _format_window_for_message(
             _MONTH_NAMES_DE[month] for month in sorted(months)
         )
     return f"{time_part} ({months_part})"
+
+
+def _format_kwh(value: float) -> str:
+    """Formatiert kWh ohne technisch bedingte Nachkommastellen."""
+    return f"{value:.10f}".rstrip("0").rstrip(".")
+
+
+def _grid_serving_pause_status(
+    *,
+    now: datetime,
+    enabled: bool,
+    start: dt_time | None,
+    end: dt_time | None,
+    months: set[int],
+    forecast_sensor_configured: bool,
+    forecast_kwh: float | None,
+    threshold_kwh: float,
+) -> str:
+    """Ermittelt den sichtbaren Ladepausen-Status gemäß REQ-GRID-SERVING-CHARGE."""
+    month_name = _MONTH_NAMES_DE[now.month]
+    if not enabled:
+        return "Inaktiv"
+    if now.month not in months:
+        return f"Inaktiv im Monat {month_name}"
+    if not is_time_in_window(now.time(), start, end):
+        return "Außerhalb des Zeitfensters"
+    if threshold_kwh > 0 and not forecast_sensor_configured:
+        return "Kein PV-Prognosesensor eingestellt"
+    if threshold_kwh > 0 and forecast_kwh is None:
+        return "PV-Prognose nicht verfügbar"
+
+    assert start is not None and end is not None
+    active = (
+        f"Ladepause zwischen {start.strftime('%H:%M')} und "
+        f"{end.strftime('%H:%M')} im Monat {month_name} aktiv."
+    )
+    if threshold_kwh <= 0:
+        return active
+
+    assert forecast_kwh is not None
+    forecast_text = _format_kwh(forecast_kwh)
+    threshold_text = _format_kwh(threshold_kwh)
+    if forecast_kwh < threshold_kwh:
+        return (
+            "Ladepause inaktiv, da die PV-Prognose von "
+            f"{forecast_text} kWh kleiner als der Mindestwert von "
+            f"{threshold_text} kWh ist."
+        )
+    return (
+        f"{active} Die PV-Prognose von {forecast_text} kWh ist größer oder "
+        f"gleich dem Mindestwert von {threshold_text} kWh."
+    )
 
 
 class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -275,6 +328,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_forecast_kwh: float | None = None
         self._grid_serving_forecast_allowed = True
         self._grid_serving_window_active = False
+        self._grid_serving_pause_status_text = "Inaktiv"
         self._grid_serving_setpoint_active = False
         self._grid_serving_wait_cycles = 0
         self._grid_serving_charge_confirm_cycles = 0
@@ -371,6 +425,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["grid_serving_window_active"] = self._grid_serving_window_active
         data["grid_serving_forecast_kwh"] = self._grid_serving_forecast_kwh
         data["grid_serving_forecast_allowed"] = self._grid_serving_forecast_allowed
+        data["grid_serving_pause_status"] = self._grid_serving_pause_status_text
         data["price_charge_active"] = self._price_charge_active
         data["price_charge_status"] = self._price_charge_status
         data["price_charge_next_start"] = plan.next_start
@@ -1767,6 +1822,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_forecast_kwh = grid_serving_forecast_kwh
         self._grid_serving_forecast_allowed = grid_serving_forecast_allowed
         self._grid_serving_window_active = grid_serving_window_active
+        self._grid_serving_pause_status_text = _grid_serving_pause_status(
+            now=now,
+            enabled=self._grid_serving_enabled,
+            start=self._grid_serving_start,
+            end=self._grid_serving_end,
+            months=self._grid_serving_months,
+            forecast_sensor_configured=(
+                self.price_planner.pv_forecast_entity_id is not None
+            ),
+            forecast_kwh=grid_serving_forecast_kwh,
+            threshold_kwh=grid_serving_forecast_threshold,
+        )
         if not grid_serving_eligible:
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
@@ -2075,7 +2142,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Set and immediately apply the optional minimum PV forecast."""
         self._grid_serving_forecast_threshold_kwh = _clamp_float(
-            value,
+            round_half_up(value),
             MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
             MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
         )

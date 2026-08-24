@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfEnergy
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
@@ -128,10 +128,21 @@ def test_core_entities_have_no_entity_category() -> None:
         "pv_power",
         "price_charge_status_text",
         "price_charge_next_start",
+        "grid_serving_forecast",
+        "grid_serving_pause_status",
     )
     for key in core_keys:
         description = _description_by_key(key)
         assert description.entity_category is None, key
+
+
+def test_grid_serving_forecast_is_kwh_or_unknown() -> None:
+    description = _description_by_key("grid_serving_forecast")
+
+    assert description.device_class == "energy"
+    assert description.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
+    assert description.value_fn({"grid_serving_forecast_kwh": 12.5}) == 12.5
+    assert description.value_fn({"grid_serving_forecast_kwh": None}) is None
 
 
 def test_next_cell_calibration_is_a_diagnostic_timestamp() -> None:

@@ -308,15 +308,13 @@ async def test_build_dashboard_config_storage_state_dropped_switch_kept(hass) ->
 
 
 async def test_build_dashboard_config_grid_serving_view(hass) -> None:
-    """Der neue Tab "Netzdienliches Laden" enthält Start-/Endezeit, den
-    Schalter "Netzdienliches Laden aktiv", den Prognose-Schwellwert und die
-    zwölf Monats-Schalter in
-    einer eigenen Karte - die reine Status-Textanzeige entfällt, weil der
-    Schalter deren Zustand bereits zeigt."""
+    """REQ-BUNDLED-DASHBOARD: Ladepause bündelt alle relevanten Anzeigen."""
     grid_serving_switch = _register(hass, "switch", "grid_serving_enabled")
     grid_serving_start = _register(hass, "time", "grid_serving_start")
     grid_serving_end = _register(hass, "time", "grid_serving_end")
+    forecast = _register(hass, "sensor", "grid_serving_forecast")
     forecast_threshold = _register(hass, "number", "grid_serving_forecast_threshold")
+    pause_status = _register(hass, "sensor", "grid_serving_pause_status")
     month_switches = [
         _register(hass, "switch", f"grid_serving_month_{month}")
         for month in range(1, 13)
@@ -331,8 +329,31 @@ async def test_build_dashboard_config_grid_serving_view(hass) -> None:
     assert grid_serving_switch in entities
     assert grid_serving_start in entities
     assert grid_serving_end in entities
+    assert forecast in entities
     assert forecast_threshold in entities
+    assert pause_status in entities
     assert entities.issuperset(month_switches)
+
+    pause_card = next(
+        card for card in grid_serving_view["cards"] if card.get("title") == "Ladepause"
+    )
+    assert [row["entity"] for row in pause_card["entities"]] == [
+        grid_serving_start,
+        grid_serving_end,
+        forecast,
+        forecast_threshold,
+        pause_status,
+    ]
+    assert [row["name"] for row in pause_card["entities"]] == [
+        "Start",
+        "End",
+        "PV forecast",
+        "Minimum PV forecast",
+        "Status",
+    ]
+    assert not any(
+        card.get("title") == "Einstellungen" for card in grid_serving_view["cards"]
+    )
 
     months_card = next(
         card

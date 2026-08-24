@@ -358,6 +358,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Modbus-Fehler nicht zusammen mit der Task-Referenz verloren
         # (REQ-GRID-SERVING-CHARGE).
         self._sun_charge_reset_required = False
+        # Letzter von dieser Coordinator-Instanz erfolgreich geschriebener
+        # Sollzustand für Register 40051. None bedeutet bewusst "noch nie
+        # abgeglichen": Auch eine frisch gestartete, inaktive Instanz
+        # schreibt dadurch genau einmal die Nullregelung, statt aus einem
+        # leeren Python-Taskzustand fälschlich auf den Gerätezustand zu
+        # schließen (REQ-GRID-SERVING-CHARGE).
+        self._sun_charge_commanded_mode: int | None = None
         self._last_observed_ic_control_mode: int | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
@@ -954,6 +961,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_write_register(
             address, value, device_id=self.slave_id_extended
         )
+        # Ein erfolgreicher Write macht den zuletzt gelesenen HIGH-Block
+        # potentiell veraltet. Der nächste Coordinator-Takt muss deshalb
+        # tatsächlich vom Gerät lesen und darf nicht den bis zu zwei
+        # Sekunden alten Cache erneut veröffentlichen.
+        self._high_last_read = None
 
     async def _async_write_register(
         self, address: int, value: int, *, device_id: int
@@ -1176,9 +1188,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def sun_charge_active(self) -> bool:
         return self._sun_charge_task is not None and not self._sun_charge_task.done()
 
-    def _sun_charge_needs_reset(self) -> bool:
-        """Ob die Integration den SunSpec-Steuermodus wieder freigeben muss."""
-        return self._sun_charge_task is not None or self._sun_charge_reset_required
+    def _record_ic_control_mode(self, mode: int) -> None:
+        """Übernehme einen quittierten Schreibwert sofort in den HA-Zustand."""
+        self._sun_charge_commanded_mode = mode
+        self._last_observed_ic_control_mode = mode
+        label = CONTROL_MODE_LABELS.get(mode, UNKNOWN_LABEL)
+        for cached_data in (self._high_data, self.data):
+            if cached_data is not None:
+                cached_data["ic_control_mode"] = mode
+                cached_data["ic_control_mode_text"] = label
 
     def _watts_to_ic_setpoint_raw(self, power_watts: int, data: dict[str, Any]) -> int:
         max_power_reference = data.get("ic_max_power_reference")
@@ -1212,6 +1230,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_write_extended_register(
             REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
         )
+        self._record_ic_control_mode(SUN_IC_CONTROL_MODE_SETPOINT)
         setpoint_raw = self._watts_to_ic_setpoint_raw(
             self._sun_charge_power, self.data or {}
         )
@@ -1256,25 +1275,35 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._sun_charge_task = self.hass.async_create_background_task(
                 self._async_sun_charge_loop(), name="sax_power_sun_charge"
             )
-        elif power_changed or device_left_setpoint_mode:
+        elif (
+            power_changed
+            or device_left_setpoint_mode
+            or self._sun_charge_commanded_mode != SUN_IC_CONTROL_MODE_SETPOINT
+        ):
             # Ein gelesener Modus 0 trotz laufendem Task beweist, dass Gerät
             # oder ein externer Schreiber 40051 zwischenzeitlich verändert
             # hat. Nicht bis zum nächsten periodischen Refresh warten.
             await self._async_write_sun_charge_setpoint()
 
     async def async_stop_sun_charge(self) -> None:
-        """No-op, wenn gerade keine SunSpec-Netzladung läuft (analog zu
-        async_stop_grid_charge) - schreibt den Steuermodus deshalb nur
-        zurück, wenn zuvor tatsächlich ein Lade-Task aktiv war, statt bei
-        jedem Aufruf (z. B. beim Entladen des Config Entry) unbedingt in ein
-        eventuell vom Nutzer selbst gesetztes Register 40051 einzugreifen.
+        """Gleiche Register 40051 mit dem Sollzustand Nullregelung ab.
 
-        Ein vorhandener, aber bereits beendeter Task gilt weiterhin als
-        zuvor aktive Netzladung. Zusätzlich bleibt nach einem fehlgeschlagenen
-        Rückschreibversuch _sun_charge_reset_required gesetzt, damit jeder
-        weitere inaktive Coordinator-Takt Register 40051 erneut zurücksetzt,
-        statt nur den periodischen Task zu beenden."""
-        if not self._sun_charge_needs_reset():
+        Die erste inaktive Entscheidung jeder Coordinator-Instanz schreibt
+        immer. Danach ist die Methode ein No-Op, solange weder Task/
+        Rücksetzauftrag noch eine abweichende Geräte-Rückmeldung vorliegen.
+        Fehlgeschlagene Rücksetzungen werden beim nächsten Takt wiederholt.
+        """
+        needs_reset = (
+            self._sun_charge_task is not None
+            or self._sun_charge_reset_required
+            or self._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SETPOINT
+            or (
+                self._sun_charge_commanded_mode is None
+                and self._last_observed_ic_control_mode is not None
+            )
+            or self._last_observed_ic_control_mode == SUN_IC_CONTROL_MODE_SETPOINT
+        )
+        if not needs_reset:
             return
         if self._sun_charge_task is not None:
             self._sun_charge_task.cancel()
@@ -1303,6 +1332,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         else:
             self._sun_charge_reset_required = False
+            self._record_ic_control_mode(SUN_IC_CONTROL_MODE_SMARTMETER)
 
     async def _async_sun_charge_loop(self) -> None:
         try:
@@ -1926,8 +1956,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Nullregelung) setzen, statt passiv auf den Timeout
                 # (Register 40050) zu warten, damit der Speicher wieder im
                 # normalen Betriebsmodus arbeitet.
-                if self._sun_charge_needs_reset():
-                    await self.async_stop_sun_charge()
+                await self.async_stop_sun_charge()
                 self._max_soc_hold_is_window_bound = False
                 self._max_soc_grid_import_wait_cycles = 0
             else:
@@ -1951,8 +1980,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "_max_soc_grid_import_wait_cycles", grid_import_raw
                 )
                 if grid_import_confirmed:
-                    if self._sun_charge_needs_reset():
-                        await self.async_stop_sun_charge()
+                    await self.async_stop_sun_charge()
                     self._max_soc_grid_import_wait_cycles = 0
                 else:
                     await self.async_start_sun_charge(0)
@@ -1990,12 +2018,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grid_serving_active_now = False
             else:
                 grid_serving_active_now = False
-                # Ein vorhandener, bereits beendeter Task muss Register
-                # 40051 trotzdem aktiv zurücksetzen. Die frühere Prüfung
-                # über sun_charge_active ließ genau diesen sicherheits-
-                # relevanten Übergang aus (REQ-GRID-SERVING-CHARGE).
-                if self._sun_charge_needs_reset():
-                    await self.async_stop_sun_charge()
+                # Nicht aus dem Vorhandensein eines Python-Tasks auf den
+                # Gerätezustand schließen: Der erste inaktive Takt gleicht
+                # Register 40051 ausdrücklich mit Modus 0 ab, danach ist der
+                # Aufruf bei unverändertem Sollzustand ein No-Op.
+                await self.async_stop_sun_charge()
+
+        # _async_update_data arbeitet beim ersten Refresh noch mit einem
+        # lokalen Dictionary, während self.data None ist. Deshalb den soeben
+        # quittierten Sollzustand auch dort sofort veröffentlichen; der durch
+        # den Write invalidierte HIGH-Cache liefert im nächsten Takt den
+        # echten Readback vom Gerät.
+        if self._sun_charge_commanded_mode is not None:
+            data["ic_control_mode"] = self._sun_charge_commanded_mode
+            data["ic_control_mode_text"] = CONTROL_MODE_LABELS.get(
+                self._sun_charge_commanded_mode, UNKNOWN_LABEL
+            )
 
         self._timed_charge_active = timed_should_charge
         self._grid_serving_active = grid_serving_active_now
@@ -2097,8 +2135,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if import_confirmed:
-            if self._sun_charge_needs_reset():
-                await self.async_stop_sun_charge()
+            await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
             self._grid_serving_import_confirm_cycles = 0
@@ -2119,8 +2156,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and smartmeter_power > -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
         )
         if release_confirmed:
-            if self._sun_charge_needs_reset():
-                await self.async_stop_sun_charge()
+            await self.async_stop_sun_charge()
             self._grid_serving_setpoint_active = False
             self._grid_serving_release_confirm_cycles = 0
             return False

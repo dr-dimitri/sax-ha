@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 jobs:
   release:
     if: github.event.pull_request.merged == true
@@ -13,26 +17,59 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Repository auschecken
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Erhöhe Versionsnummer (Tag)
-        id: bump_version
-        uses: anothrNick/github-tag-action@1.71.0
+      - name: Nächste Versionsnummer bestimmen
+        id: version
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEFAULT_BUMP: patch
-          WITH_V: false       # Generiert den Tag als reine Nummer (z. B. 1.0.2)
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
 
-      - name: Erstelle GitHub Release
+          bump_labels="$(jq '[.[] | select(. == "release:major" or . == "release:minor" or . == "release:patch")] | length' <<< "$PR_LABELS")"
+          if (( bump_labels > 1 )); then
+            echo "Mehrere Release-Labels gefunden. Bitte genau eines von release:major, release:minor oder release:patch verwenden." >&2
+            exit 1
+          fi
+
+          bump="patch"
+          if jq -e 'index("release:major") != null' <<< "$PR_LABELS" >/dev/null; then
+            bump="major"
+          elif jq -e 'index("release:minor") != null' <<< "$PR_LABELS" >/dev/null; then
+            bump="minor"
+          fi
+
+          latest_tag="$(git tag --list --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '1p')"
+          latest_tag="${latest_tag:-0.0.0}"
+          IFS=. read -r major minor patch <<< "$latest_tag"
+
+          case "$bump" in
+            major) next_tag="$((major + 1)).0.0" ;;
+            minor) next_tag="$major.$((minor + 1)).0" ;;
+            patch) next_tag="$major.$minor.$((patch + 1))" ;;
+          esac
+
+          echo "Aus $latest_tag wird per $bump-Bump die Version $next_tag."
+          echo "tag=$next_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Versions-Tag erstellen
+        env:
+          NEXT_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "$NEXT_TAG" --message "Release $NEXT_TAG"
+          git push origin "$NEXT_TAG"
+
+      - name: GitHub Release erstellen
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.bump_version.outputs.new_tag }} # Nur die Versionsnummer
-          name: ${{ steps.bump_version.outputs.new_tag }}     # Nur die Versionsnummer
-          # Fügt den PR-Text ein. GitHub hängt die automatischen Notizen direkt darunter an.
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           body: ${{ github.event.pull_request.body }}
-          generate_release_notes: true # Aktiviert die automatische Commit-/PR-Liste von GitHub
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

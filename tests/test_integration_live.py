@@ -572,12 +572,16 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
 async def test_live_grid_serving_switches_sunspec_mode_both_directions(
     hass, socket_enabled
 ) -> None:
-    """REQ-GRID-SERVING-CHARGE: Die Ladepause setzt über echtes Modbus TCP
+    """REQ-GRID-SERVING-CHARGE: Eine neue Instanz räumt einen verwaisten
+    Sollwertmodus auf. Danach setzt die Ladepause über echtes Modbus TCP
     40051/40049 auf Sollwertvorgabe/0 % und beim Deaktivieren 40051 wieder
     auf SmartMeter-Nullregelung."""
     extended_registers = _build_extended_registers()
     extended_registers[29] = -200  # Speicher lädt mit 200 W
     extended_registers[72] = 300  # Einspeisung -> smartmeter_power -300 W
+    # Simuliert Reload/Neuinstallation innerhalb des 300-s-Gerätetimeouts:
+    # Der alte Prozess ist weg, der Speicher steht aber noch im Sollwertmodus.
+    extended_registers[51] = SUN_IC_CONTROL_MODE_SETPOINT
     server = _modbus_server(TEST_PORT + 7, _build_basic_registers(), extended_registers)
     await server.serve_forever(background=True)
 
@@ -606,6 +610,20 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
         coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
 
         try:
+            # Bereits das erste Coordinator-Update muss den am Gerät gelesenen
+            # verwaisten Modus zurücksetzen; dafür existiert bewusst noch kein
+            # _sun_charge_task aus dieser neuen Instanz.
+            assert coordinator.sun_charge_active is False
+            verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 7)
+            await verify_client.connect()
+            control_mode_result = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_CONTROL_MODE,
+                count=1,
+                device_id=SLAVE_ID_EXTENDED,
+            )
+            verify_client.close()
+            assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
+
             with patch(
                 "custom_components.sax_power.coordinator.dt_util.now",
                 return_value=datetime(2024, 1, 1, 12, 0),

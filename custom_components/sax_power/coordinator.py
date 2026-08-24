@@ -358,6 +358,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Modbus-Fehler nicht zusammen mit der Task-Referenz verloren
         # (REQ-GRID-SERVING-CHARGE).
         self._sun_charge_reset_required = False
+        self._last_observed_ic_control_mode: int | None = None
         self._sun_charge_power = 0
         self._ic_power_setpoint_sf_raw = to_unsigned16(-2)
         # Cache für den NORMAL-Block (Basic Mode): _async_read_basic befüllt
@@ -1206,6 +1207,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             SUN_IC_MIN_WRITE_INTERVAL, min(timeout // 2, GRID_CHARGE_WRITE_INTERVAL)
         )
 
+    async def _async_write_sun_charge_setpoint(self) -> None:
+        """Schreibe Steuermodus und aktuellen Sollwert als eine Sequenz."""
+        await self.async_write_extended_register(
+            REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
+        )
+        setpoint_raw = self._watts_to_ic_setpoint_raw(
+            self._sun_charge_power, self.data or {}
+        )
+        await self.async_write_extended_register(
+            REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
+        )
+
     async def async_start_sun_charge(self, power: int) -> None:
         """Start (or update the setpoint of) periodic SunSpec-Modus grid-charge
         writes (Register 40049/40051).
@@ -1226,23 +1239,28 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         power_changed = power != self._sun_charge_power
         self._sun_charge_power = power
+        device_left_setpoint_mode = (
+            self._last_observed_ic_control_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+        )
         if self._sun_charge_task is None or self._sun_charge_task.done():
             # Ab dem Startauftrag besitzt die Integration den SunSpec-
             # Steuermodus und muss ihn später explizit wieder freigeben. Das
             # gilt konservativ auch dann, wenn der erste Schreibvorgang nur
             # teilweise beim Gerät ankommt.
             self._sun_charge_reset_required = True
+            # Der aufrufende Zustandswechsel darf erst als angewendet gelten,
+            # nachdem beide Register vom Gerät quittiert wurden. Die frühere
+            # reine Task-Erzeugung ließ Status und tatsächlichen Steuermodus
+            # kurzzeitig auseinanderlaufen (REQ-GRID-SERVING-CHARGE).
+            await self._async_write_sun_charge_setpoint()
             self._sun_charge_task = self.hass.async_create_background_task(
                 self._async_sun_charge_loop(), name="sax_power_sun_charge"
             )
-        elif power_changed:
-            await self.async_write_extended_register(
-                REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
-            )
-            setpoint_raw = self._watts_to_ic_setpoint_raw(power, self.data or {})
-            await self.async_write_extended_register(
-                REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
-            )
+        elif power_changed or device_left_setpoint_mode:
+            # Ein gelesener Modus 0 trotz laufendem Task beweist, dass Gerät
+            # oder ein externer Schreiber 40051 zwischenzeitlich verändert
+            # hat. Nicht bis zum nächsten periodischen Refresh warten.
+            await self._async_write_sun_charge_setpoint()
 
     async def async_stop_sun_charge(self) -> None:
         """No-op, wenn gerade keine SunSpec-Netzladung läuft (analog zu
@@ -1289,16 +1307,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_sun_charge_loop(self) -> None:
         try:
             while True:
-                await self.async_write_extended_register(
-                    REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
-                )
-                setpoint_raw = self._watts_to_ic_setpoint_raw(
-                    self._sun_charge_power, self.data or {}
-                )
-                await self.async_write_extended_register(
-                    REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
-                )
                 await asyncio.sleep(self._sun_ic_write_interval())
+                await self._async_write_sun_charge_setpoint()
         except asyncio.CancelledError:
             raise
         except HomeAssistantError:
@@ -1792,6 +1802,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
+        # Nach Reload/Neuinstallation kann der Speicher noch bis zum Ablauf
+        # von Register 40050 im Sollwertmodus der vorherigen Instanz stehen,
+        # obwohl deren Task und RAM-Merker nicht mehr existieren. Die echte
+        # Register-Rückmeldung übernimmt dann den Rücksetzauftrag; ohne sie
+        # blieb der inaktive Pfad bis zu 300 Sekunden wirkungslos.
+        observed_control_mode = data.get("ic_control_mode")
+        control_mode_changed = (
+            observed_control_mode != self._last_observed_ic_control_mode
+        )
+        self._last_observed_ic_control_mode = observed_control_mode
+        if (
+            control_mode_changed
+            and observed_control_mode == SUN_IC_CONTROL_MODE_SETPOINT
+        ):
+            self._sun_charge_reset_required = True
+
         target_soc = self.effective_max_soc
         current_soc = data["soc"]
         if current_soc >= target_soc:

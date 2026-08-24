@@ -8,13 +8,18 @@ ohne dass für jeden einzelnen Sensor ein eigener Test geschrieben werden muss.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.const import EntityCategory, UnitOfEnergy
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
-from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
+from custom_components.sax_power.sensor import (
+    SENSOR_DESCRIPTIONS,
+    SaxPowerForecastSensor,
+)
 
 COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "sax_power"
 
@@ -42,6 +47,15 @@ def test_every_sensor_has_translations_in_all_locales() -> None:
         translated_keys = set(data.get("entity", {}).get("sensor", {}).keys())
         missing = keys - translated_keys
         assert not missing, f"{filename} fehlt Übersetzung für: {sorted(missing)}"
+
+
+def test_german_forecast_threshold_label_uses_hyphen() -> None:
+    translations = _load("translations/de.json")
+
+    assert (
+        translations["entity"]["number"]["grid_serving_forecast_threshold"]["name"]
+        == "Mindest PV-Prognose"
+    )
 
 
 def _full_data(hass) -> dict:
@@ -143,6 +157,30 @@ def test_grid_serving_forecast_is_kwh_or_unknown() -> None:
     assert description.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
     assert description.value_fn({"grid_serving_forecast_kwh": 12.5}) == 12.5
     assert description.value_fn({"grid_serving_forecast_kwh": None}) is None
+
+
+def test_grid_serving_forecast_name_tracks_current_date() -> None:
+    description = _description_by_key("grid_serving_forecast")
+    coordinator = MagicMock()
+    entity = SaxPowerForecastSensor(coordinator, "test_entry_id", description)
+    entity.platform_data = SimpleNamespace(
+        platform_name="sax_power",
+        domain="sensor",
+        platform_translations={
+            "component.sax_power.entity.sensor.grid_serving_forecast.name": (
+                "PV-Prognose"
+            )
+        },
+    )
+
+    with patch(
+        "custom_components.sax_power.sensor.dt_util.now",
+        side_effect=[datetime(2026, 8, 24), datetime(2026, 8, 25)],
+    ):
+        assert entity.name == "PV-Prognose 24.8."
+        assert entity.name == "PV-Prognose 25.8."
+
+    assert entity.has_entity_name is False
 
 
 def test_next_cell_calibration_is_a_diagnostic_timestamp() -> None:

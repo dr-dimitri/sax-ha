@@ -295,7 +295,7 @@
         "name": "Netzladung Min. SOC"
       },
       "grid_serving_forecast_threshold": {
-        "name": "Mindest PV Prognose"
+        "name": "Mindest PV-Prognose"
       },
       "price_charge_max_price": {
         "name": "Netzbezug und laden bis"

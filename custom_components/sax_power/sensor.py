@@ -37,6 +37,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import SaxPowerCoordinator
@@ -648,7 +649,11 @@ async def async_setup_entry(
         DATA_COORDINATOR
     ]
     entities: list[SensorEntity] = [
-        SaxPowerSensor(coordinator, entry.entry_id, description)
+        (
+            SaxPowerForecastSensor(coordinator, entry.entry_id, description)
+            if description.key == "grid_serving_forecast"
+            else SaxPowerSensor(coordinator, entry.entry_id, description)
+        )
         for description in SENSOR_DESCRIPTIONS
     ]
     entities.append(
@@ -700,6 +705,29 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         if (attributes_fn := self.entity_description.attributes_fn) is None:
             return None
         return attributes_fn(self.coordinator)
+
+
+class SaxPowerForecastSensor(SaxPowerSensor):
+    """PV-Prognose mit täglich aktualisiertem Datum im Anzeigenamen."""
+
+    # Das Dashboard übernimmt bei dieser Entity bewusst den Originalnamen.
+    # Ohne Entity-Namenssemantik ergänzt Home Assistant dabei nicht zusätzlich
+    # den Gerätenamen (siehe REQ-BUNDLED-DASHBOARD).
+    _attr_has_entity_name = False
+
+    @property
+    def name(self) -> str | None:
+        """Liefert den übersetzten Namen mit aktuellem Tag und Monat."""
+        if self.platform_data is None:
+            return None
+        translation_key = self._name_translation_key
+        if translation_key is None:
+            return None
+        translated_name = self.platform_data.platform_translations.get(translation_key)
+        if translated_name is None:
+            return None
+        now = dt_util.now()
+        return f"{translated_name} {now.day}.{now.month}."
 
 
 class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):

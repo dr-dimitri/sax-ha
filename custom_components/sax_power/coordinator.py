@@ -233,9 +233,7 @@ def _grid_serving_pause_status(
         return f"Inaktiv im Monat {month_name}"
     if not is_time_in_window(now.time(), start, end):
         return "Außerhalb des Zeitfensters"
-    if threshold_kwh > 0 and not forecast_sensor_configured:
-        return "Kein PV-Prognosesensor eingestellt"
-    if threshold_kwh > 0 and forecast_kwh is None:
+    if threshold_kwh > 0 and forecast_sensor_configured and forecast_kwh is None:
         return "PV-Prognose nicht verfügbar"
 
     assert start is not None and end is not None
@@ -243,7 +241,7 @@ def _grid_serving_pause_status(
         f"Ladepause ist zwischen {start.strftime('%H:%M')} Uhr und "
         f"{end.strftime('%H:%M')} Uhr im {month_name} aktiv."
     )
-    if threshold_kwh <= 0:
+    if threshold_kwh <= 0 or not forecast_sensor_configured:
         return active
 
     assert forecast_kwh is not None

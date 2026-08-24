@@ -70,6 +70,13 @@ _TRANSLATION_KEY_OVERRIDES: dict[tuple[str, str], str] = {
     ("switch", "storage_switch"): "storage",
 }
 
+# Diese Entity aktualisiert ihren eigenen Namen täglich um das Datum. Ein hier
+# gespeicherter Zeilenname würde dagegen bis zur Neuerstellung des Dashboards
+# unverändert bleiben (siehe REQ-BUNDLED-DASHBOARD).
+_ENTITY_NAME_FROM_STATE: set[tuple[str, str]] = {
+    ("sensor", "grid_serving_forecast"),
+}
+
 
 def _entity_id(hass: HomeAssistant, entity_domain: str, unique_id: str) -> str | None:
     return er.async_get(hass).async_get_entity_id(entity_domain, DOMAIN, unique_id)
@@ -103,6 +110,9 @@ def _entities_card(
     for entity_domain, suffix in entities:
         entity_id = _entity_id(hass, entity_domain, f"{entry_id}_{suffix}")
         if entity_id is None:
+            continue
+        if (entity_domain, suffix) in _ENTITY_NAME_FROM_STATE:
+            resolved.append({"entity": entity_id})
             continue
         name = _entity_name(translations, entity_domain, suffix)
         resolved.append({"entity": entity_id, "name": name} if name else entity_id)

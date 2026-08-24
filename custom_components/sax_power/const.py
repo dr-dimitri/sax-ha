@@ -91,7 +91,7 @@ DEFAULT_GRID_SERVING_ENABLED = False
 # nach dem Update unverändert rein statisch über Monate/Zeitfenster arbeiten.
 MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
 MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH = 100.0
-GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH = 0.1
+GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH = 1.0
 DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
 
 # Aktive Monate für Netzladung/netzdienliches Laden (siehe anforderung.yaml,

@@ -109,6 +109,12 @@
       "grid_serving_active_text": {
         "name": "Grid-serving charge active"
       },
+      "grid_serving_forecast": {
+        "name": "PV forecast"
+      },
+      "grid_serving_pause_status": {
+        "name": "Status"
+      },
       "setpoint_power": {
         "name": "Setpoint power P"
       },
@@ -289,7 +295,7 @@
         "name": "Grid charge min. SOC"
       },
       "grid_serving_forecast_threshold": {
-        "name": "Grid-serving minimum PV forecast"
+        "name": "Minimum PV forecast"
       },
       "price_charge_max_price": {
         "name": "Grid draw and charging up to"

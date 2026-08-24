@@ -874,6 +874,12 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
+            assert coordinator.data["grid_serving_forecast_kwh"] == pytest.approx(10)
+            assert coordinator.data["grid_serving_pause_status"] == (
+                "Ladepause zwischen 10:00 und 14:00 im Monat Januar aktiv. Die "
+                "PV-Prognose von 10 kWh ist größer oder gleich dem Mindestwert "
+                "von 8 kWh."
+            )
 
             coordinator.price_planner.async_setup()
             hass.states.async_set(
@@ -887,6 +893,11 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
         assert coordinator.grid_serving_forecast_allowed is False
         assert coordinator.grid_serving_window_active is False
         assert coordinator.grid_serving_active is False
+        assert coordinator.data["grid_serving_forecast_kwh"] == pytest.approx(4)
+        assert coordinator.data["grid_serving_pause_status"] == (
+            "Ladepause inaktiv, da die PV-Prognose von 4 kWh kleiner als der "
+            "Mindestwert von 8 kWh ist."
+        )
         assert coordinator.sun_charge_active is False
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_CONTROL_MODE,

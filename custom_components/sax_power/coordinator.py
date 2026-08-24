@@ -301,6 +301,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.options: Mapping[str, Any] = dict(options or {})
         self._scan_interval = scan_interval
         self._write_lock = asyncio.Lock()
+        # Polling, Entity-Setter und Prognose-Callbacks können dieselbe
+        # Ladeentscheidung gleichzeitig anstoßen. Nur eine vollständig
+        # ausgewertete Entscheidung darf die SunSpec-Register steuern, sonst
+        # kann ein älterer Aktiv-Zweig einen gerade ausgeführten Rücksprung in
+        # die Nullregelung wieder überschreiben (REQ-GRID-SERVING-CHARGE).
+        self._charge_control_lock = asyncio.Lock()
         self._max_soc: int | None = None
         self._cell_calibration_state = CalibrationState()
         self._cell_calibration_active = False
@@ -1632,6 +1638,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_enforce_grid_charge(self, data: dict[str, Any]) -> None:
+        """Werte Ladebedingungen aus und wende genau eine Entscheidung an."""
+        async with self._charge_control_lock:
+            await self._async_enforce_grid_charge_locked(data)
+
+    async def _async_enforce_grid_charge_locked(self, data: dict[str, Any]) -> None:
         """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden,
         netzdienliches Laden und preisoptimiertes Laden - alle vier teilen
         sich den SunSpec-Modus-Schreibpfad (_sun_charge_task). Priorität

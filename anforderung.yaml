@@ -684,6 +684,17 @@ requirement_grid_serving_charge:
     Rücksetzauftrag auf; nur wenn beides fehlt, bleibt die Methode ein No-Op
     und greift nicht in einen fremd gesetzten Modus ein.
 
+    Die komplette Auswertung und Anwendung einer Ladeentscheidung ist durch
+    self._charge_control_lock serialisiert. Poll-Zyklus, Entity-Setter und
+    Prognose-/Preis-Callback dürfen dadurch keine SunSpec-Schreibpfade
+    parallel ausführen. Insbesondere kann eine ältere, bereits begonnene
+    Aktiv-Auswertung Register 40051 nicht mehr nach einer neueren
+    Deaktivierung wieder auf Sollwertvorgabe setzen: Die Deaktivierung läuft
+    nach der begonnenen Entscheidung vollständig durch und endet immer mit
+    Register 40051 = 0, sofern keine höher priorisierte Ladefunktion den
+    Sollwertmodus benötigt. Status und physischer Steuermodus bleiben damit
+    atomar konsistent.
+
     Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose
     <Tag>.<Monat>." (grid_serving_forecast, kWh; bei fehlender Konfiguration
     oder jedem unbrauchbaren Wert unknown) und "Status"

@@ -253,6 +253,9 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         soc_id = _entity_id(registry, entry.entry_id, "soc")
         discharge_id = _entity_id(registry, entry.entry_id, "discharge_power")
         charge_id = _entity_id(registry, entry.entry_id, "charge_power")
+        charge_discharge_id = _entity_id(
+            registry, entry.entry_id, "charge_discharge_power"
+        )
         switch_id = _entity_id(registry, entry.entry_id, "storage_switch")
         max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
 
@@ -266,6 +269,7 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         #    anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION --
         assert hass.states.get(discharge_id).state == "1200"
         assert hass.states.get(charge_id).state == "0"
+        assert hass.states.get(charge_discharge_id).state == "1200"
 
         # -- SunSpec-Modus: Skalierung über echtes TCP --
         storage_current_a_id = _entity_id(registry, entry.entry_id, "storage_current_a")

@@ -113,7 +113,7 @@ Geräteseite.
 Zu den wichtigsten Messwerten gehören:
 
 - Ladezustand des Speichers
-- Lade- und Entladeleistung
+- getrennte Lade- und Entladeleistung sowie eine kombinierte Leistung
 - Netzbezug und Netzeinspeisung
 - PV-Leistung, sofern sie vom verwendeten Smart Meter bereitgestellt wird
 - Zelltemperatur
@@ -122,6 +122,9 @@ Zu den wichtigsten Messwerten gehören:
 
 Bei der **Netzleistung** gilt die in Home Assistant übliche Darstellung:
 Positive Werte stehen für Netzbezug, negative Werte für Einspeisung.
+
+Die **Lade-/Entladeleistung** bildet beide Flussrichtungen in einer Entität
+ab: Positive Werte stehen für Entladung, negative Werte für Ladung.
 
 Die PV-Leistung ist laut Hersteller nur mit dem Smart Meter ADW200 vollständig
 verfügbar. Bei anderen Smart-Meter-Modellen kann dieser Wert dauerhaft 0 W

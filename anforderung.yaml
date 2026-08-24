@@ -191,11 +191,15 @@ requirement_sunspec_mode_correction:
     REQ-TIMED-SOC-CHARGE), "WYE Connect 3Ph Meter" (203, Netz/Smart Meter)
     und "Battery Base" (802, Akkuzellen).
 
-    Entlade-/Ladeleistung (discharge_power/charge_power) werden aus
-    Register 40029 ("Wirkleistung Speicher Summe") abgeleitet, die
-    Smart-Meter-Leistung aus Register 40072 ("Summenwirkleistung Netz").
-    Die Basic-Mode-Register 47 ("Leistung P des Speichers") und 48
-    ("Leistung des Smart Meters") werden nicht mehr gelesen.
+    Entlade-/Ladeleistung (discharge_power/charge_power) sowie die
+    kombinierte Lade-/Entladeleistung (charge_discharge_power) werden aus
+    Register 40029 ("Wirkleistung Speicher Summe") abgeleitet. Die beiden
+    getrennten Sensoren zeigen jeweils einen nichtnegativen Betrag und 0 W
+    für die Gegenrichtung; der kombinierte Sensor erhält das Vorzeichen des
+    Registers (positiv = Entladen, negativ = Laden). Die Smart-Meter-Leistung
+    stammt aus Register 40072 ("Summenwirkleistung Netz"). Die Basic-Mode-
+    Register 47 ("Leistung P des Speichers") und 48 ("Leistung des Smart
+    Meters") werden nicht mehr gelesen.
 
     Vorzeichenkonvention von data["smartmeter_power"] (Standarddarstellung,
     nicht offiziell in modbus.pdf dokumentiert): NEGATIV = Einspeisung ins
@@ -247,6 +251,8 @@ requirement_sunspec_mode_correction:
        genutzten Basic-Mode-Register 47/48 als DEPRECATED."
     - "tests/test_coordinator.py, tests/test_integration_live.py und
        tests/test_real_hardware.py laufen gegen Slave-ID 100."
+    - "tests/test_sensor_descriptions.py prüft für charge_discharge_power
+       positive Entlade-, negative Lade-, Null- und unbekannte Werte."
     - "README.md und die Sensortabellen verwenden die aktuellen
        Sensor-Keys."
     - "tests/test_coordinator.py deckt die Vorzeichenkonvention von
@@ -2119,7 +2125,8 @@ requirement_diagnostic_entity_category:
     grid_current_*, grid_voltage_*, grid_frequency, grid_power_active_l1/
     l2/l3, grid_power_apparent_sum/reactive_sum/factor_sum). Ohne
     entity_category (sichtbar) bleiben die Kernwerte: soc, discharge_power,
-    charge_power, smartmeter_power, pv_power, storage_max_cell_temp sowie
+    charge_power, charge_discharge_power, smartmeter_power, pv_power,
+    storage_max_cell_temp sowie
     die Automatik-Statuswerte des preisoptimierten Ladens
     (price_charge_status_text, price_charge_next_start,
     price_charge_current_price) - siehe REQ-DYNAMIC-PRICE-CHARGE. Der

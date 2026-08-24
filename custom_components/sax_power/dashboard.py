@@ -286,6 +286,7 @@ async def async_build_dashboard_config(
                     ("sensor", "sun_version_gateway"),
                     ("sensor", "sun_serial_number"),
                     ("sensor", "storage_event_text"),
+                    ("sensor", "ic_control_mode_text"),
                     ("binary_sensor", "cell_calibration_active"),
                     ("sensor", "next_cell_calibration"),
                 ],

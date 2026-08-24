@@ -1548,9 +1548,11 @@ requirement_bundled_dashboard:
     "smartmeter_power", nur das angezeigte Label wurde von "Smart Meter
     Leistung" auf "Netzleistung" verkürzt, siehe translations/de.json),
     Energiezähler, Gerätedaten (ohne die fest bekannten "Hersteller"/
-    "Gerätemodell" - beide boten dort keinen Mehrwert) - die reine
-    Textanzeige "Speicher Zustand" wurde entfernt, der Speicher-Schalter
-    bleibt), "Ladeautomatik" und "Netzdienliches Laden" sowie "Dynamisches
+    "Gerätemodell" - beide boten dort keinen Mehrwert; der Sensor
+    ic_control_mode_text erscheint mit dem Label "Steuermodus" direkt
+    unter "Speicher Ereignis") - die reine Textanzeige "Speicher Zustand"
+    wurde entfernt, der Speicher-Schalter bleibt), "Ladeautomatik" und
+    "Netzdienliches Laden" sowie "Dynamisches
     Laden" (preisoptimiertes Laden: Strategie, Preisgrenze, Neutralpreis,
     Stundenzahl, Status). Die frühere Karte "Status" mit den vier Lade-/Automatik-
     binary_sensor-Entities (REQ-BINARY-SENSORS) wurde aus "Allgemeine
@@ -1711,6 +1713,9 @@ requirement_bundled_dashboard:
     - "tests/test_dashboard.py deckt ab, dass \"smartmeter_power\" eine
        ganz normale Zeile der \"Leistung\"-Karte ist (wie jede andere
        Sensor-Entity dort auch) und das Label \"Netzleistung\" trägt."
+    - "tests/test_dashboard.py deckt ab, dass die Gerätekarte den Sensor
+       ic_control_mode_text direkt nach storage_event_text aufführt und
+       dabei das übersetzte Label \"Steuermodus\" verwendet."
     - "tests/test_dashboard.py deckt ab, dass keine Kartenzeile der
        \"Preisoptimiertes Laden\"-Karte (Tab \"Dynamisches Laden\") noch
        den Präfix \"Preisoptimiertes Laden\"/\"Price-optimised charging\"

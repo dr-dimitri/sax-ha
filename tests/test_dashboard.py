@@ -294,6 +294,26 @@ async def test_build_dashboard_config_geraet_card_drops_manufacturer_and_model(
     assert sun_version_master in geraet_entities
 
 
+async def test_geraet_card_shows_control_mode_after_storage_event(
+    hass,
+) -> None:
+    """REQ-BUNDLED-DASHBOARD: Der Steuermodus folgt in der Gerätekarte
+    unmittelbar auf das Speicher-Ereignis und verwendet sein kurzes Label."""
+    storage_event = _register(hass, "sensor", "storage_event_text")
+    control_mode = _register(hass, "sensor", "ic_control_mode_text")
+    hass.config.language = "de"
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    geraet_card = next(
+        card for card in config["views"][0]["cards"] if card.get("title") == "Gerät"
+    )
+    assert geraet_card["entities"] == [
+        {"entity": storage_event, "name": "Speicher Ereignis"},
+        {"entity": control_mode, "name": "Steuermodus"},
+    ]
+
+
 async def test_build_dashboard_config_storage_state_dropped_switch_kept(hass) -> None:
     """Die reine Zustands-Anzeige "Speicher Zustand" wird nicht mehr
     dargestellt, der Speicher-Schalter bleibt aber erhalten."""

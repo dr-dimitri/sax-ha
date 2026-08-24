@@ -91,6 +91,9 @@
       "charge_power": {
         "name": "Ladeleistung"
       },
+      "charge_discharge_power": {
+        "name": "Lade-/Entladeleistung"
+      },
       "energy_charged": {
         "name": "Geladene Energie (gesamt)"
       },

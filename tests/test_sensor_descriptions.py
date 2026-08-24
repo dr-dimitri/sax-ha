@@ -13,7 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from homeassistant.const import EntityCategory, UnitOfEnergy
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
@@ -138,6 +139,7 @@ def test_core_entities_have_no_entity_category() -> None:
         "soc",
         "discharge_power",
         "charge_power",
+        "charge_discharge_power",
         "smartmeter_power",
         "storage_max_cell_temp",
         "pv_power",
@@ -149,6 +151,20 @@ def test_core_entities_have_no_entity_category() -> None:
     for key in core_keys:
         description = _description_by_key(key)
         assert description.entity_category is None, key
+
+
+def test_charge_discharge_power_preserves_storage_power_sign() -> None:
+    """REQ-SUNSPEC-MODE-CORRECTION: Der kombinierte Sensor zeigt
+    Entladung positiv und Ladung negativ in derselben Entity."""
+    description = _description_by_key("charge_discharge_power")
+
+    assert description.device_class == SensorDeviceClass.POWER
+    assert description.state_class == SensorStateClass.MEASUREMENT
+    assert description.native_unit_of_measurement == UnitOfPower.WATT
+    assert description.value_fn({"storage_power_active": 1200}) == 1200
+    assert description.value_fn({"storage_power_active": -850}) == -850
+    assert description.value_fn({"storage_power_active": 0}) == 0
+    assert description.value_fn({}) is None
 
 
 def test_grid_serving_forecast_is_kwh_or_unknown() -> None:

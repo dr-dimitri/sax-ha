@@ -133,6 +133,14 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_negative_part("storage_power_active"),
     ),
     SaxPowerSensorEntityDescription(
+        key="charge_discharge_power",
+        translation_key="charge_discharge_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=_direct("storage_power_active"),
+    ),
+    SaxPowerSensorEntityDescription(
         key="smartmeter_power",
         translation_key="smartmeter_power",
         device_class=SensorDeviceClass.POWER,

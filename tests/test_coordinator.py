@@ -863,9 +863,6 @@ async def test_enforce_grid_charge_starts_timed_charge_when_enabled_in_window(
     try:
         with _patched_now(2):
             await coordinator.async_set_timed_charge_enabled(True)
-        # async_start_sun_charge spawnt nur den Hintergrund-Task; der erste
-        # Schreibvorgang läuft asynchron, daher kurz dem Event-Loop Zeit geben.
-        await asyncio.sleep(0.1)
 
         assert coordinator._timed_charge_active is True
         assert coordinator.sun_charge_active is True
@@ -892,6 +889,46 @@ async def test_enforce_grid_charge_starts_timed_charge_when_enabled_in_window(
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
         device_id=100,
     )
+
+
+async def test_active_sun_charge_immediately_repairs_observed_mode_change(hass) -> None:
+    """Liest der Coordinator trotz laufendem Schreib-Task wieder Modus 0,
+    muss er 40051/40049 sofort erneut setzen statt bis zum periodischen
+    Schreibintervall zu warten. Das deckt Geräte- und externe Schreibvorgänge
+    auf denselben Registern ab."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+
+    try:
+        await coordinator.async_start_sun_charge(0)
+        client.write_register.reset_mock()
+        coordinator._last_observed_ic_control_mode = SUN_IC_CONTROL_MODE_SMARTMETER
+
+        await coordinator.async_start_sun_charge(0)
+
+        assert [call.kwargs for call in client.write_register.await_args_list] == [
+            {
+                "address": REG_SUN_IC_CONTROL_MODE,
+                "value": SUN_IC_CONTROL_MODE_SETPOINT,
+                "device_id": 100,
+            },
+            {
+                "address": REG_SUN_IC_POWER_SETPOINT_PCT,
+                "value": 0,
+                "device_id": 100,
+            },
+        ]
+    finally:
+        await coordinator.async_stop_sun_charge()
 
 
 async def test_stop_sun_charge_retries_failed_smartmeter_reset(hass) -> None:
@@ -986,6 +1023,37 @@ async def test_inactive_grid_serving_retries_failed_smartmeter_reset(hass) -> No
             }
     finally:
         await coordinator.async_stop_sun_charge()
+
+
+async def test_inactive_fresh_coordinator_resets_observed_orphaned_setpoint_mode(
+    hass,
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Nach Reload oder Neuinstallation existiert
+    kein Python-Task mehr, Register 40051 kann aber bis zum 300-s-Timeout der
+    vorherigen Instanz auf Sollwertvorgabe stehen. Der gelesene Gerätemodus
+    muss den Rücksprung in die SmartMeter-Nullregelung auslösen."""
+    client = _make_client()
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SETPOINT,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+
+    await coordinator._async_enforce_grid_charge(coordinator.data)
+
+    assert coordinator.sun_charge_active is False
+    assert coordinator._sun_charge_reset_required is False
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
 
 
 async def test_enforce_grid_charge_inactive_outside_window(hass) -> None:

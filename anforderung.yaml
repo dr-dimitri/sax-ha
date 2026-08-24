@@ -681,8 +681,31 @@ requirement_grid_serving_charge:
     weitere inaktive Coordinator-Takt versucht die SmartMeter-Nullregelung
     erneut, obwohl _sun_charge_task bereits None ist. Die inaktiven Pfade
     rufen async_stop_sun_charge deshalb bei vorhandenem Task ODER offenem
-    Rücksetzauftrag auf; nur wenn beides fehlt, bleibt die Methode ein No-Op
-    und greift nicht in einen fremd gesetzten Modus ein.
+    Rücksetzauftrag auf. Zusätzlich wird die tatsächliche Rückmeldung aus
+    Register 40051 ausgewertet: Meldet eine neue Coordinator-Instanz beim
+    ersten Read Sollwertvorgabe, obwohl ihr eigener Task noch nicht existiert,
+    übernimmt sie daraus den Rücksetzauftrag. Das ist der Zustand nach einem
+    Reload oder einer Neuinstallation innerhalb des geräteseitigen
+    300-s-Timeouts; ohne die Register-Rückmeldung blieb der verwaiste Modus
+    bis zum Timeout bestehen und ein Deaktivieren der Ladepause wirkte nicht.
+    Erst wenn weder Task/Rücksetzauftrag noch ein neu beobachteter Gerätemodus
+    1 vorliegen, bleibt async_stop_sun_charge ein No-Op.
+
+    Das Aktivieren erzeugt nicht mehr lediglich den periodischen Task. Der
+    erste Registersatz wird synchron in der dokumentierten Reihenfolge
+    geschrieben und quittiert (40051 = 1, danach 40049 = berechneter Sollwert,
+    für die Ladepause 0 %); erst anschließend startet die Schleife mit dem
+    nächsten Refresh nach Ablauf des Schreibintervalls. Damit wird ein
+    Aktivstatus erst veröffentlicht, wenn die beiden SunSpec-Register
+    tatsächlich gesetzt wurden. Beim Deaktivieren bleibt die Reihenfolge
+    unverändert: Schleife beenden, anschließend 40051 = 0 schreiben.
+    Meldet ein späterer Read trotz laufender Schleife wieder 40051 = 0,
+    schreibt async_start_sun_charge beide Aktivregister sofort erneut. Damit
+    wird auch eine zwischenzeitliche Geräte-Rücksetzung oder ein externer
+    Schreibzugriff korrigiert, ohne bis zum nächsten periodischen
+    Schreibintervall zu warten. Innerhalb der Integration existiert dagegen
+    kein zweiter unabhängiger Schreiber für 40049/40051: Alle vier
+    Ladefunktionen verwenden denselben serialisierten SunSpec-Pfad.
 
     Die komplette Auswertung und Anwendung einer Ladeentscheidung ist durch
     self._charge_control_lock serialisiert. Poll-Zyklus, Entity-Setter und

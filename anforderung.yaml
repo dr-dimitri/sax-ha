@@ -630,6 +630,37 @@ requirement_grid_serving_charge:
     zurückschalten (Ladung bleibt konservativ gehalten) - in beiden Fällen
     ohne bekannten Messwert keine aktive Entscheidung.
 
+    Optionale PV-Prognose-Freigabe (Issue #78): number.py stellt die über
+    RestoreEntity persistierte Einstellung "Netzdienliches Laden Mindest-
+    PV-Prognose" in kWh bereit (0.0-100.0 kWh, Schritt 0.1, Default 0.0).
+    0 kWh deaktiviert die Zusatzbedingung vollständig und erhält damit das
+    bisherige statische Verhalten für Bestandsinstallationen. Bei einem
+    Wert > 0 wird der bereits im Options Flow für REQ-DYNAMIC-PRICE-CHARGE
+    auswählbare CONF_PV_FORECAST_SENSOR als gemeinsame Quelle verwendet.
+    price_optimizer.SaxPricePlanner.forecast_kwh liest dessen Zustand;
+    domain.forecast.normalize_energy_kwh normalisiert endliche Zahlen aus
+    Wh/kWh/MWh auf kWh. Der Vergleich nutzt bewusst den rohen normalisierten
+    Prognosewert und NICHT CONF_PV_FORECAST_FACTOR, weil dieser Faktor nur
+    den nutzbaren Anteil für die Bedarfsrechnung der Smart-Preisstrategie
+    beschreibt. Nur forecast >= Mindestwert gibt die Ladepause frei.
+    Fehlender Sensor sowie unknown/unavailable/leerer/nichtnumerischer oder
+    nicht endlicher Zustand gelten als nicht freigegeben (Fail-open für die
+    Ladung): Die Zustandsmaschine greift nicht ein und der Speicher darf
+    früh über die SmartMeter-Nullregelung laden.
+
+    ChargePolicyInput.grid_serving_forecast_allowed fließt zentral in
+    grid_serving_window_active ein. Dieser Wert ist damit das EINE effektive
+    Fenster für Zustandsmaschine, Max-SOC-Fensterbindung, Status und die
+    Priorität gegenüber preisoptimiertem Laden. Fällt die Prognose während
+    eines aktiven 0-%-Eingriffs unter die Schwelle oder wird ungültig, wird
+    grid_serving_eligible False, alle Zustandszähler werden zurückgesetzt
+    und _async_enforce_grid_charge ruft async_stop_sun_charge auf. Dasselbe
+    effektive False gibt den Schreibpfad für price_should_charge bzw.
+    price_should_pause frei. Änderungen am Number-Wert werden über dessen
+    Coordinator-Setter sofort angewendet; Zustandswechsel am gemeinsamen
+    Sensor werden vom Planner beobachtet und über async_apply_price_plan
+    ohne Neustart sofort auf den Coordinator übertragen.
+
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
     ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
@@ -640,7 +671,8 @@ requirement_grid_serving_charge:
     timed_should_charge" (kein Ausschluss mehr durch price_should_charge/
     price_should_pause), preisoptimiertes Laden schließt seinerseits über
     "not grid_serving_window_active" aus, sobald das Zeitfenster des
-    netzdienlichen Ladens aktiv ist (unabhängig davon, ob dessen eigene
+    netzdienlichen Ladens effektiv aktiv ist (Zeit/Monat UND optionale
+    Prognosefreigabe, unabhängig davon, ob dessen eigene
     Zustandsmaschine gerade tatsächlich eingreift) - zusätzlich zur
     strukturellen if/elif-Priorisierung, damit nie zwei Automatiken im selben
     Zyklus um denselben Sollwertvorgabemodus konkurrieren. Begründung: ohne
@@ -762,7 +794,8 @@ requirement_grid_serving_charge:
     Sensor "SAX Ladeleistung"). Das informiert den Anwender laufend über
     den Aktivzustand des Eingriffs.
 
-    Aktiviert-Zustand, Start-/Endzeit sowie die aktiven Monate werden über
+    Aktiviert-Zustand, Start-/Endzeit, aktive Monate sowie der optionale
+    Mindest-Prognosewert werden über
     RestoreEntity über Neustarts hinweg persistiert (analog zum
     zeitgesteuerten Laden). Ohne zuvor gespeicherten Zustand gelten die
     Defaults DEFAULT_GRID_SERVING_ENABLED (False) sowie
@@ -773,6 +806,15 @@ requirement_grid_serving_charge:
     REQ-TIMED-SOC-CHARGE) - das Feature wird ausschließlich über die
     Entitäten nach der Ersteinrichtung konfiguriert.
   acceptance_criteria:
+    - "tests/test_price_optimizer.py/test_charge_policy.py/test_forecast.py
+       decken die optionale Prognosefreigabe ab: 0 kWh deaktiviert sie;
+       unterhalb/exakt auf/oberhalb der Schwelle gilt False/True/True;
+       Wh, kWh und MWh werden normalisiert; unknown, unavailable,
+       nichtnumerische und nicht endliche Werte deaktivieren die Ladepause;
+       ein laufender 0-%-Eingriff wird sicher per SmartMeter-Nullregelung
+       beendet; bei niedriger Prognose bleibt aktives preisoptimiertes Laden
+       freigegeben. tests/test_number.py deckt Default, Restore und Klemmung
+       der neuen Number-Entity ab; tests/test_dashboard.py ihre Darstellung."
     - "tests/test_coordinator.py deckt windows_overlap (normales Fenster,
        über Mitternacht laufendes Fenster, berührende statt überlappende
        Fenster, unvollständige Fenster) ab - inklusive des Falls, dass
@@ -1175,8 +1217,9 @@ requirement_dynamic_price_charge:
     Preisoptimiertes Laden bricht - wie das zeitgesteuerte Laden - bei
     bestätigtem PV-Überschuss am Smart Meter sofort ab (dieselbe
     Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES), UND weicht zusätzlich
-    einem aktiven Zeitfenster des netzdienlichen Ladens
-    (grid_serving_window_active) - unabhängig davon, ob dessen eigene
+    einem effektiven Zeitfenster des netzdienlichen Ladens
+    (grid_serving_window_active: Zeit/Monat plus optionale Prognosefreigabe
+    aus REQ-GRID-SERVING-CHARGE) - unabhängig davon, ob dessen eigene
     Zustandsmaschine gerade tatsächlich eingreift. Siehe
     REQ-GRID-SERVING-CHARGE für die Begründung dieses Vorrangs (netzdienliches
     Laden läuft nur in ertragsreichen Sommermonaten mit ohnehin kaum nötigem
@@ -1332,7 +1375,8 @@ requirement_dynamic_price_charge:
        test_async_update_options_applies_live_without_reload verifiziert,
        dass eine Options-Änderung NICHT mehr hass.config_entries.
        async_reload aufruft, sondern coordinator.options ersetzt und
-       coordinator.price_planner.async_setup() aufruft (Regressionsschutz
+       coordinator.price_planner.async_setup() und anschließend
+       coordinator.async_apply_price_plan() aufruft (Regressionsschutz
        für den oben beschriebenen Bug); test_async_update_options_noop_
        without_loaded_entry deckt den Fall ab, dass der Listener feuert,
        während der Coordinator (noch) nicht in hass.data registriert ist."

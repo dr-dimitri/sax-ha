@@ -27,6 +27,7 @@ from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     CELL_CALIBRATION_INTERVAL,
     CONF_PRICE_SENSOR,
+    CONF_PV_FORECAST_SENSOR,
     DATA_COORDINATOR,
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
@@ -801,6 +802,169 @@ async def test_grid_serving_takes_priority_over_price_charge_active_charging(
         assert coordinator.grid_serving_active is True
         assert coordinator.price_charge_active is False
         assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_GRID_SERVING
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+@pytest.mark.parametrize(
+    ("threshold", "state", "unit", "expected_allowed"),
+    [
+        (0.0, "unknown", "kWh", True),
+        (8.0, "7.9", "kWh", False),
+        (8.0, "8.0", "kWh", True),
+        (8.0, "8100", "Wh", True),
+        (8.0, "0.0081", "MWh", True),
+        (8.0, "unknown", "kWh", False),
+        (8.0, "unavailable", "kWh", False),
+        (8.0, "kein Wert", "kWh", False),
+        (8.0, None, "kWh", False),
+    ],
+)
+async def test_grid_serving_forecast_controls_effective_window(
+    hass, threshold: float, state: str | None, unit: str, expected_allowed: bool
+) -> None:
+    """0 deaktiviert die Prognoseprüfung; sonst gilt >= Schwellwert.
+
+    Nicht verfügbare oder ungültige Werte schalten die Ladepause fail-open
+    ab, damit der Speicher früh über seine Nullregelung laden darf.
+    """
+    if state is not None:
+        hass.states.async_set(
+            "sensor.pv_prognose_morgen", state, {"unit_of_measurement": unit}
+        )
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.data = {"soc": 50, "smartmeter_power": 0}
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_grid_serving_forecast_threshold_kwh(threshold)
+
+    with _patched_now(12):
+        await coordinator.async_set_grid_serving_enabled(True)
+
+    assert coordinator.grid_serving_forecast_allowed is expected_allowed
+    assert coordinator.grid_serving_window_active is expected_allowed
+
+
+async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -> None:
+    """Ein Sensorwechsel unter die Schwelle beendet einen aktiven 0-%-
+    Sollwert über den sicheren Rückweg in die SmartMeter-Nullregelung."""
+    hass.states.async_set(
+        "sensor.pv_prognose_morgen", "10", {"unit_of_measurement": "kWh"}
+    )
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is True
+
+            coordinator.price_planner.async_setup()
+            hass.states.async_set(
+                "sensor.pv_prognose_morgen",
+                "4",
+                {"unit_of_measurement": "kWh"},
+            )
+            await hass.async_block_till_done()
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_forecast_allowed is False
+        assert coordinator.grid_serving_window_active is False
+        assert coordinator.grid_serving_active is False
+        assert coordinator.sun_charge_active is False
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_shutdown()
+
+
+async def test_raised_forecast_threshold_stops_running_pause_immediately(hass) -> None:
+    """Auch eine Änderung der Number-Entity wird ohne Poll-Verzögerung auf
+    eine laufende Zustandsmaschine angewendet."""
+    hass.states.async_set(
+        "sensor.pv_prognose_morgen", "10", {"unit_of_measurement": "kWh"}
+    )
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+            assert coordinator.grid_serving_active is True
+
+            await coordinator.async_set_grid_serving_forecast_threshold_kwh(12)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_forecast_allowed is False
+        assert coordinator.grid_serving_active is False
+        assert coordinator.sun_charge_active is False
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_low_forecast_does_not_block_active_price_charge(hass) -> None:
+    """Die statische Ladepause reserviert bei zu wenig Prognose nicht den
+    gemeinsamen Schreibpfad vor dem preisoptimierten Laden."""
+    hass.states.async_set(
+        "sensor.pv_prognose_morgen", "4", {"unit_of_measurement": "kWh"}
+    )
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+    }
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
+    coordinator.price_planner.plan = _charging_plan()
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            coordinator.price_planner.plan = _charging_plan()
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_window_active is False
+        assert coordinator.grid_serving_active is False
+        assert coordinator.price_charge_active is True
+        assert coordinator.price_charge_status == PRICE_STATUS_CHARGING
     finally:
         await coordinator.async_stop_sun_charge()
 

@@ -288,6 +288,9 @@
       "timed_charge_min_soc": {
         "name": "Netzladung Min. SOC"
       },
+      "grid_serving_forecast_threshold": {
+        "name": "Netzdienliches Laden Mindest-PV-Prognose"
+      },
       "price_charge_max_price": {
         "name": "Netzbezug und laden bis"
       },
@@ -583,8 +586,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Preisoptimiertes Laden",
-        "description": "Quellen und Grundeinstellungen für das preisoptimierte Laden. Die Integration ruft selbst keine Strompreise ab, sondern nutzt eine bereits vorhandene Sensor-Entity (z. B. Tibber, Nordpool, EPEX Spot, ENTSO-e, Awattar). Die im Alltag veränderlichen Stellgrößen - Strategie, Preisgrenze, Anzahl Stunden, Ziel-SOC - sind eigene Entitäten am SAX-Gerät.",
+        "title": "Preisoptimiertes Laden und PV-Prognose",
+        "description": "Quellen und Grundeinstellungen für das preisoptimierte Laden sowie die gemeinsam genutzte PV-Prognose. Die Integration ruft selbst keine Strompreise oder Prognosen ab, sondern nutzt bereits vorhandene Sensor-Entities. Die im Alltag veränderlichen Stellgrößen sind eigene Entitäten am SAX-Gerät.",
         "data": {
           "price_sensor": "Strompreis-Sensor",
           "price_attribute": "Attribut mit der Preisvorschau (optional)",
@@ -596,8 +599,8 @@
           "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Die Zeitfenster der Modi „Relativ“ und „Smart“ werden aus dessen Preisvorschau-Attributen ermittelt.",
           "price_attribute": "Nur ausfüllen, wenn die automatische Erkennung fehlschlägt - z. B. „raw_today“, „data“ oder „forecast“.",
           "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh wird intern in EUR/kWh umgerechnet.",
-          "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Nur für den Modus „Smart“ nötig.",
-          "pv_forecast_factor": "Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab."
+          "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Gemeinsame Quelle für den Modus „Smart“ und den optionalen Mindestwert des netzdienlichen Ladens.",
+          "pv_forecast_factor": "Nur für den Modus „Smart“: Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab. Der Mindestwert des netzdienlichen Ladens vergleicht dagegen den unveränderten Sensorwert."
         }
       }
     }

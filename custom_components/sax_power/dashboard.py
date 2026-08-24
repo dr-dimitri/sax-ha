@@ -338,6 +338,13 @@ async def async_build_dashboard_config(
             _entities_card(
                 hass,
                 entry_id,
+                "Einstellungen",
+                [("number", "grid_serving_forecast_threshold")],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
                 "Aktive Monate",
                 [("switch", f"grid_serving_month_{month}") for month in range(1, 13)],
                 translations,

@@ -5,8 +5,10 @@ AGENTS.md: sämtliche Register-Reads/-Writes gehören in den Coordinator).
 Dieses Modul liest ausschließlich Home-Assistant-Zustände - den vom
 Anwender im Options Flow ausgewählten Strompreis-Sensor sowie optional
 einen PV-Prognose-Sensor - und leitet daraus ab, ob und wann aus dem Netz
-geladen werden soll. Der Coordinator übernimmt diese Entscheidung und
-setzt sie über den vorhandenen SunSpec-Schreibpfad um.
+geladen werden soll. Den normalisierten Prognosewert stellt es außerdem
+dem Coordinator für die optionale Freigabe des netzdienlichen Ladens bereit.
+Der Coordinator übernimmt alle Entscheidungen und setzt sie über den
+vorhandenen SunSpec-Schreibpfad um.
 
 Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 """
@@ -50,6 +52,7 @@ from .const import (
     PRICE_UNIT_CT_KWH,
     PRICE_UNIT_EUR_KWH,
 )
+from .domain.forecast import normalize_energy_kwh
 
 if TYPE_CHECKING:
     from .coordinator import SaxPowerCoordinator
@@ -581,9 +584,13 @@ class SaxPricePlanner:
     @callback
     def _async_source_changed(self, _event: Event[EventStateChangedData]) -> None:
         self.evaluate()
+        self.hass.async_create_task(
+            self.coordinator.async_apply_price_plan(),
+            "sax_power_apply_forecast_or_price_change",
+        )
 
     # -- Auswertung ---------------------------------------------------------
-    def _forecast_kwh(self) -> float | None:
+    def forecast_kwh(self) -> float | None:
         """Erwarteter PV-Ertrag laut Prognose-Sensor, in kWh.
 
         Erwartet wird ein Sensor, dessen Zustand die noch zu erwartende
@@ -597,18 +604,9 @@ class SaxPricePlanner:
         state = self.hass.states.get(entity_id)
         if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE, ""):
             return None
-        try:
-            value = float(state.state)
-        except TypeError, ValueError:
-            return None
-        if not math.isfinite(value):
-            return None
-        unit = str(state.attributes.get("unit_of_measurement") or "").lower()
-        if unit == "wh":
-            value /= 1000
-        elif unit == "mwh":
-            value *= 1000
-        return value
+        return normalize_energy_kwh(
+            state.state, state.attributes.get("unit_of_measurement")
+        )
 
     def _context(self) -> PriceChargeContext:
         coordinator = self.coordinator
@@ -631,7 +629,7 @@ class SaxPricePlanner:
             # realistischere Grundlage für die Bedarfsrechnung als der
             # frühere, in der Praxis wirkungslose Nutzerwert.
             charge_power_w=data.get("ic_max_power_reference"),
-            pv_forecast_kwh=self._forecast_kwh(),
+            pv_forecast_kwh=self.forecast_kwh(),
             pv_factor=self.pv_factor,
         )
 

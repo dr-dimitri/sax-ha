@@ -27,6 +27,7 @@ from .const import (
     CELL_CALIBRATION_INTERVAL,
     CHARGE_CONFLICT_ISSUES,
     CONTROL_MODE_LABELS,
+    DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
@@ -34,11 +35,13 @@ from .const import (
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
     ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_TIMED_CHARGE_CONFLICT,
+    MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MAX_IC_POWER_SETPOINT_PCT,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SETPOINT_POWER,
     MAX_SOC,
+    MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MIN_IC_POWER_SETPOINT_PCT,
     MIN_PRICE_HOURS,
     MIN_PRICE_LIMIT,
@@ -268,6 +271,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_end: dt_time | None = None
         self._grid_serving_active = False
         self._grid_serving_months: set[int] = set(ALL_MONTHS)
+        self._grid_serving_forecast_threshold_kwh: float | None = None
+        self._grid_serving_forecast_kwh: float | None = None
+        self._grid_serving_forecast_allowed = True
+        self._grid_serving_window_active = False
         self._grid_serving_setpoint_active = False
         self._grid_serving_wait_cycles = 0
         self._grid_serving_charge_confirm_cycles = 0
@@ -361,6 +368,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plan = self.price_planner.plan
         data["timed_charge_active"] = self._timed_charge_active
         data["grid_serving_active"] = self._grid_serving_active
+        data["grid_serving_window_active"] = self._grid_serving_window_active
+        data["grid_serving_forecast_kwh"] = self._grid_serving_forecast_kwh
+        data["grid_serving_forecast_allowed"] = self._grid_serving_forecast_allowed
         data["price_charge_active"] = self._price_charge_active
         data["price_charge_status"] = self._price_charge_status
         data["price_charge_next_start"] = plan.next_start
@@ -1715,6 +1725,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         now = dt_util.now()
         price_plan = self.price_planner.plan
+        grid_serving_forecast_kwh = self.price_planner.forecast_kwh()
+        grid_serving_forecast_threshold = self.grid_serving_forecast_threshold_kwh
+        grid_serving_forecast_allowed = grid_serving_forecast_threshold <= 0 or (
+            grid_serving_forecast_kwh is not None
+            and grid_serving_forecast_kwh >= grid_serving_forecast_threshold
+        )
         policy = evaluate_charge_policy(
             ChargePolicyInput(
                 now=now,
@@ -1731,6 +1747,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grid_serving_start=self._grid_serving_start,
                 grid_serving_end=self._grid_serving_end,
                 grid_serving_months=self._grid_serving_months,
+                grid_serving_forecast_allowed=grid_serving_forecast_allowed,
                 price_enabled=self._price_charge_enabled,
                 price_strategy_active=(
                     self._price_charge_strategy != PRICE_STRATEGY_OFF
@@ -1747,6 +1764,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         grid_serving_eligible = policy.grid_serving_eligible
         price_should_charge = policy.price_should_charge
         price_should_pause = policy.price_should_pause
+        self._grid_serving_forecast_kwh = grid_serving_forecast_kwh
+        self._grid_serving_forecast_allowed = grid_serving_forecast_allowed
+        self._grid_serving_window_active = grid_serving_window_active
         if not grid_serving_eligible:
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
@@ -2020,8 +2040,45 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def grid_serving_active(self) -> bool:
         return self._grid_serving_active
 
+    @property
+    def grid_serving_forecast_threshold_kwh(self) -> float:
+        """Effective forecast threshold; 0 keeps static scheduling active."""
+        return (
+            self._grid_serving_forecast_threshold_kwh
+            if self._grid_serving_forecast_threshold_kwh is not None
+            else DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH
+        )
+
+    @property
+    def grid_serving_forecast_threshold_kwh_raw(self) -> float | None:
+        """Configured value without fallback, used by the RestoreEntity."""
+        return self._grid_serving_forecast_threshold_kwh
+
+    @property
+    def grid_serving_forecast_kwh(self) -> float | None:
+        return self._grid_serving_forecast_kwh
+
+    @property
+    def grid_serving_forecast_allowed(self) -> bool:
+        return self._grid_serving_forecast_allowed
+
+    @property
+    def grid_serving_window_active(self) -> bool:
+        return self._grid_serving_window_active
+
     async def async_set_grid_serving_enabled(self, enabled: bool) -> None:
         self._grid_serving_enabled = enabled
+        await self._async_apply_grid_charge_change()
+
+    async def async_set_grid_serving_forecast_threshold_kwh(
+        self, value: float | None
+    ) -> None:
+        """Set and immediately apply the optional minimum PV forecast."""
+        self._grid_serving_forecast_threshold_kwh = _clamp_float(
+            value,
+            MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
+            MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
+        )
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_start(self, value: dt_time) -> None:

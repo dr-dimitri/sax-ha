@@ -30,9 +30,9 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     async_stop_sun_charge Register 40051 aktiv auf SmartMeter-Nullregelung
     zurücksetzt, selbst wenn netzdienliches Laden gerade aktiv den Sollwert
     bei 0 % hält. Stattdessen übernimmt async_update_options die neuen
-    Optionen direkt in den laufenden Coordinator und ruft
-    price_planner.async_setup() erneut auf, ohne den Coordinator selbst
-    (und damit eine laufende Lade-Automatik) anzutasten."""
+    Optionen direkt in den laufenden Coordinator, setzt den Planner neu auf
+    und wendet die neue Prognose sofort an, ohne den Coordinator selbst (und
+    damit eine laufende Lade-Automatik) neu zu starten."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=VALID_INPUT,
@@ -44,6 +44,7 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     coordinator = MagicMock()
     coordinator.options = {}
     coordinator.price_planner.async_setup = MagicMock()
+    coordinator.async_apply_price_plan = AsyncMock()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
 
@@ -61,6 +62,7 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     hass.config_entries.async_reload.assert_not_called()
     assert coordinator.options == {CONF_PRICE_SENSOR: "sensor.strompreis"}
     coordinator.price_planner.async_setup.assert_called_once()
+    coordinator.async_apply_price_plan.assert_awaited_once()
 
 
 async def test_async_update_options_noop_without_loaded_entry(hass) -> None:

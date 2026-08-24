@@ -15,10 +15,12 @@ import pytest
 from homeassistant.core import State
 
 from custom_components.sax_power.const import (
+    DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
     DEFAULT_PRICE_NEUTRAL,
     DEFAULT_TIMED_CHARGE_MIN_SOC,
+    MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SOC,
@@ -26,6 +28,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.number import (
+    SaxPowerGridServingForecastThresholdNumber,
     SaxPowerMaxSocNumber,
     SaxPowerPriceChargeHoursNumber,
     SaxPowerPriceLimitNumber,
@@ -161,6 +164,54 @@ async def test_max_soc_restore_clamps_out_of_range_value(hass, coordinator) -> N
     await entity.async_added_to_hass()
 
     assert coordinator.max_soc == MIN_SOC
+
+
+# -- Netzdienliches Laden (anforderung.yaml, REQ-GRID-SERVING-CHARGE) ------
+async def test_grid_serving_forecast_threshold_defaults_to_disabled(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerGridServingForecastThresholdNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_grid_serving_forecast", None)
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(
+        DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH
+    )
+
+
+async def test_grid_serving_forecast_threshold_restores_value(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerGridServingForecastThresholdNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_grid_serving_forecast",
+        State("number.test_grid_serving_forecast", "8.5"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(8.5)
+
+
+async def test_grid_serving_forecast_threshold_restore_clamps_value(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerGridServingForecastThresholdNumber(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_grid_serving_forecast",
+        State("number.test_grid_serving_forecast", "999"),
+    )
+
+    await entity.async_added_to_hass()
+
+    assert coordinator.grid_serving_forecast_threshold_kwh == pytest.approx(
+        MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH
+    )
 
 
 # -- Preisoptimiertes Laden (anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) ----

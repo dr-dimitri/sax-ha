@@ -27,6 +27,7 @@ def _inputs() -> ChargePolicyInput:
         grid_serving_start=time(10),
         grid_serving_end=time(14),
         grid_serving_months={1},
+        grid_serving_forecast_allowed=True,
         price_enabled=False,
         price_strategy_active=False,
         price_charge_now=False,
@@ -84,6 +85,23 @@ def test_grid_serving_window_reserves_control_from_price_charge() -> None:
     assert decision.grid_serving_window_active is True
     assert decision.grid_serving_eligible is True
     assert decision.price_should_charge is False
+
+
+def test_low_forecast_releases_grid_serving_priority_for_price_charge() -> None:
+    decision = evaluate_charge_policy(
+        replace(
+            _inputs(),
+            grid_serving_enabled=True,
+            grid_serving_forecast_allowed=False,
+            price_enabled=True,
+            price_strategy_active=True,
+            price_charge_now=True,
+        )
+    )
+
+    assert decision.grid_serving_window_active is False
+    assert decision.grid_serving_eligible is False
+    assert decision.price_should_charge is True
 
 
 def test_pv_surplus_blocks_timed_and_price_charge() -> None:

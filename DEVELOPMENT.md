@@ -33,7 +33,8 @@ custom_components/sax_power/
 │                          Repair-Issues und den Kalibrierungs-State-Store
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
-│                          Options Flow (preisoptimiertes Laden)
+│                          Options Flow (preisoptimiertes Laden + gemeinsame
+│                          PV-Prognose)
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
 │                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
 │                          zeitgesteuertes Laden, netzdienliches Laden,
@@ -41,7 +42,8 @@ custom_components/sax_power/
 │                          Zeitfenster-Überlappungsprüfung
 ├── price_optimizer.py    Preisoptimiertes Laden: Einlesen der Preisdaten aus
 │                          einer beliebigen Preis-Sensor-Entity, Ladeplanung je
-│                          Strategie, 60-Sekunden-Takt - ohne Modbus-Zugriff
+│                          Strategie, gemeinsame Prognosequelle,
+│                          60-Sekunden-Takt - ohne Modbus-Zugriff
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          _assign_ids() (unique_id + vom Gerätenamen
 │                          unabhängige entity_id, siehe
@@ -53,7 +55,8 @@ custom_components/sax_power/
 │                          energy_discharged) fürs Energy-Dashboard
 ├── number.py              Max. SOC (einzige SOC-Einstellung, auch Ziel-SOC für
 │                          Zeitfenster- und preisoptimiertes Laden), Netzladung
-│                          Min. SOC, Preisgrenze/Anzahl Stunden
+│                          Min. SOC, Mindest-PV-Prognose für netzdienliches
+│                          Laden, Preisgrenze/Anzahl Stunden
 │                          (preisoptimiertes Laden)
 ├── select.py              Strategie des preisoptimierten Ladens
 ├── switch.py              Speicher ein/aus, zeitgesteuertes Laden ein/aus,
@@ -112,7 +115,8 @@ Entity abbilden lassen (Auswahl der Quell-Sensoren und deren Interpretation);
 die im Alltag veränderlichen Stellgrößen sind echte Entities am SAX-Gerät.
 Eine Änderung wendet `async_update_options` direkt auf den laufenden
 Coordinator an (`coordinator.options` ersetzen + `price_planner.async_setup()`
-erneut aufrufen, idempotent) - bewusst **kein** Config-Entry-Reload mehr: Ein
+erneut aufrufen, idempotent + Plan sofort anwenden) - bewusst **kein**
+Config-Entry-Reload mehr: Ein
 Reload hätte über `SaxPowerCoordinator.async_shutdown`/`async_stop_sun_charge`
 ein gerade aktiv gehaltenes netzdienliches Laden (Register 40051 zurück auf
 SmartMeter-Nullregelung) unterbrochen und einen kurzen, ungewollten
@@ -163,7 +167,8 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    weil der eingestellte Watt-Wert in der Praxis keinen Einfluss auf die
    tatsächliche Ladeleistung hatte).
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
-   im eigenen aktiven Monat + nicht bereits durch zeitgesteuertes Laden
+   im eigenen aktiven Monat + optionale Mindest-PV-Prognose erfüllt + nicht
+   bereits durch zeitgesteuertes Laden
    beansprucht** (`grid_serving_eligible`): eigene Zustandsmaschine
    (`SaxPowerCoordinator._async_step_grid_serving`), NICHT über einen aus
    dem PV-Überschuss berechneten Sollwert - es wird nie ein Sollwert > 0
@@ -196,7 +201,8 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    ausgewähltes Preisfenster** (`price_should_charge`, siehe
    `price_optimizer.py`): Leistungsvorgabe = `MIN_SETPOINT_POWER`, gleicher
    Schreibpfad wie Schritt 2. `price_should_charge` schließt zusätzlich
-   `grid_serving_window_active` aus - **netzdienliches Laden hat also
+   das effektive `grid_serving_window_active` aus (inklusive der optionalen
+   Prognosefreigabe) - **netzdienliches Laden hat also
    Vorrang vor preisoptimiertem Laden, nicht umgekehrt** (Regression, die
    behoben wurde: vorher blockierte preisoptimiertes Laden stattdessen
    netzdienliches Laden, was dazu führte, dass sich beide Automatiken

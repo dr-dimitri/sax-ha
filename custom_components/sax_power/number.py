@@ -4,21 +4,25 @@ from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DATA_COORDINATOR,
+    DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
     DEFAULT_PRICE_NEUTRAL,
     DEFAULT_TIMED_CHARGE_MIN_SOC,
     DOMAIN,
+    GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH,
+    MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SOC,
+    MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MIN_PRICE_HOURS,
     MIN_PRICE_LIMIT,
     MIN_SOC,
@@ -38,6 +42,7 @@ async def async_setup_entry(
         [
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
+            SaxPowerGridServingForecastThresholdNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
             SaxPowerPriceNeutralPriceNumber(coordinator, entry.entry_id),
             SaxPowerPriceChargeHoursNumber(coordinator, entry.entry_id),
@@ -146,6 +151,52 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_timed_charge_min_soc(int(value))
+        self.async_write_ha_state()
+
+
+class SaxPowerGridServingForecastThresholdNumber(
+    RestoreEntity, SaxPowerEntity, NumberEntity
+):
+    """Optional minimum PV forecast for grid-serving charge pauses.
+
+    Zero disables the forecast condition and preserves the static schedule.
+    Restore values are validated again by the Coordinator because restoring
+    bypasses the normal NumberEntity service validation.
+    """
+
+    _attr_translation_key = "grid_serving_forecast_threshold"
+    _attr_native_min_value = MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH
+    _attr_native_max_value = MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH
+    _attr_native_step = GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._assign_ids("number", "grid_serving_forecast_threshold")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.grid_serving_forecast_threshold_kwh_raw is not None:
+            return
+        restored_value: float | None = None
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                restored_value = float(last_state.state)
+            except TypeError, ValueError:
+                restored_value = None
+        await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(
+            restored_value
+            if restored_value is not None
+            else DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.grid_serving_forecast_threshold_kwh_raw
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(value)
         self.async_write_ha_state()
 
 

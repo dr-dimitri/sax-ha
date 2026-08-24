@@ -301,10 +301,10 @@
         "name": "Mindest PV-Prognose"
       },
       "price_charge_max_price": {
-        "name": "Netzbezug und laden bis"
+        "name": "Netzbezug und Laden bis"
       },
       "price_charge_neutral_price": {
-        "name": "Netzbezug ohne laden bis"
+        "name": "Netzbezug ohne Laden bis"
       },
       "price_charge_hours": {
         "name": "Anzahl Stunden"

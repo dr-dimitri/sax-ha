@@ -377,6 +377,7 @@ async def async_build_dashboard_config(
                     ("number", "max_soc"),
                     ("sensor", "price_charge_active_text"),
                     ("sensor", "price_charge_status_text"),
+                    ("sensor", "grid_serving_forecast"),
                     ("sensor", "price_charge_next_start"),
                     ("sensor", "price_charge_current_price"),
                 ],

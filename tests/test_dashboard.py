@@ -4,6 +4,8 @@ anforderung.yaml, REQ-BUNDLED-DASHBOARD).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -27,6 +29,7 @@ from custom_components.sax_power.dashboard import (
 )
 
 ENTRY_ID = "test_entry_id"
+COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "sax_power"
 
 
 def _register(hass, entity_domain: str, suffix: str) -> str:
@@ -212,6 +215,45 @@ async def test_build_dashboard_config_price_charge_card_labels_drop_prefix(
     assert names  # es gibt tatsächlich aufgelöste Zeilen zu prüfen
     for name in names:
         assert "price-optimised charging" not in name.lower()
+
+
+def test_german_price_charge_labels_capitalize_laden() -> None:
+    """REQ-BUNDLED-DASHBOARD: Laden wird in beiden Preislabels als
+    substantivierter Infinitiv großgeschrieben."""
+    for filename in ("strings.json", "translations/de.json"):
+        with (COMPONENT_DIR / filename).open(encoding="utf-8") as handle:
+            number_names = json.load(handle)["entity"]["number"]
+
+        assert number_names["price_charge_max_price"]["name"] == (
+            "Netzbezug und Laden bis"
+        )
+        assert number_names["price_charge_neutral_price"]["name"] == (
+            "Netzbezug ohne Laden bis"
+        )
+
+
+async def test_price_charge_forecast_follows_status_with_dynamic_name(hass) -> None:
+    """REQ-BUNDLED-DASHBOARD: Die PV-Prognose steht im Preis-Tab direkt
+    unter Status und übernimmt dort ihren täglich aktualisierten Namen."""
+    status = _register(hass, "sensor", "price_charge_status_text")
+    forecast = _register(hass, "sensor", "grid_serving_forecast")
+    next_start = _register(hass, "sensor", "price_charge_next_start")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    price_view = next(
+        view for view in config["views"] if view["path"] == "dynamisches-laden"
+    )
+    price_card = next(
+        card
+        for card in price_view["cards"]
+        if card.get("title") == "Preisoptimiertes Laden"
+    )
+    assert price_card["entities"] == [
+        {"entity": status, "name": "Status"},
+        {"entity": forecast},
+        {"entity": next_start, "name": "Next start"},
+    ]
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:

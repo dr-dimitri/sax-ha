@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components import persistent_notification
 
+from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     ALL_MONTHS,
+    CELL_CALIBRATION_INTERVAL,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_SOC,
     PV_SURPLUS_HYSTERESIS_CYCLES,
@@ -136,6 +138,127 @@ def test_update_interval_matches_high_interval(hass) -> None:
     assert coordinator.update_interval == timedelta(
         seconds=READ_BLOCK_EXT_HIGH_INTERVAL
     )
+
+
+async def test_due_cell_calibration_lifts_max_soc_without_forcing_grid_charge(
+    hass,
+) -> None:
+    """REQ-PERIODIC-FULL-CALIBRATION: Fälligkeit hebt nur die Software-
+    Sperre auf; ohne konfigurierte Ladeautomatik startet kein Netzladen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    now = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
+    coordinator._max_soc = 80
+    coordinator._cell_calibration_state = CalibrationState(
+        now - CELL_CALIBRATION_INTERVAL,
+        was_full=False,
+    )
+    coordinator._calibration_store.async_save = AsyncMock()
+    coordinator.async_start_sun_charge = AsyncMock()
+    coordinator.async_stop_sun_charge = AsyncMock()
+
+    changed = await coordinator._async_update_cell_calibration(80, now=now)
+    await coordinator._async_enforce_grid_charge({"soc": 80, "smartmeter_power": 0})
+
+    assert changed is True
+    assert coordinator.cell_calibration_active is True
+    assert coordinator.max_soc == 80
+    assert coordinator.effective_max_soc == 100
+    assert coordinator.max_soc_clamped is False
+    coordinator.async_start_sun_charge.assert_not_awaited()
+    coordinator.async_stop_sun_charge.assert_not_awaited()
+    coordinator._calibration_store.async_save.assert_not_awaited()
+
+
+async def test_full_soc_completes_calibration_and_reapplies_user_target(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    now = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
+    coordinator._max_soc = 80
+    coordinator._cell_calibration_state = CalibrationState(
+        now - timedelta(days=8),
+        was_full=False,
+    )
+    coordinator._cell_calibration_active = True
+    coordinator._calibration_store.async_save = AsyncMock()
+    coordinator.async_start_sun_charge = AsyncMock()
+
+    changed = await coordinator._async_update_cell_calibration(100, now=now)
+    await coordinator._async_enforce_grid_charge({"soc": 100, "smartmeter_power": 0})
+
+    assert changed is True
+    assert coordinator.cell_calibration_active is False
+    assert coordinator.effective_max_soc == 80
+    assert coordinator.last_full_charge_at == now
+    assert coordinator.next_cell_calibration_at == now + CELL_CALIBRATION_INTERVAL
+    assert coordinator.max_soc_clamped is True
+    coordinator.async_start_sun_charge.assert_awaited_once_with(0)
+    coordinator._calibration_store.async_save.assert_awaited_once_with(
+        CalibrationState(now, was_full=True)
+    )
+
+
+async def test_max_soc_changes_keep_latest_user_value_during_calibration(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    now = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
+    coordinator.data = {"soc": 50, "smartmeter_power": 0}
+    coordinator._max_soc = 80
+    coordinator._cell_calibration_state = CalibrationState(
+        now - timedelta(days=8),
+        was_full=False,
+    )
+    coordinator._calibration_store.async_save = AsyncMock()
+    coordinator._async_apply_grid_charge_change = AsyncMock()
+    coordinator.price_planner.evaluate = MagicMock()
+    await coordinator._async_update_cell_calibration(50, now=now)
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow", return_value=now
+    ):
+        await coordinator.async_set_max_soc(90)
+        assert coordinator.max_soc == 90
+        assert coordinator.cell_calibration_active is True
+        assert coordinator.effective_max_soc == 100
+
+        await coordinator.async_set_max_soc(100)
+        assert coordinator.cell_calibration_active is False
+        assert coordinator.effective_max_soc == 100
+
+        await coordinator.async_set_max_soc(70)
+        assert coordinator.max_soc == 70
+        assert coordinator.cell_calibration_active is True
+        assert coordinator.effective_max_soc == 100
+
+
+async def test_calibration_state_load_restores_overdue_schedule(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    now = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
+    stored = CalibrationState(now - timedelta(days=8), was_full=False)
+    coordinator._calibration_store.async_load = AsyncMock(return_value=stored)
+    coordinator._calibration_store.async_save = AsyncMock()
+
+    await coordinator.async_load_calibration_state()
+    coordinator._max_soc = 80
+    await coordinator._async_update_cell_calibration(50, now=now)
+
+    assert coordinator.last_full_charge_at == stored.last_full_charge_at
+    assert coordinator.cell_calibration_active is True
+    assert coordinator.effective_max_soc == 100
+    coordinator._calibration_store.async_save.assert_not_awaited()
+
+
+async def test_calibration_storage_failure_does_not_abort_update(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._max_soc = 80
+    coordinator._calibration_store.async_save = AsyncMock(
+        side_effect=OSError("Datenträger voll")
+    )
+
+    changed = await coordinator._async_update_cell_calibration(
+        50,
+        now=datetime(2026, 8, 24, 8, 0, tzinfo=UTC),
+    )
+
+    assert changed is False
+    assert coordinator.last_full_charge_at is not None
 
 
 async def test_write_register_forces_fresh_basic_read(hass) -> None:

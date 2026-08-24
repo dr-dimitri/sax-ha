@@ -71,6 +71,9 @@
       "max_soc_clamped": {
         "name": "Max-SOC-Sperre aktiv"
       },
+      "cell_calibration_active": {
+        "name": "Zellkalibrierung aktiv"
+      },
       "extended_mode_available": {
         "name": "SunSpec-Modus erreichbar"
       },
@@ -270,6 +273,9 @@
       },
       "price_charge_next_start": {
         "name": "Nächster Start"
+      },
+      "next_cell_calibration": {
+        "name": "Nächste Zellkalibrierung"
       },
       "price_charge_current_price": {
         "name": "Aktueller Strompreis"

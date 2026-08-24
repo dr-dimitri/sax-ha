@@ -36,7 +36,11 @@ async def async_get_config_entry_diagnostics(
         "coordinator_data": coordinator.data,
         "state": {
             "max_soc": coordinator.max_soc,
+            "effective_max_soc": coordinator.effective_max_soc,
             "max_soc_clamped": coordinator.max_soc_clamped,
+            "cell_calibration_active": coordinator.cell_calibration_active,
+            "last_full_charge_at": coordinator.last_full_charge_at,
+            "next_cell_calibration_at": coordinator.next_cell_calibration_at,
             "grid_charge_active": coordinator.grid_charge_active,
             "sun_charge_active": coordinator.sun_charge_active,
             "extended_available": coordinator.extended_available,

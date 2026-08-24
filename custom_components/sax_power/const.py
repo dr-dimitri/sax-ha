@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 DOMAIN = "sax_power"
 
 CONF_SLAVE_ID_BASIC = "slave_id_basic"
@@ -366,6 +368,11 @@ SWITCH_STATE_UNKNOWN_LABEL = UNKNOWN_LABEL
 
 MIN_SOC = 0
 MAX_SOC = 100
+
+# REQ-PERIODIC-FULL-CALIBRATION: Nach diesem Zeitraum ohne tatsächlich
+# gemessene 100 % wird der effektive Max-SOC bis zur nächsten Volladung
+# vorübergehend angehoben.
+CELL_CALIBRATION_INTERVAL = timedelta(days=7)
 
 # Sollwert Leistung P (Register 41) ist ein signed 16-bit Register.
 MIN_SETPOINT_POWER = -32768

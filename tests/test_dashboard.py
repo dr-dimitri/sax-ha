@@ -64,6 +64,8 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
     grid_serving_switch_entity_id = _register(hass, "switch", "grid_serving_enabled")
     price_switch_entity_id = _register(hass, "switch", "price_charge_enabled")
+    calibration_active_id = _register(hass, "binary_sensor", "cell_calibration_active")
+    next_calibration_id = _register(hass, "sensor", "next_cell_calibration")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -77,6 +79,8 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
     general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
     assert soc_entity_id in general_entities
     assert storage_switch_entity_id in general_entities
+    assert calibration_active_id in general_entities
+    assert next_calibration_id in general_entities
 
     grid_serving_entities = set(_iter_entity_ids(config["views"][2]["cards"]))
     assert grid_serving_switch_entity_id in grid_serving_entities

@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+from homeassistant.const import EntityCategory
+
 from custom_components.sax_power.binary_sensor import (
     BINARY_SENSOR_DESCRIPTIONS,
     SaxPowerBinarySensor,
@@ -109,6 +111,17 @@ async def test_max_soc_clamped_reflects_coordinator_property(hass) -> None:
     assert is_on_fn(coordinator) is False
     coordinator._max_soc_clamped = True
     assert is_on_fn(coordinator) is True
+
+
+async def test_cell_calibration_active_is_a_quiet_diagnostic_status(hass) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {}
+    description = _description("cell_calibration_active")
+
+    assert description.entity_category == EntityCategory.DIAGNOSTIC
+    assert description.is_on_fn(coordinator) is False
+    coordinator._cell_calibration_active = True
+    assert description.is_on_fn(coordinator) is True
 
 
 async def test_extended_mode_available_reflects_coordinator_property(hass) -> None:

@@ -186,6 +186,13 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_direct("price_charge_next_start"),
     ),
     SaxPowerSensorEntityDescription(
+        key="next_cell_calibration",
+        translation_key="next_cell_calibration",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("next_cell_calibration"),
+    ),
+    SaxPowerSensorEntityDescription(
         key="price_charge_current_price",
         translation_key="price_charge_current_price",
         state_class=SensorStateClass.MEASUREMENT,

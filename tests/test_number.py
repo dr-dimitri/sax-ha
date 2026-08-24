@@ -129,6 +129,17 @@ async def test_max_soc_restores_a_genuine_value(hass, coordinator) -> None:
     assert coordinator.max_soc == 80
 
 
+async def test_max_soc_entity_keeps_user_value_during_calibration(
+    hass, coordinator
+) -> None:
+    entity = SaxPowerMaxSocNumber(coordinator, "test_entry_id")
+    coordinator._max_soc = 80
+    coordinator._cell_calibration_active = True
+
+    assert entity.native_value == 80
+    assert coordinator.effective_max_soc == 100
+
+
 async def test_max_soc_restore_clamps_out_of_range_value(hass, coordinator) -> None:
     """Analog zu test_timed_charge_min_soc_restore_clamps_out_of_range_value,
     hier für "Max. SOC" - ein negativer wiederhergestellter Wert wird auf

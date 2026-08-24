@@ -54,6 +54,7 @@
 # REQ-STABLE-DEVICE-IDENTITY      done       Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen
 # REQ-DHCP-DISCOVERY              done       Automatische Netzwerk-Discovery per DHCP - IP-Feld der Ersteinrichtung vorbelegt
 # REQ-DIAGNOSTIC-ENTITY-CATEGORY  done       Technische Detail-/Rohwerte als entity_category=diagnostic, Kernwerte bleiben sichtbar
+# REQ-PERIODIC-FULL-CALIBRATION   done       Alle 7 Tage temporär bis 100 % laden, um die Zell-/SOC-Kalibrierung zu ermöglichen
 # ==============================================================================
 
 # ==============================================================================
@@ -269,7 +270,9 @@ requirement_timed_soc_charge:
     ausgewertet) sowie denselben SunSpec-Modus-Schreibpfad
     (_async_sun_charge_loop). Priorität pro Auswertung:
 
-    1. Ist der SOC >= "Max. SOC" (number.py), hält der Coordinator Register
+    1. Ist der SOC >= dem effektiven "Max. SOC" (number.py; während der
+       periodischen Zellkalibrierung temporär 100 %, siehe
+       REQ-PERIODIC-FULL-CALIBRATION), hält der Coordinator Register
        40051 (Steuermodus) auf 1 (Sollwertvorgabe) und Register 40049
        (Leistungsvorgabe) auf 0 % - UNABHÄNGIG davon, ob zeitgesteuertes
        Laden aktiviert ist (z. B. auch bei einem durch PV-Überschuss vollen
@@ -1915,7 +1918,10 @@ requirement_diagnostic_entity_category:
     charge_power, smartmeter_power, pv_power, storage_max_cell_temp sowie
     die Automatik-Statuswerte des preisoptimierten Ladens
     (price_charge_status_text, price_charge_next_start,
-    price_charge_current_price) - siehe REQ-DYNAMIC-PRICE-CHARGE.
+    price_charge_current_price) - siehe REQ-DYNAMIC-PRICE-CHARGE. Der
+    Binary-Sensor cell_calibration_active und der Timestamp-Sensor
+    next_cell_calibration sind als leise Statusanzeigen ebenfalls
+    diagnostic kategorisiert (REQ-PERIODIC-FULL-CALIBRATION).
     number.py- und switch.py-Entities blieben unverändert: die dortigen
     Number-Entities sind aktiv genutzte Einstellungen (kein diagnostic),
     die Monats-Switches tragen bereits entity_category=CONFIG.
@@ -1934,3 +1940,70 @@ requirement_diagnostic_entity_category:
     - "tests/test_sensor_descriptions.py deckt stichprobenartig ab, dass
        diagnostic-Entities entity_category=DIAGNOSTIC tragen und die
        genannten Kernwerte entity_category=None bleiben."
+
+# ==============================================================================
+# ANFORDERUNG: PERIODISCHE VOLLADUNG ZUR ZELLKALIBRIERUNG
+# ==============================================================================
+requirement_periodic_full_calibration:
+  id: REQ-PERIODIC-FULL-CALIBRATION
+  title: "Reduzierten Max-SOC alle sieben Tage temporär bis 100 % anheben"
+  status: done
+  description: >
+    Bei einem vom Benutzer konfigurierten "Max. SOC" unter 100 % hebt die
+    Integration den effektiven Ziel-SOC sieben Tage nach der letzten real
+    gemessenen Volladung vorübergehend auf 100 % an. Der konfigurierte Wert
+    der RestoreEntity-Number bleibt dabei unverändert sichtbar und
+    persistent; Coordinator und Preisplaner verwenden während der fälligen
+    Phase ausschließlich den effektiven Zielwert. Die Phase endet erst bei
+    einem Messwert soc >= 100, nicht bei Ladeleistung 0, einem Fensterende
+    oder einer Ladepause. Dann wird der Zeitpunkt der Volladung in UTC
+    gespeichert und der zuletzt konfigurierte Max-SOC wirkt im selben Poll
+    wieder.
+
+    Der Zustand besteht aus dem letzten Vollladezeitpunkt und einem
+    persistenten Voll-SOC-Latch. Dadurch wird der Zeitstempel nur auf der
+    Flanke von unter 100 % auf 100 % aktualisiert und wandert weder bei
+    jedem Poll auf dauerhaft 100 % noch durch einen Home-Assistant-Neustart.
+    Ohne gespeicherten Zustand legt der erste gültige SOC-Poll eine Baseline
+    an, sodass ein Update keine sofortige, überraschende Kalibrierungsphase
+    auslöst. Fehlende oder ungültige Storage-Daten werden verworfen und wie
+    eine Erstinitialisierung behandelt. Persistiert wird nur bei einer
+    Zustandsänderung, pro Config Entry in einem versionierten Home-Assistant-
+    Store, der vor dem ersten Coordinator-Refresh geladen wird.
+
+    Die Funktion startet keinen eigenen Netzladevorgang. Sie gibt eine
+    bestehende Max-SOC-Sperre frei und erlaubt PV, zeitgesteuertem oder
+    preisoptimiertem Laden, den Speicher bei der nächsten normalen
+    Lademöglichkeit auf 100 % zu bringen. Ein auf 100 % geänderter
+    Benutzerwert deaktiviert nur den besonderen Override; der Zähler wird
+    weiterhin erst durch einen realen 100-%-Messwert zurückgesetzt. Wird
+    während einer aktiven Phase ein anderer Wert unter 100 % gewählt, gilt
+    nach Abschluss der zuletzt gewählte Wert.
+
+    Zwei leise Diagnose-Entities informieren ohne Benachrichtigungs-Pop-up:
+    binary_sensor cell_calibration_active zeigt die fällige/laufende Phase,
+    sensor next_cell_calibration zeigt den UTC-Zeitpunkt der nächsten
+    Fälligkeit mit device_class timestamp. Diagnostics exportieren
+    konfigurierten und effektiven Max-SOC, Aktivzustand sowie letzten und
+    nächsten Zeitpunkt.
+  requirements:
+    - "Die reine Policy in application/calibration.py hat keine Home-
+       Assistant- oder pymodbus-Abhängigkeit; Persistenz liegt im
+       infrastructure-Adapter, Modbus-Orchestrierung ausschließlich im
+       Coordinator."
+    - "Fälligkeit gilt exakt ab last_full_charge_at + 7 Tage und bleibt bei
+       konfiguriertem Max-SOC < 100 % bis zum realen SOC 100 aktiv."
+    - "price_optimizer.py und _async_enforce_grid_charge verwenden den
+       effektiven Ziel-SOC, number.py weiterhin nur den Benutzerwert."
+    - "Ein Storage-Fehler darf den laufenden Coordinator-/Modbus-Updatepfad
+       nicht abbrechen."
+  acceptance_criteria:
+    - "tests/test_calibration.py deckt Erstinitialisierung, exakte
+       Fälligkeit, Voll-SOC-Flanken, Einstellungswechsel, UTC-Persistenz und
+       ungültige Storage-Daten ab."
+    - "tests/test_coordinator.py deckt Freigabe ohne erzwungene Netzladung,
+       Abschluss bei SOC 100, Wiederanwendung des Benutzerwerts, Neustart-
+       Wiederherstellung und tolerierte Storage-Fehler ab."
+    - "Tests der Sensor-, Binary-Sensor- und Diagnoseplattform decken beide
+       Status-Entities, diagnostic-Kategorisierung, Übersetzungen und die
+       exportierten Zustandswerte ab."

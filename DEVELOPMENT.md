@@ -27,10 +27,10 @@ custom_components/sax_power/
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          Zeitfenster und Wertevalidierung
-├── application/         Use-Case-Policy für die Ladeprioritäten sowie der
-│                          injizierbare Modbus-Client-Port
+├── application/         Use-Case-Policies für Ladeprioritäten und periodische
+│                          Vollkalibrierung sowie der injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
-│                          Repair-Issues
+│                          Repair-Issues und den Kalibrierungs-State-Store
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden)
@@ -140,6 +140,13 @@ charge`, bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
 ausgewertet) und denselben Hintergrund-Task (`SaxPowerCoordinator._async_
 sun_charge_loop`), der über den SunSpec-Modus schreibt: erst Register 40051
 (Steuermodus) auf Sollwertvorgabe, dann Register 40049 (Leistungsvorgabe %).
+Vor dieser Auswertung ermittelt `application/calibration.py` aus dem realen
+SOC und dem persistenten letzten Vollladezeitpunkt den effektiven Ziel-SOC.
+Bei einem Benutzerwert unter 100 % ist dieser nach sieben Tagen bis zur
+nächsten real gemessenen Volladung 100 %. `infrastructure/calibration_store.py`
+speichert Zeitstempel und Voll-SOC-Flanke pro Config Entry; `__init__.py` lädt
+sie vor dem ersten Refresh. Die Number-Entity behält stets den konfigurierten
+Wert, während Coordinator und Preisplaner den effektiven Wert verwenden.
 Reihenfolge/Priorität in `_async_enforce_grid_charge`:
 
 1. **SOC ≥ "Max. SOC"** (`soc_reached`): Leistungsvorgabe wird auf 0 %
@@ -364,6 +371,8 @@ liefern statt den soeben geschriebenen.
 ```
 tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
+├── test_calibration.py           Reine 7-Tage-/Voll-SOC-Policy und versionierte
+│                                  UTC-Persistenz einschließlich ungültiger Daten
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
 │                                  Fehlerbehandlung bei Modbus-Schreibfehlern, Parsing des
 │                                  kompletten SunSpec-Modus-Blocks (gemockt), Zeitfenster-Logik +

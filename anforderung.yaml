@@ -1573,9 +1573,9 @@ requirement_bundled_dashboard:
     bis", price_charge_neutral_price "Netzbezug ohne Laden bis",
     price_charge_hours "Anzahl Stunden", price_charge_active_text "Aktiv",
     price_charge_status_text "Status", direkt gefolgt von
-    grid_serving_forecast mit dem festen Dashboard-Label "PV-Prognose",
-    sowie price_charge_next_start "Nächster Start" (jeweils
-    translations/de.json, außer dem bewusst festen Prognose-Label).
+    grid_serving_forecast mit dem täglich aktualisierten Namen "PV-Prognose
+    <Tag>.<Monat>.", sowie price_charge_next_start "Nächster Start" (jeweils
+    translations/de.json; der Prognosename wird von der Entity übernommen).
     price_charge_current_price
     ("Aktueller Strompreis") und max_soc ("Max. SOC") trugen nie einen
     solchen Präfix und bleiben unverändert. Der Hauptschalter außerhalb
@@ -1732,7 +1732,8 @@ requirement_bundled_dashboard:
        im Label trägt."
     - "tests/test_dashboard.py deckt ab, dass die beiden Preislabels
        \"Laden\" großschreiben und grid_serving_forecast direkt nach
-       price_charge_status_text mit dem festen Label \"PV-Prognose\" steht."
+       price_charge_status_text steht und dort den dynamischen Entity-Namen
+       \"PV-Prognose <Tag>.<Monat>.\" übernimmt."
     - "tests/test_dashboard.py deckt ab, dass die Karte \"Ladepause\" ihre
        fünf Zeilen in der Reihenfolge Start, Ende, PV-Prognose mit aktuellem
        Datum, Mindest PV-Prognose, Status enthält und im Tab \"Netzdienliches

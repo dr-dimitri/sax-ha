@@ -232,9 +232,9 @@ def test_german_price_charge_labels_capitalize_laden() -> None:
         )
 
 
-async def test_price_charge_forecast_follows_status_with_fixed_label(hass) -> None:
+async def test_price_charge_forecast_follows_status_with_dynamic_name(hass) -> None:
     """REQ-BUNDLED-DASHBOARD: Die PV-Prognose steht im Preis-Tab direkt
-    unter Status und trägt dort kein dynamisches Datums-Suffix."""
+    unter Status und übernimmt dort ihren täglich aktualisierten Namen."""
     status = _register(hass, "sensor", "price_charge_status_text")
     forecast = _register(hass, "sensor", "grid_serving_forecast")
     next_start = _register(hass, "sensor", "price_charge_next_start")
@@ -251,7 +251,7 @@ async def test_price_charge_forecast_follows_status_with_fixed_label(hass) -> No
     )
     assert price_card["entities"] == [
         {"entity": status, "name": "Status"},
-        {"entity": forecast, "name": "PV-Prognose"},
+        {"entity": forecast},
         {"entity": next_start, "name": "Next start"},
     ]
 

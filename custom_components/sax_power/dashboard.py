@@ -97,8 +97,6 @@ def _entities_card(
     title: str,
     entities: list[tuple[str, str]],
     translations: dict[str, str],
-    *,
-    name_overrides: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, Any] | None:
     """Baut eine "entities"-Karte aus (Entity-Domain, unique_id-Suffix)-Paaren.
 
@@ -112,11 +110,6 @@ def _entities_card(
     for entity_domain, suffix in entities:
         entity_id = _entity_id(hass, entity_domain, f"{entry_id}_{suffix}")
         if entity_id is None:
-            continue
-        if name_overrides and (
-            name_override := name_overrides.get((entity_domain, suffix))
-        ):
-            resolved.append({"entity": entity_id, "name": name_override})
             continue
         if (entity_domain, suffix) in _ENTITY_NAME_FROM_STATE:
             resolved.append({"entity": entity_id})
@@ -389,9 +382,6 @@ async def async_build_dashboard_config(
                     ("sensor", "price_charge_current_price"),
                 ],
                 translations,
-                # Im Preis-Tab bleibt das Label kompakt; im netzdienlichen
-                # Tab zeigt dieselbe Entity weiterhin das aktuelle Datum.
-                name_overrides={("sensor", "grid_serving_forecast"): "PV-Prognose"},
             ),
         ],
     )

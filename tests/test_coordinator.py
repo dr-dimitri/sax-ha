@@ -57,7 +57,15 @@ from custom_components.sax_power.coordinator import (
         (False, {7}, 10, False, None, 10, "Inaktiv"),
         (True, {7}, 10, False, None, 10, "Inaktiv im Monat August"),
         (True, {8}, 10, False, None, 10, "Außerhalb des Zeitfensters"),
-        (True, {8}, 12, False, None, 10, "Kein PV-Prognosesensor eingestellt"),
+        (
+            True,
+            {8},
+            12,
+            False,
+            None,
+            10,
+            "Ladepause ist zwischen 11:00 Uhr und 14:00 Uhr im August aktiv.",
+        ),
         (True, {8}, 12, True, None, 10, "PV-Prognose nicht verfügbar"),
         (
             True,

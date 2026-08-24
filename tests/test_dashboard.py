@@ -344,10 +344,10 @@ async def test_build_dashboard_config_grid_serving_view(hass) -> None:
         forecast_threshold,
         pause_status,
     ]
-    assert [row["name"] for row in pause_card["entities"]] == [
+    assert [row.get("name") for row in pause_card["entities"]] == [
         "Start",
         "End",
-        "PV forecast",
+        None,
         "Minimum PV forecast",
         "Status",
     ]

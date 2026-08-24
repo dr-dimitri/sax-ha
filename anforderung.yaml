@@ -631,7 +631,7 @@ requirement_grid_serving_charge:
     ohne bekannten Messwert keine aktive Entscheidung.
 
     Optionale PV-Prognose-Freigabe (Issues #78/#81): number.py stellt die
-    über RestoreEntity persistierte Einstellung "Mindest PV Prognose" in
+    über RestoreEntity persistierte Einstellung "Mindest PV-Prognose" in
     kWh bereit (0-999 kWh, Schritt 1 kWh, Default 0). Der Coordinator rundet
     jeden Schreibwert auf volle kWh; bei genau 0,5 wird kaufmännisch
     aufgerundet (8,5 -> 9), anschließend wird auf 0-999 begrenzt. Dadurch
@@ -653,8 +653,8 @@ requirement_grid_serving_charge:
 
     ChargePolicyInput.grid_serving_forecast_allowed fließt zentral in
     grid_serving_window_active ein. Dieser Wert ist damit das EINE effektive
-    Fenster für Zustandsmaschine, Max-SOC-Fensterbindung, Status und die
-    Priorität gegenüber preisoptimiertem Laden. Fällt die Prognose während
+    Fenster für Zustandsmaschine, Max-SOC-Fensterbindung und die Priorität
+    gegenüber preisoptimiertem Laden. Fällt die Prognose während
     eines aktiven 0-%-Eingriffs unter die Schwelle oder wird ungültig, wird
     grid_serving_eligible False, alle Zustandszähler werden zurückgesetzt
     und _async_enforce_grid_charge ruft async_stop_sun_charge auf. Dasselbe
@@ -678,16 +678,19 @@ requirement_grid_serving_charge:
     gestartet wurde (_sun_charge_task is None), bleibt sie ein No-Op und
     greift nicht in einen fremd gesetzten Modus ein.
 
-    Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose"
-    (grid_serving_forecast, kWh; bei fehlender Konfiguration oder jedem
-    unbrauchbaren Wert unknown) und "Status" (grid_serving_pause_status).
-    Der Status beschreibt bewusst das effektive Ladepausen-Fenster, nicht
-    erst den späteren Eingriff nach erkannter PV-Ladung. Die erste passende
-    Bedingung gewinnt: Hauptschalter aus -> "Inaktiv"; aktueller Monat aus
+    Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose
+    <Tag>.<Monat>." (grid_serving_forecast, kWh; bei fehlender Konfiguration
+    oder jedem unbrauchbaren Wert unknown) und "Status"
+    (grid_serving_pause_status).
+    Der Status beschreibt grundsätzlich das effektive Ladepausen-Fenster,
+    nicht erst den späteren Eingriff nach erkannter PV-Ladung. Ist kein
+    Prognosesensor konfiguriert, bleibt jedoch der reine zeitliche Aktivsatz
+    sichtbar und die Mindestprognose wird im Statustext nicht geprüft. Die
+    erste passende Bedingung gewinnt: Hauptschalter aus -> "Inaktiv";
+    aktueller Monat aus
     -> "Inaktiv im Monat <Monat>"; Uhrzeit außerhalb -> "Außerhalb des
-    Zeitfensters"; Mindestwert > 0 ohne konfigurierten Sensor -> "Kein PV-
-    Prognosesensor eingestellt"; konfigurierter, aber ungültiger Sensor ->
-    "PV-Prognose nicht verfügbar"; Prognose unter Mindestwert -> Satz mit
+    Zeitfensters"; konfigurierter, aber ungültiger Sensor -> "PV-Prognose
+    nicht verfügbar"; Prognose unter Mindestwert -> Satz mit
     beiden kWh-Werten und inaktiver Ladepause; Prognose > Mindestwert ->
     aktiver Satz mit "größer als"; Prognose == Mindestwert -> derselbe aktive
     Satz mit "gleich". Mindestwert 0 ergibt den aktiven Satz ohne
@@ -855,7 +858,8 @@ requirement_grid_serving_charge:
        freigegeben. tests/test_number.py deckt Default, Restore und Klemmung
        der Number-Entity sowie 1-kWh-Schritt und kaufmännische Rundung ab;
        tests/test_dashboard.py ihre Darstellung. tests/test_coordinator.py
-       deckt alle priorisierten Ladepausen-Statustexte einschließlich der
+       deckt alle priorisierten Ladepausen-Statustexte einschließlich des
+       reinen Aktivsatzes ohne konfigurierten Prognosesensor und der
        getrennten Ausgaben für größer und gleich ab; die bestehende
        Policy-Abdeckung bestätigt, dass Gleichheit die Ladepause freigibt."
     - "tests/test_coordinator.py und tests/test_price_optimizer.py decken
@@ -1485,9 +1489,10 @@ requirement_bundled_dashboard:
     "Ladeautomatik" "Zeitfenster" (das Zeitfenster löst das Laden aus), bei
     "Netzdienliches Laden" aber "Ladepause" (das Zeitfenster unterbricht
     umgekehrt gerade das PV-Laden, siehe REQ-GRID-SERVING-CHARGE). Diese
-    Karte enthält in fester Reihenfolge Start, Ende, "PV-Prognose" in kWh,
-    die Number-Entity "Mindest PV Prognose" und den dynamischen Status aus
-    REQ-GRID-SERVING-CHARGE. Eine separate Karte "Einstellungen" gibt es im
+    Karte enthält in fester Reihenfolge Start, Ende, "PV-Prognose
+    <Tag>.<Monat>." in kWh, die Number-Entity "Mindest PV-Prognose" und den
+    dynamischen Status aus REQ-GRID-SERVING-CHARGE. Eine separate Karte
+    "Einstellungen" gibt es im
     Tab "Netzdienliches Laden" nicht mehr. Am Ende folgt in beiden Tabs
     eine Karte "Aktive Monate" mit den zwölf Monats-Schaltern des
     jeweiligen Mechanismus, deren Label ebenfalls in beiden Tabs
@@ -1620,9 +1625,11 @@ requirement_bundled_dashboard:
        den Präfix \"Preisoptimiertes Laden\"/\"Price-optimised charging\"
        im Label trägt."
     - "tests/test_dashboard.py deckt ab, dass die Karte \"Ladepause\" ihre
-       fünf Zeilen in der Reihenfolge Start, Ende, PV-Prognose, Mindest PV
-       Prognose, Status enthält und im Tab \"Netzdienliches Laden\" keine
-       separate Karte \"Einstellungen\" mehr existiert."
+       fünf Zeilen in der Reihenfolge Start, Ende, PV-Prognose mit aktuellem
+       Datum, Mindest PV-Prognose, Status enthält und im Tab \"Netzdienliches
+       Laden\" keine separate Karte \"Einstellungen\" mehr existiert;
+       tests/test_sensor_descriptions.py prüft den täglichen Datumswechsel
+       sowie das korrigierte deutsche Mindestprognose-Label."
 
 # ==============================================================================
 # ANFORDERUNG: BINARY_SENSOR-PLATTFORM

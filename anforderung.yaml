@@ -1560,19 +1560,23 @@ requirement_bundled_dashboard:
     wurde entfernt, der Speicher-Schalter bleibt), "Ladeautomatik" und
     "Netzdienliches Laden" sowie "Dynamisches
     Laden" (preisoptimiertes Laden: Strategie, Preisgrenze, Neutralpreis,
-    Stundenzahl, Status). Die frühere Karte "Status" mit den vier Lade-/Automatik-
-    binary_sensor-Entities (REQ-BINARY-SENSORS) wurde aus "Allgemeine
-    Informationen" entfernt, ohne Ersatz - die Entities selbst bleiben
+    Stundenzahl, Status und PV-Prognose). Die frühere Karte "Status" mit den
+    vier Lade-/Automatik-binary_sensor-Entities (REQ-BINARY-SENSORS) wurde
+    aus "Allgemeine Informationen" entfernt, ohne Ersatz - die Entities bleiben
     unverändert bestehen (z. B. für eigene Automationen), erscheinen aber
     in keiner Karte des mitgelieferten Dashboards mehr.
 
     Die Kartenzeilen der "Preisoptimiertes Laden"-Karte (Tab "Dynamisches
     Laden") tragen keinen "Preisoptimiertes Laden"-Präfix im Label mehr -
     der Kartentitel gibt den Kontext bereits vor: price_charge_strategy
-    heißt nur noch "Strategie", price_charge_max_price "Preisgrenze",
+    heißt nur noch "Strategie", price_charge_max_price "Netzbezug und Laden
+    bis", price_charge_neutral_price "Netzbezug ohne Laden bis",
     price_charge_hours "Anzahl Stunden", price_charge_active_text "Aktiv",
-    price_charge_status_text "Status", price_charge_next_start "Nächster
-    Start" (jeweils translations/de.json). price_charge_current_price
+    price_charge_status_text "Status", direkt gefolgt von
+    grid_serving_forecast mit dem festen Dashboard-Label "PV-Prognose",
+    sowie price_charge_next_start "Nächster Start" (jeweils
+    translations/de.json, außer dem bewusst festen Prognose-Label).
+    price_charge_current_price
     ("Aktueller Strompreis") und max_soc ("Max. SOC") trugen nie einen
     solchen Präfix und bleiben unverändert. Der Hauptschalter außerhalb
     dieser Karte (switch.price_charge_enabled, Tile-Karte oberhalb der
@@ -1726,6 +1730,9 @@ requirement_bundled_dashboard:
        \"Preisoptimiertes Laden\"-Karte (Tab \"Dynamisches Laden\") noch
        den Präfix \"Preisoptimiertes Laden\"/\"Price-optimised charging\"
        im Label trägt."
+    - "tests/test_dashboard.py deckt ab, dass die beiden Preislabels
+       \"Laden\" großschreiben und grid_serving_forecast direkt nach
+       price_charge_status_text mit dem festen Label \"PV-Prognose\" steht."
     - "tests/test_dashboard.py deckt ab, dass die Karte \"Ladepause\" ihre
        fünf Zeilen in der Reihenfolge Start, Ende, PV-Prognose mit aktuellem
        Datum, Mindest PV-Prognose, Status enthält und im Tab \"Netzdienliches

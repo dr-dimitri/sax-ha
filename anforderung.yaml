@@ -645,10 +645,13 @@ requirement_grid_serving_charge:
     Wh/kWh/MWh auf kWh. Der Vergleich nutzt bewusst den rohen normalisierten
     Prognosewert und NICHT CONF_PV_FORECAST_FACTOR, weil dieser Faktor nur
     den nutzbaren Anteil für die Bedarfsrechnung der Smart-Preisstrategie
-    beschreibt. Nur forecast >= Mindestwert gibt die Ladepause frei.
-    Fehlender Sensor sowie unknown/unavailable/leerer/nichtnumerischer oder
-    nicht endlicher Zustand gelten als nicht freigegeben (Fail-open für die
-    Ladung): Die Zustandsmaschine greift nicht ein und der Speicher darf
+    beschreibt. Ist kein CONF_PV_FORECAST_SENSOR ausgewählt, entfällt die
+    Zusatzbedingung vollständig und die Ladepause bleibt unabhängig vom
+    eingestellten Mindestwert freigegeben. Nur bei ausgewähltem Sensor gilt:
+    forecast >= Mindestwert gibt die Ladepause frei; eine nicht vorhandene
+    Entity sowie unknown/unavailable/leerer/nichtnumerischer oder nicht
+    endlicher Zustand gelten als nicht freigegeben (Fail-open für die
+    Ladung). Die Zustandsmaschine greift dann nicht ein und der Speicher darf
     früh über die SmartMeter-Nullregelung laden.
 
     ChargePolicyInput.grid_serving_forecast_allowed fließt zentral in
@@ -684,11 +687,15 @@ requirement_grid_serving_charge:
     Für das Dashboard veröffentlicht sensor.py zusätzlich "PV-Prognose
     <Tag>.<Monat>." (grid_serving_forecast, kWh; bei fehlender Konfiguration
     oder jedem unbrauchbaren Wert unknown) und "Status"
-    (grid_serving_pause_status).
+    (grid_serving_pause_status). Als abgeleitete Anzeige statt physischem
+    SAX-Messwert wird die Prognose-Entity nicht dem SAX-Gerät zugeordnet;
+    dadurch verwendet Home Assistant ihren dynamischen Namen unverändert und
+    stellt nicht "SAX Power Home" voran.
     Der Status beschreibt grundsätzlich das effektive Ladepausen-Fenster,
     nicht erst den späteren Eingriff nach erkannter PV-Ladung. Ist kein
-    Prognosesensor konfiguriert, bleibt jedoch der reine zeitliche Aktivsatz
-    sichtbar und die Mindestprognose wird im Statustext nicht geprüft. Die
+    Prognosesensor konfiguriert, bleibt der reine zeitliche Aktivsatz sichtbar,
+    die Mindestprognose wird nicht geprüft und auch das effektive
+    Ladepausen-Fenster bleibt freigegeben. Die
     erste passende Bedingung gewinnt: Hauptschalter aus -> "Inaktiv";
     aktueller Monat aus
     -> "Inaktiv im Monat <Monat>"; Uhrzeit außerhalb -> "Außerhalb des
@@ -854,8 +861,10 @@ requirement_grid_serving_charge:
     - "tests/test_price_optimizer.py/test_charge_policy.py/test_forecast.py
        decken die optionale Prognosefreigabe ab: 0 kWh deaktiviert sie;
        unterhalb/exakt auf/oberhalb der Schwelle gilt False/True/True;
-       Wh, kWh und MWh werden normalisiert; unknown, unavailable,
-       nichtnumerische und nicht endliche Werte deaktivieren die Ladepause;
+       ohne ausgewählten Sensor bleibt die Ladepause trotz Mindestwert aktiv
+       und stoppt erkannte SAX-Ladung; Wh, kWh und MWh werden normalisiert;
+       bei ausgewähltem Sensor deaktivieren unknown, unavailable,
+       nichtnumerische und nicht endliche Werte die Ladepause;
        ein laufender 0-%-Eingriff wird sicher per SmartMeter-Nullregelung
        beendet; bei niedriger Prognose bleibt aktives preisoptimiertes Laden
        freigegeben. tests/test_number.py deckt Default, Restore und Klemmung
@@ -1635,8 +1644,9 @@ requirement_bundled_dashboard:
        fünf Zeilen in der Reihenfolge Start, Ende, PV-Prognose mit aktuellem
        Datum, Mindest PV-Prognose, Status enthält und im Tab \"Netzdienliches
        Laden\" keine separate Karte \"Einstellungen\" mehr existiert;
-       tests/test_sensor_descriptions.py prüft den täglichen Datumswechsel
-       sowie das korrigierte deutsche Mindestprognose-Label."
+       tests/test_sensor_descriptions.py prüft den täglichen Datumswechsel,
+       den Registry-Namen ohne Gerätepräfix sowie das korrigierte deutsche
+       Mindestprognose-Label."
 
 # ==============================================================================
 # ANFORDERUNG: BINARY_SENSOR-PLATTFORM

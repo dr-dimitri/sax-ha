@@ -825,8 +825,9 @@ async def test_grid_serving_forecast_controls_effective_window(
 ) -> None:
     """0 deaktiviert die Prognoseprüfung; sonst gilt >= Schwellwert.
 
-    Nicht verfügbare oder ungültige Werte schalten die Ladepause fail-open
-    ab, damit der Speicher früh über seine Nullregelung laden darf.
+    Bei einem konfigurierten Sensor schalten nicht verfügbare oder ungültige
+    Werte die Ladepause fail-open ab, damit der Speicher früh über seine
+    Nullregelung laden darf.
     """
     if state is not None:
         hass.states.async_set(
@@ -845,6 +846,49 @@ async def test_grid_serving_forecast_controls_effective_window(
 
     assert coordinator.grid_serving_forecast_allowed is expected_allowed
     assert coordinator.grid_serving_window_active is expected_allowed
+
+
+async def test_missing_forecast_sensor_keeps_grid_serving_pause_active(hass) -> None:
+    """Ohne ausgewählten Prognosesensor ist der Mindestwert wirkungslos;
+    die Ladepause erkennt reale SAX-Ladung weiterhin und stoppt sie."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300),
+        "storage_power_active": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50),
+    }
+    await coordinator.async_set_max_soc(90)
+    await coordinator.async_set_grid_serving_start(dt_time(10))
+    await coordinator.async_set_grid_serving_end(dt_time(14))
+    await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
+
+    try:
+        with _patched_now(12):
+            await coordinator.async_set_grid_serving_enabled(True)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            await asyncio.sleep(0.1)
+
+        assert coordinator.grid_serving_forecast_allowed is True
+        assert coordinator.grid_serving_window_active is True
+        assert coordinator.grid_serving_active is True
+        assert coordinator.data["grid_serving_pause_status"] == (
+            "Ladepause ist zwischen 10:00 Uhr und 14:00 Uhr im Januar aktiv."
+        )
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        )
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_stop_sun_charge()
 
 
 async def test_equal_forecast_keeps_grid_serving_pause_active(hass) -> None:

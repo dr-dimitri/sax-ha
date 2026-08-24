@@ -1,941 +1,400 @@
-# SAX Power Home – Home Assistant Integration
+<p align="center">
+  <img src="custom_components/sax_power/brand/logo.png" alt="SAX Power Home Logo" width="192">
+</p>
 
-Bindet einen **SAX Power Home (Plus)** Heimspeicher über Modbus TCP in Home
-Assistant ein: alle Messwerte als Sensoren, dazu drei Lade-Automatiken
-(Netzladung nach Zeitplan, netzdienliches Laden, preisoptimiertes Laden nach
-dynamischem Strompreis).
+<h1 align="center">SAX Power Home für Home Assistant</h1>
 
-Die Einrichtung läuft vollständig über die Oberfläche – keine YAML-Konfiguration,
-kein Cloud-Zugang, keine Zugangsdaten. Die Integration spricht ausschließlich
-lokal mit dem Speicher.
+<p align="center">
+  Lokale Einbindung und intelligente Ladesteuerung für SAX Power Home und
+  SAX Power Home Plus.
+</p>
 
-## Inhaltsverzeichnis
+Die Integration verbindet einen SAX Power Heimspeicher direkt über das lokale
+Netzwerk mit Home Assistant. Messwerte, Einstellungen und Ladefunktionen stehen
+als Entitäten zur Verfügung und lassen sich in Dashboards und Automationen
+verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 
-- [Was die Integration kann](#was-die-integration-kann)
-- [Installation](#installation)
-- [Einrichtung](#einrichtung)
-- [Entitäten im Überblick](#entitäten-im-überblick)
-  - [Messwerte (Sensoren)](#messwerte-sensoren)
-  - [Energiezähler fürs Energy-Dashboard](#energiezähler-fürs-energy-dashboard)
-  - [Statusanzeigen der Lade-Automatiken](#statusanzeigen-der-lade-automatiken)
-  - [Binäre Statusanzeigen](#binäre-statusanzeigen)
-  - [Einstellungen und Schalter](#einstellungen-und-schalter)
-- [Die drei Lade-Automatiken](#die-drei-lade-automatiken)
-- [Max-SOC-Sperre](#max-soc-sperre)
-- [Netzladung (zeitgesteuertes Laden)](#netzladung-zeitgesteuertes-laden)
-- [Netzdienliches Laden](#netzdienliches-laden)
-- [Preisoptimiertes Laden](#preisoptimiertes-laden)
-- [Zeitfenster dürfen sich nicht überschneiden](#zeitfenster-dürfen-sich-nicht-überschneiden)
-- [Services (für Automationen)](#services-für-automationen)
-- [Verbindungsdaten nachträglich ändern](#verbindungsdaten-nachträglich-ändern)
-- [Diagnose und Fehlersuche](#diagnose-und-fehlersuche)
-- [Bekannte Einschränkungen](#bekannte-einschränkungen)
-- [Weiterführende Dokumentation](#weiterführende-dokumentation)
+## Funktionen
 
-## Was die Integration kann
+- Ladezustand, Lade- und Entladeleistung, Netzleistung, PV-Leistung sowie
+  weitere Geräte- und Akkudaten anzeigen
+- Lade- und Entladeenergie im Home-Assistant-Energy-Dashboard erfassen
+- Speicher ein- und ausschalten
+- maximalen Ladezustand festlegen
+- zeitgesteuert aus dem Netz laden
+- PV-Ladung für eine bessere Nutzung der Mittagsspitze verschieben
+- bei dynamischen Stromtarifen in günstigen Zeiträumen laden
+- optional ein vorbereitetes SAX-Power-Dashboard anlegen
+- alle Funktionen vollständig lokal im eigenen Netzwerk nutzen
 
-- **Alles ablesen:** Ladezustand, Lade-/Entladeleistung, Smart-Meter- und
-  Netzwerte, Ströme, Spannungen, Zell- und Akkudaten – rund 60 Sensoren.
-- **Energy-Dashboard:** zwei kWh-Zähler (geladen/entladen), die sich direkt als
-  Batteriesystem eintragen lassen.
-- **Speicher steuern:** ein/aus, Ladeleistungsgrenze, Ziel-Ladestand.
-- **Automatisch laden:** drei getrennt einstellbare Automatiken – nach Zeitplan,
-  netzdienlich (Laden bewusst in die Mittagsspitze verschieben) oder nach
-  dynamischem Strompreis.
-- **Akku schonen:** eine geräteunabhängige Max-SOC-Sperre, die auch dann greift,
-  wenn der Speicher von selbst mit PV-Überschuss volllädt.
-- **Fertiges Dashboard:** optional in der Ersteinrichtung anlegbar, mit den
-  wichtigsten Informationen in vier Tabs (siehe
-  [Schritt 3: Dashboard anlegen](#schritt-3-dashboard-anlegen-optional)).
+## Voraussetzungen
+
+- Home Assistant mit HACS oder Zugriff auf das Verzeichnis
+  `custom_components`
+- SAX Power Home oder SAX Power Home Plus im selben Netzwerk wie Home Assistant
+- aktivierte Modbus-TCP-Verbindung am Speicher
+- für erweiterte Messwerte und Ladefunktionen eine kompatible Firmware
+  (Master V61/Gateway V54 oder neuer empfohlen)
 
 ## Installation
 
-### Über HACS (empfohlen)
+### Installation über HACS
 
-1. In Home Assistant: **HACS → Integrationen → ⋮ (oben rechts) →
-   Benutzerdefinierte Repositories**
-2. Repository-URL eintragen: `https://github.com/dr-dimitri/sax-ha`,
-   Kategorie: **Integration**
-3. **Hinzufügen**, danach "SAX Power Home" in HACS suchen und installieren
-4. Home Assistant neu starten
-5. Weiter mit [Einrichtung](#einrichtung)
+1. In Home Assistant **HACS → Integrationen** öffnen.
+2. Über das Menü oben rechts **Benutzerdefinierte Repositories** auswählen.
+3. `https://github.com/dr-dimitri/sax-ha` als Repository eintragen und als
+   Kategorie **Integration** wählen.
+4. Nach **SAX Power Home** suchen und die Integration installieren.
+5. Home Assistant neu starten.
 
-### Manuell
+### Manuelle Installation
 
-1. Ordner `custom_components/sax_power` in das `custom_components`-Verzeichnis
-   der Home-Assistant-Konfiguration kopieren
-2. Home Assistant neu starten
-3. Weiter mit [Einrichtung](#einrichtung)
+1. Das Verzeichnis `custom_components/sax_power` in das Verzeichnis
+   `custom_components` der Home-Assistant-Konfiguration kopieren.
+2. Home Assistant neu starten.
 
 ## Einrichtung
 
-**Einstellungen → Geräte & Dienste → Integration hinzufügen →** nach "SAX Power"
-suchen.
+Die Einrichtung erfolgt unter **Einstellungen → Geräte & Dienste → Integration
+hinzufügen**. Dort nach **SAX Power** suchen und den Anweisungen folgen.
 
-### Schritt 1: Verbindung
+### Verbindung zum Speicher
 
-| Feld | Bedeutung | Standard |
+| Feld | Beschreibung | Standard |
 | --- | --- | --- |
-| IP-Adresse | IP des SAX Speichers im lokalen Netz | – |
+| IP-Adresse | Lokale IP-Adresse des Speichers | – |
 | Port | Modbus-TCP-Port | 502 |
-| Slave-ID (Basic Mode) | Registerkarte mit den Grundfunktionen (Ladezustand, Schalter, Leistungslimits) | 64 |
-| Slave-ID (SunSpec-Modus) | Registerkarte mit den erweiterten Mess- und Diagnosewerten | 100 |
-| Aktualisierungsintervall | Abfragetakt der Basic-Mode-Sensoren in Sekunden. Die SunSpec-Messwerte werden davon unabhängig alle 2 Sekunden gelesen (siehe [Hinweis](#wie-oft-wird-abgefragt)) | 10 |
+| Slave-ID (Basic Mode) | Verbindung für Grundfunktionen | 64 |
+| Slave-ID (SunSpec-Modus) | Verbindung für erweiterte Mess- und Ladefunktionen | 100 |
+| Aktualisierungsintervall | Intervall für grundlegende Messwerte | 10 Sekunden |
 
-Die Verbindung wird geprüft, bevor der Eintrag angelegt wird. Schlägt das fehl:
-IP-Adresse, Port und Erreichbarkeit im Netz prüfen. Meldet der Speicher einen
-Modbus-Fehler, obwohl die Verbindung steht, stimmt in der Regel die Slave-ID
-nicht.
+Home Assistant prüft die Verbindung vor dem Abschluss der Einrichtung. Falls
+die Prüfung fehlschlägt, zunächst IP-Adresse, Port und Erreichbarkeit des
+Speichers kontrollieren. Bei einem Modbus-Fehler sind meist die Slave-IDs oder
+die Firmware des Speichers die Ursache.
 
-### Schritt 2: Netzladung vorbelegen (optional)
+### Netzladung vorbelegen
 
-Der zweite Schritt belegt die Netzladung vor: "Netzladung aktiv", "Start"
-und "Ende". Ohne Änderung gelten die Standardwerte
-(deaktiviert, Zeitfenster 00:00–00:05). Diese Vorgaben wirken nur beim
-allerersten Start – danach zählt ausschließlich das, was an den Entitäten
-eingestellt ist.
+Im nächsten Schritt können der Schalter sowie Start- und Endzeit der
+zeitgesteuerten Netzladung vorbelegt werden. Diese Angaben sind optional und
+lassen sich später jederzeit über die Entitäten des Geräts ändern.
 
-Das preisoptimierte Laden wird **nicht** hier, sondern später über
-**Konfigurieren** eingerichtet (siehe
-[Preisoptimiertes Laden](#preisoptimiertes-laden)) – ein passender
-Strompreis-Sensor existiert bei einer frischen Installation oft noch gar nicht.
+Das preisoptimierte Laden wird nach der Einrichtung über **Konfigurieren** bei
+der Integration eingerichtet. So kann dort direkt der bereits vorhandene
+Strompreis-Sensor ausgewählt werden.
 
-### Schritt 3: Dashboard anlegen (optional)
+### Mitgeliefertes Dashboard
 
-Der dritte Schritt bietet an, ein vorbereitetes Dashboard **"SAX Power"**
-anzulegen – mit den wichtigsten Sensoren und Einstellungen, gegliedert in vier
-Tabs: **Allgemeine Informationen**, **Ladeautomatik** sowie **Netzdienliches
-Laden** (beide bewusst gleich aufgebaut: Hauptschalter, eine Karte mit den
-einheitlich benannten Zeit-Entities "Start"/"Ende" – bei "Ladeautomatik"
-"Zeitfenster" genannt, bei "Netzdienliches Laden" "Ladepause" – und eine
-eigene Karte "Aktive Monate" mit den zwölf Monats-Schaltern) sowie
-**Dynamisches Laden**
-(preisoptimiertes Laden). Der Ladezustand erscheint dabei als Gauge (grün ab
-50 % SOC, orange ab 20 %, darunter rot), die wichtigsten Ein/Aus-Schalter als
-große Kacheln. Die
-Checkbox ist standardmäßig aktiv; das Dashboard erscheint danach sofort in
-der Sidebar und lässt sich jederzeit unter **Einstellungen → Dashboards**
-anpassen oder wieder entfernen.
+Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
+**SAX Power** an. Es enthält Übersichten für:
 
-Wurde die Checkbox abgewählt, das Dashboard später gelöscht, oder wurde die
-Integration schon vor Einführung dieses Features eingerichtet: Der Service
-**`sax_power.create_dashboard`** (siehe [Services](#services-für-automationen))
-legt es jederzeit nachträglich an – aufrufbar unter **Entwicklertools →
-Aktionen**. Existiert das Dashboard bereits, passiert nichts.
+- allgemeine Informationen,
+- zeitgesteuertes Laden,
+- netzdienliches Laden und
+- dynamisches Laden.
 
-Um ein bereits vorhandenes Dashboard auf diesen Auslieferungszustand
-zurückzusetzen (z. B. nach eigenen Anpassungen), gibt es den Service
-**`sax_power.reinstall_dashboard`** – ebenfalls unter **Entwicklertools →
-Aktionen** aufrufbar. Im Unterschied zu `create_dashboard` überschreibt er
-auch ein bereits bestehendes Dashboard mit dem aktuellen
-Auslieferungszustand.
+Das Dashboard erscheint in der Seitenleiste und kann wie jedes andere
+Home-Assistant-Dashboard angepasst oder entfernt werden.
 
-## Entitäten im Überblick
+Falls es später angelegt werden soll, steht unter **Entwicklertools → Aktionen**
+die Aktion `sax_power.create_dashboard` zur Verfügung. Mit
+`sax_power.reinstall_dashboard` lässt es sich auf den aktuellen
+Auslieferungszustand zurücksetzen. Dabei werden eigene Änderungen am Dashboard
+überschrieben.
 
-### Messwerte (Sensoren)
+## Wichtige Entitäten
 
-Die Messwerte stammen aus zwei Registerkarten des Speichers mit
-unterschiedlicher Slave-ID.
+Home Assistant ordnet die Entitäten automatisch dem SAX-Power-Gerät zu. Weniger
+häufig benötigte Detailwerte befinden sich im Bereich **Diagnose** der
+Geräteseite.
 
-Sensoren mit "(Diagnose)" tragen `entity_category: diagnostic` und werden von
-Home Assistant standardmäßig unter "Diagnose" auf der Geräteseite eingeklappt
-sowie in manchen Karten ausgeblendet, statt direkt auf der Hauptübersicht zu
-erscheinen – das betrifft vor allem Rohwerte, Gerätekennung und die
-phasenaufgeschlüsselten Strom-/Spannungs-/Leistungswerte, während die
-Kernwerte (Ladezustand, Lade-/Entladeleistung, Netzleistung, PV-Leistung,
-Zelltemperatur) sichtbar bleiben.
+### Messwerte
 
-**Basic Mode (Slave-ID 64):**
+Zu den wichtigsten Messwerten gehören:
 
-| Entität | Beschreibung |
-| --- | --- |
-| Ladezustand | Ladestand (SOC) des Speichers in % |
-| Speicher Schaltzustand (Text) | "Aus" / "Ein" / "Verbunden" als Klartext (Diagnose) |
-| Sollwert Leistung P | Aktuell gesetzter P-Sollwert in W (Diagnose) |
-| Sollwert cos(phi) | Aktuell gesetzter cos(phi)-Sollwert (Diagnose) |
+- Ladezustand des Speichers
+- Lade- und Entladeleistung
+- Netzbezug und Netzeinspeisung
+- PV-Leistung, sofern sie vom verwendeten Smart Meter bereitgestellt wird
+- Zelltemperatur
+- verfügbare Lade- und Entladeleistung
+- Geräte-, Firmware- und Akkustatus
 
-**SunSpec-Modus (Slave-ID 100):**
+Bei der **Netzleistung** gilt die in Home Assistant übliche Darstellung:
+Positive Werte stehen für Netzbezug, negative Werte für Einspeisung.
 
-| Entität | Beschreibung |
-| --- | --- |
-| Hersteller / Gerätemodell / Softwareversion Master und Gateway / Seriennummer | Geräteidentität (Diagnose) |
-| **Ladeleistung / Entladeleistung** | Aktuelle Lade- bzw. Entladeleistung des Speichers in W |
-| **Netzleistung** | Leistung am Netzanschlusspunkt. Negativ = Einspeisung/PV-Überschuss, positiv = Netzbezug |
-| Speicher Stromsumme / Strom A, B, C | in A (Diagnose) |
-| Speicher Spannung A, B, C | in V (Diagnose) |
-| Wirk-, Schein-, Blindleistung Speicher Summe | in W / VA / var (Diagnose) |
-| Leistungsfaktor Speicher Summe | dimensionslos (Diagnose) |
-| Netzfrequenz (Speicher) | in Hz (Diagnose) |
-| Zelltemperatur | in °C |
-| Speicher Zustand / Speicher Ereignis | Klartext (Diagnose) |
-| PV-Leistung | in W – nur mit Smartmeter ADW200 verfügbar (siehe Hinweis unten) |
-| Leistungsvorgabe / Timeout Leistungsvorgabe / Steuermodus / Referenzwert Maximalleistung | Nur-Lese-Diagnosewerte. Leistungsvorgabe und Steuermodus werden von den Lade-Automatiken auch selbst geschrieben |
-| Netz Stromsumme / Strom L1, L2, L3 | in A (Diagnose) |
-| Netzspannung Durchschnitt (L-N) / L1, L2, L3 | in V (Diagnose) |
-| Netzfrequenz | in Hz (Diagnose) |
-| Netzleistung L1, L2, L3 | in W (Diagnose). Gleiche Vorzeichenkonvention wie oben "Netzleistung": negativ = Einspeisung, positiv = Netzbezug |
-| Schein-, Blindleistung, Leistungsfaktor Netz Summe | in VA / var / dimensionslos (Diagnose) |
-| Speicherkapazität / Verfügbare Lade- und Entladeleistung | in Wh / W (Diagnose) |
-| Maximaler und Minimaler SoC / Akku SoC (SunSpec) / Entladetiefe | in % (Diagnose) |
-| Ladestatus Akku / Akku Ereignis | Klartext (Diagnose) |
-| Durchschnittliche Zellspannung | in mV (Diagnose) |
-
-**Warum "var"?** Blindleistung wird korrekt in **var** (Volt-Ampere reaktiv)
-angegeben, Scheinleistung in **VA** – dieselbe Konvention wie bei jedem
-Energiemessgerät.
-
-**Smartmeter-Modell:** PV-Leistung und einzelne Werte des Meter-Modells sind
-laut Herstellerdokumentation nur mit dem Smartmeter **ADW200** vollständig
-verfügbar. Mit anderen Modellen (z. B. ADL400) sind die Netzwerte (Ströme,
-Spannungen, Leistungen) in der Regel trotzdem plausibel befüllt; nur die
-PV-Leistung bleibt dann dauerhaft 0.
-
-#### Wie oft wird abgefragt?
-
-| Werte | Takt |
-| --- | --- |
-| Basic-Mode-Sensoren (Ladezustand, Schaltzustand, Sollwerte) | Aktualisierungsintervall aus der Einrichtung (Standard 10 s) |
-| Dynamische SunSpec-Werte (Leistungen, Ströme, Spannungen, Zustände) | fest alle 2 s – damit die Lade-Automatiken zügig auf die tatsächliche Leistung reagieren |
-| Geräteidentität und interne Skalierungsfaktoren | einmal pro Stunde – sie ändern sich im Betrieb praktisch nie |
-
-Ist der SunSpec-Modus nicht erreichbar (siehe
-[Bekannte Einschränkungen](#bekannte-einschränkungen)), zeigen die Sensoren aus
-der SunSpec-Tabelle "unbekannt". Die Basic-Mode-Sensoren laufen unbeeindruckt
-weiter.
-
-### Energiezähler fürs Energy-Dashboard
-
-| Entität | Beschreibung |
-| --- | --- |
-| Geladene Energie (gesamt) | Kumulierte, in den Speicher geladene Energie in kWh |
-| Entladene Energie (gesamt) | Kumulierte, aus dem Speicher entladene Energie in kWh |
-
-Der SAX Speicher liefert selbst keine Energiezähler, sondern nur die
-Momentanleistung. Die Integration rechnet die beiden kWh-Zähler deshalb selbst
-hoch (Aufsummierung bei jedem Abfragezyklus, also etwa alle 2 Sekunden) und
-behält den Stand über Neustarts hinweg.
-
-Beide Sensoren lassen sich direkt unter **Einstellungen → Dashboards → Energie
-→ Batteriesysteme** als Ladung/Entladung eintragen – ohne Template-Sensoren oder
-Zusatzkonfiguration.
-
-Ist der SunSpec-Modus zwischenzeitlich nicht erreichbar, **pausiert** die
-Hochrechnung für diese Zeit, statt sie später fälschlich nachzuholen.
-
-### Statusanzeigen der Lade-Automatiken
-
-| Entität | Beschreibung |
-| --- | --- |
-| Zeitgesteuertes Laden aktiv | Zeigt, ob die Netzladung gerade aktiv nachlädt |
-| Netzdienliches Laden aktiv | Zeigt, ob das Laden gerade aktiv blockiert wird |
-| Preisoptimiertes Laden aktiv | Zeigt, ob gerade preisoptimiert aus dem Netz geladen wird |
-| Preisoptimiertes Laden Status | Klartext-Status mit dem *Grund* – siehe [Statusanzeige](#statusanzeige) |
-| Preisoptimiertes Laden nächster Start | Zeitstempel des nächsten geplanten Ladefensters (bzw. Beginn des laufenden) |
-| Aktueller Strompreis | Preis des aktuellen Zeitfensters in EUR/kWh |
-| Nächste Zellkalibrierung | Diagnose-Zeitstempel, ab dem der effektive Max-SOC vorübergehend auf 100 % angehoben wird |
-
-### Binäre Statusanzeigen
-
-Zusätzlich zu den Klartext-Sensoren oben gibt es dieselben (und ein paar
-weitere) Zustände als `binary_sensor`-Entities mit echtem Ein/Aus-Zustand,
-Icon und Zustandsfarbe – praktisch für Automationen (kein String-Vergleich
-gegen deutsche Klartexte nötig) und fürs Dashboard. Die Klartext-Sensoren
-bleiben unverändert bestehen, beide Varianten existieren nebeneinander.
-
-| Entität | Beschreibung |
-| --- | --- |
-| Ladestatus | Ein, solange der Speicher gerade lädt |
-| Zeitgesteuertes Laden aktiv | Wie oben, als binärer Zustand |
-| Preisoptimiertes Laden aktiv | Wie oben, als binärer Zustand |
-| Netzdienliches Laden aktiv | Wie oben, als binärer Zustand |
-| Max-SOC-Sperre aktiv | Ein, solange die [Max-SOC-Sperre](#max-soc-sperre) den Speicher aktiv hält |
-| Zellkalibrierung aktiv | Diagnose-Entität; Ein, solange der effektive Max-SOC vorübergehend 100 % beträgt |
-| SunSpec-Modus erreichbar | Diagnose-Entität; Aus, wenn Slave-ID 100 gerade nicht antwortet (siehe [Bekannte Einschränkungen](#bekannte-einschränkungen)) |
-| Speicherproblem | Diagnose-Entität; Ein, sobald Speicher oder Akku ein Ereignis außerhalb des Normalbetriebs melden |
-
-Ist der SunSpec-Modus gerade nicht erreichbar, zeigen "Ladestatus" und
-"Speicherproblem" konsequent "nicht verfügbar" statt eines falschen "Aus" –
-wie alle anderen von diesem Block abhängigen Entities auch.
+Die PV-Leistung ist laut Hersteller nur mit dem Smart Meter ADW200 vollständig
+verfügbar. Bei anderen Smart-Meter-Modellen kann dieser Wert dauerhaft 0 W
+anzeigen, obwohl die übrigen Netzwerte korrekt vorliegen.
 
 ### Einstellungen und Schalter
 
-**Zahlenwerte:**
-
-| Entität | Bereich | Beschreibung |
-| --- | --- | --- |
-| Max. SOC | 0–100 % | Ziel-Ladestand für die [Max-SOC-Sperre](#max-soc-sperre); gleichzeitig oberes Ziel der Netzladung. Ohne vorherige Einstellung 100 % (nicht 0) |
-| Netzladung Min. SOC | 0–100 % | Untere Schwelle, ab der die Netzladung startet. Ohne vorherige Einstellung 20 % |
-| Netzdienliches Laden Mindest-PV-Prognose | 0–100 kWh (Schritt 0,1) | Optionale Mindestprognose für die Ladepause. `0 kWh` deaktiviert die Prognoseprüfung; Standard 0 kWh |
-| Preisoptimiertes Laden Netzbezug und laden bis (Preisgrenze) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Preis, bis zu dem in der Strategie "Absoluter Preis" geladen wird. Negative Preise sind zulässig. Standard 0,20 EUR/kWh |
-| Preisoptimiertes Laden Netzbezug ohne laden bis (Neutralpreis) | −1,00 bis 2,00 EUR/kWh (Schritt 0,001) | Muss über der Preisgrenze liegen (sonst Reparaturhinweis). Zwischen Preisgrenze und Neutralpreis wird der Speicher pausiert (siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone)). Standard 0,30 EUR/kWh |
-| Preisoptimiertes Laden Anzahl Stunden | 1–24 h | Wie viele der günstigsten Stunden in den Strategien "Relativ" und "Smart" genutzt werden. Standard 3 |
-
-Alle Werte bleiben über Neustarts hinweg erhalten. Netzladung und
-preisoptimiertes Laden laden dabei immer mit der maximal möglichen
-Leistung - eine eigene Watt-Einstellung dafür gibt es bewusst nicht mehr,
-weil sie in der Praxis keinen messbaren Einfluss auf die tatsächliche
-Ladeleistung hatte.
-
-**Schalter:**
-
-| Entität | Beschreibung |
+| Entität | Funktion |
 | --- | --- |
-| Speicher On/Off | Schaltet den Speicher ein/aus |
-| Netzladung aktiv | Hauptschalter der [Netzladung](#netzladung-zeitgesteuertes-laden) |
-| Netzdienliches Laden aktiv | Hauptschalter des [netzdienlichen Ladens](#netzdienliches-laden) |
-| Preisoptimiertes Laden aktiv | Hauptschalter des [preisoptimierten Ladens](#preisoptimiertes-laden) |
-| Netzladung: 12 Monats-Schalter (Label je Schalter nur der Monatsname, z. B. "Januar") | In welchen Monaten das Netzladungs-Zeitfenster gilt |
-| Netzdienliches Laden: 12 Monats-Schalter (Label ebenfalls nur der Monatsname) | Analog für das netzdienliche Laden |
+| Max. SOC | Obergrenze für den Ladezustand und gemeinsames Ladeziel |
+| Netzladung Min. SOC | Ladezustand, unterhalb dessen die zeitgesteuerte Netzladung startet |
+| Speicher On/Off | Speicher ein- oder ausschalten |
+| Netzladung aktiv | Zeitgesteuerte Netzladung ein- oder ausschalten |
+| Netzdienliches Laden aktiv | Verschieben der PV-Ladung ein- oder ausschalten |
+| Preisoptimiertes Laden aktiv | Laden nach Strompreis ein- oder ausschalten |
+| Start / Ende | Zeitfenster für Netzladung und netzdienliches Laden |
+| Januar bis Dezember | Monate auswählen, in denen das jeweilige Zeitfenster gilt |
 
-**Zeiten:** je zwei Entitäten "Start"/"Ende" - für die Netzladung und für das
-netzdienliche Laden (jeweils HH:MM).
-
-**Auswahl:**
-
-- "Preisoptimiertes Laden Strategie" mit den Optionen "Manuell / Aus",
-  "Absoluter Preis", "Relativ / Günstigste Stunden" und "Smart / PV-optimiert".
-
-**Warum gibt es nicht für jede Automatik eigene Werte?** "Max. SOC" wird
-bewusst geteilt, damit es keine zwei konkurrierenden Obergrenzen gibt - "Max.
-SOC" ist die einzige SOC-Einstellung der Integration und damit auch das Ziel
-des preisoptimierten Ladens. Nur dort, wo eine Automatik wirklich etwas
-Eigenes braucht, gibt es eine eigene Einstellung: "Netzladung Min. SOC" (nur
-die Netzladung braucht eine Startschwelle).
-
-## Die drei Lade-Automatiken
-
-| Automatik | Was sie tut | Wofür |
-| --- | --- | --- |
-| **[Netzladung](#netzladung-zeitgesteuertes-laden)** | Lädt im Zeitfenster **aktiv aus dem Netz** bis "Max. SOC" | Günstiger Nachtstromtarif, feste Zeiten |
-| **[Netzdienliches Laden](#netzdienliches-laden)** | **Verhindert** im Zeitfenster, dass der Speicher PV-Überschuss einlädt | Laden in die Mittagsspitze verschieben, Einspeisespitzen glätten |
-| **[Preisoptimiertes Laden](#preisoptimiertes-laden)** | Lädt aus dem Netz, **wenn der Strom günstig ist** | Dynamische Tarife (Tibber, Nordpool, aWATTar …) |
-
-Wichtig zum Zusammenspiel:
-
-- **Netzladung und preisoptimiertes Laden schließen sich aus** – beide laden
-  aktiv aus dem Netz. Beim Einschalten des einen bei laufendem anderen kommt
-  eine Rückfrage, siehe
-  [Netzladung und preisoptimiertes Laden schließen sich aus](#netzladung-und-preisoptimiertes-laden-schließen-sich-aus).
-- **Netzladung und netzdienliches Laden dürfen sich zeitlich nicht
-  überschneiden** – die Integration prüft das, siehe
-  [Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden).
-- Die **[Max-SOC-Sperre](#max-soc-sperre)** steht über allen dreien.
-
-Treffen die Bedingungen mehrerer Automatiken gleichzeitig zu, entscheidet eine
-feste Rangfolge, welche davon tatsächlich läuft:
-
-```
-Max-SOC-Sperre  >  Netzladung  >  Netzdienliches Laden  >  Preisoptimiertes Laden
-```
-
-- **Netzladung hat Vorrang vor allem außer der Max-SOC-Sperre.**
-- **Netzdienliches Laden hat Vorrang vor preisoptimiertem Laden.** Ist das
-  Zeitfenster des netzdienlichen Ladens gerade aktiv und die optionale
-  Mindest-PV-Prognose erfüllt, pausiert
-  preisoptimiertes Laden dafür – auch seine
-  [Neutralpreis-Pausezone](#neutralpreis-pausezone) – bis das Zeitfenster
-  endet. Der Grund für diese Reihenfolge: Netzdienliches Laden ergibt nur in
-  ertragsreichen Monaten mit reichlich PV-Überschuss Sinn (typischerweise
-  Sommer, mittags) – also gerade in Zeiten, in denen ohnehin kaum oder gar
-  kein Netzbezug nötig ist. Ohne diesen Vorrang würden sich beide Automatiken
-  gegenseitig ein- und ausschalten, sobald ihre Bedingungen zufällig
-  gleichzeitig erfüllt sind (z. B. PV-Überschuss und gleichzeitig günstiger
-  Netzstrom an einem Sommermittag) – jede würde der anderen ständig den
-  Sollwertvorgabemodus streitig machen. Mit dem Vorrang bleibt das Verhalten
-  stattdessen vorhersehbar: In den wirksamen Monaten/Zeitfenstern entscheidet
-  netzdienliches Laden. Bei zu niedriger oder ungültiger Prognose sowie
-  außerhalb davon entscheidet preisoptimiertes Laden normal weiter.
-
-Alle drei Automatiken brauchen den SunSpec-Modus, weil sie über dessen Register
-schreiben. Ist er nicht erreichbar, greift keine von ihnen.
-
-### Der 50-W-Schwellwert
-
-An mehreren Stellen wird gegen denselben Schwellwert von **50 W** geprüft
-(`SMARTMETER_PV_SURPLUS_THRESHOLD_WATT` in `const.py`):
-
-- PV-Überschuss am Smart Meter (Einspeisung > 50 W) → Netzladung und
-  preisoptimiertes Laden brechen ab, die eigene Sonne ist günstiger.
-- Netzbezug am Smart Meter (> 50 W) → die Max-SOC-Sperre wird freigegeben.
-- Tatsächliche Ladeleistung des Speichers (≥ 50 W) → das netzdienliche Laden
-  greift ein.
-
-Damit kurze Lastspitzen oder Messausreißer nichts auslösen, zählt jede
-Über- oder Unterschreitung erst, wenn sie **zwei Abfragezyklen in Folge**
-(also etwa 4 Sekunden) besteht. Ein einzelner Wert auf der anderen Seite der
-Schwelle setzt die Zählung sofort zurück.
+Alle Einstellungen bleiben nach einem Neustart von Home Assistant erhalten.
 
 ## Max-SOC-Sperre
 
-Die Sperre gilt **immer** – unabhängig davon, ob eine der Lade-Automatiken
-eingeschaltet ist.
+Mit **Max. SOC** wird der gewünschte maximale Ladezustand festgelegt. Sobald
+dieser Wert erreicht ist, beendet die Integration den Ladevorgang. Die Grenze
+gilt sowohl für die Ladefunktionen der Integration als auch beim Laden mit
+PV-Überschuss. Bei 100 % ist die Begrenzung praktisch deaktiviert.
 
-Sobald der Ladestand "Max. SOC" erreicht oder überschreitet, hält die
-Integration den Speicher aktiv bei 0 % Leistungsvorgabe. Das verhindert
-dauerhaftes Volladen auf 100 % und schont den Akku – auch dann, wenn der
-Speicher gar nicht von der Integration, sondern durch PV-Überschuss über die
-geräteeigene Nullregelung vollgeladen wurde.
+Beispiel: Mit **Max. SOC = 80 %** lädt der Speicher bis höchstens 80 %. Das
+schafft eine Reserve und kann dabei helfen, den Akku im Alltag zu schonen.
 
-**Achtung, das geht über eine reine Ladebegrenzung hinaus:** Solange die Sperre
-aktiv ist, entlädt sich der Speicher auch nicht zur Deckung des Eigenverbrauchs.
-0 % Leistungsvorgabe heißt: weder laden noch entladen.
+### Regelmäßige Zellkalibrierung
 
-Damit die Sperre nicht ewig bestehen bleibt – bei 0 % fällt der Ladestand ja von
-selbst kaum –, gibt es drei Wege heraus:
+Ist Max. SOC kleiner als 100 %, erlaubt die Integration alle sieben Tage eine
+vollständige Ladung zur Zellkalibrierung. Die eingestellte Grenze bleibt dabei
+unverändert; nur für diesen Kalibrierungsvorgang darf der Speicher 100 %
+erreichen. Die Funktion startet keine zusätzliche Netzladung, sondern nutzt
+die nächste reguläre Lademöglichkeit.
 
-1. **Ladestand fällt unter "Max. SOC"** (z. B. durch Selbstentladung): Der
-   Speicher geht sofort zurück in die geräteeigene SmartMeter-Nullregelung.
-2. **Netzbezug über 50 W** am Smart Meter, bestätigt über zwei Zyklen: Wurde
-   die Sperre außerhalb eines Ladefensters ausgelöst, setzt die Integration
-   den Speicher aktiv zurück in die SmartMeter-Nullregelung. So kann er den
-   Hausverbrauch wieder decken, statt ihn weiter aus dem Netz zu beziehen.
-3. **Ende des Zeitfensters:** Wurde "Max. SOC" *innerhalb* eines Netzladungs-
-   oder netzdienlich-Zeitfensters erreicht, bleibt die Sperre an dieses Fenster
-   gebunden und wird spätestens an dessen Ende aufgehoben.
+Die Diagnose-Entitäten **Zellkalibrierung aktiv** und **Nächste
+Zellkalibrierung** zeigen den aktuellen Zustand und den nächsten Termin.
 
-Die Freigabe über Netzbezug wird bei jedem Aktualisierungszyklus neu bewertet.
-Fällt der Bezug wieder unter die Schwelle, während der SOC weiterhin am
-Grenzwert liegt, hält die Max-SOC-Sperre den Speicher erneut bei 0 %. Innerhalb
-eines Netzladungs- oder wirksamen netzdienlichen Zeitfensters bleibt die Sperre
-dagegen bewusst bis zum Fensterende gebunden; dort gilt die Netzbezugsfreigabe
-nicht vorzeitig. Danach übernimmt wieder die normale Automatik des Geräts.
+## Ladefunktionen
 
-> **Technischer Hintergrund:** "Max. SOC" ist kein Register des Geräts, sondern
-> Software-Logik der Integration. Geschrieben wird über den SunSpec-Modus:
-> Register 40051 (Steuermodus) auf Sollwertvorgabe, Register 40049
-> (Leistungsvorgabe) auf 0 %. Zum Aufheben geht Register 40051 zurück auf 0
-> (SmartMeter-Nullregelung).
+Die Integration bietet drei unabhängig konfigurierbare Ladefunktionen:
 
-### Periodische Volladung zur Zellkalibrierung
-
-Ist „Max. SOC“ kleiner als 100 %, erlaubt die Integration alle sieben Tage
-eine vollständige Ladung. Dafür wird nur der **effektive** Zielwert
-vorübergehend auf 100 % angehoben; die Zahleneinstellung des Benutzers bleibt
-unverändert. Erst wenn der Speicher tatsächlich 100 % meldet, startet der
-Sieben-Tage-Zeitraum neu und der zuletzt eingestellte Max-SOC gilt wieder.
-Ladepausen, Zeitfensterenden oder 0 W Ladeleistung beenden die Phase nicht.
-
-Die Funktion erzwingt keine zusätzliche Netzladung. Ohne PV oder bereits
-aktivierte Netz-/Preisautomatik wartet sie auf die nächste normale
-Lademöglichkeit. Der Zeitplan bleibt über Home-Assistant-Neustarts erhalten;
-bei der erstmaligen Aktivierung nach einem Update beginnt er mit dem ersten
-gültigen SOC-Messwert, statt sofort eine Volladung anzustoßen.
-
-Die Diagnose-Entities „Zellkalibrierung aktiv“ und „Nächste
-Zellkalibrierung“ zeigen Zustand und Fälligkeit leise auf der Geräteseite und
-stehen für eigene Automationen bereit. Es wird keine dauerhafte
-Benachrichtigung erzeugt.
-
-## Netzladung (zeitgesteuertes Laden)
-
-Lädt den Speicher innerhalb eines Zeitfensters aktiv aus dem Netz – unabhängig
-von PV-Überschuss. Typischer Anwendungsfall: *"Lade auf 90 %, wenn es zwischen
-1 und 5 Uhr ist und der Ladestand unter 40 % liegt."*
-
-### Einstellungen
-
-| Entität | Beschreibung |
+| Funktion | Zweck |
 | --- | --- |
-| Netzladung aktiv | Ein-/Ausschalten |
-| Start / Ende | Zeitfenster (HH:MM) |
-| Netzladung Min. SOC | Startschwelle: erst unterhalb dieses Ladestands wird geladen |
-| Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt |
-| Max. SOC | Ziel, bis zu dem geladen wird (geteilte Einstellung) |
+| [Zeitgesteuerte Netzladung](#zeitgesteuerte-netzladung) | Zu festgelegten Zeiten bis zum gewünschten Ladezustand aus dem Netz laden |
+| [Netzdienliches Laden](#netzdienliches-laden) | PV-Ladung in ertragreiche Tageszeiten verschieben |
+| [Preisoptimiertes Laden](#preisoptimiertes-laden) | Bei dynamischen Tarifen günstige Zeiträume nutzen |
 
-Alle Werte bleiben über Neustarts hinweg erhalten; ein eingerichteter Zeitplan
-muss also nicht nach jedem Neustart neu gesetzt werden. Geladen wird immer
-mit der maximal möglichen Leistung.
+Max. SOC gilt als gemeinsame Obergrenze für alle Ladefunktionen. Die
+zeitgesteuerte und die preisoptimierte Netzladung können nicht gleichzeitig
+aktiv sein. Home Assistant zeigt beim Wechsel eine Bestätigung an und schaltet
+die bisher aktive Funktion erst nach Zustimmung aus.
 
-### Wann geladen wird
+Das netzdienliche Laden hat in seinem wirksamen Zeitfenster Vorrang vor dem
+preisoptimierten Laden. Außerhalb dieses Zeitfensters läuft die
+Preisoptimierung wie gewohnt weiter.
 
-Geladen wird nur, wenn **alle** Bedingungen zutreffen:
+### Zeitgesteuerte Netzladung
 
-- "Netzladung aktiv" ist eingeschaltet,
-- der aktuelle Monat ist ausgewählt,
-- die Uhrzeit liegt im Zeitfenster,
-- der Ladestand liegt unter "Netzladung Min. SOC" (siehe Hysterese unten),
-- "Max. SOC" ist noch nicht erreicht,
-- am Smart Meter liegt kein PV-Überschuss über 50 W an.
+Die zeitgesteuerte Netzladung lädt den Speicher in einem festgelegten
+Zeitfenster aus dem Netz. Sie eignet sich beispielsweise für einen günstigen
+Nachttarif oder zur Vorbereitung auf einen erwarteten hohen Verbrauch.
 
-**Zeitfenster über Mitternacht** sind erlaubt (z. B. 23:00–05:00). Sind Start
-und Ende gleich – oder ist eines von beiden leer –, gilt das Fenster als leer
-und es wird nie geladen. Ist kein einziger Monat ausgewählt, ist die Netzladung
-ganzjährig inaktiv.
+Benötigte Einstellungen:
 
-**Hysterese bei "Min. SOC":** Ist die Schwelle einmal unterschritten, lädt die
-Netzladung durch bis "Max. SOC" – auch wenn der Ladestand zwischendurch wieder
-über "Min. SOC" steigt. Erst "Max. SOC" beendet den Vorgang.
+- **Netzladung aktiv**
+- **Start** und **Ende**
+- gewünschte Monate
+- **Netzladung Min. SOC** als Startschwelle
+- **Max. SOC** als Ladeziel
 
-Der Standardwert von "Netzladung Min. SOC" ist 100 %. Da der Ladestand
-praktisch immer darunter liegt, blockiert die Schwelle zunächst nichts – die
-Netzladung verhält sich also wie ohne diese Einstellung, bis bewusst ein
-niedrigerer Wert gesetzt wird.
+Beispiel: Bei einem Zeitfenster von 01:00 bis 05:00 Uhr, Min. SOC von 40 % und
+Max. SOC von 90 % startet die Netzladung nur, wenn der Ladezustand unter 40 %
+liegt. Anschließend lädt sie bis 90 % oder bis zum Ende des Zeitfensters.
 
-### Wann abgebrochen wird
+Zeitfenster über Mitternacht, etwa 23:00 bis 05:00 Uhr, werden unterstützt.
+Sind Start und Ende identisch oder ist eine Zeit nicht gesetzt, bleibt die
+Funktion inaktiv. Wenn ausreichend eigener PV-Strom zur Verfügung steht, wird
+die Netzladung beendet und der Speicher nutzt die Sonnenenergie.
 
-- **"Max. SOC" erreicht** → zusätzlich greift die
-  [Max-SOC-Sperre](#max-soc-sperre).
-- **PV-Überschuss über 50 W** am Smart Meter (bestätigt über zwei Zyklen) →
-  Abbruch mitten im Zeitfenster, nicht erst an dessen Ende. Der Speicher lädt
-  dann ohnehin über die geräteeigene Nullregelung mit der eigenen Sonne.
-  Ist der Messwert gerade nicht verfügbar (z. B. SunSpec-Modus nicht
-  erreichbar), blockiert das die Netzladung nicht.
-- **Ende des Zeitfensters.**
+### Netzdienliches Laden
 
-> **Technischer Hintergrund:** Geschrieben wird über den SunSpec-Modus
-> ("Immediate Controls"): Register 40051 auf Sollwertvorgabe, dann Register
-> 40049 auf den maximal möglichen negativen Sollwert (sättigt auf -100 % der
-> Referenz-Maximalleistung). Beide Register werden periodisch neu
-> geschrieben (abgeleitet aus dem geräteseitig gemeldeten Timeout, Register
-> 40050), weil das Gerät einen alten Sollwert sonst verwirft.
->
-> Der manuelle Service `start_grid_charge`/`stop_grid_charge` benutzt einen
-> **anderen** Weg (Basic-Mode-Register 41, absoluter Watt-Sollwert) und läuft
-> unabhängig von dieser Automatik.
+Das netzdienliche Laden verschiebt die Aufnahme von PV-Überschuss in ein
+späteres Zeitfenster. Dadurch bleibt morgens mehr freie Speicherkapazität für
+die ertragreiche Mittagszeit und Einspeisespitzen können reduziert werden.
 
-## Netzdienliches Laden
+Typische Einstellungen sind beispielsweise die Monate Mai bis August und eine
+Ladepause am Vormittag. Außerhalb der ausgewählten Monate und Zeiten arbeitet
+der Speicher normal.
 
-Diese Automatik **lädt nicht selbst** – sie hindert den Speicher innerhalb eines
-eigenen Zeitfensters gezielt **am Laden**. Gedacht für Zeiträume, in denen der
-Speicher den PV-Überschuss noch nicht einsammeln soll, damit das Laden in die
-Zeit mit dem höchsten PV-Ertrag rutscht (Mittagsspitze) und die Einspeisespitze
-geglättet wird.
+Benötigte Einstellungen:
 
-**Hat Vorrang vor preisoptimiertem Laden** (siehe
-[Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken)): Ist das
-Zeitfenster des netzdienlichen Ladens wirksam, pausiert preisoptimiertes Laden
-so lange dafür. Mit aktivierter Mindestprognose ist es nur wirksam, wenn der
-Prognosewert den Schwellwert erreicht. Sinn ergibt netzdienliches Laden ohnehin nur in ertragsreichen
-Monaten mit reichlich PV-Überschuss – typischerweise im Sommer, mittags –, und
-gerade dann ist kaum oder gar kein Netzbezug nötig, sodass preisoptimiertes
-Laden in diesem Zeitfenster wenig verlieren würde.
+- **Netzdienliches Laden aktiv**
+- **Start** und **Ende** der Ladepause
+- gewünschte Monate
+- optional **Mindest-PV-Prognose**
 
-Ablauf im Zeitfenster:
+#### Mindest-PV-Prognose
 
-1. Der Speicher beginnt über die geräteeigene Nullregelung von selbst zu laden.
-   Erreicht seine **tatsächliche Ladeleistung mindestens 50 W** (über zwei
-   Zyklen bestätigt), übernimmt die Integration: Sie schaltet in den
-   Sollwertvorgabemodus und stoppt die Ladung auf 0 %.
-2. Solange die **Netzeinspeisung** am Smart Meter danach mindestens 50 W
-   beträgt, bleibt die Ladung bewusst bei 0 % – genau das ist der Zweck.
-3. Fällt die Netzeinspeisung unter 50 W (ebenfalls über zwei Zyklen bestätigt),
-   geht der Speicher zurück in die SmartMeter-Nullregelung und darf wieder von
-   selbst laden. Steigt seine Ladeleistung erneut über 50 W, beginnt der Ablauf
-   von vorn.
+Über **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren** kann
+ein PV-Prognose-Sensor ausgewählt werden. Die Einstellung **Netzdienliches
+Laden Mindest-PV-Prognose** bestimmt anschließend, ab welcher erwarteten
+PV-Energie die Ladepause gilt.
 
-Ist die Ladeleistung des Speichers noch unbekannt, kann Schritt 1 nicht
-auslösen. Ist die Netzeinspeisung nach dem Eingriff unbekannt, bleibt die Ladung
-sicherheitshalber gestoppt (anders als bei der Netzladung, die bei fehlendem
-Messwert weiterläuft).
+- **0 kWh:** Die Prognoseprüfung ist ausgeschaltet.
+- Prognose erreicht den Mindestwert: Die Ladepause wird angewendet.
+- Prognose liegt darunter oder ist nicht verfügbar: Der Speicher darf bereits
+  früher laden.
 
-### Optionale PV-Prognose
+Beispiel: Für eine Ladepause von 08:00 bis 13:00 Uhr und einen Mindestwert von
+8 kWh greift die Pause nur an Tagen, an denen mindestens 8 kWh PV-Ertrag
+prognostiziert werden.
 
-Zusätzlich zu Schalter, Monaten und Uhrzeit kann eine Mindestprognose festgelegt
-werden. Als Quelle dient derselbe **PV-Prognose-Sensor**, der unter
-**Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren** auch für
-die Smart-Strategie des preisoptimierten Ladens ausgewählt wird. Unterstützt
-werden Energieangaben in Wh, kWh und MWh; intern vergleicht die Integration den
-auf kWh normalisierten Sensorzustand.
+### Preisoptimiertes Laden
 
-- `0 kWh`: Prognoseprüfung aus, das bisherige statische Verhalten bleibt aktiv.
-- Prognose gleich oder über dem Mindestwert: Ladepause gilt wie bisher.
-- Prognose unter dem Mindestwert: Ladepause entfällt vollständig, damit der
-  Speicher bereits früh mit PV-Überschuss laden kann.
-- Sensor fehlt, ist `unknown`/`unavailable` oder nicht numerisch: Ladepause
-  entfällt ebenfalls (Fail-open), damit fehlende Prognosedaten keine frühe
-  PV-Ladung verhindern.
+Das preisoptimierte Laden verwendet einen bereits in Home Assistant
+vorhandenen Strompreis-Sensor. Die Integration selbst ruft keine Strompreise
+von einem Anbieter ab. Geeignet sind beispielsweise Sensoren von Tibber,
+Nordpool, EPEX Spot, ENTSO-E oder aWATTar sowie entsprechend aufgebaute
+Template-Sensoren.
 
-Der Vergleich verwendet den unveränderten Prognosewert. Der unter
-„Konfigurieren“ einstellbare **nutzbare Anteil** gilt nur für die Bedarfsrechnung
-der preisoptimierten Smart-Strategie. Änderungen am Sensor oder Schwellwert
-werden sofort neu bewertet. Wird die Prognose während einer aktiven Ladepause
-zu niedrig oder ungültig, setzt die Integration den Speicher sicher in die
-SmartMeter-Nullregelung zurück. In diesem Fall blockiert das Zeitfenster auch
-das preisoptimierte Laden nicht.
+#### Einrichtung
 
-> **Beispiel:** Ladepause 08:00–13:00 Uhr, Mindestprognose 8 kWh, Prognose
-> 4 kWh wegen Wolken und Regen ab Mittag: Die Ladepause greift nicht; der
-> Speicher darf bereits morgens laden.
-
-### Einstellungen
-
-| Entität | Beschreibung |
-| --- | --- |
-| Netzdienliches Laden aktiv | Ein-/Ausschalten |
-| Start / Ende | Zeitfenster (HH:MM) |
-| Januar … Dezember (12 Schalter) | In welchen Monaten das Zeitfenster gilt – z. B. nur Mai bis August, 11–14 Uhr |
-| Netzdienliches Laden Mindest-PV-Prognose | Optionaler Schwellwert in kWh; 0 deaktiviert die Prognoseprüfung |
-| Max. SOC | Ziel für die Max-SOC-Sperre (geteilte Einstellung) |
-
-Eine eigene Leistungseinstellung wird hier **nicht** gebraucht, weil
-netzdienliches Laden nie einen Sollwert größer 0 schreibt.
-
-Es gibt keinen Vorbelegungsschritt bei der Ersteinrichtung – die Automatik ist
-ab Werk aus und wird ausschließlich über diese Entitäten konfiguriert. Alle
-Werte bleiben über Neustarts hinweg erhalten.
-
-## Preisoptimiertes Laden
-
-Lädt den Speicher dann aus dem Netz, wenn der Strom günstig ist, und lässt ihn
-in teuren Phasen den Hausverbrauch decken – vergleichbar mit dem, was EVCC oder
-cleverPV für dynamische Tarife machen.
-
-Die Integration ruft **keine Strompreise selbst ab**. Sie wertet einen Sensor
-aus, den es in deinem Home Assistant bereits gibt: Tibber, Nordpool, EPEX Spot,
-ENTSO-e, aWATTar oder ein eigener Template-Sensor.
-
-Erkannt werden die üblichen Vorschau-Attribute (`raw_today`/`raw_tomorrow`,
-`today`/`tomorrow`, `data`, `forecast`, `prices`) – sowohl als Liste von
-Zeitfenstern als auch als reine Zahlenliste für einen Kalendertag, stündlich wie
-viertelstündlich. Preise in ct/kWh werden anhand der Einheit des Sensors
-automatisch in EUR/kWh umgerechnet.
-
-### Einrichtung
-
-**Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
+Unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
+stehen folgende Angaben zur Verfügung:
 
 | Feld | Beschreibung |
 | --- | --- |
-| Strompreis-Sensor | Sensor mit dem aktuellen Arbeitspreis. Aus seinen Vorschau-Attributen entstehen die Ladefenster der Strategien "Relativ" und "Smart" |
-| Attribut mit der Preisvorschau | Optional. Nur nötig, wenn die automatische Erkennung bei deinem Sensor danebenliegt – dann den Attributnamen eintragen (z. B. `raw_today`) |
-| Preis-Einheit | "Automatisch" leitet sie aus dem Sensor ab. EUR/kWh bzw. ct/kWh erzwingen die Interpretation, falls der Sensor keine oder eine irreführende Einheit meldet |
-| PV-Prognose-Sensor | Optionale gemeinsame Quelle für "Smart" und die Mindestprognose des netzdienlichen Ladens. Erwartet die Erzeugung als Energie, z. B. `sensor.energy_production_tomorrow` (Forecast.Solar) oder das Solcast-Pendant |
-| Nutzbarer Anteil der PV-Prognose | Nur für "Smart": Wie viel der Prognose tatsächlich im Speicher landen dürfte (Standard 80 %) – deckt Eigenverbrauch, Wetterunsicherheit und Wandlungsverluste ab. Der Schwellwert des netzdienlichen Ladens verwendet den unveränderten Sensorwert |
+| Strompreis-Sensor | Sensor mit aktuellem Preis und, je nach Strategie, zukünftigen Preisen |
+| Attribut mit der Preisvorschau | Optionaler Attributname, falls die automatische Erkennung nicht passt |
+| Preis-Einheit | Automatische Erkennung oder feste Auswahl von EUR/kWh beziehungsweise ct/kWh |
+| PV-Prognose-Sensor | Optional für die Strategie „Smart“ und das netzdienliche Laden |
+| Nutzbarer Anteil der PV-Prognose | Erwarteter Anteil der Prognose, der zum Laden verfügbar ist |
 
-Alles Weitere läuft über Entitäten am Gerät und ist damit automatisierbar und in
-Dashboards nutzbar. Der Hauptschalter **"Preisoptimiertes Laden aktiv"** schaltet
-die Automatik ein; ab Werk ist sie aus.
+Anschließend die gewünschte **Strategie** wählen und den Schalter
+**Preisoptimiertes Laden aktiv** einschalten.
 
-### Strategien
+#### Strategien
 
 | Strategie | Verhalten |
 | --- | --- |
-| **Manuell / Aus** | Automatik stillgelegt, ohne die übrigen Einstellungen zu verlieren |
-| **Absoluter Preis** | Lädt, solange der Preis die "Preisgrenze" nicht überschreitet – *"lade, wenn Strom unter 15 ct/kWh kostet"* |
-| **Relativ / Günstigste Stunden** | Lädt in den X günstigsten Stunden – *"lade in den 3 billigsten Stunden"*. Die Auswahl erfolgt vorausschauend über die bekannten Preise |
-| **Smart / PV-optimiert** | Wie "Relativ", ermittelt die Stundenzahl aber aus dem tatsächlichen Bedarf abzüglich PV-Prognose |
+| Manuell / Aus | Preisautomatik ist ausgeschaltet, Einstellungen bleiben erhalten |
+| Absoluter Preis | Lädt, solange der aktuelle Preis die festgelegte Preisgrenze nicht überschreitet |
+| Relativ / Günstigste Stunden | Nutzt die eingestellte Anzahl der günstigsten Stunden im verfügbaren Vorschauzeitraum |
+| Smart / PV-optimiert | Berücksichtigt zusätzlich Ladezustand, Speicherkapazität und PV-Prognose |
 
-Der Planungshorizont ist ein gleitendes **24-Stunden-Fenster** über die bekannten
-Preise (Rest von heute plus – sobald veröffentlicht – morgen), nicht der
-Kalendertag. "Die 3 günstigsten Stunden" heißt also: die drei günstigsten der
-nächsten 24 Stunden.
+Für **Relativ** und **Smart** wird ein Preis-Sensor mit zukünftigen Preisen
+benötigt. Die Planung betrachtet die bekannten Preise der kommenden 24
+Stunden. Sind noch keine Preise für den nächsten Tag verfügbar, plant die
+Integration mit den bereits bekannten Zeiträumen.
 
-**So rechnet "Smart":**
+Bei der Smart-Strategie reduziert eine erwartete PV-Erzeugung den aus dem Netz
+zu ladenden Energiebedarf. Deckt die Prognose den Bedarf vollständig, findet
+keine Netzladung statt. Die Einstellung **Anzahl Stunden** bleibt die maximale
+zulässige Ladedauer.
 
-1. Fehlende Energie = ("Max. SOC" − aktueller Ladestand) × Speicherkapazität
-2. minus nutzbarer Anteil der PV-Prognose
-3. Rest geteilt durch die vom Gerät gemeldete Referenz-Maximalleistung =
-   benötigte Ladestunden
-4. Genau so viele der günstigsten Stunden werden eingeplant
+#### Preisgrenze und Neutralpreis
 
-Deckt die Prognose den Bedarf vollständig, wird gar kein Netzstrom eingekauft
-(Status "PV-Prognose deckt Bedarf"). "Anzahl Stunden" bleibt dabei die
-**Obergrenze** – es wird nie mehr eingekauft, als du zugelassen hast. Sind
-Kapazität, Ladestand oder Ladeleistung gerade unbekannt (z. B. SunSpec-Modus
-nicht erreichbar), verhält sich "Smart" wie "Relativ".
+Die beiden Preiswerte teilen den Tarif in drei Bereiche:
 
-> **Beispiel:** "Max. SOC" 80 %, aktuell 40 %, 10 kWh Speicher → 4 kWh fehlen.
-> Die Prognose meldet für morgen 8 kWh, davon gelten 80 % als nutzbar → 6,4 kWh.
-> Der Bedarf ist gedeckt, es wird nachts nichts zugekauft.
-
-### Leistung, Ziel-SOC und Abbruchgründe
-
-Geladen wird wie bei der Netzladung immer mit der **maximal möglichen
-Leistung** – eine eigene (oder geteilte) Watt-Einstellung dafür gibt es
-nicht.
-
-Der **Ziel-SOC ist derselbe Wert wie "Max. SOC"** – keine eigene Einstellung.
-Ist er erreicht, endet die Netzladung UND zusätzlich greift die
-[Max-SOC-Sperre](#max-soc-sperre), der Speicher wird bei 0 % gehalten – genau
-wie bei der Netzladung.
-
-Weitere Abbruchgründe, jeweils sofort wirksam (nicht erst im nächsten
-60-Sekunden-Takt):
-
-- **PV-Überschuss** über 50 W am Smart Meter – die eigene Sonne ist immer
-  günstiger als Netzstrom.
-- **Netzladung aktiv** – das zeitgesteuerte Laden hat Vorrang.
-- **Netzdienliches Laden im wirksamen Zeitfenster** – siehe
-  [Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken). Solange
-  das Zeitfenster des netzdienlichen Ladens aktiv ist und eine konfigurierte
-  Mindestprognose erfüllt wird, pausiert
-  preisoptimiertes Laden dafür, egal ob netzdienliches Laden gerade selbst
-  eingreift oder nicht. Bei zu niedriger oder ungültiger Prognose bleibt das
-  preisoptimierte Laden freigegeben.
-
-Der Ladeplan wird **alle 60 Sekunden** neu berechnet, zusätzlich sofort bei jeder
-Einstellungsänderung und bei jedem Zustandswechsel des Preis- oder
-Prognose-Sensors. Die oben genannten Abbruchgründe werden dagegen bei **jedem**
-Abfragezyklus geprüft, greifen also ohne Verzögerung.
-
-> **Technischer Hintergrund:** Geladen wird über denselben SunSpec-Schreibpfad
-> wie bei der Netzladung (Register 40051 auf Sollwertvorgabe, Register 40049
-> auf den maximal möglichen negativen Sollwert). Ist die Bedingung nicht
-> erfüllt, geht der Speicher in die SmartMeter-Nullregelung zurück.
-
-### Neutralpreis-Pausezone
-
-Lädt die Automatik gerade nicht aus dem Netz (der aktuelle Preis liegt über
-der Preisgrenze), aber unterhalb des **Neutralpreises**, wird der Speicher
-nicht der normalen SmartMeter-Nullregelung überlassen, sondern aktiv
-**pausiert** – Laden UND Entladen werden gestoppt, der gesamte Hausverbrauch
-läuft über das Netz. Grund: die im Speicher gespeicherte, günstig eingekaufte
-Energie würde durch die Speicherverluste beim Entladen teurer werden als der
-direkte Netzbezug in diesem mittleren Preisband. Erst **ab dem Neutralpreis**
-lohnt sich die Entladung wieder trotz der Verluste – der Speicher geht dann
-zurück in die normale Nullregelung, das Smart Meter übernimmt die Entladung
-wieder.
-
-```
-Preis ≤ Preisgrenze        →  Lade aus Netz
-Preisgrenze < Preis <       →  Pausiert (Preisband): Laden und Entladen gestoppt
-           Neutralpreis
-Preis ≥ Neutralpreis       →  Normale SmartMeter-Nullregelung (Entladung erlaubt)
-```
-
-Die Pausezone gilt für **alle drei Strategien** und weicht denselben
-Abbruchgründen wie preisoptimiertes Laden selbst – insbesondere einem
-bestätigten PV-Überschuss sowie einem aktiven Zeitfenster des netzdienlichen
-Ladens, damit freie Sonnenenergie weiterhin ungehindert in den Speicher
-fließen kann. Der Neutralpreis muss über der Preisgrenze liegen;
-andernfalls erscheint ein Reparaturhinweis unter *Einstellungen → Geräte &
-Dienste → Reparaturen*, und die Pausezone bleibt inaktiv (unverändertes
-Verhalten wie vor Einführung dieser Einstellung).
-
-### Statusanzeige
-
-Der Sensor **"Preisoptimiertes Laden Status"** nennt in Klartext den Grund für
-das aktuelle Verhalten:
-
-| Status | Bedeutung |
+| Preisbereich | Verhalten |
 | --- | --- |
-| Aus | Hauptschalter aus oder Strategie "Manuell / Aus" |
-| Keine Preisdaten | Kein Sensor konfiguriert, oder seine Attribute lassen sich nicht auswerten |
-| Warten auf Preisabfall | Alles bereit, aber der aktuelle Zeitraum gehört nicht zu den ausgewählten Fenstern |
-| Lade aus Netz | Die Zwangsladung läuft |
-| PV-Prognose deckt Bedarf | Strategie "Smart": morgen kommt genug Sonne, es wird nichts zugekauft |
-| Pausiert (PV-Überschuss) | Am Smart Meter wird Einspeisung gemessen |
-| Pausiert (Max. SOC) | Die übergeordnete Max-SOC-Sperre greift |
-| Pausiert (Netzladung aktiv) | Das zeitgesteuerte Laden hat gerade Vorrang |
-| Pausiert (Netzdienliches Laden aktiv) | Das Zeitfenster des netzdienlichen Ladens ist gerade aktiv und hat Vorrang – siehe [Zusammenspiel der Lade-Automatiken](#die-drei-lade-automatiken) |
-| Pausiert (Preisband) | Preis liegt zwischen Preisgrenze und Neutralpreis – siehe [Neutralpreis-Pausezone](#neutralpreis-pausezone) |
+| Geplanter günstiger Zeitraum | Speicher wird aus dem Netz geladen |
+| Preis zwischen Preisgrenze und Neutralpreis | Speicher pausiert; der Hausverbrauch wird aus dem Netz gedeckt |
+| Preis ab Neutralpreis | Speicher steht wieder für den normalen Betrieb zur Verfügung |
 
-Die Attribute dieses Sensors zeigen zusätzlich Strategie, aktuellen Preis,
-wirksame Preisgrenze, Neutralpreis, benötigte Stunden, eingerechnete
-PV-Prognose, die konfigurierten Quell-Sensoren und alle geplanten
-Zeitfenster – hilfreich, wenn eine Entscheidung einmal nicht nachvollziehbar
-erscheint.
+Der Neutralpreis muss über der Preisgrenze liegen. Andernfalls weist Home
+Assistant unter **Einstellungen → Geräte & Dienste → Reparaturen** darauf hin.
 
-### Netzladung und preisoptimiertes Laden schließen sich aus
+Der Sensor **Preisoptimiertes Laden Status** erklärt den aktuellen Zustand,
+beispielsweise **Lade aus Netz**, **Warten auf Preisabfall**, **Keine
+Preisdaten** oder **PV-Prognose deckt Bedarf**. Der Sensor **Nächster Start**
+zeigt das nächste geplante Ladefenster.
 
-Netzladung und preisoptimiertes Laden benutzen denselben Schreibpfad und dürfen
-deshalb nicht gleichzeitig laufen. Schaltest du eines ein, während das andere
-aktiv ist, passiert **zunächst nichts**: Der Schalter springt zurück, und du
-bekommst eine Rückfrage – als Benachrichtigung und als Eintrag unter
-**Einstellungen → Geräte & Dienste → Reparaturen**.
+## Zeitfenster und Überschneidungen
 
-- **Bestätigen** – das jeweils andere Feature wird abgeschaltet, das gewünschte
-  aktiviert.
-- **Abbrechen** – es ändert sich nichts.
+Die Zeitfenster der zeitgesteuerten Netzladung und des netzdienlichen Ladens
+dürfen sich in denselben Monaten nicht überschneiden. Die Integration prüft
+dies automatisch.
 
-Das gilt in beide Richtungen.
+- Bei einer unzulässigen Monatsauswahl wird die Änderung abgelehnt.
+- Bei einer unzulässigen Änderung von Start oder Ende wird die geänderte Zeit
+  geleert und Home Assistant zeigt eine Benachrichtigung an.
 
-Für **Automationen**, die keinen Dialog beantworten können, gibt es den Service
-`sax_power.set_price_charge_enabled` mit dem Feld `force` – damit wird die
-Netzladung ohne Rückfrage abgeschaltet.
+Zeitlich identische Fenster sind zulässig, wenn sie ausschließlich in
+verschiedenen Monaten aktiv sind. Für Automationen können Start und Ende mit
+den Aktionen `sax_power.set_timed_charge_window` und
+`sax_power.set_grid_serving_window` gemeinsam gesetzt werden.
 
-## Zeitfenster dürfen sich nicht überschneiden
+## Energy-Dashboard
 
-Das Zeitfenster des netzdienlichen Ladens darf sich nicht mit dem der Netzladung
-überlappen. Dabei zählen **Tageszeit UND aktive Monate zusammen**: Laufen beide
-Fenster in verschiedenen Monaten (z. B. Netzladung nur November–Januar,
-netzdienliches Laden nur Mai–August), dürfen sich die Uhrzeiten beliebig
-überlappen – sie sind ja nie gleichzeitig aktiv.
+Die Sensoren **Geladene Energie (gesamt)** und **Entladene Energie (gesamt)**
+lassen sich direkt als Batteriesystem verwenden:
 
-Was passiert bei einer echten Überschneidung (gleiche Tageszeit **und**
-gemeinsamer Monat)?
+**Einstellungen → Dashboards → Energie → Batteriesysteme**
 
-| Geänderte Einstellung | Reaktion |
+Dort den ersten Sensor für die in den Speicher geladene und den zweiten für
+die aus dem Speicher entladene Energie auswählen. Die Zählerstände bleiben
+über Neustarts hinweg erhalten.
+
+## Aktionen für Automationen
+
+Alle Aktionen werden unter **Entwicklertools → Aktionen** ausgeführt und über
+das Feld `device_id` dem gewünschten SAX-Power-Gerät zugeordnet.
+
+| Aktion | Verwendung |
 | --- | --- |
-| **Monats-Schalter** | Die Änderung wird abgelehnt und im Frontend als Fehler angezeigt. Die bisherige Auswahl bleibt bestehen |
-| **Start- oder Endzeit** | Die Änderung wird angenommen, aber die gerade geänderte Zeit wird **geleert** – dazu kommt eine Benachrichtigung mit beiden betroffenen Zeitfenstern |
+| `sax_power.start_grid_charge` | Manuelle Netzladung mit einem Leistungssollwert starten |
+| `sax_power.stop_grid_charge` | Manuelle Netzladung beenden |
+| `sax_power.set_timed_charge_window` | Start und Ende der zeitgesteuerten Netzladung gemeinsam setzen |
+| `sax_power.set_grid_serving_window` | Start und Ende des netzdienlichen Ladens gemeinsam setzen |
+| `sax_power.refresh_price_plan` | Ladeplan nach aktualisierten Preisdaten sofort neu berechnen |
+| `sax_power.set_price_charge_enabled` | Preisoptimiertes Laden per Automation schalten |
+| `sax_power.create_dashboard` | Mitgeliefertes Dashboard nachträglich anlegen |
+| `sax_power.reinstall_dashboard` | Dashboard auf den Auslieferungszustand zurücksetzen |
 
-Eine leere Start- oder Endzeit bedeutet immer: Das Feature läuft nicht. Ein
-geleertes Feld muss also bewusst neu gesetzt werden.
+Die für eine Aktion verfügbaren Felder und Beschreibungen zeigt Home Assistant
+direkt im Aktionseditor an. Für den normalen Betrieb werden die manuellen
+Aktionen zum Starten und Stoppen einer Netzladung nicht benötigt.
 
-**Warum wird geleert statt zurückgesetzt?** Start und Ende sind zwei getrennte
-Entitäten. Verschiebt man ein Fenster in zwei Schritten (erst Start, dann Ende),
-prüft Home Assistant jeden Schritt einzeln gegen den noch alten Wert der anderen
-Grenze. Ein rein dadurch entstehender Zwischenzustand könnte sonst fälschlich als
-Überschneidung gelten und die Änderung dauerhaft mit dem alten Wert blockieren.
-
-**Praxistipps:**
-
-- Ein ganzes Zeitfenster in einem Rutsch verschieben: die Services
-  `sax_power.set_timed_charge_window` bzw. `sax_power.set_grid_serving_window`
-  benutzen – sie setzen Start und Ende **atomar** und prüfen nur das tatsächliche
-  Ziel-Fenster.
-- Beim Umstellen auf verschiedene Monate bei bereits überlappenden Zeiten: erst
-  die Monate beider Features anpassen, dann die Zeiten (oder umgekehrt) – nicht
-  beides gleichzeitig schrittweise verschieben.
-
-## Services (für Automationen)
-
-Alle Services werden über `device_id` an das jeweilige SAX-Gerät adressiert –
-relevant, wenn mehrere Speicher eingerichtet sind.
-
-**`sax_power.start_grid_charge`** – startet eine Netzladung mit festem
-Leistungssollwert und wiederholt den Schreibvorgang periodisch im Hintergrund,
-solange sie aktiv ist. Läuft unabhängig von der Netzladungs-Automatik.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-| `power` | Sollwert in Watt (−32768 bis 32767) |
-
-**`sax_power.stop_grid_charge`** – beendet diese manuelle Netzladung.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-
-**`sax_power.set_timed_charge_window`** – setzt Start- und Endzeit der
-Netzladung atomar in einem Aufruf (siehe
-[Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden)).
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-| `start` | Startzeit |
-| `end` | Endzeit |
-
-**`sax_power.set_grid_serving_window`** – dasselbe für das netzdienliche Laden.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-| `start` | Startzeit |
-| `end` | Endzeit |
-
-**`sax_power.refresh_price_plan`** – berechnet den Ladeplan des preisoptimierten
-Ladens sofort neu und wendet ihn an, statt auf die nächste reguläre Prüfung
-(alle 60 s) zu warten.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-
-**`sax_power.set_price_charge_enabled`** – schaltet das preisoptimierte Laden
-ein oder aus. Nicht-interaktiver Gegenpart zum Schalter: Steht die Netzladung im
-Weg, schlägt der Aufruf mit einem Fehler fehl – mit `force: true` wird sie
-stattdessen ohne Rückfrage abgeschaltet.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-| `enabled` | Ein- (`true`) oder ausschalten (`false`) |
-| `force` | Optional, Standard `false`. Schaltet eine aktive Netzladung ohne Rückfrage ab |
-
-**`sax_power.create_dashboard`** – legt das mitgelieferte Dashboard "SAX Power"
-nachträglich an (siehe [Schritt 3](#schritt-3-dashboard-anlegen-optional)) –
-z. B. wenn es bei der Ersteinrichtung abgewählt oder später gelöscht wurde.
-Existiert es bereits, passiert nichts.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-
-**`sax_power.reinstall_dashboard`** – setzt das Dashboard "SAX Power" auf den
-Auslieferungszustand zurück, z. B. nach eigenen Anpassungen. Überschreibt im
-Unterschied zu `create_dashboard` auch ein bereits bestehendes Dashboard;
-wurde es zwischenzeitlich komplett gelöscht, legt der Service es stattdessen
-neu an.
-
-| Feld | Beschreibung |
-| --- | --- |
-| `device_id` | SAX Power Gerät |
-
-## Verbindungsdaten nachträglich ändern
+## Verbindung nachträglich ändern
 
 IP-Adresse, Port, Slave-IDs und Aktualisierungsintervall lassen sich jederzeit
-ändern, z. B. wenn der Speicher eine neue IP bekommen hat:
+anpassen:
 
-**Einstellungen → Geräte & Dienste → SAX Power Home → ⋮ (Gerät) →
-Neu konfigurieren**
+**Einstellungen → Geräte & Dienste → SAX Power Home → Neu konfigurieren**
 
-Das Formular ist mit den gespeicherten Werten vorbelegt. Die neue Verbindung
-wird vor dem Speichern geprüft; bei Erfolg lädt die Integration automatisch mit
-den neuen Daten neu.
+Die neuen Verbindungsdaten werden vor dem Speichern geprüft. Nach erfolgreicher
+Prüfung lädt Home Assistant die Integration automatisch neu.
 
 ## Diagnose und Fehlersuche
 
-**Diagnose-Export:** **Einstellungen → Geräte & Dienste → SAX Power Home →
-⋮ (Gerät) → Diagnose herunterladen**
+| Problem | Mögliche Ursache und Lösung |
+| --- | --- |
+| Verbindung kann nicht hergestellt werden | IP-Adresse und Port prüfen und sicherstellen, dass Home Assistant den Speicher im lokalen Netzwerk erreicht |
+| Modbus-Fehler bei der Einrichtung | Slave-IDs prüfen; die Standardwerte sind 64 und 100 |
+| Viele Detailwerte sind unbekannt | SunSpec-Slave-ID und Firmware prüfen; empfohlen werden Master V61/Gateway V54 oder neuer |
+| Ladefunktionen reagieren nicht | Erreichbarkeit des SunSpec-Modus sowie Statussensoren und ausgewählte Monate prüfen |
+| Netzladung startet nicht | Zeitfenster, aktive Monate, Min. SOC und Max. SOC kontrollieren |
+| Preisoptimiertes Laden zeigt „Keine Preisdaten“ | Preis-Sensor, Vorschauattribut und Preis-Einheit unter **Konfigurieren** prüfen |
+| Zeitangabe wurde geleert | Zeitfenster von Netzladung und netzdienlichem Laden überschneiden sich |
+| PV-Leistung zeigt dauerhaft 0 W | Der verwendete Smart Meter stellt diesen Wert möglicherweise nicht bereit |
 
-Die Datei enthält den kompletten internen Zustand (alle Messwerte, Max-SOC-
-Sperre, Zustand der drei Lade-Automatiken, ausgewerteter Ladeplan,
-Erreichbarkeit des SunSpec-Modus). Die IP-Adresse wird automatisch unkenntlich
-gemacht – die Datei kann also gefahrlos geteilt werden.
-
-| Symptom | Wahrscheinliche Ursache | Was tun |
-| --- | --- | --- |
-| Verbindung schlägt bei der Einrichtung fehl | IP/Port falsch oder Speicher nicht erreichbar | IP im Router prüfen, Erreichbarkeit testen |
-| Verbindung steht, aber Modbus-Fehler | Falsche Slave-ID | Slave-ID (Basic Mode) prüfen, Standard 64 |
-| Viele Sensoren zeigen "unbekannt" | SunSpec-Modus nicht erreichbar | Slave-ID (SunSpec, Standard 100) und Firmware prüfen (Master V61/Gateway V54 oder neuer). Wird zusätzlich als Reparatur-Hinweis angezeigt |
-| Lade-Automatiken tun nichts | SunSpec-Modus nicht erreichbar – alle drei brauchen ihn zum Schreiben | wie oben |
-| Netzladung startet nicht | "Netzladung Min. SOC" zu niedrig, Monat nicht ausgewählt, Zeitfenster leer, oder PV-Überschuss über 50 W | Einstellungen prüfen, Sensor "Zeitgesteuertes Laden aktiv" beobachten |
-| Preisoptimiertes Laden meldet "Keine Preisdaten" | Der Sensor liefert keine auswertbare Vorschau | Attributnamen im Options-Dialog fest vorgeben; Diagnose-Export zeigt den ausgewerteten Plan |
-| Neutralpreis-Pausezone greift nie | "Neutralpreis" liegt nicht über "Preisgrenze" | Reparatur-Hinweis unter Einstellungen → Geräte & Dienste → Reparaturen beachten, Neutralpreis anheben |
-| Speicher lädt und entlädt gar nicht mehr | Die [Max-SOC-Sperre](#max-soc-sperre) hält ihn bei 0 % | "Max. SOC" höher setzen oder Netzbezug abwarten |
-| Zeit lässt sich nicht setzen / wurde geleert | Überschneidung der Zeitfenster | Siehe [Zeitfenster](#zeitfenster-dürfen-sich-nicht-überschneiden) |
-| "Ladestatus Akku" (oder andere Klartext-Sensoren) erzeugt viele Einträge im Protokoll/in der Aktivität | Der Wert wird alle 2 s abgefragt und kann entsprechend oft wechseln; Home Assistant blendet nur Sensoren mit Einheit/state_class automatisch aus dem Logbuch aus – für reine Klartext-Sensoren geht das nicht, ohne sie kaputt zu machen | Entity-ID in Entwicklertools → Zustände nachschlagen und gezielt ausschließen: `logbook:` → `exclude:` → `entities:` in der `configuration.yaml` (siehe [Logbuch-Dokumentation](https://www.home-assistant.io/integrations/logbook/#exclude)) |
+Unter **Einstellungen → Geräte & Dienste → SAX Power Home → Diagnose
+herunterladen** kann eine Diagnosedatei erstellt werden. Sie enthält die für
+die Fehlersuche relevanten Zustände; die IP-Adresse wird dabei unkenntlich
+gemacht. Die Datei kann einem Fehlerbericht auf GitHub beigefügt werden.
 
 ## Bekannte Einschränkungen
 
-- **Vorzeichenkonvention von Register 40029** (Wirkleistung Speicher Summe) ist
-  herstellerseitig nicht dokumentiert. Die Integration nimmt an:
-  positiv = Entladung/Einspeisung.
-- **Vorzeichenkonvention von Register 40049** (Leistungsvorgabe) ist ebenfalls
-  nicht dokumentiert. In Analogie zu 40029 gilt: negativ = Laden. Die
-  Integration schreibt hier bewusst nur negative Sollwerte.
-- **Vorzeichenkonvention von Register 40072** (Summenwirkleistung Netz) ist
-  ebenfalls nicht dokumentiert; der Rohregisterwert meldet positiv bei
-  Einspeisung. Die Integration negiert ihn beim Einlesen, damit
-  `sensor.sax_power_smartmeter_power` (angezeigt als "Netzleistung") die
-  Standarddarstellung zeigt: negativ = Einspeisung/PV-Überschuss, positiv =
-  Netzbezug. Dieselbe Negation gilt für die drei Phasenregister 40073-40075
-  ("Netzleistung L1/L2/L3"), da sie sich denselben Registerblock und damit
-  dasselbe rohe Vorzeichen teilen - ihre Summe entspricht weiterhin der
-  Netzleistung.
-- **Keine ferngesteuerte manuelle Entladung.** Positive Sollwerte auf Register
-  40049 bzw. Register 41 wurden gegen echte Hardware getestet und zeigten keine
-  Wirkung; der Hersteller hat bestätigt, dass das nicht vorgesehen ist.
-- **"Max. SOC" ist kein Geräteregister**, sondern Software-Logik – siehe
-  [Max-SOC-Sperre](#max-soc-sperre). Solange sie greift, entlädt sich der
-  Speicher auch nicht zur Eigenverbrauchsdeckung.
-- **Der Service `start_grid_charge`** schreibt einen absoluten Watt-Sollwert auf
-  Basic-Mode-Register 41. Ob dieses Register auf einem konkreten Gerät
-  freigeschaltet ist, hängt von Gerät und Firmware ab und sollte vor dem
-  produktiven Einsatz geprüft werden.
-- **SunSpec-Modus ist optional**, aber für alles Schreibende nötig. Ist er nicht
-  erreichbar (z. B. zu alte Firmware – Master V61/Gateway V54 oder neuer
-  erforderlich), bleiben die Basic-Mode-Sensoren verfügbar; die SunSpec-Sensoren
-  zeigen "unbekannt", und die drei Lade-Automatiken sowie die Max-SOC-Sperre
-  können nicht greifen. Ein dauerhafter Ausfall wird als Reparatur-Hinweis
-  angezeigt.
-- **Preisoptimiertes Laden hängt an der Datenqualität des Preis-Sensors.**
-  Liefert er nur den aktuellen Preis ohne Vorschau, funktioniert "Absoluter
-  Preis" weiterhin; "Relativ" und "Smart" können mangels Zukunftsdaten keine
-  Fenster planen (Status "Keine Preisdaten").
-- **Die Strategie "Smart" braucht die Speicherkapazität** (SunSpec-Register
-  40097) und einen PV-Prognose-Sensor. Fehlt eines davon, verhält sie sich wie
-  "Relativ".
+- Eine ferngesteuerte manuelle Entladung wird vom Speicher nicht unterstützt.
+- Erweiterte Messwerte und Ladefunktionen benötigen den SunSpec-Modus. Die
+  grundlegenden Messwerte bleiben auch dann verfügbar, wenn dieser Modus nicht
+  erreichbar ist.
+- Die Strategien **Relativ** und **Smart** benötigen zukünftige Preisdaten. Mit
+  einem Sensor, der nur den aktuellen Preis liefert, steht weiterhin die
+  Strategie **Absoluter Preis** zur Verfügung.
+- Die Strategie **Smart** benötigt zusätzlich Speicherkapazität und
+  PV-Prognose. Fehlen diese Angaben, verhält sie sich wie **Relativ**.
 
-## Weiterführende Dokumentation
+## Hilfe und Entwicklung
 
-- [DEVELOPMENT.md](DEVELOPMENT.md) – Interna: Datenfluss, Register-Mapping,
-  Tests, lokale Entwicklung (DevContainer).
-- [anforderung.yaml](anforderung.yaml) – die vollständigen, aktuell gültigen
-  Anforderungen an die Integration.
-- [AGENTS.md](AGENTS.md) – für KI-Coding-Agenten: Setup-, Test- und
-  Lint-Befehle, Code-Stil, Git-Workflow.
+Fehler und Verbesserungsvorschläge können über die
+[GitHub-Issues](https://github.com/dr-dimitri/sax-ha/issues) gemeldet werden.
+Für eine zügige Analyse bitte die Home-Assistant-Version, die Firmware des
+Speichers, eine kurze Beschreibung des beobachteten Verhaltens und nach
+Möglichkeit die Diagnosedatei angeben.
+
+Technische Informationen für Mitwirkende befinden sich in:
+
+- [DEVELOPMENT.md](DEVELOPMENT.md) – Architektur, lokale Entwicklung und Tests
+- [anforderung.yaml](anforderung.yaml) – vollständige Verhaltensanforderungen
+- [AGENTS.md](AGENTS.md) – Arbeitsregeln für Coding-Agenten

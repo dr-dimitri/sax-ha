@@ -1,9 +1,9 @@
 start_grid_charge:
   name: Netzladung starten
   description: >-
-    Startet die Netzladung des SAX Speichers. Schaltet das Gerät implizit in
-    den P-Sollwert-Modus (Register 40042) und schreibt den Sollwert
-    periodisch (alle 30s), bis stop_grid_charge aufgerufen wird.
+    Fordert eine manuelle Netzladung über den zentralen SunSpec-Steuerpfad an.
+    Die Max-SOC-Sperre hat Vorrang; der manuelle Auftrag hat Vorrang vor den
+    Ladeautomatiken und bleibt bis zum Aufruf von stop_grid_charge aktiv.
   fields:
     device_id:
       name: Gerät
@@ -15,20 +15,23 @@ start_grid_charge:
     power:
       name: Leistung
       description: >-
-        Sollwert für die Netzladung in Watt. Vorzeichenkonvention ist
-        herstellerseitig nicht dokumentiert und sollte am realen Gerät
-        verifiziert werden.
+        Strikt negativer Sollwert für die Netzladung in Watt. Null und positive
+        Werte sind nicht zulässig; eine manuelle Entladung wird nicht unterstützt.
       required: true
       selector:
         number:
           min: -32768
-          max: 32767
+          max: -1
+          step: 1
           unit_of_measurement: W
           mode: box
 
 stop_grid_charge:
   name: Netzladung stoppen
-  description: Beendet die periodischen Sollwert-Schreibbefehle der Netzladung.
+  description: >-
+    Beendet den manuellen Ladeauftrag, wartet das Ende des gemeinsamen
+    Schreib-Tasks ab und setzt den Speicher bestmöglich auf die
+    SmartMeter-Nullregelung zurück.
   fields:
     device_id:
       name: Gerät

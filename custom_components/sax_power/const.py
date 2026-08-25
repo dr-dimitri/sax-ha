@@ -119,8 +119,9 @@ ALL_MONTHS = frozenset(range(1, 13))
 # ACHTUNG für spätere Umsetzungen ("manuelle Entladung" o. Ä.): positive
 # (entladende) Sollwerte auf diesem Register wurden gegen echte Hardware
 # getestet und wirkungslos befunden - siehe ausführlichen Kommentar bei
-# REG_SUN_IC_POWER_SETPOINT_PCT unten. Die Integration schreibt dieses
-# Register nur noch mit negativen (Lade-)Sollwerten (start_grid_charge).
+# REG_SUN_IC_POWER_SETPOINT_PCT unten. Die Integration liest den Sollwert nur
+# noch zur Diagnose; auch start_grid_charge schreibt ausschließlich über den
+# zentral arbitrierten SunSpec-Pfad (REQ-MANUAL-GRID-CHARGE).
 REG_SETPOINT_POWER = 41  # Write - W - Sollwert Leistung P (P-Sollwert-Modus)
 REG_SETPOINT_COSPHI = 42  # Write - Sollwert cos(phi)
 # Register 43 ("Leistungsgrenzwert Entladung") wird von der Integration
@@ -384,19 +385,20 @@ CELL_CALIBRATION_INTERVAL = timedelta(days=7)
 # Sollwert Leistung P (Register 41) ist ein signed 16-bit Register.
 MIN_SETPOINT_POWER = -32768
 MAX_SETPOINT_POWER = 32767
+MAX_MANUAL_CHARGE_POWER = -1
 
 # Doku: "Periodisches Wiederholen der Schreibbefehle (alle 5s bis 5min) bei
-# aktiver Netzladung zur Vermeidung von Timeout-Resets." Gilt für den
-# Basic-Mode-Pfad (Register 41, start_grid_charge-Service).
+# aktiver Netzladung zur Vermeidung von Timeout-Resets." Der zentrale
+# SunSpec-Pfad nutzt den Wert als Obergrenze und als Fallback, solange der
+# Geräte-Timeout noch nicht gelesen wurde.
 GRID_CHARGE_WRITE_INTERVAL = 30  # Sekunden
 
 # -- SunSpec-Modus-Netzladung (Immediate Controls, Register 40049/40051) --
 # Das Wiederholungsintervall für den periodischen Refresh ist die Hälfte des
 # vom Gerät gemeldeten Timeouts (Register 40050, siehe REG_SUN_IC_TIMEOUT),
 # damit der Sollwert sicher vor dessen Ablauf aufgefrischt wird.
-# GRID_CHARGE_WRITE_INTERVAL dient dabei als Obergrenze (kein Grund, öfter zu
-# schreiben als beim Basic-Mode-Pfad) sowie als Fallback, solange der
-# Timeout-Wert noch nicht gelesen wurde. Siehe
+# GRID_CHARGE_WRITE_INTERVAL dient dabei als Obergrenze sowie als Fallback,
+# solange der Timeout-Wert noch nicht gelesen wurde. Siehe
 # SaxPowerCoordinator._sun_ic_write_interval.
 SUN_IC_MIN_WRITE_INTERVAL = 5  # Sekunden, Untergrenze gegen zu enges Polling
 

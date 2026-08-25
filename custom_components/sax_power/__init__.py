@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -28,8 +29,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID_EXTENDED,
     DOMAIN,
-    MAX_SETPOINT_POWER,
-    MIN_SETPOINT_POWER,
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_REINSTALL_DASHBOARD,
@@ -53,12 +52,29 @@ PLATFORMS: list[Platform] = [
     Platform.TIME,
 ]
 
+
+def _coerce_grid_charge_power(value: Any) -> Any:
+    """Erhalte Validierungsfehler im übersetzbaren Coordinator-Pfad.
+
+    Ganzzahlige Strings bleiben aus Kompatibilitätsgründen erlaubt. Alle
+    anderen Typen werden unverändert weitergereicht, damit der Coordinator
+    sie mit ServiceValidationError statt Voluptuous generisch ablehnt.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
 SERVICE_GRID_CHARGE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_DEVICE_ID): cv.string,
-        vol.Required(ATTR_POWER): vol.All(
-            vol.Coerce(int), vol.Range(min=MIN_SETPOINT_POWER, max=MAX_SETPOINT_POWER)
-        ),
+        # Wertebereich und Vorzeichen prüft bewusst der Coordinator, damit
+        # ungültige numerische Werte als übersetzbare ServiceValidationError
+        # statt als generischer Schemafehler beim Anwender ankommen.
+        vol.Required(ATTR_POWER): _coerce_grid_charge_power,
     }
 )
 SERVICE_STOP_SCHEMA = vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string})

@@ -373,7 +373,8 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
         )
         await hass.async_block_till_done()
 
-        # -- Netzladung starten: periodischer Sollwert-Write auf Register 41 --
+        # -- Manuelle Netzladung: kompatibler Service über den zentralen
+        #    SunSpec-Pfad; kein zweiter Basic-Register-Writer mehr. --
         switch_entry = registry.async_get(switch_id)
         assert switch_entry is not None and switch_entry.device_id is not None
         device_id = switch_entry.device_id
@@ -390,16 +391,39 @@ async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:
 
         verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT)
         await verify_client.connect()
-        result = await verify_client.read_holding_registers(
+        basic_result = await verify_client.read_holding_registers(
             address=41, count=1, device_id=SLAVE_ID_BASIC
         )
+        control_mode_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_CONTROL_MODE,
+            count=1,
+            device_id=SLAVE_ID_EXTENDED,
+        )
+        setpoint_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            count=1,
+            device_id=SLAVE_ID_EXTENDED,
+        )
         verify_client.close()
-        assert to_signed16(result.registers[0]) == -1500
+        assert to_signed16(basic_result.registers[0]) == 0
+        assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SETPOINT
+        assert setpoint_result.registers[0] == to_unsigned16(-3261)
 
         await hass.services.async_call(
             DOMAIN, "stop_grid_charge", {"device_id": device_id}, blocking=True
         )
         assert coordinator.grid_charge_active is False
+        assert coordinator.sun_charge_active is False
+
+        verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT)
+        await verify_client.connect()
+        control_mode_result = await verify_client.read_holding_registers(
+            address=REG_SUN_IC_CONTROL_MODE,
+            count=1,
+            device_id=SLAVE_ID_EXTENDED,
+        )
+        verify_client.close()
+        assert control_mode_result.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
     finally:
         await server.shutdown()
 

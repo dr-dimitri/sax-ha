@@ -4,14 +4,26 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from homeassistant.exceptions import ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power import async_setup_entry, async_update_options
+from custom_components.sax_power import (
+    _async_register_services,
+    async_setup_entry,
+    async_update_options,
+)
 from custom_components.sax_power.const import (
+    ATTR_DEVICE_ID,
+    ATTR_POWER,
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
     DOMAIN,
+    MAX_SETPOINT_POWER,
+    MIN_SETPOINT_POWER,
+    SERVICE_START_GRID_CHARGE,
 )
+from custom_components.sax_power.coordinator import SaxPowerCoordinator
 
 VALID_INPUT = {
     "host": "192.168.1.50",
@@ -20,6 +32,49 @@ VALID_INPUT = {
     "slave_id_extended": 100,
     "scan_interval": 10,
 }
+
+
+@pytest.mark.parametrize(
+    "power",
+    [True, 1.5, "ungültig", MIN_SETPOINT_POWER - 1, 0, 1, MAX_SETPOINT_POWER + 1],
+)
+async def test_start_grid_charge_service_translates_unsafe_power(
+    hass, power: object
+) -> None:
+    """REQ-MANUAL-GRID-CHARGE: Unsichere Schemawerte erreichen die
+    Coordinator-Validierung und werden als übersetzbarer Servicefehler
+    abgelehnt, bevor ein Geräte-Write stattfinden kann."""
+    client = MagicMock()
+    client.connected = True
+    write_result = MagicMock()
+    write_result.isError.return_value = False
+    client.write_register = AsyncMock(return_value=write_result)
+    coordinator = SaxPowerCoordinator(
+        hass,
+        client,
+        slave_id=64,
+        slave_id_extended=100,
+        scan_interval=10,
+        entry_id="test_entry_id",
+    )
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600}
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        with pytest.raises(ServiceValidationError) as raised:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_START_GRID_CHARGE,
+                {ATTR_DEVICE_ID: "device", ATTR_POWER: power},
+                blocking=True,
+            )
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "invalid_grid_charge_power"
+    client.write_register.assert_not_awaited()
 
 
 async def test_async_update_options_applies_live_without_reload(hass) -> None:

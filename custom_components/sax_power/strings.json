@@ -490,10 +490,15 @@
       "description": "Folgende Einstellungen standen beim ersten Start dieser Version auf einem nicht auswertbaren Altzustand (unbekannt/nicht verfügbar) und wurden deshalb auf ihren sicheren Vorgabewert gesetzt, statt den vorherigen Wert zu übernehmen: {fields}. Bitte diese Einstellungen prüfen und bei Bedarf erneut wie gewünscht setzen - danach verschwindet dieser Hinweis automatisch."
     }
   },
+  "exceptions": {
+    "invalid_grid_charge_power": {
+      "message": "Der Leistungssollwert {power} ist ungültig. Für eine sichere manuelle Netzladung ist eine ganze Zahl zwischen {min_power} W und {max_power} W erforderlich; Null und positive Werte werden nicht unterstützt."
+    }
+  },
   "services": {
     "start_grid_charge": {
       "name": "Netzladung starten",
-      "description": "Startet die Netzladung des SAX Speichers.",
+      "description": "Fordert eine manuelle Netzladung über den zentralen, Max-SOC-geschützten Steuerpfad an.",
       "fields": {
         "device_id": {
           "name": "Gerät",
@@ -501,13 +506,13 @@
         },
         "power": {
           "name": "Leistung",
-          "description": "Sollwert für die Netzladung in Watt."
+          "description": "Strikt negativer Sollwert für die Netzladung in Watt (-32768 bis -1 W)."
         }
       }
     },
     "stop_grid_charge": {
       "name": "Netzladung stoppen",
-      "description": "Beendet die periodischen Sollwert-Schreibbefehle der Netzladung.",
+      "description": "Beendet den manuellen Ladeauftrag und setzt den Speicher bestmöglich auf SmartMeter-Nullregelung zurück.",
       "fields": {
         "device_id": {
           "name": "Gerät",

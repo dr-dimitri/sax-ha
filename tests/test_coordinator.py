@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from homeassistant.components import persistent_notification
@@ -273,6 +273,8 @@ async def test_full_soc_completes_calibration_and_reapplies_user_target(hass) ->
         was_full=False,
     )
     coordinator._cell_calibration_active = True
+    coordinator._max_soc_released_for_discharge = True
+    coordinator._last_effective_max_soc = MAX_SOC
     coordinator._calibration_store.async_save = AsyncMock()
     coordinator.async_start_sun_charge = AsyncMock()
 
@@ -282,6 +284,7 @@ async def test_full_soc_completes_calibration_and_reapplies_user_target(hass) ->
     assert changed is True
     assert coordinator.cell_calibration_active is False
     assert coordinator.effective_max_soc == 80
+    assert coordinator._max_soc_released_for_discharge is False
     assert coordinator.last_full_charge_at == now
     assert coordinator.next_cell_calibration_at == now + CELL_CALIBRATION_INTERVAL
     assert coordinator.max_soc_clamped is True
@@ -1376,16 +1379,16 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_two_grid_import_
 ) -> None:
     """Netzbezug über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT über zwei
     aufeinanderfolgende Zyklen hebt die geräteunabhängige Max-SOC-Sperre
-    aktiv auf (Register 40051 zurück auf SmartMeter-Nullregelung), obwohl
-    der SOC weiterhin >= Max. SOC ist - siehe anforderung.yaml,
-    REQ-TIMED-SOC-CHARGE."""
+    aktiv auf (Register 40051 zurück auf SmartMeter-Nullregelung). Fünf
+    weitere Polls bei unverändertem SOC dürfen die Sperre nicht erneut
+    aktivieren - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
     client.write_register = AsyncMock(return_value=write_result)
 
     coordinator = _make_coordinator(hass, client)
-    coordinator.data = {"soc": 85, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
     await coordinator.async_set_max_soc(80)
 
     grid_import_data = {
@@ -1394,23 +1397,170 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_two_grid_import_
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
     }
     try:
-        await coordinator._async_enforce_grid_charge(grid_import_data)
-        await asyncio.sleep(0.1)
-        assert coordinator.max_soc_clamped is True
+        clamped_states = []
+        for _ in range(7):
+            await coordinator._async_enforce_grid_charge(grid_import_data)
+            clamped_states.append(coordinator.max_soc_clamped)
 
-        await coordinator._async_enforce_grid_charge(grid_import_data)
-        await asyncio.sleep(0.1)
-
+        assert clamped_states == [True, False, False, False, False, False, False]
         assert coordinator.max_soc_clamped is False
         assert coordinator.sun_charge_active is False
         assert coordinator._max_soc_grid_import_wait_cycles == 0
-        client.write_register.assert_awaited_with(
+        assert coordinator._max_soc_released_for_discharge is True
+        assert client.write_register.await_args_list == [
+            call(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SETPOINT,
+                device_id=100,
+            ),
+            call(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                value=0,
+                device_id=100,
+            ),
+            call(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                device_id=100,
+            ),
+        ]
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_max_soc_release_latch_resets_below_target_and_clamps_again(hass) -> None:
+    """Nach echter SOC-Unterschreitung ist eine spätere Überschreitung neu."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    grid_import_data = {
+        "soc": 85,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+    }
+
+    try:
+        for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            await coordinator._async_enforce_grid_charge(grid_import_data)
+        assert coordinator._max_soc_released_for_discharge is True
+
+        client.write_register.reset_mock()
+        await coordinator._async_enforce_grid_charge({"soc": 79, "smartmeter_power": 0})
+        assert coordinator._max_soc_released_for_discharge is False
+        assert coordinator.max_soc_clamped is False
+
+        await coordinator._async_enforce_grid_charge({"soc": 81, "smartmeter_power": 0})
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.sun_charge_active is True
+        assert client.write_register.await_args_list == [
+            call(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SETPOINT,
+                device_id=100,
+            ),
+            call(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                value=0,
+                device_id=100,
+            ),
+        ]
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_max_soc_release_latch_handles_target_raise_and_lower(hass) -> None:
+    """Eine Zielerhöhung behält die Freigabe, eine Absenkung widerruft sie."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    coordinator.data = {
+        "soc": 95,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+    }
+
+    try:
+        for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+        assert coordinator._max_soc_released_for_discharge is True
+
+        client.write_register.reset_mock()
+        await coordinator.async_set_max_soc(90)
+        assert coordinator._max_soc_released_for_discharge is True
+        assert coordinator.max_soc_clamped is False
+        client.write_register.assert_not_awaited()
+
+        await coordinator.async_set_max_soc(85)
+        assert coordinator._max_soc_released_for_discharge is False
+        assert coordinator.max_soc_clamped is True
+        assert client.write_register.await_args_list == [
+            call(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SETPOINT,
+                device_id=100,
+            ),
+            call(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                value=0,
+                device_id=100,
+            ),
+        ]
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_max_soc_release_latch_waits_for_successful_mode_reset(hass) -> None:
+    """Ein fehlgeschlagener Modus-0-Write darf keine Freigabe vortäuschen."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    failure = MagicMock()
+    failure.isError.return_value = True
+    client.write_register = AsyncMock(side_effect=[success, success, failure, success])
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"soc": 50, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_set_max_soc(80)
+    grid_import_data = {
+        "soc": 85,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+    }
+
+    await coordinator._async_enforce_grid_charge(grid_import_data)
+    await coordinator._async_enforce_grid_charge(grid_import_data)
+
+    assert coordinator._max_soc_released_for_discharge is False
+    assert coordinator.max_soc_clamped is True
+    assert coordinator._sun_charge_reset_required is True
+
+    await coordinator._async_enforce_grid_charge(grid_import_data)
+
+    assert coordinator._max_soc_released_for_discharge is True
+    assert coordinator.max_soc_clamped is False
+    assert coordinator._sun_charge_reset_required is False
+    assert client.write_register.await_args_list == [
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        ),
+        call(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        ),
+        call(
             address=REG_SUN_IC_CONTROL_MODE,
             value=SUN_IC_CONTROL_MODE_SMARTMETER,
             device_id=100,
-        )
-    finally:
-        await coordinator.async_stop_sun_charge()
+        ),
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        ),
+    ]
 
 
 async def test_enforce_grid_charge_max_soc_clamp_resets_grid_import_counter(
@@ -1510,6 +1660,7 @@ async def test_enforce_grid_charge_max_soc_clamp_stays_within_charge_window(
         assert coordinator.max_soc_clamped is True
         assert coordinator.sun_charge_active is True
         assert coordinator._max_soc_hold_is_window_bound is True
+        assert coordinator._max_soc_released_for_discharge is False
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_POWER_SETPOINT_PCT,
             value=0,
@@ -1552,6 +1703,7 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_en
         assert coordinator.max_soc_clamped is False
         assert coordinator.sun_charge_active is False
         assert coordinator._max_soc_hold_is_window_bound is False
+        assert coordinator._max_soc_released_for_discharge is False
         client.write_register.assert_awaited_with(
             address=REG_SUN_IC_CONTROL_MODE,
             value=SUN_IC_CONTROL_MODE_SMARTMETER,

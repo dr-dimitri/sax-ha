@@ -325,7 +325,29 @@ requirement_timed_soc_charge:
        "PV-Überschuss-Prüfung") gegen kurze Lastspitzen: erst wenn
        PV_SURPLUS_HYSTERESIS_CYCLES aufeinanderfolgende Aufrufe von
        _async_enforce_grid_charge Netzbezug über dem Schwellwert melden,
-       wird Register 40051 aktiv auf 0 zurückgesetzt. Ohne diesen Trigger
+       wird Register 40051 aktiv auf 0 zurückgesetzt. Gleichzeitig setzt der
+       Coordinator den Freigabe-Latch
+       self._max_soc_released_for_discharge: Solange der SOC weiterhin auf
+       oder über dem wirksamen Zielwert liegt, bleibt die SmartMeter-
+       Nullregelung danach freigegeben und weitere Polls starten weder einen
+       neuen 0-%-Task noch schreiben sie Register 40051 erneut auf Modus 1.
+       Dadurch kann der Speicher den Hausverbrauch tatsächlich decken, statt
+       nach jeweils zwei Polls zwischen Freigabe und Sperre zu flattern.
+       max_soc_clamped ist während dieser Freigabe False und entspricht damit
+       dem tatsächlich gehaltenen Gerätemodus. Erst ein real gemessener SOC
+       unter dem wirksamen Zielwert löscht den Latch; eine spätere neue
+       Überschreitung aktiviert die Sperre wieder.
+
+       Änderungen des wirksamen Zielwerts berücksichtigen denselben Latch:
+       Eine Zielerhöhung unter den weiterhin höheren aktuellen SOC behält die
+       Freigabe bei, eine Zielabsenkung löscht sie als neue Überschreitung.
+       Das gilt sowohl für async_set_max_soc als auch für Beginn und Ende der
+       periodischen Zellkalibrierung (effektiver Zielwert temporär 100 %).
+       Die separate Zeitfensterbindung (_max_soc_hold_is_window_bound) bleibt
+       davon unberührt und hält bzw. beendet ihre Sperre weiterhin am
+       jeweiligen Fensterende.
+
+       Ohne den Netzbezug-Trigger
        würde die Sperre in diesem Fall de facto dauerhaft bestehen bleiben
        und der Hausverbrauch dauerhaft aus dem Netz statt aus dem Speicher
        gedeckt, bis der Nutzer manuell eingreift (z. B. "Max. SOC" ändert).
@@ -496,7 +518,12 @@ requirement_timed_soc_charge:
        aufeinanderfolgenden Zyklen, Zurücksetzen des Zählers bei einem
        Zyklus ohne (oder mit zu geringem) Netzbezug zwischen zwei
        Netzbezug-Zyklen, sowie unveränderter Ablauf (Sperre bleibt
-       unbegrenzt bestehen) bei fehlendem smartmeter_power."
+       unbegrenzt bestehen) bei fehlendem smartmeter_power. Nach bestätigter
+       Freigabe prüfen mindestens fünf weitere Polls bei SOC >= Zielwert,
+       dass kein erneuter Modus-1-/0-%-Write erfolgt. Weitere Tests decken
+       Löschen des Latch unterhalb des Zielwerts, erneutes Klemmen bei einer
+       späteren Überschreitung, Beibehalten bei Zielerhöhung, Löschen bei
+       Zielabsenkung und unveränderte Zeitfensterbindung ab."
     - "tests/test_coordinator.py deckt zusätzlich die PV-Überschuss-Prüfung
        ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
        smartmeter_power unter -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (negativ

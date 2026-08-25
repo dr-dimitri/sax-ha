@@ -455,6 +455,22 @@ requirement_timed_soc_charge:
     mindestens alle 5s), da das Gerät den Sollwert sonst nach Ablauf des
     Timeouts verwirft.
 
+    Jeder Start und jede sofortige Sollwertänderung validiert vor dem ersten
+    Modbus-Write die positive, endliche Referenz-Maximalleistung, den
+    SunSpec-Skalierungsfaktor (-10..10), den Watt-Bereich sowie den daraus
+    berechneten int16-Rohwert für Register 40049. Erst danach wird 40051 = 1
+    und anschließend 40049 geschrieben. Scheitert der zweite Write, versucht
+    derselbe Fehlerpfad unmittelbar 40051 = 0 zurückzuschreiben und meldet
+    den ursprünglichen Fehler zusammen mit dem Rollback-Ergebnis als
+    HomeAssistantError. Ein fehlgeschlagener Rollback hält
+    _sun_charge_reset_required gesetzt, bis ein späterer inaktiver Poll die
+    SmartMeter-Nullregelung quittiert; Task und Aktivstatus werden nach einer
+    unvollständigen Sequenz nicht veröffentlicht bzw. beendet. Dadurch kann
+    weder eine Vorvalidierung noch ein schlafender Task das Gerät mit einem
+    alten oder undefinierten Sollwert in Modus 1 zurücklassen. Ein eigener
+    Sequenz-Lock verhindert außerdem, dass periodische Wiederholung und
+    sofortige Änderung ihre jeweiligen 40051/40049-Writes verschachteln.
+
     Der ältere Basic-Mode-P-Sollwert (Register 41) bleibt ausschließlich
     für den manuellen start_grid_charge/stop_grid_charge-Service erhalten
     (absoluter Watt-Sollwert, freie Vorzeichenwahl, eigener
@@ -511,6 +527,13 @@ requirement_timed_soc_charge:
        beim Unterschreiten), die Watt-zu-Prozent-Umrechnung (inkl.
        Klemmung auf ±100 %) sowie das Schreibintervall
        (_sun_ic_write_interval) ab."
+    - "Gezielte Schreibpfadtests prüfen: fehlende/0-Referenzleistung und
+       ungültiger Scale Factor ohne jeden Write; Fehler auf 40051 ohne
+       Sollwert-Write; Fehler auf 40049 mit unmittelbarer Reihenfolge
+       40051=1, 40049, 40051=0; erfolgreichen und fehlgeschlagenen Rollback,
+       offenen Rücksetzauftrag bis zum nächsten quittierten Reset sowie
+       fehlenden Task/Aktivstatus nach unvollständigem Start und sofortiger
+       Sollwertänderung."
     - "tests/test_coordinator.py deckt zusätzlich den Netzbezug-Freigabe-
        Trigger der geräteunabhängigen (nicht zeitfenstergebundenen)
        Max-SOC-Sperre ab: keine Freigabe bei nur einem Zyklus Netzbezug über
@@ -747,8 +770,12 @@ requirement_grid_serving_charge:
     für die Ladepause 0 %); erst anschließend startet die Schleife mit dem
     nächsten Refresh nach Ablauf des Schreibintervalls. Damit wird ein
     Aktivstatus erst veröffentlicht, wenn die beiden SunSpec-Register
-    tatsächlich gesetzt wurden. Beim Deaktivieren bleibt die Reihenfolge
-    unverändert: Schleife beenden, anschließend 40051 = 0 schreiben.
+    tatsächlich gesetzt wurden. Scheitert 40049 nach quittiertem Modus 1,
+    versucht der gemeinsame Schreibpfad 40051 sofort auf 0 zurückzusetzen;
+    bis dieser Rollback oder ein Folge-Reset quittiert ist, bleibt der
+    Rücksetzauftrag erhalten und es läuft kein Task weiter. Beim Deaktivieren
+    bleibt die Reihenfolge unverändert: Schleife beenden, anschließend
+    40051 = 0 schreiben.
     Meldet ein späterer Read trotz laufender Schleife wieder 40051 = 0,
     schreibt async_start_sun_charge beide Aktivregister sofort erneut. Damit
     wird auch eine zwischenzeitliche Geräte-Rücksetzung oder ein externer

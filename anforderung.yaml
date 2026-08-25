@@ -40,6 +40,7 @@
 # REQ-REAL-HARDWARE-TESTS         done       Testfälle lesen echte Werte von einem physischen SAX Speicher
 # REQ-SUNSPEC-MODE-CORRECTION     done       SunSpec-Modus-Registerkarte (Slave-ID 100) als alleinige Quelle für Speicher-/Netz-/Akkudetails
 # REQ-TIMED-SOC-CHARGE            done       Zeitgesteuertes Laden auf Ziel-SOC + geräteunabhängige Max-SOC-Sperre + PV-Überschuss-Hysterese
+# REQ-MANUAL-GRID-CHARGE          done       Manueller Netzladeservice als sicherer Adapter auf die zentrale SunSpec-Steuerung
 # REQ-GRID-SERVING-CHARGE         done       Netzdienliches Laden: PV-Ladevorgang im eigenen Zeitfenster aktiv unterbrechen
 # REQ-MANUAL-DISCHARGE            verworfen  Manuelle Entladung mit fester Leistung - vom Hersteller nicht vorgesehen
 # REQ-LOW-INTERVAL-REGISTERS      done       Statische SunSpec-Register seltener abfragen als Messwerte
@@ -237,9 +238,9 @@ requirement_sunspec_mode_correction:
     ob er gerade von der Integration selbst gesetzt wurde.
 
     Der Basic-Mode-P-Sollwert (Register 41, Slave 64, absoluter
-    Watt-Sollwert) bleibt ausschließlich für den manuellen
-    start_grid_charge/stop_grid_charge-Service in Verwendung, siehe
-    REQ-TIMED-SOC-CHARGE.
+    Watt-Sollwert) wird nur noch gelesen und nicht mehr beschrieben. Auch
+    start_grid_charge/stop_grid_charge verwendet den zentral arbitrierten
+    SunSpec-Schreibpfad, siehe REQ-MANUAL-GRID-CHARGE.
 
     PV-Leistung (Register 40045) und das komplette Meter-Modell 203 sind
     laut modbus.pdf nur mit dem Smartmeter ADW200 vollständig verfügbar.
@@ -271,11 +272,13 @@ requirement_timed_soc_charge:
   status: done
   description: >
     Zeitgesteuertes Laden und die Max-SOC-Sperre sind Software-Logik (kein
-    natives Geräteregister für die Aktivierung selbst) und teilen sich eine
-    zentrale Auswertung (SaxPowerCoordinator._async_enforce_grid_charge,
-    bei jedem Poll-Zyklus sowie bei jeder Einstellungsänderung neu
-    ausgewertet) sowie denselben SunSpec-Modus-Schreibpfad
-    (_async_sun_charge_loop). Priorität pro Auswertung:
+    natives Geräteregister für die Aktivierung selbst) und teilen sich mit
+    der manuellen Netzladung (REQ-MANUAL-GRID-CHARGE), netzdienlichem und
+    preisoptimiertem Laden eine zentrale Auswertung
+    (SaxPowerCoordinator._async_enforce_grid_charge, bei jedem Poll-Zyklus
+    sowie bei jeder Einstellungsänderung neu ausgewertet) sowie denselben
+    SunSpec-Modus-Schreibpfad (_async_sun_charge_loop). Priorität pro
+    Auswertung:
 
     1. Ist der SOC >= dem effektiven "Max. SOC" (number.py; während der
        periodischen Zellkalibrierung temporär 100 %, siehe
@@ -356,7 +359,10 @@ requirement_timed_soc_charge:
        smartmeter_power sowie beim Verlassen dieses Zweigs (SOC unter
        Zielwert, Wechsel in einen zeitfenstergebundenen Zustand) auf 0
        zurückgesetzt.
-    2. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
+    2. Andernfalls hat ein aktiver, strikt negativer manueller
+       Netzladeauftrag Vorrang vor allen Automatiken, siehe
+       REQ-MANUAL-GRID-CHARGE.
+    3. Andernfalls: Ist zeitgesteuertes Laden aktiviert (switch.py,
        "Netzladung aktiv"), die aktuelle Uhrzeit innerhalb des
        konfigurierten Zeitfensters (time.py, "Start"/"Ende", HH:MM, darf
        über Mitternacht laufen), im aktiven Monat, "Netzladung Min. SOC"
@@ -395,7 +401,7 @@ requirement_timed_soc_charge:
        eines faktisch inaktiven 100-%-Defaults, mit dem Netzladung bei der
        Ersteinrichtung nie von selbst armt, bis der Anwender ihn bewusst
        ändert.
-    3. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
+    4. Andernfalls stoppt die Netzladung: Register 40051 wird aktiv zurück
        auf 0 (SmartMeter-Nullregelung) gesetzt, statt nur passiv auf den
        geräteseitigen Timeout zu warten. Das umfasst neben Fensterende/
        Deaktivierung auch den Fall, dass
@@ -448,9 +454,10 @@ requirement_timed_soc_charge:
     Referenz-Maximalleistung Register 40053; SaxPowerCoordinator.
     _watts_to_ic_setpoint_raw; negativ=Laden - Vorzeichenkonvention laut
     modbus.pdf nicht dokumentiert, hier analog zum Basic-Mode-P-Sollwert
-    angenommen. Die Integration schreibt hier bewusst nur negative
-    Sollwerte - siehe REQ-MANUAL-DISCHARGE zum Befund bei positiven
-    (entladenden) Sollwerten). Beide Register werden periodisch
+    angenommen. Die Integration schreibt hier bewusst nur nicht positive
+    Werte: negative Ladesollwerte oder 0 für Max-SOC-Sperre/Ladepausen -
+    siehe REQ-MANUAL-DISCHARGE zum Befund bei positiven (entladenden)
+    Sollwerten). Beide Register werden periodisch
     neu geschrieben (SaxPowerCoordinator._sun_ic_write_interval: die Hälfte
     des von Register 40050 gemeldeten Timeouts, gedeckelt auf 30s,
     mindestens alle 5s), da das Gerät den Sollwert sonst nach Ablauf des
@@ -472,10 +479,11 @@ requirement_timed_soc_charge:
     Sequenz-Lock verhindert außerdem, dass periodische Wiederholung und
     sofortige Änderung ihre jeweiligen 40051/40049-Writes verschachteln.
 
-    Der ältere Basic-Mode-P-Sollwert (Register 41) bleibt ausschließlich
-    für den manuellen start_grid_charge/stop_grid_charge-Service erhalten
-    (absoluter Watt-Sollwert, freie Vorzeichenwahl, eigener
-    Hintergrund-Task). Die Integration liest/schreibt die Basic-Mode-
+    Der Basic-Mode-P-Sollwert (Register 41) wird nur noch als Diagnosewert
+    gelesen. Der manuelle start_grid_charge/stop_grid_charge-Service ist ein
+    Adapter auf denselben zentralen SunSpec-Pfad und erlaubt ausschließlich
+    negative Ladesollwerte, siehe REQ-MANUAL-GRID-CHARGE. Die Integration
+    liest/schreibt die Basic-Mode-
     Register 43/44 (Ent-/Ladeleistungsgrenzwert) nicht mehr - eine frühere
     Software-Einstellung "Max. Netzladeleistung" (number.py,
     SaxPowerChargeLimitNumber), die Register 44 einmalig als Vorgabewert
@@ -587,6 +595,77 @@ requirement_timed_soc_charge:
        ab: ein außerhalb [MIN_SOC, MAX_SOC] liegender wiederhergestellter
        Wert wird beim Neustart auf die jeweilige Grenze geklemmt statt
        ungeprüft übernommen zu werden."
+
+# ==============================================================================
+# ANFORDERUNG: MANUELLE NETZLADUNG ÜBER DEN ZENTRALEN STEUERPFAD
+# ==============================================================================
+requirement_manual_grid_charge:
+  id: REQ-MANUAL-GRID-CHARGE
+  title: "Manueller Netzladeservice als sicherer Adapter auf die zentrale SunSpec-Steuerung"
+  status: done
+  description: >
+    Die Aktionen sax_power.start_grid_charge und
+    sax_power.stop_grid_charge stellen eine nicht persistierte manuelle
+    Netzladung für Automationen bereit. start_grid_charge verlangt device_id
+    und einen ganzzahligen, strikt negativen Watt-Sollwert von -32768 bis -1.
+    Boolesche Werte, nicht ganzzahlige Werte, 0, positive Werte und Werte
+    außerhalb dieses Gerätegrenzbereichs werden vor jedem Modbus-Write als
+    übersetzbare ServiceValidationError (translation_domain sax_power,
+    translation_key invalid_grid_charge_power) abgelehnt. Eine positive
+    manuelle Entladung bleibt ausgeschlossen (REQ-MANUAL-DISCHARGE).
+
+    Der Service schreibt Register 41 (Basic Mode) nicht. Er hinterlegt nur
+    den manuellen Ladeauftrag und wertet unter _charge_control_lock sofort
+    SaxPowerCoordinator._async_enforce_grid_charge_locked aus. Die
+    verbindliche Gesamtpriorität lautet: Max-SOC-Sperre > manuelle
+    Netzladung > zeitgesteuertes Laden > netzdienliches Laden >
+    preisoptimiertes Laden. Alle Quellen steuern ausschließlich den einen
+    gemeinsamen SunSpec-Writer (_sun_charge_task) für Register 40051/40049;
+    _sun_charge_write_lock hält jede Mode-/Sollwertsequenz unteilbar.
+    async_start_sun_charge selbst akzeptiert als zusätzliche innere
+    Sicherheitsgrenze nur Werte von MIN_SETPOINT_POWER bis 0.
+
+    Liegt der SOC unter dem wirksamen Max-SOC, wartet ein erstmaliger Start
+    die vollständige Sequenz 40051 = 1 und 40049 = berechneter negativer
+    Sollwert ab. Erst nach beiden Quittungen gilt der Auftrag als
+    erfolgreich; Vorvalidierungs- oder Schreibfehler werden an den
+    Service-Aufruf zurückgegeben und ein neuer Auftrag wird nicht als aktiv
+    veröffentlicht. Ändert start_grid_charge einen bereits laufenden
+    Sollwert, schreibt der gemeinsame Pfad die neue Sequenz sofort, ohne bis
+    zum periodischen Wiederholungsintervall zu warten. Ist der wirksame
+    Max-SOC erreicht, gewinnt stattdessen die Sperre und der Start wartet
+    deren 40051=1-/40049=0-Sequenz ab, während der manuelle Auftrag bis zu
+    stop_grid_charge vorgemerkt bleibt; eine negative Ladeleistung darf in
+    diesem Zustand nie gewinnen.
+
+    stop_grid_charge läuft ebenfalls vollständig unter
+    _charge_control_lock. Die Aktion löscht den manuellen Auftrag, storniert
+    den gemeinsamen SunSpec-Task, wartet dessen tatsächliches Ende auch bei
+    einem gleichzeitig laufenden Schreibabschnitt ab und versucht danach
+    Register 40051 aktiv auf 0 (SmartMeter-Nullregelung) zurückzusetzen. Erst
+    anschließend wird die zentrale Entscheidung erneut ausgewertet, sodass
+    eine weiterhin berechtigte Automatik übernehmen darf. Ein Stop ohne
+    manuellen Auftrag verändert eine laufende Automatik nicht.
+
+    async_shutdown beendet zuerst Polling und Planner, erwirbt anschließend
+    denselben _charge_control_lock, löscht den manuellen Auftrag, storniert
+    und erwartet den gemeinsamen Writer und versucht bestmöglich 40051 = 0.
+    Während des Shutdowns wird keine Automatik erneut ausgewertet; danach
+    existiert kein schreibender Hintergrundtask mehr.
+  acceptance_criteria:
+    - "tests/test_init.py prüft den echten Service-Aufruf für negative Werte
+       außerhalb des int16-Bereichs, 0 und positive Werte: übersetzbare
+       ServiceValidationError und kein Modbus-Write."
+    - "tests/test_coordinator.py prüft zusätzlich boolesche und gebrochene
+       Werte, sichtbare Fehler beim ersten 40051-Write, ausschließlich
+       40051/40049 beim Start sowie die sofortige Sollwertänderung."
+    - "Coordinator-Tests belegen die Priorität Max-SOC > manuell >
+       Automatiken, die Freigabe einer berechtigten Automatik nach Stop,
+       abgewartete Cancellation während eines Schreibabschnitts sowie einen
+       Shutdown ohne verbleibenden Auftrag oder Writer."
+    - "tests/test_integration_live.py verifiziert end-to-end, dass
+       start_grid_charge Register 41 unverändert lässt, 40051/40049 setzt
+       und stop_grid_charge 40051 auf SmartMeter-Nullregelung zurücksetzt."
 
 # ==============================================================================
 # ANFORDERUNG: NETZDIENLICHES LADEN (NUR MIT PV-ÜBERSCHUSS)
@@ -786,8 +865,9 @@ requirement_grid_serving_charge:
     wird auch eine zwischenzeitliche Geräte-Rücksetzung oder ein externer
     Schreibzugriff korrigiert, ohne bis zum nächsten periodischen
     Schreibintervall zu warten. Innerhalb der Integration existiert dagegen
-    kein zweiter unabhängiger Schreiber für 40049/40051: Alle vier
-    Ladefunktionen verwenden denselben serialisierten SunSpec-Pfad.
+    kein zweiter unabhängiger Schreiber für 40049/40051: Alle Ladefunktionen
+    einschließlich des manuellen Netzladeservice verwenden denselben
+    serialisierten SunSpec-Pfad.
 
     Nach jedem erfolgreichen SunSpec-Write wird der HIGH-Readcache
     invalidiert, damit der nächste Coordinator-Takt den tatsächlichen
@@ -850,8 +930,9 @@ requirement_grid_serving_charge:
     Priorität (höchste zuerst, siehe
     SaxPowerCoordinator._async_enforce_grid_charge): 1. Max-SOC-Sperre
     ("Auch der angegebene SOC muss berücksichtigt werden" - gilt
-    unverändert für alle Lademodi), 2. zeitgesteuertes Laden, 3.
-    netzdienliches Laden, 4. preisoptimiertes Laden (REQ-DYNAMIC-PRICE-CHARGE)
+    unverändert für alle Lademodi), 2. manuelle Netzladung
+    (REQ-MANUAL-GRID-CHARGE), 3. zeitgesteuertes Laden, 4.
+    netzdienliches Laden, 5. preisoptimiertes Laden (REQ-DYNAMIC-PRICE-CHARGE)
     - netzdienliches Laden hat also Vorrang vor preisoptimiertem Laden, nicht
     umgekehrt: grid_serving_eligible verlangt nur noch "not
     timed_should_charge" (kein Ausschluss mehr durch price_should_charge/
@@ -1446,7 +1527,8 @@ requirement_dynamic_price_charge:
     zeitgesteuerten Laden).
 
     Vorrang innerhalb von _async_enforce_grid_charge: Max-SOC-Sperre >
-    zeitgesteuertes Laden > netzdienliches Laden > preisoptimiertes Laden.
+    manuelle Netzladung > zeitgesteuertes Laden > netzdienliches Laden >
+    preisoptimiertes Laden.
     Preisoptimiertes Laden bricht - wie das zeitgesteuerte Laden - bei
     bestätigtem PV-Überschuss am Smart Meter sofort ab (dieselbe
     Zyklen-Hysterese, PV_SURPLUS_HYSTERESIS_CYCLES), UND weicht zusätzlich

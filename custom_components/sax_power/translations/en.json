@@ -490,10 +490,15 @@
       "description": "The following settings had a value that could not be evaluated (unknown/unavailable) on the first start of this version and were therefore set to their safe default instead of the previous value: {fields}. Please review these settings and set them again as desired - this notice disappears automatically once resolved."
     }
   },
+  "exceptions": {
+    "invalid_grid_charge_power": {
+      "message": "The power setpoint {power} is invalid. Safe manual grid charging requires an integer between {min_power} W and {max_power} W; zero and positive values are not supported."
+    }
+  },
   "services": {
     "start_grid_charge": {
       "name": "Start grid charge",
-      "description": "Starts grid charging of the SAX storage system.",
+      "description": "Requests manual grid charging through the central control path protected by the max SOC limit.",
       "fields": {
         "device_id": {
           "name": "Device",
@@ -501,13 +506,13 @@
         },
         "power": {
           "name": "Power",
-          "description": "Setpoint for grid charging in watts."
+          "description": "Strictly negative setpoint for grid charging in watts (-32768 to -1 W)."
         }
       }
     },
     "stop_grid_charge": {
       "name": "Stop grid charge",
-      "description": "Stops the periodic setpoint writes of grid charging.",
+      "description": "Stops the manual charging request and makes a best-effort return to SmartMeter control.",
       "fields": {
         "device_id": {
           "name": "Device",

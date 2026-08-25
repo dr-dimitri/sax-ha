@@ -13,7 +13,7 @@ from typing import Any
 
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -40,9 +40,9 @@ from .const import (
     ISSUE_TIMED_CHARGE_CONFLICT,
     MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MAX_IC_POWER_SETPOINT_PCT,
+    MAX_MANUAL_CHARGE_POWER,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
-    MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MIN_IC_POWER_SETPOINT_PCT,
@@ -388,8 +388,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_soc_grid_import_wait_cycles = 0
         self._max_soc_released_for_discharge = False
         self._last_effective_max_soc: int | None = None
-        self._grid_charge_task: asyncio.Task | None = None
-        self._grid_charge_power = 0
+        # Nicht persistierter Auftrag des kompatiblen start_grid_charge-
+        # Service. Die eigentliche Gerätesteuerung läuft ausschließlich über
+        # _sun_charge_task und die zentrale Prioritätsentscheidung unter
+        # _charge_control_lock (REQ-MANUAL-GRID-CHARGE).
+        self._grid_charge_power: int | None = None
         self._timed_charge_enabled = False
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
@@ -1566,50 +1569,63 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
-    # -- Netzladung (Grid Charge, Basic Mode) --------------------------------
-    # Das Schreiben von Register 41 versetzt den Speicher laut Doku implizit
-    # in den P-Sollwert-Modus. Der Wert muss periodisch wiederholt werden,
-    # da der Speicher sonst per Timeout in den vorherigen Modus zurückfällt.
-    #
-    # Ausschließlich noch für den manuellen start_grid_charge/stop_grid_charge-
-    # Service (absoluter Watt-Sollwert, freie Vorzeichenwahl). Zeitgesteuertes
-    # Laden nutzt stattdessen den SunSpec-Modus-Pfad weiter unten
-    # (_async_sun_charge_loop), siehe dort.
+    # -- Manueller Netzladeauftrag (kompatible Service-API) -------------------
+    # start_grid_charge/stop_grid_charge bleiben als Automation-API erhalten,
+    # besitzen aber keinen eigenen Register-Writer. Der Auftrag wird unter
+    # demselben Control-Lock wie Max-SOC und alle Automatiken ausgewertet und
+    # über den gemeinsamen SunSpec-Task ausgeführt (REQ-MANUAL-GRID-CHARGE).
 
     @property
     def grid_charge_active(self) -> bool:
-        return self._grid_charge_task is not None and not self._grid_charge_task.done()
+        return self._grid_charge_power is not None
 
     async def async_start_grid_charge(self, power: int) -> None:
-        """Start (or update the setpoint of) periodic grid-charge writes."""
-        if not MIN_SETPOINT_POWER <= power <= MAX_SETPOINT_POWER:
+        """Starte oder aktualisiere einen zentral arbitrierten Ladeauftrag."""
+        if (
+            isinstance(power, bool)
+            or not isinstance(power, int)
+            or not MIN_SETPOINT_POWER <= power <= MAX_MANUAL_CHARGE_POWER
+        ):
+            raise ServiceValidationError(
+                f"power muss eine ganze Zahl zwischen {MIN_SETPOINT_POWER} "
+                f"und {MAX_MANUAL_CHARGE_POWER} sein",
+                translation_domain=DOMAIN,
+                translation_key="invalid_grid_charge_power",
+                translation_placeholders={
+                    "min_power": str(MIN_SETPOINT_POWER),
+                    "max_power": str(MAX_MANUAL_CHARGE_POWER),
+                    "power": repr(power),
+                },
+            )
+        if self.data is None:
             raise HomeAssistantError(
-                f"power muss zwischen {MIN_SETPOINT_POWER} und "
-                f"{MAX_SETPOINT_POWER} liegen"
+                "Netzladung kann erst nach dem ersten erfolgreichen "
+                "Coordinator-Update gestartet werden"
             )
-        self._grid_charge_power = power
-        if self._grid_charge_task is None or self._grid_charge_task.done():
-            self._grid_charge_task = self.hass.async_create_background_task(
-                self._async_grid_charge_loop(), name="sax_power_grid_charge"
-            )
+        async with self._charge_control_lock:
+            previous_power = self._grid_charge_power
+            self._grid_charge_power = power
+            try:
+                # Der Aufruf kehrt erst zurück, wenn die wirksame zentrale
+                # Entscheidung (manueller Sollwert oder höherrangige Max-SOC-
+                # Sperre) vom Gerät quittiert wurde.
+                await self._async_enforce_grid_charge_locked(self.data)
+            except HomeAssistantError:
+                self._grid_charge_power = previous_power
+                raise
 
     async def async_stop_grid_charge(self) -> None:
-        if self._grid_charge_task is not None:
-            self._grid_charge_task.cancel()
-            self._grid_charge_task = None
-
-    async def _async_grid_charge_loop(self) -> None:
-        try:
-            while True:
-                await self.async_write_register(
-                    REG_SETPOINT_POWER, self._grid_charge_power
-                )
-                await asyncio.sleep(GRID_CHARGE_WRITE_INTERVAL)
-        except asyncio.CancelledError:
-            raise
-        except HomeAssistantError:
-            _LOGGER.exception("Netzladung: periodischer Schreibvorgang fehlgeschlagen")
-            raise
+        """Beende den Auftrag erst nach Task-Ende und sicherem Resetversuch."""
+        async with self._charge_control_lock:
+            if self._grid_charge_power is None:
+                return
+            self._grid_charge_power = None
+            # Immer zuerst den manuellen Besitz des Sollwertmodus freigeben.
+            # Die anschließende zentrale Auswertung darf danach eine weiterhin
+            # berechtigte Automatik sofort übernehmen.
+            await self.async_stop_sun_charge()
+            if self.data is not None:
+                await self._async_enforce_grid_charge_locked(self.data)
 
     # -- Netzladung (SunSpec-Modus, Immediate Controls) ----------------------
     # Schreibpfad für zeitgesteuertes Laden (siehe Abschnitt weiter unten):
@@ -1632,9 +1648,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # dokumentiert. Hier analog zum Basic-Mode-P-Sollwert (Register 41) und
     # zur gemessenen Wirkleistung (Register 40029, "positiv = Entladung")
     # angenommen: negativ = Laden. Die Integration schreibt hier bewusst nur
-    # negative (Lade-)Sollwerte - siehe REG_SUN_IC_POWER_SETPOINT_PCT in
-    # const.py für den Hintergrund (frühere, vom Hersteller als nicht
-    # vorgesehen bestätigte "manuelle Entladung" mit positiven Sollwerten).
+    # nicht positive Werte: negative Ladesollwerte oder 0 für Sperren/Pausen -
+    # siehe REG_SUN_IC_POWER_SETPOINT_PCT in const.py für den Hintergrund
+    # (frühere, vom Hersteller als nicht vorgesehen bestätigte "manuelle
+    # Entladung" mit positiven Sollwerten).
 
     @property
     def sun_charge_active(self) -> bool:
@@ -1783,11 +1800,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             isinstance(power, bool)
             or not isinstance(power, int)
-            or not MIN_SETPOINT_POWER <= power <= MAX_SETPOINT_POWER
+            or not MIN_SETPOINT_POWER <= power <= 0
         ):
             raise HomeAssistantError(
-                f"power muss zwischen {MIN_SETPOINT_POWER} und "
-                f"{MAX_SETPOINT_POWER} liegen"
+                f"power muss zwischen {MIN_SETPOINT_POWER} und 0 liegen"
             )
         power_changed = power != self._sun_charge_power
         device_left_setpoint_mode = (
@@ -2264,8 +2280,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_enforce_grid_charge_locked(self, data: dict[str, Any]) -> None:
         """Zentrale Auswertung für Max-SOC-Sperre, zeitgesteuertes Laden,
-        netzdienliches Laden und preisoptimiertes Laden - alle vier teilen
-        sich den SunSpec-Modus-Schreibpfad (_sun_charge_task). Priorität
+        manuellen Netzladeauftrag, zeitgesteuertes, netzdienliches und
+        preisoptimiertes Laden - alle teilen sich den SunSpec-Modus-
+        Schreibpfad (_sun_charge_task). Priorität
         (höchste zuerst):
 
         1. Ist der Ziel-SOC erreicht/überschritten, hat die Max-SOC-Sperre
@@ -2281,7 +2298,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            fällt ODER am Smart Meter über mehrere Zyklen hinweg Netzbezug
            gemessen wird (siehe _max_soc_hold_is_window_bound sowie den
            Max-SOC-Abschnitt oben zum Netzbezug-Freigabe-Trigger).
-        2. Erst wenn die Max-SOC-Sperre nicht greift, kann zeitgesteuertes
+        2. Erst wenn die Max-SOC-Sperre nicht greift, übernimmt ein über
+           start_grid_charge angeforderter strikt negativer manueller
+           Ladesollwert. Er hat Vorrang vor allen Automatiken und bleibt bis
+           stop_grid_charge aktiv.
+        3. Erst wenn weder Max-SOC-Sperre noch manueller Auftrag greifen,
+           kann zeitgesteuertes
            Laden (falls aktiviert, im Zeitfenster, im aktiven Monat - siehe
            "Aktive Monate"-Schalter unten -, mit gesetztem "Min. SOC"
            (siehe unten) UND ohne PV-Überschuss über
@@ -2304,7 +2326,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
-        3. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
+        4. Netzdienliches Laden (falls aktiviert, im eigenen Zeitfenster, im
            eigenen aktiven Monat UND nicht bereits durch zeitgesteuertes
            Laden beansprucht - die Zeitfenster von zeitgesteuertem und
            netzdienlichem Laden dürfen sich zusätzlich nicht überschneiden,
@@ -2366,7 +2388,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
            Beide Prüfungen sind exklusiv (a nur ohne, b nur mit aktivem
            Sollwertvorgabemodus) - siehe _async_step_grid_serving.
-        4. Erst wenn weder die Max-SOC-Sperre noch zeitgesteuertes noch
+        5. Erst wenn weder die Max-SOC-Sperre, manuelle Netzladung,
+           zeitgesteuertes noch
            netzdienliches Laden (dessen Zeitfenster gerade aktiv ist -
            grid_serving_window_active) greifen, kann preisoptimiertes Laden
            (siehe eigenen Abschnitt weiter unten sowie anforderung.yaml,
@@ -2398,7 +2421,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            _check_price_neutral_below_limit für den zugehörigen
            Reparaturhinweis) - Verhalten unverändert wie vor Einführung des
            Neutralpreises.
-        5. Andernfalls (alle Features deaktiviert, außerhalb Zeitfenster/
+        6. Andernfalls (alle Features deaktiviert, außerhalb Zeitfenster/
            Monat oder SOC erreicht) wird Register 40051 zurück auf 0
            (SmartMeter-Nullregelung) gesetzt und der Zustand der
            netzdienlichen Zustandsmaschine (_grid_serving_setpoint_active/
@@ -2529,6 +2552,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_import_confirm_cycles = 0
 
         max_soc_clamped_now = False
+        manual_charge_active_now = False
         if soc_reached:
             in_timed_window = policy.timed_window_active
             in_grid_serving_window = policy.grid_serving_window_active
@@ -2597,7 +2621,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._max_soc_hold_is_window_bound = False
             self._max_soc_grid_import_wait_cycles = 0
-            if timed_should_charge or price_should_charge:
+            manual_charge_active_now = self._grid_charge_power is not None
+            if manual_charge_active_now:
+                await self.async_start_sun_charge(self._grid_charge_power)
+                grid_serving_active_now = False
+            elif timed_should_charge or price_should_charge:
                 # MIN_SETPOINT_POWER sättigt in _watts_to_ic_setpoint_raw
                 # auf MIN_IC_POWER_SETPOINT_PCT (-100 %, maximale
                 # Ladeleistung) - siehe Kommentar am Abschnittsanfang
@@ -2657,22 +2685,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._sun_charge_commanded_mode, UNKNOWN_LABEL
             )
 
-        self._timed_charge_active = timed_should_charge
+        self._timed_charge_active = timed_should_charge and not manual_charge_active_now
         self._grid_serving_active = grid_serving_active_now
-        self._price_charge_active = price_should_charge and not soc_reached
+        self._price_charge_active = (
+            price_should_charge and not soc_reached and not manual_charge_active_now
+        )
         self._price_charge_status = self._price_charge_status_text(
             price_plan,
             charging=self._price_charge_active,
             paused_neutral_band=price_should_pause,
             soc_reached=soc_reached,
             pv_surplus_active=pv_surplus_active,
-            timed_should_charge=timed_should_charge,
+            timed_should_charge=timed_should_charge or manual_charge_active_now,
             grid_serving_window_active=grid_serving_window_active,
         )
         self._max_soc_clamped = max_soc_clamped_now
 
     async def _async_step_grid_serving(self, data: dict[str, Any]) -> bool:
-        """Ein Schritt der unter _async_enforce_grid_charge (Punkt 3)
+        """Ein Schritt der unter _async_enforce_grid_charge (Punkt 4)
         beschriebenen Zustandsmaschine für netzdienliches Laden. Nur
         aufgerufen, wenn grid_serving_eligible dort bereits True ist (SOC
         nicht erreicht, Zeitfenster/Monat/Schalter aktiv, kein Vorrang für
@@ -3252,8 +3282,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_flush_energy_state()
         await self._async_flush_control_state()
         self.price_planner.async_shutdown()
-        await self.async_stop_grid_charge()
-        await self.async_stop_sun_charge()
+        # Kein Stop-via-Service: Dieser würde nach dem manuellen Reset eine
+        # konfigurierte Automatik erneut anwenden. Beim Shutdown werden unter
+        # demselben Control-Lock stattdessen alle neuen Entscheidungen
+        # ausgesperrt, der gemeinsame Writer abgewartet und Modus 0 versucht.
+        async with self._charge_control_lock:
+            self._grid_charge_power = None
+            await self.async_stop_sun_charge()
         ir.async_delete_issue(
             self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

@@ -371,8 +371,8 @@ das Feld `device_id` dem gewünschten SAX-Power-Gerät zugeordnet.
 
 | Aktion | Verwendung |
 | --- | --- |
-| `sax_power.start_grid_charge` | Manuelle Netzladung mit einem Leistungssollwert starten |
-| `sax_power.stop_grid_charge` | Manuelle Netzladung beenden |
+| `sax_power.start_grid_charge` | Manuelle Netzladung mit einem strikt negativen Leistungssollwert starten oder sofort aktualisieren |
+| `sax_power.stop_grid_charge` | Manuelle Netzladung kontrolliert beenden und die SmartMeter-Regelung wieder freigeben |
 | `sax_power.set_timed_charge_window` | Start und Ende der zeitgesteuerten Netzladung gemeinsam setzen |
 | `sax_power.set_grid_serving_window` | Start und Ende des netzdienlichen Ladens gemeinsam setzen |
 | `sax_power.refresh_price_plan` | Ladeplan nach aktualisierten Preisdaten sofort neu berechnen |
@@ -383,6 +383,17 @@ das Feld `device_id` dem gewünschten SAX-Power-Gerät zugeordnet.
 Die für eine Aktion verfügbaren Felder und Beschreibungen zeigt Home Assistant
 direkt im Aktionseditor an. Für den normalen Betrieb werden die manuellen
 Aktionen zum Starten und Stoppen einer Netzladung nicht benötigt.
+
+`sax_power.start_grid_charge` akzeptiert ausschließlich ganzzahlige
+Ladesollwerte von **-32768 bis -1 W**. Null, positive Werte und damit eine
+manuelle Entladung werden abgelehnt. Der Aufruf verwendet denselben zentralen
+SunSpec-Steuerpfad wie die Ladeautomatiken und wartet, bis der erste wirksame
+Schreibvorgang vom Speicher quittiert wurde. Eine erneute Start-Aktion ändert
+den Sollwert sofort. Es gilt stets die Priorität **Max-SOC-Sperre → manuelle
+Netzladung → zeitgesteuertes Laden → netzdienliches Laden → preisoptimiertes
+Laden**. `sax_power.stop_grid_charge` wartet das Ende des gemeinsamen
+Schreib-Tasks ab, versucht aktiv zur SmartMeter-Nullregelung zurückzukehren und
+gibt danach weiterhin berechtigte Automatiken wieder frei.
 
 ## Verbindung nachträglich ändern
 

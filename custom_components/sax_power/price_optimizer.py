@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Sized
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -369,12 +369,27 @@ def has_price_forecast(state: Any, *, attribute: str | None = None) -> bool:
         return False
     attributes: Mapping[str, Any] = getattr(state, "attributes", {}) or {}
     if attribute:
-        return bool(attributes.get(attribute))
+        return _has_value(attributes.get(attribute))
     return any(
         isinstance(attributes.get(name), (list, tuple)) and attributes.get(name)
         for group in ATTRIBUTE_GROUPS
         for name in group
     )
+
+
+def _has_value(value: Any) -> bool:
+    """Ob ein Attribut überhaupt einen Inhalt hat.
+
+    Bewusst nicht bool(value): Ein Attribut, das auf den skalaren Wert 0
+    oder False wechselt, ist vorhanden - nur eben nicht lesbar. Leer sind
+    ausschließlich ein fehlender/None-Wert und ein leerer Container
+    (Liste, Tupel, Mapping, String).
+    """
+    if value is None:
+        return False
+    if isinstance(value, Sized):
+        return len(value) > 0
+    return True
 
 
 def current_price(slots: Sequence[PriceSlot], moment: datetime) -> float | None:

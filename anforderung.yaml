@@ -2714,7 +2714,10 @@ requirement_economics_tariffs:
     Vorschau vorliegt. Ein über CONF_PRICE_ATTRIBUTE ausdrücklich benanntes
     Attribut gilt dabei schon bei jedem nicht leeren Wert als Vorschau -
     der Anwender hat genau dieses Attribut als Preisquelle bestimmt, ein
-    Typwechsel ist deshalb eine unlesbare und keine fehlende Vorschau. Ohne
+    Typwechsel ist deshalb eine unlesbare und keine fehlende Vorschau. Als
+    leer gelten dort ausschließlich ein fehlender bzw. None-Wert und ein
+    leerer Container (Liste, Tupel, Mapping, String); ein skalarer Wert wie
+    0 oder False ist vorhanden und damit unlesbar, nicht fehlend. Ohne
     ausdrückliche Angabe wird geraten; dann zählt nur die Listenform der
     bekannten Attributnamen, damit ein gleichnamiges Attribut anderer
     Bedeutung die Auswertung nicht blockiert.

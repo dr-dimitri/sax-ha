@@ -738,6 +738,9 @@ async def test_unreadable_price_forecast_does_not_fall_back_to_the_state(hass) -
         {"08:00": 0.21, "09:00": 0.24},  # Mapping statt Liste
         "0.21, 0.24, 0.31",  # String statt Liste
         [{"beginn": "heute frueh", "betrag": "guenstig"}],  # Liste, aber unlesbar
+        0,  # skalare Null: vorhanden, aber unlesbar - nicht "fehlt"
+        False,
+        0.0,
     ],
 )
 async def test_explicit_forecast_attribute_counts_even_with_a_foreign_type(

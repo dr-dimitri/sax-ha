@@ -27,7 +27,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerEntity, initial_config_value
+from .entity import SaxPowerConfigEntity, initial_config_value
 
 
 async def async_setup_entry(
@@ -46,7 +46,7 @@ async def async_setup_entry(
     )
 
 
-class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
+class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
     """Beginn des Zeitfensters für das zeitgesteuerte Laden."""
 
     _attr_translation_key = "timed_charge_start"
@@ -57,6 +57,11 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.timed_charge_start is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -82,7 +87,7 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
+class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
     """Ende des Zeitfensters für das zeitgesteuerte Laden."""
 
     _attr_translation_key = "timed_charge_end"
@@ -93,6 +98,11 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.timed_charge_end is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -113,7 +123,7 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
+class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
     """Beginn des Zeitfensters für das netzdienliche Laden.
 
     Darf sich nicht mit dem Zeitfenster des zeitgesteuerten Ladens
@@ -133,6 +143,11 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.grid_serving_start is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -152,7 +167,7 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerEntity, TimeEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
+class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
     """Ende des Zeitfensters für das netzdienliche Laden.
 
     Siehe SaxPowerGridServingStartTime zur Nicht-Überlappungs-Prüfung.
@@ -166,6 +181,11 @@ class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerEntity, TimeEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.grid_serving_end is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:

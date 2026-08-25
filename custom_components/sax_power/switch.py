@@ -26,7 +26,7 @@ from .const import (
     SWITCH_STATE_ON,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerEntity, initial_config_value
+from .entity import SaxPowerConfigEntity, SaxPowerEntity, initial_config_value
 
 
 async def async_setup_entry(
@@ -93,7 +93,7 @@ class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
         await self.coordinator.async_refresh()
 
 
-class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
     """Aktiviert/deaktiviert das zeitgesteuerte Laden (Software-Logik).
 
     Siehe SaxPowerCoordinator._async_enforce_grid_charge sowie die
@@ -109,6 +109,11 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.timed_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -147,7 +152,7 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
     """Aktiviert/deaktiviert das netzdienliche Laden (Software-Logik).
 
     Lädt - anders als "Netzladung aktiv" - ausschließlich mit PV-Überschuss,
@@ -165,6 +170,11 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.grid_serving_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -189,7 +199,7 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
     """Legt fest, ob Netzladung bzw. netzdienliches Laden in einem
     bestimmten Kalendermonat überhaupt wirksam sein dürfen (siehe
     anforderung.yaml, REQ-GRID-SERVING-CHARGE) - z. B. Netzladung nur
@@ -199,10 +209,13 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
     (SaxPowerCoordinator.timed_charge_months/async_set_timed_charge_month
     bzw. .grid_serving_months/async_set_grid_serving_month).
 
-    Default (kein zuvor gespeicherter Zustand): aktiv - der Coordinator
-    initialisiert beide Monats-Sets bereits mit allen 12 Monaten, sodass
-    sich bestehende Konfigurationen nach einem Update unverändert verhalten,
-    bis der Anwender einzelne Monate bewusst abwählt.
+    Persistiert im Konfigurations-Store (siehe anforderung.yaml,
+    REQ-CONTROL-CONFIG-BOOTSTRAP), RestoreEntity nur noch als einmaliger
+    Migrationspfad. Default (weder Store noch gespeicherter Zustand):
+    aktiv - der Coordinator initialisiert beide Monats-Sets bereits mit
+    allen 12 Monaten, sodass sich bestehende Konfigurationen nach einem
+    Update unverändert verhalten, bis der Anwender einzelne Monate bewusst
+    abwählt.
     """
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -226,6 +239,11 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if (last_state := await self.async_get_last_state()) is not None:
             # validate=False: siehe SaxPowerCoordinator.async_set_timed_charge_month
             # - vermeidet fälschliche Überlappungsfehler während des
@@ -247,7 +265,7 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
+class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
     """Hauptschalter für das preisoptimierte Laden (Software-Logik).
 
     Lädt den Speicher aus dem Netz, wenn der Strompreis günstig ist - nach
@@ -272,6 +290,11 @@ class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.coordinator.control_config_restored:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
+            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
+            # Migrationsweg für Einträge ohne Store.
+            return
         if self.coordinator.price_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:

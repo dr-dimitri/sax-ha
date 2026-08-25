@@ -35,6 +35,12 @@ async def async_get_config_entry_diagnostics(
         "entry_options": dict(entry.options),
         "coordinator_data": coordinator.data,
         "state": {
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: zeigt, ob die folgenden Werte aus
+            # dem Konfigurations-Store stammen oder aus dem einmaligen
+            # RestoreEntity-Migrationspfad - und ob der Bootstrap überhaupt
+            # abgeschlossen ist (sonst steuert die Integration bewusst nicht).
+            "control_config_restored": coordinator.control_config_restored,
+            "control_bootstrap_pending": coordinator.control_bootstrap_pending,
             "max_soc": coordinator.max_soc,
             "effective_max_soc": coordinator.effective_max_soc,
             "max_soc_clamped": coordinator.max_soc_clamped,

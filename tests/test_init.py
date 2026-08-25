@@ -81,7 +81,9 @@ async def test_async_update_options_noop_without_loaded_entry(hass) -> None:
 
 
 async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
-    """Persistierte Kalibrierungs- und Energiezustände gehen dem Poll voran."""
+    """Persistierte Kalibrierungs-, Energie- und Ladeeinstellungszustände
+    gehen dem Poll voran; die eine Ladeentscheidung folgt erst nach dem
+    Plattform-Setup (siehe anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP)."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=VALID_INPUT,
@@ -92,7 +94,9 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     order: list[str] = []
-    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock(
+        side_effect=lambda *args, **kwargs: order.append("platforms")
+    )
 
     with (
         patch(
@@ -111,13 +115,29 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
         ),
         patch(
             "custom_components.sax_power.SaxPowerCoordinator."
+            "async_load_control_state",
+            new=AsyncMock(side_effect=lambda: order.append("control")),
+        ),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator."
             "async_config_entry_first_refresh",
             new=AsyncMock(side_effect=lambda: order.append("refresh")),
+        ),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator." "async_finish_bootstrap",
+            new=AsyncMock(side_effect=lambda: order.append("bootstrap_done")),
         ),
         patch("custom_components.sax_power.coordinator.SaxPricePlanner.async_setup"),
     ):
         assert await async_setup_entry(hass, entry) is True
 
-    assert order == ["calibration", "energy", "refresh"]
+    assert order == [
+        "calibration",
+        "energy",
+        "control",
+        "refresh",
+        "platforms",
+        "bootstrap_done",
+    ]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     await coordinator.async_shutdown()

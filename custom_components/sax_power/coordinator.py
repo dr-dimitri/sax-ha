@@ -168,6 +168,7 @@ from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
 from .infrastructure.calibration_store import CalibrationStateStore
+from .infrastructure.control_store import ControlConfig, ControlConfigStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
@@ -320,6 +321,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._calibration_store = CalibrationStateStore(hass, entry_id)
         self._energy_store = EnergyStateStore(hass, entry_id)
         self._energy_store_loaded = False
+        # Versionierter, vom sichtbaren Entity-Zustand unabhängiger Snapshot
+        # aller softwareseitigen Steuerwerte (REQ-CONTROL-CONFIG-BOOTSTRAP).
+        self._control_store = ControlConfigStore(hass, entry_id)
+        self._control_config_restored = False
+        # Solange True, darf KEINE Ladeentscheidung das Gerät steuern: der
+        # erste Refresh und die (nur noch migrierenden) Entity-Setter würden
+        # sonst aus einer Teilkonfiguration heraus schreiben - insbesondere
+        # Register 40051 auf Modus 0, obwohl ein gespeichertes Fenster gerade
+        # aktiv ist. Wird von async_load_control_state() geöffnet und von
+        # async_finish_bootstrap() nach dem Plattform-Setup wieder
+        # geschlossen. Default False, damit ein direkt instanziierter
+        # Coordinator (Tests, Diagnose) sich unverändert verhält.
+        self._control_bootstrap_pending = False
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
         self._max_soc_grid_import_wait_cycles = 0
@@ -437,7 +451,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         calibration_changed = await self._async_update_cell_calibration(data["soc"])
         if calibration_changed:
             self.price_planner.evaluate()
-        await self._async_enforce_grid_charge(data)
+        if not self._control_bootstrap_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Lesen ist während des Bootstraps
+            # erlaubt, Steuern nicht - der erste Refresh läuft absichtlich
+            # ohne Ladeentscheidung durch.
+            await self._async_enforce_grid_charge(data)
         self._publish_charge_state(data)
         self._async_check_self_diagnostics()
         return data
@@ -1191,6 +1209,160 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         return active_changed
 
+    # -- Persistenz der Ladeeinstellungen (REQ-CONTROL-CONFIG-BOOTSTRAP) -----
+    # Alle softwareseitigen Steuerwerte (Max-SOC, Zeitfenster, Monate,
+    # Schalter, Strategie und Preisparameter) liegen in einem versionierten,
+    # vom sichtbaren Entity-Zustand unabhängigen Store. Er wird vollständig
+    # geladen, bevor der erste Refresh überhaupt steuern darf; die
+    # RestoreEntity-Zustände der Plattformen sind nur noch der einmalige
+    # Migrationspfad für Einträge, für die es noch keinen Store gibt.
+    # Dadurch kann ein "unknown"/"unavailable" gewordener Entity-Zustand
+    # (z. B. bei Basic-Modbus-Ausfall) keinen gespeicherten Wert mehr als
+    # Default oder "aus" überschreiben.
+
+    @property
+    def control_config_restored(self) -> bool:
+        """True, sobald ein gespeicherter Snapshot übernommen wurde.
+
+        Die Konfigurations-Entities überspringen dann ihren
+        RestoreEntity-Pfad vollständig (number.py/switch.py/select.py/
+        time.py) - der Store ist ab dann die alleinige Quelle."""
+        return self._control_config_restored
+
+    @property
+    def control_bootstrap_pending(self) -> bool:
+        """True zwischen async_load_control_state und async_finish_bootstrap."""
+        return self._control_bootstrap_pending
+
+    def control_config(self) -> ControlConfig:
+        """Aktueller Stand aller softwareseitigen Steuerwerte."""
+        return ControlConfig(
+            max_soc=self._max_soc,
+            timed_charge_enabled=self._timed_charge_enabled,
+            timed_charge_start=self._timed_charge_start,
+            timed_charge_end=self._timed_charge_end,
+            timed_charge_months=frozenset(self._timed_charge_months),
+            timed_charge_min_soc=self._timed_charge_min_soc,
+            grid_serving_enabled=self._grid_serving_enabled,
+            grid_serving_start=self._grid_serving_start,
+            grid_serving_end=self._grid_serving_end,
+            grid_serving_months=frozenset(self._grid_serving_months),
+            grid_serving_forecast_threshold_kwh=(
+                self._grid_serving_forecast_threshold_kwh
+            ),
+            price_charge_enabled=self._price_charge_enabled,
+            price_charge_strategy=self._price_charge_strategy,
+            price_charge_max_price=self._price_charge_max_price,
+            price_charge_neutral_price=self._price_charge_neutral_price,
+            price_charge_hours=self._price_charge_hours,
+        )
+
+    async def async_load_control_state(self) -> None:
+        """Load the stored charge configuration and open the bootstrap gate.
+
+        Muss vor async_config_entry_first_refresh() laufen (siehe
+        __init__.async_setup_entry): Ab hier bis async_finish_bootstrap()
+        sind Register-Reads weiter erlaubt, jede steuernde Entscheidung ist
+        dagegen gesperrt. Ein nicht lesbarer Store lässt die Automatiken
+        bewusst auf ihren sicheren Defaults stehen (aus, Max-SOC 100 %),
+        statt eine halb geratene Konfiguration zu erzwingen.
+        """
+        self._control_bootstrap_pending = True
+        try:
+            stored = await self._control_store.async_load()
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Ladeeinstellungen konnten nicht geladen werden; "
+                "starte mit den Vorgabewerten: %s",
+                err,
+            )
+            return
+        if stored is None:
+            # Noch kein Store für diesen Eintrag - die Plattformen migrieren
+            # ihre RestoreEntity-Zustände einmalig, async_finish_bootstrap
+            # schreibt das Ergebnis anschließend fest.
+            return
+        self._apply_control_config(stored.with_defaults())
+        self._control_config_restored = True
+
+    def _apply_control_config(self, config: ControlConfig) -> None:
+        """Übernimmt einen geladenen Snapshot, ohne etwas zu schreiben.
+
+        Bewusst an den Settern vorbei: die lösen jeweils sofort eine eigene
+        Ladeentscheidung aus, genau das soll der Bootstrap ja verhindern.
+        Die Wertebereiche sind bereits beim Laden geprüft
+        (infrastructure/control_store.py), eine Überlappungsprüfung der
+        beiden Zeitfenster entfällt hier absichtlich - gespeichert werden
+        kann nur eine Kombination, die die Setter zuvor akzeptiert haben.
+        """
+        self._max_soc = config.max_soc
+        self._timed_charge_enabled = bool(config.timed_charge_enabled)
+        self._timed_charge_start = config.timed_charge_start
+        self._timed_charge_end = config.timed_charge_end
+        self._timed_charge_months = set(config.timed_charge_months or ())
+        self._timed_charge_min_soc = config.timed_charge_min_soc
+        self._grid_serving_enabled = bool(config.grid_serving_enabled)
+        self._grid_serving_start = config.grid_serving_start
+        self._grid_serving_end = config.grid_serving_end
+        self._grid_serving_months = set(config.grid_serving_months or ())
+        self._grid_serving_forecast_threshold_kwh = (
+            config.grid_serving_forecast_threshold_kwh
+        )
+        self._price_charge_enabled = bool(config.price_charge_enabled)
+        if config.price_charge_strategy is not None:
+            self._price_charge_strategy = config.price_charge_strategy
+        self._price_charge_max_price = config.price_charge_max_price
+        self._price_charge_neutral_price = config.price_charge_neutral_price
+        self._price_charge_hours = config.price_charge_hours
+
+    async def async_finish_bootstrap(self) -> None:
+        """Close the bootstrap gate and apply exactly one charge decision.
+
+        Wird nach dem Plattform-Setup aufgerufen, also erst wenn entweder der
+        Store (Regelfall) oder der einmalige RestoreEntity-Migrationspfad die
+        vollständige Konfiguration bereitgestellt hat. Die eine Auswertung
+        läuft über denselben Pfad wie jede spätere Änderung und damit unter
+        dem vorhandenen Control-Lock (_async_enforce_grid_charge)."""
+        if not self._control_bootstrap_pending:
+            return
+        self._control_bootstrap_pending = False
+        # Nicht verzögert: nach einer Migration ohne Store soll der Snapshot
+        # auch dann schon vollständig auf der Platte liegen, wenn Home
+        # Assistant unmittelbar danach neu startet.
+        try:
+            await self._control_store.async_save(self.control_config())
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Ladeeinstellungen konnten nicht gespeichert werden: %s", err
+            )
+        await self._async_apply_grid_charge_change()
+
+    def _async_schedule_control_save(self) -> None:
+        """Merkt den aktuellen Snapshot für einen gesammelten Store-Write vor.
+
+        Der Store verwirft einen unveränderten Snapshot selbst, deshalb darf
+        das aus jeder Ladeentscheidung heraus aufgerufen werden."""
+        try:
+            self._control_store.async_delay_save(self.control_config())
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Ladeeinstellungen konnten nicht gespeichert werden: %s", err
+            )
+
+    async def _async_flush_control_state(self) -> None:
+        """Schreibt den Snapshot beim Entladen sofort, statt auf den
+        Sammel-Timer zu warten."""
+        if self._control_bootstrap_pending:
+            return
+        try:
+            await self._control_store.async_save(self.control_config())
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Ladeeinstellungen konnten beim Entladen nicht gespeichert "
+                "werden: %s",
+                err,
+            )
+
     async def async_set_max_soc(self, max_soc: int | None) -> None:
         """Set (or clear with None) the software-side max charge SOC.
 
@@ -1733,7 +1905,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_apply_grid_charge_change(self) -> None:
         """Re-evaluate Zeitfenster/Max-SOC/Netzladeleistung sofort nach einer
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
-        warten."""
+        warten.
+
+        Gemeinsamer Endpunkt aller async_set_*-Setter: hier - und nur hier -
+        wird der Konfigurations-Snapshot zum Speichern vorgemerkt
+        (REQ-CONTROL-CONFIG-BOOTSTRAP). Während des Bootstraps passiert
+        beides nicht: die Setter restaurieren dann nur noch Altzustände, und
+        eine Teilkonfiguration darf weder das Gerät steuern noch den
+        vollständigen gespeicherten Stand überschreiben."""
+        if self._control_bootstrap_pending:
+            return
+        self._async_schedule_control_save()
         if self.data is not None:
             await self._async_enforce_grid_charge(self.data)
             self._publish_charge_state(self.data)
@@ -2845,6 +3027,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # __init__.async_unload_entry) unbemerkt im Hintergrund weiter.
         await super().async_shutdown()
         await self._async_flush_energy_state()
+        await self._async_flush_control_state()
         self.price_planner.async_shutdown()
         await self.async_stop_grid_charge()
         await self.async_stop_sun_charge()

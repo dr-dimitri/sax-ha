@@ -10,6 +10,7 @@ Ist-Zustand-Anforderungen je REQ-ID).
 
 - [Aufbau](#aufbau)
 - [Datenfluss](#datenfluss)
+- [Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen)
 - [Register-Mapping](#register-mapping)
 - [SunSpec-Skalierung](#sunspec-skalierung)
 - [Refresh-Verhalten](#refresh-verhalten)
@@ -31,7 +32,8 @@ custom_components/sax_power/
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung sowie der injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
-│                          Repair-Issues und den Kalibrierungs-State-Store
+│                          Repair-Issues sowie die drei versionierten Stores
+│                          (Kalibrierung, Energiezähler, Ladeeinstellungen)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
@@ -258,22 +260,96 @@ grenzwert) nicht mehr - eine frühere Software-Einstellung "Max.
 Netzladeleistung" (`SaxPowerChargeLimitNumber`), die Register 44 einmalig
 als Vorgabewert gelesen hat, wurde entfernt (siehe unten).
 
-**"Max. SOC"** (`SaxPowerMaxSocNumber`, `RestoreEntity`) setzt sich bei
-fehlendem Vorzustand (z. B. direkt nach der Ersteinrichtung) explizit auf
-`MAX_SOC` (100) statt "unbekannt"/0 zu bleiben.
+**"Max. SOC"** (`SaxPowerMaxSocNumber`) kommt beim Start aus dem
+Konfigurations-Store (siehe
+[Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen))
+und setzt sich nur bei fehlendem Store UND fehlendem Vorzustand (z. B.
+direkt nach der Ersteinrichtung) explizit auf `MAX_SOC` (100) statt
+"unbekannt"/0 zu bleiben.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils
-`RestoreEntity`) fragen beim Start in dieser Reihenfolge: (1) hat der
-Coordinator bereits einen Wert (z. B. durch eine andere Entity in dieser
-Session)? (2) gibt es einen über RestoreEntity gespeicherten Vorzustand aus
-einem früheren Lauf? (3) steht ein Wert aus dem zweiten
+`RestoreEntity`) fragen beim Start in dieser Reihenfolge: (0) stammt der
+Wert bereits aus dem Konfigurations-Store? Dann ist er maßgeblich und die
+folgenden Stufen entfallen (siehe
+[Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen)).
+(1) hat der Coordinator bereits einen Wert (z. B. durch eine andere Entity
+in dieser Session)? (2) gibt es einen über RestoreEntity gespeicherten
+Vorzustand aus einem früheren Lauf? (3) steht ein Wert aus dem zweiten
 Ersteinrichtungs-Schritt im Config Entry (`entity.initial_config_value`)? (4)
 sonst der Hard-Default aus `const.py`. Stufe 3 kommt dadurch effektiv nur
 beim allerersten Start eines neuen Eintrags zum Tragen - sobald einmal ein
 echter Zustand über RestoreEntity gespeichert wurde, hat der stets Vorrang,
 auch nach einem späteren `Reconfigure` (der die Netzladung-Schlüssel nicht
 im Config Entry aktualisiert).
+
+## Startreihenfolge und Persistenz der Ladeeinstellungen
+
+Siehe `anforderung.yaml`, REQ-CONTROL-CONFIG-BOOTSTRAP.
+
+Alle softwareseitigen Steuerwerte (Max. SOC, beide Zeitfenster mit ihren
+Monats-Sets, Min. SOC, PV-Prognose-Mindestwert, die drei Automatik-Schalter,
+Ladestrategie und Preisparameter) liegen als ein Snapshot in einem
+versionierten Store: `infrastructure/control_store.py`
+(`ControlConfig`/`ControlConfigStore`, Schlüssel
+`sax_power.control.<entry_id>`). Mehrere Config Entries haben dadurch
+getrennte Stores.
+
+`__init__.async_setup_entry` hält eine verbindliche Reihenfolge ein:
+
+1. `async_load_calibration_state()` / `async_load_energy_state()` /
+   `async_load_control_state()` - alle drei Stores werden geladen, bevor
+   irgendetwas das Gerät steuert. `async_load_control_state()` öffnet
+   zusätzlich das **Bootstrap-Fenster**.
+2. `async_config_entry_first_refresh()` - liest die Register ganz normal,
+   überspringt aber `_async_enforce_grid_charge`. Reads sind im
+   Bootstrap-Fenster erlaubt, steuernde Writes nicht.
+3. `async_forward_entry_setups(...)` - die Plattformen legen ihre Entities
+   an. Deren Setter laufen ebenfalls ins gesperrte
+   `_async_apply_grid_charge_change` und wenden daher keine
+   Teilkonfiguration an.
+4. `price_planner.async_setup()`, danach `async_finish_bootstrap()` -
+   schließt das Fenster, schreibt den vollständigen Snapshot fest und wendet
+   unter dem vorhandenen Control-Lock **genau eine** Ladeentscheidung an.
+
+Ohne diese Reihenfolge wertete der erste Refresh reine Defaults aus
+(Automatiken aus, Max-SOC 100 %) und konnte Register 40051 auf Modus 0
+setzen, obwohl ein gespeichertes Ladefenster gerade aktiv war - der
+Ladevorgang wurde also beim Neustart kurz freigegeben und anschließend aus
+Zwischenzuständen der nacheinander restaurierenden Entities wieder
+aufgebaut.
+
+**Migration:** Die `RestoreEntity`-Zustände von `number.py`, `switch.py`,
+`select.py` und `time.py` sind nur noch der einmalige Migrationspfad für
+Einträge ohne Store. Sobald `coordinator.control_config_restored` gilt,
+überspringen alle Konfigurations-Entities ihren Restore-Pfad vollständig -
+ein `unknown`/`unavailable` gewordener Entity-Zustand kann einen
+gespeicherten Wert damit weder als Default noch als "Aus" überschreiben.
+Beim allerersten Start eines neuen Eintrags greift weiter die bekannte
+Kaskade (Coordinator-Wert, RestoreEntity, `entity.initial_config_value`,
+Hard-Default aus `const.py`); `async_finish_bootstrap()` schreibt das
+Ergebnis anschließend sofort in den Store.
+
+**Verfügbarkeit:** Diese Entities erben von `entity.SaxPowerConfigEntity`,
+das `available` fest auf `True` setzt. Ihre Werte stammen aus keinem
+Register, deshalb dürfen sie nicht an `coordinator.last_update_success`
+hängen - ein reiner Basic-Mode-Ausfall macht sie sonst sichtbar
+"nicht verfügbar" und hinterlässt einen Restore-State-Dump in genau diesem
+Zustand.
+
+**Validierung:** Beim Laden wird jedes Feld einzeln gegen seinen
+Wertebereich geprüft. Ein ungültiger Wert wird verworfen und in
+`ControlConfig.with_defaults()` durch den Hard-Default ersetzt, ohne die
+übrigen gespeicherten Werte zu verlieren. Ein leeres Monats-Set und ein
+wegen Überschneidung geleertes Zeitfenster sind dagegen gültige
+Anwenderzustände und bleiben leer. Ist gar kein Store lesbar, bleiben die
+Automatiken fail-safe aus.
+
+**Schreiben:** Nach dem Bootstrap merkt jede Einstellungsänderung über den
+gemeinsamen Endpunkt `_async_apply_grid_charge_change` den aktuellen
+Snapshot zum gebündelten Schreiben vor; ein unveränderter Snapshot löst
+keinen Schreibvorgang aus. `async_shutdown` flusht den neuesten Stand
+zusätzlich best-effort sofort.
 
 ## Register-Mapping
 
@@ -417,6 +493,12 @@ tests/
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)
+├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
+│                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
+│                                  unvollständiger Store, getrennte Stores je Config Entry,
+│                                  gesperrte Writes während des Bootstraps, Migration ohne
+│                                  Store, Basic-Mode-Ausfall, unknown-Restore-Zustand und
+│                                  Verfügbarkeit der Konfigurations-Entities
 ├── test_repairs.py                 Fünf Selbstdiagnose-Issues (coordinator.
 │                                  _async_check_self_diagnostics): Auslösen nach Karenzzeit,
 │                                  Idempotenz (kein erneutes Anlegen bei unverändertem
@@ -448,6 +530,10 @@ die Integration real darüber kommunizieren. Geprüft werden u. a.:
   trotzdem erfolgreich, Basic-Mode-Sensoren liefern echte Werte,
   SunSpec-Sensoren zeigen "unbekannt" statt die Integration am Start zu
   hindern
+- Neustart in einem gespeicherten, gerade aktiven Ladefenster: Register
+  40051 wird zu keinem Zeitpunkt auf 0 geschrieben, die gespeicherte
+  Konfiguration ist vollständig sichtbar zurück (siehe
+  [Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen))
 
 Alle Tests laufen auch ohne echte Hardware und ohne Internetzugriff (der
 Live-Test bindet nur an `127.0.0.1`) – der Live-Hardware-Test

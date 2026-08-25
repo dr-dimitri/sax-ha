@@ -64,3 +64,22 @@ class SaxPowerEntity(CoordinatorEntity[SaxPowerCoordinator]):
         """
         self._attr_unique_id = f"{self._entry_id}_{suffix}"
         self.entity_id = f"{platform_domain}.sax_power_{suffix}"
+
+
+class SaxPowerConfigEntity(SaxPowerEntity):
+    """Basisklasse für rein softwareseitige Konfigurations-Entities.
+
+    Max-SOC, Zeitfenster, Monate, Automatik-Schalter, Ladestrategie und
+    Preisparameter stammen aus keinem Register - sie werden vom Coordinator
+    gehalten und über infrastructure/control_store.py persistiert (siehe
+    anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP). Deshalb dürfen sie
+    NICHT an CoordinatorEntity.available (= coordinator.last_update_success)
+    hängen: ein reiner Modbus-Ausfall macht die gespeicherten Werte weder
+    unbekannt noch ungültig, würde die Entities aber sichtbar
+    "nicht verfügbar" schalten - und einen Restore-State-Dump in genau
+    diesem Zustand hinterlassen.
+    """
+
+    @property
+    def available(self) -> bool:
+        return True

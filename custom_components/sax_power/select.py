@@ -21,7 +21,7 @@ from .const import (
     PRICE_STRATEGIES,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerConfigEntity
+from .entity import SaxPowerConfigEntity, log_unmigratable_state
 
 
 async def async_setup_entry(
@@ -70,15 +70,20 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerConfigEntity, SelectEnt
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if (last_state := await self.async_get_last_state()) is not None:
             if last_state.state in PRICE_STRATEGIES:
                 await self.coordinator.async_set_price_charge_strategy(last_state.state)
-                return
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+            return
         await self.coordinator.async_set_price_charge_strategy(DEFAULT_PRICE_STRATEGY)
 
     @property

@@ -2343,21 +2343,45 @@ requirement_control_config_bootstrap:
     erzeugt dadurch keinen vorübergehenden Write von Register 40051 auf
     Modus 0.
 
-    Beim Laden wird jedes Feld einzeln gegen seinen Wertebereich geprüft;
-    ein ungültiger Wert wird mit Warnung verworfen und in
-    ControlConfig.with_defaults durch den dokumentierten Hard-Default
+    Ein Ladeversuch endet in genau einem von drei Zuständen
+    (ControlConfigLoadStatus): LOADED (lesbarer Store, alleinige Quelle),
+    MISSING (noch kein Store - nur dann darf migriert werden) oder FAILED
+    (vorhandener, aber nicht verwertbarer Store: I/O-Fehler, kein Objekt,
+    oder eine unbekannte künftige Storage-Hauptversion). Bei FAILED gelten
+    die sicheren Vorgabewerte, es wird NICHT migriert, und der vorhandene
+    Store wird nicht automatisch überschrieben - weder beim
+    Bootstrap-Abschluss noch beim Entladen. Erst eine bewusste
+    Einstellungsänderung des Anwenders schreibt ihn wieder, weil sie ein
+    ausdrücklicher neuer Wert und kein Ratewert ist.
+
+    Innerhalb eines lesbaren Stores wird jedes Feld einzeln gegen seinen
+    Wertebereich geprüft; ein ungültiger Wert wird mit Warnung verworfen und
+    in ControlConfig.sanitized durch den dokumentierten Hard-Default
     ersetzt, ohne die übrigen gespeicherten Werte zu verlieren. Ein leeres
     Monats-Set bleibt dabei leer (gültiger Anwenderzustand, kein fehlender
-    Wert), ebenso ein wegen Überschneidung geleertes Zeitfenster. Ein Store,
-    in dem Netzladung und preisoptimiertes Laden gleichzeitig aktiv sind,
-    kann nur beschädigt sein - preisoptimiertes Laden bleibt dann aus.
+    Wert), ebenso ein wegen Überschneidung geleertes Zeitfenster.
+    ControlConfig.sanitized prüft zusätzlich die fachlichen Invarianten der
+    Gesamtkonfiguration, die sonst nur die Setter garantieren - denn ein
+    korrupter oder von Hand bearbeiteter Store kann aus lauter einzeln
+    gültigen Werten bestehen und trotzdem eine Kombination enthalten, die
+    kein Setter je erzeugt hätte: Sind Netzladung und preisoptimiertes Laden
+    gleichzeitig aktiv, bleibt preisoptimiertes Laden aus; überschneiden
+    sich die beiden Zeitfenster in Tageszeit UND aktiven Monaten, wird das
+    Netzladefenster geleert (nur die Netzladung zieht aktiv Strom aus dem
+    Netz).
 
     Die RestoreEntity-Zustände der Konfigurations-Entities (number.py,
     switch.py, select.py, time.py) sind nur noch der einmalige
-    Migrationspfad für Config Entries, für die es noch keinen Store gibt:
-    Sobald ein Snapshot geladen wurde, überspringen sie ihren Restore-Pfad
-    vollständig. Ein unknown/unavailable gewordener Entity-Zustand kann
-    damit nie mehr als Default oder als ausdrückliches "Aus" gelesen werden.
+    Migrationspfad für Config Entries, für die es noch keinen Store gibt
+    (MISSING). Migriert werden dabei ausschließlich fachlich verwertbare
+    Zustände: bei Schaltern nur on/off, bei Zahlen nur endliche Zahlenwerte,
+    bei Zeiten nur parsebare Uhrzeiten, bei der Strategie nur ein bekannter
+    Wert. Ein unknown/unavailable oder sonst unbrauchbarer Altzustand ruft
+    gar keinen Setter auf und wird mit Warnung protokolliert; die
+    betroffene Einstellung bleibt auf ihrem Ausgangswert, statt als
+    ausdrückliches "Aus" oder als Vorgabewert übernommen und anschließend
+    dauerhaft gespeichert zu werden.
+
     Zusätzlich hängen diese Entities über entity.SaxPowerConfigEntity nicht
     mehr an coordinator.last_update_success und bleiben bei einem reinen
     Basic-Mode-Ausfall verfügbar - ihre Werte stammen aus keinem Register.
@@ -2377,20 +2401,27 @@ requirement_control_config_bootstrap:
        Control-Lock angewendet."
     - "Korrupte oder fehlende Einzelfelder werden fail-safe durch ihren
        Hard-Default ersetzt, ohne die übrigen gespeicherten Werte zu
-       verwerfen."
+       verwerfen; zusätzlich werden die fachlichen Invarianten der
+       Gesamtkonfiguration erzwungen."
+    - "Ein vorhandener, aber nicht verwertbarer Store erlaubt keine
+       Migration und wird nicht automatisch überschrieben."
     - "Bestehende RestoreEntity-Zustände werden einmalig migriert, solange
-       kein Store existiert; danach darf unknown/unavailable keinen
-       gespeicherten Wert überschreiben."
+       kein Store existiert - und auch dann nur, wenn sie fachlich gültig
+       sind. unknown/unavailable ruft keinen Setter auf und gilt nie als
+       ausdrückliches Aus oder als Vorgabewert."
     - "Reine Software-Konfigurationsentities bleiben bei einem
        Basic-Mode-Ausfall verfügbar."
   acceptance_criteria:
     - "tests/test_control_persistence.py deckt ab: Store-Round-Trip,
-       korrupter/unvollständiger/alter Store, leeres Monats-Set, zwei
+       korrupter/unvollständiger/alter Store, nicht lesbarer Store und
+       unbekannte künftige Storage-Version (keine Migration, kein
+       automatisches Überschreiben, aber Persistenz nach einer bewussten
+       Änderung), überlappende Zeitfenster im Store, leeres Monats-Set, zwei
        getrennte Config Entries, vollständige Konfiguration vor dem ersten
        Refresh, keine Writes während des Bootstraps (weder aus dem Refresh
-       noch aus den Settern), Migration ohne Store, Basic-Mode-Ausfall,
-       unknown-Restore-Zustand und Verfügbarkeit der
-       Konfigurations-Entities."
+       noch aus den Settern), Max-SOC-Hold über den Neustart, Migration ohne
+       Store, Basic-Mode-Ausfall, unknown/unavailable in allen vier
+       Plattformen und Verfügbarkeit der Konfigurations-Entities."
     - "tests/test_init.py prüft die Startreihenfolge (Kalibrierung, Energie,
        Ladekonfiguration, Refresh, Plattformen, Bootstrap-Abschluss)."
     - "tests/test_integration_live.py prüft end-to-end gegen den lokalen

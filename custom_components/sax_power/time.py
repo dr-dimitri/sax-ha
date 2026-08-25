@@ -27,7 +27,12 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerConfigEntity, initial_config_value
+from .entity import (
+    SaxPowerConfigEntity,
+    initial_config_value,
+    log_unmigratable_state,
+    restorable_time,
+)
 
 
 async def async_setup_entry(
@@ -57,17 +62,22 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.timed_charge_start is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            if (value := dt_util.parse_time(last_state.state)) is not None:
+            if (value := restorable_time(last_state)) is not None:
                 await self.coordinator.async_set_timed_charge_start(value)
-                return
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+            return
         # Kein zuvor gespeicherter Zustand (allererster Start eines neu
         # eingerichteten Eintrags) - Vorgabewert aus der Ersteinrichtung
         # nutzen, sonst den Hard-Default (siehe const.py).
@@ -98,17 +108,22 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.timed_charge_end is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            if (value := dt_util.parse_time(last_state.state)) is not None:
+            if (value := restorable_time(last_state)) is not None:
                 await self.coordinator.async_set_timed_charge_end(value)
-                return
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+            return
         initial = initial_config_value(self.hass, self._entry_id, CONF_TIMED_CHARGE_END)
         value = dt_util.parse_time(initial or DEFAULT_TIMED_CHARGE_END)
         if value is not None:
@@ -143,17 +158,22 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.grid_serving_start is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            if (value := dt_util.parse_time(last_state.state)) is not None:
+            if (value := restorable_time(last_state)) is not None:
                 await self.coordinator.async_set_grid_serving_start(value)
-                return
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+            return
         value = dt_util.parse_time(DEFAULT_GRID_SERVING_START)
         if value is not None:
             await self.coordinator.async_set_grid_serving_start(value)
@@ -181,17 +201,22 @@ class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.grid_serving_end is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            if (value := dt_util.parse_time(last_state.state)) is not None:
+            if (value := restorable_time(last_state)) is not None:
                 await self.coordinator.async_set_grid_serving_end(value)
-                return
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+            return
         value = dt_util.parse_time(DEFAULT_GRID_SERVING_END)
         if value is not None:
             await self.coordinator.async_set_grid_serving_end(value)

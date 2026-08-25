@@ -26,7 +26,13 @@ from .const import (
     SWITCH_STATE_ON,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerConfigEntity, SaxPowerEntity, initial_config_value
+from .entity import (
+    SaxPowerConfigEntity,
+    SaxPowerEntity,
+    initial_config_value,
+    log_unmigratable_state,
+    restorable_bool,
+)
 
 
 async def async_setup_entry(
@@ -109,14 +115,20 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.timed_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
+            if (restored := restorable_bool(last_state)) is None:
+                log_unmigratable_state(self.entity_id, last_state)
+                return
             # force=True: Der Konfliktdialog (siehe
             # SaxPowerCoordinator.async_set_timed_charge_enabled) ist beim
             # Restaurieren fehl am Platz - er würde den Anwender zu einer
@@ -124,9 +136,7 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
             # der Dialog verhindert, dass Netzladung und preisoptimiertes
             # Laden jemals gemeinsam eingeschaltet sind, kann auch nie ein
             # widersprüchliches Paar gespeicherter Zustände entstehen.
-            await self.coordinator.async_set_timed_charge_enabled(
-                last_state.state == "on", force=True
-            )
+            await self.coordinator.async_set_timed_charge_enabled(restored, force=True)
             return
         # Kein zuvor gespeicherter Zustand (allererster Start eines neu
         # eingerichteten Eintrags) - Vorgabewert aus der Ersteinrichtung
@@ -170,17 +180,21 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.grid_serving_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            await self.coordinator.async_set_grid_serving_enabled(
-                last_state.state == "on"
-            )
+            if (restored := restorable_bool(last_state)) is None:
+                log_unmigratable_state(self.entity_id, last_state)
+                return
+            await self.coordinator.async_set_grid_serving_enabled(restored)
             return
         await self.coordinator.async_set_grid_serving_enabled(
             DEFAULT_GRID_SERVING_ENABLED
@@ -239,18 +253,26 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if (last_state := await self.async_get_last_state()) is not None:
+            if (restored := restorable_bool(last_state)) is None:
+                # Ohne diese Prüfung würde ein "unavailable" gewordener
+                # Schalter den Monat aus dem Default "alle Monate"
+                # entfernen und die Automatik in diesem Monat dauerhaft
+                # stilllegen.
+                log_unmigratable_state(self.entity_id, last_state)
+                return
             # validate=False: siehe SaxPowerCoordinator.async_set_timed_charge_month
             # - vermeidet fälschliche Überlappungsfehler während des
             # sequentiellen Restaurierens mehrerer Monats-Entities.
-            await self._async_set_month_active(
-                self._month, last_state.state == "on", False
-            )
+            await self._async_set_month_active(self._month, restored, False)
 
     @property
     def is_on(self) -> bool:
@@ -290,19 +312,23 @@ class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        if self.coordinator.control_config_restored:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Der Store hat den Wert bereits
-            # gesetzt; der RestoreEntity-Pfad ist nur noch der einmalige
-            # Migrationsweg für Einträge ohne Store.
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
             return
         if self.coordinator.price_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
+            if (restored := restorable_bool(last_state)) is None:
+                log_unmigratable_state(self.entity_id, last_state)
+                return
             # force=True beim Restaurieren, siehe
             # SaxPowerTimedChargeSwitch.async_added_to_hass.
-            await self.coordinator.async_set_price_charge_enabled(
-                last_state.state == "on", force=True
-            )
+            await self.coordinator.async_set_price_charge_enabled(restored, force=True)
             return
         await self.coordinator.async_set_price_charge_enabled(
             DEFAULT_PRICE_CHARGE_ENABLED, force=True

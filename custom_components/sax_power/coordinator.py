@@ -168,7 +168,11 @@ from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
 from .infrastructure.calibration_store import CalibrationStateStore
-from .infrastructure.control_store import ControlConfig, ControlConfigStore
+from .infrastructure.control_store import (
+    ControlConfig,
+    ControlConfigLoadStatus,
+    ControlConfigStore,
+)
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
@@ -324,7 +328,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Versionierter, vom sichtbaren Entity-Zustand unabhängiger Snapshot
         # aller softwareseitigen Steuerwerte (REQ-CONTROL-CONFIG-BOOTSTRAP).
         self._control_store = ControlConfigStore(hass, entry_id)
-        self._control_config_restored = False
+        # MISSING als Ausgangswert: Eine direkt instanziierte
+        # Coordinator-Instanz, die async_load_control_state nie aufruft
+        # (Tests, Diagnose), verhält sich damit wie ein Eintrag ohne Store -
+        # der RestoreEntity-Migrationspfad bleibt für sie offen.
+        self._control_config_status = ControlConfigLoadStatus.MISSING
+        # Gesetzt, solange ein vorhandener, aber nicht verwertbarer Store
+        # nicht automatisch überschrieben werden darf - siehe
+        # _async_persist_bootstrap_result.
+        self._control_store_write_blocked = False
         # Solange True, darf KEINE Ladeentscheidung das Gerät steuern: der
         # erste Refresh und die (nur noch migrierenden) Entity-Setter würden
         # sonst aus einer Teilkonfiguration heraus schreiben - insbesondere
@@ -1221,13 +1233,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Default oder "aus" überschreiben.
 
     @property
-    def control_config_restored(self) -> bool:
-        """True, sobald ein gespeicherter Snapshot übernommen wurde.
+    def control_config_status(self) -> ControlConfigLoadStatus:
+        """Woher die aktuell gültige Ladekonfiguration stammt."""
+        return self._control_config_status
 
-        Die Konfigurations-Entities überspringen dann ihren
-        RestoreEntity-Pfad vollständig (number.py/switch.py/select.py/
-        time.py) - der Store ist ab dann die alleinige Quelle."""
-        return self._control_config_restored
+    @property
+    def control_config_migration_pending(self) -> bool:
+        """True, wenn der einmalige RestoreEntity-Migrationspfad greifen darf.
+
+        Ausschließlich bei ControlConfigLoadStatus.MISSING, also solange es
+        für diesen Config Entry noch gar keinen Store gibt. Bei LOADED ist
+        der Store die alleinige Quelle; bei FAILED gelten sichere Defaults -
+        in beiden Fällen darf ein veralteter Entity-Zustand nicht
+        einspringen (number.py/switch.py/select.py/time.py)."""
+        return self._control_config_status is ControlConfigLoadStatus.MISSING
 
     @property
     def control_bootstrap_pending(self) -> bool:
@@ -1263,37 +1282,37 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Muss vor async_config_entry_first_refresh() laufen (siehe
         __init__.async_setup_entry): Ab hier bis async_finish_bootstrap()
         sind Register-Reads weiter erlaubt, jede steuernde Entscheidung ist
-        dagegen gesperrt. Ein nicht lesbarer Store lässt die Automatiken
-        bewusst auf ihren sicheren Defaults stehen (aus, Max-SOC 100 %),
-        statt eine halb geratene Konfiguration zu erzwingen.
+        dagegen gesperrt.
+
+        Unterscheidet drei Fälle (ControlConfigLoadStatus): Ein lesbarer
+        Store ist die alleinige Quelle. Fehlt er, migrieren die Plattformen
+        ihre RestoreEntity-Zustände einmalig. Ist er vorhanden, aber nicht
+        verwertbar, bleiben die Automatiken auf ihren sicheren Defaults
+        stehen (aus, Max-SOC 100 %) - weder eine halb geratene Konfiguration
+        noch ein veralteter Entity-Zustand darf dann einspringen, und der
+        vorhandene Store wird nicht automatisch überschrieben.
         """
         self._control_bootstrap_pending = True
-        try:
-            stored = await self._control_store.async_load()
-        except (HomeAssistantError, OSError, ValueError) as err:
-            _LOGGER.warning(
-                "Ladeeinstellungen konnten nicht geladen werden; "
-                "starte mit den Vorgabewerten: %s",
-                err,
-            )
-            return
-        if stored is None:
-            # Noch kein Store für diesen Eintrag - die Plattformen migrieren
-            # ihre RestoreEntity-Zustände einmalig, async_finish_bootstrap
-            # schreibt das Ergebnis anschließend fest.
-            return
-        self._apply_control_config(stored.with_defaults())
-        self._control_config_restored = True
+        result = await self._control_store.async_load()
+        self._control_config_status = result.status
+        self._control_store_write_blocked = (
+            result.status is ControlConfigLoadStatus.FAILED
+        )
+        if result.config is not None:
+            self._apply_control_config(result.config.sanitized())
 
     def _apply_control_config(self, config: ControlConfig) -> None:
         """Übernimmt einen geladenen Snapshot, ohne etwas zu schreiben.
 
         Bewusst an den Settern vorbei: die lösen jeweils sofort eine eigene
         Ladeentscheidung aus, genau das soll der Bootstrap ja verhindern.
-        Die Wertebereiche sind bereits beim Laden geprüft
-        (infrastructure/control_store.py), eine Überlappungsprüfung der
-        beiden Zeitfenster entfällt hier absichtlich - gespeichert werden
-        kann nur eine Kombination, die die Setter zuvor akzeptiert haben.
+        Sowohl die Wertebereiche der Einzelfelder als auch die fachlichen
+        Invarianten der Gesamtkonfiguration (sich ausschließende
+        Automatiken, nicht überlappende Zeitfenster) sind zu diesem
+        Zeitpunkt bereits geprüft - siehe ControlConfig.sanitized() in
+        infrastructure/control_store.py, das dafür ausdrücklich NICHT
+        voraussetzt, dass nur von Settern erzeugte Kombinationen im Store
+        stehen.
         """
         self._max_soc = config.max_soc
         self._timed_charge_enabled = bool(config.timed_charge_enabled)
@@ -1322,26 +1341,59 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Store (Regelfall) oder der einmalige RestoreEntity-Migrationspfad die
         vollständige Konfiguration bereitgestellt hat. Die eine Auswertung
         läuft über denselben Pfad wie jede spätere Änderung und damit unter
-        dem vorhandenen Control-Lock (_async_enforce_grid_charge)."""
+        dem vorhandenen Control-Lock (_async_enforce_grid_charge) - aber mit
+        persist=False, weil der Bootstrap seine Persistenz je nach Herkunft
+        der Konfiguration selbst entscheidet."""
         if not self._control_bootstrap_pending:
             return
         self._control_bootstrap_pending = False
-        # Nicht verzögert: nach einer Migration ohne Store soll der Snapshot
-        # auch dann schon vollständig auf der Platte liegen, wenn Home
-        # Assistant unmittelbar danach neu startet.
+        await self._async_persist_bootstrap_result()
+        await self._async_apply_grid_charge_change(persist=False)
+
+    async def _async_persist_bootstrap_result(self) -> None:
+        """Schreibt das Bootstrap-Ergebnis - außer der Store ist defekt.
+
+        Ein nicht verwertbarer Store (FAILED) wird NICHT automatisch
+        überschrieben: Sein Inhalt kann die einzig verbliebene Kopie einer
+        korrekten Konfiguration sein (vorübergehender Lesefehler) oder von
+        einer neueren Version stammen, die diese hier nicht kennt. Erst eine
+        bewusste Einstellungsänderung des Anwenders schreibt ihn wieder -
+        die ist dann ein ausdrücklicher neuer Wert, kein Ratewert.
+        """
+        if self._control_store_write_blocked:
+            _LOGGER.warning(
+                "Ladeeinstellungen werden nicht automatisch gespeichert, weil "
+                "der vorhandene Store nicht gelesen werden konnte; er bleibt "
+                "unverändert, bis eine Einstellung bewusst geändert wird"
+            )
+            return
+        if self._control_config_status is ControlConfigLoadStatus.LOADED:
+            # Unverändert übernommen - nur schreiben, falls sanitized()
+            # etwas korrigiert hat (der Store verwirft gleiche Snapshots).
+            self._async_schedule_control_save()
+            return
+        # Migration ohne Store: nicht verzögert, damit der Snapshot auch
+        # einen unmittelbar folgenden Neustart überlebt.
         try:
             await self._control_store.async_save(self.control_config())
         except (HomeAssistantError, OSError, ValueError) as err:
             _LOGGER.warning(
                 "Ladeeinstellungen konnten nicht gespeichert werden: %s", err
             )
-        await self._async_apply_grid_charge_change()
 
     def _async_schedule_control_save(self) -> None:
         """Merkt den aktuellen Snapshot für einen gesammelten Store-Write vor.
 
         Der Store verwirft einen unveränderten Snapshot selbst, deshalb darf
-        das aus jeder Ladeentscheidung heraus aufgerufen werden."""
+        das aus jeder Ladeentscheidung heraus aufgerufen werden.
+
+        Erreicht wird das nur über den Setter-Pfad
+        (_async_apply_grid_charge_change mit persist=True) und über eine
+        Korrektur des geladenen Snapshots durch sanitized(). Beides sind
+        ausdrückliche Werte, keine Ratewerte - deshalb hebt schon der erste
+        solche Aufruf eine Schreibsperre wegen eines defekten Stores wieder
+        auf (siehe _async_persist_bootstrap_result)."""
+        self._control_store_write_blocked = False
         try:
             self._control_store.async_delay_save(self.control_config())
         except (HomeAssistantError, OSError, ValueError) as err:
@@ -1351,8 +1403,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_flush_control_state(self) -> None:
         """Schreibt den Snapshot beim Entladen sofort, statt auf den
-        Sammel-Timer zu warten."""
-        if self._control_bootstrap_pending:
+        Sammel-Timer zu warten.
+
+        Übersprungen, solange der Bootstrap läuft (die Konfiguration ist
+        dann noch unvollständig) sowie bei einem nicht verwertbaren Store,
+        an dem nichts bewusst geändert wurde - siehe
+        _async_persist_bootstrap_result."""
+        if self._control_bootstrap_pending or self._control_store_write_blocked:
             return
         try:
             await self._control_store.async_save(self.control_config())
@@ -1902,7 +1959,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_months = new_months
         await self._async_apply_grid_charge_change()
 
-    async def _async_apply_grid_charge_change(self) -> None:
+    async def _async_apply_grid_charge_change(self, *, persist: bool = True) -> None:
         """Re-evaluate Zeitfenster/Max-SOC/Netzladeleistung sofort nach einer
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
         warten.
@@ -1912,10 +1969,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (REQ-CONTROL-CONFIG-BOOTSTRAP). Während des Bootstraps passiert
         beides nicht: die Setter restaurieren dann nur noch Altzustände, und
         eine Teilkonfiguration darf weder das Gerät steuern noch den
-        vollständigen gespeicherten Stand überschreiben."""
+        vollständigen gespeicherten Stand überschreiben.
+
+        `persist=False` nutzt ausschließlich async_finish_bootstrap für
+        seine eine Auswertung: Die dortige Konfiguration stammt nicht aus
+        einer Anwenderänderung, deshalb entscheidet der Bootstrap selbst, ob
+        und wie sie geschrieben wird (siehe _async_persist_bootstrap_result).
+        """
         if self._control_bootstrap_pending:
             return
-        self._async_schedule_control_save()
+        if persist:
+            self._async_schedule_control_save()
         if self.data is not None:
             await self._async_enforce_grid_charge(self.data)
             self._publish_charge_state(self.data)

@@ -13,9 +13,11 @@ import logging
 import math
 from dataclasses import asdict, dataclass, replace
 from datetime import time as dt_time
+from enum import StrEnum
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -41,6 +43,7 @@ from ..const import (
     MIN_SOC,
     PRICE_STRATEGIES,
 )
+from ..domain.scheduling import windows_overlap
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +64,34 @@ _TIME_FIELDS = (
 _MONTH_FIELDS = ("timed_charge_months", "grid_serving_months")
 
 
+class ControlConfigLoadStatus(StrEnum):
+    """Woher die aktuell gültige Ladekonfiguration stammt.
+
+    Die drei Fälle müssen auseinandergehalten werden, weil sich nur einer
+    von ihnen migrieren lässt (REQ-CONTROL-CONFIG-BOOTSTRAP):
+
+    - LOADED: Es gibt einen lesbaren Store; er ist die alleinige Quelle.
+    - MISSING: Es gibt noch keinen Store - und NUR dann darf der einmalige
+      RestoreEntity-Migrationspfad der Plattformen greifen.
+    - FAILED: Es gibt einen Store, er ist aber nicht verwertbar (I/O-Fehler,
+      kein Objekt, unbekannte künftige Version). Dann gelten sichere
+      Defaults, ein veralteter Entity-Zustand darf NICHT einspringen, und
+      der vorhandene Store wird nicht automatisch überschrieben.
+    """
+
+    LOADED = "loaded"
+    MISSING = "missing"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class ControlConfigLoadResult:
+    """Ergebnis eines Ladeversuchs; `config` ist nur bei LOADED gesetzt."""
+
+    status: ControlConfigLoadStatus
+    config: ControlConfig | None = None
+
+
 @dataclass(frozen=True)
 class ControlConfig:
     """Alle softwareseitigen Steuerwerte eines Config Entry.
@@ -69,7 +100,7 @@ class ControlConfig:
     Zeitfelder ist es zusätzlich ein gültiger Endzustand (ein wegen
     Überschneidung geleertes Zeitfenster, siehe
     SaxPowerCoordinator._notify_time_window_overlap). Deshalb unterscheidet
-    erst `ControlConfig.with_defaults()` beim Laden zwischen beidem: fehlende
+    erst `ControlConfig.sanitized()` beim Laden zwischen beidem: fehlende
     Nicht-Zeit-Felder bekommen den Hard-Default, ein geleertes Zeitfenster
     bleibt leer.
     """
@@ -91,13 +122,20 @@ class ControlConfig:
     price_charge_neutral_price: float | None = None
     price_charge_hours: int | None = None
 
-    def with_defaults(self) -> ControlConfig:
-        """Füllt fehlende/verworfene Felder mit ihrem Hard-Default auf.
+    def sanitized(self) -> ControlConfig:
+        """Füllt fehlende Felder auf und erzwingt die fachlichen Invarianten.
 
-        Greift für Stores, die vor der Einführung eines Feldes geschrieben
-        wurden, sowie für Felder, die die Validierung beim Laden verworfen
-        hat (fail-safe: lieber der dokumentierte Default als ein aus einem
-        korrupten Wert abgeleiteter Zustand).
+        Die Feldvalidierung beim Laden prüft jeden Wert nur für sich. Ein
+        korrupter oder von Hand bearbeiteter Store kann aber auch aus lauter
+        einzeln gültigen Werten bestehen und trotzdem eine Kombination
+        enthalten, die kein Setter je erzeugt hätte - deshalb werden hier
+        zusätzlich die Invarianten geprüft, die sonst nur die Setter
+        garantieren (REQ-CONTROL-CONFIG-BOOTSTRAP).
+
+        Fehlende Felder (Store von vor der Einführung eines Feldes, oder von
+        der Feldvalidierung verworfen) bekommen ihren Hard-Default -
+        fail-safe: lieber der dokumentierte Default als ein aus einem
+        korrupten Wert abgeleiteter Zustand.
         """
         defaults: dict[str, Any] = {
             "max_soc": MAX_SOC,
@@ -132,7 +170,41 @@ class ControlConfig:
                 "preisoptimiertes Laden bleibt aus"
             )
             config = replace(config, price_charge_enabled=False)
-        return config
+        return config._without_overlapping_windows()
+
+    def _without_overlapping_windows(self) -> ControlConfig:
+        """Erzwingt die Nicht-Überschneidung der beiden Zeitfenster.
+
+        Netzladung und netzdienliches Laden dürfen sich weder in ihrer
+        Tageszeit noch in ihren aktiven Monaten überschneiden; die
+        Zeit-/Monats-Setter lehnen so eine Kombination ab (siehe
+        SaxPowerCoordinator._assert_windows_dont_overlap). Steht sie
+        trotzdem im Store, wird das Netzladefenster geleert und nicht das
+        des netzdienlichen Ladens: Netzladung zieht aktiv Strom aus dem
+        Netz, netzdienliches Laden unterbricht nur eine PV-Ladung - ohne
+        Fenster kann die Netzladung gar nicht erst anspringen.
+        """
+        timed_months = self.timed_charge_months or frozenset()
+        grid_serving_months = self.grid_serving_months or frozenset()
+        if not (timed_months & grid_serving_months):
+            return self
+        if not windows_overlap(
+            self.timed_charge_start,
+            self.timed_charge_end,
+            self.grid_serving_start,
+            self.grid_serving_end,
+        ):
+            return self
+        _LOGGER.warning(
+            "Gespeicherte Zeitfenster von Netzladung (%s-%s) und "
+            "netzdienlichem Laden (%s-%s) überschneiden sich; das "
+            "Netzladefenster wird geleert",
+            self.timed_charge_start,
+            self.timed_charge_end,
+            self.grid_serving_start,
+            self.grid_serving_end,
+        )
+        return replace(self, timed_charge_start=None, timed_charge_end=None)
 
 
 class ControlConfigStore:
@@ -148,24 +220,40 @@ class ControlConfigStore:
         self._pending: dict[str, Any] | None = None
         self._save_scheduled = False
 
-    async def async_load(self) -> ControlConfig | None:
+    async def async_load(self) -> ControlConfigLoadResult:
         """Load the snapshot, dropping each invalid field independently.
 
-        Gibt None ausschließlich zurück, wenn für diesen Config Entry noch
+        MISSING gibt es ausschließlich, wenn für diesen Config Entry noch
         gar kein Store existiert - nur dann darf der einmalige
-        RestoreEntity-Migrationspfad greifen. Ein vorhandener, aber
-        unbrauchbarer Store liefert eine leere (= vollständig
-        defaultbesetzte) Konfiguration, damit ein einzelner korrupter Wert
-        nicht die gesamte gespeicherte Konfiguration verwirft.
+        RestoreEntity-Migrationspfad greifen. Ein vorhandener, aber gar
+        nicht verwertbarer Store (I/O-Fehler, kein Objekt, unbekannte
+        künftige Version) meldet FAILED: dann gelten sichere Defaults, und
+        der Aufrufer überschreibt ihn nicht automatisch. Ein einzelner
+        korrupter Wert innerhalb eines lesbaren Stores verwirft dagegen nur
+        sich selbst und lässt den Rest der Konfiguration stehen.
         """
-        raw = await self._store.async_load()
-        if raw is None:
-            return None
-        if not isinstance(raw, dict):
-            _LOGGER.warning(
-                "Ungültige gespeicherte Ladekonfiguration verworfen: kein Objekt"
+        try:
+            raw = await self._store.async_load()
+        except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
+            # NotImplementedError: Home Assistant meldet damit einen Store
+            # mit einer Hauptversion, für die es hier keine Migration gibt -
+            # typischerweise ein Downgrade. Der darf niemals von Version
+            # STORAGE_VERSION überschrieben werden.
+            _LOGGER.error(
+                "Gespeicherte Ladekonfiguration konnte nicht gelesen werden; "
+                "es gelten die Vorgabewerte und der vorhandene Store bleibt "
+                "unangetastet: %s",
+                err,
             )
-            return ControlConfig()
+            return ControlConfigLoadResult(ControlConfigLoadStatus.FAILED)
+        if raw is None:
+            return ControlConfigLoadResult(ControlConfigLoadStatus.MISSING)
+        if not isinstance(raw, dict):
+            _LOGGER.error(
+                "Gespeicherte Ladekonfiguration ist kein Objekt; es gelten "
+                "die Vorgabewerte und der vorhandene Store bleibt unangetastet"
+            )
+            return ControlConfigLoadResult(ControlConfigLoadStatus.FAILED)
 
         config = ControlConfig(
             max_soc=_valid_int(raw.get("max_soc"), MIN_SOC, MAX_SOC, "Max. SOC"),
@@ -226,7 +314,7 @@ class ControlConfigStore:
             ),
         )
         self._last_persisted = _serialize(config)
-        return config
+        return ControlConfigLoadResult(ControlConfigLoadStatus.LOADED, config)
 
     @callback
     def async_delay_save(

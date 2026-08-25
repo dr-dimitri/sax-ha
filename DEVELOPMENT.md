@@ -319,16 +319,43 @@ Ladevorgang wurde also beim Neustart kurz freigegeben und anschließend aus
 Zwischenzuständen der nacheinander restaurierenden Entities wieder
 aufgebaut.
 
+**Drei Ladeergebnisse:** `ControlConfigStore.async_load()` liefert einen
+`ControlConfigLoadStatus`, weil sich nur einer der drei Fälle migrieren
+lässt:
+
+| Status | Bedeutung | Migration erlaubt? | Automatischer Store-Write? |
+| --- | --- | --- | --- |
+| `LOADED` | lesbarer Store | nein | nur wenn `sanitized()` korrigiert hat |
+| `MISSING` | noch kein Store | **ja** | ja, sofort nach der Migration |
+| `FAILED` | Store da, aber unbrauchbar | nein | **nein** |
+
+`FAILED` entsteht bei einem I/O-Fehler, einem Payload, der kein Objekt ist,
+oder einer Storage-Hauptversion, die diese Version nicht kennt (Home
+Assistant meldet das per `NotImplementedError`). Dann gelten sichere
+Defaults, es wird nicht migriert, und der vorhandene Store bleibt
+unangetastet - er kann die einzige Kopie einer korrekten Konfiguration sein
+oder von einer neueren Version stammen. Erst eine bewusste
+Einstellungsänderung hebt die Schreibsperre auf
+(`_control_store_write_blocked`), denn die ist ein ausdrücklicher neuer
+Wert und kein Ratewert.
+
 **Migration:** Die `RestoreEntity`-Zustände von `number.py`, `switch.py`,
 `select.py` und `time.py` sind nur noch der einmalige Migrationspfad für
-Einträge ohne Store. Sobald `coordinator.control_config_restored` gilt,
-überspringen alle Konfigurations-Entities ihren Restore-Pfad vollständig -
-ein `unknown`/`unavailable` gewordener Entity-Zustand kann einen
-gespeicherten Wert damit weder als Default noch als "Aus" überschreiben.
-Beim allerersten Start eines neuen Eintrags greift weiter die bekannte
-Kaskade (Coordinator-Wert, RestoreEntity, `entity.initial_config_value`,
-Hard-Default aus `const.py`); `async_finish_bootstrap()` schreibt das
-Ergebnis anschließend sofort in den Store.
+Einträge ohne Store. Nur solange `coordinator.control_config_migration_pending`
+gilt (also bei `MISSING`), laufen sie überhaupt - und auch dann übernehmen
+sie ausschließlich fachlich verwertbare Zustände: `restorable_bool` (nur
+`on`/`off`), `restorable_number` (nur endliche Zahlen) und
+`restorable_time` (nur parsebare Uhrzeiten) in `entity.py`, bei der
+Strategie nur ein bekannter Wert. Ein `unknown`/`unavailable` oder sonst
+unbrauchbarer Altzustand ruft **gar keinen Setter** auf, wird über
+`log_unmigratable_state` protokolliert, und die Einstellung bleibt auf
+ihrem Ausgangswert - sonst würde etwa ein `unavailable` gewordener
+Monats-Schalter den Monat aus dem Default "alle Monate" entfernen und die
+Automatik dort dauerhaft stilllegen. Beim allerersten Start eines neuen
+Eintrags (gar kein Vorzustand) greift weiter die bekannte Kaskade
+(Coordinator-Wert, `entity.initial_config_value`, Hard-Default aus
+`const.py`); `async_finish_bootstrap()` schreibt das Ergebnis anschließend
+sofort in den Store.
 
 **Verfügbarkeit:** Diese Entities erben von `entity.SaxPowerConfigEntity`,
 das `available` fest auf `True` setzt. Ihre Werte stammen aus keinem
@@ -339,11 +366,26 @@ Zustand.
 
 **Validierung:** Beim Laden wird jedes Feld einzeln gegen seinen
 Wertebereich geprüft. Ein ungültiger Wert wird verworfen und in
-`ControlConfig.with_defaults()` durch den Hard-Default ersetzt, ohne die
+`ControlConfig.sanitized()` durch den Hard-Default ersetzt, ohne die
 übrigen gespeicherten Werte zu verlieren. Ein leeres Monats-Set und ein
 wegen Überschneidung geleertes Zeitfenster sind dagegen gültige
-Anwenderzustände und bleiben leer. Ist gar kein Store lesbar, bleiben die
-Automatiken fail-safe aus.
+Anwenderzustände und bleiben leer.
+
+`sanitized()` prüft zusätzlich die **fachlichen Invarianten der
+Gesamtkonfiguration**. Ein korrupter oder von Hand bearbeiteter Store kann
+aus lauter einzeln gültigen Werten bestehen und trotzdem eine Kombination
+enthalten, die kein Setter je erzeugt hätte - man darf hier also gerade
+nicht annehmen, der Store enthalte nur von Settern akzeptierte Zustände:
+
+- Netzladung und preisoptimiertes Laden gleichzeitig aktiv → preisoptimiertes
+  Laden bleibt aus.
+- Die beiden Zeitfenster überschneiden sich in Tageszeit **und** aktiven
+  Monaten → das Netzladefenster wird geleert. Bewusst dieses und nicht das
+  andere: Nur die Netzladung zieht aktiv Strom aus dem Netz, netzdienliches
+  Laden unterbricht lediglich eine PV-Ladung.
+
+Deshalb überspringt `_apply_control_config` die Überlappungsprüfung - sie
+ist an dieser Stelle bereits gelaufen.
 
 **Schreiben:** Nach dem Bootstrap merkt jede Einstellungsänderung über den
 gemeinsamen Endpunkt `_async_apply_grid_charge_change` den aktuellen

@@ -303,6 +303,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.options: Mapping[str, Any] = dict(options or {})
         self._scan_interval = scan_interval
         self._write_lock = asyncio.Lock()
+        # Die beiden Immediate-Control-Register bilden eine logische
+        # Sequenz. Periodischer Task und sofortige Sollwertänderung dürfen
+        # ihre Mode/Setpoint/Rollback-Writes nicht ineinander verschachteln
+        # (REQ-TIMED-SOC-CHARGE).
+        self._sun_charge_write_lock = asyncio.Lock()
         # Polling, Entity-Setter und Prognose-Callbacks können dieselbe
         # Ladeentscheidung gleichzeitig anstoßen. Nur eine vollständig
         # ausgewertete Entscheidung darf die SunSpec-Register steuern, sonst
@@ -1287,18 +1292,47 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _watts_to_ic_setpoint_raw(self, power_watts: int, data: dict[str, Any]) -> int:
         max_power_reference = data.get("ic_max_power_reference")
-        if not max_power_reference:
+        if (
+            isinstance(max_power_reference, bool)
+            or not isinstance(max_power_reference, int | float)
+            or not math.isfinite(max_power_reference)
+            or max_power_reference <= 0
+        ):
             raise HomeAssistantError(
-                "Referenzwert Maximalleistung (Register 40053) noch nicht "
-                "bekannt - SunSpec-Modus-Block muss zuerst erfolgreich "
-                "gelesen worden sein."
+                "Referenzwert Maximalleistung (Register 40053) ist nicht "
+                f"gültig: {max_power_reference!r}. Der SunSpec-Modus-Block "
+                "muss zuerst erfolgreich gelesen worden sein."
             )
-        scale_factor = to_signed16(self._ic_power_setpoint_sf_raw)
+        scale_factor_raw = self._ic_power_setpoint_sf_raw
+        if (
+            isinstance(scale_factor_raw, bool)
+            or not isinstance(scale_factor_raw, int)
+            or not 0 <= scale_factor_raw <= 0xFFFF
+        ):
+            raise HomeAssistantError(
+                "Skalierungsfaktor für Register 40049 ist nicht gültig: "
+                f"{scale_factor_raw!r}."
+            )
+        scale_factor = to_signed16(scale_factor_raw)
+        # SunSpec erlaubt für sunssf nur -10 bis +10; -32768 kennzeichnet
+        # einen nicht implementierten Wert. Die frühe Begrenzung verhindert
+        # zugleich unkontrolliert große Zehnerpotenzen im Schreibpfad.
+        if not -10 <= scale_factor <= 10:
+            raise HomeAssistantError(
+                "Skalierungsfaktor für Register 40049 liegt außerhalb des "
+                f"SunSpec-Bereichs -10..10: {scale_factor}."
+            )
         percent = (power_watts / max_power_reference) * 100
         percent = max(
             MIN_IC_POWER_SETPOINT_PCT, min(MAX_IC_POWER_SETPOINT_PCT, percent)
         )
-        return to_unsigned16(round(percent / (10**scale_factor)))
+        raw_value = round(percent / (10**scale_factor))
+        if not -0x8000 <= raw_value <= 0x7FFF:
+            raise HomeAssistantError(
+                "Berechneter Rohwert für Register 40049 liegt außerhalb des "
+                f"int16-Bereichs: {raw_value}."
+            )
+        return to_unsigned16(raw_value)
 
     def _sun_ic_write_interval(self) -> int:
         """Wiederholungsintervall für die Schleife: die Hälfte des vom Gerät
@@ -1312,18 +1346,65 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             SUN_IC_MIN_WRITE_INTERVAL, min(timeout // 2, GRID_CHARGE_WRITE_INTERVAL)
         )
 
-    async def _async_write_sun_charge_setpoint(self) -> None:
-        """Schreibe Steuermodus und aktuellen Sollwert als eine Sequenz."""
-        await self.async_write_extended_register(
-            REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
-        )
+    async def _async_write_sun_charge_setpoint(self, power: int | None = None) -> None:
+        """Write mode and setpoint as one best-effort atomic sequence."""
+        async with self._sun_charge_write_lock:
+            await self._async_write_sun_charge_setpoint_unlocked(power)
+
+    async def _async_write_sun_charge_setpoint_unlocked(
+        self, power: int | None = None
+    ) -> None:
+        """Execute one sequence while the Immediate Controls lock is held."""
+        requested_power = self._sun_charge_power if power is None else power
+        # REQ-TIMED-SOC-CHARGE: Jede Voraussetzung und der endgültige
+        # int16-Rohwert müssen feststehen, bevor Modus 1 das Gerät aus seiner
+        # sicheren SmartMeter-Nullregelung nimmt.
+        setpoint_raw = self._watts_to_ic_setpoint_raw(requested_power, self.data or {})
+        try:
+            await self.async_write_extended_register(
+                REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
+            )
+        except HomeAssistantError as err:
+            message = (
+                "SunSpec-Sollwertsequenz beim Schreiben von Steuermodus "
+                f"Register 40051 abgebrochen: {err}"
+            )
+            _LOGGER.error(message)
+            raise HomeAssistantError(message) from err
+
+        # Ab der quittierten Modusumschaltung bleibt der Rücksetzauftrag für
+        # die spätere Freigabe bestehen; bei einer unvollständigen Sequenz
+        # löscht ihn ausschließlich ein quittierter Modus-0-Rollback.
+        self._sun_charge_reset_required = True
         self._record_ic_control_mode(SUN_IC_CONTROL_MODE_SETPOINT)
-        setpoint_raw = self._watts_to_ic_setpoint_raw(
-            self._sun_charge_power, self.data or {}
-        )
-        await self.async_write_extended_register(
-            REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
-        )
+        try:
+            await self.async_write_extended_register(
+                REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
+            )
+        except HomeAssistantError as setpoint_error:
+            try:
+                await self.async_write_extended_register(
+                    REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
+                )
+            except HomeAssistantError as rollback_error:
+                message = (
+                    "SunSpec-Sollwertsequenz nach quittiertem Moduswechsel: "
+                    f"Schreiben von Register 40049 fehlgeschlagen: "
+                    f"{setpoint_error}; Rollback über Register 40051 auf "
+                    "SmartMeter-Nullregelung ebenfalls fehlgeschlagen: "
+                    f"{rollback_error}. Rücksetzauftrag bleibt aktiv."
+                )
+            else:
+                self._sun_charge_reset_required = False
+                self._record_ic_control_mode(SUN_IC_CONTROL_MODE_SMARTMETER)
+                message = (
+                    "SunSpec-Sollwertsequenz nach quittiertem Moduswechsel: "
+                    f"Schreiben von Register 40049 fehlgeschlagen: "
+                    f"{setpoint_error}; Rollback über Register 40051 auf "
+                    "SmartMeter-Nullregelung erfolgreich."
+                )
+            _LOGGER.error(message)
+            raise HomeAssistantError(message) from setpoint_error
 
     async def async_start_sun_charge(self, power: int) -> None:
         """Start (or update the setpoint of) periodic SunSpec-Modus grid-charge
@@ -1338,27 +1419,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         GRID_CHARGE_WRITE_INTERVAL Sekunden später) - eine Einstellungs-
         änderung soll unmittelbar wirken.
         """
-        if not MIN_SETPOINT_POWER <= power <= MAX_SETPOINT_POWER:
+        if (
+            isinstance(power, bool)
+            or not isinstance(power, int)
+            or not MIN_SETPOINT_POWER <= power <= MAX_SETPOINT_POWER
+        ):
             raise HomeAssistantError(
                 f"power muss zwischen {MIN_SETPOINT_POWER} und "
                 f"{MAX_SETPOINT_POWER} liegen"
             )
         power_changed = power != self._sun_charge_power
-        self._sun_charge_power = power
         device_left_setpoint_mode = (
             self._last_observed_ic_control_mode == SUN_IC_CONTROL_MODE_SMARTMETER
         )
         if self._sun_charge_task is None or self._sun_charge_task.done():
-            # Ab dem Startauftrag besitzt die Integration den SunSpec-
-            # Steuermodus und muss ihn später explizit wieder freigeben. Das
-            # gilt konservativ auch dann, wenn der erste Schreibvorgang nur
-            # teilweise beim Gerät ankommt.
-            self._sun_charge_reset_required = True
+            self._sun_charge_task = None
             # Der aufrufende Zustandswechsel darf erst als angewendet gelten,
             # nachdem beide Register vom Gerät quittiert wurden. Die frühere
             # reine Task-Erzeugung ließ Status und tatsächlichen Steuermodus
             # kurzzeitig auseinanderlaufen (REQ-GRID-SERVING-CHARGE).
-            await self._async_write_sun_charge_setpoint()
+            try:
+                await self._async_write_sun_charge_setpoint(power)
+            except HomeAssistantError:
+                self._clear_sun_charge_active_flags()
+                raise
+            self._sun_charge_power = power
             self._sun_charge_task = self.hass.async_create_background_task(
                 self._async_sun_charge_loop(), name="sax_power_sun_charge"
             )
@@ -1370,7 +1455,35 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Ein gelesener Modus 0 trotz laufendem Task beweist, dass Gerät
             # oder ein externer Schreiber 40051 zwischenzeitlich verändert
             # hat. Nicht bis zum nächsten periodischen Refresh warten.
-            await self._async_write_sun_charge_setpoint()
+            try:
+                await self._async_write_sun_charge_setpoint(power)
+            except HomeAssistantError:
+                # Nach einer unvollständigen Sofortänderung darf der
+                # schlafende Task den alten Sollwert nicht später erneut
+                # aktivieren. Der nächste Coordinator-Takt entscheidet neu.
+                await self._async_cancel_sun_charge_task()
+                self._clear_sun_charge_active_flags()
+                raise
+            self._sun_charge_power = power
+
+    def _clear_sun_charge_active_flags(self) -> None:
+        """Avoid publishing activity after an incomplete device sequence."""
+        self._timed_charge_active = False
+        self._grid_serving_active = False
+        self._grid_serving_setpoint_active = False
+        self._price_charge_active = False
+        self._max_soc_clamped = False
+
+    async def _async_cancel_sun_charge_task(self) -> None:
+        """Cancel and forget the periodic writer without another mode write."""
+        if self._sun_charge_task is None:
+            return
+        self._sun_charge_task.cancel()
+        try:
+            await self._sun_charge_task
+        except asyncio.CancelledError, HomeAssistantError:
+            pass
+        self._sun_charge_task = None
 
     async def async_stop_sun_charge(self) -> None:
         """Gleiche Register 40051 mit dem Sollzustand Nullregelung ab.
@@ -1392,24 +1505,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if not needs_reset:
             return
-        if self._sun_charge_task is not None:
-            self._sun_charge_task.cancel()
-            try:
-                await self._sun_charge_task
-            except asyncio.CancelledError:
-                pass
-            except HomeAssistantError:
-                # Trifft die Cancellation einen gerade laufenden Modbus-Write,
-                # wandelt pymodbus sie in eine ModbusIOException um statt eine
-                # reine CancelledError durchzureichen - async_write_register
-                # daraus wiederum in HomeAssistantError. Der Task ist damit
-                # trotzdem beendet, nur eben nicht über den CancelledError-Pfad.
-                pass
-            self._sun_charge_task = None
+        await self._async_cancel_sun_charge_task()
         try:
-            await self.async_write_extended_register(
-                REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
-            )
+            async with self._sun_charge_write_lock:
+                await self.async_write_extended_register(
+                    REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
+                )
         except HomeAssistantError:
             _LOGGER.exception(
                 "Netzladung (SunSpec-Modus): Steuermodus konnte nicht auf "
@@ -1429,6 +1530,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except asyncio.CancelledError:
             raise
         except HomeAssistantError:
+            self._clear_sun_charge_active_flags()
             _LOGGER.exception(
                 "Netzladung (SunSpec-Modus): periodischer Schreibvorgang fehlgeschlagen"
             )

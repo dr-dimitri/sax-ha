@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from homeassistant.components import persistent_notification
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
@@ -16,7 +17,9 @@ from custom_components.sax_power.const import (
     CELL_CALIBRATION_INTERVAL,
     CONF_PV_FORECAST_SENSOR,
     GRID_CHARGE_WRITE_INTERVAL,
+    MAX_SETPOINT_POWER,
     MAX_SOC,
+    MIN_SETPOINT_POWER,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
@@ -938,6 +941,244 @@ async def test_active_sun_charge_immediately_repairs_observed_mode_change(hass) 
         ]
     finally:
         await coordinator.async_stop_sun_charge()
+
+
+@pytest.mark.parametrize("reference", [None, 0])
+async def test_sun_charge_rejects_missing_or_zero_reference_before_write(
+    hass, reference: int | None
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Register 40053 wird vor Modus 1 validiert."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": reference}
+
+    with pytest.raises(HomeAssistantError, match="Referenzwert Maximalleistung"):
+        await coordinator.async_start_sun_charge(0)
+
+    client.write_register.assert_not_awaited()
+    assert coordinator._sun_charge_task is None
+    assert coordinator.sun_charge_active is False
+    assert coordinator._sun_charge_reset_required is False
+
+
+@pytest.mark.parametrize(
+    "power", [True, 1.5, MIN_SETPOINT_POWER - 1, MAX_SETPOINT_POWER + 1]
+)
+async def test_sun_charge_rejects_invalid_power_before_write(
+    hass, power: object
+) -> None:
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600}
+
+    with pytest.raises(HomeAssistantError, match="power muss zwischen"):
+        await coordinator.async_start_sun_charge(power)  # type: ignore[arg-type]
+
+    client.write_register.assert_not_awaited()
+
+
+@pytest.mark.parametrize("scale_factor_raw", [to_unsigned16(-32768), to_unsigned16(-3)])
+async def test_sun_charge_rejects_invalid_scale_or_encoded_raw_before_write(
+    hass, scale_factor_raw: int
+) -> None:
+    """Ungültiges sunssf und ein nicht darstellbarer int16-Rohwert schreiben nie."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600}
+    coordinator._ic_power_setpoint_sf_raw = scale_factor_raw
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_start_sun_charge(-3000)
+
+    client.write_register.assert_not_awaited()
+    assert coordinator._sun_charge_task is None
+    assert coordinator._sun_charge_reset_required is False
+
+
+async def test_sun_charge_mode_write_failure_does_not_publish_task(hass) -> None:
+    """Ohne quittierten Modus 1 folgen weder Sollwert noch Rollback."""
+    client = _make_client()
+    failure = MagicMock()
+    failure.isError.return_value = True
+    failure.__str__.return_value = "Mode-Write abgelehnt"
+    client.write_register = AsyncMock(return_value=failure)
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600}
+
+    with pytest.raises(HomeAssistantError, match="Register 40051.*abgebrochen"):
+        await coordinator.async_start_sun_charge(0)
+
+    assert client.write_register.await_args_list == [
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        )
+    ]
+    assert coordinator._sun_charge_task is None
+    assert coordinator.sun_charge_active is False
+    assert coordinator._sun_charge_reset_required is False
+
+
+async def test_sun_charge_setpoint_failure_rolls_mode_back_immediately(
+    hass, caplog
+) -> None:
+    """Ein Fehler auf 40049 wird in derselben Sequenz mit 40051=0 gerollt."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    failure = MagicMock()
+    failure.isError.return_value = True
+    failure.__str__.return_value = "Setpoint-Write abgelehnt"
+    client.write_register = AsyncMock(side_effect=[success, failure, success])
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600}
+
+    with pytest.raises(HomeAssistantError, match="Rollback.*erfolgreich"):
+        await coordinator.async_start_sun_charge(0)
+
+    assert client.write_register.await_args_list == [
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        ),
+        call(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        ),
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        ),
+    ]
+    assert "Setpoint-Write abgelehnt" in caplog.text
+    assert "Rollback über Register 40051" in caplog.text
+    assert "SmartMeter-Nullregelung erfolgreich" in caplog.text
+    assert coordinator._sun_charge_task is None
+    assert coordinator.sun_charge_active is False
+    assert coordinator._sun_charge_reset_required is False
+    assert coordinator._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+
+
+async def test_failed_sun_charge_rollback_stays_pending_until_next_reset(
+    hass, caplog
+) -> None:
+    """Ein gescheiterter 40051=0-Rollback wird beim nächsten Stop wiederholt."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    setpoint_failure = MagicMock()
+    setpoint_failure.isError.return_value = True
+    setpoint_failure.__str__.return_value = "Setpoint-Write abgelehnt"
+    rollback_failure = MagicMock()
+    rollback_failure.isError.return_value = True
+    rollback_failure.__str__.return_value = "Rollback-Write abgelehnt"
+    client.write_register = AsyncMock(
+        side_effect=[success, setpoint_failure, rollback_failure, success]
+    )
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600}
+
+    with pytest.raises(HomeAssistantError, match="Rücksetzauftrag bleibt aktiv"):
+        await coordinator.async_start_sun_charge(0)
+
+    assert coordinator._sun_charge_task is None
+    assert coordinator._sun_charge_reset_required is True
+    assert coordinator._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SETPOINT
+    assert "Rollback-Write abgelehnt" in caplog.text
+
+    await coordinator.async_stop_sun_charge()
+
+    assert coordinator._sun_charge_reset_required is False
+    assert coordinator._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+    written_addresses = [
+        write.kwargs["address"] for write in client.write_register.await_args_list
+    ]
+    assert written_addresses == [
+        REG_SUN_IC_CONTROL_MODE,
+        REG_SUN_IC_POWER_SETPOINT_PCT,
+        REG_SUN_IC_CONTROL_MODE,
+        REG_SUN_IC_CONTROL_MODE,
+    ]
+
+
+async def test_failed_immediate_setpoint_change_rolls_back_and_stops_task(hass) -> None:
+    """Auch die Sofortänderung eines laufenden Tasks ist atomar abgesichert."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    failure = MagicMock()
+    failure.isError.return_value = True
+    failure.__str__.return_value = "Setpoint-Write abgelehnt"
+    client.write_register = AsyncMock(return_value=success)
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600, "ic_timeout": 300}
+    await coordinator.async_start_sun_charge(0)
+    coordinator._timed_charge_active = True
+    client.write_register.reset_mock()
+    client.write_register.side_effect = [success, failure, success]
+
+    with pytest.raises(HomeAssistantError, match="Rollback.*erfolgreich"):
+        await coordinator.async_start_sun_charge(-1000)
+
+    written_addresses = [
+        write.kwargs["address"] for write in client.write_register.await_args_list
+    ]
+    assert written_addresses == [
+        REG_SUN_IC_CONTROL_MODE,
+        REG_SUN_IC_POWER_SETPOINT_PCT,
+        REG_SUN_IC_CONTROL_MODE,
+    ]
+    assert coordinator._sun_charge_power == 0
+    assert coordinator._sun_charge_task is None
+    assert coordinator.sun_charge_active is False
+    assert coordinator._sun_charge_reset_required is False
+    assert coordinator._timed_charge_active is False
+
+
+async def test_sun_charge_sequences_cannot_interleave(hass) -> None:
+    """Periodischer und sofortiger Pfad serialisieren jeweils beide Register."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    first_write_started = asyncio.Event()
+    release_first_write = asyncio.Event()
+
+    async def delayed_first_write(**_kwargs):
+        if not first_write_started.is_set():
+            first_write_started.set()
+            await release_first_write.wait()
+        return success
+
+    client.write_register = AsyncMock(side_effect=delayed_first_write)
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {"ic_max_power_reference": 4600}
+
+    first_sequence = asyncio.create_task(
+        coordinator._async_write_sun_charge_setpoint(0)
+    )
+    await first_write_started.wait()
+    second_sequence = asyncio.create_task(
+        coordinator._async_write_sun_charge_setpoint(-1000)
+    )
+    await asyncio.sleep(0)
+
+    assert client.write_register.await_count == 1
+    release_first_write.set()
+    await asyncio.gather(first_sequence, second_sequence)
+
+    written_addresses = [
+        write.kwargs["address"] for write in client.write_register.await_args_list
+    ]
+    assert written_addresses == [
+        REG_SUN_IC_CONTROL_MODE,
+        REG_SUN_IC_POWER_SETPOINT_PCT,
+        REG_SUN_IC_CONTROL_MODE,
+        REG_SUN_IC_POWER_SETPOINT_PCT,
+    ]
 
 
 async def test_stop_sun_charge_retries_failed_smartmeter_reset(hass) -> None:

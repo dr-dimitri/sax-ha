@@ -55,6 +55,7 @@ async def async_setup_entry(
             translation_key=f"timed_charge_month_{month}",
             is_month_active=lambda m: m in coordinator.timed_charge_months,
             async_set_month_active=coordinator.async_set_timed_charge_month,
+            control_field="timed_charge_months",
         )
         for month in ALL_MONTHS
     )
@@ -66,6 +67,7 @@ async def async_setup_entry(
             translation_key=f"grid_serving_month_{month}",
             is_month_active=lambda m: m in coordinator.grid_serving_months,
             async_set_month_active=coordinator.async_set_grid_serving_month,
+            control_field="grid_serving_months",
         )
         for month in ALL_MONTHS
     )
@@ -128,6 +130,7 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         if (last_state := await self.async_get_last_state()) is not None:
             if (restored := restorable_bool(last_state)) is None:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("timed_charge_enabled")
                 return
             # force=True: Der Konfliktdialog (siehe
             # SaxPowerCoordinator.async_set_timed_charge_enabled) ist beim
@@ -193,6 +196,7 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         if (last_state := await self.async_get_last_state()) is not None:
             if (restored := restorable_bool(last_state)) is None:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("grid_serving_enabled")
                 return
             await self.coordinator.async_set_grid_serving_enabled(restored)
             return
@@ -243,11 +247,13 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
         translation_key: str,
         is_month_active: Callable[[int], bool],
         async_set_month_active: Callable[[int, bool, bool], Awaitable[None]],
+        control_field: str,
     ) -> None:
         super().__init__(coordinator, entry_id)
         self._month = month
         self._is_month_active = is_month_active
         self._async_set_month_active = async_set_month_active
+        self._control_field = control_field
         self._attr_translation_key = translation_key
         self._assign_ids("switch", translation_key)
 
@@ -268,6 +274,7 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
                 # entfernen und die Automatik in diesem Monat dauerhaft
                 # stilllegen.
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved(self._control_field)
                 return
             # validate=False: siehe SaxPowerCoordinator.async_set_timed_charge_month
             # - vermeidet fälschliche Überlappungsfehler während des
@@ -325,6 +332,7 @@ class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         if (last_state := await self.async_get_last_state()) is not None:
             if (restored := restorable_bool(last_state)) is None:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_enabled")
                 return
             # force=True beim Restaurieren, siehe
             # SaxPowerTimedChargeSwitch.async_added_to_hass.

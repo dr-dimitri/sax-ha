@@ -102,6 +102,7 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
                 await self.coordinator.async_set_max_soc(int(restored))
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("max_soc")
             return
         await self.coordinator.async_set_max_soc(MAX_SOC)
 
@@ -160,6 +161,7 @@ class SaxPowerTimedChargeMinSocNumber(
                 await self.coordinator.async_set_timed_charge_min_soc(int(restored))
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("timed_charge_min_soc")
             return
         await self.coordinator.async_set_timed_charge_min_soc(
             DEFAULT_TIMED_CHARGE_MIN_SOC
@@ -214,6 +216,9 @@ class SaxPowerGridServingForecastThresholdNumber(
                 )
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved(
+                    "grid_serving_forecast_threshold_kwh"
+                )
             return
         await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(
             DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH
@@ -271,6 +276,7 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity
                 await self.coordinator.async_set_price_charge_max_price(restored)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_max_price")
             return
         await self.coordinator.async_set_price_charge_max_price(DEFAULT_PRICE_LIMIT)
 
@@ -331,6 +337,9 @@ class SaxPowerPriceNeutralPriceNumber(
                 await self.coordinator.async_set_price_charge_neutral_price(restored)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved(
+                    "price_charge_neutral_price"
+                )
             return
         await self.coordinator.async_set_price_charge_neutral_price(
             DEFAULT_PRICE_NEUTRAL
@@ -385,6 +394,7 @@ class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerConfigEntity, Number
                 await self.coordinator.async_set_price_charge_hours(int(restored))
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_hours")
             return
         await self.coordinator.async_set_price_charge_hours(DEFAULT_PRICE_HOURS)
 

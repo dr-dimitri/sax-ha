@@ -41,6 +41,9 @@ async def async_get_config_entry_diagnostics(
             # bewusst nicht).
             "control_config_status": coordinator.control_config_status,
             "control_bootstrap_pending": coordinator.control_bootstrap_pending,
+            "control_config_unresolved_fields": sorted(
+                coordinator.control_config_unresolved_fields
+            ),
             "max_soc": coordinator.max_soc,
             "effective_max_soc": coordinator.effective_max_soc,
             "max_soc_clamped": coordinator.max_soc_clamped,

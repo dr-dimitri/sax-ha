@@ -63,6 +63,33 @@ _TIME_FIELDS = (
 )
 _MONTH_FIELDS = ("timed_charge_months", "grid_serving_months")
 
+# Alle Feldnamen, die während der einmaligen RestoreEntity-Migration eines
+# Config Entry ohne Store scheitern können (siehe entity.py,
+# SaxPowerCoordinator.mark_control_field_unresolved) - zugleich die einzigen
+# gültigen Einträge in ControlConfig.unresolved_fields. timed_charge_months/
+# grid_serving_months stehen hier je EINMAL für ihr gesamtes Monats-Set (12
+# Schalter teilen sich ein Feld), nicht pro Einzelmonat.
+CONTROL_MIGRATABLE_FIELDS = frozenset(
+    {
+        "max_soc",
+        "timed_charge_enabled",
+        "timed_charge_start",
+        "timed_charge_end",
+        "timed_charge_months",
+        "timed_charge_min_soc",
+        "grid_serving_enabled",
+        "grid_serving_start",
+        "grid_serving_end",
+        "grid_serving_months",
+        "grid_serving_forecast_threshold_kwh",
+        "price_charge_enabled",
+        "price_charge_strategy",
+        "price_charge_max_price",
+        "price_charge_neutral_price",
+        "price_charge_hours",
+    }
+)
+
 
 class ControlConfigLoadStatus(StrEnum):
     """Woher die aktuell gültige Ladekonfiguration stammt.
@@ -121,6 +148,15 @@ class ControlConfig:
     price_charge_max_price: float | None = None
     price_charge_neutral_price: float | None = None
     price_charge_hours: int | None = None
+    # Felder, deren RestoreEntity-Altzustand beim einmaligen Migrieren nicht
+    # verwertbar war (unknown/unavailable/unparsebar) - siehe
+    # anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP sowie entity.py,
+    # SaxPowerCoordinator.mark_control_field_unresolved. Bleibt bis zu einer
+    # bewussten Änderung über die jeweilige Entity gesetzt; sanitized()
+    # füllt trotzdem den Hard-Default, damit der Betrieb nicht blockiert -
+    # dieses Set ist die einzige Stelle, an der sichtbar bleibt, dass es
+    # sich dabei nicht um einen bestätigten Anwenderwert handelt.
+    unresolved_fields: frozenset[str] = frozenset()
 
     def sanitized(self) -> ControlConfig:
         """Füllt fehlende Felder auf und erzwingt die fachlichen Invarianten.
@@ -312,6 +348,7 @@ class ControlConfigStore:
                 MAX_PRICE_HOURS,
                 "Anzahl Stunden",
             ),
+            unresolved_fields=_valid_unresolved_fields(raw.get("unresolved_fields")),
         )
         self._last_persisted = _serialize(config)
         return ControlConfigLoadResult(ControlConfigLoadStatus.LOADED, config)
@@ -361,6 +398,7 @@ def _serialize(config: ControlConfig) -> dict[str, Any]:
     for field in _MONTH_FIELDS:
         value = payload[field]
         payload[field] = sorted(value) if value is not None else None
+    payload["unresolved_fields"] = sorted(payload["unresolved_fields"])
     return payload
 
 
@@ -431,3 +469,22 @@ def _valid_strategy(value: Any) -> str | None:
         _discard("Ladestrategie", value)
         return None
     return value
+
+
+def _valid_unresolved_fields(value: Any) -> frozenset[str]:
+    """Anders als die übrigen Felder gibt es hier keine "nicht gespeichert"-
+    Bedeutung von None: Fehlt das Feld (älterer Store) oder ist es
+    unbrauchbar, bedeutet das schlicht "keine unmigrierten Felder bekannt" -
+    ein leeres Set, nicht None."""
+    if not isinstance(value, list):
+        if value is not None:
+            _discard("nicht migrierte Felder", value)
+        return frozenset()
+    valid = {
+        field
+        for field in value
+        if isinstance(field, str) and field in CONTROL_MIGRATABLE_FIELDS
+    }
+    if len(valid) != len(value):
+        _discard("nicht migrierte Felder (unbekannter Feldname)", value)
+    return frozenset(valid)

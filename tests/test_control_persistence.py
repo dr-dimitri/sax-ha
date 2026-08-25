@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import State
+from homeassistant.helpers import issue_registry as ir
 
 from custom_components.sax_power.const import (
     ALL_MONTHS,
@@ -22,6 +23,9 @@ from custom_components.sax_power.const import (
     DEFAULT_PRICE_NEUTRAL,
     DEFAULT_PRICE_STRATEGY,
     DEFAULT_TIMED_CHARGE_MIN_SOC,
+    DOMAIN,
+    ISSUE_CONTROL_CONFIG_UNREADABLE,
+    ISSUE_CONTROL_CONFIG_UNRESOLVED,
     MAX_SOC,
     PRICE_STRATEGY_RELATIVE,
     REG_SUN_IC_CONTROL_MODE,
@@ -484,6 +488,11 @@ async def test_unreadable_store_neither_migrates_nor_gets_overwritten(
     assert coordinator.grid_serving_enabled is False
     assert coordinator.price_charge_enabled is False
 
+    # Ein Reparaturhinweis macht den Zustand für den Anwender sichtbar,
+    # statt es nur zu loggen (siehe Review von PR #118).
+    issue_id = f"{ISSUE_CONTROL_CONFIG_UNREADABLE}_entry"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
     # Der Migrationspfad einer Entity mit veraltetem "on" bleibt wirkungslos.
     entity = SaxPowerTimedChargeSwitch(coordinator, "entry")
     entity.hass = hass
@@ -506,23 +515,59 @@ async def test_unreadable_store_neither_migrates_nor_gets_overwritten(
     assert _setpoint_mode_writes(client) == []
     assert hass_storage[f"{STORAGE_KEY_PREFIX}.entry"] == original
 
+    # Finding (Review von PR #118): Auch eine EINZELNE bewusste
+    # Einstellungsänderung darf jetzt nicht mehr den vollständigen,
+    # unbekannten Snapshot überschreiben - sie wirkt nur im Arbeitsspeicher.
+    await coordinator.async_set_max_soc(65)
+    assert coordinator.max_soc == 65
+    assert hass_storage[f"{STORAGE_KEY_PREFIX}.entry"] == original
+
     # Auch das Entladen schreibt nichts zurück.
     await coordinator.async_shutdown()
     assert hass_storage[f"{STORAGE_KEY_PREFIX}.entry"] == original
 
 
-async def test_deliberate_change_writes_again_after_a_store_read_error(
+async def test_deliberate_change_after_a_store_read_error_stays_unpersisted(
     hass, hass_storage
 ) -> None:
-    """Die Schreibsperre gilt nur für automatische Writes: Ändert der
-    Anwender eine Einstellung bewusst, ist das ein ausdrücklicher neuer Wert
-    und wird persistiert."""
+    """Finding (Review von PR #118): Eine einzelne Einstellungsänderung
+    darf nach einem Lesefehler NICHT den vollständigen (unbekannten)
+    Snapshot überschreiben - auch nicht mittelbar über eine spätere
+    Änderung. Die Schreibsperre gilt deshalb für die gesamte Lebensdauer
+    dieser Coordinator-Instanz; der Anwender sieht Max. SOC 65 % nur im
+    Arbeitsspeicher, während Netzladung/Zeitfenster/Preisparameter im Store
+    unangetastet bleiben. Erst ein Neuladen des Config Entry (neue Instanz,
+    neuer Ladeversuch) kann die Sperre aufheben - siehe
+    test_reload_after_a_store_read_error_persists_again."""
     _seed_store(hass_storage, "entry", ACTIVE_WINDOW_PAYLOAD)
+    original = dict(hass_storage[f"{STORAGE_KEY_PREFIX}.entry"])
     coordinator = _make_coordinator(hass, _make_client(), "entry")
     _patched_reads(coordinator)
     coordinator._control_store._store.async_load = AsyncMock(
         side_effect=OSError("kaputt")
     )
+
+    await coordinator.async_load_control_state()
+    with _patched_now(8):
+        await coordinator.async_refresh()
+        await coordinator.async_finish_bootstrap()
+        await coordinator.async_set_max_soc(65)
+
+    assert coordinator.max_soc == 65  # wirkt operativ, nur nicht persistiert
+    await coordinator.async_shutdown()
+
+    assert hass_storage[f"{STORAGE_KEY_PREFIX}.entry"] == original
+
+
+async def test_reload_after_a_store_read_error_persists_again(
+    hass, hass_storage
+) -> None:
+    """Gegenprobe: Eine FRISCHE Coordinator-Instanz (wie sie ein Neuladen
+    des Config Entry erzeugt) liest den Store erneut - gelingt das
+    diesmal, greift die Schreibsperre nicht mehr."""
+    _seed_store(hass_storage, "entry", ACTIVE_WINDOW_PAYLOAD)
+    coordinator = _make_coordinator(hass, _make_client(), "entry")
+    _patched_reads(coordinator)
 
     await coordinator.async_load_control_state()
     with _patched_now(8):
@@ -741,6 +786,7 @@ async def test_migration_ignores_unrestorable_number_state(hass, state: str) -> 
 
     assert coordinator.timed_charge_min_soc is None
     assert coordinator.timed_charge_min_soc != DEFAULT_TIMED_CHARGE_MIN_SOC
+    assert "timed_charge_min_soc" in coordinator.control_config_unresolved_fields
     await coordinator.async_shutdown()
 
 
@@ -761,6 +807,7 @@ async def test_migration_ignores_unrestorable_switch_state(hass, state: str) -> 
 
     coordinator.async_set_grid_serving_enabled.assert_not_awaited()
     assert coordinator.grid_serving_enabled is DEFAULT_GRID_SERVING_ENABLED
+    assert "grid_serving_enabled" in coordinator.control_config_unresolved_fields
     await coordinator.async_shutdown()
 
 
@@ -778,6 +825,7 @@ async def test_migration_ignores_unrestorable_month_state(hass, state: str) -> N
             translation_key="timed_charge_month_3",
             is_month_active=lambda m: m in coordinator.timed_charge_months,
             async_set_month_active=coordinator.async_set_timed_charge_month,
+            control_field="timed_charge_months",
         ),
         hass,
         State("switch.x", state),
@@ -786,6 +834,7 @@ async def test_migration_ignores_unrestorable_month_state(hass, state: str) -> N
     await entity.async_added_to_hass()
 
     assert coordinator.timed_charge_months == ALL_MONTHS
+    assert "timed_charge_months" in coordinator.control_config_unresolved_fields
     await coordinator.async_shutdown()
 
 
@@ -804,6 +853,7 @@ async def test_migration_ignores_unrestorable_time_state(hass, state: str) -> No
     await entity.async_added_to_hass()
 
     assert coordinator.timed_charge_start is None
+    assert "timed_charge_start" in coordinator.control_config_unresolved_fields
     await coordinator.async_shutdown()
 
 
@@ -823,13 +873,16 @@ async def test_migration_ignores_unrestorable_strategy_state(hass, state: str) -
 
     coordinator.async_set_price_charge_strategy.assert_not_awaited()
     assert coordinator.price_charge_strategy == DEFAULT_PRICE_STRATEGY
+    assert "price_charge_strategy" in coordinator.control_config_unresolved_fields
     await coordinator.async_shutdown()
 
 
 async def test_unrestorable_states_are_not_persisted_as_values(hass, hass_storage):
     """Der Bootstrap schreibt danach keinen Ratewert fest: Die nicht
     migrierbaren Felder bleiben leer, statt als ausdrückliche Einstellung im
-    Store zu landen."""
+    Store zu landen - und die Tatsache, dass sie nicht auflösbar waren,
+    wird selbst mitgespeichert (unresolved_fields), statt beim nächsten
+    Laden spurlos zu verschwinden."""
     client = _make_client()
     coordinator = _make_coordinator(hass, client, "entry")
     _patched_reads(coordinator)
@@ -850,5 +903,96 @@ async def test_unrestorable_states_are_not_persisted_as_values(hass, hass_storag
     assert saved["timed_charge_min_soc"] is None
     assert saved["timed_charge_start"] is None
     assert saved["timed_charge_enabled"] is False
+    assert set(saved["unresolved_fields"]) == {
+        "timed_charge_min_soc",
+        "timed_charge_start",
+        "timed_charge_enabled",
+    }
     assert _setpoint_mode_writes(client) == []
+    await coordinator.async_shutdown()
+
+
+async def test_unresolved_fields_survive_a_restart_and_stay_flagged(
+    hass, hass_storage
+) -> None:
+    """Kernpunkt des Findings: Ein nicht migrierbares Feld darf nicht beim
+    nächsten Start stillschweigend als vollständig migriert gelten. Eine
+    FRISCHE Coordinator-Instanz, die den soeben geschriebenen Store lädt,
+    muss dieselben Felder weiterhin als unresolved führen - und darf sie
+    NICHT erneut über RestoreEntity zu erraten versuchen (der Store ist ab
+    LOADED die alleinige Quelle, ein zweiter automatischer Rateversuch
+    könnte einen inzwischen nur zufällig plausibel aussehenden Altzustand
+    fälschlich als "jetzt doch aufgelöst" durchwinken). Einzig eine
+    ausdrückliche Änderung über die Entity löst die Markierung."""
+    coordinator = _make_coordinator(hass, _make_client(), "entry")
+    _patched_reads(coordinator)
+    await coordinator.async_load_control_state()
+    entity = SaxPowerTimedChargeMinSocNumber(coordinator, "entry")
+    await _prepare(entity, hass, State("number.x", "unavailable")).async_added_to_hass()
+    with _patched_now(8):
+        await coordinator.async_refresh()
+        await coordinator.async_finish_bootstrap()
+    await coordinator.async_shutdown()
+    assert "timed_charge_min_soc" in coordinator.control_config_unresolved_fields
+
+    # Neustart: frische Instanz lädt denselben Store.
+    restarted = _make_coordinator(hass, _make_client(), "entry")
+    await restarted.async_load_control_state()
+    await restarted.async_finish_bootstrap()
+
+    assert restarted.control_config_status is ControlConfigLoadStatus.LOADED
+    assert restarted.control_config_migration_pending is False
+    assert "timed_charge_min_soc" in restarted.control_config_unresolved_fields
+    assert restarted.timed_charge_min_soc == DEFAULT_TIMED_CHARGE_MIN_SOC
+
+    # Selbst ein inzwischen "gültig" aussehender Altzustand darf die
+    # Markierung nicht automatisch auflösen - der Migrationspfad ist zu.
+    stale_entity = _prepare(
+        SaxPowerTimedChargeMinSocNumber(restarted, "entry"),
+        hass,
+        State("number.x", "55"),
+    )
+    await stale_entity.async_added_to_hass()
+
+    assert "timed_charge_min_soc" in restarted.control_config_unresolved_fields
+    assert restarted.timed_charge_min_soc == DEFAULT_TIMED_CHARGE_MIN_SOC
+
+    # Erst eine ausdrückliche Änderung über den Service-/UI-Pfad löst sie.
+    await stale_entity.async_set_native_value(55)
+
+    assert "timed_charge_min_soc" not in restarted.control_config_unresolved_fields
+    assert restarted.timed_charge_min_soc == 55
+    await restarted.async_shutdown()
+
+    assert (
+        "timed_charge_min_soc"
+        not in hass_storage[f"{STORAGE_KEY_PREFIX}.entry"]["data"]["unresolved_fields"]
+    )
+    assert (
+        hass_storage[f"{STORAGE_KEY_PREFIX}.entry"]["data"]["timed_charge_min_soc"]
+        == 55
+    )
+
+
+async def test_unresolved_fields_issue_lifecycle(hass, hass_storage) -> None:
+    """Sinnvoller Repair-Hinweis (siehe Review): angelegt, solange
+    mindestens ein Feld unresolved ist, gelöscht sobald keins mehr übrig
+    ist."""
+    coordinator = _make_coordinator(hass, _make_client(), "entry")
+    await coordinator.async_load_control_state()
+    entity = SaxPowerTimedChargeMinSocNumber(coordinator, "entry")
+    await _prepare(entity, hass, State("number.x", "unavailable")).async_added_to_hass()
+
+    with _patched_now(8):
+        await coordinator.async_refresh()
+        await coordinator.async_finish_bootstrap()
+
+    issue_id = f"{ISSUE_CONTROL_CONFIG_UNRESOLVED}_entry"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_placeholders == {"fields": "Netzladung Min. SOC"}
+
+    await coordinator.async_set_timed_charge_min_soc(55)
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
     await coordinator.async_shutdown()

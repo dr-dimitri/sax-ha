@@ -33,6 +33,8 @@ from .const import (
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
     GRID_CHARGE_WRITE_INTERVAL,
+    ISSUE_CONTROL_CONFIG_UNREADABLE,
+    ISSUE_CONTROL_CONFIG_UNRESOLVED,
     ISSUE_EXTENDED_MODE_UNAVAILABLE,
     ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_TIMED_CHARGE_CONFLICT,
@@ -195,6 +197,32 @@ _MONTH_NAMES_DE = {
     12: "Dezember",
 }
 
+# Anzeigenamen für ISSUE_CONTROL_CONFIG_UNRESOLVED (siehe
+# SaxPowerCoordinator._async_sync_unresolved_fields_issue) - dieselben
+# Feldnamen wie infrastructure/control_store.CONTROL_MIGRATABLE_FIELDS,
+# hier auf die deutschen Entity-Namen abgebildet, wie sie der Anwender in
+# der Oberfläche sieht.
+_CONTROL_FIELD_LABELS = {
+    "max_soc": "Max. SOC",
+    "timed_charge_enabled": "Netzladung aktiv",
+    "timed_charge_start": "Netzladung Start",
+    "timed_charge_end": "Netzladung Ende",
+    "timed_charge_months": "Netzladung Aktive Monate",
+    "timed_charge_min_soc": "Netzladung Min. SOC",
+    "grid_serving_enabled": "Netzdienliches Laden aktiv",
+    "grid_serving_start": "Netzdienliches Laden Start",
+    "grid_serving_end": "Netzdienliches Laden Ende",
+    "grid_serving_months": "Netzdienliches Laden Aktive Monate",
+    "grid_serving_forecast_threshold_kwh": (
+        "Netzdienliches Laden PV-Prognose-Mindestwert"
+    ),
+    "price_charge_enabled": "Preisoptimiertes Laden aktiv",
+    "price_charge_strategy": "Preisoptimiertes Laden Strategie",
+    "price_charge_max_price": "Preisoptimiertes Laden Preisgrenze",
+    "price_charge_neutral_price": "Preisoptimiertes Laden Neutralpreis",
+    "price_charge_hours": "Preisoptimiertes Laden Anzahl Stunden",
+}
+
 
 def _format_window_for_message(
     start: dt_time | None, end: dt_time | None, months: set[int]
@@ -335,8 +363,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._control_config_status = ControlConfigLoadStatus.MISSING
         # Gesetzt, solange ein vorhandener, aber nicht verwertbarer Store
         # nicht automatisch überschrieben werden darf - siehe
-        # _async_persist_bootstrap_result.
+        # _async_schedule_control_save.
         self._control_store_write_blocked = False
+        # Feldnamen, deren RestoreEntity-Altzustand beim einmaligen
+        # Migrieren nicht verwertbar war (unknown/unavailable/unparsebar) -
+        # siehe mark_control_field_unresolved/clear_control_field_unresolved
+        # sowie anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP. Bleibt über
+        # Neustarts hinweg gesetzt (persistiert in ControlConfig.
+        # unresolved_fields), bis die betroffene Einstellung bewusst über
+        # ihre Entity neu gesetzt wird - erst das ist ein ausdrücklicher
+        # Wert, kein Ratewert.
+        self._control_unresolved_fields: set[str] = set()
         # Solange True, darf KEINE Ladeentscheidung das Gerät steuern: der
         # erste Refresh und die (nur noch migrierenden) Entity-Setter würden
         # sonst aus einer Teilkonfiguration heraus schreiben - insbesondere
@@ -1253,6 +1290,62 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """True zwischen async_load_control_state und async_finish_bootstrap."""
         return self._control_bootstrap_pending
 
+    @property
+    def control_config_unresolved_fields(self) -> frozenset[str]:
+        """Feldnamen, deren Wert derzeit nicht als bestätigt gilt.
+
+        Siehe mark_control_field_unresolved für die Bedeutung."""
+        return frozenset(self._control_unresolved_fields)
+
+    def mark_control_field_unresolved(self, field: str) -> None:
+        """Markiert `field`, weil sein RestoreEntity-Altzustand nicht
+        verwertbar war (unknown/unavailable/unparsebar, siehe
+        entity.log_unmigratable_state).
+
+        Bleibt gesetzt und wird mitgespeichert (control_config(),
+        infrastructure/control_store.py), bis clear_control_field_unresolved
+        läuft - also bis der Anwender diese Einstellung bewusst über ihre
+        Entity neu setzt. sanitized() füllt trotzdem sofort einen sicheren
+        Hard-Default, damit der Betrieb nicht blockiert; dieses Set ist die
+        einzige Stelle, an der sichtbar bleibt, dass es sich dabei nicht um
+        einen bestätigten Anwenderwert handelt (REQ-CONTROL-CONFIG-
+        BOOTSTRAP, Akzeptanzkriterium "unknown/unavailable gilt nie als
+        ausdrückliches Aus oder Default")."""
+        self._control_unresolved_fields.add(field)
+
+    def clear_control_field_unresolved(self, field: str) -> None:
+        """Bestätigt `field` als ausdrücklichen Anwenderwert.
+
+        Von jedem betroffenen async_set_*-Setter aufgerufen, sobald er den
+        Wert tatsächlich übernimmt - unabhängig davon, ob das Feld überhaupt
+        als unresolved markiert war (dann ein No-Op). Synchronisiert danach
+        den Reparaturhinweis neu, außer der Bootstrap läuft noch - dessen
+        Abschluss übernimmt das selbst (async_finish_bootstrap)."""
+        self._control_unresolved_fields.discard(field)
+        if not self._control_bootstrap_pending:
+            self._async_sync_unresolved_fields_issue()
+
+    def _async_sync_unresolved_fields_issue(self) -> None:
+        """Legt den Reparaturhinweis für nicht migrierte Felder an oder
+        entfernt ihn - siehe mark_control_field_unresolved."""
+        issue_id = f"{ISSUE_CONTROL_CONFIG_UNRESOLVED}_{self.entry_id}"
+        if not self._control_unresolved_fields:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        labels = sorted(
+            _CONTROL_FIELD_LABELS.get(field, field)
+            for field in self._control_unresolved_fields
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_CONTROL_CONFIG_UNRESOLVED,
+            translation_placeholders={"fields": ", ".join(labels)},
+        )
+
     def control_config(self) -> ControlConfig:
         """Aktueller Stand aller softwareseitigen Steuerwerte."""
         return ControlConfig(
@@ -1274,6 +1367,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             price_charge_max_price=self._price_charge_max_price,
             price_charge_neutral_price=self._price_charge_neutral_price,
             price_charge_hours=self._price_charge_hours,
+            unresolved_fields=frozenset(self._control_unresolved_fields),
         )
 
     async def async_load_control_state(self) -> None:
@@ -1298,8 +1392,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._control_store_write_blocked = (
             result.status is ControlConfigLoadStatus.FAILED
         )
+        self._async_sync_unreadable_store_issue()
         if result.config is not None:
             self._apply_control_config(result.config.sanitized())
+
+    def _async_sync_unreadable_store_issue(self) -> None:
+        """Meldet einen unlesbaren Store dem Anwender, statt es nur zu
+        loggen: Ohne diesen Hinweis würde er nicht bemerken, dass eigene
+        Änderungen für die Dauer dieser Instanz nicht dauerhaft gespeichert
+        werden (siehe _async_schedule_control_save)."""
+        issue_id = f"{ISSUE_CONTROL_CONFIG_UNREADABLE}_{self.entry_id}"
+        if self._control_store_write_blocked:
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_CONTROL_CONFIG_UNREADABLE,
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     def _apply_control_config(self, config: ControlConfig) -> None:
         """Übernimmt einen geladenen Snapshot, ohne etwas zu schreiben.
@@ -1333,6 +1446,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_max_price = config.price_charge_max_price
         self._price_charge_neutral_price = config.price_charge_neutral_price
         self._price_charge_hours = config.price_charge_hours
+        self._control_unresolved_fields = set(config.unresolved_fields or ())
 
     async def async_finish_bootstrap(self) -> None:
         """Close the bootstrap gate and apply exactly one charge decision.
@@ -1347,6 +1461,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._control_bootstrap_pending:
             return
         self._control_bootstrap_pending = False
+        self._async_sync_unresolved_fields_issue()
         await self._async_persist_bootstrap_result()
         await self._async_apply_grid_charge_change(persist=False)
 
@@ -1364,7 +1479,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning(
                 "Ladeeinstellungen werden nicht automatisch gespeichert, weil "
                 "der vorhandene Store nicht gelesen werden konnte; er bleibt "
-                "unverändert, bis eine Einstellung bewusst geändert wird"
+                "unverändert, bis diese Config-Entry-Instanz neu geladen wird "
+                "und der Store dann wieder lesbar ist"
             )
             return
         if self._control_config_status is ControlConfigLoadStatus.LOADED:
@@ -1387,13 +1503,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Der Store verwirft einen unveränderten Snapshot selbst, deshalb darf
         das aus jeder Ladeentscheidung heraus aufgerufen werden.
 
-        Erreicht wird das nur über den Setter-Pfad
-        (_async_apply_grid_charge_change mit persist=True) und über eine
-        Korrektur des geladenen Snapshots durch sanitized(). Beides sind
-        ausdrückliche Werte, keine Ratewerte - deshalb hebt schon der erste
-        solche Aufruf eine Schreibsperre wegen eines defekten Stores wieder
-        auf (siehe _async_persist_bootstrap_result)."""
-        self._control_store_write_blocked = False
+        Bewusst KEIN automatisches Aufheben der Schreibsperre eines defekten
+        Stores mehr: Diese Instanz kennt den vorher gespeicherten Stand nicht
+        (der Ladeversuch ist gescheitert) und würde mit dem aktuellen, aus
+        lauter Initialwerten bestehenden Snapshot alle anderen, tatsächlich
+        weiter im Store stehenden Einstellungen überschreiben, sobald auch
+        nur eine einzelne Einstellung geändert wird - siehe
+        anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP. Die Sperre gilt
+        deshalb für die gesamte Lebensdauer dieser Coordinator-Instanz; erst
+        ein Neuladen des Config Entry (frische Instanz, neuer Ladeversuch)
+        kann sie aufheben."""
+        if self._control_store_write_blocked:
+            _LOGGER.warning(
+                "Einstellungsänderung wird nicht gespeichert, weil der "
+                "vorhandene Store beim Start nicht gelesen werden konnte; "
+                "sie bleibt bis zu einem Neuladen des Config Entry nur im "
+                "Arbeitsspeicher wirksam"
+            )
+            return
         try:
             self._control_store.async_delay_save(self.control_config())
         except (HomeAssistantError, OSError, ValueError) as err:
@@ -1406,9 +1533,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Sammel-Timer zu warten.
 
         Übersprungen, solange der Bootstrap läuft (die Konfiguration ist
-        dann noch unvollständig) sowie bei einem nicht verwertbaren Store,
-        an dem nichts bewusst geändert wurde - siehe
-        _async_persist_bootstrap_result."""
+        dann noch unvollständig) sowie bei gesperrtem Store - siehe
+        _async_schedule_control_save."""
         if self._control_bootstrap_pending or self._control_store_write_blocked:
             return
         try:
@@ -1429,6 +1555,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ohne die sonst greifende NumberEntity-Min/Max-Validierung des
         regulären Service-Call-Pfads."""
         self._max_soc = _clamp_int(max_soc, MIN_SOC, MAX_SOC)
+        self.clear_control_field_unresolved("max_soc")
         if self.data is not None and (current_soc := self.data.get("soc")) is not None:
             await self._async_update_cell_calibration(current_soc)
         self.price_planner.evaluate()
@@ -1829,6 +1956,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return False
             self._price_charge_enabled = False
         self._timed_charge_enabled = enabled
+        self.clear_control_field_unresolved("timed_charge_enabled")
         self.async_dismiss_charge_conflict()
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
@@ -1844,6 +1972,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
         NumberEntity-Validierung)."""
         self._timed_charge_min_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
+        self.clear_control_field_unresolved("timed_charge_min_soc")
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_start(self, value: dt_time) -> None:
@@ -1868,6 +1997,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_start = None
         else:
             self._timed_charge_start = value
+        self.clear_control_field_unresolved("timed_charge_start")
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_end(self, value: dt_time) -> None:
@@ -1892,6 +2022,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_end = None
         else:
             self._timed_charge_end = value
+        self.clear_control_field_unresolved("timed_charge_end")
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_window(self, start: dt_time, end: dt_time) -> None:
@@ -1928,6 +2059,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._timed_charge_start = start
             self._timed_charge_end = end
+        self.clear_control_field_unresolved("timed_charge_start")
+        self.clear_control_field_unresolved("timed_charge_end")
         await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_month(
@@ -1957,6 +2090,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._grid_serving_months,
             )
         self._timed_charge_months = new_months
+        if validate:
+            # Nur eine echte, vom Anwender ausgelöste Änderung (siehe
+            # Docstring oben) gilt als Bestätigung des gesamten Monats-Sets -
+            # der Migrationspfad (validate=False) ruft dies für jeden der 12
+            # Schalter einzeln auf und darf eine für ein ANDERES Monat
+            # gesetzte Markierung nicht versehentlich mit löschen.
+            self.clear_control_field_unresolved("timed_charge_months")
         await self._async_apply_grid_charge_change()
 
     async def _async_apply_grid_charge_change(self, *, persist: bool = True) -> None:
@@ -2716,6 +2856,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_set_grid_serving_enabled(self, enabled: bool) -> None:
         self._grid_serving_enabled = enabled
+        self.clear_control_field_unresolved("grid_serving_enabled")
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_forecast_threshold_kwh(
@@ -2727,6 +2868,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
             MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
         )
+        self.clear_control_field_unresolved("grid_serving_forecast_threshold_kwh")
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_start(self, value: dt_time) -> None:
@@ -2751,6 +2893,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_start = None
         else:
             self._grid_serving_start = value
+        self.clear_control_field_unresolved("grid_serving_start")
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_end(self, value: dt_time) -> None:
@@ -2775,6 +2918,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_end = None
         else:
             self._grid_serving_end = value
+        self.clear_control_field_unresolved("grid_serving_end")
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_window(self, start: dt_time, end: dt_time) -> None:
@@ -2805,6 +2949,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._grid_serving_start = start
             self._grid_serving_end = end
+        self.clear_control_field_unresolved("grid_serving_start")
+        self.clear_control_field_unresolved("grid_serving_end")
         await self._async_apply_grid_charge_change()
 
     async def async_set_grid_serving_month(
@@ -2827,6 +2973,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._timed_charge_months,
             )
         self._grid_serving_months = new_months
+        if validate:
+            # Siehe async_set_timed_charge_month für den Hintergrund.
+            self.clear_control_field_unresolved("grid_serving_months")
         await self._async_apply_grid_charge_change()
 
     # -- Preisoptimiertes Laden ------------------------------------------------
@@ -2905,6 +3054,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return False
             self._timed_charge_enabled = False
         self._price_charge_enabled = enabled
+        self.clear_control_field_unresolved("price_charge_enabled")
         self.async_dismiss_charge_conflict()
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
@@ -2917,6 +3067,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"{', '.join(PRICE_STRATEGIES)}"
             )
         self._price_charge_strategy = strategy
+        self.clear_control_field_unresolved("price_charge_strategy")
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
@@ -2929,6 +3080,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_max_price = _clamp_float(
             value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
         )
+        self.clear_control_field_unresolved("price_charge_max_price")
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
@@ -2947,10 +3099,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_neutral_price = _clamp_float(
             value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
         )
+        self.clear_control_field_unresolved("price_charge_neutral_price")
         await self._async_apply_grid_charge_change()
 
     async def async_set_price_charge_hours(self, value: int | None) -> None:
         self._price_charge_hours = _clamp_int(value, MIN_PRICE_HOURS, MAX_PRICE_HOURS)
+        self.clear_control_field_unresolved("price_charge_hours")
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 

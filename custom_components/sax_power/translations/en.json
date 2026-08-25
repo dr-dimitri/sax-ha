@@ -480,6 +480,14 @@
     "price_neutral_below_limit": {
       "title": "Neutral price is not above the price limit",
       "description": "\"Neutral price\" ({neutral_price} EUR/kWh) is not above \"Price limit\" ({max_price} EUR/kWh) - the pause zone of price-optimised charging (charging and discharging stopped between these two values) can therefore never engage, the storage behaves outside of charging phases as it did before the neutral price was introduced. Please raise the neutral price above the price limit."
+    },
+    "control_config_unreadable": {
+      "title": "Charging settings could not be read",
+      "description": "The stored software-side charging settings (max. SOC, time windows, automations, price parameters) could not be read on startup. Safe defaults apply temporarily (automations off, max. SOC 100%); changes are only effective in memory until this integration is reloaded and are NOT saved, to avoid overwriting the existing data. Please check the cause (e.g. disk space, Home Assistant file permissions) and then reload the integration under Settings -> Devices & Services."
+    },
+    "control_config_unresolved": {
+      "title": "Some charging settings could not be restored automatically",
+      "description": "The following settings had a value that could not be evaluated (unknown/unavailable) on the first start of this version and were therefore set to their safe default instead of the previous value: {fields}. Please review these settings and set them again as desired - this notice disappears automatically once resolved."
     }
   },
   "services": {

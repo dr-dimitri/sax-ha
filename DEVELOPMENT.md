@@ -327,17 +327,31 @@ lässt:
 | --- | --- | --- | --- |
 | `LOADED` | lesbarer Store | nein | nur wenn `sanitized()` korrigiert hat |
 | `MISSING` | noch kein Store | **ja** | ja, sofort nach der Migration |
-| `FAILED` | Store da, aber unbrauchbar | nein | **nein** |
+| `FAILED` | Store da, aber unbrauchbar | nein | **nein, dauerhaft** |
 
 `FAILED` entsteht bei einem I/O-Fehler, einem Payload, der kein Objekt ist,
 oder einer Storage-Hauptversion, die diese Version nicht kennt (Home
 Assistant meldet das per `NotImplementedError`). Dann gelten sichere
 Defaults, es wird nicht migriert, und der vorhandene Store bleibt
 unangetastet - er kann die einzige Kopie einer korrekten Konfiguration sein
-oder von einer neueren Version stammen. Erst eine bewusste
-Einstellungsänderung hebt die Schreibsperre auf
-(`_control_store_write_blocked`), denn die ist ein ausdrücklicher neuer
-Wert und kein Ratewert.
+oder von einer neueren Version stammen.
+
+`_control_store_write_blocked` bleibt dabei für die **gesamte
+Lebensdauer dieser Coordinator-Instanz** gesetzt - auch eine danach bewusst
+geänderte Einstellung hebt sie nicht mehr auf
+(`_async_schedule_control_save` bricht früh ab, statt wie in einer früheren
+Fassung dieses Fixes den kompletten aktuellen Snapshot zu schreiben). Der
+Grund: Diese Instanz kennt den zuvor gespeicherten Gesamtzustand nicht
+(Netzladung, Zeitfenster, Preisparameter, ...) - würde eine einzelne
+Änderung (z. B. nur "Max. SOC" auf 65 %) den vollständigen, aus lauter
+Initialwerten bestehenden Snapshot schreiben, gingen alle anderen,
+tatsächlich noch im Store stehenden Einstellungen verloren. Die Änderung
+wirkt deshalb nur im Arbeitsspeicher; erst ein Neuladen des Config Entry
+(frische Instanz, neuer Ladeversuch über `async_load_control_state`) kann
+wieder lesen und damit die Sperre aufheben. Ein reparierbares Issue
+(`ISSUE_CONTROL_CONFIG_UNREADABLE`,
+`SaxPowerCoordinator._async_sync_unreadable_store_issue`) macht diesen
+Zustand für den Anwender sichtbar, statt es nur zu loggen.
 
 **Migration:** Die `RestoreEntity`-Zustände von `number.py`, `switch.py`,
 `select.py` und `time.py` sind nur noch der einmalige Migrationspfad für
@@ -346,16 +360,38 @@ gilt (also bei `MISSING`), laufen sie überhaupt - und auch dann übernehmen
 sie ausschließlich fachlich verwertbare Zustände: `restorable_bool` (nur
 `on`/`off`), `restorable_number` (nur endliche Zahlen) und
 `restorable_time` (nur parsebare Uhrzeiten) in `entity.py`, bei der
-Strategie nur ein bekannter Wert. Ein `unknown`/`unavailable` oder sonst
-unbrauchbarer Altzustand ruft **gar keinen Setter** auf, wird über
-`log_unmigratable_state` protokolliert, und die Einstellung bleibt auf
-ihrem Ausgangswert - sonst würde etwa ein `unavailable` gewordener
-Monats-Schalter den Monat aus dem Default "alle Monate" entfernen und die
-Automatik dort dauerhaft stilllegen. Beim allerersten Start eines neuen
+Strategie nur ein bekannter Wert. Beim allerersten Start eines neuen
 Eintrags (gar kein Vorzustand) greift weiter die bekannte Kaskade
 (Coordinator-Wert, `entity.initial_config_value`, Hard-Default aus
 `const.py`); `async_finish_bootstrap()` schreibt das Ergebnis anschließend
 sofort in den Store.
+
+Ein `unknown`/`unavailable` oder sonst unbrauchbarer Altzustand ruft **gar
+keinen Setter** auf, wird über `log_unmigratable_state` protokolliert, und
+die Einstellung bleibt auf ihrem sicheren Vorgabewert (`sanitized()`) -
+sonst würde etwa ein `unavailable` gewordener Monats-Schalter den Monat aus
+dem Default "alle Monate" entfernen und die Automatik dort dauerhaft
+stilllegen. Ein sicherer Vorgabewert allein wäre von einer echten,
+bestätigten Einstellung aber nicht mehr unterscheidbar - deshalb merkt der
+Coordinator sich das betroffene Feld zusätzlich namentlich
+(`mark_control_field_unresolved`, `ControlConfig.unresolved_fields`,
+mitgespeichert im Store). Diese Markierung:
+
+- **übersteht Neustarts unverändert** - bei `LOADED` läuft für dieses Feld
+  keine erneute RestoreEntity-Migration mehr (ein zweiter automatischer
+  Versuch könnte einen inzwischen nur zufällig plausibel aussehenden
+  Altzustand fälschlich als "jetzt doch aufgelöst" durchwinken, siehe
+  `test_unresolved_fields_survive_a_restart_and_stay_flagged`);
+- wird **ausschließlich durch eine spätere, ausdrückliche Änderung** der
+  betroffenen Einstellung gelöscht (`clear_control_field_unresolved`, in
+  jedem betroffenen `async_set_*`-Setter verdrahtet - bei den beiden
+  Monats-Feldern nur bei einer echten Live-Änderung, `validate=True`, nicht
+  während der eigenen 12-Schalter-Migration);
+- löst, solange mindestens ein Feld betroffen ist, ein reparierbares Issue
+  aus (`ISSUE_CONTROL_CONFIG_UNRESOLVED`, mit den deutschen Anzeigenamen
+  der betroffenen Einstellungen als Platzhalter,
+  `_CONTROL_FIELD_LABELS` in `coordinator.py`), das automatisch
+  verschwindet, sobald keins mehr übrig ist.
 
 **Verfügbarkeit:** Diese Entities erben von `entity.SaxPowerConfigEntity`,
 das `available` fest auf `True` setzt. Ihre Werte stammen aus keinem
@@ -537,10 +573,16 @@ tests/
 │                                  Automatiken (repairs.py)
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
-│                                  unvollständiger Store, getrennte Stores je Config Entry,
-│                                  gesperrte Writes während des Bootstraps, Migration ohne
-│                                  Store, Basic-Mode-Ausfall, unknown-Restore-Zustand und
-│                                  Verfügbarkeit der Konfigurations-Entities
+│                                  unvollständiger/unlesbarer Store (inkl. dauerhafter
+│                                  Schreibsperre über eine einzelne spätere Änderung hinweg und
+│                                  Reparaturhinweis), unbekannte künftige Storage-Version,
+│                                  überlappende Zeitfenster im Store, getrennte Stores je Config
+│                                  Entry, gesperrte Writes während des Bootstraps, Migration ohne
+│                                  Store, Basic-Mode-Ausfall, unknown/unavailable in allen vier
+│                                  Plattformen inkl. persistenter unresolved_fields-Markierung
+│                                  über einen simulierten Neustart hinweg samt Issue-Lebenszyklus,
+│                                  Max-SOC-Hold über den Neustart und Verfügbarkeit der
+│                                  Konfigurations-Entities
 ├── test_repairs.py                 Fünf Selbstdiagnose-Issues (coordinator.
 │                                  _async_check_self_diagnostics): Auslösen nach Karenzzeit,
 │                                  Idempotenz (kein erneutes Anlegen bei unverändertem

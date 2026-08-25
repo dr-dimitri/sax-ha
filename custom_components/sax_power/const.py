@@ -624,6 +624,22 @@ ISSUE_EMPTY_CHARGE_WINDOW = "empty_charge_window"
 ISSUE_NO_ACTIVE_MONTHS = "no_active_months"
 ISSUE_PRICE_NEUTRAL_BELOW_LIMIT = "price_neutral_below_limit"
 
+# Zwei weitere, ebenfalls rein informative (is_fixable=False) Issues rund um
+# REQ-CONTROL-CONFIG-BOOTSTRAP - anders als die fünf oben aber nicht aus
+# einer periodischen Prüfung, sondern direkt aus dem Bootstrap heraus
+# gesetzt/gelöscht (siehe SaxPowerCoordinator.async_load_control_state /
+# .async_finish_bootstrap / .clear_control_field_unresolved):
+# - ISSUE_CONTROL_CONFIG_UNREADABLE: der Konfigurations-Store existiert,
+#   konnte aber nicht gelesen werden - Einstellungsänderungen wirken nur
+#   noch im Arbeitsspeicher, bis der Config Entry neu geladen wird.
+# - ISSUE_CONTROL_CONFIG_UNRESOLVED: mindestens eine Einstellung konnte beim
+#   einmaligen Migrieren eines Eintrags ganz ohne Store nicht aus einem
+#   RestoreEntity-Altzustand übernommen werden (unknown/unavailable) und
+#   steht deshalb auf ihrem sicheren Vorgabewert, bis sie bewusst neu
+#   gesetzt wird.
+ISSUE_CONTROL_CONFIG_UNREADABLE = "control_config_unreadable"
+ISSUE_CONTROL_CONFIG_UNRESOLVED = "control_config_unresolved"
+
 # Mindestdauer eines fortbestehenden Problemzustands, bevor die jeweilige
 # Prüfung anschlägt - kurze Aussetzer (ein einzelner verpasster
 # Preis-Update-Zyklus, ein kurzer Netzwerk-Hänger) sollen kein Issue

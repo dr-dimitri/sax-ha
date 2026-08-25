@@ -83,6 +83,7 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerConfigEntity, SelectEnt
                 await self.coordinator.async_set_price_charge_strategy(last_state.state)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_strategy")
             return
         await self.coordinator.async_set_price_charge_strategy(DEFAULT_PRICE_STRATEGY)
 

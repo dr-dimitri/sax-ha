@@ -77,6 +77,7 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
                 await self.coordinator.async_set_timed_charge_start(value)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("timed_charge_start")
             return
         # Kein zuvor gespeicherter Zustand (allererster Start eines neu
         # eingerichteten Eintrags) - Vorgabewert aus der Ersteinrichtung
@@ -123,6 +124,7 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
                 await self.coordinator.async_set_timed_charge_end(value)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("timed_charge_end")
             return
         initial = initial_config_value(self.hass, self._entry_id, CONF_TIMED_CHARGE_END)
         value = dt_util.parse_time(initial or DEFAULT_TIMED_CHARGE_END)
@@ -173,6 +175,7 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
                 await self.coordinator.async_set_grid_serving_start(value)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("grid_serving_start")
             return
         value = dt_util.parse_time(DEFAULT_GRID_SERVING_START)
         if value is not None:
@@ -216,6 +219,7 @@ class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
                 await self.coordinator.async_set_grid_serving_end(value)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("grid_serving_end")
             return
         value = dt_util.parse_time(DEFAULT_GRID_SERVING_END)
         if value is not None:

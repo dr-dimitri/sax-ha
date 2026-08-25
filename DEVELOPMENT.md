@@ -165,7 +165,10 @@ allein genügt nicht, weil `entry.options` auch von Hand bearbeitet sein kann.
 Derselbe Wertebereich gilt für den normalisierten Preis des dynamischen
 Tarifs. Eine vorhandene Preisvorschau ist verbindlich
 (`price_optimizer.has_price_forecast()` trennt "keine Vorschau" von "Vorschau
-vorhanden, aber unlesbar") - der Sensorzustand ersetzt sie nie. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
+vorhanden, aber unlesbar") - der Sensorzustand ersetzt sie nie. Ein über
+`CONF_PRICE_ATTRIBUTE` ausdrücklich benanntes Attribut zählt dabei schon bei
+jedem nicht leeren Wert als Vorschau; nur die Auto-Erkennung verlangt die
+Listenform der bekannten Attributnamen. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
 über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
 Sonderfall.
 

@@ -409,7 +409,9 @@ durch 0 EUR/kWh ersetzt. Der Grund steht im Diagnose-Download.
 
 Bringt der Sensor eine Preisvorschau mit, ist sie verbindlich – der
 Sensorzustand wird nur dann als aktueller Preis verwendet, wenn gar keine
-Vorschau vorliegt.
+Vorschau vorliegt. Ein im Feld **Attribut mit der Preisvorschau** ausdrücklich
+angegebenes Attribut gilt dabei bereits als Vorschau, sobald es überhaupt
+einen Wert enthält.
 
 Änderungen am Tarifmodell wirken sofort und ohne Neustart der Integration –
 allerdings nur für zukünftige Messintervalle. Bereits erfasste Geldbeträge

@@ -28,6 +28,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
     ECONOMICS_TOU_WINDOW_COUNT,
@@ -729,6 +730,94 @@ async def test_unreadable_price_forecast_does_not_fall_back_to_the_state(hass) -
 
     assert result.quote is None
     assert result.reason is QuoteUnavailable.PRICE_FORECAST_UNREADABLE
+
+
+@pytest.mark.parametrize(
+    "forecast",
+    [
+        {"08:00": 0.21, "09:00": 0.24},  # Mapping statt Liste
+        "0.21, 0.24, 0.31",  # String statt Liste
+        [{"beginn": "heute frueh", "betrag": "guenstig"}],  # Liste, aber unlesbar
+    ],
+)
+async def test_explicit_forecast_attribute_counts_even_with_a_foreign_type(
+    hass, forecast
+) -> None:
+    """Wer ein Attribut ausdrücklich als Preisquelle benennt, bekommt es
+    auch dann als verbindliche Vorschau gewertet, wenn der Sensor dessen
+    Datentyp ändert - sonst fiele die Auswertung stillschweigend auf den
+    Sensorzustand zurück."""
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.25",
+        {"unit_of_measurement": "EUR/kWh", "preisliste": forecast},
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_PRICE_ATTRIBUTE: "preisliste",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    result = coordinator.tariff_provider.quote()
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.PRICE_FORECAST_UNREADABLE
+
+
+@pytest.mark.parametrize("forecast", [[], {}, "", None])
+async def test_explicit_forecast_attribute_without_a_value_allows_the_state(
+    hass, forecast
+) -> None:
+    """Ein leeres oder fehlendes Attribut ist keine vorhandene Vorschau -
+    dann bleibt der Sensorzustand die gültige Quelle."""
+    attributes = {"unit_of_measurement": "EUR/kWh"}
+    if forecast is not None:
+        attributes["preisliste"] = forecast
+    hass.states.async_set("sensor.strompreis", "0.25", attributes)
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_PRICE_ATTRIBUTE: "preisliste",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    quote = coordinator.tariff_provider.quote().quote
+
+    assert quote.price_eur_kwh == pytest.approx(0.25)
+    assert quote.source is QuoteSource.DYNAMIC_STATE
+
+
+async def test_a_foreign_attribute_type_without_an_explicit_choice_is_ignored(
+    hass,
+) -> None:
+    """Ohne ausdrückliche Angabe wird nur geraten: ein bekannter
+    Attributname mit fremdem Datentyp darf nicht als Vorschau gelten, sonst
+    blockiert ein gleichnamiges Attribut anderer Bedeutung die Auswertung."""
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.25",
+        {"unit_of_measurement": "EUR/kWh", "prices": "siehe Anbieter-App"},
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    quote = coordinator.tariff_provider.quote().quote
+
+    assert quote.price_eur_kwh == pytest.approx(0.25)
+    assert quote.source is QuoteSource.DYNAMIC_STATE
 
 
 async def test_an_empty_forecast_attribute_still_allows_the_state(hass) -> None:

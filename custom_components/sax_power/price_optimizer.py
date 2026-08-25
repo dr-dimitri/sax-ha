@@ -355,18 +355,25 @@ def has_price_forecast(state: Any, *, attribute: str | None = None) -> bool:
     (kein Plan), für die Wirtschaftlichkeit nicht - eine vorhandene, aber
     unbrauchbare Vorschau darf nicht stillschweigend durch den
     Sensorzustand ersetzt werden (siehe economics.SaxTariffProvider).
+
+    Ein über CONF_PRICE_ATTRIBUTE ausdrücklich benanntes Attribut zählt
+    schon dann als Vorschau, wenn es überhaupt einen nicht leeren Wert hat:
+    Der Anwender hat genau dieses Attribut als Preisquelle bestimmt, also
+    ist ein Typwechsel (etwa auf ein Mapping oder einen String) eine
+    unlesbare Vorschau und keine fehlende. Ohne ausdrückliche Angabe wird
+    dagegen nur geraten - dann gilt ausschließlich die Listenform der
+    bekannten Attributnamen als Vorschau, damit ein gleichnamiges Attribut
+    mit anderer Bedeutung nicht fälschlich als solche durchgeht.
     """
     if state is None:
         return False
     attributes: Mapping[str, Any] = getattr(state, "attributes", {}) or {}
-    names = (
-        (attribute,)
-        if attribute
-        else tuple(name for group in ATTRIBUTE_GROUPS for name in group)
-    )
+    if attribute:
+        return bool(attributes.get(attribute))
     return any(
         isinstance(attributes.get(name), (list, tuple)) and attributes.get(name)
-        for name in names
+        for group in ATTRIBUTE_GROUPS
+        for name in group
     )
 
 

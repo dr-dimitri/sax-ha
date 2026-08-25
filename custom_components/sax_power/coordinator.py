@@ -1471,9 +1471,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Ein nicht verwertbarer Store (FAILED) wird NICHT automatisch
         überschrieben: Sein Inhalt kann die einzig verbliebene Kopie einer
         korrekten Konfiguration sein (vorübergehender Lesefehler) oder von
-        einer neueren Version stammen, die diese hier nicht kennt. Erst eine
-        bewusste Einstellungsänderung des Anwenders schreibt ihn wieder -
-        die ist dann ein ausdrücklicher neuer Wert, kein Ratewert.
+        einer neueren Version stammen, die diese hier nicht kennt. Die
+        Sperre gilt dabei für die gesamte Lebensdauer dieser
+        Coordinator-Instanz (siehe _async_schedule_control_save) - auch eine
+        danach bewusst geänderte Einstellung schreibt ihn nicht wieder, weil
+        der dabei geschriebene Snapshot sonst alle anderen, tatsächlich noch
+        im Store stehenden Einstellungen mit überschreiben würde. Erst ein
+        Neuladen des Config Entry (frische Instanz, neuer Ladeversuch) kann
+        wieder schreiben.
         """
         if self._control_store_write_blocked:
             _LOGGER.warning(

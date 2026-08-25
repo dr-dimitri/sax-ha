@@ -39,6 +39,7 @@
 # REQ-EXTENDED-MODE-RESILIENCE    done       Nicht erreichbarer SunSpec-Modus-Block darf nicht alle Sensoren lahmlegen
 # REQ-REAL-HARDWARE-TESTS         done       Testfälle lesen echte Werte von einem physischen SAX Speicher
 # REQ-SUNSPEC-MODE-CORRECTION     done       SunSpec-Modus-Registerkarte (Slave-ID 100) als alleinige Quelle für Speicher-/Netz-/Akkudetails
+# REQ-SUNSPEC-DATATYPES           done       SunSpec-Datentypen (int16/uint16/enum16/bitfield16/sunssf) und ihre Not-Implemented-Sentinels korrekt decodieren
 # REQ-TIMED-SOC-CHARGE            done       Zeitgesteuertes Laden auf Ziel-SOC + geräteunabhängige Max-SOC-Sperre + PV-Überschuss-Hysterese
 # REQ-MANUAL-GRID-CHARGE          done       Manueller Netzladeservice als sicherer Adapter auf die zentrale SunSpec-Steuerung
 # REQ-GRID-SERVING-CHARGE         done       Netzdienliches Laden: PV-Ladevorgang im eigenen Zeitfenster aktiv unterbrechen
@@ -207,7 +208,7 @@ requirement_sunspec_mode_correction:
     nicht offiziell in modbus.pdf dokumentiert): NEGATIV = Einspeisung ins
     Netz (PV-Überschuss), POSITIV = Netzbezug. Das Rohregister selbst meldet
     das umgekehrte Vorzeichen (positiv bei Einspeisung) -
-    coordinator._async_read_high_block negiert deshalb apply_sunssf(...) vor
+    coordinator._parse_extended negiert deshalb apply_typed_sunssf(...) vor
     der Ablage in data["smartmeter_power"]; der Sensor "Netzleistung"
     (sensor.py) bleibt dabei ein reiner Durchreicher (_direct) und zeigt
     damit direkt den bereits negierten Wert. Alle Vergleiche gegen
@@ -259,9 +260,85 @@ requirement_sunspec_mode_correction:
        Sensor-Keys."
     - "tests/test_coordinator.py deckt die Vorzeichenkonvention von
        data[\"smartmeter_power\"] ab: ein positiver Rohregisterwert (via
-       apply_sunssf) ergibt einen negativen data-Wert (Einspeisung) und
+       apply_typed_sunssf) ergibt einen negativen data-Wert (Einspeisung) und
        umgekehrt. tests/test_integration_live.py verifiziert denselben
        negierten Wert end-to-end am Sensorzustand."
+
+# ==============================================================================
+# ANFORDERUNG: SUNSPEC-DATENTYPEN UND NOT-IMPLEMENTED-SENTINELS
+# ==============================================================================
+requirement_sunspec_datatypes:
+  id: REQ-SUNSPEC-DATATYPES
+  title: "SunSpec-Datentypen (int16/uint16/enum16/bitfield16/sunssf) und ihre Not-Implemented-Sentinels korrekt decodieren"
+  status: done
+  description: >
+    domain/registers.py::apply_sunssf() (ersetzt durch apply_typed_sunssf())
+    wandelte früher JEDEN Rohwert pauschal mit to_signed16() um, obwohl
+    modbus_llm.yaml pro Register einen eigenen Datentyp dokumentiert
+    (uint16, int16, sunssf - alle als 16-Bit-Register, siehe SunSpec Device
+    Information Model Specification V1.1, Abschnitt 6.4). Ein unsigniertes
+    0x8001 wurde dadurch fälschlich zu -32767, ein 0xFFFF ("not
+    implemented" bei unsignierten/enum-/bitfield-Typen) zu -1 statt zu
+    "kein Messwert", und ein "not implemented"-Scale-Factor (0x8000 bei
+    int16/sunssf) erzeugte über eine extreme Zehnerpotenz einen scheinbar
+    plausiblen, aber falschen Wert nahe 0 statt eines erkennbar fehlenden
+    Werts.
+
+    domain/registers.py stellt jetzt reine, typisierte Decoder bereit:
+    decode_int16 (Sentinel 0x8000 -> None), decode_uint16 (auch für
+    enum16/bitfield16, Sentinel 0xFFFF -> None), decode_sunssf (= decode_int16,
+    eigener Name für Lesbarkeit an den sunssf-Aufrufstellen), decode_bool16
+    (0/1 als uint16, jeder andere Wert inkl. Sentinel -> None statt
+    fälschlich True) sowie apply_typed_sunssf(raw_value, raw_scale_factor,
+    *, signed=True), das Wert und Skalierungsfaktor VOR der Skalierung
+    getrennt decodiert und bei jedem Sentinel None statt eines berechneten
+    Werts liefert.
+
+    coordinator._parse_extended und coordinator._parse_low_block wählen für
+    jedes Register signed=True/False anhand des in modbus_llm.yaml
+    dokumentierten Datentyps (Quelle der Wahrheit, siehe
+    REQ-SUNSPEC-MODE-CORRECTION - Abweichungen davon nur mit
+    Vendor-/SunSpec-Beleg). storage_state/storage_event, ic_control_mode,
+    battery_event sowie battery_charging_active (jetzt via decode_bool16)
+    sind rohe Enum-/Bool-Register ohne Skalierung und werden dementsprechend
+    direkt mit decode_int16/decode_uint16/decode_bool16 statt
+    apply_typed_sunssf decodiert. ic_max_power_reference und ic_timeout
+    (Register 40053/40050, unskalierte uint16-Rohwerte) werden ebenfalls
+    über decode_uint16 geführt, statt einen Sentinel unbemerkt als riesigen
+    Referenz-/Timeout-Wert zu übernehmen.
+
+    SaxPowerCoordinator._watts_to_ic_setpoint_raw (REQ-TIMED-SOC-CHARGE)
+    validierte den Skalierungsfaktor für Register 40049 bereits vor dieser
+    Änderung explizit (Bereich -10..10, schließt den Sentinel -32768
+    implizit aus) und bricht bei einem ungültigen
+    ic_max_power_reference/Skalierungsfaktor mit HomeAssistantError vor
+    jedem Schreibvorgang ab - das gilt unverändert weiter und profitiert
+    zusätzlich davon, dass ic_max_power_reference jetzt bereits als
+    decode_uint16-Ergebnis (None statt 65535) ankommt.
+
+    Downstream (Energieakkumulation, PV-Überschuss-Hysterese aller drei
+    Verwendungsstellen, Preisplanung, sensor.py/binary_sensor.py) prüfen
+    die betroffenen data[...]-Werte bereits durchgehend auf None, bevor sie
+    rechnen oder vergleichen (siehe REQ-EXTENDED-MODE-RESILIENCE) - ein
+    durch einen Sentinel erzeugtes None reiht sich dort ein wie ein wegen
+    nicht erreichbarem SunSpec-Modus fehlender Wert und löst weder eine
+    Hysterese-Bestätigung noch einen Geräte-Write aus. Die Negation von
+    smartmeter_power/grid_power_active_l1/l2/l3 (REQ-SUNSPEC-MODE-CORRECTION)
+    prüft dafür explizit auf None, bevor sie das unäre Minus anwendet.
+  acceptance_criteria:
+    - "tests/test_coordinator.py deckt decode_int16/decode_uint16/
+       decode_bool16/apply_typed_sunssf parametrisch ab: signiertes 0xFFFF
+       -> -1, unsigniertes 0x8001 -> 32769, int16/sunssf-Sentinel 0x8000 ->
+       None, uint16/enum16/bitfield16-Sentinel 0xFFFF -> None, ein
+       Sentinel-Skalierungsfaktor an apply_typed_sunssf -> None (weder 0
+       noch Exception), sowie ein Boolean-Sentinel an decode_bool16 -> None
+       statt True."
+    - "tests/test_coordinator.py::test_parse_extended_decodes_sunspec_block
+       (normale Vendor-Beispielwerte, positiv und negativ) bleibt
+       unverändert grün."
+    - "Ein eigener Testfall belegt, dass ein Sentinel in
+       storage_power_active/smartmeter_power weder die Energieakkumulation
+       noch eine PV-Überschuss-Hysterese fälschlich bestätigt."
 
 # ==============================================================================
 # ANFORDERUNG: ZEITGESTEUERTES LADEN AUF ZIEL-SOC
@@ -420,8 +497,8 @@ requirement_timed_soc_charge:
     REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert bedeutet
     Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
     POSITIVER Anzeigewert Netzbezug; der rohe Registerinhalt meldet dagegen
-    das umgekehrte Vorzeichen, weshalb coordinator._async_read_high_block
-    apply_sunssf(...) beim Einlesen negiert (nicht sensor.py - der Sensor
+    das umgekehrte Vorzeichen, weshalb coordinator._parse_extended
+    apply_typed_sunssf(...) beim Einlesen negiert (nicht sensor.py - der Sensor
     bleibt ein reiner Durchreicher, siehe _direct). Ist der Wert (noch)
     nicht verfügbar (z. B. SunSpec-Modus nicht erreichbar), blockiert das
     die Netzladung nicht. Der Schwellwert

@@ -160,8 +160,11 @@ from .const import (
     UNKNOWN_LABEL,
 )
 from .domain.registers import (
-    apply_sunssf,
+    apply_typed_sunssf,
     decode_ascii_registers,
+    decode_bool16,
+    decode_int16,
+    decode_uint16,
     to_signed16,
     to_unsigned16,
 )
@@ -888,6 +891,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._battery_soc_sf_raw = low2_reg(REG_SUN_BATTERY_SOC_SF)
         self._battery_cell_voltage_sf_raw = low2_reg(REG_SUN_BATTERY_CELL_VOLTAGE_SF)
 
+        # uint16 laut modbus_llm.yaml (REQ-SUNSPEC-DATATYPES) - decode_uint16
+        # liefert None statt einer falschen Seriennummernhälfte, sobald das
+        # Gerät hier den "not implemented"-Sentinel 0xFFFF meldet.
+        serial_hi = decode_uint16(low1_reg(REG_SUN_SERIAL_HI))
+        serial_lo = decode_uint16(low1_reg(REG_SUN_SERIAL_LO))
+
         return {
             "sun_manufacturer": decode_ascii_registers(
                 [low1_reg(REG_SUN_MANUFACTURER + i) for i in range(4)]
@@ -895,10 +904,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "sun_model": decode_ascii_registers(
                 [low1_reg(REG_SUN_MODEL + i) for i in range(3)]
             ),
-            "sun_version_master": low1_reg(REG_SUN_VERSION_MASTER),
-            "sun_version_gateway": low1_reg(REG_SUN_VERSION_GATEWAY),
-            "sun_serial_number": (low1_reg(REG_SUN_SERIAL_HI) << 16)
-            | low1_reg(REG_SUN_SERIAL_LO),
+            "sun_version_master": decode_uint16(low1_reg(REG_SUN_VERSION_MASTER)),
+            "sun_version_gateway": decode_uint16(low1_reg(REG_SUN_VERSION_GATEWAY)),
+            "sun_serial_number": (
+                (serial_hi << 16) | serial_lo
+                if serial_hi is not None and serial_lo is not None
+                else None
+            ),
         }
 
     def _parse_extended(self, ext_reg: Callable[[int], int]) -> dict[str, Any]:
@@ -917,15 +929,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         REQ-LOW-INTERVAL-REGISTERS) - Battery-Werte werden deshalb mit den
         zuletzt dort gelesenen self._battery_*_sf_raw skaliert statt mit
         einem eigenen ext_reg-Zugriff.
+
+        signed=False bei apply_typed_sunssf markiert die laut modbus_llm.yaml
+        als uint16 dokumentierten Werteregister; ohne diese Unterscheidung
+        würde ein rohes 0xFFFF ("not implemented", siehe
+        anforderung.yaml REQ-SUNSPEC-DATATYPES) fälschlich als -1 statt als
+        fehlender Messwert (None) decodiert.
         """
         storage_current_sf = ext_reg(REG_SUN_STORAGE_CURRENT_SF)
         storage_voltage_sf = ext_reg(REG_SUN_STORAGE_VOLTAGE_SF)
-        storage_state = ext_reg(REG_SUN_STORAGE_STATE)
-        storage_event = ext_reg(REG_SUN_STORAGE_EVENT)
+        storage_state = decode_int16(ext_reg(REG_SUN_STORAGE_STATE))
+        storage_event = decode_uint16(ext_reg(REG_SUN_STORAGE_EVENT))
 
-        control_mode = ext_reg(REG_SUN_IC_CONTROL_MODE)
+        control_mode = decode_uint16(ext_reg(REG_SUN_IC_CONTROL_MODE))
         # Für den Schreibpfad (Watt -> Prozent-Sollwert) zwischengespeichert,
-        # siehe SaxPowerCoordinator._watts_to_ic_setpoint_raw.
+        # siehe SaxPowerCoordinator._watts_to_ic_setpoint_raw - dort erfolgt
+        # die Sentinel-Prüfung dieses Rohwerts eigenständig vor jedem Write.
         self._ic_power_setpoint_sf_raw = ext_reg(REG_SUN_IC_POWER_SETPOINT_SF)
 
         meter_current_sf = ext_reg(REG_SUN_METER_CURRENT_SF)
@@ -935,52 +954,67 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         battery_capacity_sf = self._battery_capacity_sf_raw
         battery_power_sf = self._battery_power_sf_raw
         battery_soc_sf = self._battery_soc_sf_raw
-        battery_event = ext_reg(REG_SUN_BATTERY_EVENT)
+        battery_event = decode_uint16(ext_reg(REG_SUN_BATTERY_EVENT))
+
+        smartmeter_power = apply_typed_sunssf(
+            ext_reg(REG_SUN_METER_POWER_ACTIVE_SUM), meter_power_active_sf
+        )
+        grid_power_active_l1 = apply_typed_sunssf(
+            ext_reg(REG_SUN_METER_POWER_ACTIVE_L1), meter_power_active_sf
+        )
+        grid_power_active_l2 = apply_typed_sunssf(
+            ext_reg(REG_SUN_METER_POWER_ACTIVE_L2), meter_power_active_sf
+        )
+        grid_power_active_l3 = apply_typed_sunssf(
+            ext_reg(REG_SUN_METER_POWER_ACTIVE_L3), meter_power_active_sf
+        )
 
         return {
             # -- Model 103: 3Ph Inverter (Speicherelektronik) --
-            "storage_current_sum": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_CURRENT_SUM), storage_current_sf
+            "storage_current_sum": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_SUM), storage_current_sf, signed=False
             ),
-            "storage_current_a": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_CURRENT_A), storage_current_sf
+            "storage_current_a": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_A), storage_current_sf, signed=False
             ),
-            "storage_current_b": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_CURRENT_B), storage_current_sf
+            "storage_current_b": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_B), storage_current_sf, signed=False
             ),
-            "storage_current_c": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_CURRENT_C), storage_current_sf
+            "storage_current_c": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_CURRENT_C), storage_current_sf, signed=False
             ),
-            "storage_voltage_a": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_VOLTAGE_A), storage_voltage_sf
+            "storage_voltage_a": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_VOLTAGE_A), storage_voltage_sf, signed=False
             ),
-            "storage_voltage_b": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_VOLTAGE_B), storage_voltage_sf
+            "storage_voltage_b": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_VOLTAGE_B), storage_voltage_sf, signed=False
             ),
-            "storage_voltage_c": apply_sunssf(
-                ext_reg(REG_SUN_STORAGE_VOLTAGE_C), storage_voltage_sf
+            "storage_voltage_c": apply_typed_sunssf(
+                ext_reg(REG_SUN_STORAGE_VOLTAGE_C), storage_voltage_sf, signed=False
             ),
-            "storage_power_active": apply_sunssf(
+            "storage_power_active": apply_typed_sunssf(
                 ext_reg(REG_SUN_STORAGE_POWER_ACTIVE),
                 ext_reg(REG_SUN_STORAGE_POWER_ACTIVE_SF),
             ),
-            "storage_power_apparent": apply_sunssf(
+            "storage_power_apparent": apply_typed_sunssf(
                 ext_reg(REG_SUN_STORAGE_POWER_APPARENT),
                 ext_reg(REG_SUN_STORAGE_POWER_APPARENT_SF),
+                signed=False,
             ),
-            "storage_power_reactive": apply_sunssf(
+            "storage_power_reactive": apply_typed_sunssf(
                 ext_reg(REG_SUN_STORAGE_POWER_REACTIVE),
                 ext_reg(REG_SUN_STORAGE_POWER_REACTIVE_SF),
             ),
-            "storage_power_factor": apply_sunssf(
+            "storage_power_factor": apply_typed_sunssf(
                 ext_reg(REG_SUN_STORAGE_POWER_FACTOR),
                 ext_reg(REG_SUN_STORAGE_POWER_FACTOR_SF),
             ),
-            "storage_frequency": apply_sunssf(
+            "storage_frequency": apply_typed_sunssf(
                 ext_reg(REG_SUN_STORAGE_FREQUENCY),
                 ext_reg(REG_SUN_STORAGE_FREQUENCY_SF),
+                signed=False,
             ),
-            "storage_max_cell_temp": apply_sunssf(
+            "storage_max_cell_temp": apply_typed_sunssf(
                 ext_reg(REG_SUN_STORAGE_MAX_CELL_TEMP), ext_reg(REG_SUN_STORAGE_TEMP_SF)
             ),
             "storage_state": storage_state,
@@ -993,110 +1027,126 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             # PV-Leistung laut modbus.pdf nur mit Smartmeter ADW200 verfügbar
             # - mit ADL400 typischerweise 0, siehe anforderung.yaml.
-            "pv_power": apply_sunssf(
-                ext_reg(REG_SUN_PV_POWER), ext_reg(REG_SUN_PV_POWER_SF)
+            "pv_power": apply_typed_sunssf(
+                ext_reg(REG_SUN_PV_POWER), ext_reg(REG_SUN_PV_POWER_SF), signed=False
             ),
             # -- Model 123: Immediate Controls --
-            "ic_power_setpoint_pct": apply_sunssf(
+            "ic_power_setpoint_pct": apply_typed_sunssf(
                 ext_reg(REG_SUN_IC_POWER_SETPOINT_PCT),
                 ext_reg(REG_SUN_IC_POWER_SETPOINT_SF),
             ),
-            "ic_timeout": ext_reg(REG_SUN_IC_TIMEOUT),
+            "ic_timeout": decode_uint16(ext_reg(REG_SUN_IC_TIMEOUT)),
             "ic_control_mode": control_mode,
             "ic_control_mode_text": CONTROL_MODE_LABELS.get(
                 control_mode, UNKNOWN_LABEL
             ),
-            "ic_max_power_reference": ext_reg(REG_SUN_IC_MAX_POWER_REFERENCE),
+            "ic_max_power_reference": decode_uint16(
+                ext_reg(REG_SUN_IC_MAX_POWER_REFERENCE)
+            ),
             # -- Model 203: WYE Connect 3Ph Meter (Netz/Smart Meter) --
-            "grid_current_sum": apply_sunssf(
-                ext_reg(REG_SUN_METER_CURRENT_SUM), meter_current_sf
+            "grid_current_sum": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_SUM), meter_current_sf, signed=False
             ),
-            "grid_current_l1": apply_sunssf(
-                ext_reg(REG_SUN_METER_CURRENT_L1), meter_current_sf
+            "grid_current_l1": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_L1), meter_current_sf, signed=False
             ),
-            "grid_current_l2": apply_sunssf(
-                ext_reg(REG_SUN_METER_CURRENT_L2), meter_current_sf
+            "grid_current_l2": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_L2), meter_current_sf, signed=False
             ),
-            "grid_current_l3": apply_sunssf(
-                ext_reg(REG_SUN_METER_CURRENT_L3), meter_current_sf
+            "grid_current_l3": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_CURRENT_L3), meter_current_sf, signed=False
             ),
-            "grid_voltage_ln_avg": apply_sunssf(
-                ext_reg(REG_SUN_METER_VOLTAGE_LN_AVG), meter_voltage_sf
+            "grid_voltage_ln_avg": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_LN_AVG), meter_voltage_sf, signed=False
             ),
-            "grid_voltage_l1": apply_sunssf(
-                ext_reg(REG_SUN_METER_VOLTAGE_L1), meter_voltage_sf
+            "grid_voltage_l1": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_L1), meter_voltage_sf, signed=False
             ),
-            "grid_voltage_l2": apply_sunssf(
-                ext_reg(REG_SUN_METER_VOLTAGE_L2), meter_voltage_sf
+            "grid_voltage_l2": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_L2), meter_voltage_sf, signed=False
             ),
-            "grid_voltage_l3": apply_sunssf(
-                ext_reg(REG_SUN_METER_VOLTAGE_L3), meter_voltage_sf
+            "grid_voltage_l3": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_VOLTAGE_L3), meter_voltage_sf, signed=False
             ),
-            "grid_frequency": apply_sunssf(
-                ext_reg(REG_SUN_METER_FREQUENCY), ext_reg(REG_SUN_METER_FREQUENCY_SF)
+            "grid_frequency": apply_typed_sunssf(
+                ext_reg(REG_SUN_METER_FREQUENCY),
+                ext_reg(REG_SUN_METER_FREQUENCY_SF),
+                signed=False,
             ),
             # Ersetzt das früher fehlerhafte "smartmeter_power" (Basic Mode,
             # Register 48), siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION.
             # Negiert: Standarddarstellung ist negativ = Einspeisung ins Netz
             # (PV-Überschuss), positiv = Netzbezug - das Register selbst
             # meldet das Gegenteil (siehe REQ-SUNSPEC-MODE-CORRECTION,
-            # Abschnitt Vorzeichenkonvention).
-            "smartmeter_power": -apply_sunssf(
-                ext_reg(REG_SUN_METER_POWER_ACTIVE_SUM), meter_power_active_sf
+            # Abschnitt Vorzeichenkonvention). None bleibt None statt am
+            # unären Minus zu crashen, sobald das Register den "not
+            # implemented"-Sentinel meldet (REQ-SUNSPEC-DATATYPES).
+            "smartmeter_power": (
+                None if smartmeter_power is None else -smartmeter_power
             ),
             # Dieselbe Negation wie bei smartmeter_power (siehe oben) - die
             # drei Phasenwerte sind Teil desselben Registerblocks und teilen
             # sich dessen Rohvorzeichen; ohne Negation würde ihre Summe nicht
             # mehr zum bereits negierten smartmeter_power passen.
-            "grid_power_active_l1": -apply_sunssf(
-                ext_reg(REG_SUN_METER_POWER_ACTIVE_L1), meter_power_active_sf
+            "grid_power_active_l1": (
+                None if grid_power_active_l1 is None else -grid_power_active_l1
             ),
-            "grid_power_active_l2": -apply_sunssf(
-                ext_reg(REG_SUN_METER_POWER_ACTIVE_L2), meter_power_active_sf
+            "grid_power_active_l2": (
+                None if grid_power_active_l2 is None else -grid_power_active_l2
             ),
-            "grid_power_active_l3": -apply_sunssf(
-                ext_reg(REG_SUN_METER_POWER_ACTIVE_L3), meter_power_active_sf
+            "grid_power_active_l3": (
+                None if grid_power_active_l3 is None else -grid_power_active_l3
             ),
-            "grid_power_apparent_sum": apply_sunssf(
+            "grid_power_apparent_sum": apply_typed_sunssf(
                 ext_reg(REG_SUN_METER_POWER_APPARENT_SUM),
                 ext_reg(REG_SUN_METER_POWER_APPARENT_SF),
+                signed=False,
             ),
-            "grid_power_reactive_sum": apply_sunssf(
+            "grid_power_reactive_sum": apply_typed_sunssf(
                 ext_reg(REG_SUN_METER_POWER_REACTIVE_SUM),
                 ext_reg(REG_SUN_METER_POWER_REACTIVE_SF),
             ),
-            "grid_power_factor_sum": apply_sunssf(
+            "grid_power_factor_sum": apply_typed_sunssf(
                 ext_reg(REG_SUN_METER_POWER_FACTOR_SUM),
                 ext_reg(REG_SUN_METER_POWER_FACTOR_SF),
             ),
             # -- Model 802: Battery Base (Akkuzellen) --
-            "battery_capacity": apply_sunssf(
-                ext_reg(REG_SUN_BATTERY_CAPACITY), battery_capacity_sf
+            "battery_capacity": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_CAPACITY), battery_capacity_sf, signed=False
             ),
-            "battery_charge_power_available": apply_sunssf(
-                ext_reg(REG_SUN_BATTERY_CHARGE_POWER_AVAILABLE), battery_power_sf
+            "battery_charge_power_available": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_CHARGE_POWER_AVAILABLE),
+                battery_power_sf,
+                signed=False,
             ),
-            "battery_discharge_power_available": apply_sunssf(
-                ext_reg(REG_SUN_BATTERY_DISCHARGE_POWER_AVAILABLE), battery_power_sf
+            "battery_discharge_power_available": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_DISCHARGE_POWER_AVAILABLE),
+                battery_power_sf,
+                signed=False,
             ),
-            "battery_soc_max": apply_sunssf(
-                ext_reg(REG_SUN_BATTERY_SOC_MAX), battery_soc_sf
+            "battery_soc_max": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_SOC_MAX), battery_soc_sf, signed=False
             ),
-            "battery_soc_min": apply_sunssf(
-                ext_reg(REG_SUN_BATTERY_SOC_MIN), battery_soc_sf
+            "battery_soc_min": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_SOC_MIN), battery_soc_sf, signed=False
             ),
-            "battery_soc": apply_sunssf(ext_reg(REG_SUN_BATTERY_SOC), battery_soc_sf),
-            "battery_discharge_depth": apply_sunssf(
-                ext_reg(REG_SUN_BATTERY_DISCHARGE_DEPTH), battery_soc_sf
+            "battery_soc": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_SOC), battery_soc_sf, signed=False
             ),
-            "battery_charging_active": bool(ext_reg(REG_SUN_BATTERY_CHARGING_ACTIVE)),
+            "battery_discharge_depth": apply_typed_sunssf(
+                ext_reg(REG_SUN_BATTERY_DISCHARGE_DEPTH), battery_soc_sf, signed=False
+            ),
+            "battery_charging_active": decode_bool16(
+                ext_reg(REG_SUN_BATTERY_CHARGING_ACTIVE)
+            ),
             "battery_event": battery_event,
             "battery_event_text": BATTERY_EVENT_LABELS.get(
                 battery_event, UNKNOWN_LABEL
             ),
-            "battery_cell_voltage_avg": apply_sunssf(
+            "battery_cell_voltage_avg": apply_typed_sunssf(
                 ext_reg(REG_SUN_BATTERY_CELL_VOLTAGE_AVG),
                 self._battery_cell_voltage_sf_raw,
+                signed=False,
             ),
         }
 

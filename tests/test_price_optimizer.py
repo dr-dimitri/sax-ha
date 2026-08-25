@@ -472,6 +472,23 @@ def test_context_uses_ic_max_power_reference_as_charge_power(hass) -> None:
     assert ctx.charge_power_w == 4600
 
 
+def test_context_treats_missing_battery_capacity_as_unknown(hass) -> None:
+    """REQ-SUNSPEC-DATATYPES: Ein nicht implementierter Skalierungsfaktor
+    für Register 40097 decodiert battery_capacity als None (statt eines
+    falschen Zahlenwerts) - die Bedarfsrechnung darf dann keine falsche
+    Kapazität annehmen."""
+    coordinator = _make_coordinator(hass)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "battery_capacity": None,
+    }
+
+    ctx = coordinator.price_planner._context()
+
+    assert ctx.capacity_kwh is None
+
+
 def test_context_uses_effective_calibration_target(hass) -> None:
     coordinator = _make_coordinator(hass)
     now = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)

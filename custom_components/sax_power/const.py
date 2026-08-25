@@ -442,7 +442,7 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert steht für
 # Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
 # POSITIVER Anzeigewert für Netzbezug - der Rohregisterwert kann davon
-# abweichen, coordinator._async_read_high_block negiert apply_sunssf(...)
+# abweichen, coordinator._parse_extended negiert apply_typed_sunssf(...)
 # beim Einlesen entsprechend.
 #
 # Wird außerdem von der Zustandsmaschine für netzdienliches Laden

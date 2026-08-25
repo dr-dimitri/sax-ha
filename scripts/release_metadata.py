@@ -14,6 +14,7 @@ RELEASE_LABELS = {
     "release:major": "major",
     "release:minor": "minor",
     "release:patch": "patch",
+    "release:snapshot": "snapshot",
 }
 STABLE_SEMVER_PATTERN = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -57,6 +58,18 @@ def next_version(tags: Sequence[str], bump: str) -> str:
     return f"{major}.{minor}.{patch}"
 
 
+def latest_stable_version(tags: Sequence[str]) -> str:
+    """Return the newest stable SemVer tag, rejecting repositories without one."""
+    stable_versions = [
+        tuple(int(part) for part in match.groups())
+        for tag in tags
+        if (match := STABLE_SEMVER_PATTERN.fullmatch(tag)) is not None
+    ]
+    if not stable_versions:
+        raise ReleaseMetadataError("Kein stabiler SemVer-Tag für Snapshot gefunden.")
+    return ".".join(str(part) for part in max(stable_versions))
+
+
 def ensure_tag_absent(version: str, tags: Sequence[str]) -> None:
     """Stop before tag creation when the target ref already exists."""
     if version in tags:
@@ -77,6 +90,19 @@ def validate_release(
 ) -> str:
     """Validate all release inputs and return the expected release version."""
     bump = release_bump(labels)
+    if bump == "snapshot":
+        expected_version = latest_stable_version(tags)
+        if STABLE_SEMVER_PATTERN.fullmatch(manifest_version) is None:
+            raise ReleaseMetadataError(
+                f"Manifest-Version ist kein stabiles SemVer: {manifest_version}"
+            )
+        if manifest_version != expected_version:
+            raise ReleaseMetadataError(
+                "Snapshot-PR muss die aktuelle stabile Manifest-Version "
+                f"beibehalten: {manifest_version} != {expected_version}."
+            )
+        return expected_version
+
     expected_version = next_version(tags, bump)
 
     if STABLE_SEMVER_PATTERN.fullmatch(manifest_version) is None:
@@ -113,7 +139,13 @@ def _parse_labels(labels_json: str) -> list[str]:
 
 
 def _manifest_version(path: Path) -> str:
+    # PR-Checkouts sind untrusted; ein Symlink könnte sonst beliebige
+    # Runner-Dateien in die öffentliche Actions-Log-Ausgabe ziehen.
+    if path.is_symlink():
+        raise ReleaseMetadataError(f"Symlink als Manifest nicht erlaubt: {path}")
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ReleaseMetadataError("manifest.json ist kein JSON-Objekt.")
     version = manifest.get("version")
     if not isinstance(version, str):
         raise ReleaseMetadataError("manifest.json enthält keine Version als String.")

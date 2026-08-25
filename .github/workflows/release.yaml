@@ -54,6 +54,9 @@ jobs:
           echo "body_path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"
 
       - name: Release-Metadaten und Commit prüfen
+        # Läuft absichtlich immer, auch für release:snapshot-PRs: nur so
+        # scheitert ein mehrdeutiges Label-Set (z. B. snapshot + patch)
+        # laut statt den Merge stillschweigend durchzulassen.
         id: version
         env:
           PR_LABELS: ${{ steps.pull_request.outputs.labels }}
@@ -66,6 +69,9 @@ jobs:
           --github-output "$GITHUB_OUTPUT"
 
       - name: Versions-Tag erstellen
+        if: >-
+          !contains(fromJSON(steps.pull_request.outputs.labels),
+          'release:snapshot')
         env:
           NEXT_TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -75,6 +81,9 @@ jobs:
           git push origin "$NEXT_TAG"
 
       - name: GitHub Release erstellen
+        if: >-
+          !contains(fromJSON(steps.pull_request.outputs.labels),
+          'release:snapshot')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -83,3 +92,12 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Snapshot-Merge ohne Produktiv-Release melden
+        if: >-
+          contains(fromJSON(steps.pull_request.outputs.labels),
+          'release:snapshot')
+        run: |
+          echo "::warning::Ein Snapshot-PR wurde gemergt; stabiler Tag und Release bleiben unverändert."
+          echo "### Kein Produktiv-Release" >> "$GITHUB_STEP_SUMMARY"
+          echo "Der gemergte PR trug \`release:snapshot\`." >> "$GITHUB_STEP_SUMMARY"

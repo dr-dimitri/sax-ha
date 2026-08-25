@@ -726,16 +726,38 @@ pytest tests/test_real_hardware.py -v
 
 `custom_components/sax_power/manifest.json` ist die ausgelieferte
 Versionsquelle. Jeder Pull Request trägt genau eines der Labels
-`release:major`, `release:minor` oder `release:patch` und setzt die
-Manifest-Version auf den daraus berechneten nächsten stabilen SemVer-Tag.
-Ausgehend vom letzten stabilen Tag `1.2.3` sind das beispielsweise `2.0.0`,
-`1.3.0` oder `1.2.4`. Prerelease-Tags wie `1.3.0-rc.1` verändern diese
-stabile Versionslinie nicht.
+`release:major`, `release:minor`, `release:patch` oder `release:snapshot`.
+Stabile Pull Requests setzen die Manifest-Version auf den daraus berechneten
+nächsten stabilen SemVer-Tag. Ausgehend vom letzten stabilen Tag `1.2.3` sind
+das beispielsweise `2.0.0`, `1.3.0` oder `1.2.4`. Prerelease- und
+Snapshot-Tags verändern diese stabile Versionslinie nicht.
+
+`release:snapshot` ist für größere oder aufeinander aufbauende Entwicklungen
+vorgesehen, die vor einem Produktiv-Release realitätsnah erprobt werden
+müssen. Ein solcher PR behält die aktuelle stabile Manifest-Version. Nach
+erfolgreicher CI erzeugt `.github/workflows/snapshot-release.yaml` aus dem
+exakt getesteten PR-Commit eine installierbare ZIP-Datei, eine SHA-256-Prüfsumme
+und eine als Vorabversion markierte GitHub-Veröffentlichung. Tag und gepackte
+Manifest-Version enthalten PR-Nummer und Commit-Kürzel und sind dadurch
+unveränderlich und eindeutig.
+
+Der privilegierte Snapshot-Workflow führt keinen Code aus dem PR aus. Er lädt
+das Packprogramm separat aus dem vertrauenswürdigen Standardbranch, behandelt
+den PR-Checkout nur als Daten und verweigert unter anderem Fork-PRs,
+mehrdeutige PR-Zuordnungen und Symlinks. Snapshot-Dateien sind ausschließlich
+für eine getrennte Home-Assistant-Testinstanz bestimmt. Ein Snapshot-PR darf
+nicht gemergt werden. Nach erfolgreichem Test werden das Snapshot-Label durch
+genau ein stabiles Release-Label ersetzt, die Manifest-Version erhöht und die
+vollständige CI erneut ausgeführt. Als zweite Sicherung erzeugt der stabile
+Release-Workflow bei einem versehentlichen Snapshot-Merge weder Tag noch
+Produktiv-Release.
 
 Die Prüfung lässt sich vor dem Push lokal ausführen (Label anpassen):
 
 ```bash
 python scripts/release_metadata.py --labels-json '["release:patch"]'
+# oder ohne Manifest-Bump für einen Snapshot-PR:
+python scripts/release_metadata.py --labels-json '["release:snapshot"]'
 ```
 
 Im Pull Request prüft CI dieselbe Logik und führt zusätzlich die HACS-Action

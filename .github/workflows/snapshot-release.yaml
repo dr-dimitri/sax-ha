@@ -1,0 +1,211 @@
+name: Snapshot Release
+
+on:
+  workflow_run:
+    workflows:
+      - Continuous Integration
+    types:
+      - completed
+
+concurrency:
+  # Nach Quell-Repository qualifiziert: ein Fork-Branch mit demselben Namen
+  # wie ein interner Branch darf dessen laufende Veröffentlichung nicht
+  # abbrechen (cancel-in-progress).
+  group: >-
+    snapshot-${{ github.event.workflow_run.head_repository.full_name }}-${{
+    github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Offenen Snapshot-Pull-Request bestimmen
+        id: pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          pull_requests="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_COMMIT/pulls")"
+          snapshot_pull_requests="$(
+            jq \
+              --arg commit "$TESTED_COMMIT" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              '[.[] | select(
+                .state == "open" and
+                .head.sha == $commit and
+                .head.repo.full_name == $repository and
+                any(.labels[]; .name == "release:snapshot")
+              )]' <<< "$pull_requests"
+          )"
+          pull_request_count="$(jq 'length' <<< "$snapshot_pull_requests")"
+
+          if [[ "$pull_request_count" -eq 0 ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Der getestete Commit gehört zu keinem offenen Snapshot-PR."
+            exit 0
+          fi
+          if [[ "$pull_request_count" -ne 1 ]]; then
+            echo "Der getestete Commit gehört nicht eindeutig zu einem Snapshot-PR." >&2
+            exit 1
+          fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          jq -r '.[0].number | "number=\(.)"' <<< "$snapshot_pull_requests" \
+            >> "$GITHUB_OUTPUT"
+          jq -r '.[0].html_url | "url=\(.)"' <<< "$snapshot_pull_requests" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Getesteten PR-Commit als Daten auschecken
+        if: steps.pull_request.outputs.publish == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Vertrauenswürdiges Packprogramm aus main auschecken
+        if: steps.pull_request.outputs.publish == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Python einrichten
+        if: steps.pull_request.outputs.publish == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Stabile Snapshot-Basis vertrauenswürdig prüfen
+        if: steps.pull_request.outputs.publish == 'true'
+        working-directory: trusted
+        run: >-
+          python -I scripts/release_metadata.py
+          --labels-json '["release:snapshot"]'
+          --manifest ../source/custom_components/sax_power/manifest.json
+
+      - name: Snapshot reproduzierbar paketieren
+        if: steps.pull_request.outputs.publish == 'true'
+        id: snapshot
+        env:
+          PR_NUMBER: ${{ steps.pull_request.outputs.number }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: >-
+          python -I trusted/scripts/snapshot_release.py
+          --source source
+          --output-directory "$RUNNER_TEMP/snapshot"
+          --pull-request "$PR_NUMBER"
+          --commit "$TESTED_COMMIT"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Vorhandenen Snapshot auf denselben Commit begrenzen
+        if: steps.pull_request.outputs.publish == 'true'
+        id: collision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "$SNAPSHOT_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag_commit="$(git -C source ls-remote origin "refs/tags/$SNAPSHOT_TAG" | cut -f1)"
+          if [[ "$tag_commit" != "$TESTED_COMMIT" ]]; then
+            echo "Snapshot-Tag verweist nicht auf den getesteten Commit." >&2
+            exit 1
+          fi
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Snapshot als kurzlebiges Workflow-Artefakt sichern
+        if: steps.pull_request.outputs.publish == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.snapshot.outputs.tag }}
+          path: |
+            ${{ steps.snapshot.outputs.archive }}
+            ${{ steps.snapshot.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: GitHub-Vorabversion erstellen
+        if: >-
+          steps.pull_request.outputs.publish == 'true' &&
+          steps.collision.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pull_request.outputs.url }}
+          SNAPSHOT_ARCHIVE: ${{ steps.snapshot.outputs.archive }}
+          SNAPSHOT_CHECKSUM: ${{ steps.snapshot.outputs.checksum }}
+          SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+          SNAPSHOT_VERSION: ${{ steps.snapshot.outputs.version }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          notes="$RUNNER_TEMP/snapshot-notes.md"
+          printf '%s\n' \
+            'Automatisch erzeugte, nicht produktive Testversion.' \
+            '' \
+            "Pull Request: $PR_URL" \
+            "Getesteter Commit: \`$TESTED_COMMIT\`" \
+            '' \
+            'Nur in einer separaten Home-Assistant-Testinstanz installieren.' \
+            'Die stabile Produktivversion wird durch diesen Snapshot nicht verändert.' \
+            > "$notes"
+
+          gh release create "$SNAPSHOT_TAG" \
+            "$SNAPSHOT_ARCHIVE" \
+            "$SNAPSHOT_CHECKSUM" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TESTED_COMMIT" \
+            --title "$SNAPSHOT_VERSION" \
+            --notes-file "$notes" \
+            --prerelease
+
+      - name: Ergebnis zusammenfassen
+        if: >-
+          steps.pull_request.outputs.publish == 'true' &&
+          steps.collision.outputs.exists == 'false'
+        env:
+          SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+          SNAPSHOT_VERSION: ${{ steps.snapshot.outputs.version }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          {
+            echo "### Snapshot veröffentlicht"
+            echo
+            echo "- Version: \`$SNAPSHOT_VERSION\`"
+            echo "- Tag: \`$SNAPSHOT_TAG\`"
+            echo "- Commit: \`$TESTED_COMMIT\`"
+            echo "- Verwendung: ausschließlich Testinstanzen"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bereits veröffentlichten Snapshot melden
+        if: >-
+          steps.pull_request.outputs.publish == 'true' &&
+          steps.collision.outputs.exists == 'true'
+        env:
+          SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+        run: |
+          {
+            echo "### Snapshot bereits veröffentlicht"
+            echo
+            echo "- Tag \`$SNAPSHOT_TAG\` existiert bereits für diesen Commit."
+            echo "- Kein neues Release wurde erstellt."
+          } >> "$GITHUB_STEP_SUMMARY"

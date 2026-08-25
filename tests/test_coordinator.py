@@ -968,6 +968,104 @@ async def test_manual_grid_charge_first_write_failure_is_visible(hass) -> None:
     ]
 
 
+async def test_manual_grid_charge_stop_retries_orphaned_failed_rollback(hass) -> None:
+    """REQ-MANUAL-GRID-CHARGE: Scheitern 40049 und sein Modus-0-Rollback,
+    muss stop_grid_charge den offenen Reset trotz verworfenem Auftrag erneut
+    versuchen und erst nach dessen Quittung als sicher beendet gelten."""
+    client = _make_client()
+    success = MagicMock()
+    success.isError.return_value = False
+    setpoint_failure = MagicMock()
+    setpoint_failure.isError.return_value = True
+    setpoint_failure.__str__.return_value = "Setpoint-Write abgelehnt"
+    rollback_failure = MagicMock()
+    rollback_failure.isError.return_value = True
+    rollback_failure.__str__.return_value = "Rollback-Write abgelehnt"
+    client.write_register = AsyncMock(
+        side_effect=[success, setpoint_failure, rollback_failure, success]
+    )
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "smartmeter_power": 0,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SMARTMETER,
+        "ic_max_power_reference": 4600,
+    }
+
+    with pytest.raises(HomeAssistantError, match="Rücksetzauftrag bleibt aktiv"):
+        await coordinator.async_start_grid_charge(-1500)
+
+    assert coordinator.grid_charge_active is False
+    assert coordinator.sun_charge_active is False
+    assert coordinator._sun_charge_reset_required is True
+
+    await coordinator.async_stop_grid_charge()
+
+    assert coordinator._sun_charge_reset_required is False
+    assert coordinator._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+    assert client.write_register.await_args_list == [
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SETPOINT,
+            device_id=100,
+        ),
+        call(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=to_unsigned16(-3261),
+            device_id=100,
+        ),
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        ),
+        call(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        ),
+    ]
+
+
+async def test_manual_grid_charge_stop_leaves_running_automation_untouched(
+    hass,
+) -> None:
+    """Ohne manuellen Auftrag ist ein offener Reset der Besitznachweis des
+    tatsächlich laufenden gemeinsamen Writers und darf ihn nicht stoppen."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "smartmeter_power": 0,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SMARTMETER,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    coordinator._timed_charge_enabled = True
+    coordinator._timed_charge_start = dt_time(1)
+    coordinator._timed_charge_end = dt_time(5)
+    coordinator._timed_charge_armed = True
+
+    try:
+        with _patched_now(2):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+        task = coordinator._sun_charge_task
+        assert task is not None
+        assert coordinator.grid_charge_active is False
+        assert coordinator._sun_charge_reset_required is True
+        client.write_register.reset_mock()
+
+        await coordinator.async_stop_grid_charge()
+
+        assert coordinator._sun_charge_task is task
+        assert task.done() is False
+        assert coordinator._timed_charge_active is True
+        client.write_register.assert_not_awaited()
+    finally:
+        coordinator._timed_charge_enabled = False
+        await coordinator.async_shutdown()
+
+
 async def test_manual_grid_charge_uses_sunspec_and_updates_immediately(hass) -> None:
     """REQ-MANUAL-GRID-CHARGE: Start und Änderung nutzen ausschließlich
     40051/40049; ein neuer Sollwert wartet nicht auf den periodischen Takt."""

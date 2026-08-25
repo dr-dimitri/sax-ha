@@ -644,8 +644,14 @@ requirement_manual_grid_charge:
     einem gleichzeitig laufenden Schreibabschnitt ab und versucht danach
     Register 40051 aktiv auf 0 (SmartMeter-Nullregelung) zurückzusetzen. Erst
     anschließend wird die zentrale Entscheidung erneut ausgewertet, sodass
-    eine weiterhin berechtigte Automatik übernehmen darf. Ein Stop ohne
-    manuellen Auftrag verändert eine laufende Automatik nicht.
+    eine weiterhin berechtigte Automatik übernehmen darf. Hat ein
+    unvollständiger manueller Start seinen Auftrag bereits verworfen, aber
+    nach quittiertem 40051=1 sowohl den 40049-Write als auch den
+    Modus-0-Rollback verloren, arbeitet stop_grid_charge den offenen
+    _sun_charge_reset_required-Auftrag auch ohne sichtbaren manuellen Auftrag
+    ab. Das gilt nur, wenn kein gemeinsamer SunSpec-Writer mehr tatsächlich
+    läuft; ein Stop ohne manuellen Auftrag unterbricht dadurch keine laufende
+    Automatik und stößt nach einem reinen Fehler-Reset auch keine neu an.
 
     async_shutdown beendet zuerst Polling und Planner, erwirbt anschließend
     denselben _charge_control_lock, löscht den manuellen Auftrag, storniert
@@ -661,8 +667,10 @@ requirement_manual_grid_charge:
        40051/40049 beim Start sowie die sofortige Sollwertänderung."
     - "Coordinator-Tests belegen die Priorität Max-SOC > manuell >
        Automatiken, die Freigabe einer berechtigten Automatik nach Stop,
-       abgewartete Cancellation während eines Schreibabschnitts sowie einen
-       Shutdown ohne verbleibenden Auftrag oder Writer."
+       den erfolgreichen Stop nach fehlgeschlagenem 40049-Write und ebenfalls
+       fehlgeschlagenem Rollback, den Schutz einer tatsächlich laufenden
+       Automatik, abgewartete Cancellation während eines Schreibabschnitts
+       sowie einen Shutdown ohne verbleibenden Auftrag oder Writer."
     - "tests/test_integration_live.py verifiziert end-to-end, dass
        start_grid_charge Register 41 unverändert lässt, 40051/40049 setzt
        und stop_grid_charge 40051 auf SmartMeter-Nullregelung zurücksetzt."

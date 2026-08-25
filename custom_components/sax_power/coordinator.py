@@ -1617,14 +1617,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_stop_grid_charge(self) -> None:
         """Beende den Auftrag erst nach Task-Ende und sicherem Resetversuch."""
         async with self._charge_control_lock:
-            if self._grid_charge_power is None:
+            manual_charge_requested = self._grid_charge_power is not None
+            sun_charge_writer_running = (
+                self._sun_charge_task is not None and not self._sun_charge_task.done()
+            )
+            orphaned_reset_required = (
+                self._sun_charge_reset_required and not sun_charge_writer_running
+            )
+            if not manual_charge_requested and not orphaned_reset_required:
                 return
             self._grid_charge_power = None
-            # Immer zuerst den manuellen Besitz des Sollwertmodus freigeben.
-            # Die anschließende zentrale Auswertung darf danach eine weiterhin
-            # berechtigte Automatik sofort übernehmen.
+            # Ein unvollständiger Start kann den Auftrag bereits verworfen
+            # haben, obwohl Modus 1 quittiert und sein Rollback fehlgeschlagen
+            # ist. Dieser verwaiste Besitznachweis muss auch ohne sichtbaren
+            # manuellen Auftrag zurückgesetzt werden (REQ-MANUAL-GRID-CHARGE).
             await self.async_stop_sun_charge()
-            if self.data is not None:
+            if manual_charge_requested and self.data is not None:
+                # Nur ein tatsächlich beendeter manueller Auftrag gibt die
+                # zentrale Entscheidung neu frei. Ein reiner Fehler-Reset darf
+                # keine laufende Automatik unterbrechen oder neu anstoßen.
                 await self._async_enforce_grid_charge_locked(self.data)
 
     # -- Netzladung (SunSpec-Modus, Immediate Controls) ----------------------

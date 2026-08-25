@@ -98,6 +98,8 @@ def build_snapshot_archive(
         raise SnapshotReleaseError(
             f"Manifest kann nicht gelesen werden: {err}"
         ) from err
+    if not isinstance(manifest, dict):
+        raise SnapshotReleaseError("Manifest ist kein JSON-Objekt.")
     stable_version = manifest.get("version")
     if not isinstance(stable_version, str):
         raise SnapshotReleaseError("Manifest enthält keine Version als String.")

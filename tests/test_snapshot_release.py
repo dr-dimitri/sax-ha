@@ -162,5 +162,41 @@ def test_stable_release_is_suppressed_after_accidental_snapshot_merge() -> None:
         encoding="utf-8"
     )
 
-    assert workflow.count("'release:snapshot'") == 4
+    assert workflow.count("'release:snapshot'") == 3
     assert "Snapshot-Merge ohne Produktiv-Release melden" in workflow
+
+
+def test_snapshot_rejects_non_object_manifest(tmp_path: Path) -> None:
+    """Valid JSON that isn't an object must fail cleanly, not with AttributeError."""
+    source = _source(tmp_path)
+    manifest = source / "custom_components" / "sax_power" / "manifest.json"
+    manifest.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(SnapshotReleaseError, match="JSON-Objekt"):
+        build_snapshot_archive(
+            source_root=source,
+            output_directory=tmp_path / "output",
+            pull_request_number=121,
+            commit=COMMIT,
+        )
+
+
+def test_summary_step_only_runs_for_a_newly_created_snapshot() -> None:
+    """Re-running CI for an already published snapshot must not claim a new one."""
+    workflow = (REPOSITORY_ROOT / ".github/workflows/snapshot-release.yaml").read_text(
+        encoding="utf-8"
+    )
+    summary_step = workflow.split("- name: Ergebnis zusammenfassen")[1].split(
+        "- name:"
+    )[0]
+
+    assert "steps.collision.outputs.exists == 'false'" in summary_step
+
+
+def test_concurrency_group_is_scoped_to_the_head_repository() -> None:
+    """Same-named branches in different repositories must not cancel each other."""
+    workflow = (REPOSITORY_ROOT / ".github/workflows/snapshot-release.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "github.event.workflow_run.head_repository.full_name" in workflow

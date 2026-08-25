@@ -54,9 +54,9 @@ jobs:
           echo "body_path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"
 
       - name: Release-Metadaten und Commit prüfen
-        if: >-
-          !contains(fromJSON(steps.pull_request.outputs.labels),
-          'release:snapshot')
+        # Läuft absichtlich immer, auch für release:snapshot-PRs: nur so
+        # scheitert ein mehrdeutiges Label-Set (z. B. snapshot + patch)
+        # laut statt den Merge stillschweigend durchzulassen.
         id: version
         env:
           PR_LABELS: ${{ steps.pull_request.outputs.labels }}

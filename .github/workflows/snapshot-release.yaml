@@ -8,7 +8,12 @@ on:
       - completed
 
 concurrency:
-  group: snapshot-${{ github.event.workflow_run.head_branch }}
+  # Nach Quell-Repository qualifiziert: ein Fork-Branch mit demselben Namen
+  # wie ein interner Branch darf dessen laufende Veröffentlichung nicht
+  # abbrechen (cancel-in-progress).
+  group: >-
+    snapshot-${{ github.event.workflow_run.head_repository.full_name }}-${{
+    github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
@@ -174,7 +179,9 @@ jobs:
             --prerelease
 
       - name: Ergebnis zusammenfassen
-        if: steps.pull_request.outputs.publish == 'true'
+        if: >-
+          steps.pull_request.outputs.publish == 'true' &&
+          steps.collision.outputs.exists == 'false'
         env:
           SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
           SNAPSHOT_VERSION: ${{ steps.snapshot.outputs.version }}
@@ -187,4 +194,18 @@ jobs:
             echo "- Tag: \`$SNAPSHOT_TAG\`"
             echo "- Commit: \`$TESTED_COMMIT\`"
             echo "- Verwendung: ausschließlich Testinstanzen"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bereits veröffentlichten Snapshot melden
+        if: >-
+          steps.pull_request.outputs.publish == 'true' &&
+          steps.collision.outputs.exists == 'true'
+        env:
+          SNAPSHOT_TAG: ${{ steps.snapshot.outputs.tag }}
+        run: |
+          {
+            echo "### Snapshot bereits veröffentlicht"
+            echo
+            echo "- Tag \`$SNAPSHOT_TAG\` existiert bereits für diesen Commit."
+            echo "- Kein neues Release wurde erstellt."
           } >> "$GITHUB_STEP_SUMMARY"

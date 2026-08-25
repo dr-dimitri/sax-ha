@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from scripts.release_metadata import (
     ReleaseMetadataError,
+    _manifest_version,
     ensure_commit_matches,
     ensure_tag_absent,
     latest_stable_version,
@@ -13,6 +17,8 @@ from scripts.release_metadata import (
     release_bump,
     validate_release,
 )
+
+REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
 @pytest.mark.parametrize(
@@ -113,3 +119,34 @@ def test_release_rejects_non_stable_manifest_semver(version: str) -> None:
             tags=["1.0.1"],
             manifest_version=version,
         )
+
+
+def test_manifest_version_rejects_symlink(tmp_path: Path) -> None:
+    """A PR-controlled symlink must never be followed to read manifest data."""
+    target = tmp_path / "outside.json"
+    target.write_text(json.dumps({"version": "9.9.9"}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.symlink_to(target)
+
+    with pytest.raises(ReleaseMetadataError, match="Symlink"):
+        _manifest_version(manifest)
+
+
+def test_manifest_version_rejects_non_object_manifest(tmp_path: Path) -> None:
+    """Valid JSON that isn't an object must fail cleanly, not with AttributeError."""
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ReleaseMetadataError, match="JSON-Objekt"):
+        _manifest_version(manifest)
+
+
+def test_release_metadata_step_always_validates_label_combination() -> None:
+    """Even a snapshot-labeled merge must fail fast on an ambiguous label set."""
+    workflow = (REPOSITORY_ROOT / ".github/workflows/release.yaml").read_text(
+        encoding="utf-8"
+    )
+    metadata_step = workflow.split("- name: Release-Metadaten und Commit prüfen")[1]
+    step_body = metadata_step.split("- name:")[0]
+
+    assert "if:" not in step_body

@@ -139,7 +139,13 @@ def _parse_labels(labels_json: str) -> list[str]:
 
 
 def _manifest_version(path: Path) -> str:
+    # PR-Checkouts sind untrusted; ein Symlink könnte sonst beliebige
+    # Runner-Dateien in die öffentliche Actions-Log-Ausgabe ziehen.
+    if path.is_symlink():
+        raise ReleaseMetadataError(f"Symlink als Manifest nicht erlaubt: {path}")
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ReleaseMetadataError("manifest.json ist kein JSON-Objekt.")
     version = manifest.get("version")
     if not isinstance(version, str):
         raise ReleaseMetadataError("manifest.json enthält keine Version als String.")

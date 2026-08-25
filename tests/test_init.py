@@ -80,9 +80,8 @@ async def test_async_update_options_noop_without_loaded_entry(hass) -> None:
     await async_update_options(hass, entry)
 
 
-async def test_setup_loads_calibration_state_before_first_refresh(hass) -> None:
-    """REQ-PERIODIC-FULL-CALIBRATION: Ein Neustart darf die Fälligkeit
-    nicht durch einen ersten Poll mit leerem In-Memory-Zustand verschieben."""
+async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
+    """Persistierte Kalibrierungs- und Energiezustände gehen dem Poll voran."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=VALID_INPUT,
@@ -103,7 +102,12 @@ async def test_setup_loads_calibration_state_before_first_refresh(hass) -> None:
         patch(
             "custom_components.sax_power.SaxPowerCoordinator."
             "async_load_calibration_state",
-            new=AsyncMock(side_effect=lambda: order.append("load")),
+            new=AsyncMock(side_effect=lambda: order.append("calibration")),
+        ),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator."
+            "async_load_energy_state",
+            new=AsyncMock(side_effect=lambda: order.append("energy")),
         ),
         patch(
             "custom_components.sax_power.SaxPowerCoordinator."
@@ -114,6 +118,6 @@ async def test_setup_loads_calibration_state_before_first_refresh(hass) -> None:
     ):
         assert await async_setup_entry(hass, entry) is True
 
-    assert order == ["load", "refresh"]
+    assert order == ["calibration", "energy", "refresh"]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     await coordinator.async_shutdown()

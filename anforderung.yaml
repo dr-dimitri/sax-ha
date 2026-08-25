@@ -1247,32 +1247,53 @@ requirement_energy_dashboard_compatibility:
     Konfigurationsaufwand (z. B. ein manuell anzulegender
     "Integration"-Helfer) für den Nutzer nötig.
 
-    Beide Zähler starten als None ("nicht initialisiert") und akkumulieren
-    erst, sobald sensor.SaxPowerEnergySensor (RestoreEntity) beim Start per
-    coordinator.restore_energy_charged/restore_energy_discharged einen
-    zuvor gespeicherten Zustand (oder 0.0 beim allerersten Start)
-    eingespielt hat - das verhindert, dass der erste, bereits vor dem
-    Plattform-Setup laufende Coordinator-Update-Zyklus einen später
-    restaurierten Zählerstand überschreibt. Ist storage_power_active
-    zwischenzeitlich unbekannt (SunSpec-Modus nicht erreichbar, siehe
-    REQ-EXTENDED-MODE-RESILIENCE), wird die betroffene Zeitspanne
-    übersprungen statt mit 0 W verbucht, damit nach Wiederkehr kein
-    Nachhol-Sprung entsteht.
+    Beide Zähler werden gemeinsam in einem versionierten Home-Assistant-
+    Store gespeichert, dessen Schlüssel die Config-Entry-ID enthält. Diese
+    Persistenz ist unabhängig vom sichtbaren RestoreEntity-Zustand: Wird die
+    Entity wegen eines Basic-Mode-Fehlers unavailable und Home Assistant
+    beendet, bleibt der letzte numerische In-Memory-Zählerstand maßgeblich.
+    Häufige Änderungen werden fünf Minuten lang gebündelt; beim Entladen des
+    Config Entry wird der neueste Stand zusätzlich best-effort sofort
+    geschrieben.
+
+    Beim ersten Start nach Einführung des Stores werden vorhandene
+    numerische RestoreEntity-Zustände einmalig und für Lade-/Entladezähler
+    unabhängig migriert, sofern für den jeweiligen Zähler noch kein neuer
+    Snapshot existiert. Ein ganz neuer Eintrag ohne Restore-Zustand beginnt
+    bei 0.0. unknown, unavailable, nicht-endliche, negative, korrupte oder
+    rückläufige Zustände werden dagegen niemals als 0 interpretiert, sondern
+    verworfen und diagnostisch geloggt; der betroffene Zähler bleibt ohne
+    numerische Baseline uninitialisiert. Ein gültiger zweiter Zähler kann
+    auch dann restauriert werden, wenn der erste gespeicherte Wert korrupt
+    ist.
+
+    Ist storage_power_active zwischenzeitlich unbekannt (SunSpec-Modus nicht
+    erreichbar, siehe REQ-EXTENDED-MODE-RESILIENCE), wird die betroffene
+    Zeitspanne übersprungen statt mit 0 W verbucht, damit nach Wiederkehr
+    kein Nachhol-Sprung entsteht. Auch ein fehlgeschlagener Basic-Mode-Poll
+    verändert die internen Zähler und ihren gespeicherten Snapshot nicht.
   requirements:
-    - "Zwei neue Sensoren 'energy_charged'/'energy_discharged'
-       (device_class energy, state_class total_increasing, Einheit kWh),
-       über Neustarts hinweg per RestoreEntity persistiert."
+    - "Zwei Sensoren 'energy_charged'/'energy_discharged' (device_class
+       energy, state_class total_increasing, Einheit kWh), über Neustarts
+       hinweg gemeinsam und pro Config Entry in einem versionierten Store
+       persistiert."
+    - "Store-Schreibvorgänge werden gedrosselt und bei Shutdown/Unload
+       best-effort final geflusht; es gibt keinen Schreibvorgang pro Poll."
+    - "Numerische RestoreEntity-Altzustände werden nur ohne neuen Snapshot
+       migriert. unknown/unavailable sowie ungültige, negative oder
+       rückläufige Werte dürfen niemals einen Zähler auf 0 oder einen
+       kleineren Wert setzen und werden mit Warnung verworfen."
     - "Kein Akkumulieren vor Abschluss des Restores und während
        storage_power_active unbekannt ist."
     - "Negative storage_power_active (Ladung) fließt ausschließlich in
        energy_charged, positive (Entladung) ausschließlich in
        energy_discharged."
   acceptance_criteria:
-    - "tests/test_coordinator.py deckt ab: kein Akkumulieren vor Restore,
-       Akkumulation über mehrere Ticks mit bekannter Leistung, Vorzeichen-
-       Split zwischen Lade-/Entlade-Zähler, kein Nachhol-Sprung nach einer
-       Zeitspanne mit unbekannter Leistung, Fortsetzung ab einem
-       restaurierten Zählerstand."
+    - "tests/test_coordinator.py und tests/test_energy_persistence.py decken
+       ab: Akkumulation/Vorzeichen-Split, SunSpec-Ausfall ohne Nachhol-Sprung,
+       Basic-Mode-Ausfall mit exaktem Final-Flush, Legacy-Migration,
+       unknown/unavailable, korrupte/negative/rückläufige Snapshots,
+       Schreibdrosselung sowie zwei unabhängige Config Entries."
     - "Beide Sensoren lassen sich in der Home-Assistant-UI im
        Energy-Dashboard als Batterie-Ladung/-Entladung auswählen."
 

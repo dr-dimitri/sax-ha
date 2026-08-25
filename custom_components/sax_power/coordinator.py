@@ -314,6 +314,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
         self._max_soc_grid_import_wait_cycles = 0
+        self._max_soc_released_for_discharge = False
+        self._last_effective_max_soc: int | None = None
         self._grid_charge_task: asyncio.Task | None = None
         self._grid_charge_power = 0
         self._timed_charge_enabled = False
@@ -1027,6 +1029,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # sofort aufheben. Register 40051 wird dann aktiv auf 0
     # (SmartMeter-Nullregelung) zurückgesetzt, damit die geräteeigene
     # Automatik den Hausverbrauch wieder aus dem Speicher decken kann.
+    # Diese bestätigte Freigabe bleibt verriegelt, solange der SOC nicht
+    # wirklich unter den wirksamen Zielwert fällt. Ohne diesen Latch würde
+    # der nächste Poll bei unverändertem SOC sofort wieder 0 % anfordern und
+    # die Register zwischen beiden Modi flattern lassen (REQ-TIMED-SOC-CHARGE).
 
     @property
     def max_soc(self) -> int | None:
@@ -1854,6 +1860,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         target_soc = self.effective_max_soc
         current_soc = data["soc"]
+        if (
+            self._last_effective_max_soc is not None
+            and target_soc < self._last_effective_max_soc
+        ):
+            # Eine Zielabsenkung ist eine neue Überschreitung. Eine Erhöhung
+            # behält die Freigabe dagegen bei, solange der neue Zielwert noch
+            # unter dem aktuellen SOC liegt (REQ-TIMED-SOC-CHARGE).
+            self._max_soc_released_for_discharge = False
+        self._last_effective_max_soc = target_soc
+        if current_soc < target_soc:
+            self._max_soc_released_for_discharge = False
         if current_soc >= target_soc:
             self._timed_charge_armed = False
         elif (
@@ -1973,22 +1990,37 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # währenddessen nicht mit) - deshalb zusätzlich Netzbezug am
                 # Smart Meter als Freigabe-Trigger auswerten, mit
                 # Zyklen-Hysterese gegen kurze Lastspitzen.
-                smartmeter_power = data.get("smartmeter_power")
-                # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_
-                # SURPLUS_THRESHOLD_WATT): positiv = Netzbezug.
-                grid_import_raw = (
-                    smartmeter_power is not None
-                    and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
-                )
-                grid_import_confirmed = self._cycles_confirmed(
-                    "_max_soc_grid_import_wait_cycles", grid_import_raw
-                )
-                if grid_import_confirmed:
+                if self._max_soc_released_for_discharge:
+                    # Nach bestätigter Freigabe darf derselbe unveränderte
+                    # SOC keinen neuen 0-%-Task erzeugen. stop ist nach der
+                    # ersten erfolgreichen Rücksetzung ein Write-freier No-Op.
                     await self.async_stop_sun_charge()
                     self._max_soc_grid_import_wait_cycles = 0
                 else:
-                    await self.async_start_sun_charge(0)
-                    max_soc_clamped_now = True
+                    smartmeter_power = data.get("smartmeter_power")
+                    # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_
+                    # SURPLUS_THRESHOLD_WATT): positiv = Netzbezug.
+                    grid_import_raw = (
+                        smartmeter_power is not None
+                        and smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+                    )
+                    grid_import_confirmed = self._cycles_confirmed(
+                        "_max_soc_grid_import_wait_cycles", grid_import_raw
+                    )
+                    if grid_import_confirmed:
+                        await self.async_stop_sun_charge()
+                        if self._sun_charge_reset_required:
+                            # Ein fehlgeschlagenes Modus-0-Schreiben ist noch
+                            # keine Freigabe. Der bestätigte Zähler bleibt
+                            # stehen, damit der nächste Poll nur die
+                            # Rücksetzung wiederholt und nicht erneut klemmt.
+                            max_soc_clamped_now = True
+                        else:
+                            self._max_soc_grid_import_wait_cycles = 0
+                            self._max_soc_released_for_discharge = True
+                    else:
+                        await self.async_start_sun_charge(0)
+                        max_soc_clamped_now = True
             grid_serving_active_now = False
         else:
             self._max_soc_hold_is_window_bound = False

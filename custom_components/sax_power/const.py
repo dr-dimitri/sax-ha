@@ -442,8 +442,8 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert steht für
 # Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
 # POSITIVER Anzeigewert für Netzbezug - der Rohregisterwert kann davon
-# abweichen, coordinator._parse_extended negiert apply_typed_sunssf(...)
-# beim Einlesen entsprechend.
+# abweichen, domain.sunspec.decode_high_block negiert den skalierten Wert
+# beim Einlesen entsprechend (ScaledField.negate).
 #
 # Wird außerdem von der Zustandsmaschine für netzdienliches Laden
 # (SaxPowerCoordinator._async_step_grid_serving, REQ-GRID-SERVING-CHARGE) für

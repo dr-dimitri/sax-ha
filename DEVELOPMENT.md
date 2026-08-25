@@ -28,6 +28,7 @@ custom_components/sax_power/
 ├── manifest.json      Metadaten, Requirements (pymodbus==3.13.1), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
+│                          SunSpec-Blockdecodierung (sunspec.py),
 │                          Zeitfenster und Wertevalidierung
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung sowie der injizierbare Modbus-Client-Port
@@ -39,7 +40,7 @@ custom_components/sax_power/
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
 │                          PV-Prognose)
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
-│                          SunSpec-Skalierung, Max-SOC-Logik, Netzladung,
+│                          Poll-Intervalle/Caches, Max-SOC-Logik, Netzladung,
 │                          zeitgesteuertes Laden, netzdienliches Laden,
 │                          preisoptimiertes Laden (Anwendung des Ladeplans),
 │                          Zeitfenster-Überlappungsprüfung
@@ -505,16 +506,48 @@ aber keine Wirkung gezeigt - siehe Kommentar bei `REG_SETPOINT_POWER`
 jeweiligen "not implemented"-Sentinel (0x8000 bzw. 0xFFFF, SunSpec Device
 Information Model Specification V1.1, Abschnitt 6.4) und liefern dafür
 `None` statt eines falschen Zahlenwerts, `decode_bool16` ergänzt das für
-0/1-Register. `coordinator.apply_typed_sunssf(raw_value, raw_scale_factor,
-*, signed=True)` decodiert Wert und Skalierungsfaktor getrennt (`signed`
-muss zum in `modbus_llm.yaml` dokumentierten Datentyp des Werteregisters
-passen) und wendet erst danach `Wert × 10^sunssf` an - liefert `float |
-None`. `SaxPowerCoordinator._parse_extended` wertet damit den HIGH-Block
-aus (Inverter/Immediate Controls/Meter/Battery), `_parse_low_block` den
-LOW1-/LOW2-Block (Common Model, Battery-Skalierungsfaktoren) - siehe
-Register-Mapping oben und anforderung.yaml, REQ-SUNSPEC-DATATYPES.
-`_parse_low_block` dekodiert außerdem die als ASCII-Zeichenpaare codierten
-Hersteller-/Modell-Register (`coordinator.decode_ascii_registers`).
+0/1-Register. `apply_typed_sunssf(raw_value, raw_scale_factor, *,
+signed=True)` decodiert Wert und Skalierungsfaktor getrennt (`signed` muss
+zum in `modbus_llm.yaml` dokumentierten Datentyp des Werteregisters passen)
+und wendet erst danach `Wert × 10^sunssf` an - liefert `float | None`.
+`decode_ascii_registers` decodiert die als ASCII-Zeichenpaare codierten
+`str`-Register. Siehe anforderung.yaml, REQ-SUNSPEC-DATATYPES.
+
+### Grenze: Registerblock → Decoder → Coordinator-Daten
+
+Die vollständige Protokollübersetzung liegt in `domain/sunspec.py` und ist
+frei von Home Assistant und pymodbus. Der Datenfluss ist einbahnig:
+
+```
+read_holding_registers          domain/sunspec.py                coordinator
+────────────────────────        ─────────────────────────        ─────────────
+LOW1  ab Adresse 0    ─┐
+                       ├──►  decode_low_blocks(low1, low2)  ──►  data["sun_*"]
+LOW2  ab Adresse 110  ─┘         └► BatteryScaleFactors  ──┐     (LOW-Cache)
+                                                           │
+HIGH  ab Adresse 17   ──►  decode_high_block(high, sf) ◄────┘──►  data["storage_*"],
+                                 └► ic_power_setpoint_sf_raw       ["grid_*"], …
+                                                                   (HIGH-Cache)
+```
+
+Die Decoder nehmen ausschließlich `Sequence[int]` entgegen - keine
+Coordinator-Callbacks - und rechnen intern über Blockstart + Offset. Ist ein
+Block kürzer als das dokumentierte Layout, fällt das als
+`SunSpecDecodeError` auf statt als IndexError mitten in der Feldzuordnung.
+
+Die Feldzuordnung des HIGH-Blocks steht als deklarative Tabelle
+`HIGH_BLOCK_FIELDS` (`ScaledField`/`EnumField`/`RawField`/`BoolField`) im
+Modul. Dadurch lässt sich jede Adresse und jede Signed/Unsigned-Entscheidung
+in `tests/test_sunspec_mapping.py` parametrisch gegen `modbus_llm.yaml`
+prüfen, ohne die YAML-Datei zur Laufzeit zu laden.
+
+Beim Coordinator bleiben Transport, Poll-Intervalle und Caches, Resilienz-
+und Repair-Verhalten, die Cache-Invalidierung nach Writes, die Abbildung auf
+`UpdateFailed`/`ConfigEntryNotReady` sowie die Entscheidung, wann die zuletzt
+erfolgreich gelesenen LOW-Skalierungsfaktoren weiterverwendet werden. Auch
+`config_flow.py` nutzt für die Einrichtungs-Zusammenfassung denselben
+`decode_identity`, statt die Geräteidentität ein zweites Mal zu
+implementieren.
 
 ## Refresh-Verhalten
 
@@ -541,10 +574,19 @@ tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
 ├── test_calibration.py           Reine 7-Tage-/Voll-SOC-Policy und versionierte
 │                                  UTC-Persistenz einschließlich ungültiger Daten
+├── test_sunspec_decoder.py       Reine Decodertests für domain/sunspec.py (ohne
+│                                  Coordinator/HA/pymodbus): alle vier SunSpec-Modelle,
+│                                  Signed/Unsigned/Sentinelwerte, ASCII-Register, unbekannte
+│                                  Enums, ungültige Blocklänge sowie LOW-alt/HIGH-neu
+├── test_sunspec_mapping.py       Parametrische Prüfung der Feldzuordnung und aller
+│                                  REG_SUN_*-Konstanten gegen modbus_llm.yaml als Quelle -
+│                                  die YAML-Datei wird nur im Test geladen, nie zur Laufzeit
 ├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, typisierte
 │                                  SunSpec-Decoder + Not-Implemented-Sentinels,
-│                                  Fehlerbehandlung bei Modbus-Schreibfehlern, Parsing des
-│                                  kompletten SunSpec-Modus-Blocks (gemockt), Zeitfenster-Logik +
+│                                  Fehlerbehandlung bei Modbus-Schreibfehlern, Wire-/Adapter-
+│                                  Nachweis für die drei SunSpec-Teilblöcke (gemockt), inkl.
+│                                  Weiterverwendung der letzten LOW-Skalierungsfaktoren bei
+│                                  fehlgeschlagenem LOW-Refresh, Zeitfenster-Logik +
 │                                  Enforcement für zeitgesteuertes Laden, netzdienliches Laden
 │                                  und die Max-SOC-Sperre (alle über SunSpec-Modus-Register
 │                                  40049/40051, auch unabhängig voneinander), Watt-zu-Prozent-

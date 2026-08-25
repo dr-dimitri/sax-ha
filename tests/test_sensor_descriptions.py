@@ -11,13 +11,24 @@ import json
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
+from custom_components.sax_power.const import (
+    READ_BLOCK_EXT_COUNT,
+    READ_BLOCK_EXT_LOW1_COUNT,
+    READ_BLOCK_EXT_LOW2_COUNT,
+    READ_BLOCK_EXT_START,
+    REG_SUN_IC_POWER_SETPOINT_SF,
+)
+from custom_components.sax_power.domain.registers import to_unsigned16
+from custom_components.sax_power.domain.sunspec import (
+    decode_high_block,
+    decode_low_blocks,
+)
 from custom_components.sax_power.sensor import (
     SENSOR_DESCRIPTIONS,
     SaxPowerForecastSensor,
@@ -60,29 +71,26 @@ def test_german_forecast_threshold_label_uses_hyphen() -> None:
     )
 
 
-def _full_data(hass) -> dict:
+def _full_data() -> dict:
     """Baut einen vollständig befüllten, coordinator.data-artigen Datensatz.
 
-    Nutzt die echte Coordinator-Parsing-Logik (_parse_extended) auf
-    Testwerten statt einer manuell gepflegten Kopie aller ~55 Schlüssel -
-    das hält den Test automatisch synchron mit dem tatsächlichen
-    Register-Layout (siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION).
+    Nutzt die echten Decoder (domain/sunspec.py) auf Testwerten statt einer
+    manuell gepflegten Kopie aller ~55 Schlüssel - das hält den Test
+    automatisch synchron mit dem tatsächlichen Register-Layout (siehe
+    anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION).
     """
-    client = MagicMock()
-    client.connected = True
-    client.connect = AsyncMock(return_value=True)
-    coordinator = SaxPowerCoordinator(
-        hass,
-        client,
-        slave_id=64,
-        slave_id_extended=100,
-        scan_interval=10,
-        entry_id="test_entry_id",
-    )
+    high = [0] * READ_BLOCK_EXT_COUNT
+    # Scalefaktor Leistungsvorgabe (Immediate Controls) - der einzige, für
+    # den 0 kein plausibler "wellknown"-Wert ist.
+    high[REG_SUN_IC_POWER_SETPOINT_SF - READ_BLOCK_EXT_START] = to_unsigned16(-2)
 
-    raw = dict.fromkeys(range(115), 0)
-    raw[52] = to_unsigned16(-2)  # Scalefaktor Leistungsvorgabe (Immediate Controls)
-    extended = coordinator._parse_extended(lambda address: raw[address])
+    low = decode_low_blocks(
+        [0] * READ_BLOCK_EXT_LOW1_COUNT, [0] * READ_BLOCK_EXT_LOW2_COUNT
+    )
+    extended = {
+        **low.values,
+        **decode_high_block(high, low.scale_factors).values,
+    }
 
     basic = {
         "switch_state": 2,
@@ -95,10 +103,10 @@ def _full_data(hass) -> dict:
     return {**basic, **extended}
 
 
-def test_value_fn_handles_full_data_dict(hass) -> None:
+def test_value_fn_handles_full_data_dict() -> None:
     """Jede value_fn muss mit einem vollständig befüllten Datensatz umgehen
     können, ohne eine Exception zu werfen (z. B. KeyError bei Tippfehlern)."""
-    full_data = _full_data(hass)
+    full_data = _full_data()
 
     for description in SENSOR_DESCRIPTIONS:
         description.value_fn(full_data)

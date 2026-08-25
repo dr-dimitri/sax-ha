@@ -53,14 +53,8 @@ from .const import (
     READ_BLOCK_EXT_LOW1_COUNT,
     READ_BLOCK_EXT_LOW1_START,
     REG_SOC,
-    REG_SUN_MANUFACTURER,
-    REG_SUN_MODEL,
-    REG_SUN_SERIAL_HI,
-    REG_SUN_SERIAL_LO,
-    REG_SUN_VERSION_GATEWAY,
-    REG_SUN_VERSION_MASTER,
 )
-from .coordinator import decode_ascii_registers
+from .domain.sunspec import SunSpecDecodeError, decode_identity
 from .sensor import SENSOR_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
@@ -222,24 +216,31 @@ async def _async_read_finish_summary(
         if result.isError():
             return summary
 
-        def reg(address: int) -> int:
-            return result.registers[address - READ_BLOCK_EXT_LOW1_START]
+        # Derselbe Decoder wie im Coordinator (siehe domain/sunspec.py):
+        # Zusammenfassung und Sensoren beschreiben dasselbe Gerät und dürfen
+        # sich nicht auseinanderentwickeln.
+        try:
+            identity = decode_identity(result.registers)
+        except SunSpecDecodeError:
+            return summary
 
         summary["sunspec_available"] = True
-        summary["sun_manufacturer"] = decode_ascii_registers(
-            [reg(REG_SUN_MANUFACTURER + i) for i in range(4)]
-        )
-        summary["sun_model"] = decode_ascii_registers(
-            [reg(REG_SUN_MODEL + i) for i in range(3)]
-        )
-        summary["sun_version_master"] = reg(REG_SUN_VERSION_MASTER)
-        summary["sun_version_gateway"] = reg(REG_SUN_VERSION_GATEWAY)
-        summary["sun_serial_number"] = (reg(REG_SUN_SERIAL_HI) << 16) | reg(
-            REG_SUN_SERIAL_LO
-        )
+        summary.update(identity.as_data())
     finally:
         client.close()
     return summary
+
+
+#: Anzeigetext für einen Identitätswert, den das Gerät nicht meldet.
+UNKNOWN_IDENTITY_TEXT = "unbekannt"
+
+
+def _format_firmware_part(label: str, version: int | None) -> str:
+    """Ein Halbsatz der Firmware-Zeile ("Master V61"), robust gegen ein
+    fehlendes Register."""
+    if version is None:
+        return f"{label} {UNKNOWN_IDENTITY_TEXT}"
+    return f"{label} V{version}"
 
 
 class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -417,11 +418,18 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
             self._connection_data[CONF_SLAVE_ID_EXTENDED],
         )
         if summary["sunspec_available"]:
+            # decode_identity liefert None, sobald ein Register den SunSpec-
+            # Sentinel "not implemented" meldet (REQ-SUNSPEC-DATATYPES) -
+            # dann "unbekannt" anzeigen statt "V None"/"None".
             firmware = (
-                f"Master V{summary['sun_version_master']} / "
-                f"Gateway V{summary['sun_version_gateway']}"
+                f"{_format_firmware_part('Master', summary['sun_version_master'])} / "
+                f"{_format_firmware_part('Gateway', summary['sun_version_gateway'])}"
             )
-            serial_number = str(summary["sun_serial_number"])
+            serial_number = (
+                UNKNOWN_IDENTITY_TEXT
+                if summary["sun_serial_number"] is None
+                else str(summary["sun_serial_number"])
+            )
             sunspec_status = "Erreichbar"
         else:
             firmware = "Nicht verfügbar (SunSpec-Modus nicht erreichbar)"

@@ -43,7 +43,7 @@ from custom_components.sax_power.const import (
     REG_SUN_STORAGE_POWER_ACTIVE,
     REG_SUN_STORAGE_POWER_ACTIVE_SF,
 )
-from custom_components.sax_power.coordinator import apply_typed_sunssf
+from custom_components.sax_power.domain.registers import apply_typed_sunssf
 
 REAL_DEVICE_CONFIG_PATH = Path(__file__).parent / "real_device.yaml"
 

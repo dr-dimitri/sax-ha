@@ -480,6 +480,14 @@
     "price_neutral_below_limit": {
       "title": "Neutralpreis liegt nicht über der Preisgrenze",
       "description": "\"Neutralpreis\" ({neutral_price} EUR/kWh) liegt nicht über \"Preisgrenze\" ({max_price} EUR/kWh) - die Pause-Zone des preisoptimierten Ladens (Laden und Entladen gestoppt zwischen diesen beiden Werten) kann dadurch nie greifen, der Speicher verhält sich außerhalb der Ladephasen wie vor Einführung des Neutralpreises. Bitte den Neutralpreis auf einen Wert über der Preisgrenze anheben."
+    },
+    "control_config_unreadable": {
+      "title": "Ladeeinstellungen konnten nicht gelesen werden",
+      "description": "Der gespeicherte Stand der softwareseitigen Ladeeinstellungen (Max. SOC, Zeitfenster, Automatiken, Preisparameter) konnte beim Start nicht gelesen werden. Es gelten vorübergehend die sicheren Vorgabewerte (Automatiken aus, Max. SOC 100 %); Änderungen wirken bis zu einem Neuladen dieser Integration nur im Arbeitsspeicher und werden NICHT gespeichert, damit der vorhandene Datenbestand nicht überschrieben wird. Bitte die Ursache prüfen (z. B. Speicherplatz, Dateiberechtigungen von Home Assistant) und die Integration anschließend unter Einstellungen -> Geräte & Dienste neu laden."
+    },
+    "control_config_unresolved": {
+      "title": "Einige Ladeeinstellungen konnten nicht automatisch übernommen werden",
+      "description": "Folgende Einstellungen standen beim ersten Start dieser Version auf einem nicht auswertbaren Altzustand (unbekannt/nicht verfügbar) und wurden deshalb auf ihren sicheren Vorgabewert gesetzt, statt den vorherigen Wert zu übernehmen: {fields}. Bitte diese Einstellungen prüfen und bei Bedarf erneut wie gewünscht setzen - danach verschwindet dieser Hinweis automatisch."
     }
   },
   "services": {

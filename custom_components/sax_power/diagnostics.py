@@ -35,6 +35,15 @@ async def async_get_config_entry_diagnostics(
         "entry_options": dict(entry.options),
         "coordinator_data": coordinator.data,
         "state": {
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: zeigt, woher die folgenden Werte
+            # stammen (loaded/missing/failed) - und ob der Bootstrap
+            # überhaupt abgeschlossen ist (sonst steuert die Integration
+            # bewusst nicht).
+            "control_config_status": coordinator.control_config_status,
+            "control_bootstrap_pending": coordinator.control_bootstrap_pending,
+            "control_config_unresolved_fields": sorted(
+                coordinator.control_config_unresolved_fields
+            ),
             "max_soc": coordinator.max_soc,
             "effective_max_soc": coordinator.effective_max_soc,
             "max_soc_clamped": coordinator.max_soc_clamped,

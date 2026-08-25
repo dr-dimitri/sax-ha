@@ -29,7 +29,11 @@ from .const import (
     PRICE_LIMIT_STEP,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerEntity
+from .entity import (
+    SaxPowerConfigEntity,
+    log_unmigratable_state,
+    restorable_number,
+)
 
 
 async def async_setup_entry(
@@ -50,7 +54,7 @@ async def async_setup_entry(
     )
 
 
-class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
     """Software-seitiges Maximal-SOC für die Ladung.
 
     Der SAX Speicher besitzt kein natives Max-SOC-Register. Der Coordinator
@@ -62,10 +66,12 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
     preisoptimierte Laden (keine eigenen Einstellungen dafür, siehe
     anforderung.yaml REQ-TIMED-SOC-CHARGE und REQ-DYNAMIC-PRICE-CHARGE).
 
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
-    es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
-    Zustand, wird MAX_SOC (100 %) als Vorgabewert gesetzt statt "unbekannt"
-    zu bleiben - andernfalls würde der Schieberegler optisch bei 0 stehen.
+    Der Wert liegt im Konfigurations-Store des Coordinators (siehe
+    anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP) und ist dort bereits
+    gesetzt, bevor diese Entity überhaupt existiert. Der RestoreEntity-Pfad
+    unten greift nur noch für Einträge ohne Store (einmalige Migration);
+    ohne beides gilt MAX_SOC (100 %) statt "unbekannt" - andernfalls würde
+    der Schieberegler optisch bei 0 stehen.
     """
 
     _attr_translation_key = "max_soc"
@@ -81,17 +87,24 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if self.coordinator.max_soc is not None:
             return
-        restored_value: int | None = None
         if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = int(float(last_state.state))
-            except TypeError, ValueError:
-                restored_value = None
-        await self.coordinator.async_set_max_soc(
-            restored_value if restored_value is not None else MAX_SOC
-        )
+            if (restored := restorable_number(last_state)) is not None:
+                await self.coordinator.async_set_max_soc(int(restored))
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("max_soc")
+            return
+        await self.coordinator.async_set_max_soc(MAX_SOC)
 
     @property
     def native_value(self) -> int | None:
@@ -102,7 +115,9 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+class SaxPowerTimedChargeMinSocNumber(
+    RestoreEntity, SaxPowerConfigEntity, NumberEntity
+):
     """Unterer SOC-Schwellwert ("Min. SOC"), unterhalb dessen die Netzladung
     starten darf - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE und
     coordinator.SaxPowerCoordinator._async_enforce_grid_charge
@@ -110,12 +125,12 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
     lädt die Netzladung bis "Max. SOC" durch, statt bei jedem erneuten
     Überschreiten von "Min. SOC" sofort wieder abzubrechen.
 
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
-    es (z. B. direkt nach der Ersteinrichtung) noch keinen gespeicherten
-    Zustand, wird DEFAULT_TIMED_CHARGE_MIN_SOC (20 %) als Vorgabewert
-    gesetzt statt "unbekannt"/0 zu bleiben - ein bereits sinnvoll nutzbarer
-    Schwellwert statt eines faktisch inaktiven 100-%-Defaults, mit dem
-    Netzladung bei der Ersteinrichtung nie von selbst armt.
+    Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),
+    RestoreEntity nur noch als einmaliger Migrationspfad. Ohne beides gilt
+    DEFAULT_TIMED_CHARGE_MIN_SOC (20 %) statt "unbekannt"/0 - ein bereits
+    sinnvoll nutzbarer Schwellwert statt eines faktisch inaktiven
+    100-%-Defaults, mit dem Netzladung bei der Ersteinrichtung nie von
+    selbst armt.
     """
 
     _attr_translation_key = "timed_charge_min_soc"
@@ -131,18 +146,25 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if self.coordinator.timed_charge_min_soc is not None:
             return
-        restored_value: int | None = None
         if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = int(float(last_state.state))
-            except TypeError, ValueError:
-                restored_value = None
+            if (restored := restorable_number(last_state)) is not None:
+                await self.coordinator.async_set_timed_charge_min_soc(int(restored))
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("timed_charge_min_soc")
+            return
         await self.coordinator.async_set_timed_charge_min_soc(
-            restored_value
-            if restored_value is not None
-            else DEFAULT_TIMED_CHARGE_MIN_SOC
+            DEFAULT_TIMED_CHARGE_MIN_SOC
         )
 
     @property
@@ -155,7 +177,7 @@ class SaxPowerTimedChargeMinSocNumber(RestoreEntity, SaxPowerEntity, NumberEntit
 
 
 class SaxPowerGridServingForecastThresholdNumber(
-    RestoreEntity, SaxPowerEntity, NumberEntity
+    RestoreEntity, SaxPowerConfigEntity, NumberEntity
 ):
     """Optional minimum PV forecast for grid-serving charge pauses.
 
@@ -177,18 +199,29 @@ class SaxPowerGridServingForecastThresholdNumber(
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if self.coordinator.grid_serving_forecast_threshold_kwh_raw is not None:
             return
-        restored_value: float | None = None
         if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = float(last_state.state)
-            except TypeError, ValueError:
-                restored_value = None
+            if (restored := restorable_number(last_state)) is not None:
+                await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(
+                    restored
+                )
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved(
+                    "grid_serving_forecast_threshold_kwh"
+                )
+            return
         await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(
-            restored_value
-            if restored_value is not None
-            else DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH
+            DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH
         )
 
     @property
@@ -200,7 +233,7 @@ class SaxPowerGridServingForecastThresholdNumber(
         self.async_write_ha_state()
 
 
-class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
     """Preisgrenze für den Modus "Absoluter Preis" des preisoptimierten
     Ladens, in EUR/kWh - siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 
@@ -210,8 +243,9 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
     attraktivsten. In den Modi "Relativ" und "Smart" wird dieser Wert nicht
     ausgewertet.
 
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert; ohne
-    gespeicherten Zustand gilt DEFAULT_PRICE_LIMIT.
+    Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),
+    RestoreEntity nur noch als einmaliger Migrationspfad; ohne beides gilt
+    DEFAULT_PRICE_LIMIT.
     """
 
     _attr_translation_key = "price_charge_max_price"
@@ -227,17 +261,24 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if self.coordinator.price_charge_max_price is not None:
             return
-        restored_value: float | None = None
         if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = float(last_state.state)
-            except TypeError, ValueError:
-                restored_value = None
-        await self.coordinator.async_set_price_charge_max_price(
-            restored_value if restored_value is not None else DEFAULT_PRICE_LIMIT
-        )
+            if (restored := restorable_number(last_state)) is not None:
+                await self.coordinator.async_set_price_charge_max_price(restored)
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_max_price")
+            return
+        await self.coordinator.async_set_price_charge_max_price(DEFAULT_PRICE_LIMIT)
 
     @property
     def native_value(self) -> float | None:
@@ -248,7 +289,9 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerPriceNeutralPriceNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+class SaxPowerPriceNeutralPriceNumber(
+    RestoreEntity, SaxPowerConfigEntity, NumberEntity
+):
     """Neutralpreis für das preisoptimierte Laden, in EUR/kWh - siehe
     anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 
@@ -261,8 +304,9 @@ class SaxPowerPriceNeutralPriceNumber(RestoreEntity, SaxPowerEntity, NumberEntit
     ab dem Neutralpreis lohnt sich die Entladung wieder trotz
     Speicherverlusten, siehe coordinator._async_enforce_grid_charge.
 
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert; ohne
-    gespeicherten Zustand gilt DEFAULT_PRICE_NEUTRAL.
+    Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),
+    RestoreEntity nur noch als einmaliger Migrationspfad; ohne beides gilt
+    DEFAULT_PRICE_NEUTRAL.
     """
 
     _attr_translation_key = "price_charge_neutral_price"
@@ -278,16 +322,27 @@ class SaxPowerPriceNeutralPriceNumber(RestoreEntity, SaxPowerEntity, NumberEntit
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if self.coordinator.price_charge_neutral_price is not None:
             return
-        restored_value: float | None = None
         if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = float(last_state.state)
-            except TypeError, ValueError:
-                restored_value = None
+            if (restored := restorable_number(last_state)) is not None:
+                await self.coordinator.async_set_price_charge_neutral_price(restored)
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved(
+                    "price_charge_neutral_price"
+                )
+            return
         await self.coordinator.async_set_price_charge_neutral_price(
-            restored_value if restored_value is not None else DEFAULT_PRICE_NEUTRAL
+            DEFAULT_PRICE_NEUTRAL
         )
 
     @property
@@ -299,15 +354,16 @@ class SaxPowerPriceNeutralPriceNumber(RestoreEntity, SaxPowerEntity, NumberEntit
         self.async_write_ha_state()
 
 
-class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerEntity, NumberEntity):
+class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
     """Anzahl der günstigsten Stunden, in denen preisoptimiert geladen wird.
 
     Wirksam in den Modi "Relativ" (exakt so viele Stunden werden
     ausgewählt) und "Smart" (Obergrenze für die aus dem Energiebedarf
     errechnete Stundenzahl). Im Modus "Absoluter Preis" ohne Wirkung.
 
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert; ohne
-    gespeicherten Zustand gilt DEFAULT_PRICE_HOURS.
+    Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),
+    RestoreEntity nur noch als einmaliger Migrationspfad; ohne beides gilt
+    DEFAULT_PRICE_HOURS.
     """
 
     _attr_translation_key = "price_charge_hours"
@@ -323,17 +379,24 @@ class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerEntity, NumberEntity
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if self.coordinator.price_charge_hours_raw is not None:
             return
-        restored_value: int | None = None
         if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                restored_value = int(float(last_state.state))
-            except TypeError, ValueError:
-                restored_value = None
-        await self.coordinator.async_set_price_charge_hours(
-            restored_value if restored_value is not None else DEFAULT_PRICE_HOURS
-        )
+            if (restored := restorable_number(last_state)) is not None:
+                await self.coordinator.async_set_price_charge_hours(int(restored))
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_hours")
+            return
+        await self.coordinator.async_set_price_charge_hours(DEFAULT_PRICE_HOURS)
 
     @property
     def native_value(self) -> int | None:

@@ -55,6 +55,7 @@
 # REQ-DHCP-DISCOVERY              done       Automatische Netzwerk-Discovery per DHCP - IP-Feld der Ersteinrichtung vorbelegt
 # REQ-DIAGNOSTIC-ENTITY-CATEGORY  done       Technische Detail-/Rohwerte als entity_category=diagnostic, Kernwerte bleiben sichtbar
 # REQ-PERIODIC-FULL-CALIBRATION   done       Alle 7 Tage temporär bis 100 % laden, um die Zell-/SOC-Kalibrierung zu ermöglichen
+# REQ-CONTROL-CONFIG-BOOTSTRAP    done       Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen
 # ==============================================================================
 
 # ==============================================================================
@@ -498,7 +499,11 @@ requirement_timed_soc_charge:
 
     Aktiviert-Zustand sowie Start-/Endzeit des zeitgesteuerten Ladens
     ("Netzladung aktiv"/"Start"/"Ende", time.py) werden ebenfalls über
-    RestoreEntity über Neustarts hinweg persistiert.
+    Neustarts hinweg persistiert. Maßgeblich ist dafür der versionierte
+    Konfigurations-Store, der bereits vor dem ersten steuernden Refresh
+    vollständig geladen wird; die RestoreEntity-Zustände sind nur noch der
+    einmalige Migrationspfad für Einträge ohne Store (siehe
+    REQ-CONTROL-CONFIG-BOOTSTRAP).
     Zusätzlich zeigt ein Diagnose-Sensor ("Zeitgesteuertes Laden aktiv") an,
     ob gerade zeitgesteuert nachgeladen wird - unabhängig von der
     Max-SOC-Sperre.
@@ -976,9 +981,11 @@ requirement_grid_serving_charge:
     den Aktivzustand des Eingriffs.
 
     Aktiviert-Zustand, Start-/Endzeit, aktive Monate sowie der optionale
-    Mindest-Prognosewert werden über
-    RestoreEntity über Neustarts hinweg persistiert (analog zum
-    zeitgesteuerten Laden). Ohne zuvor gespeicherten Zustand gelten die
+    Mindest-Prognosewert werden über Neustarts hinweg persistiert (analog
+    zum zeitgesteuerten Laden) - im versionierten Konfigurations-Store, der
+    vor dem ersten steuernden Refresh geladen wird, mit dem
+    RestoreEntity-Zustand nur noch als einmaligem Migrationspfad (siehe
+    REQ-CONTROL-CONFIG-BOOTSTRAP). Ohne zuvor gespeicherten Zustand gelten die
     Defaults DEFAULT_GRID_SERVING_ENABLED (False) sowie
     DEFAULT_GRID_SERVING_START/-END (const.py) - bewusst identisch (Start ==
     Ende), damit das Default-Zeitfenster leer ist und nie mit dem (beliebig
@@ -1537,10 +1544,12 @@ requirement_dynamic_price_charge:
        'Aktueller Strompreis'. Kein eigenes Ziel-SOC - number 'Max. SOC' ist
        die einzige SOC-Einstellung der Integration, siehe
        REQ-TIMED-SOC-CHARGE."
-    - "Alle Stellgrößen werden per RestoreEntity über Neustarts hinweg
-       persistiert; ohne gespeicherten Zustand gelten die Defaults aus
-       const.py - für die Strategie DEFAULT_PRICE_STRATEGY (kein
-       Options-Flow-Fallback mehr, siehe oben)."
+    - "Alle Stellgrößen werden über Neustarts hinweg persistiert - im
+       versionierten Konfigurations-Store, der vor dem ersten steuernden
+       Refresh geladen wird (REQ-CONTROL-CONFIG-BOOTSTRAP); RestoreEntity
+       ist nur noch der einmalige Migrationspfad. Ohne beides gelten die
+       Defaults aus const.py - für die Strategie DEFAULT_PRICE_STRATEGY
+       (kein Options-Flow-Fallback mehr, siehe oben)."
     - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
        Preisdaten, Warten auf Preisabfall, Lade aus Netz, PV-Prognose deckt
        Bedarf, Pausiert (PV-Überschuss), Pausiert (Max. SOC), Pausiert
@@ -2301,3 +2310,158 @@ requirement_periodic_full_calibration:
     - "Tests der Sensor-, Binary-Sensor- und Diagnoseplattform decken beide
        Status-Entities, diagnostic-Kategorisierung, Übersetzungen und die
        exportierten Zustandswerte ab."
+
+# ==============================================================================
+# ANFORDERUNG: PERSISTENZ UND STARTREIHENFOLGE DER LADEEINSTELLUNGEN
+# ==============================================================================
+requirement_control_config_bootstrap:
+  id: REQ-CONTROL-CONFIG-BOOTSTRAP
+  title: "Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen"
+  status: done
+  description: >
+    Sämtliche softwareseitigen Steuerwerte - Max. SOC, Netzladung
+    (aktiv/Zeitfenster/Monate/Min. SOC), netzdienliches Laden
+    (aktiv/Zeitfenster/Monate/PV-Prognose-Mindestwert) und preisoptimiertes
+    Laden (aktiv/Strategie/Preisgrenze/Neutralpreis/Anzahl Stunden) - liegen
+    in einem versionierten Home-Assistant-Store, dessen Schlüssel die
+    Config-Entry-ID enthält (infrastructure/control_store.py,
+    ControlConfig/ControlConfigStore). Mehrere Config Entries besitzen damit
+    getrennte Stores; die Store-I/O läuft vollständig asynchron.
+
+    Die Startreihenfolge in __init__.async_setup_entry ist verbindlich:
+    Kalibrierungs-, Energie- und Ladekonfigurations-Store werden geladen,
+    danach läuft der erste Refresh, danach das Plattform-Setup, danach genau
+    eine Ladeentscheidung. SaxPowerCoordinator.async_load_control_state
+    öffnet dabei ein Bootstrap-Fenster, in dem Register-Reads weiterhin
+    erlaubt sind, jede steuernde Entscheidung dagegen gesperrt ist - sowohl
+    die aus _async_update_data als auch die setterseitigen
+    Einzelentscheidungen aus _async_apply_grid_charge_change.
+    SaxPowerCoordinator.async_finish_bootstrap schließt das Fenster nach dem
+    Plattform-Setup, schreibt den vollständigen Snapshot fest und wendet
+    unter dem vorhandenen Control-Lock (_async_enforce_grid_charge) genau
+    eine Auswertung an. Ein Neustart innerhalb eines aktiven Ladefensters
+    erzeugt dadurch keinen vorübergehenden Write von Register 40051 auf
+    Modus 0.
+
+    Ein Ladeversuch endet in genau einem von drei Zuständen
+    (ControlConfigLoadStatus): LOADED (lesbarer Store, alleinige Quelle),
+    MISSING (noch kein Store - nur dann darf migriert werden) oder FAILED
+    (vorhandener, aber nicht verwertbarer Store: I/O-Fehler, kein Objekt,
+    oder eine unbekannte künftige Storage-Hauptversion). Bei FAILED gelten
+    die sicheren Vorgabewerte, es wird NICHT migriert, und der vorhandene
+    Store wird für die gesamte Lebensdauer dieser Coordinator-Instanz nicht
+    mehr automatisch überschrieben - auch keine einzelne, danach bewusst
+    geänderte Einstellung löst wieder einen Schreibvorgang aus
+    (_control_store_write_blocked bleibt gesetzt): Diese Instanz kennt den
+    zuvor gespeicherten Gesamtzustand nicht, ein aus lauter Initialwerten
+    bestehender Snapshot würde beim Schreiben sämtliche andere, tatsächlich
+    weiter im Store stehende Einstellungen mit überschreiben, sobald auch
+    nur ein einzelner Wert geändert wird. Änderungen wirken in diesem
+    Zustand ausschließlich im Arbeitsspeicher; erst ein Neuladen des
+    Config Entry (frische Instanz, neuer Ladeversuch) kann die Sperre
+    aufheben. Ein reparierbares, informatives Issue
+    (ISSUE_CONTROL_CONFIG_UNREADABLE) macht diesen Zustand für den Anwender
+    sichtbar.
+
+    Innerhalb eines lesbaren Stores wird jedes Feld einzeln gegen seinen
+    Wertebereich geprüft; ein ungültiger Wert wird mit Warnung verworfen und
+    in ControlConfig.sanitized durch den dokumentierten Hard-Default
+    ersetzt, ohne die übrigen gespeicherten Werte zu verlieren. Ein leeres
+    Monats-Set bleibt dabei leer (gültiger Anwenderzustand, kein fehlender
+    Wert), ebenso ein wegen Überschneidung geleertes Zeitfenster.
+    ControlConfig.sanitized prüft zusätzlich die fachlichen Invarianten der
+    Gesamtkonfiguration, die sonst nur die Setter garantieren - denn ein
+    korrupter oder von Hand bearbeiteter Store kann aus lauter einzeln
+    gültigen Werten bestehen und trotzdem eine Kombination enthalten, die
+    kein Setter je erzeugt hätte: Sind Netzladung und preisoptimiertes Laden
+    gleichzeitig aktiv, bleibt preisoptimiertes Laden aus; überschneiden
+    sich die beiden Zeitfenster in Tageszeit UND aktiven Monaten, wird das
+    Netzladefenster geleert (nur die Netzladung zieht aktiv Strom aus dem
+    Netz).
+
+    Die RestoreEntity-Zustände der Konfigurations-Entities (number.py,
+    switch.py, select.py, time.py) sind nur noch der einmalige
+    Migrationspfad für Config Entries, für die es noch keinen Store gibt
+    (MISSING). Migriert werden dabei ausschließlich fachlich verwertbare
+    Zustände: bei Schaltern nur on/off, bei Zahlen nur endliche Zahlenwerte,
+    bei Zeiten nur parsebare Uhrzeiten, bei der Strategie nur ein bekannter
+    Wert. Ein unknown/unavailable oder sonst unbrauchbarer Altzustand ruft
+    gar keinen Setter auf; die betroffene Einstellung bleibt auf ihrem
+    sicheren Vorgabewert (ControlConfig.sanitized), statt als ausdrückliches
+    "Aus" oder als Vorgabewert übernommen zu werden - das allein würde
+    diesen Zustand aber nicht von einer echten, künftig bestätigten
+    Einstellung unterscheidbar machen. Deshalb merkt sich der Coordinator
+    (mark_control_field_unresolved) zusätzlich JEDES so verworfene Feld
+    namentlich in ControlConfig.unresolved_fields, mitgespeichert im
+    Store: Der Store gilt dadurch nie stillschweigend als vollständig
+    migriert. Diese Markierung übersteht Neustarts unverändert (bei
+    LOADED läuft keine erneute RestoreEntity-Migration mehr - ein
+    zweiter automatischer Versuch könnte einen inzwischen nur zufällig
+    plausibel aussehenden Altzustand fälschlich als "jetzt doch aufgelöst"
+    durchwinken) und wird ausschließlich durch eine spätere, ausdrückliche
+    Änderung der betroffenen Einstellung über ihre Entity/ihren Service
+    gelöscht (clear_control_field_unresolved, in jedem betroffenen
+    async_set_*-Setter verdrahtet). Solange mindestens ein Feld unresolved
+    ist, listet ein reparierbares, informatives Issue
+    (ISSUE_CONTROL_CONFIG_UNRESOLVED) die betroffenen Einstellungen mit
+    ihrem deutschen Anzeigenamen auf; es verschwindet automatisch, sobald
+    keins mehr übrig ist.
+
+    Zusätzlich hängen diese Entities über entity.SaxPowerConfigEntity nicht
+    mehr an coordinator.last_update_success und bleiben bei einem reinen
+    Basic-Mode-Ausfall verfügbar - ihre Werte stammen aus keinem Register.
+
+    Nach abgeschlossenem Bootstrap merkt jede Einstellungsänderung den
+    aktuellen Snapshot über den gemeinsamen Endpunkt
+    _async_apply_grid_charge_change zum gebündelten Schreiben vor; ein
+    unveränderter Snapshot löst keinen Schreibvorgang aus. Beim Entladen des
+    Config Entry wird der neueste Stand zusätzlich best-effort sofort
+    geschrieben.
+  requirements:
+    - "Ein versionierter Store je Config Entry hält alle softwareseitigen
+       Steuerwerte; er wird vor async_config_entry_first_refresh geladen."
+    - "Während des Bootstraps sind Reads erlaubt, steuernde Writes und
+       setterseitige Einzelentscheidungen gesperrt."
+    - "Nach dem Plattform-Setup wird genau eine Ladeentscheidung unter dem
+       Control-Lock angewendet."
+    - "Korrupte oder fehlende Einzelfelder werden fail-safe durch ihren
+       Hard-Default ersetzt, ohne die übrigen gespeicherten Werte zu
+       verwerfen; zusätzlich werden die fachlichen Invarianten der
+       Gesamtkonfiguration erzwungen."
+    - "Ein vorhandener, aber nicht verwertbarer Store erlaubt keine
+       Migration und wird für die Lebensdauer der ladenden
+       Coordinator-Instanz nicht automatisch überschrieben - auch nicht
+       mittelbar durch eine einzelne, danach geänderte Einstellung; ein
+       Issue macht das dem Anwender sichtbar."
+    - "Bestehende RestoreEntity-Zustände werden einmalig migriert, solange
+       kein Store existiert - und auch dann nur, wenn sie fachlich gültig
+       sind. unknown/unavailable ruft keinen Setter auf und gilt nie als
+       ausdrückliches Aus oder als Vorgabewert; nicht migrierbare Felder
+       werden namentlich als unresolved markiert, dauerhaft mitgespeichert
+       und per Issue gemeldet, statt beim nächsten Laden stillschweigend
+       als vollständig migriert zu gelten - erst eine bewusste
+       Einstellungsänderung löst die Markierung wieder."
+    - "Reine Software-Konfigurationsentities bleiben bei einem
+       Basic-Mode-Ausfall verfügbar."
+  acceptance_criteria:
+    - "tests/test_control_persistence.py deckt ab: Store-Round-Trip,
+       korrupter/unvollständiger/alter Store, nicht lesbarer Store und
+       unbekannte künftige Storage-Version (keine Migration, kein
+       automatisches Überschreiben - auch nicht durch eine einzelne
+       nachträgliche Änderung, dafür ein Issue, sowie Persistenz nach einem
+       erfolgreichen Neuladen), überlappende Zeitfenster im Store, leeres
+       Monats-Set, zwei getrennte Config Entries, vollständige Konfiguration
+       vor dem ersten Refresh, keine Writes während des Bootstraps (weder
+       aus dem Refresh noch aus den Settern), Max-SOC-Hold über den
+       Neustart, Migration ohne Store, Basic-Mode-Ausfall,
+       unknown/unavailable in allen vier Plattformen (inkl. persistenter
+       unresolved_fields-Markierung, die einen simulierten Neustart
+       übersteht und nur durch eine ausdrückliche Änderung wieder
+       verschwindet, sowie deren Issue-Lebenszyklus) und Verfügbarkeit der
+       Konfigurations-Entities."
+    - "tests/test_init.py prüft die Startreihenfolge (Kalibrierung, Energie,
+       Ladekonfiguration, Refresh, Plattformen, Bootstrap-Abschluss)."
+    - "tests/test_integration_live.py prüft end-to-end gegen den lokalen
+       Modbus-Simulator, dass ein Neustart in einem gespeicherten aktiven
+       Ladefenster Register 40051 nie auf 0 schreibt und die gespeicherte
+       Konfiguration vollständig sichtbar zurück ist."

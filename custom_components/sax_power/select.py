@@ -21,7 +21,7 @@ from .const import (
     PRICE_STRATEGIES,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerEntity
+from .entity import SaxPowerConfigEntity, log_unmigratable_state
 
 
 async def async_setup_entry(
@@ -37,7 +37,7 @@ async def async_setup_entry(
     )
 
 
-class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
+class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerConfigEntity, SelectEntity):
     """Ladestrategie des preisoptimierten Ladens.
 
     - `off`      - Automatik stillgelegt, ohne die übrigen Einstellungen
@@ -51,8 +51,9 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
                    erwarteten PV-Erzeugung (Options Flow) - lädt also
                    nachts nichts teuer nach, wenn morgen genug Sonne kommt.
 
-    Zustand wird über RestoreEntity über Neustarts hinweg persistiert. Gibt
-    es noch keinen gespeicherten Zustand (allererster Start), gilt
+    Persistiert im Konfigurations-Store (siehe anforderung.yaml,
+    REQ-CONTROL-CONFIG-BOOTSTRAP), RestoreEntity nur noch als einmaliger
+    Migrationspfad. Gibt es beides nicht (allererster Start), gilt
     DEFAULT_PRICE_STRATEGY - bewusst kein eigenes Options-Flow-Feld dafür
     (siehe config_flow.SaxPowerOptionsFlow): Ein dort hinterlegter Wert hätte
     nur bis zum ersten gespeicherten Zustand gewirkt und dem Anwender
@@ -69,10 +70,21 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerEntity, SelectEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if not self.coordinator.control_config_migration_pending:
+            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
+            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
+            # es gelten sichere Defaults. In beiden Fällen darf ein
+            # veralteter Entity-Zustand nicht einspringen; der
+            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
+            # für Einträge ganz ohne Store.
+            return
         if (last_state := await self.async_get_last_state()) is not None:
             if last_state.state in PRICE_STRATEGIES:
                 await self.coordinator.async_set_price_charge_strategy(last_state.state)
-                return
+            else:
+                log_unmigratable_state(self.entity_id, last_state)
+                self.coordinator.mark_control_field_unresolved("price_charge_strategy")
+            return
         await self.coordinator.async_set_price_charge_strategy(DEFAULT_PRICE_STRATEGY)
 
     @property

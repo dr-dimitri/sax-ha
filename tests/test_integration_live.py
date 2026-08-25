@@ -30,6 +30,7 @@ from pymodbus.simulator import DataType, SimData, SimDevice
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
+    ALL_MONTHS,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
     DATA_COORDINATOR,
@@ -37,6 +38,7 @@ from custom_components.sax_power.const import (
     ISSUE_PRICE_CHARGE_CONFLICT,
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_OFF,
+    PRICE_STRATEGY_OFF,
     PRICE_STRATEGY_RELATIVE,
     PRICE_UNIT_AUTO,
     REG_SUN_IC_CONTROL_MODE,
@@ -45,6 +47,12 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SMARTMETER,
 )
 from custom_components.sax_power.coordinator import to_signed16, to_unsigned16
+from custom_components.sax_power.infrastructure.control_store import (
+    STORAGE_KEY_PREFIX as CONTROL_STORAGE_KEY_PREFIX,
+)
+from custom_components.sax_power.infrastructure.control_store import (
+    STORAGE_VERSION as CONTROL_STORAGE_VERSION,
+)
 
 SLAVE_ID_BASIC = 64
 SLAVE_ID_EXTENDED = 100
@@ -974,5 +982,111 @@ async def test_live_price_charge_conflicts_with_timed_charge(
             )
             is not None
         )
+    finally:
+        await server.shutdown()
+
+
+async def test_live_restart_in_active_window_never_falls_back_to_mode_zero(
+    hass, hass_storage, socket_enabled
+) -> None:
+    """End-to-End-Nachweis für REQ-CONTROL-CONFIG-BOOTSTRAP: Ein Neustart
+    mitten in einem gespeicherten, gerade aktiven Ladefenster darf Register
+    40051 zu keinem Zeitpunkt auf 0 (SmartMeter-Nullregelung) setzen.
+
+    Der Speicher steht hier bereits in Sollwertvorgabe, so wie ihn ein
+    laufender Ladevorgang hinterlässt. Ohne den vor dem ersten Refresh
+    geladenen Konfigurations-Store würde die Auswertung aus reinen Defaults
+    (Automatiken aus) heraus zunächst die Nullregelung schreiben und den
+    Ladevorgang erst über die nacheinander restaurierenden Entities wieder
+    aufbauen."""
+    basic_registers = _build_basic_registers()
+    basic_registers[46] = 50  # SOC 50 %, unterhalb des gespeicherten Ziel-SOC
+    extended_registers = _build_extended_registers()
+    # Gerätezustand eines laufenden Ladevorgangs: Sollwertvorgabe aktiv,
+    # Leistungsvorgabe auf -100 %.
+    extended_registers[REG_SUN_IC_POWER_SETPOINT_PCT] = -10000
+    extended_registers[REG_SUN_IC_CONTROL_MODE] = SUN_IC_CONTROL_MODE_SETPOINT
+    server = _modbus_server(TEST_PORT + 7, basic_registers, extended_registers)
+    await server.serve_forever(background=True)
+
+    writes: list[tuple[int | None, int | None]] = []
+    original_write = AsyncModbusTcpClient.write_register
+
+    async def _recording_write(self, *args, **kwargs):
+        writes.append((kwargs.get("address"), kwargs.get("value")))
+        return await original_write(self, *args, **kwargs)
+
+    try:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "host": "127.0.0.1",
+                "port": TEST_PORT + 7,
+                "slave_id_basic": SLAVE_ID_BASIC,
+                "slave_id_extended": SLAVE_ID_EXTENDED,
+                "scan_interval": 3600,
+            },
+        )
+        entry.add_to_hass(hass)
+        storage_key = f"{CONTROL_STORAGE_KEY_PREFIX}.{entry.entry_id}"
+        hass_storage[storage_key] = {
+            "version": CONTROL_STORAGE_VERSION,
+            "minor_version": 1,
+            "key": storage_key,
+            "data": {
+                "max_soc": 90,
+                "timed_charge_enabled": True,
+                "timed_charge_start": "01:00:00",
+                "timed_charge_end": "05:00:00",
+                "timed_charge_months": sorted(ALL_MONTHS),
+                "timed_charge_min_soc": 60,
+                "grid_serving_enabled": False,
+                "grid_serving_start": "12:00:00",
+                "grid_serving_end": "14:00:00",
+                "grid_serving_months": sorted(ALL_MONTHS),
+                "grid_serving_forecast_threshold_kwh": 0.0,
+                "price_charge_enabled": False,
+                "price_charge_strategy": PRICE_STRATEGY_OFF,
+                "price_charge_max_price": 0.2,
+                "price_charge_neutral_price": 0.3,
+                "price_charge_hours": 3,
+            },
+        }
+
+        with (
+            patch.object(AsyncModbusTcpClient, "write_register", _recording_write),
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.now",
+                return_value=datetime(2024, 1, 1, 2, 0),
+            ),
+        ):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        try:
+            registry = er.async_get(hass)
+            enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
+            max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
+            start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
+
+            # Die gespeicherte Konfiguration ist vollständig zurück ...
+            assert hass.states.get(enabled_id).state == "on"
+            assert hass.states.get(max_soc_id).state == "90"
+            assert hass.states.get(start_id).state == "01:00:00"
+            assert coordinator.sun_charge_active is True
+
+            # ... und der Ladevorgang lief ohne Unterbrechung weiter.
+            assert (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER) not in (
+                writes
+            )
+            control_mode_writes = [
+                value for address, value in writes if address == REG_SUN_IC_CONTROL_MODE
+            ]
+            assert control_mode_writes == [SUN_IC_CONTROL_MODE_SETPOINT]
+        finally:
+            await coordinator.async_stop_sun_charge()
+            await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
     finally:
         await server.shutdown()

@@ -109,6 +109,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_load_calibration_state()
     await coordinator.async_load_energy_state()
+    # Muss vor dem ersten Refresh stehen: der Coordinator kennt danach die
+    # vollständige gespeicherte Ladekonfiguration und sperrt bis
+    # async_finish_bootstrap() unten jede steuernde Entscheidung. Sonst
+    # würde der erste Refresh aus reinen Defaults heraus auswerten und z. B.
+    # Register 40051 auf Modus 0 setzen, obwohl ein gespeichertes
+    # Ladefenster gerade aktiv ist (anforderung.yaml,
+    # REQ-CONTROL-CONFIG-BOOTSTRAP).
+    await coordinator.async_load_control_state()
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})
@@ -130,9 +138,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
-    # sofort einmal aus und braucht dafür die von den Entities (select.py/
-    # number.py, RestoreEntity) wiederhergestellten Einstellungen.
+    # sofort einmal aus und braucht dafür die vollständige Konfiguration -
+    # entweder aus dem Store (Regelfall) oder aus dem einmaligen
+    # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
     coordinator.price_planner.async_setup()
+    # Schließt das Bootstrap-Fenster: ab hier ist die Konfiguration
+    # vollständig, und genau eine Ladeentscheidung wird angewendet - statt
+    # während des Entity-Setups eine Kette von Teilkonfigurationen
+    # (REQ-CONTROL-CONFIG-BOOTSTRAP).
+    await coordinator.async_finish_bootstrap()
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     _async_register_services(hass)

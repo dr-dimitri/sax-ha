@@ -10,6 +10,7 @@ Ist-Zustand-Anforderungen je REQ-ID).
 
 - [Aufbau](#aufbau)
 - [Datenfluss](#datenfluss)
+- [Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen)
 - [Register-Mapping](#register-mapping)
 - [SunSpec-Skalierung](#sunspec-skalierung)
 - [Refresh-Verhalten](#refresh-verhalten)
@@ -31,7 +32,8 @@ custom_components/sax_power/
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung sowie der injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
-│                          Repair-Issues und den Kalibrierungs-State-Store
+│                          Repair-Issues sowie die drei versionierten Stores
+│                          (Kalibrierung, Energiezähler, Ladeeinstellungen)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
@@ -258,22 +260,174 @@ grenzwert) nicht mehr - eine frühere Software-Einstellung "Max.
 Netzladeleistung" (`SaxPowerChargeLimitNumber`), die Register 44 einmalig
 als Vorgabewert gelesen hat, wurde entfernt (siehe unten).
 
-**"Max. SOC"** (`SaxPowerMaxSocNumber`, `RestoreEntity`) setzt sich bei
-fehlendem Vorzustand (z. B. direkt nach der Ersteinrichtung) explizit auf
-`MAX_SOC` (100) statt "unbekannt"/0 zu bleiben.
+**"Max. SOC"** (`SaxPowerMaxSocNumber`) kommt beim Start aus dem
+Konfigurations-Store (siehe
+[Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen))
+und setzt sich nur bei fehlendem Store UND fehlendem Vorzustand (z. B.
+direkt nach der Ersteinrichtung) explizit auf `MAX_SOC` (100) statt
+"unbekannt"/0 zu bleiben.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils
-`RestoreEntity`) fragen beim Start in dieser Reihenfolge: (1) hat der
-Coordinator bereits einen Wert (z. B. durch eine andere Entity in dieser
-Session)? (2) gibt es einen über RestoreEntity gespeicherten Vorzustand aus
-einem früheren Lauf? (3) steht ein Wert aus dem zweiten
+`RestoreEntity`) fragen beim Start in dieser Reihenfolge: (0) stammt der
+Wert bereits aus dem Konfigurations-Store? Dann ist er maßgeblich und die
+folgenden Stufen entfallen (siehe
+[Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen)).
+(1) hat der Coordinator bereits einen Wert (z. B. durch eine andere Entity
+in dieser Session)? (2) gibt es einen über RestoreEntity gespeicherten
+Vorzustand aus einem früheren Lauf? (3) steht ein Wert aus dem zweiten
 Ersteinrichtungs-Schritt im Config Entry (`entity.initial_config_value`)? (4)
 sonst der Hard-Default aus `const.py`. Stufe 3 kommt dadurch effektiv nur
 beim allerersten Start eines neuen Eintrags zum Tragen - sobald einmal ein
 echter Zustand über RestoreEntity gespeichert wurde, hat der stets Vorrang,
 auch nach einem späteren `Reconfigure` (der die Netzladung-Schlüssel nicht
 im Config Entry aktualisiert).
+
+## Startreihenfolge und Persistenz der Ladeeinstellungen
+
+Siehe `anforderung.yaml`, REQ-CONTROL-CONFIG-BOOTSTRAP.
+
+Alle softwareseitigen Steuerwerte (Max. SOC, beide Zeitfenster mit ihren
+Monats-Sets, Min. SOC, PV-Prognose-Mindestwert, die drei Automatik-Schalter,
+Ladestrategie und Preisparameter) liegen als ein Snapshot in einem
+versionierten Store: `infrastructure/control_store.py`
+(`ControlConfig`/`ControlConfigStore`, Schlüssel
+`sax_power.control.<entry_id>`). Mehrere Config Entries haben dadurch
+getrennte Stores.
+
+`__init__.async_setup_entry` hält eine verbindliche Reihenfolge ein:
+
+1. `async_load_calibration_state()` / `async_load_energy_state()` /
+   `async_load_control_state()` - alle drei Stores werden geladen, bevor
+   irgendetwas das Gerät steuert. `async_load_control_state()` öffnet
+   zusätzlich das **Bootstrap-Fenster**.
+2. `async_config_entry_first_refresh()` - liest die Register ganz normal,
+   überspringt aber `_async_enforce_grid_charge`. Reads sind im
+   Bootstrap-Fenster erlaubt, steuernde Writes nicht.
+3. `async_forward_entry_setups(...)` - die Plattformen legen ihre Entities
+   an. Deren Setter laufen ebenfalls ins gesperrte
+   `_async_apply_grid_charge_change` und wenden daher keine
+   Teilkonfiguration an.
+4. `price_planner.async_setup()`, danach `async_finish_bootstrap()` -
+   schließt das Fenster, schreibt den vollständigen Snapshot fest und wendet
+   unter dem vorhandenen Control-Lock **genau eine** Ladeentscheidung an.
+
+Ohne diese Reihenfolge wertete der erste Refresh reine Defaults aus
+(Automatiken aus, Max-SOC 100 %) und konnte Register 40051 auf Modus 0
+setzen, obwohl ein gespeichertes Ladefenster gerade aktiv war - der
+Ladevorgang wurde also beim Neustart kurz freigegeben und anschließend aus
+Zwischenzuständen der nacheinander restaurierenden Entities wieder
+aufgebaut.
+
+**Drei Ladeergebnisse:** `ControlConfigStore.async_load()` liefert einen
+`ControlConfigLoadStatus`, weil sich nur einer der drei Fälle migrieren
+lässt:
+
+| Status | Bedeutung | Migration erlaubt? | Automatischer Store-Write? |
+| --- | --- | --- | --- |
+| `LOADED` | lesbarer Store | nein | nur wenn `sanitized()` korrigiert hat |
+| `MISSING` | noch kein Store | **ja** | ja, sofort nach der Migration |
+| `FAILED` | Store da, aber unbrauchbar | nein | **nein, dauerhaft** |
+
+`FAILED` entsteht bei einem I/O-Fehler, einem Payload, der kein Objekt ist,
+oder einer Storage-Hauptversion, die diese Version nicht kennt (Home
+Assistant meldet das per `NotImplementedError`). Dann gelten sichere
+Defaults, es wird nicht migriert, und der vorhandene Store bleibt
+unangetastet - er kann die einzige Kopie einer korrekten Konfiguration sein
+oder von einer neueren Version stammen.
+
+`_control_store_write_blocked` bleibt dabei für die **gesamte
+Lebensdauer dieser Coordinator-Instanz** gesetzt - auch eine danach bewusst
+geänderte Einstellung hebt sie nicht mehr auf
+(`_async_schedule_control_save` bricht früh ab, statt wie in einer früheren
+Fassung dieses Fixes den kompletten aktuellen Snapshot zu schreiben). Der
+Grund: Diese Instanz kennt den zuvor gespeicherten Gesamtzustand nicht
+(Netzladung, Zeitfenster, Preisparameter, ...) - würde eine einzelne
+Änderung (z. B. nur "Max. SOC" auf 65 %) den vollständigen, aus lauter
+Initialwerten bestehenden Snapshot schreiben, gingen alle anderen,
+tatsächlich noch im Store stehenden Einstellungen verloren. Die Änderung
+wirkt deshalb nur im Arbeitsspeicher; erst ein Neuladen des Config Entry
+(frische Instanz, neuer Ladeversuch über `async_load_control_state`) kann
+wieder lesen und damit die Sperre aufheben. Ein reparierbares Issue
+(`ISSUE_CONTROL_CONFIG_UNREADABLE`,
+`SaxPowerCoordinator._async_sync_unreadable_store_issue`) macht diesen
+Zustand für den Anwender sichtbar, statt es nur zu loggen.
+
+**Migration:** Die `RestoreEntity`-Zustände von `number.py`, `switch.py`,
+`select.py` und `time.py` sind nur noch der einmalige Migrationspfad für
+Einträge ohne Store. Nur solange `coordinator.control_config_migration_pending`
+gilt (also bei `MISSING`), laufen sie überhaupt - und auch dann übernehmen
+sie ausschließlich fachlich verwertbare Zustände: `restorable_bool` (nur
+`on`/`off`), `restorable_number` (nur endliche Zahlen) und
+`restorable_time` (nur parsebare Uhrzeiten) in `entity.py`, bei der
+Strategie nur ein bekannter Wert. Beim allerersten Start eines neuen
+Eintrags (gar kein Vorzustand) greift weiter die bekannte Kaskade
+(Coordinator-Wert, `entity.initial_config_value`, Hard-Default aus
+`const.py`); `async_finish_bootstrap()` schreibt das Ergebnis anschließend
+sofort in den Store.
+
+Ein `unknown`/`unavailable` oder sonst unbrauchbarer Altzustand ruft **gar
+keinen Setter** auf, wird über `log_unmigratable_state` protokolliert, und
+die Einstellung bleibt auf ihrem sicheren Vorgabewert (`sanitized()`) -
+sonst würde etwa ein `unavailable` gewordener Monats-Schalter den Monat aus
+dem Default "alle Monate" entfernen und die Automatik dort dauerhaft
+stilllegen. Ein sicherer Vorgabewert allein wäre von einer echten,
+bestätigten Einstellung aber nicht mehr unterscheidbar - deshalb merkt der
+Coordinator sich das betroffene Feld zusätzlich namentlich
+(`mark_control_field_unresolved`, `ControlConfig.unresolved_fields`,
+mitgespeichert im Store). Diese Markierung:
+
+- **übersteht Neustarts unverändert** - bei `LOADED` läuft für dieses Feld
+  keine erneute RestoreEntity-Migration mehr (ein zweiter automatischer
+  Versuch könnte einen inzwischen nur zufällig plausibel aussehenden
+  Altzustand fälschlich als "jetzt doch aufgelöst" durchwinken, siehe
+  `test_unresolved_fields_survive_a_restart_and_stay_flagged`);
+- wird **ausschließlich durch eine spätere, ausdrückliche Änderung** der
+  betroffenen Einstellung gelöscht (`clear_control_field_unresolved`, in
+  jedem betroffenen `async_set_*`-Setter verdrahtet - bei den beiden
+  Monats-Feldern nur bei einer echten Live-Änderung, `validate=True`, nicht
+  während der eigenen 12-Schalter-Migration);
+- löst, solange mindestens ein Feld betroffen ist, ein reparierbares Issue
+  aus (`ISSUE_CONTROL_CONFIG_UNRESOLVED`, mit den deutschen Anzeigenamen
+  der betroffenen Einstellungen als Platzhalter,
+  `_CONTROL_FIELD_LABELS` in `coordinator.py`), das automatisch
+  verschwindet, sobald keins mehr übrig ist.
+
+**Verfügbarkeit:** Diese Entities erben von `entity.SaxPowerConfigEntity`,
+das `available` fest auf `True` setzt. Ihre Werte stammen aus keinem
+Register, deshalb dürfen sie nicht an `coordinator.last_update_success`
+hängen - ein reiner Basic-Mode-Ausfall macht sie sonst sichtbar
+"nicht verfügbar" und hinterlässt einen Restore-State-Dump in genau diesem
+Zustand.
+
+**Validierung:** Beim Laden wird jedes Feld einzeln gegen seinen
+Wertebereich geprüft. Ein ungültiger Wert wird verworfen und in
+`ControlConfig.sanitized()` durch den Hard-Default ersetzt, ohne die
+übrigen gespeicherten Werte zu verlieren. Ein leeres Monats-Set und ein
+wegen Überschneidung geleertes Zeitfenster sind dagegen gültige
+Anwenderzustände und bleiben leer.
+
+`sanitized()` prüft zusätzlich die **fachlichen Invarianten der
+Gesamtkonfiguration**. Ein korrupter oder von Hand bearbeiteter Store kann
+aus lauter einzeln gültigen Werten bestehen und trotzdem eine Kombination
+enthalten, die kein Setter je erzeugt hätte - man darf hier also gerade
+nicht annehmen, der Store enthalte nur von Settern akzeptierte Zustände:
+
+- Netzladung und preisoptimiertes Laden gleichzeitig aktiv → preisoptimiertes
+  Laden bleibt aus.
+- Die beiden Zeitfenster überschneiden sich in Tageszeit **und** aktiven
+  Monaten → das Netzladefenster wird geleert. Bewusst dieses und nicht das
+  andere: Nur die Netzladung zieht aktiv Strom aus dem Netz, netzdienliches
+  Laden unterbricht lediglich eine PV-Ladung.
+
+Deshalb überspringt `_apply_control_config` die Überlappungsprüfung - sie
+ist an dieser Stelle bereits gelaufen.
+
+**Schreiben:** Nach dem Bootstrap merkt jede Einstellungsänderung über den
+gemeinsamen Endpunkt `_async_apply_grid_charge_change` den aktuellen
+Snapshot zum gebündelten Schreiben vor; ein unveränderter Snapshot löst
+keinen Schreibvorgang aus. `async_shutdown` flusht den neuesten Stand
+zusätzlich best-effort sofort.
 
 ## Register-Mapping
 
@@ -417,6 +571,18 @@ tests/
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)
+├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
+│                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
+│                                  unvollständiger/unlesbarer Store (inkl. dauerhafter
+│                                  Schreibsperre über eine einzelne spätere Änderung hinweg und
+│                                  Reparaturhinweis), unbekannte künftige Storage-Version,
+│                                  überlappende Zeitfenster im Store, getrennte Stores je Config
+│                                  Entry, gesperrte Writes während des Bootstraps, Migration ohne
+│                                  Store, Basic-Mode-Ausfall, unknown/unavailable in allen vier
+│                                  Plattformen inkl. persistenter unresolved_fields-Markierung
+│                                  über einen simulierten Neustart hinweg samt Issue-Lebenszyklus,
+│                                  Max-SOC-Hold über den Neustart und Verfügbarkeit der
+│                                  Konfigurations-Entities
 ├── test_repairs.py                 Fünf Selbstdiagnose-Issues (coordinator.
 │                                  _async_check_self_diagnostics): Auslösen nach Karenzzeit,
 │                                  Idempotenz (kein erneutes Anlegen bei unverändertem
@@ -448,6 +614,10 @@ die Integration real darüber kommunizieren. Geprüft werden u. a.:
   trotzdem erfolgreich, Basic-Mode-Sensoren liefern echte Werte,
   SunSpec-Sensoren zeigen "unbekannt" statt die Integration am Start zu
   hindern
+- Neustart in einem gespeicherten, gerade aktiven Ladefenster: Register
+  40051 wird zu keinem Zeitpunkt auf 0 geschrieben, die gespeicherte
+  Konfiguration ist vollständig sichtbar zurück (siehe
+  [Startreihenfolge und Persistenz der Ladeeinstellungen](#startreihenfolge-und-persistenz-der-ladeeinstellungen))
 
 Alle Tests laufen auch ohne echte Hardware und ohne Internetzugriff (der
 Live-Test bindet nur an `127.0.0.1`) – der Live-Hardware-Test

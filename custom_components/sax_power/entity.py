@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+import math
+from datetime import time as dt_time
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import SaxPowerCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def initial_config_value(hass: HomeAssistant, entry_id: str, key: str) -> Any | None:
@@ -29,6 +36,51 @@ def initial_config_value(hass: HomeAssistant, entry_id: str, key: str) -> Any | 
     if entry is None:
         return None
     return entry.data.get(key)
+
+
+# -- Einmalige Migration alter RestoreEntity-Zustände ------------------------
+# Siehe anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP. Diese drei Parser
+# geben None zurück, sobald ein gespeicherter Zustand fachlich nicht
+# verwertbar ist - insbesondere für "unknown"/"unavailable", die entstehen,
+# wenn Home Assistant beendet wurde, während die Entity keinen Wert hatte.
+# Ein solcher Zustand darf beim Migrieren weder als ausdrückliches "Aus"
+# noch als Vorgabewert gelten: Der Aufrufer ruft dann gar keinen Setter auf
+# und lässt die Einstellung auf ihrem Ausgangswert stehen, statt einen
+# Ratewert zu übernehmen und anschließend dauerhaft zu speichern.
+
+
+def restorable_bool(last_state: State) -> bool | None:
+    """Migrierbarer Schalterzustand, sonst None."""
+    if last_state.state == STATE_ON:
+        return True
+    if last_state.state == STATE_OFF:
+        return False
+    return None
+
+
+def restorable_number(last_state: State) -> float | None:
+    """Migrierbarer Zahlenwert, sonst None."""
+    try:
+        value = float(last_state.state)
+    except TypeError, ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+def restorable_time(last_state: State) -> dt_time | None:
+    """Migrierbare Uhrzeit, sonst None."""
+    return dt_util.parse_time(last_state.state)
+
+
+def log_unmigratable_state(entity_id: str, last_state: State) -> None:
+    """Meldet einen Altzustand, der nicht als Wert übernommen werden darf."""
+    _LOGGER.warning(
+        "Gespeicherter Zustand %r von %s ist nicht migrierbar; die Einstellung "
+        "bleibt auf ihrem Ausgangswert, statt ihn als ausdrücklichen Wert zu "
+        "übernehmen",
+        last_state.state,
+        entity_id,
+    )
 
 
 class SaxPowerEntity(CoordinatorEntity[SaxPowerCoordinator]):
@@ -64,3 +116,22 @@ class SaxPowerEntity(CoordinatorEntity[SaxPowerCoordinator]):
         """
         self._attr_unique_id = f"{self._entry_id}_{suffix}"
         self.entity_id = f"{platform_domain}.sax_power_{suffix}"
+
+
+class SaxPowerConfigEntity(SaxPowerEntity):
+    """Basisklasse für rein softwareseitige Konfigurations-Entities.
+
+    Max-SOC, Zeitfenster, Monate, Automatik-Schalter, Ladestrategie und
+    Preisparameter stammen aus keinem Register - sie werden vom Coordinator
+    gehalten und über infrastructure/control_store.py persistiert (siehe
+    anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP). Deshalb dürfen sie
+    NICHT an CoordinatorEntity.available (= coordinator.last_update_success)
+    hängen: ein reiner Modbus-Ausfall macht die gespeicherten Werte weder
+    unbekannt noch ungültig, würde die Entities aber sichtbar
+    "nicht verfügbar" schalten - und einen Restore-State-Dump in genau
+    diesem Zustand hinterlassen.
+    """
+
+    @property
+    def available(self) -> bool:
+        return True

@@ -158,7 +158,14 @@ Zeitfensterregeln und der Bewertung der nicht-dynamischen Tarife,
 aufgerufen. Ein fehlender oder unbrauchbarer Preis ist immer `None` plus ein
 `QuoteUnavailable`-Grund - nie 0 EUR/kWh, weil ein stiller Nullpreis
 Netzbezug als kostenlos bewerten und jede spätere Rechnung unbemerkt
-verfälschen würde. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
+verfälschen würde. `domain.tariff.validate_tariff()` läuft dafür vor jeder
+Quote-Erzeugung und prüft für **alle** Tarifarten die Einspeisevergütung und
+die tarifeigenen Pflichtpreise gegen ihren Wertebereich; der Options Flow
+allein genügt nicht, weil `entry.options` auch von Hand bearbeitet sein kann.
+Derselbe Wertebereich gilt für den normalisierten Preis des dynamischen
+Tarifs. Eine vorhandene Preisvorschau ist verbindlich
+(`price_optimizer.has_price_forecast()` trennt "keine Vorschau" von "Vorschau
+vorhanden, aber unlesbar") - der Sensorzustand ersetzt sie nie. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
 über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
 Sonderfall.
 

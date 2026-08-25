@@ -14,6 +14,12 @@ from datetime import datetime, timedelta
 from datetime import time as dt_time
 from enum import StrEnum
 
+from ..const import (
+    MAX_ECONOMICS_FEED_IN_PRICE,
+    MAX_ECONOMICS_IMPORT_PRICE,
+    MIN_ECONOMICS_FEED_IN_PRICE,
+    MIN_ECONOMICS_IMPORT_PRICE,
+)
 from .scheduling import is_time_in_window, windows_overlap
 
 _SECONDS_PER_DAY = 24 * 3600
@@ -55,7 +61,9 @@ class QuoteUnavailable(StrEnum):
     PRICE_NOT_NUMERIC = "price_not_numeric"
     PRICE_NOT_FINITE = "price_not_finite"
     PRICE_UNIT_UNSUPPORTED = "price_unit_unsupported"
+    PRICE_FORECAST_UNREADABLE = "price_forecast_unreadable"
     PRICE_FORECAST_OUT_OF_RANGE = "price_forecast_out_of_range"
+    PRICE_OUT_OF_RANGE = "price_out_of_range"
 
 
 class TariffWindowError(StrEnum):
@@ -179,6 +187,59 @@ def find_overlapping_window(
     return None
 
 
+def is_valid_import_price(price: float | None) -> bool:
+    """Ob `price` ein zulässiger Arbeitspreis für Netzbezug ist.
+
+    Der negative Bereich ist bewusst zugelassen (börsengekoppelte Tarife
+    weisen zeitweise negative Arbeitspreise aus); die Obergrenze fängt
+    dagegen falsch skalierte Werte ab - ein als EUR/kWh gelesener
+    ct/kWh-Wert liegt weit außerhalb.
+    """
+    return (
+        price is not None
+        and MIN_ECONOMICS_IMPORT_PRICE <= price <= MAX_ECONOMICS_IMPORT_PRICE
+    )
+
+
+def is_valid_feed_in_price(price: float | None) -> bool:
+    """Ob `price` eine zulässige Einspeisevergütung ist."""
+    return (
+        price is not None
+        and MIN_ECONOMICS_FEED_IN_PRICE <= price <= MAX_ECONOMICS_FEED_IN_PRICE
+    )
+
+
+def validate_tariff(config: TariffConfig) -> QuoteUnavailable | None:
+    """Grund, warum aus `config` überhaupt kein Quote entstehen darf.
+
+    Läuft vor jeder Quote-Erzeugung - auch beim dynamischen Tarif. Der
+    Options Flow lässt eine unvollständige Konfiguration zwar nicht
+    speichern, ein von Hand bearbeiteter oder aus einer früheren Version
+    stammender Options-Eintrag kann aber trotzdem einen fehlenden oder
+    unsinnigen Wert enthalten.
+
+    Die Einspeisevergütung ist dabei genauso Pflicht wie der Arbeitspreis:
+    ohne sie wäre die PV-Kilowattstunde im Speicher unbewertet, und
+    PV-Energie darf niemals als kostenlos gelten.
+    """
+    if not config.enabled:
+        return QuoteUnavailable.TARIFF_DISABLED
+    if not is_valid_feed_in_price(config.feed_in_price_eur_kwh):
+        return QuoteUnavailable.TARIFF_INCOMPLETE
+    if config.tariff_type is TariffType.FIXED and not is_valid_import_price(
+        config.fixed_import_price_eur_kwh
+    ):
+        return QuoteUnavailable.TARIFF_INCOMPLETE
+    if config.tariff_type is TariffType.TIME_OF_USE and not (
+        is_valid_import_price(config.tou_base_price_eur_kwh)
+        and all(
+            is_valid_import_price(window.price_eur_kwh) for window in config.windows
+        )
+    ):
+        return QuoteUnavailable.TARIFF_INCOMPLETE
+    return None
+
+
 def evaluate_static_tariff(config: TariffConfig, moment: datetime) -> QuoteResult:
     """Quote für die nicht-dynamischen Tarifarten.
 
@@ -188,21 +249,22 @@ def evaluate_static_tariff(config: TariffConfig, moment: datetime) -> QuoteResul
     übersprungene Ortszeit tritt nie auf, und beide Vorkommen der im Herbst
     doppelten Stunde treffen dasselbe Fenster.
     """
+    reason = validate_tariff(config)
+    if reason is not None:
+        return QuoteResult(reason=reason)
+
+    # Ab hier hat validate_tariff jeden benötigten Preis als vorhanden und
+    # im zulässigen Bereich bestätigt.
     if config.tariff_type is TariffType.FIXED:
-        if config.fixed_import_price_eur_kwh is None:
-            return QuoteResult(reason=QuoteUnavailable.TARIFF_INCOMPLETE)
         return QuoteResult(
-            PriceQuote(config.fixed_import_price_eur_kwh, QuoteSource.FIXED)
+            PriceQuote(float(config.fixed_import_price_eur_kwh), QuoteSource.FIXED)
         )
 
     if config.tariff_type is not TariffType.TIME_OF_USE:
         return QuoteResult(reason=QuoteUnavailable.TARIFF_DISABLED)
 
-    if config.tou_base_price_eur_kwh is None:
-        return QuoteResult(reason=QuoteUnavailable.TARIFF_INCOMPLETE)
-
     local_time = moment.time()
-    price = config.tou_base_price_eur_kwh
+    price = float(config.tou_base_price_eur_kwh)
     source = QuoteSource.TIME_OF_USE_BASE
     for window in config.windows:
         if window.contains(local_time):

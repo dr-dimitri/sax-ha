@@ -45,6 +45,7 @@ from custom_components.sax_power.domain.tariff import (
     TariffWindowError,
     evaluate_static_tariff,
     find_overlapping_window,
+    validate_tariff,
     validate_window_fields,
 )
 
@@ -61,15 +62,24 @@ def _window(start: str, end: str, price: float) -> DailyPriceWindow:
     )
 
 
+def _config(**overrides) -> TariffConfig:
+    """TariffConfig mit gültiger Einspeisevergütung.
+
+    Sie ist bei jeder aktivierten Tarifart Pflicht (REQ-ECONOMICS-TARIFFS);
+    ohne sie meldet die Auswertung TARIFF_INCOMPLETE, bevor sie überhaupt
+    einen Preis bestimmt. Die Tests hier prüfen die Preisregeln und setzen
+    sie deshalb zentral über diesen Helfer.
+    """
+    return TariffConfig(feed_in_price_eur_kwh=0.0786, **overrides)
+
+
 # --------------------------------------------------------------------------
 # Festpreis
 # --------------------------------------------------------------------------
 def test_fixed_tariff_returns_the_same_quote_at_every_moment() -> None:
     """Ein Festpreis ist ganztägig konstant - der Quote darf sich über die
     Zeit in keinem Feld unterscheiden."""
-    config = TariffConfig(
-        tariff_type=TariffType.FIXED, fixed_import_price_eur_kwh=0.3421
-    )
+    config = _config(tariff_type=TariffType.FIXED, fixed_import_price_eur_kwh=0.3421)
 
     quotes = {
         evaluate_static_tariff(config, _local(2026, 3, day, hour)).quote
@@ -88,7 +98,7 @@ def test_fixed_tariff_without_price_reports_incomplete() -> None:
     """Ohne hinterlegten Arbeitspreis gibt es keinen Preis - und schon gar
     nicht 0 EUR/kWh."""
     result = evaluate_static_tariff(
-        TariffConfig(tariff_type=TariffType.FIXED), _local(2026, 3, 1, 12)
+        _config(tariff_type=TariffType.FIXED), _local(2026, 3, 1, 12)
     )
 
     assert result.quote is None
@@ -100,7 +110,7 @@ def test_fixed_tariff_without_price_reports_incomplete() -> None:
 # Tageszeitabhängig
 # --------------------------------------------------------------------------
 def test_time_of_use_falls_back_to_the_base_price_outside_all_windows() -> None:
-    config = TariffConfig(
+    config = _config(
         tariff_type=TariffType.TIME_OF_USE,
         tou_base_price_eur_kwh=0.30,
         windows=(_window("06:00:00", "09:00:00", 0.40),),
@@ -127,7 +137,7 @@ def test_time_of_use_window_is_half_open(
     hour: int, minute: int, expected: float
 ) -> None:
     """Start inklusive, Ende exklusive - siehe REQ-ECONOMICS-TARIFFS."""
-    config = TariffConfig(
+    config = _config(
         tariff_type=TariffType.TIME_OF_USE,
         tou_base_price_eur_kwh=0.30,
         windows=(_window("06:00:00", "09:00:00", 0.40),),
@@ -143,7 +153,7 @@ def test_time_of_use_window_is_half_open(
     [(21, 0.30), (22, 0.20), (23, 0.20), (0, 0.20), (5, 0.20), (6, 0.30)],
 )
 def test_time_of_use_window_may_cross_midnight(hour: int, expected: float) -> None:
-    config = TariffConfig(
+    config = _config(
         tariff_type=TariffType.TIME_OF_USE,
         tou_base_price_eur_kwh=0.30,
         windows=(_window("22:00:00", "06:00:00", 0.20),),
@@ -160,7 +170,7 @@ def test_time_of_use_supports_eight_windows() -> None:
         _window(f"{index * 2:02d}:00:00", f"{index * 2 + 1:02d}:00:00", 0.1 * index)
         for index in range(1, ECONOMICS_TOU_WINDOW_COUNT + 1)
     )
-    config = TariffConfig(
+    config = _config(
         tariff_type=TariffType.TIME_OF_USE,
         tou_base_price_eur_kwh=0.30,
         windows=windows,
@@ -179,7 +189,7 @@ def test_time_of_use_supports_eight_windows() -> None:
 
 def test_time_of_use_without_base_price_reports_incomplete() -> None:
     result = evaluate_static_tariff(
-        TariffConfig(
+        _config(
             tariff_type=TariffType.TIME_OF_USE,
             windows=(_window("06:00:00", "09:00:00", 0.40),),
         ),
@@ -191,9 +201,7 @@ def test_time_of_use_without_base_price_reports_incomplete() -> None:
 
 
 def test_time_of_use_validity_spans_the_whole_day_without_windows() -> None:
-    config = TariffConfig(
-        tariff_type=TariffType.TIME_OF_USE, tou_base_price_eur_kwh=0.30
-    )
+    config = _config(tariff_type=TariffType.TIME_OF_USE, tou_base_price_eur_kwh=0.30)
 
     result = evaluate_static_tariff(config, _local(2026, 3, 1, 12))
 
@@ -208,7 +216,7 @@ def test_spring_forward_never_produces_the_skipped_local_hour() -> None:
     """Am 29.03.2026 springt Europa/Berlin von 02:00 auf 03:00. Die
     übersprungene Ortszeit existiert nicht und darf deshalb nie den Preis
     des 02:00-Fensters liefern."""
-    config = TariffConfig(
+    config = _config(
         tariff_type=TariffType.TIME_OF_USE,
         tou_base_price_eur_kwh=0.30,
         windows=(_window("02:00:00", "03:00:00", 0.10),),
@@ -227,7 +235,7 @@ def test_spring_forward_never_produces_the_skipped_local_hour() -> None:
 def test_fall_back_prices_both_occurrences_of_the_repeated_hour_alike() -> None:
     """Am 25.10.2026 tritt 02:30 Ortszeit zweimal auf - beide Male gilt
     derselbe lokale Zeitfensterpreis."""
-    config = TariffConfig(
+    config = _config(
         tariff_type=TariffType.TIME_OF_USE,
         tou_base_price_eur_kwh=0.30,
         windows=(_window("02:00:00", "03:00:00", 0.10),),
@@ -302,6 +310,70 @@ def test_overlap_is_detected_across_midnight() -> None:
     ]
 
     assert find_overlapping_window(windows).index == 2
+
+
+# --------------------------------------------------------------------------
+# Pflichtfelder und Wertebereiche
+# --------------------------------------------------------------------------
+def test_disabled_tariff_needs_no_feed_in_price() -> None:
+    assert validate_tariff(TariffConfig()) is QuoteUnavailable.TARIFF_DISABLED
+
+
+@pytest.mark.parametrize("feed_in", [None, -0.01, 2.01, float("nan")])
+def test_enabled_tariff_requires_a_valid_feed_in_price(feed_in) -> None:
+    """PV-Energie darf nie als kostenlos gelten: ohne gültige
+    Einspeisevergütung entsteht auch dann kein Quote, wenn der Arbeitspreis
+    hinterlegt ist. Der Options Flow verhindert das zwar, ein von Hand
+    bearbeiteter Options-Eintrag nicht."""
+    config = TariffConfig(
+        tariff_type=TariffType.FIXED,
+        feed_in_price_eur_kwh=feed_in,
+        fixed_import_price_eur_kwh=0.34,
+    )
+
+    assert validate_tariff(config) is QuoteUnavailable.TARIFF_INCOMPLETE
+
+    result = evaluate_static_tariff(config, _local(2026, 3, 1, 12))
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.TARIFF_INCOMPLETE
+
+
+async def test_dynamic_tariff_also_requires_the_feed_in_price(hass) -> None:
+    """Die Pflicht gilt für jede aktivierte Tarifart, nicht nur die
+    statischen."""
+    await _set_price(hass, "sensor.strompreis", "0.25")
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+        },
+    )
+
+    result = coordinator.tariff_provider.quote()
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.TARIFF_INCOMPLETE
+
+
+@pytest.mark.parametrize("price", [-2.01, 5.01, 999.0])
+def test_out_of_range_stored_prices_make_the_tariff_incomplete(price) -> None:
+    """Ein gespeicherter Arbeitspreis außerhalb von -2 bis 5 EUR/kWh ist
+    kein Arbeitspreis - er darf nicht als gültiger Preis durchgehen."""
+    config = _config(tariff_type=TariffType.FIXED, fixed_import_price_eur_kwh=price)
+
+    assert validate_tariff(config) is QuoteUnavailable.TARIFF_INCOMPLETE
+
+
+def test_out_of_range_window_price_makes_the_tariff_incomplete() -> None:
+    config = _config(
+        tariff_type=TariffType.TIME_OF_USE,
+        tou_base_price_eur_kwh=0.30,
+        windows=(_window("06:00:00", "09:00:00", 999.0),),
+    )
+
+    assert validate_tariff(config) is QuoteUnavailable.TARIFF_INCOMPLETE
 
 
 # --------------------------------------------------------------------------
@@ -571,6 +643,115 @@ async def test_dynamic_tariff_rejects_a_stale_price_forecast(hass) -> None:
 
     assert result.quote is None
     assert result.reason is QuoteUnavailable.PRICE_FORECAST_OUT_OF_RANGE
+
+
+@pytest.mark.parametrize("state", ["999", "-2.5", "24.5"])
+async def test_dynamic_state_outside_the_price_range_is_rejected(hass, state) -> None:
+    """Ein Sensorwert außerhalb von -2 bis 5 EUR/kWh ist kein
+    Arbeitspreis, sondern ein falsch skalierter oder schlicht falscher Wert
+    - typisch ein in EUR/kWh gelesener ct/kWh-Wert."""
+    hass.states.async_set(
+        "sensor.strompreis", state, {"unit_of_measurement": "EUR/kWh"}
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    result = coordinator.tariff_provider.quote()
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.PRICE_OUT_OF_RANGE
+
+
+async def test_dynamic_forecast_outside_the_price_range_is_rejected(hass) -> None:
+    now = dt_util.now()
+    start = now.replace(minute=0, second=0, microsecond=0)
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.25",
+        {
+            "unit_of_measurement": "EUR/kWh",
+            "raw_today": [
+                {
+                    "start": start.isoformat(),
+                    "end": (start + timedelta(hours=1)).isoformat(),
+                    "value": 999,
+                }
+            ],
+        },
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    result = coordinator.tariff_provider.quote(now)
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.PRICE_OUT_OF_RANGE
+
+
+async def test_unreadable_price_forecast_does_not_fall_back_to_the_state(hass) -> None:
+    """Eine vorhandene, aber unlesbare Preisvorschau ist etwas anderes als
+    gar keine Vorschau: Der Sensorzustand darf sie nicht stillschweigend
+    ersetzen, sonst rechnet die Wirtschaftlichkeit mit einem Preis, dessen
+    Gültigkeitszeitraum niemand kennt."""
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.25",
+        {
+            "unit_of_measurement": "EUR/kWh",
+            "raw_today": [
+                {"beginn": "heute frueh", "betrag": "guenstig"},
+                {"beginn": "heute mittag", "betrag": "teuer"},
+            ],
+        },
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    result = coordinator.tariff_provider.quote()
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.PRICE_FORECAST_UNREADABLE
+
+
+async def test_an_empty_forecast_attribute_still_allows_the_state(hass) -> None:
+    """Ein leeres Vorschau-Attribut ist keine vorhandene Vorschau - der
+    Sensorzustand bleibt die gültige Quelle."""
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.25",
+        {"unit_of_measurement": "EUR/kWh", "raw_today": []},
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    quote = coordinator.tariff_provider.quote().quote
+
+    assert quote.price_eur_kwh == pytest.approx(0.25)
+    assert quote.source is QuoteSource.DYNAMIC_STATE
 
 
 async def test_dynamic_tariff_without_a_sensor_reports_a_reason(hass) -> None:

@@ -2665,13 +2665,24 @@ requirement_economics_tariffs:
     (CONF_ECONOMICS_FEED_IN_PRICE, 0 bis 2 EUR/kWh) Pflichtfeld. Sie ist der
     entgangene Erlös und damit der Beschaffungspreis von PV-Energie, die in
     den Speicher statt ins Netz fließt; PV-Energie wird nie als kostenlos
-    bewertet. Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh mit
+    bewertet. Geprüft wird das nicht nur im Options Flow, sondern vor jeder
+    Quote-Erzeugung erneut (domain.tariff.validate_tariff) - für alle
+    Tarifarten einschließlich der dynamischen: Ein von Hand bearbeiteter
+    oder aus einer früheren Version stammender Options-Eintrag darf keinen
+    Quote ohne bewertete PV-Energie erzeugen. Dieselbe Prüfung verlangt die
+    tarifeigenen Pflichtpreise (Festpreis-Arbeitspreis bzw. Grundpreis und
+    alle Fensterpreise) innerhalb ihres Wertebereichs; andernfalls lautet
+    der Grund TARIFF_INCOMPLETE. Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh mit
     einer Schrittweite von 0,0001 - monatlicher Grundpreis, Boni, außerhalb
     des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten sind
     ausdrücklich nicht Bestandteil der Rechnung. Arbeitspreise für den
     Netzbezug liegen zwischen -2 und 5 EUR/kWh; der negative Bereich ist
     bewusst zugelassen, weil börsengekoppelte Tarife zeitweise negative
-    Arbeitspreise ausweisen.
+    Arbeitspreise ausweisen. Der Wertebereich gilt auch für den fertig auf
+    EUR/kWh normalisierten Preis des dynamischen Tarifs: Ein Wert außerhalb
+    davon ist kein Arbeitspreis, sondern ein falsch skalierter oder schlicht
+    falscher Sensorwert (typisch ein als EUR/kWh gelesener ct/kWh-Wert) und
+    wird mit PRICE_OUT_OF_RANGE abgelehnt statt akzeptiert.
 
     Die Konfiguration liegt vollständig im Options Flow
     (config_flow.SaxPowerOptionsFlow). Die Tarifart wird auf der ersten
@@ -2694,7 +2705,13 @@ requirement_economics_tariffs:
     Einheitenumrechnung liegt gemeinsam mit der Ladeplanung in
     domain/price_units.unit_factor; die Preisvorschau wird mit derselben
     Funktion price_optimizer.parse_price_slots gelesen wie für den
-    Ladeplan.
+    Ladeplan. Sobald der Sensor überhaupt eine Preisvorschau mitbringt
+    (price_optimizer.has_price_forecast), ist sie verbindlich: Weder eine
+    Vorschau, die den Auswertungszeitpunkt nicht abdeckt, noch eine
+    vorhandene, aber unlesbare Vorschau darf durch den Sensorzustand ersetzt
+    werden - sonst entstünde ein Preis, dessen Gültigkeitszeitraum niemand
+    kennt. Der Sensorzustand ist nur dann die Quelle, wenn gar keine
+    Vorschau vorliegt.
 
     Zeitfensterregeln für "time_of_use": Intervalle sind halboffen (Start
     inklusive, Ende exklusive); start == end ist ungültig und bedeutet
@@ -2732,10 +2749,12 @@ requirement_economics_tariffs:
     price_sensor_not_configured, price_sensor_missing,
     price_sensor_unavailable (unknown/unavailable/leer), price_not_numeric,
     price_not_finite (NaN/Inf), price_unit_unsupported (gesetzte, aber nicht
-    preisartige Einheit) und price_forecast_out_of_range (vorhandene
-    Preisvorschau deckt den Auswertungszeitpunkt nicht ab). Der Tarifzustand
-    samt Grund steht im Diagnose-Download (diagnostics.py, Schlüssel
-    "tariff").
+    preisartige Einheit), price_forecast_unreadable (Preisvorschau
+    vorhanden, aber nicht auswertbar), price_forecast_out_of_range
+    (vorhandene Preisvorschau deckt den Auswertungszeitpunkt nicht ab) und
+    price_out_of_range (normalisierter Preis außerhalb von -2 bis 5
+    EUR/kWh). Der Tarifzustand samt Grund steht im Diagnose-Download
+    (diagnostics.py, Schlüssel "tariff").
 
     Nicht Bestandteil dieser Anforderung: Energieherkunft,
     Kostenakkumulation, ROI-Sensoren und Dashboardkarten. Das Tarifmodell
@@ -2753,8 +2772,13 @@ requirement_economics_tariffs:
        Attribut-Erkennung und dieselbe Einheitenlogik wie die vorhandene
        Preisfunktion; ohne ausgewählten Sensor lehnt der Options Flow das
        Speichern am Sensorfeld ab."
-    - "Fehlende, nicht numerische, nicht endliche, falsch skalierte oder
-       zeitlich unpassende Preiswerte ergeben None samt Grund - nie 0."
+    - "Fehlende, nicht numerische, nicht endliche, außerhalb des
+       Wertebereichs liegende, unlesbare oder zeitlich unpassende Preiswerte
+       ergeben None samt Grund - nie 0."
+    - "Jede aktivierte Tarifart wird vor der Quote-Erzeugung auf eine
+       gültige Einspeisevergütung (0 bis 2 EUR/kWh) und ihre eigenen
+       Pflichtpreise geprüft, auch wenn die Options von Hand bearbeitet
+       wurden."
     - "Eine Optionsänderung und ein Sensor-State-Change wirken ohne Reload;
        Listener werden beim Optionswechsel und beim Entladen entfernt und
        nie doppelt registriert."

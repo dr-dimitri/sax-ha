@@ -43,8 +43,10 @@ from .domain.tariff import (
     TariffConfig,
     TariffType,
     evaluate_static_tariff,
+    is_valid_import_price,
+    validate_tariff,
 )
-from .price_optimizer import parse_price_slots
+from .price_optimizer import has_price_forecast, parse_price_slots
 
 if TYPE_CHECKING:
     from .coordinator import SaxPowerCoordinator
@@ -133,8 +135,12 @@ class SaxTariffProvider:
         einen Ersatzpreis.
         """
         config = self.config
-        if not config.enabled:
-            return DISABLED_RESULT
+        # Gilt für alle Tarifarten, auch die dynamische: ohne gültige
+        # Einspeisevergütung (und ohne die tarifeigenen Pflichtpreise)
+        # entsteht gar kein Quote.
+        reason = validate_tariff(config)
+        if reason is not None:
+            return QuoteResult(reason=reason)
         now = dt_util.as_local(moment) if moment else dt_util.now()
         if config.tariff_type is TariffType.DYNAMIC:
             return self._dynamic_quote(config, now)
@@ -168,25 +174,22 @@ class SaxTariffProvider:
             return QuoteResult(reason=QuoteUnavailable.PRICE_UNIT_UNSUPPORTED)
 
         # Die Preisvorschau ist die genauere Quelle: sie liefert zusätzlich
-        # den Gültigkeitszeitraum des Preises. Existiert sie, ist ein
-        # fehlender Slot für "jetzt" ein echter Fehlerfall (veraltete
-        # Vorschau) und darf nicht durch den Sensorzustand überdeckt werden.
+        # den Gültigkeitszeitraum des Preises. Sobald der Sensor überhaupt
+        # eine mitbringt, ist sie auch verbindlich - weder ein fehlender
+        # Slot für "jetzt" (veraltete Vorschau) noch eine unlesbare Vorschau
+        # darf stillschweigend durch den Sensorzustand ersetzt werden.
+        attribute = self.coordinator.options.get(CONF_PRICE_ATTRIBUTE) or None
         slots = parse_price_slots(
-            state,
-            attribute=self.coordinator.options.get(CONF_PRICE_ATTRIBUTE) or None,
-            unit=configured_unit,
-            now=now,
+            state, attribute=attribute, unit=configured_unit, now=now
         )
         if slots:
             for slot in slots:
                 if slot.overlaps(now):
-                    return QuoteResult(
-                        PriceQuote(
-                            slot.price,
-                            QuoteSource.DYNAMIC_FORECAST,
-                            slot.start,
-                            slot.end,
-                        )
+                    return self._priced(
+                        slot.price,
+                        QuoteSource.DYNAMIC_FORECAST,
+                        slot.start,
+                        slot.end,
                     )
             _LOGGER.debug(
                 "Wirtschaftlichkeit: Preisvorschau von %s deckt %s nicht ab",
@@ -194,6 +197,12 @@ class SaxTariffProvider:
                 now.isoformat(),
             )
             return QuoteResult(reason=QuoteUnavailable.PRICE_FORECAST_OUT_OF_RANGE)
+        if has_price_forecast(state, attribute=attribute):
+            _LOGGER.debug(
+                "Wirtschaftlichkeit: Preisvorschau von %s ist nicht auswertbar",
+                entity_id,
+            )
+            return QuoteResult(reason=QuoteUnavailable.PRICE_FORECAST_UNREADABLE)
 
         try:
             value = float(state.state)
@@ -201,7 +210,25 @@ class SaxTariffProvider:
             return QuoteResult(reason=QuoteUnavailable.PRICE_NOT_NUMERIC)
         if not math.isfinite(value):
             return QuoteResult(reason=QuoteUnavailable.PRICE_NOT_FINITE)
-        return QuoteResult(PriceQuote(value * factor, QuoteSource.DYNAMIC_STATE))
+        return self._priced(value * factor, QuoteSource.DYNAMIC_STATE)
+
+    def _priced(
+        self,
+        price_eur_kwh: float,
+        source: QuoteSource,
+        valid_from: datetime | None = None,
+        valid_until: datetime | None = None,
+    ) -> QuoteResult:
+        """Quote aus einem bereits auf EUR/kWh normalisierten Preis.
+
+        Der Wertebereich gilt auch für den dynamischen Tarif: ein Sensor,
+        der 999 meldet, liefert keinen Arbeitspreis, sondern einen falsch
+        skalierten oder schlicht falschen Wert - der darf nicht als gültiger
+        Netzbezugspreis in die Wirtschaftlichkeit eingehen.
+        """
+        if not is_valid_import_price(price_eur_kwh):
+            return QuoteResult(reason=QuoteUnavailable.PRICE_OUT_OF_RANGE)
+        return QuoteResult(PriceQuote(price_eur_kwh, source, valid_from, valid_until))
 
     # -- Diagnose -----------------------------------------------------------
     @property

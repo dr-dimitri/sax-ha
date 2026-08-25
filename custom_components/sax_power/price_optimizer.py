@@ -346,6 +346,30 @@ def parse_price_slots(
     return []
 
 
+def has_price_forecast(state: Any, *, attribute: str | None = None) -> bool:
+    """Ob der Sensor überhaupt eine Preisvorschau mitbringt.
+
+    Bewusst getrennt von parse_price_slots: eine leere Slot-Liste bedeutet
+    dort sowohl "gar keine Vorschau vorhanden" als auch "Vorschau vorhanden,
+    aber vollständig unlesbar". Für die Ladeplanung ist beides gleich
+    (kein Plan), für die Wirtschaftlichkeit nicht - eine vorhandene, aber
+    unbrauchbare Vorschau darf nicht stillschweigend durch den
+    Sensorzustand ersetzt werden (siehe economics.SaxTariffProvider).
+    """
+    if state is None:
+        return False
+    attributes: Mapping[str, Any] = getattr(state, "attributes", {}) or {}
+    names = (
+        (attribute,)
+        if attribute
+        else tuple(name for group in ATTRIBUTE_GROUPS for name in group)
+    )
+    return any(
+        isinstance(attributes.get(name), (list, tuple)) and attributes.get(name)
+        for name in names
+    )
+
+
 def current_price(slots: Sequence[PriceSlot], moment: datetime) -> float | None:
     for slot in slots:
         if slot.overlaps(moment):

@@ -402,10 +402,14 @@ Der dynamische Tarif nutzt bewusst denselben Strompreis-Sensor samt dessen
 Attribut- und Einheiteneinstellung wie das preisoptimierte Laden – es gibt
 keine zweite Preisquelle. Ohne ausgewählten Sensor lässt sich dieses
 Tarifmodell nicht speichern. Liefert der Sensor keinen brauchbaren Wert
-(unbekannt, nicht verfügbar, keine Zahl, fremde Einheit oder eine
-Preisvorschau, die den aktuellen Zeitpunkt nicht abdeckt), gilt der Preis als
-unbekannt; er wird nie durch 0 EUR/kWh ersetzt. Der Grund steht im
-Diagnose-Download.
+(unbekannt, nicht verfügbar, keine Zahl, fremde Einheit, ein Preis außerhalb
+von -2 bis 5 EUR/kWh oder eine Preisvorschau, die unlesbar ist oder den
+aktuellen Zeitpunkt nicht abdeckt), gilt der Preis als unbekannt; er wird nie
+durch 0 EUR/kWh ersetzt. Der Grund steht im Diagnose-Download.
+
+Bringt der Sensor eine Preisvorschau mit, ist sie verbindlich – der
+Sensorzustand wird nur dann als aktueller Preis verwendet, wenn gar keine
+Vorschau vorliegt.
 
 Änderungen am Tarifmodell wirken sofort und ohne Neustart der Integration –
 allerdings nur für zukünftige Messintervalle. Bereits erfasste Geldbeträge

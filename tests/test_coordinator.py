@@ -3576,10 +3576,12 @@ def test_restore_energy_charged_and_discharged_continue_from_saved_value(
     assert data["energy_discharged"] == 7.0
 
 
-def test_restore_energy_clamps_negative_values(hass) -> None:
-    """Ein (eigentlich nicht erwarteter) negativer restaurierter Zustand
-    wird auf 0 geklemmt statt übernommen zu werden, analog zu _clamp_int an
-    anderen Restore-Stellen."""
+def test_restore_energy_rejects_negative_values(hass, caplog) -> None:
+    """Ein negativer Altzustand bleibt uninitialisiert und wird geloggt.
+
+    Insbesondere darf daraus kein künstlicher Reset auf 0 entstehen
+    (REQ-ENERGY-DASHBOARD, Regression zu Issue #101).
+    """
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.restore_energy_charged(-5.0)
     coordinator.restore_energy_discharged(-3.0)
@@ -3590,5 +3592,6 @@ def test_restore_energy_clamps_negative_values(hass) -> None:
         data = {"storage_power_active": 0}
         coordinator._accumulate_energy(data)
 
-    assert data["energy_charged"] == 0.0
-    assert data["energy_discharged"] == 0.0
+    assert data["energy_charged"] is None
+    assert data["energy_discharged"] is None
+    assert "Ungültigen RestoreEntity-Altzustand" in caplog.text

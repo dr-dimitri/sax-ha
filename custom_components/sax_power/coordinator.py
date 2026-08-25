@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from datetime import time as dt_time
@@ -167,6 +168,7 @@ from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
 from .infrastructure.calibration_store import CalibrationStateStore
+from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
 
@@ -311,6 +313,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cell_calibration_state = CalibrationState()
         self._cell_calibration_active = False
         self._calibration_store = CalibrationStateStore(hass, entry_id)
+        self._energy_store = EnergyStateStore(hass, entry_id)
+        self._energy_store_loaded = False
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
         self._max_soc_grid_import_wait_cycles = 0
@@ -392,13 +396,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._battery_power_sf_raw = 0
         self._battery_soc_sf_raw = 0
         self._battery_cell_voltage_sf_raw = 0
-        # Energy-Dashboard-Kompatibilität (siehe anforderung.yaml,
-        # REQ-ENERGY-DASHBOARD): laufende kWh-Zähler, aus der Momentanleistung
-        # (storage_power_active) per gehaltener Riemann-Summe akkumuliert, da
-        # der Speicher selbst keine Energiezähler-Register besitzt. None =
-        # "noch nicht initialisiert" (wartet auf restore_energy_charged/
-        # restore_energy_discharged über RestoreEntity, siehe sensor.py) -
-        # unterscheidet sich damit bewusst von 0.0, siehe _accumulate_energy.
+        # Energy-Dashboard-Kompatibilität (REQ-ENERGY-DASHBOARD): Der
+        # Coordinator hält die abgeleiteten Zähler unabhängig vom sichtbaren
+        # RestoreEntity-Zustand in einem versionierten Store. None bedeutet
+        # weiterhin "noch nicht initialisiert"; so kann ein nichtnumerischer
+        # Altzustand keinen künstlichen Reset auf 0 auslösen.
         self._energy_charged_kwh: float | None = None
         self._energy_discharged_kwh: float | None = None
         self._energy_last_ts: float | None = None
@@ -470,26 +472,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Energie zu verbuchen.
 
         self._energy_charged_kwh/_energy_discharged_kwh bleiben zusätzlich
-        so lange None (statt bei 0.0 zu starten), bis sensor.
-        SaxPowerEnergySensor.async_added_to_hass einen zuvor gespeicherten
-        Zählerstand per restore_energy_charged/restore_energy_discharged
-        eingespielt hat - sonst würde der allererste Update-Lauf (passiert
-        in __init__.py bereits vor dem Plattform-Setup, also vor jedem
-        RestoreEntity-Restore) einen später restaurierten Zählerstand
-        überschreiben."""
+        so lange None (statt bei 0.0 zu starten), bis der unabhängige Store
+        geladen oder einmalig ein numerischer RestoreEntity-Altzustand
+        migriert wurde."""
         now = monotonic()
         power = data.get("storage_power_active")
         last_ts = self._energy_last_ts
         self._energy_last_ts = now
+        changed = False
 
         if last_ts is not None and power is not None:
             elapsed_hours = (now - last_ts) / 3600
             if self._energy_charged_kwh is not None:
                 charge_w = -power if power < 0 else 0
-                self._energy_charged_kwh += charge_w * elapsed_hours / 1000
+                increment = charge_w * elapsed_hours / 1000
+                self._energy_charged_kwh += increment
+                changed = changed or increment > 0
             if self._energy_discharged_kwh is not None:
                 discharge_w = power if power > 0 else 0
-                self._energy_discharged_kwh += discharge_w * elapsed_hours / 1000
+                increment = discharge_w * elapsed_hours / 1000
+                self._energy_discharged_kwh += increment
+                changed = changed or increment > 0
+
+        if changed:
+            self._async_schedule_energy_save()
 
         data["energy_charged"] = (
             round(self._energy_charged_kwh, 3)
@@ -502,14 +508,87 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else None
         )
 
-    def restore_energy_charged(self, value_kwh: float) -> None:
-        """Initialisiert den Zähler für geladene Energie mit einem zuvor
-        gespeicherten Zustand (siehe sensor.SaxPowerEnergySensor)."""
-        self._energy_charged_kwh = max(0.0, value_kwh)
+    async def async_load_energy_state(self) -> None:
+        """Load the independent counters before the first device refresh."""
+        try:
+            state = await self._energy_store.async_load()
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Energiezählerzustand konnte nicht geladen werden; "
+                "warte auf einen numerischen Altzustand: %s",
+                err,
+            )
+        else:
+            if state is not None:
+                self._energy_charged_kwh = state.charged_kwh
+                self._energy_discharged_kwh = state.discharged_kwh
+        finally:
+            self._energy_store_loaded = True
 
-    def restore_energy_discharged(self, value_kwh: float) -> None:
-        """Analog zu restore_energy_charged für entladene Energie."""
-        self._energy_discharged_kwh = max(0.0, value_kwh)
+    def restore_energy_charged(self, value_kwh: float | None) -> None:
+        """Migrate a numeric legacy RestoreEntity charge counter once."""
+        self._restore_legacy_energy("_energy_charged_kwh", "Laden", value_kwh)
+
+    def restore_energy_discharged(self, value_kwh: float | None) -> None:
+        """Migrate a numeric legacy RestoreEntity discharge counter once."""
+        self._restore_legacy_energy("_energy_discharged_kwh", "Entladen", value_kwh)
+
+    def _restore_legacy_energy(
+        self, attribute: str, label: str, value_kwh: float | None
+    ) -> None:
+        current = getattr(self, attribute)
+        if current is not None:
+            if value_kwh is not None and value_kwh < current:
+                _LOGGER.warning(
+                    "Rückläufigen RestoreEntity-Altzustand für %s verworfen: "
+                    "%r statt mindestens %r",
+                    label,
+                    value_kwh,
+                    current,
+                )
+            return
+        if (
+            value_kwh is None
+            or isinstance(value_kwh, bool)
+            or not math.isfinite(value_kwh)
+            or value_kwh < 0
+        ):
+            if value_kwh is not None:
+                _LOGGER.warning(
+                    "Ungültigen RestoreEntity-Altzustand für %s verworfen: %r",
+                    label,
+                    value_kwh,
+                )
+            return
+        setattr(self, attribute, float(value_kwh))
+        self._async_schedule_energy_save()
+
+    def _energy_state(self) -> EnergyState:
+        return EnergyState(
+            charged_kwh=self._energy_charged_kwh,
+            discharged_kwh=self._energy_discharged_kwh,
+        )
+
+    def _async_schedule_energy_save(self) -> None:
+        state = self._energy_state()
+        if self._energy_store_loaded and state.initialized:
+            self._energy_store.async_delay_save(state)
+
+    async def _async_flush_energy_state(self) -> None:
+        state = self._energy_state()
+        if not self._energy_store_loaded or not state.initialized:
+            return
+        try:
+            await self._energy_store.async_save(state)
+        except (HomeAssistantError, OSError, ValueError) as err:
+            # Der Modbus-/Unload-Pfad muss auch bei lokal defektem Storage
+            # vollständig aufräumen; der Store versucht beim regulären HA-
+            # Stop zusätzlich seinen registrierten Final-Write.
+            _LOGGER.warning(
+                "Energiezählerzustand konnte beim Entladen nicht gespeichert "
+                "werden: %s",
+                err,
+            )
 
     async def _async_read_basic(self) -> dict[str, Any]:
         """Liest den NORMAL-Block (Basic Mode, Slave-ID self.slave_id) nur
@@ -2663,6 +2742,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Aufruf lief der Timer beim Entladen des Config Entry (siehe
         # __init__.async_unload_entry) unbemerkt im Hintergrund weiter.
         await super().async_shutdown()
+        await self._async_flush_energy_state()
         self.price_planner.async_shutdown()
         await self.async_stop_grid_charge()
         await self.async_stop_sun_charge()

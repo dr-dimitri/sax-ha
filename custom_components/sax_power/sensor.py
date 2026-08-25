@@ -8,6 +8,7 @@ von Descriptions), siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -753,13 +754,10 @@ class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
     """Energy-Dashboard-kompatibler kWh-Zähler (geladen/entladen), siehe
     anforderung.yaml REQ-ENERGY-DASHBOARD.
 
-    Anders als SaxPowerSensor oben nicht beschreibungsbasiert: der
-    Zählerstand wird nicht nur gelesen, sondern muss über Neustarts hinweg
-    per RestoreEntity in den Coordinator zurückgespielt werden (dieser
-    akkumuliert selbst, siehe SaxPowerCoordinator._accumulate_energy) -
-    analog zum RestoreEntity-Muster in number.py (z. B.
-    SaxPowerMaxSocNumber.async_added_to_hass -> coordinator.
-    async_set_max_soc(restored_value))."""
+    Der versionierte Config-Entry-Store im Coordinator ist die maßgebliche
+    Persistenz. RestoreEntity wird nur noch zur einmaligen Migration eines
+    numerischen Altzustands verwendet; unknown/unavailable darf den internen
+    Zähler dabei niemals auf 0 zurücksetzen."""
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -773,7 +771,7 @@ class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
         key: str,
         translation_key: str,
         data_key: str,
-        restore_fn: Callable[[float], None],
+        restore_fn: Callable[[float | None], None],
     ) -> None:
         super().__init__(coordinator, entry_id)
         self._attr_translation_key = translation_key
@@ -783,12 +781,16 @@ class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        restored_value = 0.0
-        if (last_state := await self.async_get_last_state()) is not None:
+        last_state = await self.async_get_last_state()
+        restored_value: float | None = 0.0 if last_state is None else None
+        if last_state is not None:
             try:
-                restored_value = float(last_state.state)
+                candidate = float(last_state.state)
             except TypeError, ValueError:
-                restored_value = 0.0
+                pass
+            else:
+                if math.isfinite(candidate) and candidate >= 0:
+                    restored_value = candidate
         self._restore_fn(restored_value)
 
     @property

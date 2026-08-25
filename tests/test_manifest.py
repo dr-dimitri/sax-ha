@@ -51,3 +51,10 @@ def test_hacs_minimum_matches_tested_home_assistant_version() -> None:
     )
 
     assert hacs["homeassistant"] == tested_version
+
+
+def test_lovelace_is_declared_as_optional_after_dependency(
+    manifest: dict[str, object],
+) -> None:
+    """Keep optional dashboard API access valid according to hassfest."""
+    assert manifest["after_dependencies"] == ["lovelace"]

@@ -1,6 +1,7 @@
 {
   "domain": "sax_power",
   "name": "SAX Power Home",
+  "after_dependencies": ["lovelace"],
   "codeowners": ["@dr-dimitri"],
   "config_flow": true,
   "dhcp": [{ "hostname": "sax*" }],

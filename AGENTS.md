@@ -95,15 +95,23 @@ before it's considered done.
   origin main --ff-only`) so the new branch starts from the current state.
 - Always create commits/branches/PRs.
 - After the pull request change to the main branch and delete the local feature Branche
-- Before every commit and pull request, inspect
-  `.github/workflows/release.yaml`. Apply exactly one matching release label
-  (`release:major`, `release:minor`, or `release:patch`) to every pull request;
-  use `release:patch` for documentation-only changes.
-- Set `custom_components/sax_power/manifest.json` in every pull request to the
-  next stable version calculated from the latest stable SemVer tag and that
-  one release label. Run `python scripts/release_metadata.py --labels-json
-  '["release:patch"]'` (adjust the label) before committing; CI rejects a
-  missing/ambiguous label, a mismatching manifest version, or an existing tag.
+- Before every commit and pull request, inspect `.github/workflows/release.yaml`
+  and `.github/workflows/snapshot-release.yaml`. Apply exactly one matching
+  release label (`release:major`, `release:minor`, `release:patch`, or
+  `release:snapshot`) to every pull request; use `release:patch` for
+  documentation-only changes.
+- Stable pull requests set `custom_components/sax_power/manifest.json` to the
+  next stable version calculated from the latest stable SemVer tag. Snapshot
+  pull requests keep the current stable manifest version unchanged. Run
+  `python scripts/release_metadata.py --labels-json '["release:patch"]'`
+  (adjust the label) before committing; CI rejects missing/ambiguous labels,
+  mismatching manifest versions, and existing stable target tags.
+- Use `release:snapshot` for changes that need isolated integration testing.
+  Successful CI publishes the exact tested PR head as an immutable GitHub
+  prerelease. Never merge a PR while it carries `release:snapshot`: first
+  select the stable release label, bump the manifest, and rerun CI. The stable
+  release workflow also suppresses a product release after an accidental
+  snapshot merge.
 - Commit messages: German, imperative/descriptive summary line, focused on
   *why*; 
   when written by an agent (see recent `git log` for examples).

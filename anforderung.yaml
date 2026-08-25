@@ -208,8 +208,8 @@ requirement_sunspec_mode_correction:
     nicht offiziell in modbus.pdf dokumentiert): NEGATIV = Einspeisung ins
     Netz (PV-Überschuss), POSITIV = Netzbezug. Das Rohregister selbst meldet
     das umgekehrte Vorzeichen (positiv bei Einspeisung) -
-    coordinator._parse_extended negiert deshalb apply_typed_sunssf(...) vor
-    der Ablage in data["smartmeter_power"]; der Sensor "Netzleistung"
+    domain.sunspec.decode_high_block negiert deshalb den skalierten Wert
+    (ScaledField.negate) vor der Ablage in data["smartmeter_power"]; der Sensor "Netzleistung"
     (sensor.py) bleibt dabei ein reiner Durchreicher (_direct) und zeigt
     damit direkt den bereits negierten Wert. Alle Vergleiche gegen
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) - PV-Überschuss-Prüfung
@@ -294,9 +294,9 @@ requirement_sunspec_datatypes:
     getrennt decodiert und bei jedem Sentinel None statt eines berechneten
     Werts liefert.
 
-    coordinator._parse_extended und coordinator._parse_low_block wählen für
-    jedes Register signed=True/False anhand des in modbus_llm.yaml
-    dokumentierten Datentyps (Quelle der Wahrheit, siehe
+    Die deklarative Feldtabelle HIGH_BLOCK_FIELDS in domain/sunspec.py und
+    decode_identity dort wählen für jedes Register signed=True/False anhand
+    des in modbus_llm.yaml dokumentierten Datentyps (Quelle der Wahrheit, siehe
     REQ-SUNSPEC-MODE-CORRECTION - Abweichungen davon nur mit
     Vendor-/SunSpec-Beleg). storage_state/storage_event, ic_control_mode,
     battery_event sowie battery_charging_active (jetzt via decode_bool16)
@@ -333,9 +333,11 @@ requirement_sunspec_datatypes:
        Sentinel-Skalierungsfaktor an apply_typed_sunssf -> None (weder 0
        noch Exception), sowie ein Boolean-Sentinel an decode_bool16 -> None
        statt True."
-    - "tests/test_coordinator.py::test_parse_extended_decodes_sunspec_block
+    - "tests/test_sunspec_decoder.py::test_decode_high_block_decodes_all_models
        (normale Vendor-Beispielwerte, positiv und negativ) bleibt
-       unverändert grün."
+       unverändert grün; tests/test_sunspec_mapping.py prüft die
+       Signed/Unsigned-Wahl jedes Feldes zusätzlich parametrisch gegen
+       modbus_llm.yaml."
     - "Ein eigener Testfall belegt, dass ein Sentinel in
        storage_power_active/smartmeter_power weder die Energieakkumulation
        noch eine PV-Überschuss-Hysterese fälschlich bestätigt."
@@ -497,8 +499,8 @@ requirement_timed_soc_charge:
     REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert bedeutet
     Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
     POSITIVER Anzeigewert Netzbezug; der rohe Registerinhalt meldet dagegen
-    das umgekehrte Vorzeichen, weshalb coordinator._parse_extended
-    apply_typed_sunssf(...) beim Einlesen negiert (nicht sensor.py - der Sensor
+    das umgekehrte Vorzeichen, weshalb domain.sunspec.decode_high_block
+    den skalierten Wert beim Einlesen negiert (nicht sensor.py - der Sensor
     bleibt ein reiner Durchreicher, siehe _direct). Ist der Wert (noch)
     nicht verfügbar (z. B. SunSpec-Modus nicht erreichbar), blockiert das
     die Netzladung nicht. Der Schwellwert
@@ -1337,9 +1339,9 @@ requirement_low_interval_registers:
     jedem regulären Poll. Der reguläre (HIGH-)Block
     (READ_BLOCK_EXT_START/READ_BLOCK_EXT_COUNT) schrumpft dadurch von 115
     auf 93 Register. Zwischen den Refreshs werden die zuletzt gelesenen
-    Werte weiterverwendet (self._low_block_data bzw. die
-    self._battery_*_sf_raw-Caches, die _parse_extended für die
-    Battery-Messwerte des HIGH-Blocks verwendet); ein Scheitern des
+    Werte weiterverwendet (self._low_block_data bzw.
+    self._battery_scale_factors, die der Coordinator beim nächsten HIGH-Read
+    an domain.sunspec.decode_high_block übergibt); ein Scheitern des
     LOW-Reads lässt das Update nicht fehlschlagen, analog zu
     REQ-EXTENDED-MODE-RESILIENCE.
   requirements:
@@ -2084,10 +2086,12 @@ requirement_setup_finish_summary:
     zum SunSpec-Modus-Block über READ_BLOCK_EXT_LOW1_START/_COUNT,
     Slave-ID CONF_SLAVE_ID_EXTENDED):
       - "firmware": aus sun_version_master/sun_version_gateway
-        zusammengesetzt ("Master V<x> / Gateway V<y>"), analog zu
-        coordinator._parse_low_block.
-      - "serial_number": aus sun_serial_number (Hi-/Lo-Word kombiniert wie
-        in coordinator._parse_low_block).
+        zusammengesetzt ("Master V<x> / Gateway V<y>"). Der Config Flow
+        verwendet dafür denselben Decoder wie der Coordinator
+        (domain.sunspec.decode_identity), statt die Geräteidentität ein
+        zweites Mal zu implementieren.
+      - "serial_number": aus sun_serial_number (Hi-/Lo-Word kombiniert in
+        domain.sunspec.decode_identity).
       - "sunspec_status": "Erreichbar"/"Nicht erreichbar".
       - "entity_count": Summe der von den sechs Plattformen (sensor,
         binary_sensor, number, select, switch, time; siehe

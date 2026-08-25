@@ -221,6 +221,44 @@ async def test_finish_step_shows_summary_placeholders(hass) -> None:
         assert placeholders["entity_count"] == str(_expected_entity_count())
 
 
+async def test_finish_step_handles_identity_sentinels(hass) -> None:
+    """REQ-SUNSPEC-DATATYPES: meldet das Gerät für Firmware-/Seriennummern-
+    register den "not implemented"-Sentinel 0xFFFF, zeigt die Abschlussseite
+    "unbekannt" statt "V65535" oder "VNone". Der Config Flow nutzt dafür
+    denselben Decoder wie der Coordinator (domain.sunspec.decode_identity)."""
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+    read_result = MagicMock()
+    read_result.isError.return_value = False
+    registers = [50] * 115
+    registers[REG_SUN_VERSION_MASTER] = 0xFFFF
+    registers[REG_SUN_VERSION_GATEWAY] = 0xFFFF
+    registers[REG_SUN_SERIAL_HI] = 0xFFFF
+    registers[REG_SUN_SERIAL_LO] = 12345
+    read_result.registers = registers
+    client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.close = MagicMock()
+
+    with patch(
+        "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+        return_value=client,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
+        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
+
+        placeholders = result4["description_placeholders"]
+        assert placeholders["sunspec_status"] == "Erreichbar"
+        assert placeholders["firmware"] == "Master unbekannt / Gateway unbekannt"
+        assert placeholders["serial_number"] == "unbekannt"
+
+
 async def test_finish_step_marks_sunspec_unavailable(hass) -> None:
     """Ist der SunSpec-Modus-Block beim Abschluss-Read nicht erreichbar (z. B.
     weil das Gerät die Slave-ID 100 ablehnt), zeigt die Abschlussseite

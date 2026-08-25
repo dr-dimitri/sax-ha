@@ -30,25 +30,30 @@ from custom_components.sax_power.const import (
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
     REG_SOC,
+    REG_SUN_BATTERY_SOC,
+    REG_SUN_BATTERY_SOC_SF,
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
+    REG_SUN_IC_POWER_SETPOINT_SF,
+    REG_SUN_VERSION_MASTER,
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
-    UNKNOWN_LABEL,
 )
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
     _clamp_int,
     _grid_serving_pause_status,
+    to_signed16,
+    to_unsigned16,
+    windows_overlap,
+)
+from custom_components.sax_power.domain.registers import (
     apply_typed_sunssf,
     decode_bool16,
     decode_int16,
     decode_uint16,
-    to_signed16,
-    to_unsigned16,
-    windows_overlap,
 )
 
 
@@ -698,200 +703,97 @@ async def test_low_block_failure_does_not_fail_update(hass) -> None:
     assert "sun_manufacturer" not in data
 
 
-def test_parse_low_block_decodes_identity_and_caches_battery_sf(hass) -> None:
-    """Parst den LOW-Intervall-Block (SunSpec Common Model + Inverter-
-    Modellkopf, Battery-Skalierungsfaktoren) - siehe anforderung.yaml,
-    REQ-LOW-INTERVAL-REGISTERS. Die Battery-Skalierungsfaktoren werden dabei
-    zusätzlich als self._battery_*_sf_raw zwischengespeichert, da
-    _parse_extended sie nicht mehr selbst aus dem HIGH-Block liest."""
-    coordinator = _make_coordinator(hass, _make_client())
-
-    low1 = {
-        0: 21365,  # SunS (Hi)
-        1: 28243,  # SunS (Lo)
-        4: 21313,  # Hersteller "SA"
-        5: 22608,  # "XP"
-        6: 20311,  # "OW"
-        7: 17746,  # "ER" -> "SAXPOWER"
-        8: 18511,  # Gerätemodell "HO"
-        9: 19781,  # "ME"
-        10: to_unsigned16(0),  # kein "PL"-Suffix -> "SAX Power Home"
-        11: 23,  # Version Master
-        12: 56,  # Version Gateway
-        13: 15448,  # Seriennummer Hi
-        14: 97,  # Seriennummer Lo
-        15: 103,  # Inverter Model-ID
-        16: 32,  # Inverter Länge
-    }
-    low2 = {
-        110: to_unsigned16(-1),  # Scalefaktor Kapazität
-        111: 0,  # Scalefaktor Lade/Entladeleistung
-        112: 0,  # Scalefaktor SoC
-        113: 0,  # Reserve
-        114: 0,  # Scalefaktor Zellspannung
-    }
-
-    data = coordinator._parse_low_block(low1.__getitem__, low2.__getitem__)
-
-    assert data["sun_manufacturer"] == "SAXPOWER"
-    assert data["sun_model"] == "HOME"
-    assert data["sun_version_master"] == 23
-    assert data["sun_version_gateway"] == 56
-    assert data["sun_serial_number"] == (15448 << 16) | 97
-
-    assert coordinator._battery_capacity_sf_raw == to_unsigned16(-1)
-    assert coordinator._battery_power_sf_raw == 0
-    assert coordinator._battery_soc_sf_raw == 0
-    assert coordinator._battery_cell_voltage_sf_raw == 0
-
-
-def test_parse_extended_decodes_sunspec_block(hass) -> None:
-    """Parst den HIGH-Intervall-Teil des SunSpec-Modus-Blocks (Slave-ID 100,
-    siehe modbus.pdf) - 3Ph Inverter (103), Immediate Controls (123), Meter
-    (203) und Battery (802). Siehe anforderung.yaml,
-    REQ-SUNSPEC-MODE-CORRECTION sowie REQ-LOW-INTERVAL-REGISTERS (Common
-    Model + Battery-Skalierungsfaktoren werden separat getestet, siehe
-    test_parse_low_block_decodes_identity_and_caches_battery_sf)."""
+async def test_extended_read_passes_block_slices_to_the_decoders(hass) -> None:
+    """Wire-/Adapter-Nachweis: der Coordinator reicht genau die drei
+    gelesenen Registerausschnitte an domain.sunspec weiter - LOW1 ab
+    READ_BLOCK_EXT_LOW1_START, LOW2 ab READ_BLOCK_EXT_LOW2_START, HIGH ab
+    READ_BLOCK_EXT_START. Die Feldzuordnung selbst prüft
+    tests/test_sunspec_decoder.py."""
     client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    basic_registers[REG_SOC - READ_BLOCK_START] = 55
+
+    def _side_effect(*, address: int, count: int, device_id: int):
+        result = MagicMock()
+        result.isError.return_value = False
+        if device_id != 100:
+            result.registers = basic_registers
+        elif address == READ_BLOCK_EXT_LOW1_START:
+            registers = [0] * count
+            registers[REG_SUN_VERSION_MASTER - READ_BLOCK_EXT_LOW1_START] = 61
+            result.registers = registers
+        elif address == READ_BLOCK_EXT_LOW2_START:
+            registers = [0] * count
+            registers[REG_SUN_BATTERY_SOC_SF - READ_BLOCK_EXT_LOW2_START] = 1
+            result.registers = registers
+        else:
+            registers = [0] * count
+            registers[REG_SUN_BATTERY_SOC - READ_BLOCK_EXT_START] = 55
+            registers[REG_SUN_IC_POWER_SETPOINT_SF - READ_BLOCK_EXT_START] = (
+                to_unsigned16(-2)
+            )
+            result.registers = registers
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=_side_effect)
     coordinator = _make_coordinator(hass, client)
 
-    # Alle Register im HIGH-Block (Adresse 17-109) auf 0 vorbelegen, damit
-    # fehlende Overrides unten nicht zu KeyError führen, und dann die für
-    # den Test relevanten Werte überschreiben. sf-Register = 0 (Faktor 1),
-    # damit skalierte Werte den Rohwerten entsprechen. Die
-    # Battery-Skalierungsfaktoren kommen inzwischen aus dem LOW-Block
-    # (self._battery_*_sf_raw, hier auf ihrem __init__-Default 0 belassen).
-    raw = dict.fromkeys(range(17, 110), 0)
-    raw.update(
-        {
-            17: 30,  # Speicher Stromsumme
-            18: 5,
-            19: 6,
-            20: 7,
-            25: 230,  # Speicher Spannung A
-            26: 231,
-            27: 229,
-            29: 1500,  # Wirkleistung Speicher Summe -> storage_power_active
-            33: 1600,  # Scheinleistung
-            35: 100,  # Blindleistung
-            37: 95,  # Leistungsfaktor
-            41: 35,  # Maximale Zelltemperatur
-            43: 4,  # Zustand: Ein
-            44: 0,  # Event: Normalbetrieb
-            46: 1,  # Scalefaktor PV-Leistung (PV-Leistung selbst bleibt 0)
-            49: 0,  # Leistungsvorgabe %
-            50: 300,  # Timeout
-            51: 1,  # Steuermodus: Sollwertvorgabe
-            52: to_unsigned16(-2),  # Scalefaktor Leistungsvorgabe
-            53: 4600,  # Referenzwert Maximalleistung
-            56: 20,  # Netz Stromsumme
-            57: 6,
-            58: 7,
-            59: 7,
-            62: 231,  # Netzspannung L1
-            63: 232,
-            64: 233,
-            72: 250,  # Summenwirkleistung Netz -> smartmeter_power
-            73: 100,  # Netzleistung L1
-            74: 80,  # Netzleistung L2
-            75: 70,  # Netzleistung L3
-            97: 7680,  # Kapazität Speichersystem
-            98: 0,  # Verfügbare Ladeleistung
-            99: 4600,  # Verfügbare Entladeleistung
-            100: 100,  # Maximaler SoC
-            101: 0,  # Minimaler SoC
-            102: 55,  # Aktueller SoC
-            103: 45,  # Entladetiefe
-            106: 1,  # Ladestatus Akku: Leistung anliegend
-            108: 0,  # Event: Normalbetrieb
-            109: 3300,  # Durchschnittliche Zellspannung
-        }
-    )
+    data = await coordinator._async_update_data()
 
-    def ext_reg(address: int) -> int:
-        return raw[address]
-
-    data = coordinator._parse_extended(ext_reg)
-
-    assert "sun_manufacturer" not in data  # jetzt Teil des LOW-Blocks
-
-    assert data["storage_current_sum"] == 30
-    assert data["storage_current_a"] == 5
-    assert data["storage_power_active"] == 1500
-    assert data["storage_state_text"] == "Ein"
-    assert data["storage_event_text"] == "Normalbetrieb"
-
-    assert data["ic_control_mode_text"] == "Sollwertvorgabe"
-    assert data["ic_max_power_reference"] == 4600
-
-    assert data["grid_current_sum"] == 20
-    # Vorzeichenkonvention: das Rohregister meldet positiv bei Einspeisung,
-    # data["smartmeter_power"] wird beim Einlesen negiert (Standarddarstellung
-    # negativ = Einspeisung, positiv = Netzbezug) - siehe const.py,
-    # SMARTMETER_PV_SURPLUS_THRESHOLD_WATT. Die drei Phasenwerte teilen sich
-    # denselben Registerblock und damit dasselbe rohe Vorzeichen, werden also
-    # ebenfalls negiert - ihre Summe entspricht weiterhin smartmeter_power.
-    assert data["smartmeter_power"] == -250
-    assert data["grid_power_active_l1"] == -100
-    assert data["grid_power_active_l2"] == -80
-    assert data["grid_power_active_l3"] == -70
-
-    assert data["battery_capacity"] == 7680
-    assert data["battery_soc"] == 55
-    assert data["battery_discharge_power_available"] == 4600
-    assert data["battery_charging_active"] is True
-    assert data["battery_event_text"] == "Normalbetrieb"
-    assert data["battery_cell_voltage_avg"] == 3300
+    assert data["sun_version_master"] == 61
+    # Battery-SF aus LOW2 (10^1) auf den HIGH-Rohwert angewandt.
+    assert data["battery_soc"] == 550
+    assert coordinator._ic_power_setpoint_sf_raw == to_unsigned16(-2)
 
 
-def test_parse_extended_decodes_not_implemented_sentinels(hass) -> None:
-    """REQ-SUNSPEC-DATATYPES: Sentinelwerte ("not implemented", SunSpec
-    Device Information Model Specification V1.1 Abschnitt 6.4) müssen als
-    None ankommen statt als falscher Zahlenwert - weder als Unterlauf über
-    einen Sentinel-Skalierungsfaktor noch als vorzeichenverdrehter uint16-
-    Wert, und ohne dass die Negation von smartmeter_power/grid_power_active_*
-    an einem None crasht."""
+async def test_low_block_failure_keeps_last_successful_scale_factors(hass) -> None:
+    """Scheitert ein späterer LOW-Refresh, müssen die zuletzt erfolgreich
+    gelesenen Battery-Skalierungsfaktoren weiterverwendet werden - sonst
+    würde battery_soc & Co. beim nächsten HIGH-Read stillschweigend um eine
+    Zehnerpotenz danebenliegen (REQ-LOW-INTERVAL-REGISTERS)."""
     client = _make_client()
+    basic_registers = [0] * READ_BLOCK_COUNT
+    low_readable = True
+
+    def _side_effect(*, address: int, count: int, device_id: int):
+        result = MagicMock()
+        if device_id != 100:
+            result.isError.return_value = False
+            result.registers = basic_registers
+        elif address == READ_BLOCK_EXT_START:
+            result.isError.return_value = False
+            registers = [0] * count
+            registers[REG_SUN_BATTERY_SOC - READ_BLOCK_EXT_START] = 55
+            result.registers = registers
+        elif low_readable:
+            result.isError.return_value = False
+            registers = [0] * count
+            if address == READ_BLOCK_EXT_LOW2_START:
+                registers[REG_SUN_BATTERY_SOC_SF - READ_BLOCK_EXT_LOW2_START] = 1
+            result.registers = registers
+        else:
+            result.isError.return_value = True
+            result.registers = []
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=_side_effect)
     coordinator = _make_coordinator(hass, client)
 
-    raw = dict.fromkeys(range(17, 110), 0)
-    raw.update(
-        {
-            17: to_unsigned16(-1),  # uint16-Sentinel 0xFFFF -> None
-            29: 0x8000,  # int16-Sentinel -> storage_power_active None
-            43: 0x8000,  # storage_state (int16) Sentinel -> None/Unbekannt
-            44: to_unsigned16(-1),  # storage_event (uint16) Sentinel -> None
-            51: to_unsigned16(-1),  # ic_control_mode (uint16) Sentinel -> None
-            53: to_unsigned16(-1),  # ic_max_power_reference Sentinel -> None
-            72: 0x8000,  # smartmeter_power-Rohwert Sentinel -> None
-            73: 0x8000,  # grid_power_active_l1-Rohwert Sentinel -> None
-            76: 0,  # meter_power_active_sf regulär, isoliert den Wert-Sentinel
-            81: 0x8000,  # sunssf-Sentinel -> grid_power_apparent_sum None
-            106: to_unsigned16(-1),  # battery_charging_active Sentinel -> None
-            108: to_unsigned16(-1),  # battery_event Sentinel -> None
-        }
-    )
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        first = await coordinator._async_update_data()
+    assert first["battery_soc"] == 550
 
-    def ext_reg(address: int) -> int:
-        return raw[address]
+    low_readable = False
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic",
+        return_value=1000.0 + READ_BLOCK_EXT_LOW_INTERVAL + 1,
+    ):
+        second = await coordinator._async_update_data()
 
-    data = coordinator._parse_extended(ext_reg)
-
-    assert data["storage_current_sum"] is None
-    assert data["storage_power_active"] is None
-    assert data["storage_state"] is None
-    assert data["storage_state_text"] == UNKNOWN_LABEL
-    assert data["storage_event"] is None
-    assert data["storage_event_text"] == UNKNOWN_LABEL
-    assert data["ic_control_mode"] is None
-    assert data["ic_control_mode_text"] == UNKNOWN_LABEL
-    assert data["ic_max_power_reference"] is None
-    assert data["smartmeter_power"] is None
-    assert data["grid_power_active_l1"] is None
-    assert data["grid_power_apparent_sum"] is None
-    assert data["battery_charging_active"] is None
-    assert data["battery_event"] is None
-    assert data["battery_event_text"] == UNKNOWN_LABEL
+    assert second["battery_soc"] == 550
+    assert coordinator._battery_scale_factors.soc == 1
 
 
 # -- Zeitgesteuertes Laden ---------------------------------------------------

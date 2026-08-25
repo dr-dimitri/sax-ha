@@ -43,7 +43,7 @@ from custom_components.sax_power.const import (
     REG_SUN_STORAGE_POWER_ACTIVE,
     REG_SUN_STORAGE_POWER_ACTIVE_SF,
 )
-from custom_components.sax_power.coordinator import apply_sunssf
+from custom_components.sax_power.coordinator import apply_typed_sunssf
 
 REAL_DEVICE_CONFIG_PATH = Path(__file__).parent / "real_device.yaml"
 
@@ -160,14 +160,22 @@ async def test_read_real_sunspec_mode_values(real_client) -> None:
     def ext_reg(address: int) -> int:
         return result.registers[address - READ_BLOCK_EXT_START]
 
-    frequency = apply_sunssf(
-        ext_reg(REG_SUN_STORAGE_FREQUENCY), ext_reg(REG_SUN_STORAGE_FREQUENCY_SF)
+    # frequency: uint16 laut modbus_llm.yaml (REQ-SUNSPEC-DATATYPES).
+    frequency = apply_typed_sunssf(
+        ext_reg(REG_SUN_STORAGE_FREQUENCY),
+        ext_reg(REG_SUN_STORAGE_FREQUENCY_SF),
+        signed=False,
     )
+    assert frequency is not None, "Netzfrequenz meldet den not-implemented-Sentinel"
     assert 40.0 <= frequency <= 65.0, f"Netzfrequenz unplausibel: {frequency} Hz"
 
-    storage_power = apply_sunssf(
+    # storage_power_active: int16 laut modbus_llm.yaml.
+    storage_power = apply_typed_sunssf(
         ext_reg(REG_SUN_STORAGE_POWER_ACTIVE), ext_reg(REG_SUN_STORAGE_POWER_ACTIVE_SF)
     )
+    assert (
+        storage_power is not None
+    ), "Speicherleistung meldet den not-implemented-Sentinel"
     # Grobe Plausibilitätsprüfung: kein Heimspeicher bewegt mehrere hundert
     # Kilowatt. Fängt genau die Art von Regressionsfehler ab (Adressierung/
     # Offset falsch), die diesen Fix ursprünglich nötig gemacht hat.

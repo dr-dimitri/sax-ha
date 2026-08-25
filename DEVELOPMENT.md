@@ -498,16 +498,23 @@ Encoding-Konvention Entladung bedeuten, haben gegen echte Hardware getestet
 aber keine Wirkung gezeigt - siehe Kommentar bei `REG_SETPOINT_POWER`
 (const.py) sowie anforderung.yaml REQ-MANUAL-DISCHARGE.
 
-## SunSpec-Skalierung
+## SunSpec-Skalierung und Datentypen
 
-`coordinator.apply_sunssf(raw_value, raw_scale_factor)` wendet
-`Wert × 10^sunssf` an (beide Rohwerte signed 16-Bit).
-`SaxPowerCoordinator._parse_extended` wertet damit den HIGH-Block aus
-(Inverter/Immediate Controls/Meter/Battery), `_parse_low_block` den LOW1-/
-LOW2-Block (Common Model, Battery-Skalierungsfaktoren) - siehe
-Register-Mapping oben. `_parse_low_block` dekodiert außerdem die als
-ASCII-Zeichenpaare codierten Hersteller-/Modell-Register
-(`coordinator.decode_ascii_registers`).
+`domain/registers.py` stellt reine Decoder je SunSpec-Datentyp bereit -
+`decode_int16`/`decode_uint16` (auch für enum16/bitfield16) erkennen den
+jeweiligen "not implemented"-Sentinel (0x8000 bzw. 0xFFFF, SunSpec Device
+Information Model Specification V1.1, Abschnitt 6.4) und liefern dafür
+`None` statt eines falschen Zahlenwerts, `decode_bool16` ergänzt das für
+0/1-Register. `coordinator.apply_typed_sunssf(raw_value, raw_scale_factor,
+*, signed=True)` decodiert Wert und Skalierungsfaktor getrennt (`signed`
+muss zum in `modbus_llm.yaml` dokumentierten Datentyp des Werteregisters
+passen) und wendet erst danach `Wert × 10^sunssf` an - liefert `float |
+None`. `SaxPowerCoordinator._parse_extended` wertet damit den HIGH-Block
+aus (Inverter/Immediate Controls/Meter/Battery), `_parse_low_block` den
+LOW1-/LOW2-Block (Common Model, Battery-Skalierungsfaktoren) - siehe
+Register-Mapping oben und anforderung.yaml, REQ-SUNSPEC-DATATYPES.
+`_parse_low_block` dekodiert außerdem die als ASCII-Zeichenpaare codierten
+Hersteller-/Modell-Register (`coordinator.decode_ascii_registers`).
 
 ## Refresh-Verhalten
 
@@ -534,7 +541,8 @@ tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
 ├── test_calibration.py           Reine 7-Tage-/Voll-SOC-Policy und versionierte
 │                                  UTC-Persistenz einschließlich ungültiger Daten
-├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, apply_sunssf,
+├── test_coordinator.py           Unit-Tests: signed/unsigned16-Konvertierung, typisierte
+│                                  SunSpec-Decoder + Not-Implemented-Sentinels,
 │                                  Fehlerbehandlung bei Modbus-Schreibfehlern, Parsing des
 │                                  kompletten SunSpec-Modus-Blocks (gemockt), Zeitfenster-Logik +
 │                                  Enforcement für zeitgesteuertes Laden, netzdienliches Laden

@@ -81,16 +81,26 @@ def _battery_problem(coordinator: SaxPowerCoordinator) -> bool | None:
     melden. Vergleicht bewusst die rohen Ereignis-Codes (storage_event/
     battery_event) statt der übersetzten *_text-Werte - robuster gegen
     künftige Label-Änderungen (siehe STORAGE_EVENT_LABELS/BATTERY_EVENT_LABELS
-    in const.py). Beide Codes stammen aus demselben SunSpec-Block und sind
-    deshalb entweder beide oder keiner vorhanden (siehe
-    REQ-EXTENDED-MODE-RESILIENCE)."""
+    in const.py).
+
+    Seit REQ-SUNSPEC-DATATYPES trägt jedes der beiden Register seinen
+    eigenen "not implemented"-Sentinel und kann deshalb UNABHÄNGIG vom
+    jeweils anderen None werden - anders als zuvor angenommen sind sie
+    NICHT mehr zuverlässig beide oder keiner vorhanden. Ein bekannter
+    Fehlercode auf der einen Seite hat deshalb Vorrang vor einem unbekannten
+    Wert auf der anderen: erst danach zählt ein einzelnes None als
+    "Status unbekannt" - sonst würde z. B. storage_event=None neben
+    battery_event=0 fälschlich als "kein Problem" statt als unbekannter
+    Speicherstatus gemeldet."""
     if coordinator.data is None:
         return None
     storage_event = coordinator.data.get("storage_event")
     battery_event = coordinator.data.get("battery_event")
-    if storage_event is None and battery_event is None:
+    if bool(storage_event) or bool(battery_event):
+        return True
+    if storage_event is None or battery_event is None:
         return None
-    return bool(storage_event) or bool(battery_event)
+    return False
 
 
 BINARY_SENSOR_DESCRIPTIONS: tuple[SaxPowerBinarySensorEntityDescription, ...] = (

@@ -154,6 +154,33 @@ async def test_battery_problem_unavailable_without_extended_mode(hass) -> None:
     assert _description("battery_problem").is_on_fn(coordinator) is None
 
 
+async def test_battery_problem_mixed_known_and_unknown_event(hass) -> None:
+    """REQ-SUNSPEC-DATATYPES: storage_event/battery_event können seit der
+    registerweisen Sentinel-Decodierung unabhängig voneinander None sein.
+    Ein bekannter Fehlercode auf der einen Seite muss trotzdem als Problem
+    erkannt werden, auch wenn die andere Seite gerade unbekannt ist - und
+    umgekehrt darf ein unbekannter Wert nicht als "kein Problem" (False)
+    verschwinden, solange kein bekannter Fehlercode vorliegt."""
+    coordinator = _make_coordinator(hass)
+    is_on_fn = _description("battery_problem").is_on_fn
+
+    # Bekannter Fehlercode auf der einen Seite, andere Seite unbekannt ->
+    # trotzdem True, nicht durch das unbekannte Event verdeckt.
+    coordinator.data = {"storage_event": None, "battery_event": 3}
+    assert is_on_fn(coordinator) is True
+
+    coordinator.data = {"storage_event": 8, "battery_event": None}
+    assert is_on_fn(coordinator) is True
+
+    # Eine Seite unbekannt, andere Seite bekannt UND unauffällig (0) ->
+    # Gesamtstatus bleibt unbekannt (None), nicht fälschlich False.
+    coordinator.data = {"storage_event": None, "battery_event": 0}
+    assert is_on_fn(coordinator) is None
+
+    coordinator.data = {"storage_event": 0, "battery_event": None}
+    assert is_on_fn(coordinator) is None
+
+
 async def test_entity_is_on_delegates_to_description(hass) -> None:
     coordinator = _make_coordinator(hass)
     coordinator.data = {"timed_charge_active": True}

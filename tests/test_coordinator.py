@@ -36,12 +36,16 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
+    UNKNOWN_LABEL,
 )
 from custom_components.sax_power.coordinator import (
     SaxPowerCoordinator,
     _clamp_int,
     _grid_serving_pause_status,
-    apply_sunssf,
+    apply_typed_sunssf,
+    decode_bool16,
+    decode_int16,
+    decode_uint16,
     to_signed16,
     to_unsigned16,
     windows_overlap,
@@ -155,16 +159,65 @@ def test_to_unsigned16(value: int, expected: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("raw_value", "raw_sf", "expected"),
+    ("raw", "expected"),
     [
-        (1200, 0, 1200),  # sf=0 -> unverändert
-        (551, to_unsigned16(-1), 55.1),  # sf=-1 -> Kommastelle
-        (5, 2, 500),  # sf=2 -> Zehnerpotenz
-        (to_unsigned16(-300), to_unsigned16(-2), -3.0),  # negativ + negativer sf
+        (0, 0),
+        (100, 100),
+        (32767, 32767),
+        (0x7FFF, 32767),
+        (0xFFFF, -1),  # REQ-SUNSPEC-DATATYPES: signiertes 0xFFFF -> -1
+        (0x8001, -32767),
+        (0x8000, None),  # int16-Sentinel "not implemented"
     ],
 )
-def test_apply_sunssf(raw_value: int, raw_sf: int, expected: float) -> None:
-    assert apply_sunssf(raw_value, raw_sf) == expected
+def test_decode_int16(raw: int, expected: int | None) -> None:
+    assert decode_int16(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (0, 0),
+        (100, 100),
+        (0x8001, 32769),  # REQ-SUNSPEC-DATATYPES: unsigniertes 0x8001 bleibt 32769
+        (0xFFFE, 0xFFFE),
+        (0xFFFF, None),  # uint16/enum16/bitfield16-Sentinel "not implemented"
+    ],
+)
+def test_decode_uint16(raw: int, expected: int | None) -> None:
+    assert decode_uint16(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (0, False),
+        (1, True),
+        (2, None),  # unbekannter Enum-/Bool-Rohwert -> nicht fälschlich True
+        (0xFFFF, None),  # Sentinel -> nicht fälschlich True
+    ],
+)
+def test_decode_bool16(raw: int, expected: bool | None) -> None:
+    assert decode_bool16(raw) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "raw_sf", "signed", "expected"),
+    [
+        (1200, 0, True, 1200),  # sf=0 -> unverändert
+        (551, to_unsigned16(-1), True, 55.1),  # sf=-1 -> Kommastelle
+        (5, 2, True, 500),  # sf=2 -> Zehnerpotenz
+        (to_unsigned16(-300), to_unsigned16(-2), True, -3.0),  # negativ + neg. sf
+        (60000, 0, False, 60000),  # uint16-Wert oberhalb des int16-Bereichs
+        (0x8000, 0, True, None),  # Wert selbst ist int16-Sentinel
+        (0xFFFF, 0, False, None),  # Wert selbst ist uint16-Sentinel
+        (1200, 0x8000, True, None),  # Sentinel-SF -> None statt 0/Exception
+    ],
+)
+def test_apply_typed_sunssf(
+    raw_value: int, raw_sf: int, signed: bool, expected: float | None
+) -> None:
+    assert apply_typed_sunssf(raw_value, raw_sf, signed=signed) == expected
 
 
 @pytest.mark.parametrize(
@@ -789,6 +842,56 @@ def test_parse_extended_decodes_sunspec_block(hass) -> None:
     assert data["battery_charging_active"] is True
     assert data["battery_event_text"] == "Normalbetrieb"
     assert data["battery_cell_voltage_avg"] == 3300
+
+
+def test_parse_extended_decodes_not_implemented_sentinels(hass) -> None:
+    """REQ-SUNSPEC-DATATYPES: Sentinelwerte ("not implemented", SunSpec
+    Device Information Model Specification V1.1 Abschnitt 6.4) müssen als
+    None ankommen statt als falscher Zahlenwert - weder als Unterlauf über
+    einen Sentinel-Skalierungsfaktor noch als vorzeichenverdrehter uint16-
+    Wert, und ohne dass die Negation von smartmeter_power/grid_power_active_*
+    an einem None crasht."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+
+    raw = dict.fromkeys(range(17, 110), 0)
+    raw.update(
+        {
+            17: to_unsigned16(-1),  # uint16-Sentinel 0xFFFF -> None
+            29: 0x8000,  # int16-Sentinel -> storage_power_active None
+            43: 0x8000,  # storage_state (int16) Sentinel -> None/Unbekannt
+            44: to_unsigned16(-1),  # storage_event (uint16) Sentinel -> None
+            51: to_unsigned16(-1),  # ic_control_mode (uint16) Sentinel -> None
+            53: to_unsigned16(-1),  # ic_max_power_reference Sentinel -> None
+            72: 0x8000,  # smartmeter_power-Rohwert Sentinel -> None
+            73: 0x8000,  # grid_power_active_l1-Rohwert Sentinel -> None
+            76: 0,  # meter_power_active_sf regulär, isoliert den Wert-Sentinel
+            81: 0x8000,  # sunssf-Sentinel -> grid_power_apparent_sum None
+            106: to_unsigned16(-1),  # battery_charging_active Sentinel -> None
+            108: to_unsigned16(-1),  # battery_event Sentinel -> None
+        }
+    )
+
+    def ext_reg(address: int) -> int:
+        return raw[address]
+
+    data = coordinator._parse_extended(ext_reg)
+
+    assert data["storage_current_sum"] is None
+    assert data["storage_power_active"] is None
+    assert data["storage_state"] is None
+    assert data["storage_state_text"] == UNKNOWN_LABEL
+    assert data["storage_event"] is None
+    assert data["storage_event_text"] == UNKNOWN_LABEL
+    assert data["ic_control_mode"] is None
+    assert data["ic_control_mode_text"] == UNKNOWN_LABEL
+    assert data["ic_max_power_reference"] is None
+    assert data["smartmeter_power"] is None
+    assert data["grid_power_active_l1"] is None
+    assert data["grid_power_apparent_sum"] is None
+    assert data["battery_charging_active"] is None
+    assert data["battery_event"] is None
+    assert data["battery_event_text"] == UNKNOWN_LABEL
 
 
 # -- Zeitgesteuertes Laden ---------------------------------------------------

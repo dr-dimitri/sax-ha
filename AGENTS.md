@@ -37,8 +37,8 @@ pytest -v                              # all tests
 pytest tests/test_coordinator.py -v    # one file
 pytest -k max_soc -v                   # filter by test name
 pytest -rs                             # show skip reasons (e.g. real-hardware test)
-ruff check custom_components tests
-black --check custom_components tests
+ruff check custom_components scripts tests
+black --check custom_components scripts tests
 ```
 
 Inside `.devcontainer/` (see `devcontainer.json`), `homeassistant`, `pytest`,
@@ -99,6 +99,11 @@ before it's considered done.
   `.github/workflows/release.yaml`. Apply exactly one matching release label
   (`release:major`, `release:minor`, or `release:patch`) to every pull request;
   use `release:patch` for documentation-only changes.
+- Set `custom_components/sax_power/manifest.json` in every pull request to the
+  next stable version calculated from the latest stable SemVer tag and that
+  one release label. Run `python scripts/release_metadata.py --labels-json
+  '["release:patch"]'` (adjust the label) before committing; CI rejects a
+  missing/ambiguous label, a mismatching manifest version, or an existing tag.
 - Commit messages: German, imperative/descriptive summary line, focused on
   *why*; 
   when written by an agent (see recent `git log` for examples).

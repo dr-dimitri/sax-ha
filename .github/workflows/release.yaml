@@ -1,8 +1,11 @@
 name: Automated Release
 
 on:
-  pull_request:
-    types: [closed]
+  workflow_run:
+    workflows:
+      - Continuous Integration
+    types:
+      - completed
     branches:
       - main
 
@@ -12,48 +15,55 @@ concurrency:
 
 jobs:
   release:
-    if: github.event.pull_request.merged == true
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
-      - name: Repository auschecken
+      - name: Getesteten Commit auschecken
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Nächste Versionsnummer bestimmen
-        id: version
+      - name: Zugehörigen Pull Request bestimmen
+        id: pull_request
         env:
-          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          GH_TOKEN: ${{ github.token }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
-          bump_labels="$(jq '[.[] | select(. == "release:major" or . == "release:minor" or . == "release:patch")] | length' <<< "$PR_LABELS")"
-          if (( bump_labels > 1 )); then
-            echo "Mehrere Release-Labels gefunden. Bitte genau eines von release:major, release:minor oder release:patch verwenden." >&2
+          pull_requests="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TESTED_COMMIT/pulls")"
+          merged_pull_requests="$(
+            jq --arg commit "$TESTED_COMMIT" \
+              '[.[] | select(.merged_at != null and .base.ref == "main" and .merge_commit_sha == $commit)]' \
+              <<< "$pull_requests"
+          )"
+          pull_request_count="$(jq 'length' <<< "$merged_pull_requests")"
+          if [[ "$pull_request_count" -ne 1 ]]; then
+            echo "Für den getesteten Commit wurde nicht genau ein gemergter Pull Request gefunden." >&2
             exit 1
           fi
 
-          bump="patch"
-          if jq -e 'index("release:major") != null' <<< "$PR_LABELS" >/dev/null; then
-            bump="major"
-          elif jq -e 'index("release:minor") != null' <<< "$PR_LABELS" >/dev/null; then
-            bump="minor"
-          fi
+          jq -c '.[0].labels | map(.name)' <<< "$merged_pull_requests" \
+            | sed 's/^/labels=/' >> "$GITHUB_OUTPUT"
+          jq -r '.[0].body // ""' <<< "$merged_pull_requests" \
+            > "$RUNNER_TEMP/release-body.md"
+          echo "body_path=$RUNNER_TEMP/release-body.md" >> "$GITHUB_OUTPUT"
 
-          latest_tag="$(git tag --list --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '1p')"
-          latest_tag="${latest_tag:-0.0.0}"
-          IFS=. read -r major minor patch <<< "$latest_tag"
-
-          case "$bump" in
-            major) next_tag="$((major + 1)).0.0" ;;
-            minor) next_tag="$major.$((minor + 1)).0" ;;
-            patch) next_tag="$major.$minor.$((patch + 1))" ;;
-          esac
-
-          echo "Aus $latest_tag wird per $bump-Bump die Version $next_tag."
-          echo "tag=$next_tag" >> "$GITHUB_OUTPUT"
+      - name: Release-Metadaten und Commit prüfen
+        id: version
+        env:
+          PR_LABELS: ${{ steps.pull_request.outputs.labels }}
+          TESTED_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: >-
+          python scripts/release_metadata.py
+          --labels-json "$PR_LABELS"
+          --manifest custom_components/sax_power/manifest.json
+          --expected-commit "$TESTED_COMMIT"
+          --github-output "$GITHUB_OUTPUT"
 
       - name: Versions-Tag erstellen
         env:
@@ -69,7 +79,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          body: ${{ github.event.pull_request.body }}
+          body_path: ${{ steps.pull_request.outputs.body_path }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

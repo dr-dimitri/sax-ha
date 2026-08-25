@@ -16,6 +16,7 @@ Ist-Zustand-Anforderungen je REQ-ID).
 - [Tests](#tests)
   - [Manuelle Testausführung](#manuelle-testausführung)
   - [Test gegen echte Hardware](#test-gegen-echte-hardware)
+- [Releaseprozess](#releaseprozess)
 - [Lokale Entwicklung (DevContainer)](#lokale-entwicklung-devcontainer)
 - [Quellen](#quellen)
 
@@ -504,7 +505,7 @@ bereits vorinstalliert – dort reicht direkt `pytest -v` ohne eigenes venv.
 | `tests/test_real_hardware.py` wird übersprungen (`SKIPPED`) | Kein `host` in `tests/real_device.yaml` hinterlegt, oder der Speicher ist gerade nicht erreichbar. | Mit `pytest -rs` den genauen Skip-Grund anzeigen lassen. `host` in `tests/real_device.yaml` eintragen (siehe Abschnitt unten) bzw. Erreichbarkeit prüfen (siehe nächste Zeile). |
 | Live-Hardware-Test bricht mit Verbindungsfehler ab statt zu überspringen | Der erste Verbindungsversuch (`connect()`) klappt kurzzeitig, ein späterer Read schlägt dann fehl (Netzwerk instabil, falscher Port/Slave-ID). | IP/Port in `tests/real_device.yaml` prüfen (`ping <IP>`, `nc -vz <IP> 502`). Prüfen, ob eine andere Anwendung (z. B. eine bereits laufende Home-Assistant-Instanz) parallel denselben Modbus-Port belegt – SAX-Geräte erlauben oft nur eine aktive Verbindung gleichzeitig. |
 | `test_read_real_sunspec_mode_values` wird übersprungen, `test_read_real_basic_mode_values` läuft durch | Der SunSpec-Modus (Slave-ID 100) ist auf diesem Gerät nicht erreichbar – z. B. zu alte Firmware (Master V61/Gateway V54 oder neuer nötig). Das Gerät antwortet dann entweder mit einer Modbus-Fehlerantwort oder mit Modbus-Exception-Code 11 "Gateway Target Device Failed to Respond", was pymodbus als `ModbusIOException` auswirft. | Erwartetes, dokumentiertes Verhalten – kein Fehler, entspricht der Fehlerbehandlung im produktiven Coordinator. Falls der SunSpec-Modus erwartet wird: Firmware-Version beim Hersteller/Installateur klären. |
-| `ruff`/`black` melden Formatierungsfehler bei eigenen Änderungen | Code entspricht nicht dem Projektstil (Zeilenlänge 88, Formatierung). | `pip install ruff black` (falls nicht vorhanden), dann `black custom_components tests` zum automatischen Formatieren und `ruff check custom_components tests` zur Kontrolle. |
+| `ruff`/`black` melden Formatierungsfehler bei eigenen Änderungen | Code entspricht nicht dem Projektstil (Zeilenlänge 88, Formatierung). | `pip install ruff black` (falls nicht vorhanden), dann `black custom_components scripts tests` zum automatischen Formatieren und `ruff check custom_components scripts tests` zur Kontrolle. |
 | Tests schlagen nach einem `git pull` plötzlich fehl | `requirements_test.txt` hat sich geändert (neue/aktualisierte Abhängigkeit), venv ist veraltet. | `source .venv/bin/activate && pip install -r requirements_test.txt` erneut ausführen. |
 
 ### Test gegen echte Hardware
@@ -543,6 +544,38 @@ physischen Zugriff auf die Hardware. Nach Eintragen einer echten IP:
 pytest tests/test_real_hardware.py -v
 ```
 
+## Releaseprozess
+
+`custom_components/sax_power/manifest.json` ist die ausgelieferte
+Versionsquelle. Jeder Pull Request trägt genau eines der Labels
+`release:major`, `release:minor` oder `release:patch` und setzt die
+Manifest-Version auf den daraus berechneten nächsten stabilen SemVer-Tag.
+Ausgehend vom letzten stabilen Tag `1.2.3` sind das beispielsweise `2.0.0`,
+`1.3.0` oder `1.2.4`. Prerelease-Tags wie `1.3.0-rc.1` verändern diese
+stabile Versionslinie nicht.
+
+Die Prüfung lässt sich vor dem Push lokal ausführen (Label anpassen):
+
+```bash
+python scripts/release_metadata.py --labels-json '["release:patch"]'
+```
+
+Im Pull Request prüft CI dieselbe Logik und führt zusätzlich die HACS-Action
+sowie hassfest aus. Null oder mehrere Release-Labels, eine ungültige oder
+abweichende Manifest-Version und ein bereits existierender Ziel-Tag brechen
+die Prüfung ab. `hacs.json.homeassistant` entspricht dabei exakt der in
+`requirements_test.txt` fixierten und in CI getesteten Home-Assistant-Version;
+damit bietet HACS die Integration keiner unbelegten älteren Python-/HA-Laufzeit
+an.
+
+Nach dem Merge testet der `push`-Lauf der Continuous Integration den neuen
+`main`-Commit. Erst dessen erfolgreicher Abschluss startet den
+Release-Workflow. Dieser checkt exakt den in CI getesteten SHA aus, liest das
+eine Release-Label des zugehörigen gemergten Pull Requests und wiederholt alle
+Metadatenprüfungen, bevor er den Manifest-Wert als Tag schreibt. Erst danach
+wird der GitHub Release erzeugt. Schlägt eine Prüfung fehl, existieren weder
+neuer Tag noch neuer Release.
+
 ## Lokale Entwicklung (DevContainer)
 
 Das Repo enthält einen VS Code DevContainer für die lokale Entwicklung/Tests:
@@ -551,7 +584,7 @@ Das Repo enthält einen VS Code DevContainer für die lokale Entwicklung/Tests:
 2. Im Container: `hass -c config` startet eine lokale Home Assistant Instanz
    auf Port 8123 mit bereits verlinkter Custom Component
 3. Tests ausführen: `pytest -v`
-4. Linting/Formatierung: `ruff check custom_components tests` bzw. `black custom_components tests`
+4. Linting/Formatierung: `ruff check custom_components scripts tests` bzw. `black custom_components scripts tests`
 
 ## Quellen
 

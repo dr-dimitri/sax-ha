@@ -15,7 +15,13 @@ from unittest.mock import AsyncMock, MagicMock
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.application.calibration import CalibrationState
-from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
+from custom_components.sax_power.const import (
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TARIFF_TYPE,
+    DATA_COORDINATOR,
+    DOMAIN,
+)
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.diagnostics import (
     TO_REDACT,
@@ -98,3 +104,29 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     assert diagnostics["state"]["grid_serving_forecast_threshold_kwh"] == 0
     assert diagnostics["state"]["grid_serving_forecast_kwh"] is None
     assert diagnostics["state"]["grid_serving_forecast_allowed"] is True
+
+
+async def test_diagnostics_includes_the_tariff_state(hass) -> None:
+    """Der Diagnose-Download weist den Tarifzustand aus - inklusive des
+    maschinenlesbaren Grundes, wenn kein Preis bestimmbar ist (siehe
+    anforderung.yaml, REQ-ECONOMICS-TARIFFS)."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["tariff"]["tariff_type"] == "disabled"
+    assert diagnostics["tariff"]["quote_price_eur_kwh"] is None
+    assert diagnostics["tariff"]["quote_unavailable_reason"] == "tariff_disabled"
+
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: "fixed",
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3421,
+    }
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["tariff"]["feed_in_price_eur_kwh"] == 0.0786
+    assert diagnostics["tariff"]["quote_price_eur_kwh"] == 0.3421
+    assert diagnostics["tariff"]["quote_source"] == "fixed"
+    assert diagnostics["tariff"]["quote_unavailable_reason"] is None

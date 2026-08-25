@@ -99,6 +99,7 @@ from .domain.sunspec import (
 from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
+from .economics import SaxTariffProvider
 from .infrastructure.calibration_store import CalibrationStateStore
 from .infrastructure.control_store import (
     ControlConfig,
@@ -359,6 +360,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
+        # Wirtschaftlichkeit: bestimmt den zu einem Zeitpunkt gültigen
+        # Netzbezugspreis (REQ-ECONOMICS-TARIFFS). Ohne konfigurierten
+        # Tarif liefert er ausschließlich "deaktiviert" und greift in
+        # nichts ein - insbesondere nicht in die Ladeplanung.
+        self.tariff_provider = SaxTariffProvider(hass, self)
         self._sun_charge_task: asyncio.Task | None = None
         # Bleibt bis zur erfolgreich quittierten Rückkehr in Registermodus 0
         # gesetzt. Dadurch geht der Rücksetzauftrag nach einem transienten
@@ -2991,6 +2997,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_flush_energy_state()
         await self._async_flush_control_state()
         self.price_planner.async_shutdown()
+        self.tariff_provider.async_shutdown()
         # Kein Stop-via-Service: Dieser würde nach dem manuellen Reset eine
         # konfigurierte Automatik erneut anwenden. Beim Shutdown werden unter
         # demselben Control-Lock stattdessen alle neuen Entscheidungen

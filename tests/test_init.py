@@ -99,6 +99,7 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     coordinator = MagicMock()
     coordinator.options = {}
     coordinator.price_planner.async_setup = MagicMock()
+    coordinator.tariff_provider.async_setup = MagicMock()
     coordinator.async_apply_price_plan = AsyncMock()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
@@ -117,6 +118,10 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     hass.config_entries.async_reload.assert_not_called()
     assert coordinator.options == {CONF_PRICE_SENSOR: "sensor.strompreis"}
     coordinator.price_planner.async_setup.assert_called_once()
+    # Auch die Tarifkonfiguration der Wirtschaftlichkeitsauswertung wird
+    # live übernommen (REQ-ECONOMICS-TARIFFS): async_setup registriert die
+    # Zustandsbeobachter des dynamischen Preis-Sensors idempotent neu.
+    coordinator.tariff_provider.async_setup.assert_called_once()
     coordinator.async_apply_price_plan.assert_awaited_once()
 
 

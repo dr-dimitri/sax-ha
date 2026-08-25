@@ -615,16 +615,172 @@
           "price_attribute": "Attribute holding the price forecast (optional)",
           "price_unit": "Price unit",
           "pv_forecast_sensor": "PV forecast sensor (optional)",
-          "pv_forecast_factor": "Usable share of the PV forecast (%)"
+          "pv_forecast_factor": "Usable share of the PV forecast (%)",
+          "economics_tariff_type": "Economics tariff model"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. The windows for the “relative” and “smart” strategies are derived from its price forecast attributes.",
           "price_attribute": "Only needed if auto-detection fails - e.g. “raw_today”, “data” or “forecast”.",
           "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh is converted to EUR/kWh internally.",
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
-          "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value."
+          "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
+          "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings."
+        }
+      },
+      "economics_fixed": {
+        "title": "Economics: fixed price",
+        "description": "All prices are variable gross energy prices in EUR/kWh. Monthly standing charges, bonuses, taxes billed outside the energy price and other fixed costs are explicitly excluded.",
+        "data": {
+          "economics_feed_in_price_eur_kwh": "Feed-in tariff (EUR/kWh)",
+          "economics_fixed_import_price_eur_kwh": "Grid import price (EUR/kWh)"
+        },
+        "data_description": {
+          "economics_feed_in_price_eur_kwh": "Required. The revenue lost - and therefore the purchase price - of every PV kilowatt-hour stored instead of exported. PV energy is never treated as free.",
+          "economics_fixed_import_price_eur_kwh": "Required. Energy price for grid imports, constant all day."
+        }
+      },
+      "economics_dynamic": {
+        "title": "Economics: dynamic tariff",
+        "description": "The import price comes from the electricity price sensor already selected - deliberately no second price source. All prices are variable gross energy prices in EUR/kWh. Monthly standing charges, bonuses, taxes billed outside the energy price and other fixed costs are explicitly excluded.",
+        "data": {
+          "economics_feed_in_price_eur_kwh": "Feed-in tariff (EUR/kWh)"
+        },
+        "data_description": {
+          "economics_feed_in_price_eur_kwh": "Required. The revenue lost - and therefore the purchase price - of every PV kilowatt-hour stored instead of exported. PV energy is never treated as free."
+        }
+      },
+      "economics_time_of_use": {
+        "title": "Economics: time-of-use tariff",
+        "description": "Every calendar day uses the same base price, overridden by up to eight windows. Windows are half-open (start inclusive, end exclusive), may cross midnight and must not overlap; touching boundaries are allowed. The local Home Assistant time zone applies. Each group is either completely empty or completely filled in. All prices are variable gross energy prices in EUR/kWh. Monthly standing charges, bonuses, taxes billed outside the energy price and other fixed costs are explicitly excluded.",
+        "data": {
+          "economics_feed_in_price_eur_kwh": "Feed-in tariff (EUR/kWh)",
+          "economics_tou_base_price_eur_kwh": "Base import price (EUR/kWh)"
+        },
+        "data_description": {
+          "economics_feed_in_price_eur_kwh": "Required. The revenue lost - and therefore the purchase price - of every PV kilowatt-hour stored instead of exported. PV energy is never treated as free.",
+          "economics_tou_base_price_eur_kwh": "Required. Applies at all times outside the windows below."
+        },
+        "sections": {
+          "economics_tou_window_1": {
+            "name": "Window 1 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_2": {
+            "name": "Window 2 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_3": {
+            "name": "Window 3 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_4": {
+            "name": "Window 4 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_5": {
+            "name": "Window 5 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_6": {
+            "name": "Window 6 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_7": {
+            "name": "Window 7 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          },
+          "economics_tou_window_8": {
+            "name": "Window 8 (optional)",
+            "description": "Fill in all three fields or leave all three empty.",
+            "data": {
+              "start": "Start",
+              "end": "End",
+              "price_eur_kwh": "Energy price (EUR/kWh)"
+            },
+            "data_description": {
+              "start": "Start of the window (inclusive).",
+              "end": "End of the window (exclusive). A window may cross midnight; start and end must differ.",
+              "price_eur_kwh": "Gross energy price that replaces the base price inside this window."
+            }
+          }
         }
       }
+    },
+    "error": {
+      "economics_price_sensor_required": "The dynamic tariff needs the electricity price sensor selected above. Pick a sensor or choose another tariff model.",
+      "economics_tou_window_incomplete": "A window is incomplete: start, end and energy price must all be filled in or all be empty.",
+      "economics_tou_window_zero_length": "Start and end of a window must differ - an empty range is not a window and does not mean \"all day\".",
+      "economics_tou_window_overlap": "Two windows overlap. Touching boundaries (end of one = start of the next) are allowed, overlapping ones are not."
     }
   },
   "selector": {
@@ -633,6 +789,14 @@
         "auto": "Automatic (from the sensor)",
         "eur_kwh": "EUR/kWh",
         "ct_kwh": "ct/kWh"
+      }
+    },
+    "economics_tariff_type": {
+      "options": {
+        "disabled": "Disabled (no economics evaluation)",
+        "fixed": "Fixed price",
+        "time_of_use": "Time of use",
+        "dynamic": "Dynamic (electricity price sensor)"
       }
     }
   }

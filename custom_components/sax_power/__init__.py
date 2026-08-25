@@ -158,6 +158,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # entweder aus dem Store (Regelfall) oder aus dem einmaligen
     # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
     coordinator.price_planner.async_setup()
+    # Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS): registriert
+    # den Zustandsbeobachter des dynamischen Preis-Sensors. Ohne
+    # konfigurierten Tarif passiert hier nichts.
+    coordinator.tariff_provider.async_setup()
     # Schließt das Bootstrap-Fenster: ab hier ist die Konfiguration
     # vollständig, und genau eine Ladeentscheidung wird angewendet - statt
     # während des Entity-Setups eine Kette von Teilkonfigurationen
@@ -197,13 +201,19 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     SaxPricePlanner.async_setup ist bewusst idempotent (räumt seine alten
     Zustandsbeobachter ab und registriert sie mit den aktuellen Optionen
     neu), ohne Entities, Modbus-Verbindung oder eine laufende
-    Lade-Automatik anzutasten."""
+    Lade-Automatik anzutasten. Für die Tarifkonfiguration der
+    Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS) gilt dasselbe:
+    SaxTariffProvider.async_setup registriert den Zustandsbeobachter des
+    dynamischen Preis-Sensors nach demselben idempotenten Muster neu, sodass
+    ein Tarif- oder Sensorwechsel weder einen Listener auf der alten Quelle
+    zurücklässt noch einen zweiten auf derselben anlegt."""
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if entry_data is None:
         return
     coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
     coordinator.options = dict(entry.options)
     coordinator.price_planner.async_setup()
+    coordinator.tariff_provider.async_setup()
     await coordinator.async_apply_price_plan()
 
 

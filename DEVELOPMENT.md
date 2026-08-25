@@ -29,9 +29,12 @@ custom_components/sax_power/
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          SunSpec-Blockdecodierung (sunspec.py),
-│                          Zeitfenster und Wertevalidierung
+│                          Zeitfenster und Wertevalidierung, Preis-Einheiten
+│                          (price_units.py) und das Tarifmodell (tariff.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
-│                          Vollkalibrierung sowie der injizierbare Modbus-Client-Port
+│                          Vollkalibrierung, die Abbildung der Tarif-Options auf
+│                          das Domänenmodell (economics.py) sowie der
+│                          injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
 │                          Repair-Issues sowie die drei versionierten Stores
 │                          (Kalibrierung, Energiezähler, Ladeeinstellungen)
@@ -48,6 +51,10 @@ custom_components/sax_power/
 │                          einer beliebigen Preis-Sensor-Entity, Ladeplanung je
 │                          Strategie, gemeinsame Prognosequelle,
 │                          60-Sekunden-Takt - ohne Modbus-Zugriff
+├── economics.py          Home-Assistant-Adapter des Tarifmodells
+│                          (SaxTariffProvider): liest Options und Preis-Sensor
+│                          und liefert den geltenden Netzbezugspreis als Quote,
+│                          siehe anforderung.yaml REQ-ECONOMICS-TARIFFS
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          _assign_ids() (unique_id + vom Gerätenamen
 │                          unabhängige entity_id, siehe
@@ -128,6 +135,32 @@ Ladevorgang ausgelöst, bis die neu erzeugte Instanz die
 `PV_SURPLUS_HYSTERESIS_CYCLES`-Bestätigung erneut durchlaufen hätte -
 ursprünglich gemeldeter Bug, siehe `anforderung.yaml`,
 REQ-DYNAMIC-PRICE-CHARGE.
+
+Derselbe Options Flow konfiguriert zusätzlich das Tarifmodell der
+Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS). Die Tarifart steht als
+`economics_tariff_type` auf der ersten Seite; anschließend verzweigt der Flow
+in genau einen tarifspezifischen Schritt (`economics_fixed`,
+`economics_time_of_use`, `economics_dynamic`) oder speichert bei
+`disabled` sofort. Beim Speichern übernimmt der Flow ausschließlich die zur
+gewählten Tarifart gehörenden Schlüssel und verwirft alle übrigen aus
+`ECONOMICS_OPTION_KEYS` - ein alter Festpreis darf nach einem Rückwechsel
+nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
+`section`-Blöcke und liegen deshalb als verschachtelte Mappings in
+`entry.options`.
+
+Die Auswertung selbst ist dreigeteilt: `domain/tariff.py` enthält die reinen
+Typen (`TariffType`, `DailyPriceWindow`, `TariffConfig`, `PriceQuote`) samt
+Zeitfensterregeln und der Bewertung der nicht-dynamischen Tarife,
+`application/economics.py` bildet gespeicherte Options auf diese Typen ab, und
+`economics.py` ist der einzige Ort, der dafür `hass.states` liest.
+`SaxTariffProvider.async_setup()` folgt demselben idempotenten Muster wie
+`SaxPricePlanner.async_setup()` und wird von `async_update_options` erneut
+aufgerufen. Ein fehlender oder unbrauchbarer Preis ist immer `None` plus ein
+`QuoteUnavailable`-Grund - nie 0 EUR/kWh, weil ein stiller Nullpreis
+Netzbezug als kostenlos bewerten und jede spätere Rechnung unbemerkt
+verfälschen würde. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
+über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
+Sonderfall.
 
 ## Datenfluss
 
@@ -621,6 +654,14 @@ tests/
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)
+├── test_tariff.py                  Tarifmodell der Wirtschaftlichkeitsauswertung
+│                                  (REQ-ECONOMICS-TARIFFS): Festpreis, Grundpreis und acht
+│                                  Zeitfenster (halboffen, über Mitternacht, angrenzend,
+│                                  überlappend), beide Sommerzeitwechsel, Abbildung der
+│                                  Options auf das Domänenmodell, dynamischer Tarif am
+│                                  gemeinsamen Preis-Sensor samt aller Gründe für einen
+│                                  fehlenden Preis sowie der Lebenszyklus der
+│                                  Zustandsbeobachter
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
 │                                  unvollständiger/unlesbarer Store (inkl. dauerhafter

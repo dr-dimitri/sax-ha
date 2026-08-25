@@ -49,10 +49,9 @@ from .const import (
     PRICE_STRATEGY_ABSOLUTE,
     PRICE_STRATEGY_OFF,
     PRICE_STRATEGY_SMART,
-    PRICE_UNIT_CT_KWH,
-    PRICE_UNIT_EUR_KWH,
 )
 from .domain.forecast import normalize_energy_kwh
+from .domain.price_units import unit_factor
 
 if TYPE_CHECKING:
     from .coordinator import SaxPowerCoordinator
@@ -169,21 +168,16 @@ EMPTY_PLAN = PricePlan()
 # Preisdaten einlesen
 # --------------------------------------------------------------------------
 def _unit_factor(configured_unit: str, sensor_unit: Any) -> float:
-    """Umrechnungsfaktor auf EUR/kWh.
+    """Umrechnungsfaktor auf EUR/kWh (siehe domain/price_units.py).
 
-    "auto" wertet die Einheit des Sensors aus: alles, was nach Cent aussieht
-    (ct, cent, ¢), wird durch 100 geteilt. Ist keine Einheit hinterlegt,
-    bleibt der Wert unverändert - eine Fehlinterpretation lässt sich dann
-    über CONF_PRICE_UNIT explizit korrigieren.
+    Anders als die Wirtschaftlichkeitsauswertung interpretiert die
+    Ladeplanung eine fremde Einheit nicht als Fehler, sondern rechnet den
+    Wert unverändert weiter: Ein Plan mit auffällig falschen Preisen ist im
+    Preis-Sensor sofort sichtbar und über CONF_PRICE_UNIT korrigierbar,
+    während ein plötzlich planloser Ladevorgang nur schwer zuzuordnen wäre.
     """
-    if configured_unit == PRICE_UNIT_CT_KWH:
-        return 0.01
-    if configured_unit == PRICE_UNIT_EUR_KWH:
-        return 1.0
-    unit = str(sensor_unit or "").lower()
-    if "ct" in unit or "cent" in unit or "¢" in unit:
-        return 0.01
-    return 1.0
+    factor = unit_factor(configured_unit, sensor_unit)
+    return 1.0 if factor is None else factor
 
 
 def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:

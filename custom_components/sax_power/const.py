@@ -651,3 +651,70 @@ ISSUE_CONTROL_CONFIG_UNRESOLVED = "control_config_unresolved"
 # Zustand tatsächlich anhält.
 PRICE_SENSOR_MISSING_GRACE_PERIOD = 6 * 3600  # Sekunden
 SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD = 3600  # Sekunden
+
+# ==========================================================================
+# Wirtschaftlichkeitsauswertung: Tarifmodell (siehe anforderung.yaml,
+# REQ-ECONOMICS-TARIFFS)
+# ==========================================================================
+# Vollständig optional und standardmäßig deaktiviert: solange
+# CONF_ECONOMICS_TARIFF_TYPE auf "disabled" steht, verhält sich die
+# Integration exakt wie bisher. Die stabilen Options-Werte der Tarifarten
+# stehen als TariffType in domain/tariff.py; hier liegen nur die
+# Options-Flow-Schlüssel und die Wertebereiche der Eingabefelder.
+CONF_ECONOMICS_TARIFF_TYPE = "economics_tariff_type"
+CONF_ECONOMICS_FEED_IN_PRICE = "economics_feed_in_price_eur_kwh"
+CONF_ECONOMICS_FIXED_IMPORT_PRICE = "economics_fixed_import_price_eur_kwh"
+CONF_ECONOMICS_TOU_BASE_PRICE = "economics_tou_base_price_eur_kwh"
+
+# Genau acht optionale Zeitfenstergruppen. Jede wird im Options Flow als
+# eigene Section dargestellt und liegt deshalb als verschachteltes Mapping
+# mit den drei Feldern unten in entry.options.
+ECONOMICS_TOU_WINDOW_COUNT = 8
+ECONOMICS_TOU_WINDOW_PREFIX = "economics_tou_window_"
+CONF_ECONOMICS_WINDOW_START = "start"
+CONF_ECONOMICS_WINDOW_END = "end"
+CONF_ECONOMICS_WINDOW_PRICE = "price_eur_kwh"
+
+
+def economics_tou_window_key(index: int) -> str:
+    """Options-Schlüssel der 1-basierten Zeitfenstergruppe `index`."""
+    return f"{ECONOMICS_TOU_WINDOW_PREFIX}{index}"
+
+
+ECONOMICS_TOU_WINDOW_KEYS = tuple(
+    economics_tou_window_key(index)
+    for index in range(1, ECONOMICS_TOU_WINDOW_COUNT + 1)
+)
+
+# Sämtliche zur Wirtschaftlichkeitskonfiguration gehörenden Schlüssel. Beim
+# Wechsel der Tarifart entfernt der Options Flow daraus alles, was zur neuen
+# Tarifart nicht mehr passt (siehe config_flow.SaxPowerOptionsFlow) - sonst
+# bliebe ein alter Festpreis unsichtbar in entry.options stehen und würde
+# nach einem späteren Rückwechsel wieder aktiv.
+ECONOMICS_OPTION_KEYS = (
+    CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+    *ECONOMICS_TOU_WINDOW_KEYS,
+)
+
+# Einspeisevergütung: der entgangene Erlös und damit der Beschaffungspreis
+# jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt. Bei
+# jeder aktivierten Auswertung deshalb Pflichtfeld - PV-Energie darf
+# niemals als kostenlos bewertet werden.
+MIN_ECONOMICS_FEED_IN_PRICE = 0.0
+MAX_ECONOMICS_FEED_IN_PRICE = 2.0
+
+# Arbeitspreise dürfen negativ sein: an die Börse gekoppelte Tarife weisen
+# zeitweise negative Arbeitspreise aus.
+MIN_ECONOMICS_IMPORT_PRICE = -2.0
+MAX_ECONOMICS_IMPORT_PRICE = 5.0
+
+# Vier Nachkommastellen entsprechen der üblichen Auflösung von
+# Arbeitspreisangaben (0,3421 EUR/kWh). Der NumberSelector von Home
+# Assistant lässt als kleinste Schrittweite nur 0,001 zu, deshalb ist das
+# Eingabefeld frei ("any") und der Options Flow rundet den eingegebenen
+# Wert selbst auf diese Schrittweite (config_flow._round_to_price_step).
+ECONOMICS_PRICE_STEP = 0.0001
+ECONOMICS_PRICE_DECIMALS = 4

@@ -58,6 +58,7 @@
 # REQ-DIAGNOSTIC-ENTITY-CATEGORY  done       Technische Detail-/Rohwerte als entity_category=diagnostic, Kernwerte bleiben sichtbar
 # REQ-PERIODIC-FULL-CALIBRATION   done       Alle 7 Tage temporär bis 100 % laden, um die Zell-/SOC-Kalibrierung zu ermöglichen
 # REQ-CONTROL-CONFIG-BOOTSTRAP    done       Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen
+# REQ-ECONOMICS-TARIFFS           done       Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung
 # ==============================================================================
 
 # ==============================================================================
@@ -2636,3 +2637,126 @@ requirement_control_config_bootstrap:
        Modbus-Simulator, dass ein Neustart in einem gespeicherten aktiven
        Ladefenster Register 40051 nie auf 0 schreibt und die gespeicherte
        Konfiguration vollständig sichtbar zurück ist."
+
+# ==============================================================================
+# ANFORDERUNG: TARIFMODELL DER WIRTSCHAFTLICHKEITSAUSWERTUNG
+# ==============================================================================
+requirement_economics_tariffs:
+  id: REQ-ECONOMICS-TARIFFS
+  title: "Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung"
+  status: done
+  description: >
+    Die Integration kann zu jedem Messzeitpunkt den wirtschaftlich
+    relevanten Netzbezugspreis in EUR/kWh bestimmen. Die Konfiguration ist
+    vollständig optional und standardmäßig deaktiviert: ohne
+    Wirtschaftlichkeitskonfiguration verhält sich die Integration exakt wie
+    bisher, bestehende Entitäten, Dienste, gespeicherte Options und
+    Regelungsfunktionen bleiben unverändert. Bestehende Installationen
+    werden nicht automatisch aktiviert.
+
+    Unterstützt werden genau drei Tarifarten (TariffType in
+    domain/tariff.py, stabile Options-Werte): "fixed" (ein ganztägig
+    konstanter Arbeitspreis), "time_of_use" (jeden lokalen Kalendertag
+    derselbe Grundpreis mit bis zu acht abweichenden Zeitfenstern) und
+    "dynamic" (aktueller Preis aus dem bereits vorhandenen
+    Strompreis-Sensor). "disabled" ist der Vorgabewert.
+
+    Bei jeder aktivierten Tarifart ist die Einspeisevergütung
+    (CONF_ECONOMICS_FEED_IN_PRICE, 0 bis 2 EUR/kWh) Pflichtfeld. Sie ist der
+    entgangene Erlös und damit der Beschaffungspreis von PV-Energie, die in
+    den Speicher statt ins Netz fließt; PV-Energie wird nie als kostenlos
+    bewertet. Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh mit
+    einer Schrittweite von 0,0001 - monatlicher Grundpreis, Boni, außerhalb
+    des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten sind
+    ausdrücklich nicht Bestandteil der Rechnung. Arbeitspreise für den
+    Netzbezug liegen zwischen -2 und 5 EUR/kWh; der negative Bereich ist
+    bewusst zugelassen, weil börsengekoppelte Tarife zeitweise negative
+    Arbeitspreise ausweisen.
+
+    Die Konfiguration liegt vollständig im Options Flow
+    (config_flow.SaxPowerOptionsFlow). Die Tarifart wird auf der ersten
+    Seite gewählt; danach verzweigt der Flow in genau einen
+    tarifspezifischen Schritt (economics_fixed, economics_time_of_use,
+    economics_dynamic) oder speichert bei "disabled" sofort - ein
+    deaktivierter Tarif fragt keine Einspeisevergütung ab. Beim Speichern
+    übernimmt der Flow ausschließlich die zur gewählten Tarifart passenden
+    Schlüssel und entfernt alle übrigen aus ECONOMICS_OPTION_KEYS, damit ein
+    alter Wert nach einem späteren Rückwechsel nicht unbemerkt wieder gilt.
+    Die acht Zeitfenstergruppen (economics_tou_window_1 bis _8) werden je
+    als eigene Section dargestellt und liegen deshalb als verschachtelte
+    Mappings mit den Feldern start/end/price_eur_kwh in entry.options.
+
+    Der dynamische Tarif verwendet ausschließlich die bereits vorhandenen
+    Options CONF_PRICE_SENSOR, CONF_PRICE_ATTRIBUTE und CONF_PRICE_UNIT -
+    es gibt weder eine zweite Sensor-Option noch eine zweite
+    Parserimplementierung. Ist kein Sensor ausgewählt, lehnt der Flow das
+    Speichern mit einer übersetzten Feldfehlermeldung am Sensorfeld ab. Die
+    Einheitenumrechnung liegt gemeinsam mit der Ladeplanung in
+    domain/price_units.unit_factor; die Preisvorschau wird mit derselben
+    Funktion price_optimizer.parse_price_slots gelesen wie für den
+    Ladeplan.
+
+    Zeitfensterregeln für "time_of_use": Intervalle sind halboffen (Start
+    inklusive, Ende exklusive); start == end ist ungültig und bedeutet
+    ausdrücklich nicht "ganzer Tag"; ein Fenster darf Mitternacht
+    überschreiten; zwei Fenster dürfen sich auf der zyklischen
+    24-Stunden-Zeitleiste nicht überschneiden, angrenzende Grenzen sind
+    erlaubt; außerhalb aller Fenster gilt der Grundpreis. Eine Gruppe ist
+    entweder vollständig leer oder vollständig befüllt. Maßgeblich ist die
+    lokale Home-Assistant-Zeitzone: Die Zuordnung erfolgt allein über die
+    lokale Wanduhrzeit, weshalb die Sommerzeitumstellung keinen Sonderfall
+    braucht - die im Frühjahr übersprungene Ortszeit tritt nie auf, und
+    beide Vorkommen der im Herbst doppelten Stunde treffen dasselbe
+    Fenster. Änderungen gelten nur für zukünftige Messintervalle; bereits
+    persistierte Geldbeträge werden nie rückwirkend neu bewertet.
+
+    Architektur: domain/tariff.py enthält die reinen, Home-Assistant-freien
+    Typen (TariffType, DailyPriceWindow, TariffConfig, PriceQuote,
+    QuoteResult, QuoteUnavailable) samt Zeitfensterregeln und der Bewertung
+    der nicht-dynamischen Tarife. application/economics.py bildet
+    gespeicherte Options auf diese Typen ab. economics.SaxTariffProvider ist
+    der einzige Ort, der dafür hass.states liest; Coordinator und spätere
+    Wirtschaftlichkeitslogik beziehen Quotes ausschließlich über
+    coordinator.tariff_provider.quote(). SaxTariffProvider.async_setup()
+    folgt demselben idempotenten Muster wie SaxPricePlanner.async_setup()
+    (räumt vorhandene Zustandsbeobachter ab, bevor es neue registriert) und
+    wird von __init__.async_update_options erneut aufgerufen: Eine
+    Options-Änderung und ein State-Change des dynamischen Sensors wirken
+    live, ohne Config-Entry-Reload und ohne doppelte Listener;
+    coordinator.async_shutdown räumt sie beim Entladen ab.
+
+    Ein nicht bestimmbarer Preis ist immer None plus ein maschinenlesbarer
+    QuoteUnavailable-Grund - niemals 0 EUR/kWh, weil ein stiller Nullpreis
+    den Netzbezug als kostenlos bewerten und jede spätere Rechnung unbemerkt
+    verfälschen würde. Gründe: tariff_disabled, tariff_incomplete,
+    price_sensor_not_configured, price_sensor_missing,
+    price_sensor_unavailable (unknown/unavailable/leer), price_not_numeric,
+    price_not_finite (NaN/Inf), price_unit_unsupported (gesetzte, aber nicht
+    preisartige Einheit) und price_forecast_out_of_range (vorhandene
+    Preisvorschau deckt den Auswertungszeitpunkt nicht ab). Der Tarifzustand
+    samt Grund steht im Diagnose-Download (diagnostics.py, Schlüssel
+    "tariff").
+
+    Nicht Bestandteil dieser Anforderung: Energieherkunft,
+    Kostenakkumulation, ROI-Sensoren und Dashboardkarten. Das Tarifmodell
+    greift in keine Ladeentscheidung ein und löst keinen Modbus-Write aus.
+  acceptance_criteria:
+    - "Ohne Wirtschaftlichkeitskonfiguration ('disabled') verändern sich
+       weder Verhalten noch vorhandene Options; es wird kein
+       Zustandsbeobachter registriert."
+    - "Ein Festpreis liefert zu jedem Zeitpunkt exakt denselben Quote
+       (unbegrenzt gültig, valid_from/valid_until sind None)."
+    - "Grundpreis, acht optionale Fenster, Mitternachtsüberschreitung,
+       halboffene Grenzen, Überschneidung und beide Sommerzeitwechsel sind
+       deterministisch getestet (tests/test_tariff.py)."
+    - "Der dynamische Tarif nutzt denselben Sensor, dieselbe
+       Attribut-Erkennung und dieselbe Einheitenlogik wie die vorhandene
+       Preisfunktion; ohne ausgewählten Sensor lehnt der Options Flow das
+       Speichern am Sensorfeld ab."
+    - "Fehlende, nicht numerische, nicht endliche, falsch skalierte oder
+       zeitlich unpassende Preiswerte ergeben None samt Grund - nie 0."
+    - "Eine Optionsänderung und ein Sensor-State-Change wirken ohne Reload;
+       Listener werden beim Optionswechsel und beim Entladen entfernt und
+       nie doppelt registriert."
+    - "strings.json, translations/de.json, translations/en.json, README.md
+       und DEVELOPMENT.md beschreiben das Tarifmodell."

@@ -27,6 +27,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
   - [Netzdienliches Laden](#netzdienliches-laden)
   - [Preisoptimiertes Laden](#preisoptimiertes-laden)
 - [Zeitfenster und Überschneidungen](#zeitfenster-und-überschneidungen)
+- [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
 - [Energy-Dashboard](#energy-dashboard)
 - [Aktionen für Automationen](#aktionen-für-automationen)
 - [Verbindung nachträglich ändern](#verbindung-nachträglich-ändern)
@@ -44,6 +45,8 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - zeitgesteuert aus dem Netz laden
 - PV-Ladung für eine bessere Nutzung der Mittagsspitze verschieben
 - bei dynamischen Stromtarifen in günstigen Zeiträumen laden
+- optional einen Stromtarif hinterlegen, an dem sich die Wirtschaftlichkeit
+  bemisst
 - optional ein vorbereitetes SAX-Power-Dashboard anlegen
 - alle Funktionen vollständig lokal im eigenen Netzwerk nutzen
 
@@ -352,6 +355,61 @@ Zeitlich identische Fenster sind zulässig, wenn sie ausschließlich in
 verschiedenen Monaten aktiv sind. Für Automationen können Start und Ende mit
 den Aktionen `sax_power.set_timed_charge_window` und
 `sax_power.set_grid_serving_window` gemeinsam gesetzt werden.
+
+## Tarifmodell für die Wirtschaftlichkeit
+
+Damit die Integration bewerten kann, was eine Kilowattstunde aus dem Netz
+tatsächlich kostet, lässt sich unter **Einstellungen → Geräte & Dienste →
+SAX Power Home → Konfigurieren** ein Tarifmodell hinterlegen. Die
+Konfiguration ist vollständig optional: Solange **Deaktiviert** eingestellt
+ist, arbeitet die Integration exakt wie bisher. Bestehende Installationen
+werden nicht automatisch umgestellt.
+
+| Tarifmodell | Bedeutung |
+| --- | --- |
+| Deaktiviert | Keine Wirtschaftlichkeitsauswertung (Vorgabe) |
+| Festpreis | Ein ganztägig konstanter Arbeitspreis |
+| Tageszeitabhängig | Ein Grundpreis und bis zu acht abweichende Zeitfenster |
+| Dynamisch | Der aktuelle Preis aus dem bereits ausgewählten Strompreis-Sensor |
+
+Bei jedem aktivierten Tarif ist zusätzlich die **Einspeisevergütung**
+erforderlich. Sie ist der entgangene Erlös und damit der Beschaffungspreis
+jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt – PV-Strom
+gilt in dieser Rechnung nie als kostenlos.
+
+Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh. Monatlicher
+Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und
+sonstige Fixkosten gehören ausdrücklich nicht dazu.
+
+### Tageszeitabhängige Zeitfenster
+
+- Ein Zeitfenster beginnt einschließlich seiner Startzeit und endet
+  ausschließlich seiner Endzeit.
+- Start und Ende dürfen nicht gleich sein; das ergibt kein Zeitfenster und
+  bedeutet auch nicht „ganzer Tag“.
+- Ein Zeitfenster darf über Mitternacht gehen.
+- Zwei Zeitfenster dürfen sich nicht überschneiden. Angrenzende Grenzen
+  (Ende des einen = Beginn des nächsten) sind erlaubt.
+- Außerhalb aller Zeitfenster gilt der Grundpreis.
+- Maßgeblich ist die in Home Assistant eingestellte Zeitzone. In der Nacht
+  der Sommerzeitumstellung gilt die Ortszeit: die im Frühjahr übersprungene
+  Stunde tritt nicht auf, die im Herbst doppelte Stunde wird beide Male
+  gleich bewertet.
+- Jede der acht Gruppen wird entweder vollständig ausgefüllt oder bleibt
+  ganz leer.
+
+Der dynamische Tarif nutzt bewusst denselben Strompreis-Sensor samt dessen
+Attribut- und Einheiteneinstellung wie das preisoptimierte Laden – es gibt
+keine zweite Preisquelle. Ohne ausgewählten Sensor lässt sich dieses
+Tarifmodell nicht speichern. Liefert der Sensor keinen brauchbaren Wert
+(unbekannt, nicht verfügbar, keine Zahl, fremde Einheit oder eine
+Preisvorschau, die den aktuellen Zeitpunkt nicht abdeckt), gilt der Preis als
+unbekannt; er wird nie durch 0 EUR/kWh ersetzt. Der Grund steht im
+Diagnose-Download.
+
+Änderungen am Tarifmodell wirken sofort und ohne Neustart der Integration –
+allerdings nur für zukünftige Messintervalle. Bereits erfasste Geldbeträge
+werden nie rückwirkend neu bewertet.
 
 ## Energy-Dashboard
 

@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 from homeassistant.helpers.device_registry import format_mac
@@ -21,10 +22,18 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
+from .application.economics import parse_price, parse_time
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
     CONF_CREATE_DASHBOARD,
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+    CONF_ECONOMICS_WINDOW_END,
+    CONF_ECONOMICS_WINDOW_PRICE,
+    CONF_ECONOMICS_WINDOW_START,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -47,7 +56,14 @@ from .const import (
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
     DOMAIN,
+    ECONOMICS_OPTION_KEYS,
+    ECONOMICS_PRICE_DECIMALS,
+    ECONOMICS_TOU_WINDOW_KEYS,
+    MAX_ECONOMICS_FEED_IN_PRICE,
+    MAX_ECONOMICS_IMPORT_PRICE,
     MAX_PV_FORECAST_FACTOR,
+    MIN_ECONOMICS_FEED_IN_PRICE,
+    MIN_ECONOMICS_IMPORT_PRICE,
     MIN_PV_FORECAST_FACTOR,
     PRICE_UNITS,
     READ_BLOCK_EXT_LOW1_COUNT,
@@ -55,6 +71,14 @@ from .const import (
     REG_SOC,
 )
 from .domain.sunspec import SunSpecDecodeError, decode_identity
+from .domain.tariff import (
+    DailyPriceWindow,
+    TariffType,
+    TariffWindowError,
+    TariffWindowIssue,
+    find_overlapping_window,
+    validate_window_fields,
+)
 from .sensor import SENSOR_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
@@ -477,8 +501,114 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
             vol.Coerce(int),
             vol.Range(min=MIN_PV_FORECAST_FACTOR, max=MAX_PV_FORECAST_FACTOR),
         ),
+        vol.Required(
+            CONF_ECONOMICS_TARIFF_TYPE, default=TariffType.DISABLED.value
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[tariff_type.value for tariff_type in TariffType],
+                translation_key="economics_tariff_type",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
     }
 )
+
+
+# --------------------------------------------------------------------------
+# Wirtschaftlichkeitsauswertung (siehe anforderung.yaml,
+# REQ-ECONOMICS-TARIFFS): Der Tariftyp wird bereits auf der ersten
+# Options-Seite gewählt, die tarifspezifischen Preise stehen anschließend in
+# einem eigenen Schritt - so sieht der Anwender nie Felder, die für seinen
+# Tarif keine Bedeutung haben, und ein deaktivierter Tarif fragt gar keine
+# Preise ab.
+# --------------------------------------------------------------------------
+
+
+def _round_to_price_step(value: float) -> float:
+    """Eingabe auf die Schrittweite ECONOMICS_PRICE_STEP festlegen.
+
+    Der NumberSelector kann sie nicht selbst erzwingen (er lässt als
+    kleinste Schrittweite 0,001 zu); ohne diese Rundung landeten
+    Fließkomma-Artefakte einer freien Eingabe dauerhaft in entry.options.
+    """
+    return round(float(value), ECONOMICS_PRICE_DECIMALS)
+
+
+def _price_selector(minimum: float, maximum: float) -> vol.All:
+    """Eingabefeld für einen Brutto-Arbeitspreis in EUR/kWh."""
+    return vol.All(
+        selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=minimum,
+                max=maximum,
+                step="any",
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="EUR/kWh",
+            )
+        ),
+        _round_to_price_step,
+    )
+
+
+_FEED_IN_FIELD = {
+    vol.Required(CONF_ECONOMICS_FEED_IN_PRICE): _price_selector(
+        MIN_ECONOMICS_FEED_IN_PRICE, MAX_ECONOMICS_FEED_IN_PRICE
+    ),
+}
+
+STEP_ECONOMICS_FIXED_SCHEMA = vol.Schema(
+    {
+        **_FEED_IN_FIELD,
+        vol.Required(CONF_ECONOMICS_FIXED_IMPORT_PRICE): _price_selector(
+            MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
+        ),
+    }
+)
+
+STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD))
+
+# Jede der acht Zeitfenstergruppen ist eine eigene, eingeklappte Section:
+# ohne die Gruppierung stünden 24 gleich aussehende Einzelfelder
+# untereinander, und die Zuordnung Start/Ende/Preis wäre nicht mehr
+# erkennbar. Alle Felder einer Gruppe sind optional - eine Gruppe ist
+# entweder vollständig leer oder vollständig befüllt, geprüft in
+# _validate_windows.
+STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
+    {
+        **_FEED_IN_FIELD,
+        vol.Required(CONF_ECONOMICS_TOU_BASE_PRICE): _price_selector(
+            MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
+        ),
+        **{
+            vol.Required(key): section(
+                vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_ECONOMICS_WINDOW_START
+                        ): selector.TimeSelector(),
+                        vol.Optional(
+                            CONF_ECONOMICS_WINDOW_END
+                        ): selector.TimeSelector(),
+                        vol.Optional(CONF_ECONOMICS_WINDOW_PRICE): _price_selector(
+                            MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
+                        ),
+                    }
+                ),
+                {"collapsed": True},
+            )
+            for key in ECONOMICS_TOU_WINDOW_KEYS
+        },
+    }
+)
+
+# Übersetzungsschlüssel der Zeitfensterfehler (options.error.* in
+# strings.json). Der Fehler wird an "base" gemeldet: Home Assistant kann
+# einen Feldfehler keiner Section zuordnen.
+_WINDOW_ERROR_KEYS = {
+    TariffWindowError.INCOMPLETE: "economics_tou_window_incomplete",
+    TariffWindowError.ZERO_LENGTH: "economics_tou_window_zero_length",
+    TariffWindowError.OVERLAP: "economics_tou_window_overlap",
+}
 
 
 class SaxPowerOptionsFlow(OptionsFlow):
@@ -497,12 +627,135 @@ class SaxPowerOptionsFlow(OptionsFlow):
     select.SaxPowerPriceStrategySelect.
     """
 
+    #: Auf der ersten Seite abgeschickte Werte, bis der tarifspezifische
+    #: Folgeschritt sie vervollständigt (siehe async_step_init).
+    _base_options: dict[str, Any]
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
+            if tariff_type is TariffType.DYNAMIC and not user_input.get(
+                CONF_PRICE_SENSOR
+            ):
+                # Der dynamische Tarif hat bewusst keine eigene
+                # Sensor-Option: Wirtschaftlichkeit und Ladeplanung müssen
+                # denselben Preis sehen (REQ-ECONOMICS-TARIFFS). Ohne
+                # ausgewählten Sensor gäbe es also gar keine Preisquelle.
+                errors[CONF_PRICE_SENSOR] = "economics_price_sensor_required"
+            else:
+                self._base_options = {
+                    key: value
+                    for key, value in user_input.items()
+                    if key not in ECONOMICS_OPTION_KEYS
+                }
+                self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
+                return await self._async_step_for_tariff(tariff_type)
+
         schema = self.add_suggested_values_to_schema(
             STEP_OPTIONS_SCHEMA, dict(self.config_entry.options)
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(
+            step_id="init", data_schema=schema, errors=errors or None
+        )
+
+    async def _async_step_for_tariff(self, tariff_type: TariffType) -> ConfigFlowResult:
+        """Nach der Tarifart verzweigen.
+
+        Ein deaktivierter Tarif braucht keine Einspeisevergütung und wird
+        deshalb sofort gespeichert - inklusive Wegräumen aller
+        tarifspezifischen Altwerte.
+        """
+        if tariff_type is TariffType.DISABLED:
+            return self.async_create_entry(title="", data=self._base_options)
+        if tariff_type is TariffType.FIXED:
+            return await self.async_step_economics_fixed()
+        if tariff_type is TariffType.TIME_OF_USE:
+            return await self.async_step_economics_time_of_use()
+        return await self.async_step_economics_dynamic()
+
+    async def async_step_economics_fixed(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Festpreistarif: ein ganztägig konstanter Arbeitspreis."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title="", data={**self._base_options, **user_input}
+            )
+        return self.async_show_form(
+            step_id="economics_fixed",
+            data_schema=self._suggested(STEP_ECONOMICS_FIXED_SCHEMA),
+        )
+
+    async def async_step_economics_dynamic(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Dynamischer Tarif: Preis aus dem bereits gewählten Preis-Sensor."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title="", data={**self._base_options, **user_input}
+            )
+        return self.async_show_form(
+            step_id="economics_dynamic",
+            data_schema=self._suggested(STEP_ECONOMICS_DYNAMIC_SCHEMA),
+        )
+
+    async def async_step_economics_time_of_use(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Tageszeitabhängiger Tarif: Grundpreis + bis zu acht Fenster."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            issue = _validate_windows(user_input)
+            if issue is None:
+                return self.async_create_entry(
+                    title="", data={**self._base_options, **user_input}
+                )
+            errors["base"] = _WINDOW_ERROR_KEYS[issue.error]
+
+        return self.async_show_form(
+            step_id="economics_time_of_use",
+            data_schema=self._suggested(STEP_ECONOMICS_TOU_SCHEMA, user_input),
+            errors=errors or None,
+        )
+
+    def _suggested(
+        self, schema: vol.Schema, user_input: dict[str, Any] | None = None
+    ) -> vol.Schema:
+        """Formular mit den zuletzt eingegebenen bzw. gespeicherten Werten.
+
+        Nach einem Validierungsfehler gewinnt die letzte Eingabe: sonst
+        müsste der Anwender acht Zeitfenster wegen eines einzigen falschen
+        Feldes komplett neu ausfüllen.
+        """
+        return self.add_suggested_values_to_schema(
+            schema, {**self.config_entry.options, **(user_input or {})}
+        )
+
+
+def _validate_windows(user_input: dict[str, Any]) -> TariffWindowIssue | None:
+    """Erste Regelverletzung der acht Zeitfenstergruppen, oder None.
+
+    Geprüft werden die Regeln aus REQ-ECONOMICS-TARIFFS: vollständig leer
+    oder vollständig befüllt, `start == end` ist ungültig (und bedeutet
+    ausdrücklich nicht "ganzer Tag"), und zwei Fenster dürfen sich auf der
+    zyklischen 24-Stunden-Zeitleiste nicht überschneiden - angrenzende
+    Grenzen dagegen schon, weil die Intervalle halboffen sind.
+    """
+    windows: list[tuple[int, DailyPriceWindow]] = []
+    for index, key in enumerate(ECONOMICS_TOU_WINDOW_KEYS, start=1):
+        group = user_input.get(key) or {}
+        start = parse_time(group.get(CONF_ECONOMICS_WINDOW_START))
+        end = parse_time(group.get(CONF_ECONOMICS_WINDOW_END))
+        price = parse_price(group.get(CONF_ECONOMICS_WINDOW_PRICE))
+        issue = validate_window_fields(index, start, end, price)
+        if issue is not None:
+            return issue
+        if start is None or end is None or price is None:
+            continue
+        windows.append(
+            (index, DailyPriceWindow(start=start, end=end, price_eur_kwh=price))
+        )
+    return find_overlapping_window(windows)

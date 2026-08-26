@@ -1149,6 +1149,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "economics_amortization_progress",
                 "economics_remaining_to_payback",
                 "economics_result_today",
+                "economics_result_today_last_reset",
                 "economics_average_daily_result_30d",
                 "economics_projected_annual_result",
                 "economics_estimated_payback_date",
@@ -1201,6 +1202,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         data["economics_result_today"] = (
             None if current_day_result is None else round(current_day_result, 4)
+        )
+        # Ein zyklisch zurückgesetzter total-Sensor muss den Zeitpunkt
+        # seines Resets mitliefern, sonst verbucht die Langzeitstatistik
+        # den Sprung auf 0 um Mitternacht als negativen Zuwachs in Höhe des
+        # Tagesergebnisses (Issue #133). Der Zeitpunkt ist der Beginn des
+        # laufenden Tages in derselben lokalen Zeitzone, aus der auch die
+        # Tageswechsel-Erkennung ihr Datum bezieht (_advance_economics_day).
+        data["economics_result_today_last_reset"] = (
+            None
+            if self._economics_current_day is None
+            else dt_util.start_of_local_day(self._economics_current_day)
         )
 
         # Unmaskierter Restbetrag ausschließlich für die (tarifpausen-

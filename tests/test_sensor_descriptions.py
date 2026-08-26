@@ -8,7 +8,7 @@ ohne dass für jeden einzelnen Sensor ein eigener Test geschrieben werden muss.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -32,6 +32,7 @@ from custom_components.sax_power.domain.sunspec import (
 from custom_components.sax_power.sensor import (
     SENSOR_DESCRIPTIONS,
     SaxPowerForecastSensor,
+    SaxPowerSensor,
 )
 
 COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "sax_power"
@@ -227,6 +228,58 @@ def test_grid_serving_forecast_name_tracks_current_date_without_device_prefix(
 
     assert entity.has_entity_name is False
     assert entity.device_info is None
+
+
+def test_only_cyclically_reset_totals_declare_a_last_reset() -> None:
+    """Home Assistant wertet last_reset ausschließlich für state_class
+    total aus - an einem anderen Sensor wäre die Funktion wirkungslos und
+    damit irreführend (Issue #133)."""
+    for description in SENSOR_DESCRIPTIONS:
+        if description.last_reset_fn is not None:
+            assert description.state_class == SensorStateClass.TOTAL, description.key
+
+
+def test_result_today_reports_the_daily_reset_timestamp() -> None:
+    """Der Tagessensor reicht den vom Coordinator veröffentlichten
+    Reset-Zeitpunkt als last_reset durch; ein Sensor ohne last_reset_fn
+    liefert unverändert None (Issue #133)."""
+    midnight = datetime(2026, 3, 11, tzinfo=UTC)
+    coordinator = MagicMock()
+    coordinator.data = {
+        "economics_result_today": 2.5,
+        "economics_result_today_last_reset": midnight,
+    }
+
+    entity = SaxPowerSensor(
+        coordinator, "test_entry_id", _description_by_key("economics_result_today")
+    )
+    assert entity.last_reset == midnight
+
+    other = SaxPowerSensor(
+        coordinator, "test_entry_id", _description_by_key("economics_roi")
+    )
+    assert other.last_reset is None
+
+
+def test_result_today_last_reset_ignores_a_missing_or_foreign_value() -> None:
+    """Solange der Coordinator noch keinen Tag begonnen hat (oder unter dem
+    Schlüssel etwas anderes als ein datetime steht), darf kein Fremdtyp als
+    last_reset in die Langzeitstatistik geraten."""
+    description = _description_by_key("economics_result_today")
+    assert description.last_reset_fn is not None
+    assert description.last_reset_fn({}) is None
+    assert (
+        description.last_reset_fn({"economics_result_today_last_reset": None}) is None
+    )
+    assert (
+        description.last_reset_fn({"economics_result_today_last_reset": "2026-03-11"})
+        is None
+    )
+
+    coordinator = MagicMock()
+    coordinator.data = None
+    entity = SaxPowerSensor(coordinator, "test_entry_id", description)
+    assert entity.last_reset is None
 
 
 def test_next_cell_calibration_is_a_diagnostic_timestamp() -> None:

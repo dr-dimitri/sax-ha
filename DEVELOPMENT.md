@@ -389,6 +389,15 @@ und einen bereits intern erreichten, weiterhin persistierten
 `payback_achieved_at`, der erst wieder veröffentlicht wird, sobald erneut
 Investitionskosten hinterlegt sind.
 
+`economics_result_today` ist der einzige zyklisch zurückgesetzte Zähler der
+Integration und veröffentlicht deshalb zusätzlich
+`economics_result_today_last_reset` (Beginn des laufenden lokalen
+Kalendertages). Der Sensor reicht ihn über das optionale
+`last_reset_fn`-Feld von `SaxPowerSensorEntityDescription` als `last_reset`
+durch - ohne diesen Zeitpunkt läse die Langzeitstatistik den Sprung auf 0
+um Mitternacht als negativen Zuwachs in Höhe des Tagesergebnisses
+(Issue #133).
+
 Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 2 erweitert
 (statt einer Hauptversion, aus demselben Grund wie beim
 `STORAGE_VERSION`-Kommentar in `energy_store.py`). Drei unabhängige Bündel:

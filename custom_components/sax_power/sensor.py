@@ -55,10 +55,17 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
     Sensoren, deren Zustand allein die Nachvollziehbarkeit nicht hergibt -
     aktuell der Statussensor des preisoptimierten Ladens, der damit die
     zugrundeliegenden Preise und die geplanten Ladefenster mitliefert.
+
+    `last_reset_fn` ist optional und nur für zyklisch zurückgesetzte
+    `state_class: total`-Sensoren gedacht: ohne diesen Zeitpunkt deutet die
+    Langzeitstatistik den Sprung auf 0 nicht als Reset, sondern als
+    negativen Zuwachs in Höhe des bisherigen Werts (siehe
+    anforderung.yaml, REQ-ECONOMICS-AMORTIZATION, economics_result_today).
     """
 
     value_fn: Callable[[dict[str, Any]], StateType | date | datetime]
     attributes_fn: Callable[[SaxPowerCoordinator], dict[str, Any]] | None = None
+    last_reset_fn: Callable[[dict[str, Any]], datetime | None] | None = None
 
 
 def _direct(key: str) -> Callable[[dict[str, Any]], StateType]:
@@ -112,6 +119,22 @@ def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, 
     if coordinator.data is None:
         return {}
     return coordinator.data.get("economics_status_attributes") or {}
+
+
+def _last_reset(key: str) -> Callable[[dict[str, Any]], datetime | None]:
+    """Reset-Zeitpunkt eines zyklisch zurückgesetzten Zählers.
+
+    Der Coordinator veröffentlicht ihn bereits als zeitzonenbehaftetes
+    datetime; hier wird nur noch der Typ abgesichert, damit ein aus einem
+    unerwarteten Zustand stammender Fremdtyp nicht als last_reset in die
+    Langzeitstatistik gerät.
+    """
+
+    def last_reset_fn(data: dict[str, Any]) -> datetime | None:
+        value = data.get(key)
+        return value if isinstance(value, datetime) else None
+
+    return last_reset_fn
 
 
 def _bool_text(
@@ -834,6 +857,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
         value_fn=_direct("economics_result_today"),
+        last_reset_fn=_last_reset("economics_result_today_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_average_daily_result_30d",
@@ -926,6 +950,14 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         if (attributes_fn := self.entity_description.attributes_fn) is None:
             return None
         return attributes_fn(self.coordinator)
+
+    @property
+    def last_reset(self) -> datetime | None:
+        if (last_reset_fn := self.entity_description.last_reset_fn) is None:
+            return None
+        if self.coordinator.data is None:
+            return None
+        return last_reset_fn(self.coordinator.data)
 
 
 class SaxPowerForecastSensor(SaxPowerSensor):

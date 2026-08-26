@@ -5509,6 +5509,61 @@ def test_roi_progress_and_remaining_are_computed_from_the_operating_result(
     assert data["economics_result_today"] == pytest.approx(250.0)
 
 
+def test_result_today_publishes_the_timestamp_of_its_daily_reset(hass) -> None:
+    """economics_result_today ist ein zyklisch zurückgesetzter
+    total-Sensor: ohne last_reset verbucht die Langzeitstatistik den
+    Sprung auf 0 um Mitternacht als negativen Zuwachs in Höhe des
+    Tagesergebnisses (Issue #133)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=2.5),
+    )
+
+    assert data["economics_result_today"] == pytest.approx(2.5)
+    assert data["economics_result_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 10)
+    )
+
+    # Mitternacht: der Tageswert beginnt wieder bei 0 - der Reset-Zeitpunkt
+    # zieht mit und macht den Sprung als Reset erkennbar.
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 0, 10),
+        delta=EconomicsDelta(),
+    )
+
+    assert data["economics_result_today"] == pytest.approx(0.0)
+    assert data["economics_result_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 11)
+    )
+
+
+def test_result_today_last_reset_is_none_while_the_sensor_has_no_value(hass) -> None:
+    """Ohne Investitionskosten (Sensor None) und vor dem ersten Tag gibt es
+    auch keinen Reset-Zeitpunkt - ein last_reset ohne Zustand hätte keine
+    Aussage."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=2.5),
+    )
+
+    assert data["economics_result_today"] is None
+    assert data["economics_result_today_last_reset"] is None
+
+
 def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None:
     """Ohne Investitionskosten müssen alle sieben Sensoren dieser
     Anforderung None liefern - nicht nur ROI/Fortschritt/Restbetrag,

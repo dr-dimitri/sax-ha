@@ -316,7 +316,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): eigener
         # Store, eigenes Bootstrap-Fenster - siehe async_load_economics_state
         # und _bootstrap_economics_if_ready weiter unten.
-        self._economics_store = EconomicsStateStore(hass, entry_id)
+        self._economics_store = EconomicsStateStore(
+            hass, entry_id, on_persist_failed=self._on_economics_persist_failed
+        )
         self._economics_store_loaded = False
         # Bleibt bis zu einem erfolgreichen Neuladen des Config Entry
         # gesetzt, wenn der vorhandene Store beim Start nicht gelesen
@@ -1441,19 +1443,40 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not (self._economics_store_loaded and state.initialized):
             return
         if not self._economics_store.async_delay_save(state):
-            # _accept() hat den Snapshot als korrupt/regressiv abgelehnt
-            # (siehe infrastructure/economics_store.py) - ab hier ist der
-            # gespeicherte Zustand nicht mehr vertrauenswürdig. Status
-            # storage_error, keine weitere Akkumulation, bis ein Neuladen
-            # des Config Entry eine frische Instanz erzeugt (REQ-ECONOMICS-
-            # OBSERVABILITY) - siehe auch async_load_economics_state für den
-            # spiegelbildlichen Fall eines Ladefehlers.
+            # _accept() hat den Snapshot bereits synchron als korrupt/
+            # regressiv abgelehnt (siehe infrastructure/economics_store.py)
+            # - ab hier ist der gespeicherte Zustand nicht mehr
+            # vertrauenswürdig. Ein erst NACH der Verzögerung auftretender
+            # echter Schreibfehler kann an dieser Stelle noch nicht bekannt
+            # sein (async_delay_save schreibt asynchron) und wird
+            # stattdessen über _on_economics_persist_failed gemeldet.
+            # Status storage_error, keine weitere Akkumulation, bis ein
+            # Neuladen des Config Entry eine frische Instanz erzeugt
+            # (REQ-ECONOMICS-OBSERVABILITY) - siehe auch
+            # async_load_economics_state für den spiegelbildlichen Fall
+            # eines Ladefehlers.
             _LOGGER.warning(
                 "Wirtschaftlichkeitszustand beim Speichern abgelehnt - "
                 "Bilanz wird eingefroren, bis der Config Entry neu geladen "
                 "wird"
             )
             self._economics_store_write_blocked = True
+
+    def _on_economics_persist_failed(self) -> None:
+        """Callback aus EconomicsStateStore (siehe deren Klassen-Docstring):
+        meldet einen erst nach der Verzögerung von async_delay_save
+        erkannten, tatsächlichen Schreibfehler (Lese-Rückprobe gegen die
+        Datei) - der synchrone Rückgabewert von async_delay_save deckt nur
+        die sofortige _accept()-Ablehnung ab, nicht das asynchrone
+        Schreibergebnis selbst."""
+        if self._economics_store_write_blocked:
+            return
+        _LOGGER.warning(
+            "Wirtschaftlichkeitszustand konnte im Hintergrund nicht "
+            "gespeichert werden - Bilanz wird eingefroren, bis der Config "
+            "Entry neu geladen wird"
+        )
+        self._economics_store_write_blocked = True
 
     async def _async_flush_economics_state(self) -> None:
         if self._economics_store_write_blocked:

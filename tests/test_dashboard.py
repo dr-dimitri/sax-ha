@@ -17,7 +17,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
 from custom_components.sax_power.const import (
-    CONF_ECONOMICS_INVESTMENT_COST,
     DATA_COORDINATOR,
     DOMAIN,
     SERVICE_CREATE_DASHBOARD,
@@ -685,47 +684,46 @@ async def test_economics_view_operating_balance_card(hass) -> None:
     ]
 
 
-_INVESTMENT_OPTIONS = {CONF_ECONOMICS_INVESTMENT_COST: 1000.0}
+def _investment_card(view: dict[str, Any]) -> dict[str, Any]:
+    """Karte 4 ("Investition und Amortisation") ist zur Laufzeit über eine
+    Core-"conditional"-Karte an den economics_roi-Sensorzustand gekoppelt
+    (REQ-ECONOMICS-DASHBOARD) statt an zum Build-Zeitpunkt gelesene
+    Config-Entry-Options: reagiert dadurch automatisch auf eine spätere
+    Options-Änderung, ohne dass das gespeicherte Dashboard neu gebaut
+    werden muss (__init__.async_update_options aktualisiert nur den
+    Coordinator, nie das Dashboard)."""
+    return next(card for card in view["cards"] if card["type"] == "conditional")
 
 
 def _investment_stack(view: dict[str, Any]) -> dict[str, Any]:
-    return next(card for card in view["cards"] if card["type"] == "vertical-stack")
+    return _investment_card(view)["card"]
 
 
-async def test_economics_view_investment_block_omitted_without_investment_cost(
+async def test_economics_view_investment_card_is_gated_by_roi_entity_state(
     hass,
 ) -> None:
-    """REQ-ECONOMICS-DASHBOARD: ROI/Fortschritt/... sind anders als die
-    übrigen Karten IMMER registriert - ohne konfigurierte
-    Investitionskosten muss die ganze Karte trotzdem fehlen, statt mit
-    lauter "unbekannt"-Zeilen zu erscheinen."""
-    _register(hass, "sensor", "economics_roi")
+    """Die sieben ROI-/Amortisationssensoren sind anders als die übrigen
+    Karten IMMER registriert (siehe REQ-ECONOMICS-AMORTIZATION) -
+    economics_roi liefert ohne konfigurierte Investitionskosten `None`
+    (Sensorzustand "unknown"). Die "conditional"-Karte blendet die ganze
+    Karte deshalb zur Laufzeit anhand genau dieses Zustands aus/ein."""
+    roi = _register(hass, "sensor", "economics_roi")
     _register(hass, "sensor", "economics_amortization_progress")
     _register(hass, "sensor", "economics_remaining_to_payback")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _economics_view(config)
-    assert not any(card["type"] == "vertical-stack" for card in view["cards"])
-    assert not any(card["type"] == "gauge" for card in view["cards"])
-
-
-async def test_economics_view_investment_block_shown_with_investment_cost(
-    hass,
-) -> None:
-    _register(hass, "sensor", "economics_roi")
-    _register(hass, "sensor", "economics_amortization_progress")
-
-    config = await async_build_dashboard_config(hass, ENTRY_ID, _INVESTMENT_OPTIONS)
-
-    view = _economics_view(config)
-    assert any(card["type"] == "vertical-stack" for card in view["cards"])
+    card = _investment_card(view)
+    assert card["conditions"] == [{"entity": roi, "state_not": "unknown"}]
+    assert card["card"]["type"] == "vertical-stack"
 
 
 async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
+    _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
 
-    config = await async_build_dashboard_config(hass, ENTRY_ID, _INVESTMENT_OPTIONS)
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _economics_view(config)
     stack = _investment_stack(view)
@@ -750,7 +748,7 @@ async def test_economics_view_investment_card_entities_and_order(hass) -> None:
     annual = _register(hass, "sensor", "economics_projected_annual_result")
     payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
 
-    config = await async_build_dashboard_config(hass, ENTRY_ID, _INVESTMENT_OPTIONS)
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _economics_view(config)
     stack = _investment_stack(view)

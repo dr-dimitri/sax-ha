@@ -437,15 +437,36 @@ Freitext-Grund des zuletzt ausgeführten `restart_economics_accounting`) -
 rein diagnostisch, ohne Einfluss auf eine Berechnung, siehe unten.
 
 Ein von `EconomicsStateStore._accept`/`_valid_snapshot` abgelehnter oder ein
-technisch fehlgeschlagener Schreibversuch (verzögert über
-`async_delay_save` wie beim finalen `async_save` beim Entladen) setzt
-`SaxPowerCoordinator._economics_store_write_blocked` - die Bilanz friert
-daraufhin ein (Status `storage_error`) statt unbemerkt weiter zu
-akkumulieren, bis der Config Entry neu geladen wird. Home Assistants
-`Store` verschluckt echte Festplattenfehler beim verzögerten Speichern
-intern (siehe `homeassistant.helpers.storage.Store`) - beobachtbar sind
-daher ausschließlich Validierungsabweisungen sowie Fehler, die bis zum
-finalen `async_save`-Aufruf durchdringen.
+technisch fehlgeschlagener Schreibversuch (verzögert wie beim finalen
+Speichern beim Entladen) setzt `SaxPowerCoordinator.
+_economics_store_write_blocked` - die Bilanz friert daraufhin ein (Status
+`storage_error`) statt unbemerkt weiter zu akkumulieren, bis der Config
+Entry neu geladen wird.
+
+Home Assistants `Store` fängt eine echte `WriteError`/`SerializationError`
+beim Schreiben intern ab und kehrt regulär zurück
+(`Store._async_handle_write_data`), ohne sie an den Aufrufer
+weiterzureichen - weder `Store.async_save()` noch der über
+`Store.async_delay_save()` verzögerte Pfad melden einen solchen Fehler
+zurück, ein synchron abgelehnter Snapshot allein deckt diesen Fall also
+nicht ab. `EconomicsStateStore` verzichtet deshalb bewusst auf
+`Store.async_delay_save()` und verwaltet die Verzögerung selbst
+(`async_call_later`, mit einem `EVENT_HOMEASSISTANT_FINAL_WRITE`-
+Sicherheitsnetz analog zu `Store._async_ensure_final_write_listener`, damit
+weder ein letzter Schreibvorgang bei einem Home-Assistant-Shutdown verloren
+geht noch ein über das Programmende hinaus offener Timer bestehen bleibt):
+`_write_and_verify` liest nach jedem Schreibversuch den soeben
+geschriebenen Schlüssel über die öffentliche `Store.async_load()`-API
+zurück und vergleicht ihn mit den beabsichtigten Daten - eine schweigend
+verschluckte `WriteError` lässt die Datei unverändert und wird dadurch als
+Abweichung sichtbar. Beim sofortigen Pfad (`async_save`/`async_reset`)
+fließt das Ergebnis direkt in den Rückgabewert ein (ein so erkannter
+stiller Fehlschlag lässt `restart_economics_accounting` deshalb korrekt
+mit `HomeAssistantError` fehlschlagen, statt fälschlich Erfolg zu melden
+und den bisherigen Zustand unverändert zu lassen); beim zeitversetzten
+Pfad, der keinen wartenden Aufrufer mehr hat, über den optionalen
+`on_persist_failed`-Callback
+(`SaxPowerCoordinator._on_economics_persist_failed`).
 
 ### Dashboard-Tab "Wirtschaftlichkeit" (REQ-ECONOMICS-DASHBOARD)
 
@@ -483,12 +504,19 @@ keine neue Berechnung ein:
 - Die sieben ROI-/Amortisationssensoren sind anders als z. B. die
   netzdienlichen Entities IMMER registriert (statische
   `SENSOR_DESCRIPTIONS`), unabhängig davon, ob Investitionskosten
-  konfiguriert sind. `async_build_dashboard_config` bekommt deshalb
-  zusätzlich die Config-Entry-Options übergeben und lässt die ganze Karte
-  "Investition und Amortisation" explizit über
-  `investment_cost_eur_from_options(options)` weg, solange keine
-  Investitionskosten konfiguriert sind - dieselbe Bedingung wie bei den
-  Sensoren selbst, statt sie mit lauter "unbekannt"-Werten anzuzeigen.
+  konfiguriert sind; `economics_roi` liefert in diesem Fall `None`
+  (Sensorzustand "unknown"). Die ganze vertical-stack "Investition und
+  Amortisation" ist deshalb in eine Core-`type: conditional`-Karte
+  eingebettet (`conditions: [{entity: <economics_roi-Entity-ID>,
+  state_not: "unknown"}]`) statt build-time über die Config-Entry-Options
+  ausgelassen zu werden: `async_build_dashboard_config` braucht dafür
+  keine Options mehr, nur `hass`/`entry_id`. Eine Options-Prüfung beim
+  Dashboardbau wäre nach einer späteren Options-Änderung veraltet, da
+  `__init__.async_update_options` das gespeicherte Dashboard nie neu baut
+  (nur den Coordinator aktualisiert, siehe unten) - die "conditional"-
+  Karte blendet sich dagegen automatisch ein/aus, sobald der Coordinator
+  nach einer Options-Änderung neu rechnet und der Sensorzustand wechselt,
+  ganz ohne Dashboard-Neubau.
 
 Alles andere folgt exakt dem bestehenden Muster der vier älteren Tabs:
 `_entities_card`/`_gauge_card` lassen fehlende Entities/Karten still aus,

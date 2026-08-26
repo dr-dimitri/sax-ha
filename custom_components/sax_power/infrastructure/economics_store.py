@@ -26,11 +26,15 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -132,9 +136,33 @@ class EconomicsState:
 
 
 class EconomicsStateStore:
-    """Persist the operative money balance per config entry."""
+    """Persist the operative money balance per config entry.
 
-    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+    Home Assistants `Store` fängt eine echte `WriteError`/
+    `SerializationError` beim Schreiben intern ab und protokolliert sie
+    nur (`Store._async_handle_write_data`) - weder `Store.async_save()`
+    noch der über `Store.async_delay_save()` verzögerte Schreibpfad melden
+    einen solchen Fehler an den Aufrufer zurück. Damit ein echter
+    Festplattenfehler trotzdem beobachtbar bleibt, verzichtet diese Klasse
+    bewusst auf `Store.async_delay_save()` und verwaltet die Verzögerung
+    selbst (`async_call_later`): Nach jedem Schreibversuch liest
+    `_write_and_verify` den soeben geschriebenen Schlüssel über die
+    öffentliche `Store.async_load()`-API zurück und vergleicht ihn mit den
+    beabsichtigten Daten - eine schweigend verschluckte `WriteError` lässt
+    die Datei unverändert und wird dadurch als Abweichung sichtbar. Für
+    den zeitversetzten Pfad gibt es dafür keinen synchronen Rückgabewert
+    mehr (der eigentliche Schreibvorgang findet erst nach der Verzögerung
+    statt) - ein tatsächlicher Fehlschlag wird stattdessen über den
+    optionalen `on_persist_failed`-Callback gemeldet.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry_id: str,
+        on_persist_failed: Callable[[], None] | None = None,
+    ) -> None:
+        self._hass = hass
         self._store: Store[dict[str, Any]] = Store(
             hass,
             STORAGE_VERSION,
@@ -143,7 +171,17 @@ class EconomicsStateStore:
         )
         self._last_persisted = EconomicsState()
         self._pending: EconomicsState | None = None
-        self._save_scheduled = False
+        self._unsub_delayed_write: CALLBACK_TYPE | None = None
+        # Sicherheitsnetz analog zu Store._async_ensure_final_write_listener:
+        # nur registriert, während ein verzögerter Schreibvorgang aussteht
+        # (siehe async_delay_save/_cancel_delayed_write) - schreibt ihn
+        # sofort, falls Home Assistant vor Ablauf der Verzögerung
+        # herunterfährt. Ohne dieses Sicherheitsnetz bliebe sowohl ein
+        # letzter Schreibvorgang verloren als auch ein über das
+        # Programmende hinaus offener Low-Level-Timer bestehen (sichtbar
+        # z. B. als "Lingering timer" in Tests).
+        self._unsub_final_write_listener: CALLBACK_TYPE | None = None
+        self._on_persist_failed = on_persist_failed
 
     async def async_load(self) -> EconomicsState | None:
         """Load the balance, rejecting invalid fields independently."""
@@ -248,24 +286,67 @@ class EconomicsStateStore:
     def async_delay_save(
         self, state: EconomicsState, delay: float = ECONOMICS_SAVE_DELAY
     ) -> bool:
-        """Coalesce frequent balance changes into one delayed write."""
+        """Coalesce frequent balance changes into one delayed write.
+
+        Der Rückgabewert deckt ausschließlich die sofortige `_accept()`-
+        Plausibilitätsprüfung ab - der eigentliche Schreibversuch (und
+        damit ein möglicher echter Fehlschlag) findet erst nach `delay`
+        Sekunden statt und wird über `on_persist_failed` gemeldet, siehe
+        Klassen-Docstring.
+        """
         if not self._accept(state):
             return False
         self._pending = state
-        if not self._save_scheduled:
-            self._save_scheduled = True
-            self._store.async_delay_save(self._consume_pending, delay)
+        if self._unsub_delayed_write is None:
+            self._unsub_delayed_write = async_call_later(
+                self._hass, delay, self._async_delayed_write
+            )
+            self._async_ensure_final_write_listener()
         return True
+
+    @callback
+    def _async_ensure_final_write_listener(self) -> None:
+        if self._unsub_final_write_listener is None:
+            self._unsub_final_write_listener = self._hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_FINAL_WRITE, self._async_handle_final_write
+            )
+
+    @callback
+    def _async_cleanup_final_write_listener(self) -> None:
+        if self._unsub_final_write_listener is not None:
+            self._unsub_final_write_listener()
+            self._unsub_final_write_listener = None
+
+    async def _async_handle_final_write(self, _event: Any) -> None:
+        """Home Assistant fährt herunter, bevor die Verzögerung abgelaufen
+        ist - denselben ausstehenden Stand sofort schreiben, statt ihn zu
+        verlieren (siehe _unsub_final_write_listener-Kommentar)."""
+        self._unsub_final_write_listener = None
+        if self._unsub_delayed_write is not None:
+            self._unsub_delayed_write()
+        await self._async_delayed_write(dt_util.utcnow())
+
+    async def _async_delayed_write(self, _now: datetime) -> None:
+        """Vom `async_call_later`-Timer (oder dem Sicherheitsnetz
+        `_async_handle_final_write`) aufgerufen - schreibt den zuletzt
+        koaleszierten Stand und meldet einen tatsächlichen Fehlschlag über
+        `_on_persist_failed`, da hier (anders als bei `async_save`/
+        `async_reset`) kein Aufrufer mehr auf einen Rückgabewert wartet."""
+        self._unsub_delayed_write = None
+        self._async_cleanup_final_write_listener()
+        state = self._pending
+        self._pending = None
+        if state is None:
+            return
+        if not await self._write_and_verify(state) and self._on_persist_failed:
+            self._on_persist_failed()
 
     async def async_save(self, state: EconomicsState) -> bool:
         """Immediately persist a final snapshot, cancelling a delayed write."""
         if not self._accept(state):
             return False
-        self._pending = None
-        self._save_scheduled = False
-        await self._store.async_save(self._serialize(state))
-        self._last_persisted = state
-        return True
+        self._cancel_delayed_write()
+        return await self._write_and_verify(state)
 
     async def async_reset(self, state: EconomicsState) -> bool:
         """Persist a deliberate restart (REQ-ECONOMICS-OBSERVABILITY,
@@ -283,19 +364,42 @@ class EconomicsStateStore:
         """
         if not self._valid_snapshot(state):
             return False
+        self._cancel_delayed_write()
+        return await self._write_and_verify(state)
+
+    def _cancel_delayed_write(self) -> None:
         self._pending = None
-        self._save_scheduled = False
-        await self._store.async_save(self._serialize(state))
+        if self._unsub_delayed_write is not None:
+            self._unsub_delayed_write()
+            self._unsub_delayed_write = None
+        self._async_cleanup_final_write_listener()
+
+    async def _write_and_verify(self, state: EconomicsState) -> bool:
+        """Persist `state` and read the key back to confirm the write
+        actually reached disk (siehe Klassen-Docstring) - der einzige über
+        die öffentliche `Store`-API beobachtbare Nachweis, da ein
+        schweigend verschluckter Schreibfehler die Datei unverändert
+        lässt: `written` weicht dann von den gerade geschriebenen Daten ab
+        (oder bleibt bei einem allerersten Schreibversuch `None`).
+        """
+        data = self._serialize(state)
+        try:
+            await self._store.async_save(data)
+            written = await self._store.async_load()
+        except (HomeAssistantError, OSError) as err:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand konnte nicht gespeichert werden: %s",
+                err,
+            )
+            return False
+        if written != data:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand nach dem Speichern nicht wie "
+                "erwartet lesbar - Schreibvorgang vermutlich fehlgeschlagen"
+            )
+            return False
         self._last_persisted = state
         return True
-
-    def _consume_pending(self) -> dict[str, Any]:
-        """Return the newest coalesced state when Home Assistant writes it."""
-        state = self._pending or self._last_persisted
-        self._pending = None
-        self._save_scheduled = False
-        self._last_persisted = state
-        return self._serialize(state)
 
     @staticmethod
     def _valid_snapshot(state: EconomicsState) -> bool:

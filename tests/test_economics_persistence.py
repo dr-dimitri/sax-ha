@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -28,6 +29,7 @@ from custom_components.sax_power.domain.economics_amortization import (
 )
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.infrastructure.economics_store import (
+    ECONOMICS_SAVE_DELAY,
     EconomicsState,
     EconomicsStateStore,
 )
@@ -66,6 +68,32 @@ def _full_state(started_at, **overrides) -> EconomicsState:
     }
     values.update(overrides)
     return EconomicsState(**values)
+
+
+def _stub_store_with_initial_data(
+    store: EconomicsStateStore, initial: dict | None = None
+) -> dict:
+    """Ersetzt Store.async_save/async_load durch ein In-Memory-Paar, das
+    sich wie ein immer erfolgreicher echter Store verhält: async_load
+    liefert stets exakt das zurück, was zuletzt über async_save
+    geschrieben wurde (oder `initial`, solange noch nichts geschrieben
+    wurde). Isoliert diese Tests bewusst von echten Festplattenzugriffen,
+    ohne dabei die Lese-Rückprobe aus
+    EconomicsStateStore._write_and_verify zu umgehen (siehe
+    test_a_silently_swallowed_write_error_is_detected_via_readback, die
+    genau diese Rückprobe gezielt fehlschlagen lässt)."""
+    current = dict(initial or {})
+
+    async def _save(data):
+        current.clear()
+        current.update(data)
+
+    async def _load():
+        return dict(current)
+
+    store._store.async_save = AsyncMock(side_effect=_save)
+    store._store.async_load = AsyncMock(side_effect=_load)
+    return current
 
 
 # --------------------------------------------------------------------------
@@ -122,7 +150,7 @@ async def test_store_rejects_a_regressive_decrease_in_a_monotonic_field(
     monoton - anders als die drei Geldsummen."""
     started_at = dt_util.utcnow()
     store = EconomicsStateStore(hass, "regressive")
-    store._store.async_save = AsyncMock()
+    _stub_store_with_initial_data(store)
     assert (
         await store.async_save(_full_state(started_at, unpriced_charge_kwh=5.0)) is True
     )
@@ -140,7 +168,7 @@ async def test_store_permits_the_inventory_gauge_to_decrease(hass) -> None:
     SOC-Minimum-Korrektur lassen ihn sinken, das ist keine Regression."""
     started_at = dt_util.utcnow()
     store = EconomicsStateStore(hass, "inventory-gauge")
-    store._store.async_save = AsyncMock()
+    _stub_store_with_initial_data(store)
     assert (
         await store.async_save(_full_state(started_at, unvalued_inventory_kwh=5.0))
         is True
@@ -157,7 +185,7 @@ async def test_store_rejects_a_changed_activation_timestamp(hass, caplog) -> Non
     first = dt_util.utcnow()
     second = first + timedelta(days=1)
     store = EconomicsStateStore(hass, "started-at-drift")
-    store._store.async_save = AsyncMock()
+    _stub_store_with_initial_data(store)
     assert await store.async_save(_full_state(first)) is True
 
     assert await store.async_save(_full_state(second)) is False
@@ -188,13 +216,13 @@ async def test_store_recovers_after_an_incomplete_bundle(hass) -> None:
     (analog zu EnergyStateStore, REQ-ENERGY-ORIGIN)."""
     old_started_at = dt_util.utcnow() - timedelta(days=1)
     store = EconomicsStateStore(hass, "recovery")
-    store._store.async_load = AsyncMock(
-        return_value={
+    _stub_store_with_initial_data(
+        store,
+        {
             **EconomicsStateStore._serialize(_full_state(old_started_at)),
             "unvalued_inventory_kwh": -1,  # macht das Bündel unvollständig
-        }
+        },
     )
-    store._store.async_save = AsyncMock()
 
     loaded = await store.async_load()
     assert loaded.initialized is False
@@ -373,7 +401,7 @@ async def test_store_rejects_a_changed_payback_achieved_at(hass, caplog) -> None
     first = started_at + timedelta(days=100)
     second = started_at + timedelta(days=150)
     store = EconomicsStateStore(hass, "payback-drift")
-    store._store.async_save = AsyncMock()
+    _stub_store_with_initial_data(store)
     assert (
         await store.async_save(_full_state(started_at, payback_achieved_at=first))
         is True
@@ -407,7 +435,7 @@ async def test_store_rejects_a_regressive_priced_amount(hass, caplog) -> None:
     kumulierte Mengen und bleiben monoton."""
     started_at = dt_util.utcnow()
     store = EconomicsStateStore(hass, "priced-regressive")
-    store._store.async_save = AsyncMock()
+    _stub_store_with_initial_data(store)
     assert (
         await store.async_save(_full_state(started_at, priced_charge_kwh=5.0)) is True
     )
@@ -469,29 +497,145 @@ async def test_store_reset_still_rejects_a_structurally_invalid_snapshot(hass) -
     store._store.async_save.assert_not_called()
 
 
-def test_store_throttles_frequent_updates_and_keeps_newest_state(hass) -> None:
+async def test_store_throttles_frequent_updates_and_keeps_newest_state(hass) -> None:
+    """Zwei rasch aufeinanderfolgende async_delay_save-Aufrufe planen nur
+    EINEN eigenen async_call_later-Timer (siehe EconomicsStateStore,
+    kein Store.async_delay_save mehr - das würde einen echten
+    Schreibfehler nicht beobachtbar machen, siehe Klassen-Docstring); nach
+    Ablauf der Verzögerung wird genau einmal geschrieben, mit dem
+    zuletzt koaleszierten Stand."""
     store = EconomicsStateStore(hass, "throttled")
-    store._store.async_delay_save = MagicMock()
+    written = _stub_store_with_initial_data(store)
     started_at = dt_util.utcnow()
 
     assert store.async_delay_save(_full_state(started_at, grid_charge_cost_eur=1.0))
     assert store.async_delay_save(_full_state(started_at, grid_charge_cost_eur=1.5))
 
-    store._store.async_delay_save.assert_called_once()
-    data_func = store._store.async_delay_save.call_args.args[0]
-    assert data_func()["grid_charge_cost_eur"] == 1.5
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=ECONOMICS_SAVE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+    assert store._store.async_save.await_count == 1
+    assert written["grid_charge_cost_eur"] == 1.5
 
 
 async def test_store_final_flush_writes_newest_state_immediately(hass) -> None:
+    """async_save schreibt sofort den übergebenen Stand und storniert einen
+    zuvor über async_delay_save geplanten Timer - der darf danach nicht
+    doch noch feuern und den frisch geschriebenen Stand mit dem alten,
+    koaleszierten Wert überschreiben."""
     store = EconomicsStateStore(hass, "flush")
-    store._store.async_delay_save = MagicMock()
-    store._store.async_save = AsyncMock()
+    written = _stub_store_with_initial_data(store)
     started_at = dt_util.utcnow()
     store.async_delay_save(_full_state(started_at, grid_charge_cost_eur=1.0))
 
     assert await store.async_save(_full_state(started_at, grid_charge_cost_eur=2.0))
-    store._store.async_save.assert_awaited_once()
-    assert store._store.async_save.await_args.args[0]["grid_charge_cost_eur"] == 2.0
+    assert store._store.async_save.await_count == 1
+    assert written["grid_charge_cost_eur"] == 2.0
+
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=ECONOMICS_SAVE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+    assert store._store.async_save.await_count == 1
+    assert written["grid_charge_cost_eur"] == 2.0
+
+
+# --------------------------------------------------------------------------
+# Store: eine von Home Assistant intern verschluckte WriteError (siehe
+# EconomicsStateStore-Klassen-Docstring) muss über die Lese-Rückprobe
+# trotzdem erkannt werden - Store._async_handle_write_data fängt eine
+# echte WriteError/SerializationError ab und kehrt regulär zurück, ohne
+# sie an den Aufrufer weiterzureichen. Simuliert hier, indem
+# Store.async_save zu einem No-Op wird (wie beim echten, verschluckten
+# Fehler) und Store.async_load weiterhin den alten Stand liefert.
+# --------------------------------------------------------------------------
+async def test_a_silently_swallowed_final_write_error_is_detected_via_readback(
+    hass,
+) -> None:
+    store = EconomicsStateStore(hass, "swallowed-final")
+    store._store.async_save = AsyncMock()  # No-Op wie bei verschluckter WriteError
+    store._store.async_load = AsyncMock(return_value={"stale": True})
+
+    assert await store.async_save(_full_state(dt_util.utcnow())) is False
+
+
+async def test_a_silently_swallowed_reset_write_error_is_detected_via_readback(
+    hass,
+) -> None:
+    """Direkte Absicherung des vom Review gemeldeten Szenarios: ein
+    restart_economics_accounting darf nicht als erfolgreich gelten, wenn
+    der Reset in Wahrheit nicht auf der Platte gelandet ist."""
+    store = EconomicsStateStore(hass, "swallowed-reset")
+    store._store.async_save = AsyncMock()
+    store._store.async_load = AsyncMock(return_value={"stale": True})
+
+    assert await store.async_reset(_full_state(dt_util.utcnow())) is False
+
+
+async def test_a_silently_swallowed_delayed_write_error_invokes_the_callback(
+    hass,
+) -> None:
+    """Der zeitversetzte Pfad hat keinen Aufrufer mehr, der auf einen
+    Rückgabewert wartet - ein erst nach der Verzögerung erkannter
+    Fehlschlag muss deshalb über on_persist_failed gemeldet werden."""
+    failures = []
+    store = EconomicsStateStore(
+        hass, "swallowed-delayed", on_persist_failed=lambda: failures.append(True)
+    )
+    store._store.async_save = AsyncMock()
+    store._store.async_load = AsyncMock(return_value={"stale": True})
+
+    assert store.async_delay_save(_full_state(dt_util.utcnow())) is True
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=ECONOMICS_SAVE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+    assert failures == [True]
+
+
+async def test_a_successful_delayed_write_never_invokes_the_callback(hass) -> None:
+    failures = []
+    store = EconomicsStateStore(
+        hass, "successful-delayed", on_persist_failed=lambda: failures.append(True)
+    )
+    _stub_store_with_initial_data(store)
+
+    assert store.async_delay_save(_full_state(dt_util.utcnow())) is True
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=ECONOMICS_SAVE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+    assert failures == []
+
+
+async def test_coordinator_freezes_the_balance_when_a_delayed_write_is_silently_lost(
+    hass,
+) -> None:
+    """End-to-End durch die echte EconomicsStateStore (nicht auf
+    Coordinator-Ebene gemockt): ein von Home Assistant intern
+    verschluckter Schreibfehler im zeitversetzten Pfad muss denselben
+    storage_error-Zustand auslösen wie eine synchron erkannte Ablehnung."""
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(dt_util.utcnow())
+    )
+    await coordinator.async_load_economics_state()
+    coordinator._economics_store._store.async_save = AsyncMock()
+    coordinator._economics_store._store.async_load = AsyncMock(
+        return_value={"stale": True}
+    )
+
+    coordinator._async_schedule_economics_save()
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=ECONOMICS_SAVE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+    assert coordinator._economics_store_write_blocked is True
 
 
 # --------------------------------------------------------------------------

@@ -37,7 +37,6 @@ Deutsch korrekt, siehe translations/en.json).
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components import frontend
@@ -58,7 +57,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
-from .application.economics import investment_cost_eur_from_options
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -293,20 +291,9 @@ def _view(
 
 
 async def async_build_dashboard_config(
-    hass: HomeAssistant, entry_id: str, options: Mapping[str, Any] | None = None
+    hass: HomeAssistant, entry_id: str
 ) -> dict[str, Any]:
-    """Baut die komplette Lovelace-Konfiguration (fünf Tabs) für einen Entry.
-
-    `options` ist der Config-Entry-Options-Mapping (siehe __init__.py) -
-    wird ausschließlich gebraucht, um REQ-ECONOMICS-DASHBOARD-Karte 4
-    ("Investition und Amortisation") an dieselbe Bedingung wie die
-    zugehörigen Sensoren zu koppeln (investment_cost_eur_from_options):
-    ohne konfigurierte Investitionskosten fehlt die ganze Karte, obwohl
-    ihre sieben Entities (anders als bei den übrigen Tabs) unabhängig
-    davon bereits statisch registriert sind. `None`/fehlend verhält sich
-    wie eine leere Options-Zuordnung (Karte fehlt) - alle anderen Karten
-    bleiben unverändert rein entity-registry-basiert.
-    """
+    """Baut die komplette Lovelace-Konfiguration (fünf Tabs) für einen Entry."""
     translations = await translation.async_get_translations(
         hass, hass.config.language, "entity", integrations=[DOMAIN]
     )
@@ -552,52 +539,64 @@ async def async_build_dashboard_config(
     # REQ-ECONOMICS-DASHBOARD: eine gemeinsame Karte in genau dieser
     # Reihenfolge (ROI, Fortschritts-Gauge, dann der Rest) - eine
     # "entities"-Karte kann selbst keine Gauge einbetten, deshalb
-    # _stack_card (vertical-stack) aus drei Teilkarten. Anders als die
-    # übrigen Karten dieses Tabs hängt diese NICHT nur von der Entity-
-    # Registry ab: die sieben Sensoren sind (anders als z. B. die
-    # netzdienlichen Entities) immer bereits statisch registriert, auch
-    # ohne konfigurierte Investitionskosten (siehe REQ-ECONOMICS-
-    # AMORTIZATION) - die Karte muss deshalb zusätzlich explizit an
-    # dieselbe Options-Bedingung wie die Sensoren selbst gekoppelt werden.
-    investment_card = None
-    if investment_cost_eur_from_options(options or {}) is not None:
-        roi_row_card = _entities_card(
-            hass,
-            entry_id,
-            "Investition und Amortisation",
-            [("sensor", "economics_roi")],
-            translations,
-        )
-        progress_gauge = _gauge_card(
-            hass,
-            entry_id,
-            "sensor",
-            "economics_amortization_progress",
-            translations,
-            min_value=0,
-            max_value=100,
-            segments=[
-                {"from": 0, "color": "red"},
-                {"from": 50, "color": "yellow"},
-                {"from": 100, "color": "green"},
-            ],
-        )
-        remaining_rows_card = _entities_card(
-            hass,
-            entry_id,
-            "",
-            [
-                ("sensor", "economics_remaining_to_payback"),
-                ("sensor", "economics_result_today"),
-                ("sensor", "economics_average_daily_result_30d"),
-                ("sensor", "economics_projected_annual_result"),
-                ("sensor", "economics_estimated_payback_date"),
-            ],
-            translations,
-        )
-        investment_card = _stack_card(
-            [roi_row_card, progress_gauge, remaining_rows_card]
-        )
+    # _stack_card (vertical-stack) aus drei Teilkarten. Die sieben Sensoren
+    # sind (anders als z. B. die netzdienlichen Entities) immer bereits
+    # statisch registriert, auch ohne konfigurierte Investitionskosten
+    # (siehe REQ-ECONOMICS-AMORTIZATION) - `economics_roi` liefert in
+    # diesem Fall `None` (Sensorzustand "unknown", siehe
+    # SaxPowerCoordinator._economics_state). Eine build-time-Prüfung der
+    # Config-Entry-Options wäre nach einer späteren Options-Änderung
+    # veraltet, ohne dass das gespeicherte Dashboard je neu gebaut wird
+    # (async_update_options aktualisiert nur den Coordinator) - die ganze
+    # Karte deshalb stattdessen in eine Core-"conditional"-Karte packen,
+    # die zur Laufzeit direkt am economics_roi-Sensorzustand hängt: sie
+    # blendet sich beim Setzen/Entfernen der Investitionskosten automatisch
+    # ein/aus, sobald der Coordinator neu rechnet, ganz ohne
+    # Dashboard-Neubau.
+    roi_row_card = _entities_card(
+        hass,
+        entry_id,
+        "Investition und Amortisation",
+        [("sensor", "economics_roi")],
+        translations,
+    )
+    progress_gauge = _gauge_card(
+        hass,
+        entry_id,
+        "sensor",
+        "economics_amortization_progress",
+        translations,
+        min_value=0,
+        max_value=100,
+        segments=[
+            {"from": 0, "color": "red"},
+            {"from": 50, "color": "yellow"},
+            {"from": 100, "color": "green"},
+        ],
+    )
+    remaining_rows_card = _entities_card(
+        hass,
+        entry_id,
+        "",
+        [
+            ("sensor", "economics_remaining_to_payback"),
+            ("sensor", "economics_result_today"),
+            ("sensor", "economics_average_daily_result_30d"),
+            ("sensor", "economics_projected_annual_result"),
+            ("sensor", "economics_estimated_payback_date"),
+        ],
+        translations,
+    )
+    investment_stack = _stack_card([roi_row_card, progress_gauge, remaining_rows_card])
+    investment_card = investment_stack
+    if investment_stack is not None:
+        roi_entity_id = _entity_id(hass, "sensor", f"{entry_id}_economics_roi")
+        if roi_entity_id is not None:
+            investment_card = {
+                "type": "conditional",
+                "conditions": [{"entity": roi_entity_id, "state_not": "unknown"}],
+                "card": investment_stack,
+            }
 
     economics_view = _view(
         "Wirtschaftlichkeit",
@@ -687,7 +686,7 @@ async def _async_create_dashboard(
     if existing_storage is not None:
         if force:
             await existing_storage.async_save(
-                await async_build_dashboard_config(hass, entry.entry_id, entry.options)
+                await async_build_dashboard_config(hass, entry.entry_id)
             )
         return  # bereits angelegt (z. B. durch einen früheren Setup-Lauf)
 
@@ -713,9 +712,7 @@ async def _async_create_dashboard(
     )
 
     storage = lovelace_dashboard.LovelaceStorage(hass, item)
-    await storage.async_save(
-        await async_build_dashboard_config(hass, entry.entry_id, entry.options)
-    )
+    await storage.async_save(await async_build_dashboard_config(hass, entry.entry_id))
     lovelace_data.dashboards[DASHBOARD_URL_PATH] = storage
 
     frontend.async_register_built_in_panel(

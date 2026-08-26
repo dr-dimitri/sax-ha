@@ -5623,3 +5623,36 @@ async def test_restart_economics_accounting_keeps_old_state_if_save_fails(
         await coordinator.async_restart_economics_accounting()
 
     assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(250.0)
+
+
+async def test_restart_economics_accounting_keeps_old_state_if_write_is_silently_lost(
+    hass,
+) -> None:
+    """Home Assistants Store fängt eine echte WriteError intern ab und
+    kehrt regulär zurück (siehe EconomicsStateStore-Klassen-Docstring) -
+    ohne die Lese-Rückprobe in EconomicsStateStore._write_and_verify würde
+    async_reset hier fälschlich True melden, obwohl der Neustart nie auf
+    der Platte gelandet ist. Anders als
+    test_restart_economics_accounting_keeps_old_state_if_save_fails (mockt
+    EconomicsStateStore.async_reset direkt) verwendet dieser Test die
+    echte EconomicsStateStore und simuliert den Fehler erst eine Ebene
+    tiefer, im zugrunde liegenden Home-Assistant-Store."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
+    coordinator._economics_store._store.async_save = AsyncMock()
+    coordinator._economics_store._store.async_load = AsyncMock(
+        return_value={"stale": True}
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_restart_economics_accounting()
+
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(250.0)

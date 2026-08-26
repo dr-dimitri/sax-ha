@@ -3452,12 +3452,34 @@ requirement_economics_observability:
 
     Speicherfehler (`SaxPowerCoordinator._economics_store_write_blocked`,
     gesetzt sowohl bei einem Ladefehler als auch bei einem abgelehnten oder
-    fehlgeschlagenen Schreibversuch des Wirtschaftlichkeits-Stores -
-    `_async_schedule_economics_save`/`_async_flush_economics_state`
-    prüfen den Rückgabewert von `async_delay_save`/`async_save` und setzen
-    das Flag, sobald `_accept()`/`_valid_snapshot()` einen Snapshot ablehnt
-    oder das Schreiben selbst einen Fehler auslöst): Status
-    `storage_error`, UND - Abweichung von REQ-ECONOMICS-ACCOUNTING -
+    fehlgeschlagenen Schreibversuch des Wirtschaftlichkeits-Stores):
+    `_async_schedule_economics_save`/`_async_flush_economics_state` prüfen
+    den Rückgabewert von `async_delay_save`/`async_save` und setzen das
+    Flag, sobald `_accept()`/`_valid_snapshot()` einen Snapshot ablehnt.
+    Ein tatsächlicher Schreibfehler ist damit allein noch nicht erkennbar:
+    Home Assistants `Store` fängt eine echte `WriteError`/
+    `SerializationError` intern ab und kehrt regulär zurück
+    (`Store._async_handle_write_data`), ohne sie an den Aufrufer
+    weiterzureichen - weder `Store.async_save()` noch der über
+    `Store.async_delay_save()` verzögerte Pfad melden einen solchen Fehler
+    zurück. `EconomicsStateStore` verzichtet deshalb bewusst auf
+    `Store.async_delay_save()` und verwaltet die Verzögerung selbst
+    (`async_call_later`, mit einem `EVENT_HOMEASSISTANT_FINAL_WRITE`-
+    Sicherheitsnetz analog zu `Store._async_ensure_final_write_listener`):
+    `_write_and_verify` liest nach jedem Schreibversuch den soeben
+    geschriebenen Schlüssel über die öffentliche `Store.async_load()`-API
+    zurück und vergleicht ihn mit den beabsichtigten Daten - eine
+    schweigend verschluckte `WriteError` lässt die Datei unverändert und
+    wird dadurch als Abweichung sichtbar. Für den sofortigen Pfad
+    (`async_save`/`async_reset`) fließt das Ergebnis in den normalen
+    Rückgabewert ein (`async_restart_economics_accounting` meldet einen
+    dadurch erkannten stillen Fehlschlag deshalb korrekt als
+    `HomeAssistantError`, statt fälschlich Erfolg zu melden); für den
+    zeitversetzten Pfad, der keinen wartenden Aufrufer mehr hat, über den
+    optionalen `on_persist_failed`-Callback
+    (`SaxPowerCoordinator._on_economics_persist_failed`). In beiden Fällen
+    identisch: Status `storage_error`, UND - Abweichung von
+    REQ-ECONOMICS-ACCOUNTING -
     `_bootstrap_economics_if_ready` bootstrapped in diesem Fall NICHT mehr
     frisch im Arbeitsspeicher, `_accumulate_economics` akkumuliert keine
     weiteren Deltas mehr auf eine ungesicherte Baseline. Vorher (03/06)
@@ -3567,11 +3589,14 @@ requirement_economics_dashboard:
     "Dynamisches Laden": Titel "Wirtschaftlichkeit", Pfad
     `wirtschaftlichkeit`, Icon `mdi:cash-chart`, exakt fünf Top-Level-
     Karten. Ausschließlich Home-Assistant-Core-Kartentypen (entities,
-    gauge, markdown, vertical-stack, statistics-graph) - keine Custom-
-    Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-Auflösung wie
-    die vier bestehenden Tabs. `async_build_dashboard_config` bekommt dafür
-    zusätzlich die Config-Entry-Options (`entry.options` in
-    `_async_create_dashboard`) übergeben, nicht nur die entry_id.
+    gauge, markdown, vertical-stack, conditional, statistics-graph) - keine
+    Custom-Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-
+    Auflösung wie die vier bestehenden Tabs. `async_build_dashboard_config`
+    braucht dafür ausschließlich `hass`/`entry_id`, keine Config-Entry-
+    Options: Karte 4 entscheidet ihre Sichtbarkeit zur Laufzeit über eine
+    Core-"conditional"-Karte (siehe dort) statt über eine zum Build-
+    Zeitpunkt gelesene Option, die nach einer späteren Options-Änderung
+    veraltet wäre, ohne dass das gespeicherte Dashboard je neu gebaut wird.
 
     - Karte 1 "Status und Preise" (eine entities-Karte, feste
       Reihenfolge): economics_status, economics_current_import_price,
@@ -3612,13 +3637,20 @@ requirement_economics_dashboard:
       Diese sieben Sensoren sind - anders als optional erst zur Laufzeit
       erschienene Entities anderer Tabs - immer bereits statisch
       registriert (SENSOR_DESCRIPTIONS, siehe REQ-ECONOMICS-AMORTIZATION),
-      unabhängig von konfigurierten Investitionskosten. Die ganze Karte 4
-      ist deshalb zusätzlich explizit an
-      `investment_cost_eur_from_options(options)` gekoppelt (dieselbe
-      Bedingung wie bei den Sensoren selbst) und fehlt komplett, solange
-      keine Investitionskosten konfiguriert sind - eine reine Registry-
-      Prüfung wie bei den übrigen Karten würde die Karte hier immer mit
-      lauter "unbekannt"-Zeilen zeigen.
+      unabhängig von konfigurierten Investitionskosten; economics_roi
+      liefert in diesem Fall `None` (Sensorzustand "unknown"). Die ganze
+      vertical-stack ist deshalb in eine Core-"conditional"-Karte
+      eingebettet (`conditions: [{entity: <economics_roi-Entity-ID>,
+      state_not: "unknown"}]`) statt an eine zum Build-Zeitpunkt gelesene
+      Config-Entry-Option gekoppelt zu sein: eine reine Registry-Prüfung
+      wie bei den übrigen Karten würde die Karte hier immer mit lauter
+      "unbekannt"-Zeilen zeigen, und eine Options-Prüfung beim Dashboardbau
+      bliebe nach einer späteren Options-Änderung veraltet, da
+      `__init__.async_update_options` das gespeicherte Dashboard nie neu
+      baut (nur den Coordinator aktualisiert). Die "conditional"-Karte
+      blendet sich dagegen automatisch ein/aus, sobald der Coordinator
+      nach einer Options-Änderung neu rechnet und der Sensorzustand
+      wechselt - ganz ohne Dashboard-Neubau.
     - Karte 5 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
       `statistics-graph` als Balkendiagramm (`chart_type: bar`),
       `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für

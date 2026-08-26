@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -16,17 +16,29 @@ from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# Version 2 fügt die Herkunftszähler (REQ-ENERGY-ORIGIN) hinzu. Ein
+# Die Herkunftszähler (REQ-ENERGY-ORIGIN) sind rein additiv: Ein
 # Version-1-Snapshot hat diese Felder schlicht nicht im gespeicherten
 # Objekt - async_load liefert dafür None zurück wie für jedes fehlende
 # Feld, der Coordinator erkennt daran den Migrationsfall und startet die
 # Herkunftszählung ab dann transparent bei 0 (siehe
-# SaxPowerCoordinator._bootstrap_energy_origin). Es gibt bewusst
-# keine eigene HA-Store-Migrationsfunktion: genau wie bei
-# infrastructure/control_store.py bekommt ein fehlendes Feld über die
-# reguläre Feldvalidierung einen sicheren Wert (hier: "noch nicht
-# initialisiert"), ohne bestehende Felder anzutasten.
-STORAGE_VERSION = 2
+# SaxPowerCoordinator._bootstrap_energy_origin).
+#
+# Deshalb bleibt STORAGE_VERSION (die Home-Assistant-Hauptversion)
+# unverändert bei 1, nur STORAGE_MINOR_VERSION steigt auf 2: Home
+# Assistants Store ruft _async_migrate_func nur auf, wenn sich entweder
+# Haupt- oder Minor-Version ändert, und die Standardimplementierung wirft
+# dabei NotImplementedError. Bei UNVERÄNDERTER Hauptversion fängt der
+# Store diesen Fehler selbst ab und behält die vorhandenen Rohdaten bei
+# (siehe homeassistant.helpers.storage.Store._async_migrate_func) - bei
+# einer geänderten Hauptversion würde derselbe Fehler dagegen ungefangen
+# nach oben durchschlagen und das Setup jeder bestehenden Installation mit
+# einem Version-1-Snapshot zum Absturz bringen. Ein fehlendes Feld bekommt
+# stattdessen über die reguläre Feldvalidierung unten einen sicheren Wert
+# ("noch nicht initialisiert"), ohne bestehende Felder anzutasten - genau
+# wie bei infrastructure/control_store.py, das aus demselben Grund seine
+# STORAGE_VERSION nie erhöht hat.
+STORAGE_VERSION = 1
+STORAGE_MINOR_VERSION = 2
 STORAGE_KEY_PREFIX = f"{DOMAIN}.energy"
 ENERGY_SAVE_DELAY = 300
 
@@ -83,6 +95,7 @@ class EnergyStateStore:
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY_PREFIX}.{entry_id}",
+            minor_version=STORAGE_MINOR_VERSION,
         )
         self._last_persisted = EnergyState()
         self._pending: EnergyState | None = None
@@ -118,8 +131,45 @@ class EnergyStateStore:
                 raw.get("origin_accounting_started_at")
             ),
         )
-        self._last_persisted = state
+        self._last_persisted = self._origin_baseline(state)
         return state
+
+    @staticmethod
+    def _origin_baseline(state: EnergyState) -> EnergyState:
+        """Monotonie-Baseline für die Herkunftsfelder aus einem geladenen
+        Zustand ableiten.
+
+        `async_load` validiert jedes Feld unabhängig (siehe oben) - ein
+        einzelnes verworfenes Feld darf die übrigen, individuell gültigen
+        Felder nicht löschen, das gilt auch für den an den Aufrufer
+        zurückgegebenen `state`. Als interne Monotonie-Baseline (siehe
+        `_accept_monotonic`) ist ein unvollständiges Herkunfts-Quartett
+        (`origin_initialized` falsch) dagegen unbrauchbar: Der Coordinator
+        setzt in diesem Fall alle drei Zähler und den Startzeitpunkt
+        gemeinsam neu auf (siehe SaxPowerCoordinator._bootstrap_energy_origin)
+        - ohne diese Anpassung würde der nächste Speicherversuch an den
+        stehen gebliebenen alten Teilwerten bzw. dem alten Startzeitpunkt
+        als "rückläufig" bzw. "abweichend" scheitern (siehe
+        _accept_monotonic) und die Herkunft bliebe dauerhaft unpersistiert.
+        charged_kwh/discharged_kwh bleiben von dieser Bereinigung
+        unberührt.
+        """
+        if state.origin_initialized:
+            return state
+        if (
+            state.grid_charged_kwh is None
+            and state.pv_charged_kwh is None
+            and state.unknown_charged_kwh is None
+            and state.origin_accounting_started_at is None
+        ):
+            return state
+        return replace(
+            state,
+            grid_charged_kwh=None,
+            pv_charged_kwh=None,
+            unknown_charged_kwh=None,
+            origin_accounting_started_at=None,
+        )
 
     @callback
     def async_delay_save(

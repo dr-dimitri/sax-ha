@@ -435,6 +435,90 @@ def test_windows_of_other_tariff_types_are_ignored() -> None:
     assert tariff_config_from_options(options).windows == ()
 
 
+def test_a_completely_empty_window_group_stays_valid() -> None:
+    """Ein nie ausgefülltes Fenster ist ein gültiger Anwenderzustand, kein
+    korrupter Store - windows_valid bleibt True."""
+    options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
+        economics_tou_window_key(1): {},
+    }
+
+    config = tariff_config_from_options(options)
+
+    assert config.windows == ()
+    assert config.windows_valid is True
+
+
+def test_a_window_group_with_a_missing_price_makes_the_tariff_incomplete() -> None:
+    """Ein von Hand beschädigter Store kann Start/Ende ohne Preis enthalten
+    - das darf nicht stillschweigend als "kein Fenster" verschwinden,
+    sondern muss die Quote-Erzeugung blockieren (siehe
+    TariffConfig.windows_valid)."""
+    options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
+        economics_tou_window_key(1): {
+            CONF_ECONOMICS_WINDOW_START: "22:00:00",
+            CONF_ECONOMICS_WINDOW_END: "06:00:00",
+            # CONF_ECONOMICS_WINDOW_PRICE fehlt.
+        },
+    }
+
+    config = tariff_config_from_options(options)
+
+    assert config.windows == ()
+    assert config.windows_valid is False
+    result = evaluate_static_tariff(config, _local(2026, 3, 1, 12))
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.TARIFF_INCOMPLETE
+
+
+def test_a_window_group_of_the_wrong_type_makes_the_tariff_incomplete() -> None:
+    """Eine Section, die kein Mapping ist (z. B. ein String statt eines
+    Objekts), ist unlesbar und darf nicht als leer durchgehen."""
+    options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
+        economics_tou_window_key(1): "kaputt",
+    }
+
+    config = tariff_config_from_options(options)
+
+    assert config.windows_valid is False
+    assert validate_tariff(config) is QuoteUnavailable.TARIFF_INCOMPLETE
+
+
+def test_an_invalid_window_group_hides_other_valid_windows_behind_incomplete() -> None:
+    """Ein kaputtes Fenster darf die Auswertung nicht einfach mit den
+    übrigen, zufällig noch lesbaren Fenstern weiterrechnen lassen."""
+    options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
+        economics_tou_window_key(1): {
+            CONF_ECONOMICS_WINDOW_START: "06:00:00",
+            CONF_ECONOMICS_WINDOW_END: "09:00:00",
+            CONF_ECONOMICS_WINDOW_PRICE: 0.40,
+        },
+        economics_tou_window_key(2): {
+            CONF_ECONOMICS_WINDOW_START: "20:00:00",
+            # end/price fehlen - Gruppe 2 ist kaputt.
+        },
+    }
+
+    config = tariff_config_from_options(options)
+
+    assert len(config.windows) == 1
+    assert config.windows_valid is False
+    result = evaluate_static_tariff(config, _local(2026, 3, 1, 7))
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.TARIFF_INCOMPLETE
+
+
 @pytest.mark.parametrize("value", [None, "", "abc", float("nan"), float("inf"), True])
 def test_unusable_price_values_stay_none(value) -> None:
     assert parse_price(value) is None

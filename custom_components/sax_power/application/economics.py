@@ -78,6 +78,10 @@ def tariff_config_from_options(options: Mapping[str, Any]) -> TariffConfig:
     erfundenen Preis weiterzurechnen.
     """
     tariff_type = parse_tariff_type(options.get(CONF_ECONOMICS_TARIFF_TYPE))
+    windows: tuple[DailyPriceWindow, ...] = ()
+    windows_valid = True
+    if tariff_type is TariffType.TIME_OF_USE:
+        windows, windows_valid = _windows_from_options(options)
     return TariffConfig(
         tariff_type=tariff_type,
         feed_in_price_eur_kwh=parse_price(options.get(CONF_ECONOMICS_FEED_IN_PRICE)),
@@ -85,38 +89,52 @@ def tariff_config_from_options(options: Mapping[str, Any]) -> TariffConfig:
             options.get(CONF_ECONOMICS_FIXED_IMPORT_PRICE)
         ),
         tou_base_price_eur_kwh=parse_price(options.get(CONF_ECONOMICS_TOU_BASE_PRICE)),
-        windows=(
-            _windows_from_options(options)
-            if tariff_type is TariffType.TIME_OF_USE
-            else ()
-        ),
+        windows=windows,
+        windows_valid=windows_valid,
     )
 
 
 def _windows_from_options(
     options: Mapping[str, Any],
-) -> tuple[DailyPriceWindow, ...]:
+) -> tuple[tuple[DailyPriceWindow, ...], bool]:
     windows: list[DailyPriceWindow] = []
+    valid = True
     for key in ECONOMICS_TOU_WINDOW_KEYS:
-        window = window_from_section(options.get(key))
+        window, section_valid = window_from_section(options.get(key))
         if window is not None:
             windows.append(window)
-    return tuple(windows)
+        valid = valid and section_valid
+    return tuple(windows), valid
 
 
-def window_from_section(section: Any) -> DailyPriceWindow | None:
-    """Ein Zeitfenster aus einer Options-Section, oder None.
+def window_from_section(section: Any) -> tuple[DailyPriceWindow | None, bool]:
+    """Ein Zeitfenster aus einer Options-Section, plus ob die Section
+    selbst überhaupt gültig ist.
 
-    None steht sowohl für "Gruppe nicht ausgefüllt" als auch für "Gruppe
-    unbrauchbar": Der Options Flow lässt eine unvollständige Gruppe gar
-    nicht erst speichern, ein von Hand bearbeiteter Store könnte sie aber
-    enthalten.
+    Eine schlicht leere Gruppe (Schlüssel fehlt, oder alle drei Felder
+    fehlen/sind None) ist ein gültiger Anwenderzustand und liefert
+    (None, True). Eine VORHANDENE, aber unvollständige, unlesbare oder
+    fremdtypige Section (z. B. `start`/`end` gesetzt, `price_eur_kwh` aber
+    ungültig) liefert dagegen (None, False): Ein von Hand bearbeiteter
+    Store kann genau das enthalten, und ein solcher Fehler darf nicht
+    stillschweigend verschwinden - sonst sähe validate_tariff() nur die
+    übrigen, zufällig noch lesbaren Fenster und würde trotz kaputter
+    Konfiguration einen Quote erzeugen (siehe TariffConfig.windows_valid).
     """
+    if section is None:
+        return None, True
     if not isinstance(section, Mapping):
-        return None
-    start = parse_time(section.get(CONF_ECONOMICS_WINDOW_START))
-    end = parse_time(section.get(CONF_ECONOMICS_WINDOW_END))
-    price = parse_price(section.get(CONF_ECONOMICS_WINDOW_PRICE))
+        return None, False
+
+    raw_start = section.get(CONF_ECONOMICS_WINDOW_START)
+    raw_end = section.get(CONF_ECONOMICS_WINDOW_END)
+    raw_price = section.get(CONF_ECONOMICS_WINDOW_PRICE)
+    if raw_start is None and raw_end is None and raw_price is None:
+        return None, True
+
+    start = parse_time(raw_start)
+    end = parse_time(raw_end)
+    price = parse_price(raw_price)
     if start is None or end is None or price is None or start == end:
-        return None
-    return DailyPriceWindow(start=start, end=end, price_eur_kwh=price)
+        return None, False
+    return DailyPriceWindow(start=start, end=end, price_eur_kwh=price), True

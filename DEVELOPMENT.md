@@ -671,10 +671,12 @@ tests/
 │                                  (REQ-ECONOMICS-TARIFFS): Festpreis, Grundpreis und acht
 │                                  Zeitfenster (halboffen, über Mitternacht, angrenzend,
 │                                  überlappend), beide Sommerzeitwechsel, Abbildung der
-│                                  Options auf das Domänenmodell, dynamischer Tarif am
-│                                  gemeinsamen Preis-Sensor samt aller Gründe für einen
-│                                  fehlenden Preis sowie der Lebenszyklus der
-│                                  Zustandsbeobachter
+│                                  Options auf das Domänenmodell (inkl. einer vorhandenen,
+│                                  aber unvollständigen/unlesbaren Zeitfenstergruppe, die
+│                                  TARIFF_INCOMPLETE auslösen muss statt stillschweigend
+│                                  zu verschwinden), dynamischer Tarif am gemeinsamen
+│                                  Preis-Sensor samt aller Gründe für einen fehlenden
+│                                  Preis sowie der Lebenszyklus der Zustandsbeobachter
 ├── test_energy_accounting.py        Reine Bilanzregel der Ladeenergie-Herkunft
 │                                  (REQ-ENERGY-ORIGIN, domain/energy_accounting.py):
 │                                  reine PV-/Netzladung, gemischte Ladung, Einspeisung
@@ -689,9 +691,16 @@ tests/
 │                                  Startzeitpunkt), Drosselung/Sofort-Flush, rückläufige
 │                                  Snapshots, RestoreEntity-Migrationspfad von
 │                                  energy_charged/-discharged, Version-1-Migration ohne
-│                                  erfundene Historie, bereits initialisierter Store,
+│                                  erfundene Historie (inkl. eines echten, unentpackten
+│                                  Store-Envelopes über die hass_storage-Fixture -
+│                                  Regressionstest gegen einen versehentlichen
+│                                  Hauptversionssprung, der Home Assistants
+│                                  NotImplementedError-Migrationsverhalten unbemerkt
+│                                  ausgelöst hätte), bereits initialisierter Store,
 │                                  Store-Ladefehler lässt die Herkunft uninitialisiert,
-│                                  zwei getrennte Config Entries sowie die
+│                                  Wiederanlauf nach einem unvollständigen
+│                                  Herkunfts-Quartett ohne an der alten Teil-Baseline zu
+│                                  scheitern, zwei getrennte Config Entries sowie die
 │                                  Coordinator-Verdrahtung (Rundung, Diagnosewert
 │                                  energy_origin_coverage, Entladung und SunSpec-Ausfall
 │                                  bleiben unverändert) in test_coordinator.py

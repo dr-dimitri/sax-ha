@@ -17,10 +17,33 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.infrastructure.energy_store import (
+    STORAGE_KEY_PREFIX,
     EnergyState,
     EnergyStateStore,
 )
 from custom_components.sax_power.sensor import SaxPowerEnergySensor
+
+
+def _seed_real_store(
+    hass_storage, entry_id: str, payload: dict, *, version: int, minor_version: int
+) -> None:
+    """Legt einen echten, unentpackten Store-Envelope an, wie ihn ein
+    früherer Home-Assistant-Lauf tatsächlich auf der Platte hinterlässt -
+    im Unterschied zu einem gemockten `_store.async_load`, das die
+    HA-eigene Versions-/Migrationslogik von `homeassistant.helpers.storage.
+    Store` komplett umgeht (siehe test_a_real_version_one_store_loads_
+    without_a_migration_crash). `version`/`minor_version` sind bewusst
+    literale Werte statt des aktuellen STORAGE_VERSION-Imports: Der Test
+    simuliert einen VOR dieser Funktion geschriebenen, also historisch
+    festen Envelope-Stand - würde er stattdessen die jeweils aktuelle
+    Konstante verwenden, prüfte er nach einer künftigen Versionsänderung
+    stillschweigend nicht mehr den ursprünglichen Migrationsfall."""
+    hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"] = {
+        "version": version,
+        "minor_version": minor_version,
+        "key": f"{STORAGE_KEY_PREFIX}.{entry_id}",
+        "data": payload,
+    }
 
 
 def _coordinator(hass, entry_id: str = "entry") -> SaxPowerCoordinator:
@@ -56,6 +79,48 @@ def _energy_entity(
     entity.async_write_ha_state = MagicMock()
     entity.async_get_last_state = AsyncMock(return_value=last_state)
     return entity
+
+
+# -- Store-Versionierung (REQ-ENERGY-ORIGIN) ---------------------------------
+# Regressionstest gegen eine erhöhte Store-HAUPTversion: Home Assistant ruft
+# beim Laden eines vorhandenen Envelopes intern _async_migrate_func auf,
+# sobald sich Haupt- ODER Minor-Version unterscheiden. Deren
+# Standardimplementierung wirft NotImplementedError; bei UNVERÄNDERTER
+# Hauptversion fängt Store diesen Fehler selbst ab und behält die Rohdaten
+# bei, bei einer geänderten Hauptversion schlägt er ungefangen durch (siehe
+# infrastructure/energy_store.py, STORAGE_VERSION-Kommentar). Ein gemocktes
+# `_store.async_load` (wie in den übrigen Tests dieser Datei) umgeht diese
+# Home-Assistant-interne Logik komplett und hätte den ursprünglichen Fehler
+# nicht aufgedeckt - deshalb hier ein echter, unentpackter Envelope über die
+# `hass_storage`-Fixture.
+
+
+async def test_a_real_version_one_store_loads_without_a_migration_crash(
+    hass, hass_storage
+) -> None:
+    """Ein auf der Platte liegender Store mit derselben Hauptversion, aber
+    älterer Minor-Version (vor Einführung der Herkunftsfelder) darf das
+    Setup nicht mit NotImplementedError zum Absturz bringen."""
+    _seed_real_store(
+        hass_storage,
+        "entry",
+        {"charged_kwh": 50.0, "discharged_kwh": 20.0},
+        version=1,
+        minor_version=1,
+    )
+    coordinator = _coordinator(hass)
+
+    await coordinator.async_load_energy_state()
+
+    assert coordinator._energy_charged_kwh == 50.0
+    assert coordinator._energy_discharged_kwh == 20.0
+    # Historische Ladeenergie wird nicht rückwirkend zugeordnet - die
+    # Herkunft startet transparent bei 0 ab der Migration.
+    assert coordinator._energy_grid_charged_kwh == 0.0
+    assert coordinator._energy_pv_charged_kwh == 0.0
+    assert coordinator._energy_unknown_charged_kwh == 0.0
+    assert coordinator._origin_accounting_started_at is not None
+    await coordinator.async_shutdown()
 
 
 async def test_store_restores_two_config_entries_independently(hass) -> None:
@@ -174,6 +239,49 @@ async def test_store_rejects_a_corrupt_origin_counter_independently(
     assert loaded.origin_accounting_started_at == started_at
     assert loaded.origin_initialized is False
     assert "Ungültigen gespeicherten Energiezähler für Netzladung" in caplog.text
+
+
+async def test_store_accepts_a_fresh_restart_after_a_partially_corrupt_bundle(
+    hass,
+) -> None:
+    """Nach einem unvollständigen Herkunfts-Bündel darf der nächste, vom
+    Coordinator neu gestartete Snapshot (alle drei Zähler auf 0, neuer
+    Startzeitpunkt - siehe SaxPowerCoordinator._bootstrap_energy_origin)
+    nicht an der alten Teil-Baseline scheitern. Andernfalls bliebe die
+    Herkunftszählung über jeden Neustart hinweg dauerhaft unpersistiert,
+    weil jeder Speicherversuch gegen die stehen gebliebenen alten
+    Teilwerte bzw. den alten Startzeitpunkt als "rückläufig" bzw.
+    "abweichend" abgelehnt würde."""
+    store = EnergyStateStore(hass, "origin-partial-recovery")
+    old_started_at = dt_util.utcnow() - timedelta(days=1)
+    store._store.async_load = AsyncMock(
+        return_value={
+            "charged_kwh": 12.5,
+            "discharged_kwh": 4.25,
+            "grid_charged_kwh": -1,  # korrupt -> gesamtes Bündel unvollständig
+            "pv_charged_kwh": 4.5,
+            "unknown_charged_kwh": 0.0,
+            "origin_accounting_started_at": old_started_at.isoformat(),
+        }
+    )
+    store._store.async_save = AsyncMock()
+
+    loaded = await store.async_load()
+    assert loaded.origin_initialized is False
+
+    # Genau das Verhalten von SaxPowerCoordinator._bootstrap_energy_origin
+    # nach einem unvollständigen Bündel: charged_kwh/discharged_kwh bleiben
+    # erhalten, die Herkunft startet komplett neu bei 0.
+    restarted = EnergyState(
+        charged_kwh=loaded.charged_kwh,
+        discharged_kwh=loaded.discharged_kwh,
+        grid_charged_kwh=0.0,
+        pv_charged_kwh=0.0,
+        unknown_charged_kwh=0.0,
+        origin_accounting_started_at=dt_util.utcnow(),
+    )
+    assert await store.async_save(restarted) is True
+    store._store.async_save.assert_awaited_once()
 
 
 async def test_store_rejects_a_regressive_origin_counter(hass, caplog) -> None:

@@ -2698,6 +2698,20 @@ requirement_economics_tariffs:
     als eigene Section dargestellt und liegen deshalb als verschachtelte
     Mappings mit den Feldern start/end/price_eur_kwh in entry.options.
 
+    Dieselbe Unterscheidung wie im Options Flow gilt auch beim erneuten
+    Einlesen für die Quote-Erzeugung
+    (application.economics.window_from_section): Eine schlicht leere
+    Gruppe (Schlüssel fehlt, oder alle drei Felder fehlen) ist ein
+    gültiger Anwenderzustand. Eine VORHANDENE, aber unvollständige,
+    unlesbare oder fremdtypige Gruppe (z. B. Start/Ende gesetzt, aber ein
+    fehlender oder unparsebarer Preis - nur über einen von Hand
+    bearbeiteten Store erreichbar, da der Options Flow das nicht speichert)
+    setzt dagegen TariffConfig.windows_valid auf False. validate_tariff()
+    lehnt in diesem Fall mit TARIFF_INCOMPLETE ab, auch wenn die übrigen
+    Fenster für sich genommen gültig wären - eine kaputte Gruppe darf nicht
+    stillschweigend verschwinden und dadurch einen Quote aus den zufällig
+    noch lesbaren Fenstern erzeugen.
+
     Der dynamische Tarif verwendet ausschließlich die bereits vorhandenen
     Options CONF_PRICE_SENSOR, CONF_PRICE_ATTRIBUTE und CONF_PRICE_UNIT -
     es gibt weder eine zweite Sensor-Option noch eine zweite
@@ -2789,6 +2803,11 @@ requirement_economics_tariffs:
        gültige Einspeisevergütung (0 bis 2 EUR/kWh) und ihre eigenen
        Pflichtpreise geprüft, auch wenn die Options von Hand bearbeitet
        wurden."
+    - "Eine vorhandene, aber unvollständige oder unlesbare
+       Zeitfenstergruppe lehnt die Quote-Erzeugung mit TARIFF_INCOMPLETE
+       ab, statt mit den übrigen, zufällig noch lesbaren Fenstern
+       weiterzurechnen - eine schlicht leere Gruppe bleibt dagegen ein
+       gültiger Zustand (TariffConfig.windows_valid)."
     - "Eine Optionsänderung und ein Sensor-State-Change wirken ohne Reload;
        Listener werden beim Optionswechsel und beim Entladen entfernt und
        nie doppelt registriert."
@@ -2856,22 +2875,37 @@ requirement_energy_origin:
     Start der Herkunftszählung; Nenner 0 ergibt 100 %, uninitialisierte
     Herkunft ergibt None - SaxPowerCoordinator._energy_origin_coverage).
 
-    Persistenz: infrastructure/energy_store.py auf STORAGE_VERSION 2
-    erweitert. EnergyState bekommt vier neue, gemeinsam behandelte Felder
-    - grid_charged_kwh, pv_charged_kwh, unknown_charged_kwh (dieselbe
-    Feldvalidierung wie charged_kwh/discharged_kwh: endlich, >= 0,
-    monotonic) sowie origin_accounting_started_at (UTC-Zeitstempel,
-    einmalig gesetzt und danach unveränderlich - ein abweichender
-    gespeicherter Wert wird wie ein rückläufiger Zähler verworfen).
-    EnergyState.origin_initialized ist nur wahr, wenn alle vier Felder
-    vorhanden sind; fehlt eines (Version-1-Snapshot ohne diese Felder,
-    frischer Eintrag, oder ein beim Laden einzeln verworfenes Feld), gilt
-    die gesamte Herkunftsbilanz als nicht initialisiert - die drei Zähler
-    sind ohne bekannten Startzeitpunkt nicht aussagekräftig. Das steht
-    nicht im Widerspruch zur unabhängigen Feldvalidierung beim Laden: Jedes
-    Feld wird einzeln geprüft und einzeln verworfen; erst
-    SaxPowerCoordinator._bootstrap_energy_origin entscheidet über das
-    Vierer-Bündel.
+    Persistenz: infrastructure/energy_store.py bleibt bei STORAGE_VERSION 1
+    (Home Assistants Store-HAUPTversion) und erhöht stattdessen
+    STORAGE_MINOR_VERSION auf 2 - eine erhöhte Hauptversion würde bei einem
+    vorhandenen Version-1-Snapshot Home Assistants interne
+    _async_migrate_func aufrufen, deren Standardimplementierung
+    NotImplementedError wirft; bei unveränderter Hauptversion fängt der
+    Store diesen Fehler dagegen selbst ab und behält die Rohdaten bei. Ein
+    Absturz beim Setup bestehender Installationen ist damit ausgeschlossen
+    (siehe SaxPowerCoordinator.async_load_energy_state, das zusätzlich
+    NotImplementedError abfängt). EnergyState bekommt vier neue, gemeinsam
+    behandelte Felder - grid_charged_kwh, pv_charged_kwh,
+    unknown_charged_kwh (dieselbe Feldvalidierung wie charged_kwh/
+    discharged_kwh: endlich, >= 0, monotonic) sowie
+    origin_accounting_started_at (UTC-Zeitstempel, einmalig gesetzt und
+    danach unveränderlich - ein abweichender gespeicherter Wert wird wie
+    ein rückläufiger Zähler verworfen). EnergyState.origin_initialized ist
+    nur wahr, wenn alle vier Felder vorhanden sind; fehlt eines (Version-1-
+    Snapshot ohne diese Felder, frischer Eintrag, oder ein beim Laden
+    einzeln verworfenes Feld), gilt die gesamte Herkunftsbilanz als nicht
+    initialisiert - die drei Zähler sind ohne bekannten Startzeitpunkt
+    nicht aussagekräftig. Das steht nicht im Widerspruch zur unabhängigen
+    Feldvalidierung beim Laden: Der an den Aufrufer zurückgegebene Zustand
+    behält jedes einzeln gültige Feld; nur die interne Monotonie-Baseline
+    (EnergyStateStore._origin_baseline) verwirft bei einem unvollständigen
+    Quartett zusätzlich dessen verbliebene Einzelwerte - sonst würde der
+    vom Coordinator anschließend bei 0 neu gestartete Stand (siehe
+    SaxPowerCoordinator._bootstrap_energy_origin) an den stehen gebliebenen
+    alten Teilwerten bzw. dem alten Startzeitpunkt als "rückläufig" bzw.
+    "abweichend" scheitern und die Herkunft bliebe über jeden Neustart
+    hinweg dauerhaft unpersistiert. charged_kwh/discharged_kwh bleiben von
+    dieser Bereinigung unberührt.
 
     SaxPowerCoordinator._bootstrap_energy_origin läuft einmalig beim Laden
     (async_load_energy_state), aber nur, wenn der Store selbst ohne
@@ -2915,6 +2949,14 @@ requirement_energy_origin:
        und rückläufige Snapshots (auch für die drei neuen Zähler und den
        Startzeitpunkt) sowie ein SunSpec-Ausfall sind getestet
        (tests/test_energy_persistence.py, tests/test_coordinator.py)."
+    - "Ein echter, unentpackter Version-1-Store-Envelope (über die
+       hass_storage-Fixture, nicht nur ein gemocktes _store.async_load)
+       lädt ohne NotImplementedError und ohne Setup-Absturz."
+    - "Nach einem unvollständigen Herkunfts-Quartett (ein einzelnes
+       ungültiges Feld) lässt sich der vom Coordinator neu gestartete
+       0/0/0-Stand samt neuem Startzeitpunkt sofort persistieren, statt an
+       der alten Teil-Baseline als rückläufig bzw. abweichend zu
+       scheitern."
     - "Sensor-Metadaten, strings.json, translations/de.json,
        translations/en.json, README.md und DEVELOPMENT.md sind
        aktualisiert."

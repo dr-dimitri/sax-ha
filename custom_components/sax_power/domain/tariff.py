@@ -101,6 +101,14 @@ class TariffConfig:
     Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh. Monatlicher
     Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und
     sonstige Fixkosten sind ausdrücklich nicht Teil dieser Rechnung.
+
+    `windows_valid` ist False, wenn beim Einlesen mindestens eine
+    Zeitfenstergruppe vorhanden, aber unvollständig oder unlesbar war
+    (application.economics.window_from_section) - anders als eine schlicht
+    leere Gruppe (kein Anwenderfehler) darf ein solcher Zustand nicht
+    stillschweigend zu weniger Fenstern führen: validate_tariff() lehnt
+    dann mit TARIFF_INCOMPLETE ab, statt nur mit den übrigen, zufällig noch
+    lesbaren Fenstern weiterzurechnen.
     """
 
     tariff_type: TariffType = TariffType.DISABLED
@@ -108,6 +116,7 @@ class TariffConfig:
     fixed_import_price_eur_kwh: float | None = None
     tou_base_price_eur_kwh: float | None = None
     windows: tuple[DailyPriceWindow, ...] = ()
+    windows_valid: bool = True
 
     @property
     def enabled(self) -> bool:
@@ -231,7 +240,8 @@ def validate_tariff(config: TariffConfig) -> QuoteUnavailable | None:
     ):
         return QuoteUnavailable.TARIFF_INCOMPLETE
     if config.tariff_type is TariffType.TIME_OF_USE and not (
-        is_valid_import_price(config.tou_base_price_eur_kwh)
+        config.windows_valid
+        and is_valid_import_price(config.tou_base_price_eur_kwh)
         and all(
             is_valid_import_price(window.price_eur_kwh) for window in config.windows
         )

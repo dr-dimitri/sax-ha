@@ -574,7 +574,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Load the independent counters before the first device refresh."""
         try:
             state = await self._energy_store.async_load()
-        except (HomeAssistantError, OSError, ValueError) as err:
+        except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
+            # NotImplementedError: Home Assistant meldet damit einen Store
+            # mit einer Hauptversion, für die es hier keine Migration gibt
+            # (siehe infrastructure/energy_store.py, STORAGE_VERSION-
+            # Kommentar) - typischerweise ein Downgrade auf eine ältere
+            # Integrationsversion nach einem zwischenzeitlichen Update.
             _LOGGER.warning(
                 "Energiezählerzustand konnte nicht geladen werden; "
                 "warte auf einen numerischen Altzustand: %s",

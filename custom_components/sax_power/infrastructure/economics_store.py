@@ -15,9 +15,10 @@ Monotonie, nur eine Wertebereichsprüfung (endlich, >= 0).
 
 STORAGE_MINOR_VERSION (statt einer erhöhten Hauptversion) trägt die
 Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION, die
-kumulierten bepreisten Lade-/Entlademengen sowie den zuletzt verwendeten
-Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY - siehe den
-ausführlichen Kommentar bei infrastructure/energy_store.py,
+kumulierten bepreisten Lade-/Entlademengen, den zuletzt verwendeten
+Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY sowie die
+Zeitabdeckung der Tages-Buckets (observed_seconds/day_length_seconds) -
+siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
 jedem bestehenden Store NotImplementedError ausgelöst).
 """
@@ -40,12 +41,16 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN, MAX_ECONOMICS_RESTART_REASON_LENGTH
-from ..domain.economics_amortization import MAX_STORED_DAYS, DayEconomicsResult
+from ..domain.economics_amortization import (
+    MAX_STORED_DAYS,
+    SECONDS_PER_DAY,
+    DayEconomicsResult,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 4
+STORAGE_MINOR_VERSION = 5
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
@@ -76,7 +81,7 @@ class EconomicsState:
     # einfach leer, ohne die übrige Bilanz zu berühren.
     day_results: tuple[DayEconomicsResult, ...] = ()
     # Der aktuell noch laufende, unvollständige Kalendertag - `current_day`
-    # ist None, solange kein Tag begonnen wurde. Die vier Zähler bilden mit
+    # ist None, solange kein Tag begonnen wurde. Die fünf Zähler bilden mit
     # `current_day` zusammen ein eigenes, kleines Bündel (siehe
     # _validated_current_day): Fehlt einer, gilt der ganze angefangene Tag
     # als nicht mehr aussagekräftig und wird verworfen - nicht die
@@ -87,6 +92,7 @@ class EconomicsState:
     current_day_unpriced_charge_kwh: float | None = None
     current_day_priced_discharge_kwh: float | None = None
     current_day_unpriced_discharge_kwh: float | None = None
+    current_day_observed_seconds: float | None = None
     # Zeitpunkt (UTC), zu dem der kumulierte operative Betrag erstmals die
     # Investitionskosten erreicht hat - einmalig gesetzt und danach
     # unveränderlich, unabhängig von einer späteren Änderung der
@@ -564,6 +570,25 @@ class EconomicsStateStore:
         return float(value)
 
     @staticmethod
+    def _validated_positive(value: Any, label: str) -> float | None:
+        """Wie _validated_nonnegative, aber ohne die 0: eine Tageslänge
+        von 0 Sekunden wäre als Nenner der Zeitabdeckung sinnlos."""
+        if (
+            value is None
+            or isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            _LOGGER.warning(
+                "Ungültigen gespeicherten Wert für %s verworfen: %r",
+                label,
+                value,
+            )
+            return None
+        return float(value)
+
+    @staticmethod
     def _validated_timestamp(value: Any, label: str) -> datetime | None:
         if value is None:
             return None
@@ -656,6 +681,25 @@ class EconomicsStateStore:
         unpriced_discharge = cls._validated_nonnegative(
             entry.get("unpriced_discharge_kwh"), "Unbepreiste Tagesentladung"
         )
+        # Ein Store aus der Zeit vor der Zeitabdeckung (Issue #131) kennt
+        # die beiden Felder noch nicht. Ein solcher Tag wird NICHT
+        # verworfen - er bleibt als Historie sichtbar, gilt aber mit 0
+        # beobachteten Sekunden als unvollständig und kommt damit erst
+        # wieder für eine Prognose in Frage, wenn 30 neue, tatsächlich
+        # beobachtete Tage vorliegen. Ein vorhandener, aber ungültiger Wert
+        # bleibt dagegen ein Korruptionsindiz und verwirft den ganzen Tag.
+        observed_seconds = (
+            0.0
+            if "observed_seconds" not in entry
+            else cls._validated_nonnegative(
+                entry.get("observed_seconds"), "Beobachtete Tagesdauer"
+            )
+        )
+        day_length_seconds = (
+            SECONDS_PER_DAY
+            if "day_length_seconds" not in entry
+            else cls._validated_positive(entry.get("day_length_seconds"), "Tageslänge")
+        )
         if (
             day is None
             or operating_result is None
@@ -663,6 +707,8 @@ class EconomicsStateStore:
             or unpriced_charge is None
             or priced_discharge is None
             or unpriced_discharge is None
+            or observed_seconds is None
+            or day_length_seconds is None
         ):
             _LOGGER.warning("Unvollständigen Tageseintrag verworfen: %r", entry)
             return None
@@ -673,15 +719,22 @@ class EconomicsStateStore:
             unpriced_charge_kwh=unpriced_charge,
             priced_discharge_kwh=priced_discharge,
             unpriced_discharge_kwh=unpriced_discharge,
+            observed_seconds=observed_seconds,
+            day_length_seconds=day_length_seconds,
         )
 
     @classmethod
     def _validated_current_day(cls, raw: dict[str, Any]) -> dict[str, Any]:
-        """Der noch laufende Tag als eigenes Fünfer-Bündel (siehe
+        """Der noch laufende Tag als eigenes Sechser-Bündel (siehe
         EconomicsState.current_day). Ist auch nur ein Feld ungültig oder
         fehlt es, gilt der ganze angefangene Tag als nicht aussagekräftig
         und startet beim nächsten Datenpunkt frisch - die abgeschlossene
-        Historie (day_results) bleibt davon unberührt.
+        Historie (day_results) bleibt davon unberührt. Das gilt bewusst
+        auch für die beobachtete Dauer aus einem älteren Store (Issue
+        #131): ein angefangener Tag ohne bekannte Beobachtungsdauer würde
+        sonst mit einer erfundenen Abdeckung abgeschlossen - anders als bei
+        den bereits abgeschlossenen Tagen kostet ein Neustart hier nur den
+        laufenden, ohnehin unvollständigen Tag.
         """
         fields = {
             "current_day": cls._validated_date(raw.get("current_day"), "Laufender Tag"),
@@ -702,6 +755,10 @@ class EconomicsStateStore:
             "current_day_unpriced_discharge_kwh": cls._validated_nonnegative(
                 raw.get("current_day_unpriced_discharge_kwh"),
                 "Laufende unbepreiste Entladung",
+            ),
+            "current_day_observed_seconds": cls._validated_nonnegative(
+                raw.get("current_day_observed_seconds"),
+                "Laufende beobachtete Tagesdauer",
             ),
         }
         if any(value is None for value in fields.values()):
@@ -735,6 +792,8 @@ class EconomicsStateStore:
                     "unpriced_charge_kwh": day.unpriced_charge_kwh,
                     "priced_discharge_kwh": day.priced_discharge_kwh,
                     "unpriced_discharge_kwh": day.unpriced_discharge_kwh,
+                    "observed_seconds": day.observed_seconds,
+                    "day_length_seconds": day.day_length_seconds,
                 }
                 for day in state.day_results
             ],
@@ -748,6 +807,7 @@ class EconomicsStateStore:
             "current_day_unpriced_discharge_kwh": (
                 state.current_day_unpriced_discharge_kwh
             ),
+            "current_day_observed_seconds": state.current_day_observed_seconds,
             "payback_achieved_at": (
                 state.payback_achieved_at.isoformat()
                 if state.payback_achieved_at is not None

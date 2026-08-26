@@ -57,6 +57,7 @@ from custom_components.sax_power.coordinator import (
 )
 from custom_components.sax_power.domain.economics_accounting import EconomicsDelta
 from custom_components.sax_power.domain.economics_amortization import (
+    SECONDS_PER_DAY,
     DayEconomicsResult,
 )
 from custom_components.sax_power.domain.economics_status import EconomicsStatus
@@ -4990,6 +4991,168 @@ def test_dst_transition_day_still_closes_exactly_once(hass, before, after) -> No
     assert coordinator._economics_current_day == after.date()
 
 
+def test_observed_time_of_a_day_comes_from_the_accounted_intervals(hass) -> None:
+    """Issue #131: Die Zeitabdeckung eines Tages speist sich aus derselben
+    Riemann-Summe wie die Energie (keine zweite Uhr) - der allererste Tick
+    nach einem Start setzt nur die Zeitbasis und zählt deshalb nicht mit."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    assert coordinator._economics_current_day_observed_seconds == 0.0
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+    )
+
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+
+def test_an_interval_without_a_power_value_is_not_observed_time(hass) -> None:
+    """Ohne Leistungswert (SunSpec nicht erreichbar) wird keine Energie
+    verbucht - genau diese Lücke soll der Tag später als Unvollständigkeit
+    ausweisen, statt sie als beobachtet zu zählen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    _tick_on(
+        coordinator,
+        monotonic_value=1000.0 + 7200,
+        now=datetime(2026, 3, 10, 11, 0),
+        storage_power_active=None,
+    )
+
+    assert coordinator._economics_current_day_observed_seconds == 0.0
+
+
+def test_a_closed_day_carries_its_observed_time_and_length(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+    )
+
+    # Das Intervall über Mitternacht zählt vollständig zum neuen Tag -
+    # wie seine Energie und sein Geldwert auch.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 7200,
+        now=datetime(2026, 3, 11, 9, 0),
+        delta=EconomicsDelta(),
+    )
+
+    closed = coordinator._economics_day_results[0]
+    assert closed.observed_seconds == pytest.approx(3600.0)
+    assert closed.day_length_seconds == pytest.approx(86400.0)
+    assert closed.is_fully_observed is False
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected_length"),
+    [
+        # Deutschland 2026: Umstellung auf Sommerzeit 29.03. (23h-Tag).
+        (datetime(2026, 3, 29, 1, 0), datetime(2026, 3, 30, 1, 0), 23 * 3600),
+        # Umstellung auf Winterzeit 25.10. (25h-Tag).
+        (datetime(2026, 10, 25, 1, 0), datetime(2026, 10, 26, 1, 0), 25 * 3600),
+    ],
+)
+async def test_a_closed_dst_day_is_measured_against_its_actual_length(
+    hass, before, after, expected_length
+) -> None:
+    """Regel 1: Der Nenner der Zeitabdeckung ist die tatsächliche Länge des
+    lokalen Kalendertages (23/24/25 h), nicht pauschal 24 h."""
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    try:
+        coordinator = _make_coordinator(hass, _make_client())
+        coordinator.options = _FIXED_TARIFF_OPTIONS
+        _bootstrap_economics_on(coordinator, now=before)
+        _tick_with_delta(
+            coordinator,
+            monotonic_value=2000.0,
+            now=before + timedelta(hours=1),
+            delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+        )
+
+        _tick_with_delta(
+            coordinator, monotonic_value=3000.0, now=after, delta=EconomicsDelta()
+        )
+    finally:
+        await hass.config.async_set_time_zone("UTC")
+
+    assert coordinator._economics_day_results[0].day_length_seconds == pytest.approx(
+        expected_length
+    )
+
+
+async def test_a_restart_resumes_the_persisted_observed_time(hass) -> None:
+    """Ohne persistierte Beobachtungsdauer sähe jeder Neustart den
+    laufenden Tag als unvollständiger an, als er tatsächlich war."""
+    from custom_components.sax_power.infrastructure.economics_store import (
+        EconomicsState,
+    )
+
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=EconomicsState(
+            grid_charge_cost_eur=0.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=0.0,
+            unvalued_inventory_kwh=0.0,
+            unpriced_charge_kwh=0.0,
+            unpriced_discharge_kwh=0.0,
+            economics_started_at=dt_util.utcnow(),
+            current_day=date(2026, 3, 10),
+            current_day_operating_result_eur=2.0,
+            current_day_priced_charge_kwh=0.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=0.0,
+            current_day_unpriced_discharge_kwh=0.0,
+            current_day_observed_seconds=70_000.0,
+        )
+    )
+    await coordinator.async_load_economics_state()
+    assert coordinator._economics_current_day_observed_seconds == 70_000.0
+
+    _tick_on(coordinator, monotonic_value=500.0, now=datetime(2026, 3, 10, 23, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=500.0 + 3600,
+        now=datetime(2026, 3, 11, 0, 30),
+        delta=EconomicsDelta(),
+    )
+
+    closed = coordinator._economics_day_results[0]
+    assert closed.day == date(2026, 3, 10)
+    assert closed.observed_seconds == pytest.approx(70_000.0)
+
+
+def test_observed_time_alone_schedules_a_save(hass) -> None:
+    """Die beobachtete Zeit bewegt sich auch ohne jede Energiebewegung -
+    ohne verzögertes Speichern überlebte sie keinen ungeplanten Neustart."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    coordinator._async_schedule_economics_save = MagicMock()
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 600,
+        now=datetime(2026, 3, 10, 9, 10),
+        delta=EconomicsDelta(),
+    )
+
+    coordinator._async_schedule_economics_save.assert_called_once()
+
+
 async def test_a_restart_resumes_the_persisted_current_day(hass) -> None:
     """Der laufende Tag ist persistiert (EconomicsState.current_day/-
     Zähler) - ein Neustart mittendrin darf weder einen zusätzlichen
@@ -5247,6 +5410,8 @@ def _forecast_ready_day_results(
             unpriced_charge_kwh=0.0,
             priced_discharge_kwh=1.0,
             unpriced_discharge_kwh=0.0,
+            observed_seconds=SECONDS_PER_DAY,
+            day_length_seconds=SECONDS_PER_DAY,
         )
         for offset in range(1, count + 1)
     )

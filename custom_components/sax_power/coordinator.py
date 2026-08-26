@@ -479,7 +479,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Kalendertag-Buckets, unabhängig vom Sieben-Felder-Bündel oben -
         # siehe _advance_economics_day. day_results sind abgeschlossene
         # Tage (älteste zuerst, höchstens MAX_STORED_DAYS); current_day und
-        # die vier Zähler bilden zusammen den noch laufenden Tag und werden
+        # die fünf Zähler bilden zusammen den noch laufenden Tag und werden
         # nur gemeinsam gesetzt oder verworfen (siehe _start_economics_day).
         self._economics_day_results: tuple[DayEconomicsResult, ...] = ()
         self._economics_current_day: date | None = None
@@ -488,6 +488,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_current_day_unpriced_charge_kwh: float | None = None
         self._economics_current_day_priced_discharge_kwh: float | None = None
         self._economics_current_day_unpriced_discharge_kwh: float | None = None
+        # Tatsächlich beobachtete Zeit des laufenden Tages (Sekunden,
+        # Issue #131) - gespeist aus derselben Riemann-Summe wie die
+        # Energie selbst (_accumulate_energy), keine zweite Uhr.
+        self._economics_current_day_observed_seconds: float | None = None
         # Einmalig gesetzt, wenn das kumulierte operative Ergebnis die
         # Investitionskosten erstmals erreicht (Regel 8) - danach für immer
         # unveränderlich, unabhängig von einer späteren Änderung der
@@ -607,8 +611,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         changed = False
         charge_delta: EnergyDelta | None = None
         discharge_kwh = 0.0
+        # Nur Intervalle, die tatsächlich verbucht werden, gelten als
+        # beobachtete Zeit des Kalendertages (REQ-ECONOMICS-AMORTIZATION,
+        # Zeitabdeckung): Ein Neustart (last_ts is None) und eine Phase
+        # ohne Leistungswert (SunSpec nicht erreichbar) sind exakt die
+        # Lücken, die der Tag später als Unvollständigkeit ausweisen soll.
+        observed_seconds = 0.0
 
         if last_ts is not None and power is not None:
+            observed_seconds = now - last_ts
             elapsed_hours = (now - last_ts) / 3600
             charge_delta = compute_charge_delta(
                 power, data.get("smartmeter_power"), elapsed_hours
@@ -656,7 +667,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else None
         )
         data["energy_origin_coverage"] = self._energy_origin_coverage()
-        self._accumulate_economics(data, charge_delta, discharge_kwh)
+        self._accumulate_economics(data, charge_delta, discharge_kwh, observed_seconds)
 
     def _energy_origin_coverage(self) -> float | None:
         """Anteil (%) der seit Start zugeordneten Ladeenergie (Netz + PV)
@@ -680,11 +691,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data: dict[str, Any],
         charge_delta: EnergyDelta | None,
         discharged_kwh: float,
+        observed_seconds: float,
     ) -> None:
         """Bewertet die Ladeenergie-Herkunft dieses Intervalls in Geld.
 
         Bewusst außerhalb jeder Ladeentscheidung: reine Nachbetrachtung
         bereits gemessener Energie, kein Modbus-Write.
+
+        `observed_seconds` ist die Dauer genau dieses verbuchten Intervalls
+        (aus _accumulate_energy, dieselbe Riemann-Summe) und wächst in den
+        laufenden Tag hinein - daraus entsteht dessen Zeitabdeckung
+        (REQ-ECONOMICS-AMORTIZATION). Ein Intervall über Mitternacht hinweg
+        zählt dabei vollständig zum neuen Tag, exakt wie seine Energie und
+        sein Geldwert; die dadurch fehlende Restsekunden des Vortages sind
+        gegenüber der Schwelle von 5 % eines Tages bedeutungslos.
 
         economics_current_import_price/economics_feed_in_price sind reine
         Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und werden
@@ -776,6 +796,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._advance_economics_day():
                 changed = True
 
+            if (
+                observed_seconds > 0
+                and self._economics_current_day_observed_seconds is not None
+            ):
+                self._economics_current_day_observed_seconds += observed_seconds
+                # Die beobachtete Zeit muss einen Neustart überleben, sonst
+                # sähe jeder Neustart den laufenden Tag als unvollständiger
+                # an, als er tatsächlich war - anders als die Geldsummen
+                # bewegt sie sich bei jedem verbuchten Intervall, das
+                # verzögerte Speichern koalesziert das (ECONOMICS_SAVE_DELAY).
+                changed = True
+
             if delta is not None:
                 self._economics_grid_charge_cost_eur += delta.grid_charge_cost_delta
                 self._economics_pv_opportunity_cost_eur += (
@@ -863,6 +895,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_current_day_unpriced_charge_kwh = 0.0
         self._economics_current_day_priced_discharge_kwh = 0.0
         self._economics_current_day_unpriced_discharge_kwh = 0.0
+        self._economics_current_day_observed_seconds = 0.0
 
     def _advance_economics_day(self) -> bool:
         """Erkennt einen lokalen Kalendertagswechsel (REQ-ECONOMICS-
@@ -902,8 +935,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Wird ausschließlich von _advance_economics_day bei einem erkannten
         Datumswechsel aufgerufen, bevor der neue Tag über
         _start_economics_day beginnt - `_economics_current_day` und seine
-        vier Zähler sind an dieser Stelle deshalb garantiert gesetzt (float,
+        fünf Zähler sind an dieser Stelle deshalb garantiert gesetzt (float,
         kein None).
+
+        Die Tageslänge wird hier festgeschrieben (nicht erst beim Lesen der
+        Historie), damit ein DST-Tag mit 23/25 Stunden dauerhaft an seiner
+        tatsächlichen Länge gemessen wird und eine spätere Änderung der
+        Zeitzone historische Tage nicht rückwirkend umbewertet.
         """
         closed_day = DayEconomicsResult(
             day=self._economics_current_day,
@@ -912,11 +950,34 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             unpriced_charge_kwh=self._economics_current_day_unpriced_charge_kwh,
             priced_discharge_kwh=self._economics_current_day_priced_discharge_kwh,
             unpriced_discharge_kwh=self._economics_current_day_unpriced_discharge_kwh,
+            observed_seconds=self._economics_current_day_observed_seconds,
+            day_length_seconds=self._local_day_length_seconds(
+                self._economics_current_day
+            ),
         )
         self._economics_day_results = (*self._economics_day_results, closed_day)[
             -MAX_STORED_DAYS:
         ]
         self._maybe_mark_payback_achieved()
+
+    @staticmethod
+    def _local_day_length_seconds(day: date) -> float:
+        """Tatsächliche Länge eines lokalen Kalendertages in Sekunden.
+
+        23 h/25 h an den DST-Umstellungstagen, sonst 24 h - der Nenner der
+        Zeitabdeckung (REQ-ECONOMICS-AMORTIZATION, Regel 1). Die Grenzen
+        kommen aus dt_util.start_of_local_day, derselben
+        Home-Assistant-Zeitzone, aus der auch die Tageswechsel-Erkennung
+        ihr Datum bezieht (_advance_economics_day).
+        """
+        start = dt_util.start_of_local_day(day)
+        next_start = dt_util.start_of_local_day(day + timedelta(days=1))
+        # Bewusst über UTC: Python ignoriert bei der Subtraktion zweier
+        # datetimes mit DEMSELBEN tzinfo-Objekt dessen Offset komplett und
+        # rechnet reine Wanduhrzeit - ein DST-Tag käme dabei immer auf
+        # exakt 24 h heraus, also genau auf den Wert, den diese Methode
+        # vermeiden soll.
+        return (dt_util.as_utc(next_start) - dt_util.as_utc(start)).total_seconds()
 
     def _maybe_mark_payback_achieved(self) -> None:
         """Setzt payback_achieved_at einmalig beim Tagesabschluss, an dem
@@ -984,7 +1045,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "window_end": None,
                 "complete_days_available": 0,
                 "accepted_days": 0,
+                "fully_observed_days": 0,
                 "average_price_coverage_percent": None,
+                "average_time_coverage_percent": None,
                 "average_daily_result_eur": None,
                 "payback_days": None,
                 "unavailable_reason": ForecastUnavailable.NO_INVESTMENT_COST.value,
@@ -1064,10 +1127,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "complete_days_available": forecast.complete_days_available,
             "accepted_days": forecast.accepted_days,
+            "fully_observed_days": forecast.fully_observed_days,
             "average_price_coverage_percent": (
                 None
                 if forecast.average_price_coverage_percent is None
                 else round(forecast.average_price_coverage_percent, 1)
+            ),
+            "average_time_coverage_percent": (
+                None
+                if forecast.average_time_coverage_percent is None
+                else round(forecast.average_time_coverage_percent, 1)
             ),
             # Zusätzlich zum Sensorzustand (economics_average_daily_result_30d)
             # auch als Attribut, wie von REQ-ECONOMICS-AMORTIZATION gefordert -
@@ -1410,6 +1479,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._economics_current_day_unpriced_discharge_kwh = (
                     state.current_day_unpriced_discharge_kwh
                 )
+                self._economics_current_day_observed_seconds = (
+                    state.current_day_observed_seconds
+                )
         self._economics_store_loaded = True
 
     def _economics_state(self) -> EconomicsState:
@@ -1439,6 +1511,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current_day_unpriced_discharge_kwh=(
                 self._economics_current_day_unpriced_discharge_kwh
             ),
+            current_day_observed_seconds=(self._economics_current_day_observed_seconds),
             payback_achieved_at=self._economics_payback_achieved_at,
             priced_charge_kwh=self._economics_priced_charge_kwh,
             priced_discharge_kwh=self._economics_priced_discharge_kwh,
@@ -1610,6 +1683,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_current_day_unpriced_charge_kwh = None
         self._economics_current_day_priced_discharge_kwh = None
         self._economics_current_day_unpriced_discharge_kwh = None
+        self._economics_current_day_observed_seconds = None
         self._economics_payback_achieved_at = None
         self._economics_price_unavailable_since = None
         self._economics_price_unavailable = False
@@ -1654,6 +1728,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "unpriced_charge_kwh": day.unpriced_charge_kwh,
                     "priced_discharge_kwh": day.priced_discharge_kwh,
                     "unpriced_discharge_kwh": day.unpriced_discharge_kwh,
+                    "observed_seconds": day.observed_seconds,
+                    "day_length_seconds": day.day_length_seconds,
                 }
                 for day in self._economics_day_results
             ],
@@ -1676,6 +1752,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "current_day_unpriced_discharge_kwh": (
                 self._economics_current_day_unpriced_discharge_kwh
+            ),
+            "current_day_observed_seconds": (
+                self._economics_current_day_observed_seconds
             ),
             "payback_achieved_at": (
                 None

@@ -604,7 +604,14 @@ Ausfall von Home Assistant), bleibt sie "unbekannt", statt ältere Tage als
 Lückenfüller zu verwenden. Sie verlangt außerdem von jedem einzelnen
 dieser 30 Tage eine Preisabdeckung von mindestens 95 % - fehlt einem
 einzigen Tag ausreichend Preisinformation, bleibt die gesamte Prognose
-"unbekannt" statt einen verzerrten Wert zu zeigen. Ein nicht positiver
+"unbekannt" statt einen verzerrten Wert zu zeigen. Genauso muss jeder
+dieser 30 Tage zu mindestens 95 % tatsächlich beobachtet worden sein: War
+Home Assistant an einem Tag längere Zeit aus (Neustart, Update,
+Stromausfall), enthält dieser Tag nur einen Teil seines Ergebnisses und
+würde Durchschnitt, Hochrechnung und Amortisationsdatum zu pessimistisch
+machen - auch dann bleibt die Prognose lieber "unbekannt". Kurze
+Neustarts von wenigen Minuten sind davon nicht betroffen. Ein nicht
+positiver
 Durchschnitt lässt nur das Rückzahlungsdatum unbekannt; Durchschnitt und
 Hochrechnung werden trotzdem angezeigt, nie ein erfundenes Datum. Anders
 als die vier "aktuellen" Sensoren bleibt diese Prognose - einschließlich

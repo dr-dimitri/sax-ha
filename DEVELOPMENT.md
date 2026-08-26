@@ -280,7 +280,12 @@ jeden Home-Assistant-Bezug:
 - `DayEconomicsResult` ist ein abgeschlossener Kalendertag (operatives
   Ergebnis plus vier Energiemengen); `price_coverage_percent` bildet daraus
   die Preisabdeckung, ohne einen Betrag durch einen möglicherweise
-  negativen oder 0 Preis zurückzurechnen.
+  negativen oder 0 Preis zurückzurechnen. `observed_seconds`/
+  `day_length_seconds` tragen eine davon unabhängige zweite
+  Qualitätsdimension: `time_coverage_percent` misst, wie viel des Tages
+  überhaupt beobachtet wurde. Beide Felder sind absichernd vorbelegt (0
+  beobachtete Sekunden) - ein Aufrufer, der sie vergisst, erzeugt einen als
+  unvollständig geltenden Tag, nie einen fälschlich vollwertigen.
 - `compute_amortization_forecast` ist eine reine 30-Tage-Prognose. Das
   Fenster ist exakt der lückenlose Kalenderbereich von `today_local - 30`
   bis `today_local - 1` (`FORECAST_WINDOW_DAYS`) - fehlt auch nur einer
@@ -291,7 +296,16 @@ jeden Home-Assistant-Bezug:
   Fenster). Verwirft die GESAMTE Prognose (nicht nur einzelne Tage),
   sobald auch nur ein Tag `DAY_COVERAGE_THRESHOLD_PERCENT` (95 %)
   unterschreitet; `average_price_coverage_percent` bleibt dabei als
-  Diagnosewert gesetzt. Das Rückzahlungsdatum entfällt nicht nur bei einem
+  Diagnosewert gesetzt. Dieselbe harte Regel gilt für die Zeitabdeckung
+  (`DAY_TIME_COVERAGE_THRESHOLD_PERCENT`, 95 %): ein nur teilweise
+  beobachteter Tag - HA war aus, Update, Stromausfall - besteht die
+  Preisprüfung typischerweise mühelos, enthält aber nur einen Teil seines
+  Ergebnisses und macht Durchschnitt, Hochrechnung und Rückzahlungsdatum
+  systematisch zu pessimistisch (Issue #131), deshalb `INCOMPLETE_DAYS` für
+  das GESAMTE Fenster. Diese Prüfung läuft vor der Preisabdeckung, weil die
+  Preisabdeckung eines halb beobachteten Tages nur den beobachteten
+  Ausschnitt misst - `unavailable_reason` benennt so die Ursache, nicht die
+  Folge. Das Rückzahlungsdatum entfällt nicht nur bei einem
   nicht positiven Durchschnitt, sondern auch jenseits von
   `MAX_FORECAST_PAYBACK_DAYS` (~100 Jahre): ein winziger, aber positiver
   Durchschnitt ergäbe sonst ein von `date`/`timedelta` nicht mehr
@@ -307,7 +321,16 @@ Tageswechsel-Erkennung ohne eigenen Timer, in
 `_accumulate_economics`, bei jedem Poll-Tick, VOR der Anwendung des
 aktuellen Deltas auf die Gesamt-/Tagessummen - siehe unten): vergleicht
 `dt_util.now().date()` (Home-Assistant-Zeitzone) mit dem zuletzt gesehenen
-Tag. Ein 23h/25h-DST-Tag wird nicht auf 24h normiert - reiner
+Tag. Die beobachtete Zeit des laufenden Tages wächst dabei aus derselben
+Riemann-Summe wie die Energie (`_accumulate_energy` reicht die Dauer des
+gerade verbuchten Intervalls durch, keine zweite Uhr): Genau die
+Intervalle, die nicht verbucht werden - der erste Tick nach einem Neustart,
+jede Phase ohne Leistungswert - zählen auch nicht als beobachtet. Beim
+Abschluss schreibt `_close_economics_day` die tatsächliche Tageslänge fest
+(`dt_util.start_of_local_day`, Differenz bewusst über UTC gerechnet: bei
+zwei `datetime`-Objekten mit demselben `tzinfo` ignoriert Python den
+Offset und käme für jeden DST-Tag auf exakt 24 h).
+Ein 23h/25h-DST-Tag wird nicht auf 24h normiert - reiner
 Kalenderdatumsvergleich, keine verstrichene Zeit. Bei einem Wechsel
 schließt `_close_economics_day` den bisherigen Tag ab (angehängt an
 `day_results`, gekappt auf `MAX_STORED_DAYS`) und ruft
@@ -444,6 +467,16 @@ bei 0 ab jetzt. `STORAGE_MINOR_VERSION` 4 ergänzt zusätzlich
 `last_restart_at`/`last_restart_reason` (Zeitpunkt und optionaler
 Freitext-Grund des zuletzt ausgeführten `restart_economics_accounting`) -
 rein diagnostisch, ohne Einfluss auf eine Berechnung, siehe unten.
+`STORAGE_MINOR_VERSION` 5 trägt die Zeitabdeckung: `observed_seconds`/
+`day_length_seconds` je abgeschlossenem Tag sowie
+`current_day_observed_seconds` im Bündel des laufenden Tages. Ein
+FEHLENDES Feld eines abgeschlossenen Tages stammt aus einem älteren Store
+und macht den Tag nur unvollständig (er bleibt als Historie erhalten); ein
+vorhandener, aber ungültiger Wert bleibt ein Korruptionsindiz und verwirft
+den Tageseintrag. Beim laufenden Tag gilt diese Nachsicht bewusst nicht -
+ohne bekannte Beobachtungsdauer ließe er sich nur mit einer erfundenen
+Abdeckung abschließen, und verloren geht dabei nur der ohnehin
+unvollständige laufende Tag.
 
 Ein von `EconomicsStateStore._accept`/`_valid_snapshot` abgelehnter oder ein
 technisch fehlgeschlagener Schreibversuch (verzögert wie beim finalen

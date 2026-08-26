@@ -270,7 +270,12 @@ async def test_store_round_trips_day_results_current_day_and_payback(hass) -> No
         unpriced_charge_kwh=0.5,
         priced_discharge_kwh=1.0,
         unpriced_discharge_kwh=0.0,
+        observed_seconds=86_400.0,
+        day_length_seconds=86_400.0,
     )
+    # Ein DST-Tag (25 h) mit einer Lücke: beide Werte müssen den
+    # Round-Trip unverfälscht überstehen, sonst würde die Zeitabdeckung
+    # nach einem Neustart anders bewertet als davor.
     day_two = DayEconomicsResult(
         day=date(2026, 3, 10),
         operating_result_eur=-0.5,
@@ -278,6 +283,8 @@ async def test_store_round_trips_day_results_current_day_and_payback(hass) -> No
         unpriced_charge_kwh=0.0,
         priced_discharge_kwh=0.5,
         unpriced_discharge_kwh=0.5,
+        observed_seconds=80_000.0,
+        day_length_seconds=90_000.0,
     )
     store = EconomicsStateStore(hass, "amortization-roundtrip")
     state = _full_state(
@@ -289,6 +296,7 @@ async def test_store_round_trips_day_results_current_day_and_payback(hass) -> No
         current_day_unpriced_charge_kwh=0.2,
         current_day_priced_discharge_kwh=0.3,
         current_day_unpriced_discharge_kwh=0.4,
+        current_day_observed_seconds=1_800.0,
         payback_achieved_at=payback_at,
     )
 
@@ -364,6 +372,97 @@ async def test_store_drops_the_whole_current_day_bundle_if_one_field_is_invalid(
     assert loaded.current_day_priced_discharge_kwh is None
     assert loaded.current_day_unpriced_discharge_kwh is None
     assert "Ungültigen gespeicherten Wert für Laufende bepreiste Ladung" in caplog.text
+
+
+async def test_store_treats_a_day_without_observed_time_as_incomplete(hass) -> None:
+    """Ein Store aus der Zeit vor der Zeitabdeckung (Issue #131) kennt
+    observed_seconds/day_length_seconds noch nicht. Solche Tage bleiben als
+    Historie erhalten, gelten aber als unvollständig beobachtet - sie
+    dürfen keine Prognose tragen, für die nie eine Beobachtungsdauer
+    gemessen wurde."""
+    store = EconomicsStateStore(hass, "day-legacy-without-observed")
+    serialized = EconomicsStateStore._serialize(_full_state(dt_util.utcnow()))
+    serialized["day_results"] = [
+        {
+            "day": date(2026, 3, 9).isoformat(),
+            "operating_result_eur": 1.0,
+            "priced_charge_kwh": 1.0,
+            "unpriced_charge_kwh": 0.0,
+            "priced_discharge_kwh": 1.0,
+            "unpriced_discharge_kwh": 0.0,
+        }
+    ]
+    store._store.async_load = AsyncMock(return_value=serialized)
+
+    loaded = await store.async_load()
+
+    assert len(loaded.day_results) == 1
+    assert loaded.day_results[0].observed_seconds == 0.0
+    assert loaded.day_results[0].is_fully_observed is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("observed_seconds", -1.0),  # ungültig: negativ
+        ("day_length_seconds", 0.0),  # ungültig: als Nenner unbrauchbar
+        ("day_length_seconds", "24h"),  # ungültig: kein Zahlenwert
+    ],
+)
+async def test_store_drops_a_day_with_an_invalid_time_coverage(
+    hass, caplog, field, value
+) -> None:
+    """Ein VORHANDENER, aber ungültiger Wert bleibt ein Korruptionsindiz
+    und verwirft den ganzen Tag - anders als ein schlicht fehlendes Feld
+    aus einem älteren Store."""
+    store = EconomicsStateStore(hass, f"day-invalid-{field}-{value}")
+    serialized = EconomicsStateStore._serialize(_full_state(dt_util.utcnow()))
+    entry = {
+        "day": date(2026, 3, 9).isoformat(),
+        "operating_result_eur": 1.0,
+        "priced_charge_kwh": 1.0,
+        "unpriced_charge_kwh": 0.0,
+        "priced_discharge_kwh": 1.0,
+        "unpriced_discharge_kwh": 0.0,
+        "observed_seconds": 86_400.0,
+        "day_length_seconds": 86_400.0,
+    }
+    entry[field] = value
+    serialized["day_results"] = [entry]
+    store._store.async_load = AsyncMock(return_value=serialized)
+
+    loaded = await store.async_load()
+
+    assert loaded.day_results == ()
+    assert "Unvollständigen Tageseintrag verworfen" in caplog.text
+
+
+async def test_store_drops_the_current_day_without_an_observed_duration(hass) -> None:
+    """Die beobachtete Dauer gehört zum Bündel des laufenden Tages: ohne
+    sie ließe sich der Tag nur mit einer erfundenen Abdeckung abschließen.
+    Betroffen ist ausschließlich der ohnehin unvollständige laufende Tag,
+    nicht die abgeschlossene Historie."""
+    store = EconomicsStateStore(hass, "current-day-legacy-without-observed")
+    serialized = EconomicsStateStore._serialize(
+        _full_state(
+            dt_util.utcnow(),
+            current_day=date(2026, 3, 11),
+            current_day_operating_result_eur=0.25,
+            current_day_priced_charge_kwh=0.1,
+            current_day_unpriced_charge_kwh=0.2,
+            current_day_priced_discharge_kwh=0.3,
+            current_day_unpriced_discharge_kwh=0.4,
+            current_day_observed_seconds=1_800.0,
+        )
+    )
+    del serialized["current_day_observed_seconds"]
+    store._store.async_load = AsyncMock(return_value=serialized)
+
+    loaded = await store.async_load()
+
+    assert loaded.current_day is None
+    assert loaded.current_day_observed_seconds is None
+    assert loaded.current_day_operating_result_eur is None
 
 
 async def test_store_caps_day_results_at_max_stored_days(hass) -> None:

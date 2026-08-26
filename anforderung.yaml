@@ -3224,7 +3224,8 @@ requirement_economics_amortization:
     Lokale Kalendertag-Buckets (domain.economics_amortization.
     DayEconomicsResult: operating_result_eur plus die vier Energiemengen
     priced_charge_kwh/unpriced_charge_kwh/priced_discharge_kwh/
-    unpriced_discharge_kwh) werden ohne eigenen Timer erkannt:
+    unpriced_discharge_kwh sowie die Zeitabdeckung observed_seconds/
+    day_length_seconds) werden ohne eigenen Timer erkannt:
     SaxPowerCoordinator._advance_economics_day vergleicht bei jedem
     ohnehin stattfindenden Poll-Tick dt_util.now().date() (Home-Assistant-
     Zeitzone, nicht UTC) mit dem zuletzt gesehenen Tag. Ein DST-Tag mit 23
@@ -3235,9 +3236,28 @@ requirement_economics_amortization:
     60 gekappt) und _start_economics_day beginnt den neuen bei 0; beides
     läuft unabhängig davon, ob dieses Intervall selbst ein Delta hatte, und
     ist idempotent gegenüber einem Neustart mittendrin (current_day plus
-    seine vier Zähler sind als eigenes Fünfer-Bündel persistiert, siehe
+    seine fünf Zähler sind als eigenes Sechser-Bündel persistiert, siehe
     unten) sowie gegenüber einer doppelten Verarbeitung desselben Ticks
     (nur ein tatsächlicher Datumswechsel löst genau einen Abschluss aus).
+
+    observed_seconds ist die tatsächlich mit Datenpunkten belegte Zeit des
+    Tages. Sie stammt aus derselben Riemann-Summe wie die Energie selbst
+    (SaxPowerCoordinator._accumulate_energy reicht die Dauer des gerade
+    verbuchten Intervalls an _accumulate_economics durch) - keine zweite
+    Uhr. Genau die Intervalle, die nicht verbucht werden, zählen auch nicht
+    als beobachtet: der erste Tick nach einem Neustart (keine bekannte
+    Vor-Leistung) und jede Phase ohne Leistungswert (SunSpec-Modus nicht
+    erreichbar). Ein Intervall über Mitternacht zählt vollständig zum neuen
+    Tag, exakt wie seine Energie und sein Geldwert. Weil sich die
+    beobachtete Zeit bei jedem verbuchten Intervall bewegt, löst sie - wie
+    jede andere Änderung des laufenden Tages - das verzögerte Speichern aus
+    (ECONOMICS_SAVE_DELAY koalesziert das); ohne diese Persistenz sähe jeder
+    Neustart den laufenden Tag als unvollständiger an, als er war.
+    day_length_seconds wird beim Tagesabschluss festgeschrieben
+    (_close_economics_day über dt_util.start_of_local_day, also dieselbe
+    Zeitzone wie die Tageserkennung) und ist an einer DST-Umstellung 23
+    bzw. 25 Stunden - passend zu Regel 1, und immun dagegen, dass eine
+    spätere Zeitzonenänderung historische Tage rückwirkend umbewertet.
 
     30-Tage-Prognose (domain.economics_amortization.
     compute_amortization_forecast, reine Funktion): schließt den laufenden,
@@ -3255,10 +3275,29 @@ requirement_economics_amortization:
     DAY_COVERAGE_THRESHOLD_PERCENT = 95 %, sonst ist die GESAMTE Prognose
     ForecastUnavailable.LOW_PRICE_COVERAGE (ein einzelner schlechter Tag
     wird nicht stillschweigend übersprungen); average_price_coverage_percent
-    bleibt dabei als Diagnosewert gesetzt. Erfüllt das Fenster beide
-    Bedingungen: average_daily_result_eur = Summe der 30 Tagesergebnisse /
-    30, projected_annual_result_eur = average_daily_result_eur * 365,2425
-    (DAYS_PER_YEAR, mittleres Kalenderjahr inkl. Schaltjahren). Ein nicht
+    bleibt dabei als Diagnosewert gesetzt.
+
+    Dieselbe harte Regel gilt für die ZEITABDECKUNG jedes der 30 Tage
+    (DayEconomicsResult.time_coverage_percent = observed_seconds /
+    day_length_seconds, auf 100 % geklemmt, Nenner ist die tatsächliche
+    Länge des lokalen Kalendertages): Unterschreitet auch nur ein Tag
+    DAY_TIME_COVERAGE_THRESHOLD_PERCENT = 95 %, ist die gesamte Prognose
+    ForecastUnavailable.INCOMPLETE_DAYS. Ein nur teilweise beobachteter Tag
+    (Home Assistant war aus, Update, Stromausfall) enthält trotz
+    einwandfreier Preisabdeckung nur einen Teil seines Ergebnisses und
+    würde Durchschnitt, Jahreshochrechnung und Rückzahlungsdatum
+    systematisch zu pessimistisch machen. Diese Prüfung läuft VOR der
+    Preisabdeckung, weil die Preisabdeckung eines nur teilweise
+    beobachteten Tages selbst nicht aussagekräftig ist (sie misst nur den
+    beobachteten Ausschnitt) - bei beiden Problemen zugleich benennt
+    unavailable_reason damit die ursächliche Lücke (incomplete_days), nicht
+    ihre Folge. average_time_coverage_percent und fully_observed_days
+    bleiben wie ihre Preis-Gegenstücke als Diagnosewerte gesetzt.
+
+    Erfüllt das Fenster alle Bedingungen: average_daily_result_eur = Summe
+    der 30 Tagesergebnisse / 30, projected_annual_result_eur =
+    average_daily_result_eur * 365,2425 (DAYS_PER_YEAR, mittleres
+    Kalenderjahr inkl. Schaltjahren). Ein nicht
     positiver Durchschnitt lässt ausschließlich das Rückzahlungsdatum
     unbekannt (Regel 9) - average/Hochrechnung bleiben trotzdem gesetzt,
     nie "unendlich" und nie ein erfundenes Datum. Ist der Durchschnitt
@@ -3312,10 +3351,11 @@ requirement_economics_amortization:
     intern gespeicherte, UTC-genaue payback_achieved_at wird dafür auf den
     lokalen Kalendertag abgebildet). economics_average_daily_result_30d
     trägt zusätzlich Attribute (window_start/window_end,
-    complete_days_available, accepted_days,
-    average_price_coverage_percent, average_daily_result_eur -
-    redundant zum Sensorzustand, aber Teil desselben Attributsatzes -,
-    payback_days, unavailable_reason) aus der Prognose. payback_days macht
+    complete_days_available, accepted_days, fully_observed_days,
+    average_price_coverage_percent, average_time_coverage_percent,
+    average_daily_result_eur - redundant zum Sensorzustand, aber Teil
+    desselben Attributsatzes -, payback_days, unavailable_reason) aus der
+    Prognose. payback_days macht
     dabei den Horizontfall sichtbar: entfällt estimated_payback_date nur
     wegen MAX_FORECAST_PAYBACK_DAYS, bleibt unavailable_reason None (der
     Durchschnitt und die Hochrechnung sind ja gültig) - ohne das Attribut
@@ -3331,15 +3371,30 @@ requirement_economics_amortization:
     Persistenz: EconomicsStateStore (REQ-ECONOMICS-ACCOUNTING) um
     STORAGE_MINOR_VERSION 2 erweitert (statt einer Hauptversion - ein
     Hauptversionssprung hätte bei jedem bestehenden Store
-    NotImplementedError ausgelöst, siehe infrastructure/energy_store.py).
+    NotImplementedError ausgelöst, siehe infrastructure/energy_store.py),
+    die Zeitabdeckung mit STORAGE_MINOR_VERSION 5.
     Drei unabhängige Bündel: das ursprüngliche Sieben-Felder-Bündel aus
     REQ-ECONOMICS-ACCOUNTING (unverändert), day_results (jeder Tag für
     sich validiert - ein kaputter Eintrag verwirft nur sich selbst, Mehrfach-
     einträge zum selben Datum behalten nur den zuletzt genannten, auf
-    MAX_STORED_DAYS gekappt) sowie current_day plus seiner vier Zähler als
-    eigenes Fünfer-Bündel (fehlt/ist auch nur eines ungültig, gilt der
+    MAX_STORED_DAYS gekappt) sowie current_day plus seiner fünf Zähler als
+    eigenes Sechser-Bündel (fehlt/ist auch nur eines ungültig, gilt der
     ganze angefangene Tag als nicht aussagekräftig und verworfen - die
-    abgeschlossene Historie bleibt davon unberührt). payback_achieved_at
+    abgeschlossene Historie bleibt davon unberührt).
+
+    Für die beiden Zeitabdeckungsfelder eines abgeschlossenen Tages gilt
+    dabei eine bewusste Unterscheidung: Ein schlicht FEHLENDES Feld stammt
+    aus einem Store vor MINOR_VERSION 5 - der Tag bleibt als Historie
+    erhalten, zählt aber mit 0 beobachteten Sekunden als unvollständig
+    beobachtet (die Prognose lebt damit erst wieder auf, wenn 30 neue,
+    tatsächlich beobachtete Tage vorliegen). Ein VORHANDENER, aber
+    ungültiger Wert (negativ, nicht endlich, Fremdtyp, Tageslänge 0)
+    bleibt dagegen ein Korruptionsindiz und verwirft den ganzen
+    Tageseintrag. Beim laufenden Tag gibt es diese Nachsicht nicht: dort
+    gehört current_day_observed_seconds zum Bündel, weil sich ein
+    angefangener Tag ohne bekannte Beobachtungsdauer nur mit einer
+    erfundenen Abdeckung abschließen ließe - verloren geht dabei
+    ausschließlich der ohnehin unvollständige laufende Tag. payback_achieved_at
     ist wie economics_started_at einmalig gesetzt und danach unveränderlich;
     ein abweichender gespeicherter Wert wird wie ein korrupter Snapshot
     verworfen.
@@ -3359,6 +3414,25 @@ requirement_economics_amortization:
     - "30 vorhandene, aber lückenhafte Tages-Buckets (z. B. nur jeder zweite
        Tag über einen längeren Zeitraum) ergeben INSUFFICIENT_HISTORY statt
        einer aus Lückenfüllern zusammengesetzten Prognose."
+    - "Ein einzelner, nur zur Hälfte beobachteter Tag im Fenster ergibt
+       INCOMPLETE_DAYS (nicht LOW_PRICE_COVERAGE, auch wenn zusätzlich die
+       Preisabdeckung fehlt) und lässt Durchschnitt, Hochrechnung und
+       Rückzahlungsdatum unbekannt; fully_observed_days und
+       average_time_coverage_percent bleiben als Diagnosewerte gesetzt
+       (tests/test_economics_amortization.py)."
+    - "Die Zeitabdeckung misst gegen die tatsächliche Länge des lokalen
+       Kalendertages: ein abgeschlossener 23h-/25h-DST-Tag trägt 82.800
+       bzw. 90.000 Sekunden als day_length_seconds
+       (tests/test_coordinator.py)."
+    - "Der erste Tick nach einem Neustart und ein Intervall ohne
+       Leistungswert zählen nicht als beobachtete Zeit; die beobachtete
+       Zeit allein löst ein verzögertes Speichern aus und übersteht einen
+       Neustart mitten im Tag (tests/test_coordinator.py)."
+    - "Ein gespeicherter Tag ohne observed_seconds (Store vor
+       MINOR_VERSION 5) bleibt erhalten und gilt als unvollständig
+       beobachtet, ein vorhandener ungültiger Wert verwirft den Tag, und
+       ein laufender Tag ohne beobachtete Dauer verwirft nur sein eigenes
+       Bündel (tests/test_economics_persistence.py)."
     - "Ein positiver, aber verschwindend kleiner Tagesdurchschnitt (z. B.
        0,001 EUR/Tag bei 9.000 EUR Restbetrag) liefert payback_days als
        Diagnosewert, estimated_payback_date = None und niemals einen

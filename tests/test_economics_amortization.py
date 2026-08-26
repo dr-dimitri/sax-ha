@@ -14,8 +14,10 @@ import pytest
 
 from custom_components.sax_power.domain.economics_amortization import (
     DAY_COVERAGE_THRESHOLD_PERCENT,
+    DAY_TIME_COVERAGE_THRESHOLD_PERCENT,
     FORECAST_WINDOW_DAYS,
     MAX_FORECAST_PAYBACK_DAYS,
+    SECONDS_PER_DAY,
     DayEconomicsResult,
     ForecastUnavailable,
     compute_amortization_forecast,
@@ -35,6 +37,8 @@ def _day(
     unpriced_charge: float = 0.0,
     priced_discharge: float = 1.0,
     unpriced_discharge: float = 0.0,
+    observed_seconds: float = SECONDS_PER_DAY,
+    day_length_seconds: float = SECONDS_PER_DAY,
 ) -> DayEconomicsResult:
     return DayEconomicsResult(
         day=day,
@@ -43,6 +47,8 @@ def _day(
         unpriced_charge_kwh=unpriced_charge,
         priced_discharge_kwh=priced_discharge,
         unpriced_discharge_kwh=unpriced_discharge,
+        observed_seconds=observed_seconds,
+        day_length_seconds=day_length_seconds,
     )
 
 
@@ -216,6 +222,126 @@ def test_forecast_reports_the_average_price_coverage_when_available() -> None:
     )
 
     assert forecast.average_price_coverage_percent == pytest.approx(100.0)
+
+
+# --------------------------------------------------------------------------
+# Prognose: Zeitabdeckung der Tage (Issue #131)
+# --------------------------------------------------------------------------
+def test_a_fully_observed_day_reports_a_full_time_coverage() -> None:
+    day = _day(TODAY - timedelta(days=1), 1.0)
+
+    assert day.time_coverage_percent == pytest.approx(100.0)
+    assert day.is_fully_observed is True
+
+
+def test_time_coverage_uses_the_actual_local_day_length() -> None:
+    """Regel 1: Nenner ist die tatsächliche Länge des lokalen
+    Kalendertages. Dieselben 24 beobachteten Stunden sind an einem 25h-Tag
+    eine Lücke von einer Stunde, an einem 23h-Tag dagegen vollständig."""
+    winter_switch = _day(
+        TODAY - timedelta(days=1),
+        1.0,
+        observed_seconds=24 * 3600,
+        day_length_seconds=25 * 3600,
+    )
+    summer_switch = _day(
+        TODAY - timedelta(days=1),
+        1.0,
+        observed_seconds=24 * 3600,
+        day_length_seconds=23 * 3600,
+    )
+
+    assert winter_switch.time_coverage_percent == pytest.approx(96.0)
+    assert winter_switch.is_fully_observed is True
+    # Geklemmt: ein Tick über Mitternacht hinaus zählt vollständig zum
+    # neuen Tag und darf keine Abdeckung über 100 % erzeugen.
+    assert summer_switch.time_coverage_percent == pytest.approx(100.0)
+
+
+def test_time_coverage_at_the_threshold_still_counts_as_fully_observed() -> None:
+    exactly_at = _day(
+        TODAY - timedelta(days=1),
+        1.0,
+        observed_seconds=SECONDS_PER_DAY * DAY_TIME_COVERAGE_THRESHOLD_PERCENT / 100,
+    )
+    just_below = _day(
+        TODAY - timedelta(days=1),
+        1.0,
+        observed_seconds=SECONDS_PER_DAY
+        * (DAY_TIME_COVERAGE_THRESHOLD_PERCENT - 0.1)
+        / 100,
+    )
+
+    assert exactly_at.is_fully_observed is True
+    assert just_below.is_fully_observed is False
+
+
+def test_forecast_unavailable_if_a_single_day_was_only_partially_observed() -> None:
+    """Issue #131: War Home Assistant einen halben Tag lang aus, enthält
+    dieser Tag nur einen Teil seines Ergebnisses - er darf den
+    30-Tage-Durchschnitt und damit die Jahreshochrechnung und das
+    Rückzahlungsdatum nicht als vollwertiger Tag zu pessimistisch machen.
+    Wie bei einer zu geringen Preisabdeckung fällt die GESAMTE Prognose
+    aus, statt den Tag stillschweigend zu überspringen."""
+    days = _full_coverage_window(count=FORECAST_WINDOW_DAYS - 1)
+    half_observed = _day(
+        TODAY - timedelta(days=FORECAST_WINDOW_DAYS),
+        1.0,
+        observed_seconds=SECONDS_PER_DAY / 2,
+    )
+
+    forecast = compute_amortization_forecast(
+        [half_observed, *days], TODAY, 1000.0, 500.0
+    )
+
+    assert forecast.reason is ForecastUnavailable.INCOMPLETE_DAYS
+    assert forecast.fully_observed_days == FORECAST_WINDOW_DAYS - 1
+    assert forecast.average_daily_result_eur is None
+    assert forecast.projected_annual_result_eur is None
+    assert forecast.estimated_payback_date is None
+    # Diagnosewerte bleiben auch bei der abgelehnten Prognose gesetzt.
+    assert forecast.average_time_coverage_percent == pytest.approx((29 * 100 + 50) / 30)
+    assert forecast.window_start == TODAY - timedelta(days=FORECAST_WINDOW_DAYS)
+    assert forecast.window_end == TODAY - timedelta(days=1)
+
+
+def test_incomplete_days_outrank_a_low_price_coverage() -> None:
+    """Die Preisabdeckung eines nur teilweise beobachteten Tages misst nur
+    den beobachteten Ausschnitt - der Grund benennt deshalb die
+    ursächliche Lücke (Zeit), nicht ihre Folge (Preis)."""
+    days = _full_coverage_window(count=FORECAST_WINDOW_DAYS - 1)
+    bad_day = _day(
+        TODAY - timedelta(days=FORECAST_WINDOW_DAYS),
+        1.0,
+        priced_charge=0.0,
+        unpriced_charge=1.0,
+        observed_seconds=SECONDS_PER_DAY / 2,
+    )
+
+    forecast = compute_amortization_forecast([bad_day, *days], TODAY, 1000.0, 500.0)
+
+    assert forecast.reason is ForecastUnavailable.INCOMPLETE_DAYS
+    assert forecast.accepted_days == FORECAST_WINDOW_DAYS - 1
+    assert forecast.fully_observed_days == FORECAST_WINDOW_DAYS - 1
+
+
+def test_forecast_reports_the_average_time_coverage_when_available() -> None:
+    forecast = compute_amortization_forecast(
+        _full_coverage_window(), TODAY, 1000.0, 500.0
+    )
+
+    assert forecast.reason is None
+    assert forecast.fully_observed_days == FORECAST_WINDOW_DAYS
+    assert forecast.average_time_coverage_percent == pytest.approx(100.0)
+
+
+def test_a_day_without_a_known_length_is_never_fully_observed() -> None:
+    """Verteidigung gegen einen von Hand auf 0 gesetzten Nenner - lieber
+    eine ausgefallene Prognose als eine Division durch 0."""
+    day = _day(TODAY - timedelta(days=1), 1.0, day_length_seconds=0.0)
+
+    assert day.time_coverage_percent == 0.0
+    assert day.is_fully_observed is False
 
 
 # --------------------------------------------------------------------------

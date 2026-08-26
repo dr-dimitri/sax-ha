@@ -28,6 +28,21 @@ MAX_STORED_DAYS = 60
 #: Prognose unavailable (siehe compute_amortization_forecast).
 DAY_COVERAGE_THRESHOLD_PERCENT = 95.0
 
+#: Regellänge eines Kalendertages in Sekunden - reiner Vorgabewert für
+#: DayEconomicsResult.day_length_seconds. Die tatsächliche Länge des
+#: lokalen Kalendertages (23/24/25 h an einer DST-Umstellung) bestimmt der
+#: Coordinator beim Tagesabschluss, nicht dieses Modul.
+SECONDS_PER_DAY = 86_400.0
+
+#: Mindest-Zeitabdeckung, die JEDER Tag im Beobachtungsfenster erreichen
+#: muss. Ein nur teilweise beobachteter Kalendertag (Home Assistant war
+#: aus, Update, Stromausfall) enthält trotz einwandfreier Preisabdeckung
+#: nur einen Teil seines Ergebnisses und würde den 30-Tage-Durchschnitt,
+#: die Jahreshochrechnung und das Rückzahlungsdatum systematisch zu
+#: pessimistisch machen - fachlich derselbe Fall wie eine zu geringe
+#: Preisabdeckung (siehe compute_amortization_forecast, Issue #131).
+DAY_TIME_COVERAGE_THRESHOLD_PERCENT = 95.0
+
 #: Mittleres Kalenderjahr inkl. Schaltjahren, für die Hochrechnung auf ein
 #: Jahr aus dem 30-Tage-Durchschnitt.
 DAYS_PER_YEAR = 365.2425
@@ -46,6 +61,7 @@ class ForecastUnavailable(StrEnum):
 
     NO_INVESTMENT_COST = "no_investment_cost"
     INSUFFICIENT_HISTORY = "insufficient_history"
+    INCOMPLETE_DAYS = "incomplete_days"
     LOW_PRICE_COVERAGE = "low_price_coverage"
 
 
@@ -61,6 +77,12 @@ class DayEconomicsResult:
     weil sie für die Bilanz nicht "relevant" ist (kein Preisbegriff nötig,
     kein Geldwert entstanden) - nur tatsächlich monetarisierbare Energie
     braucht überhaupt einen Preis.
+
+    `observed_seconds`/`day_length_seconds` beschreiben eine zweite,
+    davon unabhängige Qualitätsdimension: wie viel dieses Kalendertages
+    überhaupt beobachtet wurde (Issue #131). Beide sind bewusst absichernd
+    vorbelegt - ein Aufrufer, der sie nicht setzt, erzeugt einen als
+    unvollständig geltenden Tag, nie einen fälschlich vollwertigen.
     """
 
     day: date
@@ -69,6 +91,11 @@ class DayEconomicsResult:
     unpriced_charge_kwh: float
     priced_discharge_kwh: float
     unpriced_discharge_kwh: float
+    #: Tatsächlich mit Datenpunkten belegte Zeit dieses Tages (Sekunden).
+    observed_seconds: float = 0.0
+    #: Länge dieses lokalen Kalendertages (Sekunden) - an einer
+    #: DST-Umstellung 23 bzw. 25 Stunden, siehe Regel 1.
+    day_length_seconds: float = SECONDS_PER_DAY
 
     @property
     def relevant_kwh(self) -> float:
@@ -98,6 +125,25 @@ class DayEconomicsResult:
     def meets_coverage_threshold(self) -> bool:
         return self.price_coverage_percent >= DAY_COVERAGE_THRESHOLD_PERCENT
 
+    @property
+    def time_coverage_percent(self) -> float:
+        """Anteil (%) des lokalen Kalendertages mit Datenpunkten.
+
+        Nenner ist die tatsächliche Länge dieses Kalendertages, nicht
+        pauschal 24 h - ein DST-Tag mit 23 oder 25 Stunden wird dadurch
+        weder benachteiligt noch bevorzugt (Regel 1). Auf 100 % geklemmt,
+        damit eine Zeitmessung minimal über der Tageslänge (Ticks über
+        Mitternacht hinweg zählen vollständig zum neuen Tag) keinen Wert
+        über 100 % ergibt.
+        """
+        if self.day_length_seconds <= 0:
+            return 0.0
+        return min(self.observed_seconds / self.day_length_seconds * 100, 100.0)
+
+    @property
+    def is_fully_observed(self) -> bool:
+        return self.time_coverage_percent >= DAY_TIME_COVERAGE_THRESHOLD_PERCENT
+
 
 @dataclass(frozen=True, slots=True)
 class AmortizationForecast:
@@ -117,6 +163,9 @@ class AmortizationForecast:
     estimated_payback_date: date | None = None
     complete_days_available: int = 0
     accepted_days: int = 0
+    #: Tage des Fensters, die DAY_TIME_COVERAGE_THRESHOLD_PERCENT
+    #: erreichen - Gegenstück zu accepted_days für die Zeitabdeckung.
+    fully_observed_days: int = 0
     window_start: date | None = None
     window_end: date | None = None
     #: Durchschnittliche Preisabdeckung (%) über das Beobachtungsfenster -
@@ -124,6 +173,10 @@ class AmortizationForecast:
     #: LOW_PRICE_COVERAGE, als Diagnosewert, wie nah das Fenster an der
     #: Schwelle liegt).
     average_price_coverage_percent: float | None = None
+    #: Durchschnittliche Zeitabdeckung (%) über das Beobachtungsfenster -
+    #: wie average_price_coverage_percent ein Diagnosewert, der auch bei
+    #: einer abgelehnten Prognose gesetzt bleibt.
+    average_time_coverage_percent: float | None = None
     reason: ForecastUnavailable | None = None
 
 
@@ -177,7 +230,14 @@ def compute_amortization_forecast(
     zu verwenden. Erreicht auch nur einer dieser 30 Tage nicht
     DAY_COVERAGE_THRESHOLD_PERCENT (Regel 4), ist die gesamte Prognose
     LOW_PRICE_COVERAGE - einzelne schlechte Tage werden nicht
-    stillschweigend übersprungen.
+    stillschweigend übersprungen. Dieselbe harte Regel gilt für die
+    Zeitabdeckung: Wurde auch nur einer der 30 Tage weniger als
+    DAY_TIME_COVERAGE_THRESHOLD_PERCENT seiner tatsächlichen Länge
+    beobachtet, ist die gesamte Prognose INCOMPLETE_DAYS. Dieser Fall wird
+    VOR der Preisabdeckung geprüft, weil die Preisabdeckung eines nur
+    teilweise beobachteten Tages selbst nicht aussagekräftig ist (sie misst
+    nur den beobachteten Ausschnitt) - der Grund benennt damit die
+    ursächliche Lücke, nicht ihre Folge.
 
     Ein nicht positiver Durchschnitt lässt ausschließlich das
     Rückzahlungsdatum unbekannt (Regel 9); average_daily_result_eur und
@@ -206,15 +266,22 @@ def compute_amortization_forecast(
 
     window = [by_day[day] for day in window_dates]
     accepted_days = sum(1 for day in window if day.meets_coverage_threshold)
+    fully_observed_days = sum(1 for day in window if day.is_fully_observed)
     average_coverage = sum(day.price_coverage_percent for day in window) / len(window)
-    if accepted_days < FORECAST_WINDOW_DAYS:
+    average_time_coverage = sum(day.time_coverage_percent for day in window) / len(
+        window
+    )
+    rejected = _window_rejection(fully_observed_days, accepted_days)
+    if rejected is not None:
         return AmortizationForecast(
             complete_days_available=len(complete_days),
             accepted_days=accepted_days,
+            fully_observed_days=fully_observed_days,
             window_start=window_start,
             window_end=window_end,
             average_price_coverage_percent=average_coverage,
-            reason=ForecastUnavailable.LOW_PRICE_COVERAGE,
+            average_time_coverage_percent=average_time_coverage,
+            reason=rejected,
         )
 
     average = sum(day.operating_result_eur for day in window) / FORECAST_WINDOW_DAYS
@@ -240,7 +307,24 @@ def compute_amortization_forecast(
         estimated_payback_date=estimated_payback_date,
         complete_days_available=len(complete_days),
         accepted_days=accepted_days,
+        fully_observed_days=fully_observed_days,
         window_start=window_start,
         window_end=window_end,
         average_price_coverage_percent=average_coverage,
+        average_time_coverage_percent=average_time_coverage,
     )
+
+
+def _window_rejection(
+    fully_observed_days: int, accepted_days: int
+) -> ForecastUnavailable | None:
+    """Ablehnungsgrund eines vollständigen 30-Tage-Fensters, oder None.
+
+    Reihenfolge siehe compute_amortization_forecast: die Zeitabdeckung ist
+    die ursächlichere Lücke und schlägt deshalb die Preisabdeckung.
+    """
+    if fully_observed_days < FORECAST_WINDOW_DAYS:
+        return ForecastUnavailable.INCOMPLETE_DAYS
+    if accepted_days < FORECAST_WINDOW_DAYS:
+        return ForecastUnavailable.LOW_PRICE_COVERAGE
+    return None

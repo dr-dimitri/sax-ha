@@ -3315,7 +3315,12 @@ requirement_economics_amortization:
     complete_days_available, accepted_days,
     average_price_coverage_percent, average_daily_result_eur -
     redundant zum Sensorzustand, aber Teil desselben Attributsatzes -,
-    unavailable_reason) aus der Prognose.
+    payback_days, unavailable_reason) aus der Prognose. payback_days macht
+    dabei den Horizontfall sichtbar: entfällt estimated_payback_date nur
+    wegen MAX_FORECAST_PAYBACK_DAYS, bleibt unavailable_reason None (der
+    Durchschnitt und die Hochrechnung sind ja gültig) - ohne das Attribut
+    wäre dieser Zustand von einer gesunden Prognose nicht zu
+    unterscheiden.
     Anders als die vier "aktuellen" Sensoren (roi, Fortschritt, Restbetrag,
     Tagesergebnis) blendet die 30-Tage-Prognose (Durchschnitt/Hochrechnung/
     Rückzahlungsdatum) während einer Tarifpause NICHT auf None: sie beruht
@@ -3357,7 +3362,9 @@ requirement_economics_amortization:
     - "Ein positiver, aber verschwindend kleiner Tagesdurchschnitt (z. B.
        0,001 EUR/Tag bei 9.000 EUR Restbetrag) liefert payback_days als
        Diagnosewert, estimated_payback_date = None und niemals einen
-       OverflowError (tests/test_economics_amortization.py)."
+       OverflowError (tests/test_economics_amortization.py); der
+       Coordinator veröffentlicht payback_days dabei als Attribut
+       (tests/test_coordinator.py)."
     - "Tageswechsel bei einer Sommerzeit- (23h) und einer
        Winterzeitumstellung (25h), ein Neustart mit bereits laufendem Tag
        sowie eine doppelte Verarbeitung desselben Ticks erzeugen jeweils

@@ -986,6 +986,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "accepted_days": 0,
                 "average_price_coverage_percent": None,
                 "average_daily_result_eur": None,
+                "payback_days": None,
                 "unavailable_reason": ForecastUnavailable.NO_INVESTMENT_COST.value,
             }
             return
@@ -1076,6 +1077,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 None
                 if forecast.average_daily_result_eur is None
                 else round(forecast.average_daily_result_eur, 4)
+            ),
+            # Ohne dieses Attribut wäre ein Rückzahlungsdatum, das nur
+            # wegen MAX_FORECAST_PAYBACK_DAYS entfällt, von einer gesunden
+            # Prognose nicht zu unterscheiden (unavailable_reason bleibt
+            # dabei None, weil Durchschnitt und Hochrechnung gültig sind).
+            "payback_days": (
+                None
+                if forecast.payback_days is None
+                else round(forecast.payback_days, 1)
             ),
             "unavailable_reason": (
                 None if forecast.reason is None else forecast.reason.value

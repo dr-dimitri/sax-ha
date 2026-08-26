@@ -297,7 +297,10 @@ jeden Home-Assistant-Bezug:
   Durchschnitt ergäbe sonst ein von `date`/`timedelta` nicht mehr
   darstellbares Datum, und dieser `OverflowError` würde über
   `_async_update_data` sämtliche Entities unavailable machen - `payback_days`
-  bleibt als Diagnosewert erhalten.
+  bleibt als Diagnosewert erhalten und wird vom Coordinator als Attribut
+  von `economics_average_daily_result_30d` veröffentlicht, weil
+  `unavailable_reason` in diesem Fall `None` bleibt (Durchschnitt und
+  Hochrechnung sind gültig) und der Horizontfall sonst unsichtbar wäre.
 
 Tageswechsel-Erkennung ohne eigenen Timer, in
 `SaxPowerCoordinator._advance_economics_day` (aufgerufen aus

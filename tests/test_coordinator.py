@@ -5281,6 +5281,38 @@ def test_forecast_sensors_populate_once_30_complete_days_are_stored(hass) -> Non
     assert attributes["unavailable_reason"] is None
 
 
+def test_forecast_publishes_payback_days_beyond_the_horizon(hass) -> None:
+    """REQ-ECONOMICS-AMORTIZATION: Jenseits von MAX_FORECAST_PAYBACK_DAYS
+    entfällt nur das Datum - Durchschnitt und Hochrechnung bleiben gültig,
+    unavailable_reason bleibt deshalb None. Ohne das payback_days-Attribut
+    wäre dieser Zustand von einer gesunden Prognose nicht zu
+    unterscheiden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    coordinator._economics_avoided_grid_cost_eur = 0.0
+    coordinator._economics_grid_charge_cost_eur = 0.0
+    coordinator._economics_pv_opportunity_cost_eur = 0.0
+    today = date(2026, 3, 31)
+    # 0,0001 EUR/Tag bei 1.000 EUR Restbetrag: 10 Mio. Tage.
+    coordinator._economics_day_results = _forecast_ready_day_results(
+        result=0.0001, end=today
+    )
+
+    data = {}
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.now",
+        return_value=datetime.combine(today, dt_time(12, 0)),
+    ):
+        coordinator._publish_amortization(data, monetary_available=True)
+
+    assert data["economics_average_daily_result_30d"] == pytest.approx(0.0001)
+    assert data["economics_projected_annual_result"] is not None
+    assert data["economics_estimated_payback_date"] is None
+    attributes = data["economics_amortization_forecast_attributes"]
+    assert attributes["payback_days"] == pytest.approx(10_000_000.0)
+    assert attributes["unavailable_reason"] is None
+
+
 def test_forecast_payback_date_survives_a_tariff_pause(hass) -> None:
     """Die 30-Tage-Prognose beruht ausschließlich auf bereits
     abgeschlossenen Tagen und den Investitionskosten - anders als die vier

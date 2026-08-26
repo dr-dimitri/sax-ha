@@ -718,3 +718,17 @@ MAX_ECONOMICS_IMPORT_PRICE = 5.0
 # Wert selbst auf diese Schrittweite (config_flow._round_to_price_step).
 ECONOMICS_PRICE_STEP = 0.0001
 ECONOMICS_PRICE_DECIMALS = 4
+
+# ==========================================================================
+# Wirtschaftlichkeitsauswertung: ROI und Amortisationsprognose (siehe
+# anforderung.yaml, REQ-ECONOMICS-AMORTIZATION)
+# ==========================================================================
+# Unabhängig von der Tarifart (ECONOMICS_OPTION_KEYS) - ein Tarifwechsel
+# darf die Investitionskosten nicht löschen, deshalb bewusst NICHT Teil
+# dieser Liste. Leer/None deaktiviert sämtliche Investitions-/
+# Amortisationssensoren, ohne die übrige Wirtschaftlichkeitsbilanz
+# (REQ-ECONOMICS-ACCOUNTING) zu berühren.
+CONF_ECONOMICS_INVESTMENT_COST = "economics_investment_cost_eur"
+MIN_ECONOMICS_INVESTMENT_COST = 0.01
+MAX_ECONOMICS_INVESTMENT_COST = 1_000_000.0
+ECONOMICS_INVESTMENT_COST_STEP = 0.01

@@ -13,6 +13,7 @@ from custom_components.sax_power.config_flow import _expected_entity_count
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
@@ -829,3 +830,83 @@ async def test_disabling_the_tariff_drops_all_economics_values(hass) -> None:
     assert CONF_ECONOMICS_FIXED_IMPORT_PRICE not in entry.options
     # Die übrige Options-Flow-Konfiguration bleibt unangetastet.
     assert entry.options[CONF_PRICE_SENSOR] == "sensor.strompreis"
+
+
+# --------------------------------------------------------------------------
+# ROI/Amortisation: Investitionskosten (siehe anforderung.yaml,
+# REQ-ECONOMICS-AMORTIZATION)
+# --------------------------------------------------------------------------
+async def test_options_flow_stores_the_investment_cost(hass) -> None:
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
+            CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_INVESTMENT_COST] == 8500.0
+
+
+async def test_investment_cost_survives_a_tariff_type_switch(hass) -> None:
+    """Die Investitionskosten sind unabhängig von der Tarifart und dürfen
+    bei einem Tarifwechsel nicht wie die tarifspezifischen Felder aus
+    ECONOMICS_OPTION_KEYS verworfen werden."""
+    entry = _economics_entry(
+        hass,
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+            CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
+            CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_INVESTMENT_COST] == 8500.0
+
+
+async def test_investment_cost_can_be_removed_without_touching_the_tariff(
+    hass,
+) -> None:
+    entry = _economics_entry(
+        hass,
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+            CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_ECONOMICS_INVESTMENT_COST not in entry.options
+    assert entry.options[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 0.34

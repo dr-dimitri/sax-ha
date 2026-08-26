@@ -327,6 +327,27 @@
       },
       "economics_feed_in_price": {
         "name": "Feed-in tariff"
+      },
+      "economics_roi": {
+        "name": "ROI"
+      },
+      "economics_amortization_progress": {
+        "name": "Amortization progress"
+      },
+      "economics_remaining_to_payback": {
+        "name": "Remaining to payback"
+      },
+      "economics_result_today": {
+        "name": "Operating result today"
+      },
+      "economics_average_daily_result_30d": {
+        "name": "Average daily result (30 days)"
+      },
+      "economics_projected_annual_result": {
+        "name": "Projected annual result"
+      },
+      "economics_estimated_payback_date": {
+        "name": "Estimated payback date"
       }
     },
     "number": {
@@ -655,7 +676,8 @@
           "price_unit": "Price unit",
           "pv_forecast_sensor": "PV forecast sensor (optional)",
           "pv_forecast_factor": "Usable share of the PV forecast (%)",
-          "economics_tariff_type": "Economics tariff model"
+          "economics_tariff_type": "Economics tariff model",
+          "economics_investment_cost_eur": "Investment cost (EUR)"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. The windows for the “relative” and “smart” strategies are derived from its price forecast attributes.",
@@ -663,7 +685,8 @@
           "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh is converted to EUR/kWh internally.",
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
-          "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings."
+          "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings.",
+          "economics_investment_cost_eur": "Optional and independent of the tariff model - switching tariffs does not clear this value. Leave empty to disable ROI, amortization progress, remaining-to-payback and the 30-day forecast."
         }
       },
       "economics_fixed": {

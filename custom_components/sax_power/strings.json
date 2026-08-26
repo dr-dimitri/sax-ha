@@ -327,6 +327,27 @@
       },
       "economics_feed_in_price": {
         "name": "Einspeisevergütung"
+      },
+      "economics_roi": {
+        "name": "ROI"
+      },
+      "economics_amortization_progress": {
+        "name": "Amortisationsfortschritt"
+      },
+      "economics_remaining_to_payback": {
+        "name": "Restbetrag bis Amortisation"
+      },
+      "economics_result_today": {
+        "name": "Operatives Ergebnis heute"
+      },
+      "economics_average_daily_result_30d": {
+        "name": "Durchschnittliches Tagesergebnis (30 Tage)"
+      },
+      "economics_projected_annual_result": {
+        "name": "Hochgerechnetes Jahresergebnis"
+      },
+      "economics_estimated_payback_date": {
+        "name": "Voraussichtliches Amortisationsdatum"
       }
     },
     "number": {
@@ -655,7 +676,8 @@
           "price_unit": "Preis-Einheit",
           "pv_forecast_sensor": "PV-Prognose-Sensor (optional)",
           "pv_forecast_factor": "Nutzbarer Anteil der PV-Prognose (%)",
-          "economics_tariff_type": "Tarifmodell für die Wirtschaftlichkeit"
+          "economics_tariff_type": "Tarifmodell für die Wirtschaftlichkeit",
+          "economics_investment_cost_eur": "Investitionskosten (EUR)"
         },
         "data_description": {
           "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Die Zeitfenster der Modi „Relativ“ und „Smart“ werden aus dessen Preisvorschau-Attributen ermittelt.",
@@ -663,7 +685,8 @@
           "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh wird intern in EUR/kWh umgerechnet.",
           "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Gemeinsame Quelle für den Modus „Smart“ und den optionalen Mindestwert des netzdienlichen Ladens.",
           "pv_forecast_factor": "Nur für den Modus „Smart“: Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab. Der Mindestwert des netzdienlichen Ladens vergleicht dagegen den unveränderten Sensorwert.",
-          "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung."
+          "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung.",
+          "economics_investment_cost_eur": "Optional und unabhängig vom Tarifmodell - ein Tarifwechsel löscht diesen Wert nicht. Leer lassen deaktiviert ROI, Amortisationsfortschritt, Restbetrag und die 30-Tage-Prognose."
         }
       },
       "economics_fixed": {

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from time import monotonic
 from typing import Any
@@ -21,6 +21,7 @@ from pymodbus.exceptions import ModbusException
 
 from .application.calibration import CalibrationState, evaluate_calibration
 from .application.charge_policy import ChargePolicyInput, evaluate_charge_policy
+from .application.economics import investment_cost_eur_from_options
 from .application.ports import ModbusClient
 from .const import (
     ALL_MONTHS,
@@ -86,9 +87,19 @@ from .const import (
     UNKNOWN_LABEL,
 )
 from .domain.economics_accounting import (
+    EconomicsDelta,
     compute_economics_delta,
     initial_unvalued_inventory_kwh,
     min_soc_inventory_correction,
+)
+from .domain.economics_amortization import (
+    MAX_STORED_DAYS,
+    AmortizationForecast,
+    DayEconomicsResult,
+    compute_amortization_forecast,
+    compute_amortization_progress_percent,
+    compute_remaining_to_payback_eur,
+    compute_roi_percent,
 )
 from .domain.energy_accounting import EnergyDelta, compute_charge_delta
 from .domain.registers import (
@@ -451,6 +462,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_unpriced_discharge_kwh: float | None = None
         self._economics_started_at: datetime | None = None
         self._last_tariff_revision_at: datetime | None = None
+        # ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION): lokale
+        # Kalendertag-Buckets, unabhängig vom Sieben-Felder-Bündel oben -
+        # siehe _advance_economics_day. day_results sind abgeschlossene
+        # Tage (älteste zuerst, höchstens MAX_STORED_DAYS); current_day und
+        # die vier Zähler bilden zusammen den noch laufenden Tag und werden
+        # nur gemeinsam gesetzt oder verworfen (siehe _start_economics_day).
+        self._economics_day_results: tuple[DayEconomicsResult, ...] = ()
+        self._economics_current_day: date | None = None
+        self._economics_current_day_operating_result_eur: float | None = None
+        self._economics_current_day_priced_charge_kwh: float | None = None
+        self._economics_current_day_unpriced_charge_kwh: float | None = None
+        self._economics_current_day_priced_discharge_kwh: float | None = None
+        self._economics_current_day_unpriced_discharge_kwh: float | None = None
+        # Einmalig gesetzt, wenn das kumulierte operative Ergebnis die
+        # Investitionskosten erstmals erreicht (Regel 8) - danach für immer
+        # unveränderlich, unabhängig von einer späteren Änderung der
+        # Investitionskosten (siehe _maybe_mark_payback_achieved).
+        self._economics_payback_achieved_at: datetime | None = None
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -667,6 +696,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         changed = False
+        delta: EconomicsDelta | None = None
         if charge_delta is not None:
             delta = compute_economics_delta(
                 charge_delta,
@@ -710,9 +740,222 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._economics_unvalued_inventory_kwh = correction
             changed = True
 
+        if self._advance_economics_day(delta):
+            changed = True
+
         if changed:
             self._async_schedule_economics_save()
         self._publish_economics_balance(data, monetary_available=tariff_enabled)
+        self._publish_amortization(data, monetary_available=tariff_enabled)
+
+    def _start_economics_day(self, day: date) -> None:
+        self._economics_current_day = day
+        self._economics_current_day_operating_result_eur = 0.0
+        self._economics_current_day_priced_charge_kwh = 0.0
+        self._economics_current_day_unpriced_charge_kwh = 0.0
+        self._economics_current_day_priced_discharge_kwh = 0.0
+        self._economics_current_day_unpriced_discharge_kwh = 0.0
+
+    def _advance_economics_day(self, delta: EconomicsDelta | None) -> bool:
+        """Erkennt einen lokalen Kalendertagswechsel und akkumuliert den
+        laufenden Tag (REQ-ECONOMICS-AMORTIZATION).
+
+        Läuft bei jedem Poll-Tick mit einem existierenden Datenpunkt mit,
+        ohne eigenen Timer - das lokale Datum kommt bewusst aus
+        `dt_util.now()` (Home-Assistant-Zeitzone), nicht aus UTC, damit ein
+        Tag dem tatsächlichen Kalendertag am Aufstellort entspricht. Ein
+        DST-Tag mit 23 oder 25 Stunden wird dabei NICHT auf 24h normiert -
+        er bleibt einfach ein Tag mit entsprechend weniger/mehr
+        Datenpunkten (Regel 1). Idempotent gegenüber einem Neustart (der
+        laufende Tag ist persistiert, siehe async_load_economics_state) und
+        einer doppelten Verarbeitung desselben Ticks: Nur ein tatsächlicher
+        Wechsel des lokalen Datums schließt genau einmal einen Tag ab.
+        """
+        today_local = dt_util.now().date()
+        changed = False
+        if self._economics_current_day is None:
+            self._start_economics_day(today_local)
+            changed = True
+        elif today_local != self._economics_current_day:
+            self._close_economics_day()
+            self._start_economics_day(today_local)
+            changed = True
+
+        if delta is not None:
+            self._economics_current_day_operating_result_eur += (
+                delta.avoided_grid_cost_delta
+                - delta.grid_charge_cost_delta
+                - delta.pv_opportunity_cost_delta
+            )
+            self._economics_current_day_priced_charge_kwh += (
+                delta.priced_charge_kwh_delta
+            )
+            self._economics_current_day_unpriced_charge_kwh += (
+                delta.unpriced_charge_delta_kwh
+            )
+            self._economics_current_day_priced_discharge_kwh += (
+                delta.priced_discharge_kwh_delta
+            )
+            self._economics_current_day_unpriced_discharge_kwh += (
+                delta.unpriced_discharge_delta_kwh
+            )
+
+        return changed
+
+    def _close_economics_day(self) -> None:
+        """Schließt den laufenden Kalendertag ab und hängt ihn an die
+        Tageshistorie an.
+
+        Wird ausschließlich von _advance_economics_day bei einem erkannten
+        Datumswechsel aufgerufen, bevor der neue Tag über
+        _start_economics_day beginnt - `_economics_current_day` und seine
+        vier Zähler sind an dieser Stelle deshalb garantiert gesetzt (float,
+        kein None).
+        """
+        closed_day = DayEconomicsResult(
+            day=self._economics_current_day,
+            operating_result_eur=self._economics_current_day_operating_result_eur,
+            priced_charge_kwh=self._economics_current_day_priced_charge_kwh,
+            unpriced_charge_kwh=self._economics_current_day_unpriced_charge_kwh,
+            priced_discharge_kwh=self._economics_current_day_priced_discharge_kwh,
+            unpriced_discharge_kwh=self._economics_current_day_unpriced_discharge_kwh,
+        )
+        self._economics_day_results = (*self._economics_day_results, closed_day)[
+            -MAX_STORED_DAYS:
+        ]
+        self._maybe_mark_payback_achieved()
+
+    def _maybe_mark_payback_achieved(self) -> None:
+        """Setzt payback_achieved_at einmalig beim Tagesabschluss, an dem
+        das kumulierte operative Ergebnis die Investitionskosten erstmals
+        erreicht (anforderung.yaml, REQ-ECONOMICS-AMORTIZATION, Regel 8).
+
+        Bleibt danach für immer unverändert - auch eine spätere Änderung
+        oder Entfernung der Investitionskosten wirkt nur prospektiv auf
+        künftige ROI-/Restbetrags-Sensoren, nie rückwirkend auf diesen
+        bereits erreichten Zeitpunkt.
+        """
+        if self._economics_payback_achieved_at is not None:
+            return
+        investment_cost = investment_cost_eur_from_options(self.options)
+        if investment_cost is None:
+            return
+        operating_result = (
+            self._economics_avoided_grid_cost_eur
+            - self._economics_grid_charge_cost_eur
+            - self._economics_pv_opportunity_cost_eur
+        )
+        if operating_result >= investment_cost:
+            self._economics_payback_achieved_at = dt_util.utcnow()
+
+    def _publish_amortization(
+        self, data: dict[str, Any], *, monetary_available: bool
+    ) -> None:
+        """Veröffentlicht ROI/Amortisationsprognose (REQ-ECONOMICS-
+        AMORTIZATION) in coordinator.data.
+
+        `monetary_available=False` (deaktivierter Tarif) blendet dieselben
+        vier "aktuellen" Geldwert-Sensoren wie _publish_economics_balance
+        auf None aus (ROI, Fortschritt, Restbetrag, Tagesergebnis) - aus
+        demselben Grund: kein sichtbarer Betrag, solange der Tarif aus ist,
+        obwohl intern weiter akkumuliert wird. Die 30-Tage-Prognose
+        (Durchschnitt/Hochrechnung/Rückzahlungsdatum) beruht dagegen
+        ausschließlich auf bereits abgeschlossenen, historisch korrekten
+        Kalendertagen und den Investitionskosten - sie wird NICHT
+        ausgeblendet, weil sie keinen "gerade jetzt" gültigen Preis zeigt.
+        """
+        investment_cost = investment_cost_eur_from_options(self.options)
+        operating_result = (
+            None
+            if self._economics_avoided_grid_cost_eur is None
+            or self._economics_grid_charge_cost_eur is None
+            or self._economics_pv_opportunity_cost_eur is None
+            else (
+                self._economics_avoided_grid_cost_eur
+                - self._economics_grid_charge_cost_eur
+                - self._economics_pv_opportunity_cost_eur
+            )
+        )
+        published_operating_result = operating_result if monetary_available else None
+        roi_percent = compute_roi_percent(published_operating_result, investment_cost)
+        remaining_to_payback = compute_remaining_to_payback_eur(
+            investment_cost, published_operating_result
+        )
+        data["economics_roi"] = None if roi_percent is None else round(roi_percent, 2)
+        data["economics_amortization_progress"] = (
+            None
+            if roi_percent is None
+            else round(compute_amortization_progress_percent(roi_percent), 2)
+        )
+        data["economics_remaining_to_payback"] = (
+            None if remaining_to_payback is None else round(remaining_to_payback, 2)
+        )
+
+        current_day_result = (
+            self._economics_current_day_operating_result_eur
+            if monetary_available
+            else None
+        )
+        data["economics_result_today"] = (
+            None if current_day_result is None else round(current_day_result, 4)
+        )
+
+        today_local = dt_util.now().date()
+        forecast = compute_amortization_forecast(
+            self._economics_day_results,
+            today_local,
+            investment_cost,
+            remaining_to_payback,
+        )
+        data["economics_average_daily_result_30d"] = (
+            None
+            if forecast.average_daily_result_eur is None
+            else round(forecast.average_daily_result_eur, 4)
+        )
+        data["economics_projected_annual_result"] = (
+            None
+            if forecast.projected_annual_result_eur is None
+            else round(forecast.projected_annual_result_eur, 2)
+        )
+        data["economics_estimated_payback_date"] = self._estimated_payback_date(
+            forecast
+        )
+        data["economics_amortization_forecast_attributes"] = {
+            "window_start": (
+                forecast.window_start.isoformat()
+                if forecast.window_start is not None
+                else None
+            ),
+            "window_end": (
+                forecast.window_end.isoformat()
+                if forecast.window_end is not None
+                else None
+            ),
+            "complete_days_available": forecast.complete_days_available,
+            "accepted_days": forecast.accepted_days,
+            "unavailable_reason": (
+                None if forecast.reason is None else forecast.reason.value
+            ),
+        }
+
+    def _estimated_payback_date(
+        self, forecast: AmortizationForecast
+    ) -> datetime | None:
+        """Rückzahlungsdatum als tz-aware datetime (device_class TIMESTAMP
+        verlangt ein echtes datetime-Objekt, kein ISO-String).
+
+        Einmal erreicht (Regel 8), gilt für immer der fixe, historische
+        Erreichungszeitpunkt statt der laufenden Projektion aus `forecast` -
+        eine spätere Änderung der Investitionskosten darf dieses Datum
+        nicht mehr verschieben. Die Projektion selbst ist nur ein
+        Kalendertag ohne Uhrzeitbezug und wird deshalb auf lokal Mitternacht
+        dieses Tages abgebildet.
+        """
+        if self._economics_payback_achieved_at is not None:
+            return self._economics_payback_achieved_at
+        if forecast.estimated_payback_date is None:
+            return None
+        return dt_util.start_of_local_day(forecast.estimated_payback_date)
 
     def _bootstrap_economics_if_ready(self, data: dict[str, Any]) -> None:
         """Startet die Bilanz beim erstmaligen Aktivieren.
@@ -850,6 +1093,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._economics_started_at = state.economics_started_at
         if state is not None:
             self._last_tariff_revision_at = state.last_tariff_revision_at
+            self._economics_day_results = state.day_results
+            self._economics_payback_achieved_at = state.payback_achieved_at
+            if state.current_day is not None:
+                self._economics_current_day = state.current_day
+                self._economics_current_day_operating_result_eur = (
+                    state.current_day_operating_result_eur
+                )
+                self._economics_current_day_priced_charge_kwh = (
+                    state.current_day_priced_charge_kwh
+                )
+                self._economics_current_day_unpriced_charge_kwh = (
+                    state.current_day_unpriced_charge_kwh
+                )
+                self._economics_current_day_priced_discharge_kwh = (
+                    state.current_day_priced_discharge_kwh
+                )
+                self._economics_current_day_unpriced_discharge_kwh = (
+                    state.current_day_unpriced_discharge_kwh
+                )
         self._economics_store_loaded = True
 
     def _economics_state(self) -> EconomicsState:
@@ -862,6 +1124,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             unpriced_discharge_kwh=self._economics_unpriced_discharge_kwh,
             economics_started_at=self._economics_started_at,
             last_tariff_revision_at=self._last_tariff_revision_at,
+            day_results=self._economics_day_results,
+            current_day=self._economics_current_day,
+            current_day_operating_result_eur=(
+                self._economics_current_day_operating_result_eur
+            ),
+            current_day_priced_charge_kwh=(
+                self._economics_current_day_priced_charge_kwh
+            ),
+            current_day_unpriced_charge_kwh=(
+                self._economics_current_day_unpriced_charge_kwh
+            ),
+            current_day_priced_discharge_kwh=(
+                self._economics_current_day_priced_discharge_kwh
+            ),
+            current_day_unpriced_discharge_kwh=(
+                self._economics_current_day_unpriced_discharge_kwh
+            ),
+            payback_achieved_at=self._economics_payback_achieved_at,
         )
 
     def _async_schedule_economics_save(self) -> None:
@@ -911,6 +1191,42 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "unvalued_inventory_kwh": self._economics_unvalued_inventory_kwh,
             "unpriced_charge_kwh": self._economics_unpriced_charge_kwh,
             "unpriced_discharge_kwh": self._economics_unpriced_discharge_kwh,
+            "day_results": [
+                {
+                    "day": day.day.isoformat(),
+                    "operating_result_eur": day.operating_result_eur,
+                    "priced_charge_kwh": day.priced_charge_kwh,
+                    "unpriced_charge_kwh": day.unpriced_charge_kwh,
+                    "priced_discharge_kwh": day.priced_discharge_kwh,
+                    "unpriced_discharge_kwh": day.unpriced_discharge_kwh,
+                }
+                for day in self._economics_day_results
+            ],
+            "current_day": (
+                None
+                if self._economics_current_day is None
+                else self._economics_current_day.isoformat()
+            ),
+            "current_day_operating_result_eur": (
+                self._economics_current_day_operating_result_eur
+            ),
+            "current_day_priced_charge_kwh": (
+                self._economics_current_day_priced_charge_kwh
+            ),
+            "current_day_unpriced_charge_kwh": (
+                self._economics_current_day_unpriced_charge_kwh
+            ),
+            "current_day_priced_discharge_kwh": (
+                self._economics_current_day_priced_discharge_kwh
+            ),
+            "current_day_unpriced_discharge_kwh": (
+                self._economics_current_day_unpriced_discharge_kwh
+            ),
+            "payback_achieved_at": (
+                None
+                if self._economics_payback_achieved_at is None
+                else self._economics_payback_achieved_at.isoformat()
+            ),
         }
 
     async def async_load_energy_state(self) -> None:

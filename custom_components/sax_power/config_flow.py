@@ -12,7 +12,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.const import CONF_HOST, CONF_PORT, CURRENCY_EURO
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import config_validation as cv
@@ -29,6 +29,7 @@ from .const import (
     CONF_CREATE_DASHBOARD,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
@@ -56,14 +57,17 @@ from .const import (
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
     DOMAIN,
+    ECONOMICS_INVESTMENT_COST_STEP,
     ECONOMICS_OPTION_KEYS,
     ECONOMICS_PRICE_DECIMALS,
     ECONOMICS_TOU_WINDOW_KEYS,
     MAX_ECONOMICS_FEED_IN_PRICE,
     MAX_ECONOMICS_IMPORT_PRICE,
+    MAX_ECONOMICS_INVESTMENT_COST,
     MAX_PV_FORECAST_FACTOR,
     MIN_ECONOMICS_FEED_IN_PRICE,
     MIN_ECONOMICS_IMPORT_PRICE,
+    MIN_ECONOMICS_INVESTMENT_COST,
     MIN_PV_FORECAST_FACTOR,
     PRICE_UNITS,
     READ_BLOCK_EXT_LOW1_COUNT,
@@ -508,6 +512,19 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
                 options=[tariff_type.value for tariff_type in TariffType],
                 translation_key="economics_tariff_type",
                 mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        # REQ-ECONOMICS-AMORTIZATION: unabhängig von der Tarifart (siehe
+        # const.ECONOMICS_OPTION_KEYS) - ein Tarifwechsel darf die
+        # Investitionskosten nicht löschen. Leer lassen deaktiviert
+        # sämtliche Investitions-/Amortisationssensoren.
+        vol.Optional(CONF_ECONOMICS_INVESTMENT_COST): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=MIN_ECONOMICS_INVESTMENT_COST,
+                max=MAX_ECONOMICS_INVESTMENT_COST,
+                step=ECONOMICS_INVESTMENT_COST_STEP,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement=CURRENCY_EURO,
             )
         ),
     }

@@ -61,6 +61,7 @@
 # REQ-ECONOMICS-TARIFFS           done       Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung
 # REQ-ENERGY-ORIGIN               done       Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)
 # REQ-ECONOMICS-ACCOUNTING        done       Kosten/operatives Ergebnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren
+# REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
 # ==============================================================================
 
 # ==============================================================================
@@ -3175,3 +3176,155 @@ requirement_economics_accounting:
     - "strings.json, translations/de.json, translations/en.json,
        README.md, DEVELOPMENT.md, diagnostics.py und anforderung.yaml
        sind aktualisiert."
+
+# ==============================================================================
+# ANFORDERUNG: ROI UND AMORTISATIONSPROGNOSE
+# ==============================================================================
+requirement_economics_amortization:
+  id: REQ-ECONOMICS-AMORTIZATION
+  title: "ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)"
+  status: done
+  description: >
+    Baut ausschließlich auf dem bereits bilanzierten operativen Ergebnis
+    (REQ-ECONOMICS-ACCOUNTING) auf - keine eigene Preis- oder
+    Energieherkunftslogik. Optionale, von der Tarifart unabhängige
+    Investitionskosten (economics_investment_cost_eur, Options Flow, 0,01
+    bis 1.000.000 EUR, Schrittweite 0,01) schalten sämtliche ROI-/
+    Amortisationssensoren frei; leer/fehlend liefert für alle sieben None
+    statt eines erfundenen Werts. Ein Tarifwechsel löscht die
+    Investitionskosten nicht (nicht Teil von const.ECONOMICS_OPTION_KEYS).
+
+    Reine Formeln (domain/economics_amortization.py, kein
+    Home-Assistant-Bezug):
+
+    ```
+    roi_percent = operating_result_eur / investment_cost_eur * 100          # unklemmt
+    amortization_progress_percent = clamp(roi_percent, 0, 100)
+    remaining_to_payback_eur = max(investment_cost_eur - operating_result_eur, 0)
+    ```
+
+    roi_percent bleibt bewusst unklemmt (negativ bei Verlust, über 100 %
+    bei mehrfacher Amortisation); nur amortization_progress_percent ist als
+    Fortschritts-Gauge auf 0..100 begrenzt.
+    SaxPowerCoordinator._publish_amortization leitet beide sowie
+    economics_remaining_to_payback und economics_result_today aus demselben
+    operativen Ergebnis wie economics_operating_result ab und blendet sie
+    bei deaktiviertem Tarif ebenso auf None aus (monetary_available) - der
+    interne Stand läuft dabei unverändert weiter, exakt wie bei den vier
+    Sensoren aus REQ-ECONOMICS-ACCOUNTING.
+
+    Lokale Kalendertag-Buckets (domain.economics_amortization.
+    DayEconomicsResult: operating_result_eur plus die vier Energiemengen
+    priced_charge_kwh/unpriced_charge_kwh/priced_discharge_kwh/
+    unpriced_discharge_kwh) werden ohne eigenen Timer erkannt:
+    SaxPowerCoordinator._advance_economics_day vergleicht bei jedem
+    ohnehin stattfindenden Poll-Tick dt_util.now().date() (Home-Assistant-
+    Zeitzone, nicht UTC) mit dem zuletzt gesehenen Tag. Ein DST-Tag mit 23
+    oder 25 Stunden wird NICHT auf 24h normiert - die Erkennung beruht
+    ausschließlich auf dem Kalenderdatum, nie auf verstrichener Zeit. Bei
+    einem erkannten Wechsel schließt _close_economics_day den bisherigen
+    Tag ab (angehängt an EconomicsState.day_results, auf MAX_STORED_DAYS =
+    60 gekappt) und _start_economics_day beginnt den neuen bei 0; beides
+    läuft unabhängig davon, ob dieses Intervall selbst ein Delta hatte, und
+    ist idempotent gegenüber einem Neustart mittendrin (current_day plus
+    seine vier Zähler sind als eigenes Fünfer-Bündel persistiert, siehe
+    unten) sowie gegenüber einer doppelten Verarbeitung desselben Ticks
+    (nur ein tatsächlicher Datumswechsel löst genau einen Abschluss aus).
+
+    30-Tage-Prognose (domain.economics_amortization.
+    compute_amortization_forecast, reine Funktion): schließt den laufenden,
+    unvollständigen Tag zwingend aus (zusätzlich zur Buckets-Erzeugung
+    selbst nochmals defensiv per day < today_local geprüft); benötigt
+    mindestens FORECAST_WINDOW_DAYS = 30 abgeschlossene Tage, sonst
+    ForecastUnavailable.INSUFFICIENT_HISTORY; verwendet exakt die jüngsten
+    30, auch wenn mehr gespeichert sind; verlangt von JEDEM dieser 30 Tage
+    eine Preisabdeckung (DayEconomicsResult.price_coverage_percent, ein Tag
+    ganz ohne relevante Energie gilt als 100 % abgedeckt) von mindestens
+    DAY_COVERAGE_THRESHOLD_PERCENT = 95 %, sonst ist die GESAMTE Prognose
+    ForecastUnavailable.LOW_PRICE_COVERAGE (ein einzelner schlechter Tag
+    wird nicht stillschweigend übersprungen). Erfüllt das Fenster beide
+    Bedingungen: average_daily_result_eur = Summe der 30 Tagesergebnisse /
+    30, projected_annual_result_eur = average_daily_result_eur * 365,2425
+    (DAYS_PER_YEAR, mittleres Kalenderjahr inkl. Schaltjahren). Ein nicht
+    positiver Durchschnitt lässt ausschließlich das Rückzahlungsdatum
+    unbekannt (Regel 9) - average/Hochrechnung bleiben trotzdem gesetzt,
+    nie "unendlich" und nie ein erfundenes Datum. Ist der Durchschnitt
+    positiv und ist noch ein Restbetrag offen, ergibt sich payback_days =
+    remaining_to_payback_eur / average_daily_result_eur und
+    estimated_payback_date = heute + aufgerundete payback_days
+    (math.ceil) - hier immer eine zukünftige Projektion.
+
+    Payback-Erkennung (SaxPowerCoordinator._maybe_mark_payback_achieved,
+    aufgerufen aus _close_economics_day): sobald das kumulierte operative
+    Ergebnis (dieselben drei Teilsummen wie economics_operating_result) die
+    konfigurierten Investitionskosten an einer Tagesgrenze erstmals
+    erreicht oder übersteigt, wird payback_achieved_at (UTC) genau einmal
+    gesetzt und bleibt danach für immer unveränderlich - auch eine spätere
+    Änderung oder Entfernung der Investitionskosten wirkt nur prospektiv
+    auf ROI/Restbetrag, nie rückwirkend auf diesen Zeitpunkt. Ist
+    payback_achieved_at gesetzt, zeigt economics_estimated_payback_date
+    diesen fixen historischen Zeitpunkt statt der laufenden Projektion aus
+    der 30-Tage-Prognose (SaxPowerCoordinator._estimated_payback_date).
+
+    Neue Sensoren (sensor.py, beschreibungsbasiert): economics_roi,
+    economics_amortization_progress (beide %, state_class measurement),
+    economics_remaining_to_payback, economics_result_today,
+    economics_average_daily_result_30d, economics_projected_annual_result
+    (alle EUR, device_class monetary, state_class total - wie die
+    Bilanz-Sensoren aus REQ-ECONOMICS-ACCOUNTING bewusst nicht
+    total_increasing), economics_estimated_payback_date (device_class
+    timestamp, echtes tz-aware datetime-Objekt, nicht nur ein ISO-String -
+    eine reine Kalenderdatum-Projektion wird dafür über
+    dt_util.start_of_local_day auf lokal Mitternacht abgebildet).
+    economics_average_daily_result_30d trägt zusätzlich Attribute
+    (window_start/window_end, complete_days_available, accepted_days,
+    unavailable_reason) aus der Prognose. Anders als die
+    Kern-Bilanzsensoren blendet die 30-Tage-Prognose (Durchschnitt/
+    Hochrechnung/Rückzahlungsdatum) während einer Tarifpause NICHT auf
+    None: sie beruht ausschließlich auf bereits abgeschlossenen,
+    historisch korrekten Tagen und den Investitionskosten, nicht auf einem
+    gerade jetzt gültigen Preis.
+
+    Persistenz: EconomicsStateStore (REQ-ECONOMICS-ACCOUNTING) um
+    STORAGE_MINOR_VERSION 2 erweitert (statt einer Hauptversion - ein
+    Hauptversionssprung hätte bei jedem bestehenden Store
+    NotImplementedError ausgelöst, siehe infrastructure/energy_store.py).
+    Drei unabhängige Bündel: das ursprüngliche Sieben-Felder-Bündel aus
+    REQ-ECONOMICS-ACCOUNTING (unverändert), day_results (jeder Tag für
+    sich validiert - ein kaputter Eintrag verwirft nur sich selbst, Mehrfach-
+    einträge zum selben Datum behalten nur den zuletzt genannten, auf
+    MAX_STORED_DAYS gekappt) sowie current_day plus seiner vier Zähler als
+    eigenes Fünfer-Bündel (fehlt/ist auch nur eines ungültig, gilt der
+    ganze angefangene Tag als nicht aussagekräftig und verworfen - die
+    abgeschlossene Historie bleibt davon unberührt). payback_achieved_at
+    ist wie economics_started_at einmalig gesetzt und danach unveränderlich;
+    ein abweichender gespeicherter Wert wird wie ein korrupter Snapshot
+    verworfen.
+
+    Nicht Teil dieser Anforderung: Grundgebühr, Batteriealterung,
+    Wartungskosten, ein eigener Dashboardtab.
+  acceptance_criteria:
+    - "ROI negativ/positiv, über 100 % sowie die Fortschritts-Klemmung auf
+       0..100 und ein bereits erreichtes Payback (remaining_to_payback_eur
+       = 0) sind getestet (tests/test_economics_amortization.py)."
+    - "Die Prognose ist getestet für: genau 29/30/31 vorhandene Tage
+       (31 verwendet nur die jüngsten 30), den ausgeschlossenen laufenden
+       Tag, eine zu niedrige Preisabdeckung eines einzelnen Tages
+       (gesamte Prognose unavailable) sowie einen nicht positiven
+       Durchschnitt (Datum bleibt unbekannt, Durchschnitt/Hochrechnung
+       bleiben gesetzt)."
+    - "Tageswechsel bei einer Sommerzeit- (23h) und einer
+       Winterzeitumstellung (25h), ein Neustart mit bereits laufendem Tag
+       sowie eine doppelte Verarbeitung desselben Ticks erzeugen jeweils
+       jeder für sich genau einen Tagesabschluss
+       (tests/test_coordinator.py)."
+    - "Eine Änderung oder Entfernung der Investitionskosten wirkt sofort
+       auf ROI/Restbetrag, ohne day_results oder einen bereits erreichten
+       payback_achieved_at rückwirkend zu verändern."
+    - "Store-Round-Trip, unabhängige Validierung einzelner Tageseinträge,
+       das Fünfer-Bündel des laufenden Tages, die Kappung auf
+       MAX_STORED_DAYS sowie die Unveränderlichkeit von
+       payback_achieved_at sind getestet
+       (tests/test_economics_persistence.py)."
+    - "strings.json, translations/de.json, translations/en.json,
+       README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."

@@ -34,6 +34,13 @@ class EconomicsDelta:
     unvalued_inventory_delta_kwh: float = 0.0
     unpriced_charge_delta_kwh: float = 0.0
     unpriced_discharge_delta_kwh: float = 0.0
+    # Energiemengen (kWh) hinter den beiden Kostenpositionen bzw. der
+    # bepreisten Entladung - zusätzlich zu den Beträgen selbst, damit die
+    # Tagesbilanz (REQ-ECONOMICS-AMORTIZATION) daraus die Preisabdeckung
+    # eines Kalendertags bilden kann, ohne einen Betrag durch einen
+    # (möglicherweise negativen oder 0) Preis zurückzurechnen.
+    priced_charge_kwh_delta: float = 0.0
+    priced_discharge_kwh_delta: float = 0.0
 
 
 NO_DELTA = EconomicsDelta()
@@ -72,11 +79,13 @@ def compute_economics_delta(
     grid_cost = 0.0
     pv_cost = 0.0
     unpriced_charge = 0.0
+    priced_charge = 0.0
     inventory_delta = 0.0
 
     if charge_delta.grid_kwh:
         if import_price_eur_kwh is not None:
             grid_cost = charge_delta.grid_kwh * import_price_eur_kwh
+            priced_charge += charge_delta.grid_kwh
         else:
             unpriced_charge += charge_delta.grid_kwh
             inventory_delta += charge_delta.grid_kwh
@@ -84,6 +93,7 @@ def compute_economics_delta(
     if charge_delta.pv_kwh:
         if feed_in_price_eur_kwh is not None:
             pv_cost = charge_delta.pv_kwh * feed_in_price_eur_kwh
+            priced_charge += charge_delta.pv_kwh
         else:
             unpriced_charge += charge_delta.pv_kwh
             inventory_delta += charge_delta.pv_kwh
@@ -96,6 +106,7 @@ def compute_economics_delta(
 
     avoided_cost = 0.0
     unpriced_discharge = 0.0
+    priced_discharge = 0.0
     if discharged_kwh:
         available_inventory = max(unvalued_inventory_kwh, 0.0)
         consumed_from_inventory = min(discharged_kwh, available_inventory)
@@ -104,6 +115,7 @@ def compute_economics_delta(
         if monetizable:
             if import_price_eur_kwh is not None:
                 avoided_cost = monetizable * import_price_eur_kwh
+                priced_discharge = monetizable
             else:
                 unpriced_discharge = monetizable
 
@@ -114,6 +126,8 @@ def compute_economics_delta(
         unvalued_inventory_delta_kwh=inventory_delta,
         unpriced_charge_delta_kwh=unpriced_charge,
         unpriced_discharge_delta_kwh=unpriced_discharge,
+        priced_charge_kwh_delta=priced_charge,
+        priced_discharge_kwh_delta=priced_discharge,
     )
 
 

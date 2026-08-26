@@ -10,7 +10,7 @@ Rundung und SOC-Minimum-Korrektur in tests/test_coordinator.py.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,6 +22,10 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_TARIFF_TYPE,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.domain.economics_amortization import (
+    MAX_STORED_DAYS,
+    DayEconomicsResult,
+)
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.infrastructure.economics_store import (
     EconomicsState,
@@ -222,6 +226,165 @@ async def test_store_restores_two_config_entries_independently(hass) -> None:
     assert loaded_first.economics_started_at == first_started
     assert loaded_second.grid_charge_cost_eur == 9.0
     assert loaded_second.economics_started_at == second_started
+
+
+# --------------------------------------------------------------------------
+# Store: Tages-Buckets/Payback (REQ-ECONOMICS-AMORTIZATION)
+# --------------------------------------------------------------------------
+async def test_store_round_trips_day_results_current_day_and_payback(hass) -> None:
+    started_at = dt_util.utcnow()
+    payback_at = started_at + timedelta(days=200)
+    day_one = DayEconomicsResult(
+        day=date(2026, 3, 9),
+        operating_result_eur=1.5,
+        priced_charge_kwh=2.0,
+        unpriced_charge_kwh=0.5,
+        priced_discharge_kwh=1.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    day_two = DayEconomicsResult(
+        day=date(2026, 3, 10),
+        operating_result_eur=-0.5,
+        priced_charge_kwh=0.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=0.5,
+        unpriced_discharge_kwh=0.5,
+    )
+    store = EconomicsStateStore(hass, "amortization-roundtrip")
+    state = _full_state(
+        started_at,
+        day_results=(day_one, day_two),
+        current_day=date(2026, 3, 11),
+        current_day_operating_result_eur=0.25,
+        current_day_priced_charge_kwh=0.1,
+        current_day_unpriced_charge_kwh=0.2,
+        current_day_priced_discharge_kwh=0.3,
+        current_day_unpriced_discharge_kwh=0.4,
+        payback_achieved_at=payback_at,
+    )
+
+    assert await store.async_save(state) is True
+    loaded = await EconomicsStateStore(hass, "amortization-roundtrip").async_load()
+
+    assert loaded == state
+    assert loaded.day_results == (day_one, day_two)
+    assert loaded.current_day == date(2026, 3, 11)
+    assert loaded.payback_achieved_at == payback_at
+
+
+async def test_store_drops_only_the_single_invalid_day_entry(hass, caplog) -> None:
+    """Ein Tag ist ein eigenes atomares Bündel - ein kaputter Eintrag
+    verwirft nur sich selbst, nicht die restliche Historie."""
+    good_day = DayEconomicsResult(
+        day=date(2026, 3, 9),
+        operating_result_eur=1.0,
+        priced_charge_kwh=1.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=0.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    store = EconomicsStateStore(hass, "day-partial-invalid")
+    serialized = EconomicsStateStore._serialize(
+        _full_state(dt_util.utcnow(), day_results=(good_day,))
+    )
+    serialized["day_results"].append(
+        {
+            "day": date(2026, 3, 10).isoformat(),
+            "operating_result_eur": 1.0,
+            "priced_charge_kwh": -1,  # ungültig: negativ
+            "unpriced_charge_kwh": 0.0,
+            "priced_discharge_kwh": 0.0,
+            "unpriced_discharge_kwh": 0.0,
+        }
+    )
+    store._store.async_load = AsyncMock(return_value=serialized)
+
+    loaded = await store.async_load()
+
+    assert loaded.day_results == (good_day,)
+    assert "Unvollständigen Tageseintrag verworfen" in caplog.text
+
+
+async def test_store_drops_the_whole_current_day_bundle_if_one_field_is_invalid(
+    hass, caplog
+) -> None:
+    """current_day und seine vier Zähler sind ein gemeinsames Bündel -
+    fehlt/ist nur eines ungültig, gilt der ganze laufende Tag als nicht
+    aussagekräftig (die abgeschlossene Historie bleibt davon unberührt)."""
+    store = EconomicsStateStore(hass, "current-day-partial-invalid")
+    serialized = EconomicsStateStore._serialize(
+        _full_state(
+            dt_util.utcnow(),
+            current_day=date(2026, 3, 11),
+            current_day_operating_result_eur=0.25,
+            current_day_priced_charge_kwh=0.1,
+            current_day_unpriced_charge_kwh=0.2,
+            current_day_priced_discharge_kwh=0.3,
+            current_day_unpriced_discharge_kwh=0.4,
+        )
+    )
+    serialized["current_day_priced_charge_kwh"] = -1  # ungültig: negativ
+    store._store.async_load = AsyncMock(return_value=serialized)
+
+    loaded = await store.async_load()
+
+    assert loaded.current_day is None
+    assert loaded.current_day_operating_result_eur is None
+    assert loaded.current_day_priced_charge_kwh is None
+    assert loaded.current_day_unpriced_charge_kwh is None
+    assert loaded.current_day_priced_discharge_kwh is None
+    assert loaded.current_day_unpriced_discharge_kwh is None
+    assert "Ungültigen gespeicherten Wert für Laufende bepreiste Ladung" in caplog.text
+
+
+async def test_store_caps_day_results_at_max_stored_days(hass) -> None:
+    """Verteidigung gegen einen von Hand über MAX_STORED_DAYS hinaus
+    erweiterten Store - im Normalbetrieb trimmt bereits der Coordinator
+    beim Anhängen eines neuen Tages."""
+    days = tuple(
+        DayEconomicsResult(
+            day=date(2026, 1, 1) + timedelta(days=offset),
+            operating_result_eur=1.0,
+            priced_charge_kwh=0.0,
+            unpriced_charge_kwh=0.0,
+            priced_discharge_kwh=0.0,
+            unpriced_discharge_kwh=0.0,
+        )
+        for offset in range(MAX_STORED_DAYS + 5)
+    )
+    store = EconomicsStateStore(hass, "day-results-cap")
+    serialized = EconomicsStateStore._serialize(
+        _full_state(dt_util.utcnow(), day_results=days)
+    )
+    store._store.async_load = AsyncMock(return_value=serialized)
+
+    loaded = await store.async_load()
+
+    assert len(loaded.day_results) == MAX_STORED_DAYS
+    # Die ältesten Tage sind verworfen, die jüngsten bleiben erhalten.
+    assert loaded.day_results[-1].day == days[-1].day
+    assert loaded.day_results[0].day == days[5].day
+
+
+async def test_store_rejects_a_changed_payback_achieved_at(hass, caplog) -> None:
+    """payback_achieved_at ist wie economics_started_at eine einmalig
+    gesetzte Konstante (Regel 8)."""
+    started_at = dt_util.utcnow()
+    first = started_at + timedelta(days=100)
+    second = started_at + timedelta(days=150)
+    store = EconomicsStateStore(hass, "payback-drift")
+    store._store.async_save = AsyncMock()
+    assert (
+        await store.async_save(_full_state(started_at, payback_achieved_at=first))
+        is True
+    )
+
+    assert (
+        await store.async_save(_full_state(started_at, payback_achieved_at=second))
+        is False
+    )
+    assert store._store.async_save.await_count == 1
+    assert "Abweichenden Payback-Erreichungszeitpunkt" in caplog.text
 
 
 def test_store_throttles_frequent_updates_and_keeps_newest_state(hass) -> None:

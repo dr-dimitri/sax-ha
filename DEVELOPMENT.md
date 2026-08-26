@@ -32,8 +32,10 @@ custom_components/sax_power/
 │                          Zeitfenster und Wertevalidierung, Preis-Einheiten
 │                          (price_units.py), das Tarifmodell (tariff.py), die
 │                          Herkunftsbilanzregel der Ladeenergie
-│                          (energy_accounting.py) und die Geldbilanz darauf
-│                          (economics_accounting.py)
+│                          (energy_accounting.py), die Geldbilanz darauf
+│                          (economics_accounting.py) sowie die ROI-/
+│                          Amortisationsprognose darüber
+│                          (economics_amortization.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung, die Abbildung der Tarif-Options auf
 │                          das Domänenmodell (economics.py) sowie der
@@ -70,7 +72,7 @@ custom_components/sax_power/
 │                          REQ-STABLE-DEVICE-IDENTITY),
 │                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
-├── sensor.py              ~60 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
+├── sensor.py              ~90 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
 │                          plus zwei RestoreEntity-Energiezähler (energy_charged/
 │                          energy_discharged) fürs Energy-Dashboard
 ├── number.py              Max. SOC (einzige SOC-Einstellung, auch Ziel-SOC für
@@ -264,6 +266,68 @@ jeden Schreibversuch, bis ein Neuladen des Config Entry eine frische
 Coordinator-Instanz erzeugt. Ohne diese Sperre würde eine aus lauter Nullen
 neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
 überschreiben und dessen Inhalt endgültig verlieren.
+
+### ROI und Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION)
+
+Baut ausschließlich auf dem bereits bilanzierten `operating_result` oben
+auf. Die reine Rechnung liegt in `domain/economics_amortization.py`, ohne
+jeden Home-Assistant-Bezug:
+
+- `compute_roi_percent`/`compute_amortization_progress_percent`/
+  `compute_remaining_to_payback_eur` sind einzeilige, unabhängig
+  testbare Formeln - `roi_percent` bleibt bewusst unklemmt (negativ oder
+  über 100 %), nur der Fortschritt ist auf 0..100 begrenzt.
+- `DayEconomicsResult` ist ein abgeschlossener Kalendertag (operatives
+  Ergebnis plus vier Energiemengen); `price_coverage_percent` bildet daraus
+  die Preisabdeckung, ohne einen Betrag durch einen möglicherweise
+  negativen oder 0 Preis zurückzurechnen.
+- `compute_amortization_forecast` ist eine reine 30-Tage-Prognose: schließt
+  den laufenden Tag defensiv nochmals aus, verlangt mindestens
+  `FORECAST_WINDOW_DAYS` (30) vollständige Tage, verwendet nur die
+  jüngsten davon, und verwirft die GESAMTE Prognose (nicht nur einzelne
+  Tage), sobald auch nur ein Tag `DAY_COVERAGE_THRESHOLD_PERCENT` (95 %)
+  unterschreitet.
+
+Tageswechsel-Erkennung ohne eigenen Timer, in
+`SaxPowerCoordinator._advance_economics_day` (aufgerufen aus
+`_accumulate_economics`, bei jedem Poll-Tick, unabhängig davon, ob dieses
+Intervall selbst ein Delta hatte): vergleicht `dt_util.now().date()`
+(Home-Assistant-Zeitzone) mit dem zuletzt gesehenen Tag. Ein 23h/25h-DST-Tag
+wird nicht auf 24h normiert - reiner Kalenderdatumsvergleich, keine
+verstrichene Zeit. Bei einem Wechsel schließt `_close_economics_day` den
+bisherigen Tag ab (angehängt an `day_results`, gekappt auf
+`MAX_STORED_DAYS`) und ruft `_maybe_mark_payback_achieved` auf;
+`_start_economics_day` beginnt den neuen Tag bei 0. Idempotent gegenüber
+Neustart (`current_day` plus seine vier Zähler sind als eigenes
+Fünfer-Bündel persistiert) und doppelter Tick-Verarbeitung (nur ein
+tatsächlicher Datumswechsel schließt ab).
+
+`_maybe_mark_payback_achieved` setzt `payback_achieved_at` (UTC) genau
+einmal, sobald das kumulierte operative Ergebnis die konfigurierten
+Investitionskosten an einer Tagesgrenze erstmals erreicht, und danach nie
+wieder - unabhängig von einer späteren Änderung der Investitionskosten.
+`_estimated_payback_date` liefert diesen fixen Zeitpunkt, sobald gesetzt,
+statt der laufenden Projektion aus `compute_amortization_forecast`; eine
+reine Kalenderdatum-Projektion wird für den `device_class: timestamp`-Sensor
+über `dt_util.start_of_local_day` auf lokal Mitternacht abgebildet.
+
+`_publish_amortization` leitet ROI/Fortschritt/Restbetrag/Tagesergebnis aus
+demselben `operating_result` wie `_publish_economics_balance` ab und
+blendet sie bei deaktiviertem Tarif ebenso aus - anders als die
+30-Tage-Prognose selbst, die ausschließlich auf bereits abgeschlossenen
+Tagen und den Investitionskosten beruht und deshalb während einer
+Tarifpause sichtbar bleibt.
+
+Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 2 erweitert
+(statt einer Hauptversion, aus demselben Grund wie beim
+`STORAGE_VERSION`-Kommentar in `energy_store.py`). Drei unabhängige Bündel:
+das ursprüngliche Sieben-Felder-Bündel oben (unverändert), `day_results`
+(jeder Tag einzeln validiert, `_validated_day_result`) sowie `current_day`
+plus seine vier Zähler als eigenes Fünfer-Bündel (`_validated_current_day`)
+- fehlt/ist auch nur eines ungültig, gilt der ganze angefangene Tag als
+nicht aussagekräftig, ohne die abgeschlossene Historie zu berühren.
+`payback_achieved_at` ist wie `economics_started_at` einmalig gesetzt und
+danach unveränderlich.
 
 ## Datenfluss
 
@@ -818,7 +882,31 @@ tests/
 │                                  Config Entries, Drosselung/Sofort-Flush sowie der
 │                                  Coordinator-Bootstrap (wartet auf Kapazität/SOC,
 │                                  deaktivierter Tarif bootstrapped nicht, Shutdown-Flush,
-│                                  Tarifrevisions-Zeitstempel)
+│                                  Tarifrevisions-Zeitstempel); zusätzlich die
+│                                  Tages-Buckets/Payback-Erweiterung (REQ-ECONOMICS-
+│                                  AMORTIZATION): Round-Trip von day_results/current_day/
+│                                  payback_achieved_at, ein kaputter Tageseintrag verwirft
+│                                  nur sich selbst, das Fünfer-Bündel des laufenden Tages
+│                                  wird als Ganzes verworfen, Kappung auf MAX_STORED_DAYS
+│                                  sowie der unveränderliche Payback-Zeitpunkt
+├── test_economics_amortization.py   Reine ROI-/Amortisationsprognose
+│                                  (REQ-ECONOMICS-AMORTIZATION,
+│                                  domain/economics_amortization.py): ROI unklemmt
+│                                  (negativ, über 100 %), Fortschritts-Klemmung auf
+│                                  0..100, Restbetrag auf 0 gefloort, Tagesabdeckung an
+│                                  der 95-%-Schwelle, ausgeschlossener laufender Tag,
+│                                  29/30/31-Tage-Fenster (31 verwendet nur die jüngsten
+│                                  30), ein einzelner schlechter Tag macht die gesamte
+│                                  Prognose unavailable, Durchschnitt/Hochrechnung sowie
+│                                  das aufgerundete Rückzahlungsdatum inkl. eines nicht
+│                                  positiven Durchschnitts (Datum bleibt unbekannt) und
+│                                  eines bereits erreichten Paybacks; die
+│                                  Coordinator-seitige Verdrahtung (Tageswechsel-
+│                                  Erkennung inkl. DST/Neustart/Doppelverarbeitung,
+│                                  ROI-/Restbetrags-/Tagesergebnis-Sensoren samt
+│                                  Tarifpause-Maskierung, Payback-Erkennung,
+│                                  Investitionskostenänderung ohne Rückwirkung) liegt in
+│                                  test_coordinator.py
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
 │                                  unvollständiger/unlesbarer Store (inkl. dauerhafter

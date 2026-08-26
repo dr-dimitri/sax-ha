@@ -96,6 +96,16 @@ def _negative_part(key: str) -> Callable[[dict[str, Any]], StateType]:
     return value_fn
 
 
+def _amortization_forecast_attributes(
+    coordinator: SaxPowerCoordinator,
+) -> dict[str, Any]:
+    """Beobachtungsfenster/Abdeckung der 30-Tage-Prognose (REQ-ECONOMICS-
+    AMORTIZATION) als Zusatzattribute des Durchschnitts-Sensors."""
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("economics_amortization_forecast_attributes") or {}
+
+
 def _bool_text(
     key: str, *, true_text: str, false_text: str
 ) -> Callable[[dict[str, Any]], StateType]:
@@ -770,6 +780,71 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement="EUR/kWh",
         suggested_display_precision=4,
         value_fn=_direct("economics_feed_in_price"),
+    ),
+    # -- ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION) -------------
+    # Ohne konfigurierte Investitionskosten (economics_investment_cost_eur)
+    # liefert value_fn für alle sieben Sensoren None wie jeder andere nicht
+    # verfügbare Wert dieser Integration.
+    SaxPowerSensorEntityDescription(
+        key="economics_roi",
+        translation_key="economics_roi",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_roi"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_amortization_progress",
+        translation_key="economics_amortization_progress",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_amortization_progress"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_remaining_to_payback",
+        translation_key="economics_remaining_to_payback",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_remaining_to_payback"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_result_today",
+        translation_key="economics_result_today",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_result_today"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_average_daily_result_30d",
+        translation_key="economics_average_daily_result_30d",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("economics_average_daily_result_30d"),
+        attributes_fn=_amortization_forecast_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_projected_annual_result",
+        translation_key="economics_projected_annual_result",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=2,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("economics_projected_annual_result"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_estimated_payback_date",
+        translation_key="economics_estimated_payback_date",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=_direct("economics_estimated_payback_date"),
     ),
 )
 

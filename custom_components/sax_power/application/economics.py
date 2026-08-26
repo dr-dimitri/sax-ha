@@ -17,12 +17,15 @@ from typing import Any
 from ..const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
     ECONOMICS_TOU_WINDOW_KEYS,
+    MAX_ECONOMICS_INVESTMENT_COST,
+    MIN_ECONOMICS_INVESTMENT_COST,
 )
 from ..domain.tariff import DailyPriceWindow, TariffConfig, TariffType
 
@@ -41,6 +44,23 @@ def parse_price(value: Any) -> float | None:
     except TypeError, ValueError:
         return None
     return price if math.isfinite(price) else None
+
+
+def investment_cost_eur_from_options(options: Mapping[str, Any]) -> float | None:
+    """Investitionskosten (EUR) aus den Options, sonst None.
+
+    Optional und unabhängig von der Tarifart (REQ-ECONOMICS-AMORTIZATION):
+    leer/fehlend deaktiviert sämtliche Investitions-/Amortisationssensoren,
+    ohne die übrige Wirtschaftlichkeitsbilanz zu berühren. Ein aus dem Bereich
+    gelaufener oder von Hand verstellter Wert wird nicht stillschweigend
+    geklammert, sondern behandelt wie "nicht konfiguriert".
+    """
+    cost = parse_price(options.get(CONF_ECONOMICS_INVESTMENT_COST))
+    if cost is None:
+        return None
+    if not (MIN_ECONOMICS_INVESTMENT_COST <= cost <= MAX_ECONOMICS_INVESTMENT_COST):
+        return None
+    return cost
 
 
 def parse_time(value: Any) -> dt_time | None:

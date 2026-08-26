@@ -45,6 +45,7 @@ def test_grid_charge_costs_the_import_price() -> None:
     assert delta.pv_opportunity_cost_delta == 0.0
     assert delta.unvalued_inventory_delta_kwh == 0.0
     assert delta.unpriced_charge_delta_kwh == 0.0
+    assert delta.priced_charge_kwh_delta == pytest.approx(2.0)
 
 
 def test_pv_charge_costs_the_feed_in_price() -> None:
@@ -81,6 +82,7 @@ def test_missing_import_price_makes_grid_charge_unpriced() -> None:
     assert delta.grid_charge_cost_delta == 0.0
     assert delta.unpriced_charge_delta_kwh == pytest.approx(2.0)
     assert delta.unvalued_inventory_delta_kwh == pytest.approx(2.0)
+    assert delta.priced_charge_kwh_delta == 0.0
 
 
 def test_missing_feed_in_price_makes_pv_charge_unpriced() -> None:
@@ -110,6 +112,7 @@ def test_discharge_from_unvalued_inventory_avoids_no_cost() -> None:
     assert delta.avoided_grid_cost_delta == 0.0
     assert delta.unvalued_inventory_delta_kwh == pytest.approx(-1.0)
     assert delta.unpriced_discharge_delta_kwh == 0.0
+    assert delta.priced_discharge_kwh_delta == 0.0
 
 
 def test_discharge_beyond_inventory_is_partially_monetizable() -> None:
@@ -120,6 +123,7 @@ def test_discharge_beyond_inventory_is_partially_monetizable() -> None:
     assert delta.unvalued_inventory_delta_kwh == pytest.approx(-1.0)
     assert delta.avoided_grid_cost_delta == pytest.approx(0.6)
     assert delta.unpriced_discharge_delta_kwh == 0.0
+    assert delta.priced_discharge_kwh_delta == pytest.approx(2.0)
 
 
 def test_discharge_without_any_inventory_is_fully_monetizable() -> None:
@@ -127,6 +131,7 @@ def test_discharge_without_any_inventory_is_fully_monetizable() -> None:
 
     assert delta.unvalued_inventory_delta_kwh == 0.0
     assert delta.avoided_grid_cost_delta == pytest.approx(0.6)
+    assert delta.priced_discharge_kwh_delta == pytest.approx(2.0)
 
 
 def test_discharge_without_an_import_price_is_unpriced_not_backfilled() -> None:
@@ -137,6 +142,7 @@ def test_discharge_without_an_import_price_is_unpriced_not_backfilled() -> None:
 
     assert delta.avoided_grid_cost_delta == 0.0
     assert delta.unpriced_discharge_delta_kwh == pytest.approx(2.0)
+    assert delta.priced_discharge_kwh_delta == 0.0
 
 
 def test_negative_import_price_applies_to_avoided_cost_too() -> None:

@@ -686,12 +686,13 @@ async def test_economics_view_operating_balance_card(hass) -> None:
 
 def _investment_card(view: dict[str, Any]) -> dict[str, Any]:
     """Karte 4 ("Investition und Amortisation") ist zur Laufzeit über eine
-    Core-"conditional"-Karte an den economics_roi-Sensorzustand gekoppelt
-    (REQ-ECONOMICS-DASHBOARD) statt an zum Build-Zeitpunkt gelesene
-    Config-Entry-Options: reagiert dadurch automatisch auf eine spätere
-    Options-Änderung, ohne dass das gespeicherte Dashboard neu gebaut
-    werden muss (__init__.async_update_options aktualisiert nur den
-    Coordinator, nie das Dashboard)."""
+    Core-"conditional"-Karte an das `unavailable_reason`-Attribut von
+    economics_average_daily_result_30d gekoppelt (REQ-ECONOMICS-DASHBOARD)
+    statt an zum Build-Zeitpunkt gelesene Config-Entry-Options: reagiert
+    dadurch automatisch auf eine spätere Options-Änderung, ohne dass das
+    gespeicherte Dashboard neu gebaut werden muss
+    (__init__.async_update_options aktualisiert nur den Coordinator, nie
+    das Dashboard)."""
     return next(card for card in view["cards"] if card["type"] == "conditional")
 
 
@@ -699,29 +700,42 @@ def _investment_stack(view: dict[str, Any]) -> dict[str, Any]:
     return _investment_card(view)["card"]
 
 
-async def test_economics_view_investment_card_is_gated_by_roi_entity_state(
+async def test_economics_view_investment_card_is_gated_by_forecast_attribute(
     hass,
 ) -> None:
     """Die sieben ROI-/Amortisationssensoren sind anders als die übrigen
     Karten IMMER registriert (siehe REQ-ECONOMICS-AMORTIZATION) -
-    economics_roi liefert ohne konfigurierte Investitionskosten `None`
-    (Sensorzustand "unknown"). Die "conditional"-Karte blendet die ganze
-    Karte deshalb zur Laufzeit anhand genau dieses Zustands aus/ein."""
-    roi = _register(hass, "sensor", "economics_roi")
+    economics_roi wird nicht nur ohne konfigurierte Investitionskosten
+    `None` (Sensorzustand "unknown"), sondern auch bei deaktiviertem
+    Tarif oder noch nicht initialisierter Geldbilanz - beides Fälle, in
+    denen die historische 30-Tage-Prognose weiterhin gültig bleibt. Die
+    "conditional"-Karte blendet die ganze Karte deshalb zur Laufzeit
+    stattdessen anhand des `unavailable_reason`-Attributs von
+    economics_average_daily_result_30d aus/ein, das ausschließlich bei
+    fehlenden Investitionskosten gesetzt wird."""
+    _register(hass, "sensor", "economics_roi")
     _register(hass, "sensor", "economics_amortization_progress")
     _register(hass, "sensor", "economics_remaining_to_payback")
+    average = _register(hass, "sensor", "economics_average_daily_result_30d")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _economics_view(config)
     card = _investment_card(view)
-    assert card["conditions"] == [{"entity": roi, "state_not": "unknown"}]
+    assert card["conditions"] == [
+        {
+            "entity": average,
+            "attribute": "unavailable_reason",
+            "state_not": "no_investment_cost",
+        }
+    ]
     assert card["card"]["type"] == "vertical-stack"
 
 
 async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
     _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
+    _register(hass, "sensor", "economics_average_daily_result_30d")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 

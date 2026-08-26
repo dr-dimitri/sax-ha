@@ -58,6 +58,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
 from .const import DOMAIN
+from .domain.economics_amortization import ForecastUnavailable
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -542,17 +543,27 @@ async def async_build_dashboard_config(
     # _stack_card (vertical-stack) aus drei Teilkarten. Die sieben Sensoren
     # sind (anders als z. B. die netzdienlichen Entities) immer bereits
     # statisch registriert, auch ohne konfigurierte Investitionskosten
-    # (siehe REQ-ECONOMICS-AMORTIZATION) - `economics_roi` liefert in
-    # diesem Fall `None` (Sensorzustand "unknown", siehe
-    # SaxPowerCoordinator._economics_state). Eine build-time-Prüfung der
+    # (siehe REQ-ECONOMICS-AMORTIZATION). Eine build-time-Prüfung der
     # Config-Entry-Options wäre nach einer späteren Options-Änderung
     # veraltet, ohne dass das gespeicherte Dashboard je neu gebaut wird
     # (async_update_options aktualisiert nur den Coordinator) - die ganze
     # Karte deshalb stattdessen in eine Core-"conditional"-Karte packen,
-    # die zur Laufzeit direkt am economics_roi-Sensorzustand hängt: sie
-    # blendet sich beim Setzen/Entfernen der Investitionskosten automatisch
-    # ein/aus, sobald der Coordinator neu rechnet, ganz ohne
-    # Dashboard-Neubau.
+    # die zur Laufzeit an ein Laufzeitsignal hängt, das ausschließlich die
+    # Investitionskosten-Konfiguration abbildet: sie blendet sich beim
+    # Setzen/Entfernen der Investitionskosten automatisch ein/aus, sobald
+    # der Coordinator neu rechnet, ganz ohne Dashboard-Neubau.
+    #
+    # `economics_roi` selbst eignet sich dafür NICHT als Gate: es wird
+    # laut SaxPowerCoordinator._publish_amortization auch bei
+    # deaktiviertem Tarif oder noch nicht initialisierter Geldbilanz
+    # "unknown", obwohl Investitionskosten konfiguriert sind und die
+    # historische 30-Tage-Prognose (average_daily_result_30d,
+    # projected_annual_result, estimated_payback_date) davon unberührt
+    # weiter veröffentlicht wird. Stattdessen das `unavailable_reason`-
+    # Attribut von economics_average_daily_result_30d verwenden: es wird
+    # ausschließlich bei fehlenden Investitionskosten auf
+    # ForecastUnavailable.NO_INVESTMENT_COST gesetzt, unabhängig von
+    # Tarifstatus oder Bilanz-Initialisierung.
     roi_row_card = _entities_card(
         hass,
         entry_id,
@@ -590,11 +601,19 @@ async def async_build_dashboard_config(
     investment_stack = _stack_card([roi_row_card, progress_gauge, remaining_rows_card])
     investment_card = investment_stack
     if investment_stack is not None:
-        roi_entity_id = _entity_id(hass, "sensor", f"{entry_id}_economics_roi")
-        if roi_entity_id is not None:
+        forecast_entity_id = _entity_id(
+            hass, "sensor", f"{entry_id}_economics_average_daily_result_30d"
+        )
+        if forecast_entity_id is not None:
             investment_card = {
                 "type": "conditional",
-                "conditions": [{"entity": roi_entity_id, "state_not": "unknown"}],
+                "conditions": [
+                    {
+                        "entity": forecast_entity_id,
+                        "attribute": "unavailable_reason",
+                        "state_not": ForecastUnavailable.NO_INVESTMENT_COST.value,
+                    }
+                ],
                 "card": investment_stack,
             }
 

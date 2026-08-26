@@ -24,6 +24,7 @@ jedem bestehenden Store NotImplementedError ausgelöst).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from collections.abc import Callable
@@ -182,6 +183,19 @@ class EconomicsStateStore:
         # z. B. als "Lingering timer" in Tests).
         self._unsub_final_write_listener: CALLBACK_TYPE | None = None
         self._on_persist_failed = on_persist_failed
+        # Serialisiert die komplette save-then-load-Sequenz aus
+        # _write_and_verify pro Instanz: Store._data wird von
+        # Store.async_save() SOFORT überschrieben, unabhängig von einem
+        # eventuell noch laufenden anderen Schreibvorgang (nur die
+        # eigentliche Schreib-E/A ist über Store._write_lock serialisiert,
+        # nicht diese Zuweisung) - ohne dieses Lock könnte ein zweiter,
+        # überlappender Schreibversuch (z. B. ein bereits laufender
+        # verzögerter Write parallel zu async_reset()/dem Shutdown-Flush)
+        # Store.async_load() nach dem ersten Write dessen eigene, noch
+        # ausstehende Daten statt der soeben geschriebenen zurückgeben
+        # lassen und den ersten, tatsächlich erfolgreichen Write fälschlich
+        # als fehlgeschlagen melden.
+        self._write_and_verify_lock = asyncio.Lock()
 
     async def async_load(self) -> EconomicsState | None:
         """Load the balance, rejecting invalid fields independently."""
@@ -381,25 +395,31 @@ class EconomicsStateStore:
         schweigend verschluckter Schreibfehler die Datei unverändert
         lässt: `written` weicht dann von den gerade geschriebenen Daten ab
         (oder bleibt bei einem allerersten Schreibversuch `None`).
+
+        Die gesamte Sequenz läuft unter `_write_and_verify_lock`, damit ein
+        zweiter, überlappender Aufruf (siehe dessen Kommentar in
+        `__init__`) nicht zwischen diesen Save- und Load-Aufruf geraten
+        kann.
         """
-        data = self._serialize(state)
-        try:
-            await self._store.async_save(data)
-            written = await self._store.async_load()
-        except (HomeAssistantError, OSError) as err:
-            _LOGGER.warning(
-                "Wirtschaftlichkeitszustand konnte nicht gespeichert werden: %s",
-                err,
-            )
-            return False
-        if written != data:
-            _LOGGER.warning(
-                "Wirtschaftlichkeitszustand nach dem Speichern nicht wie "
-                "erwartet lesbar - Schreibvorgang vermutlich fehlgeschlagen"
-            )
-            return False
-        self._last_persisted = state
-        return True
+        async with self._write_and_verify_lock:
+            data = self._serialize(state)
+            try:
+                await self._store.async_save(data)
+                written = await self._store.async_load()
+            except (HomeAssistantError, OSError) as err:
+                _LOGGER.warning(
+                    "Wirtschaftlichkeitszustand konnte nicht gespeichert werden: %s",
+                    err,
+                )
+                return False
+            if written != data:
+                _LOGGER.warning(
+                    "Wirtschaftlichkeitszustand nach dem Speichern nicht wie "
+                    "erwartet lesbar - Schreibvorgang vermutlich fehlgeschlagen"
+                )
+                return False
+            self._last_persisted = state
+            return True
 
     @staticmethod
     def _valid_snapshot(state: EconomicsState) -> bool:

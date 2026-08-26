@@ -10,6 +10,7 @@ Rundung und SOC-Minimum-Korrektur in tests/test_coordinator.py.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -542,9 +543,65 @@ async def test_store_final_flush_writes_newest_state_immediately(hass) -> None:
     assert written["grid_charge_cost_eur"] == 2.0
 
 
-# --------------------------------------------------------------------------
-# Store: eine von Home Assistant intern verschluckte WriteError (siehe
-# EconomicsStateStore-Klassen-Docstring) muss über die Lese-Rückprobe
+async def test_concurrent_writes_do_not_falsely_fail_the_readback(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY-Review: zwei überlappende
+    Schreibversuche (z. B. ein bereits laufender verzögerter Write und ein
+    parallel gestarteter async_reset/Shutdown-Flush) dürfen sich die
+    save-then-load-Sequenz aus _write_and_verify nicht gegenseitig
+    verfälschen.
+
+    Nachgebildet wird genau das Verhalten des echten
+    homeassistant.helpers.storage.Store: `self._data` wird beim Aufruf von
+    async_save() SOFORT (unabhängig von einem eventuell noch laufenden
+    anderen Schreibvorgang) überschrieben, bevor der eigentliche
+    Schreibvorgang serialisiert (Store._write_lock) startet - siehe
+    Store.async_save/_async_handle_write_data. Ohne ein eigenes Lock in
+    EconomicsStateStore, das die gesamte save-then-load-Sequenz pro
+    Instanz seriealisiert, sieht der erste Aufrufer beim Rücklesen die
+    bereits gesetzten, aber noch nicht geschriebenen Daten des zweiten
+    Aufrufers und meldet fälschlich einen Fehlschlag - obwohl sein
+    eigener Schreibvorgang tatsächlich erfolgreich war."""
+
+    class _RacingFakeStore:
+        """Minimalnachbildung von Store._data/_write_lock/async_load, die
+        genau die für diesen Test relevante Race-Bedingung reproduziert."""
+
+        def __init__(self) -> None:
+            self._data: dict | None = None
+            self._disk: dict | None = None
+            self._write_lock = asyncio.Lock()
+
+        async def async_save(self, data: dict) -> None:
+            self._data = data
+            async with self._write_lock:
+                if self._data is None:
+                    return
+                taken = self._data
+                self._data = None
+                await asyncio.sleep(0)
+                self._disk = taken
+
+        async def async_load(self) -> dict | None:
+            if self._data is not None:
+                return dict(self._data)
+            return dict(self._disk) if self._disk is not None else None
+
+    store = EconomicsStateStore(hass, "racing")
+    store._store = _RacingFakeStore()
+    started_at = dt_util.utcnow()
+
+    first_state = _full_state(started_at, grid_charge_cost_eur=1.0)
+    second_state = _full_state(started_at, grid_charge_cost_eur=2.0)
+
+    first_result, second_result = await asyncio.gather(
+        store.async_reset(first_state),
+        store.async_save(second_state),
+    )
+
+    assert first_result is True
+    assert second_result is True
+
+
 # trotzdem erkannt werden - Store._async_handle_write_data fängt eine
 # echte WriteError/SerializationError ab und kehrt regulär zurück, ohne
 # sie an den Aufrufer weiterzureichen. Simuliert hier, indem

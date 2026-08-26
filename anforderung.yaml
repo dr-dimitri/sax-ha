@@ -3477,7 +3477,20 @@ requirement_economics_observability:
     `HomeAssistantError`, statt fälschlich Erfolg zu melden); für den
     zeitversetzten Pfad, der keinen wartenden Aufrufer mehr hat, über den
     optionalen `on_persist_failed`-Callback
-    (`SaxPowerCoordinator._on_economics_persist_failed`). In beiden Fällen
+    (`SaxPowerCoordinator._on_economics_persist_failed`). Die gesamte
+    save-then-load-Sequenz aus `_write_and_verify` läuft dabei unter einem
+    pro `EconomicsStateStore`-Instanz gehaltenen `asyncio.Lock`
+    (`_write_and_verify_lock`): `Store.async_save()` überschreibt
+    `Store._data` sofort, unabhängig von einem eventuell noch laufenden
+    anderen Schreibvorgang (nur die eigentliche Schreib-E/A ist über
+    `Store._write_lock` serialisiert) - ein zweiter, überlappender
+    Schreibversuch (z. B. ein bereits laufender verzögerter Write parallel
+    zu `async_reset()`/dem Shutdown-Flush) könnte sonst zwischen den
+    Save- und den Load-Aufruf des ersten geraten und dessen
+    `Store.async_load()` fälschlich die eigenen, noch ausstehenden Daten
+    statt der soeben geschriebenen zurückgeben lassen - der erste,
+    tatsächlich erfolgreiche Write würde dann fälschlich als
+    Schreibfehler gemeldet. In beiden Fällen
     identisch: Status `storage_error`, UND - Abweichung von
     REQ-ECONOMICS-ACCOUNTING -
     `_bootstrap_economics_if_ready` bootstrapped in diesem Fall NICHT mehr
@@ -3637,20 +3650,34 @@ requirement_economics_dashboard:
       Diese sieben Sensoren sind - anders als optional erst zur Laufzeit
       erschienene Entities anderer Tabs - immer bereits statisch
       registriert (SENSOR_DESCRIPTIONS, siehe REQ-ECONOMICS-AMORTIZATION),
-      unabhängig von konfigurierten Investitionskosten; economics_roi
-      liefert in diesem Fall `None` (Sensorzustand "unknown"). Die ganze
-      vertical-stack ist deshalb in eine Core-"conditional"-Karte
-      eingebettet (`conditions: [{entity: <economics_roi-Entity-ID>,
-      state_not: "unknown"}]`) statt an eine zum Build-Zeitpunkt gelesene
-      Config-Entry-Option gekoppelt zu sein: eine reine Registry-Prüfung
-      wie bei den übrigen Karten würde die Karte hier immer mit lauter
-      "unbekannt"-Zeilen zeigen, und eine Options-Prüfung beim Dashboardbau
-      bliebe nach einer späteren Options-Änderung veraltet, da
+      unabhängig von konfigurierten Investitionskosten; ohne konfigurierte
+      Investitionskosten liefern alle sieben `None` (Sensorzustand
+      "unknown"). Die ganze vertical-stack ist deshalb in eine Core-
+      "conditional"-Karte eingebettet statt an eine zum Build-Zeitpunkt
+      gelesene Config-Entry-Option gekoppelt zu sein: eine reine Registry-
+      Prüfung wie bei den übrigen Karten würde die Karte hier immer mit
+      lauter "unbekannt"-Zeilen zeigen, und eine Options-Prüfung beim
+      Dashboardbau bliebe nach einer späteren Options-Änderung veraltet, da
       `__init__.async_update_options` das gespeicherte Dashboard nie neu
       baut (nur den Coordinator aktualisiert). Die "conditional"-Karte
       blendet sich dagegen automatisch ein/aus, sobald der Coordinator
-      nach einer Options-Änderung neu rechnet und der Sensorzustand
-      wechselt - ganz ohne Dashboard-Neubau.
+      nach einer Options-Änderung neu rechnet und der zugrunde liegende
+      Zustand wechselt - ganz ohne Dashboard-Neubau.
+
+      Das Gate ist bewusst NICHT an economics_roi selbst gekoppelt: dessen
+      Sensorzustand wird laut REQ-ECONOMICS-AMORTIZATION auch bei
+      deaktiviertem Tarif oder noch nicht initialisierter Geldbilanz
+      "unknown", obwohl Investitionskosten konfiguriert sind und die
+      historische 30-Tage-Prognose davon unberührt weiter veröffentlicht
+      wird - eine Kopplung an economics_roi würde die Karte in diesen
+      Fällen fälschlich mit ausblenden. Stattdessen hängt die Karte am
+      `unavailable_reason`-Attribut von economics_average_daily_result_30d
+      (`conditions: [{entity: <economics_average_daily_result_30d-Entity-
+      ID>, attribute: "unavailable_reason", state_not:
+      "no_investment_cost"}]`), das ausschließlich bei fehlenden
+      Investitionskosten auf `ForecastUnavailable.NO_INVESTMENT_COST`
+      gesetzt wird, unabhängig von Tarifstatus oder Bilanz-
+      Initialisierung.
     - Karte 5 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
       `statistics-graph` als Balkendiagramm (`chart_type: bar`),
       `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für

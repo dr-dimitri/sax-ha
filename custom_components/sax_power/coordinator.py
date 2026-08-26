@@ -296,6 +296,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # und _bootstrap_economics_if_ready weiter unten.
         self._economics_store = EconomicsStateStore(hass, entry_id)
         self._economics_store_loaded = False
+        # Bleibt bis zu einem erfolgreichen Neuladen des Config Entry
+        # gesetzt, wenn der vorhandene Store beim Start nicht gelesen
+        # werden konnte (siehe async_load_economics_state) - verhindert,
+        # dass ein anschließend aus lauter Nullen neu gebootstrapptes
+        # Bilanz-Objekt den eigentlich vorhandenen, nur unlesbaren Store
+        # überschreibt (analog zu _control_store_write_blocked).
+        self._economics_store_write_blocked = False
         # Versionierter, vom sichtbaren Entity-Zustand unabhängiger Snapshot
         # aller softwareseitigen Steuerwerte (REQ-CONTROL-CONFIG-BOOTSTRAP).
         self._control_store = ControlConfigStore(hass, entry_id)
@@ -613,16 +620,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Bewertet die Ladeenergie-Herkunft dieses Intervalls in Geld.
 
         Bewusst außerhalb jeder Ladeentscheidung: reine Nachbetrachtung
-        bereits gemessener Energie, kein Modbus-Write. Läuft nur, solange
-        ein Tarif aktiv ist (siehe SaxTariffProvider.config.enabled) -
-        deaktiviert bleibt die gesamte Bilanz unangetastet und die
-        monetären Sensoren zeigen "unbekannt" statt 0, damit ein
-        deaktivierter Tarif keinen falschen Nullgewinn suggeriert.
+        bereits gemessener Energie, kein Modbus-Write.
 
         economics_current_import_price/economics_feed_in_price sind reine
         Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und werden
         unabhängig vom Bilanz-Bootstrap immer aktualisiert - sie beschreiben
         den JETZT gültigen Tarif, nicht die kumulierte Bilanz.
+
+        Der Bootstrap (siehe _bootstrap_economics_if_ready) läuft nur,
+        solange der Tarif aktiv ist - "beim erstmaligen Aktivieren" (siehe
+        anforderung.yaml, REQ-ECONOMICS-ACCOUNTING). Ist die Bilanz aber
+        einmal gestartet, akkumuliert sie AUCH während einer späteren
+        Tarifpause (tariff_type=disabled) unverändert weiter: current_price/
+        feed_in_price sind während der Pause bereits None (SaxTariffProvider
+        liefert das für einen deaktivierten Tarif von sich aus), jede in
+        dieser Zeit geladene Energie landet dadurch automatisch im
+        unbewerteten Bestand. Würde die Akkumulation stattdessen komplett
+        pausieren, bliebe in der Pause geladene Energie unbeobachtet und
+        eine spätere Entladung würde beim Reaktivieren fälschlich vollständig
+        als vermiedener Netzbezug monetarisiert - ein kostenloser
+        Scheingewinn, exakt der bei #42 vermiedene Fehler. Nur die
+        VERÖFFENTLICHTEN monetären Sensoren blenden während einer Pause auf
+        None statt auf die (weiter mitlaufenden) internen Summen (siehe
+        _publish_economics_balance) - kein falscher Nullgewinn, aber auch
+        keine sichtbaren Beträge, solange der Tarif aus ist.
         """
         quote_result = self.tariff_provider.quote()
         current_price = quote_result.price_eur_kwh
@@ -634,16 +655,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             None if feed_in_price is None else round(feed_in_price, 5)
         )
 
-        if not self.tariff_provider.config.enabled:
-            self._publish_economics_balance(data)
-            return
-
-        self._bootstrap_economics_if_ready(data)
+        tariff_enabled = self.tariff_provider.config.enabled
+        if tariff_enabled:
+            self._bootstrap_economics_if_ready(data)
         if self._economics_started_at is None:
-            # Kapazität/SOC noch nicht numerisch bekannt (SunSpec-Modus
-            # nicht erreichbar) - die Bilanz wartet, statt mit einem
-            # erfundenen Anfangsbestand zu starten.
-            self._publish_economics_balance(data)
+            # Nie aktiviert, oder aktiviert, aber Kapazität/SOC noch nicht
+            # numerisch bekannt (SunSpec-Modus nicht erreichbar) - die
+            # Bilanz wartet, statt mit einem erfundenen Anfangsbestand zu
+            # starten.
+            self._publish_economics_balance(data, monetary_available=False)
             return
 
         changed = False
@@ -672,6 +692,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             )
 
+        # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
+        # Bestandskorrektur betrifft die Integrität des unbewerteten
+        # Bestands selbst, nicht die aktuelle Bepreisung.
         correction = min_soc_inventory_correction(
             self._economics_unvalued_inventory_kwh,
             data.get("battery_soc"),
@@ -689,7 +712,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if changed:
             self._async_schedule_economics_save()
-        self._publish_economics_balance(data)
+        self._publish_economics_balance(data, monetary_available=tariff_enabled)
 
     def _bootstrap_economics_if_ready(self, data: dict[str, Any]) -> None:
         """Startet die Bilanz beim erstmaligen Aktivieren.
@@ -727,10 +750,26 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_started_at = dt_util.utcnow()
         self._async_schedule_economics_save()
 
-    def _publish_economics_balance(self, data: dict[str, Any]) -> None:
-        grid_cost = self._economics_grid_charge_cost_eur
-        pv_cost = self._economics_pv_opportunity_cost_eur
-        avoided_cost = self._economics_avoided_grid_cost_eur
+    def _publish_economics_balance(
+        self, data: dict[str, Any], *, monetary_available: bool
+    ) -> None:
+        """Veröffentlicht die Bilanz in coordinator.data.
+
+        `monetary_available=False` (deaktivierter Tarif) blendet
+        ausschließlich die vier monetären Sensoren (device_class monetary)
+        auf None aus - ein deaktivierter Tarif darf keinen Betrag mehr
+        zeigen, unabhängig davon, dass intern (siehe _accumulate_economics)
+        weiter akkumuliert wird. Bestand und Unpriced-Zähler sind keine
+        Geldwerte und bleiben deshalb auch während einer Tarifpause
+        sichtbar.
+        """
+        grid_cost = self._economics_grid_charge_cost_eur if monetary_available else None
+        pv_cost = (
+            self._economics_pv_opportunity_cost_eur if monetary_available else None
+        )
+        avoided_cost = (
+            self._economics_avoided_grid_cost_eur if monetary_available else None
+        )
         data["economics_grid_charge_cost"] = (
             None if grid_cost is None else round(grid_cost, 4)
         )
@@ -784,13 +823,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             state = await self._economics_store.async_load()
         except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
+            # Der vorhandene Store ist unlesbar, aber nicht zwangsläufig
+            # leer - ein anschließend aus lauter Nullen neu gebootstrapptes
+            # Bilanz-Objekt darf ihn deshalb nie überschreiben. Rechnung und
+            # Bootstrap laufen trotzdem normal weiter (nur im
+            # Arbeitsspeicher, analog zu ControlConfigLoadStatus.FAILED) -
+            # ein Neuladen des Config Entry ist der einzige Weg, die Sperre
+            # wieder aufzuheben.
             _LOGGER.warning(
                 "Wirtschaftlichkeitszustand konnte nicht geladen werden; "
-                "die Bilanz bleibt inaktiv, bis der Config Entry neu "
-                "geladen wird: %s",
+                "Änderungen wirken bis zu einem Neuladen des Config Entry "
+                "nur im Arbeitsspeicher: %s",
                 err,
             )
             self._economics_store_loaded = True
+            self._economics_store_write_blocked = True
             return
 
         if state is not None and state.initialized:
@@ -818,11 +865,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def _async_schedule_economics_save(self) -> None:
+        if self._economics_store_write_blocked:
+            return
         state = self._economics_state()
         if self._economics_store_loaded and state.initialized:
             self._economics_store.async_delay_save(state)
 
     async def _async_flush_economics_state(self) -> None:
+        if self._economics_store_write_blocked:
+            return
         state = self._economics_state()
         if not self._economics_store_loaded or not state.initialized:
             return

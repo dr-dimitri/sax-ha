@@ -597,6 +597,29 @@ async def test_provider_exposes_feed_in_price_when_enabled(hass) -> None:
     assert coordinator.tariff_provider.quote().quote.price_eur_kwh == 0.34
 
 
+@pytest.mark.parametrize("feed_in_price", [-0.01, 2.01, 3.0, float("nan")])
+async def test_provider_hides_an_out_of_range_feed_in_price(
+    hass, feed_in_price
+) -> None:
+    """Ein von Hand beschädigter Store kann einen endlichen, aber
+    außerhalb von 0 bis 2 EUR/kWh liegenden Wert enthalten - validate_tariff
+    lehnt einen daraus resultierenden Quote zwar ab, aber
+    feed_in_price_eur_kwh wird UNABHÄNGIG von quote() für die
+    Wirtschaftlichkeitsbilanz gelesen (REQ-ECONOMICS-ACCOUNTING) und muss
+    denselben Wertebereich selbst durchsetzen, statt den rohen Wert
+    durchzureichen."""
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: feed_in_price,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+        },
+    )
+
+    assert coordinator.tariff_provider.feed_in_price_eur_kwh is None
+
+
 async def test_dynamic_tariff_uses_the_price_forecast_slot(hass) -> None:
     """Der dynamische Tarif nutzt denselben Sensor und dieselbe
     Attribut-/Einheitenlogik wie die Ladeplanung."""

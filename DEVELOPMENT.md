@@ -213,12 +213,28 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
 `operating_result` (vermiedene Netzkosten − Netzladekosten −
 PV-Opportunitätskosten) wird nie separat gespeichert, sondern in
 `_publish_economics_balance` aus den drei Teilsummen abgeleitet - so kann er
-nie von ihnen abweichen. Die gesamte Bilanz läuft nur, solange
-`SaxTariffProvider.config.enabled` wahr ist; deaktiviert bleiben die
-monetären Sensoren `None` ("unbekannt") statt 0, damit kein falscher
-Nullgewinn suggeriert wird. `economics_current_import_price`/
+nie von ihnen abweichen.
+
+Der einmalige Bootstrap läuft nur, solange `SaxTariffProvider.config.enabled`
+wahr ist. Nach dem Bootstrap akkumuliert `_accumulate_economics` aber AUCH
+während einer späteren Tarifpause unverändert weiter: `current_price`/
+`feed_in_price` sind während der Pause bereits `None` (der Tarif-Adapter
+liefert das für einen deaktivierten Tarif von sich aus), pausenweise
+geladene Energie landet dadurch automatisch im unbewerteten Bestand statt
+unbeobachtet zu bleiben - andernfalls würde eine nach dem Reaktivieren
+erfolgende Entladung dieser Energie fälschlich vollständig als vermiedenen
+Netzbezug monetarisieren (derselbe Scheingewinn-Fehler wie bei #42, nur
+über den Umweg einer Pause statt des Anfangsbestands). Nur die
+VERÖFFENTLICHTEN vier monetären Sensoren blenden während einer Pause auf
+`None` (`_publish_economics_balance(..., monetary_available=...)`) statt
+auf die weiter mitlaufenden internen Summen; `unvalued_inventory_kwh`/
+`unpriced_charge_kwh`/`unpriced_discharge_kwh` sind keine Geldwerte und
+bleiben sichtbar. `economics_current_import_price`/
 `economics_feed_in_price` sind reine Durchreichungen des aktuellen Tarifs
-und unabhängig vom Bilanz-Bootstrap immer aktuell.
+und unabhängig vom Bilanz-Bootstrap immer aktuell -
+`SaxTariffProvider.feed_in_price_eur_kwh` validiert dafür selbst den
+Wertebereich (`is_valid_feed_in_price`), weil `validate_tariff()` nur die
+Quote-Erzeugung schützt, nicht diese separat gelesene Property.
 
 Persistenz: `infrastructure/economics_store.py` (`EconomicsStateStore`,
 eigener STORAGE_VERSION, eigenes Bootstrap-Fenster analog zu
@@ -238,6 +254,16 @@ gelernte Muster). `notify_tariff_revision()` (aufgerufen aus
 Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
 ausschließlich prospektiv, weil jedes künftige Delta einfach den dann
 aktuellen Preis verwendet; nichts wird rückwirkend neu berechnet.
+
+Scheitert `EconomicsStateStore.async_load()` selbst (I/O-Fehler, unbekannte
+künftige Storage-Hauptversion), setzt `async_load_economics_state`
+`_economics_store_write_blocked` - Rechnung und Bootstrap laufen normal im
+Arbeitsspeicher weiter (analog zu `ControlConfigLoadStatus.FAILED`), aber
+`_async_schedule_economics_save`/`_async_flush_economics_state` verweigern
+jeden Schreibversuch, bis ein Neuladen des Config Entry eine frische
+Coordinator-Instanz erzeugt. Ohne diese Sperre würde eine aus lauter Nullen
+neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
+überschreiben und dessen Inhalt endgültig verlieren.
 
 ## Datenfluss
 

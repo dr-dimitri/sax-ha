@@ -4659,3 +4659,105 @@ def test_soc_minimum_correction_resets_the_inventory_and_logs(hass, caplog) -> N
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
     assert data["economics_unvalued_inventory"] == 0.0
     assert "SOC-Minimum" in caplog.text
+
+
+def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
+    """Wird während einer Tarifpause geladen, darf die spätere Entladung
+    nach der Reaktivierung keinen vermiedenen Geldwert erzeugen - die
+    Ladung kam nie mit Kosten hinein (Review-Regression: sonst kostenloser
+    Scheingewinn analog zum verworfenen Issue #42)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=0)  # unbewerteter Bestand startet bei 0
+
+    # Tarif pausieren, dann 1 kWh aus dem Netz laden.
+    coordinator.options = {}
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 20,  # deutlich über battery_soc_min
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.0)
+    assert coordinator._economics_unpriced_charge_kwh == pytest.approx(1.0)
+    assert coordinator._economics_grid_charge_cost_eur == 0.0
+
+    # Reaktivieren und exakt dieselbe Menge wieder entladen.
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": 1000,
+            "smartmeter_power": 0,
+            "battery_soc": 10,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_avoided_grid_cost"] == 0.0
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
+
+
+def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
+    hass,
+) -> None:
+    """Bei deaktiviertem Tarif müssen die vier monetären Sensoren None
+    liefern (Akzeptanzkriterium) - der interne Stand bleibt dabei erhalten
+    und die Sensoren zeigen ihn nach der Reaktivierung unverändert wieder."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+    assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
+
+    coordinator.options = {}
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] is None
+    assert data["economics_pv_opportunity_cost"] is None
+    assert data["economics_avoided_grid_cost"] is None
+    assert data["economics_operating_result"] is None
+    # Interner Stand ist NICHT auf 0 zurückgesetzt worden.
+    assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
+
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=11800.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.30)

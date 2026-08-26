@@ -43,6 +43,7 @@ from .domain.tariff import (
     TariffConfig,
     TariffType,
     evaluate_static_tariff,
+    is_valid_feed_in_price,
     is_valid_import_price,
     validate_tariff,
 )
@@ -85,9 +86,20 @@ class SaxTariffProvider:
     @property
     def feed_in_price_eur_kwh(self) -> float | None:
         """Einspeisevergütung in EUR/kWh - der Beschaffungspreis von
-        PV-Energie, die statt ins Netz in den Speicher fließt."""
+        PV-Energie, die statt ins Netz in den Speicher fließt.
+
+        Prüft den Wertebereich (0 bis 2 EUR/kWh) genauso wie
+        validate_tariff() für die Quote-Erzeugung: Ein von Hand
+        beschädigter Store kann einen endlichen, aber außerhalb des
+        zulässigen Bereichs liegenden Wert enthalten (z. B. 3 EUR/kWh) -
+        der darf nicht ungeprüft in die PV-Bewertung der
+        Wirtschaftlichkeitsbilanz einfließen (REQ-ECONOMICS-ACCOUNTING).
+        """
         config = self.config
-        return config.feed_in_price_eur_kwh if config.enabled else None
+        if not config.enabled:
+            return None
+        price = config.feed_in_price_eur_kwh
+        return price if is_valid_feed_in_price(price) else None
 
     @property
     def price_entity_id(self) -> str | None:

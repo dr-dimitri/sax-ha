@@ -3042,17 +3042,35 @@ requirement_economics_accounting:
     SaxPowerCoordinator._accumulate_economics, aufgerufen am Ende von
     _accumulate_energy mit demselben EnergyDelta und demselben rohen,
     ungerundeten Entladezuwachs dieses Intervalls (02/06) - keine zweite
-    Uhr, keine zweite Riemann-Summe. Gilt nur, solange
-    SaxTariffProvider.config.enabled wahr ist; deaktiviert bleibt die
-    gesamte Bilanz unangetastet und die vier monetären Sensoren
-    (economics_grid_charge_cost, economics_pv_opportunity_cost,
-    economics_avoided_grid_cost, economics_operating_result) liefern None
-    ("unbekannt") statt 0 - ein deaktivierter Tarif darf keinen falschen
-    Nullgewinn suggerieren. Die Herkunfts-/Energiesensoren aus 02/06
-    bleiben davon unberührt und weiterhin verfügbar.
+    Uhr, keine zweite Riemann-Summe. Der einmalige Bootstrap (siehe oben)
+    läuft nur, solange SaxTariffProvider.config.enabled wahr ist - "beim
+    erstmaligen Aktivieren". Ist die Bilanz aber einmal gestartet
+    (economics_started_at gesetzt), akkumuliert sie AUCH während einer
+    späteren Tarifpause (tariff_type=disabled) unverändert weiter:
+    current_price/feed_in_price sind während der Pause bereits None (siehe
+    unten), jede in dieser Zeit geladene Energie landet dadurch automatisch
+    im unbewerteten Bestand statt unbeobachtet zu bleiben. Würde die
+    Akkumulation stattdessen komplett pausieren, würde eine spätere
+    Entladung nach dem Reaktivieren die in der Pause geladene Energie
+    fälschlich vollständig als vermiedenen Netzbezug monetarisieren - ein
+    kostenloser Scheingewinn, exakt der bei #42 vermiedene Fehler. Nur die
+    VERÖFFENTLICHTEN vier monetären Sensoren (economics_grid_charge_cost,
+    economics_pv_opportunity_cost, economics_avoided_grid_cost,
+    economics_operating_result) blenden während einer Pause auf None statt
+    auf die weiter mitlaufenden internen Summen - ein deaktivierter Tarif
+    darf keinen falschen Nullgewinn suggerieren, aber auch keine sichtbaren
+    Beträge zeigen. unvalued_inventory_kwh/unpriced_charge_kwh/
+    unpriced_discharge_kwh sind keine Geldwerte und bleiben davon
+    unberührt sichtbar. Die Herkunfts-/Energiesensoren aus 02/06 bleiben
+    ebenfalls unberührt und weiterhin verfügbar.
     economics_current_import_price/economics_feed_in_price sind reine
     Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und
-    unabhängig vom Bilanz-Bootstrap immer aktuell.
+    unabhängig vom Bilanz-Bootstrap immer aktuell; beide validieren ihren
+    jeweiligen Wertebereich selbst (feed_in_price_eur_kwh über
+    is_valid_feed_in_price) statt einen aus einem von Hand beschädigten
+    Store stammenden, außerhalb des zulässigen Bereichs liegenden Preis
+    ungeprüft durchzureichen - validate_tariff() schützt nur die
+    Quote-Erzeugung selbst, nicht diese separat gelesene Property.
 
     Neue Sensoren (sensor.py, beschreibungsbasiert wie jeder andere
     berechnete Wert): economics_grid_charge_cost,
@@ -3100,6 +3118,16 @@ requirement_economics_accounting:
     EnergyStateStore._origin_baseline, REQ-ENERGY-ORIGIN, übernommenes
     Muster). Ein korrupter Snapshot wird nie still auf 0 gesetzt.
 
+    Scheitert das Laden selbst (I/O-Fehler, unbekannte künftige
+    Storage-Hauptversion), bleiben Rechnung und Bootstrap normal im
+    Arbeitsspeicher aktiv (analog zu ControlConfigLoadStatus.FAILED), aber
+    SaxPowerCoordinator._economics_store_write_blocked wird gesetzt und
+    unterbindet jeden weiteren Schreibversuch (gedrosselt wie sofort) bis
+    zu einem erfolgreichen Neuladen des Config Entry - ohne diese Sperre
+    würde eine aus lauter Nullen neu gebootstrappte Bilanz den eigentlich
+    vorhandenen, nur unlesbaren Store überschreiben und dessen Inhalt
+    endgültig verlieren.
+
     Diagnose-Download (diagnostics.py, Schlüssel "economics") zeigt
     zusätzlich zu den bereits über coordinator_data sichtbaren, gerundeten
     Sensorwerten den internen, ungerundeten Rohzustand samt beider
@@ -3129,8 +3157,21 @@ requirement_economics_accounting:
        Entries und Final-Flush sind getestet
        (tests/test_economics_persistence.py)."
     - "Ein deaktivierter Tarif lässt die vier monetären Sensoren None
-       liefern, nie 0; die Herkunfts-/Energiesensoren aus 02/06 bleiben
+       liefern, nie 0 - auch dann, wenn die Bilanz bereits vor der Pause
+       initialisiert war (nicht nur bei einem nie aktivierten
+       Coordinator); die Herkunfts-/Energiesensoren aus 02/06 bleiben
        unverändert verfügbar."
+    - "Während einer Tarifpause geladene oder entladene Energie wird
+       weiterhin als unbewertet nachgeführt; eine nach dem Reaktivieren
+       erfolgende Entladung dieser Energie erzeugt nachweislich 0 EUR
+       vermiedenen Geldwert (kein kostenloser Scheingewinn)."
+    - "Eine außerhalb von 0 bis 2 EUR/kWh liegende, aber endliche
+       gespeicherte Einspeisevergütung ergibt None statt eines
+       ungeprüften Rohwerts (SaxTariffProvider.feed_in_price_eur_kwh)."
+    - "Ein Lesefehler des Wirtschaftlichkeits-Stores blockiert jeden
+       weiteren Schreibversuch bis zu einem erfolgreichen Neuladen des
+       Config Entry, während Rechnung und Bootstrap im Arbeitsspeicher
+       normal weiterlaufen."
     - "strings.json, translations/de.json, translations/en.json,
        README.md, DEVELOPMENT.md, diagnostics.py und anforderung.yaml
        sind aktualisiert."

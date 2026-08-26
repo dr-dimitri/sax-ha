@@ -342,6 +342,56 @@ async def test_disabled_tariff_reports_unavailable_and_does_not_bootstrap(
     await coordinator.async_shutdown()
 
 
+async def test_a_load_error_blocks_writes_until_a_reload(hass) -> None:
+    """Ein Lesefehler darf einen vorhandenen, nur unlesbaren Store nicht
+    durch eine frisch gebootstrappte Nullbilanz überschreiben - Rechnung
+    und Bootstrap laufen trotzdem normal im Arbeitsspeicher weiter (analog
+    zu ControlConfigLoadStatus.FAILED)."""
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(side_effect=OSError("kaputt"))
+    coordinator._economics_store.async_delay_save = MagicMock(return_value=True)
+    coordinator._economics_store.async_save = AsyncMock(return_value=True)
+
+    await coordinator.async_load_economics_state()
+
+    assert coordinator._economics_store_write_blocked is True
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+
+    # Bootstrap und Akkumulation laufen normal im Arbeitsspeicher weiter...
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
+    # ...aber es wird nichts gespeichert, solange der Store als unlesbar gilt.
+    coordinator._economics_store.async_delay_save.assert_not_called()
+
+    await coordinator.async_shutdown()
+
+    coordinator._economics_store.async_save.assert_not_called()
+
+
 async def test_shutdown_flushes_the_current_balance(hass) -> None:
     started_at = dt_util.utcnow()
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)

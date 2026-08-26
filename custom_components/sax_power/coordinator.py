@@ -164,6 +164,23 @@ OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
 INVENTORY_CAP_LOG_INTERVAL_SECONDS = 3600.0
 
 
+def _economics_capacity_kwh(capacity_wh: Any) -> float | None:
+    """Speicherkapazität (Wh) als kWh, oder None bei unbekanntem Rohwert.
+
+    Eine gemeldete Kapazität von 0 (oder negativ) ist kein plausibler
+    Messwert, sondern ein noch nicht gefüllter bzw. gestörter
+    SunSpec-Block. Sie darf weder einen Anfangsbestand von 0 bootstrappen
+    noch den unbewerteten Bestand auf 0 deckeln - beides verwürfe einen
+    real vorhandenen Bestand und erzeugte beim nächsten Entladen exakt den
+    kostenlosen Scheingewinn aus dem verworfenen Issue #42.
+    price_optimizer._context behandelt denselben Rohwert aus demselben
+    Grund als unbekannt.
+    """
+    if capacity_wh is None or capacity_wh <= 0:
+        return None
+    return float(capacity_wh) / 1000
+
+
 _MONTH_NAMES_DE = {
     1: "Januar",
     2: "Februar",
@@ -936,10 +953,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # darin liegen und würde später bepreist geladene Entladung als
             # unbewertet abbuchen (Issue #132). Läuft wie die
             # SOC-Minimum-Korrektur unabhängig vom aktuellen Tarifzustand.
-            capacity_wh = data.get("battery_capacity")
             capped = capacity_inventory_correction(
                 self._economics_unvalued_inventory_kwh,
-                None if capacity_wh is None else float(capacity_wh) / 1000,
+                _economics_capacity_kwh(data.get("battery_capacity")),
                 data.get("battery_soc"),
             )
             if capped is not None:
@@ -1431,10 +1447,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or self._economics_store_write_blocked
         ):
             return
-        capacity_wh = data.get("battery_capacity")
-        capacity_kwh = None if capacity_wh is None else float(capacity_wh) / 1000
         inventory = initial_unvalued_inventory_kwh(
-            capacity_kwh, data.get("battery_soc")
+            _economics_capacity_kwh(data.get("battery_capacity")),
+            data.get("battery_soc"),
         )
         if inventory is None:
             return
@@ -1721,10 +1736,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         current_data = self.data or {}
-        capacity_wh = current_data.get("battery_capacity")
-        capacity_kwh = None if capacity_wh is None else float(capacity_wh) / 1000
         inventory = initial_unvalued_inventory_kwh(
-            capacity_kwh, current_data.get("battery_soc")
+            _economics_capacity_kwh(current_data.get("battery_capacity")),
+            current_data.get("battery_soc"),
         )
         if inventory is None:
             raise ServiceValidationError(

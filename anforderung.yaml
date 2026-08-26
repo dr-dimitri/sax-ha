@@ -3021,8 +3021,9 @@ requirement_economics_accounting:
     "Ehrlicher Start": Beim erstmaligen Aktivieren steckt bereits Energie
     unbekannter Herkunft im Speicher.
     SaxPowerCoordinator._bootstrap_economics_if_ready wartet, bis
-    battery_capacity und battery_soc numerisch verfügbar sind (beide aus
-    demselben SunSpec-Modus-Block wie battery_soc_min, mit demselben
+    battery_capacity (plausibel, also > 0) und battery_soc numerisch
+    verfügbar sind (beide aus demselben SunSpec-Modus-Block wie
+    battery_soc_min, mit demselben
     Skalierungsfaktor - bewusst nicht die Basic-Mode-SOC), und
     initialisiert dann einmalig unvalued_inventory_kwh = capacity_kwh *
     battery_soc / 100 sowie economics_started_at (UTC) - vorher bleibt die
@@ -3063,7 +3064,12 @@ requirement_economics_accounting:
     unberührt: er verlangt nur, dass der Bestand nicht zu KLEIN ist. Ist
     Kapazität oder SOC gerade nicht numerisch bekannt (SunSpec nicht
     erreichbar), wird nicht gedeckelt - nie gegen einen unbekannten Wert
-    klemmen. Die Korrektur wird wie die SOC-Minimum-Korrektur mit
+    klemmen. Als unbekannt gilt dabei auch eine gemeldete Kapazität von 0
+    oder darunter (SaxPowerCoordinator._economics_capacity_kwh): das ist
+    kein plausibler Messwert, sondern ein gestörter SunSpec-Block, und
+    würde sowohl den gesamten Bestand verwerfen als auch (im Bootstrap)
+    einen Anfangsbestand von 0 setzen - beides erzeugte beim nächsten
+    Entladen genau den kostenlosen Scheingewinn aus #42. Die Korrektur wird wie die SOC-Minimum-Korrektur mit
     Zeitstempel und Betrag geloggt, jedoch höchstens einmal je
     SaxPowerCoordinator.INVENTORY_CAP_LOG_INTERVAL_SECONDS (während einer
     unbepreisten Ladung greift der Deckel an nahezu jedem Poll-Intervall

@@ -4629,6 +4629,25 @@ def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
     assert coordinator._economics_started_at is None
 
 
+def test_economics_bootstrap_waits_for_a_plausible_capacity(hass) -> None:
+    """Eine gemeldete Kapazität von 0 ist ein gestörter SunSpec-Block, kein
+    Messwert: die Bilanz wartet, statt mit einem Anfangsbestand von 0 zu
+    starten und die erste Entladung als kostenlosen Gewinn zu verbuchen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+
+    data = _economics_tick(coordinator, at=1000.0, soc=50, capacity_wh=0)
+
+    assert coordinator._economics_started_at is None
+    assert coordinator._economics_unvalued_inventory_kwh is None
+    assert data["economics_unvalued_inventory"] is None
+
+    data = _economics_tick(coordinator, at=1010.0, soc=50)
+
+    assert coordinator._economics_started_at is not None
+    assert data["economics_unvalued_inventory"] == pytest.approx(5.0)
+
+
 def test_economics_current_price_sensors_track_the_tariff_independently_of_bootstrap(
     hass,
 ) -> None:
@@ -4778,13 +4797,15 @@ def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> Non
     """Regression zu Issue #132: der Ladeverlust-Rest eines unbepreisten
     Zyklus darf eine spätere, ganz normal bepreist geladene Entladung nicht
     als unbewertet abbuchen und so den vermiedenen Netzbezug dauerhaft zu
-    niedrig ausweisen."""
+    niedrig ausweisen. Der Speicher bleibt dabei durchgehend über seinem
+    SOC-Minimum - die bestehende Minimum-Korrektur greift also nie und kann
+    den Deckel nicht ersetzen."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=0)
 
-    # Tarifpause: 7 kWh geladen (SOC steigt verlustbedingt nur auf 63 %),
-    # anschließend die vollen 6,3 kWh wieder entladen.
+    # Tarifpause: 7 kWh geladen, der SOC steigt verlustbedingt nur um
+    # 6,3 kWh - der Bestand wird auf diese 6,3 kWh gedeckelt.
     coordinator.options = {}
     _economics_tick(
         coordinator,
@@ -4793,28 +4814,33 @@ def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> Non
         smartmeter_power=7000,
         soc=63,
     )
-    _economics_tick(coordinator, at=8200.0, storage_power_active=6300, soc=0, soc_min=0)
-    # Ohne den Deckel stünden hier 0,7 kWh unbewerteter Rest.
-    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(6.3)
 
-    # Tarif wieder da: 2 kWh bepreist geladen, 1,8 kWh entladen.
+    # ... und wieder entladen bis auf 0,7 kWh Restinhalt (SOC 7 %, also
+    # deutlich über dem Minimum von 5 %).
+    _economics_tick(coordinator, at=8200.0, storage_power_active=5600, soc=7)
+    # Ohne den Deckel stünden hier 1,4 statt 0,7 kWh unbewerteter Bestand.
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.7)
+
+    # Tarif wieder da: 2 kWh bepreist geladen (1,8 kWh landen im Speicher),
+    # danach dieselben 1,8 kWh entladen.
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _economics_tick(
         coordinator,
         at=11800.0,
         storage_power_active=-2000,
         smartmeter_power=2000,
-        soc=18,
+        soc=25,
     )
-    data = _economics_tick(
-        coordinator, at=15400.0, storage_power_active=1800, soc=0, soc_min=0
-    )
+    data = _economics_tick(coordinator, at=15400.0, storage_power_active=1800, soc=7)
 
-    # Die volle Entladung ist vermiedener Netzbezug - ohne den Deckel wären
-    # davon 0,7 kWh (0,21 EUR) unbewertet verfallen.
-    assert data["economics_avoided_grid_cost"] == pytest.approx(1.8 * 0.30)
+    # 0,7 kWh gehen als unbewerteter Bestand ab, die restlichen 1,1 kWh
+    # sind vermiedener Netzbezug - ohne den Deckel wären es nur 0,4 kWh
+    # (0,12 statt 0,33 EUR) gewesen.
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
+    assert data["economics_avoided_grid_cost"] == pytest.approx(1.1 * 0.30)
     assert data["economics_grid_charge_cost"] == pytest.approx(2.0 * 0.30)
-    assert data["economics_operating_result"] == pytest.approx(1.8 * 0.30 - 2.0 * 0.30)
+    assert data["economics_operating_result"] == pytest.approx(1.1 * 0.30 - 2.0 * 0.30)
 
 
 def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> None:
@@ -4853,8 +4879,25 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
         )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
+    # Eine gemeldete Kapazität von 0 ist kein plausibler Messwert, sondern
+    # ein gestörter Block - sonst würde der gesamte Bestand verworfen und
+    # die nächste Entladung erzeugte den Scheingewinn aus Issue #42.
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=11800.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": 0,
+                "smartmeter_power": 0,
+                "battery_soc": 50,
+                "battery_capacity": 0,
+                "battery_soc_min": 5,
+            }
+        )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
+
     # Sind beide wieder da, greift der Deckel sofort.
-    data = _economics_tick(coordinator, at=11800.0, soc=50)
+    data = _economics_tick(coordinator, at=15400.0, soc=50)
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.0)
     assert data["economics_unvalued_inventory"] == pytest.approx(5.0)
 

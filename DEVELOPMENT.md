@@ -217,7 +217,8 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
   Ladeverlust-Differenz jedes *unbepreisten* Zyklus (geladen > entladen)
   dauerhaft im Bestand liegen und würde später bepreist geladene Entladung
   als unbewertet abbuchen (Issue #132). Ist Kapazität oder SOC gerade
-  unbekannt, wird nicht gedeckelt. Geloggt wird höchstens einmal je
+  unbekannt, wird nicht gedeckelt - als unbekannt gilt (wie im Bootstrap und
+  in `price_optimizer._context`) auch eine gemeldete Kapazität von 0. Geloggt wird höchstens einmal je
   `INVENTORY_CAP_LOG_INTERVAL_SECONDS`; die insgesamt verworfene Menge steht
   als `inventory_capped_kwh` im Diagnose-Download.
 

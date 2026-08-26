@@ -3047,6 +3047,31 @@ requirement_economics_accounting:
     verworfen und mit Zeitstempel diagnostisch geloggt - keine nutzbare
     unbekannte Energie kann an diesem Punkt mehr vorhanden sein.
 
+    unvalued_inventory_kwh ist ein Lagerbestand und wird deshalb bei JEDEM
+    Tick zusätzlich auf den tatsächlichen Speicherinhalt capacity_kwh *
+    battery_soc / 100 gedeckelt
+    (domain.economics_accounting.capacity_inventory_correction, dieselbe
+    Größe wie beim "Ehrlichen Start", aus demselben SunSpec-Block). Ohne
+    diesen Deckel bliebe die Ladeverlust-Differenz jedes UNBEPREISTEN
+    Zyklus (geladen > entladen, siehe oben) dauerhaft als Rest im Bestand
+    liegen und würde später eine bereits bepreist geladene Entladung als
+    unbewertet abbuchen - economics_avoided_grid_cost und damit
+    economics_operating_result fielen mit jedem Preisausfall weiter zu
+    niedrig aus, und der Diagnosesensor economics_unvalued_inventory
+    könnte einen physikalisch unmöglichen, über der Speicherkapazität
+    liegenden Bestand melden. Der Vorsichtsgedanke aus #42 bleibt
+    unberührt: er verlangt nur, dass der Bestand nicht zu KLEIN ist. Ist
+    Kapazität oder SOC gerade nicht numerisch bekannt (SunSpec nicht
+    erreichbar), wird nicht gedeckelt - nie gegen einen unbekannten Wert
+    klemmen. Die Korrektur wird wie die SOC-Minimum-Korrektur mit
+    Zeitstempel und Betrag geloggt, jedoch höchstens einmal je
+    SaxPowerCoordinator.INVENTORY_CAP_LOG_INTERVAL_SECONDS (während einer
+    unbepreisten Ladung greift der Deckel an nahezu jedem Poll-Intervall
+    erneut, weil der Bestand stetig wächst, der gemeldete SOC aber nur in
+    ganzen Prozentschritten); die seither insgesamt verworfene Menge steht
+    ungedrosselt im Diagnose-Download (Schlüssel inventory_capped_kwh, rein
+    diagnostisch, nicht persistiert).
+
     Eine Tarifänderung wirkt ausschließlich prospektiv: jedes künftige
     Delta verwendet einfach den dann aktuellen Preis, nichts wird
     rückwirkend neu berechnet. SaxPowerCoordinator.notify_tariff_revision
@@ -3165,6 +3190,11 @@ requirement_economics_accounting:
     - "Negative Preise, fehlende Preise (Ladung wie Entladung),
        Tarifwechsel (prospektiv, keine rückwirkende Neuberechnung),
        SOC-Minimum-Korrektur, Neustart und Unload sind getestet."
+    - "Der unbewertete Bestand überschreitet nie den tatsächlichen
+       Speicherinhalt: nach einem unbepreisten Zyklus verfällt der
+       Ladeverlust-Rest, und eine spätere bepreiste Entladung wird
+       nachweislich vollständig als vermiedener Netzbezug bewertet
+       (Issue #132). Ohne bekannte Kapazität/SOC wird nicht gedeckelt."
     - "Ladeverluste senken das operative Ergebnis über die gemessene
        Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu
        benötigen."

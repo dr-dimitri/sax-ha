@@ -13,6 +13,7 @@ import pytest
 from custom_components.sax_power.domain.economics_accounting import (
     NO_DELTA,
     EconomicsDelta,
+    capacity_inventory_correction,
     compute_economics_delta,
     initial_unvalued_inventory_kwh,
     min_soc_inventory_correction,
@@ -197,6 +198,49 @@ def test_min_soc_correction_only_applies_at_or_below_the_minimum() -> None:
 
 def test_min_soc_correction_is_a_noop_once_inventory_is_already_zero() -> None:
     assert min_soc_inventory_correction(0.0, 5, 5) is None
+
+
+# --------------------------------------------------------------------------
+# Deckelung auf den Speicherinhalt (Issue #132)
+# --------------------------------------------------------------------------
+def test_inventory_cap_needs_both_values_known() -> None:
+    assert capacity_inventory_correction(9.0, None, 50) is None
+    assert capacity_inventory_correction(9.0, 10.0, None) is None
+
+
+def test_inventory_cap_only_applies_above_the_physical_content() -> None:
+    assert capacity_inventory_correction(4.0, 10.0, 50) is None
+    assert capacity_inventory_correction(5.0, 10.0, 50) is None
+    assert capacity_inventory_correction(5.5, 10.0, 50) == pytest.approx(5.0)
+
+
+def test_inventory_cap_never_returns_a_negative_content() -> None:
+    """Ein (theoretisch) negativ gemeldeter SOC darf keinen negativen
+    Bestand erzeugen - der Bestand kennt nur 0 als Untergrenze."""
+    assert capacity_inventory_correction(1.0, 10.0, -5) == 0.0
+
+
+def test_inventory_cap_empties_the_inventory_at_an_empty_storage() -> None:
+    assert capacity_inventory_correction(0.7, 10.0, 0) == 0.0
+
+
+def test_charging_losses_of_an_unpriced_cycle_leave_a_residual_without_the_cap() -> (
+    None
+):
+    """Zusammenspiel aus Issue #132: 7 kWh unbepreiste Ladung heben den SOC
+    verlustbedingt nur um 6,3 kWh; ohne Deckel bliebe der Rest für immer im
+    Bestand und würde später bepreiste Entladung entwerten."""
+    charge = compute_economics_delta(_charge(grid=7.0), 0.0, 0.0, None, None)
+    inventory = charge.unvalued_inventory_delta_kwh
+    assert inventory == pytest.approx(7.0)
+
+    discharge = compute_economics_delta(ZERO_DELTA, 6.3, inventory, 0.30, 0.08)
+    inventory += discharge.unvalued_inventory_delta_kwh
+    assert discharge.avoided_grid_cost_delta == 0.0
+    assert inventory == pytest.approx(0.7)  # Ladeverlust-Rest
+
+    # Der Deckel räumt ihn ab, sobald der Speicher tatsächlich leer ist.
+    assert capacity_inventory_correction(inventory, 10.0, 0) == 0.0
 
 
 def test_economics_delta_equality_and_default() -> None:

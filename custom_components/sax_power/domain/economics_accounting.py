@@ -167,3 +167,32 @@ def min_soc_inventory_correction(
     if unvalued_inventory_kwh <= 0:
         return None
     return 0.0
+
+
+def capacity_inventory_correction(
+    unvalued_inventory_kwh: float, capacity_kwh: float | None, soc: float | None
+) -> float | None:
+    """Deckel des unbewerteten Bestands auf den Speicherinhalt, oder None.
+
+    Der unbewertete Bestand ist ein Lagerbestand und kann nie größer sein
+    als die tatsächlich im Speicher liegende Energie (`capacity_kwh * soc /
+    100` - genau die Größe, mit der er auch initialisiert wird). Ohne
+    diesen Deckel bliebe nach jedem unbepreisten Zyklus die Ladeverlust-
+    Differenz (geladen > entladen) dauerhaft als Rest im Bestand liegen und
+    würde später eine bereits bepreist geladene Entladung fälschlich als
+    unbewertet abbuchen - der vermiedene Netzbezug fiele dauerhaft zu
+    niedrig aus (Issue #132).
+
+    Der Vorsichtsgedanke aus dem verworfenen Issue #42 bleibt unberührt: er
+    verlangt nur, dass der Bestand nicht zu KLEIN ist. Liefert None, wenn
+    keine Korrektur nötig bzw. möglich ist (Kapazität/SOC unbekannt -
+    gegen einen unbekannten Wert wird nie geklemmt - oder der Bestand
+    liegt ohnehin nicht über dem Speicherinhalt); der Aufrufer soll die
+    Korrektur diagnostisch protokollieren.
+    """
+    if capacity_kwh is None or soc is None:
+        return None
+    stored_kwh = max(capacity_kwh * soc / 100, 0.0)
+    if unvalued_inventory_kwh <= stored_kwh:
+        return None
+    return stored_kwh

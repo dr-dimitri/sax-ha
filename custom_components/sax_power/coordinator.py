@@ -90,6 +90,7 @@ from .const import (
 )
 from .domain.economics_accounting import (
     EconomicsDelta,
+    capacity_inventory_correction,
     compute_economics_delta,
     initial_unvalued_inventory_kwh,
     min_soc_inventory_correction,
@@ -152,6 +153,15 @@ _LOGGER = logging.getLogger(__name__)
 #: Änderung (Geld, Energie, Tagesabschluss) speichert unverändert sofort
 #: und nimmt den aktuellen Stand dabei ohnehin mit.
 OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
+
+#: Mindestabstand zwischen zwei Log-Zeilen der Bestandsdeckelung
+#: (capacity_inventory_correction, REQ-ECONOMICS-ACCOUNTING). Der Deckel
+#: greift während einer längeren unbepreisten Ladung an nahezu jedem
+#: Poll-Intervall erneut (der Bestand wächst stetig, der gemeldete SOC nur
+#: in ganzen Prozentschritten) - ungedrosselt entstünden daraus stündlich
+#: hunderte identischer INFO-Zeilen. Die kumulierte Korrekturmenge steht
+#: unabhängig davon jederzeit vollständig im Diagnose-Download.
+INVENTORY_CAP_LOG_INTERVAL_SECONDS = 3600.0
 
 
 _MONTH_NAMES_DE = {
@@ -487,6 +497,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_unpriced_discharge_kwh: float | None = None
         self._economics_started_at: datetime | None = None
         self._last_tariff_revision_at: datetime | None = None
+        # Reine Diagnose der Bestandsdeckelung (Issue #132): wie viel
+        # unbewerteter Bestand seit dem Start dieses Coordinators verworfen
+        # wurde und wann darüber zuletzt geloggt wurde (monotonic, siehe
+        # INVENTORY_CAP_LOG_INTERVAL_SECONDS). Bewusst nicht persistiert -
+        # beides beeinflusst keine Berechnung.
+        self._economics_inventory_capped_kwh: float = 0.0
+        self._economics_inventory_cap_logged_at: float | None = None
         # ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION): lokale
         # Kalendertag-Buckets, unabhängig vom Sieben-Felder-Bündel oben -
         # siehe _advance_economics_day. day_results sind abgeschlossene
@@ -913,6 +930,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._economics_unvalued_inventory_kwh = correction
                 changed = True
 
+            # Der Bestand ist ein Lagerbestand und kann nie mehr Energie
+            # umfassen, als tatsächlich im Speicher liegt: sonst bliebe die
+            # Ladeverlust-Differenz jedes unbepreisten Zyklus dauerhaft
+            # darin liegen und würde später bepreist geladene Entladung als
+            # unbewertet abbuchen (Issue #132). Läuft wie die
+            # SOC-Minimum-Korrektur unabhängig vom aktuellen Tarifzustand.
+            capacity_wh = data.get("battery_capacity")
+            capped = capacity_inventory_correction(
+                self._economics_unvalued_inventory_kwh,
+                None if capacity_wh is None else float(capacity_wh) / 1000,
+                data.get("battery_soc"),
+            )
+            if capped is not None:
+                self._note_inventory_cap_correction(
+                    self._economics_unvalued_inventory_kwh, capped
+                )
+                self._economics_unvalued_inventory_kwh = capped
+                changed = True
+
         if changed:
             self._async_schedule_economics_save()
         self._publish_economics_balance(data, monetary_available=tariff_enabled)
@@ -922,6 +958,32 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             tariff_enabled=tariff_enabled,
             current_price=current_price,
             feed_in_price=feed_in_price,
+        )
+
+    def _note_inventory_cap_correction(
+        self, previous_kwh: float, capped_kwh: float
+    ) -> None:
+        """Protokolliert eine Deckelung des unbewerteten Bestands.
+
+        Zählt die verworfene Menge vollständig für den Diagnose-Download
+        mit, loggt aber höchstens alle INVENTORY_CAP_LOG_INTERVAL_SECONDS
+        eine Zeile - der Deckel greift während einer unbepreisten Ladung an
+        nahezu jedem Poll-Intervall erneut (siehe Konstante).
+        """
+        self._economics_inventory_capped_kwh += previous_kwh - capped_kwh
+        now = monotonic()
+        last = self._economics_inventory_cap_logged_at
+        if last is not None and now - last < INVENTORY_CAP_LOG_INTERVAL_SECONDS:
+            return
+        self._economics_inventory_cap_logged_at = now
+        _LOGGER.info(
+            "Wirtschaftlichkeit: unbewerteter Bestand auf den tatsächlichen "
+            "Speicherinhalt gedeckelt (war %.3f kWh, jetzt %.3f kWh, "
+            "insgesamt %.3f kWh verworfen, %s)",
+            previous_kwh,
+            capped_kwh,
+            self._economics_inventory_capped_kwh,
+            dt_util.utcnow().isoformat(),
         )
 
     def _start_economics_day(self, day: date) -> None:
@@ -1756,6 +1818,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "unvalued_inventory_kwh": self._economics_unvalued_inventory_kwh,
             "unpriced_charge_kwh": self._economics_unpriced_charge_kwh,
             "unpriced_discharge_kwh": self._economics_unpriced_discharge_kwh,
+            "inventory_capped_kwh": self._economics_inventory_capped_kwh,
             "day_results": [
                 {
                     "day": day.day.isoformat(),

@@ -211,6 +211,15 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
   die Basic-Mode-SOC), und am geräteseitig gemeldeten SOC-Minimum
   (`data["battery_soc_min"]`) wird ein rechnerisch nie ganz auf 0
   gelaufener Rest verworfen und diagnostisch geloggt.
+- `capacity_inventory_correction` deckelt den Bestand bei jedem Tick auf den
+  tatsächlichen Speicherinhalt (`capacity_kwh * battery_soc / 100`, dieselbe
+  Größe wie der Anfangsbestand). Ohne diesen Deckel bliebe die
+  Ladeverlust-Differenz jedes *unbepreisten* Zyklus (geladen > entladen)
+  dauerhaft im Bestand liegen und würde später bepreist geladene Entladung
+  als unbewertet abbuchen (Issue #132). Ist Kapazität oder SOC gerade
+  unbekannt, wird nicht gedeckelt. Geloggt wird höchstens einmal je
+  `INVENTORY_CAP_LOG_INTERVAL_SECONDS`; die insgesamt verworfene Menge steht
+  als `inventory_capped_kwh` im Diagnose-Download.
 
 `operating_result` (vermiedene Netzkosten − Netzladekosten −
 PV-Opportunitätskosten) wird nie separat gespeichert, sondern in

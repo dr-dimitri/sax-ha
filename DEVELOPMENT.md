@@ -281,42 +281,65 @@ jeden Home-Assistant-Bezug:
   Ergebnis plus vier Energiemengen); `price_coverage_percent` bildet daraus
   die Preisabdeckung, ohne einen Betrag durch einen möglicherweise
   negativen oder 0 Preis zurückzurechnen.
-- `compute_amortization_forecast` ist eine reine 30-Tage-Prognose: schließt
-  den laufenden Tag defensiv nochmals aus, verlangt mindestens
-  `FORECAST_WINDOW_DAYS` (30) vollständige Tage, verwendet nur die
-  jüngsten davon, und verwirft die GESAMTE Prognose (nicht nur einzelne
-  Tage), sobald auch nur ein Tag `DAY_COVERAGE_THRESHOLD_PERCENT` (95 %)
-  unterschreitet.
+- `compute_amortization_forecast` ist eine reine 30-Tage-Prognose. Das
+  Fenster ist exakt der lückenlose Kalenderbereich von `today_local - 30`
+  bis `today_local - 1` (`FORECAST_WINDOW_DAYS`) - fehlt auch nur einer
+  dieser 30 konkreten Tage in der Historie (z. B. nach einer längeren
+  HA-Ausfallzeit), ist das `INSUFFICIENT_HISTORY`, statt stattdessen
+  ältere, außerhalb des Fensters liegende Tage als Lückenfüller zu
+  verwenden (30 vorhandene, aber lückenhafte Buckets sind KEIN gültiges
+  Fenster). Verwirft die GESAMTE Prognose (nicht nur einzelne Tage),
+  sobald auch nur ein Tag `DAY_COVERAGE_THRESHOLD_PERCENT` (95 %)
+  unterschreitet; `average_price_coverage_percent` bleibt dabei als
+  Diagnosewert gesetzt.
 
 Tageswechsel-Erkennung ohne eigenen Timer, in
 `SaxPowerCoordinator._advance_economics_day` (aufgerufen aus
-`_accumulate_economics`, bei jedem Poll-Tick, unabhängig davon, ob dieses
-Intervall selbst ein Delta hatte): vergleicht `dt_util.now().date()`
-(Home-Assistant-Zeitzone) mit dem zuletzt gesehenen Tag. Ein 23h/25h-DST-Tag
-wird nicht auf 24h normiert - reiner Kalenderdatumsvergleich, keine
-verstrichene Zeit. Bei einem Wechsel schließt `_close_economics_day` den
-bisherigen Tag ab (angehängt an `day_results`, gekappt auf
-`MAX_STORED_DAYS`) und ruft `_maybe_mark_payback_achieved` auf;
-`_start_economics_day` beginnt den neuen Tag bei 0. Idempotent gegenüber
-Neustart (`current_day` plus seine vier Zähler sind als eigenes
-Fünfer-Bündel persistiert) und doppelter Tick-Verarbeitung (nur ein
-tatsächlicher Datumswechsel schließt ab).
+`_accumulate_economics`, bei jedem Poll-Tick, VOR der Anwendung des
+aktuellen Deltas auf die Gesamt-/Tagessummen - siehe unten): vergleicht
+`dt_util.now().date()` (Home-Assistant-Zeitzone) mit dem zuletzt gesehenen
+Tag. Ein 23h/25h-DST-Tag wird nicht auf 24h normiert - reiner
+Kalenderdatumsvergleich, keine verstrichene Zeit. Bei einem Wechsel
+schließt `_close_economics_day` den bisherigen Tag ab (angehängt an
+`day_results`, gekappt auf `MAX_STORED_DAYS`) und ruft
+`_maybe_mark_payback_achieved` auf; `_start_economics_day` beginnt den
+neuen Tag bei 0. Idempotent gegenüber Neustart (`current_day` plus seine
+vier Zähler sind als eigenes Fünfer-Bündel persistiert) und doppelter
+Tick-Verarbeitung (nur ein tatsächlicher Datumswechsel schließt ab).
+
+Die Reihenfolge in `_accumulate_economics` ist bewusst: erst
+`_advance_economics_day()` (Tagesabschluss inkl. Payback-Check), DANACH
+erst die Anwendung des aktuellen Deltas auf Gesamt- und Tagessummen. Würde
+stattdessen zuerst das Delta angewendet, sähe ein beim selben Tick
+abgeschlossener Vortag bereits das erste Delta des NEUEN Tages - ein
+Payback, der erst durch dieses neue Delta erreicht wird, würde dadurch
+fälschlich auf die vorherige Tagesgrenze zurückdatiert. Der `changed`-Flag,
+der das verzögerte Speichern auslöst, berücksichtigt neben den sechs
+ursprünglichen Delta-Feldern auch `priced_charge_kwh_delta`/
+`priced_discharge_kwh_delta` - eine Bewegung zu einem gültigen Preis von
+exakt 0 EUR/kWh bewegt nur diese beiden, keine der drei Geldsummen.
 
 `_maybe_mark_payback_achieved` setzt `payback_achieved_at` (UTC) genau
 einmal, sobald das kumulierte operative Ergebnis die konfigurierten
 Investitionskosten an einer Tagesgrenze erstmals erreicht, und danach nie
 wieder - unabhängig von einer späteren Änderung der Investitionskosten.
-`_estimated_payback_date` liefert diesen fixen Zeitpunkt, sobald gesetzt,
-statt der laufenden Projektion aus `compute_amortization_forecast`; eine
-reine Kalenderdatum-Projektion wird für den `device_class: timestamp`-Sensor
-über `dt_util.start_of_local_day` auf lokal Mitternacht abgebildet.
+`_estimated_payback_date` liefert dieses fixe Datum, sobald gesetzt, statt
+der laufenden Projektion aus `compute_amortization_forecast`; für den
+`device_class: date`-Sensor wird der intern UTC-genaue Zeitpunkt dafür auf
+den lokalen Kalendertag abgebildet (`dt_util.as_local(...).date()`).
 
 `_publish_amortization` leitet ROI/Fortschritt/Restbetrag/Tagesergebnis aus
 demselben `operating_result` wie `_publish_economics_balance` ab und
 blendet sie bei deaktiviertem Tarif ebenso aus - anders als die
 30-Tage-Prognose selbst, die ausschließlich auf bereits abgeschlossenen
-Tagen und den Investitionskosten beruht und deshalb während einer
-Tarifpause sichtbar bleibt.
+Tagen und den Investitionskosten beruht, deshalb den tatsächlichen,
+UNMASKIERTEN Restbetrag braucht (nicht den während einer Pause
+ausgeblendeten) und während einer Tarifpause sichtbar bleibt. Fehlen
+gültige Investitionskosten, liefert die Methode dagegen für ALLE SIEBEN
+Sensoren `None` (früher Rückgabepfad) - auch für `economics_result_today`
+und einen bereits intern erreichten, weiterhin persistierten
+`payback_achieved_at`, der erst wieder veröffentlicht wird, sobald erneut
+Investitionskosten hinterlegt sind.
 
 Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 2 erweitert
 (statt einer Hauptversion, aus demselben Grund wie beim

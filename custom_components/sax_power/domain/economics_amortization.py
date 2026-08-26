@@ -109,6 +109,11 @@ class AmortizationForecast:
     accepted_days: int = 0
     window_start: date | None = None
     window_end: date | None = None
+    #: Durchschnittliche Preisabdeckung (%) über das Beobachtungsfenster -
+    #: gesetzt, sobald ein lückenloses 30-Tage-Fenster vorliegt (auch bei
+    #: LOW_PRICE_COVERAGE, als Diagnosewert, wie nah das Fenster an der
+    #: Schwelle liegt).
+    average_price_coverage_percent: float | None = None
     reason: ForecastUnavailable | None = None
 
 
@@ -153,12 +158,16 @@ def compute_amortization_forecast(
 
     `day_results` darf den aktuellen, noch laufenden Tag NICHT enthalten
     (Regel 2) - als zusätzliche Absicherung wird trotzdem jeder Eintrag mit
-    `day >= today_local` hier verworfen. Exakt die jüngsten
-    FORECAST_WINDOW_DAYS (30) vollständigen Tage fließen ein (Regel 3);
-    weniger als das ergibt INSUFFICIENT_HISTORY. Erreicht auch nur einer
-    dieser 30 Tage nicht DAY_COVERAGE_THRESHOLD_PERCENT (Regel 4), ist die
-    gesamte Prognose LOW_PRICE_COVERAGE - einzelne schlechte Tage werden
-    nicht stillschweigend übersprungen.
+    `day >= today_local` hier verworfen. Das Fenster ist exakt der
+    lückenlose Kalenderbereich von `today_local - FORECAST_WINDOW_DAYS` bis
+    `today_local - 1 Tag` (Regel 3) - fehlt auch nur einer dieser 30
+    konkreten Kalendertage in `day_results` (z. B. nach einer längeren
+    Ausfallzeit von Home Assistant), ist das INSUFFICIENT_HISTORY, statt
+    stattdessen ältere, außerhalb des Fensters liegende Tage als Lückenfüller
+    zu verwenden. Erreicht auch nur einer dieser 30 Tage nicht
+    DAY_COVERAGE_THRESHOLD_PERCENT (Regel 4), ist die gesamte Prognose
+    LOW_PRICE_COVERAGE - einzelne schlechte Tage werden nicht
+    stillschweigend übersprungen.
 
     Ein nicht positiver Durchschnitt lässt ausschließlich das
     Rückzahlungsdatum unbekannt (Regel 9); average_daily_result_eur und
@@ -170,20 +179,28 @@ def compute_amortization_forecast(
         return AmortizationForecast(reason=ForecastUnavailable.NO_INVESTMENT_COST)
 
     complete_days = [day for day in day_results if day.day < today_local]
-    if len(complete_days) < FORECAST_WINDOW_DAYS:
+    window_start = today_local - timedelta(days=FORECAST_WINDOW_DAYS)
+    window_end = today_local - timedelta(days=1)
+    by_day = {day.day: day for day in complete_days}
+    window_dates = [
+        window_start + timedelta(days=offset) for offset in range(FORECAST_WINDOW_DAYS)
+    ]
+    if any(day not in by_day for day in window_dates):
         return AmortizationForecast(
             complete_days_available=len(complete_days),
             reason=ForecastUnavailable.INSUFFICIENT_HISTORY,
         )
 
-    window = sorted(complete_days, key=lambda day: day.day)[-FORECAST_WINDOW_DAYS:]
+    window = [by_day[day] for day in window_dates]
     accepted_days = sum(1 for day in window if day.meets_coverage_threshold)
+    average_coverage = sum(day.price_coverage_percent for day in window) / len(window)
     if accepted_days < FORECAST_WINDOW_DAYS:
         return AmortizationForecast(
             complete_days_available=len(complete_days),
             accepted_days=accepted_days,
-            window_start=window[0].day,
-            window_end=window[-1].day,
+            window_start=window_start,
+            window_end=window_end,
+            average_price_coverage_percent=average_coverage,
             reason=ForecastUnavailable.LOW_PRICE_COVERAGE,
         )
 
@@ -207,6 +224,7 @@ def compute_amortization_forecast(
         estimated_payback_date=estimated_payback_date,
         complete_days_available=len(complete_days),
         accepted_days=accepted_days,
-        window_start=window[0].day,
-        window_end=window[-1].day,
+        window_start=window_start,
+        window_end=window_end,
+        average_price_coverage_percent=average_coverage,
     )

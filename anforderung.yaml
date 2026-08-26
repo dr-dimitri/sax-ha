@@ -3211,7 +3211,11 @@ requirement_economics_amortization:
     operativen Ergebnis wie economics_operating_result ab und blendet sie
     bei deaktiviertem Tarif ebenso auf None aus (monetary_available) - der
     interne Stand läuft dabei unverändert weiter, exakt wie bei den vier
-    Sensoren aus REQ-ECONOMICS-ACCOUNTING.
+    Sensoren aus REQ-ECONOMICS-ACCOUNTING. Fehlende/ungültige
+    Investitionskosten deaktivieren dagegen ALLE SIEBEN Sensoren dieser
+    Anforderung (auch economics_result_today und ein bereits intern
+    erreichter, weiterhin persistierter payback_achieved_at), unabhängig
+    vom Tarifstatus.
 
     Lokale Kalendertag-Buckets (domain.economics_amortization.
     DayEconomicsResult: operating_result_eur plus die vier Energiemengen
@@ -3234,15 +3238,20 @@ requirement_economics_amortization:
     30-Tage-Prognose (domain.economics_amortization.
     compute_amortization_forecast, reine Funktion): schließt den laufenden,
     unvollständigen Tag zwingend aus (zusätzlich zur Buckets-Erzeugung
-    selbst nochmals defensiv per day < today_local geprüft); benötigt
-    mindestens FORECAST_WINDOW_DAYS = 30 abgeschlossene Tage, sonst
-    ForecastUnavailable.INSUFFICIENT_HISTORY; verwendet exakt die jüngsten
-    30, auch wenn mehr gespeichert sind; verlangt von JEDEM dieser 30 Tage
-    eine Preisabdeckung (DayEconomicsResult.price_coverage_percent, ein Tag
-    ganz ohne relevante Energie gilt als 100 % abgedeckt) von mindestens
+    selbst nochmals defensiv per day < today_local geprüft). Das Fenster ist
+    exakt der lückenlose Kalenderbereich von `today_local -
+    FORECAST_WINDOW_DAYS (30)` bis `today_local - 1 Tag` - fehlt auch nur
+    einer dieser 30 konkreten Kalendertage in der Historie (z. B. nach einer
+    längeren Ausfallzeit von Home Assistant), ist das
+    ForecastUnavailable.INSUFFICIENT_HISTORY, statt stattdessen ältere,
+    außerhalb des Fensters liegende Tage als Lückenfüller zu verwenden.
+    Verlangt von JEDEM dieser 30 Tage eine Preisabdeckung
+    (DayEconomicsResult.price_coverage_percent, ein Tag ganz ohne relevante
+    Energie gilt als 100 % abgedeckt) von mindestens
     DAY_COVERAGE_THRESHOLD_PERCENT = 95 %, sonst ist die GESAMTE Prognose
     ForecastUnavailable.LOW_PRICE_COVERAGE (ein einzelner schlechter Tag
-    wird nicht stillschweigend übersprungen). Erfüllt das Fenster beide
+    wird nicht stillschweigend übersprungen); average_price_coverage_percent
+    bleibt dabei als Diagnosewert gesetzt. Erfüllt das Fenster beide
     Bedingungen: average_daily_result_eur = Summe der 30 Tagesergebnisse /
     30, projected_annual_result_eur = average_daily_result_eur * 365,2425
     (DAYS_PER_YEAR, mittleres Kalenderjahr inkl. Schaltjahren). Ein nicht
@@ -3252,7 +3261,11 @@ requirement_economics_amortization:
     positiv und ist noch ein Restbetrag offen, ergibt sich payback_days =
     remaining_to_payback_eur / average_daily_result_eur und
     estimated_payback_date = heute + aufgerundete payback_days
-    (math.ceil) - hier immer eine zukünftige Projektion.
+    (math.ceil) - hier immer eine zukünftige Projektion. Der dafür
+    verwendete remaining_to_payback_eur ist der tatsächliche, UNMASKIERTE
+    Restbetrag aus dem intern weiterlaufenden operativen Ergebnis, nicht der
+    während einer Tarifpause auf None ausgeblendete - sonst würde eine Pause
+    auch das Rückzahlungsdatum der Prognose verschwinden lassen.
 
     Payback-Erkennung (SaxPowerCoordinator._maybe_mark_payback_achieved,
     aufgerufen aus _close_economics_day): sobald das kumulierte operative
@@ -3261,29 +3274,39 @@ requirement_economics_amortization:
     erreicht oder übersteigt, wird payback_achieved_at (UTC) genau einmal
     gesetzt und bleibt danach für immer unveränderlich - auch eine spätere
     Änderung oder Entfernung der Investitionskosten wirkt nur prospektiv
-    auf ROI/Restbetrag, nie rückwirkend auf diesen Zeitpunkt. Ist
-    payback_achieved_at gesetzt, zeigt economics_estimated_payback_date
-    diesen fixen historischen Zeitpunkt statt der laufenden Projektion aus
-    der 30-Tage-Prognose (SaxPowerCoordinator._estimated_payback_date).
+    auf ROI/Restbetrag, nie rückwirkend auf diesen Zeitpunkt. Die
+    Tageswechsel-Erkennung (_advance_economics_day) läuft dafür VOR der
+    Anwendung des aktuellen Deltas auf die Gesamtsummen: der Payback-Check
+    beim Abschluss eines Tages sieht ausschließlich den am Ende dieses
+    (vorherigen) Tages tatsächlich erreichten Stand, nie bereits das erste
+    Delta des NEUEN Tages - sonst würde ein erst durch dieses neue Delta
+    erreichtes Payback fälschlich auf die vorherige Tagesgrenze
+    zurückdatiert. Ist payback_achieved_at gesetzt, zeigt
+    economics_estimated_payback_date dieses fixe historische Datum statt
+    der laufenden Projektion aus der 30-Tage-Prognose
+    (SaxPowerCoordinator._estimated_payback_date).
 
     Neue Sensoren (sensor.py, beschreibungsbasiert): economics_roi,
     economics_amortization_progress (beide %, state_class measurement),
-    economics_remaining_to_payback, economics_result_today,
-    economics_average_daily_result_30d, economics_projected_annual_result
-    (alle EUR, device_class monetary, state_class total - wie die
-    Bilanz-Sensoren aus REQ-ECONOMICS-ACCOUNTING bewusst nicht
-    total_increasing), economics_estimated_payback_date (device_class
-    timestamp, echtes tz-aware datetime-Objekt, nicht nur ein ISO-String -
-    eine reine Kalenderdatum-Projektion wird dafür über
-    dt_util.start_of_local_day auf lokal Mitternacht abgebildet).
-    economics_average_daily_result_30d trägt zusätzlich Attribute
-    (window_start/window_end, complete_days_available, accepted_days,
-    unavailable_reason) aus der Prognose. Anders als die
-    Kern-Bilanzsensoren blendet die 30-Tage-Prognose (Durchschnitt/
-    Hochrechnung/Rückzahlungsdatum) während einer Tarifpause NICHT auf
-    None: sie beruht ausschließlich auf bereits abgeschlossenen,
-    historisch korrekten Tagen und den Investitionskosten, nicht auf einem
-    gerade jetzt gültigen Preis.
+    economics_remaining_to_payback (EUR, state_class measurement, kein
+    device_class monetary - der Betrag ist kein kumulierter Zähler),
+    economics_result_today (EUR, device_class monetary, state_class total -
+    wie die Bilanz-Sensoren aus REQ-ECONOMICS-ACCOUNTING bewusst nicht
+    total_increasing), economics_average_daily_result_30d (EUR/Tag,
+    state_class measurement), economics_projected_annual_result (EUR/Jahr,
+    state_class measurement), economics_estimated_payback_date
+    (device_class date, ein reines Kalenderdatum ohne Uhrzeitbezug - der
+    intern gespeicherte, UTC-genaue payback_achieved_at wird dafür auf den
+    lokalen Kalendertag abgebildet). economics_average_daily_result_30d
+    trägt zusätzlich Attribute (window_start/window_end,
+    complete_days_available, accepted_days,
+    average_price_coverage_percent, unavailable_reason) aus der Prognose.
+    Anders als die vier "aktuellen" Sensoren (roi, Fortschritt, Restbetrag,
+    Tagesergebnis) blendet die 30-Tage-Prognose (Durchschnitt/Hochrechnung/
+    Rückzahlungsdatum) während einer Tarifpause NICHT auf None: sie beruht
+    ausschließlich auf bereits abgeschlossenen, historisch korrekten Tagen
+    und den Investitionskosten, nicht auf einem gerade jetzt gültigen
+    Preis.
 
     Persistenz: EconomicsStateStore (REQ-ECONOMICS-ACCOUNTING) um
     STORAGE_MINOR_VERSION 2 erweitert (statt einer Hauptversion - ein
@@ -3313,11 +3336,30 @@ requirement_economics_amortization:
        (gesamte Prognose unavailable) sowie einen nicht positiven
        Durchschnitt (Datum bleibt unbekannt, Durchschnitt/Hochrechnung
        bleiben gesetzt)."
+    - "30 vorhandene, aber lückenhafte Tages-Buckets (z. B. nur jeder zweite
+       Tag über einen längeren Zeitraum) ergeben INSUFFICIENT_HISTORY statt
+       einer aus Lückenfüllern zusammengesetzten Prognose."
     - "Tageswechsel bei einer Sommerzeit- (23h) und einer
        Winterzeitumstellung (25h), ein Neustart mit bereits laufendem Tag
        sowie eine doppelte Verarbeitung desselben Ticks erzeugen jeweils
        jeder für sich genau einen Tagesabschluss
        (tests/test_coordinator.py)."
+    - "Überschreitet erst das erste Delta des NEUEN Tages die
+       Investitionskosten, wird der Payback nicht auf den Abschluss des
+       VORTAGES zurückdatiert - erst der nächste Tagesabschluss markiert
+       ihn, mit dem am Ende des dann geschlossenen Tages tatsächlich
+       erreichten Stand."
+    - "Fehlende/ungültige Investitionskosten setzen alle sieben Sensoren
+       dieser Anforderung auf None - einschließlich economics_result_today
+       und eines bereits intern erreichten, weiterhin persistierten
+       payback_achieved_at."
+    - "Das Rückzahlungsdatum der 30-Tage-Prognose bleibt während einer
+       Tarifpause sichtbar (unmaskierter Restbetrag), auch wenn die vier
+       aktuellen Sensoren (ROI, Fortschritt, Restbetrag, Tagesergebnis) auf
+       None ausgeblendet sind."
+    - "Eine Bewegung zu einem gültigen Preis von exakt 0 EUR/kWh (bepreiste,
+       aber kostenneutrale Energie) löst ein verzögertes Speichern des
+       laufenden Tages aus, obwohl keine der drei Geldsummen sich ändert."
     - "Eine Änderung oder Entfernung der Investitionskosten wirkt sofort
        auf ROI/Restbetrag, ohne day_results oder einen bereits erreichten
        payback_achieved_at rückwirkend zu verändern."

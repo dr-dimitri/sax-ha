@@ -173,6 +173,20 @@ def test_forecast_uses_only_the_most_recent_30_of_31_days() -> None:
     assert forecast.window_end == TODAY - timedelta(days=1)
 
 
+def test_forecast_rejects_a_gap_even_with_30_buckets_present() -> None:
+    """Regel 3: das Fenster ist der lückenlose Kalenderbereich der letzten
+    30 Tage - 30 vorhandene, aber über einen größeren Zeitraum verstreute
+    Buckets (z. B. nach einer längeren HA-Ausfallzeit nur jeder zweite Tag)
+    dürfen keine gültige Prognose ergeben."""
+    days = [_day(TODAY - timedelta(days=offset), 5.0) for offset in range(2, 62, 2)]
+    assert len(days) == 30
+
+    forecast = compute_amortization_forecast(days, TODAY, 1000.0, 500.0)
+
+    assert forecast.reason is ForecastUnavailable.INSUFFICIENT_HISTORY
+    assert forecast.average_daily_result_eur is None
+
+
 # --------------------------------------------------------------------------
 # Prognose: Preisabdeckung
 # --------------------------------------------------------------------------
@@ -190,6 +204,17 @@ def test_forecast_unavailable_if_a_single_day_misses_the_coverage_threshold() ->
 
     assert forecast.reason is ForecastUnavailable.LOW_PRICE_COVERAGE
     assert forecast.accepted_days == 29
+    # Diagnosewert bleibt auch bei einer unzureichenden Prognose gesetzt.
+    assert forecast.average_price_coverage_percent is not None
+    assert forecast.average_price_coverage_percent < 100.0
+
+
+def test_forecast_reports_the_average_price_coverage_when_available() -> None:
+    forecast = compute_amortization_forecast(
+        _full_coverage_window(), TODAY, 1000.0, 500.0
+    )
+
+    assert forecast.average_price_coverage_percent == pytest.approx(100.0)
 
 
 # --------------------------------------------------------------------------

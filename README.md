@@ -523,27 +523,34 @@ Bezug zu dieser Investition:
 - **Operatives Ergebnis heute**: nur der auf den laufenden Kalendertag
   entfallende Anteil des operativen Ergebnisses.
 
-Diese vier Sensoren zeigen "unbekannt", solange keine Investitionskosten
-hinterlegt sind, und blenden bei deaktiviertem Tarif ebenso auf "unbekannt"
-wie die Sensoren der Wirtschaftlichkeitsbilanz - der interne Stand läuft in
-beiden Fällen unverändert weiter.
+Alle sieben Sensoren dieses Abschnitts zeigen "unbekannt", solange keine
+Investitionskosten hinterlegt sind. Von den vier oben genannten Sensoren
+blenden zusätzlich bei deaktiviertem Tarif auf "unbekannt" wie die Sensoren
+der Wirtschaftlichkeitsbilanz - der interne Stand läuft in beiden Fällen
+unverändert weiter.
 
-Zusätzlich berechnet die Integration eine **30-Tage-Prognose** aus den
-jüngsten 30 vollständig abgeschlossenen Kalendertagen (der laufende Tag
-zählt nie mit): **Durchschnittliches Tagesergebnis (30 Tage)** und die
-daraus hochgerechnete **Hochgerechnetes Jahresergebnis** (Durchschnitt ×
-365,2425 Tage). Ist bereits ein ausreichend positiver Durchschnitt und ein
-offener Restbetrag bekannt, zeigt **Voraussichtliches Amortisationsdatum**
-das daraus abgeleitete Datum. Die Prognose braucht mindestens 30
-gespeicherte Tage und verlangt von jedem einzelnen dieser 30 Tage eine
-Preisabdeckung von mindestens 95 % - fehlt einem einzigen Tag ausreichend
-Preisinformation, bleibt die gesamte Prognose "unbekannt" statt einen
-verzerrten Wert zu zeigen. Ein nicht positiver Durchschnitt lässt nur das
-Rückzahlungsdatum unbekannt; Durchschnitt und Hochrechnung werden trotzdem
-angezeigt, nie ein erfundenes Datum.
+Zusätzlich berechnet die Integration eine **30-Tage-Prognose** aus genau
+den jüngsten 30 zusammenhängenden, vollständig abgeschlossenen
+Kalendertagen (der laufende Tag zählt nie mit): **Durchschnittliches
+Tagesergebnis (30 Tage)** und die daraus hochgerechnete **Hochgerechnetes
+Jahresergebnis** (Durchschnitt × 365,2425 Tage). Ist bereits ein
+ausreichend positiver Durchschnitt und ein offener Restbetrag bekannt,
+zeigt **Voraussichtliches Amortisationsdatum** das daraus abgeleitete
+Datum. Die Prognose braucht lückenlos genau diese 30 aufeinanderfolgenden
+Kalendertage - fehlt auch nur einer davon (etwa nach einem längeren
+Ausfall von Home Assistant), bleibt sie "unbekannt", statt ältere Tage als
+Lückenfüller zu verwenden. Sie verlangt außerdem von jedem einzelnen
+dieser 30 Tage eine Preisabdeckung von mindestens 95 % - fehlt einem
+einzigen Tag ausreichend Preisinformation, bleibt die gesamte Prognose
+"unbekannt" statt einen verzerrten Wert zu zeigen. Ein nicht positiver
+Durchschnitt lässt nur das Rückzahlungsdatum unbekannt; Durchschnitt und
+Hochrechnung werden trotzdem angezeigt, nie ein erfundenes Datum. Anders
+als die vier "aktuellen" Sensoren bleibt diese Prognose - einschließlich
+des Rückzahlungsdatums - während einer Tarifpause sichtbar, weil sie
+ausschließlich auf bereits abgeschlossenen Tagen beruht.
 
 Ist die Investition einmal tatsächlich amortisiert, bleibt das
-Amortisationsdatum dauerhaft auf diesem historischen Zeitpunkt stehen -
+Amortisationsdatum dauerhaft auf diesem historischen Kalendertag stehen -
 eine spätere Änderung der Investitionskosten verschiebt es nicht mehr
 rückwirkend.
 

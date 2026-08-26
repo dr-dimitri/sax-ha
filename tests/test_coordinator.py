@@ -4901,6 +4901,29 @@ def test_several_ticks_on_the_same_day_do_not_close_it(hass) -> None:
     assert coordinator._economics_current_day_operating_result_eur == pytest.approx(3.0)
 
 
+def test_a_zero_price_movement_still_schedules_a_save(hass) -> None:
+    """Ein gültiger Preis von exakt 0 EUR/kWh bewegt ausschließlich
+    priced_charge_kwh_delta/priced_discharge_kwh_delta, ohne einen der
+    sechs ursprünglichen Delta-Felder zu verändern - trotzdem muss das
+    verzögerte Speichern angestoßen werden, sonst überlebt der
+    Tageszähler keinen ungeplanten Neustart."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    coordinator._async_schedule_economics_save = MagicMock()
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=1.0, priced_discharge_kwh_delta=0.5
+        ),
+    )
+
+    coordinator._async_schedule_economics_save.assert_called_once()
+
+
 def test_a_repeated_identical_tick_after_a_rollover_closes_only_once(hass) -> None:
     """Doppelte Verarbeitung desselben Ticks (z. B. ein erneuter Aufruf mit
     demselben lokalen Datum) darf keinen zweiten Tagesabschluss auslösen."""
@@ -5044,9 +5067,14 @@ def test_roi_progress_and_remaining_are_computed_from_the_operating_result(
 
 
 def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None:
+    """Ohne Investitionskosten müssen alle sieben Sensoren dieser
+    Anforderung None liefern - nicht nur ROI/Fortschritt/Restbetrag,
+    sondern auch das Tagesergebnis, die 30-Tage-Prognose und ein bereits
+    intern erreichter (aber weiterhin persistierter) Payback-Zeitpunkt."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    coordinator._economics_payback_achieved_at = dt_util.utcnow()
 
     data = _tick_with_delta(
         coordinator,
@@ -5058,6 +5086,10 @@ def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None
     assert data["economics_roi"] is None
     assert data["economics_amortization_progress"] is None
     assert data["economics_remaining_to_payback"] is None
+    assert data["economics_result_today"] is None
+    assert data["economics_average_daily_result_30d"] is None
+    assert data["economics_projected_annual_result"] is None
+    assert data["economics_estimated_payback_date"] is None
 
 
 def test_roi_and_result_today_hide_during_a_tariff_pause_but_survive_it(hass) -> None:
@@ -5128,9 +5160,61 @@ def test_payback_achieved_is_marked_once_at_day_close_and_stays_fixed(hass) -> N
     assert coordinator._economics_payback_achieved_at == achieved_at
 
 
+def test_payback_is_not_backdated_to_a_day_only_reached_by_the_next_days_delta(
+    hass,
+) -> None:
+    """Überschreitet erst das ERSTE Delta des neuen Tages die
+    Investitionskosten, darf der Payback nicht auf den Abschluss des
+    VORTAGES zurückdatiert werden - der Tagesabschluss darf ausschließlich
+    den am Ende des geschlossenen Tages tatsächlich erreichten Stand
+    sehen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    # Tag D0: Gesamtsumme bleibt unter den 1000 EUR Investitionskosten.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=900.0),
+    )
+
+    # Erster Tick auf D1 (schließt D0 ab) - dessen eigenes Delta allein
+    # reicht bereits über die Investitionskosten, darf den Vortagesabschluss
+    # aber nicht rückwirkend als Payback markieren.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 9, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=150.0),
+    )
+    assert coordinator._economics_day_results[-1].operating_result_eur == pytest.approx(
+        900.0
+    )
+    assert coordinator._economics_payback_achieved_at is None
+
+    # Erst der nächste Tagesabschluss (D1 -> D2) sieht den am Ende von D1
+    # tatsächlich erreichten Stand (1050 EUR) und markiert den Payback.
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=datetime(2026, 3, 12, 0, 0, tzinfo=UTC),
+    ):
+        _tick_with_delta(
+            coordinator,
+            monotonic_value=4000.0,
+            now=datetime(2026, 3, 12, 9, 0),
+            delta=EconomicsDelta(),
+        )
+    assert coordinator._economics_payback_achieved_at == datetime(
+        2026, 3, 12, 0, 0, tzinfo=UTC
+    )
+
+
 def test_estimated_payback_date_uses_the_fixed_achieved_timestamp(hass) -> None:
-    """Einmal erreicht, zeigt der Sensor den fixen historischen Zeitpunkt -
-    nicht mehr die laufende Projektion aus der 30-Tage-Prognose."""
+    """Einmal erreicht, zeigt der Sensor das fixe historische Datum - nicht
+    mehr die laufende Projektion aus der 30-Tage-Prognose. Der Sensor selbst
+    ist device_class DATE und liefert deshalb ein reines Kalenderdatum,
+    keine Uhrzeit (der interne Zeitpunkt bleibt UTC mit Uhrzeit)."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _INVESTMENT_OPTIONS
     achieved_at = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -5139,7 +5223,7 @@ def test_estimated_payback_date_uses_the_fixed_achieved_timestamp(hass) -> None:
     data = {}
     coordinator._publish_amortization(data, monetary_available=True)
 
-    assert data["economics_estimated_payback_date"] == achieved_at
+    assert data["economics_estimated_payback_date"] == date(2026, 1, 1)
 
 
 def _forecast_ready_day_results(
@@ -5180,7 +5264,39 @@ def test_forecast_sensors_populate_once_30_complete_days_are_stored(hass) -> Non
     attributes = data["economics_amortization_forecast_attributes"]
     assert attributes["complete_days_available"] == 30
     assert attributes["accepted_days"] == 30
+    assert attributes["average_price_coverage_percent"] == pytest.approx(100.0)
     assert attributes["unavailable_reason"] is None
+
+
+def test_forecast_payback_date_survives_a_tariff_pause(hass) -> None:
+    """Die 30-Tage-Prognose beruht ausschließlich auf bereits
+    abgeschlossenen Tagen und den Investitionskosten - anders als die vier
+    "aktuellen" Sensoren darf sie während einer Tarifpause nicht auf None
+    ausgeblendet werden, auch nicht das daraus abgeleitete
+    Rückzahlungsdatum (das den tatsächlichen, unmaskierten Restbetrag
+    braucht, nicht den während der Pause ausgeblendeten)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    coordinator._economics_avoided_grid_cost_eur = 100.0
+    coordinator._economics_grid_charge_cost_eur = 0.0
+    coordinator._economics_pv_opportunity_cost_eur = 0.0
+    today = date(2026, 3, 31)
+    coordinator._economics_day_results = _forecast_ready_day_results(
+        result=5.0, end=today
+    )
+
+    data = {}
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.now",
+        return_value=datetime.combine(today, dt_time(12, 0)),
+    ):
+        coordinator._publish_amortization(data, monetary_available=False)
+
+    assert data["economics_roi"] is None
+    assert data["economics_result_today"] is None
+    assert data["economics_average_daily_result_30d"] == pytest.approx(5.0)
+    assert data["economics_projected_annual_result"] is not None
+    assert data["economics_estimated_payback_date"] is not None
 
 
 def test_forecast_sensors_stay_unavailable_with_fewer_than_30_days(hass) -> None:

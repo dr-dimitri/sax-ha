@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -56,7 +56,7 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
     zugrundeliegenden Preise und die geplanten Ladefenster mitliefert.
     """
 
-    value_fn: Callable[[dict[str, Any]], StateType | datetime]
+    value_fn: Callable[[dict[str, Any]], StateType | date | datetime]
     attributes_fn: Callable[[SaxPowerCoordinator], dict[str, Any]] | None = None
 
 
@@ -804,8 +804,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     SaxPowerSensorEntityDescription(
         key="economics_remaining_to_payback",
         translation_key="economics_remaining_to_payback",
-        device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
+        state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
         value_fn=_direct("economics_remaining_to_payback"),
@@ -822,9 +821,8 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     SaxPowerSensorEntityDescription(
         key="economics_average_daily_result_30d",
         translation_key="economics_average_daily_result_30d",
-        device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=CURRENCY_EURO,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/Tag",
         suggested_display_precision=4,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("economics_average_daily_result_30d"),
@@ -833,9 +831,8 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     SaxPowerSensorEntityDescription(
         key="economics_projected_annual_result",
         translation_key="economics_projected_annual_result",
-        device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
-        native_unit_of_measurement=CURRENCY_EURO,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/Jahr",
         suggested_display_precision=2,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("economics_projected_annual_result"),
@@ -843,7 +840,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     SaxPowerSensorEntityDescription(
         key="economics_estimated_payback_date",
         translation_key="economics_estimated_payback_date",
-        device_class=SensorDeviceClass.TIMESTAMP,
+        device_class=SensorDeviceClass.DATE,
         value_fn=_direct("economics_estimated_payback_date"),
     ),
 )
@@ -902,7 +899,7 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         self._assign_ids("sensor", description.key)
 
     @property
-    def native_value(self) -> StateType | datetime:
+    def native_value(self) -> StateType | date | datetime:
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)

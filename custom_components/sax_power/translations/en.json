@@ -300,6 +300,33 @@
       },
       "energy_origin_coverage": {
         "name": "Charge energy origin coverage"
+      },
+      "economics_grid_charge_cost": {
+        "name": "Grid charge cost"
+      },
+      "economics_pv_opportunity_cost": {
+        "name": "PV opportunity cost"
+      },
+      "economics_avoided_grid_cost": {
+        "name": "Avoided grid cost"
+      },
+      "economics_operating_result": {
+        "name": "Operating result"
+      },
+      "economics_unvalued_inventory": {
+        "name": "Unvalued energy inventory"
+      },
+      "economics_unpriced_charge": {
+        "name": "Unpriced charge energy"
+      },
+      "economics_unpriced_discharge": {
+        "name": "Unpriced discharge energy"
+      },
+      "economics_current_import_price": {
+        "name": "Current import price"
+      },
+      "economics_feed_in_price": {
+        "name": "Feed-in tariff"
       }
     },
     "number": {

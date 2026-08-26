@@ -60,6 +60,7 @@
 # REQ-CONTROL-CONFIG-BOOTSTRAP    done       Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen
 # REQ-ECONOMICS-TARIFFS           done       Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung
 # REQ-ENERGY-ORIGIN               done       Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)
+# REQ-ECONOMICS-ACCOUNTING        done       Kosten/operatives Ergebnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren
 # ==============================================================================
 
 # ==============================================================================
@@ -2960,3 +2961,176 @@ requirement_energy_origin:
     - "Sensor-Metadaten, strings.json, translations/de.json,
        translations/en.json, README.md und DEVELOPMENT.md sind
        aktualisiert."
+
+# ==============================================================================
+# ANFORDERUNG: KOSTEN UND OPERATIVES SPEICHERERGEBNIS
+# ==============================================================================
+requirement_economics_accounting:
+  id: REQ-ECONOMICS-ACCOUNTING
+  title: "Kosten/operatives Ergebnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren"
+  status: done
+  description: >
+    Bewertet ausschließlich tatsächlich gemessene Lade-/Entladeenergie, nie
+    einen Sollwert. PV-Ladung kostet die entgangene Einspeisevergütung
+    (PV-Energie ist niemals kostenlos), Netzladung den zum Ladezeitpunkt
+    gültigen Netzbezugspreis (REQ-ECONOMICS-TARIFFS), Entladung ist den
+    zum Entladezeitpunkt vermiedenen Netzbezug wert. Ersetzt fachlich das
+    geschlossene Issue #42 vollständig - dessen Fehler (PV kostenlos,
+    smartmeter_power < 0 als Netzbezug statt Einspeisung gedeutet,
+    primäre RestoreEntity-Persistenz für Geldzustände) werden nicht
+    übernommen.
+
+    Verbindliche Geldbilanz je EnergyDelta (02/06,
+    domain.economics_accounting.compute_economics_delta), alle Beträge
+    intern ungerundet in EUR:
+
+    ```
+    grid_charge_cost_delta = charged_from_grid_kwh * import_price_at_charge
+    pv_opportunity_cost_delta = charged_from_pv_kwh * feed_in_price
+    avoided_grid_cost_delta = monetizable_discharged_kwh * import_price_at_discharge
+    operating_result = avoided_grid_cost_total - grid_charge_cost_total - pv_opportunity_cost_total
+    ```
+
+    operating_result ist ein kumulierter operativer Cashflow, kein
+    Kontostand, und wird nie separat gespeichert, sondern in
+    SaxPowerCoordinator._publish_economics_balance aus den drei
+    Teilsummen abgeleitet - so kann er nie von ihnen abweichen. Noch im
+    Speicher liegende Energie hat bereits Beschaffungskosten, aber noch
+    keinen Nutzen erzeugt: Ladeverluste werden dadurch automatisch
+    sichtbar (Kosten für die volle geladene Energie, Nutzen nur für die
+    tatsächlich gemessene, kleinere entladene Energie), ohne einen
+    angenommenen Wirkungsgradfaktor oder eine fiktive Nachbewertung des
+    Lagerbestands.
+
+    "Ehrlicher Start": Beim erstmaligen Aktivieren steckt bereits Energie
+    unbekannter Herkunft im Speicher.
+    SaxPowerCoordinator._bootstrap_economics_if_ready wartet, bis
+    battery_capacity und battery_soc numerisch verfügbar sind (beide aus
+    demselben SunSpec-Modus-Block wie battery_soc_min, mit demselben
+    Skalierungsfaktor - bewusst nicht die Basic-Mode-SOC), und
+    initialisiert dann einmalig unvalued_inventory_kwh = capacity_kwh *
+    battery_soc / 100 sowie economics_started_at (UTC) - vorher bleibt die
+    gesamte Bilanz wartend/unbekannt. Läuft nur einmal: Ein
+    zwischenzeitliches
+    Deaktivieren/Reaktivieren des Tarifs setzt weder Bestand noch
+    Startzeitpunkt zurück. Nicht bepreisbare neue Ladeenergie
+    (energy_charged_origin_unknown ODER ein fehlender Preis für Netz/PV)
+    erhöht unvalued_inventory_kwh und den passenden
+    unpriced_charge-Zähler statt einen Preis zu erfinden. Jede Entladung
+    verbraucht zuerst min(discharge_delta, unvalued_inventory_kwh) - dieser
+    Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst
+    entstünde beim Entladen von Alt-/Unbekannt-Bestand ein kostenloser
+    Scheingewinn, der Kernfehler des verworfenen Issues #42); nur der
+    danach verbleibende Rest ("monetizable_discharged_kwh") ist bepreist.
+    Fehlt der Importpreis bei einer monetarisierbaren Entladung, zählt sie
+    als unpriced_discharge_kwh und wird nicht später rückwirkend bewertet
+    (ebenso wenig wie unpriced_charge_kwh). Erreicht battery_soc das
+    geräteseitig gemeldete battery_soc_min (beide numerisch,
+    domain.economics_accounting.min_soc_inventory_correction), wird ein
+    rechnerisch nie ganz auf 0 gelaufener Rest von unvalued_inventory_kwh
+    verworfen und mit Zeitstempel diagnostisch geloggt - keine nutzbare
+    unbekannte Energie kann an diesem Punkt mehr vorhanden sein.
+
+    Eine Tarifänderung wirkt ausschließlich prospektiv: jedes künftige
+    Delta verwendet einfach den dann aktuellen Preis, nichts wird
+    rückwirkend neu berechnet. SaxPowerCoordinator.notify_tariff_revision
+    (aufgerufen aus __init__.async_update_options bei jeder
+    Options-Flow-Änderung) merkt sich dafür nur einen rein diagnostischen
+    Zeitpunkt der letzten Revision.
+
+    Läuft ausschließlich innerhalb von
+    SaxPowerCoordinator._accumulate_economics, aufgerufen am Ende von
+    _accumulate_energy mit demselben EnergyDelta und demselben rohen,
+    ungerundeten Entladezuwachs dieses Intervalls (02/06) - keine zweite
+    Uhr, keine zweite Riemann-Summe. Gilt nur, solange
+    SaxTariffProvider.config.enabled wahr ist; deaktiviert bleibt die
+    gesamte Bilanz unangetastet und die vier monetären Sensoren
+    (economics_grid_charge_cost, economics_pv_opportunity_cost,
+    economics_avoided_grid_cost, economics_operating_result) liefern None
+    ("unbekannt") statt 0 - ein deaktivierter Tarif darf keinen falschen
+    Nullgewinn suggerieren. Die Herkunfts-/Energiesensoren aus 02/06
+    bleiben davon unberührt und weiterhin verfügbar.
+    economics_current_import_price/economics_feed_in_price sind reine
+    Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und
+    unabhängig vom Bilanz-Bootstrap immer aktuell.
+
+    Neue Sensoren (sensor.py, beschreibungsbasiert wie jeder andere
+    berechnete Wert): economics_grid_charge_cost,
+    economics_pv_opportunity_cost, economics_avoided_grid_cost,
+    economics_operating_result (alle EUR, device_class monetary,
+    state_class total - bewusst nicht total_increasing, weil negative
+    Strompreise die Summen sinken lassen dürfen), economics_unvalued_inventory
+    (kWh, device_class energy_storage, state_class measurement,
+    Diagnose - ein Bestand/Gauge, kein kumulierter Zähler),
+    economics_unpriced_charge/economics_unpriced_discharge (kWh,
+    device_class energy, state_class total), sowie
+    economics_current_import_price/economics_feed_in_price (EUR/kWh,
+    state_class measurement).
+
+    Persistenz: neuer versionierter EconomicsStateStore
+    (infrastructure/economics_store.py) pro Config Entry, eigener
+    STORAGE_VERSION (beginnt bei 1, keine Migration von einem
+    energy_store.py-artigen Vorgänger nötig). Persistiert werden die drei
+    Geldsummen, unvalued_inventory_kwh, unpriced_charge_kwh/
+    unpriced_discharge_kwh, economics_started_at sowie
+    last_tariff_revision_at. Writes werden wie beim Energy Store gebündelt
+    (kein Write je 2-Sekunden-Poll) und beim Unload best-effort final
+    geflusht. Felder werden unabhängig validiert, NaN/Inf werden
+    abgelehnt; anders als die monoton steigenden Energiezähler dürfen die
+    drei Geldsummen wegen negativer Strompreise sinken - "kleiner als der
+    zuvor gespeicherte Wert" ist dort bewusst KEIN Ablehnungsgrund.
+    unpriced_charge_kwh/unpriced_discharge_kwh bleiben dagegen echte
+    monotone Summen, unvalued_inventory_kwh ist ein Bestand ohne
+    Monotonieprüfung (nur Wertebereich: endlich, >= 0).
+    economics_started_at ist wie origin_accounting_started_at (02/06)
+    einmalig gesetzt und danach unveränderlich; ein abweichender
+    gespeicherter Wert wird wie ein korrupter Snapshot verworfen. Alle
+    sieben Kernfelder (ohne das rein diagnostische
+    last_tariff_revision_at) bilden ein gemeinsam behandeltes Bündel -
+    EconomicsState.initialized ist nur wahr, wenn alle sieben vorhanden
+    sind; ist auch nur eines ungültig, gilt die gesamte Bilanz als nicht
+    initialisiert und wird beim nächsten Datenpunkt komplett neu
+    gebootstrapped. Die zugehörige interne Monotonie-/Vergleichs-Baseline
+    (EconomicsStateStore._baseline) wird in diesem Fall ebenfalls
+    vollständig bereinigt, damit der anschließend vom Coordinator neu
+    gestartete 0/0/0-Stand nicht an den stehen gebliebenen alten
+    Teilwerten bzw. dem alten Aktivierungszeitpunkt als rückläufig bzw.
+    abweichend scheitert und die Bilanz dadurch über jeden Neustart hinweg
+    dauerhaft unpersistiert bliebe (aus einem Review-Befund an
+    EnergyStateStore._origin_baseline, REQ-ENERGY-ORIGIN, übernommenes
+    Muster). Ein korrupter Snapshot wird nie still auf 0 gesetzt.
+
+    Diagnose-Download (diagnostics.py, Schlüssel "economics") zeigt
+    zusätzlich zu den bereits über coordinator_data sichtbaren, gerundeten
+    Sensorwerten den internen, ungerundeten Rohzustand samt beider
+    Zeitstempel.
+
+    Nicht Teil dieser Anforderung: Anschaffungskosten, ROI-/
+    Amortisationsprognose, Dashboardtab, Grundgebühr, Batteriealterung
+    oder Wartungskosten.
+  acceptance_criteria:
+    - "Fest-, Zeitfenster- und dynamischer Preis werden am jeweiligen
+       Lade-/Entladezeitpunkt korrekt angewendet - über SaxTariffProvider.quote(),
+       nicht über eine eigene Preislogik."
+    - "PV-Ladung wird mit der Einspeisevergütung bewertet; reine
+       Netz-/PV-/Mischladung stimmen mit der Herkunftsaufteilung aus
+       02/06 überein (tests/test_economics_accounting.py)."
+    - "Der Anfangsbestand und unbepreiste Ladung können keinen
+       kostenlosen Gewinn erzeugen: Entladung aus unvalued_inventory_kwh
+       erzeugt nachweislich 0 EUR vermiedenen Geldwert."
+    - "Negative Preise, fehlende Preise (Ladung wie Entladung),
+       Tarifwechsel (prospektiv, keine rückwirkende Neuberechnung),
+       SOC-Minimum-Korrektur, Neustart und Unload sind getestet."
+    - "Ladeverluste senken das operative Ergebnis über die gemessene
+       Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu
+       benötigen."
+    - "Store-Drosselung, Korruption (inkl. eines unvollständigen
+       Sieben-Felder-Bündels samt bereinigter Baseline), zwei Config
+       Entries und Final-Flush sind getestet
+       (tests/test_economics_persistence.py)."
+    - "Ein deaktivierter Tarif lässt die vier monetären Sensoren None
+       liefern, nie 0; die Herkunfts-/Energiesensoren aus 02/06 bleiben
+       unverändert verfügbar."
+    - "strings.json, translations/de.json, translations/en.json,
+       README.md, DEVELOPMENT.md, diagnostics.py und anforderung.yaml
+       sind aktualisiert."

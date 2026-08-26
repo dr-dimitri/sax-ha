@@ -15,6 +15,9 @@ from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     ALL_MONTHS,
     CELL_CALIBRATION_INTERVAL,
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PV_FORECAST_SENSOR,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_MANUAL_CHARGE_POWER,
@@ -55,6 +58,7 @@ from custom_components.sax_power.domain.registers import (
     decode_int16,
     decode_uint16,
 )
+from custom_components.sax_power.domain.tariff import TariffType
 
 
 @pytest.mark.parametrize(
@@ -4388,3 +4392,270 @@ def test_energy_origin_coverage_is_100_percent_without_any_charging(hass) -> Non
         coordinator._accumulate_energy(data)
 
     assert data["energy_origin_coverage"] == 100.0
+
+
+# -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) --------------------
+# Die reine Geldbilanz (compute_economics_delta) ist erschöpfend in
+# tests/test_economics_accounting.py getestet, Store/Bootstrap/Shutdown in
+# tests/test_economics_persistence.py. Hier nur die Verdrahtung über
+# _accumulate_energy -> _accumulate_economics: Rundung, Ableitung von
+# operating_result, SOC-Minimum-Korrektur im echten Datenfluss, prospektiver
+# Tarifwechsel sowie der deaktivierte Tarif.
+
+_FIXED_TARIFF_OPTIONS = {
+    CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+    CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.30,
+}
+
+
+def _bootstrap_economics(coordinator, *, soc: int, capacity_wh: int = 10000) -> None:
+    """Erster Tick: setzt nur die Zeitbasis und bootstrapped die Bilanz -
+    noch kein Delta, exakt wie beim echten ersten Refresh nach Aktivierung."""
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": 0,
+                "smartmeter_power": 0,
+                "battery_soc": soc,
+                "battery_capacity": capacity_wh,
+                "battery_soc_min": 5,
+            }
+        )
+
+
+def test_economics_grid_charge_cost_matches_the_grid_share(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
+    assert data["economics_pv_opportunity_cost"] == 0.0
+    assert data["economics_unvalued_inventory"] == pytest.approx(5.0)
+
+
+def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": -500,  # Einspeisung während des Ladens
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_pv_opportunity_cost"] == pytest.approx(0.08)
+    assert data["economics_grid_charge_cost"] == 0.0
+
+
+def test_economics_operating_result_is_derived_from_the_three_sums(hass) -> None:
+    """avoided - grid - pv, nie separat gespeichert."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=0)  # Anfangsbestand 0
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 0,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": 1000,
+            "smartmeter_power": 0,
+            "battery_soc": 10,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
+    assert data["economics_avoided_grid_cost"] == pytest.approx(0.30)
+    assert data["economics_operating_result"] == pytest.approx(0.0)
+
+
+def test_economics_amounts_round_to_four_decimals(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 1 / 3,
+    }
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == round(1 / 3, 4)
+
+
+def test_tariff_switch_is_prospective_not_retroactive(hass) -> None:
+    """Eine Tarifänderung wirkt nur auf künftige Deltas - der bereits
+    verbuchte Betrag zum alten Preis bleibt unverändert."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS  # 0.30 EUR/kWh
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+    cost_after_first_hour = coordinator._economics_grid_charge_cost_eur
+    assert cost_after_first_hour == pytest.approx(0.30)
+
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.50,
+    }
+    coordinator.notify_tariff_revision()
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    # 0.30 (alter Tarif, erste Stunde) + 0.50 (neuer Tarif, zweite Stunde).
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.80)
+    assert coordinator._last_tariff_revision_at is not None
+
+
+def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.options = {}  # kein Tarif konfiguriert
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+            }
+        )
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == pytest.approx(1.0)
+    assert data["economics_grid_charge_cost"] is None
+    assert data["economics_pv_opportunity_cost"] is None
+    assert data["economics_avoided_grid_cost"] is None
+    assert data["economics_operating_result"] is None
+    assert data["economics_unvalued_inventory"] is None
+    assert data["economics_current_import_price"] is None
+    assert data["economics_feed_in_price"] is None
+    assert coordinator._economics_started_at is None
+
+
+def test_economics_current_price_sensors_track_the_tariff_independently_of_bootstrap(
+    hass,
+) -> None:
+    """economics_current_import_price/economics_feed_in_price sind reine
+    Durchreichungen - sie zeigen den Tarif bereits, bevor Kapazität/SOC
+    bekannt sind und die Bilanz selbst noch wartet."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": None,
+            "battery_capacity": None,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert coordinator._economics_started_at is None
+    assert data["economics_current_import_price"] == pytest.approx(0.30)
+    assert data["economics_feed_in_price"] == pytest.approx(0.08)
+
+
+def test_soc_minimum_correction_resets_the_inventory_and_logs(hass, caplog) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "smartmeter_power": 0,
+            "battery_soc": 5,  # == battery_soc_min
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        with caplog.at_level("INFO"):
+            coordinator._accumulate_energy(data)
+
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert data["economics_unvalued_inventory"] == 0.0
+    assert "SOC-Minimum" in caplog.text

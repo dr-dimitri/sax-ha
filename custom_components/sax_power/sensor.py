@@ -22,6 +22,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    CURRENCY_EURO,
     PERCENTAGE,
     EntityCategory,
     UnitOfApparentPower,
@@ -686,6 +687,89 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("energy_origin_coverage"),
+    ),
+    # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) ----------------
+    # Monetäre Sensoren nutzen state_class TOTAL statt TOTAL_INCREASING:
+    # Negative Strompreise lassen die Summen legitim sinken (siehe
+    # anforderung.yaml). Bei deaktiviertem Tarif liefert value_fn None wie
+    # jeder andere nicht verfügbare Wert dieser Integration - keine eigene
+    # HA-"unavailable"-Sonderbehandlung.
+    SaxPowerSensorEntityDescription(
+        key="economics_grid_charge_cost",
+        translation_key="economics_grid_charge_cost",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_grid_charge_cost"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_pv_opportunity_cost",
+        translation_key="economics_pv_opportunity_cost",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_pv_opportunity_cost"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_avoided_grid_cost",
+        translation_key="economics_avoided_grid_cost",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_avoided_grid_cost"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_operating_result",
+        translation_key="economics_operating_result",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_operating_result"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_unvalued_inventory",
+        translation_key="economics_unvalued_inventory",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("economics_unvalued_inventory"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_unpriced_charge",
+        translation_key="economics_unpriced_charge",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("economics_unpriced_charge"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_unpriced_discharge",
+        translation_key="economics_unpriced_discharge",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("economics_unpriced_discharge"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_current_import_price",
+        translation_key="economics_current_import_price",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/kWh",
+        suggested_display_precision=4,
+        value_fn=_direct("economics_current_import_price"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_feed_in_price",
+        translation_key="economics_feed_in_price",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/kWh",
+        suggested_display_precision=4,
+        value_fn=_direct("economics_feed_in_price"),
     ),
 )
 

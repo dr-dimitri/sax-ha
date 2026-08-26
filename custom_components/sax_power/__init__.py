@@ -125,6 +125,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_load_calibration_state()
     await coordinator.async_load_energy_state()
+    # Wie async_load_energy_state: muss vor dem ersten Refresh stehen, da
+    # dessen Bootstrap (siehe SaxPowerCoordinator._bootstrap_economics_if_ready)
+    # bereits im ersten Refresh laufen kann (REQ-ECONOMICS-ACCOUNTING).
+    await coordinator.async_load_economics_state()
     # Muss vor dem ersten Refresh stehen: der Coordinator kennt danach die
     # vollständige gespeicherte Ladekonfiguration und sperrt bis
     # async_finish_bootstrap() unten jede steuernde Entscheidung. Sonst
@@ -214,6 +218,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     coordinator.options = dict(entry.options)
     coordinator.price_planner.async_setup()
     coordinator.tariff_provider.async_setup()
+    # REQ-ECONOMICS-ACCOUNTING: rein diagnostischer Zeitstempel der letzten
+    # Tarifrevision - beeinflusst keine bereits verbuchten Beträge.
+    coordinator.notify_tariff_revision()
     await coordinator.async_apply_price_plan()
 
 

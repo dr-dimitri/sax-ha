@@ -300,6 +300,33 @@
       },
       "energy_origin_coverage": {
         "name": "Herkunftsabdeckung Ladeenergie"
+      },
+      "economics_grid_charge_cost": {
+        "name": "Netzladekosten"
+      },
+      "economics_pv_opportunity_cost": {
+        "name": "PV-Opportunitätskosten"
+      },
+      "economics_avoided_grid_cost": {
+        "name": "Vermiedene Netzkosten"
+      },
+      "economics_operating_result": {
+        "name": "Operatives Ergebnis"
+      },
+      "economics_unvalued_inventory": {
+        "name": "Unbewerteter Energiebestand"
+      },
+      "economics_unpriced_charge": {
+        "name": "Unbepreiste Ladeenergie"
+      },
+      "economics_unpriced_discharge": {
+        "name": "Unbepreiste Entladeenergie"
+      },
+      "economics_current_import_price": {
+        "name": "Aktueller Netzbezugspreis"
+      },
+      "economics_feed_in_price": {
+        "name": "Einspeisevergütung"
       }
     },
     "number": {

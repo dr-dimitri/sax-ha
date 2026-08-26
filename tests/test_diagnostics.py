@@ -130,3 +130,24 @@ async def test_diagnostics_includes_the_tariff_state(hass) -> None:
     assert diagnostics["tariff"]["quote_price_eur_kwh"] == 0.3421
     assert diagnostics["tariff"]["quote_source"] == "fixed"
     assert diagnostics["tariff"]["quote_unavailable_reason"] is None
+
+
+async def test_diagnostics_includes_the_economics_balance(hass) -> None:
+    """Der Diagnose-Download weist den internen Bilanzzustand aus -
+    Zeitstempel und ungerundete Rohsummen, die in coordinator_data nicht
+    stehen (siehe anforderung.yaml, REQ-ECONOMICS-ACCOUNTING)."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["started_at"] is None
+    assert diagnostics["economics"]["grid_charge_cost_eur"] is None
+
+    started_at = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
+    coordinator._economics_started_at = started_at
+    coordinator._economics_grid_charge_cost_eur = 1.23456
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["started_at"] == started_at.isoformat()
+    assert diagnostics["economics"]["grid_charge_cost_eur"] == 1.23456

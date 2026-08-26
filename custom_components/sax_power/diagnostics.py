@@ -79,4 +79,8 @@ async def async_get_config_entry_diagnostics(
         # Quote bzw. dem maschinenlesbaren Grund, warum keiner bestimmbar
         # ist (REQ-ECONOMICS-TARIFFS).
         "tariff": coordinator.tariff_provider.diagnostics,
+        # Interner Bilanzzustand (Zeitstempel, ungerundete Rohsummen) -
+        # coordinator_data enthält bereits die gerundeten, veröffentlichten
+        # economics_*-Sensorwerte (REQ-ECONOMICS-ACCOUNTING).
+        "economics": coordinator.economics_diagnostics,
     }

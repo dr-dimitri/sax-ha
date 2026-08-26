@@ -29,6 +29,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - [Zeitfenster und Überschneidungen](#zeitfenster-und-überschneidungen)
 - [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
 - [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)
+- [Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz)
 - [Energy-Dashboard](#energy-dashboard)
 - [Aktionen für Automationen](#aktionen-für-automationen)
 - [Verbindung nachträglich ändern](#verbindung-nachträglich-ändern)
@@ -50,6 +51,8 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - bei dynamischen Stromtarifen in günstigen Zeiträumen laden
 - optional einen Stromtarif hinterlegen, an dem sich die Wirtschaftlichkeit
   bemisst
+- daraus Netzladekosten, entgangene Einspeisevergütung, vermiedene
+  Netzkosten und ein operatives Ergebnis bilanzieren
 - optional ein vorbereitetes SAX-Power-Dashboard anlegen
 - alle Funktionen vollständig lokal im eigenen Netzwerk nutzen
 
@@ -449,6 +452,51 @@ Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
 0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
 zugeordnet, der bestehende Gesamtzähler **Geladene Energie (gesamt)** bleibt
 davon unberührt.
+
+## Wirtschaftlichkeitsbilanz
+
+Ist unter [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
+ein Tarif aktiviert, bilanziert die Integration zusätzlich zur reinen
+[Herkunft der Ladeenergie](#herkunft-der-ladeenergie) einen fortlaufenden
+Geldwert. Bewertet wird ausschließlich tatsächlich gemessene Lade-/
+Entladeenergie, nie ein Sollwert:
+
+- **Netzladekosten**: geladene Netzenergie zum jeweils zum Ladezeitpunkt
+  gültigen Netzbezugspreis.
+- **PV-Opportunitätskosten**: geladene PV-Energie zur eingestellten
+  Einspeisevergütung - PV-Strom gilt nie als kostenlos, weil er statt in den
+  Speicher auch hätte eingespeist werden können.
+- **Vermiedene Netzkosten**: entladene Energie zum jeweils zum
+  Entladezeitpunkt gültigen Netzbezugspreis, also der Betrag, den der
+  Hausverbrauch dadurch nicht aus dem Netz decken musste.
+- **Operatives Ergebnis**: vermiedene Netzkosten abzüglich Netzladekosten
+  und PV-Opportunitätskosten - ein kumulierter operativer Cashflow, kein
+  Kontostand. Ladeverluste werden dadurch automatisch sichtbar: Kosten
+  entstehen für die volle geladene Energie, Nutzen nur für die tatsächlich
+  wieder entladene, ohne dass dafür ein angenommener Wirkungsgrad nötig
+  wäre. Kann negativ sein.
+
+Zusätzlich zeigen zwei Diagnosesensoren, welcher Anteil der Ladeenergie
+(noch) nicht bewertet werden konnte: **Unbepreiste Ladeenergie**/
+**Unbepreiste Entladeenergie** (z. B. weil der dynamische Preis-Sensor
+kurzzeitig ausgefallen war) sowie der **Unbewertete Energiebestand**
+(Herkunft-unbekannt- und unbepreist geladene Energie, die noch im Speicher
+liegt). Die Sensoren **Aktueller Netzbezugspreis** und
+**Einspeisevergütung** zeigen den gerade angewendeten Tarif.
+
+**Ehrlicher Start:** Bereits vor der Aktivierung im Speicher liegende
+Energie ist unbekannter Herkunft. Damit ihr späteres Entladen keinen
+kostenlosen Scheingewinn erzeugt, initialisiert die Integration beim
+erstmaligen Aktivieren den unbewerteten Energiebestand aus der aktuellen
+Kapazität und dem aktuellen Ladezustand - jede Entladung verbraucht zuerst
+diesen Bestand, ohne dabei vermiedene Netzkosten zu erzeugen. Erst danach
+gilt eine Entladung als vermiedener Netzbezug. Eine spätere Tarifänderung
+wirkt ausschließlich auf künftige Beträge; bereits verbuchte Werte bleiben
+unverändert.
+
+Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
+ist oder die Bilanz noch auf Kapazität/Ladezustand wartet - ein
+deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
 
 ## Energy-Dashboard
 

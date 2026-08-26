@@ -30,17 +30,19 @@ custom_components/sax_power/
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          SunSpec-Blockdecodierung (sunspec.py),
 │                          Zeitfenster und Wertevalidierung, Preis-Einheiten
-│                          (price_units.py), das Tarifmodell (tariff.py) und
-│                          die Herkunftsbilanzregel der Ladeenergie
-│                          (energy_accounting.py)
+│                          (price_units.py), das Tarifmodell (tariff.py), die
+│                          Herkunftsbilanzregel der Ladeenergie
+│                          (energy_accounting.py) und die Geldbilanz darauf
+│                          (economics_accounting.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung, die Abbildung der Tarif-Options auf
 │                          das Domänenmodell (economics.py) sowie der
 │                          injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
-│                          Repair-Issues sowie die drei versionierten Stores
+│                          Repair-Issues sowie die vier versionierten Stores
 │                          (Kalibrierung, Energiezähler inkl. Herkunft der
-│                          Ladeenergie, Ladeeinstellungen)
+│                          Ladeenergie, Wirtschaftlichkeitsbilanz,
+│                          Ladeeinstellungen)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
@@ -57,7 +59,11 @@ custom_components/sax_power/
 ├── economics.py          Home-Assistant-Adapter des Tarifmodells
 │                          (SaxTariffProvider): liest Options und Preis-Sensor
 │                          und liefert den geltenden Netzbezugspreis als Quote,
-│                          siehe anforderung.yaml REQ-ECONOMICS-TARIFFS
+│                          siehe anforderung.yaml REQ-ECONOMICS-TARIFFS. Die
+│                          Geldbilanz selbst (REQ-ECONOMICS-ACCOUNTING) hat
+│                          keinen eigenen Adapter - sie läuft im Coordinator
+│                          mit (_accumulate_economics, siehe unten), weil sie
+│                          keine eigenen HA-Zustandsbeobachter braucht
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          _assign_ids() (unique_id + vom Gerätenamen
 │                          unabhängige entity_id, siehe
@@ -174,6 +180,64 @@ jedem nicht leeren Wert als Vorschau; nur die Auto-Erkennung verlangt die
 Listenform der bekannten Attributnamen. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
 über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
 Sonderfall.
+
+### Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING)
+
+Läuft in `SaxPowerCoordinator._accumulate_economics`, aufgerufen am Ende von
+`_accumulate_energy` mit demselben `EnergyDelta` (02/06) und demselben
+rohen, ungerundeten Entladezuwachs dieses Intervalls - keine zweite Uhr,
+keine zweite Riemann-Summe. Die reine Rechnung liegt in
+`domain/economics_accounting.py`:
+
+- `compute_economics_delta` bewertet ein Intervall: Netzladung kostet den
+  Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
+  Preis oder ist die Herkunft unbekannt, wird nichts erfunden - die Energie
+  erhöht stattdessen `unvalued_inventory_kwh` (unbewerteter Bestand) und
+  einen `unpriced_charge`-Zähler. Jede Entladung verbraucht zuerst aus
+  diesem Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser
+  Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst entstünde
+  beim Entladen von Alt-/Unbekannt-Bestand ein kostenloser Scheingewinn,
+  der Kernfehler des verworfenen Issues #42). Nur der danach verbleibende,
+  tatsächlich bepreist geladene Rest ("monetizable") ist den aktuellen
+  Netzbezugspreis wert.
+- `initial_unvalued_inventory_kwh`/`min_soc_inventory_correction` decken
+  den "Ehrlichen Start" ab: Der Anfangsbestand
+  (`battery_capacity * battery_soc / 100`) wird einmalig beim erstmaligen
+  Aktivieren gesetzt (`SaxPowerCoordinator._bootstrap_economics_if_ready`,
+  wartet auf numerisch bekannte `battery_capacity`/`battery_soc` - beide
+  aus demselben SunSpec-Modus-Block wie `battery_soc_min`, bewusst nicht
+  die Basic-Mode-SOC), und am geräteseitig gemeldeten SOC-Minimum
+  (`data["battery_soc_min"]`) wird ein rechnerisch nie ganz auf 0
+  gelaufener Rest verworfen und diagnostisch geloggt.
+
+`operating_result` (vermiedene Netzkosten − Netzladekosten −
+PV-Opportunitätskosten) wird nie separat gespeichert, sondern in
+`_publish_economics_balance` aus den drei Teilsummen abgeleitet - so kann er
+nie von ihnen abweichen. Die gesamte Bilanz läuft nur, solange
+`SaxTariffProvider.config.enabled` wahr ist; deaktiviert bleiben die
+monetären Sensoren `None` ("unbekannt") statt 0, damit kein falscher
+Nullgewinn suggeriert wird. `economics_current_import_price`/
+`economics_feed_in_price` sind reine Durchreichungen des aktuellen Tarifs
+und unabhängig vom Bilanz-Bootstrap immer aktuell.
+
+Persistenz: `infrastructure/economics_store.py` (`EconomicsStateStore`,
+eigener STORAGE_VERSION, eigenes Bootstrap-Fenster analog zu
+`EnergyStateStore`). Anders als die monoton steigenden Energiezähler dürfen
+die drei Geldsummen wegen negativer Strompreise sinken - "kleiner als der
+alte Wert" ist dort deshalb bewusst KEIN Ablehnungsgrund, nur
+NaN/Inf/Fremdtypen sind es. `unpriced_charge_kwh`/`unpriced_discharge_kwh`
+bleiben dagegen echte monotone Summen, `unvalued_inventory_kwh` ist ein
+Bestand (Gauge) ohne Monotonieprüfung. `economics_started_at` ist wie
+`origin_accounting_started_at` (02/06) einmalig gesetzt und danach
+unveränderlich; ein unvollständiges Sieben-Felder-Bündel wird beim Laden
+komplett neu gebootstrapped, und die interne Monotonie-Baseline wird in
+diesem Fall ebenfalls komplett bereinigt (siehe
+`EnergyStateStore._origin_baseline` für dasselbe, aus einem Review-Befund
+gelernte Muster). `notify_tariff_revision()` (aufgerufen aus
+`__init__.async_update_options`) merkt sich nur einen rein diagnostischen
+Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
+ausschließlich prospektiv, weil jedes künftige Delta einfach den dann
+aktuellen Preis verwendet; nichts wird rückwirkend neu berechnet.
 
 ## Datenfluss
 
@@ -704,6 +768,31 @@ tests/
 │                                  Coordinator-Verdrahtung (Rundung, Diagnosewert
 │                                  energy_origin_coverage, Entladung und SunSpec-Ausfall
 │                                  bleiben unverändert) in test_coordinator.py
+├── test_economics_accounting.py     Reine Geldbilanz (REQ-ECONOMICS-ACCOUNTING,
+│                                  domain/economics_accounting.py): Netz-/PV-/gemischte
+│                                  Ladung, unbekannte Herkunft nie bepreist, fehlender
+│                                  Netzbezugs-/Einspeisepreis macht Ladung unbepreist statt
+│                                  erfunden, negative Preise ohne Clamping, Entladung aus
+│                                  unbewertetem Bestand ohne vermiedenen Geldwert (Regression
+│                                  zum verworfenen Issue #42), teilweise/vollständig
+│                                  monetarisierbare Entladung, fehlender Preis bei
+│                                  Entladung wird nicht rückwirkend bewertet,
+│                                  Ladeverlust-Sichtbarkeit ohne angenommenen
+│                                  Wirkungsgradfaktor, Anfangsbestand sowie
+│                                  SOC-Minimum-Korrektur
+├── test_economics_persistence.py    Persistenz der Wirtschaftlichkeitsbilanz
+│                                  (REQ-ECONOMICS-ACCOUNTING): Store-Round-Trip, negative
+│                                  Geldsummen ausdrücklich erlaubt (keine
+│                                  Monotonieprüfung), unabhängige Feldvalidierung,
+│                                  rückläufige unpriced-Zähler abgelehnt, der
+│                                  unvalued_inventory-Bestand darf dagegen sinken,
+│                                  unveränderlicher Aktivierungszeitpunkt, Wiederanlauf
+│                                  nach einem unvollständigen Sieben-Felder-Bündel ohne an
+│                                  der alten Teil-Baseline zu scheitern, zwei getrennte
+│                                  Config Entries, Drosselung/Sofort-Flush sowie der
+│                                  Coordinator-Bootstrap (wartet auf Kapazität/SOC,
+│                                  deaktivierter Tarif bootstrapped nicht, Shutdown-Flush,
+│                                  Tarifrevisions-Zeitstempel)
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
 │                                  unvollständiger/unlesbarer Store (inkl. dauerhafter

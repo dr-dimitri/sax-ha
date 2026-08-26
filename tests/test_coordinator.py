@@ -5090,6 +5090,10 @@ def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None
     assert data["economics_average_daily_result_30d"] is None
     assert data["economics_projected_annual_result"] is None
     assert data["economics_estimated_payback_date"] is None
+    assert (
+        data["economics_amortization_forecast_attributes"]["average_daily_result_eur"]
+        is None
+    )
 
 
 def test_roi_and_result_today_hide_during_a_tariff_pause_but_survive_it(hass) -> None:
@@ -5265,6 +5269,9 @@ def test_forecast_sensors_populate_once_30_complete_days_are_stored(hass) -> Non
     assert attributes["complete_days_available"] == 30
     assert attributes["accepted_days"] == 30
     assert attributes["average_price_coverage_percent"] == pytest.approx(100.0)
+    # REQ-ECONOMICS-AMORTIZATION verlangt den Durchschnitt zusätzlich zum
+    # Sensorzustand auch als Attribut.
+    assert attributes["average_daily_result_eur"] == pytest.approx(5.0)
     assert attributes["unavailable_reason"] is None
 
 
@@ -5319,6 +5326,7 @@ def test_forecast_sensors_stay_unavailable_with_fewer_than_30_days(hass) -> None
     assert data["economics_estimated_payback_date"] is None
     attributes = data["economics_amortization_forecast_attributes"]
     assert attributes["complete_days_available"] == 29
+    assert attributes["average_daily_result_eur"] is None
     assert attributes["unavailable_reason"] == "insufficient_history"
 
 

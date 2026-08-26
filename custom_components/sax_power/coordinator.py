@@ -913,6 +913,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "complete_days_available": 0,
                 "accepted_days": 0,
                 "average_price_coverage_percent": None,
+                "average_daily_result_eur": None,
                 "unavailable_reason": ForecastUnavailable.NO_INVESTMENT_COST.value,
             }
             return
@@ -994,6 +995,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 None
                 if forecast.average_price_coverage_percent is None
                 else round(forecast.average_price_coverage_percent, 1)
+            ),
+            # Zusätzlich zum Sensorzustand (economics_average_daily_result_30d)
+            # auch als Attribut, wie von REQ-ECONOMICS-AMORTIZATION gefordert -
+            # nützlich für Dashboards, die den Durchschnitt zusammen mit den
+            # übrigen Prognoseattributen aus einer einzigen Entity lesen.
+            "average_daily_result_eur": (
+                None
+                if forecast.average_daily_result_eur is None
+                else round(forecast.average_daily_result_eur, 4)
             ),
             "unavailable_reason": (
                 None if forecast.reason is None else forecast.reason.value

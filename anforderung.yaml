@@ -3300,7 +3300,9 @@ requirement_economics_amortization:
     lokalen Kalendertag abgebildet). economics_average_daily_result_30d
     trägt zusätzlich Attribute (window_start/window_end,
     complete_days_available, accepted_days,
-    average_price_coverage_percent, unavailable_reason) aus der Prognose.
+    average_price_coverage_percent, average_daily_result_eur -
+    redundant zum Sensorzustand, aber Teil desselben Attributsatzes -,
+    unavailable_reason) aus der Prognose.
     Anders als die vier "aktuellen" Sensoren (roi, Fortschritt, Restbetrag,
     Tagesergebnis) blendet die 30-Tage-Prognose (Durchschnitt/Hochrechnung/
     Rückzahlungsdatum) während einer Tarifpause NICHT auf None: sie beruht

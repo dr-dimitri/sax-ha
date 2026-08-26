@@ -657,6 +657,52 @@ async def test_shutdown_flushes_the_current_balance(hass) -> None:
     assert saved.economics_started_at == started_at
 
 
+async def test_a_rejected_delayed_save_freezes_the_balance(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: schlägt async_delay_save fehl (_accept
+    lehnt den Snapshot ab, z. B. wegen eines Bugs, der einen regressiven
+    Wert erzeugt), gilt der Store ab sofort als storage_error - keine
+    weitere Akkumulation auf einer nicht mehr vertrauenswürdigen
+    Baseline."""
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(dt_util.utcnow())
+    )
+    await coordinator.async_load_economics_state()
+    coordinator._economics_store.async_delay_save = MagicMock(return_value=False)
+
+    coordinator._async_schedule_economics_save()
+
+    assert coordinator._economics_store_write_blocked is True
+
+
+async def test_a_rejected_final_save_freezes_the_balance(hass) -> None:
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(dt_util.utcnow())
+    )
+    await coordinator.async_load_economics_state()
+    coordinator._economics_store.async_save = AsyncMock(return_value=False)
+
+    await coordinator._async_flush_economics_state()
+
+    assert coordinator._economics_store_write_blocked is True
+
+
+async def test_a_raised_final_save_error_freezes_the_balance(hass) -> None:
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(dt_util.utcnow())
+    )
+    await coordinator.async_load_economics_state()
+    coordinator._economics_store.async_save = AsyncMock(
+        side_effect=OSError("Platte voll")
+    )
+
+    await coordinator._async_flush_economics_state()
+
+    assert coordinator._economics_store_write_blocked is True
+
+
 async def test_notify_tariff_revision_updates_the_timestamp_and_schedules_a_save(
     hass,
 ) -> None:

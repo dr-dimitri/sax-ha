@@ -3441,10 +3441,22 @@ requirement_economics_observability:
     `economics_price_unavailable` (rein informativ, is_fixable=False,
     Zustandsflanke wie bei den fünf bestehenden Selbstdiagnose-Issues aus
     REQ-SELF-DIAGNOSIS-REPAIRS) die alleinige Quelle - keine doppelte
-    Karenzzeit-Logik.
+    Karenzzeit-Logik. Die Löschung prüft dabei zusätzlich zum lokalen
+    In-Memory-Flag den tatsächlichen Issue-Registry-Zustand
+    (`SelfDiagnostics._check_economics_price_unavailable`): Das Flag lebt
+    nur im Arbeitsspeicher der jeweiligen SelfDiagnostics-Instanz und
+    startet nach jedem Neuladen des Config Entry wieder bei `False` - ein
+    zuvor angelegtes, in der Registry aber weiterhin vorhandenes Issue
+    würde sonst nach einem Reload nie gelöscht, selbst wenn der Preis
+    inzwischen wieder gültig ist.
 
     Speicherfehler (`SaxPowerCoordinator._economics_store_write_blocked`,
-    gesetzt bei einem Ladefehler des Wirtschaftlichkeits-Stores): Status
+    gesetzt sowohl bei einem Ladefehler als auch bei einem abgelehnten oder
+    fehlgeschlagenen Schreibversuch des Wirtschaftlichkeits-Stores -
+    `_async_schedule_economics_save`/`_async_flush_economics_state`
+    prüfen den Rückgabewert von `async_delay_save`/`async_save` und setzen
+    das Flag, sobald `_accept()`/`_valid_snapshot()` einen Snapshot ablehnt
+    oder das Schreiben selbst einen Fehler auslöst): Status
     `storage_error`, UND - Abweichung von REQ-ECONOMICS-ACCOUNTING -
     `_bootstrap_economics_if_ready` bootstrapped in diesem Fall NICHT mehr
     frisch im Arbeitsspeicher, `_accumulate_economics` akkumuliert keine
@@ -3470,9 +3482,11 @@ requirement_economics_observability:
     (`_require_confirm_true` in __init__.py, eine fehlende oder
     falsch geschriebene Bestätigung darf niemals als Zustimmung gelten);
     optionales `reason` (Freitext, höchstens
-    MAX_ECONOMICS_RESTART_REASON_LENGTH = 120 Zeichen), rein diagnostisch
-    (nur im lokalen Diagnose-Download über den Log-Eintrag, sonst nirgends
-    sichtbar). Lehnt mit ServiceValidationError ab, wenn der Tarif
+    MAX_ECONOMICS_RESTART_REASON_LENGTH = 120 Zeichen), rein diagnostisch:
+    wird zusammen mit dem UTC-Zeitpunkt dieses Neustarts persistiert
+    (`EconomicsState.last_restart_at`/`last_restart_reason`, unabhängig
+    vom Sieben-Felder-Bündel) und im Diagnose-Download angezeigt -
+    beeinflusst keine Berechnung. Lehnt mit ServiceValidationError ab, wenn der Tarif
     deaktiviert ist, die Bilanz noch nie initialisiert wurde, oder
     Speicherkapazität/Ladezustand gerade nicht bekannt sind. Setzt
     AUSSCHLIESSLICH zurück: die drei Economics-Geldsummen, die vier
@@ -3551,13 +3565,16 @@ requirement_economics_dashboard:
 
     Fünfter View (dashboard.async_build_dashboard_config), direkt nach
     "Dynamisches Laden": Titel "Wirtschaftlichkeit", Pfad
-    `wirtschaftlichkeit`, Icon `mdi:cash-chart`. Ausschließlich Home-
-    Assistant-Core-Kartentypen (entities, gauge, statistics-graph) - keine
-    Custom-Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-
-    Auflösung wie die vier bestehenden Tabs.
+    `wirtschaftlichkeit`, Icon `mdi:cash-chart`, exakt fünf Top-Level-
+    Karten. Ausschließlich Home-Assistant-Core-Kartentypen (entities,
+    gauge, markdown, vertical-stack, statistics-graph) - keine Custom-
+    Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-Auflösung wie
+    die vier bestehenden Tabs. `async_build_dashboard_config` bekommt dafür
+    zusätzlich die Config-Entry-Options (`entry.options` in
+    `_async_create_dashboard`) übergeben, nicht nur die entry_id.
 
-    - Karte "Status und Preise" (eine entities-Karte, feste Reihenfolge):
-      economics_status, economics_current_import_price,
+    - Karte 1 "Status und Preise" (eine entities-Karte, feste
+      Reihenfolge): economics_status, economics_current_import_price,
       economics_feed_in_price, energy_origin_coverage, danach drei neue
       "attribute"-Kartenzeilen (`_attribute_row`) auf economics_status:
       charge_price_coverage_percent, discharge_price_coverage_percent
@@ -3567,37 +3584,42 @@ requirement_economics_dashboard:
       bleibt economics_status sichtbar und erklärt über seine eigene
       Zustandsübersetzung (`disabled`), dass die Konfiguration unter
       "Geräte & Dienste -> SAX Power Home -> Konfigurieren" erfolgt.
-    - Karte "Herkunft der Ladeenergie": energy_charged_from_pv,
+    - Karte 2 "Herkunft der Ladeenergie": ein `_stack_card`
+      (vertical-stack) aus der entities-Karte (energy_charged_from_pv,
       energy_charged_from_grid, energy_charged_origin_unknown,
-      energy_charged, energy_discharged (REQ-ENERGY-ORIGIN, dieselbe
-      konservative Schätzung am Netzanschlusspunkt wie im Tab "Allgemeine
-      Informationen").
-    - Karte "Operative Geldbilanz": economics_avoided_grid_cost,
+      energy_charged, energy_discharged) plus einer `markdown`-Karte mit
+      dem Hinweis, dass die Herkunftsaufteilung eine konservative
+      Schätzung am Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine
+      physikalische Einzelstromverfolgung - als Teil derselben Karte, nicht
+      als zusätzliche eigenständige Karte (bliebe sonst bei fünf Karten
+      im View, aber sechs Kartenobjekten). Der Hinweis fehlt, wenn keine
+      der Herkunfts-Entities registriert ist.
+    - Karte 3 "Operative Geldbilanz": economics_avoided_grid_cost,
       economics_grid_charge_cost, economics_pv_opportunity_cost,
       economics_operating_result, economics_unpriced_charge,
       economics_unpriced_discharge - Kosten/Nutzen bleiben durch die
       Reihenfolge (zuerst der Nutzen, dann die beiden Kostenarten) und die
       Sensor-Übersetzungen eindeutig unterscheidbar; der Entity-Name
       bleibt "Operatives Ergebnis", kein Wort wie "Gewinn".
-    - Amortisationsfortschritt als eigene Gauge-Karte (0..100, needle,
-      segments rot/gelb/grün bei 0/50/100 - wie die bestehenden SOC-/
-      Zelltemperatur-Gauges).
-    - Karte "Investition und Amortisation": economics_roi,
+    - Karte 4 "Investition und Amortisation": EINE gemeinsame Karte
+      (`_stack_card`, vertical-stack) in genau der geforderten Reihenfolge
+      - eine entities-Zeile mit economics_roi, dann die Fortschritts-Gauge
+      (economics_amortization_progress, 0..100, needle, segments rot/gelb/
+      grün bei 0/50/100), dann eine zweite entities-Karte mit
       economics_remaining_to_payback, economics_result_today,
       economics_average_daily_result_30d,
       economics_projected_annual_result, economics_estimated_payback_date.
-      Diese sieben Sensoren (inkl. der Gauge) sind - anders als bei
-      optional erst zur Laufzeit erschienenen Entities anderer Tabs -
-      immer bereits registriert (statische SENSOR_DESCRIPTIONS, siehe
-      REQ-ECONOMICS-AMORTIZATION) und deshalb auch ohne konfigurierte
-      Investitionssumme in der Karte sichtbar; sie zeigen dann
-      durchgehend "unbekannt" statt eines erfundenen Werts (dieselbe
-      Garantie wie bei jedem anderen Sensor dieser Integration) - eine
-      wörtliche Auslassung der ganzen Karte allein anhand fehlender
-      Registry-Einträge ist mit dieser Architektur nicht möglich, aber
-      auch nicht nötig: Der View bleibt in jedem Fall vollständig
-      nutzbar.
-    - Karte "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
+      Diese sieben Sensoren sind - anders als optional erst zur Laufzeit
+      erschienene Entities anderer Tabs - immer bereits statisch
+      registriert (SENSOR_DESCRIPTIONS, siehe REQ-ECONOMICS-AMORTIZATION),
+      unabhängig von konfigurierten Investitionskosten. Die ganze Karte 4
+      ist deshalb zusätzlich explizit an
+      `investment_cost_eur_from_options(options)` gekoppelt (dieselbe
+      Bedingung wie bei den Sensoren selbst) und fehlt komplett, solange
+      keine Investitionskosten konfiguriert sind - eine reine Registry-
+      Prüfung wie bei den übrigen Karten würde die Karte hier immer mit
+      lauter "unbekannt"-Zeilen zeigen.
+    - Karte 5 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
       `statistics-graph` als Balkendiagramm (`chart_type: bar`),
       `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für
       economics_operating_result, economics_avoided_grid_cost,

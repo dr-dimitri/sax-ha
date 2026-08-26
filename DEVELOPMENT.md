@@ -392,7 +392,14 @@ Bilanz je gestartet ist) setzt das zusammen:
   ist die alleinige Quelle sowohl für den Status-Sensor als auch für das
   Repair-Issue `economics_price_unavailable`
   (`SelfDiagnostics._check_economics_price_unavailable`, keine doppelte
-  Karenzzeit-Logik).
+  Karenzzeit-Logik). Die Löschung prüft dabei zusätzlich zum lokalen
+  In-Memory-Flag den tatsächlichen Issue-Registry-Zustand
+  (`ir.async_get_issue`): Das Flag lebt nur im Arbeitsspeicher der
+  jeweiligen `SelfDiagnostics`-Instanz und startet nach jedem Neuladen
+  des Config Entry wieder bei `False`, während ein zuvor angelegtes
+  Issue in der Registry weiterbestehen kann - ohne die zusätzliche
+  Registry-Prüfung bliebe ein solches Issue nach einem Reload dauerhaft
+  bestehen, selbst wenn der Preis inzwischen wieder gültig ist.
 - Ein Speicherfehler (`_economics_store_write_blocked`) ergibt
   `storage_error` UND verhindert - Abweichung von REQ-ECONOMICS-
   ACCOUNTING - sowohl einen frischen 0-Bootstrap im Arbeitsspeicher
@@ -414,13 +421,31 @@ der erstmaligen Aktivierung - rührt niemals `energy_charged`/
 aber bewusst die Monotonie-/Unveränderlichkeits-Baseline aus `_accept` -
 ein gewollter Reset auf 0 ist kein Korruptionsindiz. Schlägt das
 Speichern fehl, bleibt der bisherige Zustand vollständig unverändert
-(kein halb angewendeter Neustart).
+(kein halb angewendeter Neustart). Zeitpunkt (UTC) und optionaler
+freier Grund dieses Neustarts werden zusätzlich als
+`last_restart_at`/`last_restart_reason` persistiert und erscheinen im
+Diagnose-Download - rein informativ, ohne Rückwirkung auf die
+Berechnung.
 
 Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 3 erweitert.
 `priced_charge_kwh`/`priced_discharge_kwh` sind wie die bestehenden
 `unpriced_*`-Zähler echte monotone Summen und unabhängig vom
 Sieben-Felder-Bündel - ein älterer Store beginnt ihre Zählung transparent
-bei 0 ab jetzt.
+bei 0 ab jetzt. `STORAGE_MINOR_VERSION` 4 ergänzt zusätzlich
+`last_restart_at`/`last_restart_reason` (Zeitpunkt und optionaler
+Freitext-Grund des zuletzt ausgeführten `restart_economics_accounting`) -
+rein diagnostisch, ohne Einfluss auf eine Berechnung, siehe unten.
+
+Ein von `EconomicsStateStore._accept`/`_valid_snapshot` abgelehnter oder ein
+technisch fehlgeschlagener Schreibversuch (verzögert über
+`async_delay_save` wie beim finalen `async_save` beim Entladen) setzt
+`SaxPowerCoordinator._economics_store_write_blocked` - die Bilanz friert
+daraufhin ein (Status `storage_error`) statt unbemerkt weiter zu
+akkumulieren, bis der Config Entry neu geladen wird. Home Assistants
+`Store` verschluckt echte Festplattenfehler beim verzögerten Speichern
+intern (siehe `homeassistant.helpers.storage.Store`) - beobachtbar sind
+daher ausschließlich Validierungsabweisungen sowie Fehler, die bis zum
+finalen `async_save`-Aufruf durchdringen.
 
 ### Dashboard-Tab "Wirtschaftlichkeit" (REQ-ECONOMICS-DASHBOARD)
 
@@ -442,13 +467,28 @@ keine neue Berechnung ein:
   (Balkendiagramm, `stat_types: ["change"]`, `period: "day"`,
   `days_to_show: 30`) für die vier Geldsensoren - keine Custom-Card,
   keine private Statistik-API.
-- Die sieben ROI-/Amortisationssensoren (inkl. der
-  `economics_amortization_progress`-Gauge) sind anders als z. B. die
+- `_stack_card` bündelt mehrere Karten zu einer Core-`vertical-stack`, wenn
+  eine fachlich zusammengehörige Gruppe als EINE Karte im View erscheinen
+  muss, obwohl eine `entities`-Karte selbst keine Gauge/Markdown einbetten
+  kann. Zwei Verwendungen:
+  - Karte "Herkunft der Ladeenergie": die entities-Karte plus eine
+    `markdown`-Karte mit dem Hinweis, dass die Herkunftsaufteilung eine
+    konservative Schätzung am Netzanschlusspunkt ist, keine physikalische
+    Einzelstromverfolgung (REQ-ENERGY-ORIGIN). Fehlt, wenn keine der
+    Herkunfts-Entities registriert ist.
+  - Karte "Investition und Amortisation": eine entities-Zeile mit
+    `economics_roi`, dann die `economics_amortization_progress`-Gauge,
+    dann eine zweite entities-Karte mit den übrigen vier ROI-/
+    Amortisationssensoren, in genau dieser Reihenfolge.
+- Die sieben ROI-/Amortisationssensoren sind anders als z. B. die
   netzdienlichen Entities IMMER registriert (statische
   `SENSOR_DESCRIPTIONS`), unabhängig davon, ob Investitionskosten
-  konfiguriert sind - die Karte "Investition und Amortisation" bleibt
-  deshalb immer sichtbar und zeigt ohne Investitionskosten durchgehend
-  "unbekannt" statt einer erfundenen Zahl, statt komplett zu verschwinden.
+  konfiguriert sind. `async_build_dashboard_config` bekommt deshalb
+  zusätzlich die Config-Entry-Options übergeben und lässt die ganze Karte
+  "Investition und Amortisation" explizit über
+  `investment_cost_eur_from_options(options)` weg, solange keine
+  Investitionskosten konfiguriert sind - dieselbe Bedingung wie bei den
+  Sensoren selbst, statt sie mit lauter "unbekannt"-Werten anzuzeigen.
 
 Alles andere folgt exakt dem bestehenden Muster der vier älteren Tabs:
 `_entities_card`/`_gauge_card` lassen fehlende Entities/Karten still aus,

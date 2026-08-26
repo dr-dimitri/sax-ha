@@ -507,6 +507,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_price_unavailable_since: float | None = None
         self._economics_price_unavailable = False
         self._economics_last_successful_quote_at: datetime | None = None
+        # Zeitpunkt und optionaler Grund des zuletzt ausgeführten
+        # kontrollierten Bilanzneustarts (siehe
+        # async_restart_economics_accounting) - rein diagnostisch,
+        # persistiert für den lokalen Diagnose-Download.
+        self._economics_last_restart_at: datetime | None = None
+        self._economics_last_restart_reason: str | None = None
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -1373,6 +1379,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_tariff_revision_at = state.last_tariff_revision_at
             self._economics_day_results = state.day_results
             self._economics_payback_achieved_at = state.payback_achieved_at
+            self._economics_last_restart_at = state.last_restart_at
+            self._economics_last_restart_reason = state.last_restart_reason
             if state.current_day is not None:
                 self._economics_current_day = state.current_day
                 self._economics_current_day_operating_result_eur = (
@@ -1422,14 +1430,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             payback_achieved_at=self._economics_payback_achieved_at,
             priced_charge_kwh=self._economics_priced_charge_kwh,
             priced_discharge_kwh=self._economics_priced_discharge_kwh,
+            last_restart_at=self._economics_last_restart_at,
+            last_restart_reason=self._economics_last_restart_reason,
         )
 
     def _async_schedule_economics_save(self) -> None:
         if self._economics_store_write_blocked:
             return
         state = self._economics_state()
-        if self._economics_store_loaded and state.initialized:
-            self._economics_store.async_delay_save(state)
+        if not (self._economics_store_loaded and state.initialized):
+            return
+        if not self._economics_store.async_delay_save(state):
+            # _accept() hat den Snapshot als korrupt/regressiv abgelehnt
+            # (siehe infrastructure/economics_store.py) - ab hier ist der
+            # gespeicherte Zustand nicht mehr vertrauenswürdig. Status
+            # storage_error, keine weitere Akkumulation, bis ein Neuladen
+            # des Config Entry eine frische Instanz erzeugt (REQ-ECONOMICS-
+            # OBSERVABILITY) - siehe auch async_load_economics_state für den
+            # spiegelbildlichen Fall eines Ladefehlers.
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand beim Speichern abgelehnt - "
+                "Bilanz wird eingefroren, bis der Config Entry neu geladen "
+                "wird"
+            )
+            self._economics_store_write_blocked = True
 
     async def _async_flush_economics_state(self) -> None:
         if self._economics_store_write_blocked:
@@ -1438,13 +1462,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._economics_store_loaded or not state.initialized:
             return
         try:
-            await self._economics_store.async_save(state)
+            saved = await self._economics_store.async_save(state)
         except (HomeAssistantError, OSError, ValueError) as err:
             _LOGGER.warning(
                 "Wirtschaftlichkeitszustand konnte beim Entladen nicht "
                 "gespeichert werden: %s",
                 err,
             )
+            self._economics_store_write_blocked = True
+            return
+        if not saved:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand beim Entladen abgelehnt - "
+                "Bilanz wird eingefroren, bis der Config Entry neu geladen "
+                "wird"
+            )
+            self._economics_store_write_blocked = True
 
     async def async_restart_economics_accounting(
         self, *, reason: str | None = None
@@ -1459,7 +1492,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Anfangsbestand erneut wie beim erstmaligen Aktivieren (03/06) - und
         rührt dabei nie `energy_charged`/`energy_discharged` oder die
         Herkunftszähler aus REQ-ENERGY-ORIGIN an. `reason` ist rein
-        diagnostisch (Diagnose-Download), nirgends sonst sichtbar.
+        diagnostisch: er wird zusammen mit dem UTC-Zeitpunkt dieses
+        Neustarts persistiert (EconomicsState.last_restart_at/
+        last_restart_reason) und im Diagnose-Download angezeigt -
+        beeinflusst aber keine Berechnung.
 
         Speichert atomar VOR jeder In-Memory-Änderung: schlägt das
         Speichern fehl, bleibt der bisherige Zustand vollständig und
@@ -1515,6 +1551,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current_day_priced_discharge_kwh=None,
             current_day_unpriced_discharge_kwh=None,
             payback_achieved_at=None,
+            last_restart_at=now,
+            last_restart_reason=reason,
         )
         if not await self._economics_store.async_reset(new_state):
             raise HomeAssistantError(
@@ -1542,6 +1580,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_payback_achieved_at = None
         self._economics_price_unavailable_since = None
         self._economics_price_unavailable = False
+        self._economics_last_restart_at = now
+        self._economics_last_restart_reason = reason
         _LOGGER.info(
             "Wirtschaftlichkeitsbilanz manuell neu gestartet (%s)%s",
             now.isoformat(),
@@ -1621,6 +1661,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._economics_last_successful_quote_at is None
                 else self._economics_last_successful_quote_at.isoformat()
             ),
+            "last_restart_at": (
+                None
+                if self._economics_last_restart_at is None
+                else self._economics_last_restart_at.isoformat()
+            ),
+            "last_restart_reason": self._economics_last_restart_reason,
         }
 
     async def async_load_energy_state(self) -> None:

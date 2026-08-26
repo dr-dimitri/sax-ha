@@ -14,9 +14,10 @@ SOC-Minimum-Korrektur sinken) und braucht deshalb ebenfalls keine
 Monotonie, nur eine Wertebereichsprüfung (endlich, >= 0).
 
 STORAGE_MINOR_VERSION (statt einer erhöhten Hauptversion) trägt die
-Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION sowie die
-kumulierten bepreisten Lade-/Entlademengen aus REQ-ECONOMICS-OBSERVABILITY -
-siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
+Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION, die
+kumulierten bepreisten Lade-/Entlademengen sowie den zuletzt verwendeten
+Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY - siehe den
+ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
 jedem bestehenden Store NotImplementedError ausgelöst).
 """
@@ -33,13 +34,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from ..const import DOMAIN
+from ..const import DOMAIN, MAX_ECONOMICS_RESTART_REASON_LENGTH
 from ..domain.economics_amortization import MAX_STORED_DAYS, DayEconomicsResult
 
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 3
+STORAGE_MINOR_VERSION = 4
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
@@ -97,6 +98,13 @@ class EconomicsState:
     # analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN.
     priced_charge_kwh: float | None = None
     priced_discharge_kwh: float | None = None
+    # Zeitpunkt (UTC) und optionaler freier Grund des zuletzt ausgeführten
+    # kontrollierten Bilanzneustarts (sax_power.restart_economics_accounting)
+    # - rein diagnostisch, für den lokalen Diagnose-Download; beeinflusst
+    # keine Berechnung. Darf sich bei jedem weiteren Neustart beliebig
+    # ändern (keine Unveränderlichkeit wie economics_started_at).
+    last_restart_at: datetime | None = None
+    last_restart_reason: str | None = None
 
     @property
     def initialized(self) -> bool:
@@ -183,6 +191,12 @@ class EconomicsStateStore:
             ),
             priced_discharge_kwh=self._validated_nonnegative(
                 raw.get("priced_discharge_kwh"), "Bepreiste Entladung"
+            ),
+            last_restart_at=self._validated_timestamp(
+                raw.get("last_restart_at"), "letzter Bilanzneustart"
+            ),
+            last_restart_reason=self._validated_restart_reason(
+                raw.get("last_restart_reason")
             ),
             **self._validated_current_day(raw),
         )
@@ -453,6 +467,21 @@ class EconomicsStateStore:
         )
         return None
 
+    @staticmethod
+    def _validated_restart_reason(value: Any) -> str | None:
+        """Rein diagnostischer Freitext (siehe EconomicsState.
+        last_restart_reason) - nur Typ und Länge werden geprüft, kein
+        Inhalt."""
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            _LOGGER.warning(
+                "Ungültigen gespeicherten Bilanzneustart-Grund verworfen: %r",
+                value,
+            )
+            return None
+        return value[:MAX_ECONOMICS_RESTART_REASON_LENGTH]
+
     @classmethod
     def _validated_day_results(cls, value: Any) -> tuple[DayEconomicsResult, ...]:
         """Abgeschlossene Kalendertage, jeder für sich validiert.
@@ -602,4 +631,10 @@ class EconomicsStateStore:
             ),
             "priced_charge_kwh": state.priced_charge_kwh,
             "priced_discharge_kwh": state.priced_discharge_kwh,
+            "last_restart_at": (
+                state.last_restart_at.isoformat()
+                if state.last_restart_at is not None
+                else None
+            ),
+            "last_restart_reason": state.last_restart_reason,
         }

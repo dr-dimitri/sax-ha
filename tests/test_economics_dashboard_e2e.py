@@ -164,14 +164,14 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     roi_id = _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
 
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    config = await async_build_dashboard_config(hass, ENTRY_ID, coordinator.options)
     economics_view = next(
         view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
     )
 
     def _entity_ids(cards):
         for card in cards:
-            if card["type"] == "grid":
+            if card["type"] in ("grid", "vertical-stack"):
                 yield from _entity_ids(card["cards"])
             elif card["type"] == "entities":
                 for row in card["entities"]:

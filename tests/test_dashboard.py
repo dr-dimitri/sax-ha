@@ -17,6 +17,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
 from custom_components.sax_power.const import (
+    CONF_ECONOMICS_INVESTMENT_COST,
     DATA_COORDINATOR,
     DOMAIN,
     SERVICE_CREATE_DASHBOARD,
@@ -593,6 +594,18 @@ async def test_economics_view_status_card_entity_and_attribute_order(hass) -> No
     assert all(row["type"] == "attribute" for row in attribute_rows)
 
 
+def _origin_stack(view: dict[str, Any]) -> dict[str, Any]:
+    """Karte 2 ("Herkunft der Ladeenergie") ist ein vertical-stack aus der
+    entities-Karte plus dem Schätzungshinweis (REQ-ECONOMICS-DASHBOARD) -
+    zusammen weiterhin genau eine der fünf Top-Level-Karten des Views."""
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "vertical-stack"
+        and any(sub.get("title") == "Herkunft der Ladeenergie" for sub in card["cards"])
+    )
+
+
 async def test_economics_view_origin_card(hass) -> None:
     pv = _register(hass, "sensor", "energy_charged_from_pv")
     grid = _register(hass, "sensor", "energy_charged_from_grid")
@@ -605,7 +618,7 @@ async def test_economics_view_origin_card(hass) -> None:
     view = _economics_view(config)
     origin_card = next(
         card
-        for card in view["cards"]
+        for card in _origin_stack(view)["cards"]
         if card.get("title") == "Herkunft der Ladeenergie"
     )
     assert [row["entity"] for row in origin_card["entities"]] == [
@@ -615,6 +628,37 @@ async def test_economics_view_origin_card(hass) -> None:
         charged,
         discharged,
     ]
+
+
+async def test_economics_view_origin_card_has_estimation_note(hass) -> None:
+    """REQ-ECONOMICS-DASHBOARD verlangt einen Hinweis, dass die Herkunft
+    eine konservative Schätzung am Netzanschlusspunkt ist, keine
+    physikalische Einzelstromverfolgung - als Teil derselben Karte, nicht
+    als zusätzliche eigenständige Karte."""
+    _register(hass, "sensor", "energy_charged_from_pv")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    markdown_cards = [
+        card for card in _origin_stack(view)["cards"] if card["type"] == "markdown"
+    ]
+    assert len(markdown_cards) == 1
+    assert "konservative Schätzung" in markdown_cards[0]["content"]
+    assert "Netzanschlusspunkt" in markdown_cards[0]["content"]
+
+
+async def test_economics_view_origin_note_omitted_without_origin_entities(
+    hass,
+) -> None:
+    config = await async_build_dashboard_config(hass, "unbekannter_entry")
+
+    view = _economics_view(config)
+    assert not any(
+        card["type"] == "vertical-stack"
+        and any(sub["type"] == "markdown" for sub in card["cards"])
+        for card in view["cards"]
+    )
 
 
 async def test_economics_view_operating_balance_card(hass) -> None:
@@ -641,15 +685,53 @@ async def test_economics_view_operating_balance_card(hass) -> None:
     ]
 
 
-async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
-    progress_id = _register(hass, "sensor", "economics_amortization_progress")
+_INVESTMENT_OPTIONS = {CONF_ECONOMICS_INVESTMENT_COST: 1000.0}
+
+
+def _investment_stack(view: dict[str, Any]) -> dict[str, Any]:
+    return next(card for card in view["cards"] if card["type"] == "vertical-stack")
+
+
+async def test_economics_view_investment_block_omitted_without_investment_cost(
+    hass,
+) -> None:
+    """REQ-ECONOMICS-DASHBOARD: ROI/Fortschritt/... sind anders als die
+    übrigen Karten IMMER registriert - ohne konfigurierte
+    Investitionskosten muss die ganze Karte trotzdem fehlen, statt mit
+    lauter "unbekannt"-Zeilen zu erscheinen."""
+    _register(hass, "sensor", "economics_roi")
+    _register(hass, "sensor", "economics_amortization_progress")
+    _register(hass, "sensor", "economics_remaining_to_payback")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _economics_view(config)
+    assert not any(card["type"] == "vertical-stack" for card in view["cards"])
+    assert not any(card["type"] == "gauge" for card in view["cards"])
+
+
+async def test_economics_view_investment_block_shown_with_investment_cost(
+    hass,
+) -> None:
+    _register(hass, "sensor", "economics_roi")
+    _register(hass, "sensor", "economics_amortization_progress")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID, _INVESTMENT_OPTIONS)
+
+    view = _economics_view(config)
+    assert any(card["type"] == "vertical-stack" for card in view["cards"])
+
+
+async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
+    progress_id = _register(hass, "sensor", "economics_amortization_progress")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID, _INVESTMENT_OPTIONS)
+
+    view = _economics_view(config)
+    stack = _investment_stack(view)
     gauge = next(
         card
-        for card in view["cards"]
+        for card in stack["cards"]
         if card["type"] == "gauge" and card["entity"] == progress_id
     )
     assert gauge["min"] == 0
@@ -657,24 +739,28 @@ async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
     assert gauge["needle"] is True
 
 
-async def test_economics_view_investment_card_entities(hass) -> None:
+async def test_economics_view_investment_card_entities_and_order(hass) -> None:
+    """ROI, dann die Fortschritts-Gauge, dann der Rest - in genau dieser
+    Reihenfolge innerhalb derselben gemeinsamen Karte (vertical-stack)."""
     roi = _register(hass, "sensor", "economics_roi")
+    progress_id = _register(hass, "sensor", "economics_amortization_progress")
     remaining = _register(hass, "sensor", "economics_remaining_to_payback")
     result_today = _register(hass, "sensor", "economics_result_today")
     average = _register(hass, "sensor", "economics_average_daily_result_30d")
     annual = _register(hass, "sensor", "economics_projected_annual_result")
     payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
 
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    config = await async_build_dashboard_config(hass, ENTRY_ID, _INVESTMENT_OPTIONS)
 
     view = _economics_view(config)
-    investment_card = next(
-        card
-        for card in view["cards"]
-        if card.get("title") == "Investition und Amortisation"
-    )
-    assert [row["entity"] for row in investment_card["entities"]] == [
-        roi,
+    stack = _investment_stack(view)
+    sub_cards = stack["cards"]
+    assert sub_cards[0]["type"] == "entities"
+    assert [row["entity"] for row in sub_cards[0]["entities"]] == [roi]
+    assert sub_cards[1]["type"] == "gauge"
+    assert sub_cards[1]["entity"] == progress_id
+    assert sub_cards[2]["type"] == "entities"
+    assert [row["entity"] for row in sub_cards[2]["entities"]] == [
         remaining,
         result_today,
         average,

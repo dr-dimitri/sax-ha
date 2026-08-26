@@ -37,6 +37,7 @@ Deutsch korrekt, siehe translations/en.json).
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components import frontend
@@ -57,6 +58,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
+from .application.economics import investment_cost_eur_from_options
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -264,6 +266,21 @@ def _grid_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     return {"type": "grid", "columns": 2, "square": False, "cards": resolved}
 
 
+def _stack_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+    """Stapelt mehrere Karten vertikal zu einer Core-"vertical-stack"-Karte
+    - anders als _grid_card (nebeneinander, für Tile-Karten) hier für eine
+    feste Lese-Reihenfolge innerhalb eines fachlich zusammengehörigen
+    Blocks (REQ-ECONOMICS-DASHBOARD, Karte "Investition und
+    Amortisation": ROI-Zeile, Fortschritts-Gauge, restliche Zeilen - eine
+    "entities"-Karte kann selbst keine Gauge einbetten). Fehlende Karten
+    werden wie bei _grid_card stillschweigend ausgelassen; bleibt am Ende
+    nichts übrig, wird die ganze Karte weggelassen."""
+    resolved = [card for card in cards if card is not None]
+    if not resolved:
+        return None
+    return {"type": "vertical-stack", "cards": resolved}
+
+
 def _view(
     title: str, path: str, icon: str, cards: list[dict[str, Any] | None]
 ) -> dict[str, Any]:
@@ -276,9 +293,20 @@ def _view(
 
 
 async def async_build_dashboard_config(
-    hass: HomeAssistant, entry_id: str
+    hass: HomeAssistant, entry_id: str, options: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Baut die komplette Lovelace-Konfiguration (vier Tabs) für einen Entry."""
+    """Baut die komplette Lovelace-Konfiguration (fünf Tabs) für einen Entry.
+
+    `options` ist der Config-Entry-Options-Mapping (siehe __init__.py) -
+    wird ausschließlich gebraucht, um REQ-ECONOMICS-DASHBOARD-Karte 4
+    ("Investition und Amortisation") an dieselbe Bedingung wie die
+    zugehörigen Sensoren zu koppeln (investment_cost_eur_from_options):
+    ohne konfigurierte Investitionskosten fehlt die ganze Karte, obwohl
+    ihre sieben Entities (anders als bei den übrigen Tabs) unabhängig
+    davon bereits statisch registriert sind. `None`/fehlend verhält sich
+    wie eine leere Options-Zuordnung (Karte fehlt) - alle anderen Karten
+    bleiben unverändert rein entity-registry-basiert.
+    """
     translations = await translation.async_get_translations(
         hass, hass.config.language, "entity", integrations=[DOMAIN]
     )
@@ -488,25 +516,96 @@ async def async_build_dashboard_config(
         else None
     )
 
+    origin_card = _entities_card(
+        hass,
+        entry_id,
+        "Herkunft der Ladeenergie",
+        [
+            ("sensor", "energy_charged_from_pv"),
+            ("sensor", "energy_charged_from_grid"),
+            ("sensor", "energy_charged_origin_unknown"),
+            ("sensor", "energy_charged"),
+            ("sensor", "energy_discharged"),
+        ],
+        translations,
+    )
+    # REQ-ECONOMICS-DASHBOARD verlangt hier ausdrücklich den Hinweis, dass
+    # die Herkunftsaufteilung eine konservative Schätzung am
+    # Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine physikalische
+    # Einzelstromverfolgung - als Teil dieser einen Karte (vertical-stack),
+    # nicht als zusätzliche eigenständige Karte, und nur relevant, wenn
+    # überhaupt eine der Herkunfts-Entities vorhanden ist.
+    origin_note_card = (
+        {
+            "type": "markdown",
+            "content": (
+                "Die Herkunftsaufteilung ist eine konservative Schätzung "
+                "am Netzanschlusspunkt, keine physikalische "
+                "Einzelstromverfolgung."
+            ),
+        }
+        if origin_card is not None
+        else None
+    )
+    origin_block = _stack_card([origin_card, origin_note_card])
+
+    # REQ-ECONOMICS-DASHBOARD: eine gemeinsame Karte in genau dieser
+    # Reihenfolge (ROI, Fortschritts-Gauge, dann der Rest) - eine
+    # "entities"-Karte kann selbst keine Gauge einbetten, deshalb
+    # _stack_card (vertical-stack) aus drei Teilkarten. Anders als die
+    # übrigen Karten dieses Tabs hängt diese NICHT nur von der Entity-
+    # Registry ab: die sieben Sensoren sind (anders als z. B. die
+    # netzdienlichen Entities) immer bereits statisch registriert, auch
+    # ohne konfigurierte Investitionskosten (siehe REQ-ECONOMICS-
+    # AMORTIZATION) - die Karte muss deshalb zusätzlich explizit an
+    # dieselbe Options-Bedingung wie die Sensoren selbst gekoppelt werden.
+    investment_card = None
+    if investment_cost_eur_from_options(options or {}) is not None:
+        roi_row_card = _entities_card(
+            hass,
+            entry_id,
+            "Investition und Amortisation",
+            [("sensor", "economics_roi")],
+            translations,
+        )
+        progress_gauge = _gauge_card(
+            hass,
+            entry_id,
+            "sensor",
+            "economics_amortization_progress",
+            translations,
+            min_value=0,
+            max_value=100,
+            segments=[
+                {"from": 0, "color": "red"},
+                {"from": 50, "color": "yellow"},
+                {"from": 100, "color": "green"},
+            ],
+        )
+        remaining_rows_card = _entities_card(
+            hass,
+            entry_id,
+            "",
+            [
+                ("sensor", "economics_remaining_to_payback"),
+                ("sensor", "economics_result_today"),
+                ("sensor", "economics_average_daily_result_30d"),
+                ("sensor", "economics_projected_annual_result"),
+                ("sensor", "economics_estimated_payback_date"),
+            ],
+            translations,
+        )
+        investment_card = _stack_card(
+            [roi_row_card, progress_gauge, remaining_rows_card]
+        )
+
     economics_view = _view(
         "Wirtschaftlichkeit",
         "wirtschaftlichkeit",
         "mdi:cash-chart",
         [
             status_card,
-            _entities_card(
-                hass,
-                entry_id,
-                "Herkunft der Ladeenergie",
-                [
-                    ("sensor", "energy_charged_from_pv"),
-                    ("sensor", "energy_charged_from_grid"),
-                    ("sensor", "energy_charged_origin_unknown"),
-                    ("sensor", "energy_charged"),
-                    ("sensor", "energy_discharged"),
-                ],
-                translations,
-            ),
+            origin_block,
             _entities_card(
                 hass,
                 entry_id,
@@ -521,34 +620,7 @@ async def async_build_dashboard_config(
                 ],
                 translations,
             ),
-            _gauge_card(
-                hass,
-                entry_id,
-                "sensor",
-                "economics_amortization_progress",
-                translations,
-                min_value=0,
-                max_value=100,
-                segments=[
-                    {"from": 0, "color": "red"},
-                    {"from": 50, "color": "yellow"},
-                    {"from": 100, "color": "green"},
-                ],
-            ),
-            _entities_card(
-                hass,
-                entry_id,
-                "Investition und Amortisation",
-                [
-                    ("sensor", "economics_roi"),
-                    ("sensor", "economics_remaining_to_payback"),
-                    ("sensor", "economics_result_today"),
-                    ("sensor", "economics_average_daily_result_30d"),
-                    ("sensor", "economics_projected_annual_result"),
-                    ("sensor", "economics_estimated_payback_date"),
-                ],
-                translations,
-            ),
+            investment_card,
             _statistics_graph_card(
                 hass,
                 entry_id,
@@ -615,7 +687,7 @@ async def _async_create_dashboard(
     if existing_storage is not None:
         if force:
             await existing_storage.async_save(
-                await async_build_dashboard_config(hass, entry.entry_id)
+                await async_build_dashboard_config(hass, entry.entry_id, entry.options)
             )
         return  # bereits angelegt (z. B. durch einen früheren Setup-Lauf)
 
@@ -641,7 +713,9 @@ async def _async_create_dashboard(
     )
 
     storage = lovelace_dashboard.LovelaceStorage(hass, item)
-    await storage.async_save(await async_build_dashboard_config(hass, entry.entry_id))
+    await storage.async_save(
+        await async_build_dashboard_config(hass, entry.entry_id, entry.options)
+    )
     lovelace_data.dashboards[DASHBOARD_URL_PATH] = storage
 
     frontend.async_register_built_in_panel(

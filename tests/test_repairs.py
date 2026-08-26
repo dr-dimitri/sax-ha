@@ -478,6 +478,32 @@ async def test_economics_price_unavailable_issue_clears_once_price_returns(
     assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
 
 
+async def test_economics_price_unavailable_issue_clears_after_a_reload(hass) -> None:
+    """Ein Neuladen des Config Entry erzeugt eine frische SelfDiagnostics-
+    Instanz mit zurückgesetztem In-Memory-Flag - ein davor angelegtes,
+    in der Registry noch vorhandenes Issue muss trotzdem gelöscht werden,
+    sobald der Preis wieder gültig ist (nicht erst nach einem erneuten
+    Sichtbarwerden des Problems)."""
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is not None
+
+    # Simuliert den Neustart der SelfDiagnostics-Instanz bei einem Neuladen
+    # des Config Entry - das Issue bleibt in der Registry bestehen.
+    from custom_components.sax_power.infrastructure.self_diagnostics import (
+        SelfDiagnostics,
+    )
+
+    coordinator._self_diagnostics = SelfDiagnostics(hass, coordinator.entry_id)
+    coordinator._economics_price_unavailable = False
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
 async def test_economics_price_unavailable_issue_not_triggered_when_disabled(
     hass,
 ) -> None:

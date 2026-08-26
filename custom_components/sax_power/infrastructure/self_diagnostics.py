@@ -218,15 +218,29 @@ class SelfDiagnostics:
     def _check_economics_price_unavailable(self, snapshot: DiagnosticSnapshot) -> None:
         """REQ-ECONOMICS-OBSERVABILITY: rein informativ, ohne eigene
         Karenzzeit - die steckt bereits in
-        snapshot.economics_price_unavailable (Coordinator)."""
+        snapshot.economics_price_unavailable (Coordinator).
+
+        Die Löschung prüft zusätzlich zum lokalen
+        `_economics_price_unavailable_issue_active`-Flag den tatsächlichen
+        Issue-Registry-Zustand: Das Flag lebt nur im Arbeitsspeicher dieser
+        SelfDiagnostics-Instanz und startet nach jedem Neuladen des Config
+        Entry wieder bei `False` - ein zuvor angelegtes, in der Registry
+        aber weiterhin vorhandenes Issue würde sonst nie gelöscht, selbst
+        wenn der Preis inzwischen wieder gültig ist. Für das Anlegen genügt
+        weiterhin das Flag: ein doppelter Aufruf von `async_create_issue`
+        für dieselbe issue_id ist ohnehin idempotent, das Flag vermeidet
+        ihn nur zusätzlich.
+        """
         issue_id = f"{ISSUE_ECONOMICS_PRICE_UNAVAILABLE}_{self._entry_id}"
         problem = (
             snapshot.economics_tariff_enabled and snapshot.economics_price_unavailable
         )
         if not problem:
-            if self._economics_price_unavailable_issue_active:
+            if self._economics_price_unavailable_issue_active or (
+                ir.async_get(self._hass).async_get_issue(DOMAIN, issue_id) is not None
+            ):
                 ir.async_delete_issue(self._hass, DOMAIN, issue_id)
-                self._economics_price_unavailable_issue_active = False
+            self._economics_price_unavailable_issue_active = False
             return
         if self._economics_price_unavailable_issue_active:
             return

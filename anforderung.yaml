@@ -3265,7 +3265,16 @@ requirement_economics_amortization:
     positiv und ist noch ein Restbetrag offen, ergibt sich payback_days =
     remaining_to_payback_eur / average_daily_result_eur und
     estimated_payback_date = heute + aufgerundete payback_days
-    (math.ceil) - hier immer eine zukünftige Projektion. Der dafür
+    (math.ceil) - hier immer eine zukünftige Projektion. Überschreitet
+    payback_days dabei die Horizontgrenze MAX_FORECAST_PAYBACK_DAYS
+    (36.524 Tage, ~100 Jahre), bleibt estimated_payback_date wie bei einem
+    nicht positiven Durchschnitt unbekannt, während payback_days als
+    Diagnosewert erhalten bleibt: ein winziger, aber positiver
+    Tagesdurchschnitt (Ladekosten und vermiedene Kosten heben sich fast
+    auf) ergäbe sonst ein von date/timedelta nicht mehr darstellbares
+    Datum, und der OverflowError daraus würde über _async_update_data
+    sämtliche Entities der Integration - auch die steuernden - unavailable
+    machen. Der dafür
     verwendete remaining_to_payback_eur ist der tatsächliche, UNMASKIERTE
     Restbetrag aus dem intern weiterlaufenden operativen Ergebnis, nicht der
     während einer Tarifpause auf None ausgeblendete - sonst würde eine Pause
@@ -3345,6 +3354,10 @@ requirement_economics_amortization:
     - "30 vorhandene, aber lückenhafte Tages-Buckets (z. B. nur jeder zweite
        Tag über einen längeren Zeitraum) ergeben INSUFFICIENT_HISTORY statt
        einer aus Lückenfüllern zusammengesetzten Prognose."
+    - "Ein positiver, aber verschwindend kleiner Tagesdurchschnitt (z. B.
+       0,001 EUR/Tag bei 9.000 EUR Restbetrag) liefert payback_days als
+       Diagnosewert, estimated_payback_date = None und niemals einen
+       OverflowError (tests/test_economics_amortization.py)."
     - "Tageswechsel bei einer Sommerzeit- (23h) und einer
        Winterzeitumstellung (25h), ein Neustart mit bereits laufendem Tag
        sowie eine doppelte Verarbeitung desselben Ticks erzeugen jeweils

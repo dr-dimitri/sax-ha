@@ -15,6 +15,7 @@ import pytest
 from custom_components.sax_power.domain.economics_amortization import (
     DAY_COVERAGE_THRESHOLD_PERCENT,
     FORECAST_WINDOW_DAYS,
+    MAX_FORECAST_PAYBACK_DAYS,
     DayEconomicsResult,
     ForecastUnavailable,
     compute_amortization_forecast,
@@ -271,3 +272,51 @@ def test_forecast_leaves_the_payback_date_unknown_once_already_achieved() -> Non
 
     assert forecast.payback_days is None
     assert forecast.estimated_payback_date is None
+
+
+def test_forecast_leaves_the_payback_date_unknown_beyond_the_horizon() -> None:
+    """Ein positiver, aber verschwindend kleiner Durchschnitt (Ladekosten
+    und vermiedene Kosten heben sich fast auf) ergibt eine Amortisations-
+    dauer jenseits von MAX_FORECAST_PAYBACK_DAYS: fachlich derselbe Fall
+    wie Regel 9 - nur das Datum bleibt unbekannt, niemals ein
+    OverflowError, der über den Coordinator die gesamte Integration
+    unavailable machen würde."""
+    forecast = compute_amortization_forecast(
+        _full_coverage_window(result=0.001), TODAY, 9000.0, 9000.0
+    )
+
+    assert forecast.average_daily_result_eur == pytest.approx(0.001)
+    assert forecast.projected_annual_result_eur == pytest.approx(0.001 * 365.2425)
+    assert forecast.payback_days == pytest.approx(9_000_000.0)
+    assert forecast.estimated_payback_date is None
+
+
+def test_forecast_survives_a_payback_duration_beyond_the_timedelta_range() -> None:
+    """Unterhalb von remaining / 1e9 scheitert bereits timedelta() selbst
+    ("Python int too large to convert to C int") - auch dieser Fall bleibt
+    eine Prognose ohne Datum statt einer Exception."""
+    forecast = compute_amortization_forecast(
+        _full_coverage_window(result=1e-12), TODAY, 9000.0, 9000.0
+    )
+
+    assert forecast.payback_days == pytest.approx(9e15)
+    assert forecast.estimated_payback_date is None
+
+
+def test_forecast_still_reports_a_payback_date_exactly_at_the_horizon() -> None:
+    """Die Grenze selbst ist inklusiv - erst darüber entfällt das Datum."""
+    remaining = float(MAX_FORECAST_PAYBACK_DAYS)
+    forecast = compute_amortization_forecast(
+        _full_coverage_window(result=1.0), TODAY, 100_000.0, remaining
+    )
+
+    assert forecast.payback_days == pytest.approx(MAX_FORECAST_PAYBACK_DAYS)
+    assert forecast.estimated_payback_date == TODAY + timedelta(
+        days=MAX_FORECAST_PAYBACK_DAYS
+    )
+
+    beyond = compute_amortization_forecast(
+        _full_coverage_window(result=1.0), TODAY, 100_000.0, remaining + 1.0
+    )
+
+    assert beyond.estimated_payback_date is None

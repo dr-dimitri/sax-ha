@@ -291,7 +291,13 @@ jeden Home-Assistant-Bezug:
   Fenster). Verwirft die GESAMTE Prognose (nicht nur einzelne Tage),
   sobald auch nur ein Tag `DAY_COVERAGE_THRESHOLD_PERCENT` (95 %)
   unterschreitet; `average_price_coverage_percent` bleibt dabei als
-  Diagnosewert gesetzt.
+  Diagnosewert gesetzt. Das Rückzahlungsdatum entfällt nicht nur bei einem
+  nicht positiven Durchschnitt, sondern auch jenseits von
+  `MAX_FORECAST_PAYBACK_DAYS` (~100 Jahre): ein winziger, aber positiver
+  Durchschnitt ergäbe sonst ein von `date`/`timedelta` nicht mehr
+  darstellbares Datum, und dieser `OverflowError` würde über
+  `_async_update_data` sämtliche Entities unavailable machen - `payback_days`
+  bleibt als Diagnosewert erhalten.
 
 Tageswechsel-Erkennung ohne eigenen Timer, in
 `SaxPowerCoordinator._advance_economics_day` (aufgerufen aus

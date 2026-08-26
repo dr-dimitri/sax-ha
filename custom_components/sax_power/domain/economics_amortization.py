@@ -32,6 +32,14 @@ DAY_COVERAGE_THRESHOLD_PERCENT = 95.0
 #: Jahr aus dem 30-Tage-Durchschnitt.
 DAYS_PER_YEAR = 365.2425
 
+#: Längste Amortisationsdauer (Tage, ~100 Jahre), für die noch ein
+#: Rückzahlungsdatum gemeldet wird. Ein winziger, aber positiver
+#: Tagesdurchschnitt (Ladekosten und vermiedene Kosten heben sich fast auf)
+#: ergibt sonst eine Tagesanzahl, die `date`/`timedelta` nicht mehr
+#: darstellen können - der resultierende OverflowError würde über den
+#: Coordinator die gesamte Integration unavailable machen (siehe Issue #130).
+MAX_FORECAST_PAYBACK_DAYS = 36_524
+
 
 class ForecastUnavailable(StrEnum):
     """Maschinenlesbarer Grund, warum keine Prognose möglich ist."""
@@ -98,7 +106,9 @@ class AmortizationForecast:
     `estimated_payback_date` ist hier IMMER eine zukünftige Projektion aus
     dem 30-Tage-Durchschnitt - ein bereits erreichtes Payback (Regel 8,
     fixes historisches Datum) verwaltet der Coordinator separat und
-    überschreibt dieses Feld dafür, statt es hier zu berechnen.
+    überschreibt dieses Feld dafür, statt es hier zu berechnen. Es kann
+    auch bei gesetztem `payback_days` None sein, sobald die Dauer
+    MAX_FORECAST_PAYBACK_DAYS überschreitet.
     """
 
     average_daily_result_eur: float | None = None
@@ -173,7 +183,10 @@ def compute_amortization_forecast(
     Rückzahlungsdatum unbekannt (Regel 9); average_daily_result_eur und
     projected_annual_result_eur bleiben trotzdem gesetzt, solange die
     30-Tage-Bedingung erfüllt ist - ein negativer Durchschnitt ist eine
-    gültige, aussagekräftige Information.
+    gültige, aussagekräftige Information. Fachlich derselbe Fall ist eine
+    Amortisationsdauer jenseits von MAX_FORECAST_PAYBACK_DAYS: auch dort
+    bleibt nur das Datum unbekannt, payback_days selbst bleibt als
+    Diagnosewert erhalten.
     """
     if investment_cost_eur is None:
         return AmortizationForecast(reason=ForecastUnavailable.NO_INVESTMENT_COST)
@@ -215,7 +228,10 @@ def compute_amortization_forecast(
         and remaining_to_payback_eur > 0
     ):
         payback_days = remaining_to_payback_eur / average
-        estimated_payback_date = today_local + timedelta(days=math.ceil(payback_days))
+        if payback_days <= MAX_FORECAST_PAYBACK_DAYS:
+            estimated_payback_date = today_local + timedelta(
+                days=math.ceil(payback_days)
+            )
 
     return AmortizationForecast(
         average_daily_result_eur=average,

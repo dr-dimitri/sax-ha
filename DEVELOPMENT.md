@@ -325,7 +325,13 @@ Tag. Die beobachtete Zeit des laufenden Tages wächst dabei aus derselben
 Riemann-Summe wie die Energie (`_accumulate_energy` reicht die Dauer des
 gerade verbuchten Intervalls durch, keine zweite Uhr): Genau die
 Intervalle, die nicht verbucht werden - der erste Tick nach einem Neustart,
-jede Phase ohne Leistungswert - zählen auch nicht als beobachtet. Beim
+jede Phase ohne Leistungswert, die Zeit nach einem fehlgeschlagenen Update
+(`_async_update_data` verwirft dafür `_energy_last_ts`) - zählen auch nicht
+als beobachtet. Gespeichert wird sie nur beim Überschreiten des nächsten
+Rasterschritts (`OBSERVED_TIME_SAVE_GRANULARITY_SECONDS`, 15 min), weil sie
+sich sonst als einziger Wert bei jedem Tick bewegte und den Store auch auf
+einem ruhenden System dauerhaft alle `ECONOMICS_SAVE_DELAY` Sekunden
+schreiben ließe. Beim
 Abschluss schreibt `_close_economics_day` die tatsächliche Tageslänge fest
 (`dt_util.start_of_local_day`, Differenz bewusst über UTC gerechnet: bei
 zwei `datetime`-Objekten mit demselben `tzinfo` ignoriert Python den

@@ -141,6 +141,18 @@ from .price_optimizer import PricePlan, SaxPricePlanner
 
 _LOGGER = logging.getLogger(__name__)
 
+#: Raster (Sekunden), in dem allein die fortlaufende Beobachtungsdauer des
+#: laufenden Tages ein verzögertes Speichern auslöst. Sie wächst bei JEDEM
+#: verbuchten Intervall; ohne dieses Raster schriebe der Store auch auf
+#: einem völlig ruhenden System dauerhaft alle ECONOMICS_SAVE_DELAY
+#: Sekunden (Flash-Verschleiß auf SD-Karten-Installationen). 15 Minuten
+#: sind rund 1 % eines Kalendertages und damit weit innerhalb der 5 %, die
+#: DAY_TIME_COVERAGE_THRESHOLD_PERCENT einem Tag zugesteht - mehr kann ein
+#: ungeplanter Neustart an Beobachtungsdauer nicht verlieren. Jede andere
+#: Änderung (Geld, Energie, Tagesabschluss) speichert unverändert sofort
+#: und nimmt den aktuellen Stand dabei ohnehin mit.
+OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
+
 
 _MONTH_NAMES_DE = {
     1: "Januar",
@@ -540,8 +552,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._self_diagnostics = SelfDiagnostics(hass, entry_id)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        data = dict(await self._async_read_basic())
-        data.update(await self._async_read_extended())
+        try:
+            data = dict(await self._async_read_basic())
+            data.update(await self._async_read_extended())
+        except UpdateFailed:
+            # Die Riemann-Baseline darf einen Ausfall nicht überbrücken:
+            # _energy_last_ts wird ausschließlich in _accumulate_energy
+            # fortgeschrieben, das bei einem fehlgeschlagenen Basic-Read gar
+            # nicht mehr erreicht wird. Ohne dieses Verwerfen verbuchte der
+            # erste erfolgreiche Tick nach einem stundenlangen Geräte-/
+            # Netzausfall die GESAMTE Ausfallzeit mit der zuletzt bekannten
+            # Leistung als Energie und zählte sie zusätzlich als beobachtete
+            # Zeit des Kalendertages (REQ-ECONOMICS-AMORTIZATION), obwohl in
+            # dieser Zeit nichts gemessen wurde - der Tag sähe damit
+            # vollständig beobachtet aus, genau den Fall soll die
+            # Zeitabdeckung ausschließen.
+            self._energy_last_ts = None
+            raise
         self._accumulate_energy(data)
 
         calibration_changed = await self._async_update_cell_calibration(data["soc"])
@@ -800,13 +827,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 observed_seconds > 0
                 and self._economics_current_day_observed_seconds is not None
             ):
-                self._economics_current_day_observed_seconds += observed_seconds
                 # Die beobachtete Zeit muss einen Neustart überleben, sonst
                 # sähe jeder Neustart den laufenden Tag als unvollständiger
-                # an, als er tatsächlich war - anders als die Geldsummen
-                # bewegt sie sich bei jedem verbuchten Intervall, das
-                # verzögerte Speichern koalesziert das (ECONOMICS_SAVE_DELAY).
-                changed = True
+                # an, als er tatsächlich war. Anders als die Geldsummen
+                # bewegt sie sich aber bei JEDEM verbuchten Intervall -
+                # deshalb löst sie das Speichern nur beim Überschreiten des
+                # nächsten Rasterschritts aus (siehe
+                # OBSERVED_TIME_SAVE_GRANULARITY_SECONDS).
+                previous = self._economics_current_day_observed_seconds
+                self._economics_current_day_observed_seconds = (
+                    previous + observed_seconds
+                )
+                changed = changed or (
+                    self._economics_current_day_observed_seconds
+                    // OBSERVED_TIME_SAVE_GRANULARITY_SECONDS
+                    > previous // OBSERVED_TIME_SAVE_GRANULARITY_SECONDS
+                )
 
             if delta is not None:
                 self._economics_grid_charge_cost_eur += delta.grid_charge_cost_delta

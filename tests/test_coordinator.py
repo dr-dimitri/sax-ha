@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 from homeassistant.components import persistent_notification
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from custom_components.sax_power.application.calibration import CalibrationState
@@ -48,6 +49,7 @@ from custom_components.sax_power.const import (
     SUN_IC_MIN_WRITE_INTERVAL,
 )
 from custom_components.sax_power.coordinator import (
+    OBSERVED_TIME_SAVE_GRANULARITY_SECONDS,
     SaxPowerCoordinator,
     _clamp_int,
     _grid_serving_pause_status,
@@ -5135,22 +5137,68 @@ async def test_a_restart_resumes_the_persisted_observed_time(hass) -> None:
     assert closed.observed_seconds == pytest.approx(70_000.0)
 
 
-def test_observed_time_alone_schedules_a_save(hass) -> None:
-    """Die beobachtete Zeit bewegt sich auch ohne jede Energiebewegung -
-    ohne verzögertes Speichern überlebte sie keinen ungeplanten Neustart."""
+def test_observed_time_schedules_a_save_once_per_granularity_step(hass) -> None:
+    """Die beobachtete Zeit bewegt sich auch ohne jede Energiebewegung und
+    muss einen ungeplanten Neustart überleben - sie darf den Store aber
+    nicht dauerhaft alle ECONOMICS_SAVE_DELAY Sekunden schreiben lassen,
+    auch nicht auf einem völlig ruhenden System."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
     coordinator._async_schedule_economics_save = MagicMock()
 
+    # Innerhalb desselben Rasterschritts: kein Speichern allein deswegen.
     _tick_with_delta(
         coordinator,
-        monotonic_value=1000.0 + 600,
-        now=datetime(2026, 3, 10, 9, 10),
+        monotonic_value=1000.0 + OBSERVED_TIME_SAVE_GRANULARITY_SECONDS / 2,
+        now=datetime(2026, 3, 10, 9, 7),
+        delta=EconomicsDelta(),
+    )
+    coordinator._async_schedule_economics_save.assert_not_called()
+
+    # Erst der Rasterschritt selbst löst genau einmal aus.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + OBSERVED_TIME_SAVE_GRANULARITY_SECONDS + 1,
+        now=datetime(2026, 3, 10, 9, 16),
+        delta=EconomicsDelta(),
+    )
+    coordinator._async_schedule_economics_save.assert_called_once()
+
+
+async def test_a_failed_update_drops_the_riemann_baseline(hass) -> None:
+    """Ein fehlgeschlagener Basic-Read überspringt _accumulate_energy
+    komplett - ohne Verwerfen der Baseline verbuchte der erste
+    erfolgreiche Tick danach die gesamte Ausfallzeit als Energie und als
+    beobachtete Zeit des Tages (Issue #131), obwohl nichts gemessen
+    wurde."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(),
+    )
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+    coordinator._async_read_basic = AsyncMock(side_effect=UpdateFailed("Modbus weg"))
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert coordinator._energy_last_ts is None
+
+    # Der erste Tick nach dem Ausfall setzt nur wieder die Zeitbasis -
+    # die 12 Stunden Ausfall zählen nicht als beobachtete Zeit.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600 + 43_200,
+        now=datetime(2026, 3, 10, 22, 0),
         delta=EconomicsDelta(),
     )
 
-    coordinator._async_schedule_economics_save.assert_called_once()
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
 
 
 async def test_a_restart_resumes_the_persisted_current_day(hass) -> None:

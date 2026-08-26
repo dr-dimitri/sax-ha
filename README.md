@@ -610,8 +610,13 @@ Home Assistant an einem Tag längere Zeit aus (Neustart, Update,
 Stromausfall), enthält dieser Tag nur einen Teil seines Ergebnisses und
 würde Durchschnitt, Hochrechnung und Amortisationsdatum zu pessimistisch
 machen - auch dann bleibt die Prognose lieber "unbekannt". Kurze
-Neustarts von wenigen Minuten sind davon nicht betroffen. Ein nicht
-positiver
+Neustarts von wenigen Minuten sind davon nicht betroffen. Für bereits
+gespeicherte Tage aus einer älteren Version der Integration ist die
+Beobachtungsdauer nicht bekannt: Nach dem Update auf diese Version bleibt
+die 30-Tage-Prognose deshalb einmalig so lange "unbekannt", bis 30 neue,
+vollständig beobachtete Kalendertage vorliegen. Die übrigen Sensoren
+(Bilanz, ROI, Fortschritt, Restbetrag, Tagesergebnis) sind davon nicht
+betroffen. Ein nicht positiver
 Durchschnitt lässt nur das Rückzahlungsdatum unbekannt; Durchschnitt und
 Hochrechnung werden trotzdem angezeigt, nie ein erfundenes Datum. Anders
 als die vier "aktuellen" Sensoren bleibt diese Prognose - einschließlich

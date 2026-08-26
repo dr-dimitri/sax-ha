@@ -1479,7 +1479,15 @@ requirement_energy_dashboard_compatibility:
     erreichbar, siehe REQ-EXTENDED-MODE-RESILIENCE), wird die betroffene
     Zeitspanne übersprungen statt mit 0 W verbucht, damit nach Wiederkehr
     kein Nachhol-Sprung entsteht. Auch ein fehlgeschlagener Basic-Mode-Poll
-    verändert die internen Zähler und ihren gespeicherten Snapshot nicht.
+    verändert die internen Zähler und ihren gespeicherten Snapshot nicht -
+    er verwirft zusätzlich die Riemann-Baseline (_energy_last_ts = None,
+    _async_update_data), weil _accumulate_energy in diesem Fall gar nicht
+    mehr erreicht wird: Ohne dieses Verwerfen verbuchte der erste
+    erfolgreiche Tick nach einem stundenlangen Geräte-/Netzausfall die
+    gesamte Ausfallzeit mit der zuletzt bekannten Leistung als Energie und
+    zählte sie als beobachtete Zeit des Kalendertages
+    (REQ-ECONOMICS-AMORTIZATION). Der erste Tick nach einem Ausfall setzt
+    damit - wie nach jedem Neustart - nur die Zeitbasis neu.
   requirements:
     - "Zwei Sensoren 'energy_charged'/'energy_discharged' (device_class
        energy, state_class total_increasing, Einheit kWh), über Neustarts
@@ -1493,6 +1501,9 @@ requirement_energy_dashboard_compatibility:
        kleineren Wert setzen und werden mit Warnung verworfen."
     - "Kein Akkumulieren vor Abschluss des Restores und während
        storage_power_active unbekannt ist."
+    - "Ein fehlgeschlagenes Update verwirft die Riemann-Baseline, sodass
+       die Ausfallzeit weder als Energie noch als beobachtete Zeit eines
+       Kalendertages verbucht wird (tests/test_coordinator.py)."
     - "Negative storage_power_active (Ladung) fließt ausschließlich in
        energy_charged, positive (Entladung) ausschließlich in
        energy_discharged."
@@ -3249,10 +3260,17 @@ requirement_economics_amortization:
     Vor-Leistung) und jede Phase ohne Leistungswert (SunSpec-Modus nicht
     erreichbar). Ein Intervall über Mitternacht zählt vollständig zum neuen
     Tag, exakt wie seine Energie und sein Geldwert. Weil sich die
-    beobachtete Zeit bei jedem verbuchten Intervall bewegt, löst sie - wie
-    jede andere Änderung des laufenden Tages - das verzögerte Speichern aus
-    (ECONOMICS_SAVE_DELAY koalesziert das); ohne diese Persistenz sähe jeder
-    Neustart den laufenden Tag als unvollständiger an, als er war.
+    beobachtete Zeit bei jedem verbuchten Intervall bewegt, löst sie das
+    verzögerte Speichern - anders als jede andere Änderung des laufenden
+    Tages - nur beim Überschreiten des nächsten Rasterschritts von
+    OBSERVED_TIME_SAVE_GRANULARITY_SECONDS (900 s) aus; sonst schriebe der
+    Store auch auf einem völlig ruhenden System dauerhaft alle
+    ECONOMICS_SAVE_DELAY Sekunden. 15 Minuten sind rund 1 % eines Tages und
+    damit das Maximum, das ein ungeplanter Neustart an Beobachtungsdauer
+    verlieren kann - weit innerhalb der 5 %, die
+    DAY_TIME_COVERAGE_THRESHOLD_PERCENT zugesteht. Ohne diese Persistenz
+    sähe jeder Neustart den laufenden Tag als unvollständiger an, als er
+    war.
     day_length_seconds wird beim Tagesabschluss festgeschrieben
     (_close_economics_day über dt_util.start_of_local_day, also dieselbe
     Zeitzone wie die Tageserkennung) und ist an einer DST-Umstellung 23
@@ -3424,10 +3442,11 @@ requirement_economics_amortization:
        Kalendertages: ein abgeschlossener 23h-/25h-DST-Tag trägt 82.800
        bzw. 90.000 Sekunden als day_length_seconds
        (tests/test_coordinator.py)."
-    - "Der erste Tick nach einem Neustart und ein Intervall ohne
-       Leistungswert zählen nicht als beobachtete Zeit; die beobachtete
-       Zeit allein löst ein verzögertes Speichern aus und übersteht einen
-       Neustart mitten im Tag (tests/test_coordinator.py)."
+    - "Der erste Tick nach einem Neustart, ein Intervall ohne
+       Leistungswert und die Zeit nach einem fehlgeschlagenen Update
+       zählen nicht als beobachtete Zeit; die beobachtete Zeit allein löst
+       ein verzögertes Speichern genau einmal je Rasterschritt aus und
+       übersteht einen Neustart mitten im Tag (tests/test_coordinator.py)."
     - "Ein gespeicherter Tag ohne observed_seconds (Store vor
        MINOR_VERSION 5) bleibt erhalten und gilt als unvollständig
        beobachtet, ein vorhandener ungültiger Wert verwirft den Tag, und

@@ -4211,3 +4211,180 @@ def test_restore_energy_rejects_negative_values(hass, caplog) -> None:
     assert data["energy_charged"] is None
     assert data["energy_discharged"] is None
     assert "Ungültigen RestoreEntity-Altzustand" in caplog.text
+
+
+# -- Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN) ----------------------------
+# Die physikalischen Bilanzregel-Fälle (reine PV-/Netzladung, gemischt,
+# Einspeisung während Ladung, Netzbezug größer/kleiner Ladeleistung,
+# unbekannter Smartmeter-Wert, Delta-Invariante) sind reine Funktionstests
+# von domain.energy_accounting.compute_charge_delta, siehe
+# tests/test_energy_accounting.py. Hier nur die Verdrahtung in
+# coordinator.data: Rundung, energy_origin_coverage sowie dass Entladung und
+# ein SunSpec-Ausfall die Herkunftszähler unverändert lassen.
+
+
+def _seed_origin_accounting(coordinator: SaxPowerCoordinator) -> None:
+    """Startet die Herkunftszählung wie ein frisch geladener Store.
+
+    Reine In-Memory-Vorbereitung für Coordinator-Tests, die keinen echten
+    Store-Ladevorgang durchlaufen (siehe _make_coordinator) - identisch zu
+    dem, was SaxPowerCoordinator._bootstrap_energy_origin bei einer frischen
+    Installation setzt.
+    """
+    coordinator._bootstrap_energy_origin(None)
+
+
+def test_accumulate_energy_origin_rounds_to_three_decimals(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": 400}
+        coordinator._accumulate_energy(data)
+
+    # 1000 W Ladeleistung über 3s, davon 400 W Netzbezug, Rest PV.
+    assert data["energy_charged"] == round(1000 * (3 / 3600) / 1000, 3)
+    assert data["energy_charged_from_grid"] == round(400 * (3 / 3600) / 1000, 3)
+    assert data["energy_charged_from_pv"] == round(600 * (3 / 3600) / 1000, 3)
+    assert data["energy_charged_origin_unknown"] == 0.0
+
+
+def test_accumulate_energy_discharge_leaves_origin_counters_untouched(hass) -> None:
+    """Entladung darf keinen Herkunftszähler verändern."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": 1500})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": 1500, "smartmeter_power": -500}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_discharged"] == 1.5
+    assert data["energy_charged_from_grid"] == 0.0
+    assert data["energy_charged_from_pv"] == 0.0
+    assert data["energy_charged_origin_unknown"] == 0.0
+    assert data["energy_origin_coverage"] == 100.0
+
+
+def test_accumulate_energy_skips_origin_when_storage_power_unknown(hass) -> None:
+    """Ein SunSpec-Ausfall (storage_power_active None) darf keinen Reset,
+    Rücksprung oder Nachholsprung der Herkunftszähler auslösen - exakt wie
+    für energy_charged/energy_discharged."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {"storage_power_active": -1000, "smartmeter_power": 1000}
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100000.0
+    ):
+        coordinator._accumulate_energy(
+            {"storage_power_active": None, "smartmeter_power": None}
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100010.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": 1000}
+        coordinator._accumulate_energy(data)
+
+    # Nur die 10s seit der Wiederkehr fließen ein, nicht die ~99000s
+    # Ausfallzeit davor.
+    assert data["energy_charged_from_grid"] == round(1000 * (10 / 3600) / 1000, 3)
+    assert data["energy_charged_from_pv"] == 0.0
+
+
+def test_accumulate_energy_origin_stays_none_before_bootstrap(hass) -> None:
+    """Ohne initialisierte Herkunftszählung (kein Store geladen) bleiben die
+    drei neuen Zähler und die Abdeckung None, exakt wie energy_charged vor
+    dem Restore."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": 500}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 1.0
+    assert data["energy_charged_from_grid"] is None
+    assert data["energy_charged_from_pv"] is None
+    assert data["energy_charged_origin_unknown"] is None
+    assert data["energy_origin_coverage"] is None
+
+
+def test_energy_origin_coverage_reflects_the_unknown_share(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        # 1 kWh Ladeenergie, Smartmeter-Wert unbekannt -> vollständig
+        # "Herkunft unbekannt".
+        data = {"storage_power_active": -1000, "smartmeter_power": None}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_origin_coverage"] == 0.0
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        # Weitere 1 kWh, diesmal komplett als Netzladung zugeordnet.
+        data = {"storage_power_active": -1000, "smartmeter_power": 2000}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_origin_coverage"] == 50.0
+
+
+def test_energy_origin_coverage_is_100_percent_without_any_charging(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {"storage_power_active": 0}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_origin_coverage"] == 100.0

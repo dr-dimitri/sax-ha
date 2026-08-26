@@ -648,6 +648,45 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("battery_cell_voltage_avg"),
     ),
+    # -- Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN) ------------------------
+    # Anders als energy_charged/energy_discharged (SaxPowerEnergySensor
+    # unten) ohne RestoreEntity: Es gibt keinen sichtbaren Alt-Zustand zu
+    # migrieren, der versionierte Store (infrastructure/energy_store.py)
+    # ist von Anfang an die alleinige, bereits beim Coordinator-Start
+    # initialisierte Quelle - genau wie bei jedem anderen berechneten Wert
+    # aus coordinator.data.
+    SaxPowerSensorEntityDescription(
+        key="energy_charged_from_grid",
+        translation_key="energy_charged_from_grid",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_charged_from_grid"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="energy_charged_from_pv",
+        translation_key="energy_charged_from_pv",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_charged_from_pv"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="energy_charged_origin_unknown",
+        translation_key="energy_charged_origin_unknown",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_charged_origin_unknown"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="energy_origin_coverage",
+        translation_key="energy_origin_coverage",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_direct("energy_origin_coverage"),
+    ),
 )
 
 

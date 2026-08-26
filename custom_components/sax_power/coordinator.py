@@ -85,6 +85,7 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
+from .domain.energy_accounting import compute_charge_delta
 from .domain.registers import (
     to_signed16,
     to_unsigned16,
@@ -408,6 +409,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_charged_kwh: float | None = None
         self._energy_discharged_kwh: float | None = None
         self._energy_last_ts: float | None = None
+        # Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN): dieselbe
+        # None-bis-Initialisierung wie oben, zusätzlich als Vierergruppe
+        # (drei Zähler + Startzeitpunkt) - siehe
+        # _bootstrap_energy_origin sowie EnergyState.origin_initialized.
+        self._energy_grid_charged_kwh: float | None = None
+        self._energy_pv_charged_kwh: float | None = None
+        self._energy_unknown_charged_kwh: float | None = None
+        self._origin_accounting_started_at: datetime | None = None
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -482,7 +491,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_charged_kwh/_energy_discharged_kwh bleiben zusätzlich
         so lange None (statt bei 0.0 zu starten), bis der unabhängige Store
         geladen oder einmalig ein numerischer RestoreEntity-Altzustand
-        migriert wurde."""
+        migriert wurde.
+
+        Die Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN,
+        domain.energy_accounting.compute_charge_delta) läuft in derselben
+        Riemann-Summe mit - dieselbe elapsed_hours, derselbe
+        charged_kwh-Zuwachs wie oben, keine zweite Uhr. Entladung bleibt
+        davon unberührt: compute_charge_delta liefert bei Entladeleistung
+        ausschließlich Nullen."""
         now = monotonic()
         power = data.get("storage_power_active")
         last_ts = self._energy_last_ts
@@ -491,11 +507,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if last_ts is not None and power is not None:
             elapsed_hours = (now - last_ts) / 3600
-            if self._energy_charged_kwh is not None:
-                charge_w = -power if power < 0 else 0
-                increment = charge_w * elapsed_hours / 1000
-                self._energy_charged_kwh += increment
-                changed = changed or increment > 0
+            charge_delta = compute_charge_delta(
+                power, data.get("smartmeter_power"), elapsed_hours
+            )
+            if charge_delta is not None:  # power ist hier bekannt
+                if self._energy_charged_kwh is not None:
+                    self._energy_charged_kwh += charge_delta.charged_kwh
+                    changed = changed or charge_delta.charged_kwh > 0
+                if self._energy_grid_charged_kwh is not None:
+                    self._energy_grid_charged_kwh += charge_delta.grid_kwh
+                    self._energy_pv_charged_kwh += charge_delta.pv_kwh
+                    self._energy_unknown_charged_kwh += charge_delta.unknown_kwh
             if self._energy_discharged_kwh is not None:
                 discharge_w = power if power > 0 else 0
                 increment = discharge_w * elapsed_hours / 1000
@@ -515,6 +537,38 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._energy_discharged_kwh is not None
             else None
         )
+        data["energy_charged_from_grid"] = (
+            round(self._energy_grid_charged_kwh, 3)
+            if self._energy_grid_charged_kwh is not None
+            else None
+        )
+        data["energy_charged_from_pv"] = (
+            round(self._energy_pv_charged_kwh, 3)
+            if self._energy_pv_charged_kwh is not None
+            else None
+        )
+        data["energy_charged_origin_unknown"] = (
+            round(self._energy_unknown_charged_kwh, 3)
+            if self._energy_unknown_charged_kwh is not None
+            else None
+        )
+        data["energy_origin_coverage"] = self._energy_origin_coverage()
+
+    def _energy_origin_coverage(self) -> float | None:
+        """Anteil (%) der seit Start zugeordneten Ladeenergie (Netz + PV)
+        an der gesamten seither akkumulierten Ladeenergie mit bekannter
+        Herkunftszählung. None, solange die Herkunftszählung selbst noch
+        nicht initialisiert ist; bei Nenner 0 (noch gar nicht geladen seit
+        Start) 100 % - siehe anforderung.yaml, REQ-ENERGY-ORIGIN."""
+        grid = self._energy_grid_charged_kwh
+        pv = self._energy_pv_charged_kwh
+        unknown = self._energy_unknown_charged_kwh
+        if grid is None or pv is None or unknown is None:
+            return None
+        total = grid + pv + unknown
+        if total <= 0:
+            return 100.0
+        return round((grid + pv) / total * 100, 1)
 
     async def async_load_energy_state(self) -> None:
         """Load the independent counters before the first device refresh."""
@@ -526,12 +580,47 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "warte auf einen numerischen Altzustand: %s",
                 err,
             )
-        else:
-            if state is not None:
-                self._energy_charged_kwh = state.charged_kwh
-                self._energy_discharged_kwh = state.discharged_kwh
-        finally:
             self._energy_store_loaded = True
+            return
+
+        if state is not None:
+            self._energy_charged_kwh = state.charged_kwh
+            self._energy_discharged_kwh = state.discharged_kwh
+        self._bootstrap_energy_origin(state)
+        self._energy_store_loaded = True
+
+    def _bootstrap_energy_origin(self, state: EnergyState | None) -> None:
+        """Startet die Herkunftszählung transparent ab jetzt.
+
+        Läuft nur, wenn der Store selbst erfolgreich gelesen wurde - state
+        ist hier None nur bei einer frischen Installation (kein
+        gespeichertes Objekt), nicht bei einem I/O-Fehler; der bleibt in
+        async_load_energy_state unbehandelt, damit ein defekter Store
+        keinen stillen Nullstart der Herkunft auslöst.
+
+        Ein bereits vollständig initialisierter Store
+        (state.origin_initialized) übernimmt seine Werte unverändert. In
+        jedem anderen Fall - brandneuer Eintrag, Version-1-Snapshot ohne
+        diese Felder, oder ein einzelnes beim Laden verworfenes Feld -
+        beginnt die Herkunftszählung jetzt bei 0 mit dem aktuellen
+        UTC-Zeitpunkt als origin_accounting_started_at. Historische
+        Ladeenergie wird dabei nicht rückwirkend zugeordnet (siehe
+        anforderung.yaml, REQ-ENERGY-ORIGIN); der bestehende
+        energy_charged-Gesamtzähler bleibt davon unberührt. Der neue Stand
+        wird bewusst nicht sofort geschrieben, sondern über den normalen
+        Speicherpfad (Änderung oder Shutdown-Flush) persistiert - kein
+        zusätzlicher Schreibvorgang allein durch das Laden.
+        """
+        if state is not None and state.origin_initialized:
+            self._energy_grid_charged_kwh = state.grid_charged_kwh
+            self._energy_pv_charged_kwh = state.pv_charged_kwh
+            self._energy_unknown_charged_kwh = state.unknown_charged_kwh
+            self._origin_accounting_started_at = state.origin_accounting_started_at
+            return
+        self._energy_grid_charged_kwh = 0.0
+        self._energy_pv_charged_kwh = 0.0
+        self._energy_unknown_charged_kwh = 0.0
+        self._origin_accounting_started_at = dt_util.utcnow()
 
     def restore_energy_charged(self, value_kwh: float | None) -> None:
         """Migrate a numeric legacy RestoreEntity charge counter once."""
@@ -575,6 +664,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return EnergyState(
             charged_kwh=self._energy_charged_kwh,
             discharged_kwh=self._energy_discharged_kwh,
+            grid_charged_kwh=self._energy_grid_charged_kwh,
+            pv_charged_kwh=self._energy_pv_charged_kwh,
+            unknown_charged_kwh=self._energy_unknown_charged_kwh,
+            origin_accounting_started_at=self._origin_accounting_started_at,
         )
 
     def _async_schedule_energy_save(self) -> None:

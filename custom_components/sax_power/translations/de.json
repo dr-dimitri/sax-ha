@@ -288,6 +288,18 @@
       },
       "price_charge_current_price": {
         "name": "Aktueller Strompreis"
+      },
+      "energy_charged_from_grid": {
+        "name": "Geladene Energie aus dem Netz"
+      },
+      "energy_charged_from_pv": {
+        "name": "Geladene Energie aus PV"
+      },
+      "energy_charged_origin_unknown": {
+        "name": "Geladene Energie, Herkunft unbekannt"
+      },
+      "energy_origin_coverage": {
+        "name": "Herkunftsabdeckung Ladeenergie"
       }
     },
     "number": {

@@ -30,14 +30,17 @@ custom_components/sax_power/
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          SunSpec-Blockdecodierung (sunspec.py),
 │                          Zeitfenster und Wertevalidierung, Preis-Einheiten
-│                          (price_units.py) und das Tarifmodell (tariff.py)
+│                          (price_units.py), das Tarifmodell (tariff.py) und
+│                          die Herkunftsbilanzregel der Ladeenergie
+│                          (energy_accounting.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung, die Abbildung der Tarif-Options auf
 │                          das Domänenmodell (economics.py) sowie der
 │                          injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
 │                          Repair-Issues sowie die drei versionierten Stores
-│                          (Kalibrierung, Energiezähler, Ladeeinstellungen)
+│                          (Kalibrierung, Energiezähler inkl. Herkunft der
+│                          Ladeenergie, Ladeeinstellungen)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
@@ -672,6 +675,26 @@ tests/
 │                                  gemeinsamen Preis-Sensor samt aller Gründe für einen
 │                                  fehlenden Preis sowie der Lebenszyklus der
 │                                  Zustandsbeobachter
+├── test_energy_accounting.py        Reine Bilanzregel der Ladeenergie-Herkunft
+│                                  (REQ-ENERGY-ORIGIN, domain/energy_accounting.py):
+│                                  reine PV-/Netzladung, gemischte Ladung, Einspeisung
+│                                  während des Ladens, Netzbezug größer/kleiner als die
+│                                  Ladeleistung, unbekannter Smartmeter-Wert sowie die
+│                                  Delta-Invariante (grid + pv + unknown == charged) über
+│                                  viele zufällige Intervalle ohne kumulative Drift
+├── test_energy_persistence.py       Persistenz der Energiezähler inkl. Herkunft
+│                                  (REQ-ENERGY-DASHBOARD/REQ-ENERGY-ORIGIN):
+│                                  Store-Round-Trip, unabhängige Feldvalidierung
+│                                  (auch für die drei neuen Zähler und den
+│                                  Startzeitpunkt), Drosselung/Sofort-Flush, rückläufige
+│                                  Snapshots, RestoreEntity-Migrationspfad von
+│                                  energy_charged/-discharged, Version-1-Migration ohne
+│                                  erfundene Historie, bereits initialisierter Store,
+│                                  Store-Ladefehler lässt die Herkunft uninitialisiert,
+│                                  zwei getrennte Config Entries sowie die
+│                                  Coordinator-Verdrahtung (Rundung, Diagnosewert
+│                                  energy_origin_coverage, Entladung und SunSpec-Ausfall
+│                                  bleiben unverändert) in test_coordinator.py
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
 │                                  unvollständiger/unlesbarer Store (inkl. dauerhafter

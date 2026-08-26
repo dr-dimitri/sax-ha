@@ -59,6 +59,7 @@
 # REQ-PERIODIC-FULL-CALIBRATION   done       Alle 7 Tage temporär bis 100 % laden, um die Zell-/SOC-Kalibrierung zu ermöglichen
 # REQ-CONTROL-CONFIG-BOOTSTRAP    done       Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen
 # REQ-ECONOMICS-TARIFFS           done       Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung
+# REQ-ENERGY-ORIGIN               done       Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)
 # ==============================================================================
 
 # ==============================================================================
@@ -2793,3 +2794,127 @@ requirement_economics_tariffs:
        nie doppelt registriert."
     - "strings.json, translations/de.json, translations/en.json, README.md
        und DEVELOPMENT.md beschreiben das Tarifmodell."
+
+# ==============================================================================
+# ANFORDERUNG: HERKUNFT DER LADEENERGIE
+# ==============================================================================
+requirement_energy_origin:
+  id: REQ-ENERGY-ORIGIN
+  title: "Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)"
+  status: done
+  description: >
+    Zusätzlich zu den bestehenden, unveränderten Zählern energy_charged/
+    energy_discharged (REQ-ENERGY-DASHBOARD) weist die Integration aus, wie
+    viel der geladenen Energie rechnerisch aus dem Netz, aus PV und aus
+    einer nicht sicher bestimmbaren Quelle stammt. Die Herkunftszähler
+    funktionieren unabhängig davon, ob eine Wirtschaftlichkeitskonfiguration
+    (REQ-ECONOMICS-TARIFFS) aktiviert ist - dieses Issue enthält weder
+    Preisbewertung noch einen Geldsensor.
+
+    Eine physikalisch eindeutige Zuordnung ist mit storage_power_active und
+    smartmeter_power bei gleichzeitigem Hausverbrauch nicht möglich - die
+    Aufteilung ist deshalb ausdrücklich eine konservative, reproduzierbare
+    Schätzung anhand des Netzanschlusspunktes, keine physikalisch
+    eindeutige Quellenzuordnung. So auch in Entity-Beschreibungen und
+    README benannt.
+
+    Verbindliche Bilanzregel je Messintervall
+    (domain/energy_accounting.compute_charge_delta), mit
+    charge_power_w = max(-storage_power_active, 0):
+
+    - storage_power_active unbekannt: Intervall vollständig überspringen,
+      wie bisher bei energy_charged/energy_discharged.
+    - charge_power_w == 0 (Leerlauf oder Entladung): keine
+      Herkunftsänderung - Entladung verändert dadurch nie einen
+      Herkunftszähler.
+    - smartmeter_power unbekannt: die gesamte Ladeenergie des Intervalls
+      zählt als unknown_charge_power_w.
+    - sonst: grid_charge_power_w = min(charge_power_w,
+      max(smartmeter_power, 0)); pv_charge_power_w = charge_power_w -
+      grid_charge_power_w; unknown_charge_power_w = 0. Netzbezug, der die
+      Ladeleistung übersteigt (er deckt dann zusätzlich Hausverbrauch),
+      zählt dadurch bewusst vollständig, aber nur bis zur tatsächlichen
+      Ladeleistung, als Netzladung.
+
+    Jede Leistung wird mit exakt derselben Zeitbasis integriert wie
+    energy_charged (dieselbe Riemann-Summe in
+    SaxPowerCoordinator._accumulate_energy, keine zweite Uhr) - der
+    charged_kwh-Zuwachs aus compute_charge_delta ist identisch mit dem
+    Zuwachs, den energy_charged verbucht. Für jedes gültige Ladeintervall
+    gilt grid_kwh + pv_kwh + unknown_kwh == charged_kwh bis auf
+    Gleitkomma-Rauschen in der Größenordnung einzelner ULPs - viele
+    Zehnerpotenzen unterhalb der veröffentlichten Präzision. Veröffentlicht
+    wird auf drei Nachkommastellen gerundet, intern bleibt volle
+    Float-Präzision erhalten.
+
+    Neue Sensoren (sensor.py, beschreibungsbasiert wie jeder andere
+    berechnete Wert - kein RestoreEntity, siehe unten):
+    energy_charged_from_grid, energy_charged_from_pv,
+    energy_charged_origin_unknown (alle kWh, device_class energy,
+    state_class total_increasing) sowie der diagnostische Prozentwert
+    energy_origin_coverage (Anteil von grid+pv an grid+pv+unknown seit
+    Start der Herkunftszählung; Nenner 0 ergibt 100 %, uninitialisierte
+    Herkunft ergibt None - SaxPowerCoordinator._energy_origin_coverage).
+
+    Persistenz: infrastructure/energy_store.py auf STORAGE_VERSION 2
+    erweitert. EnergyState bekommt vier neue, gemeinsam behandelte Felder
+    - grid_charged_kwh, pv_charged_kwh, unknown_charged_kwh (dieselbe
+    Feldvalidierung wie charged_kwh/discharged_kwh: endlich, >= 0,
+    monotonic) sowie origin_accounting_started_at (UTC-Zeitstempel,
+    einmalig gesetzt und danach unveränderlich - ein abweichender
+    gespeicherter Wert wird wie ein rückläufiger Zähler verworfen).
+    EnergyState.origin_initialized ist nur wahr, wenn alle vier Felder
+    vorhanden sind; fehlt eines (Version-1-Snapshot ohne diese Felder,
+    frischer Eintrag, oder ein beim Laden einzeln verworfenes Feld), gilt
+    die gesamte Herkunftsbilanz als nicht initialisiert - die drei Zähler
+    sind ohne bekannten Startzeitpunkt nicht aussagekräftig. Das steht
+    nicht im Widerspruch zur unabhängigen Feldvalidierung beim Laden: Jedes
+    Feld wird einzeln geprüft und einzeln verworfen; erst
+    SaxPowerCoordinator._bootstrap_energy_origin entscheidet über das
+    Vierer-Bündel.
+
+    SaxPowerCoordinator._bootstrap_energy_origin läuft einmalig beim Laden
+    (async_load_energy_state), aber nur, wenn der Store selbst ohne
+    Ausnahme gelesen werden konnte - ein I/O-Fehler beim Laden lässt die
+    Herkunft absichtlich uninitialisiert (None), statt einen stillen
+    Nullstart über einen eigentlich kaputten Store zu legen. Ist der Store
+    bereits vollständig initialisiert, übernimmt der Coordinator seine
+    Werte unverändert. Andernfalls (Version-1-Snapshot, frischer Eintrag,
+    einzelnes verworfenes Feld) startet die Herkunftszählung transparent
+    bei 0 mit dem aktuellen UTC-Zeitpunkt als
+    origin_accounting_started_at - ohne einen sofortigen zusätzlichen
+    Schreibvorgang: Der neue Stand wird über den ohnehin vorhandenen
+    Speicherpfad (gedrosselte Änderung oder Shutdown-Flush) persistiert.
+    Historische Ladeenergie wird dabei nicht erfunden oder nachträglich
+    einer Quelle zugeordnet; der bestehende energy_charged-Gesamtzähler
+    bleibt unberührt. Herkunftszähler werden gemeinsam mit den bestehenden
+    Energiezählern gedrosselt gespeichert und beim Unload best-effort final
+    geflusht (dieselbe EnergyStateStore-Instanz, derselbe Schreibpfad,
+    dieselbe Drosselung).
+
+    Kein RestoreEntity als primäre Persistenz für die drei neuen Zähler:
+    Es gibt keinen sichtbaren Alt-Zustand zu migrieren, sie werden wie jeder
+    andere berechnete Sensor direkt aus coordinator.data gelesen
+    (SaxPowerSensor + SaxPowerSensorEntityDescription, kein eigener
+    Migrationspfad nötig). Ausfall des SunSpec-Modus-Blocks (
+    storage_power_active None) überspringt das Intervall exakt wie bei
+    energy_charged/energy_discharged - kein Reset, kein Rücksprung, kein
+    Nachholsprung nach Rückkehr.
+  requirements:
+    - "Reine PV-Ladung, reine Netzladung, gemischte Ladung, Einspeisung
+       während Ladung, Netzbezug größer/kleiner als die Ladeleistung und
+       unbekannter Smartmeter-Wert sind deterministisch getestet
+       (tests/test_energy_accounting.py)."
+    - "Die Delta-Invariante (grid + pv + unknown == charged) gilt über
+       viele zufällige Intervalle ohne kumulative Rundungsabweichung."
+    - "Entladung verändert keinen Herkunftszähler."
+    - "Eine Version-1-Migration erhält bestehende Lade-/Entladezähler
+       exakt und startet die Herkunft transparent ab einem persistierten
+       UTC-Zeitpunkt, ohne historische Energie zu erfinden."
+    - "Persistenz, Shutdown-Flush, zwei getrennte Config Entries, korrupte
+       und rückläufige Snapshots (auch für die drei neuen Zähler und den
+       Startzeitpunkt) sowie ein SunSpec-Ausfall sind getestet
+       (tests/test_energy_persistence.py, tests/test_coordinator.py)."
+    - "Sensor-Metadaten, strings.json, translations/de.json,
+       translations/en.json, README.md und DEVELOPMENT.md sind
+       aktualisiert."

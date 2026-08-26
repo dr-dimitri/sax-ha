@@ -28,6 +28,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
   - [Preisoptimiertes Laden](#preisoptimiertes-laden)
 - [Zeitfenster und Überschneidungen](#zeitfenster-und-überschneidungen)
 - [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
+- [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)
 - [Energy-Dashboard](#energy-dashboard)
 - [Aktionen für Automationen](#aktionen-für-automationen)
 - [Verbindung nachträglich ändern](#verbindung-nachträglich-ändern)
@@ -40,6 +41,8 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - Ladezustand, Lade- und Entladeleistung, Netzleistung, PV-Leistung sowie
   weitere Geräte- und Akkudaten anzeigen
 - Lade- und Entladeenergie im Home-Assistant-Energy-Dashboard erfassen
+- geladene Energie zusätzlich nach Netz, PV und unbekannter Herkunft
+  aufteilen
 - Speicher ein- und ausschalten
 - maximalen Ladezustand festlegen
 - zeitgesteuert aus dem Netz laden
@@ -416,6 +419,36 @@ einen Wert enthält.
 Änderungen am Tarifmodell wirken sofort und ohne Neustart der Integration –
 allerdings nur für zukünftige Messintervalle. Bereits erfasste Geldbeträge
 werden nie rückwirkend neu bewertet.
+
+## Herkunft der Ladeenergie
+
+Zusätzlich zu **Geladene Energie (gesamt)** zeigen drei weitere Sensoren, wie
+viel der geladenen Energie rechnerisch aus dem Netz, aus PV und aus einer
+nicht sicher bestimmbaren Quelle stammt:
+
+- **Geladene Energie aus dem Netz**
+- **Geladene Energie aus PV**
+- **Geladene Energie, Herkunft unbekannt**
+
+Diese Aufteilung funktioniert unabhängig davon, ob unter
+[Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
+eine Geldbewertung aktiviert ist, und ist eine **Schätzung anhand des
+Netzanschlusspunktes**, keine physikalisch eindeutige Zuordnung: Bei
+gleichzeitigem Hausverbrauch lässt sich aus Ladeleistung und Netzleistung
+allein nicht herleiten, welcher Anteil der PV-Erzeugung tatsächlich in den
+Speicher statt in den Hausverbrauch geflossen ist. Netzbezug, der die
+aktuelle Ladeleistung übersteigt (er deckt dann zusätzlich laufenden
+Hausverbrauch), zählt deshalb konservativ vollständig als Netzladung. Ist der
+Netzwert selbst gerade nicht bekannt, zählt die Ladeenergie dieses Zeitraums
+als "Herkunft unbekannt" statt geraten der einen oder anderen Quelle
+zugeschlagen zu werden. Der diagnostische Sensor **Herkunftsabdeckung
+Ladeenergie** zeigt den Anteil der seit Beginn der Zählung eindeutig Netz
+oder PV zugeordneten Ladeenergie in Prozent.
+
+Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
+0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
+zugeordnet, der bestehende Gesamtzähler **Geladene Energie (gesamt)** bleibt
+davon unberührt.
 
 ## Energy-Dashboard
 

@@ -123,8 +123,13 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
 
 - allgemeine Informationen,
 - zeitgesteuertes Laden,
-- netzdienliches Laden und
-- dynamisches Laden.
+- netzdienliches Laden,
+- dynamisches Laden und
+- Wirtschaftlichkeit (Status/Preise, Herkunft der Ladeenergie, operative
+  Geldbilanz, Investition/Amortisation samt Fortschritts-Gauge sowie ein
+  30-Tage-Verlaufsdiagramm - referenziert ausschließlich bereits
+  bestehende Entities, siehe [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+  und [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)).
 
 ![Dashboard mit allgemeinen Informationen zum SAX-Power-Speicher](docs/images/dashboard/allgemeine_information.png)
 
@@ -431,6 +436,62 @@ Unabhängig von der gewählten Tarifart lässt sich auf derselben Seite
 optional ein Feld **Investitionskosten (EUR)** ausfüllen. Es schaltet die in
 [ROI und Amortisationsprognose](#roi-und-amortisationsprognose) beschriebenen
 Sensoren frei; ein Wechsel des Tarifmodells löscht diesen Wert nicht.
+
+### Beispiele je Tarifart
+
+Alle drei Beispiele gehen von derselben Einspeisevergütung (0,08 EUR/kWh)
+sowie von 1 kWh Netzladung, 1 kWh PV-Ladung und 1 kWh späterer Entladung
+aus - nur der zum jeweiligen Zeitpunkt gültige Netzbezugspreis
+unterscheidet sich:
+
+- **Festpreis** (0,30 EUR/kWh ganztägig): Netzladekosten = 1 kWh × 0,30
+  EUR/kWh = 0,30 EUR. PV-Opportunitätskosten = 1 kWh × 0,08 EUR/kWh = 0,08
+  EUR. Vermiedene Netzkosten (Entladung um 0,30 EUR/kWh) = 1 kWh × 0,30
+  EUR/kWh = 0,30 EUR. Operatives Ergebnis = 0,30 − 0,30 − 0,08 = **−0,08
+  EUR**.
+- **Tageszeitabhängig** (Grundpreis 0,25 EUR/kWh, Zeitfenster 17:00–20:00
+  Uhr zu 0,40 EUR/kWh): Lädt die Netzladung innerhalb des Zeitfensters,
+  kosten die 1 kWh 0,40 EUR statt 0,25 EUR - außerhalb des Fensters gilt
+  durchgehend der Grundpreis. PV-Opportunitätskosten und die Bewertung
+  einer späteren Entladung folgen exakt derselben Formel wie beim
+  Festpreis, nur mit dem zum jeweiligen Zeitpunkt gültigen Preis.
+- **Dynamisch** (Strompreis-Sensor liefert z. B. 0,22 EUR/kWh zum
+  Ladezeitpunkt, 0,35 EUR/kWh zum späteren Entladezeitpunkt):
+  Netzladekosten = 1 kWh × 0,22 EUR/kWh = 0,22 EUR, vermiedene Netzkosten
+  = 1 kWh × 0,35 EUR/kWh = 0,35 EUR - Laden und Entladen werden bewusst
+  mit dem jeweils zu ihrem eigenen Zeitpunkt gültigen Preis bewertet, nie
+  mit einem einzigen "aktuellen" Preis für beide Vorgänge.
+
+### Formeln im Überblick
+
+```
+Netzladekosten          = geladene Netzenergie (kWh) × Netzbezugspreis zum Ladezeitpunkt
+PV-Opportunitätskosten  = geladene PV-Energie (kWh) × Einspeisevergütung
+Vermiedene Netzkosten   = monetarisierbare Entladung (kWh) × Netzbezugspreis zum Entladezeitpunkt
+Operatives Ergebnis     = Vermiedene Netzkosten − Netzladekosten − PV-Opportunitätskosten
+ROI (%)                 = Operatives Ergebnis ÷ Investitionskosten × 100
+Amortisationsfortschritt (%) = ROI, auf 0 bis 100 % begrenzt
+Restbetrag              = max(Investitionskosten − Operatives Ergebnis, 0)
+30-Tage-Prognose        = Durchschnitt der letzten 30 abgeschlossenen Tagesergebnisse
+Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
+```
+
+### Grenzen der Wirtschaftlichkeitsauswertung
+
+- Die Herkunftsaufteilung (Netz/PV/unbekannt) ist eine **Schätzung am
+  Netzanschlusspunkt** (siehe [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)),
+  keine physikalische Einzelstromverfolgung.
+- Monatlicher Grundpreis, Finanzierungskosten, Wartung und
+  Batteriealterung sind **nicht Bestandteil** dieser Rechnung - das
+  operative Ergebnis bildet ausschließlich die reinen Arbeitspreis-
+  Zahlungsströme ab.
+- Die 30-Tage-Prognose und das geschätzte Amortisationsdatum sind
+  **keine Garantie**: Sie schreiben die letzten 30 Tage unverändert fort
+  und reagieren nicht auf künftige Preis-, Verbrauchs- oder
+  Nutzungsänderungen.
+- Eine Änderung des Tarifmodells oder der Investitionskosten wirkt
+  ausschließlich prospektiv - bereits verbuchte Beträge und eine bereits
+  erreichte Amortisation werden nie rückwirkend neu berechnet.
 
 ## Herkunft der Ladeenergie
 

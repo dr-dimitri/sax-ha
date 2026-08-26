@@ -89,9 +89,9 @@ custom_components/sax_power/
 │                          und preisoptimiertem Laden
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan, IP-Adresse redigiert
-├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in
+├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
-│                          REQ-BUNDLED-DASHBOARD
+│                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-DASHBOARD
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -421,6 +421,40 @@ Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 3 erweitert.
 `unpriced_*`-Zähler echte monotone Summen und unabhängig vom
 Sieben-Felder-Bündel - ein älterer Store beginnt ihre Zählung transparent
 bei 0 ab jetzt.
+
+### Dashboard-Tab "Wirtschaftlichkeit" (REQ-ECONOMICS-DASHBOARD)
+
+Fünfter View in `dashboard.async_build_dashboard_config`, direkt nach
+"Dynamisches Laden" - baut ausschließlich auf bereits bestehenden Entities
+und Bausteinen der ganzen Wirtschaftlichkeits-Reihe auf, führt selbst
+keine neue Berechnung ein:
+
+- `_resolved_row` faktorisiert die bisher in `_entities_card` inline
+  liegende Entity-Auflösung + Namensermittlung, damit sie auch außerhalb
+  einer vollständigen `_entities_card` wiederverwendbar ist (Karte "Status
+  und Preise" mischt normale Entity-Zeilen mit Attribut-Zeilen).
+- `_attribute_row` baut eine `type: attribute`-Kartenzeile - zeigt ein
+  Attribut einer Entity (hier: `charge_price_coverage_percent`/
+  `discharge_price_coverage_percent`/`economics_started_at` von
+  `economics_status`, siehe REQ-ECONOMICS-OBSERVABILITY) wie einen
+  eigenen Sensor, ohne dass dafür ein eigener Sensor existieren müsste.
+- `_statistics_graph_card` baut eine Core-`statistics-graph`-Karte
+  (Balkendiagramm, `stat_types: ["change"]`, `period: "day"`,
+  `days_to_show: 30`) für die vier Geldsensoren - keine Custom-Card,
+  keine private Statistik-API.
+- Die sieben ROI-/Amortisationssensoren (inkl. der
+  `economics_amortization_progress`-Gauge) sind anders als z. B. die
+  netzdienlichen Entities IMMER registriert (statische
+  `SENSOR_DESCRIPTIONS`), unabhängig davon, ob Investitionskosten
+  konfiguriert sind - die Karte "Investition und Amortisation" bleibt
+  deshalb immer sichtbar und zeigt ohne Investitionskosten durchgehend
+  "unbekannt" statt einer erfundenen Zahl, statt komplett zu verschwinden.
+
+Alles andere folgt exakt dem bestehenden Muster der vier älteren Tabs:
+`_entities_card`/`_gauge_card` lassen fehlende Entities/Karten still aus,
+`async_create_dashboard` bleibt idempotent, `force=True`
+(`sax_power.reinstall_dashboard`) überschreibt inklusive des neuen Tabs,
+ein Fehler beim Dashboardbau blockiert nie das Setup.
 
 ## Datenfluss
 
@@ -1030,6 +1064,20 @@ tests/
 │                                  ist - fünf davon siehe anforderung.yaml
 │                                  REQ-SELF-DIAGNOSIS-REPAIRS, das sechste
 │                                  (economics_price_unavailable) REQ-ECONOMICS-OBSERVABILITY
+├── test_dashboard.py                Mitgeliefertes Lovelace-Dashboard (REQ-BUNDLED-DASHBOARD/
+│                                  REQ-ECONOMICS-DASHBOARD): Entity-Auflösung/-Auslassung je
+│                                  Tab, Gauge-Karten, geräteprefix-freie Labels für alle fünf
+│                                  Views inkl. des Tabs "Wirtschaftlichkeit" (Karten-/Entity-
+│                                  Reihenfolge, Attribut-Zeilen für Preisabdeckung/
+│                                  Bilanzbeginn, Amortisationsfortschritt als Gauge,
+│                                  statistics-graph-Verlaufskarte, nicht-leerer View auch ohne
+│                                  jede registrierte Entity), create_dashboard-Idempotenz und
+│                                  reinstall_dashboard-Service
+├── test_economics_dashboard_e2e.py  Ende-zu-Ende über die gesamte Wirtschaftlichkeits-Reihe
+│                                  (REQ-ECONOMICS-DASHBOARD-Akzeptanzkriterium): je ein PV-Lade-,
+│                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
+│                                  Herkunftsaufteilung und die Geldsensoren bis zur
+│                                  Dashboard-Entityauflösung
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

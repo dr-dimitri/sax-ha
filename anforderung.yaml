@@ -49,7 +49,7 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
-# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
@@ -63,6 +63,7 @@
 # REQ-ECONOMICS-ACCOUNTING        done       Kosten/operatives Ergebnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren
 # REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
+# REQ-ECONOMICS-DASHBOARD         done       Eigener Dashboard-Tab "Wirtschaftlichkeit" sowie End-to-End-Dokumentation der gesamten Feature-Reihe
 # ==============================================================================
 
 # ==============================================================================
@@ -1801,12 +1802,14 @@ requirement_dynamic_price_charge:
 # ==============================================================================
 requirement_bundled_dashboard:
   id: REQ-BUNDLED-DASHBOARD
-  title: "Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in der Ersteinrichtung anlegbar"
+  title: "Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar"
   status: done
   description: >
-    dashboard.py baut ein vierteiliges Storage-Dashboard mit den
-    wichtigsten Sensoren/Einstellungen, gegliedert in vier Tabs (Lovelace-
-    Views): "Allgemeine Informationen" (Speicher-Schalter, SOC, Lade-/
+    dashboard.py baut ein fünfteiliges Storage-Dashboard mit den
+    wichtigsten Sensoren/Einstellungen, gegliedert in fünf Tabs (Lovelace-
+    Views, der fünfte "Wirtschaftlichkeit" ist gesondert unter
+    REQ-ECONOMICS-DASHBOARD beschrieben): "Allgemeine Informationen"
+    (Speicher-Schalter, SOC, Lade-/
     Entladeleistung, Netzleistung (translation_key smartmeter_power - der
     Sensor selbst heißt weiterhin smartmeter_power/unique_id-Suffix
     "smartmeter_power", nur das angezeigte Label wurde von "Smart Meter
@@ -1955,7 +1958,7 @@ requirement_bundled_dashboard:
     davon nie blockiert werden.
   acceptance_criteria:
     - "tests/test_dashboard.py deckt ab: async_build_dashboard_config
-       erzeugt immer alle drei Views, löst nur tatsächlich in der Entity
+       erzeugt immer alle fünf Views, löst nur tatsächlich in der Entity
        Registry vorhandene Entities auf und lässt Karten ohne jede
        aufgelöste Entity komplett weg. async_create_dashboard überspringt
        sauber, wenn Lovelace nicht geladen ist, registriert Panel und
@@ -3531,3 +3534,115 @@ requirement_economics_observability:
     - "services.yaml, strings.json, translations/de.json,
        translations/en.json, README.md, DEVELOPMENT.md und
        anforderung.yaml sind aktualisiert."
+
+# ==============================================================================
+# ANFORDERUNG: DASHBOARD-TAB UND END-TO-END-DOKUMENTATION DER WIRTSCHAFTLICHKEIT
+# ==============================================================================
+requirement_economics_dashboard:
+  id: REQ-ECONOMICS-DASHBOARD
+  title: "Eigener Dashboard-Tab \"Wirtschaftlichkeit\" sowie End-to-End-Dokumentation der gesamten Feature-Reihe"
+  status: done
+  description: >
+    Schließt die sechsteilige Wirtschaftlichkeits-Reihe (01/06 bis 06/06)
+    mit einem eigenen Dashboard-Tab und vollständiger Nutzerdokumentation
+    ab, ohne selbst neue Berechnungen einzuführen. Keine Zahl darf durch
+    fehlende Daten wie ein belastbarer Gewinn aussehen - der Tab zeigt
+    deshalb zuerst Datenqualität, erst danach Geldwerte.
+
+    Fünfter View (dashboard.async_build_dashboard_config), direkt nach
+    "Dynamisches Laden": Titel "Wirtschaftlichkeit", Pfad
+    `wirtschaftlichkeit`, Icon `mdi:cash-chart`. Ausschließlich Home-
+    Assistant-Core-Kartentypen (entities, gauge, statistics-graph) - keine
+    Custom-Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-
+    Auflösung wie die vier bestehenden Tabs.
+
+    - Karte "Status und Preise" (eine entities-Karte, feste Reihenfolge):
+      economics_status, economics_current_import_price,
+      economics_feed_in_price, energy_origin_coverage, danach drei neue
+      "attribute"-Kartenzeilen (`_attribute_row`) auf economics_status:
+      charge_price_coverage_percent, discharge_price_coverage_percent
+      ("Preisabdeckungen für Laden/Entladen" - haben keinen eigenen
+      Sensor, siehe REQ-ECONOMICS-OBSERVABILITY) sowie
+      economics_started_at ("Beginn der Bilanz"). Bei deaktiviertem Tarif
+      bleibt economics_status sichtbar und erklärt über seine eigene
+      Zustandsübersetzung (`disabled`), dass die Konfiguration unter
+      "Geräte & Dienste -> SAX Power Home -> Konfigurieren" erfolgt.
+    - Karte "Herkunft der Ladeenergie": energy_charged_from_pv,
+      energy_charged_from_grid, energy_charged_origin_unknown,
+      energy_charged, energy_discharged (REQ-ENERGY-ORIGIN, dieselbe
+      konservative Schätzung am Netzanschlusspunkt wie im Tab "Allgemeine
+      Informationen").
+    - Karte "Operative Geldbilanz": economics_avoided_grid_cost,
+      economics_grid_charge_cost, economics_pv_opportunity_cost,
+      economics_operating_result, economics_unpriced_charge,
+      economics_unpriced_discharge - Kosten/Nutzen bleiben durch die
+      Reihenfolge (zuerst der Nutzen, dann die beiden Kostenarten) und die
+      Sensor-Übersetzungen eindeutig unterscheidbar; der Entity-Name
+      bleibt "Operatives Ergebnis", kein Wort wie "Gewinn".
+    - Amortisationsfortschritt als eigene Gauge-Karte (0..100, needle,
+      segments rot/gelb/grün bei 0/50/100 - wie die bestehenden SOC-/
+      Zelltemperatur-Gauges).
+    - Karte "Investition und Amortisation": economics_roi,
+      economics_remaining_to_payback, economics_result_today,
+      economics_average_daily_result_30d,
+      economics_projected_annual_result, economics_estimated_payback_date.
+      Diese sieben Sensoren (inkl. der Gauge) sind - anders als bei
+      optional erst zur Laufzeit erschienenen Entities anderer Tabs -
+      immer bereits registriert (statische SENSOR_DESCRIPTIONS, siehe
+      REQ-ECONOMICS-AMORTIZATION) und deshalb auch ohne konfigurierte
+      Investitionssumme in der Karte sichtbar; sie zeigen dann
+      durchgehend "unbekannt" statt eines erfundenen Werts (dieselbe
+      Garantie wie bei jedem anderen Sensor dieser Integration) - eine
+      wörtliche Auslassung der ganzen Karte allein anhand fehlender
+      Registry-Einträge ist mit dieser Architektur nicht möglich, aber
+      auch nicht nötig: Der View bleibt in jedem Fall vollständig
+      nutzbar.
+    - Karte "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
+      `statistics-graph` als Balkendiagramm (`chart_type: bar`),
+      `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für
+      economics_operating_result, economics_avoided_grid_cost,
+      economics_grid_charge_cost, economics_pv_opportunity_cost. `change`
+      ist für `state_class: total`-Sensoren eine unterstützte
+      Langzeitstatistik-Kennzahl; eine künftig fehlende Unterstützung
+      wäre über die dedizierten Tages-Sensoren aus REQ-ECONOMICS-
+      AMORTIZATION aufzufangen, nie über eine private Statistik-API oder
+      einen nicht unterstützten Kartentyp.
+
+    Bestehendes Verhalten unverändert: async_create_dashboard bleibt
+    idempotent und überschreibt kein vorhandenes Nutzer-Dashboard; nur
+    sax_power.reinstall_dashboard ersetzt ein bestehendes Dashboard (jetzt
+    inklusive des neuen Tabs); ein Fehler beim Dashboardbau blockiert
+    niemals Setup oder Integration (unverändertes try/except in
+    async_create_dashboard); fehlende optionale Entities werden über
+    dieselbe `_entities_card`-/`_gauge_card`-/`_statistics_graph_card`-
+    Filterlogik wie in den bestehenden vier Tabs still ausgelassen - keine
+    leeren Karten.
+
+    Dokumentation: README.md ergänzt einen Abschnitt "Datenqualität,
+    Diagnose und Bilanzneustart" (bereits in 05/06 angelegt) sowie einen
+    neuen Abschnitt zum Dashboard-Tab; die drei Tarifarten sind bereits im
+    Abschnitt "Tarifmodell für die Wirtschaftlichkeit" mit Formeln/
+    Grenzen dokumentiert. DEVELOPMENT.md erhält einen Abschnitt zum neuen
+    View sowie eine Ergänzung von REQ-BUNDLED-DASHBOARD (jetzt fünf statt
+    vier Tabs). strings.json/translations sind unverändert, da der
+    Dashboard-Tab ausschließlich bereits übersetzte Entities referenziert.
+  acceptance_criteria:
+    - "View-Reihenfolge (fünfter Tab), Titel/Pfad/Icon sowie die exakte
+       Karten-/Entity-Reihenfolge aller fünf Karten sind regression-
+       getestet (tests/test_dashboard.py)."
+    - "Deaktivierter Tarif, aktiv ohne Investitionssumme, aktiv mit
+       Investitionssumme und teilweise fehlende Entities erzeugen
+       durchweg einen nicht-leeren, nutzbaren View."
+    - "Die Verlaufskarte ist eine Core-statistics-graph-Karte mit
+       stat_types [change], chart_type bar, period day, 30 Tagen - keine
+       Custom-Card, keine private Statistik-API."
+    - "async_build_dashboard_config bleibt ohne jede registrierte Entity
+       fehlerfrei (leerer, aber vorhandener View); async_create_dashboard
+       bleibt idempotent, sax_power.reinstall_dashboard ersetzt
+       deterministisch inklusive des neuen Tabs
+       (tests/test_dashboard.py)."
+    - "Ein vollständiger End-to-End-Test führt je einen PV-Lade-, Netzlade-
+       und Entladeabschnitt über Tarifauflösung -> Herkunft ->
+       Geldsensoren -> Dashboard-Entityauflösung
+       (tests/test_economics_dashboard_e2e.py)."
+    - "README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."

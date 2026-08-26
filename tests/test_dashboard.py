@@ -62,7 +62,7 @@ def _iter_entity_ids(cards: list[dict[str, Any]]):
 
 async def test_build_dashboard_config_resolves_registered_entities(hass) -> None:
     """Nur tatsächlich in der Entity Registry vorhandene Entities landen in
-    den Karten; die vier Tabs (Views) sind immer vorhanden."""
+    den Karten; die fünf Tabs (Views) sind immer vorhanden."""
     soc_entity_id = _register(hass, "sensor", "soc")
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
     grid_serving_switch_entity_id = _register(hass, "switch", "grid_serving_enabled")
@@ -77,6 +77,7 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
         "ladeautomatik",
         "netzdienliches-laden",
         "dynamisches-laden",
+        "wirtschaftlichkeit",
     ]
 
     general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
@@ -257,11 +258,11 @@ async def test_price_charge_forecast_follows_status_with_dynamic_name(hass) -> N
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
-    """Ohne jede registrierte Entity bleiben alle vier Views vorhanden, aber
+    """Ohne jede registrierte Entity bleiben alle fünf Views vorhanden, aber
     ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
     config = await async_build_dashboard_config(hass, "unbekannter_entry")
 
-    assert len(config["views"]) == 4
+    assert len(config["views"]) == 5
     for view in config["views"]:
         assert view["cards"] == []
 
@@ -522,6 +523,203 @@ async def test_build_dashboard_config_month_switch_labels_are_bare_month_names(
         assert months_card["entities"][0]["name"] == "January"
 
 
+# ===========================================================================
+# Tab "Wirtschaftlichkeit" (REQ-ECONOMICS-DASHBOARD)
+# ===========================================================================
+def _economics_view(config: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
+    )
+
+
+async def test_economics_view_is_fifth_with_expected_title_and_icon(hass) -> None:
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert config["views"][4]["path"] == "wirtschaftlichkeit"
+    assert config["views"][4]["title"] == "Wirtschaftlichkeit"
+    assert config["views"][4]["icon"] == "mdi:cash-chart"
+
+
+async def test_economics_view_status_card_shows_disabled_tariff(hass) -> None:
+    """Auch ohne konfigurierten Tarif bleibt der Status-Sensor sichtbar -
+    er erklärt über seine eigene Übersetzung, dass die Konfiguration unter
+    "Konfigurieren" erfolgt (REQ-ECONOMICS-DASHBOARD)."""
+    status_id = _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    status_card = next(
+        card for card in view["cards"] if card.get("title") == "Status und Preise"
+    )
+    first_row = status_card["entities"][0]
+    assert (first_row["entity"] if isinstance(first_row, dict) else first_row) == (
+        status_id
+    )
+
+
+async def test_economics_view_status_card_entity_and_attribute_order(hass) -> None:
+    """Karte 1 in genau der geforderten Reihenfolge: Status, aktueller
+    Preis, Einspeisevergütung, Herkunftsabdeckung, dann die beiden
+    Preisabdeckungen und der Bilanzbeginn als Attribute des
+    Status-Sensors."""
+    status_id = _register(hass, "sensor", "economics_status")
+    import_price_id = _register(hass, "sensor", "economics_current_import_price")
+    feed_in_id = _register(hass, "sensor", "economics_feed_in_price")
+    origin_coverage_id = _register(hass, "sensor", "energy_origin_coverage")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    status_card = next(
+        card for card in view["cards"] if card.get("title") == "Status und Preise"
+    )
+    rows = status_card["entities"]
+    assert [row["entity"] if isinstance(row, dict) else row for row in rows] == [
+        status_id,
+        import_price_id,
+        feed_in_id,
+        origin_coverage_id,
+        status_id,
+        status_id,
+        status_id,
+    ]
+    attribute_rows = rows[4:]
+    assert [row["attribute"] for row in attribute_rows] == [
+        "charge_price_coverage_percent",
+        "discharge_price_coverage_percent",
+        "economics_started_at",
+    ]
+    assert all(row["type"] == "attribute" for row in attribute_rows)
+
+
+async def test_economics_view_origin_card(hass) -> None:
+    pv = _register(hass, "sensor", "energy_charged_from_pv")
+    grid = _register(hass, "sensor", "energy_charged_from_grid")
+    unknown = _register(hass, "sensor", "energy_charged_origin_unknown")
+    charged = _register(hass, "sensor", "energy_charged")
+    discharged = _register(hass, "sensor", "energy_discharged")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    origin_card = next(
+        card
+        for card in view["cards"]
+        if card.get("title") == "Herkunft der Ladeenergie"
+    )
+    assert [row["entity"] for row in origin_card["entities"]] == [
+        pv,
+        grid,
+        unknown,
+        charged,
+        discharged,
+    ]
+
+
+async def test_economics_view_operating_balance_card(hass) -> None:
+    avoided = _register(hass, "sensor", "economics_avoided_grid_cost")
+    grid_cost = _register(hass, "sensor", "economics_grid_charge_cost")
+    pv_cost = _register(hass, "sensor", "economics_pv_opportunity_cost")
+    result = _register(hass, "sensor", "economics_operating_result")
+    unpriced_charge = _register(hass, "sensor", "economics_unpriced_charge")
+    unpriced_discharge = _register(hass, "sensor", "economics_unpriced_discharge")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    balance_card = next(
+        card for card in view["cards"] if card.get("title") == "Operative Geldbilanz"
+    )
+    assert [row["entity"] for row in balance_card["entities"]] == [
+        avoided,
+        grid_cost,
+        pv_cost,
+        result,
+        unpriced_charge,
+        unpriced_discharge,
+    ]
+
+
+async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
+    progress_id = _register(hass, "sensor", "economics_amortization_progress")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    gauge = next(
+        card
+        for card in view["cards"]
+        if card["type"] == "gauge" and card["entity"] == progress_id
+    )
+    assert gauge["min"] == 0
+    assert gauge["max"] == 100
+    assert gauge["needle"] is True
+
+
+async def test_economics_view_investment_card_entities(hass) -> None:
+    roi = _register(hass, "sensor", "economics_roi")
+    remaining = _register(hass, "sensor", "economics_remaining_to_payback")
+    result_today = _register(hass, "sensor", "economics_result_today")
+    average = _register(hass, "sensor", "economics_average_daily_result_30d")
+    annual = _register(hass, "sensor", "economics_projected_annual_result")
+    payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    investment_card = next(
+        card
+        for card in view["cards"]
+        if card.get("title") == "Investition und Amortisation"
+    )
+    assert [row["entity"] for row in investment_card["entities"]] == [
+        roi,
+        remaining,
+        result_today,
+        average,
+        annual,
+        payback_date,
+    ]
+
+
+async def test_economics_view_history_card_is_a_statistics_graph(hass) -> None:
+    result = _register(hass, "sensor", "economics_operating_result")
+    avoided = _register(hass, "sensor", "economics_avoided_grid_cost")
+    grid_cost = _register(hass, "sensor", "economics_grid_charge_cost")
+    pv_cost = _register(hass, "sensor", "economics_pv_opportunity_cost")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    history_card = next(
+        card for card in view["cards"] if card["type"] == "statistics-graph"
+    )
+    assert history_card["entities"] == [result, avoided, grid_cost, pv_cost]
+    assert history_card["stat_types"] == ["change"]
+    assert history_card["chart_type"] == "bar"
+    assert history_card["period"] == "day"
+    assert history_card["days_to_show"] == 30
+
+
+async def test_economics_view_is_never_empty_when_any_entity_exists(hass) -> None:
+    """Auch mit nur einer einzigen registrierten Entity bleibt der Tab
+    nutzbar (mindestens eine Karte) - kein leerer View."""
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    assert view["cards"] != []
+
+
+async def test_economics_view_is_present_but_cardless_without_any_entity(hass) -> None:
+    config = await async_build_dashboard_config(hass, "unbekannter_entry")
+
+    view = _economics_view(config)
+    assert view["cards"] == []
+
+
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:
     """Ohne geladene Lovelace-Komponente (z. B. in den meisten Unit-Tests)
     darf async_create_dashboard nicht fehlschlagen, sondern nur überspringen."""
@@ -555,7 +753,7 @@ async def test_create_dashboard_registers_panel_and_is_idempotent(hass) -> None:
         assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards
         dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 4
+        assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()
         assert (
             mock_register_panel.call_args.kwargs["frontend_url_path"]
@@ -591,7 +789,7 @@ async def test_create_dashboard_force_overwrites_existing_config(hass) -> None:
         await async_create_dashboard(hass, entry, force=True)
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 4
+        assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()  # weiterhin kein zweiter Panel-Aufruf
 
 
@@ -691,5 +889,5 @@ async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
         )
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 4
+        assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()  # kein zweiter Panel-Aufruf

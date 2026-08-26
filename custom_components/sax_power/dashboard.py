@@ -1,8 +1,9 @@
 """Mitgeliefertes Lovelace-Dashboard für SAX Power (siehe anforderung.yaml,
 REQ-BUNDLED-DASHBOARD).
 
-Baut ein vierteiliges Storage-Dashboard ("Allgemeine Informationen",
-"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden") und legt es -
+Baut ein fünfteiliges Storage-Dashboard ("Allgemeine Informationen",
+"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden",
+"Wirtschaftlichkeit", siehe REQ-ECONOMICS-DASHBOARD) und legt es -
 wenn der Anwender das in der Ersteinrichtung ausgewählt hat (config_flow.py,
 CONF_CREATE_DASHBOARD) - direkt in Home Assistants Lovelace-Speicher an,
 damit es sofort ohne Neustart in der Sidebar erscheint.
@@ -180,6 +181,76 @@ def _gauge_card(
         "max": max_value,
         "needle": True,
         "segments": segments,
+    }
+
+
+def _resolved_row(
+    hass: HomeAssistant,
+    entry_id: str,
+    entity_domain: str,
+    suffix: str,
+    translations: dict[str, str],
+) -> tuple[str | None, dict[str, str] | str | None]:
+    """Löst eine einzelne (Entity-Domain, unique_id-Suffix)-Zeile auf und
+    liefert sowohl die rohe Entity-ID (für Attribut-Zeilen, siehe
+    _attribute_row) als auch die fertige entities-Kartenzeile - oder
+    (None, None), wenn die Entity (noch) nicht registriert ist."""
+    entity_id = _entity_id(hass, entity_domain, f"{entry_id}_{suffix}")
+    if entity_id is None:
+        return None, None
+    if (entity_domain, suffix) in _ENTITY_NAME_FROM_STATE:
+        return entity_id, {"entity": entity_id}
+    name = _entity_name(translations, entity_domain, suffix)
+    return entity_id, ({"entity": entity_id, "name": name} if name else entity_id)
+
+
+def _attribute_row(
+    entity_id: str | None, attribute: str, name: str
+) -> dict[str, Any] | None:
+    """Eine "attribute"-Zeile einer entities-Karte - zeigt ein Attribut der
+    übergebenen Entity wie einen eigenen Sensor an (REQ-ECONOMICS-
+    DASHBOARD, für Preisabdeckungen/Bilanzbeginn, die keinen eigenen
+    Sensor haben, siehe REQ-ECONOMICS-OBSERVABILITY)."""
+    if entity_id is None:
+        return None
+    return {
+        "type": "attribute",
+        "entity": entity_id,
+        "attribute": attribute,
+        "name": name,
+    }
+
+
+def _statistics_graph_card(
+    hass: HomeAssistant,
+    entry_id: str,
+    title: str,
+    entities: list[tuple[str, str]],
+) -> dict[str, Any] | None:
+    """Core-"statistics-graph"-Karte als Balkendiagramm mit Tagesänderung
+    (REQ-ECONOMICS-DASHBOARD) - keine Custom-Card-Abhängigkeit. `change`
+    ist für `state_class: total`-Sensoren (wie die hier verwendeten
+    Geldsensoren) eine unterstützte Langzeitstatistik-Kennzahl; sollte
+    eine künftig getestete HA-Version das nicht mehr unterstützen, sind
+    stattdessen die dedizierten Tages-Sensoren aus REQ-ECONOMICS-
+    AMORTIZATION zu verwenden statt auf einen nicht unterstützten
+    Kartentyp oder eine private Statistik-API auszuweichen."""
+    resolved = [
+        entity_id
+        for entity_domain, suffix in entities
+        if (entity_id := _entity_id(hass, entity_domain, f"{entry_id}_{suffix}"))
+        is not None
+    ]
+    if not resolved:
+        return None
+    return {
+        "type": "statistics-graph",
+        "title": title,
+        "entities": resolved,
+        "stat_types": ["change"],
+        "chart_type": "bar",
+        "period": "day",
+        "days_to_show": 30,
     }
 
 
@@ -386,12 +457,119 @@ async def async_build_dashboard_config(
         ],
     )
 
+    status_entity_id, status_row = _resolved_row(
+        hass, entry_id, "sensor", "economics_status", translations
+    )
+    status_rows: list[dict[str, Any] | str] = [status_row] if status_row else []
+    for entity_domain, suffix in (
+        ("sensor", "economics_current_import_price"),
+        ("sensor", "economics_feed_in_price"),
+        ("sensor", "energy_origin_coverage"),
+    ):
+        _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
+        if row is not None:
+            status_rows.append(row)
+    for attribute, label in (
+        ("charge_price_coverage_percent", "Preisabdeckung Ladung"),
+        ("discharge_price_coverage_percent", "Preisabdeckung Entladung"),
+        ("economics_started_at", "Beginn der Bilanz"),
+    ):
+        row = _attribute_row(status_entity_id, attribute, label)
+        if row is not None:
+            status_rows.append(row)
+    status_card = (
+        {
+            "type": "entities",
+            "title": "Status und Preise",
+            "state_color": True,
+            "entities": status_rows,
+        }
+        if status_rows
+        else None
+    )
+
+    economics_view = _view(
+        "Wirtschaftlichkeit",
+        "wirtschaftlichkeit",
+        "mdi:cash-chart",
+        [
+            status_card,
+            _entities_card(
+                hass,
+                entry_id,
+                "Herkunft der Ladeenergie",
+                [
+                    ("sensor", "energy_charged_from_pv"),
+                    ("sensor", "energy_charged_from_grid"),
+                    ("sensor", "energy_charged_origin_unknown"),
+                    ("sensor", "energy_charged"),
+                    ("sensor", "energy_discharged"),
+                ],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
+                "Operative Geldbilanz",
+                [
+                    ("sensor", "economics_avoided_grid_cost"),
+                    ("sensor", "economics_grid_charge_cost"),
+                    ("sensor", "economics_pv_opportunity_cost"),
+                    ("sensor", "economics_operating_result"),
+                    ("sensor", "economics_unpriced_charge"),
+                    ("sensor", "economics_unpriced_discharge"),
+                ],
+                translations,
+            ),
+            _gauge_card(
+                hass,
+                entry_id,
+                "sensor",
+                "economics_amortization_progress",
+                translations,
+                min_value=0,
+                max_value=100,
+                segments=[
+                    {"from": 0, "color": "red"},
+                    {"from": 50, "color": "yellow"},
+                    {"from": 100, "color": "green"},
+                ],
+            ),
+            _entities_card(
+                hass,
+                entry_id,
+                "Investition und Amortisation",
+                [
+                    ("sensor", "economics_roi"),
+                    ("sensor", "economics_remaining_to_payback"),
+                    ("sensor", "economics_result_today"),
+                    ("sensor", "economics_average_daily_result_30d"),
+                    ("sensor", "economics_projected_annual_result"),
+                    ("sensor", "economics_estimated_payback_date"),
+                ],
+                translations,
+            ),
+            _statistics_graph_card(
+                hass,
+                entry_id,
+                "Verlauf (30 Tage)",
+                [
+                    ("sensor", "economics_operating_result"),
+                    ("sensor", "economics_avoided_grid_cost"),
+                    ("sensor", "economics_grid_charge_cost"),
+                    ("sensor", "economics_pv_opportunity_cost"),
+                ],
+            ),
+        ],
+    )
+
     return {
         "views": [
             general_view,
             charging_view,
             grid_serving_view,
             price_view,
+            economics_view,
         ]
     }
 

@@ -43,6 +43,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import SaxPowerCoordinator
+from .domain.economics_status import EconomicsStatus
 from .entity import SaxPowerEntity
 
 
@@ -104,6 +105,13 @@ def _amortization_forecast_attributes(
     if coordinator.data is None:
         return {}
     return coordinator.data.get("economics_amortization_forecast_attributes") or {}
+
+
+def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Diagnoseattribute des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY)."""
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("economics_status_attributes") or {}
 
 
 def _bool_text(
@@ -697,6 +705,15 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("energy_origin_coverage"),
+    ),
+    # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
+    SaxPowerSensorEntityDescription(
+        key="economics_status",
+        translation_key="economics_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=[status.value for status in EconomicsStatus],
+        value_fn=_direct("economics_status"),
+        attributes_fn=_economics_status_attributes,
     ),
     # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) ----------------
     # Monetäre Sensoren nutzen state_class TOTAL statt TOTAL_INCREASING:

@@ -732,3 +732,32 @@ CONF_ECONOMICS_INVESTMENT_COST = "economics_investment_cost_eur"
 MIN_ECONOMICS_INVESTMENT_COST = 0.01
 MAX_ECONOMICS_INVESTMENT_COST = 1_000_000.0
 ECONOMICS_INVESTMENT_COST_STEP = 0.01
+
+# ==========================================================================
+# Wirtschaftlichkeitsauswertung: Datenqualität, Diagnose und Bilanzneustart
+# (siehe anforderung.yaml, REQ-ECONOMICS-OBSERVABILITY)
+# ==========================================================================
+# Wie PRICE_SENSOR_MISSING_GRACE_PERIOD (6h) - kurze Preisaussetzer sollen
+# den Status economics_status nicht sofort auf price_unavailable kippen.
+# Ausnahme: ein ungültig GESPEICHERTER Fest-/Zeitfenstertarif
+# (QuoteUnavailable.TARIFF_INCOMPLETE) ist ein sofortiger Konfigurations-
+# fehler, kein transienter Preisausfall - dafür gilt keine Karenzzeit (siehe
+# SaxPowerCoordinator._update_economics_price_availability).
+ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD = 6 * 3600  # Sekunden
+
+# Rein informatives (is_fixable=False), selbstheilendes Issue, analog zu
+# ISSUE_PRICE_SENSOR_MISSING - aber für den Netzbezugspreis der
+# Wirtschaftlichkeitsauswertung statt für das preisoptimierte Laden.
+ISSUE_ECONOMICS_PRICE_UNAVAILABLE = "economics_price_unavailable"
+
+# Kontrollierter Bilanzneustart: setzt ausschließlich die Economics-
+# Geldsummen, Preisabdeckungszähler, Tages-Buckets, Start-/Revisionszeit und
+# den Amortisations-Erreichungszeitpunkt zurück - nie die Energie-/
+# Herkunftszähler aus REQ-ENERGY-ORIGIN (siehe
+# SaxPowerCoordinator.async_restart_economics_accounting).
+SERVICE_RESTART_ECONOMICS_ACCOUNTING = "restart_economics_accounting"
+ATTR_CONFIRM = "confirm"
+ATTR_REASON = "reason"
+# Nur in lokaler Diagnose-/Store-Historie sichtbar, keine harte
+# Verarbeitungsgrenze außer der Eingabelänge selbst.
+MAX_ECONOMICS_RESTART_REASON_LENGTH = 120

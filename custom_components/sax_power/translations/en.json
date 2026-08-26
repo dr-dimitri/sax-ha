@@ -301,6 +301,18 @@
       "energy_origin_coverage": {
         "name": "Charge energy origin coverage"
       },
+      "economics_status": {
+        "name": "Economics status",
+        "state": {
+          "disabled": "Disabled",
+          "waiting_for_initial_state": "Waiting for initial state",
+          "active": "Active",
+          "partial_price_coverage": "Partial price coverage",
+          "price_unavailable": "Price unavailable",
+          "origin_unavailable": "Origin unavailable",
+          "storage_error": "Storage error"
+        }
+      },
       "economics_grid_charge_cost": {
         "name": "Grid charge cost"
       },
@@ -521,6 +533,10 @@
       "title": "Price-optimised charging: price sensor delivers no data",
       "description": "Price-optimised charging is active, but the price sensor {price_sensor} has delivered no usable price data for over 6 hours (entity no longer exists, no price forecast, or wrong attribute). No grid charging is happening at the moment. Please check the price sensor under \"Configure\" on this integration."
     },
+    "economics_price_unavailable": {
+      "title": "Economics: import price unavailable",
+      "description": "No valid import price has been available for the economics evaluation for over 6 hours - for a fixed or time-of-use tariff this can also be an immediate configuration error (a missing required price, a broken time-window group). New charge energy is booked as unpriced in the meantime and never re-evaluated retroactively. Please check the import price tariff, or for a dynamic tariff the selected electricity price sensor, under \"Configure\" on this integration."
+    },
     "sunspec_persistently_unavailable": {
       "title": "SAX SunSpec mode persistently unreachable",
       "description": "Slave ID {slave_id} has been continuously unreachable for over an hour. Storage detail values, grid/smart meter values and all three charging automations (timed, grid-serving and price-optimised charging) are non-functional without this register block. Please check the network connection and the configured slave ID (SunSpec mode, default: 100)."
@@ -553,6 +569,12 @@
   "exceptions": {
     "invalid_grid_charge_power": {
       "message": "The power setpoint {power} is invalid. Safe manual grid charging requires an integer between {min_power} W and {max_power} W; zero and positive values are not supported."
+    },
+    "economics_restart_not_ready": {
+      "message": "A balance restart is only possible while economics is enabled and already initialized."
+    },
+    "economics_restart_missing_initial_values": {
+      "message": "Restarting the balance needs a currently known battery capacity and state of charge (is the SunSpec mode reachable?)."
     }
   },
   "services": {
@@ -661,6 +683,24 @@
         "device_id": {
           "name": "Device",
           "description": "The SAX Power device."
+        }
+      }
+    },
+    "restart_economics_accounting": {
+      "name": "Restart economics accounting",
+      "description": "Deliberately resets the economics balance (money sums, price-coverage counters, day buckets, activation time, an already-reached payback date) - never touches energy counters or the charge-origin split.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The SAX Power device."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Must be exactly \"true\"."
+        },
+        "reason": {
+          "name": "Reason",
+          "description": "Optional free text (120 characters max), diagnostic only."
         }
       }
     }

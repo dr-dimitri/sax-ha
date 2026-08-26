@@ -62,6 +62,7 @@
 # REQ-ENERGY-ORIGIN               done       Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)
 # REQ-ECONOMICS-ACCOUNTING        done       Kosten/operatives Ergebnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren
 # REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
+# REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # ==============================================================================
 
 # ==============================================================================
@@ -3372,3 +3373,161 @@ requirement_economics_amortization:
        (tests/test_economics_persistence.py)."
     - "strings.json, translations/de.json, translations/en.json,
        README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."
+
+# ==============================================================================
+# ANFORDERUNG: DATENQUALITÄT, DIAGNOSE UND BILANZNEUSTART
+# ==============================================================================
+requirement_economics_observability:
+  id: REQ-ECONOMICS-OBSERVABILITY
+  title: "Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart"
+  status: done
+  description: >
+    Eine Geldzahl ohne Aussage zur Datenqualität ist irreführend - dieser
+    Block macht sichtbar, ob und warum die Wirtschaftlichkeitsbilanz
+    (REQ-ECONOMICS-ACCOUNTING/-AMORTIZATION) gerade vertrauenswürdig ist,
+    ohne selbst neue Geldwerte zu berechnen.
+
+    Read-only Enum-Sensor `economics_status`
+    (domain.economics_status.EconomicsStatus) mit sieben stabilen
+    Zuständen. Priorität bei gleichzeitig zutreffenden Problemen (höchste
+    zuerst, domain.economics_status.compute_economics_status):
+    `disabled` (ausschließlich bei deaktiviertem Tarif, schlägt dabei jeden
+    anderen Zustand) > `storage_error` > `waiting_for_initial_state` >
+    `price_unavailable` > `origin_unavailable` > `partial_price_coverage` >
+    `active`. Attribute: `reason` (redundant zum Sensorzustand),
+    `tariff_type`, `price_sensor_entity_id` (nur bei dynamischem Tarif -
+    eine Entity-ID ist keine identifizierende Information),
+    `economics_started_at`/`last_tariff_revision_at`/
+    `last_successful_quote_at` (UTC ISO), aktuelle Import-/
+    Einspeisevergütung, kumulierte bepreiste/unbepreiste Lade-/
+    Entlade-kWh sowie `charge_price_coverage_percent`/
+    `discharge_price_coverage_percent`/`origin_coverage_percent`. Kurze
+    lokalisierte Erklärungen kommen über die Entity-Übersetzung der
+    Sensorzustände (strings.json, `entity.sensor.economics_status.state`),
+    nicht über ein zusätzliches Freitextattribut.
+
+    Preisabdeckung (domain.economics_status.compute_price_coverage_percent,
+    reine Funktion): energiebasiert, nicht tickbasiert - bepreiste kWh
+    geteilt durch (bepreiste + unbepreiste) kWh, bei Nenner 0 (noch keine
+    relevante Energie) 100 %. Braucht dafür zwei neue, seit
+    economics_started_at kumulierte Lifetime-Zähler
+    (`SaxPowerCoordinator._economics_priced_charge_kwh`/
+    `_economics_priced_discharge_kwh`, aus denselben
+    `EconomicsDelta.priced_charge_kwh_delta`/`priced_discharge_kwh_delta`
+    wie die Tages-Buckets aus 04/06) - Gegenstück zu den bestehenden
+    `unpriced_charge_kwh`/`unpriced_discharge_kwh`.
+    `origin_coverage_percent` ist unverändert
+    `SaxPowerCoordinator._energy_origin_coverage()` (02/06);
+    `origin_unavailable` ist wahr, wenn diese Methode `None` liefert (die
+    Herkunftszählung selbst nie initialisiert wurde, z. B. nach einem
+    Energiezähler-Store-Ladefehler) - unabhängig davon, ob die
+    Geldbilanz selbst weiterläuft.
+
+    Preisausfall-Erkennung
+    (SaxPowerCoordinator._update_economics_price_availability, läuft nur
+    solange der Tarif aktiv ist): verfolgt monotonic, seit wann
+    ununterbrochen kein gültiger Netzbezugspreis mehr vorlag.
+    QuoteUnavailable.TARIFF_INCOMPLETE (ein ungültig gespeicherter Fest-/
+    Zeitfenstertarif - fehlender Pflichtpreis, kaputte Zeitfenstergruppe)
+    ist ein sofortiger Konfigurationsfehler ohne Karenzzeit; jeder andere
+    Grund (typischerweise ein transienter Ausfall des dynamischen
+    Preis-Sensors) braucht ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD (6h,
+    wie PRICE_SENSOR_MISSING_GRACE_PERIOD beim preisoptimierten Laden).
+    Das daraus abgeleitete `_economics_price_unavailable`-Flag ist
+    sowohl für den Status-Sensor als auch für das Repair-Issue
+    `economics_price_unavailable` (rein informativ, is_fixable=False,
+    Zustandsflanke wie bei den fünf bestehenden Selbstdiagnose-Issues aus
+    REQ-SELF-DIAGNOSIS-REPAIRS) die alleinige Quelle - keine doppelte
+    Karenzzeit-Logik.
+
+    Speicherfehler (`SaxPowerCoordinator._economics_store_write_blocked`,
+    gesetzt bei einem Ladefehler des Wirtschaftlichkeits-Stores): Status
+    `storage_error`, UND - Abweichung von REQ-ECONOMICS-ACCOUNTING -
+    `_bootstrap_economics_if_ready` bootstrapped in diesem Fall NICHT mehr
+    frisch im Arbeitsspeicher, `_accumulate_economics` akkumuliert keine
+    weiteren Deltas mehr auf eine ungesicherte Baseline. Vorher (03/06)
+    lief die Bilanz bei einem unlesbaren Store noch normal im
+    Arbeitsspeicher weiter; das barg das Risiko, beliebig viel
+    unsicherbaren Fortschritt zu verlieren. Die Energiezähler und die
+    Herkunftsaufteilung aus 02/06 laufen davon unberührt weiter.
+
+    Diagnostics (diagnostics.py, Schlüssel "economics"): zusätzlich zu den
+    bereits vorhandenen Rohsummen/Zeitstempeln jetzt auch `status`,
+    `store_write_blocked`, `store_minor_version`, `priced_charge_kwh`/
+    `priced_discharge_kwh` und `price_unavailable`/
+    `last_successful_quote_at`. Schlüssel "tariff"
+    (SaxTariffProvider.diagnostics) zusätzlich um `price_sensor_entity_id`
+    ergänzt. Bestehende Redaction-Regeln (TO_REDACT, nur der Host) bleiben
+    unverändert.
+
+    Kontrollierter Bilanzneustart: neue Action
+    `sax_power.restart_economics_accounting`
+    (SaxPowerCoordinator.async_restart_economics_accounting). Pflichtfeld
+    `device_id`; Pflichtfeld `confirm`, muss exakt `true` sein
+    (`_require_confirm_true` in __init__.py, eine fehlende oder
+    falsch geschriebene Bestätigung darf niemals als Zustimmung gelten);
+    optionales `reason` (Freitext, höchstens
+    MAX_ECONOMICS_RESTART_REASON_LENGTH = 120 Zeichen), rein diagnostisch
+    (nur im lokalen Diagnose-Download über den Log-Eintrag, sonst nirgends
+    sichtbar). Lehnt mit ServiceValidationError ab, wenn der Tarif
+    deaktiviert ist, die Bilanz noch nie initialisiert wurde, oder
+    Speicherkapazität/Ladezustand gerade nicht bekannt sind. Setzt
+    AUSSCHLIESSLICH zurück: die drei Economics-Geldsummen, die vier
+    Preisabdeckungszähler (priced_*/unpriced_*), die Tages-Buckets
+    (day_results, current_day plus seine vier Zähler), den Aktivierungs-/
+    Revisionszeitpunkt (neu auf jetzt) und einen bereits erreichten
+    Payback-Zeitpunkt (auf None) - initialisiert den unbekannten
+    Anfangsbestand dabei erneut wie beim erstmaligen Aktivieren (03/06,
+    "Ehrlicher Start"). Rührt NIEMALS `energy_charged`/`energy_discharged`
+    oder die Herkunftszähler aus REQ-ENERGY-ORIGIN an - keine
+    `total_increasing`-Entity darf durch diesen Service zurückspringen.
+    Speichert atomar über EconomicsStateStore.async_reset (bypasst
+    bewusst die sonst geltende Monotonie-/Unveränderlichkeits-Baseline aus
+    _accept, prüft aber weiterhin Endlichkeit/Wertebereich) VOR jeder
+    In-Memory-Änderung: schlägt das Speichern fehl, bleibt der bisherige
+    Zustand vollständig und unverändert bestehen (kein halb angewendeter
+    Neustart). Keine rückwirkende Neuberechnung und kein automatischer
+    Reset bei einer späteren Tarif-/Investitionsänderung - das gilt
+    unverändert weiter.
+
+    Persistenz: EconomicsStateStore um STORAGE_MINOR_VERSION 3 erweitert
+    (statt einer Hauptversion, aus demselben Grund wie bei 04/06).
+    `priced_charge_kwh`/`priced_discharge_kwh` sind wie
+    `unpriced_charge_kwh`/`unpriced_discharge_kwh` echte monotone Summen,
+    unabhängig vom Sieben-Felder-Bündel aus 03/06 - ein Store aus der Zeit
+    davor kennt sie noch nicht und beginnt ihre Zählung transparent bei 0
+    ab jetzt (analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN).
+
+    Nicht Teil dieser Anforderung: ein eigener Dashboard-Tab (folgt in
+    06/06, REQ-ECONOMICS-DASHBOARD).
+  acceptance_criteria:
+    - "Jeder der sieben Status ist einzeln erreichbar; kombinierte,
+       gleichzeitig zutreffende Probleme ergeben genau den einen Status
+       mit der höchsten Priorität (tests/test_economics_status.py,
+       tests/test_coordinator.py)."
+    - "Preisabdeckung ist energiebasiert (nicht tickbasiert), bleibt bei
+       Nenner 0 bei 100 % und wird intern aus ungerundeten Zählern
+       gebildet, erst beim Veröffentlichen gerundet."
+    - "Ein ungültig gespeicherter Fest-/Zeitfenstertarif löst
+       price_unavailable sofort aus; ein transienter Ausfall des
+       dynamischen Preis-Sensors erst nach
+       ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD (6h)."
+    - "Das Repair-Issue economics_price_unavailable entsteht/löscht sich
+       auf der jeweiligen Zustandsflanke, ohne bei unverändertem
+       Problemzustand erneut angelegt zu werden
+       (tests/test_repairs.py)."
+    - "Ein Store-Ladefehler verhindert sowohl einen frischen 0-Bootstrap
+       im Arbeitsspeicher als auch jede weitere Akkumulation - die
+       Energiezähler/Herkunftsaufteilung aus 02/06 laufen davon
+       unberührt weiter (tests/test_economics_persistence.py)."
+    - "Der Bilanzneustart verlangt confirm=true, ist atomar (ein
+       fehlgeschlagener Speicherversuch lässt den In-Memory-Zustand
+       vollständig unverändert), initialisiert den Anfangsbestand neu und
+       lässt alle Energie-/Herkunftszähler unangetastet
+       (tests/test_coordinator.py, tests/test_init.py)."
+    - "Diagnostics enthalten Status, Store-Zustand, Preisabdeckungszähler
+       und - nur bei dynamischem Tarif - die Sensor-Entity-ID, aber keine
+       neue identifizierende Information (tests/test_diagnostics.py)."
+    - "services.yaml, strings.json, translations/de.json,
+       translations/en.json, README.md, DEVELOPMENT.md und
+       anforderung.yaml sind aktualisiert."

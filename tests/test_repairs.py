@@ -18,8 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.helpers import issue_registry as ir
 
 from custom_components.sax_power.const import (
+    CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
     DOMAIN,
+    ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
     ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_MAX_SOC_BELOW_MIN_SOC,
     ISSUE_NO_ACTIVE_MONTHS,
@@ -429,6 +431,68 @@ async def test_no_active_months_issue_clears_once_a_month_is_selected(hass) -> N
 
 
 # ===========================================================================
+# 6. Wirtschaftlichkeit: Netzbezugspreis nicht verfügbar
+# (REQ-ECONOMICS-OBSERVABILITY) - die Karenzzeit/Sofortfehler-Logik selbst
+# sitzt bereits im Coordinator (_update_economics_price_availability, siehe
+# tests/test_coordinator.py); hier nur die Zustandsflanke der Issue-
+# Erzeugung/-Löschung anhand des bereits fertig ausgewerteten Flags.
+# ===========================================================================
+async def test_economics_price_unavailable_issue_triggers_when_flagged(hass) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is not None
+
+
+async def test_economics_price_unavailable_issue_not_recreated_every_cycle(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+
+    with patch(
+        "custom_components.sax_power.coordinator.ir.async_create_issue"
+    ) as mock_create:
+        coordinator._async_check_self_diagnostics()
+        coordinator._async_check_self_diagnostics()
+
+    assert mock_create.call_count == 1
+
+
+async def test_economics_price_unavailable_issue_clears_once_price_returns(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is not None
+
+    coordinator._economics_price_unavailable = False
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+async def test_economics_price_unavailable_issue_not_triggered_when_disabled(
+    hass,
+) -> None:
+    """Ein deaktivierter Tarif zeigt keinen Preis-Issue, selbst wenn das
+    Flag aus einer früheren Aktivierung noch True wäre."""
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {}
+    coordinator._economics_price_unavailable = True
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+# ===========================================================================
 # Kein falsch-positives Issue bei unauffälliger Konfiguration
 # ===========================================================================
 async def test_no_issues_created_for_a_healthy_default_configuration(hass) -> None:
@@ -444,3 +508,4 @@ async def test_no_issues_created_for_a_healthy_default_configuration(hass) -> No
     assert _get_issue(hass, f"{ISSUE_EMPTY_CHARGE_WINDOW}_grid_serving") is None
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_timed_charge") is None
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_grid_serving") is None
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None

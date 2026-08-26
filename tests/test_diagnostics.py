@@ -130,6 +130,24 @@ async def test_diagnostics_includes_the_tariff_state(hass) -> None:
     assert diagnostics["tariff"]["quote_price_eur_kwh"] == 0.3421
     assert diagnostics["tariff"]["quote_source"] == "fixed"
     assert diagnostics["tariff"]["quote_unavailable_reason"] is None
+    # Ein Fest-/Zeitfenstertarif hat keine Sensor-Quelle.
+    assert diagnostics["tariff"]["price_sensor_entity_id"] is None
+
+
+async def test_diagnostics_includes_the_dynamic_price_sensor_entity_id(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: eine Entity-ID ist keine identifizierende
+    Information (anders als Host/Seriennummer) und wird deshalb
+    unredigiert gezeigt."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: "dynamic",
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        "price_sensor": "sensor.strompreis",
+    }
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["tariff"]["price_sensor_entity_id"] == "sensor.strompreis"
 
 
 async def test_diagnostics_includes_the_economics_balance(hass) -> None:
@@ -151,3 +169,22 @@ async def test_diagnostics_includes_the_economics_balance(hass) -> None:
 
     assert diagnostics["economics"]["started_at"] == started_at.isoformat()
     assert diagnostics["economics"]["grid_charge_cost_eur"] == 1.23456
+
+
+async def test_diagnostics_includes_the_economics_data_quality_state(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Status, Store-Zustand und
+    Preisabdeckungszähler landen ebenfalls im Diagnose-Download."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["store_write_blocked"] is False
+    assert diagnostics["economics"]["store_minor_version"] >= 3
+    assert diagnostics["economics"]["priced_charge_kwh"] is None
+    assert diagnostics["economics"]["price_unavailable"] is False
+
+    coordinator._economics_store_write_blocked = True
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["store_write_blocked"] is True

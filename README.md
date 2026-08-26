@@ -31,6 +31,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)
 - [Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz)
 - [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+- [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)
 - [Energy-Dashboard](#energy-dashboard)
 - [Aktionen für Automationen](#aktionen-für-automationen)
 - [Verbindung nachträglich ändern](#verbindung-nachträglich-ändern)
@@ -553,6 +554,47 @@ Ist die Investition einmal tatsächlich amortisiert, bleibt das
 Amortisationsdatum dauerhaft auf diesem historischen Kalendertag stehen -
 eine spätere Änderung der Investitionskosten verschiebt es nicht mehr
 rückwirkend.
+
+## Datenqualität, Diagnose und Bilanzneustart
+
+Eine Geldzahl ohne Aussage zur Datenqualität ist irreführend. Der Sensor
+**Wirtschaftlichkeit Status** zeigt deshalb auf einen Blick, ob und warum
+der Wirtschaftlichkeitsbilanz gerade zu trauen ist:
+
+| Status | Bedeutung |
+| --- | --- |
+| Deaktiviert | Kein Tarif konfiguriert (siehe [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)) |
+| Wartet auf Initialwerte | Tarif aktiv, aber Speicherkapazität/Ladezustand noch nicht bekannt |
+| Speicherfehler | Der interne Bilanz-Speicher ist unlesbar - die Bilanz pausiert, bis die Integration neu geladen wird |
+| Preis nicht verfügbar | Seit über 6 Stunden kein gültiger Netzbezugspreis (bei einem Fest-/Zeitfenstertarif sofort, wenn die gespeicherte Konfiguration selbst ungültig ist) |
+| Herkunft nicht verfügbar | Die Herkunftsaufteilung aus [Herkunft der Ladeenergie](#herkunft-der-ladeenergie) läuft gerade nicht |
+| Teilweise Preisabdeckung | Ein Teil der geladenen oder entladenen Energie konnte (noch) nicht bepreist werden |
+| Aktiv | Alles vollständig - die Bilanz ist ohne Einschränkung aussagekräftig |
+
+Bei mehreren gleichzeitig zutreffenden Problemen zeigt der Sensor immer
+das dringendste in dieser Reihenfolge. Seine Attribute liefern zusätzlich
+die aktuellen Preise, den Aktivierungszeitpunkt, kumulierte bepreiste/
+unbepreiste Energiemengen sowie die genauen Abdeckungsprozentsätze - für
+Dashboards und Automationen, die feiner reagieren wollen als der reine
+Status.
+
+Bleibt der interne Bilanz-Speicher länger als 6 Stunden unlesbar oder
+liegt ebenso lange kein gültiger Netzbezugspreis vor, erscheint zusätzlich
+ein Reparaturhinweis unter **Einstellungen → System → Reparaturen**, der
+sich automatisch wieder auflöst, sobald die Ursache behoben ist.
+
+Bei einer fehlerhaften Konfiguration (z. B. einem versehentlich falsch
+eingegebenen Tarif) lässt sich über den Service **Wirtschaftlichkeitsbilanz
+neu starten** (`sax_power.restart_economics_accounting`) eine neue,
+prospektive Bilanz beginnen: Alle bisherigen Geldsummen, Preisabdeckungs-
+zähler und die Amortisationshistorie werden zurückgesetzt, der unbekannte
+Anfangsbestand wird wie bei der erstmaligen Aktivierung neu ermittelt. Der
+Aufruf verlangt zur Sicherheit das Feld **Bestätigen** exakt auf „wahr“
+gesetzt und akzeptiert optional einen freien **Grund**-Text, der
+ausschließlich im Diagnose-Download erscheint. Die Energiezähler
+(**Geladene/Entladene Energie**) und die Herkunftsaufteilung aus
+[Herkunft der Ladeenergie](#herkunft-der-ladeenergie) bleiben davon
+vollständig unberührt - es gibt keine rückwirkende Neuberechnung.
 
 ## Energy-Dashboard
 

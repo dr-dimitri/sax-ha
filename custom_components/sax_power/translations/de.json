@@ -301,6 +301,18 @@
       "energy_origin_coverage": {
         "name": "Herkunftsabdeckung Ladeenergie"
       },
+      "economics_status": {
+        "name": "Wirtschaftlichkeit Status",
+        "state": {
+          "disabled": "Deaktiviert",
+          "waiting_for_initial_state": "Wartet auf Initialwerte",
+          "active": "Aktiv",
+          "partial_price_coverage": "Teilweise Preisabdeckung",
+          "price_unavailable": "Preis nicht verfügbar",
+          "origin_unavailable": "Herkunft nicht verfügbar",
+          "storage_error": "Speicherfehler"
+        }
+      },
       "economics_grid_charge_cost": {
         "name": "Netzladekosten"
       },
@@ -521,6 +533,10 @@
       "title": "Preisoptimiertes Laden: Preis-Sensor liefert keine Daten",
       "description": "Preisoptimiertes Laden ist aktiv, aber der Preis-Sensor {price_sensor} liefert seit über 6 Stunden keine auswertbaren Preisdaten (Entity existiert nicht mehr, keine Preisvorschau oder falsches Attribut). Es wird derzeit nicht aus dem Netz geladen. Bitte den Preis-Sensor unter \"Konfigurieren\" bei dieser Integration prüfen."
     },
+    "economics_price_unavailable": {
+      "title": "Wirtschaftlichkeit: Netzbezugspreis nicht verfügbar",
+      "description": "Für die Wirtschaftlichkeitsauswertung liegt seit über 6 Stunden kein gültiger Netzbezugspreis vor - bei einem Fest- oder Zeitfenstertarif kann das auch sofort ein Konfigurationsfehler sein (fehlender Pflichtpreis, kaputte Zeitfenstergruppe). Neue Ladeenergie wird währenddessen als unbepreist verbucht, nie rückwirkend bewertet. Bitte den Netzbezugspreis-Tarif bzw. bei dynamischem Tarif den ausgewählten Strompreis-Sensor unter \"Konfigurieren\" bei dieser Integration prüfen."
+    },
     "sunspec_persistently_unavailable": {
       "title": "SAX SunSpec-Modus dauerhaft nicht erreichbar",
       "description": "Slave-ID {slave_id} ist seit über einer Stunde ununterbrochen nicht erreichbar. Speicherdetails, Netz-/Smart-Meter-Werte und alle drei Lade-Automatiken (zeitgesteuertes, netzdienliches und preisoptimiertes Laden) sind ohne diesen Registerblock funktionslos. Bitte Netzwerkverbindung und die konfigurierte Slave-ID (SunSpec-Modus, Standard: 100) prüfen."
@@ -553,6 +569,12 @@
   "exceptions": {
     "invalid_grid_charge_power": {
       "message": "Der Leistungssollwert {power} ist ungültig. Für eine sichere manuelle Netzladung ist eine ganze Zahl zwischen {min_power} W und {max_power} W erforderlich; Null und positive Werte werden nicht unterstützt."
+    },
+    "economics_restart_not_ready": {
+      "message": "Ein Bilanzneustart ist nur möglich, solange die Wirtschaftlichkeit aktiviert und bereits initialisiert ist."
+    },
+    "economics_restart_missing_initial_values": {
+      "message": "Bilanzneustart benötigt aktuell bekannte Speicherkapazität und Ladezustand (SunSpec-Modus gerade nicht erreichbar?)."
     }
   },
   "services": {
@@ -661,6 +683,24 @@
         "device_id": {
           "name": "Gerät",
           "description": "Das SAX Power Gerät."
+        }
+      }
+    },
+    "restart_economics_accounting": {
+      "name": "Wirtschaftlichkeitsbilanz neu starten",
+      "description": "Setzt die Wirtschaftlichkeitsbilanz kontrolliert zurück (Geldsummen, Preisabdeckungszähler, Tages-Buckets, Aktivierungszeitpunkt, ein bereits erreichtes Amortisationsdatum) - rührt niemals Energiezähler oder Herkunftsaufteilung an.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät",
+          "description": "Das SAX Power Gerät."
+        },
+        "confirm": {
+          "name": "Bestätigen",
+          "description": "Muss genau \"true\" sein."
+        },
+        "reason": {
+          "name": "Grund",
+          "description": "Optionaler freier Text (höchstens 120 Zeichen), rein diagnostisch."
         }
       }
     }

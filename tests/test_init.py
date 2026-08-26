@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -14,13 +15,16 @@ from custom_components.sax_power import (
     async_update_options,
 )
 from custom_components.sax_power.const import (
+    ATTR_CONFIRM,
     ATTR_DEVICE_ID,
     ATTR_POWER,
+    ATTR_REASON,
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
     DOMAIN,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
+    SERVICE_RESTART_ECONOMICS_ACCOUNTING,
     SERVICE_START_GRID_CHARGE,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -201,3 +205,72 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
     ]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     await coordinator.async_shutdown()
+
+
+# -- restart_economics_accounting (REQ-ECONOMICS-OBSERVABILITY) -------------
+async def test_restart_economics_accounting_service_requires_confirm_true(
+    hass,
+) -> None:
+    coordinator = MagicMock()
+    coordinator.async_restart_economics_accounting = AsyncMock()
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        with pytest.raises(vol.Invalid):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+                {ATTR_DEVICE_ID: "device", ATTR_CONFIRM: False},
+                blocking=True,
+            )
+
+    coordinator.async_restart_economics_accounting.assert_not_awaited()
+
+
+async def test_restart_economics_accounting_service_delegates_to_coordinator(
+    hass,
+) -> None:
+    coordinator = MagicMock()
+    coordinator.async_restart_economics_accounting = AsyncMock()
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+            {
+                ATTR_DEVICE_ID: "device",
+                ATTR_CONFIRM: True,
+                ATTR_REASON: "Tarifwechsel",
+            },
+            blocking=True,
+        )
+
+    coordinator.async_restart_economics_accounting.assert_awaited_once_with(
+        reason="Tarifwechsel"
+    )
+
+
+async def test_restart_economics_accounting_service_reason_is_optional(hass) -> None:
+    coordinator = MagicMock()
+    coordinator.async_restart_economics_accounting = AsyncMock()
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+            {ATTR_DEVICE_ID: "device", ATTR_CONFIRM: True},
+            blocking=True,
+        )
+
+    coordinator.async_restart_economics_accounting.assert_awaited_once_with(reason=None)

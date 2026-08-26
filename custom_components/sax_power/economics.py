@@ -251,6 +251,15 @@ class SaxTariffProvider:
         quote = result.quote
         return {
             "tariff_type": str(config.tariff_type),
+            # Erlaubte Quell-ID (REQ-ECONOMICS-OBSERVABILITY): eine
+            # Entity-ID ist keine identifizierende Information wie Host
+            # oder Seriennummer und wird deshalb unredigiert gezeigt - nur
+            # gesetzt, wenn der Tarif tatsächlich dynamisch ist.
+            "price_sensor_entity_id": (
+                self.price_entity_id
+                if config.tariff_type is TariffType.DYNAMIC
+                else None
+            ),
             "feed_in_price_eur_kwh": config.feed_in_price_eur_kwh,
             "fixed_import_price_eur_kwh": config.fixed_import_price_eur_kwh,
             "tou_base_price_eur_kwh": config.tou_base_price_eur_kwh,

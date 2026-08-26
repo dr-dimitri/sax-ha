@@ -352,6 +352,76 @@ nicht aussagekräftig, ohne die abgeschlossene Historie zu berühren.
 `payback_achieved_at` ist wie `economics_started_at` einmalig gesetzt und
 danach unveränderlich.
 
+### Datenqualität, Diagnose und Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY)
+
+Macht sichtbar, ob und warum die Bilanz gerade vertrauenswürdig ist, ohne
+selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
+`domain/economics_status.py`:
+
+- `EconomicsStatus` (sieben Werte) und `compute_economics_status(...)`
+  bilden eine feste Prioritätsreihenfolge aus mehreren, ggf. gleichzeitig
+  zutreffenden Booleans ab: `disabled` > `storage_error` >
+  `waiting_for_initial_state` > `price_unavailable` >
+  `origin_unavailable` > `partial_price_coverage` > `active`. `disabled`
+  gilt ausschließlich bei deaktiviertem Tarif und schlägt dabei jeden
+  anderen Zustand.
+- `compute_price_coverage_percent(priced_kwh, unpriced_kwh)` ist
+  energiebasiert (nicht tickbasiert) und liefert bei Nenner 0 100 % -
+  dieselbe Formel wie `DayEconomicsResult.price_coverage_percent` (04/06)
+  und `_energy_origin_coverage()` (02/06).
+
+`SaxPowerCoordinator._publish_economics_status` (aufgerufen am Ende von
+`_accumulate_economics`, unabhängig vom `frozen`-Zweig, damit auch
+`waiting_for_initial_state`/`storage_error` sichtbar werden, bevor die
+Bilanz je gestartet ist) setzt das zusammen:
+
+- Zwei neue Lifetime-Zähler `_economics_priced_charge_kwh`/
+  `_economics_priced_discharge_kwh` (Gegenstück zu den bestehenden
+  `unpriced_*`-Zählern, aus denselben `EconomicsDelta.priced_charge_kwh_delta`/
+  `priced_discharge_kwh_delta` wie die Tages-Buckets) ergeben
+  `charge_price_coverage_percent`/`discharge_price_coverage_percent`.
+  `origin_unavailable` ist wahr, wenn `_energy_origin_coverage()` (02/06)
+  `None` liefert.
+- `_update_economics_price_availability` verfolgt monotonic, seit wann
+  ununterbrochen kein gültiger Preis mehr vorlag.
+  `QuoteUnavailable.TARIFF_INCOMPLETE` (ungültig gespeicherter Fest-/
+  Zeitfenstertarif) ist ein sofortiger Konfigurationsfehler ohne
+  Karenzzeit; jeder andere Grund braucht
+  `ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD` (6h, wie beim
+  preisoptimierten Laden). Das Ergebnis (`_economics_price_unavailable`)
+  ist die alleinige Quelle sowohl für den Status-Sensor als auch für das
+  Repair-Issue `economics_price_unavailable`
+  (`SelfDiagnostics._check_economics_price_unavailable`, keine doppelte
+  Karenzzeit-Logik).
+- Ein Speicherfehler (`_economics_store_write_blocked`) ergibt
+  `storage_error` UND verhindert - Abweichung von REQ-ECONOMICS-
+  ACCOUNTING - sowohl einen frischen 0-Bootstrap im Arbeitsspeicher
+  (`_bootstrap_economics_if_ready`) als auch jede weitere Akkumulation
+  (`_accumulate_economics` wickelt den gesamten Mutationsblock in
+  `if not frozen:`). Die Energiezähler/Herkunftsaufteilung aus 02/06
+  laufen davon unberührt weiter.
+
+Kontrollierter Bilanzneustart
+(`SaxPowerCoordinator.async_restart_economics_accounting`, Service
+`sax_power.restart_economics_accounting`, `confirm` muss exakt `true`
+sein): setzt ausschließlich die drei Geldsummen, die vier
+Preisabdeckungszähler, die Tages-Buckets und den Aktivierungs-/
+Payback-Zeitpunkt zurück, initialisiert den Anfangsbestand erneut wie bei
+der erstmaligen Aktivierung - rührt niemals `energy_charged`/
+`energy_discharged` oder die Herkunftszähler an. Speichert atomar über
+`EconomicsStateStore.async_reset` VOR jeder In-Memory-Änderung: dessen
+`_valid_snapshot` prüft weiterhin Endlichkeit/Wertebereich, überspringt
+aber bewusst die Monotonie-/Unveränderlichkeits-Baseline aus `_accept` -
+ein gewollter Reset auf 0 ist kein Korruptionsindiz. Schlägt das
+Speichern fehl, bleibt der bisherige Zustand vollständig unverändert
+(kein halb angewendeter Neustart).
+
+Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 3 erweitert.
+`priced_charge_kwh`/`priced_discharge_kwh` sind wie die bestehenden
+`unpriced_*`-Zähler echte monotone Summen und unabhängig vom
+Sieben-Felder-Bündel - ein älterer Store beginnt ihre Zählung transparent
+bei 0 ab jetzt.
+
 ## Datenfluss
 
 `config_flow.py` sammelt Host/Port/Slave-IDs/Intervall und validiert die
@@ -930,6 +1000,17 @@ tests/
 │                                  Tarifpause-Maskierung, Payback-Erkennung,
 │                                  Investitionskostenänderung ohne Rückwirkung) liegt in
 │                                  test_coordinator.py
+├── test_economics_status.py         Reine Status-/Abdeckungsableitung
+│                                  (REQ-ECONOMICS-OBSERVABILITY,
+│                                  domain/economics_status.py): jeder der sieben Status
+│                                  einzeln sowie kombinierte, gleichzeitig zutreffende
+│                                  Probleme (Priorität), Preisabdeckung energiebasiert mit
+│                                  100 % bei Nenner 0; die Coordinator-seitige Verdrahtung
+│                                  (Preisausfall-Karenzzeit vs. sofortiger
+│                                  Konfigurationsfehler, Herkunfts-/Preisabdeckung aus
+│                                  echten Zählern, Speicherfehler-Freeze, kontrollierter
+│                                  Bilanzneustart inkl. Atomarität) liegt in
+│                                  test_coordinator.py/test_init.py
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
 │                                  unvollständiger/unlesbarer Store (inkl. dauerhafter
@@ -942,11 +1023,13 @@ tests/
 │                                  über einen simulierten Neustart hinweg samt Issue-Lebenszyklus,
 │                                  Max-SOC-Hold über den Neustart und Verfügbarkeit der
 │                                  Konfigurations-Entities
-├── test_repairs.py                 Fünf Selbstdiagnose-Issues (coordinator.
+├── test_repairs.py                 Sechs Selbstdiagnose-Issues (coordinator.
 │                                  _async_check_self_diagnostics): Auslösen nach Karenzzeit,
 │                                  Idempotenz (kein erneutes Anlegen bei unverändertem
 │                                  Problemzustand), Selbstheilung sobald die Ursache behoben
-│                                  ist - siehe anforderung.yaml REQ-SELF-DIAGNOSIS-REPAIRS
+│                                  ist - fünf davon siehe anforderung.yaml
+│                                  REQ-SELF-DIAGNOSIS-REPAIRS, das sechste
+│                                  (economics_price_unavailable) REQ-ECONOMICS-OBSERVABILITY
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

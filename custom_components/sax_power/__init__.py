@@ -15,11 +15,13 @@ from homeassistant.helpers import device_registry as dr
 from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
+    ATTR_CONFIRM,
     ATTR_DEVICE_ID,
     ATTR_ENABLED,
     ATTR_END,
     ATTR_FORCE,
     ATTR_POWER,
+    ATTR_REASON,
     ATTR_START,
     CONF_CREATE_DASHBOARD,
     CONF_SCAN_INTERVAL,
@@ -29,9 +31,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID_EXTENDED,
     DOMAIN,
+    MAX_ECONOMICS_RESTART_REASON_LENGTH,
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_REINSTALL_DASHBOARD,
+    SERVICE_RESTART_ECONOMICS_ACCOUNTING,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
     SERVICE_SET_TIMED_CHARGE_WINDOW,
@@ -51,6 +55,15 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.TIME,
 ]
+
+
+def _require_confirm_true(value: Any) -> Any:
+    """`confirm` muss exakt True sein - eine fehlende oder falsch
+    geschriebene Bestätigung darf niemals als "ja" durchgehen."""
+    coerced = cv.boolean(value)
+    if coerced is not True:
+        raise vol.Invalid("confirm muss genau 'true' sein")
+    return coerced
 
 
 def _coerce_grid_charge_power(value: Any) -> Any:
@@ -93,6 +106,20 @@ SERVICE_SET_PRICE_CHARGE_ENABLED_SCHEMA = vol.Schema(
         vol.Required(ATTR_DEVICE_ID): cv.string,
         vol.Required(ATTR_ENABLED): cv.boolean,
         vol.Optional(ATTR_FORCE, default=False): cv.boolean,
+    }
+)
+# `confirm` muss exakt True sein (REQ-ECONOMICS-OBSERVABILITY) - eine
+# Automation, die den Bilanzneustart versehentlich ohne bewusste
+# Bestätigung aufruft, darf keine Geldsummen zurücksetzen. `reason` ist
+# rein diagnostisch (lokaler Diagnose-Download) und auf eine sinnvolle
+# Länge begrenzt.
+SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_CONFIRM): _require_confirm_true,
+        vol.Optional(ATTR_REASON): vol.All(
+            cv.string, vol.Length(max=MAX_ECONOMICS_RESTART_REASON_LENGTH)
+        ),
     }
 )
 
@@ -311,6 +338,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
         await async_create_dashboard(hass, entry, force=True)
 
+    async def _async_restart_economics_accounting(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.async_restart_economics_accounting(
+            reason=call.data.get(ATTR_REASON)
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_GRID_CHARGE,
@@ -358,4 +391,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_REINSTALL_DASHBOARD,
         _async_reinstall_dashboard_service,
         schema=SERVICE_STOP_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+        _async_restart_economics_accounting,
+        schema=SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA,
     )

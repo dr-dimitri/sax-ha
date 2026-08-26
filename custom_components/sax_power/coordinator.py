@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from time import monotonic
@@ -32,6 +33,7 @@ from .const import (
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
+    ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_CONTROL_CONFIG_UNREADABLE,
     ISSUE_CONTROL_CONFIG_UNRESOLVED,
@@ -102,6 +104,10 @@ from .domain.economics_amortization import (
     compute_remaining_to_payback_eur,
     compute_roi_percent,
 )
+from .domain.economics_status import (
+    compute_economics_status,
+    compute_price_coverage_percent,
+)
 from .domain.energy_accounting import EnergyDelta, compute_charge_delta
 from .domain.registers import (
     to_signed16,
@@ -114,6 +120,7 @@ from .domain.sunspec import (
     decode_high_block,
     decode_low_blocks,
 )
+from .domain.tariff import QuoteResult, QuoteUnavailable, TariffType
 from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
@@ -123,6 +130,9 @@ from .infrastructure.control_store import (
     ControlConfig,
     ControlConfigLoadStatus,
     ControlConfigStore,
+)
+from .infrastructure.economics_store import (
+    STORAGE_MINOR_VERSION as ECONOMICS_STORE_MINOR_VERSION,
 )
 from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
@@ -481,6 +491,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # unveränderlich, unabhängig von einer späteren Änderung der
         # Investitionskosten (siehe _maybe_mark_payback_achieved).
         self._economics_payback_achieved_at: datetime | None = None
+        # Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY): kumulierte,
+        # seit economics_started_at tatsächlich bepreiste Lade-/
+        # Entlademenge - Gegenstück zu den beiden unpriced-Zählern oben, für
+        # charge_price_coverage_percent/discharge_price_coverage_percent.
+        self._economics_priced_charge_kwh: float | None = None
+        self._economics_priced_discharge_kwh: float | None = None
+        # Seit wann ununterbrochen kein gültiger Netzbezugspreis mehr
+        # vorlag (monotonic) - None, solange zuletzt ein Preis vorlag.
+        # _economics_price_unavailable ist der daraus abgeleitete, fertig
+        # ausgewertete Status (Karenzzeit bzw. sofortiger
+        # Konfigurationsfehler bei Fest-/Zeitfenstertarif, siehe
+        # _update_economics_price_availability) - unabhängig vom
+        # persistierten Zustand, nur zur Laufzeit gültig.
+        self._economics_price_unavailable_since: float | None = None
+        self._economics_price_unavailable = False
+        self._economics_last_successful_quote_at: datetime | None = None
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -687,6 +713,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         tariff_enabled = self.tariff_provider.config.enabled
         if tariff_enabled:
+            self._update_economics_price_availability(
+                quote_result, current_price, monotonic()
+            )
+        else:
+            # Re-Aktivierung soll ohne einen stehen gebliebenen
+            # Karenzzeit-Countdown aus einer früheren Deaktivierung starten.
+            self._economics_price_unavailable_since = None
+            self._economics_price_unavailable = False
+
+        # REQ-ECONOMICS-OBSERVABILITY: ein unlesbarer Store darf weder einen
+        # frischen 0-Bootstrap im Arbeitsspeicher starten noch eine bereits
+        # laufende Bilanz weiter akkumulieren - siehe
+        # _bootstrap_economics_if_ready sowie den Docstring dort.
+        frozen = self._economics_store_write_blocked
+        if tariff_enabled:
             self._bootstrap_economics_if_ready(data)
         if self._economics_started_at is None:
             # Nie aktiviert, oder aktiviert, aber Kapazität/SOC noch nicht
@@ -694,95 +735,118 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Bilanz wartet, statt mit einem erfundenen Anfangsbestand zu
             # starten.
             self._publish_economics_balance(data, monetary_available=False)
+            self._publish_amortization(data, monetary_available=False)
+            self._publish_economics_status(
+                data,
+                tariff_enabled=tariff_enabled,
+                current_price=current_price,
+                feed_in_price=feed_in_price,
+            )
             return
 
         changed = False
-        delta: EconomicsDelta | None = None
-        if charge_delta is not None:
-            delta = compute_economics_delta(
-                charge_delta,
-                discharged_kwh,
-                self._economics_unvalued_inventory_kwh,
-                current_price,
-                feed_in_price,
-            )
-
-        # Tageswechsel-Erkennung VOR der Anwendung des aktuellen Deltas: der
-        # Payback-Check beim Tagesabschluss (_maybe_mark_payback_achieved,
-        # aufgerufen aus _close_economics_day) darf ausschließlich den am
-        # Ende des GESCHLOSSENEN Tages tatsächlich erreichten Stand sehen.
-        # Würde stattdessen erst das Delta angewendet und danach der Tag
-        # geschlossen, könnte ein Payback, der erst durch das erste Delta
-        # des NEUEN Tages erreicht wird, fälschlich auf die vorherige
-        # Tagesgrenze zurückdatiert werden.
-        if self._advance_economics_day():
-            changed = True
-
-        if delta is not None:
-            self._economics_grid_charge_cost_eur += delta.grid_charge_cost_delta
-            self._economics_pv_opportunity_cost_eur += delta.pv_opportunity_cost_delta
-            self._economics_avoided_grid_cost_eur += delta.avoided_grid_cost_delta
-            self._economics_unvalued_inventory_kwh += delta.unvalued_inventory_delta_kwh
-            self._economics_unpriced_charge_kwh += delta.unpriced_charge_delta_kwh
-            self._economics_unpriced_discharge_kwh += delta.unpriced_discharge_delta_kwh
-            self._economics_current_day_operating_result_eur += (
-                delta.avoided_grid_cost_delta
-                - delta.grid_charge_cost_delta
-                - delta.pv_opportunity_cost_delta
-            )
-            self._economics_current_day_priced_charge_kwh += (
-                delta.priced_charge_kwh_delta
-            )
-            self._economics_current_day_unpriced_charge_kwh += (
-                delta.unpriced_charge_delta_kwh
-            )
-            self._economics_current_day_priced_discharge_kwh += (
-                delta.priced_discharge_kwh_delta
-            )
-            self._economics_current_day_unpriced_discharge_kwh += (
-                delta.unpriced_discharge_delta_kwh
-            )
-            # Auch ein gültiger Preis von exakt 0 EUR/kWh bewegt
-            # priced_charge_kwh_delta/priced_discharge_kwh_delta, ohne einen
-            # der übrigen sechs Werte zu verändern - ohne die beiden hier
-            # würde eine solche Bewegung kein verzögertes Speichern auslösen
-            # und der Tageszähler könnte einen ungeplanten Neustart nicht
-            # überleben.
-            changed = changed or any(
-                (
-                    delta.grid_charge_cost_delta,
-                    delta.pv_opportunity_cost_delta,
-                    delta.avoided_grid_cost_delta,
-                    delta.unvalued_inventory_delta_kwh,
-                    delta.unpriced_charge_delta_kwh,
-                    delta.unpriced_discharge_delta_kwh,
-                    delta.priced_charge_kwh_delta,
-                    delta.priced_discharge_kwh_delta,
+        if not frozen:
+            delta: EconomicsDelta | None = None
+            if charge_delta is not None:
+                delta = compute_economics_delta(
+                    charge_delta,
+                    discharged_kwh,
+                    self._economics_unvalued_inventory_kwh,
+                    current_price,
+                    feed_in_price,
                 )
-            )
 
-        # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
-        # Bestandskorrektur betrifft die Integrität des unbewerteten
-        # Bestands selbst, nicht die aktuelle Bepreisung.
-        correction = min_soc_inventory_correction(
-            self._economics_unvalued_inventory_kwh,
-            data.get("battery_soc"),
-            data.get("battery_soc_min"),
-        )
-        if correction is not None:
-            _LOGGER.info(
-                "Wirtschaftlichkeit: unbewerteter Bestand am SOC-Minimum "
-                "auf 0 korrigiert (war %.3f kWh, %s)",
+            # Tageswechsel-Erkennung VOR der Anwendung des aktuellen Deltas:
+            # der Payback-Check beim Tagesabschluss
+            # (_maybe_mark_payback_achieved, aufgerufen aus
+            # _close_economics_day) darf ausschließlich den am Ende des
+            # GESCHLOSSENEN Tages tatsächlich erreichten Stand sehen. Würde
+            # stattdessen erst das Delta angewendet und danach der Tag
+            # geschlossen, könnte ein Payback, der erst durch das erste
+            # Delta des NEUEN Tages erreicht wird, fälschlich auf die
+            # vorherige Tagesgrenze zurückdatiert werden.
+            if self._advance_economics_day():
+                changed = True
+
+            if delta is not None:
+                self._economics_grid_charge_cost_eur += delta.grid_charge_cost_delta
+                self._economics_pv_opportunity_cost_eur += (
+                    delta.pv_opportunity_cost_delta
+                )
+                self._economics_avoided_grid_cost_eur += delta.avoided_grid_cost_delta
+                self._economics_unvalued_inventory_kwh += (
+                    delta.unvalued_inventory_delta_kwh
+                )
+                self._economics_unpriced_charge_kwh += delta.unpriced_charge_delta_kwh
+                self._economics_unpriced_discharge_kwh += (
+                    delta.unpriced_discharge_delta_kwh
+                )
+                self._economics_priced_charge_kwh += delta.priced_charge_kwh_delta
+                self._economics_priced_discharge_kwh += delta.priced_discharge_kwh_delta
+                self._economics_current_day_operating_result_eur += (
+                    delta.avoided_grid_cost_delta
+                    - delta.grid_charge_cost_delta
+                    - delta.pv_opportunity_cost_delta
+                )
+                self._economics_current_day_priced_charge_kwh += (
+                    delta.priced_charge_kwh_delta
+                )
+                self._economics_current_day_unpriced_charge_kwh += (
+                    delta.unpriced_charge_delta_kwh
+                )
+                self._economics_current_day_priced_discharge_kwh += (
+                    delta.priced_discharge_kwh_delta
+                )
+                self._economics_current_day_unpriced_discharge_kwh += (
+                    delta.unpriced_discharge_delta_kwh
+                )
+                # Auch ein gültiger Preis von exakt 0 EUR/kWh bewegt
+                # priced_charge_kwh_delta/priced_discharge_kwh_delta, ohne
+                # einen der übrigen sechs Werte zu verändern - ohne die
+                # beiden hier würde eine solche Bewegung kein verzögertes
+                # Speichern auslösen und der Tageszähler könnte einen
+                # ungeplanten Neustart nicht überleben.
+                changed = changed or any(
+                    (
+                        delta.grid_charge_cost_delta,
+                        delta.pv_opportunity_cost_delta,
+                        delta.avoided_grid_cost_delta,
+                        delta.unvalued_inventory_delta_kwh,
+                        delta.unpriced_charge_delta_kwh,
+                        delta.unpriced_discharge_delta_kwh,
+                        delta.priced_charge_kwh_delta,
+                        delta.priced_discharge_kwh_delta,
+                    )
+                )
+
+            # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
+            # Bestandskorrektur betrifft die Integrität des unbewerteten
+            # Bestands selbst, nicht die aktuelle Bepreisung.
+            correction = min_soc_inventory_correction(
                 self._economics_unvalued_inventory_kwh,
-                dt_util.utcnow().isoformat(),
+                data.get("battery_soc"),
+                data.get("battery_soc_min"),
             )
-            self._economics_unvalued_inventory_kwh = correction
-            changed = True
+            if correction is not None:
+                _LOGGER.info(
+                    "Wirtschaftlichkeit: unbewerteter Bestand am SOC-Minimum "
+                    "auf 0 korrigiert (war %.3f kWh, %s)",
+                    self._economics_unvalued_inventory_kwh,
+                    dt_util.utcnow().isoformat(),
+                )
+                self._economics_unvalued_inventory_kwh = correction
+                changed = True
 
         if changed:
             self._async_schedule_economics_save()
         self._publish_economics_balance(data, monetary_available=tariff_enabled)
         self._publish_amortization(data, monetary_available=tariff_enabled)
+        self._publish_economics_status(
+            data,
+            tariff_enabled=tariff_enabled,
+            current_price=current_price,
+            feed_in_price=feed_in_price,
+        )
 
     def _start_economics_day(self, day: date) -> None:
         self._economics_current_day = day
@@ -1026,6 +1090,131 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return dt_util.as_local(self._economics_payback_achieved_at).date()
         return forecast.estimated_payback_date
 
+    # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
+    def _update_economics_price_availability(
+        self, quote_result: QuoteResult, current_price: float | None, now: float
+    ) -> None:
+        """Verfolgt, seit wann ununterbrochen kein gültiger Netzbezugspreis
+        mehr vorlag, und leitet daraus _economics_price_unavailable ab.
+
+        Ein ungültig GESPEICHERTER Fest-/Zeitfenstertarif
+        (QuoteUnavailable.TARIFF_INCOMPLETE, z. B. ein fehlender Pflichtpreis
+        oder eine kaputte Zeitfenstergruppe) ist ein sofortiger
+        Konfigurationsfehler - anders als ein transienter Ausfall des
+        dynamischen Preis-Sensors gilt dafür keine Karenzzeit. Läuft nur,
+        solange der Tarif aktiv ist (siehe Aufrufer _accumulate_economics).
+        """
+        if current_price is not None:
+            self._economics_price_unavailable_since = None
+            self._economics_price_unavailable = False
+            self._economics_last_successful_quote_at = dt_util.utcnow()
+            return
+        if quote_result.reason is QuoteUnavailable.TARIFF_INCOMPLETE:
+            self._economics_price_unavailable = True
+            return
+        if self._economics_price_unavailable_since is None:
+            self._economics_price_unavailable_since = now
+        self._economics_price_unavailable = (
+            now - self._economics_price_unavailable_since
+            >= ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD
+        )
+
+    def _publish_economics_status(
+        self,
+        data: dict[str, Any],
+        *,
+        tariff_enabled: bool,
+        current_price: float | None,
+        feed_in_price: float | None,
+    ) -> None:
+        """Veröffentlicht economics_status samt Diagnoseattributen.
+
+        Fasst zusammen, ob und warum die Wirtschaftlichkeitsbilanz gerade
+        vertrauenswürdig ist - eine Geldzahl ohne Aussage zur Datenqualität
+        ist irreführend. Läuft unabhängig vom `frozen`/Bootstrap-Zweig in
+        _accumulate_economics, damit auch waiting_for_initial_state und
+        storage_error sichtbar werden, bevor die Bilanz je gestartet ist.
+        """
+        origin_coverage = self._energy_origin_coverage()
+        charge_coverage = compute_price_coverage_percent(
+            self._economics_priced_charge_kwh, self._economics_unpriced_charge_kwh
+        )
+        discharge_coverage = compute_price_coverage_percent(
+            self._economics_priced_discharge_kwh,
+            self._economics_unpriced_discharge_kwh,
+        )
+        status = compute_economics_status(
+            tariff_enabled=tariff_enabled,
+            storage_error=self._economics_store_write_blocked,
+            started=self._economics_started_at is not None,
+            price_unavailable=self._economics_price_unavailable,
+            origin_unavailable=origin_coverage is None,
+            charge_price_coverage_percent=charge_coverage,
+            discharge_price_coverage_percent=discharge_coverage,
+        )
+        data["economics_status"] = status.value
+        price_entity_id = (
+            self.tariff_provider.price_entity_id
+            if self.tariff_provider.config.tariff_type is TariffType.DYNAMIC
+            else None
+        )
+        data["economics_status_attributes"] = {
+            # Redundant zum Sensorzustand, aber Teil desselben
+            # Attributsatzes - siehe die analoge average_daily_result_eur-
+            # Ergänzung bei REQ-ECONOMICS-AMORTIZATION.
+            "reason": status.value,
+            "tariff_type": str(self.tariff_provider.config.tariff_type),
+            "price_sensor_entity_id": price_entity_id,
+            "economics_started_at": (
+                None
+                if self._economics_started_at is None
+                else self._economics_started_at.isoformat()
+            ),
+            "last_tariff_revision_at": (
+                None
+                if self._last_tariff_revision_at is None
+                else self._last_tariff_revision_at.isoformat()
+            ),
+            "last_successful_quote_at": (
+                None
+                if self._economics_last_successful_quote_at is None
+                else self._economics_last_successful_quote_at.isoformat()
+            ),
+            "current_import_price_eur_kwh": (
+                None if current_price is None else round(current_price, 5)
+            ),
+            "feed_in_price_eur_kwh": (
+                None if feed_in_price is None else round(feed_in_price, 5)
+            ),
+            "priced_charge_kwh": (
+                None
+                if self._economics_priced_charge_kwh is None
+                else round(self._economics_priced_charge_kwh, 3)
+            ),
+            "unpriced_charge_kwh": (
+                None
+                if self._economics_unpriced_charge_kwh is None
+                else round(self._economics_unpriced_charge_kwh, 3)
+            ),
+            "priced_discharge_kwh": (
+                None
+                if self._economics_priced_discharge_kwh is None
+                else round(self._economics_priced_discharge_kwh, 3)
+            ),
+            "unpriced_discharge_kwh": (
+                None
+                if self._economics_unpriced_discharge_kwh is None
+                else round(self._economics_unpriced_discharge_kwh, 3)
+            ),
+            "charge_price_coverage_percent": (
+                None if charge_coverage is None else round(charge_coverage, 1)
+            ),
+            "discharge_price_coverage_percent": (
+                None if discharge_coverage is None else round(discharge_coverage, 1)
+            ),
+            "origin_coverage_percent": origin_coverage,
+        }
+
     def _bootstrap_economics_if_ready(self, data: dict[str, Any]) -> None:
         """Startet die Bilanz beim erstmaligen Aktivieren.
 
@@ -1043,8 +1232,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         economics_started_at bereits gesetzt (laufender Betrieb oder aus
         dem Store geladen), passiert hier nichts mehr - auch nicht nach
         einem zwischenzeitlichen Deaktivieren/Reaktivieren des Tarifs.
+
+        Läuft außerdem NICHT, solange der Store als unlesbar gilt
+        (_economics_store_write_blocked, REQ-ECONOMICS-OBSERVABILITY,
+        Status storage_error) - sonst würde eine aus lauter Nullen frisch
+        gebootstrappte Bilanz im Arbeitsspeicher weiterlaufen, obwohl sie
+        nie gesichert werden kann. Ohne diesen Neustart bleibt der Zustand
+        stattdessen bis zu einem erfolgreichen Neuladen des Config Entry
+        unverändert `None` ("wartend"), statt unbeobachtet zu akkumulieren.
         """
-        if self._economics_started_at is not None:
+        if (
+            self._economics_started_at is not None
+            or self._economics_store_write_blocked
+        ):
             return
         capacity_wh = data.get("battery_capacity")
         capacity_kwh = None if capacity_wh is None else float(capacity_wh) / 1000
@@ -1059,6 +1259,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_unvalued_inventory_kwh = inventory
         self._economics_unpriced_charge_kwh = 0.0
         self._economics_unpriced_discharge_kwh = 0.0
+        self._economics_priced_charge_kwh = 0.0
+        self._economics_priced_discharge_kwh = 0.0
         self._economics_started_at = dt_util.utcnow()
         self._async_schedule_economics_save()
 
@@ -1160,6 +1362,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._economics_unpriced_charge_kwh = state.unpriced_charge_kwh
             self._economics_unpriced_discharge_kwh = state.unpriced_discharge_kwh
             self._economics_started_at = state.economics_started_at
+            # REQ-ECONOMICS-OBSERVABILITY: additiv zum Sieben-Felder-Bündel
+            # oben - ein Store aus der Zeit davor kennt diese beiden Felder
+            # noch nicht und beginnt die Abdeckungszählung transparent bei 0
+            # ab jetzt, analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN
+            # (siehe _bootstrap_energy_origin).
+            self._economics_priced_charge_kwh = state.priced_charge_kwh or 0.0
+            self._economics_priced_discharge_kwh = state.priced_discharge_kwh or 0.0
         if state is not None:
             self._last_tariff_revision_at = state.last_tariff_revision_at
             self._economics_day_results = state.day_results
@@ -1211,6 +1420,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._economics_current_day_unpriced_discharge_kwh
             ),
             payback_achieved_at=self._economics_payback_achieved_at,
+            priced_charge_kwh=self._economics_priced_charge_kwh,
+            priced_discharge_kwh=self._economics_priced_discharge_kwh,
         )
 
     def _async_schedule_economics_save(self) -> None:
@@ -1234,6 +1445,108 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "gespeichert werden: %s",
                 err,
             )
+
+    async def async_restart_economics_accounting(
+        self, *, reason: str | None = None
+    ) -> None:
+        """Kontrollierter Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY,
+        Service `sax_power.restart_economics_accounting`).
+
+        Setzt AUSSCHLIESSLICH die drei Economics-Geldsummen, die Preis-
+        abdeckungszähler (priced_*/unpriced_*), die Tages-Buckets, den
+        Aktivierungs-/Revisionszeitpunkt und einen bereits erreichten
+        Payback-Zeitpunkt zurück, initialisiert den unbekannten
+        Anfangsbestand erneut wie beim erstmaligen Aktivieren (03/06) - und
+        rührt dabei nie `energy_charged`/`energy_discharged` oder die
+        Herkunftszähler aus REQ-ENERGY-ORIGIN an. `reason` ist rein
+        diagnostisch (Diagnose-Download), nirgends sonst sichtbar.
+
+        Speichert atomar VOR jeder In-Memory-Änderung: schlägt das
+        Speichern fehl, bleibt der bisherige Zustand vollständig und
+        unverändert bestehen (kein halb angewendeter Neustart). Keine
+        rückwirkende Neuberechnung und kein automatischer Reset bei einer
+        späteren Tarif-/Investitionsänderung - das war schon vorher so und
+        ändert sich durch diesen Service nicht.
+        """
+        economics_ready = (
+            self.tariff_provider.config.enabled
+            and self._economics_started_at is not None
+        )
+        if not economics_ready:
+            raise ServiceValidationError(
+                "Ein Bilanzneustart ist nur möglich, solange die "
+                "Wirtschaftlichkeit aktiviert und bereits initialisiert ist",
+                translation_domain=DOMAIN,
+                translation_key="economics_restart_not_ready",
+            )
+
+        current_data = self.data or {}
+        capacity_wh = current_data.get("battery_capacity")
+        capacity_kwh = None if capacity_wh is None else float(capacity_wh) / 1000
+        inventory = initial_unvalued_inventory_kwh(
+            capacity_kwh, current_data.get("battery_soc")
+        )
+        if inventory is None:
+            raise ServiceValidationError(
+                "Bilanzneustart benötigt aktuell bekannte Speicherkapazität "
+                "und Ladezustand (SunSpec-Modus gerade nicht erreichbar?)",
+                translation_domain=DOMAIN,
+                translation_key="economics_restart_missing_initial_values",
+            )
+
+        now = dt_util.utcnow()
+        new_state = replace(
+            self._economics_state(),
+            grid_charge_cost_eur=0.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=0.0,
+            unvalued_inventory_kwh=inventory,
+            unpriced_charge_kwh=0.0,
+            unpriced_discharge_kwh=0.0,
+            priced_charge_kwh=0.0,
+            priced_discharge_kwh=0.0,
+            economics_started_at=now,
+            last_tariff_revision_at=now,
+            day_results=(),
+            current_day=None,
+            current_day_operating_result_eur=None,
+            current_day_priced_charge_kwh=None,
+            current_day_unpriced_charge_kwh=None,
+            current_day_priced_discharge_kwh=None,
+            current_day_unpriced_discharge_kwh=None,
+            payback_achieved_at=None,
+        )
+        if not await self._economics_store.async_reset(new_state):
+            raise HomeAssistantError(
+                "Bilanzneustart konnte nicht gespeichert werden - der "
+                "bisherige Zustand bleibt unverändert bestehen"
+            )
+
+        self._economics_grid_charge_cost_eur = 0.0
+        self._economics_pv_opportunity_cost_eur = 0.0
+        self._economics_avoided_grid_cost_eur = 0.0
+        self._economics_unvalued_inventory_kwh = inventory
+        self._economics_unpriced_charge_kwh = 0.0
+        self._economics_unpriced_discharge_kwh = 0.0
+        self._economics_priced_charge_kwh = 0.0
+        self._economics_priced_discharge_kwh = 0.0
+        self._economics_started_at = now
+        self._last_tariff_revision_at = now
+        self._economics_day_results = ()
+        self._economics_current_day = None
+        self._economics_current_day_operating_result_eur = None
+        self._economics_current_day_priced_charge_kwh = None
+        self._economics_current_day_unpriced_charge_kwh = None
+        self._economics_current_day_priced_discharge_kwh = None
+        self._economics_current_day_unpriced_discharge_kwh = None
+        self._economics_payback_achieved_at = None
+        self._economics_price_unavailable_since = None
+        self._economics_price_unavailable = False
+        _LOGGER.info(
+            "Wirtschaftlichkeitsbilanz manuell neu gestartet (%s)%s",
+            now.isoformat(),
+            f" - Grund: {reason}" if reason else "",
+        )
 
     @property
     def economics_diagnostics(self) -> dict[str, Any]:
@@ -1295,6 +1608,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 None
                 if self._economics_payback_achieved_at is None
                 else self._economics_payback_achieved_at.isoformat()
+            ),
+            # -- REQ-ECONOMICS-OBSERVABILITY -------------------------------
+            "status": (self.data or {}).get("economics_status"),
+            "store_write_blocked": self._economics_store_write_blocked,
+            "store_minor_version": ECONOMICS_STORE_MINOR_VERSION,
+            "priced_charge_kwh": self._economics_priced_charge_kwh,
+            "priced_discharge_kwh": self._economics_priced_discharge_kwh,
+            "price_unavailable": self._economics_price_unavailable,
+            "last_successful_quote_at": (
+                None
+                if self._economics_last_successful_quote_at is None
+                else self._economics_last_successful_quote_at.isoformat()
             ),
         }
 
@@ -3810,6 +4135,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grid_serving_start=self._grid_serving_start,
                 grid_serving_end=self._grid_serving_end,
                 grid_serving_months=frozenset(self._grid_serving_months),
+                economics_tariff_enabled=self.tariff_provider.config.enabled,
+                economics_price_unavailable=self._economics_price_unavailable,
             ),
             monotonic(),
         )

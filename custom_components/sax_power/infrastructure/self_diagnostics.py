@@ -10,6 +10,7 @@ from homeassistant.helpers import issue_registry as ir
 
 from ..const import (
     DOMAIN,
+    ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
     ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_MAX_SOC_BELOW_MIN_SOC,
     ISSUE_NO_ACTIVE_MONTHS,
@@ -43,6 +44,13 @@ class DiagnosticSnapshot:
     grid_serving_start: dt_time | None
     grid_serving_end: dt_time | None
     grid_serving_months: frozenset[int]
+    # REQ-ECONOMICS-OBSERVABILITY: economics_price_unavailable ist bereits
+    # vom Coordinator fertig ausgewertet (Karenzzeit bzw. sofortiger
+    # Konfigurationsfehler bei Fest-/Zeitfenstertarif, siehe
+    # SaxPowerCoordinator._update_economics_price_availability) - hier nur
+    # noch die Zustandsflanke für Issue-Erzeugung/-Löschung.
+    economics_tariff_enabled: bool = False
+    economics_price_unavailable: bool = False
 
 
 class SelfDiagnostics:
@@ -58,6 +66,7 @@ class SelfDiagnostics:
         self._price_neutral_below_limit_issue_active = False
         self._empty_window_issue_active: dict[str, bool] = {}
         self._no_active_months_issue_active: dict[str, bool] = {}
+        self._economics_price_unavailable_issue_active = False
 
     def check(self, snapshot: DiagnosticSnapshot, now: float) -> None:
         """Evaluate every self-diagnostic rule for one coordinator update."""
@@ -65,6 +74,7 @@ class SelfDiagnostics:
         self._check_sunspec_persistently_unavailable(snapshot, now)
         self._check_max_soc_below_min_soc(snapshot)
         self._check_price_neutral_below_limit(snapshot)
+        self._check_economics_price_unavailable(snapshot)
         self._check_empty_charge_window(
             "timed_charge",
             snapshot.timed_enabled,
@@ -204,6 +214,31 @@ class SelfDiagnostics:
             },
         )
         self._price_neutral_below_limit_issue_active = True
+
+    def _check_economics_price_unavailable(self, snapshot: DiagnosticSnapshot) -> None:
+        """REQ-ECONOMICS-OBSERVABILITY: rein informativ, ohne eigene
+        Karenzzeit - die steckt bereits in
+        snapshot.economics_price_unavailable (Coordinator)."""
+        issue_id = f"{ISSUE_ECONOMICS_PRICE_UNAVAILABLE}_{self._entry_id}"
+        problem = (
+            snapshot.economics_tariff_enabled and snapshot.economics_price_unavailable
+        )
+        if not problem:
+            if self._economics_price_unavailable_issue_active:
+                ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+                self._economics_price_unavailable_issue_active = False
+            return
+        if self._economics_price_unavailable_issue_active:
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
+        )
+        self._economics_price_unavailable_issue_active = True
 
     def _check_empty_charge_window(
         self,

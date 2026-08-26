@@ -14,8 +14,9 @@ SOC-Minimum-Korrektur sinken) und braucht deshalb ebenfalls keine
 Monotonie, nur eine Wertebereichsprüfung (endlich, >= 0).
 
 STORAGE_MINOR_VERSION (statt einer erhöhten Hauptversion) trägt die
-Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION - siehe
-den ausführlichen Kommentar bei infrastructure/energy_store.py,
+Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION sowie die
+kumulierten bepreisten Lade-/Entlademengen aus REQ-ECONOMICS-OBSERVABILITY -
+siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
 jedem bestehenden Store NotImplementedError ausgelöst).
 """
@@ -38,7 +39,7 @@ from ..domain.economics_amortization import MAX_STORED_DAYS, DayEconomicsResult
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 2
+STORAGE_MINOR_VERSION = 3
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
@@ -86,6 +87,16 @@ class EconomicsState:
     # Investitionskosten (siehe anforderung.yaml, REQ-ECONOMICS-AMORTIZATION,
     # Regel 8).
     payback_achieved_at: datetime | None = None
+    # -- REQ-ECONOMICS-OBSERVABILITY ----------------------------------------
+    # Kumulierte, seit economics_started_at tatsächlich bepreiste Lade-/
+    # Entlademenge (kWh) - Gegenstück zu unpriced_charge_kwh/
+    # unpriced_discharge_kwh oben, für charge_price_coverage_percent/
+    # discharge_price_coverage_percent des Status-Sensors economics_status.
+    # Unabhängig vom Sieben-Felder-Bündel: fehlt eines (Store aus der Zeit
+    # vor 05/06), beginnt die Abdeckungszählung transparent bei 0 ab jetzt,
+    # analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN.
+    priced_charge_kwh: float | None = None
+    priced_discharge_kwh: float | None = None
 
     @property
     def initialized(self) -> bool:
@@ -167,6 +178,12 @@ class EconomicsStateStore:
             payback_achieved_at=self._validated_timestamp(
                 raw.get("payback_achieved_at"), "Payback-Erreichungszeitpunkt"
             ),
+            priced_charge_kwh=self._validated_nonnegative(
+                raw.get("priced_charge_kwh"), "Bepreiste Ladung"
+            ),
+            priced_discharge_kwh=self._validated_nonnegative(
+                raw.get("priced_discharge_kwh"), "Bepreiste Entladung"
+            ),
             **self._validated_current_day(raw),
         )
         self._last_persisted = self._baseline(state)
@@ -236,6 +253,28 @@ class EconomicsStateStore:
         self._last_persisted = state
         return True
 
+    async def async_reset(self, state: EconomicsState) -> bool:
+        """Persist a deliberate restart (REQ-ECONOMICS-OBSERVABILITY,
+        `sax_power.restart_economics_accounting`), bypassing die
+        Monotonie-/Unveränderlichkeits-Baseline aus _accept.
+
+        Ein kontrollierter Neustart setzt die sonst zu Recht geschützten
+        monotonen Zähler (unpriced_charge_kwh, priced_charge_kwh, ...) und
+        die sonst unveränderlichen Zeitstempel (economics_started_at,
+        payback_achieved_at) bewusst zurück - das ist kein Korruptionsindiz
+        wie ein spontan rückläufiger Wert außerhalb dieses expliziten
+        Aufrufs. Nur die strukturelle Gültigkeit (endlich, Wertebereich)
+        wird weiterhin geprüft, damit ein Programmierfehler trotzdem nicht
+        zu einem korrupten Store führen kann.
+        """
+        if not self._valid_snapshot(state):
+            return False
+        self._pending = None
+        self._save_scheduled = False
+        await self._store.async_save(self._serialize(state))
+        self._last_persisted = state
+        return True
+
     def _consume_pending(self) -> dict[str, Any]:
         """Return the newest coalesced state when Home Assistant writes it."""
         state = self._pending or self._last_persisted
@@ -244,16 +283,10 @@ class EconomicsStateStore:
         self._last_persisted = state
         return self._serialize(state)
 
-    def _accept(self, state: EconomicsState) -> bool:
-        """Feldweise Plausibilitätsprüfung vor dem Schreiben.
-
-        Die drei Geldsummen dürfen wegen negativer Preise schwanken und
-        sinken - hier nur Endlichkeit prüfen, kein Monotonie-Vergleich.
-        unpriced_charge_kwh/unpriced_discharge_kwh sind dagegen echte
-        kumulierte Mengen und bleiben monoton. economics_started_at ist
-        eine einmalig gesetzte Konstante.
-        """
-        baseline = self._pending or self._last_persisted
+    @staticmethod
+    def _valid_snapshot(state: EconomicsState) -> bool:
+        """Rein strukturelle Prüfung (endlich, Wertebereich) ohne jeden
+        Vergleich gegen eine Baseline - siehe _accept/async_reset."""
         for label, value in (
             ("Netzladekosten", state.grid_charge_cost_eur),
             ("PV-Opportunitätskosten", state.pv_opportunity_cost_eur),
@@ -268,18 +301,12 @@ class EconomicsStateStore:
                     value,
                 )
                 return False
-        for label, value, previous in (
-            ("Unbewerteter Bestand", state.unvalued_inventory_kwh, None),
-            (
-                "Unbepreiste Ladung",
-                state.unpriced_charge_kwh,
-                baseline.unpriced_charge_kwh,
-            ),
-            (
-                "Unbepreiste Entladung",
-                state.unpriced_discharge_kwh,
-                baseline.unpriced_discharge_kwh,
-            ),
+        for label, value in (
+            ("Unbewerteter Bestand", state.unvalued_inventory_kwh),
+            ("Unbepreiste Ladung", state.unpriced_charge_kwh),
+            ("Unbepreiste Entladung", state.unpriced_discharge_kwh),
+            ("Bepreiste Ladung", state.priced_charge_kwh),
+            ("Bepreiste Entladung", state.priced_discharge_kwh),
         ):
             if value is not None and (
                 not math.isfinite(value) or value < 0 or isinstance(value, bool)
@@ -290,6 +317,45 @@ class EconomicsStateStore:
                     value,
                 )
                 return False
+        return True
+
+    def _accept(self, state: EconomicsState) -> bool:
+        """Feldweise Plausibilitätsprüfung vor dem Schreiben.
+
+        Die drei Geldsummen dürfen wegen negativer Preise schwanken und
+        sinken - hier nur Endlichkeit prüfen (_valid_snapshot), kein
+        Monotonie-Vergleich. unpriced_charge_kwh/unpriced_discharge_kwh/
+        priced_charge_kwh/priced_discharge_kwh sind dagegen echte
+        kumulierte Mengen und bleiben monoton. economics_started_at/
+        payback_achieved_at sind einmalig gesetzte Konstanten. Ein
+        gewollter Bilanzneustart (async_reset) umgeht diese Prüfungen
+        bewusst.
+        """
+        if not self._valid_snapshot(state):
+            return False
+        baseline = self._pending or self._last_persisted
+        for label, value, previous in (
+            (
+                "Unbepreiste Ladung",
+                state.unpriced_charge_kwh,
+                baseline.unpriced_charge_kwh,
+            ),
+            (
+                "Unbepreiste Entladung",
+                state.unpriced_discharge_kwh,
+                baseline.unpriced_discharge_kwh,
+            ),
+            (
+                "Bepreiste Ladung",
+                state.priced_charge_kwh,
+                baseline.priced_charge_kwh,
+            ),
+            (
+                "Bepreiste Entladung",
+                state.priced_discharge_kwh,
+                baseline.priced_discharge_kwh,
+            ),
+        ):
             if previous is not None and (value is None or value < previous):
                 _LOGGER.warning(
                     "Rückläufigen Wirtschaftlichkeits-Snapshot für %s verworfen: "
@@ -534,4 +600,6 @@ class EconomicsStateStore:
                 if state.payback_achieved_at is not None
                 else None
             ),
+            "priced_charge_kwh": state.priced_charge_kwh,
+            "priced_discharge_kwh": state.priced_discharge_kwh,
         }

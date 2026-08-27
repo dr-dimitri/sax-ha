@@ -43,7 +43,7 @@ from .const import (
     SERVICE_STOP_GRID_CHARGE,
 )
 from .coordinator import SaxPowerCoordinator
-from .dashboard import async_create_dashboard
+from .dashboard import async_check_dashboard_up_to_date, async_create_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -183,6 +183,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_CREATE_DASHBOARD: False}
         )
+    else:
+        # Genau der Fall, den das Flag oben erzeugt: Ab jetzt wird das
+        # Dashboard nie wieder gebaut. Ergänzt eine neuere Version einen
+        # Tab, fehlt er einem bestehenden Dashboard stillschweigend - der
+        # Hinweis darauf ist die einzige Stelle, an der der Anwender davon
+        # überhaupt erfährt (siehe dashboard.py, #138).
+        await async_check_dashboard_up_to_date(hass, entry)
 
     # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
     # sofort einmal aus und braucht dafür die vollständige Konfiguration -

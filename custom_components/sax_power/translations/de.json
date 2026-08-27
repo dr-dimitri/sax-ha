@@ -564,6 +564,21 @@
     "control_config_unresolved": {
       "title": "Einige Ladeeinstellungen konnten nicht automatisch übernommen werden",
       "description": "Folgende Einstellungen standen beim ersten Start dieser Version auf einem nicht auswertbaren Altzustand (unbekannt/nicht verfügbar) und wurden deshalb auf ihren sicheren Vorgabewert gesetzt, statt den vorherigen Wert zu übernehmen: {fields}. Bitte diese Einstellungen prüfen und bei Bedarf erneut wie gewünscht setzen - danach verschwindet dieser Hinweis automatisch."
+    },
+    "dashboard_outdated": {
+      "title": "Dashboard „{dashboard}“ ist nicht auf dem aktuellen Stand",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Fehlende Tabs im Dashboard „{dashboard}“ ergänzen?",
+            "description": "Dem mitgelieferten Dashboard fehlen Tabs, die eine neuere Version der Integration mitbringt: **{views}**.\n\nDas Dashboard wird nur bei der Ersteinrichtung angelegt und danach nie wieder verändert - eigene Anpassungen bleiben dadurch erhalten, neue Tabs kommen aber auch nicht von selbst hinzu.\n\n**Bestätigen**: Das Dashboard wird auf den aktuellen Auslieferungsstand zurückgesetzt. Die fehlenden Tabs sind danach vorhanden, eigene Änderungen am Dashboard gehen dabei verloren.\n**Abbrechen**: Es ändert sich nichts, und dieser Hinweis erscheint nicht erneut.",
+            "menu_options": {
+              "confirm": "Bestätigen - Dashboard neu aufbauen",
+              "cancel": "Abbrechen - Dashboard so lassen"
+            }
+          }
+        }
+      }
     }
   },
   "exceptions": {

@@ -147,6 +147,13 @@ die Aktion `sax_power.create_dashboard` zur Verfügung. Mit
 Auslieferungszustand zurücksetzen. Dabei werden eigene Änderungen am Dashboard
 überschrieben.
 
+Das Dashboard wird **nur bei der Ersteinrichtung** angelegt und danach nicht
+mehr verändert – eigene Anpassungen bleiben dadurch erhalten. Bringt ein
+Update der Integration einen neuen Tab mit, fehlt dieser einem bestehenden
+Dashboard deshalb. Home Assistant meldet das unter **Einstellungen → System →
+Reparaturen** und bietet dort an, das Dashboard neu aufzubauen; wer das
+ablehnt, wird nicht erneut gefragt.
+
 ## Wichtige Entitäten
 
 Home Assistant ordnet die Entitäten automatisch dem SAX-Power-Gerät zu. Weniger

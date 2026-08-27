@@ -4016,6 +4016,27 @@ requirement_economics_dashboard:
     Aufrufen dürfte sonst ein Fenster ausweisen, das zum gemeldeten Preis
     nicht gehört.
 
+    Weil das Dashboard nur bei der Ersteinrichtung gebaut wird
+    (const.CONF_CREATE_DASHBOARD ist ein einmaliges Flag), bekommt ein
+    bestehendes Dashboard einen neu hinzugekommenen Tab nie zu sehen - er
+    fehlt einfach, ohne Fehlermeldung. Beim Setup prüft die Integration
+    deshalb, ob dem gespeicherten Dashboard Views des aktuellen
+    Auslieferungsstands fehlen (Vergleich über die stabilen View-PFADE,
+    nicht die Anzeigetitel), und legt in diesem Fall ein reparierbares
+    Issue an (ISSUE_DASHBOARD_OUTDATED,
+    dashboard.async_check_dashboard_up_to_date). Der Fix-Flow
+    (repairs.DashboardOutdatedRepairFlow) baut das Dashboard auf Wunsch mit
+    force=True neu - inklusive des Hinweises, dass eigene Änderungen daran
+    dabei verloren gehen - oder merkt sich die Ablehnung dauerhaft im
+    Config Entry (CONF_DASHBOARD_UPDATE_DISMISSED), damit der Hinweis nicht
+    bei jedem Neustart erneut erscheint. Gemeldet wird ausschließlich ein
+    VORHANDENES, unvollständiges Dashboard: Ein gar nicht vorhandenes ist
+    eine bewusste Entscheidung des Anwenders, und eine
+    Reparaturaufforderung würde genau das Dashboard zurückholen, das er
+    gerade gelöscht hat. Ein YAML-Dashboard und ein nicht verfügbares
+    Lovelace bleiben unberührt; wie der gesamte übrige Dashboard-Code wird
+    jeder Fehler nur geloggt und niemals weitergereicht.
+
     Bestehendes Verhalten unverändert: async_create_dashboard bleibt
     idempotent und überschreibt kein vorhandenes Nutzer-Dashboard; nur
     sax_power.reinstall_dashboard ersetzt ein bestehendes Dashboard (jetzt

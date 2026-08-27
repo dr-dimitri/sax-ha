@@ -564,6 +564,21 @@
     "control_config_unresolved": {
       "title": "Some charging settings could not be restored automatically",
       "description": "The following settings had a value that could not be evaluated (unknown/unavailable) on the first start of this version and were therefore set to their safe default instead of the previous value: {fields}. Please review these settings and set them again as desired - this notice disappears automatically once resolved."
+    },
+    "dashboard_outdated": {
+      "title": "Dashboard “{dashboard}” is out of date",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Add the missing tabs to dashboard “{dashboard}”?",
+            "description": "The bundled dashboard is missing tabs that a newer version of the integration provides: **{views}**.\n\nThe dashboard is only built during initial setup and never touched afterwards - that keeps your own changes intact, but new tabs do not appear on their own.\n\n**Confirm**: the dashboard is reset to the current shipped state. The missing tabs will be there afterwards; your own changes to the dashboard are lost.\n**Cancel**: nothing changes, and this notice will not appear again.",
+            "menu_options": {
+              "confirm": "Confirm - rebuild the dashboard",
+              "cancel": "Cancel - leave the dashboard as it is"
+            }
+          }
+        }
+      }
     }
   },
   "exceptions": {

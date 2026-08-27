@@ -34,6 +34,23 @@ CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
 CONF_CREATE_DASHBOARD = "create_dashboard"
 DEFAULT_CREATE_DASHBOARD = True
 
+# Genau wegen dieses einmaligen Flags bekommt ein bestehendes Dashboard die
+# Tabs einer neueren Version nie zu sehen: Nach der Ersteinrichtung wird
+# das Dashboard nie wieder gebaut, und async_create_dashboard fasst ein
+# vorhandenes ohne force nicht an. Ohne Hinweis merkt der Anwender davon
+# nichts - der Tab fehlt einfach, und der einzige Ausweg (der Dienst
+# sax_power.reinstall_dashboard) ist nur dem bekannt, der die
+# Dokumentation gelesen hat (Anwenderbericht zu #138). Das Issue meldet
+# deshalb ausschließlich ein VORHANDENES, aber unvollständiges Dashboard:
+# Ein bewusst gelöschtes darf nicht durch eine Reparaturaufforderung
+# zurückgeholt werden - genau das verhindert der Reset oben.
+ISSUE_DASHBOARD_OUTDATED = "dashboard_outdated"
+
+# Wer den Hinweis einmal ablehnt, soll ihn nicht bei jedem Neustart erneut
+# sehen: Ein umgebautes Dashboard, dem bewusst Tabs fehlen, ist ein
+# legitimer Zustand.
+CONF_DASHBOARD_UPDATE_DISMISSED = "dashboard_update_dismissed"
+
 DEFAULT_PORT = 502
 DEFAULT_SLAVE_ID_BASIC = 64
 # SunSpec-Modus (siehe modbus.pdf, offizielle sax-power.net-Dokumentation):

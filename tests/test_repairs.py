@@ -16,15 +16,19 @@ from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
+    CONF_DASHBOARD_UPDATE_DISMISSED,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
     DOMAIN,
+    ISSUE_DASHBOARD_OUTDATED,
     ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
     ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_MAX_SOC_BELOW_MIN_SOC,
     ISSUE_NO_ACTIVE_MONTHS,
+    ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
     ISSUE_PRICE_SENSOR_MISSING,
     ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
@@ -36,6 +40,11 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.price_optimizer import PricePlan
+from custom_components.sax_power.repairs import (
+    ChargeConflictRepairFlow,
+    DashboardOutdatedRepairFlow,
+    async_create_fix_flow,
+)
 
 
 def _make_client() -> MagicMock:
@@ -535,3 +544,82 @@ async def test_no_issues_created_for_a_healthy_default_configuration(hass) -> No
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_timed_charge") is None
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_grid_serving") is None
     assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+# --------------------------------------------------------------------------
+# Hinweis auf ein veraltetes Dashboard (#138)
+# --------------------------------------------------------------------------
+async def test_fix_flow_is_chosen_by_issue_key(hass) -> None:
+    """Die issue_id trägt die Entry-ID als Suffix und taugt deshalb nicht
+    zum Vergleich - verzweigt wird über den issue_key aus den Issue-Daten.
+    Ohne diese Verzweigung bekäme jedes künftige fixierbare Issue den
+    Ladekonflikt-Dialog."""
+    dashboard_flow = await async_create_fix_flow(
+        hass,
+        f"{ISSUE_DASHBOARD_OUTDATED}_entry",
+        {"entry_id": "entry", "issue_key": ISSUE_DASHBOARD_OUTDATED},
+    )
+    conflict_flow = await async_create_fix_flow(
+        hass,
+        f"{ISSUE_PRICE_CHARGE_CONFLICT}_entry",
+        {"entry_id": "entry", "issue_key": ISSUE_PRICE_CHARGE_CONFLICT},
+    )
+
+    assert isinstance(dashboard_flow, DashboardOutdatedRepairFlow)
+    assert isinstance(conflict_flow, ChargeConflictRepairFlow)
+
+
+async def test_dashboard_repair_rebuilds_on_confirm(hass) -> None:
+    """Bestätigen baut das Dashboard neu - mit force, weil ein vorhandenes
+    Dashboard sonst unangetastet bliebe (genau der gemeldete Zustand)."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id="dash_entry", data={})
+    entry.add_to_hass(hass)
+    flow = DashboardOutdatedRepairFlow(
+        {"entry_id": entry.entry_id, "issue_key": ISSUE_DASHBOARD_OUTDATED}
+    )
+    flow.hass = hass
+
+    with patch(
+        "custom_components.sax_power.repairs.async_create_dashboard",
+        new=AsyncMock(),
+    ) as rebuild:
+        result = await flow.async_step_confirm()
+
+    assert result["type"] == "create_entry"
+    assert rebuild.await_args.args[1] is entry
+    assert rebuild.await_args.kwargs["force"] is True
+    assert not entry.data.get(CONF_DASHBOARD_UPDATE_DISMISSED)
+
+
+async def test_dashboard_repair_remembers_a_declined_hint(hass) -> None:
+    """Abbrechen ändert nichts am Dashboard und merkt sich das dauerhaft -
+    ein bewusst umgebautes Dashboard ist ein legitimer Zustand."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id="dash_entry", data={})
+    entry.add_to_hass(hass)
+    flow = DashboardOutdatedRepairFlow(
+        {"entry_id": entry.entry_id, "issue_key": ISSUE_DASHBOARD_OUTDATED}
+    )
+    flow.hass = hass
+
+    with patch(
+        "custom_components.sax_power.repairs.async_create_dashboard",
+        new=AsyncMock(),
+    ) as rebuild:
+        result = await flow.async_step_cancel()
+    await hass.async_block_till_done()
+
+    assert result["type"] == "create_entry"
+    rebuild.assert_not_awaited()
+    assert entry.data[CONF_DASHBOARD_UPDATE_DISMISSED] is True
+
+
+async def test_dashboard_repair_survives_a_removed_entry(hass) -> None:
+    """Der Config Entry kann zwischen Anlegen des Issues und Öffnen des
+    Dialogs entfernt worden sein - der Flow darf daran nicht scheitern."""
+    flow = DashboardOutdatedRepairFlow(
+        {"entry_id": "gibt_es_nicht", "issue_key": ISSUE_DASHBOARD_OUTDATED}
+    )
+    flow.hass = hass
+
+    assert (await flow.async_step_confirm())["type"] == "create_entry"
+    assert (await flow.async_step_cancel())["type"] == "create_entry"

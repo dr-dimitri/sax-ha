@@ -55,9 +55,14 @@ from homeassistant.components.lovelace.const import DOMAIN as LOVELACE_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import translation
 
-from .const import DOMAIN
+from .const import (
+    CONF_DASHBOARD_UPDATE_DISMISSED,
+    DOMAIN,
+    ISSUE_DASHBOARD_OUTDATED,
+)
 from .domain.economics_amortization import ForecastUnavailable
 from .domain.tariff import TariffType
 
@@ -836,3 +841,85 @@ async def _async_create_dashboard(
         sidebar_icon=item.get(LL_CONF_ICON, DEFAULT_ICON),
         config={"mode": MODE_STORAGE},
     )
+
+
+async def async_check_dashboard_up_to_date(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Meldet ein vorhandenes, aber unvollständiges Dashboard als Issue.
+
+    Das mitgelieferte Dashboard wird genau einmal gebaut - danach setzt
+    __init__ das Flag CONF_CREATE_DASHBOARD zurück, und async_create_dashboard
+    fasst ein vorhandenes Dashboard ohne `force` nicht an. Ergänzt eine
+    neuere Version einen Tab, sieht ein Bestandsanwender davon deshalb
+    nichts: Der Tab fehlt einfach, ohne Fehlermeldung und ohne Hinweis
+    darauf, dass der Dienst sax_power.reinstall_dashboard ihn nachliefern
+    würde (Anwenderbericht zu #138).
+
+    Gemeldet wird ausschließlich ein VORHANDENES Dashboard, dem Tabs des
+    aktuellen Auslieferungsstands fehlen. Ein gar nicht vorhandenes
+    Dashboard ist dagegen eine bewusste Entscheidung des Anwenders (siehe
+    const.CONF_CREATE_DASHBOARD) und wird nicht angemahnt - eine
+    Reparaturaufforderung würde genau das Dashboard zurückholen, das er
+    gerade gelöscht hat.
+
+    Wie der gesamte übrige Dashboard-Code eine rein optionale
+    Komfortfunktion auf nicht-öffentlichen Lovelace-Interna: Jeder Fehler
+    wird nur geloggt, niemals weitergereicht.
+    """
+    if entry.data.get(CONF_DASHBOARD_UPDATE_DISMISSED):
+        return
+    try:
+        missing = await _async_missing_dashboard_views(hass, entry)
+    except Exception:  # siehe Docstring - darf die Integration nie blockieren
+        _LOGGER.debug("Dashboard-Stand nicht prüfbar", exc_info=True)
+        return
+
+    issue_id = f"{ISSUE_DASHBOARD_OUTDATED}_{entry.entry_id}"
+    if not missing:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_DASHBOARD_OUTDATED,
+        translation_placeholders={
+            "dashboard": DASHBOARD_TITLE,
+            "views": ", ".join(missing),
+        },
+        data={"entry_id": entry.entry_id, "issue_key": ISSUE_DASHBOARD_OUTDATED},
+    )
+
+
+async def _async_missing_dashboard_views(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> list[str]:
+    """Titel der Tabs, die dem gespeicherten Dashboard fehlen.
+
+    Verglichen werden die Pfade, nicht die Titel: Der Pfad ist der stabile
+    Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Leer, wenn
+    das Dashboard vollständig ist, gar nicht existiert oder nicht im
+    Storage-Modus läuft (ein YAML-Dashboard verwaltet der Anwender selbst).
+    """
+    lovelace_data = hass.data.get(LOVELACE_DATA)
+    if lovelace_data is None:
+        return []
+    storage = lovelace_data.dashboards.get(DASHBOARD_URL_PATH)
+    if not isinstance(storage, lovelace_dashboard.LovelaceStorage):
+        return []
+
+    stored = await storage.async_load(False)
+    if not isinstance(stored, dict):
+        return []
+    stored_paths = {
+        view.get("path") for view in stored.get("views", []) if isinstance(view, dict)
+    }
+
+    expected = await async_build_dashboard_config(hass, entry.entry_id)
+    return [
+        view["title"] for view in expected["views"] if view["path"] not in stored_paths
+    ]

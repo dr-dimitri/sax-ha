@@ -13,19 +13,23 @@ from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
 from custom_components.sax_power.const import (
+    CONF_DASHBOARD_UPDATE_DISMISSED,
     DATA_COORDINATOR,
     DOMAIN,
+    ISSUE_DASHBOARD_OUTDATED,
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REINSTALL_DASHBOARD,
 )
 from custom_components.sax_power.dashboard import (
     DASHBOARD_URL_PATH,
     async_build_dashboard_config,
+    async_check_dashboard_up_to_date,
     async_create_dashboard,
 )
 
@@ -1197,3 +1201,136 @@ async def test_economics_view_tariff_plan_card_marks_nothing_without_a_price(
     # Die Fensterliste bleibt sichtbar - genau sie braucht der Anwender,
     # um den Konfigurationsfehler zu finden.
     assert "| 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered
+
+
+# --------------------------------------------------------------------------
+# Hinweis auf ein veraltetes Dashboard (#138)
+# --------------------------------------------------------------------------
+def _lovelace(hass) -> None:
+    hass.data[LOVELACE_DATA] = LovelaceData(
+        resource_mode="storage", dashboards={}, resources=None, yaml_dashboards={}
+    )
+
+
+async def _existing_dashboard(hass, entry) -> Any:
+    """Legt das Dashboard an und gibt seinen Storage zurück."""
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await async_create_dashboard(hass, entry)
+    return hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
+
+
+def _issue(hass, entry_id: str):
+    return ir.async_get(hass).async_get_issue(
+        DOMAIN, f"{ISSUE_DASHBOARD_OUTDATED}_{entry_id}"
+    )
+
+
+async def test_outdated_dashboard_is_reported(hass) -> None:
+    """Das Dashboard wird nur bei der Ersteinrichtung gebaut. Ergänzt eine
+    neuere Version einen Tab, fehlt er einem bestehenden Dashboard
+    stillschweigend - ohne diesen Hinweis erfährt der Anwender davon nie
+    (Anwenderbericht zu #138)."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+
+    # Ein Dashboard aus einer Version, die den Wirtschaftlichkeits-Tab noch
+    # nicht kannte.
+    stored = await storage.async_load(False)
+    await storage.async_save(
+        {"views": [v for v in stored["views"] if v["path"] != "wirtschaftlichkeit"]}
+    )
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.is_fixable
+    assert issue.translation_placeholders["views"] == "Wirtschaftlichkeit"
+
+
+async def test_complete_dashboard_is_not_reported(hass) -> None:
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    await _existing_dashboard(hass, entry)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_missing_dashboard_is_not_reported(hass) -> None:
+    """Ein gar nicht vorhandenes Dashboard ist eine bewusste Entscheidung
+    des Anwenders (siehe const.CONF_CREATE_DASHBOARD) - eine
+    Reparaturaufforderung würde genau das Dashboard zurückholen, das er
+    gerade gelöscht hat."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_dismissed_hint_is_not_reported_again(hass) -> None:
+    """Wer den Hinweis einmal ablehnt, soll ihn nicht bei jedem Neustart
+    erneut sehen."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id=ENTRY_ID,
+        data={CONF_DASHBOARD_UPDATE_DISMISSED: True},
+    )
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    await storage.async_save({"views": []})
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_outdated_issue_disappears_after_the_dashboard_is_rebuilt(hass) -> None:
+    """Selbstheilung: Wer den Dienst sax_power.reinstall_dashboard von Hand
+    aufruft, darf den Hinweis nicht behalten."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    await storage.async_save({"views": []})
+    await async_check_dashboard_up_to_date(hass, entry)
+    assert _issue(hass, ENTRY_ID) is not None
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await async_create_dashboard(hass, entry, force=True)
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_dashboard_check_swallows_unexpected_errors(hass) -> None:
+    """Wie der gesamte übrige Dashboard-Code eine rein optionale
+    Komfortfunktion auf nicht-öffentlichen Lovelace-Interna - ein Fehler
+    darf die Integration niemals blockieren."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+
+    with patch(
+        "custom_components.sax_power.dashboard._async_missing_dashboard_views",
+        side_effect=RuntimeError("Lovelace-Interna geändert"),
+    ):
+        await async_check_dashboard_up_to_date(hass, entry)  # darf nicht raisen
+
+    assert _issue(hass, ENTRY_ID) is None

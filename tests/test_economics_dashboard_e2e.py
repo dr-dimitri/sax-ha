@@ -266,12 +266,9 @@ async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
     card = next(
         entry
         for entry in economics_view["cards"]
-        if entry["type"] == "conditional"
-        and entry["conditions"][0].get("attribute") == "tariff_type"
+        if entry["type"] == "markdown" and "tariff_type" in entry.get("content", "")
     )
-    rendered = template.Template(card["card"]["content"], hass).async_render(
-        parse_result=False
-    )
+    rendered = template.Template(card["content"], hass).async_render(parse_result=False)
 
     assert "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered
     assert "0.3000 EUR/kWh (Grundpreis)" in rendered

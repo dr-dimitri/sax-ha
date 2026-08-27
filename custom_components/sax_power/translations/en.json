@@ -79,6 +79,9 @@
       },
       "battery_problem": {
         "name": "Battery problem"
+      },
+      "economics_investment_configured": {
+        "name": "Investment cost configured"
       }
     },
     "sensor": {

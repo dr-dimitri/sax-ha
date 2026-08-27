@@ -3903,13 +3903,17 @@ requirement_economics_dashboard:
       bleibt economics_status sichtbar und erklärt über seine eigene
       Zustandsübersetzung (`disabled`), dass die Konfiguration unter
       "Geräte & Dienste -> SAX Power Home -> Konfigurieren" erfolgt.
-    - Karte 2 "Tarifplan (tageszeitabhängig)": eine `markdown`-Karte in
-      einer Core-"conditional"-Karte, die ausschließlich beim
-      tageszeitabhängigen Tarif erscheint (Bedingung: Attribut
-      `tariff_type` von economics_current_import_price gleich
-      `time_of_use`) - also am Laufzeitsignal statt an einem zum
-      Build-Zeitpunkt gelesenen Options-Wert, damit ein Tarifwechsel sie
-      selbsttätig ein- und ausblendet. Die Karte rendert den hinterlegten
+    - Karte 2 "Tarifplan (tageszeitabhängig)": eine `markdown`-Karte mit
+      `show_empty: false`, deren Vorlage selbst prüft, ob das Attribut
+      `tariff_type` von economics_current_import_price `time_of_use`
+      lautet; bei jeder anderen Tarifart rendert sie zu einer leeren
+      Zeichenkette und die Karte blendet sich aus. Also am Laufzeitsignal
+      statt an einem zum Build-Zeitpunkt gelesenen Options-Wert, damit ein
+      Tarifwechsel sie selbsttätig ein- und ausblendet. Ausdrücklich KEINE
+      Core-"conditional"-Karte: deren Bedingungen prüfen ausschließlich
+      den Zustand einer Entity (siehe unten). Die Überschrift steht
+      deshalb im Inhalt und nicht in `title` - ein gesetzter Kartentitel
+      bliebe sonst als leerer Kasten stehen. Die Karte rendert den hinterlegten
       Tagesplan als Tabelle (Beginn, Ende, Arbeitspreis), sortiert nach
       Beginn, mit dem Grundpreis als letzter Zeile und der Markierung
       "jetzt" an der gerade geltenden Zeile - beim Grundpreis also an
@@ -3970,13 +3974,10 @@ requirement_economics_dashboard:
       historische 30-Tage-Prognose davon unberührt weiter veröffentlicht
       wird - eine Kopplung an economics_roi würde die Karte in diesen
       Fällen fälschlich mit ausblenden. Stattdessen hängt die Karte am
-      `unavailable_reason`-Attribut von economics_average_daily_result_30d
-      (`conditions: [{entity: <economics_average_daily_result_30d-Entity-
-      ID>, attribute: "unavailable_reason", state_not:
-      "no_investment_cost"}]`), das ausschließlich bei fehlenden
-      Investitionskosten auf `ForecastUnavailable.NO_INVESTMENT_COST`
-      gesetzt wird, unabhängig von Tarifstatus oder Bilanz-
-      Initialisierung.
+      ZUSTAND des Binary-Sensors economics_investment_configured
+      (`conditions: [{entity: <Entity-ID>, state: "on"}]`), der genau
+      "Investitionskosten hinterlegt" abbildet - unabhängig von
+      Tarifstatus oder Bilanz-Initialisierung.
     - Karte 6 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
       `statistics-graph` als Balkendiagramm (`chart_type: bar`),
       `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für
@@ -3987,6 +3988,21 @@ requirement_economics_dashboard:
       wäre über die dedizierten Tages-Sensoren aus REQ-ECONOMICS-
       AMORTIZATION aufzufangen, nie über eine private Statistik-API oder
       einen nicht unterstützten Kartentyp.
+
+    Für JEDE Sichtbarkeitssteuerung im Dashboard gilt: Die Bedingungen
+    einer Core-"conditional"-Karte prüfen ausschließlich den ZUSTAND einer
+    Entity. Einen Schlüssel `attribute` kennen sie nicht - er wird nicht
+    abgelehnt, sondern stillschweigend ignoriert, und der Vergleich läuft
+    weiter gegen den Zustand. Eine so gebaute Karte ist dadurch dauerhaft
+    unsichtbar (`state` trifft nie zu) oder dauerhaft sichtbar
+    (`state_not` trifft immer zu), ohne jede Fehlermeldung und in der
+    gespeicherten YAML-Konfiguration unauffällig (Anwenderbericht zu
+    #139). Muss eine Bedingung einen Attributwert auswerten, braucht sie
+    entweder eine Entity, die ihn als Zustand trägt (so bei Karte 5), oder
+    eine Karte, die ihre Leere selbst erzeugt (so bei Karte 2:
+    `markdown` + `show_empty: false`). tests/test_dashboard.py prüft
+    deshalb, dass keine gebaute Bedingung einen Schlüssel `attribute`
+    enthält.
 
     Der Sensor economics_current_import_price trägt dafür sieben
     Zusatzattribute (coordinator._tariff_plan_attributes, veröffentlicht

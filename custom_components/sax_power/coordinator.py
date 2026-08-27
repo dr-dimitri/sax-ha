@@ -1186,6 +1186,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         erneut Investitionskosten hinterlegt sind.
         """
         investment_cost = investment_cost_eur_from_options(self.options)
+        # Trägt die Sichtbarkeit der Investitionskarte im Dashboard: Eine
+        # Core-"conditional"-Karte kann ausschließlich den ZUSTAND einer
+        # Entity prüfen, nie ein Attribut (siehe dashboard.py, #139) -
+        # dieses Flag ist deshalb ein eigener Binary-Sensor.
+        data["economics_investment_configured"] = investment_cost is not None
         if investment_cost is None:
             for key in (
                 "economics_roi",

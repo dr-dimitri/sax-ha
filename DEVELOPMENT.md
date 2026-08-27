@@ -645,10 +645,24 @@ keine neue Berechnung ein:
   Options-Änderung nicht veralten. `unavailable_reason` entscheidet, ob
   überhaupt eine Zeile als "jetzt" markiert wird: Gilt kein Preis, ist
   auch `active_window` None, und die Markierung träfe sonst fälschlich
-  den Grundpreis. Wie die Investitionskarte hängt ihre
-  Sichtbarkeit an einer Core-`conditional`-Karte, hier am Attribut
-  `tariff_type`: Der Preis-Sensor existiert bei jeder Tarifart, ein
-  Tagesplan ergibt aber nur beim tageszeitabhängigen Tarif Sinn. Der
+  den Grundpreis. Ihre Sichtbarkeit steuert sie selbst: Die Vorlage prüft
+  `tariff_type` und rendert bei jeder anderen Tarifart zu einer leeren
+  Zeichenkette, `show_empty: false` blendet die Karte dann aus. Die
+  Überschrift steht im Inhalt statt in `title`, weil ein Kartentitel sonst
+  als leerer Kasten stehen bliebe.
+
+  **Wichtig für jede Sichtbarkeitssteuerung im Dashboard:** Die
+  Bedingungen einer Core-`conditional`-Karte prüfen ausschließlich den
+  **Zustand** einer Entity. Einen Schlüssel `attribute` kennen sie nicht -
+  er wird stillschweigend ignoriert, verglichen wird weiter gegen den
+  Zustand. Die Karte ist dadurch dauerhaft unsichtbar (`state` trifft nie
+  zu) oder dauerhaft sichtbar (`state_not` trifft immer zu), ohne
+  Fehlermeldung und in der gespeicherten YAML unauffällig (#139). Wer
+  einen Attributwert braucht, braucht entweder eine Entity, die ihn als
+  Zustand trägt (`binary_sensor.economics_investment_configured` für die
+  Investitionskarte), oder eine Karte, die ihre Leere selbst erzeugt
+  (`markdown` + `show_empty: false`). `tests/test_dashboard.py` prüft,
+  dass keine gebaute Bedingung ein `attribute` enthält. Der
   Platzhalter der Entity-ID wird per `str.replace` ersetzt, nicht per
   `str.format` - die Vorlage ist voll von geschweiften Klammern, die
   Jinja gehören. `tests/test_dashboard.py` **rendert** die Vorlage mit
@@ -661,9 +675,9 @@ keine neue Berechnung ein:
   konfiguriert sind; `economics_roi` liefert in diesem Fall `None`
   (Sensorzustand "unknown"). Die ganze vertical-stack "Investition und
   Amortisation" ist deshalb in eine Core-`type: conditional`-Karte
-  eingebettet (`conditions: [{entity: <economics_roi-Entity-ID>,
-  state_not: "unknown"}]`) statt build-time über die Config-Entry-Options
-  ausgelassen zu werden: `async_build_dashboard_config` braucht dafür
+  eingebettet (`conditions: [{entity:
+  <economics_investment_configured-Entity-ID>, state: "on"}]`) statt
+  build-time über die Config-Entry-Options ausgelassen zu werden: `async_build_dashboard_config` braucht dafür
   keine Options mehr, nur `hass`/`entry_id`. Eine Options-Prüfung beim
   Dashboardbau wäre nach einer späteren Options-Änderung veraltet, da
   `__init__.async_update_options` das gespeicherte Dashboard nie neu baut

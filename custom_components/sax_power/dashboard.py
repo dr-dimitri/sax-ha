@@ -63,14 +63,23 @@ from .const import (
     DOMAIN,
     ISSUE_DASHBOARD_OUTDATED,
 )
-from .domain.economics_amortization import ForecastUnavailable
-from .domain.tariff import TariffType
 
 _LOGGER = logging.getLogger(__name__)
 
 #: Jinja-Vorlage der Tarifplan-Karte (_tariff_plan_card). Der Platzhalter
 #: wird per str.replace ersetzt, nicht per str.format: Die Vorlage ist voll
 #: von geschweiften Klammern, die Jinja gehören.
+#:
+#: Die Vorlage entscheidet SELBST, ob die Karte etwas anzeigt: Bei jeder
+#: anderen Tarifart als time_of_use rendert sie zu einer leeren
+#: Zeichenkette, und `show_empty: false` blendet die Karte dann aus. Eine
+#: Core-"conditional"-Karte kann das hier nicht leisten - ihre Bedingungen
+#: prüfen ausschließlich den ZUSTAND einer Entity. Ein zusätzlich
+#: angegebenes `attribute` ist dort schlicht kein unterstützter Schlüssel:
+#: Es wird ignoriert, der Vergleich läuft weiter gegen den Zustand, und die
+#: Karte war dadurch dauerhaft unsichtbar (Anwenderbericht zu #139).
+#: Deshalb steht auch die Überschrift im Inhalt statt in `title` - ein
+#: gesetzter Kartentitel bliebe sonst als leerer Kasten stehen.
 #:
 #: Die Zeilenumbrüche innerhalb der {{ ... }}-Ausdrücke halten die
 #: Quelltextzeilen unter der Zeilenlänge, ohne die Ausgabe zu verändern -
@@ -79,15 +88,18 @@ _LOGGER = logging.getLogger(__name__)
 #: `unavailable_reason` entscheidet, ob überhaupt eine Zeile als "jetzt"
 #: geltend markiert wird: Gilt gerade kein Preis, ist auch `active_window`
 #: None - ohne diese zusätzliche Abfrage träfe die Markierung dann
-#: fälschlich den Grundpreis (Review-Befund).
+#: fälschlich den Grundpreis.
 _PRICE_ENTITY_PLACEHOLDER = "__PRICE_ENTITY__"
 _TARIFF_PLAN_TEMPLATE = """\
 {%- set entity = '__PRICE_ENTITY__' %}
+{%- if state_attr(entity, 'tariff_type') == 'time_of_use' %}
 {%- set windows = state_attr(entity, 'windows') or [] %}
 {%- set active = state_attr(entity, 'active_window') %}
 {%- set base = state_attr(entity, 'base_price_eur_kwh') %}
 {%- set change = state_attr(entity, 'next_price_change_at') %}
 {%- set reason = state_attr(entity, 'unavailable_reason') %}
+### Tarifplan (tageszeitabhängig)
+
 | | Von | Bis | Arbeitspreis |
 |---|---|---|---|
 {%- for window in windows %}
@@ -103,6 +115,7 @@ _TARIFF_PLAN_TEMPLATE = """\
 Derzeit gilt kein Preis ({{ reason }}) – bitte die Tarifkonfiguration prüfen.
 {%- elif change is not none %}
 Nächster Preiswechsel: {{ as_timestamp(change) | timestamp_custom('%H:%M') }} Uhr
+{%- endif %}
 {%- endif %}
 """
 
@@ -324,21 +337,13 @@ def _tariff_plan_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | No
     if price_entity_id is None:
         return None
     return {
-        "type": "conditional",
-        "conditions": [
-            {
-                "entity": price_entity_id,
-                "attribute": "tariff_type",
-                "state": TariffType.TIME_OF_USE.value,
-            }
-        ],
-        "card": {
-            "type": "markdown",
-            "title": "Tarifplan (tageszeitabhängig)",
-            "content": _TARIFF_PLAN_TEMPLATE.replace(
-                _PRICE_ENTITY_PLACEHOLDER, price_entity_id
-            ),
-        },
+        "type": "markdown",
+        # Ohne show_empty bliebe bei jeder anderen Tarifart ein leerer
+        # Kasten stehen (Vorgabe des Kartentyps ist True).
+        "show_empty": False,
+        "content": _TARIFF_PLAN_TEMPLATE.replace(
+            _PRICE_ENTITY_PLACEHOLDER, price_entity_id
+        ),
     }
 
 
@@ -643,11 +648,18 @@ async def async_build_dashboard_config(
     # "unknown", obwohl Investitionskosten konfiguriert sind und die
     # historische 30-Tage-Prognose (average_daily_result_30d,
     # projected_annual_result, estimated_payback_date) davon unberührt
-    # weiter veröffentlicht wird. Stattdessen das `unavailable_reason`-
-    # Attribut von economics_average_daily_result_30d verwenden: es wird
-    # ausschließlich bei fehlenden Investitionskosten auf
-    # ForecastUnavailable.NO_INVESTMENT_COST gesetzt, unabhängig von
-    # Tarifstatus oder Bilanz-Initialisierung.
+    # weiter veröffentlicht wird.
+    #
+    # Die Bedingung prüft deshalb den ZUSTAND eines eigenen
+    # Binary-Sensors, der genau "Investitionskosten hinterlegt" abbildet.
+    # Vorher stand hier das `unavailable_reason`-Attribut von
+    # economics_average_daily_result_30d - fachlich richtig, technisch
+    # wirkungslos: Die Bedingungen einer Core-"conditional"-Karte kennen
+    # keinen Schlüssel `attribute`. Er wurde stillschweigend ignoriert,
+    # verglichen wurde weiter gegen den Zustand, und weil dieser nie
+    # "no_investment_cost" lautet, war das `state_not` IMMER erfüllt - die
+    # Karte stand also auch ohne Investitionskosten dauerhaft im
+    # Dashboard (#139).
     roi_row_card = _entities_card(
         hass,
         entry_id,
@@ -685,19 +697,13 @@ async def async_build_dashboard_config(
     investment_stack = _stack_card([roi_row_card, progress_gauge, remaining_rows_card])
     investment_card = investment_stack
     if investment_stack is not None:
-        forecast_entity_id = _entity_id(
-            hass, "sensor", f"{entry_id}_economics_average_daily_result_30d"
+        configured_entity_id = _entity_id(
+            hass, "binary_sensor", f"{entry_id}_economics_investment_configured"
         )
-        if forecast_entity_id is not None:
+        if configured_entity_id is not None:
             investment_card = {
                 "type": "conditional",
-                "conditions": [
-                    {
-                        "entity": forecast_entity_id,
-                        "attribute": "unavailable_reason",
-                        "state_not": ForecastUnavailable.NO_INVESTMENT_COST.value,
-                    }
-                ],
+                "conditions": [{"entity": configured_entity_id, "state": "on"}],
                 "card": investment_stack,
             }
 

@@ -79,6 +79,9 @@
       },
       "battery_problem": {
         "name": "Speicherproblem"
+      },
+      "economics_investment_configured": {
+        "name": "Investitionskosten hinterlegt"
       }
     },
     "sensor": {

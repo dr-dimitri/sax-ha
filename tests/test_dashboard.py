@@ -18,6 +18,7 @@ from homeassistant.helpers import template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
+from custom_components.sax_power import binary_sensor, sensor  # noqa: F401
 from custom_components.sax_power.const import (
     CONF_DASHBOARD_UPDATE_DISMISSED,
     DATA_COORDINATOR,
@@ -721,19 +722,14 @@ async def test_economics_view_investment_card_is_gated_by_forecast_attribute(
     _register(hass, "sensor", "economics_roi")
     _register(hass, "sensor", "economics_amortization_progress")
     _register(hass, "sensor", "economics_remaining_to_payback")
-    average = _register(hass, "sensor", "economics_average_daily_result_30d")
+    _register(hass, "sensor", "economics_average_daily_result_30d")
+    configured = _register(hass, "binary_sensor", "economics_investment_configured")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _economics_view(config)
     card = _investment_card(view)
-    assert card["conditions"] == [
-        {
-            "entity": average,
-            "attribute": "unavailable_reason",
-            "state_not": "no_investment_cost",
-        }
-    ]
+    assert card["conditions"] == [{"entity": configured, "state": "on"}]
     assert card["card"]["type"] == "vertical-stack"
 
 
@@ -741,6 +737,7 @@ async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
     _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
     _register(hass, "sensor", "economics_average_daily_result_30d")
+    _register(hass, "binary_sensor", "economics_investment_configured")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -766,6 +763,7 @@ async def test_economics_view_investment_card_entities_and_order(hass) -> None:
     average = _register(hass, "sensor", "economics_average_daily_result_30d")
     annual = _register(hass, "sensor", "economics_projected_annual_result")
     payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
+    _register(hass, "binary_sensor", "economics_investment_configured")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -1000,13 +998,17 @@ async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
 # Tarifplan-Karte (REQ-ECONOMICS-DASHBOARD)
 # --------------------------------------------------------------------------
 def _tariff_plan_card(view: dict[str, Any]) -> dict[str, Any] | None:
-    """Die "conditional"-Karte am Attribut `tariff_type` des Preis-Sensors."""
+    """Die Markdown-Karte, die den Tarifplan rendert.
+
+    Bewusst KEINE "conditional"-Karte: deren Bedingungen können nur den
+    Zustand einer Entity prüfen, nie ein Attribut (#139). Die Karte
+    entscheidet stattdessen selbst, ob sie etwas ausgibt.
+    """
     return next(
         (
             card
             for card in view["cards"]
-            if card["type"] == "conditional"
-            and card["conditions"][0].get("attribute") == "tariff_type"
+            if card["type"] == "markdown" and "tariff_type" in card.get("content", "")
         ),
         None,
     )
@@ -1014,20 +1016,23 @@ def _tariff_plan_card(view: dict[str, Any]) -> dict[str, Any] | None:
 
 async def test_economics_view_tariff_plan_card_is_gated_by_tariff_type(hass) -> None:
     """Der Preis-Sensor existiert bei jeder Tarifart; ein Tagesplan ergibt
-    aber nur beim tageszeitabhängigen Tarif Sinn. Ein zur Bauzeit
-    gelesener Options-Wert wäre nach dem nächsten Tarifwechsel falsch,
-    ohne dass das gespeicherte Dashboard je neu gebaut wird - die Karte
-    hängt deshalb an einem Laufzeitattribut."""
-    price = _register(hass, "sensor", "economics_current_import_price")
+    aber nur beim tageszeitabhängigen Tarif Sinn. Die Karte entscheidet das
+    zur Laufzeit selbst: Bei jeder anderen Tarifart rendert die Vorlage zu
+    einer leeren Zeichenkette, und show_empty blendet die Karte dann aus.
+    Eine "conditional"-Karte kann das nicht leisten - ihre Bedingungen
+    prüfen nur den Zustand einer Entity, nie ein Attribut (#139)."""
+    _register(hass, "sensor", "economics_current_import_price")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     card = _tariff_plan_card(_economics_view(config))
     assert card is not None
-    assert card["conditions"] == [
-        {"entity": price, "attribute": "tariff_type", "state": "time_of_use"}
-    ]
-    assert card["card"]["type"] == "markdown"
+    assert card["type"] == "markdown"
+    assert card["show_empty"] is False
+    # Ein Kartentitel bliebe als leerer Kasten stehen - die Überschrift
+    # gehört deshalb in den bedingten Teil des Inhalts.
+    assert "title" not in card
+    assert "### Tarifplan" in card["content"]
 
 
 async def test_economics_view_tariff_plan_card_reads_only_sensor_attributes(
@@ -1040,9 +1045,10 @@ async def test_economics_view_tariff_plan_card_reads_only_sensor_attributes(
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
-    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    content = _tariff_plan_card(_economics_view(config))["content"]
     assert f"'{price}'" in content
     for attribute in (
+        "tariff_type",
         "windows",
         "active_window",
         "base_price_eur_kwh",
@@ -1110,7 +1116,7 @@ async def test_economics_view_tariff_plan_card_renders_a_table(hass) -> None:
     )
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
-    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    content = _tariff_plan_card(_economics_view(config))["content"]
     rendered = template.Template(content, hass).async_render(parse_result=False)
 
     lines = [line for line in rendered.splitlines() if line.startswith("|")]
@@ -1143,7 +1149,7 @@ async def test_economics_view_tariff_plan_card_marks_the_base_price(hass) -> Non
     )
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
-    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    content = _tariff_plan_card(_economics_view(config))["content"]
     rendered = template.Template(content, hass).async_render(parse_result=False)
 
     lines = [line for line in rendered.splitlines() if line.startswith("|")]
@@ -1157,16 +1163,42 @@ async def test_economics_view_tariff_plan_card_survives_missing_attributes(
 ) -> None:
     """Zwischen Neustart und erstem Coordinator-Tick trägt der Sensor noch
     keine Attribute. Eine Vorlage, die dabei eine Exception wirft, zeigt im
-    Dashboard nur eine rote Fehlerkarte."""
+    Dashboard nur eine rote Fehlerkarte - hier bleibt sie stattdessen leer
+    und die Karte blendet sich aus."""
     price = _register(hass, "sensor", "economics_current_import_price")
     hass.states.async_set(price, "unknown", {})
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
-    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    content = _tariff_plan_card(_economics_view(config))["content"]
     rendered = template.Template(content, hass).async_render(parse_result=False)
 
-    assert "| Von | Bis | Arbeitspreis |" in rendered
-    assert "? EUR/kWh (Grundpreis)" in rendered
+    assert rendered.strip() == ""
+
+
+async def test_economics_view_tariff_plan_card_is_empty_for_other_tariffs(
+    hass,
+) -> None:
+    """Ein Festpreis hat keinen Tagesplan: Die Vorlage rendert zu einer
+    leeren Zeichenkette, damit show_empty die Karte ausblenden kann."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "0.30",
+        {
+            "tariff_type": "fixed",
+            "windows": None,
+            "active_window": None,
+            "base_price_eur_kwh": None,
+            "next_price_change_at": None,
+            "unavailable_reason": None,
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_economics_view(config))["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert rendered.strip() == ""
 
 
 async def test_economics_view_tariff_plan_card_marks_nothing_without_a_price(
@@ -1193,7 +1225,7 @@ async def test_economics_view_tariff_plan_card_marks_nothing_without_a_price(
     )
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
-    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    content = _tariff_plan_card(_economics_view(config))["content"]
     rendered = template.Template(content, hass).async_render(parse_result=False)
 
     assert "**jetzt**" not in rendered
@@ -1334,3 +1366,55 @@ async def test_dashboard_check_swallows_unexpected_errors(hass) -> None:
         await async_check_dashboard_up_to_date(hass, entry)  # darf nicht raisen
 
     assert _issue(hass, ENTRY_ID) is None
+
+
+# --------------------------------------------------------------------------
+# Bedingungen von "conditional"-Karten (#139)
+# --------------------------------------------------------------------------
+def _iter_all_cards(cards: list[dict[str, Any]]):
+    """Läuft rekursiv durch ALLE Karten, auch durch conditional/stack."""
+    for card in cards:
+        yield card
+        yield from _iter_all_cards(card.get("cards", []))
+        if (nested := card.get("card")) is not None:
+            yield from _iter_all_cards([nested])
+
+
+async def test_no_conditional_card_tests_an_attribute(hass) -> None:
+    """Die Bedingungen einer Core-"conditional"-Karte prüfen ausschließlich
+    den ZUSTAND einer Entity - einen Schlüssel `attribute` kennen sie
+    nicht.
+
+    Er wird nicht etwa abgelehnt, sondern stillschweigend ignoriert: Der
+    Vergleich läuft weiter gegen den Zustand. Eine so gebaute Karte ist
+    damit dauerhaft unsichtbar (`state` trifft nie zu) oder dauerhaft
+    sichtbar (`state_not` trifft immer zu) - beides ohne jede
+    Fehlermeldung, in der gespeicherten YAML-Konfiguration unauffällig und
+    nur im laufenden Dashboard zu bemerken. Genau so blieben die
+    Tarifplan-Karte unsichtbar und die Investitionskarte dauerhaft
+    sichtbar (Anwenderbericht zu #139)."""
+    reg = er.async_get(hass)
+    for entity_domain, suffixes in (
+        ("sensor", [d.key for d in sax_power.sensor.SENSOR_DESCRIPTIONS]),
+        (
+            "binary_sensor",
+            [d.key for d in sax_power.binary_sensor.BINARY_SENSOR_DESCRIPTIONS],
+        ),
+    ):
+        for suffix in suffixes:
+            reg.async_get_or_create(entity_domain, DOMAIN, f"{ENTRY_ID}_{suffix}")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    conditions = [
+        condition
+        for view in config["views"]
+        for card in _iter_all_cards(view["cards"])
+        for condition in card.get("conditions", [])
+    ]
+    assert conditions, "Keine conditional-Karte gefunden - Test greift ins Leere"
+    for condition in conditions:
+        assert "attribute" not in condition, (
+            f"Bedingung prüft ein Attribut: {condition} - "
+            "wird von Home Assistant ignoriert"
+        )

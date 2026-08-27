@@ -543,7 +543,7 @@ async def test_economics_view_is_fifth_with_expected_title_and_icon(hass) -> Non
 
     assert config["views"][4]["path"] == "wirtschaftlichkeit"
     assert config["views"][4]["title"] == "Wirtschaftlichkeit"
-    assert config["views"][4]["icon"] == "mdi:cash-chart"
+    assert config["views"][4]["icon"] == "mdi:cash-multiple"
 
 
 async def test_economics_view_status_card_shows_disabled_tariff(hass) -> None:

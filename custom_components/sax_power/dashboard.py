@@ -719,10 +719,17 @@ async def async_build_dashboard_config(
     # je neu gebaut wird.
     tariff_plan_card = _tariff_plan_card(hass, entry_id)
 
+    # Die Tab-Leiste zeigt bei gesetztem Icon ausschließlich das Icon, den
+    # Titel nur noch als Tooltip. Ein Name, den Material Design Icons nicht
+    # kennt, rendert als leere Fläche - der Tab ist dann zwar vorhanden und
+    # anklickbar, aber unsichtbar. Genau das passierte mit dem frei
+    # erfundenen "mdi:cash-chart" (Anwenderbericht: "Wirtschaftlichkeits-Tab
+    # wird nicht angezeigt", obwohl der View im gespeicherten Dashboard
+    # stand). Neue Icons deshalb immer gegen die MDI-Liste prüfen.
     economics_view = _view(
         "Wirtschaftlichkeit",
         "wirtschaftlichkeit",
-        "mdi:cash-chart",
+        "mdi:cash-multiple",
         [
             status_card,
             tariff_plan_card,

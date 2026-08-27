@@ -3878,7 +3878,7 @@ requirement_economics_dashboard:
 
     Fünfter View (dashboard.async_build_dashboard_config), direkt nach
     "Dynamisches Laden": Titel "Wirtschaftlichkeit", Pfad
-    `wirtschaftlichkeit`, Icon `mdi:cash-chart`, exakt sechs Top-Level-
+    `wirtschaftlichkeit`, Icon `mdi:cash-multiple`, exakt sechs Top-Level-
     Karten. Ausschließlich Home-Assistant-Core-Kartentypen (entities,
     gauge, markdown, vertical-stack, conditional, statistics-graph) - keine
     Custom-Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-

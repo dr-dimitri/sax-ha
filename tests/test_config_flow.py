@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
@@ -605,6 +606,126 @@ async def test_options_flow_stores_a_fixed_tariff(hass) -> None:
     assert entry.options[CONF_ECONOMICS_TARIFF_TYPE] == TariffType.FIXED.value
     assert entry.options[CONF_ECONOMICS_FEED_IN_PRICE] == 0.0786
     assert entry.options[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 0.3421
+
+
+@pytest.mark.parametrize(
+    ("tariff_type", "step_id", "second_page"),
+    [
+        pytest.param(
+            TariffType.FIXED,
+            "economics_fixed",
+            {CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3421},
+            id="fixed",
+        ),
+        pytest.param(TariffType.DYNAMIC, "economics_dynamic", {}, id="dynamic"),
+        pytest.param(
+            TariffType.TIME_OF_USE,
+            "economics_time_of_use",
+            {CONF_ECONOMICS_TOU_BASE_PRICE: 0.34, **_empty_windows()},
+            id="time_of_use",
+        ),
+    ],
+)
+async def test_repeated_first_page_does_not_show_raw_schema_errors(
+    hass, tariff_type: TariffType, step_id: str, second_page: dict
+) -> None:
+    """Schickt das Frontend die erste Seite ein zweites Mal ab (Doppelklick
+    bzw. Enter im Eingabefeld plus Klick auf "Absenden"), prüft Home
+    Assistant diese Werte gegen das Schema der bereits erreichten
+    Folgeseite. Ohne Behandlung sah der Anwender eine Wand aus "extra keys
+    not allowed @ data[...]"-Rohmeldungen (Anwenderbericht zu #129)."""
+    entry = _economics_entry(hass)
+    first_page = {
+        CONF_PRICE_UNIT: PRICE_UNIT_CT_KWH,
+        CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose",
+        CONF_PV_FORECAST_FACTOR: 100,
+        CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value,
+        CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+    }
+    if tariff_type is TariffType.DYNAMIC:
+        first_page[CONF_PRICE_SENSOR] = "sensor.strompreis"
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], first_page
+    )
+    assert result["step_id"] == step_id
+
+    # Zweiter Versand derselben ersten Seite: derselbe Schritt, kein Fehler.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], first_page
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == step_id
+    assert not result["errors"]
+
+    # Danach lässt sich der Flow normal zu Ende führen.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**second_page, CONF_ECONOMICS_FEED_IN_PRICE: 0.0786}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_INVESTMENT_COST] == 8500.0
+    assert entry.options[CONF_ECONOMICS_FEED_IN_PRICE] == 0.0786
+    assert entry.options[CONF_ECONOMICS_TARIFF_TYPE] == tariff_type.value
+    # Fremde Schlüssel der ersten Seite landen nicht doppelt im Eintrag.
+    assert entry.options[CONF_PV_FORECAST_FACTOR] == 100
+
+
+@pytest.mark.parametrize(
+    ("tariff_type", "step_id", "user_input", "expected_errors"),
+    [
+        pytest.param(
+            TariffType.FIXED,
+            "economics_fixed",
+            {CONF_ECONOMICS_FEED_IN_PRICE: 0.0786},
+            {CONF_ECONOMICS_FIXED_IMPORT_PRICE: "economics_price_required"},
+            id="fixed_without_import_price",
+        ),
+        pytest.param(
+            TariffType.FIXED,
+            "economics_fixed",
+            {},
+            {
+                CONF_ECONOMICS_FEED_IN_PRICE: "economics_price_required",
+                CONF_ECONOMICS_FIXED_IMPORT_PRICE: "economics_price_required",
+            },
+            id="fixed_without_any_price",
+        ),
+        pytest.param(
+            TariffType.TIME_OF_USE,
+            "economics_time_of_use",
+            {CONF_ECONOMICS_FEED_IN_PRICE: 0.0786, **_empty_windows()},
+            {CONF_ECONOMICS_TOU_BASE_PRICE: "economics_price_required"},
+            id="time_of_use_without_base_price",
+        ),
+    ],
+)
+async def test_missing_tariff_price_is_reported_on_its_field(
+    hass,
+    tariff_type: TariffType,
+    step_id: str,
+    user_input: dict,
+    expected_errors: dict,
+) -> None:
+    """Die Preisfelder sind im Schema optional, damit ein fehlender Wert
+    als erklärter Feldfehler erscheint statt als unübersetztes "required
+    key not provided" - Pflicht bleiben sie trotzdem."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == step_id
+    assert result["errors"] == expected_errors
+    assert CONF_ECONOMICS_TARIFF_TYPE not in entry.options
 
 
 async def test_options_flow_stores_time_of_use_windows(hass) -> None:

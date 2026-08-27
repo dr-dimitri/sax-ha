@@ -159,6 +159,21 @@ nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
 `section`-Blöcke und liegen deshalb als verschachtelte Mappings in
 `entry.options`.
 
+Die Preisfelder der Folgeseiten sind im Schema `vol.Optional` und werden
+erst im Schritt selbst geprüft (`_missing_prices` → Feldfehler
+`economics_price_required`): Ein `vol.Required` scheitert schon in der
+Schema-Validierung von Home Assistant, also *vor* dem Schritt, und zeigt die
+unübersetzte Rohmeldung `required key not provided`. Pflicht bleiben die
+Preise dadurch unverändert. Aus demselben Grund lassen die Folgeseiten
+fremde Schlüssel zu (`vol.ALLOW_EXTRA`) und behandeln eine erneut
+abgeschickte erste Seite als Wiederholung genau dieser Seite
+(`_async_repeat_init`) - schickt das Frontend die erste Seite zweimal ab
+(Doppelklick, oder Enter im Eingabefeld plus Klick auf „Absenden"), prüft
+Home Assistant deren Werte gegen das Schema der bereits erreichten
+Folgeseite, was sonst als Wand aus `extra keys not allowed @ data[...]` im
+Dialog landet. `add_suggested_values_to_schema` baut das Schema neu auf und
+verliert dabei `extra`; `_suggested` setzt es deshalb wieder.
+
 Die Auswertung selbst ist dreigeteilt: `domain/tariff.py` enthält die reinen
 Typen (`TariffType`, `DailyPriceWindow`, `TariffConfig`, `PriceQuote`) samt
 Zeitfensterregeln und der Bewertung der nicht-dynamischen Tarife,

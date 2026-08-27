@@ -567,22 +567,38 @@ def _price_selector(minimum: float, maximum: float) -> vol.All:
     )
 
 
+# Die Preisfelder der Folgeseiten sind im Schema bewusst vol.Optional und
+# werden erst im Schritt selbst auf Vollständigkeit geprüft
+# (_missing_prices): Ein vol.Required scheitert bereits in der
+# Schema-Validierung von Home Assistant, also VOR dem Schritt - der
+# Anwender sähe dann die unübersetzte Rohmeldung "required key not
+# provided" statt eines erklärenden Feldfehlers. Pflicht bleiben sie
+# dadurch trotzdem: ohne Preis wird kein Eintrag geschrieben.
 _FEED_IN_FIELD = {
-    vol.Required(CONF_ECONOMICS_FEED_IN_PRICE): _price_selector(
+    vol.Optional(CONF_ECONOMICS_FEED_IN_PRICE): _price_selector(
         MIN_ECONOMICS_FEED_IN_PRICE, MAX_ECONOMICS_FEED_IN_PRICE
     ),
 }
 
+# ALLOW_EXTRA: Schickt das Frontend die erste Seite ein zweites Mal ab
+# (Doppelklick bzw. Enter im Eingabefeld plus Klick auf "Absenden"),
+# während der Flow bereits auf dieser Folgeseite steht, prüft Home
+# Assistant diese Werte gegen DIESES Schema. Ohne ALLOW_EXTRA quittiert
+# das der Dialog mit einer Wand aus "extra keys not allowed @
+# data[...]"-Rohmeldungen; mit ALLOW_EXTRA erkennt der Schritt die
+# wiederholte erste Seite und wiederholt sie einfach (siehe
+# _async_restart_init_if_resubmitted).
 STEP_ECONOMICS_FIXED_SCHEMA = vol.Schema(
     {
         **_FEED_IN_FIELD,
-        vol.Required(CONF_ECONOMICS_FIXED_IMPORT_PRICE): _price_selector(
+        vol.Optional(CONF_ECONOMICS_FIXED_IMPORT_PRICE): _price_selector(
             MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
         ),
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
-STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD))
+STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD), extra=vol.ALLOW_EXTRA)
 
 # Jede der acht Zeitfenstergruppen ist eine eigene, eingeklappte Section:
 # ohne die Gruppierung stünden 24 gleich aussehende Einzelfelder
@@ -593,11 +609,15 @@ STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD))
 STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
     {
         **_FEED_IN_FIELD,
-        vol.Required(CONF_ECONOMICS_TOU_BASE_PRICE): _price_selector(
+        vol.Optional(CONF_ECONOMICS_TOU_BASE_PRICE): _price_selector(
             MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
         ),
         **{
-            vol.Required(key): section(
+            # Optional wie die Preisfelder darüber: eine erneut
+            # abgeschickte erste Seite enthält keine Zeitfenstergruppen,
+            # und _validate_windows behandelt eine fehlende Gruppe ohnehin
+            # wie eine leere.
+            vol.Optional(key): section(
                 vol.Schema(
                     {
                         vol.Optional(
@@ -615,12 +635,16 @@ STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
             )
             for key in ECONOMICS_TOU_WINDOW_KEYS
         },
-    }
+    },
+    extra=vol.ALLOW_EXTRA,
 )
 
 # Übersetzungsschlüssel der Zeitfensterfehler (options.error.* in
 # strings.json). Der Fehler wird an "base" gemeldet: Home Assistant kann
 # einen Feldfehler keiner Section zuordnen.
+#: Übersetzungsschlüssel des fehlenden Pflichtpreises (options.error.*).
+_PRICE_REQUIRED_ERROR = "economics_price_required"
+
 _WINDOW_ERROR_KEYS = {
     TariffWindowError.INCOMPLETE: "economics_tou_window_incomplete",
     TariffWindowError.ZERO_LENGTH: "economics_tou_window_zero_length",
@@ -697,26 +721,37 @@ class SaxPowerOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Festpreistarif: ein ganztägig konstanter Arbeitspreis."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                title="", data={**self._base_options, **user_input}
+            if (repeated := await self._async_repeat_init(user_input)) is not None:
+                return repeated
+            errors = _missing_prices(
+                user_input,
+                (CONF_ECONOMICS_FEED_IN_PRICE, CONF_ECONOMICS_FIXED_IMPORT_PRICE),
             )
+            if not errors:
+                return self._create_entry(STEP_ECONOMICS_FIXED_SCHEMA, user_input)
         return self.async_show_form(
             step_id="economics_fixed",
-            data_schema=self._suggested(STEP_ECONOMICS_FIXED_SCHEMA),
+            data_schema=self._suggested(STEP_ECONOMICS_FIXED_SCHEMA, user_input),
+            errors=errors or None,
         )
 
     async def async_step_economics_dynamic(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Dynamischer Tarif: Preis aus dem bereits gewählten Preis-Sensor."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                title="", data={**self._base_options, **user_input}
-            )
+            if (repeated := await self._async_repeat_init(user_input)) is not None:
+                return repeated
+            errors = _missing_prices(user_input, (CONF_ECONOMICS_FEED_IN_PRICE,))
+            if not errors:
+                return self._create_entry(STEP_ECONOMICS_DYNAMIC_SCHEMA, user_input)
         return self.async_show_form(
             step_id="economics_dynamic",
-            data_schema=self._suggested(STEP_ECONOMICS_DYNAMIC_SCHEMA),
+            data_schema=self._suggested(STEP_ECONOMICS_DYNAMIC_SCHEMA, user_input),
+            errors=errors or None,
         )
 
     async def async_step_economics_time_of_use(
@@ -725,17 +760,60 @@ class SaxPowerOptionsFlow(OptionsFlow):
         """Tageszeitabhängiger Tarif: Grundpreis + bis zu acht Fenster."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            if (repeated := await self._async_repeat_init(user_input)) is not None:
+                return repeated
+            errors = _missing_prices(
+                user_input,
+                (CONF_ECONOMICS_FEED_IN_PRICE, CONF_ECONOMICS_TOU_BASE_PRICE),
+            )
             issue = _validate_windows(user_input)
-            if issue is None:
-                return self.async_create_entry(
-                    title="", data={**self._base_options, **user_input}
-                )
-            errors["base"] = _WINDOW_ERROR_KEYS[issue.error]
+            if issue is not None:
+                errors["base"] = _WINDOW_ERROR_KEYS[issue.error]
+            if not errors:
+                return self._create_entry(STEP_ECONOMICS_TOU_SCHEMA, user_input)
 
         return self.async_show_form(
             step_id="economics_time_of_use",
             data_schema=self._suggested(STEP_ECONOMICS_TOU_SCHEMA, user_input),
             errors=errors or None,
+        )
+
+    async def _async_repeat_init(
+        self, user_input: dict[str, Any]
+    ) -> ConfigFlowResult | None:
+        """Wiederholt die erste Seite, falls sie erneut abgeschickt wurde.
+
+        Schickt das Frontend die erste Seite ein zweites Mal ab
+        (Doppelklick bzw. Enter im Eingabefeld plus Klick auf "Absenden"),
+        prüft Home Assistant diese Werte gegen das Schema dieser
+        Folgeseite - erkennbar am Tarifmodell, das es hier gar nicht gibt.
+        Ohne diese Behandlung sähe der Anwender eine Wand aus "extra keys
+        not allowed @ data[...]"-Rohmeldungen. Stattdessen wird die erste
+        Seite einfach erneut ausgewertet: der Dialog landet wieder auf der
+        passenden Folgeseite, als wäre nur einmal abgeschickt worden.
+        Liefert None, wenn es sich um eine echte Eingabe dieser Seite
+        handelt.
+        """
+        if CONF_ECONOMICS_TARIFF_TYPE not in user_input:
+            return None
+        return await self.async_step_init(user_input)
+
+    def _create_entry(
+        self, schema: vol.Schema, user_input: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Speichert erste Seite + Folgeseite, ohne fremde Schlüssel.
+
+        Die Folgeseiten-Schemata lassen zusätzliche Schlüssel zu (siehe
+        _async_repeat_init) - gespeichert wird trotzdem ausschließlich, was
+        das jeweilige Schema selbst kennt.
+        """
+        known = {str(marker) for marker in schema.schema}
+        return self.async_create_entry(
+            title="",
+            data={
+                **self._base_options,
+                **{key: value for key, value in user_input.items() if key in known},
+            },
         )
 
     def _suggested(
@@ -746,10 +824,32 @@ class SaxPowerOptionsFlow(OptionsFlow):
         Nach einem Validierungsfehler gewinnt die letzte Eingabe: sonst
         müsste der Anwender acht Zeitfenster wegen eines einzigen falschen
         Feldes komplett neu ausfüllen.
+
+        `add_suggested_values_to_schema` baut das Schema dafür neu auf und
+        verliert dabei dessen `extra`-Einstellung - die wird hier wieder
+        übernommen, sonst scheiterte eine erneut abgeschickte erste Seite
+        weiterhin an der Schema-Validierung (siehe _async_repeat_init).
         """
-        return self.add_suggested_values_to_schema(
+        with_values = self.add_suggested_values_to_schema(
             schema, {**self.config_entry.options, **(user_input or {})}
         )
+        return vol.Schema(with_values.schema, extra=schema.extra)
+
+
+def _missing_prices(
+    user_input: dict[str, Any], required_keys: tuple[str, ...]
+) -> dict[str, str]:
+    """Feldfehler für jeden fehlenden Pflichtpreis einer Tarifseite.
+
+    Die Preisfelder sind im Schema optional (siehe _FEED_IN_FIELD), damit
+    ein fehlender Wert als erklärter Feldfehler und nicht als
+    unübersetzte Schema-Rohmeldung erscheint - Pflicht sind sie trotzdem.
+    """
+    return {
+        key: _PRICE_REQUIRED_ERROR
+        for key in required_keys
+        if user_input.get(key) is None
+    }
 
 
 def _validate_windows(user_input: dict[str, Any]) -> TariffWindowIssue | None:

@@ -2715,6 +2715,26 @@ requirement_economics_tariffs:
     als eigene Section dargestellt und liegen deshalb als verschachtelte
     Mappings mit den Feldern start/end/price_eur_kwh in entry.options.
 
+    Die Preisfelder der tarifspezifischen Schritte sind im Schema bewusst
+    vol.Optional und werden erst im Schritt selbst geprüft
+    (config_flow._missing_prices, Feldfehler economics_price_required):
+    Ein vol.Required scheitert bereits in der Schema-Validierung von Home
+    Assistant, also VOR dem Schritt, und der Anwender sähe die
+    unübersetzte Rohmeldung "required key not provided". Pflicht bleiben
+    sie dadurch unverändert - ohne Preis wird kein Eintrag geschrieben.
+
+    Die tarifspezifischen Schemata lassen zusätzlich fremde Schlüssel zu
+    (vol.ALLOW_EXTRA) und behandeln eine erneut abgeschickte erste Seite
+    (erkennbar am dort enthaltenen Tarifmodell) als Wiederholung genau
+    dieser Seite (config_flow.SaxPowerOptionsFlow._async_repeat_init).
+    Schickt das Frontend die erste Seite ein zweites Mal ab - Doppelklick,
+    oder Enter im Eingabefeld plus Klick auf "Absenden" -, prüft Home
+    Assistant deren Werte gegen das Schema der bereits erreichten
+    Folgeseite; ohne diese Behandlung quittiert der Dialog das mit einer
+    Wand aus "extra keys not allowed @ data[...]"-Rohmeldungen
+    (Anwenderbericht zu #129). Gespeichert wird trotz ALLOW_EXTRA
+    ausschließlich, was das jeweilige Schema selbst kennt.
+
     Dieselbe Unterscheidung wie im Options Flow gilt auch beim erneuten
     Einlesen für die Quote-Erzeugung
     (application.economics.window_from_section): Eine schlicht leere
@@ -2825,6 +2845,14 @@ requirement_economics_tariffs:
        ab, statt mit den übrigen, zufällig noch lesbaren Fenstern
        weiterzurechnen - eine schlicht leere Gruppe bleibt dagegen ein
        gültiger Zustand (TariffConfig.windows_valid)."
+    - "Ein fehlender Pflichtpreis einer Tarifseite erscheint als
+       übersetzter Feldfehler (economics_price_required) an genau diesem
+       Feld, nie als unübersetzte Schema-Rohmeldung; ohne Preis entsteht
+       kein Eintrag."
+    - "Eine erneut abgeschickte erste Options-Seite (Doppelklick bzw.
+       Enter plus Klick) führt bei jeder Tarifart zurück auf dieselbe
+       Folgeseite - ohne Fehlermeldung und ohne fremde Schlüssel im
+       gespeicherten Eintrag (tests/test_config_flow.py)."
     - "Eine Optionsänderung und ein Sensor-State-Change wirken ohne Reload;
        Listener werden beim Optionswechsel und beim Entladen entfernt und
        nie doppelt registriert."

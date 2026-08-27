@@ -726,7 +726,7 @@
           "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Gemeinsame Quelle für den Modus „Smart“ und den optionalen Mindestwert des netzdienlichen Ladens.",
           "pv_forecast_factor": "Nur für den Modus „Smart“: Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab. Der Mindestwert des netzdienlichen Ladens vergleicht dagegen den unveränderten Sensorwert.",
           "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung.",
-          "economics_investment_cost_eur": "Optional und unabhängig vom Tarifmodell - ein Tarifwechsel löscht diesen Wert nicht. Leer lassen deaktiviert ROI, Amortisationsfortschritt, Restbetrag und die 30-Tage-Prognose."
+          "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt, Restbetrag bis zur Amortisation und das voraussichtliche Rückzahlungsdatum; verrechnet wird gegen das laufende operative Ergebnis (vermiedener Netzbezug abzüglich Lade- und PV-Opportunitätskosten). Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter."
         }
       },
       "economics_fixed": {
@@ -882,7 +882,8 @@
       "economics_price_sensor_required": "Der dynamische Tarif braucht den oben ausgewählten Strompreis-Sensor. Bitte einen Sensor auswählen oder ein anderes Tarifmodell wählen.",
       "economics_tou_window_incomplete": "Ein Zeitfenster ist unvollständig: Beginn, Ende und Arbeitspreis müssen entweder alle ausgefüllt oder alle leer sein.",
       "economics_tou_window_zero_length": "Beginn und Ende eines Zeitfensters dürfen nicht gleich sein - das ergibt kein Zeitfenster und bedeutet auch nicht „ganzer Tag“.",
-      "economics_tou_window_overlap": "Zwei Zeitfenster überschneiden sich. Angrenzende Grenzen (Ende des einen = Beginn des nächsten) sind erlaubt, eine Überlappung nicht."
+      "economics_tou_window_overlap": "Zwei Zeitfenster überschneiden sich. Angrenzende Grenzen (Ende des einen = Beginn des nächsten) sind erlaubt, eine Überlappung nicht.",
+      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in EUR/kWh eintragen (Bruttopreis inklusive aller Abgaben)."
     }
   },
   "selector": {

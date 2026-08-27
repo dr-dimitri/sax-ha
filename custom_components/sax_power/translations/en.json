@@ -726,7 +726,7 @@
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings.",
-          "economics_investment_cost_eur": "Optional and independent of the tariff model - switching tariffs does not clear this value. Leave empty to disable ROI, amortization progress, remaining-to-payback and the 30-day forecast."
+          "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress, remaining-to-payback and the estimated payback date, offset against the running operating result (avoided grid import minus charging and PV opportunity cost). Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running."
         }
       },
       "economics_fixed": {
@@ -882,7 +882,8 @@
       "economics_price_sensor_required": "The dynamic tariff needs the electricity price sensor selected above. Pick a sensor or choose another tariff model.",
       "economics_tou_window_incomplete": "A window is incomplete: start, end and energy price must all be filled in or all be empty.",
       "economics_tou_window_zero_length": "Start and end of a window must differ - an empty range is not a window and does not mean \"all day\".",
-      "economics_tou_window_overlap": "Two windows overlap. Touching boundaries (end of one = start of the next) are allowed, overlapping ones are not."
+      "economics_tou_window_overlap": "Two windows overlap. Touching boundaries (end of one = start of the next) are allowed, overlapping ones are not.",
+      "economics_price_required": "Required: please enter an energy price in EUR/kWh (gross price including all levies)."
     }
   },
   "selector": {

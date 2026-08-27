@@ -3588,7 +3588,11 @@ requirement_economics_observability:
     `last_successful_quote_at` (UTC ISO), aktuelle Import-/
     Einspeisevergütung, kumulierte bepreiste/unbepreiste Lade-/
     Entlade-kWh sowie `charge_price_coverage_percent`/
-    `discharge_price_coverage_percent`/`origin_coverage_percent`. Kurze
+    `discharge_price_coverage_percent` (kumuliert seit
+    economics_started_at), die zustandsbestimmenden Tageswerte
+    `charge_price_coverage_percent_today`/
+    `discharge_price_coverage_percent_today` (siehe unten) und
+    `origin_coverage_percent`. Kurze
     lokalisierte Erklärungen kommen über die Entity-Übersetzung der
     Sensorzustände (strings.json, `entity.sensor.economics_status.state`),
     nicht über ein zusätzliches Freitextattribut.
@@ -3603,6 +3607,27 @@ requirement_economics_observability:
     `EconomicsDelta.priced_charge_kwh_delta`/`priced_discharge_kwh_delta`
     wie die Tages-Buckets aus 04/06) - Gegenstück zu den bestehenden
     `unpriced_charge_kwh`/`unpriced_discharge_kwh`.
+
+    `partial_price_coverage` bewertet ausdrücklich NUR den laufenden
+    Kalendertag: Auslöser sind die aus den Tages-Buckets von
+    REQ-ECONOMICS-AMORTIZATION gebildeten
+    `charge_price_coverage_percent_today`/
+    `discharge_price_coverage_percent_today` (keine zusätzlichen Zähler),
+    und zwar erst unterhalb von
+    domain.economics_status.PRICE_COVERAGE_THRESHOLD_PERCENT (95 %, analog
+    zu DAY_COVERAGE_THRESHOLD_PERCENT), nicht schon bei exakt < 100 %. Aus
+    den Lifetime-Quoten abgeleitet (und ohne Toleranz) kippte eine
+    EINZIGE unbepreiste Kilowattstunde den Sensor dauerhaft und
+    unwiderruflich: solche kWh sind im Normalbetrieb unvermeidbar (der
+    erste Coordinator-Tick nach einem Neustart läuft oft, bevor die
+    Preis-Integration ihre Entity angelegt hat; dazu jede kurze
+    Tarifpause und jedes Intervall unbekannter Herkunft), Lifetime-Zähler
+    gehen nie zurück, und der einzige Ausweg wäre der Bilanzneustart, der
+    zugleich die gesamte Geldbilanz verwirft. Ein dauerhaft anliegender
+    Warnzustand wird ignoriert - der Sensor verlöre damit genau die
+    Aussage, für die er gebaut ist (Issue #134). Die kumulierten
+    Lifetime-Quoten bleiben als Attribute erhalten (Langzeitinformation),
+    sind aber kein Zustandsauslöser mehr.
     `origin_coverage_percent` ist unverändert
     `SaxPowerCoordinator._energy_origin_coverage()` (02/06);
     `origin_unavailable` ist wahr, wenn diese Methode `None` liefert (die
@@ -3744,6 +3769,14 @@ requirement_economics_observability:
     - "Preisabdeckung ist energiebasiert (nicht tickbasiert), bleibt bei
        Nenner 0 bei 100 % und wird intern aus ungerundeten Zählern
        gebildet, erst beim Veröffentlichen gerundet."
+    - "partial_price_coverage entsteht ausschließlich aus der Abdeckung
+       des laufenden Kalendertages und erst unterhalb von
+       PRICE_COVERAGE_THRESHOLD_PERCENT: eine einzelne unbepreiste
+       Kilowattstunde lässt den Status auf active, und ein Tag mit
+       echter Lücke kehrt am Folgetag ohne Bilanzneustart auf active
+       zurück, während die Lifetime-Quote als Attribut sichtbar
+       niedriger bleibt (Issue #134, tests/test_economics_status.py,
+       tests/test_coordinator.py)."
     - "Ein ungültig gespeicherter Fest-/Zeitfenstertarif löst
        price_unavailable sofort aus; ein transienter Ausfall des
        dynamischen Preis-Sensors erst nach
@@ -3799,9 +3832,11 @@ requirement_economics_dashboard:
       Reihenfolge): economics_status, economics_current_import_price,
       economics_feed_in_price, energy_origin_coverage, danach drei neue
       "attribute"-Kartenzeilen (`_attribute_row`) auf economics_status:
-      charge_price_coverage_percent, discharge_price_coverage_percent
-      ("Preisabdeckungen für Laden/Entladen" - haben keinen eigenen
-      Sensor, siehe REQ-ECONOMICS-OBSERVABILITY) sowie
+      charge_price_coverage_percent_today,
+      discharge_price_coverage_percent_today ("Preisabdeckungen für
+      Laden/Entladen heute" - haben keinen eigenen Sensor, siehe
+      REQ-ECONOMICS-OBSERVABILITY; bewusst die Tageswerte, weil genau sie
+      den darüber stehenden Status bestimmen) sowie
       economics_started_at ("Beginn der Bilanz"). Bei deaktiviertem Tarif
       bleibt economics_status sichtbar und erklärt über seine eigene
       Zustandsübersetzung (`disabled`), dass die Konfiguration unter

@@ -641,13 +641,15 @@ der Wirtschaftlichkeitsbilanz gerade zu trauen ist:
 | Speicherfehler | Der interne Bilanz-Speicher ist unlesbar - die Bilanz pausiert, bis die Integration neu geladen wird |
 | Preis nicht verfügbar | Seit über 6 Stunden kein gültiger Netzbezugspreis (bei einem Fest-/Zeitfenstertarif sofort, wenn die gespeicherte Konfiguration selbst ungültig ist) |
 | Herkunft nicht verfügbar | Die Herkunftsaufteilung aus [Herkunft der Ladeenergie](#herkunft-der-ladeenergie) läuft gerade nicht |
-| Teilweise Preisabdeckung | Ein Teil der geladenen oder entladenen Energie konnte (noch) nicht bepreist werden |
+| Teilweise Preisabdeckung | Mehr als 5 % der heute geladenen oder entladenen Energie konnte nicht bepreist werden |
 | Aktiv | Alles vollständig - die Bilanz ist ohne Einschränkung aussagekräftig |
 
 Bei mehreren gleichzeitig zutreffenden Problemen zeigt der Sensor immer
 das dringendste in dieser Reihenfolge. Seine Attribute liefern zusätzlich
 die aktuellen Preise, den Aktivierungszeitpunkt, kumulierte bepreiste/
-unbepreiste Energiemengen sowie die genauen Abdeckungsprozentsätze - für
+unbepreiste Energiemengen sowie die genauen Abdeckungsprozentsätze (die
+des laufenden Tages, die den Zustand bestimmen, und die kumulierten seit
+Beginn der Bilanz) - für
 Dashboards und Automationen, die feiner reagieren wollen als der reine
 Status.
 

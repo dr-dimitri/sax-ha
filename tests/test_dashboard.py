@@ -586,8 +586,8 @@ async def test_economics_view_status_card_entity_and_attribute_order(hass) -> No
     ]
     attribute_rows = rows[4:]
     assert [row["attribute"] for row in attribute_rows] == [
-        "charge_price_coverage_percent",
-        "discharge_price_coverage_percent",
+        "charge_price_coverage_percent_today",
+        "discharge_price_coverage_percent_today",
         "economics_started_at",
     ]
     assert all(row["type"] == "attribute" for row in attribute_rows)

@@ -1364,6 +1364,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ist irreführend. Läuft unabhängig vom `frozen`/Bootstrap-Zweig in
         _accumulate_economics, damit auch waiting_for_initial_state und
         storage_error sichtbar werden, bevor die Bilanz je gestartet ist.
+
+        Den Zustand bestimmen ausschließlich die Abdeckungen des LAUFENDEN
+        Kalendertages (dieselben Tages-Buckets wie in
+        REQ-ECONOMICS-AMORTIZATION, keine zusätzlichen Zähler) - die
+        kumulierten Lifetime-Quoten bleiben als Langzeitinformation
+        daneben erhalten, taugen aber nicht als Auslöser, weil sie nie
+        zurückgehen (Issue #134, siehe compute_economics_status).
         """
         origin_coverage = self._energy_origin_coverage()
         charge_coverage = compute_price_coverage_percent(
@@ -1373,14 +1380,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._economics_priced_discharge_kwh,
             self._economics_unpriced_discharge_kwh,
         )
+        charge_coverage_today = compute_price_coverage_percent(
+            self._economics_current_day_priced_charge_kwh,
+            self._economics_current_day_unpriced_charge_kwh,
+        )
+        discharge_coverage_today = compute_price_coverage_percent(
+            self._economics_current_day_priced_discharge_kwh,
+            self._economics_current_day_unpriced_discharge_kwh,
+        )
         status = compute_economics_status(
             tariff_enabled=tariff_enabled,
             storage_error=self._economics_store_write_blocked,
             started=self._economics_started_at is not None,
             price_unavailable=self._economics_price_unavailable,
             origin_unavailable=origin_coverage is None,
-            charge_price_coverage_percent=charge_coverage,
-            discharge_price_coverage_percent=discharge_coverage,
+            charge_price_coverage_percent_today=charge_coverage_today,
+            discharge_price_coverage_percent_today=discharge_coverage_today,
         )
         data["economics_status"] = status.value
         price_entity_id = (
@@ -1441,6 +1456,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "discharge_price_coverage_percent": (
                 None if discharge_coverage is None else round(discharge_coverage, 1)
+            ),
+            # Die beiden Tageswerte bestimmen den Zustand (Issue #134) -
+            # die kumulierten Quoten darüber bleiben als
+            # Langzeitinformation daneben stehen.
+            "charge_price_coverage_percent_today": (
+                None
+                if charge_coverage_today is None
+                else round(charge_coverage_today, 1)
+            ),
+            "discharge_price_coverage_percent_today": (
+                None
+                if discharge_coverage_today is None
+                else round(discharge_coverage_today, 1)
             ),
             "origin_coverage_percent": origin_coverage,
         }

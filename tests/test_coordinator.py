@@ -6068,6 +6068,67 @@ def test_economics_status_partial_price_coverage_from_unpriced_charge(hass) -> N
     assert attributes["reason"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
 
 
+def test_economics_status_recovers_on_the_next_day_after_a_price_gap(hass) -> None:
+    """partial_price_coverage meldet eine Lücke des LAUFENDEN Tages. Aus
+    der Lifetime-Quote (die nie zurückgeht) wäre der Zustand dagegen nur
+    noch über einen Bilanzneustart zu verlassen, der die gesamte
+    Geldbilanz verwirft (Issue #134)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=1.0, unpriced_charge_delta_kwh=1.0
+        ),
+    )
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+
+    # Nächster Kalendertag, wieder vollständig bepreist: der Tagesbucket
+    # startet bei 0/0, der Zustand kehrt zurück auf active.
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 0, 10),
+        delta=EconomicsDelta(priced_charge_kwh_delta=1.0),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+    attributes = data["economics_status_attributes"]
+    assert attributes["charge_price_coverage_percent_today"] == pytest.approx(100.0)
+    # Die Lifetime-Quote bleibt als Langzeitinformation erhalten - sie ist
+    # nur kein Zustandsauslöser mehr.
+    assert attributes["charge_price_coverage_percent"] == pytest.approx(66.7)
+
+
+def test_economics_status_tolerates_a_negligible_unpriced_share(hass) -> None:
+    """Eine einzelne unbepreiste Kilowattstunde (z. B. der erste Tick nach
+    einem Neustart, bevor die Preis-Integration ihre Entity angelegt hat)
+    darf den Sensor nicht auf partial_price_coverage kippen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=100.0, unpriced_charge_delta_kwh=0.001
+        ),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+    assert data["economics_status_attributes"][
+        "charge_price_coverage_percent_today"
+    ] == pytest.approx(100.0)
+
+
 def test_economics_status_attributes_contain_expected_diagnostics(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS

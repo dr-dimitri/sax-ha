@@ -486,8 +486,15 @@ async def async_build_dashboard_config(
         if row is not None:
             status_rows.append(row)
     for attribute, label in (
-        ("charge_price_coverage_percent", "Preisabdeckung Ladung"),
-        ("discharge_price_coverage_percent", "Preisabdeckung Entladung"),
+        # Bewusst die Tageswerte: sie bestimmen den Zustand des
+        # Status-Sensors direkt darüber (REQ-ECONOMICS-OBSERVABILITY,
+        # Issue #134) - die kumulierten Lifetime-Quoten bleiben als
+        # Attribute desselben Sensors erhalten.
+        ("charge_price_coverage_percent_today", "Preisabdeckung Ladung (heute)"),
+        (
+            "discharge_price_coverage_percent_today",
+            "Preisabdeckung Entladung (heute)",
+        ),
         ("economics_started_at", "Beginn der Bilanz"),
     ):
         row = _attribute_row(status_entity_id, attribute, label)

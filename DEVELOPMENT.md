@@ -428,6 +428,14 @@ selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
   energiebasiert (nicht tickbasiert) und liefert bei Nenner 0 100 % -
   dieselbe Formel wie `DayEconomicsResult.price_coverage_percent` (04/06)
   und `_energy_origin_coverage()` (02/06).
+- `partial_price_coverage` bewertet nur den LAUFENDEN Kalendertag (die
+  Tages-Buckets aus 04/06) und erst unterhalb von
+  `PRICE_COVERAGE_THRESHOLD_PERCENT` (95 %). Aus den Lifetime-Zählern
+  abgeleitet, die nie zurückgehen, kippte sonst eine einzige unbepreiste
+  Kilowattstunde den Sensor dauerhaft - `active` wäre nur noch über einen
+  Bilanzneustart erreichbar, der die gesamte Geldbilanz verwirft
+  (Issue #134). Die Lifetime-Quoten bleiben Attribute, sind aber kein
+  Zustandsauslöser.
 
 `SaxPowerCoordinator._publish_economics_status` (aufgerufen am Ende von
 `_accumulate_economics`, unabhängig vom `frozen`-Zweig, damit auch

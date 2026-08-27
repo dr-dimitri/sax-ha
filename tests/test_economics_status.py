@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.sax_power.domain.economics_status import (
+    PRICE_COVERAGE_THRESHOLD_PERCENT,
     EconomicsStatus,
     compute_economics_status,
     compute_price_coverage_percent,
@@ -19,8 +20,8 @@ _FULLY_HEALTHY = {
     "started": True,
     "price_unavailable": False,
     "origin_unavailable": False,
-    "charge_price_coverage_percent": 100.0,
-    "discharge_price_coverage_percent": 100.0,
+    "charge_price_coverage_percent_today": 100.0,
+    "discharge_price_coverage_percent_today": 100.0,
 }
 
 
@@ -35,7 +36,7 @@ def test_disabled_wins_over_every_other_problem() -> None:
             "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent": 0.0,
+            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.DISABLED
@@ -49,7 +50,7 @@ def test_storage_error_wins_over_lower_priority_problems() -> None:
             "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent": 0.0,
+            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.STORAGE_ERROR
@@ -62,7 +63,7 @@ def test_waiting_for_initial_state_wins_over_lower_priority_problems() -> None:
             "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent": 0.0,
+            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.WAITING_FOR_INITIAL_STATE
@@ -74,7 +75,7 @@ def test_price_unavailable_wins_over_origin_and_coverage() -> None:
             **_FULLY_HEALTHY,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent": 0.0,
+            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.PRICE_UNAVAILABLE
@@ -85,7 +86,7 @@ def test_origin_unavailable_wins_over_partial_coverage() -> None:
         **{
             **_FULLY_HEALTHY,
             "origin_unavailable": True,
-            "charge_price_coverage_percent": 0.0,
+            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.ORIGIN_UNAVAILABLE
@@ -93,7 +94,7 @@ def test_origin_unavailable_wins_over_partial_coverage() -> None:
 
 @pytest.mark.parametrize(
     ("charge_coverage", "discharge_coverage"),
-    [(50.0, 100.0), (100.0, 50.0), (0.0, 0.0)],
+    [(50.0, 100.0), (100.0, 50.0), (0.0, 0.0), (94.9, 100.0)],
 )
 def test_partial_price_coverage_from_either_side(
     charge_coverage: float, discharge_coverage: float
@@ -101,8 +102,8 @@ def test_partial_price_coverage_from_either_side(
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
-            "charge_price_coverage_percent": charge_coverage,
-            "discharge_price_coverage_percent": discharge_coverage,
+            "charge_price_coverage_percent_today": charge_coverage,
+            "discharge_price_coverage_percent_today": discharge_coverage,
         }
     )
     assert status is EconomicsStatus.PARTIAL_PRICE_COVERAGE
@@ -112,6 +113,30 @@ def test_active_when_everything_is_healthy() -> None:
     assert compute_economics_status(**_FULLY_HEALTHY) is EconomicsStatus.ACTIVE
 
 
+@pytest.mark.parametrize(
+    ("charge_coverage", "discharge_coverage"),
+    [
+        (PRICE_COVERAGE_THRESHOLD_PERCENT, 100.0),
+        (100.0, PRICE_COVERAGE_THRESHOLD_PERCENT),
+        (99.99999, 99.99999),
+    ],
+)
+def test_a_negligible_gap_stays_active(
+    charge_coverage: float, discharge_coverage: float
+) -> None:
+    """Eine einzelne unbepreiste Kilowattstunde ist im Normalbetrieb
+    unvermeidbar und darf keinen Warnzustand auslösen - erst UNTERHALB der
+    Toleranzschwelle wird gewarnt (Issue #134)."""
+    status = compute_economics_status(
+        **{
+            **_FULLY_HEALTHY,
+            "charge_price_coverage_percent_today": charge_coverage,
+            "discharge_price_coverage_percent_today": discharge_coverage,
+        }
+    )
+    assert status is EconomicsStatus.ACTIVE
+
+
 def test_unknown_coverage_does_not_count_as_partial() -> None:
     """None (Zähler noch nicht initialisiert) ist kein Abdeckungsproblem -
     das wird bereits durch waiting_for_initial_state/storage_error
@@ -119,8 +144,8 @@ def test_unknown_coverage_does_not_count_as_partial() -> None:
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
-            "charge_price_coverage_percent": None,
-            "discharge_price_coverage_percent": None,
+            "charge_price_coverage_percent_today": None,
+            "discharge_price_coverage_percent_today": None,
         }
     )
     assert status is EconomicsStatus.ACTIVE

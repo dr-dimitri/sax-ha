@@ -3878,16 +3878,17 @@ requirement_economics_dashboard:
 
     Fünfter View (dashboard.async_build_dashboard_config), direkt nach
     "Dynamisches Laden": Titel "Wirtschaftlichkeit", Pfad
-    `wirtschaftlichkeit`, Icon `mdi:cash-chart`, exakt fünf Top-Level-
+    `wirtschaftlichkeit`, Icon `mdi:cash-chart`, exakt sechs Top-Level-
     Karten. Ausschließlich Home-Assistant-Core-Kartentypen (entities,
     gauge, markdown, vertical-stack, conditional, statistics-graph) - keine
     Custom-Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-
     Auflösung wie die vier bestehenden Tabs. `async_build_dashboard_config`
     braucht dafür ausschließlich `hass`/`entry_id`, keine Config-Entry-
-    Options: Karte 4 entscheidet ihre Sichtbarkeit zur Laufzeit über eine
-    Core-"conditional"-Karte (siehe dort) statt über eine zum Build-
-    Zeitpunkt gelesene Option, die nach einer späteren Options-Änderung
-    veraltet wäre, ohne dass das gespeicherte Dashboard je neu gebaut wird.
+    Options: Karte 2 und Karte 5 entscheiden ihre Sichtbarkeit zur Laufzeit
+    über eine Core-"conditional"-Karte (siehe dort) statt über eine zum
+    Build-Zeitpunkt gelesene Option, die nach einer späteren
+    Options-Änderung veraltet wäre, ohne dass das gespeicherte Dashboard je
+    neu gebaut wird.
 
     - Karte 1 "Status und Preise" (eine entities-Karte, feste
       Reihenfolge): economics_status, economics_current_import_price,
@@ -3902,24 +3903,39 @@ requirement_economics_dashboard:
       bleibt economics_status sichtbar und erklärt über seine eigene
       Zustandsübersetzung (`disabled`), dass die Konfiguration unter
       "Geräte & Dienste -> SAX Power Home -> Konfigurieren" erfolgt.
-    - Karte 2 "Herkunft der Ladeenergie": ein `_stack_card`
+    - Karte 2 "Tarifplan (tageszeitabhängig)": eine `markdown`-Karte in
+      einer Core-"conditional"-Karte, die ausschließlich beim
+      tageszeitabhängigen Tarif erscheint (Bedingung: Attribut
+      `tariff_type` von economics_current_import_price gleich
+      `time_of_use`) - also am Laufzeitsignal statt an einem zum
+      Build-Zeitpunkt gelesenen Options-Wert, damit ein Tarifwechsel sie
+      selbsttätig ein- und ausblendet. Die Karte rendert den hinterlegten
+      Tagesplan als Tabelle (Beginn, Ende, Arbeitspreis), sortiert nach
+      Beginn, mit dem Grundpreis als letzter Zeile und der Markierung
+      "jetzt" an der gerade geltenden Zeile - beim Grundpreis also an
+      dieser. Darunter steht der nächste Preiswechsel als Ortszeit,
+      sofern bekannt. Gespeist wird sie ausschließlich aus den Attributen
+      des Preis-Sensors (siehe unten); sie enthält damit keine eigene
+      Kopie der Konfiguration und kann nach einer Options-Änderung nicht
+      veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
+    - Karte 3 "Herkunft der Ladeenergie": ein `_stack_card`
       (vertical-stack) aus der entities-Karte (energy_charged_from_pv,
       energy_charged_from_grid, energy_charged_origin_unknown,
       energy_charged, energy_discharged) plus einer `markdown`-Karte mit
       dem Hinweis, dass die Herkunftsaufteilung eine konservative
       Schätzung am Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine
       physikalische Einzelstromverfolgung - als Teil derselben Karte, nicht
-      als zusätzliche eigenständige Karte (bliebe sonst bei fünf Karten
-      im View, aber sechs Kartenobjekten). Der Hinweis fehlt, wenn keine
+      als zusätzliche eigenständige Karte (bliebe sonst bei sechs Karten
+      im View, aber sieben Kartenobjekten). Der Hinweis fehlt, wenn keine
       der Herkunfts-Entities registriert ist.
-    - Karte 3 "Operative Geldbilanz": economics_avoided_grid_cost,
+    - Karte 4 "Operative Geldbilanz": economics_avoided_grid_cost,
       economics_grid_charge_cost, economics_pv_opportunity_cost,
       economics_operating_result, economics_unpriced_charge,
       economics_unpriced_discharge - Kosten/Nutzen bleiben durch die
       Reihenfolge (zuerst der Nutzen, dann die beiden Kostenarten) und die
       Sensor-Übersetzungen eindeutig unterscheidbar; der Entity-Name
       bleibt "Operatives Ergebnis", kein Wort wie "Gewinn".
-    - Karte 4 "Investition und Amortisation": EINE gemeinsame Karte
+    - Karte 5 "Investition und Amortisation": EINE gemeinsame Karte
       (`_stack_card`, vertical-stack) in genau der geforderten Reihenfolge
       - eine entities-Zeile mit economics_roi, dann die Fortschritts-Gauge
       (economics_amortization_progress, 0..100, needle, segments rot/gelb/
@@ -3958,7 +3974,7 @@ requirement_economics_dashboard:
       Investitionskosten auf `ForecastUnavailable.NO_INVESTMENT_COST`
       gesetzt wird, unabhängig von Tarifstatus oder Bilanz-
       Initialisierung.
-    - Karte 5 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
+    - Karte 6 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
       `statistics-graph` als Balkendiagramm (`chart_type: bar`),
       `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für
       economics_operating_result, economics_avoided_grid_cost,
@@ -3968,6 +3984,26 @@ requirement_economics_dashboard:
       wäre über die dedizierten Tages-Sensoren aus REQ-ECONOMICS-
       AMORTIZATION aufzufangen, nie über eine private Statistik-API oder
       einen nicht unterstützten Kartentyp.
+
+    Der Sensor economics_current_import_price trägt dafür sieben
+    Zusatzattribute (coordinator._tariff_plan_attributes, veröffentlicht
+    als data["economics_price_attributes"], gelesen über
+    sensor.SaxPowerSensorEntityDescription.attributes_fn): `tariff_type`,
+    `quote_source` (None ohne Preis), `unavailable_reason` (der
+    QuoteUnavailable-Grund, None mit Preis), `active_window` (Beginn/Ende/
+    Preis des greifenden Fensters, None solange der Grundpreis gilt),
+    `next_price_change_at` (Ende des laufenden Preisabschnitts als
+    ISO-Ortszeit; beim Festpreis None, weil er unbegrenzt gilt),
+    `base_price_eur_kwh` und `windows` (die vollständige, nach Beginn
+    sortierte Fensterliste). Die beiden letztgenannten sowie
+    `active_window` sind bei jeder anderen Tarifart als "time_of_use"
+    ausdrücklich None - Zeitfenster einer früheren Konfiguration bleiben
+    in entry.options stehen, gelten aber nicht mehr, und ein sichtbarer
+    Tarifplan, der gar nicht gilt, wäre irreführender als gar keiner. Der
+    Zeitpunkt, zu dem Preis und Attribute bestimmt werden, ist derselbe
+    (ein einziges dt_util.now() je Tick): ein Fensterwechsel zwischen zwei
+    Aufrufen dürfte sonst ein Fenster ausweisen, das zum gemeldeten Preis
+    nicht gehört.
 
     Bestehendes Verhalten unverändert: async_create_dashboard bleibt
     idempotent und überschreibt kein vorhandenes Nutzer-Dashboard; nur
@@ -3989,7 +4025,7 @@ requirement_economics_dashboard:
     Dashboard-Tab ausschließlich bereits übersetzte Entities referenziert.
   acceptance_criteria:
     - "View-Reihenfolge (fünfter Tab), Titel/Pfad/Icon sowie die exakte
-       Karten-/Entity-Reihenfolge aller fünf Karten sind regression-
+       Karten-/Entity-Reihenfolge aller sechs Karten sind regression-
        getestet (tests/test_dashboard.py)."
     - "Deaktivierter Tarif, aktiv ohne Investitionssumme, aktiv mit
        Investitionssumme und teilweise fehlende Entities erzeugen

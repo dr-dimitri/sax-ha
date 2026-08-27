@@ -633,6 +633,25 @@ keine neue Berechnung ein:
     `economics_roi`, dann die `economics_amortization_progress`-Gauge,
     dann eine zweite entities-Karte mit den übrigen vier ROI-/
     Amortisationssensoren, in genau dieser Reihenfolge.
+- `_tariff_plan_card` baut die Karte "Tarifplan (tageszeitabhängig)":
+  eine Core-`markdown`-Karte mit einer Jinja-Vorlage, die den hinterlegten
+  Tagesplan als Tabelle rendert (nach Beginn sortiert, Grundpreis als
+  letzte Zeile, Markierung „jetzt" an der geltenden Zeile, darunter der
+  nächste Preiswechsel). Ihre einzige Datenquelle sind die Attribute von
+  `economics_current_import_price` (`windows`, `active_window`,
+  `base_price_eur_kwh`, `next_price_change_at`, siehe
+  `coordinator._tariff_plan_attributes`) - die Karte enthält damit keine
+  eigene Kopie der Tarifkonfiguration und kann nach einer
+  Options-Änderung nicht veralten. Wie die Investitionskarte hängt ihre
+  Sichtbarkeit an einer Core-`conditional`-Karte, hier am Attribut
+  `tariff_type`: Der Preis-Sensor existiert bei jeder Tarifart, ein
+  Tagesplan ergibt aber nur beim tageszeitabhängigen Tarif Sinn. Der
+  Platzhalter der Entity-ID wird per `str.replace` ersetzt, nicht per
+  `str.format` - die Vorlage ist voll von geschweiften Klammern, die
+  Jinja gehören. `tests/test_dashboard.py` **rendert** die Vorlage mit
+  Home Assistants Template-Engine, statt nur auf Zeichenketten zu prüfen:
+  Code, den sonst nur das Frontend ausführt, war schon einmal der Grund
+  für eine grüne Testsuite über einer unbrauchbaren Oberfläche (#135).
 - Die sieben ROI-/Amortisationssensoren sind anders als z. B. die
   netzdienlichen Entities IMMER registriert (statische
   `SENSOR_DESCRIPTIONS`), unabhängig davon, ob Investitionskosten

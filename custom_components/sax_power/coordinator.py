@@ -121,7 +121,14 @@ from .domain.sunspec import (
     decode_high_block,
     decode_low_blocks,
 )
-from .domain.tariff import QuoteResult, QuoteUnavailable, TariffType
+from .domain.tariff import (
+    QuoteResult,
+    QuoteUnavailable,
+    TariffType,
+    active_window,
+    sorted_windows,
+    window_as_mapping,
+)
 from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
@@ -790,11 +797,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _publish_economics_balance) - kein falscher Nullgewinn, aber auch
         keine sichtbaren Beträge, solange der Tarif aus ist.
         """
-        quote_result = self.tariff_provider.quote()
+        # Zeitpunkt bewusst einmal bestimmt und weitergereicht: Preis und
+        # die Tarifplan-Attribute darunter müssen denselben Moment
+        # beschreiben, sonst könnte ein Fensterwechsel zwischen beiden
+        # Aufrufen ein Fenster ausweisen, das zum gemeldeten Preis gar
+        # nicht gehört (REQ-ECONOMICS-DASHBOARD).
+        moment = dt_util.now()
+        quote_result = self.tariff_provider.quote(moment)
         current_price = quote_result.price_eur_kwh
         feed_in_price = self.tariff_provider.feed_in_price_eur_kwh
         data["economics_current_import_price"] = (
             None if current_price is None else round(current_price, 5)
+        )
+        data["economics_price_attributes"] = self._tariff_plan_attributes(
+            quote_result, moment
         )
         data["economics_feed_in_price"] = (
             None if feed_in_price is None else round(feed_in_price, 5)
@@ -1348,6 +1364,51 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             now - self._economics_price_unavailable_since
             >= ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD
         )
+
+    def _tariff_plan_attributes(
+        self, quote_result: QuoteResult, moment: datetime
+    ) -> dict[str, Any]:
+        """Der hinterlegte Tarifplan als Attribute des Preis-Sensors.
+
+        REQ-ECONOMICS-DASHBOARD: Der reine Preiswert beantwortet weder
+        "habe ich meinen Tarif richtig eingetragen?" noch "welches Fenster
+        liefert diesen Preis gerade, und wann ändert er sich wieder?". Die
+        Konfiguration liegt sonst ausschließlich in entry.options und ist
+        damit nur im Options Flow einsehbar - dort aber immer im
+        Bearbeitungsmodus und ohne jeden Bezug zur aktuellen Uhrzeit.
+
+        Die tageszeitabhängigen Felder (base_price_eur_kwh, windows) sind
+        bei jeder anderen Tarifart None statt eines Restwerts aus einer
+        früheren Konfiguration: ein sichtbarer Tarifplan, der gar nicht
+        gilt, wäre irreführender als gar keiner.
+        """
+        config = self.tariff_provider.config
+        quote = quote_result.quote
+        time_of_use = config.tariff_type is TariffType.TIME_OF_USE
+        window = active_window(config, moment)
+        return {
+            "tariff_type": str(config.tariff_type),
+            "quote_source": None if quote is None else str(quote.source),
+            "unavailable_reason": (
+                None if quote_result.reason is None else str(quote_result.reason)
+            ),
+            "active_window": None if window is None else window_as_mapping(window),
+            # Beim Festpreis unbegrenzt gültig (valid_until ist None), beim
+            # dynamischen Tarif das Ende des Vorschau-Slots.
+            "next_price_change_at": (
+                None
+                if quote is None or quote.valid_until is None
+                else quote.valid_until.isoformat()
+            ),
+            "base_price_eur_kwh": (
+                config.tou_base_price_eur_kwh if time_of_use else None
+            ),
+            "windows": (
+                [window_as_mapping(entry) for entry in sorted_windows(config)]
+                if time_of_use
+                else None
+            ),
+        }
 
     def _publish_economics_status(
         self,

@@ -16,17 +16,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import template
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+    CONF_ECONOMICS_WINDOW_END,
+    CONF_ECONOMICS_WINDOW_PRICE,
+    CONF_ECONOMICS_WINDOW_START,
     DOMAIN,
+    economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.dashboard import async_build_dashboard_config
 from custom_components.sax_power.domain.tariff import TariffType
+from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
 
 ENTRY_ID = "e2e_entry"
 
@@ -197,3 +204,75 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
         progress_id,
     ):
         assert entity_id in resolved
+
+
+async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
+    """Ganze Kette des Tarifplans (REQ-ECONOMICS-DASHBOARD): Options ->
+    Coordinator-Attribute -> Sensor-Entity -> gerenderte Dashboard-Karte.
+
+    Jedes Glied für sich ist bereits abgedeckt; hier geht es darum, dass
+    die vier Attributnamen an allen drei Stellen dieselben sind - ein
+    umbenanntes Attribut fiele sonst erst im Dashboard des Anwenders auf,
+    als leere Karte ohne jede Fehlermeldung."""
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+        economics_tou_window_key(1): {
+            CONF_ECONOMICS_WINDOW_START: "22:00:00",
+            CONF_ECONOMICS_WINDOW_END: "06:00:00",
+            CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+        },
+    }
+    coordinator._energy_charged_kwh = 0.0
+    coordinator._energy_discharged_kwh = 0.0
+
+    with (
+        patch("custom_components.sax_power.coordinator.monotonic", return_value=1000.0),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2026, 6, 1, 23, 0),
+        ),
+    ):
+        data = {
+            "storage_power_active": 0,
+            "smartmeter_power": 0,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+    coordinator.data = data
+
+    # Genau der Weg, den auch die Sensor-Entity nimmt (sensor.py,
+    # SaxPowerSensorEntityDescription.attributes_fn).
+    description = next(
+        entry
+        for entry in SENSOR_DESCRIPTIONS
+        if entry.key == "economics_current_import_price"
+    )
+    assert description.attributes_fn is not None
+    attributes = description.attributes_fn(coordinator)
+
+    price_entity_id = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(price_entity_id, str(data[description.key]), attributes)
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    economics_view = next(
+        view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
+    )
+    card = next(
+        entry
+        for entry in economics_view["cards"]
+        if entry["type"] == "conditional"
+        and entry["conditions"][0].get("attribute") == "tariff_type"
+    )
+    rendered = template.Template(card["card"]["content"], hass).async_render(
+        parse_result=False
+    )
+
+    assert "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered
+    assert "0.3000 EUR/kWh (Grundpreis)" in rendered
+    assert "Nächster Preiswechsel: 06:00 Uhr" in rendered

@@ -250,6 +250,44 @@ def validate_tariff(config: TariffConfig) -> QuoteUnavailable | None:
     return None
 
 
+def active_window(config: TariffConfig, moment: datetime) -> DailyPriceWindow | None:
+    """Das zu `moment` geltende Zeitfenster, sonst None (= Grundpreis).
+
+    Dieselbe Zuordnung, die auch evaluate_static_tariff verwendet -
+    bewusst als eigene Funktion, damit die Anzeige des aktiven Fensters
+    (REQ-ECONOMICS-DASHBOARD) nicht mit einer zweiten, irgendwann
+    abweichenden Suche arbeitet. `moment` muss eine zeitzonenbehaftete
+    Ortszeit sein.
+    """
+    if config.tariff_type is not TariffType.TIME_OF_USE:
+        return None
+    local_time = moment.time()
+    for window in config.windows:
+        if window.contains(local_time):
+            return window
+    return None
+
+
+def sorted_windows(config: TariffConfig) -> tuple[DailyPriceWindow, ...]:
+    """Zeitfenster nach Beginn sortiert.
+
+    Die Reihenfolge in den Options ist die der acht Eingabegruppen und
+    damit beliebig; für eine Anzeige als Tagesplan ist die zeitliche
+    Reihenfolge die einzig sinnvolle. Ein über Mitternacht laufendes
+    Fenster steht dabei an der Stelle seines Beginns.
+    """
+    return tuple(sorted(config.windows, key=lambda window: window.start))
+
+
+def window_as_mapping(window: DailyPriceWindow) -> dict[str, object]:
+    """Ein Zeitfenster als reines Mapping für Sensorattribute."""
+    return {
+        "start": window.start.isoformat(),
+        "end": window.end.isoformat(),
+        "price_eur_kwh": window.price_eur_kwh,
+    }
+
+
 def evaluate_static_tariff(config: TariffConfig, moment: datetime) -> QuoteResult:
     """Quote für die nicht-dynamischen Tarifarten.
 
@@ -273,14 +311,13 @@ def evaluate_static_tariff(config: TariffConfig, moment: datetime) -> QuoteResul
     if config.tariff_type is not TariffType.TIME_OF_USE:
         return QuoteResult(reason=QuoteUnavailable.TARIFF_DISABLED)
 
-    local_time = moment.time()
-    price = float(config.tou_base_price_eur_kwh)
-    source = QuoteSource.TIME_OF_USE_BASE
-    for window in config.windows:
-        if window.contains(local_time):
-            price = window.price_eur_kwh
-            source = QuoteSource.TIME_OF_USE_WINDOW
-            break
+    window = active_window(config, moment)
+    if window is None:
+        price = float(config.tou_base_price_eur_kwh)
+        source = QuoteSource.TIME_OF_USE_BASE
+    else:
+        price = window.price_eur_kwh
+        source = QuoteSource.TIME_OF_USE_WINDOW
 
     valid_from, valid_until = _segment_bounds(moment, config.windows)
     return QuoteResult(PriceQuote(price, source, valid_from, valid_until))

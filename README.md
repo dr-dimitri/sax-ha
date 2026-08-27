@@ -125,10 +125,13 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
 - zeitgesteuertes Laden,
 - netzdienliches Laden,
 - dynamisches Laden und
-- Wirtschaftlichkeit (Status/Preise, Herkunft der Ladeenergie, operative
-  Geldbilanz, Investition/Amortisation samt Fortschritts-Gauge sowie ein
-  30-Tage-Verlaufsdiagramm - referenziert ausschließlich bereits
-  bestehende Entities, siehe [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+- Wirtschaftlichkeit (Status/Preise, beim tageszeitabhängigen Tarif der
+  hinterlegte Tarifplan mit Hervorhebung des gerade geltenden Zeitfensters,
+  Herkunft der Ladeenergie, operative Geldbilanz, Investition/Amortisation
+  samt Fortschritts-Gauge sowie ein 30-Tage-Verlaufsdiagramm - referenziert
+  ausschließlich bereits bestehende Entities, siehe
+  [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit),
+  [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
   und [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)).
 
 ![Dashboard mit allgemeinen Informationen zum SAX-Power-Speicher](docs/images/dashboard/allgemeine_information.png)
@@ -412,6 +415,24 @@ sonstige Fixkosten gehören ausdrücklich nicht dazu.
   gleich bewertet.
 - Jede der acht Gruppen wird entweder vollständig ausgefüllt oder bleibt
   ganz leer.
+
+Der **Strompreis-Sensor** auf der ersten Seite wird für dieses Tarifmodell
+ausdrücklich **nicht** verwendet und muss dafür auch nicht gesetzt sein: Ein
+dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden,
+hier wird dagegen ein täglich wiederkehrendes Preisprofil hinterlegt – beide
+Formate lassen sich nicht ineinander überführen. Für das preisoptimierte
+Laden bleibt der Sensor unabhängig vom Tarifmodell die Quelle; für die
+Wirtschaftlichkeit ist er es nur beim Tarifmodell **Dynamisch**.
+
+Der hinterlegte Tarifplan ist im Dashboard-Tab **Wirtschaftlichkeit**
+sichtbar: eine Tabelle aus Beginn, Ende und Arbeitspreis, sortiert nach
+Beginn, mit dem Grundpreis als letzter Zeile. Die gerade geltende Zeile ist
+mit **jetzt** markiert, darunter steht der nächste Preiswechsel. Damit lässt
+sich ohne Umweg über den Konfigurationsdialog prüfen, ob die Zeitfenster so
+angekommen sind wie eingegeben. Dieselben Angaben stehen als Attribute am
+Sensor **Aktueller Netzbezugspreis** (`tariff_type`, `quote_source`,
+`active_window`, `next_price_change_at`, `base_price_eur_kwh`, `windows`) und
+sind damit auch in eigenen Automatisierungen und Vorlagen nutzbar.
 
 Der dynamische Tarif nutzt bewusst denselben Strompreis-Sensor samt dessen
 Attribut- und Einheiteneinstellung wie das preisoptimierte Laden – es gibt

@@ -21,6 +21,10 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+    CONF_ECONOMICS_WINDOW_END,
+    CONF_ECONOMICS_WINDOW_PRICE,
+    CONF_ECONOMICS_WINDOW_START,
     CONF_PV_FORECAST_SENSOR,
     ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
     GRID_CHARGE_WRITE_INTERVAL,
@@ -47,6 +51,7 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
+    economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import (
     INVENTORY_CAP_LOG_INTERVAL_SECONDS,
@@ -6364,3 +6369,106 @@ async def test_restart_economics_accounting_keeps_old_state_if_write_is_silently
         await coordinator.async_restart_economics_accounting()
 
     assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(250.0)
+
+
+# --------------------------------------------------------------------------
+# Anzeige des Tarifplans (REQ-ECONOMICS-DASHBOARD)
+# --------------------------------------------------------------------------
+_TOU_TARIFF_OPTIONS = {
+    CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+    CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+    CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+    economics_tou_window_key(1): {
+        CONF_ECONOMICS_WINDOW_START: "22:00:00",
+        CONF_ECONOMICS_WINDOW_END: "06:00:00",
+        CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+    },
+    economics_tou_window_key(2): {
+        CONF_ECONOMICS_WINDOW_START: "06:00:00",
+        CONF_ECONOMICS_WINDOW_END: "08:00:00",
+        CONF_ECONOMICS_WINDOW_PRICE: 0.41,
+    },
+}
+
+
+def test_tariff_plan_attributes_show_the_active_window(hass) -> None:
+    """Der Preiswert allein sagt nicht, welches Fenster ihn liefert und
+    wann er sich wieder ändert - der Sensor trägt beides als Attribute."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _TOU_TARIFF_OPTIONS
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 30)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["tariff_type"] == "time_of_use"
+    assert attributes["quote_source"] == "time_of_use_window"
+    assert attributes["unavailable_reason"] is None
+    assert attributes["active_window"] == {
+        "start": "22:00:00",
+        "end": "06:00:00",
+        "price_eur_kwh": 0.21,
+    }
+    assert data["economics_current_import_price"] == pytest.approx(0.21)
+    # Das Fenster läuft über Mitternacht: der nächste Wechsel liegt am
+    # Folgetag um 06:00 Ortszeit.
+    assert attributes["next_price_change_at"].startswith("2026-03-11T06:00:00")
+
+
+def test_tariff_plan_attributes_list_windows_sorted_by_start(hass) -> None:
+    """Die Fensterliste ist die Grundlage der Dashboard-Karte und deshalb
+    nach Beginn sortiert, nicht in der Reihenfolge der Eingabegruppen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _TOU_TARIFF_OPTIONS
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 12, 0)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["base_price_eur_kwh"] == pytest.approx(0.30)
+    assert attributes["windows"] == [
+        {"start": "06:00:00", "end": "08:00:00", "price_eur_kwh": 0.41},
+        {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21},
+    ]
+    # Mittags gilt der Grundpreis - kein Fenster darf als aktiv gelten.
+    assert attributes["active_window"] is None
+    assert attributes["quote_source"] == "time_of_use_base"
+
+
+def test_tariff_plan_attributes_are_empty_for_a_fixed_tariff(hass) -> None:
+    """Zeitfenster einer früheren Konfiguration bleiben zwar in den
+    Options stehen, gelten aber nicht mehr - ein sichtbarer Tarifplan, der
+    gar nicht gilt, wäre irreführender als gar keiner."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {**_TOU_TARIFF_OPTIONS, **_FIXED_TARIFF_OPTIONS}
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 30)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["tariff_type"] == "fixed"
+    assert attributes["windows"] is None
+    assert attributes["base_price_eur_kwh"] is None
+    assert attributes["active_window"] is None
+    # Ein Festpreis gilt unbegrenzt und wechselt deshalb nie.
+    assert attributes["next_price_change_at"] is None
+
+
+def test_tariff_plan_attributes_name_the_reason_without_a_price(hass) -> None:
+    """Ohne Preis muss die Karte erklären können, warum - der Grund ist
+    derselbe maschinenlesbare QuoteUnavailable wie überall sonst."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {}
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 30)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["tariff_type"] == "disabled"
+    assert attributes["quote_source"] is None
+    assert attributes["unavailable_reason"] == "tariff_disabled"
+    assert data["economics_current_import_price"] is None

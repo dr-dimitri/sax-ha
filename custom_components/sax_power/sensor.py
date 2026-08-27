@@ -121,6 +121,14 @@ def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, 
     return coordinator.data.get("economics_status_attributes") or {}
 
 
+def _economics_price_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Hinterlegter Tarifplan und aktives Zeitfenster (REQ-ECONOMICS-
+    DASHBOARD) als Zusatzattribute des Netzbezugspreis-Sensors."""
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("economics_price_attributes") or {}
+
+
 def _last_reset(key: str) -> Callable[[dict[str, Any]], datetime | None]:
     """Reset-Zeitpunkt eines zyklisch zurückgesetzten Zählers.
 
@@ -812,6 +820,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement="EUR/kWh",
         suggested_display_precision=4,
         value_fn=_direct("economics_current_import_price"),
+        attributes_fn=_economics_price_attributes,
     ),
     SaxPowerSensorEntityDescription(
         key="economics_feed_in_price",

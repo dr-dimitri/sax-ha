@@ -44,10 +44,13 @@ from custom_components.sax_power.domain.tariff import (
     TariffConfig,
     TariffType,
     TariffWindowError,
+    active_window,
     evaluate_static_tariff,
     find_overlapping_window,
+    sorted_windows,
     validate_tariff,
     validate_window_fields,
+    window_as_mapping,
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -1113,3 +1116,88 @@ async def test_disabled_tariff_registers_no_listener(hass) -> None:
     assert provider.last_result.reason is QuoteUnavailable.TARIFF_DISABLED
 
     provider.async_shutdown()
+
+
+# --------------------------------------------------------------------------
+# Anzeige des Tarifplans (REQ-ECONOMICS-DASHBOARD)
+# --------------------------------------------------------------------------
+def test_active_window_matches_the_window_the_quote_used() -> None:
+    """active_window und evaluate_static_tariff müssen dasselbe Fenster
+    meinen - eine zweite, eigene Suche für die Anzeige würde irgendwann
+    abweichen und ein Fenster ausweisen, das zum gemeldeten Preis gar nicht
+    gehört."""
+    config = _config(
+        tariff_type=TariffType.TIME_OF_USE,
+        tou_base_price_eur_kwh=0.30,
+        windows=(_window("22:00", "06:00", 0.21), _window("06:00", "08:00", 0.41)),
+    )
+
+    moment = _local(2026, 3, 10, 23)
+    window = active_window(config, moment)
+
+    assert window == _window("22:00", "06:00", 0.21)
+    quote = evaluate_static_tariff(config, moment).quote
+    assert quote.price_eur_kwh == pytest.approx(window.price_eur_kwh)
+    assert quote.source is QuoteSource.TIME_OF_USE_WINDOW
+
+
+def test_active_window_is_none_outside_every_window() -> None:
+    """Außerhalb aller Fenster gilt der Grundpreis - dann gibt es kein
+    aktives Fenster, und die Anzeige darf keines vortäuschen."""
+    config = _config(
+        tariff_type=TariffType.TIME_OF_USE,
+        tou_base_price_eur_kwh=0.30,
+        windows=(_window("22:00", "06:00", 0.21),),
+    )
+
+    moment = _local(2026, 3, 10, 12)
+
+    assert active_window(config, moment) is None
+    assert (
+        evaluate_static_tariff(config, moment).quote.source
+        is QuoteSource.TIME_OF_USE_BASE
+    )
+
+
+@pytest.mark.parametrize(
+    "tariff_type", [TariffType.FIXED, TariffType.DYNAMIC, TariffType.DISABLED]
+)
+def test_active_window_is_none_for_other_tariffs(tariff_type: TariffType) -> None:
+    """Zeitfenster aus einer früheren Konfiguration können in den Options
+    stehen bleiben - für eine andere Tarifart gelten sie trotzdem nicht."""
+    config = _config(
+        tariff_type=tariff_type,
+        fixed_import_price_eur_kwh=0.30,
+        windows=(_window("00:00", "23:59", 0.21),),
+    )
+
+    assert active_window(config, _local(2026, 3, 10, 12)) is None
+
+
+def test_sorted_windows_orders_by_start_time() -> None:
+    """Die Reihenfolge in den Options ist die der acht Eingabegruppen und
+    damit beliebig; als Tagesplan ist nur die zeitliche Reihenfolge
+    lesbar."""
+    config = _config(
+        tariff_type=TariffType.TIME_OF_USE,
+        windows=(
+            _window("22:00", "06:00", 0.21),
+            _window("06:00", "08:00", 0.41),
+            _window("11:00", "14:00", 0.25),
+        ),
+    )
+
+    assert [window.start.isoformat() for window in sorted_windows(config)] == [
+        "06:00:00",
+        "11:00:00",
+        "22:00:00",
+    ]
+
+
+def test_window_as_mapping_uses_plain_types() -> None:
+    """Sensorattribute müssen JSON-serialisierbar sein - dt_time nicht."""
+    assert window_as_mapping(_window("22:00", "06:00", 0.21)) == {
+        "start": "22:00:00",
+        "end": "06:00:00",
+        "price_eur_kwh": 0.21,
+    }

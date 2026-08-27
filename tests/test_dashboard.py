@@ -13,6 +13,7 @@ from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
@@ -989,3 +990,176 @@ async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
         saved_config = await dashboard_storage.async_load(False)
         assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()  # kein zweiter Panel-Aufruf
+
+
+# --------------------------------------------------------------------------
+# Tarifplan-Karte (REQ-ECONOMICS-DASHBOARD)
+# --------------------------------------------------------------------------
+def _tariff_plan_card(view: dict[str, Any]) -> dict[str, Any] | None:
+    """Die "conditional"-Karte am Attribut `tariff_type` des Preis-Sensors."""
+    return next(
+        (
+            card
+            for card in view["cards"]
+            if card["type"] == "conditional"
+            and card["conditions"][0].get("attribute") == "tariff_type"
+        ),
+        None,
+    )
+
+
+async def test_economics_view_tariff_plan_card_is_gated_by_tariff_type(hass) -> None:
+    """Der Preis-Sensor existiert bei jeder Tarifart; ein Tagesplan ergibt
+    aber nur beim tageszeitabhängigen Tarif Sinn. Ein zur Bauzeit
+    gelesener Options-Wert wäre nach dem nächsten Tarifwechsel falsch,
+    ohne dass das gespeicherte Dashboard je neu gebaut wird - die Karte
+    hängt deshalb an einem Laufzeitattribut."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    card = _tariff_plan_card(_economics_view(config))
+    assert card is not None
+    assert card["conditions"] == [
+        {"entity": price, "attribute": "tariff_type", "state": "time_of_use"}
+    ]
+    assert card["card"]["type"] == "markdown"
+
+
+async def test_economics_view_tariff_plan_card_reads_only_sensor_attributes(
+    hass,
+) -> None:
+    """Die Karte darf keine eigene Kopie der Tarifkonfiguration enthalten -
+    sonst zeigte sie nach einer Options-Änderung veraltete Preise, ohne
+    dass das jemand bemerkt."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    assert f"'{price}'" in content
+    for attribute in (
+        "windows",
+        "active_window",
+        "base_price_eur_kwh",
+        "next_price_change_at",
+    ):
+        assert f"'{attribute}'" in content
+
+
+async def test_economics_view_tariff_plan_card_omitted_without_price_sensor(
+    hass,
+) -> None:
+    """Ohne registrierten Preis-Sensor hat die Karte keine Datenquelle."""
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert _tariff_plan_card(_economics_view(config)) is None
+
+
+async def test_economics_view_tariff_plan_card_follows_the_status_card(hass) -> None:
+    """Erst der Zustand ("gilt die Bilanz gerade?"), dann der Tarifplan,
+    der ihn erklärt."""
+    _register(hass, "sensor", "economics_status")
+    _register(hass, "sensor", "economics_current_import_price")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    cards = _economics_view(config)["cards"]
+    status_index = next(
+        index
+        for index, card in enumerate(cards)
+        if card.get("title") == "Status und Preise"
+    )
+    plan_index = cards.index(_tariff_plan_card(_economics_view(config)))
+    assert plan_index == status_index + 1
+
+
+async def test_economics_view_tariff_plan_card_renders_a_table(hass) -> None:
+    """Die Vorlage wird hier wirklich gerendert, nicht nur auf Zeichenketten
+    geprüft. Genau diese Lücke - Code, den nur das Frontend je ausführt -
+    hat in #135 dafür gesorgt, dass eine unbrauchbare Konfigurationsseite
+    mit grüner Testsuite ausgeliefert wurde."""
+    # timestamp_custom rechnet in die lokale Zeitzone von Home Assistant um;
+    # der Coordinator liefert den Zeitstempel bereits als Ortszeit, beide
+    # müssen für eine nachvollziehbare Erwartung dieselbe Zone meinen.
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "0.21",
+        {
+            "tariff_type": "time_of_use",
+            "windows": [
+                {"start": "06:00:00", "end": "08:00:00", "price_eur_kwh": 0.41},
+                {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21},
+            ],
+            "active_window": {
+                "start": "22:00:00",
+                "end": "06:00:00",
+                "price_eur_kwh": 0.21,
+            },
+            "base_price_eur_kwh": 0.30,
+            "next_price_change_at": "2026-03-11T06:00:00+01:00",
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    lines = [line for line in rendered.splitlines() if line.startswith("|")]
+    # Kopfzeile, Trennzeile, zwei Fenster, Grundpreis.
+    assert len(lines) == 5
+    assert lines[2] == "|  | 06:00 | 08:00 | 0.4100 EUR/kWh |"
+    assert lines[3] == "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |"
+    assert lines[4].endswith("0.3000 EUR/kWh (Grundpreis) |")
+    assert "**jetzt**" not in lines[4]
+    assert "Nächster Preiswechsel: 06:00 Uhr" in rendered
+
+
+async def test_economics_view_tariff_plan_card_marks_the_base_price(hass) -> None:
+    """Außerhalb aller Fenster gilt der Grundpreis - dann trägt seine Zeile
+    die Markierung, und ohne bekannten nächsten Wechsel entfällt der
+    Hinweis darunter ersatzlos."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "0.30",
+        {
+            "tariff_type": "time_of_use",
+            "windows": [
+                {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+            ],
+            "active_window": None,
+            "base_price_eur_kwh": 0.30,
+            "next_price_change_at": None,
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    lines = [line for line in rendered.splitlines() if line.startswith("|")]
+    assert lines[3] == "| **jetzt** | – | – | 0.3000 EUR/kWh (Grundpreis) |"
+    assert "**jetzt**" not in lines[2]
+    assert "Preiswechsel" not in rendered
+
+
+async def test_economics_view_tariff_plan_card_survives_missing_attributes(
+    hass,
+) -> None:
+    """Zwischen Neustart und erstem Coordinator-Tick trägt der Sensor noch
+    keine Attribute. Eine Vorlage, die dabei eine Exception wirft, zeigt im
+    Dashboard nur eine rote Fehlerkarte."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(price, "unknown", {})
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert "| Von | Bis | Arbeitspreis |" in rendered
+    assert "? EUR/kWh (Grundpreis)" in rendered

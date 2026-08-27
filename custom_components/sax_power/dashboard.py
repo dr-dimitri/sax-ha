@@ -59,8 +59,39 @@ from homeassistant.helpers import translation
 
 from .const import DOMAIN
 from .domain.economics_amortization import ForecastUnavailable
+from .domain.tariff import TariffType
 
 _LOGGER = logging.getLogger(__name__)
+
+#: Jinja-Vorlage der Tarifplan-Karte (_tariff_plan_card). Der Platzhalter
+#: wird per str.replace ersetzt, nicht per str.format: Die Vorlage ist voll
+#: von geschweiften Klammern, die Jinja gehören.
+#:
+#: Die Zeilenumbrüche innerhalb der {{ ... }}-Ausdrücke halten die
+#: Quelltextzeilen unter der Zeilenlänge, ohne die Ausgabe zu verändern -
+#: eine Markdown-Tabellenzeile muss eine einzige Ausgabezeile bleiben.
+_PRICE_ENTITY_PLACEHOLDER = "__PRICE_ENTITY__"
+_TARIFF_PLAN_TEMPLATE = """\
+{%- set entity = '__PRICE_ENTITY__' %}
+{%- set windows = state_attr(entity, 'windows') or [] %}
+{%- set active = state_attr(entity, 'active_window') %}
+{%- set base = state_attr(entity, 'base_price_eur_kwh') %}
+{%- set change = state_attr(entity, 'next_price_change_at') %}
+| | Von | Bis | Arbeitspreis |
+|---|---|---|---|
+{%- for window in windows %}
+{%- set current = active is not none
+    and window.start == active.start
+    and window.end == active.end %}
+| {{ '**jetzt**' if current else '' }} | {{ window.start[:5] }} | {{
+    window.end[:5] }} | {{ '%.4f'|format(window.price_eur_kwh) }} EUR/kWh |
+{%- endfor %}
+| {{ '**jetzt**' if active is none else '' }} | – | – | {{
+    '%.4f'|format(base) if base is not none else '?' }} EUR/kWh (Grundpreis) |
+{% if change is not none %}
+Nächster Preiswechsel: {{ as_timestamp(change) | timestamp_custom('%H:%M') }} Uhr
+{%- endif %}
+"""
 
 DASHBOARD_URL_PATH = "sax-power"
 DASHBOARD_TITLE = "SAX Power"
@@ -263,6 +294,39 @@ def _grid_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     if not resolved:
         return None
     return {"type": "grid", "columns": 2, "square": False, "cards": resolved}
+
+
+def _tariff_plan_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:
+    """Der tageszeitabhängige Tarifplan als Tabelle (REQ-ECONOMICS-DASHBOARD).
+
+    Gespeist wird die Karte ausschließlich aus den Attributen des
+    Netzbezugspreis-Sensors (`windows`, `active_window`,
+    `base_price_eur_kwh`, `next_price_change_at`) - sie enthält damit keine
+    eigene Kopie der Konfiguration und kann nach einer Options-Änderung
+    nicht veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
+    """
+    price_entity_id = _entity_id(
+        hass, "sensor", f"{entry_id}_economics_current_import_price"
+    )
+    if price_entity_id is None:
+        return None
+    return {
+        "type": "conditional",
+        "conditions": [
+            {
+                "entity": price_entity_id,
+                "attribute": "tariff_type",
+                "state": TariffType.TIME_OF_USE.value,
+            }
+        ],
+        "card": {
+            "type": "markdown",
+            "title": "Tarifplan (tageszeitabhängig)",
+            "content": _TARIFF_PLAN_TEMPLATE.replace(
+                _PRICE_ENTITY_PLACEHOLDER, price_entity_id
+            ),
+        },
+    }
 
 
 def _stack_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
@@ -624,12 +688,25 @@ async def async_build_dashboard_config(
                 "card": investment_stack,
             }
 
+    # REQ-ECONOMICS-DASHBOARD: Der hinterlegte Tarifplan lebt sonst
+    # ausschließlich in entry.options und ist damit nur im Options Flow
+    # einsehbar - dort aber immer im Bearbeitungsmodus und ohne jeden Bezug
+    # zur aktuellen Uhrzeit. Acht Zeitfenster über Mitternacht hinweg sind
+    # fehleranfällig; ohne Anzeige fällt ein Zahlendreher erst Wochen später
+    # in der Geldbilanz auf. Die Karte hängt wie die Investitionskarte an
+    # einem Laufzeitsignal (hier dem Attribut `tariff_type`) statt an einem
+    # zur Bauzeit gelesenen Options-Wert: Ein Tarifwechsel blendet sie
+    # dadurch selbsttätig ein und aus, ohne dass das gespeicherte Dashboard
+    # je neu gebaut wird.
+    tariff_plan_card = _tariff_plan_card(hass, entry_id)
+
     economics_view = _view(
         "Wirtschaftlichkeit",
         "wirtschaftlichkeit",
         "mdi:cash-chart",
         [
             status_card,
+            tariff_plan_card,
             origin_block,
             _entities_card(
                 hass,

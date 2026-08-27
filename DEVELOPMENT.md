@@ -171,7 +171,10 @@ abgeschickte erste Seite als Wiederholung genau dieser Seite
 (Doppelklick, oder Enter im Eingabefeld plus Klick auf „Absenden"), prüft
 Home Assistant deren Werte gegen das Schema der bereits erreichten
 Folgeseite, was sonst als Wand aus `extra keys not allowed @ data[...]` im
-Dialog landet. `add_suggested_values_to_schema` baut das Schema neu auf und
+Dialog landet. Die wiederholte erste Seite prüft `_async_repeat_init` dabei
+selbst gegen `STEP_OPTIONS_SCHEMA` (auf diesem Weg wendet Home Assistant es
+nicht mehr an); was nicht passt, gilt als unvollständige Eingabe der
+Folgeseite. `add_suggested_values_to_schema` baut das Schema neu auf und
 verliert dabei `extra`; `_suggested` setzt es deshalb wieder.
 
 Die Auswertung selbst ist dreigeteilt: `domain/tariff.py` enthält die reinen

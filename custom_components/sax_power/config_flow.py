@@ -587,7 +587,7 @@ _FEED_IN_FIELD = {
 # das der Dialog mit einer Wand aus "extra keys not allowed @
 # data[...]"-Rohmeldungen; mit ALLOW_EXTRA erkennt der Schritt die
 # wiederholte erste Seite und wiederholt sie einfach (siehe
-# _async_restart_init_if_resubmitted).
+# SaxPowerOptionsFlow._async_repeat_init).
 STEP_ECONOMICS_FIXED_SCHEMA = vol.Schema(
     {
         **_FEED_IN_FIELD,
@@ -639,12 +639,14 @@ STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
+#: Übersetzungsschlüssel des fehlenden Pflichtpreises (options.error.* in
+#: strings.json) - anders als die Zeitfensterfehler darunter wird er an
+#: seinem eigenen Feld gemeldet.
+_PRICE_REQUIRED_ERROR = "economics_price_required"
+
 # Übersetzungsschlüssel der Zeitfensterfehler (options.error.* in
 # strings.json). Der Fehler wird an "base" gemeldet: Home Assistant kann
 # einen Feldfehler keiner Section zuordnen.
-#: Übersetzungsschlüssel des fehlenden Pflichtpreises (options.error.*).
-_PRICE_REQUIRED_ERROR = "economics_price_required"
-
 _WINDOW_ERROR_KEYS = {
     TariffWindowError.INCOMPLETE: "economics_tou_window_incomplete",
     TariffWindowError.ZERO_LENGTH: "economics_tou_window_zero_length",
@@ -791,12 +793,24 @@ class SaxPowerOptionsFlow(OptionsFlow):
         not allowed @ data[...]"-Rohmeldungen. Stattdessen wird die erste
         Seite einfach erneut ausgewertet: der Dialog landet wieder auf der
         passenden Folgeseite, als wäre nur einmal abgeschickt worden.
-        Liefert None, wenn es sich um eine echte Eingabe dieser Seite
-        handelt.
+        Geprüft wird dabei gegen STEP_OPTIONS_SCHEMA, das Home Assistant
+        auf diesem Weg gar nicht mehr anwendet: Ohne diese Prüfung landete
+        eine per Websocket von Hand geschickte erste Seite ungeprüft in
+        entry.options (fremde Schlüssel, unbrauchbare Werte), und ein
+        unbekanntes Tarifmodell ließe async_step_init mit einem
+        ValueError aus dem Schritt fliegen. Passt die Eingabe nicht auf
+        dieses Schema, ist sie keine wiederholte erste Seite - dann
+        liefert die Methode None und der aufrufende Schritt behandelt sie
+        wie eine eigene (unvollständige) Eingabe. None ebenso, wenn es
+        sich um eine echte Eingabe dieser Seite handelt.
         """
         if CONF_ECONOMICS_TARIFF_TYPE not in user_input:
             return None
-        return await self.async_step_init(user_input)
+        try:
+            first_page = STEP_OPTIONS_SCHEMA(user_input)
+        except vol.Invalid:
+            return None
+        return await self.async_step_init(first_page)
 
     def _create_entry(
         self, schema: vol.Schema, user_input: dict[str, Any]

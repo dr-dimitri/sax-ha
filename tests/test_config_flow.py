@@ -673,6 +673,41 @@ async def test_repeated_first_page_does_not_show_raw_schema_errors(
     assert entry.options[CONF_PV_FORECAST_FACTOR] == 100
 
 
+async def test_repeated_first_page_is_validated_against_its_own_schema(hass) -> None:
+    """Auf diesem Weg wendet Home Assistant STEP_OPTIONS_SCHEMA nicht mehr
+    an - der Schritt prüft deshalb selbst. Ungültige Werte dürfen weder
+    ungeprüft in entry.options landen noch den Flow mit einem ValueError
+    aus einem unbekannten Tarifmodell abbrechen (Review-Befund)."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value},
+    )
+    assert result["step_id"] == "economics_fixed"
+
+    # Von Hand geschickte "erste Seite" mit unbekanntem Tarifmodell und
+    # fremdem Schlüssel: wird nicht als Wiederholung akzeptiert, sondern
+    # wie eine unvollständige Eingabe dieser Seite behandelt.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: "kein_tarif",
+            CONF_PV_FORECAST_FACTOR: "keine-zahl",
+            "voellig_fremd": "x",
+        },
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "economics_fixed"
+    assert result["errors"] == {
+        CONF_ECONOMICS_FEED_IN_PRICE: "economics_price_required",
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: "economics_price_required",
+    }
+    assert entry.options == {}
+
+
 @pytest.mark.parametrize(
     ("tariff_type", "step_id", "user_input", "expected_errors"),
     [

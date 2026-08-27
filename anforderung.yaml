@@ -2732,8 +2732,12 @@ requirement_economics_tariffs:
     Assistant deren Werte gegen das Schema der bereits erreichten
     Folgeseite; ohne diese Behandlung quittiert der Dialog das mit einer
     Wand aus "extra keys not allowed @ data[...]"-Rohmeldungen
-    (Anwenderbericht zu #129). Gespeichert wird trotz ALLOW_EXTRA
-    ausschließlich, was das jeweilige Schema selbst kennt.
+    (Anwenderbericht zu #129). Die wiederholte erste Seite wird dabei
+    selbst gegen STEP_OPTIONS_SCHEMA geprüft - auf diesem Weg wendet Home
+    Assistant es nicht mehr an -, und was nicht darauf passt, gilt nicht
+    als Wiederholung, sondern als unvollständige Eingabe der Folgeseite.
+    Gespeichert wird trotz ALLOW_EXTRA ausschließlich, was das jeweilige
+    Schema selbst kennt.
 
     Dieselbe Unterscheidung wie im Options Flow gilt auch beim erneuten
     Einlesen für die Quote-Erzeugung

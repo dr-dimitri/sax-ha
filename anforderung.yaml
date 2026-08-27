@@ -3613,9 +3613,16 @@ requirement_economics_observability:
     REQ-ECONOMICS-AMORTIZATION gebildeten
     `charge_price_coverage_percent_today`/
     `discharge_price_coverage_percent_today` (keine zusätzlichen Zähler),
-    und zwar erst unterhalb von
-    domain.economics_status.PRICE_COVERAGE_THRESHOLD_PERCENT (95 %, analog
-    zu DAY_COVERAGE_THRESHOLD_PERCENT), nicht schon bei exakt < 100 %. Aus
+    und zwar erst, wenn die Lücke einer Seite sowohl absolut als auch
+    relativ ins Gewicht fällt (domain.economics_status.
+    is_price_coverage_partial): mindestens
+    MIN_UNPRICED_KWH_FOR_PARTIAL (0,5 kWh) unbepreist UND unterhalb von
+    PRICE_COVERAGE_THRESHOLD_PERCENT (95 %, analog zu
+    DAY_COVERAGE_THRESHOLD_PERCENT) - nicht schon bei exakt < 100 %. Die
+    relative Schwelle allein genügt nicht: kurz nach Mitternacht ist der
+    Tagesbucket leer, ein einziges unbepreistes Intervall von 0,01 kWh
+    stünde dort auf 0 % Abdeckung und die Warnung bliebe den ganzen Tag
+    stehen. Aus
     den Lifetime-Quoten abgeleitet (und ohne Toleranz) kippte eine
     EINZIGE unbepreiste Kilowattstunde den Sensor dauerhaft und
     unwiderruflich: solche kWh sind im Normalbetrieb unvermeidbar (der
@@ -3627,7 +3634,13 @@ requirement_economics_observability:
     Warnzustand wird ignoriert - der Sensor verlöre damit genau die
     Aussage, für die er gebaut ist (Issue #134). Die kumulierten
     Lifetime-Quoten bleiben als Attribute erhalten (Langzeitinformation),
-    sind aber kein Zustandsauslöser mehr.
+    sind aber kein Zustandsauslöser mehr. Entladung aus dem unbewerteten
+    Bestand (REQ-ECONOMICS-ACCOUNTING) ist bewusst nicht erfasst: sie ist
+    weder bepreiste noch unbepreiste Entladung, die zugehörige Lücke wird
+    an dem Tag gemeldet, an dem die nicht bepreisbare LADUNG stattfand
+    (dort entsteht sie und dort ist sie behebbar), und ein späterer Tag,
+    an dem dieser Bestand entladen wird, ist rechnerisch einwandfrei -
+    sein Ergebnis ist korrekt 0 EUR, nicht unbekannt.
     `origin_coverage_percent` ist unverändert
     `SaxPowerCoordinator._energy_origin_coverage()` (02/06);
     `origin_unavailable` ist wahr, wenn diese Methode `None` liefert (die
@@ -3770,11 +3783,13 @@ requirement_economics_observability:
        Nenner 0 bei 100 % und wird intern aus ungerundeten Zählern
        gebildet, erst beim Veröffentlichen gerundet."
     - "partial_price_coverage entsteht ausschließlich aus der Abdeckung
-       des laufenden Kalendertages und erst unterhalb von
-       PRICE_COVERAGE_THRESHOLD_PERCENT: eine einzelne unbepreiste
-       Kilowattstunde lässt den Status auf active, und ein Tag mit
-       echter Lücke kehrt am Folgetag ohne Bilanzneustart auf active
-       zurück, während die Lifetime-Quote als Attribut sichtbar
+       des laufenden Kalendertages und erst, wenn die Lücke absolut
+       (MIN_UNPRICED_KWH_FOR_PARTIAL) UND relativ
+       (PRICE_COVERAGE_THRESHOLD_PERCENT) ins Gewicht fällt: eine
+       einzelne unbepreiste Kilowattstunde lässt den Status auf active -
+       auch im noch leeren Tagesbucket kurz nach Mitternacht -, und ein
+       Tag mit echter Lücke kehrt am Folgetag ohne Bilanzneustart auf
+       active zurück, während die Lifetime-Quote als Attribut sichtbar
        niedriger bleibt (Issue #134, tests/test_economics_status.py,
        tests/test_coordinator.py)."
     - "Ein ungültig gespeicherter Fest-/Zeitfenstertarif löst

@@ -6105,7 +6105,20 @@ def test_economics_status_recovers_on_the_next_day_after_a_price_gap(hass) -> No
     assert attributes["charge_price_coverage_percent"] == pytest.approx(66.7)
 
 
-def test_economics_status_tolerates_a_negligible_unpriced_share(hass) -> None:
+@pytest.mark.parametrize(
+    ("priced_kwh", "unpriced_kwh", "expected_coverage"),
+    [
+        # Relativ verschwindende Lücke an einem energiereichen Tag.
+        pytest.param(100.0, 0.001, 100.0, id="relatively_negligible"),
+        # Erster Tick nach einem Neustart: der Tagesbucket ist noch leer,
+        # die relative Quote steht dadurch auf 0 % - 10 Wh dürfen den
+        # Sensor trotzdem nicht den ganzen Tag warnen lassen.
+        pytest.param(0.0, 0.01, 0.0, id="tiny_gap_in_an_almost_empty_day"),
+    ],
+)
+def test_economics_status_tolerates_a_negligible_unpriced_share(
+    hass, priced_kwh: float, unpriced_kwh: float, expected_coverage: float
+) -> None:
     """Eine einzelne unbepreiste Kilowattstunde (z. B. der erste Tick nach
     einem Neustart, bevor die Preis-Integration ihre Entity angelegt hat)
     darf den Sensor nicht auf partial_price_coverage kippen."""
@@ -6119,14 +6132,49 @@ def test_economics_status_tolerates_a_negligible_unpriced_share(hass) -> None:
         monotonic_value=2000.0,
         now=datetime(2026, 3, 10, 10, 0),
         delta=EconomicsDelta(
-            priced_charge_kwh_delta=100.0, unpriced_charge_delta_kwh=0.001
+            priced_charge_kwh_delta=priced_kwh,
+            unpriced_charge_delta_kwh=unpriced_kwh,
         ),
     )
 
     assert data["economics_status"] == EconomicsStatus.ACTIVE.value
     assert data["economics_status_attributes"][
         "charge_price_coverage_percent_today"
-    ] == pytest.approx(100.0)
+    ] == pytest.approx(expected_coverage)
+
+
+def test_economics_status_stays_active_while_unvalued_inventory_is_discharged(
+    hass,
+) -> None:
+    """Entladung aus dem unbewerteten Bestand ist weder bepreiste noch
+    unbepreiste Entladung: gemeldet wird die Lücke an dem Tag, an dem die
+    nicht bepreisbare LADUNG stattfand. Ein späterer Tag, an dem dieser
+    Bestand entladen wird, ist rechnerisch einwandfrei (Ergebnis korrekt
+    0 EUR, nicht unbekannt) und bleibt deshalb active."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            unpriced_charge_delta_kwh=10.0, unvalued_inventory_delta_kwh=10.0
+        ),
+    )
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 10, 0),
+        delta=EconomicsDelta(unvalued_inventory_delta_kwh=-10.0),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+    assert data["economics_result_today"] == pytest.approx(0.0)
 
 
 def test_economics_status_attributes_contain_expected_diagnostics(hass) -> None:

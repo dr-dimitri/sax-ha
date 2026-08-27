@@ -429,8 +429,12 @@ selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
   dieselbe Formel wie `DayEconomicsResult.price_coverage_percent` (04/06)
   und `_energy_origin_coverage()` (02/06).
 - `partial_price_coverage` bewertet nur den LAUFENDEN Kalendertag (die
-  Tages-Buckets aus 04/06) und erst unterhalb von
-  `PRICE_COVERAGE_THRESHOLD_PERCENT` (95 %). Aus den Lifetime-Zählern
+  Tages-Buckets aus 04/06) und erst, wenn die Lücke sowohl absolut
+  (`MIN_UNPRICED_KWH_FOR_PARTIAL`) als auch relativ
+  (`PRICE_COVERAGE_THRESHOLD_PERCENT`, 95 %) ins Gewicht fällt -
+  `is_price_coverage_partial`. Die relative Schwelle allein genügt nicht:
+  kurz nach Mitternacht ist der Tagesbucket leer, ein einziges
+  unbepreistes Intervall stünde dort auf 0 % Abdeckung. Aus den Lifetime-Zählern
   abgeleitet, die nie zurückgehen, kippte sonst eine einzige unbepreiste
   Kilowattstunde den Sensor dauerhaft - `active` wäre nur noch über einen
   Bilanzneustart erreichbar, der die gesamte Geldbilanz verwirft
@@ -557,10 +561,12 @@ keine neue Berechnung ein:
   einer vollständigen `_entities_card` wiederverwendbar ist (Karte "Status
   und Preise" mischt normale Entity-Zeilen mit Attribut-Zeilen).
 - `_attribute_row` baut eine `type: attribute`-Kartenzeile - zeigt ein
-  Attribut einer Entity (hier: `charge_price_coverage_percent`/
-  `discharge_price_coverage_percent`/`economics_started_at` von
+  Attribut einer Entity (hier: `charge_price_coverage_percent_today`/
+  `discharge_price_coverage_percent_today`/`economics_started_at` von
   `economics_status`, siehe REQ-ECONOMICS-OBSERVABILITY) wie einen
   eigenen Sensor, ohne dass dafür ein eigener Sensor existieren müsste.
+  Bewusst die Tageswerte: genau sie bestimmen den Zustand des
+  Status-Sensors in derselben Karte (Issue #134).
 - `_statistics_graph_card` baut eine Core-`statistics-graph`-Karte
   (Balkendiagramm, `stat_types: ["change"]`, `period: "day"`,
   `days_to_show: 30`) für die vier Geldsensoren - keine Custom-Card,

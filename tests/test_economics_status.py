@@ -8,10 +8,12 @@ from __future__ import annotations
 import pytest
 
 from custom_components.sax_power.domain.economics_status import (
+    MIN_UNPRICED_KWH_FOR_PARTIAL,
     PRICE_COVERAGE_THRESHOLD_PERCENT,
     EconomicsStatus,
     compute_economics_status,
     compute_price_coverage_percent,
+    is_price_coverage_partial,
 )
 
 _FULLY_HEALTHY = {
@@ -20,8 +22,16 @@ _FULLY_HEALTHY = {
     "started": True,
     "price_unavailable": False,
     "origin_unavailable": False,
-    "charge_price_coverage_percent_today": 100.0,
-    "discharge_price_coverage_percent_today": 100.0,
+    "priced_charge_kwh_today": 10.0,
+    "unpriced_charge_kwh_today": 0.0,
+    "priced_discharge_kwh_today": 10.0,
+    "unpriced_discharge_kwh_today": 0.0,
+}
+
+#: Ein Tag, an dem die Ladung praktisch vollständig unbepreist blieb.
+_UNPRICED_DAY = {
+    "priced_charge_kwh_today": 0.0,
+    "unpriced_charge_kwh_today": 10.0,
 }
 
 
@@ -31,12 +41,12 @@ def test_disabled_wins_over_every_other_problem() -> None:
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
+            **_UNPRICED_DAY,
             "tariff_enabled": False,
             "storage_error": True,
             "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.DISABLED
@@ -46,11 +56,11 @@ def test_storage_error_wins_over_lower_priority_problems() -> None:
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
+            **_UNPRICED_DAY,
             "storage_error": True,
             "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.STORAGE_ERROR
@@ -60,10 +70,10 @@ def test_waiting_for_initial_state_wins_over_lower_priority_problems() -> None:
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
+            **_UNPRICED_DAY,
             "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.WAITING_FOR_INITIAL_STATE
@@ -73,9 +83,9 @@ def test_price_unavailable_wins_over_origin_and_coverage() -> None:
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
+            **_UNPRICED_DAY,
             "price_unavailable": True,
             "origin_unavailable": True,
-            "charge_price_coverage_percent_today": 0.0,
         }
     )
     assert status is EconomicsStatus.PRICE_UNAVAILABLE
@@ -83,29 +93,27 @@ def test_price_unavailable_wins_over_origin_and_coverage() -> None:
 
 def test_origin_unavailable_wins_over_partial_coverage() -> None:
     status = compute_economics_status(
-        **{
-            **_FULLY_HEALTHY,
-            "origin_unavailable": True,
-            "charge_price_coverage_percent_today": 0.0,
-        }
+        **{**_FULLY_HEALTHY, **_UNPRICED_DAY, "origin_unavailable": True}
     )
     assert status is EconomicsStatus.ORIGIN_UNAVAILABLE
 
 
 @pytest.mark.parametrize(
-    ("charge_coverage", "discharge_coverage"),
-    [(50.0, 100.0), (100.0, 50.0), (0.0, 0.0), (94.9, 100.0)],
+    "day",
+    [
+        pytest.param(_UNPRICED_DAY, id="charge_side"),
+        pytest.param(
+            {"priced_discharge_kwh_today": 0.0, "unpriced_discharge_kwh_today": 10.0},
+            id="discharge_side",
+        ),
+        pytest.param(
+            {"priced_charge_kwh_today": 10.0, "unpriced_charge_kwh_today": 1.0},
+            id="just_below_the_relative_threshold",
+        ),
+    ],
 )
-def test_partial_price_coverage_from_either_side(
-    charge_coverage: float, discharge_coverage: float
-) -> None:
-    status = compute_economics_status(
-        **{
-            **_FULLY_HEALTHY,
-            "charge_price_coverage_percent_today": charge_coverage,
-            "discharge_price_coverage_percent_today": discharge_coverage,
-        }
-    )
+def test_partial_price_coverage_from_either_side(day: dict[str, float]) -> None:
+    status = compute_economics_status(**{**_FULLY_HEALTHY, **day})
     assert status is EconomicsStatus.PARTIAL_PRICE_COVERAGE
 
 
@@ -114,26 +122,28 @@ def test_active_when_everything_is_healthy() -> None:
 
 
 @pytest.mark.parametrize(
-    ("charge_coverage", "discharge_coverage"),
+    "day",
     [
-        (PRICE_COVERAGE_THRESHOLD_PERCENT, 100.0),
-        (100.0, PRICE_COVERAGE_THRESHOLD_PERCENT),
-        (99.99999, 99.99999),
+        pytest.param(
+            {"priced_charge_kwh_today": 0.0, "unpriced_charge_kwh_today": 0.01},
+            id="tiny_gap_in_an_empty_day",
+        ),
+        pytest.param(
+            {"priced_charge_kwh_today": 100.0, "unpriced_charge_kwh_today": 1.0},
+            id="relatively_negligible_gap",
+        ),
+        pytest.param(
+            {"priced_discharge_kwh_today": 0.0, "unpriced_discharge_kwh_today": 0.4},
+            id="tiny_gap_on_the_discharge_side",
+        ),
     ],
 )
-def test_a_negligible_gap_stays_active(
-    charge_coverage: float, discharge_coverage: float
-) -> None:
+def test_a_negligible_gap_stays_active(day: dict[str, float]) -> None:
     """Eine einzelne unbepreiste Kilowattstunde ist im Normalbetrieb
-    unvermeidbar und darf keinen Warnzustand auslösen - erst UNTERHALB der
-    Toleranzschwelle wird gewarnt (Issue #134)."""
-    status = compute_economics_status(
-        **{
-            **_FULLY_HEALTHY,
-            "charge_price_coverage_percent_today": charge_coverage,
-            "discharge_price_coverage_percent_today": discharge_coverage,
-        }
-    )
+    unvermeidbar und darf keinen Warnzustand auslösen - auch nicht kurz
+    nach Mitternacht, wenn der Tagesbucket noch fast leer ist und die
+    relative Quote deshalb auf 0 % steht (Issue #134)."""
+    status = compute_economics_status(**{**_FULLY_HEALTHY, **day})
     assert status is EconomicsStatus.ACTIVE
 
 
@@ -144,11 +154,39 @@ def test_unknown_coverage_does_not_count_as_partial() -> None:
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,
-            "charge_price_coverage_percent_today": None,
-            "discharge_price_coverage_percent_today": None,
+            "priced_charge_kwh_today": None,
+            "unpriced_charge_kwh_today": None,
+            "priced_discharge_kwh_today": None,
+            "unpriced_discharge_kwh_today": None,
         }
     )
     assert status is EconomicsStatus.ACTIVE
+
+
+def test_partial_needs_both_an_absolute_and_a_relative_gap() -> None:
+    """Die absolute Untergrenze schützt den noch leeren Tagesbucket, die
+    relative Schwelle einen energiereichen Tag - keine der beiden allein
+    genügt."""
+    assert is_price_coverage_partial(0.0, MIN_UNPRICED_KWH_FOR_PARTIAL) is True
+    assert is_price_coverage_partial(0.0, MIN_UNPRICED_KWH_FOR_PARTIAL / 2) is False
+    # Absolut nennenswert, relativ verschwindend (>= 95 % Abdeckung).
+    assert is_price_coverage_partial(1000.0, 10.0) is False
+
+
+def test_partial_is_unknown_safe() -> None:
+    assert is_price_coverage_partial(None, 10.0) is False
+    assert is_price_coverage_partial(10.0, None) is False
+
+
+def test_price_coverage_threshold_matches_the_partial_decision() -> None:
+    """Die veröffentlichte Quote und die Zustandsentscheidung dürfen nicht
+    auseinanderlaufen: exakt auf der Schwelle gilt der Tag noch als
+    unauffällig."""
+    priced, unpriced = 95.0, 5.0
+    assert compute_price_coverage_percent(priced, unpriced) == pytest.approx(
+        PRICE_COVERAGE_THRESHOLD_PERCENT
+    )
+    assert is_price_coverage_partial(priced, unpriced) is False
 
 
 def test_price_coverage_percent_is_100_without_any_relevant_energy() -> None:

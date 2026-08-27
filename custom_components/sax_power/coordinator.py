@@ -1394,8 +1394,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             started=self._economics_started_at is not None,
             price_unavailable=self._economics_price_unavailable,
             origin_unavailable=origin_coverage is None,
-            charge_price_coverage_percent_today=charge_coverage_today,
-            discharge_price_coverage_percent_today=discharge_coverage_today,
+            priced_charge_kwh_today=self._economics_current_day_priced_charge_kwh,
+            unpriced_charge_kwh_today=self._economics_current_day_unpriced_charge_kwh,
+            priced_discharge_kwh_today=(
+                self._economics_current_day_priced_discharge_kwh
+            ),
+            unpriced_discharge_kwh_today=(
+                self._economics_current_day_unpriced_discharge_kwh
+            ),
         )
         data["economics_status"] = status.value
         price_entity_id = (

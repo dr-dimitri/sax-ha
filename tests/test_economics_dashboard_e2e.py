@@ -76,7 +76,6 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     coordinator._energy_discharged_kwh = 0.0
     coordinator._energy_grid_charged_kwh = 0.0
     coordinator._energy_pv_charged_kwh = 0.0
-    coordinator._energy_unknown_charged_kwh = 0.0
 
     def _tick(monotonic_value, now, *, storage_power_active, smartmeter_power, soc):
         with (
@@ -135,7 +134,6 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     # -- Herkunft (REQ-ENERGY-ORIGIN) -----------------------------------
     assert pv_tick["energy_charged_from_pv"] == 1.0
     assert grid_tick["energy_charged_from_grid"] == 1.0
-    assert discharge_tick["energy_origin_coverage"] == 100.0
 
     # -- Tarifauflösung + Geldsensoren (REQ-ECONOMICS-TARIFFS/-ACCOUNTING) --
     assert pv_tick["economics_current_import_price"] == 0.30
@@ -161,7 +159,6 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     status_id = _register(hass, "sensor", "economics_status")
     import_price_id = _register(hass, "sensor", "economics_current_import_price")
     feed_in_id = _register(hass, "sensor", "economics_feed_in_price")
-    origin_coverage_id = _register(hass, "sensor", "energy_origin_coverage")
     pv_id = _register(hass, "sensor", "energy_charged_from_pv")
     grid_id = _register(hass, "sensor", "energy_charged_from_grid")
     avoided_id = _register(hass, "sensor", "economics_avoided_grid_cost")
@@ -193,7 +190,6 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
         status_id,
         import_price_id,
         feed_in_id,
-        origin_coverage_id,
         pv_id,
         grid_id,
         avoided_id,

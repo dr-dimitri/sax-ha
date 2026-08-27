@@ -19,6 +19,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
+    CONF_ECONOMICS_PRIOR_RESULT,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
@@ -1011,6 +1012,87 @@ async def test_options_flow_stores_the_investment_cost(hass) -> None:
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_ECONOMICS_INVESTMENT_COST] == 8500.0
+
+
+async def test_missing_price_sensor_error_keeps_the_other_edits(hass) -> None:
+    """Der Fehler economics_price_sensor_required darf nur den fehlenden
+    Sensor anmahnen, nicht die übrigen Änderungen derselben Seite
+    verwerfen - sonst müsste der Anwender Tarifart, PV-Prognose,
+    Investitionskosten und Vorlauf erneut eintragen."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_PV_FORECAST_FACTOR: 80,
+            CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+            CONF_ECONOMICS_PRIOR_RESULT: 1250.0,
+        },
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+    assert result["errors"] == {CONF_PRICE_SENSOR: "economics_price_sensor_required"}
+
+    suggested = {
+        key.schema: key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if isinstance(key.description, dict) and "suggested_value" in key.description
+    }
+    assert suggested[CONF_ECONOMICS_TARIFF_TYPE] == TariffType.DYNAMIC.value
+    assert suggested[CONF_PV_FORECAST_FACTOR] == 80
+    assert suggested[CONF_ECONOMICS_INVESTMENT_COST] == 8500.0
+    assert suggested[CONF_ECONOMICS_PRIOR_RESULT] == 1250.0
+
+
+async def test_options_flow_stores_the_prior_result(hass) -> None:
+    """Der vor der Integration erwirtschaftete Ertrag steht auf derselben
+    Seite wie die Investitionskosten und ist ebenso optional
+    (REQ-ECONOMICS-AMORTIZATION)."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
+            CONF_ECONOMICS_INVESTMENT_COST: 8500.0,
+            CONF_ECONOMICS_PRIOR_RESULT: 1250.0,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_PRIOR_RESULT] == 1250.0
+
+
+async def test_prior_result_survives_a_tariff_type_switch(hass) -> None:
+    """Wie die Investitionskosten ist der Vorlauf unabhängig von der
+    Tarifart und darf bei einem Tarifwechsel nicht verworfen werden."""
+    entry = _economics_entry(
+        hass,
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+            CONF_ECONOMICS_PRIOR_RESULT: 1250.0,
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
+            CONF_ECONOMICS_PRIOR_RESULT: 1250.0,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_PRIOR_RESULT] == 1250.0
 
 
 async def test_investment_cost_survives_a_tariff_type_switch(hass) -> None:

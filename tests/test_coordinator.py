@@ -20,6 +20,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
+    CONF_ECONOMICS_PRIOR_RESULT,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
@@ -4244,8 +4245,8 @@ def test_restore_energy_rejects_negative_values(hass, caplog) -> None:
 # unbekannter Smartmeter-Wert, Delta-Invariante) sind reine Funktionstests
 # von domain.energy_accounting.compute_charge_delta, siehe
 # tests/test_energy_accounting.py. Hier nur die Verdrahtung in
-# coordinator.data: Rundung, energy_origin_coverage sowie dass Entladung und
-# ein SunSpec-Ausfall die Herkunftszähler unverändert lassen.
+# coordinator.data: Rundung sowie dass Entladung und ein SunSpec-Ausfall
+# die Herkunftszähler unverändert lassen.
 
 
 def _seed_origin_accounting(coordinator: SaxPowerCoordinator) -> None:
@@ -4280,7 +4281,6 @@ def test_accumulate_energy_origin_rounds_to_three_decimals(hass) -> None:
     assert data["energy_charged"] == round(1000 * (3 / 3600) / 1000, 3)
     assert data["energy_charged_from_grid"] == round(400 * (3 / 3600) / 1000, 3)
     assert data["energy_charged_from_pv"] == round(600 * (3 / 3600) / 1000, 3)
-    assert data["energy_charged_origin_unknown"] == 0.0
 
 
 def test_accumulate_energy_discharge_leaves_origin_counters_untouched(hass) -> None:
@@ -4304,8 +4304,6 @@ def test_accumulate_energy_discharge_leaves_origin_counters_untouched(hass) -> N
     assert data["energy_discharged"] == 1.5
     assert data["energy_charged_from_grid"] == 0.0
     assert data["energy_charged_from_pv"] == 0.0
-    assert data["energy_charged_origin_unknown"] == 0.0
-    assert data["energy_origin_coverage"] == 100.0
 
 
 def test_accumulate_energy_skips_origin_when_storage_power_unknown(hass) -> None:
@@ -4365,11 +4363,12 @@ def test_accumulate_energy_origin_stays_none_before_bootstrap(hass) -> None:
     assert data["energy_charged"] == 1.0
     assert data["energy_charged_from_grid"] is None
     assert data["energy_charged_from_pv"] is None
-    assert data["energy_charged_origin_unknown"] is None
-    assert data["energy_origin_coverage"] is None
 
 
-def test_energy_origin_coverage_reflects_the_unknown_share(hass) -> None:
+def test_missing_smartmeter_value_counts_as_grid_charge(hass) -> None:
+    """Fehlt der Smartmeter-Wert, landet die Ladeenergie vollständig auf dem
+    Netzzähler statt in einer eigenen Kategorie - PV + Netz ergibt damit
+    immer die Gesamtladung (REQ-ENERGY-ORIGIN)."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.restore_energy_charged(0.0)
     coordinator.restore_energy_discharged(0.0)
@@ -4383,36 +4382,27 @@ def test_energy_origin_coverage_reflects_the_unknown_share(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
-        # 1 kWh Ladeenergie, Smartmeter-Wert unbekannt -> vollständig
-        # "Herkunft unbekannt".
         data = {"storage_power_active": -1000, "smartmeter_power": None}
         coordinator._accumulate_energy(data)
 
-    assert data["energy_origin_coverage"] == 0.0
+    assert data["energy_charged"] == 1.0
+    assert data["energy_charged_from_grid"] == 1.0
+    assert data["energy_charged_from_pv"] == 0.0
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
     ):
-        # Weitere 1 kWh, diesmal komplett als Netzladung zugeordnet.
-        data = {"storage_power_active": -1000, "smartmeter_power": 2000}
+        # Weitere 1 kWh, diesmal mit Messwert und komplett als PV.
+        data = {"storage_power_active": -1000, "smartmeter_power": -2000}
         coordinator._accumulate_energy(data)
 
-    assert data["energy_origin_coverage"] == 50.0
-
-
-def test_energy_origin_coverage_is_100_percent_without_any_charging(hass) -> None:
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.restore_energy_charged(0.0)
-    coordinator.restore_energy_discharged(0.0)
-    _seed_origin_accounting(coordinator)
-
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
-    ):
-        data = {"storage_power_active": 0}
-        coordinator._accumulate_energy(data)
-
-    assert data["energy_origin_coverage"] == 100.0
+    assert data["energy_charged"] == 2.0
+    assert data["energy_charged_from_grid"] == 1.0
+    assert data["energy_charged_from_pv"] == 1.0
+    assert (
+        data["energy_charged_from_grid"] + data["energy_charged_from_pv"]
+        == data["energy_charged"]
+    )
 
 
 # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) --------------------
@@ -5514,6 +5504,187 @@ def test_roi_progress_and_remaining_are_computed_from_the_operating_result(
     assert data["economics_result_today"] == pytest.approx(250.0)
 
 
+def test_prior_result_counts_towards_the_amortization_but_not_the_balance(
+    hass,
+) -> None:
+    """Der vor der Integration erwirtschaftete Ertrag verschiebt ROI,
+    Fortschritt und Restbetrag, lässt das operative Ergebnis und das
+    Tagesergebnis aber unangetastet (REQ-ECONOMICS-AMORTIZATION): Die
+    30-Tage-Verlaufsgrafik wertet economics_operating_result über `change`
+    aus - ein Offset dort erschiene als Tagesertrag."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 400.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    # 250 EUR gemessen + 400 EUR Vorlauf = 650 von 1000 EUR.
+    assert data["economics_roi"] == pytest.approx(65.0)
+    assert data["economics_amortization_progress"] == pytest.approx(65.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(350.0)
+
+    # Unverändert die reine Messung.
+    assert data["economics_operating_result"] == pytest.approx(250.0)
+    assert data["economics_result_today"] == pytest.approx(250.0)
+
+
+def test_prior_result_can_complete_the_payback_on_its_own(hass) -> None:
+    """Ein Vorlauf, der zusammen mit dem gemessenen Ergebnis die
+    Investitionskosten erreicht, schließt die Amortisation ab - der
+    Fortschritt wird dabei wie bisher auf 100 % geklemmt, der ROI nicht."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 900.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    assert data["economics_roi"] == pytest.approx(115.0)
+    assert data["economics_amortization_progress"] == pytest.approx(100.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(0.0)
+
+
+def test_an_out_of_range_prior_result_is_ignored_instead_of_clamped(hass) -> None:
+    """Ein von Hand verstellter Vorlauf außerhalb des Wertebereichs gilt
+    wie ein fehlender - ein stillschweigend geklammerter Betrag wäre
+    schlechter als gar keiner, weil er unbemerkt in die Amortisation
+    einginge."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: -50.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    assert data["economics_roi"] == pytest.approx(25.0)
+
+
+def test_prior_result_alone_does_not_produce_an_roi_without_a_balance(hass) -> None:
+    """Ohne laufende Bilanz bleiben die Amortisationssensoren unbekannt,
+    auch mit hinterlegtem Vorlauf: Ein ROI aus reiner Handeingabe neben
+    lauter unbekannten Geldwerten wäre irreführend."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 400.0,
+    }
+
+    data: dict[str, object] = {}
+    coordinator._publish_amortization(data, monetary_available=True)
+
+    assert data["economics_roi"] is None
+    assert data["economics_amortization_progress"] is None
+    assert data["economics_remaining_to_payback"] is None
+
+
+def test_a_prior_result_never_stamps_a_payback_timestamp(hass) -> None:
+    """Der Vorlauf-Ertrag setzt payback_achieved_at nicht - auch nicht,
+    wenn er die Investitionskosten allein überschreitet. Der tatsächliche
+    Amortisationszeitpunkt läge dann in einer Vergangenheit, die diese
+    Integration nie beobachtet hat; "heute" zu stempeln erfände ein Datum.
+    Zugleich bleibt der persistierte Zeitstempel damit unwiderruflich -
+    eine Rücknahme würde der Economics-Store als beschädigten Snapshot
+    ablehnen und die gesamte Bilanz einfrieren
+    (REQ-ECONOMICS-AMORTIZATION)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 40000.0,  # Tippfehler: 40.000 statt 4.000
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=10.0),
+    )
+    coordinator._maybe_mark_payback_achieved()
+
+    assert coordinator._economics_payback_achieved_at is None
+    # Fortschritt und Restbetrag zeigen die Amortisation trotzdem an.
+    assert data["economics_amortization_progress"] == pytest.approx(100.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(0.0)
+
+
+def test_roi_attributes_reconcile_the_gap_to_the_operating_result(hass) -> None:
+    """Die ROI-Attribute lösen auf, warum ROI und operatives Ergebnis
+    auseinanderfallen: Sie nennen den Vorlauf und - bewusst ohne ihn - den
+    rein gemessenen Betrag, also genau die Zahl, die der Sensor
+    economics_operating_result daneben zeigt."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 400.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    attributes = data["economics_roi_attributes"]
+    assert attributes["prior_result_eur"] == pytest.approx(400.0)
+    assert attributes["measured_operating_result_eur"] == pytest.approx(250.0)
+    assert attributes["measured_operating_result_eur"] == pytest.approx(
+        data["economics_operating_result"]
+    )
+    # 250 + 400 = 650 von 1000 EUR - die Attribute erklären die 65 %.
+    assert data["economics_roi"] == pytest.approx(65.0)
+
+
+def test_a_measured_payback_stays_fixed_even_if_the_result_drops(hass) -> None:
+    """Ein aus der reinen Messung erreichter Amortisationszeitpunkt bleibt
+    dagegen unverändert - die Rücknahme betrifft ausschließlich den vom
+    Vorlauf getragenen Fall."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=1200.0),
+    )
+    coordinator._maybe_mark_payback_achieved()
+    achieved_at = coordinator._economics_payback_achieved_at
+    assert achieved_at is not None
+
+    # Höhere Investitionskosten: der bereits erreichte Zeitpunkt bleibt.
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_INVESTMENT_COST: 5000.0,
+    }
+    coordinator._maybe_mark_payback_achieved()
+    assert coordinator._economics_payback_achieved_at == achieved_at
+
+
 def test_result_today_publishes_the_timestamp_of_its_daily_reset(hass) -> None:
     """economics_result_today ist ein zyklisch zurückgesetzter
     total-Sensor: ohne last_reset verbucht die Langzeitstatistik den
@@ -5932,7 +6103,6 @@ _BROKEN_FIXED_TARIFF_OPTIONS = {
 def _mark_origin_initialized(coordinator) -> None:
     coordinator._energy_grid_charged_kwh = 0.0
     coordinator._energy_pv_charged_kwh = 0.0
-    coordinator._energy_unknown_charged_kwh = 0.0
 
 
 def test_economics_status_is_disabled_without_a_tariff(hass) -> None:
@@ -6197,7 +6367,6 @@ def test_economics_status_attributes_contain_expected_diagnostics(hass) -> None:
     assert attributes["economics_started_at"] is not None
     assert attributes["current_import_price_eur_kwh"] == pytest.approx(0.30)
     assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
-    assert attributes["origin_coverage_percent"] == 100.0
 
 
 # -- Kontrollierter Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY) -------------

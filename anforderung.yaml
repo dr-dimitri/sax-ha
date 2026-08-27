@@ -2909,11 +2909,16 @@ requirement_energy_origin:
     - charge_power_w == 0 (Leerlauf oder Entladung): keine
       Herkunftsänderung - Entladung verändert dadurch nie einen
       Herkunftszähler.
-    - smartmeter_power unbekannt: die gesamte Ladeenergie des Intervalls
-      zählt als unknown_charge_power_w.
+    - smartmeter_power unbekannt: die Aufteilung ist nicht messbar, die
+      gesamte Ladeenergie des Intervalls zählt konservativ als
+      grid_charge_power_w. Es gibt bewusst KEINE dritte Kategorie
+      "Herkunft unbekannt": Physikalisch speist entweder PV oder das Netz,
+      und Netzladung ist die teurere der beiden Deutungen (Netzbezugspreis
+      statt der niedrigeren Einspeisevergütung) - ein Messausfall rechnet
+      die Bilanz damit nie schön.
     - sonst: grid_charge_power_w = min(charge_power_w,
       max(smartmeter_power, 0)); pv_charge_power_w = charge_power_w -
-      grid_charge_power_w; unknown_charge_power_w = 0. Netzbezug, der die
+      grid_charge_power_w. Netzbezug, der die
       Ladeleistung übersteigt (er deckt dann zusätzlich Hausverbrauch),
       zählt dadurch bewusst vollständig, aber nur bis zur tatsächlichen
       Ladeleistung, als Netzladung.
@@ -2923,7 +2928,7 @@ requirement_energy_origin:
     SaxPowerCoordinator._accumulate_energy, keine zweite Uhr) - der
     charged_kwh-Zuwachs aus compute_charge_delta ist identisch mit dem
     Zuwachs, den energy_charged verbucht. Für jedes gültige Ladeintervall
-    gilt grid_kwh + pv_kwh + unknown_kwh == charged_kwh bis auf
+    gilt grid_kwh + pv_kwh == charged_kwh bis auf
     Gleitkomma-Rauschen in der Größenordnung einzelner ULPs - viele
     Zehnerpotenzen unterhalb der veröffentlichten Präzision. Veröffentlicht
     wird auf drei Nachkommastellen gerundet, intern bleibt volle
@@ -2931,30 +2936,42 @@ requirement_energy_origin:
 
     Neue Sensoren (sensor.py, beschreibungsbasiert wie jeder andere
     berechnete Wert - kein RestoreEntity, siehe unten):
-    energy_charged_from_grid, energy_charged_from_pv,
-    energy_charged_origin_unknown (alle kWh, device_class energy,
-    state_class total_increasing) sowie der diagnostische Prozentwert
-    energy_origin_coverage (Anteil von grid+pv an grid+pv+unknown seit
-    Start der Herkunftszählung; Nenner 0 ergibt 100 %, uninitialisierte
-    Herkunft ergibt None - SaxPowerCoordinator._energy_origin_coverage).
+    energy_charged_from_grid, energy_charged_from_pv (beide kWh,
+    device_class energy, state_class total_increasing). Einen
+    diagnostischen Abdeckungsgrad gibt es nicht: Da jede gezählte
+    Ladeenergie genau einer Quelle zugeordnet ist, wäre er konstant 100 %.
+    Übrig bleibt allein die interne Aussage, ob überhaupt schon gezählt
+    wird (SaxPowerCoordinator._energy_origin_initialized), die
+    REQ-ECONOMICS-OBSERVABILITY als origin_unavailable auswertet.
 
     Persistenz: infrastructure/energy_store.py bleibt bei STORAGE_VERSION 1
     (Home Assistants Store-HAUPTversion) und erhöht stattdessen
-    STORAGE_MINOR_VERSION auf 2 - eine erhöhte Hauptversion würde bei einem
+    STORAGE_MINOR_VERSION (2 mit Einführung der Herkunftsfelder, 3 mit dem
+    Wegfall der dritten Kategorie) - eine erhöhte Hauptversion würde bei einem
     vorhandenen Version-1-Snapshot Home Assistants interne
     _async_migrate_func aufrufen, deren Standardimplementierung
     NotImplementedError wirft; bei unveränderter Hauptversion fängt der
     Store diesen Fehler dagegen selbst ab und behält die Rohdaten bei. Ein
     Absturz beim Setup bestehender Installationen ist damit ausgeschlossen
     (siehe SaxPowerCoordinator.async_load_energy_state, das zusätzlich
-    NotImplementedError abfängt). EnergyState bekommt vier neue, gemeinsam
-    behandelte Felder - grid_charged_kwh, pv_charged_kwh,
-    unknown_charged_kwh (dieselbe Feldvalidierung wie charged_kwh/
+    NotImplementedError abfängt). Ein Snapshot der Minor-Version 2 führt
+    noch ein Feld unknown_charged_kwh. Trägt es echten Bestand, startet
+    die Herkunftszählung transparent neu
+    (EnergyStateStore._has_legacy_unknown_origin); den Restbestand
+    stattdessen auf grid_charged_kwh zu addieren wäre falsch, weil
+    energy_charged_from_grid TOTAL_INCREASING ist und die
+    Langzeitstatistik den Aufschlag als am Upgrade-Tag zugeflossene
+    Netzenergie verbuchte - der Rücksprung auf 0 ist dagegen ein
+    regulärer, von Home Assistant korrekt behandelter Zählerreset. Ein
+    Snapshot ohne solchen Bestand (der Regelfall) behält seine
+    Herkunftszähler unangetastet. EnergyState bekommt drei neue,
+    gemeinsam behandelte Felder - grid_charged_kwh, pv_charged_kwh
+    (dieselbe Feldvalidierung wie charged_kwh/
     discharged_kwh: endlich, >= 0, monotonic) sowie
     origin_accounting_started_at (UTC-Zeitstempel, einmalig gesetzt und
     danach unveränderlich - ein abweichender gespeicherter Wert wird wie
     ein rückläufiger Zähler verworfen). EnergyState.origin_initialized ist
-    nur wahr, wenn alle vier Felder vorhanden sind; fehlt eines (Version-1-
+    nur wahr, wenn alle drei Felder vorhanden sind; fehlt eines (Version-1-
     Snapshot ohne diese Felder, frischer Eintrag, oder ein beim Laden
     einzeln verworfenes Feld), gilt die gesamte Herkunftsbilanz als nicht
     initialisiert - die drei Zähler sind ohne bekannten Startzeitpunkt
@@ -2962,7 +2979,7 @@ requirement_energy_origin:
     Feldvalidierung beim Laden: Der an den Aufrufer zurückgegebene Zustand
     behält jedes einzeln gültige Feld; nur die interne Monotonie-Baseline
     (EnergyStateStore._origin_baseline) verwirft bei einem unvollständigen
-    Quartett zusätzlich dessen verbliebene Einzelwerte - sonst würde der
+    Bündel zusätzlich dessen verbliebene Einzelwerte - sonst würde der
     vom Coordinator anschließend bei 0 neu gestartete Stand (siehe
     SaxPowerCoordinator._bootstrap_energy_origin) an den stehen gebliebenen
     alten Teilwerten bzw. dem alten Startzeitpunkt als "rückläufig" bzw.
@@ -2989,7 +3006,7 @@ requirement_energy_origin:
     geflusht (dieselbe EnergyStateStore-Instanz, derselbe Schreibpfad,
     dieselbe Drosselung).
 
-    Kein RestoreEntity als primäre Persistenz für die drei neuen Zähler:
+    Kein RestoreEntity als primäre Persistenz für die beiden neuen Zähler:
     Es gibt keinen sichtbaren Alt-Zustand zu migrieren, sie werden wie jeder
     andere berechnete Sensor direkt aus coordinator.data gelesen
     (SaxPowerSensor + SaxPowerSensorEntityDescription, kein eigener
@@ -3002,7 +3019,7 @@ requirement_energy_origin:
        während Ladung, Netzbezug größer/kleiner als die Ladeleistung und
        unbekannter Smartmeter-Wert sind deterministisch getestet
        (tests/test_energy_accounting.py)."
-    - "Die Delta-Invariante (grid + pv + unknown == charged) gilt über
+    - "Die Delta-Invariante (grid + pv == charged) gilt über
        viele zufällige Intervalle ohne kumulative Rundungsabweichung."
     - "Entladung verändert keinen Herkunftszähler."
     - "Eine Version-1-Migration erhält bestehende Lade-/Entladezähler
@@ -3015,11 +3032,15 @@ requirement_energy_origin:
     - "Ein echter, unentpackter Version-1-Store-Envelope (über die
        hass_storage-Fixture, nicht nur ein gemocktes _store.async_load)
        lädt ohne NotImplementedError und ohne Setup-Absturz."
-    - "Nach einem unvollständigen Herkunfts-Quartett (ein einzelnes
+    - "Nach einem unvollständigen Herkunfts-Bündel (ein einzelnes
        ungültiges Feld) lässt sich der vom Coordinator neu gestartete
-       0/0/0-Stand samt neuem Startzeitpunkt sofort persistieren, statt an
+       0/0-Stand samt neuem Startzeitpunkt sofort persistieren, statt an
        der alten Teil-Baseline als rückläufig bzw. abweichend zu
        scheitern."
+    - "Ein Snapshot der Minor-Version 2 mit echtem Restbestand in
+       unknown_charged_kwh startet die Herkunftszählung neu (beide Zähler
+       0, neuer Startzeitpunkt), ohne die Gesamtzähler zu berühren; ein
+       Snapshot ohne solchen Bestand behält seine Herkunftszähler."
     - "Sensor-Metadaten, strings.json, translations/de.json,
        translations/en.json, README.md und DEVELOPMENT.md sind
        aktualisiert."
@@ -3076,8 +3097,9 @@ requirement_economics_accounting:
     gesamte Bilanz wartend/unbekannt. Läuft nur einmal: Ein
     zwischenzeitliches
     Deaktivieren/Reaktivieren des Tarifs setzt weder Bestand noch
-    Startzeitpunkt zurück. Nicht bepreisbare neue Ladeenergie
-    (energy_charged_origin_unknown ODER ein fehlender Preis für Netz/PV)
+    Startzeitpunkt zurück. Nicht bepreisbare neue Ladeenergie (ein
+    fehlender Preis für Netz bzw. PV - eine unbekannte Herkunft gibt es
+    seit REQ-ENERGY-ORIGIN nicht mehr)
     erhöht unvalued_inventory_kwh und den passenden
     unpriced_charge-Zähler statt einen Preis zu erfinden. Jede Entladung
     verbraucht zuerst min(discharge_delta, unvalued_inventory_kwh) - dieser
@@ -3291,8 +3313,30 @@ requirement_economics_amortization:
     statt eines erfundenen Werts. Ein Tarifwechsel löscht die
     Investitionskosten nicht (nicht Teil von const.ECONOMICS_OPTION_KEYS).
 
+    Ebenso optional und ebenso tarifunabhängig: der vor der Einrichtung
+    dieser Integration bereits erwirtschaftete Ertrag
+    (economics_prior_result_eur, Options Flow, 0 bis 1.000.000 EUR,
+    Schrittweite 0,01, leer/fehlend/außerhalb des Bereichs zählt als 0).
+    Ohne ihn stünde ein seit Jahren laufender Speicher bei 0 %
+    Amortisationsfortschritt, obwohl ein Teil der Investition längst
+    zurückverdient ist. Er wirkt AUSSCHLIESSLICH auf die Sensoren dieser
+    Anforderung (ROI, Fortschritt, Restbetrag, payback_achieved_at und
+    damit den Restbetrag, gegen den die Prognose rechnet; payback_achieved_at
+    selbst bleibt davon unberührt, siehe die Payback-Erkennung unten),
+    NIEMALS auf economics_operating_result
+    oder economics_result_today aus REQ-ECONOMICS-ACCOUNTING: Deren
+    Verlauf wertet das Dashboard als statistics-graph über `change` aus -
+    ein Offset aus einer Handeingabe erschiene dort als Tagesertrag.
+    Addiert wird er nur zu einem bereits vorhandenen operativen Ergebnis;
+    solange die Bilanz nicht läuft, bleiben die Sensoren unbekannt, statt
+    einen ROI aus reiner Handeingabe neben lauter unbekannten Geldwerten
+    zu zeigen. Die 30-Tage-Prognose beruht unverändert auf abgeschlossenen
+    Kalendertagen und bleibt davon unberührt - nur der Restbetrag, gegen
+    den sie rechnet, wird kleiner.
+
     Reine Formeln (domain/economics_amortization.py, kein
-    Home-Assistant-Bezug):
+    Home-Assistant-Bezug; `operating_result_eur` ist dabei das bilanzierte
+    Ergebnis zuzüglich des Vorlauf-Ertrags):
 
     ```
     roi_percent = operating_result_eur / investment_cost_eur * 100          # unklemmt
@@ -3426,7 +3470,21 @@ requirement_economics_amortization:
     erreicht oder übersteigt, wird payback_achieved_at (UTC) genau einmal
     gesetzt und bleibt danach für immer unveränderlich - auch eine spätere
     Änderung oder Entfernung der Investitionskosten wirkt nur prospektiv
-    auf ROI/Restbetrag, nie rückwirkend auf diesen Zeitpunkt. Die
+    auf ROI/Restbetrag, nie rückwirkend auf diesen Zeitpunkt.
+
+    Der Vorlauf-Ertrag geht in diese Prüfung ausdrücklich NICHT ein,
+    obwohl er ROI, Fortschritt und Restbetrag verschiebt. Erstens wäre der
+    Zeitstempel sonst falsch: Trägt erst der Vorlauf die Amortisation, lag
+    der tatsächliche Zeitpunkt in einer Vergangenheit, die diese
+    Integration nie beobachtet hat - "heute" zu stempeln erfände ein
+    Datum. Fortschritt (100 %) und Restbetrag (0 EUR) zeigen die erreichte
+    Amortisation trotzdem an, economics_estimated_payback_date bleibt
+    ehrlich unbekannt. Zweitens ist der Zeitstempel persistiert und
+    unwiderruflich: Ein Tippfehler im Vorlauf (40.000 statt 4.000) schriebe
+    das Rückzahlungsdatum dauerhaft fest, und ein Zurücknehmen ist kein
+    Ausweg - EconomicsStateStore._accept weist einen abweichenden
+    Payback-Zeitpunkt als beschädigten Snapshot ab, was die gesamte
+    Geldbilanz in den Zustand storage_error einfrieren würde. Die
     Tageswechsel-Erkennung (_advance_economics_day) läuft dafür VOR der
     Anwendung des aktuellen Deltas auf die Gesamtsummen: der Payback-Check
     beim Abschluss eines Tages sieht ausschließlich den am Ende dieses
@@ -3604,6 +3662,24 @@ requirement_economics_amortization:
        MAX_STORED_DAYS sowie die Unveränderlichkeit von
        payback_achieved_at sind getestet
        (tests/test_economics_persistence.py)."
+    - "Ein hinterlegter Vorlauf-Ertrag verschiebt ROI, Fortschritt und
+       Restbetrag, lässt economics_operating_result und
+       economics_result_today aber unverändert; ein Wert außerhalb des
+       Bereichs gilt als nicht konfiguriert statt geklammert; ohne
+       laufende Bilanz bleiben die Amortisationssensoren auch mit
+       Vorlauf unbekannt. Der Options Flow speichert ihn und ein
+       Tarifwechsel löscht ihn nicht."
+    - "Ein Vorlauf-Ertrag setzt payback_achieved_at nie, auch wenn er die
+       Investitionskosten allein überschreitet; Fortschritt und Restbetrag
+       weisen die Amortisation trotzdem aus."
+    - "Der ROI-Sensor weist prior_result_eur und
+       measured_operating_result_eur (ohne Vorlauf, also identisch mit
+       economics_operating_result) als Attribute aus, und das Dashboard
+       zeigt den Vorlauf als Attributzeile unter dem ROI."
+    - "Der Fehler economics_price_sensor_required rendert die erste
+       Options-Seite aus der letzten Eingabe statt aus den gespeicherten
+       Options und verwirft dadurch keine übrigen Änderungen derselben
+       Seite."
     - "strings.json, translations/de.json, translations/en.json,
        README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."
 
@@ -3637,8 +3713,7 @@ requirement_economics_observability:
     `discharge_price_coverage_percent` (kumuliert seit
     economics_started_at), die zustandsbestimmenden Tageswerte
     `charge_price_coverage_percent_today`/
-    `discharge_price_coverage_percent_today` (siehe unten) und
-    `origin_coverage_percent`. Kurze
+    `discharge_price_coverage_percent_today` (siehe unten). Kurze
     lokalisierte Erklärungen kommen über die Entity-Übersetzung der
     Sensorzustände (strings.json, `entity.sensor.economics_status.state`),
     nicht über ein zusätzliches Freitextattribut.
@@ -3674,7 +3749,7 @@ requirement_economics_observability:
     unwiderruflich: solche kWh sind im Normalbetrieb unvermeidbar (der
     erste Coordinator-Tick nach einem Neustart läuft oft, bevor die
     Preis-Integration ihre Entity angelegt hat; dazu jede kurze
-    Tarifpause und jedes Intervall unbekannter Herkunft), Lifetime-Zähler
+    Tarifpause), Lifetime-Zähler
     gehen nie zurück, und der einzige Ausweg wäre der Bilanzneustart, der
     zugleich die gesamte Geldbilanz verwirft. Ein dauerhaft anliegender
     Warnzustand wird ignoriert - der Sensor verlöre damit genau die
@@ -3687,10 +3762,11 @@ requirement_economics_observability:
     (dort entsteht sie und dort ist sie behebbar), und ein späterer Tag,
     an dem dieser Bestand entladen wird, ist rechnerisch einwandfrei -
     sein Ergebnis ist korrekt 0 EUR, nicht unbekannt.
-    `origin_coverage_percent` ist unverändert
-    `SaxPowerCoordinator._energy_origin_coverage()` (02/06);
-    `origin_unavailable` ist wahr, wenn diese Methode `None` liefert (die
-    Herkunftszählung selbst nie initialisiert wurde, z. B. nach einem
+    Ein Attribut `origin_coverage_percent` gibt es nicht mehr: Seit dem
+    Wegfall der Kategorie "Herkunft unbekannt" (02/06) wäre es konstant
+    100 %. `origin_unavailable` ist wahr, wenn
+    `SaxPowerCoordinator._energy_origin_initialized()` falsch liefert (die
+    Herkunftszählung wurde nie initialisiert, z. B. nach einem
     Energiezähler-Store-Ladefehler) - unabhängig davon, ob die
     Geldbilanz selbst weiterläuft.
 
@@ -3892,7 +3968,7 @@ requirement_economics_dashboard:
 
     - Karte 1 "Status und Preise" (eine entities-Karte, feste
       Reihenfolge): economics_status, economics_current_import_price,
-      economics_feed_in_price, energy_origin_coverage, danach drei neue
+      economics_feed_in_price, danach drei
       "attribute"-Kartenzeilen (`_attribute_row`) auf economics_status:
       charge_price_coverage_percent_today,
       discharge_price_coverage_percent_today ("Preisabdeckungen für
@@ -3927,8 +4003,8 @@ requirement_economics_dashboard:
       veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
     - Karte 3 "Herkunft der Ladeenergie": ein `_stack_card`
       (vertical-stack) aus der entities-Karte (energy_charged_from_pv,
-      energy_charged_from_grid, energy_charged_origin_unknown,
-      energy_charged, energy_discharged) plus einer `markdown`-Karte mit
+      energy_charged_from_grid, energy_charged, energy_discharged) plus
+      einer `markdown`-Karte mit
       dem Hinweis, dass die Herkunftsaufteilung eine konservative
       Schätzung am Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine
       physikalische Einzelstromverfolgung - als Teil derselben Karte, nicht
@@ -3945,8 +4021,12 @@ requirement_economics_dashboard:
     - Karte 5 "Investition und Amortisation": EINE gemeinsame Karte
       (`_stack_card`, vertical-stack) in genau der geforderten Reihenfolge
       - eine entities-Zeile mit economics_roi, dann die Fortschritts-Gauge
-      (economics_amortization_progress, 0..100, needle, segments rot/gelb/
-      grün bei 0/50/100), dann eine zweite entities-Karte mit
+      (economics_amortization_progress, 0..100, needle, EIN durchgehend
+      blaues segment ab 0 - ein niedriger Amortisationsfortschritt ist
+      kein Fehlerzustand, den der Anwender abstellen könnte, sondern nur
+      ein früher Zeitpunkt auf einer mehrjährigen Strecke; eine Ampel
+      rot/gelb/grün hätte genau das suggeriert), dann eine zweite
+      entities-Karte mit
       economics_remaining_to_payback, economics_result_today,
       economics_average_daily_result_30d,
       economics_projected_annual_result, economics_estimated_payback_date.
@@ -4090,4 +4170,6 @@ requirement_economics_dashboard:
        und Entladeabschnitt über Tarifauflösung -> Herkunft ->
        Geldsensoren -> Dashboard-Entityauflösung
        (tests/test_economics_dashboard_e2e.py)."
+    - "Die Fortschritts-Gauge trägt genau ein Segment (ab 0, blau) - keine
+       rot/gelb/grüne Ampel."
     - "README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."

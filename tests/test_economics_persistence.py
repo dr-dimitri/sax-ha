@@ -240,6 +240,50 @@ async def test_store_recovers_after_an_incomplete_bundle(hass) -> None:
     assert await store.async_save(restarted) is True
 
 
+async def test_store_recovers_after_an_incomplete_bundle_with_priced_counters(
+    hass,
+) -> None:
+    """Auch die beiden priced_*-Zähler müssen dabei aus der Baseline
+    fallen: Sie gehören nicht zu `initialized` (sie kamen später dazu),
+    unterliegen in _accept aber derselben Monotonieprüfung wie die
+    unpriced_*-Zähler. Blieben sie stehen, während der Coordinator bei 0
+    neu startet, würde jeder Speicherversuch als "rückläufig" abgelehnt -
+    die Bilanz fröre dauerhaft in storage_error ein, und ein Reload hülfe
+    nicht, weil die Datei unverändert bleibt."""
+    old_started_at = dt_util.utcnow() - timedelta(days=1)
+    store = EconomicsStateStore(hass, "recovery-priced")
+    _stub_store_with_initial_data(
+        store,
+        {
+            **EconomicsStateStore._serialize(
+                _full_state(
+                    old_started_at,
+                    priced_charge_kwh=40.0,
+                    priced_discharge_kwh=30.0,
+                )
+            ),
+            "unvalued_inventory_kwh": -1,  # macht das Bündel unvollständig
+        },
+    )
+
+    loaded = await store.async_load()
+    assert loaded.initialized is False
+    assert loaded.priced_charge_kwh == 40.0  # der Aufrufer sieht ihn weiter
+
+    restarted = _full_state(
+        dt_util.utcnow(),
+        grid_charge_cost_eur=0.0,
+        pv_opportunity_cost_eur=0.0,
+        avoided_grid_cost_eur=0.0,
+        unvalued_inventory_kwh=2.0,
+        unpriced_charge_kwh=0.0,
+        unpriced_discharge_kwh=0.0,
+        priced_charge_kwh=0.0,
+        priced_discharge_kwh=0.0,
+    )
+    assert await store.async_save(restarted) is True
+
+
 async def test_store_restores_two_config_entries_independently(hass) -> None:
     first_started = dt_util.utcnow()
     second_started = first_started + timedelta(days=1)

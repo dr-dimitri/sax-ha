@@ -8,10 +8,11 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
@@ -124,8 +125,43 @@ SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
 )
 
 
+#: Entities früherer Versionen, die es nicht mehr gibt - als Suffix der
+#: unique_id (siehe SaxPowerEntity._apply_identity: "<entry_id>_<suffix>").
+#: Die Herkunftskategorie "Herkunft unbekannt" ist entfallen
+#: (REQ-ENERGY-ORIGIN), und mit ihr der zugehörige Abdeckungsgrad, der
+#: seither konstant 100 % wäre. Ohne diese Bereinigung blieben beide als
+#: dauerhaft "nicht verfügbar" in der Entity-Registry stehen.
+_REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
+    (Platform.SENSOR, "energy_charged_origin_unknown"),
+    (Platform.SENSOR, "energy_origin_coverage"),
+)
+
+
+@callback
+def _async_remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Entfernt Entities früherer Versionen aus der Entity-Registry.
+
+    Home Assistant räumt eine weggefallene Entity nicht von selbst auf: Sie
+    bleibt mit ihrem letzten Zustand als "nicht verfügbar" in der Registry
+    und damit in jedem Dashboard und jeder Automation stehen, in der sie
+    verwendet wurde. Bewusst nur exakt benannte Suffixe statt eines
+    Abgleichs gegen alle aktuellen Beschreibungen - der würde bei einer
+    noch nicht geladenen Plattform jede Entity dieser Plattform löschen.
+    """
+    registry = er.async_get(hass)
+    for platform, suffix in _REMOVED_ENTITY_SUFFIXES:
+        entity_id = registry.async_get_entity_id(
+            platform, DOMAIN, f"{entry.entry_id}_{suffix}"
+        )
+        if entity_id is None:
+            continue
+        _LOGGER.info("Entferne die entfallene Entity %s", entity_id)
+        registry.async_remove(entity_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SAX Power from a config entry."""
+    _async_remove_stale_entities(hass, entry)
     client = AsyncModbusTcpClient(
         host=entry.data[CONF_HOST],
         port=entry.data.get(CONF_PORT, 502),
@@ -249,6 +285,16 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if entry_data is None:
         return
     coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
+    if coordinator.options == entry.options:
+        # hass.config_entries.async_update_entry löst diesen Listener auch
+        # aus, wenn ausschließlich entry.DATA geschrieben wurde - etwa beim
+        # Wegklicken des Dashboard-Hinweises (repairs.py,
+        # CONF_DASHBOARD_UPDATE_DISMISSED). Ohne diese Abkürzung setzte
+        # eine solche reine Datenänderung den diagnostischen Zeitstempel
+        # der letzten Tarifrevision zurück und liefe durch
+        # async_apply_price_plan bis in einen Modbus-Schreibpfad, obwohl
+        # sich an den Options nichts geändert hat.
+        return
     coordinator.options = dict(entry.options)
     coordinator.price_planner.async_setup()
     coordinator.tariff_provider.async_setup()

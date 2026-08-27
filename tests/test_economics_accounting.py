@@ -24,10 +24,8 @@ from custom_components.sax_power.domain.energy_accounting import (
 )
 
 
-def _charge(grid: float = 0.0, pv: float = 0.0, unknown: float = 0.0) -> EnergyDelta:
-    return EnergyDelta(
-        charged_kwh=grid + pv + unknown, grid_kwh=grid, pv_kwh=pv, unknown_kwh=unknown
-    )
+def _charge(grid: float = 0.0, pv: float = 0.0) -> EnergyDelta:
+    return EnergyDelta(charged_kwh=grid + pv, grid_kwh=grid, pv_kwh=pv)
 
 
 # --------------------------------------------------------------------------
@@ -66,15 +64,18 @@ def test_mixed_charge_costs_grid_and_pv_shares_separately() -> None:
     assert delta.pv_opportunity_cost_delta == pytest.approx(0.12)
 
 
-def test_unknown_origin_charge_is_never_priced() -> None:
-    """Herkunft unbekannt hat keinen Preisbegriff - unabhängig davon, ob
-    gerade Preise verfügbar wären."""
-    delta = compute_economics_delta(_charge(unknown=1.0), 0.0, 0.0, 0.30, 0.08)
+def test_charge_without_a_smartmeter_reading_is_priced_as_grid_charge() -> None:
+    """Ein Intervall ohne Smartmeter-Messwert kommt aus
+    domain/energy_accounting bereits vollständig als Netzladung an (die
+    Kategorie "Herkunft unbekannt" gibt es nicht mehr) und wird hier
+    entsprechend mit dem Netzbezugspreis belastet - nicht als unbewerteter
+    Bestand geparkt."""
+    delta = compute_economics_delta(_charge(grid=1.0), 0.0, 0.0, 0.30, 0.08)
 
-    assert delta.grid_charge_cost_delta == 0.0
+    assert delta.grid_charge_cost_delta == pytest.approx(0.30)
     assert delta.pv_opportunity_cost_delta == 0.0
-    assert delta.unpriced_charge_delta_kwh == pytest.approx(1.0)
-    assert delta.unvalued_inventory_delta_kwh == pytest.approx(1.0)
+    assert delta.unpriced_charge_delta_kwh == 0.0
+    assert delta.unvalued_inventory_delta_kwh == 0.0
 
 
 def test_missing_import_price_makes_grid_charge_unpriced() -> None:
@@ -168,6 +169,34 @@ def test_charge_efficiency_losses_reduce_the_result_without_a_factor() -> None:
     )
     assert operating_result == pytest.approx(0.9 * 0.30 - 1.0 * 0.30)
     assert operating_result < 0
+
+
+def test_pv_charge_efficiency_losses_reduce_the_result_without_a_factor() -> None:
+    """Derselbe Zusammenhang auf der PV-Seite: Die Opportunitätskosten
+    hängen an der GELADENEN Energie (entgangene Einspeisevergütung für
+    jede eingespeicherte kWh), der vermiedene Netzbezug dagegen an der
+    ENTLADENEN. Der Ladeverlust verschlechtert das Ergebnis damit auch
+    hier von selbst, ohne angenommenen Wirkungsgrad."""
+    charge = compute_economics_delta(_charge(pv=1.0), 0.0, 0.0, 0.30, 0.08)
+    discharge = compute_economics_delta(ZERO_DELTA, 0.9, 0.0, 0.30, 0.08)
+
+    assert charge.pv_opportunity_cost_delta == pytest.approx(1.0 * 0.08)
+    assert discharge.avoided_grid_cost_delta == pytest.approx(0.9 * 0.30)
+
+    operating_result = (
+        discharge.avoided_grid_cost_delta
+        - charge.grid_charge_cost_delta
+        - charge.pv_opportunity_cost_delta
+    )
+    assert operating_result == pytest.approx(0.9 * 0.30 - 1.0 * 0.08)
+
+    # Gegenprobe: Ohne Verlust fiele das Ergebnis um genau den Wert der
+    # verlorenen 0.1 kWh besser aus - der Verlust ist also tatsächlich
+    # eingepreist und nicht bloß rechnerisch unsichtbar.
+    lossless = compute_economics_delta(ZERO_DELTA, 1.0, 0.0, 0.30, 0.08)
+    assert lossless.avoided_grid_cost_delta - discharge.avoided_grid_cost_delta == (
+        pytest.approx(0.1 * 0.30)
+    )
 
 
 # --------------------------------------------------------------------------

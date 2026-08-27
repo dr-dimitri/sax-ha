@@ -20,19 +20,20 @@ class EnergyDelta:
     `charged_kwh` ist exakt derselbe Gesamt-Ladezuwachs, den der bestehende
     energy_charged-Zähler verbucht - Aufrufer müssen ihn dort ebenfalls
     verwenden statt ihn ein zweites Mal zu berechnen, damit Herkunfts- und
-    Gesamtzähler niemals auseinanderlaufen. `grid_kwh + pv_kwh +
-    unknown_kwh` ergibt `charged_kwh` bis auf Gleitkomma-Rundung in der
-    Größenordnung einzelner ULPs - viele Zehnerpotenzen unterhalb der auf
-    drei Nachkommastellen veröffentlichten Präzision.
+    Gesamtzähler niemals auseinanderlaufen. `grid_kwh + pv_kwh` ergibt
+    `charged_kwh` bis auf Gleitkomma-Rundung in der Größenordnung
+    einzelner ULPs - viele Zehnerpotenzen unterhalb der auf drei
+    Nachkommastellen veröffentlichten Präzision. Es gibt bewusst keine
+    dritte Kategorie: Physikalisch speist entweder PV oder das Netz, und
+    jede Ladeenergie ist genau einer der beiden zugeordnet.
     """
 
     charged_kwh: float
     grid_kwh: float
     pv_kwh: float
-    unknown_kwh: float
 
 
-ZERO_DELTA = EnergyDelta(0.0, 0.0, 0.0, 0.0)
+ZERO_DELTA = EnergyDelta(0.0, 0.0, 0.0)
 
 
 def compute_charge_delta(
@@ -56,6 +57,14 @@ def compute_charge_delta(
     physikalisch eindeutig herleiten. Das ist eine konservative Schätzung
     anhand des Netzanschlusspunktes, keine physikalisch eindeutige
     Quellenzuordnung.
+
+    Fehlt `smartmeter_power`, ist die Aufteilung nicht messbar. Sie fällt
+    dann vollständig auf Netzladung - die teurere der beiden Deutungen,
+    weil sie den Netzbezugspreis statt der niedrigeren Einspeisevergütung
+    kostet. Ein Messausfall rechnet die Bilanz damit nie schön; ihn als
+    eigene Kategorie "Herkunft unbekannt" zu führen, wäre die Alternative
+    gewesen, hätte aber einen Zähler erzeugt, der keine Energiequelle
+    beschreibt, sondern eine Datenlücke.
     """
     if storage_power_active is None:
         return None
@@ -66,7 +75,7 @@ def compute_charge_delta(
 
     charged_kwh = charge_power_w * elapsed_hours / 1000
     if smartmeter_power is None:
-        return EnergyDelta(charged_kwh, 0.0, 0.0, charged_kwh)
+        return EnergyDelta(charged_kwh, charged_kwh, 0.0)
 
     grid_charge_power_w = min(charge_power_w, max(smartmeter_power, 0.0))
     grid_kwh = grid_charge_power_w * elapsed_hours / 1000
@@ -76,4 +85,4 @@ def compute_charge_delta(
     # verankert, statt zwei unabhängig gerundete Werte gegeneinander
     # aufzusummieren.
     pv_kwh = charged_kwh - grid_kwh
-    return EnergyDelta(charged_kwh, grid_kwh, pv_kwh, 0.0)
+    return EnergyDelta(charged_kwh, grid_kwh, pv_kwh)

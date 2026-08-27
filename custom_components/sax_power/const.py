@@ -750,6 +750,24 @@ MIN_ECONOMICS_INVESTMENT_COST = 0.01
 MAX_ECONOMICS_INVESTMENT_COST = 1_000_000.0
 ECONOMICS_INVESTMENT_COST_STEP = 0.01
 
+# Bereits vor dieser Integration erwirtschafteter Ertrag (EUR). Wer den
+# Speicher schon jahrelang betreibt, hätte sonst einen
+# Amortisationsfortschritt von 0 %, obwohl ein erheblicher Teil der
+# Investition längst zurückverdient ist - die Prognose startete faktisch
+# bei null. Der Wert wirkt AUSSCHLIESSLICH auf die Amortisationssensoren
+# (ROI, Fortschritt, Restbetrag, Rückzahlungsdatum), nie auf
+# economics_operating_result: Dessen Verlauf wird im Dashboard als
+# statistics-graph über `change` ausgewertet, ein Sprung durch eine
+# manuelle Eingabe würde dort als Tagesertrag erscheinen.
+#
+# 0 ist ein gültiger, ausdrücklicher Wert ("kein Vorlauf") - anders als
+# bei den Investitionskosten gibt es hier keinen Grund, ihn von
+# "nicht konfiguriert" zu unterscheiden.
+CONF_ECONOMICS_PRIOR_RESULT = "economics_prior_result_eur"
+MIN_ECONOMICS_PRIOR_RESULT = 0.0
+MAX_ECONOMICS_PRIOR_RESULT = 1_000_000.0
+ECONOMICS_PRIOR_RESULT_STEP = 0.01
+
 # ==========================================================================
 # Wirtschaftlichkeitsauswertung: Datenqualität, Diagnose und Bilanzneustart
 # (siehe anforderung.yaml, REQ-ECONOMICS-OBSERVABILITY)

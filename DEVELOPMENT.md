@@ -242,8 +242,7 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
 
 - `compute_economics_delta` bewertet ein Intervall: Netzladung kostet den
   Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
-  Preis oder ist die Herkunft unbekannt, wird nichts erfunden - die Energie
-  erhöht stattdessen `unvalued_inventory_kwh` (unbewerteter Bestand) und
+  Preis, wird nichts erfunden - die Energie erhöht stattdessen `unvalued_inventory_kwh` (unbewerteter Bestand) und
   einen `unpriced_charge`-Zähler. Jede Entladung verbraucht zuerst aus
   diesem Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser
   Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst entstünde
@@ -329,7 +328,18 @@ neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
 ### ROI und Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION)
 
 Baut ausschließlich auf dem bereits bilanzierten `operating_result` oben
-auf. Die reine Rechnung liegt in `domain/economics_amortization.py`, ohne
+auf, zuzüglich des optionalen Vorlauf-Ertrags aus der Zeit vor der
+Integration (`application/economics.prior_result_eur_from_options`, Option
+`economics_prior_result_eur`). Der wirkt bewusst nur hier: Er verschiebt
+ROI, Fortschritt und Restbetrag, nie `economics_operating_result` - dessen
+Verlauf wertet das Dashboard als `statistics-graph` über `change` aus, ein
+Offset aus einer Handeingabe erschiene dort als Tagesertrag. Der ROI-Sensor
+weist ihn zusammen mit dem rein gemessenen Betrag als Attribute aus
+(`economics_roi_attributes`), damit sich die Differenz zwischen beiden
+Zahlen im Dashboard auflösen lässt. `payback_achieved_at` setzt er dagegen
+nie - siehe `_maybe_mark_payback_achieved`.
+
+Die reine Rechnung liegt in `domain/economics_amortization.py`, ohne
 jeden Home-Assistant-Bezug:
 
 - `compute_roi_percent`/`compute_amortization_progress_percent`/
@@ -475,8 +485,7 @@ selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
   anderen Zustand.
 - `compute_price_coverage_percent(priced_kwh, unpriced_kwh)` ist
   energiebasiert (nicht tickbasiert) und liefert bei Nenner 0 100 % -
-  dieselbe Formel wie `DayEconomicsResult.price_coverage_percent` (04/06)
-  und `_energy_origin_coverage()` (02/06).
+  dieselbe Formel wie `DayEconomicsResult.price_coverage_percent` (04/06).
 - `partial_price_coverage` bewertet nur den LAUFENDEN Kalendertag (die
   Tages-Buckets aus 04/06) und erst, wenn die Lücke sowohl absolut
   (`MIN_UNPRICED_KWH_FOR_PARTIAL`) als auch relativ
@@ -500,8 +509,8 @@ Bilanz je gestartet ist) setzt das zusammen:
   `unpriced_*`-Zählern, aus denselben `EconomicsDelta.priced_charge_kwh_delta`/
   `priced_discharge_kwh_delta` wie die Tages-Buckets) ergeben
   `charge_price_coverage_percent`/`discharge_price_coverage_percent`.
-  `origin_unavailable` ist wahr, wenn `_energy_origin_coverage()` (02/06)
-  `None` liefert.
+  `origin_unavailable` ist wahr, wenn `_energy_origin_initialized()`
+  (02/06) falsch liefert.
 - `_update_economics_price_availability` verfolgt monotonic, seit wann
   ununterbrochen kein gültiger Preis mehr vorlag.
   `QuoteUnavailable.TARIFF_INCOMPLETE` (ungültig gespeicherter Fest-/
@@ -1198,13 +1207,14 @@ tests/
 │                                  (REQ-ENERGY-ORIGIN, domain/energy_accounting.py):
 │                                  reine PV-/Netzladung, gemischte Ladung, Einspeisung
 │                                  während des Ladens, Netzbezug größer/kleiner als die
-│                                  Ladeleistung, unbekannter Smartmeter-Wert sowie die
-│                                  Delta-Invariante (grid + pv + unknown == charged) über
+│                                  Ladeleistung, fehlender Smartmeter-Wert (zählt
+│                                  konservativ als Netzladung) sowie die
+│                                  Delta-Invariante (grid + pv == charged) über
 │                                  viele zufällige Intervalle ohne kumulative Drift
 ├── test_energy_persistence.py       Persistenz der Energiezähler inkl. Herkunft
 │                                  (REQ-ENERGY-DASHBOARD/REQ-ENERGY-ORIGIN):
 │                                  Store-Round-Trip, unabhängige Feldvalidierung
-│                                  (auch für die drei neuen Zähler und den
+│                                  (auch für die beiden Herkunftszähler und den
 │                                  Startzeitpunkt), Drosselung/Sofort-Flush, rückläufige
 │                                  Snapshots, RestoreEntity-Migrationspfad von
 │                                  energy_charged/-discharged, Version-1-Migration ohne
@@ -1216,14 +1226,16 @@ tests/
 │                                  ausgelöst hätte), bereits initialisierter Store,
 │                                  Store-Ladefehler lässt die Herkunft uninitialisiert,
 │                                  Wiederanlauf nach einem unvollständigen
-│                                  Herkunfts-Quartett ohne an der alten Teil-Baseline zu
-│                                  scheitern, zwei getrennte Config Entries sowie die
-│                                  Coordinator-Verdrahtung (Rundung, Diagnosewert
-│                                  energy_origin_coverage, Entladung und SunSpec-Ausfall
-│                                  bleiben unverändert) in test_coordinator.py
+│                                  Herkunfts-Bündel ohne an der alten Teil-Baseline zu
+│                                  scheitern, Migration eines Minor-Version-2-Snapshots
+│                                  (Restbestand "Herkunft unbekannt" wandert auf den
+│                                  Netzzähler), zwei getrennte Config Entries sowie die
+│                                  Coordinator-Verdrahtung (Rundung, Entladung und
+│                                  SunSpec-Ausfall bleiben unverändert) in
+│                                  test_coordinator.py
 ├── test_economics_accounting.py     Reine Geldbilanz (REQ-ECONOMICS-ACCOUNTING,
 │                                  domain/economics_accounting.py): Netz-/PV-/gemischte
-│                                  Ladung, unbekannte Herkunft nie bepreist, fehlender
+│                                  Ladung, fehlender
 │                                  Netzbezugs-/Einspeisepreis macht Ladung unbepreist statt
 │                                  erfunden, negative Preise ohne Clamping, Entladung aus
 │                                  unbewertetem Bestand ohne vermiedenen Geldwert (Regression

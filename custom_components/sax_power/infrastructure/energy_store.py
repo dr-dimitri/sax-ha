@@ -37,8 +37,15 @@ _LOGGER = logging.getLogger(__name__)
 # ("noch nicht initialisiert"), ohne bestehende Felder anzutasten - genau
 # wie bei infrastructure/control_store.py, das aus demselben Grund seine
 # STORAGE_VERSION nie erhöht hat.
+#
+# Minor-Version 3 entfernt den dritten Herkunftszähler
+# ("unknown_charged_kwh"): Ein Intervall ohne Smartmeter-Messwert gilt
+# jetzt konservativ als Netzladung. Gespeicherte Altbestände wandern beim
+# Laden einmalig auf den Netzzähler (siehe _migrated_grid_charged_kwh) -
+# auch das kommt ohne _async_migrate_func aus und arbeitet allein auf den
+# unverändert erhaltenen Rohdaten.
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 2
+STORAGE_MINOR_VERSION = 3
 STORAGE_KEY_PREFIX = f"{DOMAIN}.energy"
 ENERGY_SAVE_DELAY = 300
 
@@ -47,10 +54,10 @@ ENERGY_SAVE_DELAY = 300
 class EnergyState:
     """Persisted, independently initialised energy counters.
 
-    Die drei Herkunftszähler und `origin_accounting_started_at` bilden
+    Die beiden Herkunftszähler und `origin_accounting_started_at` bilden
     zusammen EINE Einheit: Sie werden gemeinsam initialisiert (siehe
     `origin_initialized`) und gemeinsam zurückgesetzt, falls auch nur eines
-    der vier Felder ungültig ist - ein isoliert wiederhergestellter Zähler
+    der drei Felder ungültig ist - ein isoliert wiederhergestellter Zähler
     ohne bekannten Startzeitpunkt (oder umgekehrt) wäre nicht aussagekräftig.
     Das steht nicht im Widerspruch zur unabhängigen Feldvalidierung beim
     Laden (siehe EnergyStateStore.async_load): Jedes Feld wird dort für
@@ -62,7 +69,6 @@ class EnergyState:
     discharged_kwh: float | None = None
     grid_charged_kwh: float | None = None
     pv_charged_kwh: float | None = None
-    unknown_charged_kwh: float | None = None
     origin_accounting_started_at: datetime | None = None
 
     @property
@@ -74,7 +80,7 @@ class EnergyState:
     def origin_initialized(self) -> bool:
         """Ob die Herkunftszählung vollständig initialisiert ist.
 
-        Nur wenn alle vier Felder vorhanden sind, gilt der Store als
+        Nur wenn alle drei Felder vorhanden sind, gilt der Store als
         maßgebliche Quelle - fehlt eines (frischer Eintrag, Version-1-
         Snapshot ohne diese Felder, oder ein einzelnes verworfenes Feld),
         startet der Coordinator die Herkunftszählung transparent neu.
@@ -82,7 +88,6 @@ class EnergyState:
         return (
             self.grid_charged_kwh is not None
             and self.pv_charged_kwh is not None
-            and self.unknown_charged_kwh is not None
             and self.origin_accounting_started_at is not None
         )
 
@@ -113,26 +118,72 @@ class EnergyStateStore:
             )
             return EnergyState()
 
+        legacy_unknown_origin = self._has_legacy_unknown_origin(raw)
         state = EnergyState(
             charged_kwh=self._validated_counter(raw.get("charged_kwh"), "Laden"),
             discharged_kwh=self._validated_counter(
                 raw.get("discharged_kwh"), "Entladen"
             ),
-            grid_charged_kwh=self._validated_counter(
-                raw.get("grid_charged_kwh"), "Netzladung (Herkunft)"
+            grid_charged_kwh=(
+                None
+                if legacy_unknown_origin
+                else self._validated_counter(
+                    raw.get("grid_charged_kwh"), "Netzladung (Herkunft)"
+                )
             ),
-            pv_charged_kwh=self._validated_counter(
-                raw.get("pv_charged_kwh"), "PV-Ladung (Herkunft)"
+            pv_charged_kwh=(
+                None
+                if legacy_unknown_origin
+                else self._validated_counter(
+                    raw.get("pv_charged_kwh"), "PV-Ladung (Herkunft)"
+                )
             ),
-            unknown_charged_kwh=self._validated_counter(
-                raw.get("unknown_charged_kwh"), "Unbekannte Herkunft"
-            ),
-            origin_accounting_started_at=self._validated_timestamp(
-                raw.get("origin_accounting_started_at")
+            origin_accounting_started_at=(
+                None
+                if legacy_unknown_origin
+                else self._validated_timestamp(raw.get("origin_accounting_started_at"))
             ),
         )
         self._last_persisted = self._origin_baseline(state)
         return state
+
+    @classmethod
+    def _has_legacy_unknown_origin(cls, raw: dict[str, Any]) -> bool:
+        """Ob ein Snapshot noch echten Bestand der Kategorie "Herkunft
+        unbekannt" führt.
+
+        Bis einschließlich Minor-Version 2 führte ein Snapshot einen
+        dritten Herkunftszähler für Intervalle ohne Smartmeter-Messwert.
+        Diese Kategorie ist entfallen (siehe
+        domain/energy_accounting.compute_charge_delta): Ein Messausfall
+        gilt jetzt konservativ als Netzladung.
+
+        Diesen Restbestand nachträglich auf `grid_charged_kwh` zu addieren
+        wäre naheliegend, aber falsch: energy_charged_from_grid ist ein
+        TOTAL_INCREASING-Sensor, ein Aufschlag ließe die Langzeitstatistik
+        die Altmenge als am Upgrade-Tag zugeflossene Netzenergie verbuchen.
+        Stattdessen gilt hier dieselbe Regel wie beim Einführen der
+        Herkunftszählung: Historie wird nicht rückwirkend umgedeutet, die
+        Zählung startet transparent neu (siehe _origin_baseline und
+        SaxPowerCoordinator._bootstrap_energy_origin). Der Rücksprung auf 0
+        ist für einen TOTAL_INCREASING-Sensor ein regulärer Zählerreset,
+        den Home Assistant selbst korrekt behandelt.
+
+        Ein Snapshot ohne diesen Bestand (Wert 0, fehlend oder unlesbar -
+        der Regelfall, weil ein Messausfall selten ist) behält seine
+        Herkunftszähler dagegen unangetastet.
+        """
+        legacy_unknown = cls._validated_counter(
+            raw.get("unknown_charged_kwh"), "Unbekannte Herkunft (Altbestand)"
+        )
+        if not legacy_unknown:
+            return False
+        _LOGGER.info(
+            "Herkunftszählung wird neu gestartet: %.3f kWh im Snapshot stammen "
+            'aus der entfallenen Kategorie "Herkunft unbekannt"',
+            legacy_unknown,
+        )
+        return True
 
     @staticmethod
     def _origin_baseline(state: EnergyState) -> EnergyState:
@@ -145,7 +196,7 @@ class EnergyStateStore:
         zurückgegebenen `state`. Als interne Monotonie-Baseline (siehe
         `_accept_monotonic`) ist ein unvollständiges Herkunfts-Quartett
         (`origin_initialized` falsch) dagegen unbrauchbar: Der Coordinator
-        setzt in diesem Fall alle drei Zähler und den Startzeitpunkt
+        setzt in diesem Fall beide Zähler und den Startzeitpunkt
         gemeinsam neu auf (siehe SaxPowerCoordinator._bootstrap_energy_origin)
         - ohne diese Anpassung würde der nächste Speicherversuch an den
         stehen gebliebenen alten Teilwerten bzw. dem alten Startzeitpunkt
@@ -159,7 +210,6 @@ class EnergyStateStore:
         if (
             state.grid_charged_kwh is None
             and state.pv_charged_kwh is None
-            and state.unknown_charged_kwh is None
             and state.origin_accounting_started_at is None
         ):
             return state
@@ -167,7 +217,6 @@ class EnergyStateStore:
             state,
             grid_charged_kwh=None,
             pv_charged_kwh=None,
-            unknown_charged_kwh=None,
             origin_accounting_started_at=None,
         )
 
@@ -213,11 +262,6 @@ class EnergyStateStore:
                 baseline.grid_charged_kwh,
             ),
             ("PV-Ladung (Herkunft)", state.pv_charged_kwh, baseline.pv_charged_kwh),
-            (
-                "Unbekannte Herkunft",
-                state.unknown_charged_kwh,
-                baseline.unknown_charged_kwh,
-            ),
         ):
             if value is not None and (
                 not math.isfinite(value) or value < 0 or isinstance(value, bool)
@@ -294,7 +338,6 @@ class EnergyStateStore:
             "discharged_kwh": state.discharged_kwh,
             "grid_charged_kwh": state.grid_charged_kwh,
             "pv_charged_kwh": state.pv_charged_kwh,
-            "unknown_charged_kwh": state.unknown_charged_kwh,
             "origin_accounting_started_at": (
                 state.origin_accounting_started_at.isoformat()
                 if state.origin_accounting_started_at is not None

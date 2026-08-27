@@ -288,6 +288,17 @@ class EconomicsStateStore:
             state.unpriced_charge_kwh,
             state.unpriced_discharge_kwh,
             state.economics_started_at,
+            # priced_charge_kwh/priced_discharge_kwh gehören NICHT zu
+            # `initialized` (sie kamen später dazu und dürfen einen sonst
+            # vollständigen Snapshot nicht entwerten), unterliegen in
+            # _accept aber derselben Monotonieprüfung wie die beiden
+            # unpriced_*-Zähler. Blieben sie hier stehen, während der
+            # Coordinator die Bilanz bei 0 neu startet, würde jeder
+            # Speicherversuch als "rückläufig" abgelehnt und die Bilanz
+            # dauerhaft in storage_error einfrieren - ein Reload hilft
+            # nicht, weil die Datei unverändert bleibt.
+            state.priced_charge_kwh,
+            state.priced_discharge_kwh,
         )
         if all(value is None for value in fields):
             return state
@@ -300,6 +311,8 @@ class EconomicsStateStore:
             unpriced_charge_kwh=None,
             unpriced_discharge_kwh=None,
             economics_started_at=None,
+            priced_charge_kwh=None,
+            priced_discharge_kwh=None,
         )
 
     @callback

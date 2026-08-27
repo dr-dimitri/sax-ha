@@ -114,6 +114,19 @@ def _amortization_forecast_attributes(
     return coordinator.data.get("economics_amortization_forecast_attributes") or {}
 
 
+def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Vorlauf-Ertrag und das rein gemessene Ergebnis dahinter
+    (REQ-ECONOMICS-AMORTIZATION).
+
+    Der ROI bezieht den vor der Einrichtung erwirtschafteten Ertrag mit
+    ein, economics_operating_result dagegen nicht - ohne diese Attribute
+    ließe sich die Differenz zwischen beiden nirgends nachvollziehen.
+    """
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("economics_roi_attributes") or {}
+
+
 def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
     """Diagnoseattribute des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY)."""
     if coordinator.data is None:
@@ -721,22 +734,6 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         value_fn=_direct("energy_charged_from_pv"),
     ),
-    SaxPowerSensorEntityDescription(
-        key="energy_charged_origin_unknown",
-        translation_key="energy_charged_origin_unknown",
-        device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        value_fn=_direct("energy_charged_origin_unknown"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="energy_origin_coverage",
-        translation_key="energy_origin_coverage",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=PERCENTAGE,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("energy_origin_coverage"),
-    ),
     # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
     SaxPowerSensorEntityDescription(
         key="economics_status",
@@ -841,6 +838,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=2,
         value_fn=_direct("economics_roi"),
+        attributes_fn=_economics_roi_attributes,
     ),
     SaxPowerSensorEntityDescription(
         key="economics_amortization_progress",

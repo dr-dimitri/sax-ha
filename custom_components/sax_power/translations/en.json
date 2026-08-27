@@ -298,12 +298,6 @@
       "energy_charged_from_pv": {
         "name": "Charged energy from PV"
       },
-      "energy_charged_origin_unknown": {
-        "name": "Charged energy, origin unknown"
-      },
-      "energy_origin_coverage": {
-        "name": "Charge energy origin coverage"
-      },
       "economics_status": {
         "name": "Economics status",
         "state": {
@@ -735,7 +729,8 @@
           "pv_forecast_sensor": "PV forecast sensor (optional)",
           "pv_forecast_factor": "Usable share of the PV forecast (%)",
           "economics_tariff_type": "Economics tariff model",
-          "economics_investment_cost_eur": "Investment cost (EUR)"
+          "economics_investment_cost_eur": "Investment cost (EUR)",
+          "economics_prior_result_eur": "Result earned before setup (EUR)"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative” and “smart” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
@@ -744,7 +739,8 @@
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
-          "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress, remaining-to-payback and the estimated payback date, offset against the running operating result (avoided grid import minus charging and PV opportunity cost). Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running."
+          "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress, remaining-to-payback and the estimated payback date, offset against the running operating result (avoided grid import minus charging and PV opportunity cost). Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
+          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress, remaining amount and payback date; the operating result keeps showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result."
         }
       },
       "economics_fixed": {

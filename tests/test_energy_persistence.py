@@ -118,8 +118,76 @@ async def test_a_real_version_one_store_loads_without_a_migration_crash(
     # Herkunft startet transparent bei 0 ab der Migration.
     assert coordinator._energy_grid_charged_kwh == 0.0
     assert coordinator._energy_pv_charged_kwh == 0.0
-    assert coordinator._energy_unknown_charged_kwh == 0.0
     assert coordinator._origin_accounting_started_at is not None
+    await coordinator.async_shutdown()
+
+
+async def test_a_version_two_store_with_unknown_origin_restarts_the_counting(
+    hass, hass_storage, caplog
+) -> None:
+    """Ein Snapshot mit echtem Restbestand der entfallenen Kategorie
+    "Herkunft unbekannt" startet die Herkunftszählung neu, statt den
+    Bestand auf den Netzzähler zu addieren: energy_charged_from_grid ist
+    TOTAL_INCREASING, ein Aufschlag erschiene in der Langzeitstatistik als
+    am Upgrade-Tag zugeflossene Netzenergie. Der Rücksprung auf 0 ist
+    dagegen ein regulärer Zählerreset (REQ-ENERGY-ORIGIN)."""
+    started_at = dt_util.utcnow() - timedelta(days=7)
+    _seed_real_store(
+        hass_storage,
+        "entry",
+        {
+            "charged_kwh": 50.0,
+            "discharged_kwh": 20.0,
+            "grid_charged_kwh": 12.0,
+            "pv_charged_kwh": 30.0,
+            "unknown_charged_kwh": 8.0,
+            "origin_accounting_started_at": started_at.isoformat(),
+        },
+        version=1,
+        minor_version=2,
+    )
+    coordinator = _coordinator(hass)
+
+    await coordinator.async_load_energy_state()
+
+    assert coordinator._energy_grid_charged_kwh == 0.0
+    assert coordinator._energy_pv_charged_kwh == 0.0
+    assert coordinator._origin_accounting_started_at != started_at
+    # Die Gesamtzähler bleiben davon unberührt.
+    assert coordinator._energy_charged_kwh == 50.0
+    assert coordinator._energy_discharged_kwh == 20.0
+    assert "Herkunftszählung wird neu gestartet" in caplog.text
+    await coordinator.async_shutdown()
+
+
+async def test_a_version_two_store_without_unknown_origin_keeps_its_counters(
+    hass, hass_storage
+) -> None:
+    """Der Regelfall - ein Snapshot, in dem die entfallene Kategorie leer
+    blieb - behält seine Herkunftszähler und seinen Startzeitpunkt
+    vollständig: Ohne echten Altbestand gibt es nichts umzudeuten."""
+    started_at = dt_util.utcnow() - timedelta(days=7)
+    _seed_real_store(
+        hass_storage,
+        "entry",
+        {
+            "charged_kwh": 50.0,
+            "discharged_kwh": 20.0,
+            "grid_charged_kwh": 12.0,
+            "pv_charged_kwh": 38.0,
+            "unknown_charged_kwh": 0.0,
+            "origin_accounting_started_at": started_at.isoformat(),
+        },
+        version=1,
+        minor_version=2,
+    )
+    coordinator = _coordinator(hass)
+
+    await coordinator.async_load_energy_state()
+
+    assert coordinator._energy_grid_charged_kwh == 12.0
+    assert coordinator._energy_pv_charged_kwh == 38.0
+    assert coordinator._origin_accounting_started_at == started_at
     await coordinator.async_shutdown()
 
 
@@ -148,7 +216,6 @@ async def test_store_rejects_corrupt_fields_independently(hass, caplog) -> None:
 _NO_ORIGIN = {
     "grid_charged_kwh": None,
     "pv_charged_kwh": None,
-    "unknown_charged_kwh": None,
     "origin_accounting_started_at": None,
 }
 
@@ -200,7 +267,6 @@ async def test_store_round_trips_origin_counters_and_start_timestamp(hass) -> No
         discharged_kwh=4.25,
         grid_charged_kwh=8.0,
         pv_charged_kwh=4.5,
-        unknown_charged_kwh=0.0,
         origin_accounting_started_at=started_at,
     )
 
@@ -225,7 +291,6 @@ async def test_store_rejects_a_corrupt_origin_counter_independently(
             "discharged_kwh": 4.25,
             "grid_charged_kwh": -1,
             "pv_charged_kwh": 4.5,
-            "unknown_charged_kwh": 0.0,
             "origin_accounting_started_at": started_at.isoformat(),
         }
     )
@@ -235,7 +300,6 @@ async def test_store_rejects_a_corrupt_origin_counter_independently(
     assert loaded.charged_kwh == 12.5
     assert loaded.grid_charged_kwh is None
     assert loaded.pv_charged_kwh == 4.5
-    assert loaded.unknown_charged_kwh == 0.0
     assert loaded.origin_accounting_started_at == started_at
     assert loaded.origin_initialized is False
     assert "Ungültigen gespeicherten Energiezähler für Netzladung" in caplog.text
@@ -245,7 +309,7 @@ async def test_store_accepts_a_fresh_restart_after_a_partially_corrupt_bundle(
     hass,
 ) -> None:
     """Nach einem unvollständigen Herkunfts-Bündel darf der nächste, vom
-    Coordinator neu gestartete Snapshot (alle drei Zähler auf 0, neuer
+    Coordinator neu gestartete Snapshot (beide Zähler auf 0, neuer
     Startzeitpunkt - siehe SaxPowerCoordinator._bootstrap_energy_origin)
     nicht an der alten Teil-Baseline scheitern. Andernfalls bliebe die
     Herkunftszählung über jeden Neustart hinweg dauerhaft unpersistiert,
@@ -260,7 +324,6 @@ async def test_store_accepts_a_fresh_restart_after_a_partially_corrupt_bundle(
             "discharged_kwh": 4.25,
             "grid_charged_kwh": -1,  # korrupt -> gesamtes Bündel unvollständig
             "pv_charged_kwh": 4.5,
-            "unknown_charged_kwh": 0.0,
             "origin_accounting_started_at": old_started_at.isoformat(),
         }
     )
@@ -277,7 +340,6 @@ async def test_store_accepts_a_fresh_restart_after_a_partially_corrupt_bundle(
         discharged_kwh=loaded.discharged_kwh,
         grid_charged_kwh=0.0,
         pv_charged_kwh=0.0,
-        unknown_charged_kwh=0.0,
         origin_accounting_started_at=dt_util.utcnow(),
     )
     assert await store.async_save(restarted) is True
@@ -293,7 +355,6 @@ async def test_store_rejects_a_regressive_origin_counter(hass, caplog) -> None:
         5.0,
         grid_charged_kwh=6.0,
         pv_charged_kwh=4.0,
-        unknown_charged_kwh=0.0,
         origin_accounting_started_at=started_at,
     )
     assert await store.async_save(base) is True
@@ -303,7 +364,6 @@ async def test_store_rejects_a_regressive_origin_counter(hass, caplog) -> None:
         5.0,
         grid_charged_kwh=5.0,
         pv_charged_kwh=4.0,
-        unknown_charged_kwh=0.0,
         origin_accounting_started_at=started_at,
     )
     assert await store.async_save(regressive) is False
@@ -323,7 +383,6 @@ async def test_store_rejects_a_changed_origin_start_timestamp(hass, caplog) -> N
         5.0,
         grid_charged_kwh=6.0,
         pv_charged_kwh=4.0,
-        unknown_charged_kwh=0.0,
         origin_accounting_started_at=first,
     )
     assert await store.async_save(base) is True
@@ -333,7 +392,6 @@ async def test_store_rejects_a_changed_origin_start_timestamp(hass, caplog) -> N
         5.0,
         grid_charged_kwh=7.0,
         pv_charged_kwh=4.0,
-        unknown_charged_kwh=0.0,
         origin_accounting_started_at=second,
     )
     assert await store.async_save(drifted) is False
@@ -353,7 +411,6 @@ async def test_store_rejects_an_unusable_start_timestamp(hass, caplog, value) ->
             "discharged_kwh": 0.0,
             "grid_charged_kwh": 1.0,
             "pv_charged_kwh": 0.0,
-            "unknown_charged_kwh": 0.0,
             "origin_accounting_started_at": value,
         }
     )
@@ -378,7 +435,6 @@ async def test_store_restores_origin_counters_for_two_entries_independently(
             2.0,
             grid_charged_kwh=3.0,
             pv_charged_kwh=2.0,
-            unknown_charged_kwh=0.0,
             origin_accounting_started_at=first_started,
         )
     )
@@ -388,7 +444,6 @@ async def test_store_restores_origin_counters_for_two_entries_independently(
             1.0,
             grid_charged_kwh=1.0,
             pv_charged_kwh=7.0,
-            unknown_charged_kwh=0.0,
             origin_accounting_started_at=second_started,
         )
     )
@@ -468,7 +523,6 @@ async def test_numeric_legacy_state_migrates_without_new_snapshot(hass) -> None:
             charged_kwh=42.125,
             grid_charged_kwh=0.0,
             pv_charged_kwh=0.0,
-            unknown_charged_kwh=0.0,
             origin_accounting_started_at=started_at,
         )
     )
@@ -523,7 +577,6 @@ async def test_shutdown_flushes_exact_counter_during_basic_mode_outage(hass) -> 
             7.25,
             grid_charged_kwh=0.0,
             pv_charged_kwh=0.0,
-            unknown_charged_kwh=0.0,
             origin_accounting_started_at=started_at,
         )
     )
@@ -539,7 +592,6 @@ async def test_shutdown_flushes_exact_counter_during_basic_mode_outage(hass) -> 
     assert data["energy_discharged"] == 7.25
     assert data["energy_charged_from_grid"] == 0.0
     assert data["energy_charged_from_pv"] == 0.0
-    assert data["energy_charged_origin_unknown"] == 0.0
     assert restarted._origin_accounting_started_at == started_at
     await restarted.async_shutdown()
 

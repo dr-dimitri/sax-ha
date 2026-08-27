@@ -460,10 +460,12 @@ einen Wert enthält.
 allerdings nur für zukünftige Messintervalle. Bereits erfasste Geldbeträge
 werden nie rückwirkend neu bewertet.
 
-Unabhängig von der gewählten Tarifart lässt sich auf derselben Seite
-optional ein Feld **Investitionskosten (EUR)** ausfüllen. Es schaltet die in
-[ROI und Amortisationsprognose](#roi-und-amortisationsprognose) beschriebenen
-Sensoren frei; ein Wechsel des Tarifmodells löscht diesen Wert nicht.
+Unabhängig von der gewählten Tarifart lassen sich auf derselben Seite
+optional die Felder **Investitionskosten (EUR)** und **Bereits
+erwirtschafteter Ertrag (EUR)** ausfüllen. Die Investitionskosten schalten
+die in [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+beschriebenen Sensoren frei; ein Wechsel des Tarifmodells löscht keinen der
+beiden Werte.
 
 ### Beispiele je Tarifart
 
@@ -497,16 +499,17 @@ Netzladekosten          = geladene Netzenergie (kWh) × Netzbezugspreis zum Lade
 PV-Opportunitätskosten  = geladene PV-Energie (kWh) × Einspeisevergütung
 Vermiedene Netzkosten   = monetarisierbare Entladung (kWh) × Netzbezugspreis zum Entladezeitpunkt
 Operatives Ergebnis     = Vermiedene Netzkosten − Netzladekosten − PV-Opportunitätskosten
-ROI (%)                 = Operatives Ergebnis ÷ Investitionskosten × 100
+Amortisationsstand      = Operatives Ergebnis + Bereits erwirtschafteter Ertrag
+ROI (%)                 = Amortisationsstand ÷ Investitionskosten × 100
 Amortisationsfortschritt (%) = ROI, auf 0 bis 100 % begrenzt
-Restbetrag              = max(Investitionskosten − Operatives Ergebnis, 0)
+Restbetrag              = max(Investitionskosten − Amortisationsstand, 0)
 30-Tage-Prognose        = Durchschnitt der letzten 30 abgeschlossenen Tagesergebnisse
 Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
 ```
 
 ### Grenzen der Wirtschaftlichkeitsauswertung
 
-- Die Herkunftsaufteilung (Netz/PV/unbekannt) ist eine **Schätzung am
+- Die Herkunftsaufteilung (Netz/PV) ist eine **Schätzung am
   Netzanschlusspunkt** (siehe [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)),
   keine physikalische Einzelstromverfolgung.
 - Monatlicher Grundpreis, Finanzierungskosten, Wartung und
@@ -523,13 +526,15 @@ Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
 
 ## Herkunft der Ladeenergie
 
-Zusätzlich zu **Geladene Energie (gesamt)** zeigen drei weitere Sensoren, wie
-viel der geladenen Energie rechnerisch aus dem Netz, aus PV und aus einer
-nicht sicher bestimmbaren Quelle stammt:
+Zusätzlich zu **Geladene Energie (gesamt)** zeigen zwei weitere Sensoren, wie
+viel der geladenen Energie rechnerisch aus dem Netz und wie viel aus PV
+stammt:
 
 - **Geladene Energie aus dem Netz**
 - **Geladene Energie aus PV**
-- **Geladene Energie, Herkunft unbekannt**
+
+Beide zusammen ergeben immer die Gesamtladung - eine dritte Kategorie gibt
+es nicht, denn physikalisch speist entweder die PV-Anlage oder das Netz.
 
 Diese Aufteilung funktioniert unabhängig davon, ob unter
 [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
@@ -541,10 +546,9 @@ Speicher statt in den Hausverbrauch geflossen ist. Netzbezug, der die
 aktuelle Ladeleistung übersteigt (er deckt dann zusätzlich laufenden
 Hausverbrauch), zählt deshalb konservativ vollständig als Netzladung. Ist der
 Netzwert selbst gerade nicht bekannt, zählt die Ladeenergie dieses Zeitraums
-als "Herkunft unbekannt" statt geraten der einen oder anderen Quelle
-zugeschlagen zu werden. Der diagnostische Sensor **Herkunftsabdeckung
-Ladeenergie** zeigt den Anteil der seit Beginn der Zählung eindeutig Netz
-oder PV zugeordneten Ladeenergie in Prozent.
+ebenfalls vollständig als Netzladung - das ist die teurere der beiden
+Deutungen (Netzbezugspreis statt der niedrigeren Einspeisevergütung), ein
+Messausfall rechnet die Bilanz also nie schön.
 
 Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
 0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
@@ -603,15 +607,41 @@ Wird zusätzlich zum Tarif ein Feld **Investitionskosten (EUR)** ausgefüllt
 setzt die Integration das [operative Ergebnis](#wirtschaftlichkeitsbilanz) in
 Bezug zu dieser Investition:
 
-- **ROI**: operatives Ergebnis in Prozent der Investitionskosten - bewusst
+- **ROI**: Amortisationsstand in Prozent der Investitionskosten - bewusst
   unbegrenzt, also auch negativ (bislang Verlust) oder über 100 % (bereits
   mehrfach amortisiert).
 - **Amortisationsfortschritt**: derselbe Wert, aber auf 0 bis 100 %
   begrenzt - für eine Fortschrittsanzeige.
-- **Restbetrag bis Amortisation**: Investitionskosten abzüglich operativem
-  Ergebnis, nie unter 0 EUR.
+- **Restbetrag bis Amortisation**: Investitionskosten abzüglich
+  Amortisationsstand, nie unter 0 EUR.
 - **Operatives Ergebnis heute**: nur der auf den laufenden Kalendertag
   entfallende Anteil des operativen Ergebnisses.
+
+### Speicher, die schon vor der Integration liefen
+
+Läuft die Anlage bereits seit Jahren, hat sie einen Teil der Investition
+längst erwirtschaftet - die Integration kennt davon aber nichts und stünde
+bei 0 % Fortschritt. Dafür gibt es das optionale Feld **Bereits
+erwirtschafteter Ertrag (EUR)** auf derselben Optionsseite wie die
+Investitionskosten. Der eingetragene Betrag zählt als Vorlauf zum laufend
+gemessenen Ergebnis; die Summe aus beidem ist der oben verwendete
+**Amortisationsstand**.
+
+Der Wert wirkt ausschließlich auf ROI, Amortisationsfortschritt und
+Restbetrag. Beim ROI weisen die Attribute **prior_result_eur** und
+**measured_operating_result_eur** aus, wie sich der Wert zusammensetzt; im
+Dashboard steht der Vorlauf als eigene Zeile direkt unter dem ROI.
+
+Das **Voraussichtliche Amortisationsdatum** setzt der Vorlauf dagegen nicht:
+Trägt erst er die Amortisation, dann lag der tatsächliche Zeitpunkt in einer
+Vergangenheit, die diese Integration nie beobachtet hat - ein Datum von heute
+wäre erfunden. Amortisationsfortschritt (100 %) und Restbetrag (0 EUR) zeigen
+die erreichte Amortisation trotzdem an. **Operatives Ergebnis** und **Operatives Ergebnis
+heute** zeigen weiterhin nur, was die Integration selbst gemessen hat - sonst
+erschiene der eingetragene Betrag in der 30-Tage-Verlaufsgrafik als
+Tagesertrag. Solange die Bilanz noch nicht läuft (kein Tarif, oder noch auf
+Kapazität/Ladezustand wartend), bleiben die Amortisationssensoren
+"unbekannt", auch wenn ein Vorlauf hinterlegt ist.
 
 Alle sieben Sensoren dieses Abschnitts zeigen "unbekannt", solange keine
 Investitionskosten hinterlegt sind. Von den vier oben genannten Sensoren

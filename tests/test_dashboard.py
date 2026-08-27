@@ -566,13 +566,11 @@ async def test_economics_view_status_card_shows_disabled_tariff(hass) -> None:
 
 async def test_economics_view_status_card_entity_and_attribute_order(hass) -> None:
     """Karte 1 in genau der geforderten Reihenfolge: Status, aktueller
-    Preis, Einspeisevergütung, Herkunftsabdeckung, dann die beiden
-    Preisabdeckungen und der Bilanzbeginn als Attribute des
-    Status-Sensors."""
+    Preis, Einspeisevergütung, dann die beiden Preisabdeckungen und der
+    Bilanzbeginn als Attribute des Status-Sensors."""
     status_id = _register(hass, "sensor", "economics_status")
     import_price_id = _register(hass, "sensor", "economics_current_import_price")
     feed_in_id = _register(hass, "sensor", "economics_feed_in_price")
-    origin_coverage_id = _register(hass, "sensor", "energy_origin_coverage")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -585,12 +583,11 @@ async def test_economics_view_status_card_entity_and_attribute_order(hass) -> No
         status_id,
         import_price_id,
         feed_in_id,
-        origin_coverage_id,
         status_id,
         status_id,
         status_id,
     ]
-    attribute_rows = rows[4:]
+    attribute_rows = rows[3:]
     assert [row["attribute"] for row in attribute_rows] == [
         "charge_price_coverage_percent_today",
         "discharge_price_coverage_percent_today",
@@ -614,7 +611,6 @@ def _origin_stack(view: dict[str, Any]) -> dict[str, Any]:
 async def test_economics_view_origin_card(hass) -> None:
     pv = _register(hass, "sensor", "energy_charged_from_pv")
     grid = _register(hass, "sensor", "energy_charged_from_grid")
-    unknown = _register(hass, "sensor", "energy_charged_origin_unknown")
     charged = _register(hass, "sensor", "energy_charged")
     discharged = _register(hass, "sensor", "energy_discharged")
 
@@ -629,7 +625,6 @@ async def test_economics_view_origin_card(hass) -> None:
     assert [row["entity"] for row in origin_card["entities"]] == [
         pv,
         grid,
-        unknown,
         charged,
         discharged,
     ]
@@ -751,6 +746,10 @@ async def test_economics_view_amortization_progress_is_a_gauge(hass) -> None:
     assert gauge["min"] == 0
     assert gauge["max"] == 100
     assert gauge["needle"] is True
+    # Durchgehend blau statt einer Ampel: Ein niedriger Fortschritt ist
+    # kein Fehlerzustand, sondern nur ein früher Zeitpunkt auf einer
+    # mehrjährigen Strecke - rot/gelb hätte genau das suggeriert.
+    assert gauge["segments"] == [{"from": 0, "color": "blue"}]
 
 
 async def test_economics_view_investment_card_entities_and_order(hass) -> None:
@@ -771,7 +770,15 @@ async def test_economics_view_investment_card_entities_and_order(hass) -> None:
     stack = _investment_stack(view)
     sub_cards = stack["cards"]
     assert sub_cards[0]["type"] == "entities"
-    assert [row["entity"] for row in sub_cards[0]["entities"]] == [roi]
+    # ROI plus die Attributzeile mit dem Vorlauf-Ertrag: Der ROI rechnet
+    # ihn ein, das operative Ergebnis eine Karte höher nicht.
+    assert [row["entity"] for row in sub_cards[0]["entities"]] == [roi, roi]
+    assert sub_cards[0]["entities"][1] == {
+        "type": "attribute",
+        "entity": roi,
+        "attribute": "prior_result_eur",
+        "name": "Bereits erwirtschafteter Ertrag",
+    }
     assert sub_cards[1]["type"] == "gauge"
     assert sub_cards[1]["entity"] == progress_id
     assert sub_cards[2]["type"] == "entities"

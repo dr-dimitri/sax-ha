@@ -18,6 +18,7 @@ from ..const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
+    CONF_ECONOMICS_PRIOR_RESULT,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
@@ -25,7 +26,9 @@ from ..const import (
     CONF_ECONOMICS_WINDOW_START,
     ECONOMICS_TOU_WINDOW_KEYS,
     MAX_ECONOMICS_INVESTMENT_COST,
+    MAX_ECONOMICS_PRIOR_RESULT,
     MIN_ECONOMICS_INVESTMENT_COST,
+    MIN_ECONOMICS_PRIOR_RESULT,
 )
 from ..domain.tariff import DailyPriceWindow, TariffConfig, TariffType
 
@@ -61,6 +64,30 @@ def investment_cost_eur_from_options(options: Mapping[str, Any]) -> float | None
     if not (MIN_ECONOMICS_INVESTMENT_COST <= cost <= MAX_ECONOMICS_INVESTMENT_COST):
         return None
     return cost
+
+
+def prior_result_eur_from_options(options: Mapping[str, Any]) -> float:
+    """Vor der Integration erwirtschafteter Ertrag (EUR); 0.0, wenn keiner.
+
+    Ergänzt ausschließlich die Amortisationsrechnung
+    (REQ-ECONOMICS-AMORTIZATION): Ohne ihn stünde ein seit Jahren
+    laufender Speicher bei 0 % Fortschritt, obwohl ein Teil der
+    Investition längst erwirtschaftet ist.
+
+    Anders als die Investitionskosten liefert diese Funktion nie None:
+    "nicht konfiguriert" und "kein Vorlauf" sind hier dasselbe, und ein
+    Summand 0.0 lässt sich an der Aufrufstelle bedingungslos addieren.
+    Ein aus dem Bereich gelaufener oder von Hand verstellter Wert gilt wie
+    bei den Investitionskosten als nicht konfiguriert, statt geklammert zu
+    werden - ein stillschweigend halbierter Vorlauf wäre schlechter als
+    gar keiner.
+    """
+    prior = parse_price(options.get(CONF_ECONOMICS_PRIOR_RESULT))
+    if prior is None:
+        return 0.0
+    if not (MIN_ECONOMICS_PRIOR_RESULT <= prior <= MAX_ECONOMICS_PRIOR_RESULT):
+        return 0.0
+    return prior
 
 
 def parse_time(value: Any) -> dt_time | None:

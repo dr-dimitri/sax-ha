@@ -7,10 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import (
     _async_register_services,
+    _async_remove_stale_entities,
     async_setup_entry,
     async_update_options,
 )
@@ -274,3 +276,81 @@ async def test_restart_economics_accounting_service_reason_is_optional(hass) -> 
         )
 
     coordinator.async_restart_economics_accounting.assert_awaited_once_with(reason=None)
+
+
+# --------------------------------------------------------------------------
+# Entfallene Entities früherer Versionen (REQ-ENERGY-ORIGIN)
+# --------------------------------------------------------------------------
+async def test_removed_origin_entities_are_purged_from_the_registry(hass) -> None:
+    """Die beiden mit der Herkunftskategorie entfallenen Sensoren räumt
+    Home Assistant nicht selbst weg - sie blieben sonst dauerhaft als
+    "nicht verfügbar" in der Registry und damit in jedem Dashboard und
+    jeder Automation stehen, die sie verwendet."""
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, entry_id="entry")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    stale = [
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{suffix}",
+            config_entry=entry,
+        ).entity_id
+        for suffix in ("energy_charged_origin_unknown", "energy_origin_coverage")
+    ]
+    kept = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{entry.entry_id}_energy_charged_from_grid",
+        config_entry=entry,
+    ).entity_id
+
+    _async_remove_stale_entities(hass, entry)
+
+    for entity_id in stale:
+        assert registry.async_get(entity_id) is None
+    assert registry.async_get(kept) is not None
+
+
+async def test_removing_stale_entities_is_a_noop_without_them(hass) -> None:
+    """Der Regelfall - eine frische Installation, die diese Entities nie
+    hatte - darf dabei nichts anfassen."""
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, entry_id="fresh")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    before = set(registry.entities)
+
+    _async_remove_stale_entities(hass, entry)
+
+    assert set(registry.entities) == before
+
+
+async def test_update_options_is_a_noop_when_only_entry_data_changed(hass) -> None:
+    """async_update_entry löst diesen Listener auch bei einer reinen
+    entry.data-Änderung aus (etwa beim Wegklicken des Dashboard-Hinweises).
+    Ohne unveränderte Options darf dabei weder der diagnostische
+    Tarifrevisions-Zeitstempel zurückgesetzt noch ein Modbus-Schreibpfad
+    angestoßen werden."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=VALID_INPUT, options={CONF_PRICE_SENSOR: "sensor.preis"}
+    )
+    entry.add_to_hass(hass)
+    coordinator = MagicMock()
+    coordinator.options = dict(entry.options)
+    coordinator.async_apply_price_plan = AsyncMock()
+    hass.data[DOMAIN] = {entry.entry_id: {DATA_COORDINATOR: coordinator}}
+
+    await async_update_options(hass, entry)
+
+    coordinator.notify_tariff_revision.assert_not_called()
+    coordinator.async_apply_price_plan.assert_not_called()
+    coordinator.price_planner.async_setup.assert_not_called()
+
+    # Gegenprobe: Eine echte Options-Änderung wird weiterhin angewendet.
+    hass.config_entries.async_update_entry(
+        entry, options={CONF_PRICE_SENSOR: "sensor.anderer_preis"}
+    )
+    await async_update_options(hass, entry)
+
+    coordinator.notify_tariff_revision.assert_called_once()
+    coordinator.async_apply_price_plan.assert_awaited_once()

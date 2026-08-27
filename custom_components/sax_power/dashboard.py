@@ -562,7 +562,6 @@ async def async_build_dashboard_config(
     for entity_domain, suffix in (
         ("sensor", "economics_current_import_price"),
         ("sensor", "economics_feed_in_price"),
-        ("sensor", "energy_origin_coverage"),
     ):
         _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
         if row is not None:
@@ -600,7 +599,6 @@ async def async_build_dashboard_config(
         [
             ("sensor", "energy_charged_from_pv"),
             ("sensor", "energy_charged_from_grid"),
-            ("sensor", "energy_charged_origin_unknown"),
             ("sensor", "energy_charged"),
             ("sensor", "energy_discharged"),
         ],
@@ -660,12 +658,28 @@ async def async_build_dashboard_config(
     # "no_investment_cost" lautet, war das `state_not` IMMER erfüllt - die
     # Karte stand also auch ohne Investitionskosten dauerhaft im
     # Dashboard (#139).
-    roi_row_card = _entities_card(
-        hass,
-        entry_id,
-        "Investition und Amortisation",
-        [("sensor", "economics_roi")],
-        translations,
+    roi_entity_id, roi_row = _resolved_row(
+        hass, entry_id, "sensor", "economics_roi", translations
+    )
+    roi_rows: list[dict[str, Any] | str] = [roi_row] if roi_row else []
+    # Der ROI rechnet den Vorlauf-Ertrag mit ein, das operative Ergebnis
+    # eine Karte höher nicht - ohne diese Zeile ließe sich die Differenz
+    # zwischen beiden im Dashboard nicht auflösen (siehe
+    # coordinator._publish_amortization).
+    prior_row = _attribute_row(
+        roi_entity_id, "prior_result_eur", "Bereits erwirtschafteter Ertrag"
+    )
+    if prior_row is not None:
+        roi_rows.append(prior_row)
+    roi_row_card = (
+        {
+            "type": "entities",
+            "title": "Investition und Amortisation",
+            "state_color": True,
+            "entities": roi_rows,
+        }
+        if roi_rows
+        else None
     )
     progress_gauge = _gauge_card(
         hass,
@@ -675,11 +689,11 @@ async def async_build_dashboard_config(
         translations,
         min_value=0,
         max_value=100,
-        segments=[
-            {"from": 0, "color": "red"},
-            {"from": 50, "color": "yellow"},
-            {"from": 100, "color": "green"},
-        ],
+        # Durchgehend blau statt der sonst üblichen Ampel: Ein niedriger
+        # Amortisationsfortschritt ist kein Fehlerzustand, den der Anwender
+        # abstellen könnte, sondern nur ein früher Zeitpunkt auf einer
+        # mehrjährigen Strecke - rot/gelb hätte genau das suggeriert.
+        segments=[{"from": 0, "color": "blue"}],
     )
     remaining_rows_card = _entities_card(
         hass,

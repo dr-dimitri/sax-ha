@@ -2,8 +2,8 @@
 
 Siehe anforderung.yaml, REQ-ENERGY-ORIGIN. Reine Funktionstests ohne Home
 Assistant - der Coordinator-seitige Verdrahtungstest (Rundung,
-energy_origin_coverage, Entladung/SunSpec-Ausfall bleiben unberührt) liegt
-in tests/test_coordinator.py.
+Entladung/SunSpec-Ausfall bleiben unberührt) liegt in
+tests/test_coordinator.py.
 """
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ def test_pure_pv_charge_assigns_everything_to_pv() -> None:
     assert delta.charged_kwh == pytest.approx(2.0)
     assert delta.grid_kwh == 0.0
     assert delta.pv_kwh == pytest.approx(2.0)
-    assert delta.unknown_kwh == 0.0
 
 
 def test_pure_grid_charge_assigns_everything_to_grid() -> None:
@@ -57,7 +56,6 @@ def test_pure_grid_charge_assigns_everything_to_grid() -> None:
     assert delta.charged_kwh == pytest.approx(2.0)
     assert delta.grid_kwh == pytest.approx(2.0)
     assert delta.pv_kwh == 0.0
-    assert delta.unknown_kwh == 0.0
 
 
 def test_mixed_charge_splits_between_grid_and_pv() -> None:
@@ -67,7 +65,6 @@ def test_mixed_charge_splits_between_grid_and_pv() -> None:
     assert delta.charged_kwh == pytest.approx(2.0)
     assert delta.grid_kwh == pytest.approx(0.8)
     assert delta.pv_kwh == pytest.approx(1.2)
-    assert delta.unknown_kwh == 0.0
 
 
 def test_export_during_charge_assigns_everything_to_pv() -> None:
@@ -88,7 +85,6 @@ def test_grid_import_exceeding_charge_power_still_caps_at_full_charge() -> None:
     assert delta.charged_kwh == pytest.approx(1.0)
     assert delta.grid_kwh == pytest.approx(1.0)
     assert delta.pv_kwh == 0.0
-    assert delta.unknown_kwh == 0.0
 
 
 def test_grid_import_smaller_than_charge_power_leaves_a_pv_remainder() -> None:
@@ -99,32 +95,32 @@ def test_grid_import_smaller_than_charge_power_leaves_a_pv_remainder() -> None:
     assert delta.pv_kwh == pytest.approx(2.0)
 
 
-def test_unknown_smartmeter_value_assigns_everything_to_unknown_origin() -> None:
+def test_unknown_smartmeter_value_assigns_everything_to_grid() -> None:
     """smartmeter_power unbekannt, aber storage_power_active bekannt: die
-    gesamte Ladeenergie gilt als Herkunft unbekannt - nicht als PV, nicht
-    als Netz."""
+    gesamte Ladeenergie gilt konservativ als Netzladung. Sie als PV zu
+    buchen wäre die günstigere Deutung (Einspeisevergütung statt
+    Netzbezugspreis) und würde die Bilanz bei jedem Messausfall
+    beschönigen."""
     delta = compute_charge_delta(-1200.0, None, 1.0)
 
     assert delta.charged_kwh == pytest.approx(1.2)
-    assert delta.grid_kwh == 0.0
+    assert delta.grid_kwh == pytest.approx(1.2)
     assert delta.pv_kwh == 0.0
-    assert delta.unknown_kwh == pytest.approx(1.2)
 
 
 def test_zero_elapsed_time_produces_zero_energy_regardless_of_power() -> None:
     delta = compute_charge_delta(-2000.0, 500.0, 0.0)
 
-    assert delta == EnergyDelta(0.0, 0.0, 0.0, 0.0)
+    assert delta == EnergyDelta(0.0, 0.0, 0.0)
 
 
 def test_delta_invariant_holds_without_drift_across_many_random_intervals() -> None:
-    """Für jedes gültige Ladeintervall gilt grid + pv + unknown == charged -
-    über viele zufällige Intervalle hinweg, ohne kumulative Abweichung."""
+    """Für jedes gültige Ladeintervall gilt grid + pv == charged - über
+    viele zufällige Intervalle hinweg, ohne kumulative Abweichung."""
     random.seed(20260826)
     total_charged = 0.0
     total_grid = 0.0
     total_pv = 0.0
-    total_unknown = 0.0
 
     for _ in range(5000):
         storage_power_active = random.uniform(-20000.0, 20000.0)
@@ -138,18 +134,13 @@ def test_delta_invariant_holds_without_drift_across_many_random_intervals() -> N
 
         # Je Intervall: keine sichtbare Rundungsabweichung bei drei
         # veröffentlichten Nachkommastellen.
-        assert round(delta.grid_kwh + delta.pv_kwh + delta.unknown_kwh, 3) == round(
-            delta.charged_kwh, 3
-        )
+        assert round(delta.grid_kwh + delta.pv_kwh, 3) == round(delta.charged_kwh, 3)
 
         total_charged += delta.charged_kwh
         total_grid += delta.grid_kwh
         total_pv += delta.pv_kwh
-        total_unknown += delta.unknown_kwh
 
     # Über die Summe vieler Intervalle bleibt die Abweichung im
     # Gleitkomma-Rauschen (viele Zehnerpotenzen unter der dritten
     # Nachkommastelle) - keine systematische Drift.
-    assert total_grid + total_pv + total_unknown == pytest.approx(
-        total_charged, abs=1e-6
-    )
+    assert total_grid + total_pv == pytest.approx(total_charged, abs=1e-6)

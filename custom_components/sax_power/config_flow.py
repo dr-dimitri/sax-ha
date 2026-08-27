@@ -30,6 +30,7 @@ from .const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
+    CONF_ECONOMICS_PRIOR_RESULT,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_ECONOMICS_WINDOW_END,
@@ -60,14 +61,17 @@ from .const import (
     ECONOMICS_INVESTMENT_COST_STEP,
     ECONOMICS_OPTION_KEYS,
     ECONOMICS_PRICE_DECIMALS,
+    ECONOMICS_PRIOR_RESULT_STEP,
     ECONOMICS_TOU_WINDOW_KEYS,
     MAX_ECONOMICS_FEED_IN_PRICE,
     MAX_ECONOMICS_IMPORT_PRICE,
     MAX_ECONOMICS_INVESTMENT_COST,
+    MAX_ECONOMICS_PRIOR_RESULT,
     MAX_PV_FORECAST_FACTOR,
     MIN_ECONOMICS_FEED_IN_PRICE,
     MIN_ECONOMICS_IMPORT_PRICE,
     MIN_ECONOMICS_INVESTMENT_COST,
+    MIN_ECONOMICS_PRIOR_RESULT,
     MIN_PV_FORECAST_FACTOR,
     PRICE_UNITS,
     READ_BLOCK_EXT_LOW1_COUNT,
@@ -527,6 +531,18 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
                 unit_of_measurement=CURRENCY_EURO,
             )
         ),
+        # REQ-ECONOMICS-AMORTIZATION: Ertrag aus der Zeit VOR dieser
+        # Integration. Wirkt nur auf die Amortisationssensoren, nicht auf
+        # das operative Ergebnis (siehe const.CONF_ECONOMICS_PRIOR_RESULT).
+        vol.Optional(CONF_ECONOMICS_PRIOR_RESULT): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=MIN_ECONOMICS_PRIOR_RESULT,
+                max=MAX_ECONOMICS_PRIOR_RESULT,
+                step=ECONOMICS_PRIOR_RESULT_STEP,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement=CURRENCY_EURO,
+            )
+        ),
     }
 )
 
@@ -746,11 +762,17 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
                 return await self._async_step_for_tariff(tariff_type)
 
-        schema = self.add_suggested_values_to_schema(
-            STEP_OPTIONS_SCHEMA, dict(self.config_entry.options)
-        )
+        # Bewusst _suggested statt add_suggested_values_to_schema auf den
+        # gespeicherten Options: Nach dem Fehler
+        # economics_price_sensor_required soll der Anwender nur den
+        # fehlenden Sensor nachtragen müssen. Gegen die reinen Options
+        # gerendert verlöre das Formular jede andere Änderung derselben
+        # Seite (Tarifart, PV-Prognose, Investitionskosten, Vorlauf) - wie
+        # bei allen Folgeschritten gewinnt deshalb die letzte Eingabe.
         return self.async_show_form(
-            step_id="init", data_schema=schema, errors=errors or None
+            step_id="init",
+            data_schema=self._suggested(STEP_OPTIONS_SCHEMA, user_input),
+            errors=errors or None,
         )
 
     async def _async_step_for_tariff(self, tariff_type: TariffType) -> ConfigFlowResult:

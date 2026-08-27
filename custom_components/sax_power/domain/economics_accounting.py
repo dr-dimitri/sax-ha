@@ -57,11 +57,10 @@ def compute_economics_delta(
 
     Ladeseite (siehe anforderung.yaml, REQ-ECONOMICS-ACCOUNTING):
     Netzladung kostet den Netzbezugspreis, PV-Ladung die entgangene
-    Einspeisevergütung. Fehlt der jeweilige Preis oder ist die Herkunft
-    unbekannt, wird nichts erfunden - die Energie erhöht stattdessen
-    `unvalued_inventory_kwh` (unbewerteter Bestand im Speicher) und den
-    zugehörigen `unpriced_charge`-Zähler, statt später rückwirkend bewertet
-    zu werden.
+    Einspeisevergütung. Fehlt der jeweilige Preis, wird nichts erfunden -
+    die Energie erhöht stattdessen `unvalued_inventory_kwh` (unbewerteter
+    Bestand im Speicher) und den zugehörigen `unpriced_charge`-Zähler,
+    statt später rückwirkend bewertet zu werden.
 
     Entladeseite: Jede Entladung verbraucht zuerst aus dem unbewerteten
     Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser Anteil
@@ -97,12 +96,6 @@ def compute_economics_delta(
         else:
             unpriced_charge += charge_delta.pv_kwh
             inventory_delta += charge_delta.pv_kwh
-
-    if charge_delta.unknown_kwh:
-        # Herkunft unbekannt hat keinen Preisbegriff - unabhängig davon, ob
-        # gerade ein Netzbezugspreis verfügbar wäre.
-        unpriced_charge += charge_delta.unknown_kwh
-        inventory_delta += charge_delta.unknown_kwh
 
     avoided_cost = 0.0
     unpriced_discharge = 0.0

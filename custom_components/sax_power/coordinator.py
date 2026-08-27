@@ -22,7 +22,10 @@ from pymodbus.exceptions import ModbusException
 
 from .application.calibration import CalibrationState, evaluate_calibration
 from .application.charge_policy import ChargePolicyInput, evaluate_charge_policy
-from .application.economics import investment_cost_eur_from_options
+from .application.economics import (
+    investment_cost_eur_from_options,
+    prior_result_eur_from_options,
+)
 from .application.ports import ModbusClient
 from .const import (
     ALL_MONTHS,
@@ -498,12 +501,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_discharged_kwh: float | None = None
         self._energy_last_ts: float | None = None
         # Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN): dieselbe
-        # None-bis-Initialisierung wie oben, zusätzlich als Vierergruppe
-        # (drei Zähler + Startzeitpunkt) - siehe
+        # None-bis-Initialisierung wie oben, zusätzlich als Dreiergruppe
+        # (zwei Zähler + Startzeitpunkt) - siehe
         # _bootstrap_energy_origin sowie EnergyState.origin_initialized.
         self._energy_grid_charged_kwh: float | None = None
         self._energy_pv_charged_kwh: float | None = None
-        self._energy_unknown_charged_kwh: float | None = None
         self._origin_accounting_started_at: datetime | None = None
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): dieselbe
         # None-bis-Bootstrap-Logik, zusätzlich gebunden an
@@ -701,7 +703,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._energy_grid_charged_kwh is not None:
                     self._energy_grid_charged_kwh += charge_delta.grid_kwh
                     self._energy_pv_charged_kwh += charge_delta.pv_kwh
-                    self._energy_unknown_charged_kwh += charge_delta.unknown_kwh
             if self._energy_discharged_kwh is not None:
                 self._energy_discharged_kwh += discharge_kwh
                 changed = changed or discharge_kwh > 0
@@ -729,29 +730,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._energy_pv_charged_kwh is not None
             else None
         )
-        data["energy_charged_origin_unknown"] = (
-            round(self._energy_unknown_charged_kwh, 3)
-            if self._energy_unknown_charged_kwh is not None
-            else None
-        )
-        data["energy_origin_coverage"] = self._energy_origin_coverage()
         self._accumulate_economics(data, charge_delta, discharge_kwh, observed_seconds)
 
-    def _energy_origin_coverage(self) -> float | None:
-        """Anteil (%) der seit Start zugeordneten Ladeenergie (Netz + PV)
-        an der gesamten seither akkumulierten Ladeenergie mit bekannter
-        Herkunftszählung. None, solange die Herkunftszählung selbst noch
-        nicht initialisiert ist; bei Nenner 0 (noch gar nicht geladen seit
-        Start) 100 % - siehe anforderung.yaml, REQ-ENERGY-ORIGIN."""
-        grid = self._energy_grid_charged_kwh
-        pv = self._energy_pv_charged_kwh
-        unknown = self._energy_unknown_charged_kwh
-        if grid is None or pv is None or unknown is None:
-            return None
-        total = grid + pv + unknown
-        if total <= 0:
-            return 100.0
-        return round((grid + pv) / total * 100, 1)
+    def _energy_origin_initialized(self) -> bool:
+        """Ob die Herkunftszählung läuft (siehe _bootstrap_energy_origin).
+
+        Seit dem Wegfall der Kategorie "Herkunft unbekannt" ist jede
+        gezählte Ladeenergie genau einer Quelle zugeordnet - eine
+        Abdeckungsquote wäre damit konstant 100 % und sagte nichts mehr
+        aus. Übrig bleibt genau die eine Aussage, die der
+        Wirtschaftlichkeitsstatus braucht: ob überhaupt schon gezählt
+        wird (REQ-ENERGY-ORIGIN).
+        """
+        return (
+            self._energy_grid_charged_kwh is not None
+            and self._energy_pv_charged_kwh is not None
+        )
 
     # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) ---------------
     def _accumulate_economics(
@@ -1145,18 +1139,33 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         oder Entfernung der Investitionskosten wirkt nur prospektiv auf
         künftige ROI-/Restbetrags-Sensoren, nie rückwirkend auf diesen
         bereits erreichten Zeitpunkt.
+
+        Der frei eingebbare Vorlauf-Ertrag geht hier bewusst NICHT ein,
+        obwohl er ROI, Fortschritt und Restbetrag verschiebt. Zwei Gründe:
+        Erstens wäre der Zeitstempel sonst schlicht falsch - trägt erst
+        der Vorlauf die Amortisation, dann lag der tatsächliche
+        Amortisationszeitpunkt in einer Vergangenheit, die diese
+        Integration nie beobachtet hat; "heute" zu stempeln erfände ein
+        Datum. Der Fortschritt zeigt in diesem Fall 100 % und der
+        Restbetrag 0 EUR, das Datum bleibt ehrlich unbekannt. Zweitens ist
+        dieser Zeitstempel persistiert und unwiderruflich: Ein Tippfehler
+        im Vorlauf (40.000 statt 4.000) schriebe das Rückzahlungsdatum
+        dauerhaft fest, und ein Zurücknehmen ist kein Ausweg - der
+        Economics-Store weist einen abweichenden Payback-Zeitpunkt als
+        beschädigten Snapshot ab (EconomicsStateStore._accept), was die
+        gesamte Geldbilanz in den Zustand storage_error einfrieren würde.
         """
         if self._economics_payback_achieved_at is not None:
             return
         investment_cost = investment_cost_eur_from_options(self.options)
         if investment_cost is None:
             return
-        operating_result = (
+        measured_result = (
             self._economics_avoided_grid_cost_eur
             - self._economics_grid_charge_cost_eur
             - self._economics_pv_opportunity_cost_eur
         )
-        if operating_result >= investment_cost:
+        if measured_result >= investment_cost:
             self._economics_payback_achieved_at = dt_util.utcnow()
 
     def _publish_amortization(
@@ -1203,6 +1212,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "economics_estimated_payback_date",
             ):
                 data[key] = None
+            data["economics_roi_attributes"] = {
+                "prior_result_eur": None,
+                "measured_operating_result_eur": None,
+            }
             data["economics_amortization_forecast_attributes"] = {
                 "window_start": None,
                 "window_end": None,
@@ -1217,7 +1230,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             }
             return
 
-        operating_result = (
+        # Exakt derselbe Betrag, den economics_operating_result
+        # veröffentlicht (_publish_economics_balance) - die reine Messung.
+        measured_result = (
             None
             if self._economics_avoided_grid_cost_eur is None
             or self._economics_grid_charge_cost_eur is None
@@ -1227,6 +1242,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 - self._economics_grid_charge_cost_eur
                 - self._economics_pv_opportunity_cost_eur
             )
+        )
+        # Der Vorlauf-Ertrag geht ausschließlich hier ein, nicht in
+        # _publish_economics_balance: economics_operating_result bleibt der
+        # von dieser Integration selbst gemessene Betrag (siehe
+        # const.CONF_ECONOMICS_PRIOR_RESULT). Er wird bewusst nur zu einer
+        # bereits laufenden Bilanz addiert - stünde er auch für sich
+        # allein, zeigte das Dashboard einen ROI aus reiner Handeingabe,
+        # während daneben jeder gemessene Geldwert unbekannt ist.
+        prior_result = prior_result_eur_from_options(self.options)
+        operating_result = (
+            None if measured_result is None else measured_result + prior_result
         )
         published_operating_result = operating_result if monetary_available else None
         roi_percent = compute_roi_percent(published_operating_result, investment_cost)
@@ -1278,6 +1304,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["economics_estimated_payback_date"] = self._estimated_payback_date(
             forecast
         )
+        # Ohne diese beiden Attribute stünden im Dashboard drei Zahlen
+        # nebeneinander, die sich nicht zur Deckung bringen lassen: ein
+        # operatives Ergebnis von 250 EUR, ein Restbetrag von 350 EUR und
+        # ein ROI von 65 % bei 1000 EUR Investition. Erst der hier
+        # ausgewiesene Vorlauf-Ertrag erklärt die Differenz.
+        data["economics_roi_attributes"] = {
+            "prior_result_eur": prior_result,
+            # Bewusst measured_result, nicht operating_result: Das Attribut
+            # soll die Differenz zum Sensor economics_operating_result
+            # AUFLÖSEN. Stünde hier der bereits um den Vorlauf erhöhte
+            # Betrag, zeigte es genau die Zahl nicht, gegen die der Leser
+            # abgleicht.
+            "measured_operating_result_eur": (
+                None if measured_result is None else round(measured_result, 2)
+            ),
+        }
         data["economics_amortization_forecast_attributes"] = {
             "window_start": (
                 forecast.window_start.isoformat()
@@ -1451,7 +1493,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         daneben erhalten, taugen aber nicht als Auslöser, weil sie nie
         zurückgehen (Issue #134, siehe compute_economics_status).
         """
-        origin_coverage = self._energy_origin_coverage()
         charge_coverage = compute_price_coverage_percent(
             self._economics_priced_charge_kwh, self._economics_unpriced_charge_kwh
         )
@@ -1472,7 +1513,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             storage_error=self._economics_store_write_blocked,
             started=self._economics_started_at is not None,
             price_unavailable=self._economics_price_unavailable,
-            origin_unavailable=origin_coverage is None,
+            origin_unavailable=not self._energy_origin_initialized(),
             priced_charge_kwh_today=self._economics_current_day_priced_charge_kwh,
             unpriced_charge_kwh_today=self._economics_current_day_unpriced_charge_kwh,
             priced_discharge_kwh_today=(
@@ -1555,7 +1596,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if discharge_coverage_today is None
                 else round(discharge_coverage_today, 1)
             ),
-            "origin_coverage_percent": origin_coverage,
         }
 
     def _bootstrap_economics_if_ready(self, data: dict[str, Any]) -> None:
@@ -2085,12 +2125,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if state is not None and state.origin_initialized:
             self._energy_grid_charged_kwh = state.grid_charged_kwh
             self._energy_pv_charged_kwh = state.pv_charged_kwh
-            self._energy_unknown_charged_kwh = state.unknown_charged_kwh
             self._origin_accounting_started_at = state.origin_accounting_started_at
             return
         self._energy_grid_charged_kwh = 0.0
         self._energy_pv_charged_kwh = 0.0
-        self._energy_unknown_charged_kwh = 0.0
         self._origin_accounting_started_at = dt_util.utcnow()
 
     def restore_energy_charged(self, value_kwh: float | None) -> None:
@@ -2137,7 +2175,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             discharged_kwh=self._energy_discharged_kwh,
             grid_charged_kwh=self._energy_grid_charged_kwh,
             pv_charged_kwh=self._energy_pv_charged_kwh,
-            unknown_charged_kwh=self._energy_unknown_charged_kwh,
             origin_accounting_started_at=self._origin_accounting_started_at,
         )
 

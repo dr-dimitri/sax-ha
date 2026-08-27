@@ -159,6 +159,37 @@ nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
 `section`-Blöcke und liegen deshalb als verschachtelte Mappings in
 `entry.options`.
 
+Der **Strompreis-Sensor** (`price_sensor`, erste Seite) hat zwei getrennte
+Aufgaben, die sich leicht verwechseln lassen:
+
+| Tarifmodell | Preisquelle der Wirtschaftlichkeit | Strompreis-Sensor |
+|---|---|---|
+| `disabled` | keine | nur preisoptimiertes Laden |
+| `fixed` | ein fester Arbeitspreis aus dem Options Flow | nur preisoptimiertes Laden |
+| `time_of_use` | Grundpreis + bis zu acht Zeitfenster aus dem Options Flow | nur preisoptimiertes Laden |
+| `dynamic` | der Strompreis-Sensor | Pflichtfeld |
+
+Für das preisoptimierte Laden ist der Sensor immer die Quelle, unabhängig vom
+Tarifmodell. Für die Wirtschaftlichkeit ist er es nur beim dynamischen Tarif.
+Beim tageszeitabhängigen Tarif ist er ausdrücklich unbrauchbar: Ein
+dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, das
+Tarifmodell dagegen ein täglich wiederkehrendes Profil - die beiden Formate
+lassen sich nicht ineinander überführen. Weil beide Felder auf derselben Seite
+untereinanderstehen, sagen die `data_description`-Texte in `strings.json` das
+ausdrücklich (Anwenderbericht zu #135/#137).
+
+Kein Formularschema darf einen Validator enthalten, den
+`voluptuous_serialize` nicht für das Frontend übersetzen kann - eine
+gewöhnliche Python-Funktion in einem `vol.All` gehört dazu. Der Fehler fliegt
+erst *nach* dem Flow-Schritt in der Websocket-Schicht, der Dialog zeigt
+deshalb nur „Unknown error occurred", und der Schritt ist überhaupt nicht
+erreichbar (#135). Die Preisfelder sind deshalb nackte `NumberSelector` (die
+prüfen den Wertebereich selbst), und die Rundung auf 0,0001 EUR/kWh erfolgt
+im Schritt (`_round_price_fields`). `tests/test_config_flow.py` führt die
+Serialisierung für jeden Schritt beider Flows und für jedes Modulschema aus;
+die übrigen Tests rufen den Flow über die Python-API auf und überspringen
+diese Schicht.
+
 Die Preisfelder der Folgeseiten sind im Schema `vol.Optional` und werden
 erst im Schritt selbst geprüft (`_missing_prices` → Feldfehler
 `economics_price_required`): Ein `vol.Required` scheitert schon in der

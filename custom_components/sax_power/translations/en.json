@@ -720,12 +720,12 @@
           "economics_investment_cost_eur": "Investment cost (EUR)"
         },
         "data_description": {
-          "price_sensor": "Sensor holding the current energy price. The windows for the “relative” and “smart” strategies are derived from its price forecast attributes.",
+          "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative” and “smart” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
           "price_attribute": "Only needed if auto-detection fails - e.g. “raw_today”, “data” or “forecast”.",
           "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh is converted to EUR/kWh internally.",
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
-          "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings.",
+          "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
           "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress, remaining-to-payback and the estimated payback date, offset against the running operating result (avoided grid import minus charging and PV opportunity cost). Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running."
         }
       },
@@ -753,7 +753,7 @@
       },
       "economics_time_of_use": {
         "title": "Economics: time-of-use tariff",
-        "description": "Every calendar day uses the same base price, overridden by up to eight windows. Windows are half-open (start inclusive, end exclusive), may cross midnight and must not overlap; touching boundaries are allowed. The local Home Assistant time zone applies. Each group is either completely empty or completely filled in. All prices are variable gross energy prices in EUR/kWh. Monthly standing charges, bonuses, taxes billed outside the energy price and other fixed costs are explicitly excluded.",
+        "description": "Every calendar day uses the same base price, overridden by up to eight windows. Windows are half-open (start inclusive, end exclusive), may cross midnight and must not overlap; touching boundaries are allowed. The local Home Assistant time zone applies. Each group is either completely empty or completely filled in. All prices are variable gross energy prices in EUR/kWh. Monthly standing charges, bonuses, taxes billed outside the energy price and other fixed costs are explicitly excluded. This page defines a daily recurring price profile, not a time-series forecast: the electricity price sensor selected on the previous page is explicitly not used here and does not need to be set for this tariff model.",
         "data": {
           "economics_feed_in_price_eur_kwh": "Feed-in tariff (EUR/kWh)",
           "economics_tou_base_price_eur_kwh": "Base import price (EUR/kWh)"

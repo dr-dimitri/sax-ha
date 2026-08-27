@@ -6472,3 +6472,57 @@ def test_tariff_plan_attributes_name_the_reason_without_a_price(hass) -> None:
     assert attributes["quote_source"] is None
     assert attributes["unavailable_reason"] == "tariff_disabled"
     assert data["economics_current_import_price"] is None
+
+
+def test_tariff_plan_reports_no_price_change_without_windows(hass) -> None:
+    """Alle acht Gruppen leer zu lassen ist eine gültige Konfiguration; sie
+    verhält sich dann wie ein Festpreis. Der zugrunde liegende Quote trägt
+    dort trotzdem den bloßen Tagesumbruch als Gültigkeitsende
+    (domain.tariff._segment_bounds) - als "nächster Preiswechsel" gemeldet
+    wäre das ein Wechsel um Mitternacht, den es nicht gibt."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+    }
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 14, 0)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert data["economics_current_import_price"] == pytest.approx(0.30)
+    assert attributes["windows"] == []
+    assert attributes["next_price_change_at"] is None
+
+
+def test_tariff_plan_marks_no_active_window_without_a_price(hass) -> None:
+    """Ein von Hand bearbeiteter Store kann Fenster ohne Grundpreis
+    enthalten (TARIFF_INCOMPLETE). Dann gilt gerade gar kein Preis - kein
+    Fenster darf als "jetzt geltend" erscheinen, die Fensterliste bleibt
+    für die Fehlersuche aber sichtbar."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        # Grundpreis fehlt bewusst.
+        economics_tou_window_key(1): {
+            CONF_ECONOMICS_WINDOW_START: "22:00:00",
+            CONF_ECONOMICS_WINDOW_END: "06:00:00",
+            CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+        },
+    }
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 0)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert data["economics_current_import_price"] is None
+    assert attributes["unavailable_reason"] == "tariff_incomplete"
+    assert attributes["active_window"] is None
+    assert attributes["next_price_change_at"] is None
+    assert attributes["windows"] == [
+        {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+    ]

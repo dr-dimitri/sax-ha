@@ -1385,7 +1385,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         config = self.tariff_provider.config
         quote = quote_result.quote
         time_of_use = config.tariff_type is TariffType.TIME_OF_USE
-        window = active_window(config, moment)
+        # Ohne gültigen Quote (z. B. TARIFF_INCOMPLETE nach einem von Hand
+        # bearbeiteten Store) gilt gerade überhaupt kein Preis - dann darf
+        # auch kein Fenster als "jetzt geltend" erscheinen. Die
+        # Fensterliste selbst bleibt sichtbar: genau sie braucht der
+        # Anwender, um den Konfigurationsfehler zu finden.
+        window = active_window(config, moment) if quote is not None else None
         return {
             "tariff_type": str(config.tariff_type),
             "quote_source": None if quote is None else str(quote.source),
@@ -1393,11 +1398,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 None if quote_result.reason is None else str(quote_result.reason)
             ),
             "active_window": None if window is None else window_as_mapping(window),
-            # Beim Festpreis unbegrenzt gültig (valid_until ist None), beim
-            # dynamischen Tarif das Ende des Vorschau-Slots.
+            # Der nächste PREISwechsel, nicht das Ende der Gültigkeit:
+            # Beim Festpreis unbegrenzt (valid_until ist None), beim
+            # dynamischen Tarif das Ende des Vorschau-Slots. Ein
+            # tageszeitabhängiger Tarif ganz ohne Zeitfenster ist zwar eine
+            # gültige Konfiguration, verhält sich aber wie ein Festpreis;
+            # sein valid_until ist dort der bloße Tagesumbruch
+            # (domain.tariff._segment_bounds) und würde einen Preiswechsel
+            # um Mitternacht melden, den es nicht gibt.
             "next_price_change_at": (
                 None
-                if quote is None or quote.valid_until is None
+                if quote is None
+                or quote.valid_until is None
+                or (time_of_use and not config.windows)
                 else quote.valid_until.isoformat()
             ),
             "base_price_eur_kwh": (

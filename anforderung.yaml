@@ -3914,7 +3914,10 @@ requirement_economics_dashboard:
       Beginn, mit dem Grundpreis als letzter Zeile und der Markierung
       "jetzt" an der gerade geltenden Zeile - beim Grundpreis also an
       dieser. Darunter steht der nächste Preiswechsel als Ortszeit,
-      sofern bekannt. Gespeist wird sie ausschließlich aus den Attributen
+      sofern bekannt. Gilt gerade kein Preis (`unavailable_reason`
+      gesetzt), trägt keine Zeile die Markierung und die Karte nennt
+      stattdessen den Grund: `active_window` ist in diesem Fall ebenfalls
+      None, die Markierung träfe sonst fälschlich den Grundpreis. Gespeist wird sie ausschließlich aus den Attributen
       des Preis-Sensors (siehe unten); sie enthält damit keine eigene
       Kopie der Konfiguration und kann nach einer Options-Änderung nicht
       veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
@@ -3991,9 +3994,17 @@ requirement_economics_dashboard:
     sensor.SaxPowerSensorEntityDescription.attributes_fn): `tariff_type`,
     `quote_source` (None ohne Preis), `unavailable_reason` (der
     QuoteUnavailable-Grund, None mit Preis), `active_window` (Beginn/Ende/
-    Preis des greifenden Fensters, None solange der Grundpreis gilt),
+    Preis des greifenden Fensters, None solange der Grundpreis gilt und
+    ebenso, solange überhaupt kein Preis bestimmbar ist - ohne gültigen
+    Quote darf kein Fenster als "jetzt geltend" erscheinen; die
+    Fensterliste bleibt dabei sichtbar, weil genau sie zur Fehlersuche
+    gebraucht wird),
     `next_price_change_at` (Ende des laufenden Preisabschnitts als
-    ISO-Ortszeit; beim Festpreis None, weil er unbegrenzt gilt),
+    ISO-Ortszeit; beim Festpreis None, weil er unbegrenzt gilt, und
+    ebenso bei einem tageszeitabhängigen Tarif ganz ohne Zeitfenster:
+    dessen Quote trägt zwar den bloßen Tagesumbruch als Gültigkeitsende
+    (_segment_bounds), ein Preiswechsel um Mitternacht findet dort aber
+    nicht statt),
     `base_price_eur_kwh` und `windows` (die vollständige, nach Beginn
     sortierte Fensterliste). Die beiden letztgenannten sowie
     `active_window` sind bei jeder anderen Tarifart als "time_of_use"

@@ -639,10 +639,13 @@ keine neue Berechnung ein:
   letzte Zeile, Markierung „jetzt" an der geltenden Zeile, darunter der
   nächste Preiswechsel). Ihre einzige Datenquelle sind die Attribute von
   `economics_current_import_price` (`windows`, `active_window`,
-  `base_price_eur_kwh`, `next_price_change_at`, siehe
-  `coordinator._tariff_plan_attributes`) - die Karte enthält damit keine
-  eigene Kopie der Tarifkonfiguration und kann nach einer
-  Options-Änderung nicht veralten. Wie die Investitionskarte hängt ihre
+  `base_price_eur_kwh`, `next_price_change_at`, `unavailable_reason`,
+  siehe `coordinator._tariff_plan_attributes`) - die Karte enthält damit
+  keine eigene Kopie der Tarifkonfiguration und kann nach einer
+  Options-Änderung nicht veralten. `unavailable_reason` entscheidet, ob
+  überhaupt eine Zeile als "jetzt" markiert wird: Gilt kein Preis, ist
+  auch `active_window` None, und die Markierung träfe sonst fälschlich
+  den Grundpreis. Wie die Investitionskarte hängt ihre
   Sichtbarkeit an einer Core-`conditional`-Karte, hier am Attribut
   `tariff_type`: Der Preis-Sensor existiert bei jeder Tarifart, ein
   Tagesplan ergibt aber nur beim tageszeitabhängigen Tarif Sinn. Der

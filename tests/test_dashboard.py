@@ -1163,3 +1163,37 @@ async def test_economics_view_tariff_plan_card_survives_missing_attributes(
 
     assert "| Von | Bis | Arbeitspreis |" in rendered
     assert "? EUR/kWh (Grundpreis)" in rendered
+
+
+async def test_economics_view_tariff_plan_card_marks_nothing_without_a_price(
+    hass,
+) -> None:
+    """Gilt gerade kein Preis, ist auch `active_window` None - ohne
+    zusätzliche Abfrage von `unavailable_reason` träfe die Markierung
+    "jetzt" dann fälschlich den Grundpreis (Review-Befund). Stattdessen
+    nennt die Karte den Grund."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "unknown",
+        {
+            "tariff_type": "time_of_use",
+            "windows": [
+                {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+            ],
+            "active_window": None,
+            "unavailable_reason": "tariff_incomplete",
+            "base_price_eur_kwh": None,
+            "next_price_change_at": None,
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_economics_view(config))["card"]["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert "**jetzt**" not in rendered
+    assert "Derzeit gilt kein Preis (tariff_incomplete)" in rendered
+    # Die Fensterliste bleibt sichtbar - genau sie braucht der Anwender,
+    # um den Konfigurationsfehler zu finden.
+    assert "| 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered

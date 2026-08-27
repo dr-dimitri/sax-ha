@@ -70,6 +70,11 @@ _LOGGER = logging.getLogger(__name__)
 #: Die Zeilenumbrüche innerhalb der {{ ... }}-Ausdrücke halten die
 #: Quelltextzeilen unter der Zeilenlänge, ohne die Ausgabe zu verändern -
 #: eine Markdown-Tabellenzeile muss eine einzige Ausgabezeile bleiben.
+#:
+#: `unavailable_reason` entscheidet, ob überhaupt eine Zeile als "jetzt"
+#: geltend markiert wird: Gilt gerade kein Preis, ist auch `active_window`
+#: None - ohne diese zusätzliche Abfrage träfe die Markierung dann
+#: fälschlich den Grundpreis (Review-Befund).
 _PRICE_ENTITY_PLACEHOLDER = "__PRICE_ENTITY__"
 _TARIFF_PLAN_TEMPLATE = """\
 {%- set entity = '__PRICE_ENTITY__' %}
@@ -77,6 +82,7 @@ _TARIFF_PLAN_TEMPLATE = """\
 {%- set active = state_attr(entity, 'active_window') %}
 {%- set base = state_attr(entity, 'base_price_eur_kwh') %}
 {%- set change = state_attr(entity, 'next_price_change_at') %}
+{%- set reason = state_attr(entity, 'unavailable_reason') %}
 | | Von | Bis | Arbeitspreis |
 |---|---|---|---|
 {%- for window in windows %}
@@ -86,9 +92,11 @@ _TARIFF_PLAN_TEMPLATE = """\
 | {{ '**jetzt**' if current else '' }} | {{ window.start[:5] }} | {{
     window.end[:5] }} | {{ '%.4f'|format(window.price_eur_kwh) }} EUR/kWh |
 {%- endfor %}
-| {{ '**jetzt**' if active is none else '' }} | – | – | {{
+| {{ '**jetzt**' if reason is none and active is none else '' }} | – | – | {{
     '%.4f'|format(base) if base is not none else '?' }} EUR/kWh (Grundpreis) |
-{% if change is not none %}
+{% if reason is not none %}
+Derzeit gilt kein Preis ({{ reason }}) – bitte die Tarifkonfiguration prüfen.
+{%- elif change is not none %}
 Nächster Preiswechsel: {{ as_timestamp(change) | timestamp_custom('%H:%M') }} Uhr
 {%- endif %}
 """

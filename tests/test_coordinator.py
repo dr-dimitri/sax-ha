@@ -5545,10 +5545,32 @@ def test_result_today_publishes_the_timestamp_of_its_daily_reset(hass) -> None:
     )
 
 
-def test_result_today_last_reset_is_none_while_the_sensor_has_no_value(hass) -> None:
-    """Ohne Investitionskosten (Sensor None) und vor dem ersten Tag gibt es
-    auch keinen Reset-Zeitpunkt - ein last_reset ohne Zustand hätte keine
-    Aussage."""
+def test_result_today_last_reset_survives_a_tariff_pause(hass) -> None:
+    """Während einer Tarifpause blendet nur der Geldwert aus; der
+    Reset-Zeitpunkt läuft weiter mit, damit der Sensor nach dem
+    Reaktivieren nicht ohne Reset-Bezug wieder auftaucht (ein
+    unknown-Zustand fließt ohnehin nicht in die Statistik)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    coordinator.options = {CONF_ECONOMICS_INVESTMENT_COST: 1000.0}
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(),
+    )
+
+    assert data["economics_result_today"] is None
+    assert data["economics_result_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 10)
+    )
+
+
+def test_result_today_last_reset_is_none_without_investment_cost(hass) -> None:
+    """Ohne Investitionskosten ist der Sensor selbst abgeschaltet - dann
+    gibt es auch keinen Reset-Zeitpunkt zu melden."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
@@ -6128,6 +6150,57 @@ async def test_restart_economics_accounting_resets_money_but_not_energy(hass) ->
     assert coordinator._energy_discharged_kwh == 9.0
     assert coordinator._energy_grid_charged_kwh == 5.0
     coordinator._economics_store.async_reset.assert_awaited_once()
+
+
+async def test_restart_mid_day_moves_the_last_reset_of_result_today(hass) -> None:
+    """Ein Bilanzneustart setzt das Tagesergebnis mitten am Tag auf 0, ohne
+    das Datum zu ändern - bliebe last_reset dabei auf Mitternacht stehen,
+    verbuchte die Langzeitstatistik den Sprung erneut als negativen Zuwachs
+    (Issue #133, Review-Befund)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    coordinator._economics_store.async_reset = AsyncMock(return_value=True)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    assert data["economics_result_today"] == pytest.approx(250.0)
+    assert data["economics_result_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 10)
+    )
+
+    coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
+    restarted_at = datetime(2026, 3, 10, 16, 0, tzinfo=UTC)
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=restarted_at,
+    ):
+        await coordinator.async_restart_economics_accounting()
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 10, 17, 0),
+        delta=EconomicsDelta(),
+    )
+
+    assert data["economics_result_today"] == pytest.approx(0.0)
+    assert data["economics_result_today_last_reset"] == restarted_at
+
+    # Am Folgetag zählt wieder der Tagesbeginn - der (ältere) Neustart darf
+    # den Reset-Zeitpunkt nicht dauerhaft festhalten.
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=4000.0,
+        now=datetime(2026, 3, 11, 0, 10),
+        delta=EconomicsDelta(),
+    )
+    assert data["economics_result_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 11)
+    )
 
 
 async def test_restart_economics_accounting_keeps_old_state_if_save_fails(

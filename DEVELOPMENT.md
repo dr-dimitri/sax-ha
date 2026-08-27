@@ -396,7 +396,9 @@ Kalendertages). Der Sensor reicht ihn über das optionale
 `last_reset_fn`-Feld von `SaxPowerSensorEntityDescription` als `last_reset`
 durch - ohne diesen Zeitpunkt läse die Langzeitstatistik den Sprung auf 0
 um Mitternacht als negativen Zuwachs in Höhe des Tagesergebnisses
-(Issue #133).
+(Issue #133). Weil ein manueller Bilanzneustart den Tageszähler auch
+mitten am Tag auf 0 setzt, ist der gemeldete Zeitpunkt der spätere von
+Tagesbeginn und `last_restart_at`.
 
 Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 2 erweitert
 (statt einer Hauptversion, aus demselben Grund wie beim

@@ -1002,6 +1002,33 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             dt_util.utcnow().isoformat(),
         )
 
+    def _result_today_last_reset(self) -> datetime | None:
+        """Zeitpunkt, zu dem economics_result_today zuletzt auf 0 sprang.
+
+        Ein zyklisch zurückgesetzter total-Sensor muss diesen Zeitpunkt
+        mitliefern, sonst verbucht die Langzeitstatistik den Sprung auf 0
+        nicht als Reset, sondern als negativen Zuwachs in Höhe des
+        bisherigen Tagesergebnisses (Issue #133).
+
+        Normalfall ist der Beginn des laufenden Tages in derselben lokalen
+        Zeitzone, aus der auch die Tageswechsel-Erkennung ihr Datum bezieht
+        (_advance_economics_day). Ein manueller Bilanzneustart
+        (async_restart_economics_accounting) setzt den Tageszähler aber
+        mitten am Tag auf 0, ohne das Datum zu ändern - ohne den Vergleich
+        mit last_restart_at bliebe last_reset dabei stehen und genau der
+        Fehler, den dieser Zeitpunkt verhindern soll, träte erneut auf.
+        last_restart_at ist persistiert und übersteht deshalb (wie das
+        Tagesdatum selbst) einen Neustart von Home Assistant, ohne dass
+        sich der gemeldete Zeitpunkt nachträglich verschiebt.
+        """
+        if self._economics_current_day is None:
+            return None
+        day_start = dt_util.start_of_local_day(self._economics_current_day)
+        restarted_at = self._economics_last_restart_at
+        if restarted_at is not None and restarted_at > day_start:
+            return restarted_at
+        return day_start
+
     def _start_economics_day(self, day: date) -> None:
         self._economics_current_day = day
         self._economics_current_day_operating_result_eur = 0.0
@@ -1203,17 +1230,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["economics_result_today"] = (
             None if current_day_result is None else round(current_day_result, 4)
         )
-        # Ein zyklisch zurückgesetzter total-Sensor muss den Zeitpunkt
-        # seines Resets mitliefern, sonst verbucht die Langzeitstatistik
-        # den Sprung auf 0 um Mitternacht als negativen Zuwachs in Höhe des
-        # Tagesergebnisses (Issue #133). Der Zeitpunkt ist der Beginn des
-        # laufenden Tages in derselben lokalen Zeitzone, aus der auch die
-        # Tageswechsel-Erkennung ihr Datum bezieht (_advance_economics_day).
-        data["economics_result_today_last_reset"] = (
-            None
-            if self._economics_current_day is None
-            else dt_util.start_of_local_day(self._economics_current_day)
-        )
+        data["economics_result_today_last_reset"] = self._result_today_last_reset()
 
         # Unmaskierter Restbetrag ausschließlich für die (tarifpausen-
         # unabhängige) Prognose - siehe Docstring oben.

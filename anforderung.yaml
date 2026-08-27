@@ -3427,8 +3427,16 @@ requirement_economics_amortization:
     Mitternachtswechsel einen guten Tag als gleich großen Verlust. Ein
     Ausweichen auf state_class measurement scheidet aus, weil
     device_class monetary in Home Assistant ausschließlich total zulässt.
-    Ist noch kein Tag begonnen (oder liefert der Sensor mangels
-    Investitionskosten ohnehin None), bleibt auch last_reset None.
+    Ein manueller Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY,
+    async_restart_economics_accounting) setzt den Tageszähler mitten am Tag
+    auf 0, ohne das Datum zu ändern - last_reset ist deshalb der spätere
+    der beiden Zeitpunkte Tagesbeginn/last_restart_at (beide persistiert,
+    verschieben sich also durch einen Neustart von Home Assistant nicht
+    nachträglich). Ohne begonnenen Kalendertag und ohne
+    Investitionskosten (der Sensor ist dann selbst abgeschaltet) bleibt
+    last_reset None; eine Tarifpause blendet dagegen nur den Geldwert aus
+    und lässt den Reset-Zeitpunkt stehen - ein unknown-Zustand fließt
+    ohnehin nicht in die Langzeitstatistik ein.
     payback_days macht
     dabei den Horizontfall sichtbar: entfällt estimated_payback_date nur
     wegen MAX_FORECAST_PAYBACK_DAYS, bleibt unavailable_reason None (der
@@ -3531,9 +3539,10 @@ requirement_economics_amortization:
     - "economics_result_today meldet den Beginn des laufenden lokalen
        Kalendertages als last_reset und zieht bei jedem Tageswechsel mit,
        damit der Sprung auf 0 in der Langzeitstatistik als Reset und nicht
-       als negativer Zuwachs verbucht wird; ohne veröffentlichten Wert
-       bleibt auch last_reset None (Issue #133,
-       tests/test_coordinator.py, tests/test_sensor_descriptions.py)."
+       als negativer Zuwachs verbucht wird; ein Bilanzneustart mitten am
+       Tag verschiebt den Zeitpunkt ebenfalls, ohne Investitionskosten
+       bleibt er None (Issue #133, tests/test_coordinator.py,
+       tests/test_sensor_descriptions.py)."
     - "Das Rückzahlungsdatum der 30-Tage-Prognose bleibt während einer
        Tarifpause sichtbar (unmaskierter Restbetrag), auch wenn die vier
        aktuellen Sensoren (ROI, Fortschritt, Restbetrag, Tagesergebnis) auf

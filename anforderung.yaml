@@ -2723,6 +2723,20 @@ requirement_economics_tariffs:
     unübersetzte Rohmeldung "required key not provided". Pflicht bleiben
     sie dadurch unverändert - ohne Preis wird kein Eintrag geschrieben.
 
+    Aus demselben Grund enthält kein Formularschema der Integration einen
+    Validator, den Home Assistant nicht für das Frontend übersetzen kann:
+    voluptuous_serialize übersetzt jedes Schema Validator für Validator,
+    und eine gewöhnliche Python-Funktion in einem vol.All ist nicht
+    übersetzbar. Der Fehler entsteht erst NACH dem Flow-Schritt in der
+    Websocket-Schicht; der Dialog zeigt deshalb nur "Unknown error
+    occurred", und die betroffene Seite ist überhaupt nicht erreichbar
+    (Anwenderbericht zu #135). Die Preisfelder sind deshalb nackte
+    NumberSelector - die Prüfung des Wertebereichs übernehmen sie selbst -,
+    und die Rundung auf die Schrittweite 0,0001 erfolgt im Schritt
+    unmittelbar vor dem Speichern (config_flow._round_price_fields): für
+    die Preise auf oberster Ebene ebenso wie für die Preise in den acht
+    Zeitfenstergruppen.
+
     Die tarifspezifischen Schemata lassen zusätzlich fremde Schlüssel zu
     (vol.ALLOW_EXTRA) und behandeln eine erneut abgeschickte erste Seite
     (erkennbar am dort enthaltenen Tarifmodell) als Wiederholung genau

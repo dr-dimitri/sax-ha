@@ -5,11 +5,15 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
+import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sax_power import config_flow
 from custom_components.sax_power.config_flow import _expected_entity_count
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -1066,3 +1070,164 @@ async def test_investment_cost_can_be_removed_without_touching_the_tariff(
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert CONF_ECONOMICS_INVESTMENT_COST not in entry.options
     assert entry.options[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 0.34
+
+
+# --------------------------------------------------------------------------
+# Frontend-Serialisierung (Issue #135)
+# --------------------------------------------------------------------------
+# Home Assistant übersetzt jedes Formularschema für das Frontend mit
+# voluptuous_serialize. Scheitert das, fliegt der Fehler erst NACH dem
+# eigentlichen Flow-Schritt in der Websocket-Schicht - der Dialog zeigt dann
+# nur "Unknown error occurred", und der Schritt ist unerreichbar. Alle
+# übrigen Tests dieser Datei rufen den Flow über die Python-API auf und
+# überspringen diese Schicht; genau deshalb blieb #135 unbemerkt, obwohl
+# keine einzige Tarifseite mehr darstellbar war.
+
+
+def _assert_frontend_can_render(schema: vol.Schema) -> None:
+    """Schema so übersetzen, wie Home Assistant es fürs Frontend tut."""
+    voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
+
+
+def test_every_module_schema_is_serializable() -> None:
+    """Jedes im Modul definierte Formularschema muss darstellbar sein.
+
+    Bewusst über das Modul iteriert statt über eine gepflegte Liste: ein
+    künftig ergänztes Schema ist damit automatisch mit abgedeckt und kann
+    den Fehler aus #135 nicht unbemerkt wieder einschleppen."""
+    schemas = {
+        name: value
+        for name, value in vars(config_flow).items()
+        if isinstance(value, vol.Schema)
+    }
+    assert schemas, "Kein Schema gefunden - Test greift ins Leere"
+    for name, schema in schemas.items():
+        try:
+            _assert_frontend_can_render(schema)
+        except ValueError as err:  # pragma: no cover - nur im Fehlerfall
+            pytest.fail(f"{name} ist für das Frontend nicht darstellbar: {err}")
+
+
+async def test_every_setup_step_renders_for_the_frontend(hass) -> None:
+    """Ersteinrichtung: jeder Schritt muss ein darstellbares Formular
+    liefern."""
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.connected = True
+    read_result = MagicMock()
+    read_result.isError.return_value = False
+    read_result.registers = [50] * 115
+    client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.write_register = AsyncMock(return_value=read_result)
+    client.close = MagicMock()
+
+    with (
+        patch(
+            "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+            return_value=client,
+        ),
+        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        for user_input in (VALID_INPUT, {}, {}, {}):
+            assert result["type"] == FlowResultType.FORM
+            _assert_frontend_can_render(result["data_schema"])
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input
+            )
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+@pytest.mark.parametrize(
+    "tariff_type",
+    [TariffType.FIXED, TariffType.TIME_OF_USE, TariffType.DYNAMIC],
+)
+async def test_every_tariff_step_renders_for_the_frontend(
+    hass, tariff_type: TariffType
+) -> None:
+    """Jede Tarif-Folgeseite muss ein darstellbares Formular liefern -
+    beim ersten Aufruf wie nach einem Validierungsfehler (dort baut
+    _suggested das Schema neu auf)."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    _assert_frontend_can_render(result["data_schema"])
+
+    first_page = {CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value}
+    if tariff_type is TariffType.DYNAMIC:
+        first_page[CONF_PRICE_SENSOR] = "sensor.strompreis"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], first_page
+    )
+    assert result["type"] == FlowResultType.FORM
+    _assert_frontend_can_render(result["data_schema"])
+
+    # Unvollständig abschicken: derselbe Schritt, aber mit den zuletzt
+    # eingegebenen Werten neu aufgebautem Schema.
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"]
+    _assert_frontend_can_render(result["data_schema"])
+
+
+async def test_prices_are_rounded_to_the_configured_step(hass) -> None:
+    """Die Rundung auf ECONOMICS_PRICE_DECIMALS sitzt seit #135 nicht mehr
+    im Schema (dort war sie nicht serialisierbar), sondern im Schritt - sie
+    muss weiterhin für alle Preisfelder greifen, auch für die Preise in den
+    Zeitfenstergruppen."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
+    )
+    windows = _empty_windows()
+    windows[economics_tou_window_key(1)] = {
+        CONF_ECONOMICS_WINDOW_START: "22:00:00",
+        CONF_ECONOMICS_WINDOW_END: "06:00:00",
+        CONF_ECONOMICS_WINDOW_PRICE: 0.2100000000000002,
+    }
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.078649999,
+            CONF_ECONOMICS_TOU_BASE_PRICE: 0.3200000000000003,
+            **windows,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_FEED_IN_PRICE] == 0.0786
+    assert entry.options[CONF_ECONOMICS_TOU_BASE_PRICE] == 0.32
+    stored = entry.options[economics_tou_window_key(1)]
+    assert stored[CONF_ECONOMICS_WINDOW_PRICE] == 0.21
+    # Die übrigen Felder der Gruppe bleiben unangetastet.
+    assert stored[CONF_ECONOMICS_WINDOW_START] == "22:00:00"
+    assert stored[CONF_ECONOMICS_WINDOW_END] == "06:00:00"
+
+
+async def test_out_of_range_price_is_still_rejected(hass) -> None:
+    """Ohne das umschließende vol.All prüft der NumberSelector den
+    Wertebereich weiterhin selbst - ein unplausibler Preis darf nicht in
+    entry.options landen (Sicherheitsanforderung: keine ungeprüften
+    Werte)."""
+    entry = _economics_entry(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value},
+    )
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 99.0,
+            },
+        )
+    assert entry.options == {}

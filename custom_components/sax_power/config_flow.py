@@ -551,19 +551,29 @@ def _round_to_price_step(value: float) -> float:
     return round(float(value), ECONOMICS_PRICE_DECIMALS)
 
 
-def _price_selector(minimum: float, maximum: float) -> vol.All:
-    """Eingabefeld für einen Brutto-Arbeitspreis in EUR/kWh."""
-    return vol.All(
-        selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=minimum,
-                max=maximum,
-                step="any",
-                mode=selector.NumberSelectorMode.BOX,
-                unit_of_measurement="EUR/kWh",
-            )
-        ),
-        _round_to_price_step,
+def _price_selector(minimum: float, maximum: float) -> selector.NumberSelector:
+    """Eingabefeld für einen Brutto-Arbeitspreis in EUR/kWh.
+
+    Bewusst ein nackter NumberSelector ohne umschließendes vol.All: Home
+    Assistant übersetzt jedes Formularschema für das Frontend mit
+    voluptuous_serialize, und dabei muss JEDER Validator eines vol.All
+    übersetzbar sein. Eine gewöhnliche Python-Funktion (hier früher
+    _round_to_price_step) ist es nicht - die Serialisierung scheiterte mit
+    "Unable to convert schema", und zwar erst NACH dem eigentlichen
+    Flow-Schritt in der Websocket-Schicht. Das Frontend bekam damit kein
+    Formular, sondern nur "Unknown error occurred", und keine einzige
+    Tarifseite war mehr erreichbar (Issue #135). Gerundet wird deshalb
+    jetzt im Schritt selbst (_round_price_fields); die Bereichsprüfung
+    übernimmt der NumberSelector weiterhin selbst.
+    """
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=minimum,
+            max=maximum,
+            step="any",
+            mode=selector.NumberSelectorMode.BOX,
+            unit_of_measurement="EUR/kWh",
+        )
     )
 
 
@@ -638,6 +648,45 @@ STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
     },
     extra=vol.ALLOW_EXTRA,
 )
+
+#: Preisfelder der Tarifseiten auf oberster Ebene. Die Preise der acht
+#: Zeitfenstergruppen stecken je eine Ebene tiefer in ihrer Section und
+#: werden in _round_price_fields getrennt behandelt.
+_TOP_LEVEL_PRICE_KEYS = (
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+)
+
+
+def _round_price_fields(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Kopie der Eingabe mit allen Preisen auf ECONOMICS_PRICE_DECIMALS.
+
+    Der Aufrufer rundet unmittelbar vor dem Speichern, weil die Rundung
+    nicht mehr im Schema stattfinden darf (siehe _price_selector).
+    Nicht auswertbare Werte bleiben unverändert stehen, statt hier eine
+    Exception aus dem Schritt fliegen zu lassen: das Schema hat die im
+    Schema bekannten Preisfelder bereits als Zahl validiert, und ein aus
+    einer wiederholten ersten Seite durchgereichter Fremdwert
+    (extra=vol.ALLOW_EXTRA) wird ohnehin nicht gespeichert.
+    """
+    rounded = dict(user_input)
+    for key in _TOP_LEVEL_PRICE_KEYS:
+        if (price := parse_price(rounded.get(key))) is not None:
+            rounded[key] = _round_to_price_step(price)
+    for key in ECONOMICS_TOU_WINDOW_KEYS:
+        group = rounded.get(key)
+        if not isinstance(group, dict):
+            continue
+        price = parse_price(group.get(CONF_ECONOMICS_WINDOW_PRICE))
+        if price is None:
+            continue
+        rounded[key] = {
+            **group,
+            CONF_ECONOMICS_WINDOW_PRICE: _round_to_price_step(price),
+        }
+    return rounded
+
 
 #: Übersetzungsschlüssel des fehlenden Pflichtpreises (options.error.* in
 #: strings.json) - anders als die Zeitfensterfehler darunter wird er an
@@ -822,11 +871,12 @@ class SaxPowerOptionsFlow(OptionsFlow):
         das jeweilige Schema selbst kennt.
         """
         known = {str(marker) for marker in schema.schema}
+        rounded = _round_price_fields(user_input)
         return self.async_create_entry(
             title="",
             data={
                 **self._base_options,
-                **{key: value for key, value in user_input.items() if key in known},
+                **{key: value for key, value in rounded.items() if key in known},
             },
         )
 

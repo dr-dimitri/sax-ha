@@ -1015,8 +1015,9 @@ async def test_savings_inventory_uses_numeric_state_and_renders_sensor_value(
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _savings_view(config)
+    grid = next(card for card in view["cards"] if card["type"] == "grid")
     card = _savings_inventory_card(view)
-    assert card == view["cards"][-1]
+    assert view["cards"].index(card) == view["cards"].index(grid) + 1
     assert card["conditions"] == [
         {
             "condition": "numeric_state",
@@ -1143,8 +1144,6 @@ async def test_savings_view_uses_exact_calendar_statistics(hass) -> None:
 async def test_savings_view_total_is_direct_state_with_accounting_start(hass) -> None:
     result = _register(hass, "sensor", "economics_net_savings")
     status = _register(hass, "sensor", "economics_status")
-    configured = _register(hass, "binary_sensor", "economics_investment_configured")
-    progress = _register(hass, "sensor", "economics_amortization_progress")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -1152,28 +1151,11 @@ async def test_savings_view_total_is_direct_state_with_accounting_start(hass) ->
     total = next(
         card
         for card in view["cards"]
-        if card["type"] == "vertical-stack"
-        and card["cards"][0].get("content") == "### Gesamt seit Bilanzbeginn"
+        if card.get("title") == "Gesamt seit Bilanzbeginn"
     )
-    assert total["cards"][0] == {
-        "type": "markdown",
-        "content": "### Gesamt seit Bilanzbeginn",
-    }
-    assert total["cards"][1] == {
-        "type": "conditional",
-        "conditions": [{"entity": configured, "state": "on"}],
-        "card": {
-            "type": "gauge",
-            "entity": progress,
-            "name": "Amortization progress",
-            "min": 0,
-            "max": 100,
-            "needle": True,
-            "segments": [{"from": 0, "color": "blue"}],
-        },
-    }
-    assert total["cards"][2] == {
+    assert total == {
         "type": "entities",
+        "title": "Gesamt seit Bilanzbeginn",
         "state_color": True,
         "entities": [
             {"entity": result, "name": "Netto-Ersparnis"},
@@ -1238,9 +1220,7 @@ async def test_savings_view_omits_data_cards_without_result_entity(hass) -> None
     assert [card["type"] for card in view["cards"]] == ["markdown", "markdown"]
     assert not any(card["type"] == "grid" for card in view["cards"])
     assert not any(
-        card["type"] == "vertical-stack"
-        and card["cards"][0].get("content") == "### Gesamt seit Bilanzbeginn"
-        for card in view["cards"]
+        card.get("title") == "Gesamt seit Bilanzbeginn" for card in view["cards"]
     )
 
 
@@ -1380,6 +1360,7 @@ async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
     assert [card["type"] for card in stack["cards"]] == [
         "tile",
         "markdown",
+        "gauge",
         "entities",
     ]
     assert stack["cards"][0] == {
@@ -1387,19 +1368,23 @@ async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
         "entity": payback_date,
         "name": "Voraussichtlich abbezahlt am",
     }
-    assert [row["entity"] for row in stack["cards"][2]["entities"]] == [
+    gauge = stack["cards"][2]
+    assert gauge["entity"] == progress
+    assert gauge["min"] == 0
+    assert gauge["max"] == 100
+    assert gauge["segments"] == [{"from": 0, "color": "blue"}]
+    assert [row["entity"] for row in stack["cards"][3]["entities"]] == [
         remaining,
         annual,
         average,
         roi,
     ]
-    assert stack["cards"][2]["entities"][-1] == {
+    assert stack["cards"][3]["entities"][-1] == {
         "type": "attribute",
         "entity": roi,
         "attribute": "prior_result_eur",
         "name": "Bereits vor Bilanzbeginn berücksichtigt",
     }
-    assert json.dumps(view).count(progress) == 2
 
 
 async def test_savings_payback_explanation_renders_every_forecast_state(

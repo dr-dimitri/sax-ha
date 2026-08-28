@@ -4388,10 +4388,8 @@ requirement_economics_savings_dashboard:
     last_reset. Innerhalb einer Bilanz sind seine Recorder-Änderungen wegen
     des persistierten Höchststands nichtnegativ.
 
-    Als letztes Kartenobjekt des Views folgt, sofern die Entity Registry den
-    Sensor economics_unvalued_inventory auflösen kann, eine
-    Core-conditional-Karte. Damit bleibt der zustandsabhängige Hinweis in der
-    rechten Spalte, steht dort aber unter den Ergebnis- und Prognosekarten.
+    Direkt nach diesem KPI-Grid folgt, sofern die Entity Registry den Sensor
+    economics_unvalued_inventory auflösen kann, eine Core-conditional-Karte.
     Ihre einzige Bedingung lautet `condition: numeric_state`, prüft den
     Entity-Zustand mit `above: 0` und enthält keinen Attributschlüssel. Die
     enthaltene selbst ausblendende Markdown-Vorlage formatiert ausschließlich
@@ -4407,20 +4405,14 @@ requirement_economics_savings_dashboard:
     Entity, entfällt der gesamte Block ohne `entity: null`. Es werden weder
     Energiemenge noch Restdauer, Ladezyklen oder künftige Ersparnis berechnet.
 
-    Der Core-vertical-stack "Gesamt seit Bilanzbeginn" zeigt direkt unter
-    seiner Überschrift als erstes Inhaltselement die vorhandene blaue Gauge
-    economics_amortization_progress (0 bis 100 %). Sie liegt ausschließlich
-    in einer Core-conditional-Karte mit Zustand `on` der über die Entity
-    Registry aufgelösten Entity economics_investment_configured; ohne
-    Investitionskosten erscheint keine unbekannte Gauge. Darunter zeigt eine
-    entities-Karte als "Netto-Ersparnis" den direkten aktuellen Zustand von
-    economics_net_savings und anschließend das Attribut economics_started_at
-    der vorhandenen Entity economics_status mit dem Label "Bilanzbeginn". Der
-    Gesamtwert ist keine fixed-period-Recorder-Differenz. Der zuvor dauerhaft
-    sichtbare separate Recorder-Hinweis ist Teil des eingeklappten
-    Erklärungs-Elements. Ein optionaler Vorlauf-Ertrag wird weder referenziert
-    noch auf Kalenderperioden verteilt; er bleibt ausschließlich Teil der
-    vorhandenen ROI-Darstellung.
+    Die entities-Karte "Gesamt seit Bilanzbeginn" zeigt als "Netto-Ersparnis"
+    den direkten aktuellen Zustand von economics_net_savings und direkt
+    darunter das Attribut economics_started_at der vorhandenen Entity
+    economics_status mit dem Label "Bilanzbeginn". Der Gesamtwert ist keine
+    fixed-period-Recorder-Differenz. Der zuvor dauerhaft sichtbare separate
+    Recorder-Hinweis ist Teil des eingeklappten Erklärungs-Elements. Ein
+    optionaler Vorlauf-Ertrag wird weder referenziert noch auf Kalenderperioden
+    verteilt; er bleibt ausschließlich Teil der vorhandenen ROI-Darstellung.
 
     Nach Gesamtwert und Bilanzhinweis, vor der freien Zeitraumauswahl, folgt
     der Core-vertical-stack "Wann ist der Speicher abbezahlt?". Seine einzige
@@ -4429,7 +4421,7 @@ requirement_economics_savings_dashboard:
     economics_investment_configured. Eine Core-conditional-Karte mit Zustand
     `off` zeigt ausschließlich die Handlungsanweisung, die Investitionskosten
     unter "Geräte & Dienste -> SAX Power Home -> Konfigurieren ->
-    Wirtschaftlichkeit" zu hinterlegen. Datum und Detailzeilen liegen
+    Wirtschaftlichkeit" zu hinterlegen. Gauge, Datum und Detailzeilen liegen
     ausschließlich im parallelen `state: on`-Zweig; ohne Investitionskosten
     erscheinen deshalb keine unbekannten Werte. Weder Attribute noch ein zum
     Build-Zeitpunkt gelesener Optionswert steuern die Bedingung.
@@ -4437,10 +4429,10 @@ requirement_economics_savings_dashboard:
     Bei konfigurierten Investitionskosten steht die Core-tile-Karte des
     vorhandenen Sensors economics_estimated_payback_date mit dem festen Label
     "Voraussichtlich abbezahlt am" an erster Stelle. Darunter folgen eine
-    selbst ausblendende Core-markdown-Erklärung (`show_empty: false`),
+    selbst ausblendende Core-markdown-Erklärung (`show_empty: false`), die
+    bestehende blaue Gauge economics_amortization_progress (0 bis 100 %),
     economics_remaining_to_payback, economics_projected_annual_result und
-    optional economics_average_daily_result_30d. Die Fortschritts-Gauge steht
-    ausschließlich im Block "Gesamt seit Bilanzbeginn". Das Attribut
+    optional economics_average_daily_result_30d. Das Attribut
     `prior_result_eur` von economics_roi wird als eigene Zeile "Bereits vor
     Bilanzbeginn berücksichtigt" gezeigt und niemals auf Kalenderperioden
     verteilt. Der Block verwendet ausschließlich diese vorhandenen Entities
@@ -4535,18 +4527,15 @@ requirement_economics_savings_dashboard:
        Template-Engine: active bleibt leer; jeder Problem-, unbekannte und
        fehlende Zustand ergibt höchstens einen verständlichen Hinweis mit
        genau einem Link zum technischen Wirtschaftlichkeits-View."
-    - "Als letztes Kartenobjekt des Views steht nur bei vorhandenem
+    - "Direkt hinter dem KPI-Grid steht nur bei vorhandenem
        economics_unvalued_inventory eine Core-conditional-Karte mit exakt
        numeric_state auf dem Entity-Zustand und above 0; sie verwendet kein
        Attribut als Bedingung."
     - "Gerenderte Template-Tests belegen den exakten Anfangsbestandstext samt
        drei Dezimalstellen, deutschem Komma und Sensor-Einheit sowie leere
        Ausgabe bei 0, negativ, unknown, unavailable, zustandslos und fehlend."
-    - "Im gemeinsamen Block Gesamt seit Bilanzbeginn steht die blaue
-       Fortschritts-Gauge als erstes Inhaltselement und ist zur Laufzeit mit
-       economics_investment_configured=on geschützt; darunter sind Gesamtwert
-       und Bilanzbeginn direkte Entity-/Attributzeilen ohne fixed_period-
-       Statistik und ohne economics_net_savings_today-Referenz."
+    - "Gesamtwert und Bilanzbeginn sind direkte Entity-/Attributzeilen; keine
+       fixed_period-Statistik und keine economics_net_savings_today-Referenz."
     - "Fehlt economics_net_savings, gibt es weder ungültige Entity-IDs
        noch ein leeres Grid, datenabhängige Hinweiskarten oder einen
        verwaisten Datumswähler."
@@ -4556,7 +4545,7 @@ requirement_economics_savings_dashboard:
        Netto-Ersparnis sowie bewusst keinen period-Schlüssel."
     - "Der Amortisationsblock verwendet ausschließlich den Zustand von
        economics_investment_configured als Gate; off zeigt nur die exakte
-       Handlungsanweisung, on zeigt Datum, Erklärung und Details."
+       Handlungsanweisung, on zeigt Datum, Erklärung, blaue Gauge und Details."
     - "Das vorhandene Datum ist eine primäre Tile-Karte; Restbetrag,
        Jahreshochrechnung, optionaler Durchschnitt und die separate
        Vorlauf-Attributzeile folgen in der verbindlichen Reihenfolge."

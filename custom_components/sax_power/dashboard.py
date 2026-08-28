@@ -592,64 +592,6 @@ def _savings_inventory_card(
     }
 
 
-def _savings_total_block(
-    hass: HomeAssistant,
-    entry_id: str,
-    translations: dict[str, str],
-    result_entity_id: str,
-    status_entity_id: str | None,
-) -> dict[str, Any]:
-    """Bündelt Fortschritt und Gesamtbilanz in einer gemeinsamen Karte."""
-    configured_entity_id = _entity_id(
-        hass, "binary_sensor", f"{entry_id}_economics_investment_configured"
-    )
-    progress_gauge = _gauge_card(
-        hass,
-        entry_id,
-        "sensor",
-        "economics_amortization_progress",
-        translations,
-        min_value=0,
-        max_value=100,
-        segments=[{"from": 0, "color": "blue"}],
-    )
-    conditional_gauge = (
-        {
-            "type": "conditional",
-            "conditions": [{"entity": configured_entity_id, "state": "on"}],
-            "card": progress_gauge,
-        }
-        if configured_entity_id is not None and progress_gauge is not None
-        else None
-    )
-
-    total_rows: list[dict[str, Any]] = [
-        {
-            "entity": result_entity_id,
-            "name": "Netto-Ersparnis",
-        }
-    ]
-    started_at_row = _attribute_row(
-        status_entity_id, "economics_started_at", "Bilanzbeginn"
-    )
-    if started_at_row is not None:
-        total_rows.append(started_at_row)
-
-    cards = [
-        {
-            "type": "markdown",
-            "content": "### Gesamt seit Bilanzbeginn",
-        },
-        conditional_gauge,
-        {
-            "type": "entities",
-            "state_color": True,
-            "entities": total_rows,
-        },
-    ]
-    return {"type": "vertical-stack", "cards": [card for card in cards if card]}
-
-
 def _payback_explanation_card(
     payback_date_entity_id: str | None,
     average_entity_id: str | None,
@@ -697,6 +639,17 @@ def _savings_payback_block(
         if payback_date_entity_id is not None
         else None
     )
+    progress_gauge = _gauge_card(
+        hass,
+        entry_id,
+        "sensor",
+        "economics_amortization_progress",
+        translations,
+        min_value=0,
+        max_value=100,
+        segments=[{"from": 0, "color": "blue"}],
+    )
+
     detail_rows: list[dict[str, Any] | str] = []
     for suffix in (
         "economics_remaining_to_payback",
@@ -732,6 +685,7 @@ def _savings_payback_block(
                 progress_entity_id,
                 roi_entity_id,
             ),
+            progress_gauge,
             details_card,
         ]
     )
@@ -1253,13 +1207,23 @@ async def async_build_dashboard_config(
                 ),
             ]
         )
-        savings_total_card = _savings_total_block(
-            hass,
-            entry_id,
-            translations,
-            savings_result_entity_id,
-            status_entity_id,
+        savings_total_rows: list[dict[str, Any]] = [
+            {
+                "entity": savings_result_entity_id,
+                "name": "Netto-Ersparnis",
+            }
+        ]
+        savings_started_at_row = _attribute_row(
+            status_entity_id, "economics_started_at", "Bilanzbeginn"
         )
+        if savings_started_at_row is not None:
+            savings_total_rows.append(savings_started_at_row)
+        savings_total_card = {
+            "type": "entities",
+            "title": "Gesamt seit Bilanzbeginn",
+            "state_color": True,
+            "entities": savings_total_rows,
+        }
         savings_free_period_block = _savings_free_period_block(savings_result_entity_id)
 
     savings_payback_block = _savings_payback_block(hass, entry_id, translations)
@@ -1275,10 +1239,10 @@ async def async_build_dashboard_config(
                 "content": _SAVINGS_EXPLANATION_CONTENT,
             },
             savings_period_grid,
+            savings_inventory_card,
             savings_total_card,
             savings_payback_block,
             savings_free_period_block,
-            savings_inventory_card,
         ],
     )
 

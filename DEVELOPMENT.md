@@ -800,10 +800,8 @@ den einzigen kontrollierten Rücksprung:
   nach erfolgreicher Registry-Auflösung gebaut wird, kann bei fehlender
   Ergebnis-Entity weder `entity: null` noch ein leerer Grid-Container
   entstehen.
-- `_savings_inventory_card` wird als letztes Kartenobjekt des Views
-  einsortiert und bleibt damit in der rechten Spalte unter den Ergebnis- und
-  Prognosekarten. Sie wird unabhängig von der Ergebnis-Entity gebaut. Die
-  Core-`conditional`-Bedingung
+- `_savings_inventory_card` folgt direkt auf dieses Grid, wird jedoch
+  unabhängig von der Ergebnis-Entity gebaut. Die Core-`conditional`-Bedingung
   prüft ausschließlich den Zustand von `economics_unvalued_inventory` mit
   `condition: numeric_state` und `above: 0`. Das innere Jinja-Markdown
   formatiert den Zustand auf drei Dezimalstellen, ersetzt nur zur deutschen
@@ -811,14 +809,11 @@ den einzigen kontrollierten Rücksprung:
   erklärt die bestehende 0-EUR-Startregel, berechnet aber weder Energie noch
   Geld oder Dauer. Fehlende, nichtpositive und nichtnumerische Zustände
   bleiben leer; ohne Registry-ID entfällt der Block vollständig.
-- Die Karte "Gesamt seit Bilanzbeginn" ist ein Core-`vertical-stack`. Direkt
-  unter der Überschrift steht als erstes Inhaltselement die blaue
-  `economics_amortization_progress`-Gauge. Eine Core-`conditional`-Karte zeigt
-  sie nur bei `economics_investment_configured: on`. Die folgende
-  Core-`entities`-Karte verweist mit ihrer Ergebniszeile direkt auf den
-  aktuellen Zustand von `economics_net_savings`; eine `_attribute_row` zeigt
-  darunter `economics_started_at` von `economics_status` als "Bilanzbeginn".
-  Sie nutzt bewusst keine Recorder-Differenz.
+- Die Karte "Gesamt seit Bilanzbeginn" ist eine Core-`entities`-Karte. Ihre
+  Ergebniszeile verweist direkt auf den aktuellen Zustand von
+  `economics_net_savings`; eine `_attribute_row` zeigt darunter
+  `economics_started_at` von `economics_status` als "Bilanzbeginn". Sie nutzt
+  bewusst keine Recorder-Differenz.
 - Eine statische Core-`markdown`-Karte bündelt Rohformel, Höchststandsregel,
   Recorder-/Bilanzbeginn und die Grenzen der freien Zeitraumauswahl in einem
   nativen `<details>`-Element. Es besitzt kein `open`-Attribut und beginnt
@@ -831,9 +826,8 @@ den einzigen kontrollierten Rücksprung:
   unter diesen Werten dar. Zwei Core-`conditional`-Karten reagieren
   ausschließlich auf den Laufzeitzustand von
   `economics_investment_configured`: `off` zeigt den Konfigurationsweg, `on`
-  zeigt Datums-Tile, selbst ausblendende Begründung und die vorhandenen
-  Detailwerte. Die Fortschritts-Gauge steht stattdessen oben im gemeinsamen
-  Block "Gesamt seit Bilanzbeginn". Die Jinja-Vorlage übersetzt nur die
+  zeigt Datums-Tile, selbst ausblendende Begründung, blaue Fortschritts-Gauge
+  und die vorhandenen Detailwerte. Die Jinja-Vorlage übersetzt nur die
   bestehenden Prognoseattribute. Ein gültiges Datum blendet sie aus; bei
   mehreren fehlgeschlagenen Voraussetzungen hat eine durch Vorlauf bereits
   erreichte Amortisation Vorrang, andernfalls gilt die in

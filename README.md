@@ -665,16 +665,14 @@ oder ist die Entity vom Recorder ausgeschlossen, bleibt der Core-Zustand
 `unknown`/`unavailable`; die Integration ersetzt fehlende Daten nicht durch
 0 EUR.
 
-**Gesamt seit Bilanzbeginn** zeigt ganz oben den blauen
-**Amortisationsfortschritt** von 0 bis 100 %. Darunter stehen der aktuelle
-Zustand des fortlaufenden Sensors `economics_net_savings` - keine
-Recorder-Differenz - und der sichtbare **Bilanzbeginn** der aktuellen Bilanz.
-Die Kalenderwerte umfassen die Zuwächse seit Beginn der Recorder-Aufzeichnung
-und können deshalb bei einem Zeitraum über einen manuellen Bilanzneustart
-durch den expliziten `last_reset` positive Zuwächse des vorherigen und des
-aktuellen Bilanzabschnitts zusammenfassen. Sie dürfen dadurch vor dem
-sichtbaren Bilanzbeginn beginnen, rekonstruieren aber keine Daten vor dem
-Recorder-Start.
+**Gesamt seit Bilanzbeginn** ist dagegen der aktuelle Zustand des
+fortlaufenden Sensors `economics_net_savings`, keine Recorder-Differenz.
+Daneben steht der sichtbare **Bilanzbeginn** der aktuellen Bilanz. Die
+Kalenderwerte umfassen die Zuwächse seit Beginn der Recorder-Aufzeichnung und
+können deshalb bei einem Zeitraum über einen manuellen Bilanzneustart durch
+den expliziten `last_reset` positive Zuwächse des vorherigen und des aktuellen
+Bilanzabschnitts zusammenfassen. Sie dürfen dadurch vor dem sichtbaren
+Bilanzbeginn beginnen, rekonstruieren aber keine Daten vor dem Recorder-Start.
 Ein optional eingetragener, bereits vor dem Bilanzbeginn erwirtschafteter
 Ertrag bleibt zeitlich nicht zuordenbar und wird deshalb ausschließlich in der
 ROI-/Amortisationsdarstellung berücksichtigt, nicht in Tag, Woche, Monat oder
@@ -692,7 +690,7 @@ noch nicht verfügbare Statusdaten werden neutral benannt. Jeder Hinweis
 verlinkt für technische Details auf den bestehenden Tab
 `/sax-power/wirtschaftlichkeit`, statt dessen Tabellen zu wiederholen.
 
-Als letzte Karte unten rechts erklärt ein zweiter, ebenfalls nur bei Bedarf
+Direkt bei den Zeitraum-KPIs erklärt ein zweiter, ebenfalls nur bei Bedarf
 sichtbarer Hinweis den unbewerteten Anfangsbestand. Ist dessen vorhandener
 Sensorzustand positiv, lautet die Aussage mit dem aktuellen, auf drei
 Dezimalstellen formatierten kWh-Wert: Beim Start der Bilanz waren bereits
@@ -711,19 +709,17 @@ als 0 ausgegeben. Der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
 
 Direkt unter den Ersparniswerten beantwortet ein kompakter Block die zentrale
 Investitionsfrage. Ist ein Datum prognostizierbar, steht der vorhandene Wert
-**Voraussichtlich abbezahlt am** an erster Stelle. Darunter folgen der
-Restbetrag, die Jahreshochrechnung und optional das durchschnittliche
-Tagesergebnis der letzten 30 vollständigen Tage. Der Amortisationsfortschritt
-steht bereits ganz oben in **Gesamt seit Bilanzbeginn**. Ein eingetragener
-Vorlauf-Ertrag erscheint
+**Voraussichtlich abbezahlt am** an erster Stelle. Darunter folgen der blaue
+Amortisationsfortschritt von 0 bis 100 %, der Restbetrag, die
+Jahreshochrechnung und optional das durchschnittliche Tagesergebnis der
+letzten 30 vollständigen Tage. Ein eingetragener Vorlauf-Ertrag erscheint
 getrennt als **Bereits vor Bilanzbeginn berücksichtigt** und wird keinem Tag,
 Monat oder Jahr zugerechnet.
 
-Ohne hinterlegte Investitionskosten bleibt die Gauge in **Gesamt seit
-Bilanzbeginn** ausgeblendet. Der Prognoseblock zeigt keine unbekannten
-Detailwerte, sondern verweist auf **Geräte & Dienste → SAX Power Home →
-Konfigurieren → Wirtschaftlichkeit**. Diese Anzeige reagiert direkt auf den
-Zustand der vorhandenen Entity `economics_investment_configured`; ein
+Ohne hinterlegte Investitionskosten zeigt der Block keine leere Gauge oder
+unbekannte Detailwerte, sondern verweist auf **Geräte & Dienste → SAX Power
+Home → Konfigurieren → Wirtschaftlichkeit**. Diese Anzeige reagiert direkt auf
+den Zustand der vorhandenen Entity `economics_investment_configured`; ein
 Dashboard-Neubau ist nach dem Hinterlegen oder Entfernen der Kosten nicht
 nötig.
 

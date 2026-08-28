@@ -120,6 +120,50 @@ Nächster Preiswechsel: {{ as_timestamp(change) | timestamp_custom('%H:%M') }} U
 {%- endif %}
 """
 
+_PAYBACK_DATE_ENTITY_PLACEHOLDER = "__PAYBACK_DATE_ENTITY__"
+_PAYBACK_AVERAGE_ENTITY_PLACEHOLDER = "__PAYBACK_AVERAGE_ENTITY__"
+_PAYBACK_PROGRESS_ENTITY_PLACEHOLDER = "__PAYBACK_PROGRESS_ENTITY__"
+_PAYBACK_ROI_ENTITY_PLACEHOLDER = "__PAYBACK_ROI_ENTITY__"
+_PAYBACK_EXPLANATION_TEMPLATE = """\
+{%- set date_entity = __PAYBACK_DATE_ENTITY__ %}
+{%- set average_entity = __PAYBACK_AVERAGE_ENTITY__ %}
+{%- set progress_entity = __PAYBACK_PROGRESS_ENTITY__ %}
+{%- set roi_entity = __PAYBACK_ROI_ENTITY__ %}
+{%- set date_state = states(date_entity) if date_entity is not none else 'unknown' %}
+{%- set reason = state_attr(average_entity, 'unavailable_reason')
+    if average_entity is not none else none %}
+{%- set complete_days = state_attr(average_entity, 'complete_days_available')
+    if average_entity is not none else none %}
+{%- set average = state_attr(average_entity, 'average_daily_result_eur')
+    if average_entity is not none else none %}
+{%- set payback_days = state_attr(average_entity, 'payback_days')
+    if average_entity is not none else none %}
+{%- set progress = states(progress_entity)
+    if progress_entity is not none else 'unknown' %}
+{%- set prior = state_attr(roi_entity, 'prior_result_eur')
+    if roi_entity is not none else none %}
+{%- if date_state not in ['unknown', 'unavailable', 'none', ''] %}
+{%- elif is_number(progress) and progress | float >= 100
+    and is_number(prior) and prior | float > 0 %}
+{{- 'Rechnerisch amortisiert; aus dem manuell erfassten Vorlauf lässt '
+    ~ 'sich kein belastbares historisches Datum ableiten.' }}
+{%- elif reason == 'insufficient_history' %}
+{%- set available = complete_days | int if is_number(complete_days) else '?' %}
+{{- 'Für die Prognose werden 30 vollständige abgeschlossene Tage benötigt. '
+    ~ 'Vorhanden: ' ~ available ~ ' von 30.' }}
+{%- elif reason == 'incomplete_days' %}
+Mindestens ein Tag im 30-Tage-Fenster wurde nicht vollständig beobachtet.
+{%- elif reason == 'low_price_coverage' %}
+Mindestens ein Tag im 30-Tage-Fenster hatte keine ausreichende Preisabdeckung.
+{%- elif reason is none and is_number(average) and average | float <= 0 %}
+Mit dem aktuellen 30-Tage-Netto-Ergebnis ist noch kein Abzahlungsdatum prognostizierbar.
+{%- elif reason is none and is_number(payback_days) %}
+Die Prognose liegt außerhalb des unterstützten Zeithorizonts.
+{%- else %}
+Derzeit kann noch keine Prognose erstellt werden.
+{%- endif %}
+"""
+
 DASHBOARD_URL_PATH = "sax-power"
 DASHBOARD_TITLE = "SAX Power"
 DASHBOARD_ICON = "mdi:battery-charging-100"
@@ -427,6 +471,138 @@ def _savings_free_period_block(entity_id: str) -> dict[str, Any]:
                 "chart_type": "bar",
                 "energy_date_selection": True,
                 "collection_key": _SAVINGS_COLLECTION_KEY,
+            },
+        ],
+    }
+
+
+def _jinja_entity(entity_id: str | None) -> str:
+    """Gibt eine sichere Jinja-Konstante für eine aufgelöste Entity zurück."""
+    return "none" if entity_id is None else repr(entity_id)
+
+
+def _payback_explanation_card(
+    payback_date_entity_id: str | None,
+    average_entity_id: str | None,
+    progress_entity_id: str | None,
+    roi_entity_id: str | None,
+) -> dict[str, Any]:
+    content = _PAYBACK_EXPLANATION_TEMPLATE
+    for placeholder, entity_id in (
+        (_PAYBACK_DATE_ENTITY_PLACEHOLDER, payback_date_entity_id),
+        (_PAYBACK_AVERAGE_ENTITY_PLACEHOLDER, average_entity_id),
+        (_PAYBACK_PROGRESS_ENTITY_PLACEHOLDER, progress_entity_id),
+        (_PAYBACK_ROI_ENTITY_PLACEHOLDER, roi_entity_id),
+    ):
+        content = content.replace(placeholder, _jinja_entity(entity_id))
+    return {"type": "markdown", "show_empty": False, "content": content}
+
+
+def _savings_payback_block(
+    hass: HomeAssistant, entry_id: str, translations: dict[str, str]
+) -> dict[str, Any] | None:
+    """Kompakte Laufzeitdarstellung der vorhandenen Amortisationsprognose."""
+    configured_entity_id = _entity_id(
+        hass, "binary_sensor", f"{entry_id}_economics_investment_configured"
+    )
+    if configured_entity_id is None:
+        return None
+
+    payback_date_entity_id = _entity_id(
+        hass, "sensor", f"{entry_id}_economics_estimated_payback_date"
+    )
+    progress_entity_id = _entity_id(
+        hass, "sensor", f"{entry_id}_economics_amortization_progress"
+    )
+    average_entity_id = _entity_id(
+        hass, "sensor", f"{entry_id}_economics_average_daily_result_30d"
+    )
+    roi_entity_id = _entity_id(hass, "sensor", f"{entry_id}_economics_roi")
+
+    date_card = (
+        {
+            "type": "tile",
+            "entity": payback_date_entity_id,
+            "name": "Voraussichtlich abbezahlt am",
+        }
+        if payback_date_entity_id is not None
+        else None
+    )
+    progress_gauge = _gauge_card(
+        hass,
+        entry_id,
+        "sensor",
+        "economics_amortization_progress",
+        translations,
+        min_value=0,
+        max_value=100,
+        segments=[{"from": 0, "color": "blue"}],
+    )
+
+    detail_rows: list[dict[str, Any] | str] = []
+    for suffix in (
+        "economics_remaining_to_payback",
+        "economics_projected_annual_result",
+        "economics_average_daily_result_30d",
+    ):
+        _, row = _resolved_row(hass, entry_id, "sensor", suffix, translations)
+        if row is not None:
+            detail_rows.append(row)
+    prior_row = _attribute_row(
+        roi_entity_id,
+        "prior_result_eur",
+        "Bereits vor Bilanzbeginn berücksichtigt",
+    )
+    if prior_row is not None:
+        detail_rows.append(prior_row)
+    details_card = (
+        {
+            "type": "entities",
+            "state_color": True,
+            "entities": detail_rows,
+        }
+        if detail_rows
+        else None
+    )
+
+    configured_stack = _stack_card(
+        [
+            date_card,
+            _payback_explanation_card(
+                payback_date_entity_id,
+                average_entity_id,
+                progress_entity_id,
+                roi_entity_id,
+            ),
+            progress_gauge,
+            details_card,
+        ]
+    )
+    assert configured_stack is not None
+    return {
+        "type": "vertical-stack",
+        "cards": [
+            {
+                "type": "markdown",
+                "content": "### Wann ist der Speicher abbezahlt?",
+            },
+            {
+                "type": "conditional",
+                "conditions": [{"entity": configured_entity_id, "state": "off"}],
+                "card": {
+                    "type": "markdown",
+                    "content": (
+                        "Für eine Amortisationsprognose bitte die "
+                        "Investitionskosten unter „Geräte & Dienste → SAX "
+                        "Power Home → Konfigurieren → Wirtschaftlichkeit“ "
+                        "hinterlegen."
+                    ),
+                },
+            },
+            {
+                "type": "conditional",
+                "conditions": [{"entity": configured_entity_id, "state": "on"}],
+                "card": configured_stack,
             },
         ],
     }
@@ -945,6 +1121,8 @@ async def async_build_dashboard_config(
         }
         savings_free_period_block = _savings_free_period_block(savings_result_entity_id)
 
+    savings_payback_block = _savings_payback_block(hass, entry_id, translations)
+
     savings_view = _view(
         "Ersparnis",
         "ersparnis",
@@ -962,6 +1140,7 @@ async def async_build_dashboard_config(
             savings_period_grid,
             savings_total_card,
             savings_recorder_note,
+            savings_payback_block,
             savings_free_period_block,
         ],
     )

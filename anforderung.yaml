@@ -64,7 +64,7 @@
 # REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # REQ-ECONOMICS-DASHBOARD         done       Eigener Dashboard-Tab "Wirtschaftlichkeit" sowie End-to-End-Dokumentation der gesamten Feature-Reihe
-# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Dashboard-Tab "Ersparnis" mit festen und frei wählbaren Zeiträumen
+# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Ersparnis-Tab mit Zeiträumen und verständlicher Amortisationsprognose
 # ==============================================================================
 
 # ==============================================================================
@@ -4233,7 +4233,7 @@ requirement_economics_dashboard:
 # ==============================================================================
 requirement_economics_savings_dashboard:
   id: REQ-ECONOMICS-SAVINGS-DASHBOARD
-  title: "Kompakter Dashboard-Tab Ersparnis mit festen und frei wählbaren Zeiträumen"
+  title: "Kompakter Ersparnis-Tab mit Zeiträumen und verständlicher Amortisationsprognose"
   status: done
   description: >
     Das mitgelieferte Dashboard besitzt unmittelbar hinter dem unveränderten
@@ -4268,6 +4268,50 @@ requirement_economics_savings_dashboard:
     optionaler Vorlauf-Ertrag wird weder referenziert noch auf Kalenderperioden
     verteilt; er bleibt ausschließlich Teil der vorhandenen ROI-Darstellung.
 
+    Nach Gesamtwert und Bilanzhinweis, vor der freien Zeitraumauswahl, folgt
+    der Core-vertical-stack "Wann ist der Speicher abbezahlt?". Seine einzige
+    Laufzeitbedingung für Investitionskosten ist der Zustand der über die
+    Entity Registry aufgelösten binary_sensor-Entity
+    economics_investment_configured. Eine Core-conditional-Karte mit Zustand
+    `off` zeigt ausschließlich die Handlungsanweisung, die Investitionskosten
+    unter "Geräte & Dienste -> SAX Power Home -> Konfigurieren ->
+    Wirtschaftlichkeit" zu hinterlegen. Gauge, Datum und Detailzeilen liegen
+    ausschließlich im parallelen `state: on`-Zweig; ohne Investitionskosten
+    erscheinen deshalb keine unbekannten Werte. Weder Attribute noch ein zum
+    Build-Zeitpunkt gelesener Optionswert steuern die Bedingung.
+
+    Bei konfigurierten Investitionskosten steht die Core-tile-Karte des
+    vorhandenen Sensors economics_estimated_payback_date mit dem festen Label
+    "Voraussichtlich abbezahlt am" an erster Stelle. Darunter folgen eine
+    selbst ausblendende Core-markdown-Erklärung (`show_empty: false`), die
+    bestehende blaue Gauge economics_amortization_progress (0 bis 100 %),
+    economics_remaining_to_payback, economics_projected_annual_result und
+    optional economics_average_daily_result_30d. Das Attribut
+    `prior_result_eur` von economics_roi wird als eigene Zeile "Bereits vor
+    Bilanzbeginn berücksichtigt" gezeigt und niemals auf Kalenderperioden
+    verteilt. Der Block verwendet ausschließlich diese vorhandenen Entities
+    und Attribute; er berechnet weder Prognose, Fortschritt, Restbetrag,
+    Jahreshochrechnung noch Datum neu.
+
+    Ist das Datum unbekannt, liest die Markdown-Vorlage ausschließlich
+    `unavailable_reason`, `complete_days_available`,
+    `average_daily_result_eur` und `payback_days` von
+    economics_average_daily_result_30d sowie den Fortschrittszustand und
+    `prior_result_eur`. Bei 100 % Fortschritt und positivem Vorlauf hat der
+    Text "Rechnerisch amortisiert; aus dem manuell erfassten Vorlauf lässt
+    sich kein belastbares historisches Datum ableiten." Vorrang vor allen
+    Gründen einer noch offenen Prognose. Ansonsten gilt diese Reihenfolge:
+    `insufficient_history` nennt N von 30 vollständigen Tagen;
+    `incomplete_days` nennt einen nicht vollständig beobachteten Tag;
+    `low_price_coverage` nennt unzureichende Preisabdeckung; ohne Fehlergrund
+    und bei nicht positivem Durchschnitt ist noch kein Datum prognostizierbar;
+    ein vorhandenes `payback_days` ohne Datum liegt außerhalb des unterstützten
+    Zeithorizonts. Unbekannte Gründe, unbekannte Zustände und fehlende
+    Quell-Entities ergeben exakt "Derzeit kann noch keine Prognose erstellt
+    werden." Ein gültiger Datumszustand lässt die Erklärung leer, sodass nur
+    der vorhandene Datumswert sichtbar bleibt. Kein Attribut wird in einer
+    conditional-Bedingung geprüft.
+
     Unter den festen Werten folgt ein klar abgegrenzter vertical-stack
     "Freier Zeitraum". Seine drei auswertenden Core-Karten verwenden exakt
     denselben isolierten Collection-Key `energy_sax_power_savings`: eine
@@ -4293,8 +4337,9 @@ requirement_economics_savings_dashboard:
     gesamte Statistik-Grid, die Gesamtkarte, der Recorder-Hinweis und der
     vollständige freie Zeitraum einschließlich Datumswähler. Es entsteht
     weder `entity: null`, ein leeres Grid noch ein funktionsloser einzelner
-    Datumswähler; nur der statische Einordnungstext des Views bleibt sichtbar.
-    Die Umsetzung ändert weder
+    Datumswähler. Der davon unabhängige Amortisationsblock richtet sich
+    ausschließlich nach seinen eigenen vorhandenen Registry-Entities und dem
+    Investitions-Gate. Die Umsetzung ändert weder
     Coordinator, Bilanz-/Tarif-/Amortisationslogik, Persistenz und Services
     noch den bestehenden View "Wirtschaftlichkeit". Sie führt keine neue
     Entity ein und greift weder auf private Recorder-APIs noch auf Custom
@@ -4321,6 +4366,15 @@ requirement_economics_savings_dashboard:
        exakt energy_sax_power_savings; der Wert ist change über
        energy_date_selection und das Balkendiagramm enthält nur das operative
        Ergebnis sowie bewusst keinen period-Schlüssel."
+    - "Der Amortisationsblock verwendet ausschließlich den Zustand von
+       economics_investment_configured als Gate; off zeigt nur die exakte
+       Handlungsanweisung, on zeigt Datum, Erklärung, blaue Gauge und Details."
+    - "Das vorhandene Datum ist eine primäre Tile-Karte; Restbetrag,
+       Jahreshochrechnung, optionaler Durchschnitt und die separate
+       Vorlauf-Attributzeile folgen in der verbindlichen Reihenfolge."
+    - "Gerenderte Template-Tests decken alle Prognosegründe, die geklärte
+       Vorrangregel für bereits erfolgte Amortisation, gültiges Datum,
+       unbekannte Gründe/Zustände und fehlende Entities ab."
     - "Eine SHA-256-Strukturregression in tests/test_dashboard.py friert den
        vollständigen bestehenden View wirtschaftlichkeit auf dem Stand vor
        Einführung des Ersparnis-Views ein."

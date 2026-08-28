@@ -1103,6 +1103,260 @@ async def test_savings_free_period_is_fully_omitted_without_result_entity(
     assert "Verlauf im gewählten Zeitraum" not in serialized
 
 
+def _savings_payback_block(view: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "vertical-stack"
+        and card["cards"][0].get("content") == "### Wann ist der Speicher abbezahlt?"
+    )
+
+
+def _configured_payback_stack(block: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card["card"]
+        for card in block["cards"]
+        if card["type"] == "conditional" and card["conditions"][0].get("state") == "on"
+    )
+
+
+def _payback_explanation(block: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in _configured_payback_stack(block)["cards"]
+        if card["type"] == "markdown" and card.get("show_empty") is False
+    )
+
+
+async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
+    configured = _register(hass, "binary_sensor", "economics_investment_configured")
+    payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
+    progress = _register(hass, "sensor", "economics_amortization_progress")
+    remaining = _register(hass, "sensor", "economics_remaining_to_payback")
+    annual = _register(hass, "sensor", "economics_projected_annual_result")
+    average = _register(hass, "sensor", "economics_average_daily_result_30d")
+    roi = _register(hass, "sensor", "economics_roi")
+    _register(hass, "sensor", "economics_operating_result")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    block = _savings_payback_block(view)
+    free_period = _savings_free_period_block(view)
+    assert view["cards"].index(block) < view["cards"].index(free_period)
+    assert [card["type"] for card in block["cards"]] == [
+        "markdown",
+        "conditional",
+        "conditional",
+    ]
+    disabled, enabled = block["cards"][1:]
+    assert disabled["conditions"] == [{"entity": configured, "state": "off"}]
+    assert disabled["card"] == {
+        "type": "markdown",
+        "content": (
+            "Für eine Amortisationsprognose bitte die Investitionskosten "
+            "unter „Geräte & Dienste → SAX Power Home → Konfigurieren → "
+            "Wirtschaftlichkeit“ hinterlegen."
+        ),
+    }
+    assert enabled["conditions"] == [{"entity": configured, "state": "on"}]
+
+    stack = enabled["card"]
+    assert [card["type"] for card in stack["cards"]] == [
+        "tile",
+        "markdown",
+        "gauge",
+        "entities",
+    ]
+    assert stack["cards"][0] == {
+        "type": "tile",
+        "entity": payback_date,
+        "name": "Voraussichtlich abbezahlt am",
+    }
+    gauge = stack["cards"][2]
+    assert gauge["entity"] == progress
+    assert gauge["min"] == 0
+    assert gauge["max"] == 100
+    assert gauge["segments"] == [{"from": 0, "color": "blue"}]
+    assert [row["entity"] for row in stack["cards"][3]["entities"]] == [
+        remaining,
+        annual,
+        average,
+        roi,
+    ]
+    assert stack["cards"][3]["entities"][-1] == {
+        "type": "attribute",
+        "entity": roi,
+        "attribute": "prior_result_eur",
+        "name": "Bereits vor Bilanzbeginn berücksichtigt",
+    }
+
+
+async def test_savings_payback_explanation_renders_every_forecast_state(
+    hass,
+) -> None:
+    _register(hass, "binary_sensor", "economics_investment_configured")
+    payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
+    progress = _register(hass, "sensor", "economics_amortization_progress")
+    average = _register(hass, "sensor", "economics_average_daily_result_30d")
+    roi = _register(hass, "sensor", "economics_roi")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    card = _payback_explanation(_savings_payback_block(_savings_view(config)))
+    assert card["show_empty"] is False
+    content = card["content"]
+
+    scenarios = [
+        (
+            "insufficient_history",
+            {
+                "unavailable_reason": "insufficient_history",
+                "complete_days_available": 12,
+                "average_daily_result_eur": -1,
+                "payback_days": 99999,
+            },
+            "20",
+            0,
+            "Für die Prognose werden 30 vollständige abgeschlossene Tage "
+            "benötigt. Vorhanden: 12 von 30.",
+        ),
+        (
+            "incomplete_days",
+            {"unavailable_reason": "incomplete_days", "fully_observed_days": 29},
+            "20",
+            0,
+            "Mindestens ein Tag im 30-Tage-Fenster wurde nicht vollständig "
+            "beobachtet.",
+        ),
+        (
+            "low_price_coverage",
+            {"unavailable_reason": "low_price_coverage"},
+            "20",
+            0,
+            "Mindestens ein Tag im 30-Tage-Fenster hatte keine ausreichende "
+            "Preisabdeckung.",
+        ),
+        (
+            "non_positive_average",
+            {"unavailable_reason": None, "average_daily_result_eur": 0},
+            "20",
+            0,
+            "Mit dem aktuellen 30-Tage-Netto-Ergebnis ist noch kein "
+            "Abzahlungsdatum prognostizierbar.",
+        ),
+        (
+            "already_amortized_has_priority",
+            {
+                "unavailable_reason": "low_price_coverage",
+                "average_daily_result_eur": -1,
+                "payback_days": 99999,
+            },
+            "100",
+            500,
+            "Rechnerisch amortisiert; aus dem manuell erfassten Vorlauf lässt "
+            "sich kein belastbares historisches Datum ableiten.",
+        ),
+        (
+            "positive_prior_without_full_amortization",
+            {"unavailable_reason": "low_price_coverage"},
+            "99.9",
+            500,
+            "Mindestens ein Tag im 30-Tage-Fenster hatte keine ausreichende "
+            "Preisabdeckung.",
+        ),
+        (
+            "outside_horizon",
+            {
+                "unavailable_reason": None,
+                "average_daily_result_eur": 1.5,
+                "payback_days": 40000,
+            },
+            "20",
+            0,
+            "Die Prognose liegt außerhalb des unterstützten Zeithorizonts.",
+        ),
+        (
+            "unknown_reason",
+            {
+                "unavailable_reason": "future_reason",
+                "payback_days": 40000,
+            },
+            "20",
+            0,
+            "Derzeit kann noch keine Prognose erstellt werden.",
+        ),
+        (
+            "unknown_payback_days",
+            {
+                "unavailable_reason": None,
+                "average_daily_result_eur": 1.5,
+                "payback_days": "unknown",
+            },
+            "20",
+            0,
+            "Derzeit kann noch keine Prognose erstellt werden.",
+        ),
+        (
+            "unknown_state",
+            {},
+            "unknown",
+            None,
+            "Derzeit kann noch keine Prognose erstellt werden.",
+        ),
+    ]
+    for name, attributes, progress_state, prior_result, expected in scenarios:
+        hass.states.async_set(payback_date, "unknown")
+        hass.states.async_set(average, "unknown", attributes)
+        hass.states.async_set(progress, progress_state)
+        hass.states.async_set(roi, "unknown", {"prior_result_eur": prior_result})
+
+        rendered = template.Template(content, hass).async_render(parse_result=False)
+
+        assert rendered.strip() == expected, name
+
+    hass.states.async_set(payback_date, "2034-05-17")
+    hass.states.async_set(
+        average,
+        "unknown",
+        {"unavailable_reason": "low_price_coverage"},
+    )
+    hass.states.async_set(progress, "100")
+    hass.states.async_set(roi, "100", {"prior_result_eur": 500})
+
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert rendered.strip() == ""
+
+
+async def test_savings_payback_template_handles_missing_entities(hass) -> None:
+    _register(hass, "binary_sensor", "economics_investment_configured")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    block = _savings_payback_block(_savings_view(config))
+    stack = _configured_payback_stack(block)
+    assert [card["type"] for card in stack["cards"]] == ["markdown"]
+    content = _payback_explanation(block)["content"]
+    assert "set date_entity = none" in content
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+    assert rendered.strip() == "Derzeit kann noch keine Prognose erstellt werden."
+
+
+async def test_savings_payback_block_is_omitted_without_investment_gate(
+    hass,
+) -> None:
+    _register(hass, "sensor", "economics_estimated_payback_date")
+    _register(hass, "sensor", "economics_amortization_progress")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert not any(
+        card["type"] == "vertical-stack"
+        and card["cards"][0].get("content") == "### Wann ist der Speicher abbezahlt?"
+        for card in _savings_view(config)["cards"]
+    )
+
+
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:
     """Ohne geladene Lovelace-Komponente (z. B. in den meisten Unit-Tests)
     darf async_create_dashboard nicht fehlschlagen, sondern nur überspringen."""

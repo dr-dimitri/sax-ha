@@ -647,6 +647,36 @@ angezeigte Kalenderperiode diesen Neustart, kann die Recorder-Änderung den
 Sprung auf 0 enthalten. Der Tab weist deshalb Bilanzbeginn und Geltungsbereich
 aus, rekonstruiert aber keine frühere Historie.
 
+### Wann ist der Speicher abbezahlt?
+
+Direkt unter den Ersparniswerten beantwortet ein kompakter Block die zentrale
+Investitionsfrage. Ist ein Datum prognostizierbar, steht der vorhandene Wert
+**Voraussichtlich abbezahlt am** an erster Stelle. Darunter folgen der blaue
+Amortisationsfortschritt von 0 bis 100 %, der Restbetrag, die
+Jahreshochrechnung und optional das durchschnittliche Tagesergebnis der
+letzten 30 vollständigen Tage. Ein eingetragener Vorlauf-Ertrag erscheint
+getrennt als **Bereits vor Bilanzbeginn berücksichtigt** und wird keinem Tag,
+Monat oder Jahr zugerechnet.
+
+Ohne hinterlegte Investitionskosten zeigt der Block keine leere Gauge oder
+unbekannte Detailwerte, sondern verweist auf **Geräte & Dienste → SAX Power
+Home → Konfigurieren → Wirtschaftlichkeit**. Diese Anzeige reagiert direkt auf
+den Zustand der vorhandenen Entity `economics_investment_configured`; ein
+Dashboard-Neubau ist nach dem Hinterlegen oder Entfernen der Kosten nicht
+nötig.
+
+Ist noch kein Datum verfügbar, übersetzt der Tab die bereits vorhandenen
+Prognoseinformationen in einen kurzen Grund: Es fehlen noch 30 vollständige
+Tage, mindestens ein Tag wurde nicht vollständig beobachtet, die
+Preisabdeckung war unzureichend, das 30-Tage-Ergebnis ist nicht positiv oder
+die Prognose liegt außerhalb des unterstützten Zeithorizonts. Hat allein ein
+manuell eingetragener Vorlauf den Fortschritt bereits auf 100 % gebracht,
+weist der Text stattdessen auf die rechnerische Amortisation hin, ohne ein
+historisches Datum zu erfinden. Für unbekannte Zustände lautet der neutrale
+Hinweis: **Derzeit kann noch keine Prognose erstellt werden.** Alle Beträge,
+Gründe und das Datum stammen unverändert aus den bestehenden Entities; der Tab
+berechnet keine zweite Prognose.
+
 ### Freier Zeitraum
 
 Unter den festen Werten lässt sich ein beliebiger Datumsbereich auswählen -

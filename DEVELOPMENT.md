@@ -758,6 +758,18 @@ Netto-Ergebnisse:
   Grenze der Zeitraumwerte: nur Recorder-Daten der laufenden Bilanz ab dem
   angezeigten Bilanzbeginn. Der optionale Vorlauf-Ertrag bleibt außerhalb der
   Kalenderwerte.
+- `_savings_payback_block` stellt die vorhandene Amortisationsprognose direkt
+  unter diesen Werten dar. Zwei Core-`conditional`-Karten reagieren
+  ausschließlich auf den Laufzeitzustand von
+  `economics_investment_configured`: `off` zeigt den Konfigurationsweg, `on`
+  zeigt Datums-Tile, selbst ausblendende Begründung, blaue Fortschritts-Gauge
+  und die vorhandenen Detailwerte. Die Jinja-Vorlage übersetzt nur die
+  bestehenden Prognoseattribute. Ein gültiges Datum blendet sie aus; bei
+  mehreren fehlgeschlagenen Voraussetzungen hat eine durch Vorlauf bereits
+  erreichte Amortisation Vorrang, andernfalls gilt die in
+  `anforderung.yaml` festgelegte Gründereihenfolge. Unbekannte oder fehlende
+  Quelldaten liefern den neutralen Fallback. Keine Dashboard-Vorlage
+  berechnet Prognosewerte neu.
 - `_savings_free_period_block` bündelt den frei wählbaren Zeitraum in einem
   Core-`vertical-stack`. `energy-date-selection`, die einzelne
   `statistic`-Karte und das `statistics-graph` teilen exakt den isolierten Key

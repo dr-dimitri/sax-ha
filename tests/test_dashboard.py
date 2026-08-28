@@ -641,8 +641,8 @@ async def test_savings_inventory_is_merged_into_explanation_and_renders_sensor_v
     card = _savings_explanation_card(view)
     grid = next(candidate for candidate in view["cards"] if candidate["type"] == "grid")
     free_period = _savings_free_period_block(view)
-    assert view["cards"].index(card) == view["cards"].index(grid) + 1
-    assert view["cards"].index(card) < view["cards"].index(free_period)
+    assert view["cards"].index(free_period) > view["cards"].index(grid)
+    assert view["cards"].index(card) == view["cards"].index(free_period) + 1
     assert not any(
         candidate["type"] == "conditional"
         and candidate["conditions"][0].get("condition") == "numeric_state"
@@ -754,11 +754,11 @@ async def test_savings_view_uses_requested_card_order(hass) -> None:
     assert cards[0]["cards"][0]["type"] == "conditional"
     assert cards[1]["type"] == "grid"
     assert cards[2] == _tariff_plan_card(_savings_view(config))
-    assert cards[3] == _savings_explanation_card(_savings_view(config))
-    assert cards[4]["type"] == "vertical-stack"
+    assert cards[3]["type"] == "vertical-stack"
     assert any(
-        nested["type"] == "energy-date-selection" for nested in cards[4]["cards"]
+        nested["type"] == "energy-date-selection" for nested in cards[3]["cards"]
     )
+    assert cards[4] == _savings_explanation_card(_savings_view(config))
     assert cards[5] == _savings_status_card(_savings_view(config))
 
 

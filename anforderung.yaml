@@ -3759,18 +3759,18 @@ requirement_economics_savings_dashboard:
     economics_current_import_price und blendet sich bei einer anderen Tarifart
     als time_of_use selbst aus. Fehlt die Preis-Entity, entfällt die Karte.
 
-    Als viertes Kartenobjekt bündelt genau eine Core-markdown-Karte die dauerhaft
-    gleichbleibenden Erklärungen in einem standardmäßig geschlossenen
-    details-Element. Bei positivem economics_unvalued_inventory ergänzt sie
-    den formatierten Anfangsbestand mit drei Dezimalstellen und Sensor-Einheit.
-    Eine separate Anfangsbestandskarte existiert nicht.
-
-    Als fünftes Kartenobjekt folgt der vertical-stack für den freien Zeitraum
+    Als viertes Kartenobjekt folgt der vertical-stack für den freien Zeitraum
     ohne separate Markdown-Überschrift "Freier Zeitraum". Auswahl,
     statistic-Karte und statistics-graph teilen den Collection-Key
     energy_sax_power_savings. Die Statistik verwendet change über
     energy_date_selection; das Balkendiagramm enthält nur
     economics_net_savings und keinen festen period-Schlüssel.
+
+    Als fünftes Kartenobjekt bündelt genau eine Core-markdown-Karte die dauerhaft
+    gleichbleibenden Erklärungen in einem standardmäßig geschlossenen
+    details-Element. Bei positivem economics_unvalued_inventory ergänzt sie
+    den formatierten Anfangsbestand mit drei Dezimalstellen und Sensor-Einheit.
+    Eine separate Anfangsbestandskarte existiert nicht.
 
     Als sechstes und letztes Kartenobjekt steht der selbst ausblendende
     Statushinweis.
@@ -3792,8 +3792,8 @@ requirement_economics_savings_dashboard:
        Icon mdi:cash-multiple sind regression-getestet. Ein View mit dem Pfad
        wirtschaftlichkeit existiert nicht."
     - "Bei vollständiger Entity-Ausstattung lautet die Top-Level-Reihenfolge
-       exakt Amortisationsblock, KPI-Grid, Tarifinformation, eingeklappte
-       Hinweise, freier Zeitraum und Statushinweis."
+       exakt Amortisationsblock, KPI-Grid, Tarifinformation, freier Zeitraum,
+       eingeklappte Hinweise und Statushinweis."
     - "Die separaten Markdown-Felder mit den Labels Amortisation und Freier
        Zeitraum existieren nicht mehr."
     - "Direkt unter dem Restbetrag folgt der Vorlaufbetrag mit dem Suffix €;

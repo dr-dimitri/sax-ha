@@ -539,8 +539,8 @@ Pfad, der keinen wartenden Aufrufer mehr hat, über den optionalen
 
 Der fünfte View verwendet `economics_net_savings` für alle Kalender- und
 freien Zeitraumwerte. Die vollständige Top-Level-Reihenfolge lautet:
-Amortisationsblock, KPI-Grid, Tarifinformation, eingeklappte Hinweise, freier
-Zeitraum, Statushinweis. `_tariff_plan_card` erzeugt die Tarifinformation
+Amortisationsblock, KPI-Grid, Tarifinformation, freier Zeitraum, eingeklappte
+Hinweise, Statushinweis. `_tariff_plan_card` erzeugt die Tarifinformation
 direkt aus den Attributen des aktuellen Netzbezugspreis-Sensors.
 
 `_savings_payback_block` wird über

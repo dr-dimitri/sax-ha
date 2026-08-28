@@ -824,8 +824,8 @@ async def async_build_dashboard_config(
             savings_payback_block,
             savings_period_grid,
             tariff_plan_card,
-            savings_explanation_card,
             savings_free_period_block,
+            savings_explanation_card,
             savings_status_card,
         ],
     )

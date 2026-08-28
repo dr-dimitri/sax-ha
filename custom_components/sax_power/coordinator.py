@@ -174,6 +174,25 @@ OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
 INVENTORY_CAP_LOG_INTERVAL_SECONDS = 3600.0
 
 
+def _rounded(value: float | None, digits: int) -> float | None:
+    """Auf `digits` gerundeter Geld-/Prozentwert ohne negative Null.
+
+    `round(-0.0001, 2)` ergibt -0.0, und Home Assistant zeigt das als
+    "-0,0" an - ein Vorzeichen, das dem Anwender einen Verlust meldet, den
+    die gerundete Zahl selbst gar nicht mehr ausweist (Anwenderbericht zum
+    ROI bei einem operativen Ergebnis von -0,0086 EUR). Betroffen ist jeder
+    hier veröffentlichte Betrag, weil die Bilanz kurz nach ihrem Start
+    zwangsläufig winzig negativ ist (siehe REQ-ECONOMICS-ACCOUNTING,
+    "Ehrlicher Start"). Der Vergleich `== 0` trifft +0.0 und -0.0
+    gleichermaßen und lässt jeden tatsächlich von 0 verschiedenen Wert
+    unangetastet.
+    """
+    if value is None:
+        return None
+    rounded = round(value, digits)
+    return 0.0 if rounded == 0 else rounded
+
+
 def _economics_capacity_kwh(capacity_wh: Any) -> float | None:
     """Speicherkapazität (Wh) als kWh, oder None bei unbekanntem Rohwert.
 
@@ -730,7 +749,33 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._energy_pv_charged_kwh is not None
             else None
         )
+        data["energy_origin_attributes"] = self._energy_origin_attributes()
         self._accumulate_economics(data, charge_delta, discharge_kwh, observed_seconds)
+
+    def _energy_origin_attributes(self) -> dict[str, Any]:
+        """Startzeitpunkt der Herkunftszählung als Sensorattribut
+        (REQ-ENERGY-ORIGIN).
+
+        Die drei Zähler energy_charged, energy_charged_from_grid/_pv und
+        die Geldbilanz aus REQ-ECONOMICS-ACCOUNTING beginnen zu drei
+        verschiedenen Zeitpunkten: der Gesamtzähler mit der ersten
+        Installation, die Herkunft mit _bootstrap_energy_origin, die
+        Geldbilanz erst mit dem ersten vollständig gespeicherten Tarif.
+        Ihre Werte sind deshalb NICHT gegeneinander verrechenbar - genau
+        das legt das Dashboard aber nahe, weil es sie untereinander zeigt
+        (Anwenderbericht: 2,44 kWh PV-Ladung neben 0,0084 EUR
+        PV-Opportunitätskosten, was 0,112 kWh entspricht; beide Werte
+        waren korrekt). economics_started_at ist als Attribut des
+        Status-Sensors längst sichtbar, sein Gegenstück hier war es
+        nirgends - auch nicht im Diagnose-Download.
+        """
+        return {
+            "origin_accounting_started_at": (
+                None
+                if self._origin_accounting_started_at is None
+                else self._origin_accounting_started_at.isoformat()
+            ),
+        }
 
     def _energy_origin_initialized(self) -> bool:
         """Ob die Herkunftszählung läuft (siehe _bootstrap_energy_origin).
@@ -1259,24 +1304,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         remaining_to_payback = compute_remaining_to_payback_eur(
             investment_cost, published_operating_result
         )
-        data["economics_roi"] = None if roi_percent is None else round(roi_percent, 2)
+        data["economics_roi"] = _rounded(roi_percent, 2)
         data["economics_amortization_progress"] = (
             None
             if roi_percent is None
-            else round(compute_amortization_progress_percent(roi_percent), 2)
+            else _rounded(compute_amortization_progress_percent(roi_percent), 2)
         )
-        data["economics_remaining_to_payback"] = (
-            None if remaining_to_payback is None else round(remaining_to_payback, 2)
-        )
+        data["economics_remaining_to_payback"] = _rounded(remaining_to_payback, 2)
 
         current_day_result = (
             self._economics_current_day_operating_result_eur
             if monetary_available
             else None
         )
-        data["economics_result_today"] = (
-            None if current_day_result is None else round(current_day_result, 4)
-        )
+        data["economics_result_today"] = _rounded(current_day_result, 4)
         data["economics_result_today_last_reset"] = self._result_today_last_reset()
 
         # Unmaskierter Restbetrag ausschließlich für die (tarifpausen-
@@ -1291,15 +1332,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             investment_cost,
             remaining_to_payback_for_forecast,
         )
-        data["economics_average_daily_result_30d"] = (
-            None
-            if forecast.average_daily_result_eur is None
-            else round(forecast.average_daily_result_eur, 4)
+        data["economics_average_daily_result_30d"] = _rounded(
+            forecast.average_daily_result_eur, 4
         )
-        data["economics_projected_annual_result"] = (
-            None
-            if forecast.projected_annual_result_eur is None
-            else round(forecast.projected_annual_result_eur, 2)
+        data["economics_projected_annual_result"] = _rounded(
+            forecast.projected_annual_result_eur, 2
         )
         data["economics_estimated_payback_date"] = self._estimated_payback_date(
             forecast
@@ -1316,9 +1353,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # AUFLÖSEN. Stünde hier der bereits um den Vorlauf erhöhte
             # Betrag, zeigte es genau die Zahl nicht, gegen die der Leser
             # abgleicht.
-            "measured_operating_result_eur": (
-                None if measured_result is None else round(measured_result, 2)
-            ),
+            "measured_operating_result_eur": _rounded(measured_result, 2),
         }
         data["economics_amortization_forecast_attributes"] = {
             "window_start": (
@@ -1348,11 +1383,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # auch als Attribut, wie von REQ-ECONOMICS-AMORTIZATION gefordert -
             # nützlich für Dashboards, die den Durchschnitt zusammen mit den
             # übrigen Prognoseattributen aus einer einzigen Entity lesen.
-            "average_daily_result_eur": (
-                None
-                if forecast.average_daily_result_eur is None
-                else round(forecast.average_daily_result_eur, 4)
-            ),
+            "average_daily_result_eur": _rounded(forecast.average_daily_result_eur, 4),
             # Ohne dieses Attribut wäre ein Rückzahlungsdatum, das nur
             # wegen MAX_FORECAST_PAYBACK_DAYS entfällt, von einer gesunden
             # Prognose nicht zu unterscheiden (unavailable_reason bleibt
@@ -1666,22 +1697,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         avoided_cost = (
             self._economics_avoided_grid_cost_eur if monetary_available else None
         )
-        data["economics_grid_charge_cost"] = (
-            None if grid_cost is None else round(grid_cost, 4)
-        )
-        data["economics_pv_opportunity_cost"] = (
-            None if pv_cost is None else round(pv_cost, 4)
-        )
-        data["economics_avoided_grid_cost"] = (
-            None if avoided_cost is None else round(avoided_cost, 4)
-        )
+        data["economics_grid_charge_cost"] = _rounded(grid_cost, 4)
+        data["economics_pv_opportunity_cost"] = _rounded(pv_cost, 4)
+        data["economics_avoided_grid_cost"] = _rounded(avoided_cost, 4)
         # operating_result wird bewusst nicht separat gespeichert, sondern
         # immer aus den drei Teilsummen abgeleitet - so kann er nie von
         # ihnen abweichen.
         data["economics_operating_result"] = (
             None
             if grid_cost is None or pv_cost is None or avoided_cost is None
-            else round(avoided_cost - grid_cost - pv_cost, 4)
+            else _rounded(avoided_cost - grid_cost - pv_cost, 4)
         )
         data["economics_unvalued_inventory"] = (
             None
@@ -1988,6 +2013,29 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             now.isoformat(),
             f" - Grund: {reason}" if reason else "",
         )
+
+    @property
+    def energy_diagnostics(self) -> dict[str, Any]:
+        """Interner Zählerzustand für den Diagnose-Download (diagnostics.py).
+
+        Gegenstück zu economics_diagnostics: die ungerundeten Rohsummen und
+        vor allem origin_accounting_started_at. Ohne diesen Zeitstempel
+        ließ sich aus einem Diagnose-Download nicht entscheiden, ob eine
+        Differenz zwischen Herkunftszählern und Geldbilanz ein Rechenfehler
+        ist oder nur zwei verschiedene Zählzeiträume - siehe
+        _energy_origin_attributes.
+        """
+        return {
+            "origin_accounting_started_at": (
+                None
+                if self._origin_accounting_started_at is None
+                else self._origin_accounting_started_at.isoformat()
+            ),
+            "charged_kwh": self._energy_charged_kwh,
+            "discharged_kwh": self._energy_discharged_kwh,
+            "grid_charged_kwh": self._energy_grid_charged_kwh,
+            "pv_charged_kwh": self._energy_pv_charged_kwh,
+        }
 
     @property
     def economics_diagnostics(self) -> dict[str, Any]:

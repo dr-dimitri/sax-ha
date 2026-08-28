@@ -127,6 +127,20 @@ def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any
     return coordinator.data.get("economics_roi_attributes") or {}
 
 
+def _energy_origin_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Startzeitpunkt der Herkunftszählung (REQ-ENERGY-ORIGIN) an beiden
+    Herkunftssensoren.
+
+    Gegenstück zu economics_started_at am Status-Sensor: Beide Zählungen
+    beginnen zu unterschiedlichen Zeitpunkten, ihre Werte sind deshalb
+    nicht gegeneinander verrechenbar (siehe
+    SaxPowerCoordinator._energy_origin_attributes).
+    """
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("energy_origin_attributes") or {}
+
+
 def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
     """Diagnoseattribute des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY)."""
     if coordinator.data is None:
@@ -725,6 +739,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         value_fn=_direct("energy_charged_from_grid"),
+        attributes_fn=_energy_origin_attributes,
     ),
     SaxPowerSensorEntityDescription(
         key="energy_charged_from_pv",
@@ -733,6 +748,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         value_fn=_direct("energy_charged_from_pv"),
+        attributes_fn=_energy_origin_attributes,
     ),
     # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
     SaxPowerSensorEntityDescription(

@@ -592,17 +592,40 @@ async def async_build_dashboard_config(
         else None
     )
 
-    origin_card = _entities_card(
-        hass,
-        entry_id,
-        "Herkunft der Ladeenergie",
-        [
-            ("sensor", "energy_charged_from_pv"),
-            ("sensor", "energy_charged_from_grid"),
-            ("sensor", "energy_charged"),
-            ("sensor", "energy_discharged"),
-        ],
-        translations,
+    pv_entity_id, pv_row = _resolved_row(
+        hass, entry_id, "sensor", "energy_charged_from_pv", translations
+    )
+    origin_rows: list[dict[str, Any] | str] = [pv_row] if pv_row else []
+    for entity_domain, suffix in (
+        ("sensor", "energy_charged_from_grid"),
+        ("sensor", "energy_charged"),
+        ("sensor", "energy_discharged"),
+    ):
+        _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
+        if row is not None:
+            origin_rows.append(row)
+    # Die drei Zähler dieser Karte und die Geldbilanz eine Karte tiefer
+    # beginnen zu verschiedenen Zeitpunkten (REQ-ENERGY-ORIGIN): Der
+    # Gesamtzähler läuft seit der Installation, die Herkunft seit
+    # _bootstrap_energy_origin, die Bilanz erst seit dem ersten
+    # vollständigen Tarif. Ohne beide Zeitpunkte nebeneinander liest sich
+    # die Differenz wie ein Rechenfehler (Anwenderbericht: 2,44 kWh
+    # PV-Ladung neben 0,0084 EUR PV-Opportunitätskosten - beide Werte
+    # korrekt, nur verschieden alt).
+    origin_start_row = _attribute_row(
+        pv_entity_id, "origin_accounting_started_at", "Beginn der Herkunftszählung"
+    )
+    if origin_start_row is not None:
+        origin_rows.append(origin_start_row)
+    origin_card = (
+        {
+            "type": "entities",
+            "title": "Herkunft der Ladeenergie",
+            "state_color": True,
+            "entities": origin_rows,
+        }
+        if origin_rows
+        else None
     )
     # REQ-ECONOMICS-DASHBOARD verlangt hier ausdrücklich den Hinweis, dass
     # die Herkunftsaufteilung eine konservative Schätzung am
@@ -721,6 +744,43 @@ async def async_build_dashboard_config(
                 "card": investment_stack,
             }
 
+    balance_rows: list[dict[str, Any] | str] = []
+    for entity_domain, suffix in (
+        ("sensor", "economics_avoided_grid_cost"),
+        ("sensor", "economics_grid_charge_cost"),
+        ("sensor", "economics_pv_opportunity_cost"),
+        ("sensor", "economics_operating_result"),
+        ("sensor", "economics_unpriced_charge"),
+        ("sensor", "economics_unpriced_discharge"),
+    ):
+        _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
+        if row is not None:
+            balance_rows.append(row)
+    # Die tatsächlich bewertete Energiemenge macht jeden Betrag dieser
+    # Karte nachrechenbar (Betrag / Preis = Menge) und zeigt zugleich, dass
+    # sie sich NICHT auf die Herkunftszähler der Karte darüber bezieht,
+    # sondern nur auf den Zeitraum seit Bilanzbeginn - siehe
+    # coordinator._energy_origin_attributes. Beide Mengen sind Attribute
+    # des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY) und haben keinen
+    # eigenen Sensor.
+    for attribute, label in (
+        ("priced_charge_kwh", "Bewertete Ladung"),
+        ("priced_discharge_kwh", "Bewertete Entladung"),
+    ):
+        row = _attribute_row(status_entity_id, attribute, label)
+        if row is not None:
+            balance_rows.append(row)
+    balance_card = (
+        {
+            "type": "entities",
+            "title": "Operative Geldbilanz",
+            "state_color": True,
+            "entities": balance_rows,
+        }
+        if balance_rows
+        else None
+    )
+
     # REQ-ECONOMICS-DASHBOARD: Der hinterlegte Tarifplan lebt sonst
     # ausschließlich in entry.options und ist damit nur im Options Flow
     # einsehbar - dort aber immer im Bearbeitungsmodus und ohne jeden Bezug
@@ -748,20 +808,7 @@ async def async_build_dashboard_config(
             status_card,
             tariff_plan_card,
             origin_block,
-            _entities_card(
-                hass,
-                entry_id,
-                "Operative Geldbilanz",
-                [
-                    ("sensor", "economics_avoided_grid_cost"),
-                    ("sensor", "economics_grid_charge_cost"),
-                    ("sensor", "economics_pv_opportunity_cost"),
-                    ("sensor", "economics_operating_result"),
-                    ("sensor", "economics_unpriced_charge"),
-                    ("sensor", "economics_unpriced_discharge"),
-                ],
-                translations,
-            ),
+            balance_card,
             investment_card,
             _statistics_graph_card(
                 hass,

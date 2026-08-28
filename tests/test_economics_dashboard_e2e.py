@@ -11,7 +11,7 @@ Registerzugriffe.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -200,6 +200,55 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
         progress_id,
     ):
         assert entity_id in resolved
+
+
+async def test_origin_start_reaches_the_dashboard_row(hass) -> None:
+    """Ganze Kette des Herkunftsbeginns (REQ-ENERGY-ORIGIN): Coordinator ->
+    Sensorattribut -> Attributzeile der Dashboard-Karte.
+
+    Der Attributname muss an allen drei Stellen derselbe sein - sonst
+    stünde im Dashboard eine leere Zeile, und genau die Angabe fehlte, die
+    die verschieden alten Zähler auseinanderhält."""
+    coordinator = _make_coordinator(hass)
+    started_at = datetime(2026, 3, 1, 8, 0, tzinfo=UTC)
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=started_at,
+    ):
+        coordinator._bootstrap_energy_origin(None)
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {"storage_power_active": 0, "smartmeter_power": 0}
+        coordinator._accumulate_energy(data)
+    coordinator.data = data
+
+    description = next(
+        entry for entry in SENSOR_DESCRIPTIONS if entry.key == "energy_charged_from_pv"
+    )
+    assert description.attributes_fn is not None
+    attributes = description.attributes_fn(coordinator)
+    assert attributes["origin_accounting_started_at"] == started_at.isoformat()
+
+    pv_entity_id = _register(hass, "sensor", "energy_charged_from_pv")
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    economics_view = next(
+        view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
+    )
+    rows = [
+        row
+        for card in economics_view["cards"]
+        if card["type"] == "vertical-stack"
+        for sub in card["cards"]
+        for row in sub.get("entities", [])
+        if isinstance(row, dict) and row.get("type") == "attribute"
+    ]
+    assert {
+        "type": "attribute",
+        "entity": pv_entity_id,
+        "attribute": "origin_accounting_started_at",
+        "name": "Beginn der Herkunftszählung",
+    } in rows
 
 
 async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:

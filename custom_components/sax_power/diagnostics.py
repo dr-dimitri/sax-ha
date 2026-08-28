@@ -79,6 +79,11 @@ async def async_get_config_entry_diagnostics(
         # Quote bzw. dem maschinenlesbaren Grund, warum keiner bestimmbar
         # ist (REQ-ECONOMICS-TARIFFS).
         "tariff": coordinator.tariff_provider.diagnostics,
+        # Interner Zählerzustand samt Startzeitpunkt der Herkunftszählung -
+        # ohne ihn ist im Download nicht erkennbar, dass Gesamtzähler,
+        # Herkunftszähler und Geldbilanz zu verschiedenen Zeitpunkten
+        # begonnen haben (REQ-ENERGY-ORIGIN).
+        "energy": coordinator.energy_diagnostics,
         # Interner Bilanzzustand (Zeitstempel, ungerundete Rohsummen) -
         # coordinator_data enthält bereits die gerundeten, veröffentlichten
         # economics_*-Sensorwerte (REQ-ECONOMICS-ACCOUNTING).

@@ -2937,7 +2937,21 @@ requirement_energy_origin:
     Neue Sensoren (sensor.py, beschreibungsbasiert wie jeder andere
     berechnete Wert - kein RestoreEntity, siehe unten):
     energy_charged_from_grid, energy_charged_from_pv (beide kWh,
-    device_class energy, state_class total_increasing). Einen
+    device_class energy, state_class total_increasing). Beide tragen
+    origin_accounting_started_at als Attribut, und derselbe Zeitstempel
+    steht samt der ungerundeten Rohsummen unter "energy" im
+    Diagnose-Download (SaxPowerCoordinator.energy_diagnostics). Das ist
+    keine Kosmetik: Gesamtzähler (seit der Installation), Herkunftszähler
+    (seit _bootstrap_energy_origin) und die Geldbilanz aus
+    REQ-ECONOMICS-ACCOUNTING (seit dem ersten vollständig gespeicherten
+    Tarif) beginnen zu drei verschiedenen Zeitpunkten und sind deshalb
+    NICHT gegeneinander verrechenbar - das Dashboard zeigt sie aber
+    untereinander. Ohne den Zeitstempel liest sich diese Differenz wie ein
+    Rechenfehler (Anwenderbericht: 2,44 kWh PV-Ladung neben 0,0084 EUR
+    PV-Opportunitätskosten, was bei 0,075 EUR/kWh genau 0,112 kWh
+    entspricht - beide Werte korrekt, nur verschieden alt);
+    economics_started_at war als Attribut des Status-Sensors längst
+    sichtbar, sein Gegenstück nirgends. Einen
     diagnostischen Abdeckungsgrad gibt es nicht: Da jede gezählte
     Ladeenergie genau einer Quelle zugeordnet ist, wäre er konstant 100 %.
     Übrig bleibt allein die interne Aussage, ob überhaupt schon gezählt
@@ -3041,6 +3055,15 @@ requirement_energy_origin:
        unknown_charged_kwh startet die Herkunftszählung neu (beide Zähler
        0, neuer Startzeitpunkt), ohne die Gesamtzähler zu berühren; ein
        Snapshot ohne solchen Bestand behält seine Herkunftszähler."
+    - "Beide Herkunftssensoren tragen origin_accounting_started_at als
+       Attribut, der Diagnose-Download weist es im Abschnitt energy aus,
+       und vor
+       dem Bootstrap ist es ausdrücklich None statt eines erfundenen
+       Zeitpunkts (tests/test_coordinator.py, tests/test_diagnostics.py)."
+    - "Der Attributname ist über Coordinator, Sensor-Beschreibung und
+       Dashboard-Attributzeile hinweg derselbe
+       (tests/test_economics_dashboard_e2e.py) - ein umbenanntes Attribut
+       fiele sonst erst als leere Zeile im Dashboard des Anwenders auf."
     - "Sensor-Metadaten, strings.json, translations/de.json,
        translations/en.json, README.md und DEVELOPMENT.md sind
        aktualisiert."
@@ -3077,7 +3100,19 @@ requirement_economics_accounting:
     operating_result ist ein kumulierter operativer Cashflow, kein
     Kontostand, und wird nie separat gespeichert, sondern in
     SaxPowerCoordinator._publish_economics_balance aus den drei
-    Teilsummen abgeleitet - so kann er nie von ihnen abweichen. Noch im
+    Teilsummen abgeleitet - so kann er nie von ihnen abweichen.
+
+    Veröffentlicht werden alle Geld- und Prozentwerte dieser Anforderung
+    sowie aus REQ-ECONOMICS-AMORTIZATION über SaxPowerCoordinator._rounded,
+    das zusätzlich zur Rundung die negative Null auf 0.0 normalisiert:
+    round(-0.0001, 2) ergibt -0.0, und Home Assistant zeigt das als "-0,0"
+    an - ein Vorzeichen für einen Verlust, den die gerundete Zahl selbst
+    gar nicht mehr ausweist. Kurz nach dem Bilanzstart ist genau das der
+    Regelfall, weil dann ausschließlich Kosten gebucht sind (siehe
+    "Ehrlicher Start" unten). Betroffen sind ausdrücklich nur Ergebnisse,
+    nicht die durchgereichten Preise (economics_current_import_price/
+    economics_feed_in_price): Dort ist ein negativer Betrag eine Aussage
+    über den Tarif, keine Rundungsartefakt. Noch im
     Speicher liegende Energie hat bereits Beschaffungskosten, aber noch
     keinen Nutzen erzeugt: Ladeverluste werden dadurch automatisch
     sichtbar (Kosten für die volle geladene Energie, Nutzen nur für die
@@ -3272,6 +3307,9 @@ requirement_economics_accounting:
     - "Ladeverluste senken das operative Ergebnis über die gemessene
        Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu
        benötigen."
+    - "Ein winziger Verlust wird als 0.0 veröffentlicht, nie als -0.0
+       (geprüft über das Vorzeichen, nicht nur über == 0.0, das beide
+       trifft) - tests/test_coordinator.py."
     - "Store-Drosselung, Korruption (inkl. eines unvollständigen
        Sieben-Felder-Bündels samt bereinigter Baseline), zwei Config
        Entries und Final-Flush sind getestet
@@ -4003,8 +4041,11 @@ requirement_economics_dashboard:
       veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
     - Karte 3 "Herkunft der Ladeenergie": ein `_stack_card`
       (vertical-stack) aus der entities-Karte (energy_charged_from_pv,
-      energy_charged_from_grid, energy_charged, energy_discharged) plus
-      einer `markdown`-Karte mit
+      energy_charged_from_grid, energy_charged, energy_discharged, dann
+      der Beginn der Herkunftszählung als Attributzeile
+      "Beginn der Herkunftszählung" -
+      origin_accounting_started_at von energy_charged_from_pv, siehe
+      REQ-ENERGY-ORIGIN) plus einer `markdown`-Karte mit
       dem Hinweis, dass die Herkunftsaufteilung eine konservative
       Schätzung am Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine
       physikalische Einzelstromverfolgung - als Teil derselben Karte, nicht
@@ -4014,10 +4055,21 @@ requirement_economics_dashboard:
     - Karte 4 "Operative Geldbilanz": economics_avoided_grid_cost,
       economics_grid_charge_cost, economics_pv_opportunity_cost,
       economics_operating_result, economics_unpriced_charge,
-      economics_unpriced_discharge - Kosten/Nutzen bleiben durch die
+      economics_unpriced_discharge, dann die beiden Attributzeilen
+      "Bewertete Ladung"/"Bewertete Entladung" (priced_charge_kwh/
+      priced_discharge_kwh des Status-Sensors, siehe
+      REQ-ECONOMICS-OBSERVABILITY) - Kosten/Nutzen bleiben durch die
       Reihenfolge (zuerst der Nutzen, dann die beiden Kostenarten) und die
       Sensor-Übersetzungen eindeutig unterscheidbar; der Entity-Name
-      bleibt "Operatives Ergebnis", kein Wort wie "Gewinn".
+      bleibt "Operatives Ergebnis", kein Wort wie "Gewinn". Die beiden
+      Mengen machen jeden Betrag der Karte nachrechenbar (Betrag / Preis =
+      Menge) und grenzen ihn gegen die Zähler der Karte darüber ab: Die
+      Geldbilanz beginnt mit dem ersten vollständig gespeicherten Tarif,
+      die Herkunftszähler dagegen mit dem Coordinator-Start - ohne beide
+      Startzeitpunkte und die bewertete Menge liest sich diese Differenz
+      wie ein Rechenfehler (Anwenderbericht: 2,44 kWh PV-Ladung neben
+      0,0084 EUR PV-Opportunitätskosten, was 0,112 kWh entspricht; beide
+      Werte waren korrekt).
     - Karte 5 "Investition und Amortisation": EINE gemeinsame Karte
       (`_stack_card`, vertical-stack) in genau der geforderten Reihenfolge
       - eine entities-Zeile mit economics_roi, dann die Fortschritts-Gauge

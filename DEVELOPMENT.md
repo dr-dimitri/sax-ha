@@ -88,7 +88,8 @@ custom_components/sax_power/
 ├── repairs.py             Bestätigungsdialog für den Konflikt zwischen Netzladung
 │                          und preisoptimiertem Laden
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
-│                          + coordinator.data + Ladeplan, IP-Adresse redigiert
+│                          + coordinator.data + Ladeplan + Roh-/Startwerte der
+│                          Energie- und Geldzähler, IP-Adresse redigiert
 ├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
 │                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-DASHBOARD
@@ -274,6 +275,28 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
 PV-Opportunitätskosten) wird nie separat gespeichert, sondern in
 `_publish_economics_balance` aus den drei Teilsummen abgeleitet - so kann er
 nie von ihnen abweichen.
+
+Veröffentlicht werden alle Geld-/Prozentwerte über `coordinator._rounded`,
+das zusätzlich zur Rundung die negative Null auf `0.0` normalisiert:
+`round(-0.0001, 2)` ergibt `-0.0`, und Home Assistant zeigt das als „−0,0"
+an - ein Vorzeichen für einen Verlust, den die gerundete Zahl selbst gar
+nicht mehr ausweist. Kurz nach dem Bilanzstart ist das der Regelfall, weil
+dann ausschließlich Kosten gebucht sind. Die durchgereichten Preise bleiben
+bewusst außen vor: Dort ist ein negatives Vorzeichen eine Aussage über den
+Tarif.
+
+Drei Zählungen, drei Startzeitpunkte: `energy_charged` läuft seit der
+Installation, die Herkunftszähler seit `_bootstrap_energy_origin`, die
+Geldbilanz erst seit dem ersten vollständig gespeicherten Tarif. Ihre Werte
+sind deshalb NICHT gegeneinander verrechenbar, obwohl das Dashboard sie
+untereinander zeigt - ein Anwenderbericht las 2,44 kWh PV-Ladung neben
+0,0084 EUR PV-Opportunitätskosten (= 0,112 kWh bei 0,075 EUR/kWh) als
+Rechenfehler, obwohl beide Werte korrekt waren. Sichtbar gemacht wird das
+über `origin_accounting_started_at` (Attribut beider Herkunftssensoren,
+`coordinator._energy_origin_attributes`, plus Abschnitt `energy` im
+Diagnose-Download) neben dem längst vorhandenen `economics_started_at`
+sowie über die bewertete Menge `priced_charge_kwh`/`priced_discharge_kwh`
+in der Geldkarte, aus der sich jeder Betrag zurückrechnen lässt.
 
 Der einmalige Bootstrap läuft nur, solange `SaxTariffProvider.config.enabled`
 wahr ist. Nach dem Bootstrap akkumuliert `_accumulate_economics` aber AUCH
@@ -620,11 +643,17 @@ keine neue Berechnung ein:
   und Preise" mischt normale Entity-Zeilen mit Attribut-Zeilen).
 - `_attribute_row` baut eine `type: attribute`-Kartenzeile - zeigt ein
   Attribut einer Entity (hier: `charge_price_coverage_percent_today`/
-  `discharge_price_coverage_percent_today`/`economics_started_at` von
-  `economics_status`, siehe REQ-ECONOMICS-OBSERVABILITY) wie einen
+  `discharge_price_coverage_percent_today`/`economics_started_at` sowie
+  `priced_charge_kwh`/`priced_discharge_kwh` von `economics_status`, siehe
+  REQ-ECONOMICS-OBSERVABILITY, und `origin_accounting_started_at` von
+  `energy_charged_from_pv`, siehe REQ-ENERGY-ORIGIN) wie einen
   eigenen Sensor, ohne dass dafür ein eigener Sensor existieren müsste.
   Bewusst die Tageswerte: genau sie bestimmen den Zustand des
-  Status-Sensors in derselben Karte (Issue #134).
+  Status-Sensors in derselben Karte (Issue #134). Die drei Zeilen aus
+  Startzeitpunkt und bewerteter Menge sind zusammen die einzige Stelle,
+  an der sichtbar wird, dass Herkunftszähler und Geldbilanz zu
+  verschiedenen Zeitpunkten begonnen haben und ihre Werte deshalb nicht
+  gegeneinander verrechenbar sind.
 - `_statistics_graph_card` baut eine Core-`statistics-graph`-Karte
   (Balkendiagramm, `stat_types: ["change"]`, `period: "day"`,
   `days_to_show: 30`) für die vier Geldsensoren - keine Custom-Card,
@@ -633,7 +662,9 @@ keine neue Berechnung ein:
   eine fachlich zusammengehörige Gruppe als EINE Karte im View erscheinen
   muss, obwohl eine `entities`-Karte selbst keine Gauge/Markdown einbetten
   kann. Zwei Verwendungen:
-  - Karte "Herkunft der Ladeenergie": die entities-Karte plus eine
+  - Karte "Herkunft der Ladeenergie": die entities-Karte (zuletzt die
+    Attribut-Zeile "Beginn der Herkunftszählung" aus
+    `origin_accounting_started_at`) plus eine
     `markdown`-Karte mit dem Hinweis, dass die Herkunftsaufteilung eine
     konservative Schätzung am Netzanschlusspunkt ist, keine physikalische
     Einzelstromverfolgung (REQ-ENERGY-ORIGIN). Fehlt, wenn keine der

@@ -627,7 +627,31 @@ async def test_economics_view_origin_card(hass) -> None:
         grid,
         charged,
         discharged,
+        pv,
     ]
+
+
+async def test_economics_view_origin_card_shows_the_origin_start(hass) -> None:
+    """Die Karte weist den Beginn der Herkunftszählung als Attribut aus
+    (REQ-ENERGY-ORIGIN) - Gegenstück zum Bilanzbeginn in Karte 1, ohne den
+    die verschieden alten Zähler nicht auseinanderzuhalten sind."""
+    pv = _register(hass, "sensor", "energy_charged_from_pv")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    origin_card = next(
+        card
+        for card in _origin_stack(view)["cards"]
+        if card.get("title") == "Herkunft der Ladeenergie"
+    )
+    start_row = origin_card["entities"][-1]
+    assert start_row == {
+        "type": "attribute",
+        "entity": pv,
+        "attribute": "origin_accounting_started_at",
+        "name": "Beginn der Herkunftszählung",
+    }
 
 
 async def test_economics_view_origin_card_has_estimation_note(hass) -> None:
@@ -682,6 +706,35 @@ async def test_economics_view_operating_balance_card(hass) -> None:
         result,
         unpriced_charge,
         unpriced_discharge,
+    ]
+
+
+async def test_economics_view_balance_card_shows_the_priced_energy(hass) -> None:
+    """Die bewertete Lade-/Entlademenge macht jeden Betrag der Karte
+    nachrechenbar und grenzt ihn gegen die verschieden alten
+    Herkunftszähler der Karte darüber ab (REQ-ECONOMICS-DASHBOARD)."""
+    _register(hass, "sensor", "economics_avoided_grid_cost")
+    status_id = _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _economics_view(config)
+    balance_card = next(
+        card for card in view["cards"] if card.get("title") == "Operative Geldbilanz"
+    )
+    assert balance_card["entities"][-2:] == [
+        {
+            "type": "attribute",
+            "entity": status_id,
+            "attribute": "priced_charge_kwh",
+            "name": "Bewertete Ladung",
+        },
+        {
+            "type": "attribute",
+            "entity": status_id,
+            "attribute": "priced_discharge_kwh",
+            "name": "Bewertete Entladung",
+        },
     ]
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -6207,6 +6208,74 @@ def test_economics_status_price_unavailable_immediately_for_broken_fixed_tariff(
     )
 
     assert data["economics_status"] == EconomicsStatus.PRICE_UNAVAILABLE.value
+
+
+def test_energy_origin_attributes_publish_the_accounting_start(hass) -> None:
+    """REQ-ENERGY-ORIGIN: Der Startzeitpunkt der Herkunftszählung hängt als
+    Attribut an den Herkunftssensoren - Gegenstück zu economics_started_at.
+    Ohne ihn lassen sich die verschieden alten Zähler und die Geldbilanz
+    nicht auseinanderhalten (Anwenderbericht zu 2,44 kWh PV-Ladung neben
+    0,0084 EUR PV-Opportunitätskosten)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    started_at = datetime(2026, 3, 1, 8, 0, tzinfo=UTC)
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=started_at,
+    ):
+        coordinator._bootstrap_energy_origin(None)
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["energy_origin_attributes"] == {
+        "origin_accounting_started_at": started_at.isoformat()
+    }
+    assert coordinator.energy_diagnostics["origin_accounting_started_at"] == (
+        started_at.isoformat()
+    )
+
+
+def test_energy_origin_attributes_stay_empty_before_the_bootstrap(hass) -> None:
+    """Ein noch nicht gelesener Store (Ladefehler) darf keinen erfundenen
+    Startzeitpunkt melden - das Attribut ist dann ausdrücklich None."""
+    coordinator = _make_coordinator(hass, _make_client())
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["energy_origin_attributes"] == {"origin_accounting_started_at": None}
+
+
+def test_economics_amounts_never_publish_a_negative_zero(hass) -> None:
+    """Ein winziger Verlust darf nicht als "-0,0" erscheinen: round() liefert
+    dafür eine negative Null, die Home Assistant mit Vorzeichen anzeigt -
+    ein Verlust, den die gerundete Zahl selbst gar nicht mehr ausweist
+    (siehe coordinator._rounded). Kurz nach dem Bilanzstart ist genau das
+    der Regelfall (REQ-ECONOMICS-ACCOUNTING, "Ehrlicher Start")."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(pv_opportunity_cost_delta=0.00001),
+    )
+
+    assert coordinator._economics_pv_opportunity_cost_eur == pytest.approx(0.00001)
+    for key in (
+        "economics_operating_result",
+        "economics_pv_opportunity_cost",
+        "economics_roi",
+        "economics_result_today",
+    ):
+        # `== 0.0` allein trifft auch -0.0 - das Vorzeichen ist hier die
+        # eigentliche Aussage.
+        assert data[key] == 0.0, key
+        assert math.copysign(1.0, data[key]) > 0, key
 
 
 def test_economics_status_origin_unavailable_without_origin_counters(hass) -> None:

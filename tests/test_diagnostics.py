@@ -171,6 +171,30 @@ async def test_diagnostics_includes_the_economics_balance(hass) -> None:
     assert diagnostics["economics"]["grid_charge_cost_eur"] == 1.23456
 
 
+async def test_diagnostics_includes_the_energy_origin_start(hass) -> None:
+    """REQ-ENERGY-ORIGIN: Ohne den Startzeitpunkt der Herkunftszählung ist
+    aus einem Download nicht zu entscheiden, ob eine Differenz zwischen
+    Herkunftszählern und Geldbilanz ein Rechenfehler ist oder nur zwei
+    verschieden alte Zählzeiträume."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["energy"]["origin_accounting_started_at"] is None
+    assert diagnostics["energy"]["pv_charged_kwh"] is None
+
+    started_at = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
+    coordinator._origin_accounting_started_at = started_at
+    coordinator._energy_pv_charged_kwh = 2.4421234
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["energy"]["origin_accounting_started_at"] == (
+        started_at.isoformat()
+    )
+    assert diagnostics["energy"]["pv_charged_kwh"] == 2.4421234
+
+
 async def test_diagnostics_includes_the_economics_data_quality_state(hass) -> None:
     """REQ-ECONOMICS-OBSERVABILITY: Status, Store-Zustand und
     Preisabdeckungszähler landen ebenfalls im Diagnose-Download."""

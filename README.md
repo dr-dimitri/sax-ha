@@ -553,7 +553,19 @@ Messausfall rechnet die Bilanz also nie schön.
 Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
 0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
 zugeordnet, der bestehende Gesamtzähler **Geladene Energie (gesamt)** bleibt
-davon unberührt.
+davon unberührt. Beide Herkunftssensoren führen diesen Startzeitpunkt als
+Attribut `origin_accounting_started_at` mit; im Dashboard steht er als Zeile
+**Beginn der Herkunftszählung**.
+
+Dieser Zeitpunkt ist wichtig, sobald daneben eine
+[Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz) läuft: Sie beginnt
+erst mit dem ersten vollständig gespeicherten Tarif und damit in aller Regel
+später als die Herkunftszählung. **Die Zähler der beiden Abschnitte sind
+deshalb nicht gegeneinander verrechenbar** - 2,44 kWh geladene PV-Energie
+neben 0,0084 EUR PV-Opportunitätskosten ist kein Widerspruch, wenn die
+Bilanz von diesen 2,44 kWh nur die letzten 0,112 kWh erlebt hat. Vergleichbar
+sind die Beträge ausschließlich mit den Zeilen **Bewertete Ladung**/
+**Bewertete Entladung** derselben Karte.
 
 ## Wirtschaftlichkeitsbilanz
 

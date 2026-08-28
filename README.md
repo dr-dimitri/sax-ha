@@ -649,6 +649,13 @@ bereits festgehaltene Ersparnis nicht; ein echtes Ergebnis von 0 bleibt als
 0 EUR sichtbar. Die unmittelbar darüber erläuterte Upgrade-Grenze gilt auch
 für diese Darstellung.
 
+Die dauerhaft gleichbleibenden Erläuterungen zur Berechnung, zur
+Recorder-Datenbasis und zur freien Zeitraumauswahl sind am Anfang des Tabs
+unter **Hinweise zur Berechnung und Datenbasis** zusammengefasst und
+standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
+Warnungen sowie Erklärungen zu Anfangsbestand und Prognose bleiben unabhängig
+davon sichtbar, weil sich ihr Inhalt mit dem Anlagenzustand ändert.
+
 Vier Karten zeigen die Zunahme der Netto-Ersparnis im laufenden
 Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
 laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus

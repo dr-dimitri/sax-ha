@@ -4363,9 +4363,19 @@ requirement_economics_savings_dashboard:
     `/sax-power/wirtschaftlichkeit`; die strikte if/elif-Kette zeigt höchstens
     einen Text und dupliziert keine technische Tabelle.
 
-    Unmittelbar danach erläutert die vorhandene Core-markdown-Karte die
-    Bedeutung der Netto-Ersparnis. Darauf folgen in einem zweispaltigen,
-    nicht quadratischen Core-grid vier
+    Unmittelbar danach bündelt genau eine Core-markdown-Karte alle dauerhaft
+    gleichbleibenden Erklärungen in einem nativen HTML-`details`-Element mit
+    der Summary "Hinweise zur Berechnung und Datenbasis". Das Element trägt
+    kein `open`-Attribut und ist deshalb beim Öffnen des Views standardmäßig
+    eingeklappt. Sein Inhalt erklärt gemeinsam die Rohformel und
+    Höchststandsregel, die mögliche Differenz zwischen Recorder-Aufzeichnung
+    und Bilanzbeginn sowie die Recorder-/Neustart-Grenzen der freien
+    Zeitraumauswahl. `details` und `summary` gehören zur HTML-Allowlist des
+    mit Home Assistant 2026.8.2 ausgelieferten Markdown-Renderers; es gibt
+    keine Custom-Card- oder JavaScript-Abhängigkeit. Zustandsabhängige Status-,
+    Anfangsbestands- und Prognosehinweise stehen ausdrücklich außerhalb des
+    eingeklappten Elements und bleiben bei Bedarf unmittelbar sichtbar.
+    Darauf folgen in einem zweispaltigen, nicht quadratischen Core-grid vier
     Core-statistic-Karten "Heute bisher", "Diese Woche bisher", "Dieser
     Monat bisher" und "Dieses Jahr bisher". Alle vier referenzieren exakt
     dieselbe economics_net_savings-Entity, verwenden `stat_type: change`
@@ -4399,10 +4409,8 @@ requirement_economics_savings_dashboard:
     den direkten aktuellen Zustand von economics_net_savings und direkt
     darunter das Attribut economics_started_at der vorhandenen Entity
     economics_status mit dem Label "Bilanzbeginn". Der Gesamtwert ist keine
-    fixed-period-Recorder-Differenz. Ein weiterer Markdown-Hinweis erklärt,
-    dass die Kalenderwerte aus der Recorder-Langzeitstatistik der neuen
-    Netto-Ersparnis-Entity stammen. Bei aktualisierten Installationen beginnt
-    diese Aufzeichnung später als der angezeigte Bilanzbeginn. Ein
+    fixed-period-Recorder-Differenz. Der zuvor dauerhaft sichtbare separate
+    Recorder-Hinweis ist Teil des eingeklappten Erklärungs-Elements. Ein
     optionaler Vorlauf-Ertrag wird weder referenziert noch auf Kalenderperioden
     verteilt; er bleibt ausschließlich Teil der vorhandenen ROI-Darstellung.
 
@@ -4462,20 +4470,20 @@ requirement_economics_savings_dashboard:
     ausdrücklich kein `period`; Home Assistant wählt die zur Zeitspanne
     passende Stunden-/Tages-/Monatsauflösung selbst.
 
-    Der Hinweis des Blocks erklärt, dass ausschließlich Daten seit Beginn der
-    Recorder-Aufzeichnung von economics_net_savings einfließen, dieser bei
-    aktualisierten Installationen jünger als der sichtbare Bilanzbeginn sein
-    kann, eine frühere Auswahl keine Werte rekonstruiert und fehlende
-    beziehungsweise ausgeschlossene Recorder-Historie als unbekannter Wert
-    oder leeres Diagramm sichtbar bleibt. Eine
-    Auswahl, die einen manuellen Bilanzneustart schneidet, kann durch den
-    expliziten last_reset positive Zuwächse vor und nach dem Neustart
-    zusammenfassen. Weder Python noch Jinja führen
+    Der Block selbst zeigt dauerhaft nur die kurze Markdown-Überschrift
+    "Freier Zeitraum". Die Erklärung, dass ausschließlich Daten seit Beginn
+    der Recorder-Aufzeichnung einfließen, eine frühere Auswahl keine Werte
+    rekonstruiert und fehlende beziehungsweise ausgeschlossene Historie leer
+    bleibt, steht im gemeinsamen eingeklappten Erklärungs-Element am Anfang
+    des Views. Dort wird ebenso erklärt, dass eine Auswahl über einen
+    manuellen Bilanzneustart durch den expliziten last_reset positive
+    Zuwächse vor und nach dem Neustart zusammenfassen kann. Weder Python noch
+    Jinja führen
     eigene Datumsarithmetik aus; es gibt keinen direkten Recorder-Datenbank-
     oder privaten Statistik-API-Zugriff.
 
     Fehlt economics_net_savings in der Entity Registry, entfallen das
-    gesamte Statistik-Grid, die Gesamtkarte, der Recorder-Hinweis und der
+    gesamte Statistik-Grid, die Gesamtkarte und der
     vollständige freie Zeitraum einschließlich Datumswähler. Es entsteht
     weder `entity: null`, ein leeres Grid noch ein funktionsloser einzelner
     Datumswähler. Statushinweis und Anfangsbestands-Erklärung bleiben davon
@@ -4511,6 +4519,10 @@ requirement_economics_savings_dashboard:
        Titel, Pfad und Icon des sechsten Views sind regression-getestet."
     - "Alle vier Kalenderkarten referenzieren dieselbe aufgelöste Entity und
        verwenden exakt change sowie day/week/month/year ohne Offset."
+    - "Genau eine statische Erklärungs-Karte bündelt Formel, Recorder- und
+       Zeitraumhinweise in `<details><summary>…</summary>…</details>`; ohne
+       open-Attribut beginnt sie eingeklappt, und keine zweite Markdown-Karte
+       wiederholt diese Erklärungen dauerhaft sichtbar."
     - "Die erste Karte rendert economics_status mit Home Assistants
        Template-Engine: active bleibt leer; jeder Problem-, unbekannte und
        fehlende Zustand ergibt höchstens einen verständlichen Hinweis mit

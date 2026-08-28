@@ -1170,30 +1170,45 @@ async def test_savings_view_total_is_direct_state_with_accounting_start(hass) ->
     assert "fixed_period" not in json.dumps(view)
 
 
-async def test_savings_view_explains_result_and_recorder_scope(hass) -> None:
+async def test_savings_view_collapses_static_explanations_into_one_control(
+    hass,
+) -> None:
     _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     view = _savings_view(config)
-    assert view["cards"][1] == {
-        "type": "markdown",
-        "content": (
-            "Grundlage der Netto-Ersparnis sind vermiedene Netzbezugskosten "
-            "minus Netzladekosten und entgangene Einspeisevergütung. Angezeigt "
-            "wird ein gespeicherter, nichtnegativer Höchststand. Spätere Kosten "
-            "verringern eine bereits festgehaltene Ersparnis nicht."
-        ),
-    }
-    recorder_note = next(
+    card = view["cards"][1]
+    assert card["type"] == "markdown"
+    content = card["content"]
+    assert content.startswith("<details>\n<summary>")
+    assert content.endswith("</details>\n")
+    assert "<details open" not in content
+    assert content.count("<details>") == 1
+    assert content.count("</details>") == 1
+    assert content.count("<summary>") == 1
+    assert content.count("</summary>") == 1
+    assert json.dumps(view).count("<details>") == 1
+    assert json.dumps(view).count("</details>") == 1
+    assert "Hinweise zur Berechnung und Datenbasis" in content
+    assert "Netto-Ersparnis:" in content
+    assert "gespeicherter, nichtnegativer Höchststand" in content
+    assert "Recorder-Langzeitstatistik der Netto-Ersparnis" in content
+    assert "jünger als der angezeigte Bilanzbeginn" in content
+    assert "Freier Zeitraum:" in content
+    assert "Eine frühere Auswahl erfindet keine Werte" in content
+    assert "vom Recorder ausgeschlossen" in content
+    assert "unbekannt beziehungsweise leer" in content
+    assert "manuellen Neustart" in content
+    assert "positiven Zuwächse vor und nach dem Neustart" in content
+
+    explanatory_cards = [
         card["content"]
         for card in view["cards"]
         if card["type"] == "markdown"
         and "Recorder-Langzeitstatistik" in card["content"]
-    )
-    assert "Recorder-Langzeitstatistik der Netto-Ersparnis" in recorder_note
-    assert "beginnt diese Aufzeichnung später" in recorder_note
-    assert "Bilanzbeginn" in recorder_note
+    ]
+    assert explanatory_cards == [content]
 
 
 async def test_savings_view_omits_data_cards_without_result_entity(hass) -> None:
@@ -1261,20 +1276,13 @@ async def test_savings_free_period_cards_share_the_exact_collection_key(
     assert "period" not in graph
 
 
-async def test_savings_free_period_explains_recorder_and_reset_limits(hass) -> None:
+async def test_savings_free_period_keeps_only_its_compact_heading(hass) -> None:
     _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     content = _savings_free_period_block(_savings_view(config))["cards"][0]["content"]
-    assert content.startswith("### Freier Zeitraum")
-    assert "Beginn der Recorder-Aufzeichnung" in content
-    assert "jünger als der angezeigte Bilanzbeginn" in content
-    assert "keine rückwirkend erfundenen Werte" in content
-    assert "vom Recorder ausgeschlossen" in content
-    assert "unbekannt beziehungsweise leer" in content
-    assert "manuellen Neustart" in content
-    assert "positiven Zuwächse vor und nach dem Neustart" in content
+    assert content == "### Freier Zeitraum"
 
 
 async def test_savings_free_period_is_fully_omitted_without_result_entity(

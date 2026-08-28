@@ -814,11 +814,14 @@ den einzigen kontrollierten Rücksprung:
   `economics_net_savings`; eine `_attribute_row` zeigt darunter
   `economics_started_at` von `economics_status` als "Bilanzbeginn". Sie nutzt
   bewusst keine Recorder-Differenz.
-- Statische Markdown-Karten erklären Rohformel und Höchststandsregel sowie
-  die Grenze der Zeitraumwerte: nur Daten seit Beginn der Recorder-Aufzeichnung
-  von `economics_net_savings`. Bei aktualisierten Installationen kann dieser
-  später als der angezeigte Bilanzbeginn liegen. Der optionale Vorlauf-Ertrag
-  bleibt außerhalb der Kalenderwerte.
+- Eine statische Core-`markdown`-Karte bündelt Rohformel, Höchststandsregel,
+  Recorder-/Bilanzbeginn und die Grenzen der freien Zeitraumauswahl in einem
+  nativen `<details>`-Element. Es besitzt kein `open`-Attribut und beginnt
+  deshalb eingeklappt; `<summary>` bleibt als kompaktes Bedienelement sichtbar.
+  Der Frontend-Renderer von Home Assistant 2026.8.2 erlaubt beide HTML-Elemente.
+  Veränderliche Status-, Anfangsbestands- und Prognosehinweise bleiben außerhalb
+  und werden bei Bedarf sofort sichtbar. Der optionale Vorlauf-Ertrag bleibt
+  außerhalb der Kalenderwerte.
 - `_savings_payback_block` stellt die vorhandene Amortisationsprognose direkt
   unter diesen Werten dar. Zwei Core-`conditional`-Karten reagieren
   ausschließlich auf den Laufzeitzustand von
@@ -840,10 +843,11 @@ den einzigen kontrollierten Rücksprung:
   bewusst keinen `period`-Schlüssel, damit Home Assistant seine Auflösung
   selbst wählt. Der ganze Block wird erst nach erfolgreicher Registry-
   Auflösung gebaut - der Datumswähler kann deshalb nie allein zurückbleiben.
-  Ein Markdown-Hinweis dokumentiert Recorder-/Bilanzstart-/Reset-Grenzen:
-  Ein Zeitraum über einen Bilanzneustart kann wegen des expliziten
-  `last_reset` positive Zuwächse beider Bilanzabschnitte zusammenfassen.
-  Python und Jinja berechnen keine Zeiträume.
+  Der Block zeigt selbst nur die kurze Überschrift "Freier Zeitraum"; die
+  Recorder-/Bilanzstart-/Reset-Grenzen stehen im gemeinsamen eingeklappten
+  Erklärungs-Element. Ein Zeitraum über einen Bilanzneustart kann wegen des
+  expliziten `last_reset` positive Zuwächse beider Bilanzabschnitte
+  zusammenfassen. Python und Jinja berechnen keine Zeiträume.
 
 Der vorhandene Dashboard-Aktualitätsmechanismus vergleicht die View-Pfade
 dynamisch. Mit `ersparnis` in der erwarteten Konfiguration meldet ein

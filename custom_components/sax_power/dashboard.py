@@ -215,6 +215,31 @@ _SAVINGS_INVENTORY_TEMPLATE = """\
 {%- endif %}
 """
 
+# Dauerhaft gleichbleibender Erklärungstext des Ersparnis-Tabs. Das native
+# HTML-Element details ist in der Allowlist des zu Home Assistant 2026.8.2
+# gehörenden Markdown-Renderers enthalten. Ohne open-Attribut beginnt es
+# bewusst geschlossen; aktuelle Warnungen bleiben in den separaten,
+# zustandsabhängigen Karten sichtbar (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+_SAVINGS_EXPLANATION_CONTENT = """\
+<details>
+<summary><strong>Hinweise zur Berechnung und Datenbasis</strong></summary>
+<p><strong>Netto-Ersparnis:</strong> Grundlage sind vermiedene
+Netzbezugskosten minus Netzladekosten und entgangene Einspeisevergütung.
+Angezeigt wird ein gespeicherter, nichtnegativer Höchststand. Spätere Kosten
+verringern eine bereits festgehaltene Ersparnis nicht.</p>
+<p><strong>Kalenderwerte:</strong> Sie stammen aus der
+Recorder-Langzeitstatistik der Netto-Ersparnis. Bei aktualisierten
+Installationen kann diese Aufzeichnung jünger als der angezeigte Bilanzbeginn
+sein.</p>
+<p><strong>Freier Zeitraum:</strong> Es fließen nur Daten seit Beginn dieser
+Recorder-Aufzeichnung ein. Eine frühere Auswahl erfindet keine Werte. Fehlt
+Recorder-Historie oder ist die Ergebnis-Entity vom Recorder ausgeschlossen,
+bleiben Wert und Diagramm unbekannt beziehungsweise leer. Schneidet die
+Auswahl einen manuellen Neustart der Wirtschaftlichkeitsbilanz, kann der
+Recorder die positiven Zuwächse vor und nach dem Neustart zusammenfassen.</p>
+</details>
+"""
+
 DASHBOARD_URL_PATH = "sax-power"
 DASHBOARD_TITLE = "SAX Power"
 DASHBOARD_ICON = "mdi:battery-charging-100"
@@ -489,19 +514,7 @@ def _savings_free_period_block(entity_id: str) -> dict[str, Any]:
         "cards": [
             {
                 "type": "markdown",
-                "content": (
-                    "### Freier Zeitraum\n\n"
-                    "Es fließen nur Daten seit Beginn der Recorder-Aufzeichnung "
-                    "der Netto-Ersparnis ein. Bei aktualisierten Installationen "
-                    "kann sie jünger als der angezeigte Bilanzbeginn sein; eine "
-                    "Auswahl davor erzeugt keine rückwirkend erfundenen Werte. "
-                    "Fehlt Recorder-Historie "
-                    "oder ist die Ergebnis-Entity vom Recorder ausgeschlossen, "
-                    "bleiben Wert und Diagramm unbekannt beziehungsweise leer. "
-                    "Schneidet die Auswahl einen manuellen Neustart der "
-                    "Wirtschaftlichkeitsbilanz, kann der Recorder die positiven "
-                    "Zuwächse vor und nach dem Neustart zusammenfassen."
-                ),
+                "content": "### Freier Zeitraum",
             },
             {
                 "type": "energy-date-selection",
@@ -1176,7 +1189,6 @@ async def async_build_dashboard_config(
     )
     savings_period_grid = None
     savings_total_card = None
-    savings_recorder_note = None
     savings_free_period_block = None
     if savings_result_entity_id is not None:
         savings_period_grid = _grid_card(
@@ -1212,15 +1224,6 @@ async def async_build_dashboard_config(
             "state_color": True,
             "entities": savings_total_rows,
         }
-        savings_recorder_note = {
-            "type": "markdown",
-            "content": (
-                "Die Kalenderwerte stammen aus der Recorder-"
-                "Langzeitstatistik der Netto-Ersparnis. Bei aktualisierten "
-                "Installationen beginnt diese Aufzeichnung später als der "
-                "daneben angezeigte Bilanzbeginn."
-            ),
-        }
         savings_free_period_block = _savings_free_period_block(savings_result_entity_id)
 
     savings_payback_block = _savings_payback_block(hass, entry_id, translations)
@@ -1233,18 +1236,11 @@ async def async_build_dashboard_config(
             savings_status_card,
             {
                 "type": "markdown",
-                "content": (
-                    "Grundlage der Netto-Ersparnis sind vermiedene "
-                    "Netzbezugskosten minus Netzladekosten und entgangene "
-                    "Einspeisevergütung. Angezeigt wird ein gespeicherter, "
-                    "nichtnegativer Höchststand. Spätere Kosten verringern eine "
-                    "bereits festgehaltene Ersparnis nicht."
-                ),
+                "content": _SAVINGS_EXPLANATION_CONTENT,
             },
             savings_period_grid,
             savings_inventory_card,
             savings_total_card,
-            savings_recorder_note,
             savings_payback_block,
             savings_free_period_block,
         ],

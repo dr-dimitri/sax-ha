@@ -3756,8 +3756,10 @@ requirement_economics_savings_dashboard:
 
     Als drittes Kartenobjekt folgt die dynamische Tarifinformation. Sie liest
     ausschließlich die Attribute der aufgelösten Entity
-    economics_current_import_price und blendet sich bei einer anderen Tarifart
-    als time_of_use selbst aus. Fehlt die Preis-Entity, entfällt die Karte.
+    economics_current_import_price, zeigt unter dem Tagesplan die im Cashflow
+    hinterlegte Einspeisevergütung mit vier Nachkommastellen und blendet sich
+    bei einer anderen Tarifart als time_of_use selbst aus. Fehlt die
+    Preis-Entity, entfällt die Karte.
 
     Als viertes Kartenobjekt folgt der vertical-stack für den freien Zeitraum
     ohne separate Markdown-Überschrift "Freier Zeitraum". Auswahl,
@@ -3804,6 +3806,8 @@ requirement_economics_savings_dashboard:
        Nachkommastellen vor, ohne interne Werte zu runden."
     - "Alle vier Kalenderkarten nutzen dieselbe Entity sowie change und
        day/week/month/year ohne Offset."
+    - "Die Tarifplan-Karte zeigt die im Cashflow hinterlegte
+       Einspeisevergütung als EUR/kWh mit vier Nachkommastellen."
     - "Freie Auswahl, Statistik und Diagramm teilen exakt
        energy_sax_power_savings; das Diagramm hat keinen period-Schlüssel."
     - "Anfangsbestand und Statuszustände sind mit gerenderten Template-Tests

@@ -6437,6 +6437,7 @@ def test_tariff_plan_attributes_list_windows_sorted_by_start(hass) -> None:
 
     attributes = data["economics_price_attributes"]
     assert attributes["base_price_eur_kwh"] == pytest.approx(0.30)
+    assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
     assert attributes["windows"] == [
         {"start": "06:00:00", "end": "08:00:00", "price_eur_kwh": 0.41},
         {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21},
@@ -6461,6 +6462,7 @@ def test_tariff_plan_attributes_are_empty_for_a_fixed_tariff(hass) -> None:
     assert attributes["tariff_type"] == "fixed"
     assert attributes["windows"] is None
     assert attributes["base_price_eur_kwh"] is None
+    assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
     assert attributes["active_window"] is None
     # Ein Festpreis gilt unbegrenzt und wechselt deshalb nie.
     assert attributes["next_price_change_at"] is None

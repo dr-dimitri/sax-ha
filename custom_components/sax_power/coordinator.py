@@ -848,7 +848,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             None if current_price is None else round(current_price, 5)
         )
         data["economics_price_attributes"] = self._tariff_plan_attributes(
-            quote_result, moment
+            quote_result, moment, feed_in_price
         )
         data["economics_feed_in_price"] = (
             None if feed_in_price is None else round(feed_in_price, 5)
@@ -1301,7 +1301,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def _tariff_plan_attributes(
-        self, quote_result: QuoteResult, moment: datetime
+        self,
+        quote_result: QuoteResult,
+        moment: datetime,
+        feed_in_price: float | None,
     ) -> dict[str, Any]:
         """Der hinterlegte Tarifplan als Attribute des Preis-Sensors.
 
@@ -1351,6 +1354,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "base_price_eur_kwh": (
                 config.tou_base_price_eur_kwh if time_of_use else None
             ),
+            "feed_in_price_eur_kwh": feed_in_price,
             "windows": (
                 [window_as_mapping(entry) for entry in sorted_windows(config)]
                 if time_of_use

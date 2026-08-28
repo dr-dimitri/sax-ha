@@ -96,6 +96,7 @@ _TARIFF_PLAN_TEMPLATE = """\
 {%- set windows = state_attr(entity, 'windows') or [] %}
 {%- set active = state_attr(entity, 'active_window') %}
 {%- set base = state_attr(entity, 'base_price_eur_kwh') %}
+{%- set feed_in = state_attr(entity, 'feed_in_price_eur_kwh') %}
 {%- set change = state_attr(entity, 'next_price_change_at') %}
 {%- set reason = state_attr(entity, 'unavailable_reason') %}
 ### Tarifplan (tageszeitabhängig)
@@ -111,6 +112,9 @@ _TARIFF_PLAN_TEMPLATE = """\
 {%- endfor %}
 | {{ '**jetzt**' if reason is none and active is none else '' }} | – | – | {{
     '%.4f'|format(base) if base is not none else '?' }} EUR/kWh (Grundpreis) |
+
+**Einspeisevergütung:** {{
+    '%.4f'|format(feed_in) if feed_in is not none else '?' }} EUR/kWh
 {% if reason is not none %}
 Derzeit gilt kein Preis ({{ reason }}) – bitte die Tarifkonfiguration prüfen.
 {%- elif change is not none %}
@@ -388,9 +392,10 @@ def _tariff_plan_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | No
 
     Gespeist wird die Karte ausschließlich aus den Attributen des
     Netzbezugspreis-Sensors (`windows`, `active_window`,
-    `base_price_eur_kwh`, `next_price_change_at`) - sie enthält damit keine
-    eigene Kopie der Konfiguration und kann nach einer Options-Änderung
-    nicht veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
+    `base_price_eur_kwh`, `feed_in_price_eur_kwh`,
+    `next_price_change_at`) - sie enthält damit keine eigene Kopie der
+    Konfiguration und kann nach einer Options-Änderung nicht veralten. Ohne
+    registrierten Preis-Sensor entfällt sie ganz.
     """
     price_entity_id = _entity_id(
         hass, "sensor", f"{entry_id}_economics_current_import_price"
@@ -1040,6 +1045,14 @@ async def _async_missing_dashboard_views(
             or (
                 _contains_dashboard_fragment(expected_savings_view, "tariff_type")
                 and not _contains_dashboard_fragment(savings_view, "tariff_type")
+            )
+            or (
+                _contains_dashboard_fragment(
+                    expected_savings_view, "feed_in_price_eur_kwh"
+                )
+                and not _contains_dashboard_fragment(
+                    savings_view, "feed_in_price_eur_kwh"
+                )
             )
         ):
             outdated_paths.add("ersparnis")

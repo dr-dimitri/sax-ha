@@ -193,7 +193,7 @@ async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
     Coordinator-Attribute -> Sensor-Entity -> gerenderte Dashboard-Karte.
 
     Jedes Glied für sich ist bereits abgedeckt; hier geht es darum, dass
-    die vier Attributnamen an allen drei Stellen dieselben sind - ein
+    die Attributnamen an allen drei Stellen dieselben sind - ein
     umbenanntes Attribut fiele sonst erst im Dashboard des Anwenders auf,
     als leere Karte ohne jede Fehlermeldung."""
     await hass.config.async_set_time_zone("Europe/Berlin")
@@ -252,4 +252,5 @@ async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
 
     assert "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered
     assert "0.3000 EUR/kWh (Grundpreis)" in rendered
+    assert "**Einspeisevergütung:** 0.0800 EUR/kWh" in rendered
     assert "Nächster Preiswechsel: 06:00 Uhr" in rendered

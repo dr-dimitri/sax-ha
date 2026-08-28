@@ -1273,6 +1273,7 @@ async def test_savings_view_tariff_plan_card_reads_only_sensor_attributes(
         "windows",
         "active_window",
         "base_price_eur_kwh",
+        "feed_in_price_eur_kwh",
         "next_price_change_at",
     ):
         assert f"'{attribute}'" in content
@@ -1314,6 +1315,7 @@ async def test_savings_view_tariff_plan_card_renders_a_table(hass) -> None:
                 "price_eur_kwh": 0.21,
             },
             "base_price_eur_kwh": 0.30,
+            "feed_in_price_eur_kwh": 0.08,
             "next_price_change_at": "2026-03-11T06:00:00+01:00",
         },
     )
@@ -1329,6 +1331,7 @@ async def test_savings_view_tariff_plan_card_renders_a_table(hass) -> None:
     assert lines[3] == "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |"
     assert lines[4].endswith("0.3000 EUR/kWh (Grundpreis) |")
     assert "**jetzt**" not in lines[4]
+    assert "**Einspeisevergütung:** 0.0800 EUR/kWh" in rendered
     assert "Nächster Preiswechsel: 06:00 Uhr" in rendered
 
 
@@ -1617,6 +1620,33 @@ async def test_savings_dashboard_with_old_headings_and_missing_tariff_is_reporte
     free_period = _savings_free_period_block(savings_view)
     free_period["cards"].insert(
         0, {"type": "markdown", "content": "### Freier Zeitraum"}
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
+
+
+async def test_savings_dashboard_without_feed_in_tariff_label_is_reported(
+    hass,
+) -> None:
+    """Eine bereits vorhandene Tarifkarte braucht nach der Ergänzung der
+    Einspeisevergütung ebenfalls eine bewusste Neuinstallation."""
+    _register(hass, "sensor", "economics_current_import_price")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    tariff_card = _tariff_plan_card(savings_view)
+    assert tariff_card is not None
+    tariff_card["content"] = tariff_card["content"].replace(
+        "feed_in_price_eur_kwh", "legacy_feed_in_price"
     )
     await storage.async_save(stored)
 

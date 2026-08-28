@@ -647,6 +647,30 @@ angezeigte Kalenderperiode diesen Neustart, kann die Recorder-Änderung den
 Sprung auf 0 enthalten. Der Tab weist deshalb Bilanzbeginn und Geltungsbereich
 aus, rekonstruiert aber keine frühere Historie.
 
+### Freier Zeitraum
+
+Unter den festen Werten lässt sich ein beliebiger Datumsbereich auswählen -
+zum Beispiel die letzten drei, sechs oder zwölf Monate. Datumswähler,
+Netto-Ergebnis und Balkendiagramm sind über den eigenen Schlüssel
+`energy_sax_power_savings` miteinander verbunden und beeinflussen dadurch
+keine Energy-Karten in anderen Ansichten. Die Vergleichsfunktion bleibt
+deaktiviert, solange der Tab keinen gesondert beschrifteten Vergleichswert
+ausgibt.
+
+Auch diese Auswertung verwendet ausschließlich die Recorder-Langzeitstatistik
+von `economics_operating_result`: Der Einzelwert ist dessen Änderung im
+gewählten Zeitraum, das Diagramm enthält keine zusätzlichen Kosten- oder
+Ertragsreihen. Home Assistant wählt abhängig von der Zeitspanne selbst die
+passende Stunden-, Tages- oder Monatsauflösung. Es gibt dafür weder neue SAX-
+Sensoren noch eine zweite Berechnung.
+
+Eine Auswahl vor dem sichtbaren Bilanzbeginn erzeugt keine rückwirkenden
+Werte. Fehlt Recorder-Historie oder ist die Ergebnis-Entity vom Recorder
+ausgeschlossen, bleiben Wert und Diagramm unbekannt beziehungsweise leer;
+ein mathematisches Ergebnis von 0 bleibt davon unterscheidbar. Schneidet die
+Auswahl einen manuellen Neustart der Bilanz, kann die dargestellte Änderung
+den Reset enthalten.
+
 ## ROI und Amortisationsprognose
 
 Wird zusätzlich zum Tarif ein Feld **Investitionskosten (EUR)** ausgefüllt

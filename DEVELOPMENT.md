@@ -758,6 +758,17 @@ Netto-Ergebnisse:
   Grenze der Zeitraumwerte: nur Recorder-Daten der laufenden Bilanz ab dem
   angezeigten Bilanzbeginn. Der optionale Vorlauf-Ertrag bleibt außerhalb der
   Kalenderwerte.
+- `_savings_free_period_block` bündelt den frei wählbaren Zeitraum in einem
+  Core-`vertical-stack`. `energy-date-selection`, die einzelne
+  `statistic`-Karte und das `statistics-graph` teilen exakt den isolierten Key
+  `energy_sax_power_savings`. Der Statistikwert verwendet
+  `period: energy_date_selection`; das Balkendiagramm setzt
+  `energy_date_selection: true`, enthält nur `economics_operating_result` und
+  bewusst keinen `period`-Schlüssel, damit Home Assistant seine Auflösung
+  selbst wählt. Der ganze Block wird erst nach erfolgreicher Registry-
+  Auflösung gebaut - der Datumswähler kann deshalb nie allein zurückbleiben.
+  Ein Markdown-Hinweis dokumentiert Recorder-/Bilanzstart-/Reset-Grenzen;
+  Python und Jinja berechnen keine Zeiträume.
 
 Der vorhandene Missing-View-Mechanismus vergleicht die View-Pfade dynamisch.
 Mit `ersparnis` in der erwarteten Konfiguration meldet ein gespeichertes

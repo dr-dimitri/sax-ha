@@ -1023,6 +1023,86 @@ async def test_savings_view_omits_data_cards_without_result_entity(hass) -> None
     assert "entity" not in json.dumps(view["cards"])
 
 
+def _savings_free_period_block(view: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "vertical-stack"
+        and any(nested["type"] == "energy-date-selection" for nested in card["cards"])
+    )
+
+
+async def test_savings_free_period_cards_share_the_exact_collection_key(
+    hass,
+) -> None:
+    result = _register(hass, "sensor", "economics_operating_result")
+    _register(hass, "sensor", "economics_avoided_grid_cost")
+    _register(hass, "sensor", "economics_grid_charge_cost")
+    _register(hass, "sensor", "economics_pv_opportunity_cost")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    block = _savings_free_period_block(_savings_view(config))
+    assert [card["type"] for card in block["cards"]] == [
+        "markdown",
+        "energy-date-selection",
+        "statistic",
+        "statistics-graph",
+    ]
+    _, selection, statistic, graph = block["cards"]
+    assert selection == {
+        "type": "energy-date-selection",
+        "collection_key": "energy_sax_power_savings",
+        "disable_compare": True,
+    }
+    assert statistic == {
+        "type": "statistic",
+        "entity": result,
+        "name": "Netto-Ersparnis im gewählten Zeitraum",
+        "period": "energy_date_selection",
+        "stat_type": "change",
+        "collection_key": "energy_sax_power_savings",
+    }
+    assert graph == {
+        "type": "statistics-graph",
+        "title": "Verlauf im gewählten Zeitraum",
+        "entities": [result],
+        "stat_types": ["change"],
+        "chart_type": "bar",
+        "energy_date_selection": True,
+        "collection_key": "energy_sax_power_savings",
+    }
+    assert "period" not in graph
+
+
+async def test_savings_free_period_explains_recorder_and_reset_limits(hass) -> None:
+    _register(hass, "sensor", "economics_operating_result")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    content = _savings_free_period_block(_savings_view(config))["cards"][0]["content"]
+    assert content.startswith("### Freier Zeitraum")
+    assert "seit dem angezeigten Bilanzbeginn" in content
+    assert "keine rückwirkend erfundenen Werte" in content
+    assert "vom Recorder ausgeschlossen" in content
+    assert "unbekannt beziehungsweise leer" in content
+    assert "manuellen Neustart" in content
+    assert "Reset enthalten" in content
+
+
+async def test_savings_free_period_is_fully_omitted_without_result_entity(
+    hass,
+) -> None:
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    serialized = json.dumps(_savings_view(config))
+    assert "energy-date-selection" not in serialized
+    assert "energy_sax_power_savings" not in serialized
+    assert "Verlauf im gewählten Zeitraum" not in serialized
+
+
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:
     """Ohne geladene Lovelace-Komponente (z. B. in den meisten Unit-Tests)
     darf async_create_dashboard nicht fehlschlagen, sondern nur überspringen."""

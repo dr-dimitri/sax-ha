@@ -123,6 +123,7 @@ Nächster Preiswechsel: {{ as_timestamp(change) | timestamp_custom('%H:%M') }} U
 DASHBOARD_URL_PATH = "sax-power"
 DASHBOARD_TITLE = "SAX Power"
 DASHBOARD_ICON = "mdi:battery-charging-100"
+_SAVINGS_COLLECTION_KEY = "energy_sax_power_savings"
 
 # Nur für die wenigen Fälle nötig, in denen der unique_id-Suffix (stabil,
 # darf sich nicht mehr ändern) vom translation_key der Entity abweicht.
@@ -379,6 +380,56 @@ def _stack_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     if not resolved:
         return None
     return {"type": "vertical-stack", "cards": resolved}
+
+
+def _savings_free_period_block(entity_id: str) -> dict[str, Any]:
+    """Core-Karten für eine gemeinsame freie Energy-Datumswahl.
+
+    Alle drei auswertenden Karten teilen denselben expliziten Collection-Key;
+    Home Assistant bestimmt Zeitraum und Diagrammauflösung vollständig selbst
+    (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+    """
+    return {
+        "type": "vertical-stack",
+        "cards": [
+            {
+                "type": "markdown",
+                "content": (
+                    "### Freier Zeitraum\n\n"
+                    "Es fließen nur Recorder-Daten seit dem angezeigten "
+                    "Bilanzbeginn ein. Eine Auswahl davor erzeugt keine "
+                    "rückwirkend erfundenen Werte. Fehlt Recorder-Historie "
+                    "oder ist die Ergebnis-Entity vom Recorder ausgeschlossen, "
+                    "bleiben Wert und Diagramm unbekannt beziehungsweise leer. "
+                    "Schneidet die Auswahl einen manuellen Neustart der "
+                    "Wirtschaftlichkeitsbilanz, kann die Recorder-Änderung den "
+                    "Reset enthalten."
+                ),
+            },
+            {
+                "type": "energy-date-selection",
+                "collection_key": _SAVINGS_COLLECTION_KEY,
+                "disable_compare": True,
+            },
+            {
+                "type": "statistic",
+                "entity": entity_id,
+                "name": "Netto-Ersparnis im gewählten Zeitraum",
+                "period": "energy_date_selection",
+                "stat_type": "change",
+                "collection_key": _SAVINGS_COLLECTION_KEY,
+            },
+            {
+                "type": "statistics-graph",
+                "title": "Verlauf im gewählten Zeitraum",
+                "entities": [entity_id],
+                "stat_types": ["change"],
+                "chart_type": "bar",
+                "energy_date_selection": True,
+                "collection_key": _SAVINGS_COLLECTION_KEY,
+            },
+        ],
+    }
 
 
 def _view(
@@ -849,6 +900,7 @@ async def async_build_dashboard_config(
     savings_period_grid = None
     savings_total_card = None
     savings_recorder_note = None
+    savings_free_period_block = None
     if savings_result_entity_id is not None:
         savings_period_grid = _grid_card(
             [
@@ -891,6 +943,7 @@ async def async_build_dashboard_config(
                 "Bilanz ab dem angezeigten Bilanzbeginn."
             ),
         }
+        savings_free_period_block = _savings_free_period_block(savings_result_entity_id)
 
     savings_view = _view(
         "Ersparnis",
@@ -909,6 +962,7 @@ async def async_build_dashboard_config(
             savings_period_grid,
             savings_total_card,
             savings_recorder_note,
+            savings_free_period_block,
         ],
     )
 

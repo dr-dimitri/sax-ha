@@ -64,7 +64,7 @@
 # REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # REQ-ECONOMICS-DASHBOARD         done       Eigener Dashboard-Tab "Wirtschaftlichkeit" sowie End-to-End-Dokumentation der gesamten Feature-Reihe
-# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Dashboard-Tab "Ersparnis" mit Netto-Ergebnis je Kalenderzeitraum
+# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Dashboard-Tab "Ersparnis" mit festen und frei wählbaren Zeiträumen
 # ==============================================================================
 
 # ==============================================================================
@@ -4233,7 +4233,7 @@ requirement_economics_dashboard:
 # ==============================================================================
 requirement_economics_savings_dashboard:
   id: REQ-ECONOMICS-SAVINGS-DASHBOARD
-  title: "Kompakter Dashboard-Tab Ersparnis mit Netto-Ergebnis je Kalenderzeitraum"
+  title: "Kompakter Dashboard-Tab Ersparnis mit festen und frei wählbaren Zeiträumen"
   status: done
   description: >
     Das mitgelieferte Dashboard besitzt unmittelbar hinter dem unveränderten
@@ -4268,10 +4268,33 @@ requirement_economics_savings_dashboard:
     optionaler Vorlauf-Ertrag wird weder referenziert noch auf Kalenderperioden
     verteilt; er bleibt ausschließlich Teil der vorhandenen ROI-Darstellung.
 
+    Unter den festen Werten folgt ein klar abgegrenzter vertical-stack
+    "Freier Zeitraum". Seine drei auswertenden Core-Karten verwenden exakt
+    denselben isolierten Collection-Key `energy_sax_power_savings`: eine
+    `energy-date-selection`-Karte mit deaktivierter Vergleichsfunktion, eine
+    statistic-Karte "Netto-Ersparnis im gewählten Zeitraum" mit
+    `period: energy_date_selection` und `stat_type: change` sowie eine
+    statistics-graph-Karte "Verlauf im gewählten Zeitraum". Das Diagramm ist
+    ein Balkendiagramm, enthält ausschließlich economics_operating_result,
+    folgt über `energy_date_selection: true` derselben Auswahl und enthält
+    ausdrücklich kein `period`; Home Assistant wählt die zur Zeitspanne
+    passende Stunden-/Tages-/Monatsauflösung selbst.
+
+    Der Hinweis des Blocks erklärt, dass ausschließlich Recorder-Daten seit
+    dem sichtbaren Bilanzbeginn einfließen, eine frühere Auswahl keine Werte
+    rekonstruiert und fehlende beziehungsweise ausgeschlossene Recorder-
+    Historie als unbekannter Wert oder leeres Diagramm sichtbar bleibt. Eine
+    Auswahl, die einen manuellen Bilanzneustart schneidet, kann weiterhin den
+    Reset als Recorder-Änderung enthalten. Weder Python noch Jinja führen
+    eigene Datumsarithmetik aus; es gibt keinen direkten Recorder-Datenbank-
+    oder privaten Statistik-API-Zugriff.
+
     Fehlt economics_operating_result in der Entity Registry, entfallen das
-    gesamte Statistik-Grid, die Gesamtkarte und der Recorder-Hinweis. Es
-    entsteht weder `entity: null` noch ein leeres Grid; nur der statische
-    Einordnungstext des Views bleibt sichtbar. Die Umsetzung ändert weder
+    gesamte Statistik-Grid, die Gesamtkarte, der Recorder-Hinweis und der
+    vollständige freie Zeitraum einschließlich Datumswähler. Es entsteht
+    weder `entity: null`, ein leeres Grid noch ein funktionsloser einzelner
+    Datumswähler; nur der statische Einordnungstext des Views bleibt sichtbar.
+    Die Umsetzung ändert weder
     Coordinator, Bilanz-/Tarif-/Amortisationslogik, Persistenz und Services
     noch den bestehenden View "Wirtschaftlichkeit". Sie führt keine neue
     Entity ein und greift weder auf private Recorder-APIs noch auf Custom
@@ -4292,7 +4315,12 @@ requirement_economics_savings_dashboard:
     - "Gesamtwert und Bilanzbeginn sind direkte Entity-/Attributzeilen; keine
        fixed_period-Statistik und keine economics_result_today-Referenz."
     - "Fehlt economics_operating_result, gibt es weder ungültige Entity-IDs
-       noch ein leeres Grid oder datenabhängige Hinweiskarten."
+       noch ein leeres Grid, datenabhängige Hinweiskarten oder einen
+       verwaisten Datumswähler."
+    - "Datumswähler, frei gewählter Statistikwert und Diagramm verwenden
+       exakt energy_sax_power_savings; der Wert ist change über
+       energy_date_selection und das Balkendiagramm enthält nur das operative
+       Ergebnis sowie bewusst keinen period-Schlüssel."
     - "Eine SHA-256-Strukturregression in tests/test_dashboard.py friert den
        vollständigen bestehenden View wirtschaftlichkeit auf dem Stand vor
        Einführung des Ersparnis-Views ein."

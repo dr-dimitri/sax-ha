@@ -1,7 +1,7 @@
-"""End-to-End-Test der gesamten Wirtschaftlichkeits-Kette (REQ-ECONOMICS-
-DASHBOARD, Akzeptanzkriterium): Tarifauflösung -> Herkunft -> Geldsensoren
--> Dashboard-Entityauflösung, über je einen PV-Lade-, Netzlade- und
-Entladeabschnitt hinweg.
+"""End-to-End-Test der Wirtschaftlichkeits-Kette bis zum Ersparnis-Tab.
+
+Tarifauflösung -> Herkunft -> Geldsensoren -> Dashboard-Entityauflösung,
+über je einen PV-Lade-, Netzlade- und Entladeabschnitt hinweg.
 
 Bewusst auf Coordinator-/Dashboard-Ebene statt über einen echten Modbus-
 Server (test_integration_live.py) - hier geht es um das Zusammenspiel der
@@ -11,7 +11,7 @@ Registerzugriffe.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -157,23 +157,16 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
         pytest.approx(0.30 - 0.30 - 0.08)
     )
 
-    # -- Dashboard-Entityauflösung (REQ-ECONOMICS-DASHBOARD) -------------
+    # -- Dashboard-Entityauflösung (REQ-ECONOMICS-SAVINGS-DASHBOARD) ------
     status_id = _register(hass, "sensor", "economics_status")
     import_price_id = _register(hass, "sensor", "economics_current_import_price")
-    feed_in_id = _register(hass, "sensor", "economics_feed_in_price")
-    pv_id = _register(hass, "sensor", "energy_charged_from_pv")
-    grid_id = _register(hass, "sensor", "energy_charged_from_grid")
-    avoided_id = _register(hass, "sensor", "economics_avoided_grid_cost")
-    grid_cost_id = _register(hass, "sensor", "economics_grid_charge_cost")
-    pv_cost_id = _register(hass, "sensor", "economics_pv_opportunity_cost")
     result_id = _register(hass, "sensor", "economics_net_savings")
     roi_id = _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
+    _register(hass, "binary_sensor", "economics_investment_configured")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
-    economics_view = next(
-        view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
-    )
+    savings_view = next(view for view in config["views"] if view["path"] == "ersparnis")
 
     def _entity_ids(cards):
         for card in cards:
@@ -187,74 +180,16 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
             elif "entity" in card:
                 yield card["entity"]
 
-    resolved = set(_entity_ids(economics_view["cards"]))
-    for entity_id in (
-        status_id,
-        import_price_id,
-        feed_in_id,
-        pv_id,
-        grid_id,
-        avoided_id,
-        grid_cost_id,
-        pv_cost_id,
-        result_id,
-        roi_id,
-        progress_id,
-    ):
+    resolved = set(_entity_ids(savings_view["cards"]))
+    for entity_id in (result_id, roi_id, progress_id):
         assert entity_id in resolved
-
-
-async def test_origin_start_reaches_the_dashboard_row(hass) -> None:
-    """Ganze Kette des Herkunftsbeginns (REQ-ENERGY-ORIGIN): Coordinator ->
-    Sensorattribut -> Attributzeile der Dashboard-Karte.
-
-    Der Attributname muss an allen drei Stellen derselbe sein - sonst
-    stünde im Dashboard eine leere Zeile, und genau die Angabe fehlte, die
-    die verschieden alten Zähler auseinanderhält."""
-    coordinator = _make_coordinator(hass)
-    started_at = datetime(2026, 3, 1, 8, 0, tzinfo=UTC)
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.utcnow",
-        return_value=started_at,
-    ):
-        coordinator._bootstrap_energy_origin(None)
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
-    ):
-        data = {"storage_power_active": 0, "smartmeter_power": 0}
-        coordinator._accumulate_energy(data)
-    coordinator.data = data
-
-    description = next(
-        entry for entry in SENSOR_DESCRIPTIONS if entry.key == "energy_charged_from_pv"
-    )
-    assert description.attributes_fn is not None
-    attributes = description.attributes_fn(coordinator)
-    assert attributes["origin_accounting_started_at"] == started_at.isoformat()
-
-    pv_entity_id = _register(hass, "sensor", "energy_charged_from_pv")
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
-    economics_view = next(
-        view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
-    )
-    rows = [
-        row
-        for card in economics_view["cards"]
-        if card["type"] == "vertical-stack"
-        for sub in card["cards"]
-        for row in sub.get("entities", [])
-        if isinstance(row, dict) and row.get("type") == "attribute"
-    ]
-    assert {
-        "type": "attribute",
-        "entity": pv_entity_id,
-        "attribute": "origin_accounting_started_at",
-        "name": "Beginn der Herkunftszählung",
-    } in rows
+    serialized = str(savings_view)
+    assert status_id in serialized
+    assert import_price_id in serialized
 
 
 async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
-    """Ganze Kette des Tarifplans (REQ-ECONOMICS-DASHBOARD): Options ->
+    """Ganze Kette des Tarifplans (REQ-ECONOMICS-SAVINGS-DASHBOARD): Options ->
     Coordinator-Attribute -> Sensor-Entity -> gerenderte Dashboard-Karte.
 
     Jedes Glied für sich ist bereits abgedeckt; hier geht es darum, dass
@@ -307,12 +242,10 @@ async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
     hass.states.async_set(price_entity_id, str(data[description.key]), attributes)
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
-    economics_view = next(
-        view for view in config["views"] if view["path"] == "wirtschaftlichkeit"
-    )
+    savings_view = next(view for view in config["views"] if view["path"] == "ersparnis")
     card = next(
         entry
-        for entry in economics_view["cards"]
+        for entry in savings_view["cards"]
         if entry["type"] == "markdown" and "tariff_type" in entry.get("content", "")
     )
     rendered = template.Template(card["content"], hass).async_render(parse_result=False)

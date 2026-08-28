@@ -255,7 +255,7 @@ def active_window(config: TariffConfig, moment: datetime) -> DailyPriceWindow | 
 
     Dieselbe Zuordnung, die auch evaluate_static_tariff verwendet -
     bewusst als eigene Funktion, damit die Anzeige des aktiven Fensters
-    (REQ-ECONOMICS-DASHBOARD) nicht mit einer zweiten, irgendwann
+    (REQ-ECONOMICS-SAVINGS-DASHBOARD) nicht mit einer zweiten, irgendwann
     abweichenden Suche arbeitet. `moment` muss eine zeitzonenbehaftete
     Ortszeit sein.
     """

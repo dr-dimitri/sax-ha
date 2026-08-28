@@ -49,7 +49,7 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
-# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (6 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
@@ -63,7 +63,6 @@
 # REQ-ECONOMICS-ACCOUNTING        done       Kosten und nichtnegative Netto-Ersparnis aus Tarif und Energieherkunft bilanzieren
 # REQ-ECONOMICS-AMORTIZATION      done       ROI und Amortisationsstand aus Investitionskosten und der Netto-Ersparnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
-# REQ-ECONOMICS-DASHBOARD         done       Eigener Dashboard-Tab "Wirtschaftlichkeit" sowie End-to-End-Dokumentation der gesamten Feature-Reihe
 # REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Ersparnis-Tab mit Zeiträumen und verständlichen Datenhinweisen
 # ==============================================================================
 
@@ -1814,13 +1813,12 @@ requirement_dynamic_price_charge:
 # ==============================================================================
 requirement_bundled_dashboard:
   id: REQ-BUNDLED-DASHBOARD
-  title: "Mitgeliefertes Lovelace-Dashboard (6 Tabs), optional in der Ersteinrichtung anlegbar"
+  title: "Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar"
   status: done
   description: >
-    dashboard.py baut ein sechsteiliges Storage-Dashboard mit den
-    wichtigsten Sensoren/Einstellungen, gegliedert in sechs Tabs (Lovelace-
-    Views, der fünfte "Wirtschaftlichkeit" ist gesondert unter
-    REQ-ECONOMICS-DASHBOARD und der sechste "Ersparnis" unter
+    dashboard.py baut ein fünfteiliges Storage-Dashboard mit den
+    wichtigsten Sensoren/Einstellungen, gegliedert in fünf Tabs (Lovelace-
+    Views; der fünfte "Ersparnis" ist unter
     REQ-ECONOMICS-SAVINGS-DASHBOARD beschrieben): "Allgemeine Informationen"
     (Speicher-Schalter, SOC, Lade-/
     Entladeleistung, Netzleistung (translation_key smartmeter_power - der
@@ -1971,7 +1969,7 @@ requirement_bundled_dashboard:
     davon nie blockiert werden.
   acceptance_criteria:
     - "tests/test_dashboard.py deckt ab: async_build_dashboard_config
-       erzeugt immer alle sechs Views, löst nur tatsächlich in der Entity
+       erzeugt immer alle fünf Views, löst nur tatsächlich in der Entity
        Registry vorhandene Entities auf und lässt Karten ohne jede
        aufgelöste Entity komplett weg. async_create_dashboard überspringt
        sauber, wenn Lovelace nicht geladen ist, registriert Panel und
@@ -3676,8 +3674,9 @@ requirement_economics_observability:
     davor kennt sie noch nicht und beginnt ihre Zählung transparent bei 0
     ab jetzt (analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN).
 
-    Nicht Teil dieser Anforderung: ein eigener Dashboard-Tab (folgt in
-    06/06, REQ-ECONOMICS-DASHBOARD).
+    Der Status wird im Ersparnis-Tab nach
+    REQ-ECONOMICS-SAVINGS-DASHBOARD verständlich eingeordnet; einen eigenen
+    technischen Wirtschaftlichkeits-Tab gibt es nicht.
   acceptance_criteria:
     - "Jeder der sieben Status ist einzeln erreichbar; kombinierte,
        gleichzeitig zutreffende Probleme ergeben genau den einen Status
@@ -3721,259 +3720,6 @@ requirement_economics_observability:
        anforderung.yaml sind aktualisiert."
 
 # ==============================================================================
-# ANFORDERUNG: DASHBOARD-TAB UND END-TO-END-DOKUMENTATION DER WIRTSCHAFTLICHKEIT
-# ==============================================================================
-requirement_economics_dashboard:
-  id: REQ-ECONOMICS-DASHBOARD
-  title: "Eigener Dashboard-Tab \"Wirtschaftlichkeit\" sowie End-to-End-Dokumentation der gesamten Feature-Reihe"
-  status: done
-  description: >
-    Schließt die sechsteilige Wirtschaftlichkeits-Reihe (01/06 bis 06/06)
-    mit einem eigenen Dashboard-Tab und vollständiger Nutzerdokumentation
-    ab, ohne selbst neue Berechnungen einzuführen. Keine Zahl darf durch
-    fehlende Daten wie ein belastbarer Gewinn aussehen - der Tab zeigt
-    deshalb zuerst Datenqualität, erst danach Geldwerte.
-
-    Fünfter View (dashboard.async_build_dashboard_config), direkt nach
-    "Dynamisches Laden": Titel "Wirtschaftlichkeit", Pfad
-    `wirtschaftlichkeit`, Icon `mdi:cash-multiple`, exakt sechs Top-Level-
-    Karten. Ausschließlich Home-Assistant-Core-Kartentypen (entities,
-    gauge, markdown, vertical-stack, conditional, statistics-graph) - keine
-    Custom-Card-Abhängigkeit, dieselbe `_entity_id`/Entity-Registry-
-    Auflösung wie die vier bestehenden Tabs. `async_build_dashboard_config`
-    braucht dafür ausschließlich `hass`/`entry_id`, keine Config-Entry-
-    Options: Karte 2 und Karte 5 entscheiden ihre Sichtbarkeit zur Laufzeit
-    über eine Core-"conditional"-Karte (siehe dort) statt über eine zum
-    Build-Zeitpunkt gelesene Option, die nach einer späteren
-    Options-Änderung veraltet wäre, ohne dass das gespeicherte Dashboard je
-    neu gebaut wird.
-
-    - Karte 1 "Status und Preise" (eine entities-Karte, feste
-      Reihenfolge): economics_status, economics_current_import_price,
-      economics_feed_in_price, danach drei
-      "attribute"-Kartenzeilen (`_attribute_row`) auf economics_status:
-      charge_price_coverage_percent_today,
-      discharge_price_coverage_percent_today ("Preisabdeckungen für
-      Laden/Entladen heute" - haben keinen eigenen Sensor, siehe
-      REQ-ECONOMICS-OBSERVABILITY; bewusst die Tageswerte, weil genau sie
-      den darüber stehenden Status bestimmen) sowie
-      economics_started_at ("Beginn der Bilanz"). Bei deaktiviertem Tarif
-      bleibt economics_status sichtbar und erklärt über seine eigene
-      Zustandsübersetzung (`disabled`), dass die Konfiguration unter
-      "Geräte & Dienste -> SAX Power Home -> Konfigurieren" erfolgt.
-    - Karte 2 "Tarifplan (tageszeitabhängig)": eine `markdown`-Karte mit
-      `show_empty: false`, deren Vorlage selbst prüft, ob das Attribut
-      `tariff_type` von economics_current_import_price `time_of_use`
-      lautet; bei jeder anderen Tarifart rendert sie zu einer leeren
-      Zeichenkette und die Karte blendet sich aus. Also am Laufzeitsignal
-      statt an einem zum Build-Zeitpunkt gelesenen Options-Wert, damit ein
-      Tarifwechsel sie selbsttätig ein- und ausblendet. Ausdrücklich KEINE
-      Core-"conditional"-Karte: deren Bedingungen prüfen ausschließlich
-      den Zustand einer Entity (siehe unten). Die Überschrift steht
-      deshalb im Inhalt und nicht in `title` - ein gesetzter Kartentitel
-      bliebe sonst als leerer Kasten stehen. Die Karte rendert den hinterlegten
-      Tagesplan als Tabelle (Beginn, Ende, Arbeitspreis), sortiert nach
-      Beginn, mit dem Grundpreis als letzter Zeile und der Markierung
-      "jetzt" an der gerade geltenden Zeile - beim Grundpreis also an
-      dieser. Darunter steht der nächste Preiswechsel als Ortszeit,
-      sofern bekannt. Gilt gerade kein Preis (`unavailable_reason`
-      gesetzt), trägt keine Zeile die Markierung und die Karte nennt
-      stattdessen den Grund: `active_window` ist in diesem Fall ebenfalls
-      None, die Markierung träfe sonst fälschlich den Grundpreis. Gespeist wird sie ausschließlich aus den Attributen
-      des Preis-Sensors (siehe unten); sie enthält damit keine eigene
-      Kopie der Konfiguration und kann nach einer Options-Änderung nicht
-      veralten. Ohne registrierten Preis-Sensor entfällt sie ganz.
-    - Karte 3 "Herkunft der Ladeenergie": ein `_stack_card`
-      (vertical-stack) aus der entities-Karte (energy_charged_from_pv,
-      energy_charged_from_grid, energy_charged, energy_discharged, dann
-      der Beginn der Herkunftszählung als Attributzeile
-      "Beginn der Herkunftszählung" -
-      origin_accounting_started_at von energy_charged_from_pv, siehe
-      REQ-ENERGY-ORIGIN) plus einer `markdown`-Karte mit
-      dem Hinweis, dass die Herkunftsaufteilung eine konservative
-      Schätzung am Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine
-      physikalische Einzelstromverfolgung - als Teil derselben Karte, nicht
-      als zusätzliche eigenständige Karte (bliebe sonst bei sechs Karten
-      im View, aber sieben Kartenobjekten). Der Hinweis fehlt, wenn keine
-      der Herkunfts-Entities registriert ist.
-    - Karte 4 "Operative Geldbilanz": economics_avoided_grid_cost,
-      economics_grid_charge_cost, economics_pv_opportunity_cost,
-      economics_operating_result, economics_net_savings,
-      economics_unpriced_charge, economics_unpriced_discharge, dann die
-      beiden Attributzeilen
-      "Bewertete Ladung"/"Bewertete Entladung" (priced_charge_kwh/
-      priced_discharge_kwh des Status-Sensors, siehe
-      REQ-ECONOMICS-OBSERVABILITY) - Kosten/Nutzen bleiben durch die
-      Reihenfolge (zuerst der Nutzen, dann die beiden Kostenarten) und die
-      Sensor-Übersetzungen eindeutig unterscheidbar. Die beiden abgeleiteten
-      Geldwerte heißen "Operativer Roh-Cashflow" und "Netto-Ersparnis";
-      kein Name verwendet ein Wort wie "Gewinn". Die beiden
-      Mengen machen jeden Betrag der Karte nachrechenbar (Betrag / Preis =
-      Menge) und grenzen ihn gegen die Zähler der Karte darüber ab: Die
-      Geldbilanz beginnt mit dem ersten vollständig gespeicherten Tarif,
-      die Herkunftszähler dagegen mit dem Coordinator-Start - ohne beide
-      Startzeitpunkte und die bewertete Menge liest sich diese Differenz
-      wie ein Rechenfehler (Anwenderbericht: 2,44 kWh PV-Ladung neben
-      0,0084 EUR PV-Opportunitätskosten, was 0,112 kWh entspricht; beide
-      Werte waren korrekt).
-    - Karte 5 "Investition und Amortisation": EINE gemeinsame Karte
-      (`_stack_card`, vertical-stack) in genau der geforderten Reihenfolge
-      - eine entities-Zeile mit economics_roi, dann die Fortschritts-Gauge
-      (economics_amortization_progress, 0..100, needle, EIN durchgehend
-      blaues segment ab 0 - ein niedriger Amortisationsfortschritt ist
-      kein Fehlerzustand, den der Anwender abstellen könnte, sondern nur
-      ein früher Zeitpunkt auf einer mehrjährigen Strecke; eine Ampel
-      rot/gelb/grün hätte genau das suggeriert), dann eine zweite
-      entities-Karte mit
-      economics_remaining_to_payback und economics_net_savings_today.
-      Diese vier Sensoren sind - anders als optional erst zur Laufzeit
-      erschienene Entities anderer Tabs - immer bereits statisch
-      registriert (SENSOR_DESCRIPTIONS, siehe REQ-ECONOMICS-AMORTIZATION),
-      unabhängig von konfigurierten Investitionskosten; ohne konfigurierte
-      Investitionskosten liefern alle vier `None` (Sensorzustand
-      "unknown"). Die ganze vertical-stack ist deshalb in eine Core-
-      "conditional"-Karte eingebettet statt an eine zum Build-Zeitpunkt
-      gelesene Config-Entry-Option gekoppelt zu sein: eine reine Registry-
-      Prüfung wie bei den übrigen Karten würde die Karte hier immer mit
-      lauter "unbekannt"-Zeilen zeigen, und eine Options-Prüfung beim
-      Dashboardbau bliebe nach einer späteren Options-Änderung veraltet, da
-      `__init__.async_update_options` das gespeicherte Dashboard nie neu
-      baut (nur den Coordinator aktualisiert). Die "conditional"-Karte
-      blendet sich dagegen automatisch ein/aus, sobald der Coordinator
-      nach einer Options-Änderung neu rechnet und der zugrunde liegende
-      Zustand wechselt - ganz ohne Dashboard-Neubau.
-
-      Das Gate ist bewusst NICHT an economics_roi selbst gekoppelt: dessen
-      Sensorzustand wird laut REQ-ECONOMICS-AMORTIZATION auch bei
-      deaktiviertem Tarif oder noch nicht initialisierter Geldbilanz
-      "unknown", obwohl Investitionskosten konfiguriert sind. Stattdessen
-      hängt die Karte am
-      ZUSTAND des Binary-Sensors economics_investment_configured
-      (`conditions: [{entity: <Entity-ID>, state: "on"}]`), der genau
-      "Investitionskosten hinterlegt" abbildet - unabhängig von
-      Tarifstatus oder Bilanz-Initialisierung.
-    - Karte 6 "Verlauf (30 Tage)" (`_statistics_graph_card`): Core-
-      `statistics-graph` als Balkendiagramm (`chart_type: bar`),
-      `stat_types: ["change"]`, `period: "day"`, `days_to_show: 30`, für
-      economics_operating_result, economics_avoided_grid_cost,
-      economics_grid_charge_cost, economics_pv_opportunity_cost. `change`
-      ist für `state_class: total`-Sensoren eine unterstützte
-      Langzeitstatistik-Kennzahl; eine künftig fehlende Unterstützung
-      wäre über die dedizierten Tages-Sensoren aus REQ-ECONOMICS-
-      AMORTIZATION aufzufangen, nie über eine private Statistik-API oder
-      einen nicht unterstützten Kartentyp.
-
-    Für JEDE Sichtbarkeitssteuerung im Dashboard gilt: Die Bedingungen
-    einer Core-"conditional"-Karte prüfen ausschließlich den ZUSTAND einer
-    Entity. Einen Schlüssel `attribute` kennen sie nicht - er wird nicht
-    abgelehnt, sondern stillschweigend ignoriert, und der Vergleich läuft
-    weiter gegen den Zustand. Eine so gebaute Karte ist dadurch dauerhaft
-    unsichtbar (`state` trifft nie zu) oder dauerhaft sichtbar
-    (`state_not` trifft immer zu), ohne jede Fehlermeldung und in der
-    gespeicherten YAML-Konfiguration unauffällig (Anwenderbericht zu
-    #139). Muss eine Bedingung einen Attributwert auswerten, braucht sie
-    entweder eine Entity, die ihn als Zustand trägt (so bei Karte 5), oder
-    eine Karte, die ihre Leere selbst erzeugt (so bei Karte 2:
-    `markdown` + `show_empty: false`). tests/test_dashboard.py prüft
-    deshalb, dass keine gebaute Bedingung einen Schlüssel `attribute`
-    enthält.
-
-    Der Sensor economics_current_import_price trägt dafür sieben
-    Zusatzattribute (coordinator._tariff_plan_attributes, veröffentlicht
-    als data["economics_price_attributes"], gelesen über
-    sensor.SaxPowerSensorEntityDescription.attributes_fn): `tariff_type`,
-    `quote_source` (None ohne Preis), `unavailable_reason` (der
-    QuoteUnavailable-Grund, None mit Preis), `active_window` (Beginn/Ende/
-    Preis des greifenden Fensters, None solange der Grundpreis gilt und
-    ebenso, solange überhaupt kein Preis bestimmbar ist - ohne gültigen
-    Quote darf kein Fenster als "jetzt geltend" erscheinen; die
-    Fensterliste bleibt dabei sichtbar, weil genau sie zur Fehlersuche
-    gebraucht wird),
-    `next_price_change_at` (Ende des laufenden Preisabschnitts als
-    ISO-Ortszeit; beim Festpreis None, weil er unbegrenzt gilt, und
-    ebenso bei einem tageszeitabhängigen Tarif ganz ohne Zeitfenster:
-    dessen Quote trägt zwar den bloßen Tagesumbruch als Gültigkeitsende
-    (_segment_bounds), ein Preiswechsel um Mitternacht findet dort aber
-    nicht statt),
-    `base_price_eur_kwh` und `windows` (die vollständige, nach Beginn
-    sortierte Fensterliste). Die beiden letztgenannten sowie
-    `active_window` sind bei jeder anderen Tarifart als "time_of_use"
-    ausdrücklich None - Zeitfenster einer früheren Konfiguration bleiben
-    in entry.options stehen, gelten aber nicht mehr, und ein sichtbarer
-    Tarifplan, der gar nicht gilt, wäre irreführender als gar keiner. Der
-    Zeitpunkt, zu dem Preis und Attribute bestimmt werden, ist derselbe
-    (ein einziges dt_util.now() je Tick): ein Fensterwechsel zwischen zwei
-    Aufrufen dürfte sonst ein Fenster ausweisen, das zum gemeldeten Preis
-    nicht gehört.
-
-    Weil das Dashboard nur bei der Ersteinrichtung gebaut wird
-    (const.CONF_CREATE_DASHBOARD ist ein einmaliges Flag), bekommt ein
-    bestehendes Dashboard einen neu hinzugekommenen Tab nie zu sehen - er
-    fehlt einfach, ohne Fehlermeldung. Beim Setup prüft die Integration
-    deshalb, ob dem gespeicherten Dashboard Views des aktuellen
-    Auslieferungsstands fehlen (Vergleich über die stabilen View-PFADE,
-    nicht die Anzeigetitel). Zusätzlich prüft er in den bereits vorhandenen
-    Views wirtschaftlichkeit und ersparnis gezielt auf die aufgelösten IDs
-    von economics_net_savings_today beziehungsweise economics_net_savings:
-    Die zuvor veröffentlichten Snapshot-Dashboards besitzen schon alle sechs
-    Pfade, würden aber sonst weiter die alten Roh-Cashflow-Entities anzeigen.
-    Bei einem Treffer legt die Integration ebenfalls ein reparierbares
-    Issue an (ISSUE_DASHBOARD_OUTDATED,
-    dashboard.async_check_dashboard_up_to_date). Der Fix-Flow
-    (repairs.DashboardOutdatedRepairFlow) baut das Dashboard auf Wunsch mit
-    force=True neu - inklusive des Hinweises, dass eigene Änderungen daran
-    dabei verloren gehen - oder merkt sich die Ablehnung dauerhaft im
-    Config Entry (CONF_DASHBOARD_UPDATE_DISMISSED), damit der Hinweis nicht
-    bei jedem Neustart erneut erscheint. Gemeldet wird ausschließlich ein
-    VORHANDENES, unvollständiges oder fachlich veraltetes Dashboard: Ein gar nicht vorhandenes ist
-    eine bewusste Entscheidung des Anwenders, und eine
-    Reparaturaufforderung würde genau das Dashboard zurückholen, das er
-    gerade gelöscht hat. Ein YAML-Dashboard und ein nicht verfügbares
-    Lovelace bleiben unberührt; wie der gesamte übrige Dashboard-Code wird
-    jeder Fehler nur geloggt und niemals weitergereicht.
-
-    Bestehendes Verhalten unverändert: async_create_dashboard bleibt
-    idempotent und überschreibt kein vorhandenes Nutzer-Dashboard; nur
-    sax_power.reinstall_dashboard ersetzt ein bestehendes Dashboard (jetzt
-    inklusive des neuen Tabs); ein Fehler beim Dashboardbau blockiert
-    niemals Setup oder Integration (unverändertes try/except in
-    async_create_dashboard); fehlende optionale Entities werden über
-    dieselbe `_entities_card`-/`_gauge_card`-/`_statistics_graph_card`-
-    Filterlogik wie in den bestehenden vier Tabs still ausgelassen - keine
-    leeren Karten.
-
-    Dokumentation: README.md ergänzt einen Abschnitt "Datenqualität,
-    Diagnose und Bilanzneustart" (bereits in 05/06 angelegt) sowie einen
-    neuen Abschnitt zum Dashboard-Tab; die drei Tarifarten sind bereits im
-    Abschnitt "Tarifmodell für die Wirtschaftlichkeit" mit Formeln/
-    Grenzen dokumentiert. DEVELOPMENT.md erhält einen Abschnitt zum neuen
-    View sowie eine Ergänzung von REQ-BUNDLED-DASHBOARD (insgesamt sechs
-    Tabs). strings.json/translations sind unverändert, da der
-    Dashboard-Tab ausschließlich bereits übersetzte Entities referenziert.
-  acceptance_criteria:
-    - "View-Reihenfolge (fünfter Tab), Titel/Pfad/Icon sowie die exakte
-       Karten-/Entity-Reihenfolge aller sechs Karten sind regression-
-       getestet (tests/test_dashboard.py)."
-    - "Deaktivierter Tarif, aktiv ohne Investitionssumme, aktiv mit
-       Investitionssumme und teilweise fehlende Entities erzeugen
-       durchweg einen nicht-leeren, nutzbaren View."
-    - "Die Verlaufskarte ist eine Core-statistics-graph-Karte mit
-       stat_types [change], chart_type bar, period day, 30 Tagen - keine
-       Custom-Card, keine private Statistik-API."
-    - "async_build_dashboard_config bleibt ohne jede registrierte Entity
-       fehlerfrei (leerer, aber vorhandener View); async_create_dashboard
-       bleibt idempotent, sax_power.reinstall_dashboard ersetzt
-       deterministisch inklusive des neuen Tabs
-       (tests/test_dashboard.py)."
-    - "Ein vollständiger End-to-End-Test führt je einen PV-Lade-, Netzlade-
-       und Entladeabschnitt über Tarifauflösung -> Herkunft ->
-       Geldsensoren -> Dashboard-Entityauflösung
-       (tests/test_economics_dashboard_e2e.py)."
-    - "Die Fortschritts-Gauge trägt genau ein Segment (ab 0, blau) - keine
-       rot/gelb/grüne Ampel."
-    - "README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."
-
-# ==============================================================================
 # ANFORDERUNG: KOMPAKTE ERSPARNISÜBERSICHT IM DASHBOARD
 # ==============================================================================
 requirement_economics_savings_dashboard:
@@ -3981,8 +3727,8 @@ requirement_economics_savings_dashboard:
   title: "Kompakter Ersparnis-Tab mit Zeiträumen und verständlichen Datenhinweisen"
   status: done
   description: >
-    Das mitgelieferte Dashboard besitzt als sechsten View "Ersparnis" mit
-    Pfad ersparnis und Icon mdi:piggy-bank. Grundlage ist ausschließlich die
+    Das mitgelieferte Dashboard besitzt als fünften View "Ersparnis" mit
+    Pfad ersparnis und Icon mdi:cash-multiple. Grundlage ist ausschließlich die
     über die Entity Registry aufgelöste Entity economics_net_savings: der
     persistierte, nichtnegative Höchststand des Roh-Cashflows aus vermiedenen
     Netzbezugskosten minus Netzladekosten und PV-Opportunitätskosten. Die
@@ -3994,10 +3740,10 @@ requirement_economics_savings_dashboard:
     economics_investment_configured steuert zwei bedingte Zweige zur Laufzeit:
     off erklärt den Konfigurationsweg, on zeigt die blaue Fortschritts-Gauge
     und darunter eine gemeinsame entities-Karte. Deren
-    Reihenfolge lautet exakt economics_remaining_to_payback,
-    economics_net_savings, das Status-Attribut economics_started_at als
-    "Bilanzbeginn" und das ROI-Attribut prior_result_eur als "Bereits vor
-    Bilanzbeginn berücksichtigt". Die Vorlaufzeile besitzt das Suffix "€".
+    Reihenfolge lautet exakt economics_remaining_to_payback, das ROI-Attribut
+    prior_result_eur als "Bereits vor Bilanzbeginn berücksichtigt",
+    economics_net_savings und das Status-Attribut economics_started_at als
+    "Bilanzbeginn". Die Vorlaufzeile besitzt das Suffix "€".
     Datum, Durchschnitt, Jahreshochrechnung und Prognosehinweise existieren
     nicht mehr. Die frühere separate Karte "Gesamt seit Bilanzbeginn" entfällt.
 
@@ -4008,12 +3754,10 @@ requirement_economics_savings_dashboard:
     Kalenderperiode day/week/month/year ohne Offset oder eigene
     Datumsberechnung.
 
-    Als drittes Kartenobjekt folgt exakt dieselbe dynamische Tarifplan-Karte
-    wie direkt nach "Status und Preise" im View wirtschaftlichkeit. Beide
-    Karten werden aus demselben Lovelace-Objekt aufgebaut, lesen ausschließlich
-    die Attribute der aufgelösten Entity economics_current_import_price und
-    blenden sich bei einer anderen Tarifart als time_of_use selbst aus. Fehlt
-    die Preis-Entity, entfällt die Karte in beiden Views.
+    Als drittes Kartenobjekt folgt die dynamische Tarifinformation. Sie liest
+    ausschließlich die Attribute der aufgelösten Entity
+    economics_current_import_price und blendet sich bei einer anderen Tarifart
+    als time_of_use selbst aus. Fehlt die Preis-Entity, entfällt die Karte.
 
     Als viertes Kartenobjekt bündelt genau eine Core-markdown-Karte die dauerhaft
     gleichbleibenden Erklärungen in einem standardmäßig geschlossenen
@@ -4031,8 +3775,8 @@ requirement_economics_savings_dashboard:
     Als sechstes und letztes Kartenobjekt steht der selbst ausblendende
     Statushinweis.
     active rendert leer; alle Fehler-, unbekannten und fehlenden Zustände
-    ergeben höchstens einen verständlichen Hinweis mit Link zum technischen
-    Wirtschaftlichkeits-View.
+    ergeben höchstens einen verständlichen Hinweis, aber keinen Link auf
+    einen separaten technischen Wirtschaftlichkeits-View.
 
     Fehlt economics_net_savings, entfallen KPI-Grid, seine Zeile im
     Amortisationsblock und der vollständige freie Zeitraum. Es entstehen
@@ -4041,19 +3785,19 @@ requirement_economics_savings_dashboard:
 
     Gespeicherte veraltete Dashboardstände werden weiterhin nur gemeldet und
     niemals automatisch überschrieben. sax_power.reinstall_dashboard erzeugt
-    deterministisch alle sechs Views; Erstanlage und normale Create-Aufrufe
+    deterministisch alle fünf Views; Erstanlage und normale Create-Aufrufe
     bleiben idempotent.
   acceptance_criteria:
-    - "Die View-Reihenfolge endet exakt mit wirtschaftlichkeit, ersparnis;
-       Titel, Pfad und Icon sind regression-getestet."
+    - "Die View-Reihenfolge endet exakt mit ersparnis; Titel, Pfad und das
+       Icon mdi:cash-multiple sind regression-getestet. Ein View mit dem Pfad
+       wirtschaftlichkeit existiert nicht."
     - "Bei vollständiger Entity-Ausstattung lautet die Top-Level-Reihenfolge
        exakt Amortisationsblock, KPI-Grid, Tarifinformation, eingeklappte
-       Hinweise, freier Zeitraum und Statushinweis; die Tarifinformation ist
-       strukturell identisch mit der Karte im View wirtschaftlichkeit."
+       Hinweise, freier Zeitraum und Statushinweis."
     - "Die separaten Markdown-Felder mit den Labels Amortisation und Freier
        Zeitraum existieren nicht mehr."
-    - "Unter dem Restbetrag folgen Netto-Ersparnis, Bilanzbeginn und der
-       Vorlaufbetrag mit dem Suffix €."
+    - "Direkt unter dem Restbetrag folgt der Vorlaufbetrag mit dem Suffix €;
+       danach folgen Netto-Ersparnis und Bilanzbeginn."
     - "Voraussichtliches Amortisationsdatum, tägliche 30-Tage-Prognose,
        Jahreshochrechnung und Prognosehinweis werden nicht referenziert."
     - "Alle im Ersparnis-Tab dargestellten Währungswerte schlagen zwei
@@ -4065,4 +3809,4 @@ requirement_economics_savings_dashboard:
     - "Anfangsbestand und Statuszustände sind mit gerenderten Template-Tests
        abgesichert; fehlende Entities erzeugen keine ungültigen Karten."
     - "Create, Reinstall und die Erkennung veralteter Dashboardstände bleiben
-       mit sechs Views getestet."
+       mit fünf Views getestet."

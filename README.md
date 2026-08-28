@@ -126,18 +126,10 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
 - zeitgesteuertes Laden,
 - netzdienliches Laden,
 - dynamisches Laden,
-- Wirtschaftlichkeit (Status/Preise, beim tageszeitabhängigen Tarif der
-  hinterlegte Tarifplan mit Hervorhebung des gerade geltenden Zeitfensters,
-  Herkunft der Ladeenergie, operative Geldbilanz, Investition/Amortisation
-  samt Fortschritts-Gauge sowie ein 30-Tage-Verlaufsdiagramm - referenziert
-  ausschließlich bereits bestehende Entities, siehe
-  [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit),
-  [ROI und Amortisationsstand](#roi-und-amortisationsstand)
-  und [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart))
-  sowie
 - Ersparnis (kompakte Netto-Ergebnisse für heute, diese Woche, diesen Monat,
-  dieses Jahr und insgesamt seit Bilanzbeginn; ausschließlich aus der
-  vorhandenen Wirtschaftlichkeitsbilanz).
+  dieses Jahr und insgesamt seit Bilanzbeginn, Tarifinformation,
+  Amortisationsstand und verständliche Statushinweise; ausschließlich aus
+  der vorhandenen Wirtschaftlichkeitsbilanz).
 
 ![Dashboard mit allgemeinen Informationen zum SAX-Power-Speicher](docs/images/dashboard/allgemeine_information.png)
 
@@ -437,7 +429,7 @@ Formate lassen sich nicht ineinander überführen. Für das preisoptimierte
 Laden bleibt der Sensor unabhängig vom Tarifmodell die Quelle; für die
 Wirtschaftlichkeit ist er es nur beim Tarifmodell **Dynamisch**.
 
-Der hinterlegte Tarifplan ist im Dashboard-Tab **Wirtschaftlichkeit**
+Der hinterlegte Tarifplan ist im Dashboard-Tab **Ersparnis**
 sichtbar: eine Tabelle aus Beginn, Ende und Arbeitspreis, sortiert nach
 Beginn, mit dem Grundpreis als letzter Zeile. Die gerade geltende Zeile ist
 mit **jetzt** markiert, darunter steht der nächste Preiswechsel. Damit lässt
@@ -633,7 +625,7 @@ angezeigte Bilanzbeginn.
 
 ## Ersparnisübersicht
 
-Der sechste Tab **Ersparnis** fasst die **Netto-Ersparnis** bewusst kompakt
+Der fünfte Tab **Ersparnis** fasst die **Netto-Ersparnis** bewusst kompakt
 zusammen. Grundlage sind vermiedene Netzbezugskosten abzüglich
 Netzladekosten und entgangener Einspeisevergütung. Angezeigt wird ein
 gespeicherter, nichtnegativer Höchststand. Spätere Kosten verringern eine
@@ -649,7 +641,7 @@ standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
 Warnungen bleiben davon unabhängig.
 
 Zwischen den festen Kalenderwerten und diesen Erläuterungen zeigt der Tab
-dieselbe dynamische Tarifinformation wie der Tab **Wirtschaftlichkeit**. Sie
+die dynamische Tarifinformation. Sie
 liest den tageszeitabhängigen Tarifplan aus der aktuellen Preis-Entity und
 reagiert deshalb ohne Dashboard-Neubau auf Tarifänderungen.
 
@@ -683,9 +675,9 @@ ein Wert ohne Kontext missverständlich wäre, erscheint genau ein kurzer
 Hinweis. Er erklärt einen deaktivierten Tarif, das Warten auf Kapazität und
 Ladezustand, einen fehlenden Strompreis, unbekannte Ladeenergieherkunft,
 teilweise Preisabdeckung oder einen angehaltenen Bilanz-Store. Unbekannte oder
-noch nicht verfügbare Statusdaten werden neutral benannt. Jeder Hinweis
-verlinkt für technische Details auf den bestehenden Tab
-`/sax-power/wirtschaftlichkeit`, statt dessen Tabellen zu wiederholen.
+noch nicht verfügbare Statusdaten werden neutral benannt. Einen separaten
+technischen Wirtschaftlichkeits-Tab oder einen Link auf einen solchen Pfad
+gibt es nicht.
 
 Innerhalb der eingeklappten Hinweiskarte erklärt ein zusätzlicher Absatz den
 unbewerteten Anfangsbestand. Ist dessen vorhandener Sensorzustand positiv,
@@ -707,9 +699,9 @@ als 0 ausgegeben. Der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
 
 Der erste Block zeigt bei hinterlegten Investitionskosten den blauen
 Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
-**Restbetrag bis Amortisation**, die **Netto-Ersparnis** und den
-**Bilanzbeginn**. Der optionale Vorlauf-Ertrag folgt als **Bereits vor
-Bilanzbeginn berücksichtigt** mit der Einheit **€**. Alle Währungsangaben im
+**Restbetrag bis Amortisation**. Direkt danach folgt der optionale
+Vorlauf-Ertrag als **Bereits vor Bilanzbeginn berücksichtigt** mit der Einheit
+**€**, anschließend **Netto-Ersparnis** und **Bilanzbeginn**. Alle Währungsangaben im
 Ersparnis-Tab erscheinen mit zwei Nachkommastellen; intern und im Recorder
 bleibt die höhere Rechengenauigkeit erhalten. Eine separate sichtbare
 Überschrift **Amortisation** besitzt dieser Block nicht.

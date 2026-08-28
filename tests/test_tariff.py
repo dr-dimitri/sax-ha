@@ -1119,7 +1119,7 @@ async def test_disabled_tariff_registers_no_listener(hass) -> None:
 
 
 # --------------------------------------------------------------------------
-# Anzeige des Tarifplans (REQ-ECONOMICS-DASHBOARD)
+# Anzeige des Tarifplans (REQ-ECONOMICS-SAVINGS-DASHBOARD)
 # --------------------------------------------------------------------------
 def test_active_window_matches_the_window_the_quote_used() -> None:
     """active_window und evaluate_static_tariff müssen dasselbe Fenster

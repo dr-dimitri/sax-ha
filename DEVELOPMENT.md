@@ -90,9 +90,9 @@ custom_components/sax_power/
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan + Roh-/Startwerte der
 │                          Energie- und Geldzähler, IP-Adresse redigiert
-├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (6 Tabs), optional in
+├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
-│                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-DASHBOARD
+│                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-SAVINGS-DASHBOARD
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -535,122 +535,19 @@ Pfad, der keinen wartenden Aufrufer mehr hat, über den optionalen
 `on_persist_failed`-Callback
 (`SaxPowerCoordinator._on_economics_persist_failed`).
 
-### Dashboard-Tab "Wirtschaftlichkeit" (REQ-ECONOMICS-DASHBOARD)
-
-Fünfter View in `dashboard.async_build_dashboard_config`, direkt nach
-"Dynamisches Laden" - baut ausschließlich auf bereits bestehenden Entities
-und Bausteinen der ganzen Wirtschaftlichkeits-Reihe auf, führt selbst
-keine neue Berechnung ein:
-
-- `_resolved_row` faktorisiert die bisher in `_entities_card` inline
-  liegende Entity-Auflösung + Namensermittlung, damit sie auch außerhalb
-  einer vollständigen `_entities_card` wiederverwendbar ist (Karte "Status
-  und Preise" mischt normale Entity-Zeilen mit Attribut-Zeilen).
-- `_attribute_row` baut eine `type: attribute`-Kartenzeile - zeigt ein
-  Attribut einer Entity (hier: `charge_price_coverage_percent_today`/
-  `discharge_price_coverage_percent_today`/`economics_started_at` sowie
-  `priced_charge_kwh`/`priced_discharge_kwh` von `economics_status`, siehe
-  REQ-ECONOMICS-OBSERVABILITY, und `origin_accounting_started_at` von
-  `energy_charged_from_pv`, siehe REQ-ENERGY-ORIGIN) wie einen
-  eigenen Sensor, ohne dass dafür ein eigener Sensor existieren müsste.
-  Bewusst die Tageswerte: genau sie bestimmen den Zustand des
-  Status-Sensors in derselben Karte (Issue #134). Die drei Zeilen aus
-  Startzeitpunkt und bewerteter Menge sind zusammen die einzige Stelle,
-  an der sichtbar wird, dass Herkunftszähler und Geldbilanz zu
-  verschiedenen Zeitpunkten begonnen haben und ihre Werte deshalb nicht
-  gegeneinander verrechenbar sind.
-- `_statistics_graph_card` baut eine Core-`statistics-graph`-Karte
-  (Balkendiagramm, `stat_types: ["change"]`, `period: "day"`,
-  `days_to_show: 30`) für die vier Geldsensoren - keine Custom-Card,
-  keine private Statistik-API.
-- `_stack_card` bündelt mehrere Karten zu einer Core-`vertical-stack`, wenn
-  eine fachlich zusammengehörige Gruppe als EINE Karte im View erscheinen
-  muss, obwohl eine `entities`-Karte selbst keine Gauge/Markdown einbetten
-  kann. Zwei Verwendungen:
-  - Karte "Herkunft der Ladeenergie": die entities-Karte (zuletzt die
-    Attribut-Zeile "Beginn der Herkunftszählung" aus
-    `origin_accounting_started_at`) plus eine
-    `markdown`-Karte mit dem Hinweis, dass die Herkunftsaufteilung eine
-    konservative Schätzung am Netzanschlusspunkt ist, keine physikalische
-    Einzelstromverfolgung (REQ-ENERGY-ORIGIN). Fehlt, wenn keine der
-    Herkunfts-Entities registriert ist.
-  - Karte "Investition und Amortisation": eine entities-Zeile mit
-    `economics_roi`, dann die `economics_amortization_progress`-Gauge,
-    dann eine zweite entities-Karte mit den übrigen vier ROI-/
-    Amortisationssensoren, in genau dieser Reihenfolge.
-- `_tariff_plan_card` baut die Karte "Tarifplan (tageszeitabhängig)":
-  eine Core-`markdown`-Karte mit einer Jinja-Vorlage, die den hinterlegten
-  Tagesplan als Tabelle rendert (nach Beginn sortiert, Grundpreis als
-  letzte Zeile, Markierung „jetzt" an der geltenden Zeile, darunter der
-  nächste Preiswechsel). Ihre einzige Datenquelle sind die Attribute von
-  `economics_current_import_price` (`windows`, `active_window`,
-  `base_price_eur_kwh`, `next_price_change_at`, `unavailable_reason`,
-  siehe `coordinator._tariff_plan_attributes`) - die Karte enthält damit
-  keine eigene Kopie der Tarifkonfiguration und kann nach einer
-  Options-Änderung nicht veralten. `unavailable_reason` entscheidet, ob
-  überhaupt eine Zeile als "jetzt" markiert wird: Gilt kein Preis, ist
-  auch `active_window` None, und die Markierung träfe sonst fälschlich
-  den Grundpreis. Ihre Sichtbarkeit steuert sie selbst: Die Vorlage prüft
-  `tariff_type` und rendert bei jeder anderen Tarifart zu einer leeren
-  Zeichenkette, `show_empty: false` blendet die Karte dann aus. Die
-  Überschrift steht im Inhalt statt in `title`, weil ein Kartentitel sonst
-  als leerer Kasten stehen bliebe.
-
-  **Wichtig für jede Sichtbarkeitssteuerung im Dashboard:** Die
-  Bedingungen einer Core-`conditional`-Karte prüfen ausschließlich den
-  **Zustand** einer Entity. Einen Schlüssel `attribute` kennen sie nicht -
-  er wird stillschweigend ignoriert, verglichen wird weiter gegen den
-  Zustand. Die Karte ist dadurch dauerhaft unsichtbar (`state` trifft nie
-  zu) oder dauerhaft sichtbar (`state_not` trifft immer zu), ohne
-  Fehlermeldung und in der gespeicherten YAML unauffällig (#139). Wer
-  einen Attributwert braucht, braucht entweder eine Entity, die ihn als
-  Zustand trägt (`binary_sensor.economics_investment_configured` für die
-  Investitionskarte), oder eine Karte, die ihre Leere selbst erzeugt
-  (`markdown` + `show_empty: false`). `tests/test_dashboard.py` prüft,
-  dass keine gebaute Bedingung ein `attribute` enthält. Der
-  Platzhalter der Entity-ID wird per `str.replace` ersetzt, nicht per
-  `str.format` - die Vorlage ist voll von geschweiften Klammern, die
-  Jinja gehören. `tests/test_dashboard.py` **rendert** die Vorlage mit
-  Home Assistants Template-Engine, statt nur auf Zeichenketten zu prüfen:
-  Code, den sonst nur das Frontend ausführt, war schon einmal der Grund
-  für eine grüne Testsuite über einer unbrauchbaren Oberfläche (#135).
-- Die sieben ROI-/Amortisationssensoren sind anders als z. B. die
-  netzdienlichen Entities IMMER registriert (statische
-  `SENSOR_DESCRIPTIONS`), unabhängig davon, ob Investitionskosten
-  konfiguriert sind; `economics_roi` liefert in diesem Fall `None`
-  (Sensorzustand "unknown"). Die ganze vertical-stack "Investition und
-  Amortisation" ist deshalb in eine Core-`type: conditional`-Karte
-  eingebettet (`conditions: [{entity:
-  <economics_investment_configured-Entity-ID>, state: "on"}]`) statt
-  build-time über die Config-Entry-Options ausgelassen zu werden: `async_build_dashboard_config` braucht dafür
-  keine Options mehr, nur `hass`/`entry_id`. Eine Options-Prüfung beim
-  Dashboardbau wäre nach einer späteren Options-Änderung veraltet, da
-  `__init__.async_update_options` das gespeicherte Dashboard nie neu baut
-  (nur den Coordinator aktualisiert, siehe unten) - die "conditional"-
-  Karte blendet sich dagegen automatisch ein/aus, sobald der Coordinator
-  nach einer Options-Änderung neu rechnet und der Sensorzustand wechselt,
-  ganz ohne Dashboard-Neubau.
-
-Alles andere folgt exakt dem bestehenden Muster der vier älteren Tabs:
-`_entities_card`/`_gauge_card` lassen fehlende Entities/Karten still aus,
-`async_create_dashboard` bleibt idempotent, `force=True`
-(`sax_power.reinstall_dashboard`) überschreibt inklusive des neuen Tabs,
-ein Fehler beim Dashboardbau blockiert nie das Setup.
-
 ### Dashboard-Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
 
-Der sechste View verwendet `economics_net_savings` für alle Kalender- und
+Der fünfte View verwendet `economics_net_savings` für alle Kalender- und
 freien Zeitraumwerte. Die vollständige Top-Level-Reihenfolge lautet:
 Amortisationsblock, KPI-Grid, Tarifinformation, eingeklappte Hinweise, freier
-Zeitraum, Statushinweis. Die Tarifinformation verwendet exakt dasselbe von
-`_tariff_plan_card` erzeugte Kartenobjekt wie der technische View
-`wirtschaftlichkeit`.
+Zeitraum, Statushinweis. `_tariff_plan_card` erzeugt die Tarifinformation
+direkt aus den Attributen des aktuellen Netzbezugspreis-Sensors.
 
 `_savings_payback_block` wird über
 `economics_investment_configured` zur Laufzeit ein- oder ausgeblendet. Im
 aktiven Zweig folgt auf die blaue Fortschritts-Gauge eine einzige
-`entities`-Karte mit Restbetrag, Netto-Ersparnis, Bilanzbeginn und
-Vorlaufbetrag. Der Vorlauf trägt `suffix: "€"`. Prognose-Tile,
+`entities`-Karte mit Restbetrag, Vorlaufbetrag, Netto-Ersparnis und
+Bilanzbeginn. Der Vorlauf trägt `suffix: "€"`. Prognose-Tile,
 Prognoseerklärung, Durchschnitt und Jahreshochrechnung sind entfernt. Die
 frühere separate Karte "Gesamt seit Bilanzbeginn" existiert nicht mehr. Der
 Block besitzt keine eigene Markdown-Überschrift "Amortisation".
@@ -1269,17 +1166,12 @@ tests/
 │                                  REQ-SELF-DIAGNOSIS-REPAIRS, das sechste
 │                                  (economics_price_unavailable) REQ-ECONOMICS-OBSERVABILITY
 ├── test_dashboard.py                Mitgeliefertes Lovelace-Dashboard (REQ-BUNDLED-DASHBOARD/
-│                                  REQ-ECONOMICS-DASHBOARD): Entity-Auflösung/-Auslassung je
-│                                  Tab, Gauge-Karten, geräteprefix-freie Labels für alle sechs
-│                                  Views inkl. der Tabs "Wirtschaftlichkeit" und "Ersparnis"
-│                                  (Karten-/Entity-
-│                                  Reihenfolge, Attribut-Zeilen für Preisabdeckung/
-│                                  Bilanzbeginn, Amortisationsfortschritt als Gauge,
-│                                  statistics-graph-Verlaufskarte, nicht-leerer View auch ohne
-│                                  jede registrierte Entity), create_dashboard-Idempotenz und
-│                                  reinstall_dashboard-Service
-├── test_economics_dashboard_e2e.py  Ende-zu-Ende über die gesamte Wirtschaftlichkeits-Reihe
-│                                  (REQ-ECONOMICS-DASHBOARD-Akzeptanzkriterium): je ein PV-Lade-,
+│                                  REQ-ECONOMICS-SAVINGS-DASHBOARD): Entity-Auflösung/-Auslassung
+│                                  je Tab, Gauge-Karten, geräteprefix-freie Labels für alle fünf
+│                                  Views einschließlich "Ersparnis", Karten-/Entity-Reihenfolge,
+│                                  Bilanzbeginn/Vorlaufbetrag als Attributzeilen,
+│                                  create_dashboard-Idempotenz und reinstall_dashboard-Service
+├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Ersparnis-Tab: je ein PV-Lade-,
 │                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
 │                                  Herkunftsaufteilung und die Geldsensoren bis zur
 │                                  Dashboard-Entityauflösung

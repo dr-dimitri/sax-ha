@@ -1,10 +1,9 @@
 """Mitgeliefertes Lovelace-Dashboard für SAX Power (siehe anforderung.yaml,
 REQ-BUNDLED-DASHBOARD).
 
-Baut ein sechsteiliges Storage-Dashboard ("Allgemeine Informationen",
-"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden",
-"Wirtschaftlichkeit", siehe REQ-ECONOMICS-DASHBOARD, und "Ersparnis",
-siehe REQ-ECONOMICS-SAVINGS-DASHBOARD) und legt es -
+Baut ein fünfteiliges Storage-Dashboard ("Allgemeine Informationen",
+"Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden" und
+"Ersparnis", siehe REQ-ECONOMICS-SAVINGS-DASHBOARD) und legt es -
 wenn der Anwender das in der Ersteinrichtung ausgewählt hat (config_flow.py,
 CONF_CREATE_DASHBOARD) - direkt in Home Assistants Lovelace-Speicher an,
 damit es sofort ohne Neustart in der Sidebar erscheint.
@@ -125,31 +124,27 @@ _SAVINGS_STATUS_TEMPLATE = """\
 {%- set status_entity = __SAVINGS_STATUS_ENTITY__ %}
 {%- set status = states(status_entity)
     if status_entity is not none else 'unknown' %}
-{%- set details = '[Technische Details](/sax-power/wirtschaftlichkeit)' %}
 {%- if status == 'active' %}
 {%- elif status == 'disabled' %}
 {{- 'Die Wirtschaftlichkeitsberechnung ist deaktiviert. Bitte unter '
     ~ '„Geräte & Dienste → SAX Power Home → Konfigurieren → '
-    ~ 'Wirtschaftlichkeit“ konfigurieren.' ~ '\n\n' ~ details }}
+    ~ 'Wirtschaftlichkeit“ konfigurieren.' }}
 {%- elif status == 'waiting_for_initial_state' %}
 {{- 'Die Wirtschaftlichkeitsberechnung wartet auf Speicherkapazität '
-    ~ 'und Ladezustand.' ~ '\n\n' ~ details }}
+    ~ 'und Ladezustand.' }}
 {%- elif status == 'price_unavailable' %}
 {{- 'Der Strompreis ist derzeit nicht verfügbar. Aktuelle Zeitraumwerte '
-    ~ 'können unvollständig sein.' ~ '\n\n' ~ details }}
+    ~ 'können unvollständig sein.' }}
 {%- elif status == 'origin_unavailable' %}
-{{- 'Die Herkunft der Ladeenergie ist derzeit nicht bestimmbar.'
-    ~ '\n\n' ~ details }}
+{{- 'Die Herkunft der Ladeenergie ist derzeit nicht bestimmbar.' }}
 {%- elif status == 'partial_price_coverage' %}
 {{- 'Für einen Teil der Energie fehlte heute ein Preis. Das Ergebnis kann '
-    ~ 'unvollständig sein.' ~ '\n\n' ~ details }}
+    ~ 'unvollständig sein.' }}
 {%- elif status == 'storage_error' %}
 {{- 'Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers '
-    ~ 'angehalten. Bitte die **Home-Assistant-Reparaturen** prüfen.'
-    ~ '\n\n' ~ details }}
+    ~ 'angehalten. Bitte die **Home-Assistant-Reparaturen** prüfen.' }}
 {%- else %}
-{{- 'Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.'
-    ~ '\n\n' ~ details }}
+{{- 'Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.' }}
 {%- endif %}
 """
 
@@ -345,9 +340,8 @@ def _attribute_row(
     suffix: str | None = None,
 ) -> dict[str, Any] | None:
     """Eine "attribute"-Zeile einer entities-Karte - zeigt ein Attribut der
-    übergebenen Entity wie einen eigenen Sensor an (REQ-ECONOMICS-
-    DASHBOARD, für Preisabdeckungen/Bilanzbeginn, die keinen eigenen
-    Sensor haben, siehe REQ-ECONOMICS-OBSERVABILITY)."""
+    übergebenen Entity wie einen eigenen Sensor an. Im Ersparnis-Tab werden
+    damit Bilanzbeginn und Vorlaufbetrag dargestellt."""
     if entity_id is None:
         return None
     row = {
@@ -359,39 +353,6 @@ def _attribute_row(
     if suffix is not None:
         row["suffix"] = suffix
     return row
-
-
-def _statistics_graph_card(
-    hass: HomeAssistant,
-    entry_id: str,
-    title: str,
-    entities: list[tuple[str, str]],
-) -> dict[str, Any] | None:
-    """Core-"statistics-graph"-Karte als Balkendiagramm mit Tagesänderung
-    (REQ-ECONOMICS-DASHBOARD) - keine Custom-Card-Abhängigkeit. `change`
-    ist für `state_class: total`-Sensoren (wie die hier verwendeten
-    Geldsensoren) eine unterstützte Langzeitstatistik-Kennzahl; sollte
-    eine künftig getestete HA-Version das nicht mehr unterstützen, sind
-    stattdessen die dedizierten Tages-Sensoren aus REQ-ECONOMICS-
-    AMORTIZATION zu verwenden statt auf einen nicht unterstützten
-    Kartentyp oder eine private Statistik-API auszuweichen."""
-    resolved = [
-        entity_id
-        for entity_domain, suffix in entities
-        if (entity_id := _entity_id(hass, entity_domain, f"{entry_id}_{suffix}"))
-        is not None
-    ]
-    if not resolved:
-        return None
-    return {
-        "type": "statistics-graph",
-        "title": title,
-        "entities": resolved,
-        "stat_types": ["change"],
-        "chart_type": "bar",
-        "period": "day",
-        "days_to_show": 30,
-    }
 
 
 def _calendar_statistic_card(
@@ -423,7 +384,7 @@ def _grid_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
 
 
 def _tariff_plan_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any] | None:
-    """Der tageszeitabhängige Tarifplan als Tabelle (REQ-ECONOMICS-DASHBOARD).
+    """Tageszeitabhängiger Tarifplan (REQ-ECONOMICS-SAVINGS-DASHBOARD).
 
     Gespeist wird die Karte ausschließlich aus den Attributen des
     Netzbezugspreis-Sensors (`windows`, `active_window`,
@@ -451,8 +412,8 @@ def _stack_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     """Stapelt mehrere Karten vertikal zu einer Core-"vertical-stack"-Karte
     - anders als _grid_card (nebeneinander, für Tile-Karten) hier für eine
     feste Lese-Reihenfolge innerhalb eines fachlich zusammengehörigen
-    Blocks (REQ-ECONOMICS-DASHBOARD, Karte "Investition und
-    Amortisation": ROI-Zeile, Fortschritts-Gauge, restliche Zeilen - eine
+    Blocks (REQ-ECONOMICS-SAVINGS-DASHBOARD: Fortschritts-Gauge und
+    Detailzeilen - eine
     "entities"-Karte kann selbst keine Gauge einbetten). Fehlende Karten
     werden wie bei _grid_card stillschweigend ausgelassen; bleibt am Ende
     nichts übrig, wird die ganze Karte weggelassen."""
@@ -560,6 +521,14 @@ def _savings_payback_block(
         _, row = _resolved_row(hass, entry_id, "sensor", suffix, translations)
         if row is not None:
             detail_rows.append(row)
+    prior_row = _attribute_row(
+        roi_entity_id,
+        "prior_result_eur",
+        "Bereits vor Bilanzbeginn berücksichtigt",
+        suffix="€",
+    )
+    if prior_row is not None:
+        detail_rows.append(prior_row)
     if savings_result_entity_id is not None:
         detail_rows.append(
             {"entity": savings_result_entity_id, "name": "Netto-Ersparnis"}
@@ -569,14 +538,6 @@ def _savings_payback_block(
     )
     if savings_started_at_row is not None:
         detail_rows.append(savings_started_at_row)
-    prior_row = _attribute_row(
-        roi_entity_id,
-        "prior_result_eur",
-        "Bereits vor Bilanzbeginn berücksichtigt",
-        suffix="€",
-    )
-    if prior_row is not None:
-        detail_rows.append(prior_row)
     details_card = (
         {
             "type": "entities",
@@ -628,7 +589,7 @@ def _view(
 async def async_build_dashboard_config(
     hass: HomeAssistant, entry_id: str
 ) -> dict[str, Any]:
-    """Baut die komplette Lovelace-Konfiguration (sechs Tabs) für einen Entry."""
+    """Baut die komplette Lovelace-Konfiguration (fünf Tabs) für einen Entry."""
     translations = await translation.async_get_translations(
         hass, hass.config.language, "entity", integrations=[DOMAIN]
     )
@@ -807,264 +768,19 @@ async def async_build_dashboard_config(
         ],
     )
 
-    status_entity_id, status_row = _resolved_row(
-        hass, entry_id, "sensor", "economics_status", translations
-    )
-    status_rows: list[dict[str, Any] | str] = [status_row] if status_row else []
-    for entity_domain, suffix in (
-        ("sensor", "economics_current_import_price"),
-        ("sensor", "economics_feed_in_price"),
-    ):
-        _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
-        if row is not None:
-            status_rows.append(row)
-    for attribute, label in (
-        # Bewusst die Tageswerte: sie bestimmen den Zustand des
-        # Status-Sensors direkt darüber (REQ-ECONOMICS-OBSERVABILITY,
-        # Issue #134) - die kumulierten Lifetime-Quoten bleiben als
-        # Attribute desselben Sensors erhalten.
-        ("charge_price_coverage_percent_today", "Preisabdeckung Ladung (heute)"),
-        (
-            "discharge_price_coverage_percent_today",
-            "Preisabdeckung Entladung (heute)",
-        ),
-        ("economics_started_at", "Beginn der Bilanz"),
-    ):
-        row = _attribute_row(status_entity_id, attribute, label)
-        if row is not None:
-            status_rows.append(row)
-    status_card = (
-        {
-            "type": "entities",
-            "title": "Status und Preise",
-            "state_color": True,
-            "entities": status_rows,
-        }
-        if status_rows
-        else None
-    )
+    status_entity_id = _entity_id(hass, "sensor", f"{entry_id}_economics_status")
 
-    pv_entity_id, pv_row = _resolved_row(
-        hass, entry_id, "sensor", "energy_charged_from_pv", translations
-    )
-    origin_rows: list[dict[str, Any] | str] = [pv_row] if pv_row else []
-    for entity_domain, suffix in (
-        ("sensor", "energy_charged_from_grid"),
-        ("sensor", "energy_charged"),
-        ("sensor", "energy_discharged"),
-    ):
-        _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
-        if row is not None:
-            origin_rows.append(row)
-    # Die drei Zähler dieser Karte und die Geldbilanz eine Karte tiefer
-    # beginnen zu verschiedenen Zeitpunkten (REQ-ENERGY-ORIGIN): Der
-    # Gesamtzähler läuft seit der Installation, die Herkunft seit
-    # _bootstrap_energy_origin, die Bilanz erst seit dem ersten
-    # vollständigen Tarif. Ohne beide Zeitpunkte nebeneinander liest sich
-    # die Differenz wie ein Rechenfehler (Anwenderbericht: 2,44 kWh
-    # PV-Ladung neben 0,0084 EUR PV-Opportunitätskosten - beide Werte
-    # korrekt, nur verschieden alt).
-    origin_start_row = _attribute_row(
-        pv_entity_id, "origin_accounting_started_at", "Beginn der Herkunftszählung"
-    )
-    if origin_start_row is not None:
-        origin_rows.append(origin_start_row)
-    origin_card = (
-        {
-            "type": "entities",
-            "title": "Herkunft der Ladeenergie",
-            "state_color": True,
-            "entities": origin_rows,
-        }
-        if origin_rows
-        else None
-    )
-    # REQ-ECONOMICS-DASHBOARD verlangt hier ausdrücklich den Hinweis, dass
-    # die Herkunftsaufteilung eine konservative Schätzung am
-    # Netzanschlusspunkt ist (REQ-ENERGY-ORIGIN), keine physikalische
-    # Einzelstromverfolgung - als Teil dieser einen Karte (vertical-stack),
-    # nicht als zusätzliche eigenständige Karte, und nur relevant, wenn
-    # überhaupt eine der Herkunfts-Entities vorhanden ist.
-    origin_note_card = (
-        {
-            "type": "markdown",
-            "content": (
-                "Die Herkunftsaufteilung ist eine konservative Schätzung "
-                "am Netzanschlusspunkt, keine physikalische "
-                "Einzelstromverfolgung."
-            ),
-        }
-        if origin_card is not None
-        else None
-    )
-    origin_block = _stack_card([origin_card, origin_note_card])
-
-    # REQ-ECONOMICS-DASHBOARD: eine gemeinsame Karte in genau dieser
-    # Reihenfolge (ROI, Fortschritts-Gauge, dann der Rest) - eine
-    # "entities"-Karte kann selbst keine Gauge einbetten, deshalb
-    # _stack_card (vertical-stack) aus drei Teilkarten. Die vier Sensoren
-    # sind (anders als z. B. die netzdienlichen Entities) immer bereits
-    # statisch registriert, auch ohne konfigurierte Investitionskosten
-    # (siehe REQ-ECONOMICS-AMORTIZATION). Eine build-time-Prüfung der
-    # Config-Entry-Options wäre nach einer späteren Options-Änderung
-    # veraltet, ohne dass das gespeicherte Dashboard je neu gebaut wird
-    # (async_update_options aktualisiert nur den Coordinator) - die ganze
-    # Karte deshalb stattdessen in eine Core-"conditional"-Karte packen,
-    # die zur Laufzeit an ein Laufzeitsignal hängt, das ausschließlich die
-    # Investitionskosten-Konfiguration abbildet: sie blendet sich beim
-    # Setzen/Entfernen der Investitionskosten automatisch ein/aus, sobald
-    # der Coordinator neu rechnet, ganz ohne Dashboard-Neubau.
-    #
-    # `economics_roi` selbst eignet sich dafür NICHT als Gate: es wird
-    # laut SaxPowerCoordinator._publish_amortization auch bei
-    # deaktiviertem Tarif oder noch nicht initialisierter Geldbilanz
-    # "unknown", obwohl Investitionskosten konfiguriert sind.
-    #
-    # Die Bedingung prüft deshalb den ZUSTAND eines eigenen
-    # Binary-Sensors, der genau "Investitionskosten hinterlegt" abbildet.
-    roi_entity_id, roi_row = _resolved_row(
-        hass, entry_id, "sensor", "economics_roi", translations
-    )
-    roi_rows: list[dict[str, Any] | str] = [roi_row] if roi_row else []
-    # Der ROI rechnet den Vorlauf-Ertrag mit ein, das operative Ergebnis
-    # eine Karte höher nicht - ohne diese Zeile ließe sich die Differenz
-    # zwischen beiden im Dashboard nicht auflösen (siehe
-    # coordinator._publish_amortization).
-    prior_row = _attribute_row(
-        roi_entity_id,
-        "prior_result_eur",
-        "Bereits erwirtschafteter Ertrag",
-        suffix="€",
-    )
-    if prior_row is not None:
-        roi_rows.append(prior_row)
-    roi_row_card = (
-        {
-            "type": "entities",
-            "title": "Investition und Amortisation",
-            "state_color": True,
-            "entities": roi_rows,
-        }
-        if roi_rows
-        else None
-    )
-    progress_gauge = _gauge_card(
-        hass,
-        entry_id,
-        "sensor",
-        "economics_amortization_progress",
-        translations,
-        min_value=0,
-        max_value=100,
-        # Durchgehend blau statt der sonst üblichen Ampel: Ein niedriger
-        # Amortisationsfortschritt ist kein Fehlerzustand, den der Anwender
-        # abstellen könnte, sondern nur ein früher Zeitpunkt auf einer
-        # mehrjährigen Strecke - rot/gelb hätte genau das suggeriert.
-        segments=[{"from": 0, "color": "blue"}],
-    )
-    remaining_rows_card = _entities_card(
-        hass,
-        entry_id,
-        "",
-        [
-            ("sensor", "economics_remaining_to_payback"),
-            ("sensor", "economics_net_savings_today"),
-        ],
-        translations,
-    )
-    investment_stack = _stack_card([roi_row_card, progress_gauge, remaining_rows_card])
-    investment_card = investment_stack
-    if investment_stack is not None:
-        configured_entity_id = _entity_id(
-            hass, "binary_sensor", f"{entry_id}_economics_investment_configured"
-        )
-        if configured_entity_id is not None:
-            investment_card = {
-                "type": "conditional",
-                "conditions": [{"entity": configured_entity_id, "state": "on"}],
-                "card": investment_stack,
-            }
-
-    balance_rows: list[dict[str, Any] | str] = []
-    for entity_domain, suffix in (
-        ("sensor", "economics_avoided_grid_cost"),
-        ("sensor", "economics_grid_charge_cost"),
-        ("sensor", "economics_pv_opportunity_cost"),
-        ("sensor", "economics_operating_result"),
-        ("sensor", "economics_net_savings"),
-        ("sensor", "economics_unpriced_charge"),
-        ("sensor", "economics_unpriced_discharge"),
-    ):
-        _, row = _resolved_row(hass, entry_id, entity_domain, suffix, translations)
-        if row is not None:
-            balance_rows.append(row)
-    # Die tatsächlich bewertete Energiemenge macht jeden Betrag dieser
-    # Karte nachrechenbar (Betrag / Preis = Menge) und zeigt zugleich, dass
-    # sie sich NICHT auf die Herkunftszähler der Karte darüber bezieht,
-    # sondern nur auf den Zeitraum seit Bilanzbeginn - siehe
-    # coordinator._energy_origin_attributes. Beide Mengen sind Attribute
-    # des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY) und haben keinen
-    # eigenen Sensor.
-    for attribute, label in (
-        ("priced_charge_kwh", "Bewertete Ladung"),
-        ("priced_discharge_kwh", "Bewertete Entladung"),
-    ):
-        row = _attribute_row(status_entity_id, attribute, label)
-        if row is not None:
-            balance_rows.append(row)
-    balance_card = (
-        {
-            "type": "entities",
-            "title": "Operative Geldbilanz",
-            "state_color": True,
-            "entities": balance_rows,
-        }
-        if balance_rows
-        else None
-    )
-
-    # REQ-ECONOMICS-DASHBOARD: Der hinterlegte Tarifplan lebt sonst
+    # REQ-ECONOMICS-SAVINGS-DASHBOARD: Der hinterlegte Tarifplan lebt sonst
     # ausschließlich in entry.options und ist damit nur im Options Flow
     # einsehbar - dort aber immer im Bearbeitungsmodus und ohne jeden Bezug
     # zur aktuellen Uhrzeit. Acht Zeitfenster über Mitternacht hinweg sind
     # fehleranfällig; ohne Anzeige fällt ein Zahlendreher erst Wochen später
-    # in der Geldbilanz auf. Die Karte hängt wie die Investitionskarte an
-    # einem Laufzeitsignal (hier dem Attribut `tariff_type`) statt an einem
+    # in der Geldbilanz auf. Die Karte hängt am Laufzeitsignal `tariff_type`
+    # statt an einem
     # zur Bauzeit gelesenen Options-Wert: Ein Tarifwechsel blendet sie
     # dadurch selbsttätig ein und aus, ohne dass das gespeicherte Dashboard
     # je neu gebaut wird.
     tariff_plan_card = _tariff_plan_card(hass, entry_id)
-
-    # Die Tab-Leiste zeigt bei gesetztem Icon ausschließlich das Icon, den
-    # Titel nur noch als Tooltip. Ein Name, den Material Design Icons nicht
-    # kennt, rendert als leere Fläche - der Tab ist dann zwar vorhanden und
-    # anklickbar, aber unsichtbar. Genau das passierte mit dem frei
-    # erfundenen "mdi:cash-chart" (Anwenderbericht: "Wirtschaftlichkeits-Tab
-    # wird nicht angezeigt", obwohl der View im gespeicherten Dashboard
-    # stand). Neue Icons deshalb immer gegen die MDI-Liste prüfen.
-    economics_view = _view(
-        "Wirtschaftlichkeit",
-        "wirtschaftlichkeit",
-        "mdi:cash-multiple",
-        [
-            status_card,
-            tariff_plan_card,
-            origin_block,
-            balance_card,
-            investment_card,
-            _statistics_graph_card(
-                hass,
-                entry_id,
-                "Verlauf (30 Tage)",
-                [
-                    ("sensor", "economics_operating_result"),
-                    ("sensor", "economics_avoided_grid_cost"),
-                    ("sensor", "economics_grid_charge_cost"),
-                    ("sensor", "economics_pv_opportunity_cost"),
-                ],
-            ),
-        ],
-    )
 
     savings_status_card = _savings_status_card(status_entity_id)
     savings_explanation_card = _savings_explanation_card(hass, entry_id)
@@ -1103,7 +819,7 @@ async def async_build_dashboard_config(
     savings_view = _view(
         "Ersparnis",
         "ersparnis",
-        "mdi:piggy-bank",
+        "mdi:cash-multiple",
         [
             savings_payback_block,
             savings_period_grid,
@@ -1120,7 +836,6 @@ async def async_build_dashboard_config(
             charging_view,
             grid_serving_view,
             price_view,
-            economics_view,
             savings_view,
         ]
     }
@@ -1270,10 +985,9 @@ async def _async_missing_dashboard_views(
 
     Verglichen werden die Pfade, nicht die Titel: Der Pfad ist der stabile
     Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Für die
-    Umstellung von Roh-Cashflow auf persistierte Netto-Ersparnis reicht das
-    einmalig nicht: Die Snapshot-Stände besitzen bereits alle sechs Pfade,
-    referenzieren in den beiden betroffenen Views aber die alten Entities.
-    Deshalb müssen dort die aktuellen Entity-IDs vorkommen. Es wird weiterhin
+    Auch fachlich veraltete Ersparnis-Views werden erkannt: Dazu zählen alte
+    Entity-IDs, entfernte Überschriften, eine fehlende Tarifinformation und
+    der inzwischen entfernte View `wirtschaftlichkeit`. Es wird weiterhin
     nichts automatisch überschrieben; der Treffer öffnet nur denselben
     reparierbaren Hinweis wie ein fehlender Tab.
 
@@ -1301,50 +1015,44 @@ async def _async_missing_dashboard_views(
         view["path"] for view in expected["views"] if view["path"] not in stored_views
     }
 
-    for path, suffix in (
-        ("wirtschaftlichkeit", "economics_net_savings_today"),
-        ("ersparnis", "economics_net_savings"),
-    ):
-        stored_view = stored_views.get(path)
-        entity_id = _entity_id(hass, "sensor", f"{entry.entry_id}_{suffix}")
-        if (
-            stored_view is None
-            or entity_id is None
-            or _contains_dashboard_value(stored_view, entity_id)
-        ):
-            continue
-        outdated_paths.add(path)
-
     savings_view = stored_views.get("ersparnis")
     expected_savings_view = next(
         view for view in expected["views"] if view["path"] == "ersparnis"
     )
     if savings_view is not None:
+        savings_entity_id = _entity_id(
+            hass, "sensor", f"{entry.entry_id}_economics_net_savings"
+        )
         # Die beiden früheren Markdown-Überschriften wurden entfernt. Die
-        # Tarifinformation ist dieselbe dynamische Karte wie im technischen
-        # View und existiert nur, wenn ihre Preis-Entity registriert ist.
-        if any(
-            _contains_dashboard_value(savings_view, heading)
-            for heading in ("### Amortisation", "### Freier Zeitraum")
-        ) or (
-            _contains_dashboard_fragment(expected_savings_view, "tariff_type")
-            and not _contains_dashboard_fragment(savings_view, "tariff_type")
+        # Tarifinformation existiert nur, wenn ihre Preis-Entity registriert
+        # ist. Ein noch vorhandener technischer Wirtschaftlichkeits-View
+        # kennzeichnet ebenfalls den alten Sechs-Tab-Stand.
+        if (
+            "wirtschaftlichkeit" in stored_views
+            or (
+                savings_entity_id is not None
+                and not _contains_dashboard_value(savings_view, savings_entity_id)
+            )
+            or any(
+                _contains_dashboard_value(savings_view, heading)
+                for heading in ("### Amortisation", "### Freier Zeitraum")
+            )
+            or (
+                _contains_dashboard_fragment(expected_savings_view, "tariff_type")
+                and not _contains_dashboard_fragment(savings_view, "tariff_type")
+            )
         ):
             outdated_paths.add("ersparnis")
 
-    for path in ("wirtschaftlichkeit", "ersparnis"):
-        stored_view = stored_views.get(path)
-        if stored_view is None:
-            continue
-        if any(
-            _contains_dashboard_fragment(stored_view, removed_suffix)
-            for removed_suffix in (
-                "economics_average_daily_result_30d",
-                "economics_projected_annual_result",
-                "economics_estimated_payback_date",
-            )
-        ):
-            outdated_paths.add(path)
+    if savings_view is not None and any(
+        _contains_dashboard_fragment(savings_view, removed_suffix)
+        for removed_suffix in (
+            "economics_average_daily_result_30d",
+            "economics_projected_annual_result",
+            "economics_estimated_payback_date",
+        )
+    ):
+        outdated_paths.add("ersparnis")
     return [
         view["title"] for view in expected["views"] if view["path"] in outdated_paths
     ]

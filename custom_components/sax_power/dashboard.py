@@ -197,30 +197,13 @@ _SAVINGS_STATUS_TEMPLATE = """\
 {%- endif %}
 """
 
-_SAVINGS_INVENTORY_ENTITY_PLACEHOLDER = "__SAVINGS_INVENTORY_ENTITY__"
-_SAVINGS_INVENTORY_TEMPLATE = """\
-{%- set inventory_entity = __SAVINGS_INVENTORY_ENTITY__ %}
-{%- set inventory = states(inventory_entity)
-    if inventory_entity is not none else 'unknown' %}
-{%- set unit = state_attr(inventory_entity, 'unit_of_measurement')
-    if inventory_entity is not none else none %}
-{%- if is_number(inventory) and inventory | float > 0 %}
-{%- set formatted = ('%.3f' | format(inventory | float)) | replace('.', ',') %}
-{%- set display = formatted ~ ' ' ~ unit if unit else formatted %}
-{{- 'Beim Start der Bilanz waren bereits **' ~ display
-    ~ '** im Speicher. Für diese Energie sind Herkunft und Preis unbekannt. '
-    ~ 'Ihre Entladung wird deshalb korrekt mit **0 €** bewertet. Sobald '
-    ~ 'dieser Anfangsbestand abgebaut ist, kann weitere bepreiste Entladung '
-    ~ 'in die Netto-Ersparnis eingehen. Das ist kein Messfehler.' }}
-{%- endif %}
-"""
-
 # Dauerhaft gleichbleibender Erklärungstext des Ersparnis-Tabs. Das native
 # HTML-Element details ist in der Allowlist des zu Home Assistant 2026.8.2
 # gehörenden Markdown-Renderers enthalten. Ohne open-Attribut beginnt es
-# bewusst geschlossen; aktuelle Warnungen bleiben in den separaten,
-# zustandsabhängigen Karten sichtbar (REQ-ECONOMICS-SAVINGS-DASHBOARD).
-_SAVINGS_EXPLANATION_CONTENT = """\
+# bewusst geschlossen; der zustandsabhängige Anfangsbestand bleibt innerhalb
+# des Elements abrufbar (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+_SAVINGS_INVENTORY_ENTITY_PLACEHOLDER = "__SAVINGS_INVENTORY_ENTITY__"
+_SAVINGS_EXPLANATION_TEMPLATE = """\
 <details>
 <summary><strong>Hinweise zur Berechnung und Datenbasis</strong></summary>
 <p><strong>Netto-Ersparnis:</strong> Grundlage sind vermiedene
@@ -237,6 +220,20 @@ Recorder-Historie oder ist die Ergebnis-Entity vom Recorder ausgeschlossen,
 bleiben Wert und Diagramm unbekannt beziehungsweise leer. Schneidet die
 Auswahl einen manuellen Neustart der Wirtschaftlichkeitsbilanz, kann der
 Recorder die positiven Zuwächse vor und nach dem Neustart zusammenfassen.</p>
+{%- set inventory_entity = __SAVINGS_INVENTORY_ENTITY__ %}
+{%- set inventory = states(inventory_entity)
+    if inventory_entity is not none else 'unknown' %}
+{%- set unit = state_attr(inventory_entity, 'unit_of_measurement')
+    if inventory_entity is not none else none %}
+{%- if is_number(inventory) and inventory | float > 0 %}
+{%- set formatted = ('%.3f' | format(inventory | float)) | replace('.', ',') %}
+{%- set display = formatted ~ ' ' ~ unit if unit else formatted %}
+<p>Beim Start der Bilanz waren bereits <strong>{{ display }}</strong> im
+Speicher. Für diese Energie sind Herkunft und Preis unbekannt. Ihre Entladung
+wird deshalb korrekt mit <strong>0 €</strong> bewertet. Sobald dieser
+Anfangsbestand abgebaut ist, kann weitere bepreiste Entladung in die
+Netto-Ersparnis eingehen. Das ist kein Messfehler.</p>
+{%- endif %}
 </details>
 """
 
@@ -558,37 +555,18 @@ def _savings_status_card(status_entity_id: str | None) -> dict[str, Any]:
     }
 
 
-def _savings_inventory_content(inventory_entity_id: str | None) -> str:
-    """Erklärt nur einen positiven, vorhandenen Anfangsbestand."""
-    return _SAVINGS_INVENTORY_TEMPLATE.replace(
-        _SAVINGS_INVENTORY_ENTITY_PLACEHOLDER,
-        _jinja_entity(inventory_entity_id),
-    )
-
-
-def _savings_inventory_card(
-    hass: HomeAssistant, entry_id: str
-) -> dict[str, Any] | None:
-    """Core-Bedingung für einen positiven unbewerteten Anfangsbestand."""
+def _savings_explanation_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
+    """Bündelt statische Hinweise und den optionalen Anfangsbestand."""
     inventory_entity_id = _entity_id(
         hass, "sensor", f"{entry_id}_economics_unvalued_inventory"
     )
-    if inventory_entity_id is None:
-        return None
+    content = _SAVINGS_EXPLANATION_TEMPLATE.replace(
+        _SAVINGS_INVENTORY_ENTITY_PLACEHOLDER,
+        _jinja_entity(inventory_entity_id),
+    )
     return {
-        "type": "conditional",
-        "conditions": [
-            {
-                "condition": "numeric_state",
-                "entity": inventory_entity_id,
-                "above": 0,
-            }
-        ],
-        "card": {
-            "type": "markdown",
-            "show_empty": False,
-            "content": _savings_inventory_content(inventory_entity_id),
-        },
+        "type": "markdown",
+        "content": content,
     }
 
 
@@ -1183,7 +1161,7 @@ async def async_build_dashboard_config(
     )
 
     savings_status_card = _savings_status_card(status_entity_id)
-    savings_inventory_card = _savings_inventory_card(hass, entry_id)
+    savings_explanation_card = _savings_explanation_card(hass, entry_id)
     savings_result_entity_id = _entity_id(
         hass, "sensor", f"{entry_id}_economics_net_savings"
     )
@@ -1233,16 +1211,12 @@ async def async_build_dashboard_config(
         "ersparnis",
         "mdi:piggy-bank",
         [
-            savings_status_card,
-            {
-                "type": "markdown",
-                "content": _SAVINGS_EXPLANATION_CONTENT,
-            },
-            savings_period_grid,
-            savings_inventory_card,
-            savings_total_card,
             savings_payback_block,
+            savings_period_grid,
+            savings_total_card,
+            savings_explanation_card,
             savings_free_period_block,
+            savings_status_card,
         ],
     )
 

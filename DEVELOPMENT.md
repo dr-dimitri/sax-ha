@@ -784,8 +784,8 @@ persistierter Bilanzbeginn wird als `last_reset` veröffentlicht und markiert
 den einzigen kontrollierten Rücksprung:
 
 - `_savings_status_card` steht als selbst ausblendende Core-`markdown`-Karte
-  an erster Stelle. Die Jinja-Vorlage liest nur den Zustand der bereits für
-  den technischen View aufgelösten `economics_status`-Entity. `active`
+  an sechster und letzter Stelle. Die Jinja-Vorlage liest nur den Zustand der
+  bereits für den technischen View aufgelösten `economics_status`-Entity. `active`
   rendert vollständig leer; eine strikte `if/elif`-Kette übersetzt jeden
   Problemzustand in höchstens einen Hinweis und verlinkt auf
   `/sax-power/wirtschaftlichkeit`. Eine fehlende Registry-Entity wird als
@@ -800,30 +800,24 @@ den einzigen kontrollierten Rücksprung:
   nach erfolgreicher Registry-Auflösung gebaut wird, kann bei fehlender
   Ergebnis-Entity weder `entity: null` noch ein leerer Grid-Container
   entstehen.
-- `_savings_inventory_card` folgt direkt auf dieses Grid, wird jedoch
-  unabhängig von der Ergebnis-Entity gebaut. Die Core-`conditional`-Bedingung
-  prüft ausschließlich den Zustand von `economics_unvalued_inventory` mit
-  `condition: numeric_state` und `above: 0`. Das innere Jinja-Markdown
-  formatiert den Zustand auf drei Dezimalstellen, ersetzt nur zur deutschen
-  Darstellung den Dezimalpunkt und übernimmt die Einheit aus der Entity. Es
-  erklärt die bestehende 0-EUR-Startregel, berechnet aber weder Energie noch
-  Geld oder Dauer. Fehlende, nichtpositive und nichtnumerische Zustände
-  bleiben leer; ohne Registry-ID entfällt der Block vollständig.
 - Die Karte "Gesamt seit Bilanzbeginn" ist eine Core-`entities`-Karte. Ihre
   Ergebniszeile verweist direkt auf den aktuellen Zustand von
   `economics_net_savings`; eine `_attribute_row` zeigt darunter
   `economics_started_at` von `economics_status` als "Bilanzbeginn". Sie nutzt
   bewusst keine Recorder-Differenz.
-- Eine statische Core-`markdown`-Karte bündelt Rohformel, Höchststandsregel,
-  Recorder-/Bilanzbeginn und die Grenzen der freien Zeitraumauswahl in einem
-  nativen `<details>`-Element. Es besitzt kein `open`-Attribut und beginnt
-  deshalb eingeklappt; `<summary>` bleibt als kompaktes Bedienelement sichtbar.
+- `_savings_explanation_card` steht an vierter Stelle und bündelt Rohformel,
+  Höchststandsregel, Recorder-/Bilanzbeginn, die Grenzen der freien
+  Zeitraumauswahl und den optionalen Anfangsbestand in einem nativen
+  `<details>`-Element. Es besitzt kein `open`-Attribut und beginnt deshalb
+  eingeklappt; `<summary>` bleibt als kompaktes Bedienelement sichtbar. Die
+  Jinja-Vorlage ergänzt den Anfangsbestandsabsatz nur bei einem positiven
+  Zustand von `economics_unvalued_inventory`; eine separate Karte gibt es
+  dafür nicht mehr.
   Der Frontend-Renderer von Home Assistant 2026.8.2 erlaubt beide HTML-Elemente.
-  Veränderliche Status-, Anfangsbestands- und Prognosehinweise bleiben außerhalb
-  und werden bei Bedarf sofort sichtbar. Der optionale Vorlauf-Ertrag bleibt
-  außerhalb der Kalenderwerte.
-- `_savings_payback_block` stellt die vorhandene Amortisationsprognose direkt
-  unter diesen Werten dar. Zwei Core-`conditional`-Karten reagieren
+  Veränderliche Status- und Prognosehinweise bleiben außerhalb. Der optionale
+  Vorlauf-Ertrag bleibt außerhalb der Kalenderwerte.
+- `_savings_payback_block` stellt die vorhandene Amortisationsprognose als
+  erstes Kartenobjekt dar. Zwei Core-`conditional`-Karten reagieren
   ausschließlich auf den Laufzeitzustand von
   `economics_investment_configured`: `off` zeigt den Konfigurationsweg, `on`
   zeigt Datums-Tile, selbst ausblendende Begründung, blaue Fortschritts-Gauge
@@ -843,6 +837,9 @@ den einzigen kontrollierten Rücksprung:
   bewusst keinen `period`-Schlüssel, damit Home Assistant seine Auflösung
   selbst wählt. Der ganze Block wird erst nach erfolgreicher Registry-
   Auflösung gebaut - der Datumswähler kann deshalb nie allein zurückbleiben.
+  Bei vollständiger Entity-Ausstattung lautet die Top-Level-Reihenfolge damit
+  exakt Amortisationsblock, KPI-Grid, Gesamtkarte, eingeklappte Hinweise,
+  freier Zeitraum und Statushinweis.
   Der Block zeigt selbst nur die kurze Überschrift "Freier Zeitraum"; die
   Recorder-/Bilanzstart-/Reset-Grenzen stehen im gemeinsamen eingeklappten
   Erklärungs-Element. Ein Zeitraum über einen Bilanzneustart kann wegen des

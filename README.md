@@ -649,12 +649,12 @@ bereits festgehaltene Ersparnis nicht; ein echtes Ergebnis von 0 bleibt als
 0 EUR sichtbar. Die unmittelbar darüber erläuterte Upgrade-Grenze gilt auch
 für diese Darstellung.
 
-Die dauerhaft gleichbleibenden Erläuterungen zur Berechnung, zur
-Recorder-Datenbasis und zur freien Zeitraumauswahl sind am Anfang des Tabs
-unter **Hinweise zur Berechnung und Datenbasis** zusammengefasst und
+Die Erläuterungen zur Berechnung, zur Recorder-Datenbasis, zur freien
+Zeitraumauswahl und zum gegebenenfalls vorhandenen Anfangsbestand sind nach
+den Zeitraum- und Gesamtwerten unter **Hinweise zur Berechnung und
+Datenbasis** zusammengefasst und
 standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
-Warnungen sowie Erklärungen zu Anfangsbestand und Prognose bleiben unabhängig
-davon sichtbar, weil sich ihr Inhalt mit dem Anlagenzustand ändert.
+Warnungen und Prognosehinweise bleiben davon unabhängig.
 
 Vier Karten zeigen die Zunahme der Netto-Ersparnis im laufenden
 Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
@@ -680,25 +680,26 @@ Jahr.
 
 ### Status und unbewerteter Anfangsbestand
 
-Im gesunden Zustand `active` bleibt der Tab ruhig: Der Statushinweis blendet
-sich vollständig aus. Nur wenn Handlungsbedarf besteht oder ein Wert ohne
-Kontext missverständlich wäre, erscheint am Anfang genau ein kurzer Hinweis.
-Er erklärt einen deaktivierten Tarif, das Warten auf Kapazität und
+Im gesunden Zustand `active` bleibt der Tab ruhig: Der Statushinweis am Ende
+des Tabs blendet sich vollständig aus. Nur wenn Handlungsbedarf besteht oder
+ein Wert ohne Kontext missverständlich wäre, erscheint genau ein kurzer
+Hinweis. Er erklärt einen deaktivierten Tarif, das Warten auf Kapazität und
 Ladezustand, einen fehlenden Strompreis, unbekannte Ladeenergieherkunft,
 teilweise Preisabdeckung oder einen angehaltenen Bilanz-Store. Unbekannte oder
 noch nicht verfügbare Statusdaten werden neutral benannt. Jeder Hinweis
 verlinkt für technische Details auf den bestehenden Tab
 `/sax-power/wirtschaftlichkeit`, statt dessen Tabellen zu wiederholen.
 
-Direkt bei den Zeitraum-KPIs erklärt ein zweiter, ebenfalls nur bei Bedarf
-sichtbarer Hinweis den unbewerteten Anfangsbestand. Ist dessen vorhandener
-Sensorzustand positiv, lautet die Aussage mit dem aktuellen, auf drei
+Innerhalb der eingeklappten Hinweiskarte erklärt ein zusätzlicher Absatz den
+unbewerteten Anfangsbestand. Ist dessen vorhandener Sensorzustand positiv,
+lautet die Aussage mit dem aktuellen, auf drei
 Dezimalstellen formatierten kWh-Wert: Beim Start der Bilanz waren bereits
 **X,XXX kWh** im Speicher; Herkunft und Preis dieser Energie sind unbekannt,
 deshalb wird ihre Entladung korrekt mit **0 €** bewertet. Sobald dieser
 Bestand abgebaut ist, kann weitere bepreiste Entladung in die Netto-Ersparnis
 eingehen. Das ist kein Messfehler. Bei 0, einem negativen oder unbekannten
-Zustand sowie einer fehlenden Entity bleibt die Karte ausgeblendet. Sie
+Zustand sowie einer fehlenden Entity fehlt der Absatz. Eine separate Karte
+für den Anfangsbestand gibt es nicht. Der Hinweis
 schätzt weder Restdauer noch Ladezyklen oder künftige Ersparnis.
 
 0 ist ein echtes berechnetes Netto-Ergebnis; negative Netto-Ersparnisse sind

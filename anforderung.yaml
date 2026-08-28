@@ -4344,7 +4344,8 @@ requirement_economics_savings_dashboard:
     die neue Ersparnis-Entity beginnt eine eigene, nicht durch alte
     Rückgänge belastete Statistik.
 
-    Am Anfang steht eine selbst ausblendende Core-markdown-Karte
+    Als sechstes und letztes Kartenobjekt steht eine selbst ausblendende
+    Core-markdown-Karte
     (`show_empty: false`), deren Jinja-Vorlage ausschließlich den Zustand der
     über die Entity Registry aufgelösten Entity economics_status liest. Bei
     `active` rendert sie vollständig leer. `disabled` nennt die deaktivierte
@@ -4363,8 +4364,9 @@ requirement_economics_savings_dashboard:
     `/sax-power/wirtschaftlichkeit`; die strikte if/elif-Kette zeigt höchstens
     einen Text und dupliziert keine technische Tabelle.
 
-    Unmittelbar danach bündelt genau eine Core-markdown-Karte alle dauerhaft
-    gleichbleibenden Erklärungen in einem nativen HTML-`details`-Element mit
+    An vierter Stelle bündelt genau eine Core-markdown-Karte alle dauerhaft
+    gleichbleibenden Erklärungen und den optionalen Anfangsbestand in einem
+    nativen HTML-`details`-Element mit
     der Summary "Hinweise zur Berechnung und Datenbasis". Das Element trägt
     kein `open`-Attribut und ist deshalb beim Öffnen des Views standardmäßig
     eingeklappt. Sein Inhalt erklärt gemeinsam die Rohformel und
@@ -4372,10 +4374,10 @@ requirement_economics_savings_dashboard:
     und Bilanzbeginn sowie die Recorder-/Neustart-Grenzen der freien
     Zeitraumauswahl. `details` und `summary` gehören zur HTML-Allowlist des
     mit Home Assistant 2026.8.2 ausgelieferten Markdown-Renderers; es gibt
-    keine Custom-Card- oder JavaScript-Abhängigkeit. Zustandsabhängige Status-,
-    Anfangsbestands- und Prognosehinweise stehen ausdrücklich außerhalb des
-    eingeklappten Elements und bleiben bei Bedarf unmittelbar sichtbar.
-    Darauf folgen in einem zweispaltigen, nicht quadratischen Core-grid vier
+    keine Custom-Card- oder JavaScript-Abhängigkeit. Der zustandsabhängige
+    Status- und der Prognosehinweis stehen außerhalb des eingeklappten
+    Elements. An zweiter Stelle folgen in einem zweispaltigen, nicht
+    quadratischen Core-grid vier
     Core-statistic-Karten "Heute bisher", "Diese Woche bisher", "Dieser
     Monat bisher" und "Dieses Jahr bisher". Alle vier referenzieren exakt
     dieselbe economics_net_savings-Entity, verwenden `stat_type: change`
@@ -4388,24 +4390,22 @@ requirement_economics_savings_dashboard:
     last_reset. Innerhalb einer Bilanz sind seine Recorder-Änderungen wegen
     des persistierten Höchststands nichtnegativ.
 
-    Direkt nach diesem KPI-Grid folgt, sofern die Entity Registry den Sensor
-    economics_unvalued_inventory auflösen kann, eine Core-conditional-Karte.
-    Ihre einzige Bedingung lautet `condition: numeric_state`, prüft den
-    Entity-Zustand mit `above: 0` und enthält keinen Attributschlüssel. Die
-    enthaltene selbst ausblendende Markdown-Vorlage formatiert ausschließlich
-    den positiven Sensorzustand mit drei Dezimalstellen und deutschem Komma,
-    übernimmt dessen Einheit und zeigt wortgleich: "Beim Start der Bilanz
-    waren bereits **X,XXX kWh** im Speicher. Für diese Energie sind Herkunft
-    und Preis unbekannt. Ihre Entladung wird deshalb korrekt mit **0 €**
-    bewertet. Sobald dieser Anfangsbestand abgebaut ist, kann weitere
-    bepreiste Entladung in die Netto-Ersparnis eingehen. Das ist kein
-    Messfehler." Bei 0, einem negativen, unknown oder unavailable Zustand
-    sowie einem registrierten Sensor ohne Zustand rendert die Vorlage leer
-    und die numeric_state-Bedingung bleibt unerfüllt. Fehlt die Registry-
-    Entity, entfällt der gesamte Block ohne `entity: null`. Es werden weder
+    Innerhalb des eingeklappten Erklärungs-Elements formatiert die Jinja-
+    Vorlage ausschließlich einen positiven Zustand von
+    economics_unvalued_inventory mit drei Dezimalstellen und deutschem Komma,
+    übernimmt dessen Einheit und zeigt: "Beim Start der Bilanz waren bereits
+    X,XXX kWh im Speicher. Für diese Energie sind Herkunft und Preis unbekannt.
+    Ihre Entladung wird deshalb korrekt mit 0 € bewertet. Sobald dieser
+    Anfangsbestand abgebaut ist, kann weitere bepreiste Entladung in die
+    Netto-Ersparnis eingehen. Das ist kein Messfehler." Bei 0, einem negativen,
+    unknown oder unavailable Zustand, einem registrierten Sensor ohne Zustand
+    sowie einer fehlenden Registry-Entity fehlt nur dieser Absatz; das
+    Erklärungs-Element selbst bleibt erhalten. Eine separate conditional- oder
+    Markdown-Karte für den Anfangsbestand existiert nicht. Es werden weder
     Energiemenge noch Restdauer, Ladezyklen oder künftige Ersparnis berechnet.
 
-    Die entities-Karte "Gesamt seit Bilanzbeginn" zeigt als "Netto-Ersparnis"
+    An dritter Stelle zeigt die entities-Karte "Gesamt seit Bilanzbeginn" als
+    "Netto-Ersparnis"
     den direkten aktuellen Zustand von economics_net_savings und direkt
     darunter das Attribut economics_started_at der vorhandenen Entity
     economics_status mit dem Label "Bilanzbeginn". Der Gesamtwert ist keine
@@ -4414,8 +4414,8 @@ requirement_economics_savings_dashboard:
     optionaler Vorlauf-Ertrag wird weder referenziert noch auf Kalenderperioden
     verteilt; er bleibt ausschließlich Teil der vorhandenen ROI-Darstellung.
 
-    Nach Gesamtwert und Bilanzhinweis, vor der freien Zeitraumauswahl, folgt
-    der Core-vertical-stack "Wann ist der Speicher abbezahlt?". Seine einzige
+    Als erstes Kartenobjekt steht der Core-vertical-stack "Wann ist der
+    Speicher abbezahlt?". Seine einzige
     Laufzeitbedingung für Investitionskosten ist der Zustand der über die
     Entity Registry aufgelösten binary_sensor-Entity
     economics_investment_configured. Eine Core-conditional-Karte mit Zustand
@@ -4458,7 +4458,7 @@ requirement_economics_savings_dashboard:
     der vorhandene Datumswert sichtbar bleibt. Kein Attribut wird in einer
     conditional-Bedingung geprüft.
 
-    Unter den festen Werten folgt ein klar abgegrenzter vertical-stack
+    Als fünftes Kartenobjekt folgt der klar abgegrenzte vertical-stack
     "Freier Zeitraum". Seine drei auswertenden Core-Karten verwenden exakt
     denselben isolierten Collection-Key `energy_sax_power_savings`: eine
     `energy-date-selection`-Karte mit deaktivierter Vergleichsfunktion, eine
@@ -4474,8 +4474,8 @@ requirement_economics_savings_dashboard:
     "Freier Zeitraum". Die Erklärung, dass ausschließlich Daten seit Beginn
     der Recorder-Aufzeichnung einfließen, eine frühere Auswahl keine Werte
     rekonstruiert und fehlende beziehungsweise ausgeschlossene Historie leer
-    bleibt, steht im gemeinsamen eingeklappten Erklärungs-Element am Anfang
-    des Views. Dort wird ebenso erklärt, dass eine Auswahl über einen
+    bleibt, steht im gemeinsamen eingeklappten Erklärungs-Element an vierter
+    Stelle. Dort wird ebenso erklärt, dass eine Auswahl über einen
     manuellen Bilanzneustart durch den expliziten last_reset positive
     Zuwächse vor und nach dem Neustart zusammenfassen kann. Weder Python noch
     Jinja führen
@@ -4523,22 +4523,24 @@ requirement_economics_savings_dashboard:
        Zeitraumhinweise in `<details><summary>…</summary>…</details>`; ohne
        open-Attribut beginnt sie eingeklappt, und keine zweite Markdown-Karte
        wiederholt diese Erklärungen dauerhaft sichtbar."
-    - "Die erste Karte rendert economics_status mit Home Assistants
+    - "Die sechste und letzte Karte rendert economics_status mit Home Assistants
        Template-Engine: active bleibt leer; jeder Problem-, unbekannte und
        fehlende Zustand ergibt höchstens einen verständlichen Hinweis mit
        genau einem Link zum technischen Wirtschaftlichkeits-View."
-    - "Direkt hinter dem KPI-Grid steht nur bei vorhandenem
-       economics_unvalued_inventory eine Core-conditional-Karte mit exakt
-       numeric_state auf dem Entity-Zustand und above 0; sie verwendet kein
-       Attribut als Bedingung."
+    - "Die vierte Karte ist das eingeklappte Erklärungs-Element; nur darin
+       erscheint bei positivem economics_unvalued_inventory der formatierte
+       Anfangsbestand. Eine separate Anfangsbestandskarte existiert nicht."
     - "Gerenderte Template-Tests belegen den exakten Anfangsbestandstext samt
        drei Dezimalstellen, deutschem Komma und Sensor-Einheit sowie leere
        Ausgabe bei 0, negativ, unknown, unavailable, zustandslos und fehlend."
     - "Gesamtwert und Bilanzbeginn sind direkte Entity-/Attributzeilen; keine
        fixed_period-Statistik und keine economics_net_savings_today-Referenz."
+    - "Bei vollständiger Entity-Ausstattung lautet die Top-Level-Reihenfolge
+       exakt Amortisationsblock, KPI-Grid, Gesamtkarte, eingeklappte Hinweise,
+       freier Zeitraum, Statushinweis."
     - "Fehlt economics_net_savings, gibt es weder ungültige Entity-IDs
-       noch ein leeres Grid, datenabhängige Hinweiskarten oder einen
-       verwaisten Datumswähler."
+       noch ein leeres Grid, eine separate datenabhängige Hinweiskarte oder
+       einen verwaisten Datumswähler."
     - "Datumswähler, frei gewählter Statistikwert und Diagramm verwenden
        exakt energy_sax_power_savings; der Wert ist change über
        energy_date_selection und das Balkendiagramm enthält nur die

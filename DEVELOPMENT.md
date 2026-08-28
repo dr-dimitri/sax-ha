@@ -740,6 +740,14 @@ sondern löst `economics_operating_result` einmal über `_entity_id` aus der
 Entity Registry auf und verwendet ausschließlich diese ID für alle
 Netto-Ergebnisse:
 
+- `_savings_status_card` steht als selbst ausblendende Core-`markdown`-Karte
+  an erster Stelle. Die Jinja-Vorlage liest nur den Zustand der bereits für
+  den technischen View aufgelösten `economics_status`-Entity. `active`
+  rendert vollständig leer; eine strikte `if/elif`-Kette übersetzt jeden
+  Problemzustand in höchstens einen Hinweis und verlinkt auf
+  `/sax-power/wirtschaftlichkeit`. Eine fehlende Registry-Entity wird als
+  Jinja-`none` eingesetzt und liefert denselben neutralen Fallback wie
+  unknown/unavailable, statt eine Entity-ID zu erfinden.
 - `_calendar_statistic_card` baut je eine Core-`statistic`-Karte mit
   `stat_type: change` und `period.calendar.period`. Die vier Aufrufe nutzen
   `day`, `week`, `month` und `year`; damit bestimmt Home Assistant die lokalen
@@ -749,6 +757,15 @@ Netto-Ergebnisse:
   nach erfolgreicher Registry-Auflösung gebaut wird, kann bei fehlender
   Ergebnis-Entity weder `entity: null` noch ein leerer Grid-Container
   entstehen.
+- `_savings_inventory_card` folgt direkt auf dieses Grid, wird jedoch
+  unabhängig von der Ergebnis-Entity gebaut. Die Core-`conditional`-Bedingung
+  prüft ausschließlich den Zustand von `economics_unvalued_inventory` mit
+  `condition: numeric_state` und `above: 0`. Das innere Jinja-Markdown
+  formatiert den Zustand auf drei Dezimalstellen, ersetzt nur zur deutschen
+  Darstellung den Dezimalpunkt und übernimmt die Einheit aus der Entity. Es
+  erklärt die bestehende 0-EUR-Startregel, berechnet aber weder Energie noch
+  Geld oder Dauer. Fehlende, nichtpositive und nichtnumerische Zustände
+  bleiben leer; ohne Registry-ID entfällt der Block vollständig.
 - Die Karte "Gesamt seit Bilanzbeginn" ist eine Core-`entities`-Karte. Ihre
   Ergebniszeile verweist direkt auf den aktuellen Zustand von
   `economics_operating_result`; eine `_attribute_row` zeigt darunter

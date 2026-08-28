@@ -64,7 +64,7 @@
 # REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # REQ-ECONOMICS-DASHBOARD         done       Eigener Dashboard-Tab "Wirtschaftlichkeit" sowie End-to-End-Dokumentation der gesamten Feature-Reihe
-# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Ersparnis-Tab mit Zeiträumen und verständlicher Amortisationsprognose
+# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Ersparnis-Tab mit Zeiträumen, Prognose und verständlichen Datenhinweisen
 # ==============================================================================
 
 # ==============================================================================
@@ -4233,7 +4233,7 @@ requirement_economics_dashboard:
 # ==============================================================================
 requirement_economics_savings_dashboard:
   id: REQ-ECONOMICS-SAVINGS-DASHBOARD
-  title: "Kompakter Ersparnis-Tab mit Zeiträumen und verständlicher Amortisationsprognose"
+  title: "Kompakter Ersparnis-Tab mit Zeiträumen, Prognose und verständlichen Datenhinweisen"
   status: done
   description: >
     Das mitgelieferte Dashboard besitzt unmittelbar hinter dem unveränderten
@@ -4247,8 +4247,28 @@ requirement_economics_savings_dashboard:
     unverändert; insbesondere werden negative Ergebnisse nicht ausgeblendet
     und echte Nullwerte nicht als fehlende Daten behandelt.
 
-    Am Anfang erläutert eine Core-markdown-Karte diese Bedeutung. Darauf
-    folgen in einem zweispaltigen, nicht quadratischen Core-grid vier
+    Am Anfang steht eine selbst ausblendende Core-markdown-Karte
+    (`show_empty: false`), deren Jinja-Vorlage ausschließlich den Zustand der
+    über die Entity Registry aufgelösten Entity economics_status liest. Bei
+    `active` rendert sie vollständig leer. `disabled` nennt die deaktivierte
+    Berechnung und den Weg "Geräte & Dienste -> SAX Power Home ->
+    Konfigurieren -> Wirtschaftlichkeit"; `waiting_for_initial_state` das
+    Warten auf Speicherkapazität und Ladezustand; `price_unavailable` den
+    derzeit fehlenden Strompreis und möglicherweise unvollständige
+    Zeitraumwerte; `origin_unavailable` die nicht bestimmbare Herkunft der
+    Ladeenergie; `partial_price_coverage` einen heute für einen Teil der
+    Energie fehlenden Preis und ein möglicherweise unvollständiges Ergebnis;
+    `storage_error` die wegen eines Speicherfehlers angehaltene Bilanz und
+    den Verweis auf Home-Assistant-Reparaturen. Unknown, unavailable, eine
+    fehlende Status-Entity und künftige unbekannte Zustände ergeben den
+    neutralen Hinweis, dass Wirtschaftlichkeitsdaten momentan nicht
+    verfügbar sind. Jeder sichtbare Hinweis verlinkt genau einmal auf
+    `/sax-power/wirtschaftlichkeit`; die strikte if/elif-Kette zeigt höchstens
+    einen Text und dupliziert keine technische Tabelle.
+
+    Unmittelbar danach erläutert die vorhandene Core-markdown-Karte die
+    Bedeutung der Netto-Ersparnis. Darauf folgen in einem zweispaltigen,
+    nicht quadratischen Core-grid vier
     Core-statistic-Karten "Heute bisher", "Diese Woche bisher", "Dieser
     Monat bisher" und "Dieses Jahr bisher". Alle vier referenzieren exakt
     dieselbe economics_operating_result-Entity, verwenden `stat_type: change`
@@ -4257,6 +4277,23 @@ requirement_economics_savings_dashboard:
     Zeitgrenzen. Recorder-Zustände unknown/unavailable bleiben der Darstellung
     durch die Core-Karte überlassen; die Integration ersetzt sie nicht durch
     einen Betrag.
+
+    Direkt nach diesem KPI-Grid folgt, sofern die Entity Registry den Sensor
+    economics_unvalued_inventory auflösen kann, eine Core-conditional-Karte.
+    Ihre einzige Bedingung lautet `condition: numeric_state`, prüft den
+    Entity-Zustand mit `above: 0` und enthält keinen Attributschlüssel. Die
+    enthaltene selbst ausblendende Markdown-Vorlage formatiert ausschließlich
+    den positiven Sensorzustand mit drei Dezimalstellen und deutschem Komma,
+    übernimmt dessen Einheit und zeigt wortgleich: "Beim Start der Bilanz
+    waren bereits **X,XXX kWh** im Speicher. Für diese Energie sind Herkunft
+    und Preis unbekannt. Ihre Entladung wird deshalb korrekt mit **0 €**
+    bewertet. Sobald dieser Anfangsbestand abgebaut ist, kann weitere
+    bepreiste Entladung in die Netto-Ersparnis eingehen. Das ist kein
+    Messfehler." Bei 0, einem negativen, unknown oder unavailable Zustand
+    sowie einem registrierten Sensor ohne Zustand rendert die Vorlage leer
+    und die numeric_state-Bedingung bleibt unerfüllt. Fehlt die Registry-
+    Entity, entfällt der gesamte Block ohne `entity: null`. Es werden weder
+    Energiemenge noch Restdauer, Ladezyklen oder künftige Ersparnis berechnet.
 
     Die entities-Karte "Gesamt seit Bilanzbeginn" zeigt als "Netto-Ersparnis"
     den direkten aktuellen Zustand von economics_operating_result und direkt
@@ -4337,9 +4374,17 @@ requirement_economics_savings_dashboard:
     gesamte Statistik-Grid, die Gesamtkarte, der Recorder-Hinweis und der
     vollständige freie Zeitraum einschließlich Datumswähler. Es entsteht
     weder `entity: null`, ein leeres Grid noch ein funktionsloser einzelner
-    Datumswähler. Der davon unabhängige Amortisationsblock richtet sich
-    ausschließlich nach seinen eigenen vorhandenen Registry-Entities und dem
-    Investitions-Gate. Die Umsetzung ändert weder
+    Datumswähler. Statushinweis und Anfangsbestands-Erklärung bleiben davon
+    unabhängig: Der Status rendert bei fehlender Entity neutral, ein
+    aufgelöster positiver Anfangsbestand bleibt erklärbar. Der ebenfalls
+    unabhängige Amortisationsblock richtet sich ausschließlich nach seinen
+    eigenen vorhandenen Registry-Entities und dem Investitions-Gate. Eine
+    echte 0 bleibt in den unveränderten Core-Ergebniskarten 0, negative Werte
+    bleiben als Mehrkosten beziehungsweise negatives Netto-Ergebnis sichtbar,
+    und unknown/unavailable werden nie in 0 umformatiert. "Gesamt" heißt
+    ausschließlich "Gesamt seit Bilanzbeginn"; Ersparnis bezeichnet stets das
+    operative Netto-Ergebnis, nicht nur vermiedene Netzkosten. Die Umsetzung
+    ändert weder
     Coordinator, Bilanz-/Tarif-/Amortisationslogik, Persistenz und Services
     noch den bestehenden View "Wirtschaftlichkeit". Sie führt keine neue
     Entity ein und greift weder auf private Recorder-APIs noch auf Custom
@@ -4357,6 +4402,17 @@ requirement_economics_savings_dashboard:
        Titel, Pfad und Icon des sechsten Views sind regression-getestet."
     - "Alle vier Kalenderkarten referenzieren dieselbe aufgelöste Entity und
        verwenden exakt change sowie day/week/month/year ohne Offset."
+    - "Die erste Karte rendert economics_status mit Home Assistants
+       Template-Engine: active bleibt leer; jeder Problem-, unbekannte und
+       fehlende Zustand ergibt höchstens einen verständlichen Hinweis mit
+       genau einem Link zum technischen Wirtschaftlichkeits-View."
+    - "Direkt hinter dem KPI-Grid steht nur bei vorhandenem
+       economics_unvalued_inventory eine Core-conditional-Karte mit exakt
+       numeric_state auf dem Entity-Zustand und above 0; sie verwendet kein
+       Attribut als Bedingung."
+    - "Gerenderte Template-Tests belegen den exakten Anfangsbestandstext samt
+       drei Dezimalstellen, deutschem Komma und Sensor-Einheit sowie leere
+       Ausgabe bei 0, negativ, unknown, unavailable, zustandslos und fehlend."
     - "Gesamtwert und Bilanzbeginn sind direkte Entity-/Attributzeilen; keine
        fixed_period-Statistik und keine economics_result_today-Referenz."
     - "Fehlt economics_operating_result, gibt es weder ungültige Entity-IDs
@@ -4375,6 +4431,9 @@ requirement_economics_savings_dashboard:
     - "Gerenderte Template-Tests decken alle Prognosegründe, die geklärte
        Vorrangregel für bereits erfolgte Amortisation, gültiges Datum,
        unbekannte Gründe/Zustände und fehlende Entities ab."
+    - "Direkte Core-Ergebniskarten bewahren echte Null, negative und
+       unknown/unavailable Zustände unverändert; kein Hinweis berechnet Geld,
+       Restdauer, Ladezyklen oder künftige Ersparnis."
     - "Eine SHA-256-Strukturregression in tests/test_dashboard.py friert den
        vollständigen bestehenden View wirtschaftlichkeit auf dem Stand vor
        Einführung des Ersparnis-Views ein."

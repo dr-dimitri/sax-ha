@@ -164,6 +164,57 @@ Derzeit kann noch keine Prognose erstellt werden.
 {%- endif %}
 """
 
+_SAVINGS_STATUS_ENTITY_PLACEHOLDER = "__SAVINGS_STATUS_ENTITY__"
+_SAVINGS_STATUS_TEMPLATE = """\
+{%- set status_entity = __SAVINGS_STATUS_ENTITY__ %}
+{%- set status = states(status_entity)
+    if status_entity is not none else 'unknown' %}
+{%- set details = '[Technische Details](/sax-power/wirtschaftlichkeit)' %}
+{%- if status == 'active' %}
+{%- elif status == 'disabled' %}
+{{- 'Die Wirtschaftlichkeitsberechnung ist deaktiviert. Bitte unter '
+    ~ '„Geräte & Dienste → SAX Power Home → Konfigurieren → '
+    ~ 'Wirtschaftlichkeit“ konfigurieren.' ~ '\n\n' ~ details }}
+{%- elif status == 'waiting_for_initial_state' %}
+{{- 'Die Wirtschaftlichkeitsberechnung wartet auf Speicherkapazität '
+    ~ 'und Ladezustand.' ~ '\n\n' ~ details }}
+{%- elif status == 'price_unavailable' %}
+{{- 'Der Strompreis ist derzeit nicht verfügbar. Aktuelle Zeitraumwerte '
+    ~ 'können unvollständig sein.' ~ '\n\n' ~ details }}
+{%- elif status == 'origin_unavailable' %}
+{{- 'Die Herkunft der Ladeenergie ist derzeit nicht bestimmbar.'
+    ~ '\n\n' ~ details }}
+{%- elif status == 'partial_price_coverage' %}
+{{- 'Für einen Teil der Energie fehlte heute ein Preis. Das Ergebnis kann '
+    ~ 'unvollständig sein.' ~ '\n\n' ~ details }}
+{%- elif status == 'storage_error' %}
+{{- 'Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers '
+    ~ 'angehalten. Bitte die **Home-Assistant-Reparaturen** prüfen.'
+    ~ '\n\n' ~ details }}
+{%- else %}
+{{- 'Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.'
+    ~ '\n\n' ~ details }}
+{%- endif %}
+"""
+
+_SAVINGS_INVENTORY_ENTITY_PLACEHOLDER = "__SAVINGS_INVENTORY_ENTITY__"
+_SAVINGS_INVENTORY_TEMPLATE = """\
+{%- set inventory_entity = __SAVINGS_INVENTORY_ENTITY__ %}
+{%- set inventory = states(inventory_entity)
+    if inventory_entity is not none else 'unknown' %}
+{%- set unit = state_attr(inventory_entity, 'unit_of_measurement')
+    if inventory_entity is not none else none %}
+{%- if is_number(inventory) and inventory | float > 0 %}
+{%- set formatted = ('%.3f' | format(inventory | float)) | replace('.', ',') %}
+{%- set display = formatted ~ ' ' ~ unit if unit else formatted %}
+{{- 'Beim Start der Bilanz waren bereits **' ~ display
+    ~ '** im Speicher. Für diese Energie sind Herkunft und Preis unbekannt. '
+    ~ 'Ihre Entladung wird deshalb korrekt mit **0 €** bewertet. Sobald '
+    ~ 'dieser Anfangsbestand abgebaut ist, kann weitere bepreiste Entladung '
+    ~ 'in die Netto-Ersparnis eingehen. Das ist kein Messfehler.' }}
+{%- endif %}
+"""
+
 DASHBOARD_URL_PATH = "sax-power"
 DASHBOARD_TITLE = "SAX Power"
 DASHBOARD_ICON = "mdi:battery-charging-100"
@@ -479,6 +530,51 @@ def _savings_free_period_block(entity_id: str) -> dict[str, Any]:
 def _jinja_entity(entity_id: str | None) -> str:
     """Gibt eine sichere Jinja-Konstante für eine aufgelöste Entity zurück."""
     return "none" if entity_id is None else repr(entity_id)
+
+
+def _savings_status_card(status_entity_id: str | None) -> dict[str, Any]:
+    """Blendet den gesunden Wirtschaftlichkeitsstatus vollständig aus."""
+    return {
+        "type": "markdown",
+        "show_empty": False,
+        "content": _SAVINGS_STATUS_TEMPLATE.replace(
+            _SAVINGS_STATUS_ENTITY_PLACEHOLDER, _jinja_entity(status_entity_id)
+        ),
+    }
+
+
+def _savings_inventory_content(inventory_entity_id: str | None) -> str:
+    """Erklärt nur einen positiven, vorhandenen Anfangsbestand."""
+    return _SAVINGS_INVENTORY_TEMPLATE.replace(
+        _SAVINGS_INVENTORY_ENTITY_PLACEHOLDER,
+        _jinja_entity(inventory_entity_id),
+    )
+
+
+def _savings_inventory_card(
+    hass: HomeAssistant, entry_id: str
+) -> dict[str, Any] | None:
+    """Core-Bedingung für einen positiven unbewerteten Anfangsbestand."""
+    inventory_entity_id = _entity_id(
+        hass, "sensor", f"{entry_id}_economics_unvalued_inventory"
+    )
+    if inventory_entity_id is None:
+        return None
+    return {
+        "type": "conditional",
+        "conditions": [
+            {
+                "condition": "numeric_state",
+                "entity": inventory_entity_id,
+                "above": 0,
+            }
+        ],
+        "card": {
+            "type": "markdown",
+            "show_empty": False,
+            "content": _savings_inventory_content(inventory_entity_id),
+        },
+    }
 
 
 def _payback_explanation_card(
@@ -1070,6 +1166,8 @@ async def async_build_dashboard_config(
         ],
     )
 
+    savings_status_card = _savings_status_card(status_entity_id)
+    savings_inventory_card = _savings_inventory_card(hass, entry_id)
     savings_result_entity_id = _entity_id(
         hass, "sensor", f"{entry_id}_economics_operating_result"
     )
@@ -1128,6 +1226,7 @@ async def async_build_dashboard_config(
         "ersparnis",
         "mdi:piggy-bank",
         [
+            savings_status_card,
             {
                 "type": "markdown",
                 "content": (
@@ -1138,6 +1237,7 @@ async def async_build_dashboard_config(
                 ),
             },
             savings_period_grid,
+            savings_inventory_card,
             savings_total_card,
             savings_recorder_note,
             savings_payback_block,

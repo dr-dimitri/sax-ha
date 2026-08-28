@@ -647,6 +647,34 @@ angezeigte Kalenderperiode diesen Neustart, kann die Recorder-Änderung den
 Sprung auf 0 enthalten. Der Tab weist deshalb Bilanzbeginn und Geltungsbereich
 aus, rekonstruiert aber keine frühere Historie.
 
+### Status und unbewerteter Anfangsbestand
+
+Im gesunden Zustand `active` bleibt der Tab ruhig: Der Statushinweis blendet
+sich vollständig aus. Nur wenn Handlungsbedarf besteht oder ein Wert ohne
+Kontext missverständlich wäre, erscheint am Anfang genau ein kurzer Hinweis.
+Er erklärt einen deaktivierten Tarif, das Warten auf Kapazität und
+Ladezustand, einen fehlenden Strompreis, unbekannte Ladeenergieherkunft,
+teilweise Preisabdeckung oder einen angehaltenen Bilanz-Store. Unbekannte oder
+noch nicht verfügbare Statusdaten werden neutral benannt. Jeder Hinweis
+verlinkt für technische Details auf den bestehenden Tab
+`/sax-power/wirtschaftlichkeit`, statt dessen Tabellen zu wiederholen.
+
+Direkt bei den Zeitraum-KPIs erklärt ein zweiter, ebenfalls nur bei Bedarf
+sichtbarer Hinweis den unbewerteten Anfangsbestand. Ist dessen vorhandener
+Sensorzustand positiv, lautet die Aussage mit dem aktuellen, auf drei
+Dezimalstellen formatierten kWh-Wert: Beim Start der Bilanz waren bereits
+**X,XXX kWh** im Speicher; Herkunft und Preis dieser Energie sind unbekannt,
+deshalb wird ihre Entladung korrekt mit **0 €** bewertet. Sobald dieser
+Bestand abgebaut ist, kann weitere bepreiste Entladung in die Netto-Ersparnis
+eingehen. Das ist kein Messfehler. Bei 0, einem negativen oder unbekannten
+Zustand sowie einer fehlenden Entity bleibt die Karte ausgeblendet. Sie
+schätzt weder Restdauer noch Ladezyklen oder künftige Ersparnis.
+
+Die Ergebniskarten selbst bleiben unverändert: 0 ist ein echtes berechnetes
+Netto-Ergebnis, negative Werte sind Mehrkosten und `unknown`/`unavailable`
+werden nicht als 0 ausgegeben. "Ersparnis" bezeichnet immer das operative
+Netto-Ergebnis; der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
+
 ### Wann ist der Speicher abbezahlt?
 
 Direkt unter den Ersparniswerten beantwortet ein kompakter Block die zentrale

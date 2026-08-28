@@ -151,7 +151,7 @@ restart_economics_accounting:
   description: >-
     Setzt die Wirtschaftlichkeitsbilanz kontrolliert zurück - Geldsummen,
     Preisabdeckungszähler, Tages-Buckets, Aktivierungszeitpunkt und einen
-    bereits erreichten Amortisations-Zeitpunkt. Initialisiert den unbekannten
+    vorhandenen Tageszustand. Initialisiert den unbekannten
     Anfangsbestand erneut wie bei der erstmaligen Aktivierung. Rührt niemals
     die Energiezähler oder die Herkunftsaufteilung (Netz/PV/unbekannt) an.
     Lehnt ab, wenn die Wirtschaftlichkeit deaktiviert ist, noch nie

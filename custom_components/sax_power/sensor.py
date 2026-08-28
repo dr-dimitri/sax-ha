@@ -104,16 +104,6 @@ def _negative_part(key: str) -> Callable[[dict[str, Any]], StateType]:
     return value_fn
 
 
-def _amortization_forecast_attributes(
-    coordinator: SaxPowerCoordinator,
-) -> dict[str, Any]:
-    """Beobachtungsfenster/Abdeckung der 30-Tage-Prognose (REQ-ECONOMICS-
-    AMORTIZATION) als Zusatzattribute des Durchschnitts-Sensors."""
-    if coordinator.data is None:
-        return {}
-    return coordinator.data.get("economics_amortization_forecast_attributes") or {}
-
-
 def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
     """Vorlauf-Ertrag und das rein gemessene Ergebnis dahinter
     (REQ-ECONOMICS-AMORTIZATION).
@@ -812,7 +802,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EURO,
-        suggested_display_precision=4,
+        suggested_display_precision=2,
         value_fn=_direct("economics_net_savings"),
         last_reset_fn=_last_reset("economics_net_savings_last_reset"),
     ),
@@ -858,9 +848,9 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         suggested_display_precision=4,
         value_fn=_direct("economics_feed_in_price"),
     ),
-    # -- ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION) -------------
+    # -- ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION) -------------
     # Ohne konfigurierte Investitionskosten (economics_investment_cost_eur)
-    # liefert value_fn für alle sieben Sensoren None wie jeder andere nicht
+    # liefert value_fn für alle vier Sensoren None wie jeder andere nicht
     # verfügbare Wert dieser Integration.
     SaxPowerSensorEntityDescription(
         key="economics_roi",
@@ -893,34 +883,9 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EURO,
-        suggested_display_precision=4,
+        suggested_display_precision=2,
         value_fn=_direct("economics_net_savings_today"),
         last_reset_fn=_last_reset("economics_net_savings_today_last_reset"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="economics_average_daily_result_30d",
-        translation_key="economics_average_daily_result_30d",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="EUR/Tag",
-        suggested_display_precision=4,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("economics_average_daily_result_30d"),
-        attributes_fn=_amortization_forecast_attributes,
-    ),
-    SaxPowerSensorEntityDescription(
-        key="economics_projected_annual_result",
-        translation_key="economics_projected_annual_result",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="EUR/Jahr",
-        suggested_display_precision=2,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=_direct("economics_projected_annual_result"),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="economics_estimated_payback_date",
-        translation_key="economics_estimated_payback_date",
-        device_class=SensorDeviceClass.DATE,
-        value_fn=_direct("economics_estimated_payback_date"),
     ),
 )
 

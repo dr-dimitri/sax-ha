@@ -131,12 +131,17 @@ SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
 #: (REQ-ENERGY-ORIGIN), und mit ihr der zugehörige Abdeckungsgrad, der
 #: seither konstant 100 % wäre. Der Tages-Roh-Cashflow aus den
 #: Snapshot-Ständen vor REQ-ECONOMICS-ACCOUNTING darf nicht als neue
-#: Netto-Ersparnis-Historie weitergeführt werden. Ohne diese Bereinigung
-#: blieben die alten Entities dauerhaft "nicht verfügbar" in der Registry.
+#: Netto-Ersparnis-Historie weitergeführt werden. Auch die entfallene
+#: Amortisationsprognose darf nicht als drei dauerhaft nicht verfügbare
+#: Entities zurückbleiben. Ohne diese Bereinigung blieben die alten Entities
+#: dauerhaft "nicht verfügbar" in der Registry.
 _REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
     (Platform.SENSOR, "energy_charged_origin_unknown"),
     (Platform.SENSOR, "energy_origin_coverage"),
     (Platform.SENSOR, "economics_result_today"),
+    (Platform.SENSOR, "economics_average_daily_result_30d"),
+    (Platform.SENSOR, "economics_projected_annual_result"),
+    (Platform.SENSOR, "economics_estimated_payback_date"),
 )
 
 

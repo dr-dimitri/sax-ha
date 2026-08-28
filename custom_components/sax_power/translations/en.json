@@ -351,15 +351,6 @@
       },
       "economics_net_savings_today": {
         "name": "Net savings today"
-      },
-      "economics_average_daily_result_30d": {
-        "name": "Average daily net savings (30 days)"
-      },
-      "economics_projected_annual_result": {
-        "name": "Projected annual net savings"
-      },
-      "economics_estimated_payback_date": {
-        "name": "Estimated payback date"
       }
     },
     "number": {
@@ -703,7 +694,7 @@
     },
     "restart_economics_accounting": {
       "name": "Restart economics accounting",
-      "description": "Deliberately resets the economics balance (money sums, net savings, price-coverage counters, day buckets, activation time, an already-reached payback date) - never touches energy counters or the charge-origin split.",
+      "description": "Deliberately resets the economics balance (money sums, net savings, price-coverage counters, day buckets and activation time) - never touches energy counters or the charge-origin split.",
       "fields": {
         "device_id": {
           "name": "Device",
@@ -742,8 +733,8 @@
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
-          "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress, remaining-to-payback and the estimated payback date, offset against the running non-negative net savings. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
-          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress, remaining amount and payback date; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result."
+          "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress and the remaining-to-payback amount, offset against the running non-negative net savings. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
+          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result."
         }
       },
       "economics_fixed": {

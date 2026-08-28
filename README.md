@@ -31,7 +31,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)
 - [Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz)
 - [Ersparnisübersicht](#ersparnisübersicht)
-- [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+- [ROI und Amortisationsstand](#roi-und-amortisationsstand)
 - [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)
 - [Energy-Dashboard](#energy-dashboard)
 - [Aktionen für Automationen](#aktionen-für-automationen)
@@ -56,8 +56,8 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
   bemisst
 - daraus Netzladekosten, entgangene Einspeisevergütung, vermiedene
   Netzkosten und eine nichtnegative Netto-Ersparnis bilanzieren
-- optional aus Investitionskosten ROI, Amortisationsfortschritt und eine
-  30-Tage-Amortisationsprognose berechnen
+- optional aus Investitionskosten ROI, Amortisationsfortschritt und den
+  verbleibenden Restbetrag berechnen
 - optional ein vorbereitetes SAX-Power-Dashboard anlegen
 - alle Funktionen vollständig lokal im eigenen Netzwerk nutzen
 
@@ -132,7 +132,7 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
   samt Fortschritts-Gauge sowie ein 30-Tage-Verlaufsdiagramm - referenziert
   ausschließlich bereits bestehende Entities, siehe
   [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit),
-  [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+  [ROI und Amortisationsstand](#roi-und-amortisationsstand)
   und [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart))
   sowie
 - Ersparnis (kompakte Netto-Ergebnisse für heute, diese Woche, diesen Monat,
@@ -469,7 +469,7 @@ werden nie rückwirkend neu bewertet.
 Unabhängig von der gewählten Tarifart lassen sich auf derselben Seite
 optional die Felder **Investitionskosten (EUR)** und **Bereits
 erwirtschafteter Ertrag (EUR)** ausfüllen. Die Investitionskosten schalten
-die in [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
+die in [ROI und Amortisationsstand](#roi-und-amortisationsstand)
 beschriebenen Sensoren frei; ein Wechsel des Tarifmodells löscht keinen der
 beiden Werte.
 
@@ -510,8 +510,6 @@ Amortisationsstand      = Netto-Ersparnis + Bereits erwirtschafteter Ertrag
 ROI (%)                 = Amortisationsstand ÷ Investitionskosten × 100
 Amortisationsfortschritt (%) = ROI, auf 0 bis 100 % begrenzt
 Restbetrag              = max(Investitionskosten − Amortisationsstand, 0)
-30-Tage-Prognose        = Durchschnitt der Netto-Ersparnis-Zuwächse der letzten 30 Tage
-Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
 ```
 
 ### Grenzen der Wirtschaftlichkeitsauswertung
@@ -524,13 +522,9 @@ Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
   operative Roh-Cashflow bildet ausschließlich die reinen Arbeitspreis-
   Zahlungsströme ab. Die sichtbare Netto-Ersparnis ist dessen historischer
   Höchststand und fällt deshalb durch spätere Kosten nicht zurück.
-- Die 30-Tage-Prognose und das geschätzte Amortisationsdatum sind
-  **keine Garantie**: Sie schreiben die letzten 30 Tage unverändert fort
-  und reagieren nicht auf künftige Preis-, Verbrauchs- oder
-  Nutzungsänderungen.
 - Eine Änderung des Tarifmodells oder der Investitionskosten wirkt
-  ausschließlich prospektiv - bereits verbuchte Beträge und eine bereits
-  erreichte Amortisation werden nie rückwirkend neu berechnet.
+  ausschließlich prospektiv - bereits verbuchte Beträge werden nie
+  rückwirkend neu berechnet.
 
 ## Herkunft der Ladeenergie
 
@@ -629,10 +623,8 @@ deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
 Beim ersten Start nach einem Update von einem älteren Bilanzspeicher ist nur
 der aktuelle Roh-Cashflow sicher bekannt. Die Netto-Ersparnis beginnt deshalb
 ehrlich bei `max(0, aktueller Roh-Cashflow)`; ein früherer, damals noch nicht
-gespeicherter Höchststand kann nicht rückwirkend erfunden werden. Weil alte
-Tageswerte noch Roh-Cashflows statt Höchststandszuwächsen enthalten, startet
-die 30-Tage-Prognose dabei mit neuen Tagen neu. Geldsummen und Bilanzbeginn
-bleiben erhalten. Gesamt- und Tages-Netto-Ersparnis sind außerdem neue
+gespeicherter Höchststand kann nicht rückwirkend erfunden werden. Geldsummen
+und Bilanzbeginn bleiben erhalten. Gesamt- und Tages-Netto-Ersparnis sind neue
 Entities mit jeweils eigener Recorder-Historie: Bereits gespeicherte negative
 oder rückläufige Gesamt- und Tagesänderungen des technischen Roh-Cashflows
 werden nicht übernommen. Bei einer aktualisierten Installation kann die
@@ -651,10 +643,10 @@ für diese Darstellung.
 
 Die Erläuterungen zur Berechnung, zur Recorder-Datenbasis, zur freien
 Zeitraumauswahl und zum gegebenenfalls vorhandenen Anfangsbestand sind nach
-den Zeitraum- und Gesamtwerten unter **Hinweise zur Berechnung und
-Datenbasis** zusammengefasst und
+den Zeitraumwerten unter **Hinweise zur Berechnung und Datenbasis**
+zusammengefasst und
 standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
-Warnungen und Prognosehinweise bleiben davon unabhängig.
+Warnungen bleiben davon unabhängig.
 
 Vier Karten zeigen die Zunahme der Netto-Ersparnis im laufenden
 Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
@@ -665,9 +657,9 @@ oder ist die Entity vom Recorder ausgeschlossen, bleibt der Core-Zustand
 `unknown`/`unavailable`; die Integration ersetzt fehlende Daten nicht durch
 0 EUR.
 
-**Gesamt seit Bilanzbeginn** ist dagegen der aktuelle Zustand des
-fortlaufenden Sensors `economics_net_savings`, keine Recorder-Differenz.
-Daneben steht der sichtbare **Bilanzbeginn** der aktuellen Bilanz. Die
+Der aktuelle Zustand des fortlaufenden Sensors `economics_net_savings` und
+der sichtbare **Bilanzbeginn** stehen im Amortisationsblock direkt unter dem
+Restbetrag. Der Gesamtwert ist keine Recorder-Differenz. Die
 Kalenderwerte umfassen die Zuwächse seit Beginn der Recorder-Aufzeichnung und
 können deshalb bei einem Zeitraum über einen manuellen Bilanzneustart durch
 den expliziten `last_reset` positive Zuwächse des vorherigen und des aktuellen
@@ -706,36 +698,24 @@ schätzt weder Restdauer noch Ladezyklen oder künftige Ersparnis.
 durch den Höchststand ausgeschlossen und `unknown`/`unavailable` werden nicht
 als 0 ausgegeben. Der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
 
-### Wann ist der Speicher abbezahlt?
+### Amortisation
 
-Direkt unter den Ersparniswerten beantwortet ein kompakter Block die zentrale
-Investitionsfrage. Ist ein Datum prognostizierbar, steht der vorhandene Wert
-**Voraussichtlich abbezahlt am** an erster Stelle. Darunter folgen der blaue
-Amortisationsfortschritt von 0 bis 100 %, der Restbetrag, die
-Jahreshochrechnung und optional das durchschnittliche Tagesergebnis der
-letzten 30 vollständigen Tage. Ein eingetragener Vorlauf-Ertrag erscheint
-getrennt als **Bereits vor Bilanzbeginn berücksichtigt** und wird keinem Tag,
-Monat oder Jahr zugerechnet.
+Der erste Block zeigt bei hinterlegten Investitionskosten den blauen
+Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
+**Restbetrag bis Amortisation**, die **Netto-Ersparnis** und den
+**Bilanzbeginn**. Der optionale Vorlauf-Ertrag folgt als **Bereits vor
+Bilanzbeginn berücksichtigt** mit der Einheit **€**. Alle Währungsangaben im
+Ersparnis-Tab erscheinen mit zwei Nachkommastellen; intern und im Recorder
+bleibt die höhere Rechengenauigkeit erhalten.
 
-Ohne hinterlegte Investitionskosten zeigt der Block keine leere Gauge oder
-unbekannte Detailwerte, sondern verweist auf **Geräte & Dienste → SAX Power
-Home → Konfigurieren → Wirtschaftlichkeit**. Diese Anzeige reagiert direkt auf
-den Zustand der vorhandenen Entity `economics_investment_configured`; ein
-Dashboard-Neubau ist nach dem Hinterlegen oder Entfernen der Kosten nicht
-nötig.
+Ohne Investitionskosten verweist der Block auf **Geräte & Dienste → SAX Power
+Home → Konfigurieren → Wirtschaftlichkeit**. Die Anzeige reagiert direkt auf
+den Zustand von `economics_investment_configured`; ein Dashboard-Neubau ist
+nach dem Hinterlegen oder Entfernen der Kosten nicht nötig.
 
-Ist noch kein Datum verfügbar, übersetzt der Tab die bereits vorhandenen
-Prognoseinformationen in einen kurzen Grund: Es fehlen noch 30 vollständige
-Tage, mindestens ein Tag wurde nicht vollständig beobachtet, die
-Preisabdeckung war unzureichend, das 30-Tage-Ergebnis ist nicht positiv oder
-die Prognose liegt außerhalb des unterstützten Zeithorizonts. Hat allein ein
-manuell eingetragener Vorlauf den Fortschritt bereits auf 100 % gebracht,
-weist der Text stattdessen auf die rechnerische Amortisation hin, ohne ein
-historisches Datum zu erfinden. Für unbekannte Zustände lautet der neutrale
-Hinweis: **Derzeit kann noch keine Prognose erstellt werden.** Alle Beträge,
-Gründe und das Datum stammen unverändert aus den bestehenden Entities; der Tab
-berechnet keine zweite Prognose.
-
+Eine künftige Amortisation wird nicht mehr hochgerechnet. Das frühere
+voraussichtliche Datum, der 30-Tage-Durchschnitt, die Jahreshochrechnung und
+die zugehörigen Prognosehinweise entfallen.
 ### Freier Zeitraum
 
 Unter den festen Werten lässt sich ein beliebiger Datumsbereich auswählen -
@@ -763,94 +743,29 @@ Ergebnis-Entity vom Recorder ausgeschlossen, bleiben Wert und Diagramm
 unbekannt beziehungsweise leer; ein mathematisches Ergebnis von 0 bleibt
 davon unterscheidbar.
 
-## ROI und Amortisationsprognose
+## ROI und Amortisationsstand
 
-Wird zusätzlich zum Tarif ein Feld **Investitionskosten (EUR)** ausgefüllt
-(siehe [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)),
-setzt die Integration die [Netto-Ersparnis](#wirtschaftlichkeitsbilanz) in
-Bezug zu dieser Investition:
+Mit hinterlegten **Investitionskosten (EUR)** setzt die Integration die
+[Netto-Ersparnis](#wirtschaftlichkeitsbilanz) in Bezug zur Investition:
 
-- **ROI**: Amortisationsstand in Prozent der Investitionskosten - durch die
-  nichtnegative Netto-Ersparnis nie negativ, aber weiterhin über 100 %
-  möglich (bereits mehrfach amortisiert).
-- **Amortisationsfortschritt**: derselbe Wert, aber auf 0 bis 100 %
-  begrenzt - für eine Fortschrittsanzeige.
+- **ROI**: Amortisationsstand in Prozent der Investitionskosten, über 100 %
+  möglich.
+- **Amortisationsfortschritt**: derselbe Wert, auf 0 bis 100 % begrenzt.
 - **Restbetrag bis Amortisation**: Investitionskosten abzüglich
   Amortisationsstand, nie unter 0 EUR.
-- **Netto-Ersparnis heute**: nur der im laufenden Kalendertag neu erreichte
-  Zuwachs des Höchststands; spätere Kosten machen ihn nicht rückläufig.
+- **Netto-Ersparnis heute**: der im laufenden Kalendertag neu erreichte
+  Zuwachs des Höchststands.
 
-### Speicher, die schon vor der Integration liefen
+Für Anlagen, die schon vor Einrichtung der Integration liefen, kann
+**Bereits erwirtschafteter Ertrag (EUR)** hinterlegt werden. Dieser Vorlauf
+zählt nur zu ROI, Fortschritt und Restbetrag. Netto-Ersparnis und
+Netto-Ersparnis heute bleiben reine Messwerte, damit Recorder-Auswertungen
+keinen künstlichen Tagesertrag erhalten.
 
-Läuft die Anlage bereits seit Jahren, hat sie einen Teil der Investition
-längst erwirtschaftet - die Integration kennt davon aber nichts und stünde
-bei 0 % Fortschritt. Dafür gibt es das optionale Feld **Bereits
-erwirtschafteter Ertrag (EUR)** auf derselben Optionsseite wie die
-Investitionskosten. Der eingetragene Betrag zählt als Vorlauf zur laufend
-gemessenen Netto-Ersparnis; die Summe aus beidem ist der oben verwendete
-**Amortisationsstand**.
-
-Der Wert wirkt ausschließlich auf ROI, Amortisationsfortschritt und
-Restbetrag. Beim ROI weisen die Attribute **prior_result_eur** und
-**measured_operating_result_eur** aus, wie sich der Wert zusammensetzt; im
-Dashboard steht der Vorlauf als eigene Zeile direkt unter dem ROI.
-
-Das **Voraussichtliche Amortisationsdatum** setzt der Vorlauf dagegen nicht:
-Trägt erst er die Amortisation, dann lag der tatsächliche Zeitpunkt in einer
-Vergangenheit, die diese Integration nie beobachtet hat - ein Datum von heute
-wäre erfunden. Amortisationsfortschritt (100 %) und Restbetrag (0 EUR) zeigen
-die erreichte Amortisation trotzdem an. **Netto-Ersparnis** und
-**Netto-Ersparnis heute** zeigen weiterhin nur, was die Integration selbst
-gemessen hat - sonst erschiene der eingetragene Betrag in der
-30-Tage-Verlaufsgrafik als Tagesertrag. Solange die Bilanz noch nicht läuft
-(kein Tarif, oder noch auf
-Kapazität/Ladezustand wartend), bleiben die Amortisationssensoren
-"unbekannt", auch wenn ein Vorlauf hinterlegt ist.
-
-Alle sieben Sensoren dieses Abschnitts zeigen "unbekannt", solange keine
-Investitionskosten hinterlegt sind. Von den vier oben genannten Sensoren
-blenden zusätzlich bei deaktiviertem Tarif auf "unbekannt" wie die Sensoren
-der Wirtschaftlichkeitsbilanz - der interne Stand läuft in beiden Fällen
-unverändert weiter.
-
-Zusätzlich berechnet die Integration eine **30-Tage-Prognose** aus genau
-den jüngsten 30 zusammenhängenden, vollständig abgeschlossenen
-Kalendertagen (der laufende Tag zählt nie mit): **Durchschnittliche tägliche
-Netto-Ersparnis (30 Tage)** und die daraus berechnete **Hochgerechnete
-jährliche Netto-Ersparnis** (Durchschnitt × 365,2425 Tage). Ist bereits ein
-ausreichend positiver Durchschnitt und ein offener Restbetrag bekannt,
-zeigt **Voraussichtliches Amortisationsdatum** das daraus abgeleitete
-Datum. Die Prognose braucht lückenlos genau diese 30 aufeinanderfolgenden
-Kalendertage - fehlt auch nur einer davon (etwa nach einem längeren
-Ausfall von Home Assistant), bleibt sie "unbekannt", statt ältere Tage als
-Lückenfüller zu verwenden. Sie verlangt außerdem von jedem einzelnen
-dieser 30 Tage eine Preisabdeckung von mindestens 95 % - fehlt einem
-einzigen Tag ausreichend Preisinformation, bleibt die gesamte Prognose
-"unbekannt" statt einen verzerrten Wert zu zeigen. Genauso muss jeder
-dieser 30 Tage zu mindestens 95 % tatsächlich beobachtet worden sein: War
-Home Assistant an einem Tag längere Zeit aus (Neustart, Update,
-Stromausfall), enthält dieser Tag nur einen Teil seines Ergebnisses und
-würde Durchschnitt, Hochrechnung und Amortisationsdatum zu pessimistisch
-machen - auch dann bleibt die Prognose lieber "unbekannt". Kurze
-Neustarts von wenigen Minuten sind davon nicht betroffen. Beim Update von
-einer Version ohne gespeicherten Netto-Ersparnis-Höchststand werden die alten
-Tageswerte verworfen, weil sie noch rückläufige Roh-Cashflows enthalten und
-nicht korrekt in Höchststandszuwächse umgerechnet werden können. Die
-30-Tage-Prognose bleibt deshalb einmalig so lange "unbekannt", bis 30 neue,
-vollständig beobachtete Kalendertage vorliegen. Die übrigen Sensoren
-(Bilanz, ROI, Fortschritt, Restbetrag, Tagesergebnis) sind davon nicht
-betroffen. Ein nicht positiver
-Durchschnitt lässt nur das Rückzahlungsdatum unbekannt; Durchschnitt und
-Hochrechnung werden trotzdem angezeigt, nie ein erfundenes Datum. Anders
-als die vier "aktuellen" Sensoren bleibt diese Prognose - einschließlich
-des Rückzahlungsdatums - während einer Tarifpause sichtbar, weil sie
-ausschließlich auf bereits abgeschlossenen Tagen beruht.
-
-Ist die Investition einmal tatsächlich amortisiert, bleibt das
-Amortisationsdatum dauerhaft auf diesem historischen Kalendertag stehen -
-eine spätere Änderung der Investitionskosten verschiebt es nicht mehr
-rückwirkend.
-
+Ohne Investitionskosten oder ohne laufende Bilanz bleiben die vier Sensoren
+unbekannt. Eine künftige Amortisation, ein geschätztes Datum, ein
+30-Tage-Durchschnitt und eine Jahreshochrechnung werden bewusst nicht
+berechnet.
 ## Datenqualität, Diagnose und Bilanzneustart
 
 Eine Geldzahl ohne Aussage zur Datenqualität ist irreführend. Der Sensor

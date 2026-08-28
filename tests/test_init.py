@@ -282,10 +282,11 @@ async def test_restart_economics_accounting_service_reason_is_optional(hass) -> 
 # Entfallene Entities früherer Versionen
 # --------------------------------------------------------------------------
 async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
-    """Die mit Herkunft oder Roh-Tagesergebnis entfallenen Sensoren räumt
-    Home Assistant nicht selbst weg - sie blieben sonst dauerhaft als
-    "nicht verfügbar" in der Registry und damit in jedem Dashboard und
-    jeder Automation stehen, die sie verwendet."""
+    """Entfallene Herkunfts-, Tages- und Prognosesensoren werden entfernt.
+
+    Home Assistant räumt sie nicht selbst weg; sie blieben sonst dauerhaft
+    als "nicht verfügbar" in Registry, Dashboards und Automationen stehen.
+    """
     entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, entry_id="entry")
     entry.add_to_hass(hass)
     registry = er.async_get(hass)
@@ -300,6 +301,9 @@ async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
             "energy_charged_origin_unknown",
             "energy_origin_coverage",
             "economics_result_today",
+            "economics_average_daily_result_30d",
+            "economics_projected_annual_result",
+            "economics_estimated_payback_date",
         )
     ]
     kept = [

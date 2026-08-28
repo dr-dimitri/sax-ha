@@ -120,50 +120,6 @@ Nächster Preiswechsel: {{ as_timestamp(change) | timestamp_custom('%H:%M') }} U
 {%- endif %}
 """
 
-_PAYBACK_DATE_ENTITY_PLACEHOLDER = "__PAYBACK_DATE_ENTITY__"
-_PAYBACK_AVERAGE_ENTITY_PLACEHOLDER = "__PAYBACK_AVERAGE_ENTITY__"
-_PAYBACK_PROGRESS_ENTITY_PLACEHOLDER = "__PAYBACK_PROGRESS_ENTITY__"
-_PAYBACK_ROI_ENTITY_PLACEHOLDER = "__PAYBACK_ROI_ENTITY__"
-_PAYBACK_EXPLANATION_TEMPLATE = """\
-{%- set date_entity = __PAYBACK_DATE_ENTITY__ %}
-{%- set average_entity = __PAYBACK_AVERAGE_ENTITY__ %}
-{%- set progress_entity = __PAYBACK_PROGRESS_ENTITY__ %}
-{%- set roi_entity = __PAYBACK_ROI_ENTITY__ %}
-{%- set date_state = states(date_entity) if date_entity is not none else 'unknown' %}
-{%- set reason = state_attr(average_entity, 'unavailable_reason')
-    if average_entity is not none else none %}
-{%- set complete_days = state_attr(average_entity, 'complete_days_available')
-    if average_entity is not none else none %}
-{%- set average = state_attr(average_entity, 'average_daily_result_eur')
-    if average_entity is not none else none %}
-{%- set payback_days = state_attr(average_entity, 'payback_days')
-    if average_entity is not none else none %}
-{%- set progress = states(progress_entity)
-    if progress_entity is not none else 'unknown' %}
-{%- set prior = state_attr(roi_entity, 'prior_result_eur')
-    if roi_entity is not none else none %}
-{%- if date_state not in ['unknown', 'unavailable', 'none', ''] %}
-{%- elif is_number(progress) and progress | float >= 100
-    and is_number(prior) and prior | float > 0 %}
-{{- 'Rechnerisch amortisiert; aus dem manuell erfassten Vorlauf lässt '
-    ~ 'sich kein belastbares historisches Datum ableiten.' }}
-{%- elif reason == 'insufficient_history' %}
-{%- set available = complete_days | int if is_number(complete_days) else '?' %}
-{{- 'Für die Prognose werden 30 vollständige abgeschlossene Tage benötigt. '
-    ~ 'Vorhanden: ' ~ available ~ ' von 30.' }}
-{%- elif reason == 'incomplete_days' %}
-Mindestens ein Tag im 30-Tage-Fenster wurde nicht vollständig beobachtet.
-{%- elif reason == 'low_price_coverage' %}
-Mindestens ein Tag im 30-Tage-Fenster hatte keine ausreichende Preisabdeckung.
-{%- elif reason is none and is_number(average) and average | float <= 0 %}
-Mit dem aktuellen 30-Tage-Netto-Ergebnis ist noch kein Abzahlungsdatum prognostizierbar.
-{%- elif reason is none and is_number(payback_days) %}
-Die Prognose liegt außerhalb des unterstützten Zeithorizonts.
-{%- else %}
-Derzeit kann noch keine Prognose erstellt werden.
-{%- endif %}
-"""
-
 _SAVINGS_STATUS_ENTITY_PLACEHOLDER = "__SAVINGS_STATUS_ENTITY__"
 _SAVINGS_STATUS_TEMPLATE = """\
 {%- set status_entity = __SAVINGS_STATUS_ENTITY__ %}
@@ -382,7 +338,11 @@ def _resolved_row(
 
 
 def _attribute_row(
-    entity_id: str | None, attribute: str, name: str
+    entity_id: str | None,
+    attribute: str,
+    name: str,
+    *,
+    suffix: str | None = None,
 ) -> dict[str, Any] | None:
     """Eine "attribute"-Zeile einer entities-Karte - zeigt ein Attribut der
     übergebenen Entity wie einen eigenen Sensor an (REQ-ECONOMICS-
@@ -390,12 +350,15 @@ def _attribute_row(
     Sensor haben, siehe REQ-ECONOMICS-OBSERVABILITY)."""
     if entity_id is None:
         return None
-    return {
+    row = {
         "type": "attribute",
         "entity": entity_id,
         "attribute": attribute,
         "name": name,
     }
+    if suffix is not None:
+        row["suffix"] = suffix
+    return row
 
 
 def _statistics_graph_card(
@@ -570,53 +533,21 @@ def _savings_explanation_card(hass: HomeAssistant, entry_id: str) -> dict[str, A
     }
 
 
-def _payback_explanation_card(
-    payback_date_entity_id: str | None,
-    average_entity_id: str | None,
-    progress_entity_id: str | None,
-    roi_entity_id: str | None,
-) -> dict[str, Any]:
-    content = _PAYBACK_EXPLANATION_TEMPLATE
-    for placeholder, entity_id in (
-        (_PAYBACK_DATE_ENTITY_PLACEHOLDER, payback_date_entity_id),
-        (_PAYBACK_AVERAGE_ENTITY_PLACEHOLDER, average_entity_id),
-        (_PAYBACK_PROGRESS_ENTITY_PLACEHOLDER, progress_entity_id),
-        (_PAYBACK_ROI_ENTITY_PLACEHOLDER, roi_entity_id),
-    ):
-        content = content.replace(placeholder, _jinja_entity(entity_id))
-    return {"type": "markdown", "show_empty": False, "content": content}
-
-
 def _savings_payback_block(
-    hass: HomeAssistant, entry_id: str, translations: dict[str, str]
+    hass: HomeAssistant,
+    entry_id: str,
+    translations: dict[str, str],
+    savings_result_entity_id: str | None,
+    status_entity_id: str | None,
 ) -> dict[str, Any] | None:
-    """Kompakte Laufzeitdarstellung der vorhandenen Amortisationsprognose."""
+    """Kompakte Darstellung des aktuellen Amortisationsstands."""
     configured_entity_id = _entity_id(
         hass, "binary_sensor", f"{entry_id}_economics_investment_configured"
     )
     if configured_entity_id is None:
         return None
 
-    payback_date_entity_id = _entity_id(
-        hass, "sensor", f"{entry_id}_economics_estimated_payback_date"
-    )
-    progress_entity_id = _entity_id(
-        hass, "sensor", f"{entry_id}_economics_amortization_progress"
-    )
-    average_entity_id = _entity_id(
-        hass, "sensor", f"{entry_id}_economics_average_daily_result_30d"
-    )
     roi_entity_id = _entity_id(hass, "sensor", f"{entry_id}_economics_roi")
-
-    date_card = (
-        {
-            "type": "tile",
-            "entity": payback_date_entity_id,
-            "name": "Voraussichtlich abbezahlt am",
-        }
-        if payback_date_entity_id is not None
-        else None
-    )
     progress_gauge = _gauge_card(
         hass,
         entry_id,
@@ -629,18 +560,24 @@ def _savings_payback_block(
     )
 
     detail_rows: list[dict[str, Any] | str] = []
-    for suffix in (
-        "economics_remaining_to_payback",
-        "economics_projected_annual_result",
-        "economics_average_daily_result_30d",
-    ):
+    for suffix in ("economics_remaining_to_payback",):
         _, row = _resolved_row(hass, entry_id, "sensor", suffix, translations)
         if row is not None:
             detail_rows.append(row)
+    if savings_result_entity_id is not None:
+        detail_rows.append(
+            {"entity": savings_result_entity_id, "name": "Netto-Ersparnis"}
+        )
+    savings_started_at_row = _attribute_row(
+        status_entity_id, "economics_started_at", "Bilanzbeginn"
+    )
+    if savings_started_at_row is not None:
+        detail_rows.append(savings_started_at_row)
     prior_row = _attribute_row(
         roi_entity_id,
         "prior_result_eur",
         "Bereits vor Bilanzbeginn berücksichtigt",
+        suffix="€",
     )
     if prior_row is not None:
         detail_rows.append(prior_row)
@@ -654,26 +591,14 @@ def _savings_payback_block(
         else None
     )
 
-    configured_stack = _stack_card(
-        [
-            date_card,
-            _payback_explanation_card(
-                payback_date_entity_id,
-                average_entity_id,
-                progress_entity_id,
-                roi_entity_id,
-            ),
-            progress_gauge,
-            details_card,
-        ]
-    )
+    configured_stack = _stack_card([progress_gauge, details_card])
     assert configured_stack is not None
     return {
         "type": "vertical-stack",
         "cards": [
             {
                 "type": "markdown",
-                "content": "### Wann ist der Speicher abbezahlt?",
+                "content": "### Amortisation",
             },
             {
                 "type": "conditional",
@@ -681,7 +606,7 @@ def _savings_payback_block(
                 "card": {
                     "type": "markdown",
                     "content": (
-                        "Für eine Amortisationsprognose bitte die "
+                        "Für die Amortisationswerte bitte die "
                         "Investitionskosten unter „Geräte & Dienste → SAX "
                         "Power Home → Konfigurieren → Wirtschaftlichkeit“ "
                         "hinterlegen."
@@ -985,7 +910,7 @@ async def async_build_dashboard_config(
     # REQ-ECONOMICS-DASHBOARD: eine gemeinsame Karte in genau dieser
     # Reihenfolge (ROI, Fortschritts-Gauge, dann der Rest) - eine
     # "entities"-Karte kann selbst keine Gauge einbetten, deshalb
-    # _stack_card (vertical-stack) aus drei Teilkarten. Die sieben Sensoren
+    # _stack_card (vertical-stack) aus drei Teilkarten. Die vier Sensoren
     # sind (anders als z. B. die netzdienlichen Entities) immer bereits
     # statisch registriert, auch ohne konfigurierte Investitionskosten
     # (siehe REQ-ECONOMICS-AMORTIZATION). Eine build-time-Prüfung der
@@ -1001,21 +926,10 @@ async def async_build_dashboard_config(
     # `economics_roi` selbst eignet sich dafür NICHT als Gate: es wird
     # laut SaxPowerCoordinator._publish_amortization auch bei
     # deaktiviertem Tarif oder noch nicht initialisierter Geldbilanz
-    # "unknown", obwohl Investitionskosten konfiguriert sind und die
-    # historische 30-Tage-Prognose (average_daily_result_30d,
-    # projected_annual_result, estimated_payback_date) davon unberührt
-    # weiter veröffentlicht wird.
+    # "unknown", obwohl Investitionskosten konfiguriert sind.
     #
     # Die Bedingung prüft deshalb den ZUSTAND eines eigenen
     # Binary-Sensors, der genau "Investitionskosten hinterlegt" abbildet.
-    # Vorher stand hier das `unavailable_reason`-Attribut von
-    # economics_average_daily_result_30d - fachlich richtig, technisch
-    # wirkungslos: Die Bedingungen einer Core-"conditional"-Karte kennen
-    # keinen Schlüssel `attribute`. Er wurde stillschweigend ignoriert,
-    # verglichen wurde weiter gegen den Zustand, und weil dieser nie
-    # "no_investment_cost" lautet, war das `state_not` IMMER erfüllt - die
-    # Karte stand also auch ohne Investitionskosten dauerhaft im
-    # Dashboard (#139).
     roi_entity_id, roi_row = _resolved_row(
         hass, entry_id, "sensor", "economics_roi", translations
     )
@@ -1025,7 +939,10 @@ async def async_build_dashboard_config(
     # zwischen beiden im Dashboard nicht auflösen (siehe
     # coordinator._publish_amortization).
     prior_row = _attribute_row(
-        roi_entity_id, "prior_result_eur", "Bereits erwirtschafteter Ertrag"
+        roi_entity_id,
+        "prior_result_eur",
+        "Bereits erwirtschafteter Ertrag",
+        suffix="€",
     )
     if prior_row is not None:
         roi_rows.append(prior_row)
@@ -1060,9 +977,6 @@ async def async_build_dashboard_config(
         [
             ("sensor", "economics_remaining_to_payback"),
             ("sensor", "economics_net_savings_today"),
-            ("sensor", "economics_average_daily_result_30d"),
-            ("sensor", "economics_projected_annual_result"),
-            ("sensor", "economics_estimated_payback_date"),
         ],
         translations,
     )
@@ -1166,7 +1080,6 @@ async def async_build_dashboard_config(
         hass, "sensor", f"{entry_id}_economics_net_savings"
     )
     savings_period_grid = None
-    savings_total_card = None
     savings_free_period_block = None
     if savings_result_entity_id is not None:
         savings_period_grid = _grid_card(
@@ -1185,26 +1098,15 @@ async def async_build_dashboard_config(
                 ),
             ]
         )
-        savings_total_rows: list[dict[str, Any]] = [
-            {
-                "entity": savings_result_entity_id,
-                "name": "Netto-Ersparnis",
-            }
-        ]
-        savings_started_at_row = _attribute_row(
-            status_entity_id, "economics_started_at", "Bilanzbeginn"
-        )
-        if savings_started_at_row is not None:
-            savings_total_rows.append(savings_started_at_row)
-        savings_total_card = {
-            "type": "entities",
-            "title": "Gesamt seit Bilanzbeginn",
-            "state_color": True,
-            "entities": savings_total_rows,
-        }
         savings_free_period_block = _savings_free_period_block(savings_result_entity_id)
 
-    savings_payback_block = _savings_payback_block(hass, entry_id, translations)
+    savings_payback_block = _savings_payback_block(
+        hass,
+        entry_id,
+        translations,
+        savings_result_entity_id,
+        status_entity_id,
+    )
 
     savings_view = _view(
         "Ersparnis",
@@ -1213,7 +1115,6 @@ async def async_build_dashboard_config(
         [
             savings_payback_block,
             savings_period_grid,
-            savings_total_card,
             savings_explanation_card,
             savings_free_period_block,
             savings_status_card,
@@ -1420,6 +1321,33 @@ async def _async_missing_dashboard_views(
         ):
             continue
         outdated_paths.add(path)
+
+    savings_view = stored_views.get("ersparnis")
+    investment_gate_entity_id = _entity_id(
+        hass,
+        "binary_sensor",
+        f"{entry.entry_id}_economics_investment_configured",
+    )
+    if (
+        savings_view is not None
+        and investment_gate_entity_id is not None
+        and not _contains_dashboard_value(savings_view, "### Amortisation")
+    ):
+        outdated_paths.add("ersparnis")
+
+    for path in ("wirtschaftlichkeit", "ersparnis"):
+        stored_view = stored_views.get(path)
+        if stored_view is None:
+            continue
+        if any(
+            _contains_dashboard_fragment(stored_view, removed_suffix)
+            for removed_suffix in (
+                "economics_average_daily_result_30d",
+                "economics_projected_annual_result",
+                "economics_estimated_payback_date",
+            )
+        ):
+            outdated_paths.add(path)
     return [
         view["title"] for view in expected["views"] if view["path"] in outdated_paths
     ]
@@ -1434,3 +1362,14 @@ def _contains_dashboard_value(node: Any, expected: str) -> bool:
     if isinstance(node, list | tuple):
         return any(_contains_dashboard_value(value, expected) for value in node)
     return node == expected
+
+
+def _contains_dashboard_fragment(node: Any, expected: str) -> bool:
+    """Ob ein String in der Lovelace-Struktur den Wert enthält."""
+    if isinstance(node, dict):
+        return any(
+            _contains_dashboard_fragment(value, expected) for value in node.values()
+        )
+    if isinstance(node, list | tuple):
+        return any(_contains_dashboard_fragment(value, expected) for value in node)
+    return isinstance(node, str) and expected in node

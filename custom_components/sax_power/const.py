@@ -737,7 +737,7 @@ ECONOMICS_PRICE_STEP = 0.0001
 ECONOMICS_PRICE_DECIMALS = 4
 
 # ==========================================================================
-# Wirtschaftlichkeitsauswertung: ROI und Amortisationsprognose (siehe
+# Wirtschaftlichkeitsauswertung: ROI und Amortisationsstand (siehe
 # anforderung.yaml, REQ-ECONOMICS-AMORTIZATION)
 # ==========================================================================
 # Unabhängig von der Tarifart (ECONOMICS_OPTION_KEYS) - ein Tarifwechsel
@@ -753,9 +753,8 @@ ECONOMICS_INVESTMENT_COST_STEP = 0.01
 # Bereits vor dieser Integration erwirtschafteter Ertrag (EUR). Wer den
 # Speicher schon jahrelang betreibt, hätte sonst einen
 # Amortisationsfortschritt von 0 %, obwohl ein erheblicher Teil der
-# Investition längst zurückverdient ist - die Prognose startete faktisch
-# bei null. Der Wert wirkt AUSSCHLIESSLICH auf die Amortisationssensoren
-# (ROI, Fortschritt, Restbetrag, Rückzahlungsdatum), nie auf
+# Investition längst zurückverdient ist. Der Wert wirkt AUSSCHLIESSLICH auf
+# ROI, Fortschritt und Restbetrag, nie auf
 # economics_net_savings: Dessen Netto-Ersparnis-Höchststand wird im
 # Dashboard als statistics-graph über `change` ausgewertet, ein Sprung
 # durch eine manuelle Eingabe würde dort als Tagesertrag erscheinen.

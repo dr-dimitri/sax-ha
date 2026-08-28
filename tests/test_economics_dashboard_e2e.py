@@ -150,7 +150,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     # Preis-/Herkunftsabdeckung während des gesamten Ablaufs -> aktiv.
     assert discharge_tick["economics_status"] == "active"
 
-    # -- ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION) --------
+    # -- ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION) --------
     assert discharge_tick["economics_net_savings_today"] == pytest.approx(0.0)
     assert discharge_tick["economics_roi"] == pytest.approx(0.0)
     assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (

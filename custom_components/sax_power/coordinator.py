@@ -101,10 +101,7 @@ from .domain.economics_accounting import (
 )
 from .domain.economics_amortization import (
     MAX_STORED_DAYS,
-    AmortizationForecast,
     DayEconomicsResult,
-    ForecastUnavailable,
-    compute_amortization_forecast,
     compute_amortization_progress_percent,
     compute_remaining_to_payback_eur,
     compute_roi_percent,
@@ -158,9 +155,8 @@ _LOGGER = logging.getLogger(__name__)
 #: verbuchten Intervall; ohne dieses Raster schriebe der Store auch auf
 #: einem völlig ruhenden System dauerhaft alle ECONOMICS_SAVE_DELAY
 #: Sekunden (Flash-Verschleiß auf SD-Karten-Installationen). 15 Minuten
-#: sind rund 1 % eines Kalendertages und damit weit innerhalb der 5 %, die
-#: DAY_TIME_COVERAGE_THRESHOLD_PERCENT einem Tag zugesteht - mehr kann ein
-#: ungeplanter Neustart an Beobachtungsdauer nicht verlieren. Jede andere
+#: sind rund 1 % eines Kalendertages. Mehr Beobachtungsdauer kann ein
+#: ungeplanter Neustart nicht verlieren. Jede andere
 #: Änderung (Geld, Energie, Tagesabschluss) speichert unverändert sofort
 #: und nimmt den aktuellen Stand dabei ohnehin mit.
 OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
@@ -553,7 +549,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # beides beeinflusst keine Berechnung.
         self._economics_inventory_capped_kwh: float = 0.0
         self._economics_inventory_cap_logged_at: float | None = None
-        # ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION): lokale
+        # ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION): lokale
         # Kalendertag-Buckets, unabhängig vom Sieben-Felder-Bündel oben -
         # siehe _advance_economics_day. day_results sind abgeschlossene
         # Tage (älteste zuerst, höchstens MAX_STORED_DAYS); current_day und
@@ -570,10 +566,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Issue #131) - gespeist aus derselben Riemann-Summe wie die
         # Energie selbst (_accumulate_energy), keine zweite Uhr.
         self._economics_current_day_observed_seconds: float | None = None
-        # Einmalig gesetzt, wenn der Netto-Ersparnis-Höchststand die
-        # Investitionskosten erstmals erreicht (Regel 8) - danach für immer
-        # unveränderlich, unabhängig von einer späteren Änderung der
-        # Investitionskosten (siehe _maybe_mark_payback_achieved).
+        # Legacy-Feld aus älteren Stores. Die Prognose wurde entfernt; der
+        # Wert wird nur unverändert geladen und gespeichert, damit ein
+        # bestehender Store keinen abweichenden Snapshot erhält.
         self._economics_payback_achieved_at: datetime | None = None
         # Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY): kumulierte,
         # seit economics_started_at tatsächlich bepreiste Lade-/
@@ -904,15 +899,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     feed_in_price,
                 )
 
-            # Tageswechsel-Erkennung VOR der Anwendung des aktuellen Deltas:
-            # der Payback-Check beim Tagesabschluss
-            # (_maybe_mark_payback_achieved, aufgerufen aus
-            # _close_economics_day) darf ausschließlich den am Ende des
-            # GESCHLOSSENEN Tages tatsächlich erreichten Stand sehen. Würde
-            # stattdessen erst das Delta angewendet und danach der Tag
-            # geschlossen, könnte ein Payback, der erst durch das erste
-            # Delta des NEUEN Tages erreicht wird, fälschlich auf die
-            # vorherige Tagesgrenze zurückdatiert werden.
+            # Tageswechsel-Erkennung VOR der Anwendung des aktuellen Deltas,
+            # damit der Tageszähler das erste Delta eines neuen Tages nicht
+            # noch dem abgeschlossenen Vortag zurechnet.
             if self._advance_economics_day():
                 changed = True
 
@@ -1129,10 +1118,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Wechsel des lokalen Datums schließt genau einmal einen Tag ab.
 
         Bewusst OHNE das aktuelle Delta: Muss vor dessen Anwendung auf die
-        Gesamtsummen laufen, damit ein bei einem Wechsel abgeschlossener Tag
-        (_close_economics_day, inkl. Payback-Check) exakt den am Ende des
-        VORHERIGEN Tages erreichten Stand sieht, nicht bereits das erste
-        Delta des neuen Tages (siehe _accumulate_economics).
+        Gesamtsummen laufen, damit der geschlossene Tag exakt den am Ende des
+        Vortags erreichten Stand sieht (siehe _accumulate_economics).
         """
         today_local = dt_util.now().date()
         if self._economics_current_day is None:
@@ -1174,7 +1161,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_day_results = (*self._economics_day_results, closed_day)[
             -MAX_STORED_DAYS:
         ]
-        self._maybe_mark_payback_achieved()
 
     @staticmethod
     def _local_day_length_seconds(day: date) -> float:
@@ -1195,68 +1181,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # vermeiden soll.
         return (dt_util.as_utc(next_start) - dt_util.as_utc(start)).total_seconds()
 
-    def _maybe_mark_payback_achieved(self) -> None:
-        """Setzt payback_achieved_at einmalig beim Tagesabschluss, an dem
-        der Netto-Ersparnis-Höchststand die Investitionskosten erstmals
-        erreicht (anforderung.yaml, REQ-ECONOMICS-AMORTIZATION, Regel 8).
-
-        Bleibt danach für immer unverändert - auch eine spätere Änderung
-        oder Entfernung der Investitionskosten wirkt nur prospektiv auf
-        künftige ROI-/Restbetrags-Sensoren, nie rückwirkend auf diesen
-        bereits erreichten Zeitpunkt.
-
-        Der frei eingebbare Vorlauf-Ertrag geht hier bewusst NICHT ein,
-        obwohl er ROI, Fortschritt und Restbetrag verschiebt. Zwei Gründe:
-        Erstens wäre der Zeitstempel sonst schlicht falsch - trägt erst
-        der Vorlauf die Amortisation, dann lag der tatsächliche
-        Amortisationszeitpunkt in einer Vergangenheit, die diese
-        Integration nie beobachtet hat; "heute" zu stempeln erfände ein
-        Datum. Der Fortschritt zeigt in diesem Fall 100 % und der
-        Restbetrag 0 EUR, das Datum bleibt ehrlich unbekannt. Zweitens ist
-        dieser Zeitstempel persistiert und unwiderruflich: Ein Tippfehler
-        im Vorlauf (40.000 statt 4.000) schriebe das Rückzahlungsdatum
-        dauerhaft fest, und ein Zurücknehmen ist kein Ausweg - der
-        Economics-Store weist einen abweichenden Payback-Zeitpunkt als
-        beschädigten Snapshot ab (EconomicsStateStore._accept), was die
-        gesamte Geldbilanz in den Zustand storage_error einfrieren würde.
-        """
-        if self._economics_payback_achieved_at is not None:
-            return
-        investment_cost = investment_cost_eur_from_options(self.options)
-        if investment_cost is None:
-            return
-        measured_result = self._net_savings_eur()
-        if measured_result is None:
-            return
-        if measured_result >= investment_cost:
-            self._economics_payback_achieved_at = dt_util.utcnow()
-
     def _publish_amortization(
         self, data: dict[str, Any], *, monetary_available: bool
     ) -> None:
-        """Veröffentlicht ROI/Amortisationsprognose (REQ-ECONOMICS-
+        """Veröffentlicht den Amortisationsstand (REQ-ECONOMICS-
         AMORTIZATION) in coordinator.data.
 
         `monetary_available=False` (deaktivierter Tarif) blendet die vier
-        "aktuellen" Geldwert-Sensoren nach derselben Regel wie
+        Geldwert-Sensoren nach derselben Regel wie
         _publish_economics_balance auf None aus (ROI, Fortschritt, Restbetrag,
         Tagesergebnis) - aus demselben Grund: kein sichtbarer Betrag, solange
         der Tarif aus ist,
-        obwohl intern weiter akkumuliert wird. Die 30-Tage-Prognose
-        (Durchschnitt/Hochrechnung/Rückzahlungsdatum) beruht dagegen
-        ausschließlich auf bereits abgeschlossenen, historisch korrekten
-        Kalendertagen und den Investitionskosten - sie wird NICHT
-        ausgeblendet, weil sie keinen "gerade jetzt" gültigen Preis zeigt,
-        und braucht deshalb den tatsächlichen, unmaskierten Restbetrag statt
-        des während einer Pause ausgeblendeten `published_operating_result`
-        (sonst würde eine Tarifpause auch das Rückzahlungsdatum der
-        Prognose verschwinden lassen).
+        obwohl intern weiter akkumuliert wird.
 
         Fehlende/ungültige Investitionskosten deaktivieren dagegen ALLE
-        sieben Sensoren dieser Anforderung, unabhängig vom Tarifstatus und
-        von einem intern bereits erreichten, weiterhin persistierten
-        Payback-Zeitpunkt - der wird erst wieder veröffentlicht, sobald
-        erneut Investitionskosten hinterlegt sind.
+        vier Sensoren dieser Anforderung unabhängig vom Tarifstatus.
         """
         investment_cost = investment_cost_eur_from_options(self.options)
         # Trägt die Sichtbarkeit der Investitionskarte im Dashboard: Eine
@@ -1271,26 +1210,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "economics_remaining_to_payback",
                 "economics_net_savings_today",
                 "economics_net_savings_today_last_reset",
-                "economics_average_daily_result_30d",
-                "economics_projected_annual_result",
-                "economics_estimated_payback_date",
             ):
                 data[key] = None
             data["economics_roi_attributes"] = {
                 "prior_result_eur": None,
                 "measured_operating_result_eur": None,
-            }
-            data["economics_amortization_forecast_attributes"] = {
-                "window_start": None,
-                "window_end": None,
-                "complete_days_available": 0,
-                "accepted_days": 0,
-                "fully_observed_days": 0,
-                "average_price_coverage_percent": None,
-                "average_time_coverage_percent": None,
-                "average_daily_result_eur": None,
-                "payback_days": None,
-                "unavailable_reason": ForecastUnavailable.NO_INVESTMENT_COST.value,
             }
             return
 
@@ -1332,27 +1256,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._net_savings_today_last_reset()
         )
 
-        # Unmaskierter Restbetrag ausschließlich für die (tarifpausen-
-        # unabhängige) Prognose - siehe Docstring oben.
-        remaining_to_payback_for_forecast = compute_remaining_to_payback_eur(
-            investment_cost, operating_result
-        )
-        today_local = dt_util.now().date()
-        forecast = compute_amortization_forecast(
-            self._economics_day_results,
-            today_local,
-            investment_cost,
-            remaining_to_payback_for_forecast,
-        )
-        data["economics_average_daily_result_30d"] = _rounded(
-            forecast.average_daily_result_eur, 4
-        )
-        data["economics_projected_annual_result"] = _rounded(
-            forecast.projected_annual_result_eur, 2
-        )
-        data["economics_estimated_payback_date"] = self._estimated_payback_date(
-            forecast
-        )
         # Ohne diese beiden Attribute stünden im Dashboard drei Zahlen
         # nebeneinander, die sich nicht zur Deckung bringen lassen: ein
         # operatives Ergebnis von 250 EUR, ein Restbetrag von 350 EUR und
@@ -1367,64 +1270,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # abgleicht.
             "measured_operating_result_eur": _rounded(measured_result, 2),
         }
-        data["economics_amortization_forecast_attributes"] = {
-            "window_start": (
-                forecast.window_start.isoformat()
-                if forecast.window_start is not None
-                else None
-            ),
-            "window_end": (
-                forecast.window_end.isoformat()
-                if forecast.window_end is not None
-                else None
-            ),
-            "complete_days_available": forecast.complete_days_available,
-            "accepted_days": forecast.accepted_days,
-            "fully_observed_days": forecast.fully_observed_days,
-            "average_price_coverage_percent": (
-                None
-                if forecast.average_price_coverage_percent is None
-                else round(forecast.average_price_coverage_percent, 1)
-            ),
-            "average_time_coverage_percent": (
-                None
-                if forecast.average_time_coverage_percent is None
-                else round(forecast.average_time_coverage_percent, 1)
-            ),
-            # Zusätzlich zum Sensorzustand (economics_average_daily_result_30d)
-            # auch als Attribut, wie von REQ-ECONOMICS-AMORTIZATION gefordert -
-            # nützlich für Dashboards, die den Durchschnitt zusammen mit den
-            # übrigen Prognoseattributen aus einer einzigen Entity lesen.
-            "average_daily_result_eur": _rounded(forecast.average_daily_result_eur, 4),
-            # Ohne dieses Attribut wäre ein Rückzahlungsdatum, das nur
-            # wegen MAX_FORECAST_PAYBACK_DAYS entfällt, von einer gesunden
-            # Prognose nicht zu unterscheiden (unavailable_reason bleibt
-            # dabei None, weil Durchschnitt und Hochrechnung gültig sind).
-            "payback_days": (
-                None
-                if forecast.payback_days is None
-                else round(forecast.payback_days, 1)
-            ),
-            "unavailable_reason": (
-                None if forecast.reason is None else forecast.reason.value
-            ),
-        }
-
-    def _estimated_payback_date(self, forecast: AmortizationForecast) -> date | None:
-        """Rückzahlungsdatum als reines Kalenderdatum (device_class DATE
-        erwartet ein date-Objekt, keine Uhrzeit).
-
-        Einmal erreicht (Regel 8), gilt für immer der fixe, historische
-        Erreichungszeitpunkt statt der laufenden Projektion aus `forecast` -
-        eine spätere Änderung der Investitionskosten darf dieses Datum
-        nicht mehr verschieben. Der intern gespeicherte Zeitpunkt ist UTC
-        und wird dafür auf den lokalen Kalendertag abgebildet, konsistent
-        mit der Tagesgrenze, an der er erkannt wurde
-        (_maybe_mark_payback_achieved).
-        """
-        if self._economics_payback_achieved_at is not None:
-            return dt_util.as_local(self._economics_payback_achieved_at).date()
-        return forecast.estimated_payback_date
 
     # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
     def _update_economics_price_availability(
@@ -1835,7 +1680,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Zuwächsen des neuen Höchststands. Sie lassen sich nicht
             # zuverlässig umdeuten: max(Tag, 0) würde eine bloße Erholung
             # unterhalb eines älteren Peaks als neue Ersparnis zählen.
-            # Deshalb startet die Prognosehistorie neu. Bei einem ansonsten
+            # Deshalb startet die Tageshistorie neu. Bei einem ansonsten
             # vollständigen Alt-Store bleiben die drei Rohsummen und die
             # daraus sicher ableitbare aktuelle 0-Untergrenze erhalten.
             self._economics_day_results = (

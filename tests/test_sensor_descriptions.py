@@ -51,6 +51,14 @@ def test_daily_net_savings_uses_a_fresh_recorder_entity() -> None:
     assert "economics_result_today" not in keys
 
 
+def test_amortization_forecast_entities_are_no_longer_published() -> None:
+    keys = {description.key for description in SENSOR_DESCRIPTIONS}
+
+    assert "economics_average_daily_result_30d" not in keys
+    assert "economics_projected_annual_result" not in keys
+    assert "economics_estimated_payback_date" not in keys
+
+
 def test_sensor_descriptions_have_reasonable_count() -> None:
     # Grobe Regression-Absicherung: die Anzahl soll nicht "aus Versehen"
     # drastisch schrumpfen (z. B. durch einen Merge-Fehler).
@@ -203,6 +211,7 @@ def test_net_savings_is_a_nonnegative_recorder_total() -> None:
     assert description.device_class == SensorDeviceClass.MONETARY
     assert description.state_class == SensorStateClass.TOTAL
     assert description.native_unit_of_measurement == CURRENCY_EURO
+    assert description.suggested_display_precision == 2
     assert description.last_reset_fn is not None
 
     started_at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
@@ -280,6 +289,7 @@ def test_net_savings_today_reports_the_daily_reset_timestamp() -> None:
     entity = SaxPowerSensor(
         coordinator, "test_entry_id", _description_by_key("economics_net_savings_today")
     )
+    assert entity.entity_description.suggested_display_precision == 2
     assert entity.last_reset == midnight
 
     other = SaxPowerSensor(

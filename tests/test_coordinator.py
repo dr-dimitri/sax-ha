@@ -66,10 +66,6 @@ from custom_components.sax_power.coordinator import (
     windows_overlap,
 )
 from custom_components.sax_power.domain.economics_accounting import EconomicsDelta
-from custom_components.sax_power.domain.economics_amortization import (
-    SECONDS_PER_DAY,
-    DayEconomicsResult,
-)
 from custom_components.sax_power.domain.economics_status import EconomicsStatus
 from custom_components.sax_power.domain.registers import (
     apply_typed_sunssf,
@@ -5026,13 +5022,10 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
     assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
 
 
-# -- ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION) -----------------
-# Die reine Prognoserechnung (compute_amortization_forecast usw.) ist
-# erschöpfend in tests/test_economics_amortization.py getestet. Hier nur die
-# Coordinator-seitige Verdrahtung: lokale Tageswechsel-Erkennung (inkl. DST,
-# Neustart, Doppelverarbeitung), die ROI-/Restbetrags-/Tagesergebnis-Sensoren
-# samt Tarifpause-Maskierung, die Payback-Erkennung sowie die
-# Prognose-Übernahme in coordinator.data.
+# -- ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION) -----------------
+# Die reinen Formeln sind in tests/test_economics_amortization.py getestet.
+# Hier folgt die Coordinator-Verdrahtung einschließlich Tageswechsel,
+# Tarifpause sowie ROI-/Restbetrags-/Tagesergebnis-Sensoren.
 
 _INVESTMENT_OPTIONS = {
     **_FIXED_TARIFF_OPTIONS,
@@ -5636,36 +5629,6 @@ def test_prior_result_alone_does_not_produce_an_roi_without_a_balance(hass) -> N
     assert data["economics_remaining_to_payback"] is None
 
 
-def test_a_prior_result_never_stamps_a_payback_timestamp(hass) -> None:
-    """Der Vorlauf-Ertrag setzt payback_achieved_at nicht - auch nicht,
-    wenn er die Investitionskosten allein überschreitet. Der tatsächliche
-    Amortisationszeitpunkt läge dann in einer Vergangenheit, die diese
-    Integration nie beobachtet hat; "heute" zu stempeln erfände ein Datum.
-    Zugleich bleibt der persistierte Zeitstempel damit unwiderruflich -
-    eine Rücknahme würde der Economics-Store als beschädigten Snapshot
-    ablehnen und die gesamte Bilanz einfrieren
-    (REQ-ECONOMICS-AMORTIZATION)."""
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = {
-        **_INVESTMENT_OPTIONS,
-        CONF_ECONOMICS_PRIOR_RESULT: 40000.0,  # Tippfehler: 40.000 statt 4.000
-    }
-    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
-
-    data = _tick_with_delta(
-        coordinator,
-        monotonic_value=2000.0,
-        now=datetime(2026, 3, 10, 15, 0),
-        delta=EconomicsDelta(avoided_grid_cost_delta=10.0),
-    )
-    coordinator._maybe_mark_payback_achieved()
-
-    assert coordinator._economics_payback_achieved_at is None
-    # Fortschritt und Restbetrag zeigen die Amortisation trotzdem an.
-    assert data["economics_amortization_progress"] == pytest.approx(100.0)
-    assert data["economics_remaining_to_payback"] == pytest.approx(0.0)
-
-
 def test_roi_attributes_reconcile_the_gap_to_net_savings(hass) -> None:
     """Die ROI-Attribute lösen auf, warum ROI und Netto-Ersparnis
     auseinanderfallen: Sie nennen den Vorlauf und - bewusst ohne ihn - den
@@ -5723,17 +5686,15 @@ def test_a_measured_payback_stays_fixed_even_if_the_result_drops(hass) -> None:
     assert data["economics_remaining_to_payback"] == pytest.approx(0.0)
     assert data["economics_net_savings_today"] == pytest.approx(1200.0)
 
-    coordinator._maybe_mark_payback_achieved()
-    achieved_at = coordinator._economics_payback_achieved_at
-    assert achieved_at is not None
-
-    # Höhere Investitionskosten: der bereits erreichte Zeitpunkt bleibt.
+    # Höhere Investitionskosten wirken unmittelbar auf den Restbetrag.
     coordinator.options = {
         **_INVESTMENT_OPTIONS,
         CONF_ECONOMICS_INVESTMENT_COST: 5000.0,
     }
-    coordinator._maybe_mark_payback_achieved()
-    assert coordinator._economics_payback_achieved_at == achieved_at
+    data = _tick_on(
+        coordinator, monotonic_value=3000.0, now=datetime(2026, 3, 10, 19, 0)
+    )
+    assert data["economics_remaining_to_payback"] == pytest.approx(3800.0)
 
 
 def test_net_savings_today_publishes_the_timestamp_of_its_daily_reset(hass) -> None:
@@ -5814,14 +5775,10 @@ def test_net_savings_today_last_reset_is_none_without_investment_cost(hass) -> N
 
 
 def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None:
-    """Ohne Investitionskosten müssen alle sieben Sensoren dieser
-    Anforderung None liefern - nicht nur ROI/Fortschritt/Restbetrag,
-    sondern auch das Tagesergebnis, die 30-Tage-Prognose und ein bereits
-    intern erreichter (aber weiterhin persistierter) Payback-Zeitpunkt."""
+    """Ohne Investitionskosten liefern alle vier Sensoren None."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
-    coordinator._economics_payback_achieved_at = dt_util.utcnow()
 
     data = _tick_with_delta(
         coordinator,
@@ -5834,13 +5791,6 @@ def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None
     assert data["economics_amortization_progress"] is None
     assert data["economics_remaining_to_payback"] is None
     assert data["economics_net_savings_today"] is None
-    assert data["economics_average_daily_result_30d"] is None
-    assert data["economics_projected_annual_result"] is None
-    assert data["economics_estimated_payback_date"] is None
-    assert (
-        data["economics_amortization_forecast_attributes"]["average_daily_result_eur"]
-        is None
-    )
 
 
 def test_roi_and_net_savings_today_hide_during_a_tariff_pause_but_survive_it(
@@ -5873,253 +5823,6 @@ def test_roi_and_net_savings_today_hide_during_a_tariff_pause_but_survive_it(
     )
     assert data["economics_roi"] == pytest.approx(25.0)
     assert data["economics_net_savings_today"] == pytest.approx(250.0)
-
-
-def test_payback_achieved_is_marked_once_at_day_close_and_stays_fixed(hass) -> None:
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
-    _tick_with_delta(
-        coordinator,
-        monotonic_value=2000.0,
-        now=datetime(2026, 3, 10, 15, 0),
-        delta=EconomicsDelta(avoided_grid_cost_delta=1000.0),
-    )
-    _tick_with_delta(
-        coordinator,
-        monotonic_value=2500.0,
-        now=datetime(2026, 3, 10, 20, 0),
-        delta=EconomicsDelta(grid_charge_cost_delta=300.0),
-    )
-    assert coordinator._economics_payback_achieved_at is None
-
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.utcnow",
-        return_value=datetime(2026, 3, 11, 0, 0, tzinfo=UTC),
-    ):
-        _tick_with_delta(
-            coordinator,
-            monotonic_value=3000.0,
-            now=datetime(2026, 3, 11, 9, 0),
-            delta=EconomicsDelta(),
-        )
-
-    achieved_at = coordinator._economics_payback_achieved_at
-    assert achieved_at == datetime(2026, 3, 11, 0, 0, tzinfo=UTC)
-    assert coordinator._economics_day_results[0].operating_result_eur == (
-        pytest.approx(1000.0)
-    )
-
-    # Weder eine spätere Änderung noch das Entfernen der Investitionskosten
-    # verändert den einmal erreichten Zeitpunkt.
-    coordinator.options = {}
-    _tick_with_delta(
-        coordinator,
-        monotonic_value=4000.0,
-        now=datetime(2026, 3, 12, 9, 0),
-        delta=EconomicsDelta(),
-    )
-    assert coordinator._economics_payback_achieved_at == achieved_at
-
-
-def test_payback_is_not_backdated_to_a_day_only_reached_by_the_next_days_delta(
-    hass,
-) -> None:
-    """Überschreitet erst das ERSTE Delta des neuen Tages die
-    Investitionskosten, darf der Payback nicht auf den Abschluss des
-    VORTAGES zurückdatiert werden - der Tagesabschluss darf ausschließlich
-    den am Ende des geschlossenen Tages tatsächlich erreichten Stand
-    sehen."""
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
-    # Tag D0: Gesamtsumme bleibt unter den 1000 EUR Investitionskosten.
-    _tick_with_delta(
-        coordinator,
-        monotonic_value=2000.0,
-        now=datetime(2026, 3, 10, 15, 0),
-        delta=EconomicsDelta(avoided_grid_cost_delta=900.0),
-    )
-
-    # Erster Tick auf D1 (schließt D0 ab) - dessen eigenes Delta allein
-    # reicht bereits über die Investitionskosten, darf den Vortagesabschluss
-    # aber nicht rückwirkend als Payback markieren.
-    _tick_with_delta(
-        coordinator,
-        monotonic_value=3000.0,
-        now=datetime(2026, 3, 11, 9, 0),
-        delta=EconomicsDelta(avoided_grid_cost_delta=150.0),
-    )
-    assert coordinator._economics_day_results[-1].operating_result_eur == pytest.approx(
-        900.0
-    )
-    assert coordinator._economics_payback_achieved_at is None
-
-    # Erst der nächste Tagesabschluss (D1 -> D2) sieht den am Ende von D1
-    # tatsächlich erreichten Stand (1050 EUR) und markiert den Payback.
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.utcnow",
-        return_value=datetime(2026, 3, 12, 0, 0, tzinfo=UTC),
-    ):
-        _tick_with_delta(
-            coordinator,
-            monotonic_value=4000.0,
-            now=datetime(2026, 3, 12, 9, 0),
-            delta=EconomicsDelta(),
-        )
-    assert coordinator._economics_payback_achieved_at == datetime(
-        2026, 3, 12, 0, 0, tzinfo=UTC
-    )
-
-
-def test_estimated_payback_date_uses_the_fixed_achieved_timestamp(hass) -> None:
-    """Einmal erreicht, zeigt der Sensor das fixe historische Datum - nicht
-    mehr die laufende Projektion aus der 30-Tage-Prognose. Der Sensor selbst
-    ist device_class DATE und liefert deshalb ein reines Kalenderdatum,
-    keine Uhrzeit (der interne Zeitpunkt bleibt UTC mit Uhrzeit)."""
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    achieved_at = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
-    coordinator._economics_payback_achieved_at = achieved_at
-
-    data = {}
-    coordinator._publish_amortization(data, monetary_available=True)
-
-    assert data["economics_estimated_payback_date"] == date(2026, 1, 1)
-
-
-def _forecast_ready_day_results(
-    *, count: int = 30, result: float = 5.0, end: date
-) -> tuple[DayEconomicsResult, ...]:
-    return tuple(
-        DayEconomicsResult(
-            day=end - timedelta(days=offset),
-            operating_result_eur=result,
-            priced_charge_kwh=1.0,
-            unpriced_charge_kwh=0.0,
-            priced_discharge_kwh=1.0,
-            unpriced_discharge_kwh=0.0,
-            observed_seconds=SECONDS_PER_DAY,
-            day_length_seconds=SECONDS_PER_DAY,
-        )
-        for offset in range(1, count + 1)
-    )
-
-
-def test_forecast_sensors_populate_once_30_complete_days_are_stored(hass) -> None:
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    today = date(2026, 3, 31)
-    coordinator._economics_day_results = _forecast_ready_day_results(
-        result=5.0, end=today
-    )
-
-    data = {}
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime.combine(today, dt_time(12, 0)),
-    ):
-        coordinator._publish_amortization(data, monetary_available=True)
-
-    assert data["economics_average_daily_result_30d"] == pytest.approx(5.0)
-    assert data["economics_projected_annual_result"] == pytest.approx(
-        round(5.0 * 365.2425, 2)
-    )
-    attributes = data["economics_amortization_forecast_attributes"]
-    assert attributes["complete_days_available"] == 30
-    assert attributes["accepted_days"] == 30
-    assert attributes["average_price_coverage_percent"] == pytest.approx(100.0)
-    # REQ-ECONOMICS-AMORTIZATION verlangt den Durchschnitt zusätzlich zum
-    # Sensorzustand auch als Attribut.
-    assert attributes["average_daily_result_eur"] == pytest.approx(5.0)
-    assert attributes["unavailable_reason"] is None
-
-
-def test_forecast_publishes_payback_days_beyond_the_horizon(hass) -> None:
-    """REQ-ECONOMICS-AMORTIZATION: Jenseits von MAX_FORECAST_PAYBACK_DAYS
-    entfällt nur das Datum - Durchschnitt und Hochrechnung bleiben gültig,
-    unavailable_reason bleibt deshalb None. Ohne das payback_days-Attribut
-    wäre dieser Zustand von einer gesunden Prognose nicht zu
-    unterscheiden."""
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    coordinator._economics_avoided_grid_cost_eur = 0.0
-    coordinator._economics_grid_charge_cost_eur = 0.0
-    coordinator._economics_pv_opportunity_cost_eur = 0.0
-    today = date(2026, 3, 31)
-    # 0,0001 EUR/Tag bei 1.000 EUR Restbetrag: 10 Mio. Tage.
-    coordinator._economics_day_results = _forecast_ready_day_results(
-        result=0.0001, end=today
-    )
-
-    data = {}
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime.combine(today, dt_time(12, 0)),
-    ):
-        coordinator._publish_amortization(data, monetary_available=True)
-
-    assert data["economics_average_daily_result_30d"] == pytest.approx(0.0001)
-    assert data["economics_projected_annual_result"] is not None
-    assert data["economics_estimated_payback_date"] is None
-    attributes = data["economics_amortization_forecast_attributes"]
-    assert attributes["payback_days"] == pytest.approx(10_000_000.0)
-    assert attributes["unavailable_reason"] is None
-
-
-def test_forecast_payback_date_survives_a_tariff_pause(hass) -> None:
-    """Die 30-Tage-Prognose beruht ausschließlich auf bereits
-    abgeschlossenen Tagen und den Investitionskosten - anders als die vier
-    "aktuellen" Sensoren darf sie während einer Tarifpause nicht auf None
-    ausgeblendet werden, auch nicht das daraus abgeleitete
-    Rückzahlungsdatum (das den tatsächlichen, unmaskierten Restbetrag
-    braucht, nicht den während der Pause ausgeblendeten)."""
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    coordinator._economics_avoided_grid_cost_eur = 100.0
-    coordinator._economics_grid_charge_cost_eur = 0.0
-    coordinator._economics_pv_opportunity_cost_eur = 0.0
-    today = date(2026, 3, 31)
-    coordinator._economics_day_results = _forecast_ready_day_results(
-        result=5.0, end=today
-    )
-
-    data = {}
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime.combine(today, dt_time(12, 0)),
-    ):
-        coordinator._publish_amortization(data, monetary_available=False)
-
-    assert data["economics_roi"] is None
-    assert data["economics_net_savings_today"] is None
-    assert data["economics_average_daily_result_30d"] == pytest.approx(5.0)
-    assert data["economics_projected_annual_result"] is not None
-    assert data["economics_estimated_payback_date"] is not None
-
-
-def test_forecast_sensors_stay_unavailable_with_fewer_than_30_days(hass) -> None:
-    coordinator = _make_coordinator(hass, _make_client())
-    coordinator.options = _INVESTMENT_OPTIONS
-    today = date(2026, 3, 31)
-    coordinator._economics_day_results = _forecast_ready_day_results(
-        count=29, end=today
-    )
-
-    data = {}
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime.combine(today, dt_time(12, 0)),
-    ):
-        coordinator._publish_amortization(data, monetary_available=True)
-
-    assert data["economics_average_daily_result_30d"] is None
-    assert data["economics_projected_annual_result"] is None
-    assert data["economics_estimated_payback_date"] is None
-    attributes = data["economics_amortization_forecast_attributes"]
-    assert attributes["complete_days_available"] == 29
-    assert attributes["average_daily_result_eur"] is None
-    assert attributes["unavailable_reason"] == "insufficient_history"
 
 
 def test_investment_cost_change_takes_effect_immediately_without_altering_history(

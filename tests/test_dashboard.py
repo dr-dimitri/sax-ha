@@ -812,7 +812,7 @@ async def test_savings_view_places_prior_result_directly_below_remaining(hass) -
         {
             "type": "attribute",
             "entity": roi,
-            "attribute": "prior_result_eur",
+            "attribute": "prior_result_eur_formatted",
             "name": "Bereits vor Bilanzbeginn berücksichtigt",
             "suffix": "€",
         },
@@ -1022,7 +1022,7 @@ async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
     assert stack["cards"][1]["entities"][1] == {
         "type": "attribute",
         "entity": roi,
-        "attribute": "prior_result_eur",
+        "attribute": "prior_result_eur_formatted",
         "name": "Bereits vor Bilanzbeginn berücksichtigt",
         "suffix": "€",
     }
@@ -1656,6 +1656,31 @@ async def test_savings_dashboard_without_feed_in_tariff_label_is_reported(
     assert issue is not None
     assert issue.translation_placeholders["views"] == "Ersparnis"
     assert await storage.async_load(False) == stored
+
+
+async def test_savings_dashboard_with_unformatted_prior_result_is_reported(
+    hass,
+) -> None:
+    """Die alte Attributzeile ohne feste Nachkommastellen braucht eine
+    bewusste Neuinstallation des Ersparnis-Tabs."""
+    _register(hass, "binary_sensor", "economics_investment_configured")
+    _register(hass, "sensor", "economics_roi")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    stale = _replace_dashboard_values(
+        stored, {"prior_result_eur_formatted": "prior_result_eur"}
+    )
+    await storage.async_save(stale)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stale
 
 
 async def test_missing_dashboard_is_not_reported(hass) -> None:

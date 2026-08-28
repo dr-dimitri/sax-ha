@@ -397,7 +397,8 @@ vier Nachkommastellen. Ihre Sensorbeschreibungen setzen
 `suggested_display_precision=2`, sodass Home Assistant Währungswerte mit zwei
 Nachkommastellen darstellt, ohne Recorder- oder Rechengenauigkeit zu verlieren.
 Das ROI-Attribut `prior_result_eur` bleibt numerisch; Dashboardzeilen ergänzen
-dafür explizit das Suffix `€`.
+dafür eine separate, auf exakt zwei Nachkommastellen festgelegte Anzeigeform
+und explizit das Suffix `€`.
 ### Datenqualität, Diagnose und Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY)
 
 Macht sichtbar, ob und warum die Bilanz gerade vertrauenswürdig ist, ohne
@@ -547,7 +548,8 @@ direkt aus den Attributen des aktuellen Netzbezugspreis-Sensors.
 `economics_investment_configured` zur Laufzeit ein- oder ausgeblendet. Im
 aktiven Zweig folgt auf die blaue Fortschritts-Gauge eine einzige
 `entities`-Karte mit Restbetrag, Vorlaufbetrag, Netto-Ersparnis und
-Bilanzbeginn. Der Vorlauf trägt `suffix: "€"`. Prognose-Tile,
+Bilanzbeginn. Der Vorlauf nutzt seine zweistellig formatierte Anzeige und trägt
+`suffix: "€"`. Prognose-Tile,
 Prognoseerklärung, Durchschnitt und Jahreshochrechnung sind entfernt. Die
 frühere separate Karte "Gesamt seit Bilanzbeginn" existiert nicht mehr. Der
 Block besitzt keine eigene Markdown-Überschrift "Amortisation".

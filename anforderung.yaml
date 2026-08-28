@@ -3456,7 +3456,8 @@ requirement_economics_amortization:
     - "Netto-Ersparnis und Netto-Ersparnis heute behalten intern vier
        Nachkommastellen, schlagen Home Assistant für die Anzeige aber zwei
        Nachkommastellen vor."
-    - "Das Vorlauf-Attribut bleibt numerisch und wird im Dashboard mit dem
+    - "Das Vorlauf-Attribut prior_result_eur bleibt numerisch. Eine separate
+       Anzeigeform wird im Dashboard mit exakt zwei Nachkommastellen und dem
        Suffix € ausgegeben."
     - "Tests decken Formeln, Tarifpause, Reset-Zeitpunkt, entfernte
        Prognose-Entities und Anzeigepräzision ab."
@@ -3741,9 +3742,11 @@ requirement_economics_savings_dashboard:
     off erklärt den Konfigurationsweg, on zeigt die blaue Fortschritts-Gauge
     und darunter eine gemeinsame entities-Karte. Deren
     Reihenfolge lautet exakt economics_remaining_to_payback, das ROI-Attribut
-    prior_result_eur als "Bereits vor Bilanzbeginn berücksichtigt",
+    die zweistellig formatierte Anzeige von prior_result_eur als
+    "Bereits vor Bilanzbeginn berücksichtigt",
     economics_net_savings und das Status-Attribut economics_started_at als
-    "Bilanzbeginn". Die Vorlaufzeile besitzt das Suffix "€".
+    "Bilanzbeginn". Die Vorlaufzeile besitzt exakt zwei Nachkommastellen und
+    das Suffix "€".
     Datum, Durchschnitt, Jahreshochrechnung und Prognosehinweise existieren
     nicht mehr. Die frühere separate Karte "Gesamt seit Bilanzbeginn" entfällt.
 

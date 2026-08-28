@@ -528,7 +528,7 @@ def _savings_payback_block(
             detail_rows.append(row)
     prior_row = _attribute_row(
         roi_entity_id,
-        "prior_result_eur",
+        "prior_result_eur_formatted",
         "Bereits vor Bilanzbeginn berücksichtigt",
         suffix="€",
     )
@@ -1052,6 +1052,14 @@ async def _async_missing_dashboard_views(
                 )
                 and not _contains_dashboard_fragment(
                     savings_view, "feed_in_price_eur_kwh"
+                )
+            )
+            or (
+                _contains_dashboard_fragment(
+                    expected_savings_view, "prior_result_eur_formatted"
+                )
+                and not _contains_dashboard_fragment(
+                    savings_view, "prior_result_eur_formatted"
                 )
             )
         ):

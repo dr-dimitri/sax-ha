@@ -59,6 +59,27 @@ def test_amortization_forecast_entities_are_no_longer_published() -> None:
     assert "economics_estimated_payback_date" not in keys
 
 
+def test_roi_attributes_format_prior_result_with_two_decimal_places() -> None:
+    """Der rohe Vorlauf bleibt numerisch; die Core-Attributzeile erhält
+    daneben eine Anzeigeform mit exakt zwei Nachkommastellen."""
+    description = next(
+        entry for entry in SENSOR_DESCRIPTIONS if entry.key == "economics_roi"
+    )
+    coordinator = SimpleNamespace(
+        data={
+            "economics_roi_attributes": {
+                "prior_result_eur": 400.5,
+                "measured_operating_result_eur": 250.0,
+            }
+        }
+    )
+
+    attributes = description.attributes_fn(coordinator)
+
+    assert attributes["prior_result_eur"] == 400.5
+    assert attributes["prior_result_eur_formatted"] == "400.50"
+
+
 def test_sensor_descriptions_have_reasonable_count() -> None:
     # Grobe Regression-Absicherung: die Anzahl soll nicht "aus Versehen"
     # drastisch schrumpfen (z. B. durch einen Merge-Fehler).

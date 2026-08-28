@@ -114,7 +114,19 @@ def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any
     """
     if coordinator.data is None:
         return {}
-    return coordinator.data.get("economics_roi_attributes") or {}
+    attributes = dict(coordinator.data.get("economics_roi_attributes") or {})
+    prior_result = attributes.get("prior_result_eur")
+    # Core-Attributzeilen formatieren Zahlen mit höchstens zwei Stellen und
+    # können keine Mindestpräzision konfigurieren. Der numerische Wert bleibt
+    # für Automationen erhalten; nur das Dashboard nutzt diese Anzeigeform.
+    attributes["prior_result_eur_formatted"] = (
+        f"{prior_result:.2f}"
+        if isinstance(prior_result, int | float)
+        and not isinstance(prior_result, bool)
+        and math.isfinite(prior_result)
+        else None
+    )
+    return attributes
 
 
 def _energy_origin_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:

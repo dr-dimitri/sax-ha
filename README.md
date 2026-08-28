@@ -701,10 +701,11 @@ Der erste Block zeigt bei hinterlegten Investitionskosten den blauen
 Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
 **Restbetrag bis Amortisation**. Direkt danach folgt der optionale
 Vorlauf-Ertrag als **Bereits vor Bilanzbeginn berücksichtigt** mit der Einheit
-**€**, anschließend **Netto-Ersparnis** und **Bilanzbeginn**. Alle Währungsangaben im
-Ersparnis-Tab erscheinen mit zwei Nachkommastellen; intern und im Recorder
-bleibt die höhere Rechengenauigkeit erhalten. Eine separate sichtbare
-Überschrift **Amortisation** besitzt dieser Block nicht.
+**€** und exakt zwei Nachkommastellen, anschließend **Netto-Ersparnis** und
+**Bilanzbeginn**. Alle Währungsangaben im Ersparnis-Tab erscheinen mit zwei
+Nachkommastellen; intern und im Recorder bleibt die höhere Rechengenauigkeit
+erhalten. Eine separate sichtbare Überschrift **Amortisation** besitzt dieser
+Block nicht.
 
 Ohne Investitionskosten verweist der Block auf **Geräte & Dienste → SAX Power
 Home → Konfigurieren → Wirtschaftlichkeit**. Die Anzeige reagiert direkt auf

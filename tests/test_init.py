@@ -279,10 +279,10 @@ async def test_restart_economics_accounting_service_reason_is_optional(hass) -> 
 
 
 # --------------------------------------------------------------------------
-# Entfallene Entities früherer Versionen (REQ-ENERGY-ORIGIN)
+# Entfallene Entities früherer Versionen
 # --------------------------------------------------------------------------
-async def test_removed_origin_entities_are_purged_from_the_registry(hass) -> None:
-    """Die beiden mit der Herkunftskategorie entfallenen Sensoren räumt
+async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
+    """Die mit Herkunft oder Roh-Tagesergebnis entfallenen Sensoren räumt
     Home Assistant nicht selbst weg - sie blieben sonst dauerhaft als
     "nicht verfügbar" in der Registry und damit in jedem Dashboard und
     jeder Automation stehen, die sie verwendet."""
@@ -296,20 +296,28 @@ async def test_removed_origin_entities_are_purged_from_the_registry(hass) -> Non
             f"{entry.entry_id}_{suffix}",
             config_entry=entry,
         ).entity_id
-        for suffix in ("energy_charged_origin_unknown", "energy_origin_coverage")
+        for suffix in (
+            "energy_charged_origin_unknown",
+            "energy_origin_coverage",
+            "economics_result_today",
+        )
     ]
-    kept = registry.async_get_or_create(
-        "sensor",
-        DOMAIN,
-        f"{entry.entry_id}_energy_charged_from_grid",
-        config_entry=entry,
-    ).entity_id
+    kept = [
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{suffix}",
+            config_entry=entry,
+        ).entity_id
+        for suffix in ("energy_charged_from_grid", "economics_net_savings_today")
+    ]
 
     _async_remove_stale_entities(hass, entry)
 
     for entity_id in stale:
         assert registry.async_get(entity_id) is None
-    assert registry.async_get(kept) is not None
+    for entity_id in kept:
+        assert registry.async_get(entity_id) is not None
 
 
 async def test_removing_stale_entities_is_a_noop_without_them(hass) -> None:

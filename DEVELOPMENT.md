@@ -271,17 +271,24 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
   `INVENTORY_CAP_LOG_INTERVAL_SECONDS`; die insgesamt verworfene Menge steht
   als `inventory_capped_kwh` im Diagnose-Download.
 
-`operating_result` (vermiedene Netzkosten − Netzladekosten −
-PV-Opportunitätskosten) wird nie separat gespeichert, sondern in
-`_publish_economics_balance` aus den drei Teilsummen abgeleitet - so kann er
-nie von ihnen abweichen.
+Der operative Roh-Cashflow (vermiedene Netzkosten − Netzladekosten −
+PV-Opportunitätskosten) bleibt jederzeit aus den drei ungerundeten Teilsummen
+ableitbar. `_accumulate_economics` schreibt zusätzlich
+`_economics_operating_result_high_water_eur = max(0, bisheriger Höchststand,
+Roh-Cashflow)` fort. Nur dieser persistierte, nichtnegative Höchststand wird
+als `economics_net_savings`/Netto-Ersparnis veröffentlicht: 100 EUR bleiben
+bei einem späteren Rohwert von 80 EUR stehen und wachsen erst ab einem neuen
+Peak. `economics_operating_result` bleibt davon getrennt der technische
+Roh-Cashflow und kann sinken oder negativ sein. Das ist bewusst kein `abs` -
+ein Rohverlust von −20 EUR ergibt bei einem bisherigen Höchststand von 0
+weiterhin 0 EUR Ersparnis, nicht +20 EUR; ein früherer positiver Höchststand
+bleibt erhalten.
 
 Veröffentlicht werden alle Geld-/Prozentwerte über `coordinator._rounded`,
 das zusätzlich zur Rundung die negative Null auf `0.0` normalisiert:
 `round(-0.0001, 2)` ergibt `-0.0`, und Home Assistant zeigt das als „−0,0"
-an - ein Vorzeichen für einen Verlust, den die gerundete Zahl selbst gar
-nicht mehr ausweist. Kurz nach dem Bilanzstart ist das der Regelfall, weil
-dann ausschließlich Kosten gebucht sind. Die durchgereichten Preise bleiben
+an - ein Vorzeichen, das die gerundete Zahl selbst gar nicht mehr ausweist.
+Die durchgereichten Preise bleiben
 bewusst außen vor: Dort ist ein negatives Vorzeichen eine Aussage über den
 Tarif.
 
@@ -308,7 +315,7 @@ unbeobachtet zu bleiben - andernfalls würde eine nach dem Reaktivieren
 erfolgende Entladung dieser Energie fälschlich vollständig als vermiedenen
 Netzbezug monetarisieren (derselbe Scheingewinn-Fehler wie bei #42, nur
 über den Umweg einer Pause statt des Anfangsbestands). Nur die
-VERÖFFENTLICHTEN vier monetären Sensoren blenden während einer Pause auf
+VERÖFFENTLICHTEN fünf monetären Sensoren blenden während einer Pause auf
 `None` (`_publish_economics_balance(..., monetary_available=...)`) statt
 auf die weiter mitlaufenden internen Summen; `unvalued_inventory_kwh`/
 `unpriced_charge_kwh`/`unpriced_discharge_kwh` sind keine Geldwerte und
@@ -324,15 +331,34 @@ eigener STORAGE_VERSION, eigenes Bootstrap-Fenster analog zu
 `EnergyStateStore`). Anders als die monoton steigenden Energiezähler dürfen
 die drei Geldsummen wegen negativer Strompreise sinken - "kleiner als der
 alte Wert" ist dort deshalb bewusst KEIN Ablehnungsgrund, nur
-NaN/Inf/Fremdtypen sind es. `unpriced_charge_kwh`/`unpriced_discharge_kwh`
-bleiben dagegen echte monotone Summen, `unvalued_inventory_kwh` ist ein
+NaN/Inf/Fremdtypen sind es. `operating_result_high_water_eur` sowie
+`unpriced_charge_kwh`/`unpriced_discharge_kwh` bleiben dagegen monotone,
+nichtnegative Summen; nur `async_reset` darf sie auf 0 setzen.
+`unvalued_inventory_kwh` ist ein
 Bestand (Gauge) ohne Monotonieprüfung. `economics_started_at` ist wie
 `origin_accounting_started_at` (02/06) einmalig gesetzt und danach
 unveränderlich; ein unvollständiges Sieben-Felder-Bündel wird beim Laden
 komplett neu gebootstrapped, und die interne Monotonie-Baseline wird in
 diesem Fall ebenfalls komplett bereinigt (siehe
 `EnergyStateStore._origin_baseline` für dasselbe, aus einem Review-Befund
-gelernte Muster). `notify_tariff_revision()` (aufgerufen aus
+gelernte Muster). Tageshistorie, laufender Tag und Payback-Zeitpunkt werden
+dann ebenfalls verworfen: Sie gehören zur alten Bilanz und dürfen nicht mit
+dem neuen Nullstand kombiniert werden. Das Höchststandsfeld gehört aus
+Migrationsgründen nicht zum
+alten Sieben-Felder-Kernbündel: Fehlt es in einem Store bis Minor-Version 5,
+startet es mit `max(0, aktueller Roh-Cashflow)`. Die alten `day_results` und
+der laufende Tageswert werden verworfen, weil sie Roh-Cashflows statt
+Peak-Zuwächsen enthalten und sich nicht ehrlich positiv klemmen lassen; die
+30-Tage-Prognose baut sich aus neuen Tagen wieder auf. Die neuen Entities
+`economics_net_savings` und `economics_net_savings_today` beginnen zugleich
+jeweils eine eigene Recorder-Historie, damit weder die Gesamt- noch die
+Tagesstatistik des technischen Roh-Cashflows als Netto-Ersparnis umgedeutet
+wird. Ihr Recorder-Beginn kann nach einem Update deshalb jünger als
+`economics_started_at` sein. `_async_remove_stale_entities` entfernt den in
+früheren Snapshot-Ständen bereits angelegten Registry-Eintrag
+`economics_result_today` über seinen exakt benannten Suffix; die neue Unique-ID
+bleibt davon unberührt.
+`notify_tariff_revision()` (aufgerufen aus
 `__init__.async_update_options`) merkt sich nur einen rein diagnostischen
 Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
 ausschließlich prospektiv, weil jedes künftige Delta einfach den dann
@@ -350,13 +376,14 @@ neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
 
 ### ROI und Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION)
 
-Baut ausschließlich auf dem bereits bilanzierten `operating_result` oben
+Baut ausschließlich auf der bereits bilanzierten Netto-Ersparnis oben
 auf, zuzüglich des optionalen Vorlauf-Ertrags aus der Zeit vor der
 Integration (`application/economics.prior_result_eur_from_options`, Option
 `economics_prior_result_eur`). Der wirkt bewusst nur hier: Er verschiebt
-ROI, Fortschritt und Restbetrag, nie `economics_operating_result` - dessen
-Verlauf wertet das Dashboard als `statistics-graph` über `change` aus, ein
-Offset aus einer Handeingabe erschiene dort als Tagesertrag. Der ROI-Sensor
+ROI, Fortschritt und Restbetrag, nie `economics_net_savings` oder
+`economics_operating_result` - der Verlauf der Netto-Ersparnis wird im
+Dashboard als `statistics-graph` über `change` ausgewertet, ein Offset aus
+einer Handeingabe erschiene dort als Tagesertrag. Der ROI-Sensor
 weist ihn zusammen mit dem rein gemessenen Betrag als Attribute aus
 (`economics_roi_attributes`), damit sich die Differenz zwischen beiden
 Zahlen im Dashboard auflösen lässt. `payback_achieved_at` setzt er dagegen
@@ -367,10 +394,13 @@ jeden Home-Assistant-Bezug:
 
 - `compute_roi_percent`/`compute_amortization_progress_percent`/
   `compute_remaining_to_payback_eur` sind einzeilige, unabhängig
-  testbare Formeln - `roi_percent` bleibt bewusst unklemmt (negativ oder
-  über 100 %), nur der Fortschritt ist auf 0..100 begrenzt.
-- `DayEconomicsResult` ist ein abgeschlossener Kalendertag (operatives
-  Ergebnis plus vier Energiemengen); `price_coverage_percent` bildet daraus
+  testbare Formeln - `roi_percent` bleibt defensiv unklemmt; der Coordinator
+  übergibt durch den nichtnegativen Höchststand jedoch keinen negativen Wert.
+  Werte über 100 % bleiben möglich, nur der Fortschritt ist auf 0..100
+  begrenzt.
+- `DayEconomicsResult` ist ein abgeschlossener Kalendertag (an diesem Tag
+  neu erreichter Höchststandszuwachs plus vier Energiemengen);
+  `price_coverage_percent` bildet daraus
   die Preisabdeckung, ohne einen Betrag durch einen möglicherweise
   negativen oder 0 Preis zurückzurechnen. `observed_seconds`/
   `day_length_seconds` tragen eine davon unabhängige zweite
@@ -434,7 +464,8 @@ schließt `_close_economics_day` den bisherigen Tag ab (angehängt an
 `day_results`, gekappt auf `MAX_STORED_DAYS`) und ruft
 `_maybe_mark_payback_achieved` auf; `_start_economics_day` beginnt den
 neuen Tag bei 0. Idempotent gegenüber Neustart (`current_day` plus seine
-vier Zähler sind als eigenes Fünfer-Bündel persistiert) und doppelter
+sechs Werte sind mit dem Datum als eigenes Sieben-Felder-Bündel persistiert)
+und doppelter
 Tick-Verarbeitung (nur ein tatsächlicher Datumswechsel schließt ab).
 
 Die Reihenfolge in `_accumulate_economics` ist bewusst: erst
@@ -450,7 +481,7 @@ ursprünglichen Delta-Feldern auch `priced_charge_kwh_delta`/
 exakt 0 EUR/kWh bewegt nur diese beiden, keine der drei Geldsummen.
 
 `_maybe_mark_payback_achieved` setzt `payback_achieved_at` (UTC) genau
-einmal, sobald das kumulierte operative Ergebnis die konfigurierten
+einmal, sobald der persistierte Netto-Ersparnis-Höchststand die konfigurierten
 Investitionskosten an einer Tagesgrenze erstmals erreicht, und danach nie
 wieder - unabhängig von einer späteren Änderung der Investitionskosten.
 `_estimated_payback_date` liefert dieses fixe Datum, sobald gesetzt, statt
@@ -459,39 +490,46 @@ der laufenden Projektion aus `compute_amortization_forecast`; für den
 den lokalen Kalendertag abgebildet (`dt_util.as_local(...).date()`).
 
 `_publish_amortization` leitet ROI/Fortschritt/Restbetrag/Tagesergebnis aus
-demselben `operating_result` wie `_publish_economics_balance` ab und
+demselben Netto-Ersparnis-Höchststand wie `_publish_economics_balance` ab und
 blendet sie bei deaktiviertem Tarif ebenso aus - anders als die
 30-Tage-Prognose selbst, die ausschließlich auf bereits abgeschlossenen
 Tagen und den Investitionskosten beruht, deshalb den tatsächlichen,
 UNMASKIERTEN Restbetrag braucht (nicht den während einer Pause
 ausgeblendeten) und während einer Tarifpause sichtbar bleibt. Fehlen
 gültige Investitionskosten, liefert die Methode dagegen für ALLE SIEBEN
-Sensoren `None` (früher Rückgabepfad) - auch für `economics_result_today`
+Sensoren `None` (früher Rückgabepfad) - auch für `economics_net_savings_today`
 und einen bereits intern erreichten, weiterhin persistierten
 `payback_achieved_at`, der erst wieder veröffentlicht wird, sobald erneut
 Investitionskosten hinterlegt sind.
 
-`economics_result_today` ist der einzige zyklisch zurückgesetzte Zähler der
+`economics_net_savings_today` summiert ausschließlich neue Höchststandszuwächse
+des laufenden Tages und kann innerhalb des Tages nicht sinken. Auch dieser
+Sensor hat eine neue Unique-ID und übernimmt keine ältere Tagesstatistik des
+Roh-Cashflows. Er ist der einzige zyklisch zurückgesetzte Zähler der
 Integration und veröffentlicht deshalb zusätzlich
-`economics_result_today_last_reset` (Beginn des laufenden lokalen
-Kalendertages). Der Sensor reicht ihn über das optionale
-`last_reset_fn`-Feld von `SaxPowerSensorEntityDescription` als `last_reset`
-durch - ohne diesen Zeitpunkt läse die Langzeitstatistik den Sprung auf 0
-um Mitternacht als negativen Zuwachs in Höhe des Tagesergebnisses
-(Issue #133). Weil ein manueller Bilanzneustart den Tageszähler auch
-mitten am Tag auf 0 setzt, ist der gemeldete Zeitpunkt der spätere von
-Tagesbeginn und `last_restart_at`.
+`economics_net_savings_today_last_reset`. Der Sensor reicht ihn über das
+optionale `last_reset_fn`-Feld von `SaxPowerSensorEntityDescription` als
+`last_reset` durch - ohne diesen Zeitpunkt läse die Langzeitstatistik den
+Sprung auf 0 um Mitternacht als negativen Zuwachs in Höhe des Tagesergebnisses
+(Issue #133). Weil sowohl ein neuer Bootstrap nach einem unvollständigen
+Store als auch ein manueller Bilanzneustart den Tageszähler mitten am Tag auf
+0 setzen können, ist der gemeldete Zeitpunkt der späteste aus Tagesbeginn,
+`economics_started_at` und `last_restart_at`.
 
 Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 2 erweitert
 (statt einer Hauptversion, aus demselben Grund wie beim
-`STORAGE_VERSION`-Kommentar in `energy_store.py`). Drei unabhängige Bündel:
+`STORAGE_VERSION`-Kommentar in `energy_store.py`). Drei getrennt validierte Bündel:
 das ursprüngliche Sieben-Felder-Bündel oben (unverändert), `day_results`
 (jeder Tag einzeln validiert, `_validated_day_result`) sowie `current_day`
-plus seine vier Zähler als eigenes Fünfer-Bündel (`_validated_current_day`)
+plus seine sechs Werte als eigenes Sieben-Felder-Bündel
+(`_validated_current_day`)
 - fehlt/ist auch nur eines ungültig, gilt der ganze angefangene Tag als
-nicht aussagekräftig, ohne die abgeschlossene Historie zu berühren.
+nicht aussagekräftig, ohne die abgeschlossene Historie zu berühren. Das gilt
+nur bei einem vollständigen Kernbündel; muss dieses neu gebootstrapped werden,
+verwirft der Coordinator alle davon abhängigen Tages- und Payback-Daten.
 `payback_achieved_at` ist wie `economics_started_at` einmalig gesetzt und
-danach unveränderlich.
+danach unveränderlich. Minor-Version 6 ergänzt den nichtnegativen, monotonen
+Höchststand; Tageswerte werden seither ebenfalls nichtnegativ validiert.
 
 ### Datenqualität, Diagnose und Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY)
 
@@ -734,11 +772,16 @@ ein Fehler beim Dashboardbau blockiert nie das Setup.
 
 ### Dashboard-Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
 
-Der sechste View folgt unmittelbar auf den unveränderten technischen View
+Der sechste View folgt unmittelbar auf den technischen View
 `wirtschaftlichkeit`. Er führt keine eigene Wirtschaftsberechnung ein,
-sondern löst `economics_operating_result` einmal über `_entity_id` aus der
-Entity Registry auf und verwendet ausschließlich diese ID für alle
-Netto-Ergebnisse:
+sondern löst `economics_net_savings` einmal über `_entity_id` aus der Entity
+Registry auf und verwendet ausschließlich diese ID für alle
+Netto-Ersparnis-Werte. Diese neue Entity ist der persistierte, nichtnegative
+Höchststand und besitzt bewusst keine Recorder-Historie des bestehenden
+technischen Roh-Cashflows. Wegen der Home-Assistant-Vorgabe für
+`device_class: monetary` verwendet sie `state_class: total`; ihr
+persistierter Bilanzbeginn wird als `last_reset` veröffentlicht und markiert
+den einzigen kontrollierten Rücksprung:
 
 - `_savings_status_card` steht als selbst ausblendende Core-`markdown`-Karte
   an erster Stelle. Die Jinja-Vorlage liest nur den Zustand der bereits für
@@ -768,13 +811,14 @@ Netto-Ergebnisse:
   bleiben leer; ohne Registry-ID entfällt der Block vollständig.
 - Die Karte "Gesamt seit Bilanzbeginn" ist eine Core-`entities`-Karte. Ihre
   Ergebniszeile verweist direkt auf den aktuellen Zustand von
-  `economics_operating_result`; eine `_attribute_row` zeigt darunter
+  `economics_net_savings`; eine `_attribute_row` zeigt darunter
   `economics_started_at` von `economics_status` als "Bilanzbeginn". Sie nutzt
   bewusst keine Recorder-Differenz.
-- Statische Markdown-Karten erklären die unveränderte Nettoformel und die
-  Grenze der Zeitraumwerte: nur Recorder-Daten der laufenden Bilanz ab dem
-  angezeigten Bilanzbeginn. Der optionale Vorlauf-Ertrag bleibt außerhalb der
-  Kalenderwerte.
+- Statische Markdown-Karten erklären Rohformel und Höchststandsregel sowie
+  die Grenze der Zeitraumwerte: nur Daten seit Beginn der Recorder-Aufzeichnung
+  von `economics_net_savings`. Bei aktualisierten Installationen kann dieser
+  später als der angezeigte Bilanzbeginn liegen. Der optionale Vorlauf-Ertrag
+  bleibt außerhalb der Kalenderwerte.
 - `_savings_payback_block` stellt die vorhandene Amortisationsprognose direkt
   unter diesen Werten dar. Zwei Core-`conditional`-Karten reagieren
   ausschließlich auf den Laufzeitzustand von
@@ -792,19 +836,29 @@ Netto-Ergebnisse:
   `statistic`-Karte und das `statistics-graph` teilen exakt den isolierten Key
   `energy_sax_power_savings`. Der Statistikwert verwendet
   `period: energy_date_selection`; das Balkendiagramm setzt
-  `energy_date_selection: true`, enthält nur `economics_operating_result` und
+  `energy_date_selection: true`, enthält nur `economics_net_savings` und
   bewusst keinen `period`-Schlüssel, damit Home Assistant seine Auflösung
   selbst wählt. Der ganze Block wird erst nach erfolgreicher Registry-
   Auflösung gebaut - der Datumswähler kann deshalb nie allein zurückbleiben.
-  Ein Markdown-Hinweis dokumentiert Recorder-/Bilanzstart-/Reset-Grenzen;
+  Ein Markdown-Hinweis dokumentiert Recorder-/Bilanzstart-/Reset-Grenzen:
+  Ein Zeitraum über einen Bilanzneustart kann wegen des expliziten
+  `last_reset` positive Zuwächse beider Bilanzabschnitte zusammenfassen.
   Python und Jinja berechnen keine Zeiträume.
 
-Der vorhandene Missing-View-Mechanismus vergleicht die View-Pfade dynamisch.
-Mit `ersparnis` in der erwarteten Konfiguration meldet ein gespeichertes
-Fünf-View-Dashboard deshalb ausschließlich den neuen View, ohne es zu
-überschreiben; Reinstall baut alle sechs Views neu. Ein vollständiger
-Struktur-Hash im Dashboard-Test friert den bestehenden View
-`wirtschaftlichkeit` auf seinem vorherigen Stand ein.
+Der vorhandene Dashboard-Aktualitätsmechanismus vergleicht die View-Pfade
+dynamisch. Mit `ersparnis` in der erwarteten Konfiguration meldet ein
+gespeichertes Fünf-View-Dashboard den neuen View und wegen der neuen
+Tages-Netto-Entity zugleich den veralteten technischen View als
+„Wirtschaftlichkeit, Ersparnis“, ohne es zu überschreiben. Für die bereits
+veröffentlichten Sechs-View-Snapshot-Stände reicht der Pfadvergleich nicht,
+weil beide betroffenen Views schon vorhanden sind: Die Prüfung verlangt dort
+gezielt die aufgelösten Entity-IDs von
+`economics_net_savings_today` beziehungsweise `economics_net_savings` und
+meldet andernfalls „Wirtschaftlichkeit, Ersparnis“. Sie löst weiterhin nur
+den Reparaturhinweis aus; Reinstall baut erst nach Bestätigung alle sechs
+Views neu. Ein vollständiger Struktur-Hash im Dashboard-Test schützt den
+View `wirtschaftlichkeit` einschließlich der verständlicheren
+Netto-Ersparnis-Namen.
 
 ## Datenfluss
 
@@ -1366,7 +1420,7 @@ tests/
 │                                  Tages-Buckets/Payback-Erweiterung (REQ-ECONOMICS-
 │                                  AMORTIZATION): Round-Trip von day_results/current_day/
 │                                  payback_achieved_at, ein kaputter Tageseintrag verwirft
-│                                  nur sich selbst, das Fünfer-Bündel des laufenden Tages
+│                                  nur sich selbst, das Sieben-Felder-Bündel des laufenden Tages
 │                                  wird als Ganzes verworfen, Kappung auf MAX_STORED_DAYS
 │                                  sowie der unveränderliche Payback-Zeitpunkt
 ├── test_economics_amortization.py   Reine ROI-/Amortisationsprognose

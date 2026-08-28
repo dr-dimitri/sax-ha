@@ -320,7 +320,10 @@
         "name": "Vermiedene Netzkosten"
       },
       "economics_operating_result": {
-        "name": "Operatives Ergebnis"
+        "name": "Operativer Roh-Cashflow"
+      },
+      "economics_net_savings": {
+        "name": "Netto-Ersparnis"
       },
       "economics_unvalued_inventory": {
         "name": "Unbewerteter Energiebestand"
@@ -346,14 +349,14 @@
       "economics_remaining_to_payback": {
         "name": "Restbetrag bis Amortisation"
       },
-      "economics_result_today": {
-        "name": "Operatives Ergebnis heute"
+      "economics_net_savings_today": {
+        "name": "Netto-Ersparnis heute"
       },
       "economics_average_daily_result_30d": {
-        "name": "Durchschnittliches Tagesergebnis (30 Tage)"
+        "name": "Durchschnittliche tägliche Netto-Ersparnis (30 Tage)"
       },
       "economics_projected_annual_result": {
-        "name": "Hochgerechnetes Jahresergebnis"
+        "name": "Hochgerechnete jährliche Netto-Ersparnis"
       },
       "economics_estimated_payback_date": {
         "name": "Voraussichtliches Amortisationsdatum"
@@ -567,8 +570,8 @@
       "fix_flow": {
         "step": {
           "init": {
-            "title": "Fehlende Tabs im Dashboard „{dashboard}“ ergänzen?",
-            "description": "Dem mitgelieferten Dashboard fehlen Tabs, die eine neuere Version der Integration mitbringt: **{views}**.\n\nDas Dashboard wird nur bei der Ersteinrichtung angelegt und danach nie wieder verändert - eigene Anpassungen bleiben dadurch erhalten, neue Tabs kommen aber auch nicht von selbst hinzu.\n\n**Bestätigen**: Das Dashboard wird auf den aktuellen Auslieferungsstand zurückgesetzt. Die fehlenden Tabs sind danach vorhanden, eigene Änderungen am Dashboard gehen dabei verloren.\n**Abbrechen**: Es ändert sich nichts, und dieser Hinweis erscheint nicht erneut.",
+            "title": "Dashboard „{dashboard}“ aktualisieren?",
+            "description": "Im mitgelieferten Dashboard fehlen Tabs oder vorhandene Bereiche verwenden einen älteren Stand: **{views}**.\n\nDas Dashboard wird nur bei der Ersteinrichtung angelegt und danach nie wieder verändert - eigene Anpassungen bleiben dadurch erhalten, neue oder aktualisierte Inhalte kommen aber auch nicht von selbst hinzu.\n\n**Bestätigen**: Das Dashboard wird auf den aktuellen Auslieferungsstand zurückgesetzt. Die genannten Bereiche sind danach aktuell; eigene Änderungen am Dashboard gehen dabei verloren.\n**Abbrechen**: Es ändert sich nichts, und dieser Hinweis erscheint nicht erneut.",
             "menu_options": {
               "confirm": "Bestätigen - Dashboard neu aufbauen",
               "cancel": "Abbrechen - Dashboard so lassen"
@@ -700,7 +703,7 @@
     },
     "restart_economics_accounting": {
       "name": "Wirtschaftlichkeitsbilanz neu starten",
-      "description": "Setzt die Wirtschaftlichkeitsbilanz kontrolliert zurück (Geldsummen, Preisabdeckungszähler, Tages-Buckets, Aktivierungszeitpunkt, ein bereits erreichtes Amortisationsdatum) - rührt niemals Energiezähler oder Herkunftsaufteilung an.",
+      "description": "Setzt die Wirtschaftlichkeitsbilanz kontrolliert zurück (Geldsummen, Netto-Ersparnis, Preisabdeckungszähler, Tages-Buckets, Aktivierungszeitpunkt, ein bereits erreichtes Amortisationsdatum) - rührt niemals Energiezähler oder Herkunftsaufteilung an.",
       "fields": {
         "device_id": {
           "name": "Gerät",
@@ -739,8 +742,8 @@
           "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Gemeinsame Quelle für den Modus „Smart“ und den optionalen Mindestwert des netzdienlichen Ladens.",
           "pv_forecast_factor": "Nur für den Modus „Smart“: Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab. Der Mindestwert des netzdienlichen Ladens vergleicht dagegen den unveränderten Sensorwert.",
           "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Festpreis“ rechnet mit einem ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ rechnet mit einem täglich wiederkehrenden Preisprofil: ein Grundpreis plus bis zu acht abweichende Zeitfenster, einzugeben auf der nächsten Seite. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung. Nur „Dynamisch“ verwendet den Strompreis-Sensor; das preisoptimierte Laden nutzt ihn unabhängig vom Tarifmodell weiter.",
-          "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt, Restbetrag bis zur Amortisation und das voraussichtliche Rückzahlungsdatum; verrechnet wird gegen das laufende operative Ergebnis (vermiedener Netzbezug abzüglich Lade- und PV-Opportunitätskosten). Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
-          "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt, Restbetrag und Rückzahlungsdatum; das operative Ergebnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf."
+          "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt, Restbetrag bis zur Amortisation und das voraussichtliche Rückzahlungsdatum; verrechnet wird gegen die laufende, nichtnegative Netto-Ersparnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
+          "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt, Restbetrag und Rückzahlungsdatum; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf."
         }
       },
       "economics_fixed": {

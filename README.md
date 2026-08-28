@@ -55,7 +55,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - optional einen Stromtarif hinterlegen, an dem sich die Wirtschaftlichkeit
   bemisst
 - daraus Netzladekosten, entgangene Einspeisevergütung, vermiedene
-  Netzkosten und ein operatives Ergebnis bilanzieren
+  Netzkosten und eine nichtnegative Netto-Ersparnis bilanzieren
 - optional aus Investitionskosten ROI, Amortisationsfortschritt und eine
   30-Tage-Amortisationsprognose berechnen
 - optional ein vorbereitetes SAX-Power-Dashboard anlegen
@@ -154,7 +154,8 @@ Auslieferungszustand zurücksetzen. Dabei werden eigene Änderungen am Dashboard
 
 Das Dashboard wird **nur bei der Ersteinrichtung** angelegt und danach nicht
 mehr verändert – eigene Anpassungen bleiben dadurch erhalten. Bringt ein
-Update der Integration einen neuen Tab mit, fehlt dieser einem bestehenden
+Update der Integration einen neuen Tab oder eine fachlich notwendige
+Aktualisierung der Ersparnisbereiche mit, fehlt diese einem bestehenden
 Dashboard deshalb. Home Assistant meldet das unter **Einstellungen → System →
 Reparaturen** und bietet dort an, das Dashboard neu aufzubauen; wer das
 ablehnt, wird nicht erneut gefragt.
@@ -482,8 +483,8 @@ unterscheidet sich:
 - **Festpreis** (0,30 EUR/kWh ganztägig): Netzladekosten = 1 kWh × 0,30
   EUR/kWh = 0,30 EUR. PV-Opportunitätskosten = 1 kWh × 0,08 EUR/kWh = 0,08
   EUR. Vermiedene Netzkosten (Entladung um 0,30 EUR/kWh) = 1 kWh × 0,30
-  EUR/kWh = 0,30 EUR. Operatives Ergebnis = 0,30 − 0,30 − 0,08 = **−0,08
-  EUR**.
+  EUR/kWh = 0,30 EUR. Der operative Roh-Cashflow beträgt 0,30 − 0,30 −
+  0,08 = **−0,08 EUR**; die sichtbare Netto-Ersparnis bleibt bei **0 EUR**.
 - **Tageszeitabhängig** (Grundpreis 0,25 EUR/kWh, Zeitfenster 17:00–20:00
   Uhr zu 0,40 EUR/kWh): Lädt die Netzladung innerhalb des Zeitfensters,
   kosten die 1 kWh 0,40 EUR statt 0,25 EUR - außerhalb des Fensters gilt
@@ -503,12 +504,13 @@ unterscheidet sich:
 Netzladekosten          = geladene Netzenergie (kWh) × Netzbezugspreis zum Ladezeitpunkt
 PV-Opportunitätskosten  = geladene PV-Energie (kWh) × Einspeisevergütung
 Vermiedene Netzkosten   = monetarisierbare Entladung (kWh) × Netzbezugspreis zum Entladezeitpunkt
-Operatives Ergebnis     = Vermiedene Netzkosten − Netzladekosten − PV-Opportunitätskosten
-Amortisationsstand      = Operatives Ergebnis + Bereits erwirtschafteter Ertrag
+Operativer Roh-Cashflow = Vermiedene Netzkosten − Netzladekosten − PV-Opportunitätskosten
+Netto-Ersparnis         = max(bisherige Netto-Ersparnis, operativer Roh-Cashflow, 0)
+Amortisationsstand      = Netto-Ersparnis + Bereits erwirtschafteter Ertrag
 ROI (%)                 = Amortisationsstand ÷ Investitionskosten × 100
 Amortisationsfortschritt (%) = ROI, auf 0 bis 100 % begrenzt
 Restbetrag              = max(Investitionskosten − Amortisationsstand, 0)
-30-Tage-Prognose        = Durchschnitt der letzten 30 abgeschlossenen Tagesergebnisse
+30-Tage-Prognose        = Durchschnitt der Netto-Ersparnis-Zuwächse der letzten 30 Tage
 Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
 ```
 
@@ -518,9 +520,10 @@ Jahreshochrechnung      = 30-Tage-Durchschnitt × 365,2425
   Netzanschlusspunkt** (siehe [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)),
   keine physikalische Einzelstromverfolgung.
 - Monatlicher Grundpreis, Finanzierungskosten, Wartung und
-  Batteriealterung sind **nicht Bestandteil** dieser Rechnung - das
-  operative Ergebnis bildet ausschließlich die reinen Arbeitspreis-
-  Zahlungsströme ab.
+  Batteriealterung sind **nicht Bestandteil** dieser Rechnung - der
+  operative Roh-Cashflow bildet ausschließlich die reinen Arbeitspreis-
+  Zahlungsströme ab. Die sichtbare Netto-Ersparnis ist dessen historischer
+  Höchststand und fällt deshalb durch spätere Kosten nicht zurück.
 - Die 30-Tage-Prognose und das geschätzte Amortisationsdatum sind
   **keine Garantie**: Sie schreiben die letzten 30 Tage unverändert fort
   und reagieren nicht auf künftige Preis-, Verbrauchs- oder
@@ -588,12 +591,18 @@ Entladeenergie, nie ein Sollwert:
 - **Vermiedene Netzkosten**: entladene Energie zum jeweils zum
   Entladezeitpunkt gültigen Netzbezugspreis, also der Betrag, den der
   Hausverbrauch dadurch nicht aus dem Netz decken musste.
-- **Operatives Ergebnis**: vermiedene Netzkosten abzüglich Netzladekosten
-  und PV-Opportunitätskosten - ein kumulierter operativer Cashflow, kein
-  Kontostand. Ladeverluste werden dadurch automatisch sichtbar: Kosten
-  entstehen für die volle geladene Energie, Nutzen nur für die tatsächlich
-  wieder entladene, ohne dass dafür ein angenommener Wirkungsgrad nötig
-  wäre. Kann negativ sein.
+- **Operativer Roh-Cashflow**: vermiedene Netzkosten abzüglich
+  Netzladekosten und PV-Opportunitätskosten. Dieser technische Wert kann
+  durch spätere Kosten sinken und auch negativ sein.
+- **Netto-Ersparnis**: ein gespeicherter Höchststand aus
+  dem operativen Roh-Cashflow. Sie beginnt bei 0 und fällt nie zurück: Sind
+  bereits 100 EUR erreicht, bleiben 100 EUR sichtbar, auch wenn spätere
+  Kosten den operativen Roh-Cashflow auf 80 EUR senken. Erst ein neuer
+  Höchststand erhöht die Ersparnis. Bei einem bisherigen Höchststand von 0
+  wird ein negativer Rohwert nicht per Absolutwert positiv umgedeutet,
+  sondern bleibt 0 EUR; ein früherer positiver Höchststand bleibt stehen.
+  Ladeverluste bleiben in den Kostenpositionen und im Diagnose-Rohwert
+  sichtbar.
 
 Zusätzlich zeigen zwei Diagnosesensoren, welcher Anteil der Ladeenergie
 (noch) nicht bewertet werden konnte: **Unbepreiste Ladeenergie**/
@@ -617,15 +626,30 @@ Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
 ist oder die Bilanz noch auf Kapazität/Ladezustand wartet - ein
 deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
 
+Beim ersten Start nach einem Update von einem älteren Bilanzspeicher ist nur
+der aktuelle Roh-Cashflow sicher bekannt. Die Netto-Ersparnis beginnt deshalb
+ehrlich bei `max(0, aktueller Roh-Cashflow)`; ein früherer, damals noch nicht
+gespeicherter Höchststand kann nicht rückwirkend erfunden werden. Weil alte
+Tageswerte noch Roh-Cashflows statt Höchststandszuwächsen enthalten, startet
+die 30-Tage-Prognose dabei mit neuen Tagen neu. Geldsummen und Bilanzbeginn
+bleiben erhalten. Gesamt- und Tages-Netto-Ersparnis sind außerdem neue
+Entities mit jeweils eigener Recorder-Historie: Bereits gespeicherte negative
+oder rückläufige Gesamt- und Tagesänderungen des technischen Roh-Cashflows
+werden nicht übernommen. Bei einer aktualisierten Installation kann die
+Zeitraumhistorie der Netto-Ersparnis deshalb jünger sein als der weiterhin
+angezeigte Bilanzbeginn.
+
 ## Ersparnisübersicht
 
-Der sechste Tab **Ersparnis** fasst das vorhandene **operative Ergebnis**
-bewusst kompakt zusammen. Netto-Ersparnis bedeutet dort immer: vermiedene
-Netzbezugskosten abzüglich Netzladekosten und entgangener Einspeisevergütung.
-Positive Werte sind Ersparnisse, negative Werte sind Mehrkosten; ein echtes
-Ergebnis von 0 bleibt als 0 EUR sichtbar.
+Der sechste Tab **Ersparnis** fasst die **Netto-Ersparnis** bewusst kompakt
+zusammen. Grundlage sind vermiedene Netzbezugskosten abzüglich
+Netzladekosten und entgangener Einspeisevergütung. Angezeigt wird ein
+gespeicherter, nichtnegativer Höchststand. Spätere Kosten verringern eine
+bereits festgehaltene Ersparnis nicht; ein echtes Ergebnis von 0 bleibt als
+0 EUR sichtbar. Die unmittelbar darüber erläuterte Upgrade-Grenze gilt auch
+für diese Darstellung.
 
-Vier Karten zeigen die Änderung des operativen Ergebnisses im laufenden
+Vier Karten zeigen die Zunahme der Netto-Ersparnis im laufenden
 Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
 laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus
 Home Assistants Recorder-Langzeitstatistik, nicht aus rollierenden
@@ -635,17 +659,17 @@ oder ist die Entity vom Recorder ausgeschlossen, bleibt der Core-Zustand
 0 EUR.
 
 **Gesamt seit Bilanzbeginn** ist dagegen der aktuelle Zustand des
-fortlaufenden Sensors `economics_operating_result`, keine Recorder-Differenz.
-Daneben steht der sichtbare **Bilanzbeginn**. Die Kalenderwerte umfassen nur
-Daten dieser laufenden Bilanz. Ein optional eingetragener, bereits vor dem
-Bilanzbeginn erwirtschafteter Ertrag bleibt zeitlich nicht zuordenbar und wird
-deshalb ausschließlich in der ROI-/Amortisationsdarstellung berücksichtigt,
-nicht in Tag, Woche, Monat oder Jahr.
-
-Wird die Wirtschaftlichkeitsbilanz manuell neu gestartet und schneidet eine
-angezeigte Kalenderperiode diesen Neustart, kann die Recorder-Änderung den
-Sprung auf 0 enthalten. Der Tab weist deshalb Bilanzbeginn und Geltungsbereich
-aus, rekonstruiert aber keine frühere Historie.
+fortlaufenden Sensors `economics_net_savings`, keine Recorder-Differenz.
+Daneben steht der sichtbare **Bilanzbeginn** der aktuellen Bilanz. Die
+Kalenderwerte umfassen die Zuwächse seit Beginn der Recorder-Aufzeichnung und
+können deshalb bei einem Zeitraum über einen manuellen Bilanzneustart durch
+den expliziten `last_reset` positive Zuwächse des vorherigen und des aktuellen
+Bilanzabschnitts zusammenfassen. Sie dürfen dadurch vor dem sichtbaren
+Bilanzbeginn beginnen, rekonstruieren aber keine Daten vor dem Recorder-Start.
+Ein optional eingetragener, bereits vor dem Bilanzbeginn erwirtschafteter
+Ertrag bleibt zeitlich nicht zuordenbar und wird deshalb ausschließlich in der
+ROI-/Amortisationsdarstellung berücksichtigt, nicht in Tag, Woche, Monat oder
+Jahr.
 
 ### Status und unbewerteter Anfangsbestand
 
@@ -670,10 +694,9 @@ eingehen. Das ist kein Messfehler. Bei 0, einem negativen oder unbekannten
 Zustand sowie einer fehlenden Entity bleibt die Karte ausgeblendet. Sie
 schätzt weder Restdauer noch Ladezyklen oder künftige Ersparnis.
 
-Die Ergebniskarten selbst bleiben unverändert: 0 ist ein echtes berechnetes
-Netto-Ergebnis, negative Werte sind Mehrkosten und `unknown`/`unavailable`
-werden nicht als 0 ausgegeben. "Ersparnis" bezeichnet immer das operative
-Netto-Ergebnis; der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
+0 ist ein echtes berechnetes Netto-Ergebnis; negative Netto-Ersparnisse sind
+durch den Höchststand ausgeschlossen und `unknown`/`unavailable` werden nicht
+als 0 ausgegeben. Der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
 
 ### Wann ist der Speicher abbezahlt?
 
@@ -716,35 +739,38 @@ deaktiviert, solange der Tab keinen gesondert beschrifteten Vergleichswert
 ausgibt.
 
 Auch diese Auswertung verwendet ausschließlich die Recorder-Langzeitstatistik
-von `economics_operating_result`: Der Einzelwert ist dessen Änderung im
+von `economics_net_savings`: Der Einzelwert ist dessen Änderung im
 gewählten Zeitraum, das Diagramm enthält keine zusätzlichen Kosten- oder
 Ertragsreihen. Home Assistant wählt abhängig von der Zeitspanne selbst die
-passende Stunden-, Tages- oder Monatsauflösung. Es gibt dafür weder neue SAX-
-Sensoren noch eine zweite Berechnung.
+passende Stunden-, Tages- oder Monatsauflösung. Der neue Sensor trennt diese
+Historie vom technischen Roh-Cashflow; eine zweite Berechnung im Dashboard
+gibt es nicht.
 
-Eine Auswahl vor dem sichtbaren Bilanzbeginn erzeugt keine rückwirkenden
-Werte. Fehlt Recorder-Historie oder ist die Ergebnis-Entity vom Recorder
-ausgeschlossen, bleiben Wert und Diagramm unbekannt beziehungsweise leer;
-ein mathematisches Ergebnis von 0 bleibt davon unterscheidbar. Schneidet die
-Auswahl einen manuellen Neustart der Bilanz, kann die dargestellte Änderung
-den Reset enthalten.
+Eine Auswahl vor dem sichtbaren Bilanzbeginn erfindet keine rückwirkenden
+Werte. Existiert dort Recorder-Historie aus einem früheren Bilanzabschnitt,
+kann sie jedoch angezeigt werden; schneidet die Auswahl den manuellen
+Neustart, kann die dargestellte Änderung positive Zuwächse aus beiden
+Bilanzabschnitten enthalten. Fehlt Recorder-Historie oder ist die
+Ergebnis-Entity vom Recorder ausgeschlossen, bleiben Wert und Diagramm
+unbekannt beziehungsweise leer; ein mathematisches Ergebnis von 0 bleibt
+davon unterscheidbar.
 
 ## ROI und Amortisationsprognose
 
 Wird zusätzlich zum Tarif ein Feld **Investitionskosten (EUR)** ausgefüllt
 (siehe [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)),
-setzt die Integration das [operative Ergebnis](#wirtschaftlichkeitsbilanz) in
+setzt die Integration die [Netto-Ersparnis](#wirtschaftlichkeitsbilanz) in
 Bezug zu dieser Investition:
 
-- **ROI**: Amortisationsstand in Prozent der Investitionskosten - bewusst
-  unbegrenzt, also auch negativ (bislang Verlust) oder über 100 % (bereits
-  mehrfach amortisiert).
+- **ROI**: Amortisationsstand in Prozent der Investitionskosten - durch die
+  nichtnegative Netto-Ersparnis nie negativ, aber weiterhin über 100 %
+  möglich (bereits mehrfach amortisiert).
 - **Amortisationsfortschritt**: derselbe Wert, aber auf 0 bis 100 %
   begrenzt - für eine Fortschrittsanzeige.
 - **Restbetrag bis Amortisation**: Investitionskosten abzüglich
   Amortisationsstand, nie unter 0 EUR.
-- **Operatives Ergebnis heute**: nur der auf den laufenden Kalendertag
-  entfallende Anteil des operativen Ergebnisses.
+- **Netto-Ersparnis heute**: nur der im laufenden Kalendertag neu erreichte
+  Zuwachs des Höchststands; spätere Kosten machen ihn nicht rückläufig.
 
 ### Speicher, die schon vor der Integration liefen
 
@@ -752,8 +778,8 @@ Läuft die Anlage bereits seit Jahren, hat sie einen Teil der Investition
 längst erwirtschaftet - die Integration kennt davon aber nichts und stünde
 bei 0 % Fortschritt. Dafür gibt es das optionale Feld **Bereits
 erwirtschafteter Ertrag (EUR)** auf derselben Optionsseite wie die
-Investitionskosten. Der eingetragene Betrag zählt als Vorlauf zum laufend
-gemessenen Ergebnis; die Summe aus beidem ist der oben verwendete
+Investitionskosten. Der eingetragene Betrag zählt als Vorlauf zur laufend
+gemessenen Netto-Ersparnis; die Summe aus beidem ist der oben verwendete
 **Amortisationsstand**.
 
 Der Wert wirkt ausschließlich auf ROI, Amortisationsfortschritt und
@@ -765,10 +791,11 @@ Das **Voraussichtliche Amortisationsdatum** setzt der Vorlauf dagegen nicht:
 Trägt erst er die Amortisation, dann lag der tatsächliche Zeitpunkt in einer
 Vergangenheit, die diese Integration nie beobachtet hat - ein Datum von heute
 wäre erfunden. Amortisationsfortschritt (100 %) und Restbetrag (0 EUR) zeigen
-die erreichte Amortisation trotzdem an. **Operatives Ergebnis** und **Operatives Ergebnis
-heute** zeigen weiterhin nur, was die Integration selbst gemessen hat - sonst
-erschiene der eingetragene Betrag in der 30-Tage-Verlaufsgrafik als
-Tagesertrag. Solange die Bilanz noch nicht läuft (kein Tarif, oder noch auf
+die erreichte Amortisation trotzdem an. **Netto-Ersparnis** und
+**Netto-Ersparnis heute** zeigen weiterhin nur, was die Integration selbst
+gemessen hat - sonst erschiene der eingetragene Betrag in der
+30-Tage-Verlaufsgrafik als Tagesertrag. Solange die Bilanz noch nicht läuft
+(kein Tarif, oder noch auf
 Kapazität/Ladezustand wartend), bleiben die Amortisationssensoren
 "unbekannt", auch wenn ein Vorlauf hinterlegt ist.
 
@@ -780,9 +807,9 @@ unverändert weiter.
 
 Zusätzlich berechnet die Integration eine **30-Tage-Prognose** aus genau
 den jüngsten 30 zusammenhängenden, vollständig abgeschlossenen
-Kalendertagen (der laufende Tag zählt nie mit): **Durchschnittliches
-Tagesergebnis (30 Tage)** und die daraus hochgerechnete **Hochgerechnetes
-Jahresergebnis** (Durchschnitt × 365,2425 Tage). Ist bereits ein
+Kalendertagen (der laufende Tag zählt nie mit): **Durchschnittliche tägliche
+Netto-Ersparnis (30 Tage)** und die daraus berechnete **Hochgerechnete
+jährliche Netto-Ersparnis** (Durchschnitt × 365,2425 Tage). Ist bereits ein
 ausreichend positiver Durchschnitt und ein offener Restbetrag bekannt,
 zeigt **Voraussichtliches Amortisationsdatum** das daraus abgeleitete
 Datum. Die Prognose braucht lückenlos genau diese 30 aufeinanderfolgenden
@@ -797,10 +824,11 @@ Home Assistant an einem Tag längere Zeit aus (Neustart, Update,
 Stromausfall), enthält dieser Tag nur einen Teil seines Ergebnisses und
 würde Durchschnitt, Hochrechnung und Amortisationsdatum zu pessimistisch
 machen - auch dann bleibt die Prognose lieber "unbekannt". Kurze
-Neustarts von wenigen Minuten sind davon nicht betroffen. Für bereits
-gespeicherte Tage aus einer älteren Version der Integration ist die
-Beobachtungsdauer nicht bekannt: Nach dem Update auf diese Version bleibt
-die 30-Tage-Prognose deshalb einmalig so lange "unbekannt", bis 30 neue,
+Neustarts von wenigen Minuten sind davon nicht betroffen. Beim Update von
+einer Version ohne gespeicherten Netto-Ersparnis-Höchststand werden die alten
+Tageswerte verworfen, weil sie noch rückläufige Roh-Cashflows enthalten und
+nicht korrekt in Höchststandszuwächse umgerechnet werden können. Die
+30-Tage-Prognose bleibt deshalb einmalig so lange "unbekannt", bis 30 neue,
 vollständig beobachtete Kalendertage vorliegen. Die übrigen Sensoren
 (Bilanz, ROI, Fortschritt, Restbetrag, Tagesergebnis) sind davon nicht
 betroffen. Ein nicht positiver

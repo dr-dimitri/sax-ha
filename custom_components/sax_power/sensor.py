@@ -56,11 +56,11 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
     aktuell der Statussensor des preisoptimierten Ladens, der damit die
     zugrundeliegenden Preise und die geplanten Ladefenster mitliefert.
 
-    `last_reset_fn` ist optional und nur für zyklisch zurückgesetzte
-    `state_class: total`-Sensoren gedacht: ohne diesen Zeitpunkt deutet die
-    Langzeitstatistik den Sprung auf 0 nicht als Reset, sondern als
-    negativen Zuwachs in Höhe des bisherigen Werts (siehe
-    anforderung.yaml, REQ-ECONOMICS-AMORTIZATION, economics_result_today).
+    `last_reset_fn` ist optional und nur für `state_class: total`-Sensoren
+    mit einem kontrollierten Reset gedacht: ohne diesen Zeitpunkt deutet die
+    Langzeitstatistik den Sprung auf 0 als negativen Zuwachs. Das betrifft den
+    täglichen Reset von economics_net_savings_today ebenso wie den ausschließlich
+    manuell möglichen Bilanzneustart von economics_net_savings.
     """
 
     value_fn: Callable[[dict[str, Any]], StateType | date | datetime]
@@ -119,7 +119,7 @@ def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any
     (REQ-ECONOMICS-AMORTIZATION).
 
     Der ROI bezieht den vor der Einrichtung erwirtschafteten Ertrag mit
-    ein, economics_operating_result dagegen nicht - ohne diese Attribute
+    ein, economics_net_savings dagegen nicht - ohne diese Attribute
     ließe sich die Differenz zwischen beiden nirgends nachvollziehen.
     """
     if coordinator.data is None:
@@ -760,11 +760,16 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         attributes_fn=_economics_status_attributes,
     ),
     # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) ----------------
-    # Monetäre Sensoren nutzen state_class TOTAL statt TOTAL_INCREASING:
-    # Negative Strompreise lassen die Summen legitim sinken (siehe
-    # anforderung.yaml). Bei deaktiviertem Tarif liefert value_fn None wie
-    # jeder andere nicht verfügbare Wert dieser Integration - keine eigene
-    # HA-"unavailable"-Sonderbehandlung.
+    # Die drei Rohsummen nutzen state_class TOTAL: Negative Strompreise
+    # lassen sie legitim sinken (siehe anforderung.yaml). Der daraus
+    # abgeleitete operative Roh-Cashflow bleibt aus Kompatibilitätsgründen
+    # ebenfalls TOTAL.
+    # Die neue Netto-Ersparnis ist ein persistierter, nichtnegativer
+    # Höchststand mit einer frischen Recorder-Historie. MONETARY erlaubt in
+    # Home Assistant ebenfalls nur TOTAL; der Bilanzbeginn kennzeichnet
+    # dessen einzigen kontrollierten Reset. Bei deaktiviertem Tarif liefert
+    # value_fn None wie jeder andere nicht verfügbare Wert dieser Integration
+    # - keine eigene HA-"unavailable"-Sonderbehandlung.
     SaxPowerSensorEntityDescription(
         key="economics_grid_charge_cost",
         translation_key="economics_grid_charge_cost",
@@ -800,6 +805,16 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
         value_fn=_direct("economics_operating_result"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_net_savings",
+        translation_key="economics_net_savings",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_net_savings"),
+        last_reset_fn=_last_reset("economics_net_savings_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_unvalued_inventory",
@@ -873,14 +888,14 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_direct("economics_remaining_to_payback"),
     ),
     SaxPowerSensorEntityDescription(
-        key="economics_result_today",
-        translation_key="economics_result_today",
+        key="economics_net_savings_today",
+        translation_key="economics_net_savings_today",
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
-        value_fn=_direct("economics_result_today"),
-        last_reset_fn=_last_reset("economics_result_today_last_reset"),
+        value_fn=_direct("economics_net_savings_today"),
+        last_reset_fn=_last_reset("economics_net_savings_today_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_average_daily_result_30d",

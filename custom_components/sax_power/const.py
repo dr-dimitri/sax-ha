@@ -756,9 +756,9 @@ ECONOMICS_INVESTMENT_COST_STEP = 0.01
 # Investition längst zurückverdient ist - die Prognose startete faktisch
 # bei null. Der Wert wirkt AUSSCHLIESSLICH auf die Amortisationssensoren
 # (ROI, Fortschritt, Restbetrag, Rückzahlungsdatum), nie auf
-# economics_operating_result: Dessen Verlauf wird im Dashboard als
-# statistics-graph über `change` ausgewertet, ein Sprung durch eine
-# manuelle Eingabe würde dort als Tagesertrag erscheinen.
+# economics_net_savings: Dessen Netto-Ersparnis-Höchststand wird im
+# Dashboard als statistics-graph über `change` ausgewertet, ein Sprung
+# durch eine manuelle Eingabe würde dort als Tagesertrag erscheinen.
 #
 # 0 ist ein gültiger, ausdrücklicher Wert ("kein Vorlauf") - anders als
 # bei den Investitionskosten gibt es hier keinen Grund, ihn von

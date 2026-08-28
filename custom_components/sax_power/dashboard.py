@@ -491,14 +491,16 @@ def _savings_free_period_block(entity_id: str) -> dict[str, Any]:
                 "type": "markdown",
                 "content": (
                     "### Freier Zeitraum\n\n"
-                    "Es fließen nur Recorder-Daten seit dem angezeigten "
-                    "Bilanzbeginn ein. Eine Auswahl davor erzeugt keine "
-                    "rückwirkend erfundenen Werte. Fehlt Recorder-Historie "
+                    "Es fließen nur Daten seit Beginn der Recorder-Aufzeichnung "
+                    "der Netto-Ersparnis ein. Bei aktualisierten Installationen "
+                    "kann sie jünger als der angezeigte Bilanzbeginn sein; eine "
+                    "Auswahl davor erzeugt keine rückwirkend erfundenen Werte. "
+                    "Fehlt Recorder-Historie "
                     "oder ist die Ergebnis-Entity vom Recorder ausgeschlossen, "
                     "bleiben Wert und Diagramm unbekannt beziehungsweise leer. "
                     "Schneidet die Auswahl einen manuellen Neustart der "
-                    "Wirtschaftlichkeitsbilanz, kann die Recorder-Änderung den "
-                    "Reset enthalten."
+                    "Wirtschaftlichkeitsbilanz, kann der Recorder die positiven "
+                    "Zuwächse vor und nach dem Neustart zusammenfassen."
                 ),
             },
             {
@@ -1066,7 +1068,7 @@ async def async_build_dashboard_config(
         "",
         [
             ("sensor", "economics_remaining_to_payback"),
-            ("sensor", "economics_result_today"),
+            ("sensor", "economics_net_savings_today"),
             ("sensor", "economics_average_daily_result_30d"),
             ("sensor", "economics_projected_annual_result"),
             ("sensor", "economics_estimated_payback_date"),
@@ -1092,6 +1094,7 @@ async def async_build_dashboard_config(
         ("sensor", "economics_grid_charge_cost"),
         ("sensor", "economics_pv_opportunity_cost"),
         ("sensor", "economics_operating_result"),
+        ("sensor", "economics_net_savings"),
         ("sensor", "economics_unpriced_charge"),
         ("sensor", "economics_unpriced_discharge"),
     ):
@@ -1169,7 +1172,7 @@ async def async_build_dashboard_config(
     savings_status_card = _savings_status_card(status_entity_id)
     savings_inventory_card = _savings_inventory_card(hass, entry_id)
     savings_result_entity_id = _entity_id(
-        hass, "sensor", f"{entry_id}_economics_operating_result"
+        hass, "sensor", f"{entry_id}_economics_net_savings"
     )
     savings_period_grid = None
     savings_total_card = None
@@ -1213,8 +1216,9 @@ async def async_build_dashboard_config(
             "type": "markdown",
             "content": (
                 "Die Kalenderwerte stammen aus der Recorder-"
-                "Langzeitstatistik und umfassen nur Daten der laufenden "
-                "Bilanz ab dem angezeigten Bilanzbeginn."
+                "Langzeitstatistik der Netto-Ersparnis. Bei aktualisierten "
+                "Installationen beginnt diese Aufzeichnung später als der "
+                "daneben angezeigte Bilanzbeginn."
             ),
         }
         savings_free_period_block = _savings_free_period_block(savings_result_entity_id)
@@ -1230,10 +1234,11 @@ async def async_build_dashboard_config(
             {
                 "type": "markdown",
                 "content": (
-                    "Netto-Ersparnis = vermiedene Netzbezugskosten minus "
-                    "Netzladekosten und entgangene Einspeisevergütung. "
-                    "Positive Werte sind Ersparnisse, negative Werte sind "
-                    "Mehrkosten."
+                    "Grundlage der Netto-Ersparnis sind vermiedene "
+                    "Netzbezugskosten minus Netzladekosten und entgangene "
+                    "Einspeisevergütung. Angezeigt wird ein gespeicherter, "
+                    "nichtnegativer Höchststand. Spätere Kosten verringern eine "
+                    "bereits festgehaltene Ersparnis nicht."
                 ),
             },
             savings_period_grid,
@@ -1342,7 +1347,7 @@ async def _async_create_dashboard(
 async def async_check_dashboard_up_to_date(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
-    """Meldet ein vorhandenes, aber unvollständiges Dashboard als Issue.
+    """Meldet ein vorhandenes, aber unvollständiges/veraltetes Dashboard.
 
     Das mitgelieferte Dashboard wird genau einmal gebaut - danach setzt
     __init__ das Flag CONF_CREATE_DASHBOARD zurück, und async_create_dashboard
@@ -1353,8 +1358,11 @@ async def async_check_dashboard_up_to_date(
     würde (Anwenderbericht zu #138).
 
     Gemeldet wird ausschließlich ein VORHANDENES Dashboard, dem Tabs des
-    aktuellen Auslieferungsstands fehlen. Ein gar nicht vorhandenes
-    Dashboard ist dagegen eine bewusste Entscheidung des Anwenders (siehe
+    aktuellen Auslieferungsstands oder die neuen Netto-Ersparnis-Entities
+    fehlen. Letzteres erkennt gezielt die bereits veröffentlichten
+    Snapshot-Dashboards, deren unveränderte View-Pfade sonst einen aktuellen
+    Stand vortäuschen würden. Ein gar nicht vorhandenes Dashboard ist
+    dagegen eine bewusste Entscheidung des Anwenders (siehe
     const.CONF_CREATE_DASHBOARD) und wird nicht angemahnt - eine
     Reparaturaufforderung würde genau das Dashboard zurückholen, das er
     gerade gelöscht hat.
@@ -1394,12 +1402,19 @@ async def async_check_dashboard_up_to_date(
 async def _async_missing_dashboard_views(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> list[str]:
-    """Titel der Tabs, die dem gespeicherten Dashboard fehlen.
+    """Titel fehlender oder fachlich veralteter Tabs.
 
     Verglichen werden die Pfade, nicht die Titel: Der Pfad ist der stabile
-    Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Leer, wenn
-    das Dashboard vollständig ist, gar nicht existiert oder nicht im
-    Storage-Modus läuft (ein YAML-Dashboard verwaltet der Anwender selbst).
+    Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Für die
+    Umstellung von Roh-Cashflow auf persistierte Netto-Ersparnis reicht das
+    einmalig nicht: Die Snapshot-Stände besitzen bereits alle sechs Pfade,
+    referenzieren in den beiden betroffenen Views aber die alten Entities.
+    Deshalb müssen dort die aktuellen Entity-IDs vorkommen. Es wird weiterhin
+    nichts automatisch überschrieben; der Treffer öffnet nur denselben
+    reparierbaren Hinweis wie ein fehlender Tab.
+
+    Leer, wenn das Dashboard vollständig ist, gar nicht existiert oder nicht
+    im Storage-Modus läuft (ein YAML-Dashboard verwaltet der Anwender selbst).
     """
     lovelace_data = hass.data.get(LOVELACE_DATA)
     if lovelace_data is None:
@@ -1411,11 +1426,41 @@ async def _async_missing_dashboard_views(
     stored = await storage.async_load(False)
     if not isinstance(stored, dict):
         return []
-    stored_paths = {
-        view.get("path") for view in stored.get("views", []) if isinstance(view, dict)
+    stored_views = {
+        view.get("path"): view
+        for view in stored.get("views", [])
+        if isinstance(view, dict)
     }
 
     expected = await async_build_dashboard_config(hass, entry.entry_id)
+    outdated_paths = {
+        view["path"] for view in expected["views"] if view["path"] not in stored_views
+    }
+
+    for path, suffix in (
+        ("wirtschaftlichkeit", "economics_net_savings_today"),
+        ("ersparnis", "economics_net_savings"),
+    ):
+        stored_view = stored_views.get(path)
+        entity_id = _entity_id(hass, "sensor", f"{entry.entry_id}_{suffix}")
+        if (
+            stored_view is None
+            or entity_id is None
+            or _contains_dashboard_value(stored_view, entity_id)
+        ):
+            continue
+        outdated_paths.add(path)
     return [
-        view["title"] for view in expected["views"] if view["path"] not in stored_paths
+        view["title"] for view in expected["views"] if view["path"] in outdated_paths
     ]
+
+
+def _contains_dashboard_value(node: Any, expected: str) -> bool:
+    """Ob ein verschachtelter Lovelace-Baustein exakt `expected` enthält."""
+    if isinstance(node, dict):
+        return any(
+            _contains_dashboard_value(value, expected) for value in node.values()
+        )
+    if isinstance(node, list | tuple):
+        return any(_contains_dashboard_value(value, expected) for value in node)
+    return node == expected

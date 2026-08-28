@@ -160,15 +160,18 @@ async def test_diagnostics_includes_the_economics_balance(hass) -> None:
 
     assert diagnostics["economics"]["started_at"] is None
     assert diagnostics["economics"]["grid_charge_cost_eur"] is None
+    assert diagnostics["economics"]["operating_result_high_water_eur"] is None
 
     started_at = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
     coordinator._economics_started_at = started_at
     coordinator._economics_grid_charge_cost_eur = 1.23456
+    coordinator._economics_operating_result_high_water_eur = 3.45678
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diagnostics["economics"]["started_at"] == started_at.isoformat()
     assert diagnostics["economics"]["grid_charge_cost_eur"] == 1.23456
+    assert diagnostics["economics"]["operating_result_high_water_eur"] == 3.45678
 
 
 async def test_diagnostics_includes_the_energy_origin_start(hass) -> None:

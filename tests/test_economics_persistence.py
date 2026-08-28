@@ -11,7 +11,7 @@ Rundung und SOC-Minimum-Korrektur in tests/test_coordinator.py.
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +21,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -31,6 +32,7 @@ from custom_components.sax_power.domain.economics_amortization import (
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.infrastructure.economics_store import (
     ECONOMICS_SAVE_DELAY,
+    STORAGE_KEY_PREFIX,
     EconomicsState,
     EconomicsStateStore,
 )
@@ -62,6 +64,7 @@ def _full_state(started_at, **overrides) -> EconomicsState:
         "grid_charge_cost_eur": 10.0,
         "pv_opportunity_cost_eur": 2.0,
         "avoided_grid_cost_eur": 5.0,
+        "operating_result_high_water_eur": 4.0,
         "unvalued_inventory_kwh": 3.0,
         "unpriced_charge_kwh": 1.0,
         "unpriced_discharge_kwh": 0.5,
@@ -95,6 +98,18 @@ def _stub_store_with_initial_data(
     store._store.async_save = AsyncMock(side_effect=_save)
     store._store.async_load = AsyncMock(side_effect=_load)
     return current
+
+
+def _seed_real_store(
+    hass_storage, entry_id: str, payload: dict, *, version: int, minor_version: int
+) -> None:
+    """Legt einen echten Store-Envelope aus einer älteren Version an."""
+    hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"] = {
+        "version": version,
+        "minor_version": minor_version,
+        "key": f"{STORAGE_KEY_PREFIX}.{entry_id}",
+        "data": payload,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -162,6 +177,27 @@ async def test_store_rejects_a_regressive_decrease_in_a_monotonic_field(
     assert "Rückläufigen Wirtschaftlichkeits-Snapshot für Unbepreiste Ladung" in (
         caplog.text
     )
+
+
+async def test_store_rejects_a_regressive_net_savings_high_water(hass, caplog) -> None:
+    started_at = dt_util.utcnow()
+    store = EconomicsStateStore(hass, "savings-regressive")
+    _stub_store_with_initial_data(store)
+    assert (
+        await store.async_save(
+            _full_state(started_at, operating_result_high_water_eur=100.0)
+        )
+        is True
+    )
+
+    assert (
+        await store.async_save(
+            _full_state(started_at, operating_result_high_water_eur=80.0)
+        )
+        is False
+    )
+    assert "Rückläufigen Wirtschaftlichkeits-Snapshot für " in caplog.text
+    assert "Netto-Ersparnis-Höchststand" in caplog.text
 
 
 async def test_store_permits_the_inventory_gauge_to_decrease(hass) -> None:
@@ -322,7 +358,7 @@ async def test_store_round_trips_day_results_current_day_and_payback(hass) -> No
     # nach einem Neustart anders bewertet als davor.
     day_two = DayEconomicsResult(
         day=date(2026, 3, 10),
-        operating_result_eur=-0.5,
+        operating_result_eur=0.5,
         priced_charge_kwh=0.0,
         unpriced_charge_kwh=0.0,
         priced_discharge_kwh=0.5,
@@ -351,6 +387,28 @@ async def test_store_round_trips_day_results_current_day_and_payback(hass) -> No
     assert loaded.day_results == (day_one, day_two)
     assert loaded.current_day == date(2026, 3, 11)
     assert loaded.payback_achieved_at == payback_at
+
+
+async def test_store_rejects_negative_savings_in_day_history(hass, caplog) -> None:
+    day = DayEconomicsResult(
+        day=date(2026, 3, 10),
+        operating_result_eur=-0.5,
+        priced_charge_kwh=0.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=0.5,
+        unpriced_discharge_kwh=0.0,
+    )
+    store = EconomicsStateStore(hass, "negative-day-savings")
+    store._store.async_load = AsyncMock(
+        return_value=EconomicsStateStore._serialize(
+            _full_state(dt_util.utcnow(), day_results=(day,))
+        )
+    )
+
+    loaded = await store.async_load()
+
+    assert loaded.day_results == ()
+    assert "Ungültigen gespeicherten Wert für Tagesergebnis" in caplog.text
 
 
 async def test_store_drops_only_the_single_invalid_day_entry(hass, caplog) -> None:
@@ -603,6 +661,7 @@ async def test_store_reset_bypasses_the_monotonicity_baseline(hass) -> None:
         await store.async_save(
             _full_state(
                 started_at,
+                operating_result_high_water_eur=100.0,
                 unpriced_charge_kwh=5.0,
                 priced_charge_kwh=5.0,
                 payback_achieved_at=started_at,
@@ -614,6 +673,7 @@ async def test_store_reset_bypasses_the_monotonicity_baseline(hass) -> None:
     new_started_at = started_at + timedelta(days=1)
     reset_state = _full_state(
         new_started_at,
+        operating_result_high_water_eur=0.0,
         unpriced_charge_kwh=0.0,
         priced_charge_kwh=0.0,
         payback_achieved_at=None,
@@ -622,6 +682,7 @@ async def test_store_reset_bypasses_the_monotonicity_baseline(hass) -> None:
 
     loaded = await EconomicsStateStore(hass, "reset-bypass").async_load()
     assert loaded.economics_started_at == new_started_at
+    assert loaded.operating_result_high_water_eur == 0.0
     assert loaded.unpriced_charge_kwh == 0.0
     assert loaded.priced_charge_kwh == 0.0
     assert loaded.payback_achieved_at is None
@@ -636,6 +697,19 @@ async def test_store_reset_still_rejects_a_structurally_invalid_snapshot(hass) -
 
     assert (
         await store.async_reset(_full_state(dt_util.utcnow(), priced_charge_kwh=-1.0))
+        is False
+    )
+    store._store.async_save.assert_not_called()
+
+
+async def test_store_rejects_a_negative_net_savings_high_water(hass) -> None:
+    store = EconomicsStateStore(hass, "negative-savings")
+    store._store.async_save = AsyncMock()
+
+    assert (
+        await store.async_reset(
+            _full_state(dt_util.utcnow(), operating_result_high_water_eur=-0.01)
+        )
         is False
     )
     store._store.async_save.assert_not_called()
@@ -862,7 +936,291 @@ async def test_load_restores_an_already_initialized_balance(hass) -> None:
 
     assert coordinator._economics_started_at == started_at
     assert coordinator._economics_grid_charge_cost_eur == 10.0
+    assert coordinator._economics_operating_result_high_water_eur == 4.0
     await coordinator.async_shutdown()
+
+
+async def test_load_repairs_a_high_water_below_the_current_raw_result(hass) -> None:
+    """Ein inkonsistenter Peak darf keinen historischen Zuwachs neu verbuchen."""
+    started_at = dt_util.utcnow()
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(
+            started_at,
+            grid_charge_cost_eur=10.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=110.0,
+            operating_result_high_water_eur=80.0,
+        )
+    )
+
+    await coordinator.async_load_economics_state()
+
+    assert coordinator._economics_operating_result_high_water_eur == 100.0
+    await coordinator.async_shutdown()
+
+
+async def test_load_migrates_the_current_result_but_discards_legacy_day_cashflows(
+    hass,
+) -> None:
+    """Alt-Stores kennen weder den früheren Peak noch Peak-Zuwächse je Tag.
+
+    Der aktuelle Rohwert ist die einzige sichere Ausgangsbasis. Alte
+    Tages-Cashflows dürfen nicht positiv geklemmt werden, weil eine Erholung
+    unter einem früheren Höchststand sonst als neue Ersparnis erschiene.
+    """
+    started_at = dt_util.utcnow()
+    legacy_day = DayEconomicsResult(
+        day=date(2026, 3, 10),
+        operating_result_eur=25.0,
+        priced_charge_kwh=1.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=1.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(
+            started_at,
+            grid_charge_cost_eur=10.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=110.0,
+            operating_result_high_water_eur=None,
+            day_results=(legacy_day,),
+            current_day=date(2026, 3, 11),
+            current_day_operating_result_eur=5.0,
+            current_day_priced_charge_kwh=0.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=0.0,
+            current_day_unpriced_discharge_kwh=0.0,
+            current_day_observed_seconds=1_800.0,
+        )
+    )
+
+    await coordinator.async_load_economics_state()
+
+    assert coordinator._economics_operating_result_high_water_eur == 100.0
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day is None
+    data: dict[str, object] = {}
+    coordinator._publish_economics_balance(data, monetary_available=True)
+    assert data["economics_operating_result"] == pytest.approx(100.0)
+    assert data["economics_net_savings"] == pytest.approx(100.0)
+    assert data["economics_net_savings_last_reset"] == started_at
+    await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize(
+    ("avoided_grid_cost_eur", "expected_net_savings"),
+    ((110.0, 100.0), (5.0, 0.0)),
+)
+async def test_real_minor_five_store_starts_fresh_daily_net_savings_history(
+    hass,
+    hass_storage,
+    avoided_grid_cost_eur,
+    expected_net_savings,
+) -> None:
+    """Der echte HA-Store-Pfad übernimmt keinen alten Tages-Cashflow."""
+    entry_id = f"legacy-{expected_net_savings}"
+    migration_at = datetime(2026, 8, 28, 10, 30, tzinfo=UTC)
+    started_at = migration_at - timedelta(days=30)
+    current_day = migration_at.astimezone(dt_util.DEFAULT_TIME_ZONE).date()
+    legacy_day = DayEconomicsResult(
+        day=current_day - timedelta(days=1),
+        operating_result_eur=25.0,
+        priced_charge_kwh=1.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=1.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    legacy_payload = EconomicsStateStore._serialize(
+        _full_state(
+            started_at,
+            grid_charge_cost_eur=10.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=avoided_grid_cost_eur,
+            operating_result_high_water_eur=None,
+            day_results=(legacy_day,),
+            current_day=current_day,
+            current_day_operating_result_eur=5.0,
+            current_day_priced_charge_kwh=0.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=0.0,
+            current_day_unpriced_discharge_kwh=0.0,
+            current_day_observed_seconds=1_800.0,
+        )
+    )
+    del legacy_payload["operating_result_high_water_eur"]
+    _seed_real_store(
+        hass_storage,
+        entry_id,
+        legacy_payload,
+        version=1,
+        minor_version=5,
+    )
+    options = {
+        **FIXED_TARIFF_OPTIONS,
+        CONF_ECONOMICS_INVESTMENT_COST: 1_000.0,
+    }
+    coordinator = _coordinator(hass, entry_id=entry_id, options=options)
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=migration_at,
+    ):
+        await coordinator.async_load_economics_state()
+
+    assert coordinator._economics_operating_result_high_water_eur == pytest.approx(
+        expected_net_savings
+    )
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day is None
+
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.now",
+        return_value=migration_at,
+    ):
+        assert coordinator._advance_economics_day() is True
+        data: dict[str, object] = {}
+        coordinator._publish_amortization(data, monetary_available=True)
+    assert data["economics_net_savings_today"] == pytest.approx(0.0)
+    assert data["economics_net_savings_today_last_reset"] == (
+        dt_util.start_of_local_day(current_day)
+    )
+
+    await coordinator.async_shutdown()
+    assert hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"]["minor_version"] == 6
+    assert (
+        hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"]["data"][
+            "operating_result_high_water_eur"
+        ]
+        == expected_net_savings
+    )
+    reloaded = _coordinator(hass, entry_id=entry_id, options=options)
+    await reloaded.async_load_economics_state()
+    assert reloaded._economics_operating_result_high_water_eur == pytest.approx(
+        expected_net_savings
+    )
+    await reloaded.async_shutdown()
+
+
+async def test_load_discards_legacy_day_cashflows_with_an_incomplete_core(
+    hass,
+) -> None:
+    """Inkompatible Alt-Tage dürfen kein vollständiges Kernbündel voraussetzen."""
+    legacy_day = DayEconomicsResult(
+        day=date(2026, 3, 10),
+        operating_result_eur=25.0,
+        priced_charge_kwh=1.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=1.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=_full_state(
+            dt_util.utcnow(),
+            unvalued_inventory_kwh=None,
+            operating_result_high_water_eur=None,
+            day_results=(legacy_day,),
+            current_day=date(2026, 3, 11),
+            current_day_operating_result_eur=5.0,
+            current_day_priced_charge_kwh=0.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=0.0,
+            current_day_unpriced_discharge_kwh=0.0,
+            current_day_observed_seconds=1_800.0,
+        )
+    )
+
+    await coordinator.async_load_economics_state()
+
+    assert coordinator._economics_started_at is None
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day is None
+    await coordinator.async_shutdown()
+
+
+async def test_load_drops_all_dependent_history_from_an_incomplete_current_store(
+    hass,
+) -> None:
+    """Eine neue Nullbilanz darf keine Historie des defekten Stands erben."""
+    started_at = dt_util.utcnow()
+    old_day = DayEconomicsResult(
+        day=date(2026, 3, 10),
+        operating_result_eur=25.0,
+        priced_charge_kwh=1.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=1.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    coordinator = _coordinator(
+        hass,
+        options={
+            **FIXED_TARIFF_OPTIONS,
+            CONF_ECONOMICS_INVESTMENT_COST: 1_000.0,
+        },
+    )
+    persisted = _stub_store_with_initial_data(
+        coordinator._economics_store,
+        EconomicsStateStore._serialize(
+            _full_state(
+                started_at,
+                unvalued_inventory_kwh=None,
+                operating_result_high_water_eur=100.0,
+                day_results=(old_day,),
+                current_day=date(2026, 3, 11),
+                current_day_operating_result_eur=5.0,
+                current_day_priced_charge_kwh=0.0,
+                current_day_unpriced_charge_kwh=0.0,
+                current_day_priced_discharge_kwh=0.0,
+                current_day_unpriced_discharge_kwh=0.0,
+                current_day_observed_seconds=1_800.0,
+                payback_achieved_at=started_at,
+            )
+        ),
+    )
+
+    await coordinator.async_load_economics_state()
+
+    assert coordinator._economics_started_at is None
+    assert coordinator._economics_operating_result_high_water_eur is None
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day is None
+    assert coordinator._economics_payback_achieved_at is None
+
+    bootstrap_at = dt_util.utcnow() + timedelta(seconds=1)
+    data = {
+        "storage_power_active": 0,
+        "battery_capacity": 10_000,
+        "battery_soc": 50,
+    }
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=bootstrap_at,
+    ):
+        coordinator._bootstrap_economics_if_ready(data)
+    assert coordinator._economics_operating_result_high_water_eur == 0.0
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_payback_achieved_at is None
+    assert coordinator._economics_store_write_blocked is False
+
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=bootstrap_at,
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.monotonic",
+            return_value=1_000.0,
+        ),
+    ):
+        coordinator._accumulate_energy(data)
+    assert data["economics_net_savings_today_last_reset"] == bootstrap_at
+    assert data["economics_net_savings_last_reset"] == bootstrap_at
+    await coordinator.async_shutdown()
+    assert persisted["operating_result_high_water_eur"] == 0.0
+    assert persisted["payback_achieved_at"] is None
 
 
 async def test_bootstrap_waits_for_numeric_capacity_and_soc(hass) -> None:
@@ -900,9 +1258,13 @@ async def test_bootstrap_sets_the_initial_inventory_once_data_is_known(hass) -> 
         coordinator._accumulate_energy(data)
 
     assert coordinator._economics_started_at is not None
+    assert coordinator._economics_operating_result_high_water_eur == 0.0
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(4.0)
     assert data["economics_unvalued_inventory"] == pytest.approx(4.0)
     assert data["economics_grid_charge_cost"] == 0.0
+    assert data["economics_operating_result"] == 0.0
+    assert data["economics_net_savings"] == 0.0
+    assert data["economics_net_savings_last_reset"] == coordinator._economics_started_at
     await coordinator.async_shutdown()
 
 
@@ -998,6 +1360,7 @@ async def test_shutdown_flushes_the_current_balance(hass) -> None:
     coordinator._economics_store.async_save.assert_awaited_once()
     saved = coordinator._economics_store.async_save.await_args.args[0]
     assert saved.grid_charge_cost_eur == 10.0
+    assert saved.operating_result_high_water_eur == 4.0
     assert saved.economics_started_at == started_at
 
 

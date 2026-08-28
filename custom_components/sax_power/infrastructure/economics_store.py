@@ -6,18 +6,23 @@ Abweichung: Die drei Geldsummen dürfen wegen negativer Strompreise legitim
 schwanken und sogar negativ sein - anders als die monoton steigenden
 Energiezähler ist "der neue Wert ist kleiner als der alte" hier kein
 Korruptionsindiz und wird deshalb NICHT abgelehnt. Nur NaN/Inf/Fremdtypen
-gelten als korrupt. `unpriced_charge_kwh`/`unpriced_discharge_kwh` sind
-dagegen echte kumulierte Energiemengen (nur additiv) und bleiben monoton
-wie bei energy_store.py. `unvalued_inventory_kwh` ist ein Bestand (Gauge,
-kann sowohl durch Ladung steigen als auch durch Entladung oder die
-SOC-Minimum-Korrektur sinken) und braucht deshalb ebenfalls keine
-Monotonie, nur eine Wertebereichsprüfung (endlich, >= 0).
+gelten als korrupt. Der daraus fortgeschriebene
+`operating_result_high_water_eur` ist dagegen die nichtnegative,
+monoton steigende Netto-Ersparnis; ausschließlich ein kontrollierter
+Bilanzneustart darf ihn auf 0 zurücksetzen. `unpriced_charge_kwh`/
+`unpriced_discharge_kwh` sind ebenfalls echte kumulierte Energiemengen
+(nur additiv) und bleiben monoton wie bei energy_store.py.
+`unvalued_inventory_kwh` ist ein Bestand (Gauge, kann sowohl durch Ladung
+steigen als auch durch Entladung oder die SOC-Minimum-Korrektur sinken)
+und braucht deshalb keine Monotonie, nur eine Wertebereichsprüfung
+(endlich, >= 0).
 
 STORAGE_MINOR_VERSION (statt einer erhöhten Hauptversion) trägt die
 Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION, die
 kumulierten bepreisten Lade-/Entlademengen, den zuletzt verwendeten
 Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY sowie die
-Zeitabdeckung der Tages-Buckets (observed_seconds/day_length_seconds) -
+Zeitabdeckung der Tages-Buckets (observed_seconds/day_length_seconds) und
+den Netto-Ersparnis-Höchststand -
 siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
 jedem bestehenden Store NotImplementedError ausgelöst).
@@ -50,7 +55,7 @@ from ..domain.economics_amortization import (
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 5
+STORAGE_MINOR_VERSION = 6
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
@@ -69,6 +74,10 @@ class EconomicsState:
     grid_charge_cost_eur: float | None = None
     pv_opportunity_cost_eur: float | None = None
     avoided_grid_cost_eur: float | None = None
+    # Nichtnegative Netto-Ersparnis seit Bilanzbeginn. Anders als die drei
+    # Rohsummen fällt dieser historische Höchststand nie; ein absichtlicher
+    # Bilanzneustart setzt ihn über async_reset auf 0 zurück.
+    operating_result_high_water_eur: float | None = None
     unvalued_inventory_kwh: float | None = None
     unpriced_charge_kwh: float | None = None
     unpriced_discharge_kwh: float | None = None
@@ -76,13 +85,14 @@ class EconomicsState:
     last_tariff_revision_at: datetime | None = None
     # -- REQ-ECONOMICS-AMORTIZATION ----------------------------------------
     # Abgeschlossene Kalendertage (höchstens MAX_STORED_DAYS, älteste
-    # zuerst) - unabhängig vom Sieben-Felder-Bündel oben: Fehlt diese
-    # Historie (frischer Eintrag, Store aus der Zeit vor 04/06), startet sie
-    # einfach leer, ohne die übrige Bilanz zu berühren.
+    # zuerst) - als eigenes Bündel validiert. Fehlt diese Historie (frischer
+    # Eintrag, Store aus der Zeit vor 04/06), startet sie einfach leer. Bei
+    # einem unvollständigen Kernstand verwirft der Coordinator sie dagegen,
+    # damit keine alte Prognose in eine neu gebootstrappte Bilanz gerät.
     day_results: tuple[DayEconomicsResult, ...] = ()
     # Der aktuell noch laufende, unvollständige Kalendertag - `current_day`
-    # ist None, solange kein Tag begonnen wurde. Die fünf Zähler bilden mit
-    # `current_day` zusammen ein eigenes, kleines Bündel (siehe
+    # ist None, solange kein Tag begonnen wurde. Die sechs Werte bilden mit
+    # `current_day` zusammen ein eigenes, kleines Sieben-Felder-Bündel (siehe
     # _validated_current_day): Fehlt einer, gilt der ganze angefangene Tag
     # als nicht mehr aussagekräftig und wird verworfen - nicht die
     # abgeschlossene Historie.
@@ -225,6 +235,10 @@ class EconomicsStateStore:
             avoided_grid_cost_eur=self._validated_amount(
                 raw.get("avoided_grid_cost_eur"), "Vermiedene Netzkosten"
             ),
+            operating_result_high_water_eur=self._validated_nonnegative(
+                raw.get("operating_result_high_water_eur"),
+                "Netto-Ersparnis-Höchststand",
+            ),
             unvalued_inventory_kwh=self._validated_nonnegative(
                 raw.get("unvalued_inventory_kwh"), "Unbewerteter Bestand"
             ),
@@ -284,6 +298,7 @@ class EconomicsStateStore:
             state.grid_charge_cost_eur,
             state.pv_opportunity_cost_eur,
             state.avoided_grid_cost_eur,
+            state.operating_result_high_water_eur,
             state.unvalued_inventory_kwh,
             state.unpriced_charge_kwh,
             state.unpriced_discharge_kwh,
@@ -299,6 +314,10 @@ class EconomicsStateStore:
             # nicht, weil die Datei unverändert bleibt.
             state.priced_charge_kwh,
             state.priced_discharge_kwh,
+            # Ein Payback-Zeitpunkt gehört zur alten, unvollständigen Bilanz.
+            # Bliebe er in der Baseline stehen, würde der neue Bootstrap mit
+            # payback_achieved_at=None als unzulässige Rücknahme abgelehnt.
+            state.payback_achieved_at,
         )
         if all(value is None for value in fields):
             return state
@@ -307,12 +326,14 @@ class EconomicsStateStore:
             grid_charge_cost_eur=None,
             pv_opportunity_cost_eur=None,
             avoided_grid_cost_eur=None,
+            operating_result_high_water_eur=None,
             unvalued_inventory_kwh=None,
             unpriced_charge_kwh=None,
             unpriced_discharge_kwh=None,
             economics_started_at=None,
             priced_charge_kwh=None,
             priced_discharge_kwh=None,
+            payback_achieved_at=None,
         )
 
     @callback
@@ -459,6 +480,10 @@ class EconomicsStateStore:
                 )
                 return False
         for label, value in (
+            (
+                "Netto-Ersparnis-Höchststand",
+                state.operating_result_high_water_eur,
+            ),
             ("Unbewerteter Bestand", state.unvalued_inventory_kwh),
             ("Unbepreiste Ladung", state.unpriced_charge_kwh),
             ("Unbepreiste Entladung", state.unpriced_discharge_kwh),
@@ -481,9 +506,9 @@ class EconomicsStateStore:
 
         Die drei Geldsummen dürfen wegen negativer Preise schwanken und
         sinken - hier nur Endlichkeit prüfen (_valid_snapshot), kein
-        Monotonie-Vergleich. unpriced_charge_kwh/unpriced_discharge_kwh/
-        priced_charge_kwh/priced_discharge_kwh sind dagegen echte
-        kumulierte Mengen und bleiben monoton. economics_started_at/
+        Monotonie-Vergleich. operating_result_high_water_eur sowie
+        unpriced_charge_kwh/unpriced_discharge_kwh/ priced_charge_kwh/
+        priced_discharge_kwh bleiben dagegen monoton. economics_started_at/
         payback_achieved_at sind einmalig gesetzte Konstanten. Ein
         gewollter Bilanzneustart (async_reset) umgeht diese Prüfungen
         bewusst.
@@ -492,6 +517,11 @@ class EconomicsStateStore:
             return False
         baseline = self._pending or self._last_persisted
         for label, value, previous in (
+            (
+                "Netto-Ersparnis-Höchststand",
+                state.operating_result_high_water_eur,
+                baseline.operating_result_high_water_eur,
+            ),
             (
                 "Unbepreiste Ladung",
                 state.unpriced_charge_kwh,
@@ -679,7 +709,7 @@ class EconomicsStateStore:
             _LOGGER.warning("Ungültigen Tageseintrag verworfen: kein Objekt: %r", entry)
             return None
         day = cls._validated_date(entry.get("day"), "Tagesdatum")
-        operating_result = cls._validated_amount(
+        operating_result = cls._validated_nonnegative(
             entry.get("operating_result_eur"), "Tagesergebnis"
         )
         priced_charge = cls._validated_nonnegative(
@@ -738,7 +768,7 @@ class EconomicsStateStore:
 
     @classmethod
     def _validated_current_day(cls, raw: dict[str, Any]) -> dict[str, Any]:
-        """Der noch laufende Tag als eigenes Sechser-Bündel (siehe
+        """Der noch laufende Tag als eigenes Sieben-Felder-Bündel (siehe
         EconomicsState.current_day). Ist auch nur ein Feld ungültig oder
         fehlt es, gilt der ganze angefangene Tag als nicht aussagekräftig
         und startet beim nächsten Datenpunkt frisch - die abgeschlossene
@@ -751,7 +781,7 @@ class EconomicsStateStore:
         """
         fields = {
             "current_day": cls._validated_date(raw.get("current_day"), "Laufender Tag"),
-            "current_day_operating_result_eur": cls._validated_amount(
+            "current_day_operating_result_eur": cls._validated_nonnegative(
                 raw.get("current_day_operating_result_eur"), "Laufendes Tagesergebnis"
             ),
             "current_day_priced_charge_kwh": cls._validated_nonnegative(
@@ -784,6 +814,7 @@ class EconomicsStateStore:
             "grid_charge_cost_eur": state.grid_charge_cost_eur,
             "pv_opportunity_cost_eur": state.pv_opportunity_cost_eur,
             "avoided_grid_cost_eur": state.avoided_grid_cost_eur,
+            "operating_result_high_water_eur": state.operating_result_high_water_eur,
             "unvalued_inventory_kwh": state.unvalued_inventory_kwh,
             "unpriced_charge_kwh": state.unpriced_charge_kwh,
             "unpriced_discharge_kwh": state.unpriced_discharge_kwh,

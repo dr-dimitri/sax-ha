@@ -701,6 +701,7 @@ async def test_economics_view_operating_balance_card(hass) -> None:
     grid_cost = _register(hass, "sensor", "economics_grid_charge_cost")
     pv_cost = _register(hass, "sensor", "economics_pv_opportunity_cost")
     result = _register(hass, "sensor", "economics_operating_result")
+    net_savings = _register(hass, "sensor", "economics_net_savings")
     unpriced_charge = _register(hass, "sensor", "economics_unpriced_charge")
     unpriced_discharge = _register(hass, "sensor", "economics_unpriced_discharge")
 
@@ -715,6 +716,7 @@ async def test_economics_view_operating_balance_card(hass) -> None:
         grid_cost,
         pv_cost,
         result,
+        net_savings,
         unpriced_charge,
         unpriced_discharge,
     ]
@@ -822,7 +824,7 @@ async def test_economics_view_investment_card_entities_and_order(hass) -> None:
     roi = _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
     remaining = _register(hass, "sensor", "economics_remaining_to_payback")
-    result_today = _register(hass, "sensor", "economics_result_today")
+    result_today = _register(hass, "sensor", "economics_net_savings_today")
     average = _register(hass, "sensor", "economics_average_daily_result_30d")
     annual = _register(hass, "sensor", "economics_projected_annual_result")
     payback_date = _register(hass, "sensor", "economics_estimated_payback_date")
@@ -892,10 +894,8 @@ async def test_economics_view_is_present_but_cardless_without_any_entity(hass) -
     assert view["cards"] == []
 
 
-async def test_economics_view_structure_is_unchanged_by_savings_view(hass) -> None:
-    """REQ-ECONOMICS-SAVINGS-DASHBOARD: Der bestehende technische View
-    bleibt gegenüber dem Stand unmittelbar vor Einführung des separaten
-    Ersparnis-Views bytegenau gleich aufgebaut."""
+async def test_economics_view_structure_stays_regression_guarded(hass) -> None:
+    """Die vollständige technische Wirtschaftlichkeitsstruktur bleibt fix."""
     registry = er.async_get(hass)
     for entity_domain, suffixes in (
         ("sensor", [description.key for description in sensor.SENSOR_DESCRIPTIONS]),
@@ -919,7 +919,7 @@ async def test_economics_view_structure_is_unchanged_by_savings_view(hass) -> No
     )
 
     assert sha256(serialized.encode()).hexdigest() == (
-        "aef2ec3dd1962a68ec4cf05d9e98160d44948025b2bd1ecdc027265eae18d3e5"
+        "2121898304252a750d054b5fd0381bdb8f9760a58beb29f488b8d1bad64488d1"
     )
 
 
@@ -1009,7 +1009,7 @@ async def test_savings_inventory_uses_numeric_state_and_renders_sensor_value(
     hass,
 ) -> None:
     status = _register(hass, "sensor", "economics_status")
-    _register(hass, "sensor", "economics_operating_result")
+    _register(hass, "sensor", "economics_net_savings")
     inventory = _register(hass, "sensor", "economics_unvalued_inventory")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
@@ -1072,7 +1072,7 @@ async def test_savings_inventory_uses_numeric_state_and_renders_sensor_value(
 async def test_savings_inventory_is_omitted_and_template_empty_when_missing(
     hass,
 ) -> None:
-    _register(hass, "sensor", "economics_operating_result")
+    _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -1113,8 +1113,8 @@ async def test_savings_view_is_sixth_with_expected_title_and_icon(hass) -> None:
 
 
 async def test_savings_view_uses_exact_calendar_statistics(hass) -> None:
-    result = _register(hass, "sensor", "economics_operating_result")
-    result_today = _register(hass, "sensor", "economics_result_today")
+    result = _register(hass, "sensor", "economics_net_savings")
+    result_today = _register(hass, "sensor", "economics_net_savings_today")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -1142,7 +1142,7 @@ async def test_savings_view_uses_exact_calendar_statistics(hass) -> None:
 
 
 async def test_savings_view_total_is_direct_state_with_accounting_start(hass) -> None:
-    result = _register(hass, "sensor", "economics_operating_result")
+    result = _register(hass, "sensor", "economics_net_savings")
     status = _register(hass, "sensor", "economics_status")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
@@ -1171,7 +1171,7 @@ async def test_savings_view_total_is_direct_state_with_accounting_start(hass) ->
 
 
 async def test_savings_view_explains_result_and_recorder_scope(hass) -> None:
-    _register(hass, "sensor", "economics_operating_result")
+    _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -1179,9 +1179,10 @@ async def test_savings_view_explains_result_and_recorder_scope(hass) -> None:
     assert view["cards"][1] == {
         "type": "markdown",
         "content": (
-            "Netto-Ersparnis = vermiedene Netzbezugskosten minus "
-            "Netzladekosten und entgangene Einspeisevergütung. Positive Werte "
-            "sind Ersparnisse, negative Werte sind Mehrkosten."
+            "Grundlage der Netto-Ersparnis sind vermiedene Netzbezugskosten "
+            "minus Netzladekosten und entgangene Einspeisevergütung. Angezeigt "
+            "wird ein gespeicherter, nichtnegativer Höchststand. Spätere Kosten "
+            "verringern eine bereits festgehaltene Ersparnis nicht."
         ),
     }
     recorder_note = next(
@@ -1190,7 +1191,8 @@ async def test_savings_view_explains_result_and_recorder_scope(hass) -> None:
         if card["type"] == "markdown"
         and "Recorder-Langzeitstatistik" in card["content"]
     )
-    assert "laufenden Bilanz" in recorder_note
+    assert "Recorder-Langzeitstatistik der Netto-Ersparnis" in recorder_note
+    assert "beginnt diese Aufzeichnung später" in recorder_note
     assert "Bilanzbeginn" in recorder_note
 
 
@@ -1219,7 +1221,7 @@ def _savings_free_period_block(view: dict[str, Any]) -> dict[str, Any]:
 async def test_savings_free_period_cards_share_the_exact_collection_key(
     hass,
 ) -> None:
-    result = _register(hass, "sensor", "economics_operating_result")
+    result = _register(hass, "sensor", "economics_net_savings")
     _register(hass, "sensor", "economics_avoided_grid_cost")
     _register(hass, "sensor", "economics_grid_charge_cost")
     _register(hass, "sensor", "economics_pv_opportunity_cost")
@@ -1260,18 +1262,19 @@ async def test_savings_free_period_cards_share_the_exact_collection_key(
 
 
 async def test_savings_free_period_explains_recorder_and_reset_limits(hass) -> None:
-    _register(hass, "sensor", "economics_operating_result")
+    _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     content = _savings_free_period_block(_savings_view(config))["cards"][0]["content"]
     assert content.startswith("### Freier Zeitraum")
-    assert "seit dem angezeigten Bilanzbeginn" in content
+    assert "Beginn der Recorder-Aufzeichnung" in content
+    assert "jünger als der angezeigte Bilanzbeginn" in content
     assert "keine rückwirkend erfundenen Werte" in content
     assert "vom Recorder ausgeschlossen" in content
     assert "unbekannt beziehungsweise leer" in content
     assert "manuellen Neustart" in content
-    assert "Reset enthalten" in content
+    assert "positiven Zuwächse vor und nach dem Neustart" in content
 
 
 async def test_savings_free_period_is_fully_omitted_without_result_entity(
@@ -1320,7 +1323,7 @@ async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
     annual = _register(hass, "sensor", "economics_projected_annual_result")
     average = _register(hass, "sensor", "economics_average_daily_result_30d")
     roi = _register(hass, "sensor", "economics_roi")
-    _register(hass, "sensor", "economics_operating_result")
+    _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -1979,6 +1982,17 @@ def _issue(hass, entry_id: str):
     )
 
 
+def _replace_dashboard_values(node: Any, replacements: dict[str, str]) -> Any:
+    if isinstance(node, dict):
+        return {
+            key: _replace_dashboard_values(value, replacements)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_replace_dashboard_values(value, replacements) for value in node]
+    return replacements.get(node, node) if isinstance(node, str) else node
+
+
 async def test_outdated_dashboard_is_reported(hass) -> None:
     """Das Dashboard wird nur bei der Ersteinrichtung gebaut. Ergänzt eine
     neuere Version einen Tab, fehlt er einem bestehenden Dashboard
@@ -2005,26 +2019,32 @@ async def test_outdated_dashboard_is_reported(hass) -> None:
     assert issue.translation_placeholders["views"] == "Wirtschaftlichkeit"
 
 
-async def test_previous_five_view_dashboard_reports_only_savings(hass) -> None:
+async def test_previous_five_view_dashboard_reports_both_changed_views(hass) -> None:
     """REQ-ECONOMICS-SAVINGS-DASHBOARD: Ein gespeichertes Dashboard mit
-    den bisherigen fünf View-Pfaden bleibt unangetastet und meldet nur den
-    tatsächlich neu hinzugekommenen View."""
+    den bisherigen fünf View-Pfaden enthält zusätzlich noch den alten
+    Tages-Roh-Cashflow im technischen View; beide Änderungen werden gemeldet."""
     _register(hass, "sensor", "soc")
+    _register(hass, "sensor", "economics_net_savings")
+    net_savings_today = _register(hass, "sensor", "economics_net_savings_today")
+    old_result_today = _register(hass, "sensor", "economics_result_today")
     entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
     entry.add_to_hass(hass)
     _lovelace(hass)
     storage = await _existing_dashboard(hass, entry)
     stored = await storage.async_load(False)
-    await storage.async_save(
-        {"views": [view for view in stored["views"] if view["path"] != "ersparnis"]}
+    previous = _replace_dashboard_values(
+        {"views": [view for view in stored["views"] if view["path"] != "ersparnis"]},
+        {net_savings_today: old_result_today},
     )
+    await storage.async_save(previous)
 
     await async_check_dashboard_up_to_date(hass, entry)
 
     issue = _issue(hass, ENTRY_ID)
     assert issue is not None
-    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert issue.translation_placeholders["views"] == ("Wirtschaftlichkeit, Ersparnis")
     unchanged = await storage.async_load(False)
+    assert unchanged == previous
     assert [view["path"] for view in unchanged["views"]] == [
         "allgemein",
         "ladeautomatik",
@@ -2036,6 +2056,8 @@ async def test_previous_five_view_dashboard_reports_only_savings(hass) -> None:
 
 async def test_complete_dashboard_is_not_reported(hass) -> None:
     _register(hass, "sensor", "soc")
+    _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_net_savings_today")
     entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
     entry.add_to_hass(hass)
     _lovelace(hass)
@@ -2044,6 +2066,39 @@ async def test_complete_dashboard_is_not_reported(hass) -> None:
     await async_check_dashboard_up_to_date(hass, entry)
 
     assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_snapshot_dashboard_with_old_cashflow_entities_is_reported(
+    hass,
+) -> None:
+    """Gleiche sechs Pfade dürfen veraltete Ersparnis-Entities nicht tarnen."""
+    _register(hass, "sensor", "soc")
+    raw_result = _register(hass, "sensor", "economics_operating_result")
+    old_result_today = _register(hass, "sensor", "economics_result_today")
+    net_savings = _register(hass, "sensor", "economics_net_savings")
+    net_savings_today = _register(hass, "sensor", "economics_net_savings_today")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    stale = _replace_dashboard_values(
+        stored,
+        {
+            net_savings: raw_result,
+            net_savings_today: old_result_today,
+        },
+    )
+    await storage.async_save(stale)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == ("Wirtschaftlichkeit, Ersparnis")
+    # Wie bei fehlenden Tabs bleibt jede Nutzeranpassung bis zur bewussten
+    # Bestätigung des Reparatur-Flows unangetastet.
+    assert await storage.async_load(False) == stale
 
 
 async def test_missing_dashboard_is_not_reported(hass) -> None:

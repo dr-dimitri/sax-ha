@@ -129,11 +129,14 @@ SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
 #: unique_id (siehe SaxPowerEntity._apply_identity: "<entry_id>_<suffix>").
 #: Die Herkunftskategorie "Herkunft unbekannt" ist entfallen
 #: (REQ-ENERGY-ORIGIN), und mit ihr der zugehörige Abdeckungsgrad, der
-#: seither konstant 100 % wäre. Ohne diese Bereinigung blieben beide als
-#: dauerhaft "nicht verfügbar" in der Entity-Registry stehen.
+#: seither konstant 100 % wäre. Der Tages-Roh-Cashflow aus den
+#: Snapshot-Ständen vor REQ-ECONOMICS-ACCOUNTING darf nicht als neue
+#: Netto-Ersparnis-Historie weitergeführt werden. Ohne diese Bereinigung
+#: blieben die alten Entities dauerhaft "nicht verfügbar" in der Registry.
 _REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
     (Platform.SENSOR, "energy_charged_origin_unknown"),
     (Platform.SENSOR, "energy_origin_coverage"),
+    (Platform.SENSOR, "economics_result_today"),
 )
 
 

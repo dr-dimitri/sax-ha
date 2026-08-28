@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower
+from homeassistant.const import CURRENCY_EURO, EntityCategory, UnitOfEnergy, UnitOfPower
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.sax_power.const import (
@@ -41,6 +41,14 @@ COMPONENT_DIR = Path(__file__).parent.parent / "custom_components" / "sax_power"
 def test_sensor_keys_are_unique() -> None:
     keys = [description.key for description in SENSOR_DESCRIPTIONS]
     assert len(keys) == len(set(keys))
+
+
+def test_daily_net_savings_uses_a_fresh_recorder_entity() -> None:
+    """Der tägliche Roh-Cashflow darf nicht als Netto-Historie umgedeutet werden."""
+    keys = {description.key for description in SENSOR_DESCRIPTIONS}
+
+    assert "economics_net_savings_today" in keys
+    assert "economics_result_today" not in keys
 
 
 def test_sensor_descriptions_have_reasonable_count() -> None:
@@ -185,6 +193,25 @@ def test_grid_serving_forecast_is_kwh_or_unknown() -> None:
     assert description.value_fn({"grid_serving_forecast_kwh": None}) is None
 
 
+def test_net_savings_is_a_nonnegative_recorder_total() -> None:
+    raw_cashflow = _description_by_key("economics_operating_result")
+    description = _description_by_key("economics_net_savings")
+
+    assert raw_cashflow.device_class == SensorDeviceClass.MONETARY
+    assert raw_cashflow.state_class == SensorStateClass.TOTAL
+    assert raw_cashflow.last_reset_fn is None
+    assert description.device_class == SensorDeviceClass.MONETARY
+    assert description.state_class == SensorStateClass.TOTAL
+    assert description.native_unit_of_measurement == CURRENCY_EURO
+    assert description.last_reset_fn is not None
+
+    started_at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
+    assert (
+        description.last_reset_fn({"economics_net_savings_last_reset": started_at})
+        == started_at
+    )
+
+
 def test_grid_serving_forecast_name_tracks_current_date_without_device_prefix(
     hass,
 ) -> None:
@@ -230,7 +257,7 @@ def test_grid_serving_forecast_name_tracks_current_date_without_device_prefix(
     assert entity.device_info is None
 
 
-def test_only_cyclically_reset_totals_declare_a_last_reset() -> None:
+def test_only_resettable_totals_declare_a_last_reset() -> None:
     """Home Assistant wertet last_reset ausschließlich für state_class
     total aus - an einem anderen Sensor wäre die Funktion wirkungslos und
     damit irreführend (Issue #133)."""
@@ -239,19 +266,19 @@ def test_only_cyclically_reset_totals_declare_a_last_reset() -> None:
             assert description.state_class == SensorStateClass.TOTAL, description.key
 
 
-def test_result_today_reports_the_daily_reset_timestamp() -> None:
+def test_net_savings_today_reports_the_daily_reset_timestamp() -> None:
     """Der Tagessensor reicht den vom Coordinator veröffentlichten
     Reset-Zeitpunkt als last_reset durch; ein Sensor ohne last_reset_fn
     liefert unverändert None (Issue #133)."""
     midnight = datetime(2026, 3, 11, tzinfo=UTC)
     coordinator = MagicMock()
     coordinator.data = {
-        "economics_result_today": 2.5,
-        "economics_result_today_last_reset": midnight,
+        "economics_net_savings_today": 2.5,
+        "economics_net_savings_today_last_reset": midnight,
     }
 
     entity = SaxPowerSensor(
-        coordinator, "test_entry_id", _description_by_key("economics_result_today")
+        coordinator, "test_entry_id", _description_by_key("economics_net_savings_today")
     )
     assert entity.last_reset == midnight
 
@@ -261,18 +288,21 @@ def test_result_today_reports_the_daily_reset_timestamp() -> None:
     assert other.last_reset is None
 
 
-def test_result_today_last_reset_ignores_a_missing_or_foreign_value() -> None:
+def test_net_savings_today_last_reset_ignores_a_missing_or_foreign_value() -> None:
     """Solange der Coordinator noch keinen Tag begonnen hat (oder unter dem
     Schlüssel etwas anderes als ein datetime steht), darf kein Fremdtyp als
     last_reset in die Langzeitstatistik geraten."""
-    description = _description_by_key("economics_result_today")
+    description = _description_by_key("economics_net_savings_today")
     assert description.last_reset_fn is not None
     assert description.last_reset_fn({}) is None
     assert (
-        description.last_reset_fn({"economics_result_today_last_reset": None}) is None
+        description.last_reset_fn({"economics_net_savings_today_last_reset": None})
+        is None
     )
     assert (
-        description.last_reset_fn({"economics_result_today_last_reset": "2026-03-11"})
+        description.last_reset_fn(
+            {"economics_net_savings_today_last_reset": "2026-03-11"}
+        )
         is None
     )
 

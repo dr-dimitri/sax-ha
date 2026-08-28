@@ -15,6 +15,7 @@ from custom_components.sax_power.domain.economics_accounting import (
     EconomicsDelta,
     capacity_inventory_correction,
     compute_economics_delta,
+    compute_operating_result_high_water,
     initial_unvalued_inventory_kwh,
     min_soc_inventory_correction,
 )
@@ -26,6 +27,19 @@ from custom_components.sax_power.domain.energy_accounting import (
 
 def _charge(grid: float = 0.0, pv: float = 0.0) -> EnergyDelta:
     return EnergyDelta(charged_kwh=grid + pv, grid_kwh=grid, pv_kwh=pv)
+
+
+# --------------------------------------------------------------------------
+# Nichtnegative Netto-Ersparnis
+# --------------------------------------------------------------------------
+def test_operating_result_high_water_never_turns_a_loss_into_savings() -> None:
+    assert compute_operating_result_high_water(0.0, -20.0) == 0.0
+
+
+def test_operating_result_high_water_never_runs_backwards() -> None:
+    assert compute_operating_result_high_water(100.0, 80.0) == 100.0
+    assert compute_operating_result_high_water(100.0, 100.0) == 100.0
+    assert compute_operating_result_high_water(100.0, 105.0) == 105.0
 
 
 # --------------------------------------------------------------------------

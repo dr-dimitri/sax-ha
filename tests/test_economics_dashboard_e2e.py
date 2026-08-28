@@ -144,15 +144,17 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     assert discharge_tick["economics_operating_result"] == pytest.approx(
         0.30 - 0.30 - 0.08
     )
+    assert discharge_tick["economics_net_savings"] == pytest.approx(0.0)
 
     # -- Datenqualität (REQ-ECONOMICS-OBSERVABILITY): vollständige
     # Preis-/Herkunftsabdeckung während des gesamten Ablaufs -> aktiv.
     assert discharge_tick["economics_status"] == "active"
 
     # -- ROI-/Amortisationsprognose (REQ-ECONOMICS-AMORTIZATION) --------
-    assert discharge_tick["economics_result_today"] == pytest.approx(0.30 - 0.30 - 0.08)
-    assert discharge_tick["economics_roi"] == pytest.approx(
-        round((0.30 - 0.30 - 0.08) / 1000.0 * 100, 2)
+    assert discharge_tick["economics_net_savings_today"] == pytest.approx(0.0)
+    assert discharge_tick["economics_roi"] == pytest.approx(0.0)
+    assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
+        pytest.approx(0.30 - 0.30 - 0.08)
     )
 
     # -- Dashboard-Entityauflösung (REQ-ECONOMICS-DASHBOARD) -------------
@@ -164,7 +166,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     avoided_id = _register(hass, "sensor", "economics_avoided_grid_cost")
     grid_cost_id = _register(hass, "sensor", "economics_grid_charge_cost")
     pv_cost_id = _register(hass, "sensor", "economics_pv_opportunity_cost")
-    result_id = _register(hass, "sensor", "economics_operating_result")
+    result_id = _register(hass, "sensor", "economics_net_savings")
     roi_id = _register(hass, "sensor", "economics_roi")
     progress_id = _register(hass, "sensor", "economics_amortization_progress")
 

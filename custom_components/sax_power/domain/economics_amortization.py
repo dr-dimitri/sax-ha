@@ -1,9 +1,10 @@
 """Pure ROI- und Amortisationsprognose-Berechnung.
 
-Siehe anforderung.yaml, REQ-ECONOMICS-AMORTIZATION. Baut auf
-economics_operating_result (03/06) sowie auf lokalen Kalendertag-Buckets
-auf, die der Coordinator aus denselben EconomicsDelta-Objekten befüllt wie
-die Gesamtbilanz - keine eigene Uhr, kein eigener Preisbegriff. Die lokale
+Siehe anforderung.yaml, REQ-ECONOMICS-AMORTIZATION. Baut auf der
+persistierten Netto-Ersparnis sowie auf lokalen Kalendertag-Buckets ihrer
+Höchststandszuwächse auf, die der Coordinator aus denselben
+EconomicsDelta-Objekten befüllt wie die Gesamtbilanz - keine eigene Uhr,
+kein eigener Preisbegriff. Die lokale
 Datumsermittlung selbst (Zeitzone, DST) liegt außerhalb dieses Moduls beim
 Coordinator; hier wird nur mit bereits bestimmten `date`-Werten gerechnet.
 """

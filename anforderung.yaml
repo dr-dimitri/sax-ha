@@ -49,7 +49,7 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
-# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (6 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
@@ -64,6 +64,7 @@
 # REQ-ECONOMICS-AMORTIZATION      done       ROI- und Amortisationsprognose aus Investitionskosten und dem operativen Ergebnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # REQ-ECONOMICS-DASHBOARD         done       Eigener Dashboard-Tab "Wirtschaftlichkeit" sowie End-to-End-Dokumentation der gesamten Feature-Reihe
+# REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Dashboard-Tab "Ersparnis" mit Netto-Ergebnis je Kalenderzeitraum
 # ==============================================================================
 
 # ==============================================================================
@@ -1813,13 +1814,14 @@ requirement_dynamic_price_charge:
 # ==============================================================================
 requirement_bundled_dashboard:
   id: REQ-BUNDLED-DASHBOARD
-  title: "Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar"
+  title: "Mitgeliefertes Lovelace-Dashboard (6 Tabs), optional in der Ersteinrichtung anlegbar"
   status: done
   description: >
-    dashboard.py baut ein fünfteiliges Storage-Dashboard mit den
-    wichtigsten Sensoren/Einstellungen, gegliedert in fünf Tabs (Lovelace-
+    dashboard.py baut ein sechsteiliges Storage-Dashboard mit den
+    wichtigsten Sensoren/Einstellungen, gegliedert in sechs Tabs (Lovelace-
     Views, der fünfte "Wirtschaftlichkeit" ist gesondert unter
-    REQ-ECONOMICS-DASHBOARD beschrieben): "Allgemeine Informationen"
+    REQ-ECONOMICS-DASHBOARD und der sechste "Ersparnis" unter
+    REQ-ECONOMICS-SAVINGS-DASHBOARD beschrieben): "Allgemeine Informationen"
     (Speicher-Schalter, SOC, Lade-/
     Entladeleistung, Netzleistung (translation_key smartmeter_power - der
     Sensor selbst heißt weiterhin smartmeter_power/unique_id-Suffix
@@ -1969,7 +1971,7 @@ requirement_bundled_dashboard:
     davon nie blockiert werden.
   acceptance_criteria:
     - "tests/test_dashboard.py deckt ab: async_build_dashboard_config
-       erzeugt immer alle fünf Views, löst nur tatsächlich in der Entity
+       erzeugt immer alle sechs Views, löst nur tatsächlich in der Entity
        Registry vorhandene Entities auf und lässt Karten ohne jede
        aufgelöste Entity komplett weg. async_create_dashboard überspringt
        sauber, wenn Lovelace nicht geladen ist, registriert Panel und
@@ -4200,8 +4202,8 @@ requirement_economics_dashboard:
     neuen Abschnitt zum Dashboard-Tab; die drei Tarifarten sind bereits im
     Abschnitt "Tarifmodell für die Wirtschaftlichkeit" mit Formeln/
     Grenzen dokumentiert. DEVELOPMENT.md erhält einen Abschnitt zum neuen
-    View sowie eine Ergänzung von REQ-BUNDLED-DASHBOARD (jetzt fünf statt
-    vier Tabs). strings.json/translations sind unverändert, da der
+    View sowie eine Ergänzung von REQ-BUNDLED-DASHBOARD (insgesamt sechs
+    Tabs). strings.json/translations sind unverändert, da der
     Dashboard-Tab ausschließlich bereits übersetzte Entities referenziert.
   acceptance_criteria:
     - "View-Reihenfolge (fünfter Tab), Titel/Pfad/Icon sowie die exakte
@@ -4225,3 +4227,75 @@ requirement_economics_dashboard:
     - "Die Fortschritts-Gauge trägt genau ein Segment (ab 0, blau) - keine
        rot/gelb/grüne Ampel."
     - "README.md, DEVELOPMENT.md und anforderung.yaml sind aktualisiert."
+
+# ==============================================================================
+# ANFORDERUNG: KOMPAKTE ERSPARNISÜBERSICHT IM DASHBOARD
+# ==============================================================================
+requirement_economics_savings_dashboard:
+  id: REQ-ECONOMICS-SAVINGS-DASHBOARD
+  title: "Kompakter Dashboard-Tab Ersparnis mit Netto-Ergebnis je Kalenderzeitraum"
+  status: done
+  description: >
+    Das mitgelieferte Dashboard besitzt unmittelbar hinter dem unveränderten
+    fünften View "Wirtschaftlichkeit" einen sechsten View "Ersparnis" mit dem
+    Pfad `ersparnis` und dem in der zu Home Assistant 2026.8.2 gehörenden
+    Frontend-Version 20260729.7 vorhandenen Icon `mdi:piggy-bank`. Der View
+    beantwortet ausschließlich die Frage nach der Netto-Ersparnis und
+    verwendet dafür die über die Entity Registry aufgelöste Entity
+    economics_operating_result. Deren bestehende Bedeutung (vermiedene
+    Netzbezugskosten minus Netzladekosten und PV-Opportunitätskosten) bleibt
+    unverändert; insbesondere werden negative Ergebnisse nicht ausgeblendet
+    und echte Nullwerte nicht als fehlende Daten behandelt.
+
+    Am Anfang erläutert eine Core-markdown-Karte diese Bedeutung. Darauf
+    folgen in einem zweispaltigen, nicht quadratischen Core-grid vier
+    Core-statistic-Karten "Heute bisher", "Diese Woche bisher", "Dieser
+    Monat bisher" und "Dieses Jahr bisher". Alle vier referenzieren exakt
+    dieselbe economics_operating_result-Entity, verwenden `stat_type: change`
+    und die lokale Kalenderperiode `day`, `week`, `month` beziehungsweise
+    `year` unter `period.calendar.period`, ohne Offset oder selbst berechnete
+    Zeitgrenzen. Recorder-Zustände unknown/unavailable bleiben der Darstellung
+    durch die Core-Karte überlassen; die Integration ersetzt sie nicht durch
+    einen Betrag.
+
+    Die entities-Karte "Gesamt seit Bilanzbeginn" zeigt als "Netto-Ersparnis"
+    den direkten aktuellen Zustand von economics_operating_result und direkt
+    darunter das Attribut economics_started_at der vorhandenen Entity
+    economics_status mit dem Label "Bilanzbeginn". Der Gesamtwert ist keine
+    fixed-period-Recorder-Differenz. Ein weiterer Markdown-Hinweis erklärt,
+    dass die Kalenderwerte aus der Recorder-Langzeitstatistik stammen und nur
+    Daten der laufenden Bilanz ab dem angezeigten Bilanzbeginn umfassen. Ein
+    optionaler Vorlauf-Ertrag wird weder referenziert noch auf Kalenderperioden
+    verteilt; er bleibt ausschließlich Teil der vorhandenen ROI-Darstellung.
+
+    Fehlt economics_operating_result in der Entity Registry, entfallen das
+    gesamte Statistik-Grid, die Gesamtkarte und der Recorder-Hinweis. Es
+    entsteht weder `entity: null` noch ein leeres Grid; nur der statische
+    Einordnungstext des Views bleibt sichtbar. Die Umsetzung ändert weder
+    Coordinator, Bilanz-/Tarif-/Amortisationslogik, Persistenz und Services
+    noch den bestehenden View "Wirtschaftlichkeit". Sie führt keine neue
+    Entity ein und greift weder auf private Recorder-APIs noch auf Custom
+    Cards zu. Ein manueller Bilanzneustart innerhalb eines Recorder-Zeitraums
+    kann weiterhin als Änderung sichtbar werden; Bilanzbeginn und Hinweis
+    machen diese UI-only-Grenze transparent, ohne sie fachlich nachzubilden.
+
+    Ein gespeichertes Dashboard mit den bisherigen fünf View-Pfaden wird als
+    unvollständig erkannt und meldet ausschließlich "Ersparnis". Es wird nicht
+    automatisch überschrieben. `sax_power.reinstall_dashboard` erzeugt
+    deterministisch alle sechs Views; Erstanlage und normale Create-Aufrufe
+    bleiben idempotent.
+  acceptance_criteria:
+    - "Die View-Reihenfolge endet exakt mit wirtschaftlichkeit, ersparnis;
+       Titel, Pfad und Icon des sechsten Views sind regression-getestet."
+    - "Alle vier Kalenderkarten referenzieren dieselbe aufgelöste Entity und
+       verwenden exakt change sowie day/week/month/year ohne Offset."
+    - "Gesamtwert und Bilanzbeginn sind direkte Entity-/Attributzeilen; keine
+       fixed_period-Statistik und keine economics_result_today-Referenz."
+    - "Fehlt economics_operating_result, gibt es weder ungültige Entity-IDs
+       noch ein leeres Grid oder datenabhängige Hinweiskarten."
+    - "Eine SHA-256-Strukturregression in tests/test_dashboard.py friert den
+       vollständigen bestehenden View wirtschaftlichkeit auf dem Stand vor
+       Einführung des Ersparnis-Views ein."
+    - "Create, Reinstall, vollständiger Dashboardstand und das bisherige
+       Fünf-View-Dashboard sind mit sechs Views beziehungsweise dem alleinigen
+       Missing-View-Hinweis Ersparnis getestet."

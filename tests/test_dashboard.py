@@ -5,6 +5,7 @@ anforderung.yaml, REQ-BUNDLED-DASHBOARD).
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -68,7 +69,7 @@ def _iter_entity_ids(cards: list[dict[str, Any]]):
 
 async def test_build_dashboard_config_resolves_registered_entities(hass) -> None:
     """Nur tatsächlich in der Entity Registry vorhandene Entities landen in
-    den Karten; die fünf Tabs (Views) sind immer vorhanden."""
+    den Karten; die sechs Tabs (Views) sind immer vorhanden."""
     soc_entity_id = _register(hass, "sensor", "soc")
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
     grid_serving_switch_entity_id = _register(hass, "switch", "grid_serving_enabled")
@@ -84,6 +85,7 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
         "netzdienliches-laden",
         "dynamisches-laden",
         "wirtschaftlichkeit",
+        "ersparnis",
     ]
 
     general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
@@ -264,13 +266,17 @@ async def test_price_charge_forecast_follows_status_with_dynamic_name(hass) -> N
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
-    """Ohne jede registrierte Entity bleiben alle fünf Views vorhanden, aber
-    ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
+    """Ohne registrierte Entity bleiben alle sechs Views vorhanden.
+
+    Die ersten fünf Views bleiben kartenlos; der Ersparnis-View behält nur
+    seinen statischen Einordnungstext, aber keine leeren Entity-/Grid-Karten.
+    """
     config = await async_build_dashboard_config(hass, "unbekannter_entry")
 
-    assert len(config["views"]) == 5
-    for view in config["views"]:
+    assert len(config["views"]) == 6
+    for view in config["views"][:5]:
         assert view["cards"] == []
+    assert [card["type"] for card in config["views"][5]["cards"]] == ["markdown"]
 
 
 async def test_build_dashboard_config_status_card_removed(hass) -> None:
@@ -881,6 +887,142 @@ async def test_economics_view_is_present_but_cardless_without_any_entity(hass) -
     assert view["cards"] == []
 
 
+async def test_economics_view_structure_is_unchanged_by_savings_view(hass) -> None:
+    """REQ-ECONOMICS-SAVINGS-DASHBOARD: Der bestehende technische View
+    bleibt gegenüber dem Stand unmittelbar vor Einführung des separaten
+    Ersparnis-Views bytegenau gleich aufgebaut."""
+    registry = er.async_get(hass)
+    for entity_domain, suffixes in (
+        ("sensor", [description.key for description in sensor.SENSOR_DESCRIPTIONS]),
+        (
+            "binary_sensor",
+            [
+                description.key
+                for description in binary_sensor.BINARY_SENSOR_DESCRIPTIONS
+            ],
+        ),
+    ):
+        for suffix in suffixes:
+            registry.async_get_or_create(entity_domain, DOMAIN, f"{ENTRY_ID}_{suffix}")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    serialized = json.dumps(
+        _economics_view(config),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    assert sha256(serialized.encode()).hexdigest() == (
+        "aef2ec3dd1962a68ec4cf05d9e98160d44948025b2bd1ecdc027265eae18d3e5"
+    )
+
+
+# ===========================================================================
+# Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+# ===========================================================================
+def _savings_view(config: dict[str, Any]) -> dict[str, Any]:
+    return next(view for view in config["views"] if view["path"] == "ersparnis")
+
+
+async def test_savings_view_is_sixth_with_expected_title_and_icon(hass) -> None:
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert config["views"][-2]["path"] == "wirtschaftlichkeit"
+    assert config["views"][5] == _savings_view(config)
+    assert config["views"][5]["title"] == "Ersparnis"
+    assert config["views"][5]["icon"] == "mdi:piggy-bank"
+
+
+async def test_savings_view_uses_exact_calendar_statistics(hass) -> None:
+    result = _register(hass, "sensor", "economics_operating_result")
+    result_today = _register(hass, "sensor", "economics_result_today")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    grid = next(card for card in view["cards"] if card["type"] == "grid")
+    assert grid["columns"] == 2
+    assert grid["square"] is False
+    assert grid["cards"] == [
+        {
+            "type": "statistic",
+            "entity": result,
+            "name": name,
+            "stat_type": "change",
+            "period": {"calendar": {"period": period}},
+        }
+        for name, period in (
+            ("Heute bisher", "day"),
+            ("Diese Woche bisher", "week"),
+            ("Dieser Monat bisher", "month"),
+            ("Dieses Jahr bisher", "year"),
+        )
+    ]
+    assert result_today not in json.dumps(view)
+    assert "offset" not in json.dumps(grid)
+
+
+async def test_savings_view_total_is_direct_state_with_accounting_start(hass) -> None:
+    result = _register(hass, "sensor", "economics_operating_result")
+    status = _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    total = next(
+        card
+        for card in view["cards"]
+        if card.get("title") == "Gesamt seit Bilanzbeginn"
+    )
+    assert total == {
+        "type": "entities",
+        "title": "Gesamt seit Bilanzbeginn",
+        "state_color": True,
+        "entities": [
+            {"entity": result, "name": "Netto-Ersparnis"},
+            {
+                "type": "attribute",
+                "entity": status,
+                "attribute": "economics_started_at",
+                "name": "Bilanzbeginn",
+            },
+        ],
+    }
+    assert "fixed_period" not in json.dumps(view)
+
+
+async def test_savings_view_explains_result_and_recorder_scope(hass) -> None:
+    _register(hass, "sensor", "economics_operating_result")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    assert view["cards"][0] == {
+        "type": "markdown",
+        "content": (
+            "Netto-Ersparnis = vermiedene Netzbezugskosten minus "
+            "Netzladekosten und entgangene Einspeisevergütung. Positive Werte "
+            "sind Ersparnisse, negative Werte sind Mehrkosten."
+        ),
+    }
+    markdown = [card["content"] for card in view["cards"] if card["type"] == "markdown"]
+    assert "Recorder-Langzeitstatistik" in markdown[1]
+    assert "laufenden Bilanz" in markdown[1]
+    assert "Bilanzbeginn" in markdown[1]
+
+
+async def test_savings_view_omits_data_cards_without_result_entity(hass) -> None:
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    assert [card["type"] for card in view["cards"]] == ["markdown"]
+    assert not any(card["type"] == "grid" for card in view["cards"])
+    assert "entity" not in json.dumps(view["cards"])
+
+
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:
     """Ohne geladene Lovelace-Komponente (z. B. in den meisten Unit-Tests)
     darf async_create_dashboard nicht fehlschlagen, sondern nur überspringen."""
@@ -914,7 +1056,7 @@ async def test_create_dashboard_registers_panel_and_is_idempotent(hass) -> None:
         assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards
         dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 5
+        assert len(saved_config["views"]) == 6
         mock_register_panel.assert_called_once()
         assert (
             mock_register_panel.call_args.kwargs["frontend_url_path"]
@@ -950,7 +1092,7 @@ async def test_create_dashboard_force_overwrites_existing_config(hass) -> None:
         await async_create_dashboard(hass, entry, force=True)
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 5
+        assert len(saved_config["views"]) == 6
         mock_register_panel.assert_called_once()  # weiterhin kein zweiter Panel-Aufruf
 
 
@@ -1050,7 +1192,7 @@ async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
         )
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 5
+        assert len(saved_config["views"]) == 6
         mock_register_panel.assert_called_once()  # kein zweiter Panel-Aufruf
 
 
@@ -1343,6 +1485,35 @@ async def test_outdated_dashboard_is_reported(hass) -> None:
     assert issue is not None
     assert issue.is_fixable
     assert issue.translation_placeholders["views"] == "Wirtschaftlichkeit"
+
+
+async def test_previous_five_view_dashboard_reports_only_savings(hass) -> None:
+    """REQ-ECONOMICS-SAVINGS-DASHBOARD: Ein gespeichertes Dashboard mit
+    den bisherigen fünf View-Pfaden bleibt unangetastet und meldet nur den
+    tatsächlich neu hinzugekommenen View."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    await storage.async_save(
+        {"views": [view for view in stored["views"] if view["path"] != "ersparnis"]}
+    )
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    unchanged = await storage.async_load(False)
+    assert [view["path"] for view in unchanged["views"]] == [
+        "allgemein",
+        "ladeautomatik",
+        "netzdienliches-laden",
+        "dynamisches-laden",
+        "wirtschaftlichkeit",
+    ]
 
 
 async def test_complete_dashboard_is_not_reported(hass) -> None:

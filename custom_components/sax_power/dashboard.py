@@ -1,9 +1,10 @@
 """Mitgeliefertes Lovelace-Dashboard für SAX Power (siehe anforderung.yaml,
 REQ-BUNDLED-DASHBOARD).
 
-Baut ein fünfteiliges Storage-Dashboard ("Allgemeine Informationen",
+Baut ein sechsteiliges Storage-Dashboard ("Allgemeine Informationen",
 "Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden",
-"Wirtschaftlichkeit", siehe REQ-ECONOMICS-DASHBOARD) und legt es -
+"Wirtschaftlichkeit", siehe REQ-ECONOMICS-DASHBOARD, und "Ersparnis",
+siehe REQ-ECONOMICS-SAVINGS-DASHBOARD) und legt es -
 wenn der Anwender das in der Ersteinrichtung ausgewählt hat (config_flow.py,
 CONF_CREATE_DASHBOARD) - direkt in Home Assistants Lovelace-Speicher an,
 damit es sofort ohne Neustart in der Sidebar erscheint.
@@ -312,8 +313,26 @@ def _statistics_graph_card(
     }
 
 
+def _calendar_statistic_card(
+    entity_id: str, name: str, calendar_period: str
+) -> dict[str, Any]:
+    """Core-Statistikkarte für eine lokale Kalenderperiode.
+
+    Die Karte überlässt die Auswertung vollständig Home Assistants
+    Recorder-Langzeitstatistik; sie berechnet weder Zeitgrenzen noch Werte
+    selbst (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+    """
+    return {
+        "type": "statistic",
+        "entity": entity_id,
+        "name": name,
+        "stat_type": "change",
+        "period": {"calendar": {"period": calendar_period}},
+    }
+
+
 def _grid_card(cards: list[dict[str, Any] | None]) -> dict[str, Any] | None:
-    """Reiht mehrere Tile-Karten nebeneinander an - fehlende Entities werden
+    """Reiht mehrere Karten nebeneinander an - fehlende Entities werden
     wie bei _entities_card stillschweigend ausgelassen; bleibt am Ende
     nichts übrig, wird die ganze Zeile weggelassen."""
     resolved = [card for card in cards if card is not None]
@@ -376,7 +395,7 @@ def _view(
 async def async_build_dashboard_config(
     hass: HomeAssistant, entry_id: str
 ) -> dict[str, Any]:
-    """Baut die komplette Lovelace-Konfiguration (fünf Tabs) für einen Entry."""
+    """Baut die komplette Lovelace-Konfiguration (sechs Tabs) für einen Entry."""
     translations = await translation.async_get_translations(
         hass, hass.config.language, "entity", integrations=[DOMAIN]
     )
@@ -824,6 +843,75 @@ async def async_build_dashboard_config(
         ],
     )
 
+    savings_result_entity_id = _entity_id(
+        hass, "sensor", f"{entry_id}_economics_operating_result"
+    )
+    savings_period_grid = None
+    savings_total_card = None
+    savings_recorder_note = None
+    if savings_result_entity_id is not None:
+        savings_period_grid = _grid_card(
+            [
+                _calendar_statistic_card(
+                    savings_result_entity_id, "Heute bisher", "day"
+                ),
+                _calendar_statistic_card(
+                    savings_result_entity_id, "Diese Woche bisher", "week"
+                ),
+                _calendar_statistic_card(
+                    savings_result_entity_id, "Dieser Monat bisher", "month"
+                ),
+                _calendar_statistic_card(
+                    savings_result_entity_id, "Dieses Jahr bisher", "year"
+                ),
+            ]
+        )
+        savings_total_rows: list[dict[str, Any]] = [
+            {
+                "entity": savings_result_entity_id,
+                "name": "Netto-Ersparnis",
+            }
+        ]
+        savings_started_at_row = _attribute_row(
+            status_entity_id, "economics_started_at", "Bilanzbeginn"
+        )
+        if savings_started_at_row is not None:
+            savings_total_rows.append(savings_started_at_row)
+        savings_total_card = {
+            "type": "entities",
+            "title": "Gesamt seit Bilanzbeginn",
+            "state_color": True,
+            "entities": savings_total_rows,
+        }
+        savings_recorder_note = {
+            "type": "markdown",
+            "content": (
+                "Die Kalenderwerte stammen aus der Recorder-"
+                "Langzeitstatistik und umfassen nur Daten der laufenden "
+                "Bilanz ab dem angezeigten Bilanzbeginn."
+            ),
+        }
+
+    savings_view = _view(
+        "Ersparnis",
+        "ersparnis",
+        "mdi:piggy-bank",
+        [
+            {
+                "type": "markdown",
+                "content": (
+                    "Netto-Ersparnis = vermiedene Netzbezugskosten minus "
+                    "Netzladekosten und entgangene Einspeisevergütung. "
+                    "Positive Werte sind Ersparnisse, negative Werte sind "
+                    "Mehrkosten."
+                ),
+            },
+            savings_period_grid,
+            savings_total_card,
+            savings_recorder_note,
+        ],
+    )
+
     return {
         "views": [
             general_view,
@@ -831,6 +919,7 @@ async def async_build_dashboard_config(
             grid_serving_view,
             price_view,
             economics_view,
+            savings_view,
         ]
     }
 

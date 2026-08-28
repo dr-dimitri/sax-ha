@@ -90,7 +90,7 @@ custom_components/sax_power/
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan + Roh-/Startwerte der
 │                          Energie- und Geldzähler, IP-Adresse redigiert
-├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
+├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (6 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
 │                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-DASHBOARD
 ├── services.yaml           Service-Schema für die UI
@@ -732,6 +732,40 @@ Alles andere folgt exakt dem bestehenden Muster der vier älteren Tabs:
 (`sax_power.reinstall_dashboard`) überschreibt inklusive des neuen Tabs,
 ein Fehler beim Dashboardbau blockiert nie das Setup.
 
+### Dashboard-Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+
+Der sechste View folgt unmittelbar auf den unveränderten technischen View
+`wirtschaftlichkeit`. Er führt keine eigene Wirtschaftsberechnung ein,
+sondern löst `economics_operating_result` einmal über `_entity_id` aus der
+Entity Registry auf und verwendet ausschließlich diese ID für alle
+Netto-Ergebnisse:
+
+- `_calendar_statistic_card` baut je eine Core-`statistic`-Karte mit
+  `stat_type: change` und `period.calendar.period`. Die vier Aufrufe nutzen
+  `day`, `week`, `month` und `year`; damit bestimmt Home Assistant die lokalen
+  Kalendergrenzen und liest die Recorder-Langzeitstatistik. Python berechnet
+  weder Zeitgrenzen noch Geldwerte.
+- `_grid_card` ordnet diese vier Karten in zwei Spalten an. Weil das Grid nur
+  nach erfolgreicher Registry-Auflösung gebaut wird, kann bei fehlender
+  Ergebnis-Entity weder `entity: null` noch ein leerer Grid-Container
+  entstehen.
+- Die Karte "Gesamt seit Bilanzbeginn" ist eine Core-`entities`-Karte. Ihre
+  Ergebniszeile verweist direkt auf den aktuellen Zustand von
+  `economics_operating_result`; eine `_attribute_row` zeigt darunter
+  `economics_started_at` von `economics_status` als "Bilanzbeginn". Sie nutzt
+  bewusst keine Recorder-Differenz.
+- Statische Markdown-Karten erklären die unveränderte Nettoformel und die
+  Grenze der Zeitraumwerte: nur Recorder-Daten der laufenden Bilanz ab dem
+  angezeigten Bilanzbeginn. Der optionale Vorlauf-Ertrag bleibt außerhalb der
+  Kalenderwerte.
+
+Der vorhandene Missing-View-Mechanismus vergleicht die View-Pfade dynamisch.
+Mit `ersparnis` in der erwarteten Konfiguration meldet ein gespeichertes
+Fünf-View-Dashboard deshalb ausschließlich den neuen View, ohne es zu
+überschreiben; Reinstall baut alle sechs Views neu. Ein vollständiger
+Struktur-Hash im Dashboard-Test friert den bestehenden View
+`wirtschaftlichkeit` auf seinem vorherigen Stand ein.
+
 ## Datenfluss
 
 `config_flow.py` sammelt Host/Port/Slave-IDs/Intervall und validiert die
@@ -1345,8 +1379,9 @@ tests/
 │                                  (economics_price_unavailable) REQ-ECONOMICS-OBSERVABILITY
 ├── test_dashboard.py                Mitgeliefertes Lovelace-Dashboard (REQ-BUNDLED-DASHBOARD/
 │                                  REQ-ECONOMICS-DASHBOARD): Entity-Auflösung/-Auslassung je
-│                                  Tab, Gauge-Karten, geräteprefix-freie Labels für alle fünf
-│                                  Views inkl. des Tabs "Wirtschaftlichkeit" (Karten-/Entity-
+│                                  Tab, Gauge-Karten, geräteprefix-freie Labels für alle sechs
+│                                  Views inkl. der Tabs "Wirtschaftlichkeit" und "Ersparnis"
+│                                  (Karten-/Entity-
 │                                  Reihenfolge, Attribut-Zeilen für Preisabdeckung/
 │                                  Bilanzbeginn, Amortisationsfortschritt als Gauge,
 │                                  statistics-graph-Verlaufskarte, nicht-leerer View auch ohne

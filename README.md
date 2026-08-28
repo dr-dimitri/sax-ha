@@ -30,6 +30,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
 - [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)
 - [Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz)
+- [Ersparnisübersicht](#ersparnisübersicht)
 - [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
 - [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)
 - [Energy-Dashboard](#energy-dashboard)
@@ -124,7 +125,7 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
 - allgemeine Informationen,
 - zeitgesteuertes Laden,
 - netzdienliches Laden,
-- dynamisches Laden und
+- dynamisches Laden,
 - Wirtschaftlichkeit (Status/Preise, beim tageszeitabhängigen Tarif der
   hinterlegte Tarifplan mit Hervorhebung des gerade geltenden Zeitfensters,
   Herkunft der Ladeenergie, operative Geldbilanz, Investition/Amortisation
@@ -132,7 +133,11 @@ Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
   ausschließlich bereits bestehende Entities, siehe
   [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit),
   [ROI und Amortisationsprognose](#roi-und-amortisationsprognose)
-  und [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)).
+  und [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart))
+  sowie
+- Ersparnis (kompakte Netto-Ergebnisse für heute, diese Woche, diesen Monat,
+  dieses Jahr und insgesamt seit Bilanzbeginn; ausschließlich aus der
+  vorhandenen Wirtschaftlichkeitsbilanz).
 
 ![Dashboard mit allgemeinen Informationen zum SAX-Power-Speicher](docs/images/dashboard/allgemeine_information.png)
 
@@ -611,6 +616,36 @@ unverändert.
 Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
 ist oder die Bilanz noch auf Kapazität/Ladezustand wartet - ein
 deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
+
+## Ersparnisübersicht
+
+Der sechste Tab **Ersparnis** fasst das vorhandene **operative Ergebnis**
+bewusst kompakt zusammen. Netto-Ersparnis bedeutet dort immer: vermiedene
+Netzbezugskosten abzüglich Netzladekosten und entgangener Einspeisevergütung.
+Positive Werte sind Ersparnisse, negative Werte sind Mehrkosten; ein echtes
+Ergebnis von 0 bleibt als 0 EUR sichtbar.
+
+Vier Karten zeigen die Änderung des operativen Ergebnisses im laufenden
+Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
+laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus
+Home Assistants Recorder-Langzeitstatistik, nicht aus rollierenden
+24-/7-/30-/365-Stunden-Fenstern. Fehlt für einen Zeitraum noch eine Statistik
+oder ist die Entity vom Recorder ausgeschlossen, bleibt der Core-Zustand
+`unknown`/`unavailable`; die Integration ersetzt fehlende Daten nicht durch
+0 EUR.
+
+**Gesamt seit Bilanzbeginn** ist dagegen der aktuelle Zustand des
+fortlaufenden Sensors `economics_operating_result`, keine Recorder-Differenz.
+Daneben steht der sichtbare **Bilanzbeginn**. Die Kalenderwerte umfassen nur
+Daten dieser laufenden Bilanz. Ein optional eingetragener, bereits vor dem
+Bilanzbeginn erwirtschafteter Ertrag bleibt zeitlich nicht zuordenbar und wird
+deshalb ausschließlich in der ROI-/Amortisationsdarstellung berücksichtigt,
+nicht in Tag, Woche, Monat oder Jahr.
+
+Wird die Wirtschaftlichkeitsbilanz manuell neu gestartet und schneidet eine
+angezeigte Kalenderperiode diesen Neustart, kann die Recorder-Änderung den
+Sprung auf 0 enthalten. Der Tab weist deshalb Bilanzbeginn und Geltungsbereich
+aus, rekonstruiert aber keine frühere Historie.
 
 ## ROI und Amortisationsprognose
 

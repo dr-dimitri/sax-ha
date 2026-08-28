@@ -648,6 +648,11 @@ zusammengefasst und
 standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
 Warnungen bleiben davon unabhängig.
 
+Zwischen den festen Kalenderwerten und diesen Erläuterungen zeigt der Tab
+dieselbe dynamische Tarifinformation wie der Tab **Wirtschaftlichkeit**. Sie
+liest den tageszeitabhängigen Tarifplan aus der aktuellen Preis-Entity und
+reagiert deshalb ohne Dashboard-Neubau auf Tarifänderungen.
+
 Vier Karten zeigen die Zunahme der Netto-Ersparnis im laufenden
 Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
 laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus
@@ -706,7 +711,8 @@ Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
 **Bilanzbeginn**. Der optionale Vorlauf-Ertrag folgt als **Bereits vor
 Bilanzbeginn berücksichtigt** mit der Einheit **€**. Alle Währungsangaben im
 Ersparnis-Tab erscheinen mit zwei Nachkommastellen; intern und im Recorder
-bleibt die höhere Rechengenauigkeit erhalten.
+bleibt die höhere Rechengenauigkeit erhalten. Eine separate sichtbare
+Überschrift **Amortisation** besitzt dieser Block nicht.
 
 Ohne Investitionskosten verweist der Block auf **Geräte & Dienste → SAX Power
 Home → Konfigurieren → Wirtschaftlichkeit**. Die Anzeige reagiert direkt auf
@@ -724,7 +730,8 @@ Netto-Ergebnis und Balkendiagramm sind über den eigenen Schlüssel
 `energy_sax_power_savings` miteinander verbunden und beeinflussen dadurch
 keine Energy-Karten in anderen Ansichten. Die Vergleichsfunktion bleibt
 deaktiviert, solange der Tab keinen gesondert beschrifteten Vergleichswert
-ausgibt.
+ausgibt. Der Block beginnt direkt mit dem Datumswähler und besitzt keine
+separate sichtbare Überschrift **Freier Zeitraum**.
 
 Auch diese Auswertung verwendet ausschließlich die Recorder-Langzeitstatistik
 von `economics_net_savings`: Der Einzelwert ist dessen Änderung im

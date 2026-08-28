@@ -473,10 +473,6 @@ def _savings_free_period_block(entity_id: str) -> dict[str, Any]:
         "type": "vertical-stack",
         "cards": [
             {
-                "type": "markdown",
-                "content": "### Freier Zeitraum",
-            },
-            {
                 "type": "energy-date-selection",
                 "collection_key": _SAVINGS_COLLECTION_KEY,
                 "disable_compare": True,
@@ -596,10 +592,6 @@ def _savings_payback_block(
     return {
         "type": "vertical-stack",
         "cards": [
-            {
-                "type": "markdown",
-                "content": "### Amortisation",
-            },
             {
                 "type": "conditional",
                 "conditions": [{"entity": configured_entity_id, "state": "off"}],
@@ -1115,6 +1107,7 @@ async def async_build_dashboard_config(
         [
             savings_payback_block,
             savings_period_grid,
+            tariff_plan_card,
             savings_explanation_card,
             savings_free_period_block,
             savings_status_card,
@@ -1323,17 +1316,21 @@ async def _async_missing_dashboard_views(
         outdated_paths.add(path)
 
     savings_view = stored_views.get("ersparnis")
-    investment_gate_entity_id = _entity_id(
-        hass,
-        "binary_sensor",
-        f"{entry.entry_id}_economics_investment_configured",
+    expected_savings_view = next(
+        view for view in expected["views"] if view["path"] == "ersparnis"
     )
-    if (
-        savings_view is not None
-        and investment_gate_entity_id is not None
-        and not _contains_dashboard_value(savings_view, "### Amortisation")
-    ):
-        outdated_paths.add("ersparnis")
+    if savings_view is not None:
+        # Die beiden früheren Markdown-Überschriften wurden entfernt. Die
+        # Tarifinformation ist dieselbe dynamische Karte wie im technischen
+        # View und existiert nur, wenn ihre Preis-Entity registriert ist.
+        if any(
+            _contains_dashboard_value(savings_view, heading)
+            for heading in ("### Amortisation", "### Freier Zeitraum")
+        ) or (
+            _contains_dashboard_fragment(expected_savings_view, "tariff_type")
+            and not _contains_dashboard_fragment(savings_view, "tariff_type")
+        ):
+            outdated_paths.add("ersparnis")
 
     for path in ("wirtschaftlichkeit", "ersparnis"):
         stored_view = stored_views.get(path)

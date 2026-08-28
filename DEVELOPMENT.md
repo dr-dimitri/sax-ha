@@ -641,8 +641,10 @@ ein Fehler beim Dashboardbau blockiert nie das Setup.
 
 Der sechste View verwendet `economics_net_savings` für alle Kalender- und
 freien Zeitraumwerte. Die vollständige Top-Level-Reihenfolge lautet:
-Amortisationsblock, KPI-Grid, eingeklappte Hinweise, freier Zeitraum,
-Statushinweis.
+Amortisationsblock, KPI-Grid, Tarifinformation, eingeklappte Hinweise, freier
+Zeitraum, Statushinweis. Die Tarifinformation verwendet exakt dasselbe von
+`_tariff_plan_card` erzeugte Kartenobjekt wie der technische View
+`wirtschaftlichkeit`.
 
 `_savings_payback_block` wird über
 `economics_investment_configured` zur Laufzeit ein- oder ausgeblendet. Im
@@ -650,12 +652,14 @@ aktiven Zweig folgt auf die blaue Fortschritts-Gauge eine einzige
 `entities`-Karte mit Restbetrag, Netto-Ersparnis, Bilanzbeginn und
 Vorlaufbetrag. Der Vorlauf trägt `suffix: "€"`. Prognose-Tile,
 Prognoseerklärung, Durchschnitt und Jahreshochrechnung sind entfernt. Die
-frühere separate Karte "Gesamt seit Bilanzbeginn" existiert nicht mehr.
+frühere separate Karte "Gesamt seit Bilanzbeginn" existiert nicht mehr. Der
+Block besitzt keine eigene Markdown-Überschrift "Amortisation".
 
 `_calendar_statistic_card` überlässt Tag, Woche, Monat und Jahr vollständig
 Home Assistants Recorder. `_savings_free_period_block` verbindet
 `energy-date-selection`, statistic und statistics-graph über
-`energy_sax_power_savings`. Die eingeklappte Erklärung ergänzt den
+`energy_sax_power_savings`, ohne eine separate Markdown-Überschrift "Freier
+Zeitraum". Die eingeklappte Erklärung ergänzt den
 unbewerteten Anfangsbestand nur bei positivem Sensorwert; der Statushinweis
 rendert im gesunden Zustand leer.
 

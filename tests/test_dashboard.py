@@ -916,7 +916,9 @@ def _savings_status_card(view: dict[str, Any]) -> dict[str, Any]:
     return next(
         card
         for card in view["cards"]
-        if card["type"] == "markdown" and card.get("show_empty") is False
+        if card["type"] == "markdown"
+        and card.get("show_empty") is False
+        and "status_entity" in card.get("content", "")
     )
 
 
@@ -1112,22 +1114,25 @@ async def test_savings_view_uses_requested_card_order(hass) -> None:
     _register(hass, "binary_sensor", "economics_investment_configured")
     _register(hass, "sensor", "economics_amortization_progress")
     _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_current_import_price")
     _register(hass, "sensor", "economics_status")
     _register(hass, "sensor", "economics_unvalued_inventory")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
     cards = _savings_view(config)["cards"]
-    assert len(cards) == 5
+    assert len(cards) == 6
     assert cards[0]["type"] == "vertical-stack"
-    assert cards[0]["cards"][0]["content"] == "### Amortisation"
+    assert cards[0]["cards"][0]["type"] == "conditional"
     assert cards[1]["type"] == "grid"
-    assert cards[2] == _savings_explanation_card(_savings_view(config))
-    assert cards[3]["type"] == "vertical-stack"
+    assert cards[2] == _tariff_plan_card(_economics_view(config))
+    assert cards[2] == _tariff_plan_card(_savings_view(config))
+    assert cards[3] == _savings_explanation_card(_savings_view(config))
+    assert cards[4]["type"] == "vertical-stack"
     assert any(
-        nested["type"] == "energy-date-selection" for nested in cards[3]["cards"]
+        nested["type"] == "energy-date-selection" for nested in cards[4]["cards"]
     )
-    assert cards[4] == _savings_status_card(_savings_view(config))
+    assert cards[5] == _savings_status_card(_savings_view(config))
 
 
 async def test_savings_view_uses_exact_calendar_statistics(hass) -> None:
@@ -1170,7 +1175,7 @@ async def test_savings_view_moves_total_and_start_below_remaining_amount(hass) -
 
     view = _savings_view(config)
     block = _savings_payback_block(view)
-    assert block["cards"][2]["conditions"] == [{"entity": configured, "state": "on"}]
+    assert block["cards"][1]["conditions"] == [{"entity": configured, "state": "on"}]
     details = _configured_payback_stack(block)["cards"][1]
     assert details["type"] == "entities"
     assert details["state_color"] is True
@@ -1265,12 +1270,11 @@ async def test_savings_free_period_cards_share_the_exact_collection_key(
 
     block = _savings_free_period_block(_savings_view(config))
     assert [card["type"] for card in block["cards"]] == [
-        "markdown",
         "energy-date-selection",
         "statistic",
         "statistics-graph",
     ]
-    _, selection, statistic, graph = block["cards"]
+    selection, statistic, graph = block["cards"]
     assert selection == {
         "type": "energy-date-selection",
         "collection_key": "energy_sax_power_savings",
@@ -1296,13 +1300,14 @@ async def test_savings_free_period_cards_share_the_exact_collection_key(
     assert "period" not in graph
 
 
-async def test_savings_free_period_keeps_only_its_compact_heading(hass) -> None:
+async def test_savings_free_period_has_no_separate_heading(hass) -> None:
     _register(hass, "sensor", "economics_net_savings")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
-    content = _savings_free_period_block(_savings_view(config))["cards"][0]["content"]
-    assert content == "### Freier Zeitraum"
+    block = _savings_free_period_block(_savings_view(config))
+    assert block["cards"][0]["type"] == "energy-date-selection"
+    assert "### Freier Zeitraum" not in json.dumps(block)
 
 
 async def test_savings_free_period_is_fully_omitted_without_result_entity(
@@ -1323,7 +1328,8 @@ def _savings_payback_block(view: dict[str, Any]) -> dict[str, Any]:
         card
         for card in view["cards"]
         if card["type"] == "vertical-stack"
-        and card["cards"][0].get("content") == "### Amortisation"
+        and card["cards"][0].get("type") == "conditional"
+        and "Amortisationswerte" in card["cards"][0].get("card", {}).get("content", "")
     )
 
 
@@ -1350,11 +1356,10 @@ async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
     free_period = _savings_free_period_block(view)
     assert view["cards"].index(block) < view["cards"].index(free_period)
     assert [card["type"] for card in block["cards"]] == [
-        "markdown",
         "conditional",
         "conditional",
     ]
-    disabled, enabled = block["cards"][1:]
+    disabled, enabled = block["cards"]
     assert disabled["conditions"] == [{"entity": configured, "state": "off"}]
     assert disabled["card"] == {
         "type": "markdown",
@@ -1397,7 +1402,7 @@ async def test_savings_payback_block_is_omitted_without_investment_gate(
 
     assert not any(
         card["type"] == "vertical-stack"
-        and card["cards"][0].get("content") == "### Amortisation"
+        and any(nested.get("type") == "conditional" for nested in card["cards"])
         for card in _savings_view(config)["cards"]
     )
 
@@ -1986,6 +1991,41 @@ async def test_dashboard_with_removed_amortization_forecast_is_reported(hass) ->
     issue = _issue(hass, ENTRY_ID)
     assert issue is not None
     assert issue.translation_placeholders["views"] == ("Wirtschaftlichkeit, Ersparnis")
+
+
+async def test_savings_dashboard_with_old_headings_and_missing_tariff_is_reported(
+    hass,
+) -> None:
+    """Der vorherige Fünf-Karten-Stand verlangt eine bewusste Neuinstallation."""
+    _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_net_savings_today")
+    _register(hass, "sensor", "economics_current_import_price")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    savings_view["cards"] = [
+        card
+        for card in savings_view["cards"]
+        if not (card["type"] == "markdown" and "tariff_type" in card.get("content", ""))
+    ]
+    savings_view["cards"][0]["cards"].insert(
+        0, {"type": "markdown", "content": "### Amortisation"}
+    )
+    free_period = _savings_free_period_block(savings_view)
+    free_period["cards"].insert(
+        0, {"type": "markdown", "content": "### Freier Zeitraum"}
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
 
 
 async def test_missing_dashboard_is_not_reported(hass) -> None:

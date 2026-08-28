@@ -3989,10 +3989,11 @@ requirement_economics_savings_dashboard:
     Anzeige aller Euro-Werte in diesem Tab verwendet zwei Nachkommastellen;
     interne Werte und Recorder-Historie behalten ihre bisherige Genauigkeit.
 
-    Das erste Kartenobjekt ist der Core-vertical-stack "Amortisation". Ein
-    Binary-Sensor economics_investment_configured steuert zwei bedingte
-    Zweige zur Laufzeit: off erklärt den Konfigurationsweg, on zeigt die blaue
-    Fortschritts-Gauge und darunter eine gemeinsame entities-Karte. Deren
+    Das erste Kartenobjekt ist ein Core-vertical-stack ohne separate
+    Markdown-Überschrift "Amortisation". Ein Binary-Sensor
+    economics_investment_configured steuert zwei bedingte Zweige zur Laufzeit:
+    off erklärt den Konfigurationsweg, on zeigt die blaue Fortschritts-Gauge
+    und darunter eine gemeinsame entities-Karte. Deren
     Reihenfolge lautet exakt economics_remaining_to_payback,
     economics_net_savings, das Status-Attribut economics_started_at als
     "Bilanzbeginn" und das ROI-Attribut prior_result_eur als "Bereits vor
@@ -4007,19 +4008,28 @@ requirement_economics_savings_dashboard:
     Kalenderperiode day/week/month/year ohne Offset oder eigene
     Datumsberechnung.
 
-    Danach bündelt genau eine Core-markdown-Karte die dauerhaft
+    Als drittes Kartenobjekt folgt exakt dieselbe dynamische Tarifplan-Karte
+    wie direkt nach "Status und Preise" im View wirtschaftlichkeit. Beide
+    Karten werden aus demselben Lovelace-Objekt aufgebaut, lesen ausschließlich
+    die Attribute der aufgelösten Entity economics_current_import_price und
+    blenden sich bei einer anderen Tarifart als time_of_use selbst aus. Fehlt
+    die Preis-Entity, entfällt die Karte in beiden Views.
+
+    Als viertes Kartenobjekt bündelt genau eine Core-markdown-Karte die dauerhaft
     gleichbleibenden Erklärungen in einem standardmäßig geschlossenen
     details-Element. Bei positivem economics_unvalued_inventory ergänzt sie
     den formatierten Anfangsbestand mit drei Dezimalstellen und Sensor-Einheit.
     Eine separate Anfangsbestandskarte existiert nicht.
 
-    Anschließend folgt der vertical-stack "Freier Zeitraum". Auswahl,
+    Als fünftes Kartenobjekt folgt der vertical-stack für den freien Zeitraum
+    ohne separate Markdown-Überschrift "Freier Zeitraum". Auswahl,
     statistic-Karte und statistics-graph teilen den Collection-Key
     energy_sax_power_savings. Die Statistik verwendet change über
     energy_date_selection; das Balkendiagramm enthält nur
     economics_net_savings und keinen festen period-Schlüssel.
 
-    Als letztes Kartenobjekt steht der selbst ausblendende Statushinweis.
+    Als sechstes und letztes Kartenobjekt steht der selbst ausblendende
+    Statushinweis.
     active rendert leer; alle Fehler-, unbekannten und fehlenden Zustände
     ergeben höchstens einen verständlichen Hinweis mit Link zum technischen
     Wirtschaftlichkeits-View.
@@ -4037,8 +4047,11 @@ requirement_economics_savings_dashboard:
     - "Die View-Reihenfolge endet exakt mit wirtschaftlichkeit, ersparnis;
        Titel, Pfad und Icon sind regression-getestet."
     - "Bei vollständiger Entity-Ausstattung lautet die Top-Level-Reihenfolge
-       exakt Amortisationsblock, KPI-Grid, eingeklappte Hinweise, freier
-       Zeitraum und Statushinweis; eine dritte Gesamtkarte existiert nicht."
+       exakt Amortisationsblock, KPI-Grid, Tarifinformation, eingeklappte
+       Hinweise, freier Zeitraum und Statushinweis; die Tarifinformation ist
+       strukturell identisch mit der Karte im View wirtschaftlichkeit."
+    - "Die separaten Markdown-Felder mit den Labels Amortisation und Freier
+       Zeitraum existieren nicht mehr."
     - "Unter dem Restbetrag folgen Netto-Ersparnis, Bilanzbeginn und der
        Vorlaufbetrag mit dem Suffix €."
     - "Voraussichtliches Amortisationsdatum, tägliche 30-Tage-Prognose,

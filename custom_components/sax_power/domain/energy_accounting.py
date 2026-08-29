@@ -26,11 +26,19 @@ class EnergyDelta:
     Nachkommastellen veröffentlichten Präzision. Es gibt bewusst keine
     dritte Kategorie: Physikalisch speist entweder PV oder das Netz, und
     jede Ladeenergie ist genau einer der beiden zugeordnet.
+
+    `origin_known` trennt dabei eine gemessene Aufteilung von der
+    kompatibilitätsbedingt als Netz ausgewiesenen Fallback-Zuordnung. Diese
+    Qualitätsinformation muss bis zur Geldbilanz erhalten bleiben: Aus
+    `grid_kwh == charged_kwh` allein lässt sich nicht erkennen, ob der
+    Netzanteil gemessen oder nur wegen eines fehlenden Smartmeter-Werts
+    angenommen wurde (Issue #146).
     """
 
     charged_kwh: float
     grid_kwh: float
     pv_kwh: float
+    origin_known: bool = True
 
 
 ZERO_DELTA = EnergyDelta(0.0, 0.0, 0.0)
@@ -58,13 +66,10 @@ def compute_charge_delta(
     anhand des Netzanschlusspunktes, keine physikalisch eindeutige
     Quellenzuordnung.
 
-    Fehlt `smartmeter_power`, ist die Aufteilung nicht messbar. Sie fällt
-    dann vollständig auf Netzladung - die teurere der beiden Deutungen,
-    weil sie den Netzbezugspreis statt der niedrigeren Einspeisevergütung
-    kostet. Ein Messausfall rechnet die Bilanz damit nie schön; ihn als
-    eigene Kategorie "Herkunft unbekannt" zu führen, wäre die Alternative
-    gewesen, hätte aber einen Zähler erzeugt, der keine Energiequelle
-    beschreibt, sondern eine Datenlücke.
+    Fehlt `smartmeter_power`, ist die Aufteilung nicht messbar. Die
+    öffentlichen Herkunftszähler dürfen die Energie weiterhin vollständig
+    als Netzladung ausweisen, `origin_known=False` verhindert aber eine
+    monetäre Bewertung dieser bloßen Fallback-Annahme (Issue #146).
     """
     if storage_power_active is None:
         return None
@@ -75,7 +80,7 @@ def compute_charge_delta(
 
     charged_kwh = charge_power_w * elapsed_hours / 1000
     if smartmeter_power is None:
-        return EnergyDelta(charged_kwh, charged_kwh, 0.0)
+        return EnergyDelta(charged_kwh, charged_kwh, 0.0, origin_known=False)
 
     grid_charge_power_w = min(charge_power_w, max(smartmeter_power, 0.0))
     grid_kwh = grid_charge_power_w * elapsed_hours / 1000

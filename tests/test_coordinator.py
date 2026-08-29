@@ -4477,6 +4477,42 @@ def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
     assert data["economics_grid_charge_cost"] == 0.0
 
 
+def test_missing_smartmeter_keeps_origin_counter_but_not_money_value(hass) -> None:
+    """Issue #146: Der kompatible physische Netz-Fallback darf nicht als
+    gemessene Herkunft in die Geldbilanz gelangen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": None,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged_from_grid"] == pytest.approx(1.0)
+    assert data["energy_charged_from_pv"] == 0.0
+    assert data["economics_grid_charge_cost"] == 0.0
+    assert data["economics_pv_opportunity_cost"] == 0.0
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+    assert coordinator.economics_diagnostics["priced_charge_kwh"] == 0.0
+    assert coordinator.economics_diagnostics["unpriced_charge_kwh"] == pytest.approx(
+        1.0
+    )
+    assert coordinator.economics_diagnostics["unvalued_inventory_kwh"] == pytest.approx(
+        1.0
+    )
+
+
 def test_economics_net_savings_tracks_the_current_signed_result(hass) -> None:
     """Spätere Kosten reduzieren Ergebnis, Tageswert und ROI (Issue #144)."""
     coordinator = _make_coordinator(hass, _make_client())

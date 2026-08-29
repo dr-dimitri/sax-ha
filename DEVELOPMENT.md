@@ -245,7 +245,10 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
   Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
   Preis, wird nichts erfunden - die Energie erhöht stattdessen
   `unvalued_inventory_kwh` (unbewerteter Bestand) und einen
-  `unpriced_charge`-Zähler. Jede Entladung verbraucht zuerst aus
+  `unpriced_charge`-Zähler. Dasselbe gilt bei fehlendem Smartmeter:
+  `EnergyDelta.origin_known=False` erhält die Qualitätslücke trotz des
+  kompatiblen physischen Netz-Fallbacks bis zur Geldbilanz. Jede Entladung
+  verbraucht zuerst aus
   diesem Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser
   Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst würde eine
   vorausgegangene Preislücke einen kostenlosen Scheingewinn erzeugen). Nur
@@ -317,7 +320,8 @@ Netzbezug monetarisieren (derselbe Scheingewinn-Fehler wie bei #42, nur
 VERÖFFENTLICHTEN fünf monetären Sensoren blenden während einer Pause auf
 `None` (`_publish_economics_balance(..., monetary_available=...)`) statt
 auf die weiter mitlaufenden internen Summen. `unvalued_inventory_kwh`,
-`unpriced_charge_kwh` und `unpriced_discharge_kwh` bleiben rein intern und
+`unpriced_charge_kwh` (fehlender Preis oder fehlende Herkunftsmessung) und
+`unpriced_discharge_kwh` bleiben rein intern und
 werden nicht als Entities veröffentlicht. `economics_current_import_price`/
 `economics_feed_in_price` sind reine Durchreichungen des aktuellen Tarifs
 und unabhängig vom Bilanz-Bootstrap immer aktuell -

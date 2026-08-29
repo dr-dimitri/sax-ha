@@ -2911,11 +2911,11 @@ requirement_energy_origin:
       Herkunftszähler.
     - smartmeter_power unbekannt: die Aufteilung ist nicht messbar, die
       gesamte Ladeenergie des Intervalls zählt konservativ als
-      grid_charge_power_w. Es gibt bewusst KEINE dritte Kategorie
-      "Herkunft unbekannt": Physikalisch speist entweder PV oder das Netz,
-      und Netzladung ist die teurere der beiden Deutungen (Netzbezugspreis
-      statt der niedrigeren Einspeisevergütung) - ein Messausfall rechnet
-      die Bilanz damit nie schön.
+      grid_charge_power_w. Es gibt bewusst KEINE dritte öffentliche
+      Energiequelle "Herkunft unbekannt": Physikalisch speist entweder PV
+      oder das Netz. Das EnergyDelta transportiert die Messqualität jedoch
+      mit origin_known=false bis zur Geldbilanz; die konservative
+      Herkunftszähler-Zuordnung darf dort nicht als Messung gelten.
     - sonst: grid_charge_power_w = min(charge_power_w,
       max(smartmeter_power, 0)); pv_charge_power_w = charge_power_w -
       grid_charge_power_w. Netzbezug, der die
@@ -3133,9 +3133,8 @@ requirement_economics_accounting:
     wird weder als unbekannte noch als unbepreiste Energie geführt. Läuft
     nur einmal: Ein zwischenzeitliches Deaktivieren/Reaktivieren des Tarifs
     setzt weder Bestand noch Startzeitpunkt zurück. Nicht bepreisbare neue
-    Ladeenergie (ein
-    fehlender Preis für Netz bzw. PV - eine unbekannte Herkunft gibt es
-    seit REQ-ENERGY-ORIGIN nicht mehr)
+    Ladeenergie (ein fehlender Preis für Netz bzw. PV oder ein während der
+    Ladung fehlender Smartmeter-Wert)
     erhöht unvalued_inventory_kwh und den passenden
     unpriced_charge-Zähler statt einen Preis zu erfinden. Jede Entladung
     verbraucht zuerst min(discharge_delta, unvalued_inventory_kwh) - dieser
@@ -3208,6 +3207,16 @@ requirement_economics_accounting:
     Beträge zeigen. Die internen Bestands- und Preisabdeckungszähler bleiben
     davon unberührt. Die Herkunfts-/Energiesensoren aus 02/06 bleiben
     ebenfalls unberührt und weiterhin verfügbar.
+    Bei einer Ladung mit smartmeter_power=None bleibt die öffentliche
+    Herkunftsbilanz kompatibel und zählt die Energie vollständig als Netz.
+    EnergyDelta.origin_known=false verhindert dennoch jede Geldbuchung:
+    weder Netzladekosten noch PV-Opportunitätskosten steigen,
+    unpriced_charge_kwh und unvalued_inventory_kwh steigen um die gesamte
+    Ladung und priced_charge_kwh bleibt unverändert. Eine spätere Entladung
+    verbraucht diesen Bestand zuerst ohne vermiedene Kosten. Damit zeigen
+    economics_status und Diagnostics die fehlende Herkunfts-/Preisabdeckung
+    über die bestehenden unpriced-Zähler, ohne eine Quellenaufteilung zu
+    erfinden (Issue #146).
     economics_current_import_price/economics_feed_in_price sind reine
     Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und
     unabhängig vom Bilanz-Bootstrap immer aktuell; beide validieren ihren

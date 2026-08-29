@@ -94,7 +94,14 @@ def compute_economics_delta(
     priced_charge = 0.0
     inventory_delta = 0.0
 
-    if charge_delta.grid_kwh:
+    if charge_delta.charged_kwh and not charge_delta.origin_known:
+        # Die Herkunftszähler dürfen bei fehlendem Smartmeter weiterhin die
+        # vollständige Ladung konservativ als Netz ausweisen. Geld darf aus
+        # dieser kompatibilitätsbedingten Fallback-Zuordnung jedoch weder bei
+        # negativen Importpreisen noch bei hoher Einspeisevergütung entstehen.
+        unpriced_charge = charge_delta.charged_kwh
+        inventory_delta = charge_delta.charged_kwh
+    elif charge_delta.grid_kwh:
         if import_price_eur_kwh is not None:
             grid_cost = charge_delta.grid_kwh * import_price_eur_kwh
             priced_charge += charge_delta.grid_kwh
@@ -102,7 +109,7 @@ def compute_economics_delta(
             unpriced_charge += charge_delta.grid_kwh
             inventory_delta += charge_delta.grid_kwh
 
-    if charge_delta.pv_kwh:
+    if charge_delta.origin_known and charge_delta.pv_kwh:
         if feed_in_price_eur_kwh is not None:
             pv_cost = charge_delta.pv_kwh * feed_in_price_eur_kwh
             priced_charge += charge_delta.pv_kwh

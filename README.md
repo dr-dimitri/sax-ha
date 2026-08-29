@@ -539,9 +539,11 @@ Speicher statt in den Hausverbrauch geflossen ist. Netzbezug, der die
 aktuelle Ladeleistung übersteigt (er deckt dann zusätzlich laufenden
 Hausverbrauch), zählt deshalb konservativ vollständig als Netzladung. Ist der
 Netzwert selbst gerade nicht bekannt, zählt die Ladeenergie dieses Zeitraums
-ebenfalls vollständig als Netzladung - das ist die teurere der beiden
-Deutungen (Netzbezugspreis statt der niedrigeren Einspeisevergütung), ein
-Messausfall rechnet die Bilanz also nie schön.
+ebenfalls vollständig als Netzladung. Diese Zuordnung hält die beiden
+öffentlichen Herkunftszähler vollständig, ist aber ausdrücklich keine
+gemessene Herkunft: Die Wirtschaftlichkeitsbilanz bepreist das Intervall
+deshalb nicht. Stattdessen erscheint die Energiemenge als unbewerteter
+Bestand und reduziert die angezeigte Preisabdeckung.
 
 Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
 0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
@@ -589,6 +591,14 @@ nicht als unbekannte Energiemenge nachgeführt; bei maximal 7 kWh ist ihr
 einmaliger Einfluss auf die Amortisationsrechnung vernachlässigbar. Eine
 spätere Tarifänderung wirkt ausschließlich auf künftige Beträge; bereits
 verbuchte Werte bleiben unverändert.
+
+Fehlt während einer Ladung der Smartmeter-Wert, bleibt deren genaue Herkunft
+unbekannt. Obwohl der öffentliche Herkunftszähler diese Energie aus
+Kompatibilitätsgründen konservativ unter Netzladung führt, entstehen weder
+Netzladekosten noch PV-Opportunitätskosten. Die Ladung zählt stattdessen als
+unbepreist; eine spätere Entladung dieses Bestands erzeugt keinen erfundenen
+vermiedenen Geldwert. Der Status und der Diagnose-Download machen diese
+fehlende Abdeckung über die unbepreisten Energiemengen sichtbar.
 
 Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
 ist - ein deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.

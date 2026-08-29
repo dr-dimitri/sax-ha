@@ -24,8 +24,15 @@ from custom_components.sax_power.domain.energy_accounting import (
 )
 
 
-def _charge(grid: float = 0.0, pv: float = 0.0) -> EnergyDelta:
-    return EnergyDelta(charged_kwh=grid + pv, grid_kwh=grid, pv_kwh=pv)
+def _charge(
+    grid: float = 0.0, pv: float = 0.0, *, origin_known: bool = True
+) -> EnergyDelta:
+    return EnergyDelta(
+        charged_kwh=grid + pv,
+        grid_kwh=grid,
+        pv_kwh=pv,
+        origin_known=origin_known,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -77,18 +84,41 @@ def test_mixed_charge_costs_grid_and_pv_shares_separately() -> None:
     assert delta.pv_opportunity_cost_delta == pytest.approx(0.12)
 
 
-def test_charge_without_a_smartmeter_reading_is_priced_as_grid_charge() -> None:
-    """Ein Intervall ohne Smartmeter-Messwert kommt aus
-    domain/energy_accounting bereits vollständig als Netzladung an (die
-    Kategorie "Herkunft unbekannt" gibt es nicht mehr) und wird hier
-    entsprechend mit dem Netzbezugspreis belastet - nicht als unbewerteter
-    Bestand geparkt."""
-    delta = compute_economics_delta(_charge(grid=1.0), 0.0, 0.0, 0.30, 0.08)
+@pytest.mark.parametrize("import_price", [-0.05, 0.05])
+def test_charge_without_a_smartmeter_reading_remains_unpriced(
+    import_price: float,
+) -> None:
+    """Die physische Netz-Fallback-Zuordnung ist keine belastbare Grundlage
+    für Geldbuchungen - weder bei negativem noch günstigem Importpreis."""
+    delta = compute_economics_delta(
+        _charge(grid=1.0, origin_known=False),
+        0.0,
+        0.0,
+        import_price,
+        0.08,
+    )
 
-    assert delta.grid_charge_cost_delta == pytest.approx(0.30)
+    assert delta.grid_charge_cost_delta == 0.0
     assert delta.pv_opportunity_cost_delta == 0.0
-    assert delta.unpriced_charge_delta_kwh == 0.0
-    assert delta.unvalued_inventory_delta_kwh == 0.0
+    assert delta.unpriced_charge_delta_kwh == pytest.approx(1.0)
+    assert delta.unvalued_inventory_delta_kwh == pytest.approx(1.0)
+    assert delta.priced_charge_kwh_delta == 0.0
+
+
+def test_discharge_after_unknown_origin_charge_avoids_no_cost() -> None:
+    charge = compute_economics_delta(
+        _charge(grid=1.0, origin_known=False), 0.0, 0.0, -0.05, 0.08
+    )
+    discharge = compute_economics_delta(
+        ZERO_DELTA,
+        1.0,
+        charge.unvalued_inventory_delta_kwh,
+        0.30,
+        0.08,
+    )
+
+    assert discharge.avoided_grid_cost_delta == 0.0
+    assert discharge.unvalued_inventory_delta_kwh == pytest.approx(-1.0)
 
 
 def test_missing_import_price_makes_grid_charge_unpriced() -> None:

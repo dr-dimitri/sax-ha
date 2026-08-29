@@ -98,14 +98,23 @@ def test_grid_import_smaller_than_charge_power_leaves_a_pv_remainder() -> None:
 def test_unknown_smartmeter_value_assigns_everything_to_grid() -> None:
     """smartmeter_power unbekannt, aber storage_power_active bekannt: die
     gesamte Ladeenergie gilt konservativ als Netzladung. Sie als PV zu
-    buchen wäre die günstigere Deutung (Einspeisevergütung statt
-    Netzbezugspreis) und würde die Bilanz bei jedem Messausfall
-    beschönigen."""
+    buchen wäre eine erfundene Quellenzuordnung. `origin_known` hält für die
+    Geldbilanz fest, dass auch die Netzzuordnung nur ein Fallback ist."""
     delta = compute_charge_delta(-1200.0, None, 1.0)
 
     assert delta.charged_kwh == pytest.approx(1.2)
     assert delta.grid_kwh == pytest.approx(1.2)
     assert delta.pv_kwh == 0.0
+    assert delta.origin_known is False
+
+
+@pytest.mark.parametrize("smartmeter_power", [-500.0, 0.0, 500.0])
+def test_present_smartmeter_value_marks_origin_as_known(
+    smartmeter_power: float,
+) -> None:
+    delta = compute_charge_delta(-1200.0, smartmeter_power, 1.0)
+
+    assert delta.origin_known is True
 
 
 def test_zero_elapsed_time_produces_zero_energy_regardless_of_power() -> None:

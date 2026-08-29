@@ -199,6 +199,53 @@ async def test_real_minor_six_store_does_not_repair_an_invalid_inventory(
     assert envelope["data"]["unvalued_inventory_kwh"] == -1
 
 
+async def test_real_minor_seven_store_drops_only_peak_based_day_values(
+    hass, hass_storage
+) -> None:
+    """Issue #144: Tages-Peak-Zuwächse dürfen nicht signiert weiterlaufen."""
+    started_at = dt_util.utcnow() - timedelta(days=2)
+    legacy_day = DayEconomicsResult(
+        day=date(2026, 3, 10),
+        operating_result_eur=5.0,
+        priced_charge_kwh=1.0,
+        unpriced_charge_kwh=0.0,
+        priced_discharge_kwh=1.0,
+        unpriced_discharge_kwh=0.0,
+    )
+    payload = EconomicsStateStore._serialize(
+        _full_state(
+            started_at,
+            unvalued_inventory_kwh=1.25,
+            day_results=(legacy_day,),
+            current_day=date(2026, 3, 11),
+            current_day_operating_result_eur=2.0,
+            current_day_priced_charge_kwh=1.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=1.0,
+            current_day_unpriced_discharge_kwh=0.0,
+            current_day_observed_seconds=3_600.0,
+        )
+    )
+    _seed_real_store(
+        hass_storage,
+        "signed-day-migration",
+        payload,
+        version=1,
+        minor_version=7,
+    )
+
+    loaded = await EconomicsStateStore(hass, "signed-day-migration").async_load()
+
+    assert loaded.grid_charge_cost_eur == 10.0
+    assert loaded.pv_opportunity_cost_eur == 2.0
+    assert loaded.avoided_grid_cost_eur == 5.0
+    assert loaded.operating_result_high_water_eur == 4.0
+    assert loaded.unvalued_inventory_kwh == 1.25
+    assert loaded.day_results == ()
+    assert loaded.current_day is None
+    assert loaded.current_day_operating_result_eur is None
+
+
 async def test_store_allows_negative_money_sums(hass) -> None:
     """Negative Strompreise dürfen die Geldsummen negativ werden lassen -
     das ist kein Korruptionsindiz."""
@@ -460,7 +507,7 @@ async def test_store_round_trips_day_results_current_day_and_payback(hass) -> No
     assert loaded.payback_achieved_at == payback_at
 
 
-async def test_store_rejects_negative_savings_in_day_history(hass, caplog) -> None:
+async def test_store_round_trips_negative_results_in_day_history(hass) -> None:
     day = DayEconomicsResult(
         day=date(2026, 3, 10),
         operating_result_eur=-0.5,
@@ -469,17 +516,24 @@ async def test_store_rejects_negative_savings_in_day_history(hass, caplog) -> No
         priced_discharge_kwh=0.5,
         unpriced_discharge_kwh=0.0,
     )
-    store = EconomicsStateStore(hass, "negative-day-savings")
-    store._store.async_load = AsyncMock(
-        return_value=EconomicsStateStore._serialize(
-            _full_state(dt_util.utcnow(), day_results=(day,))
-        )
+    state = _full_state(
+        dt_util.utcnow(),
+        day_results=(day,),
+        current_day=date(2026, 3, 11),
+        current_day_operating_result_eur=-0.25,
+        current_day_priced_charge_kwh=0.0,
+        current_day_unpriced_charge_kwh=0.0,
+        current_day_priced_discharge_kwh=0.0,
+        current_day_unpriced_discharge_kwh=0.0,
+        current_day_observed_seconds=60.0,
     )
+    store = EconomicsStateStore(hass, "negative-day-savings")
 
-    loaded = await store.async_load()
+    assert await store.async_save(state) is True
+    loaded = await EconomicsStateStore(hass, "negative-day-savings").async_load()
 
-    assert loaded.day_results == ()
-    assert "Ungültigen gespeicherten Wert für Tagesergebnis" in caplog.text
+    assert loaded.day_results == (day,)
+    assert loaded.current_day_operating_result_eur == pytest.approx(-0.25)
 
 
 async def test_store_drops_only_the_single_invalid_day_entry(hass, caplog) -> None:

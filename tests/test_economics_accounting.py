@@ -29,7 +29,7 @@ def _charge(grid: float = 0.0, pv: float = 0.0) -> EnergyDelta:
 
 
 # --------------------------------------------------------------------------
-# Nichtnegative Netto-Ersparnis
+# Historischer Diagnose-Peak
 # --------------------------------------------------------------------------
 def test_operating_result_high_water_never_turns_a_loss_into_savings() -> None:
     assert compute_operating_result_high_water(0.0, -20.0) == 0.0

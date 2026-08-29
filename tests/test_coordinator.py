@@ -4477,8 +4477,8 @@ def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
     assert data["economics_grid_charge_cost"] == 0.0
 
 
-def test_economics_net_savings_is_a_nonnegative_high_water_mark(hass) -> None:
-    """100 EUR Ersparnis bleiben auch nach späteren Kosten 100 EUR."""
+def test_economics_net_savings_tracks_the_current_signed_result(hass) -> None:
+    """Spätere Kosten reduzieren Ergebnis, Tageswert und ROI (Issue #144)."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _INVESTMENT_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0), soc=0)
@@ -4501,10 +4501,10 @@ def test_economics_net_savings_is_a_nonnegative_high_water_mark(hass) -> None:
         delta=EconomicsDelta(grid_charge_cost_delta=20.0),
     )
     assert data["economics_operating_result"] == pytest.approx(80.0)
-    assert data["economics_net_savings"] == pytest.approx(100.0)
-    assert data["economics_net_savings_today"] == pytest.approx(100.0)
-    assert data["economics_roi"] == pytest.approx(10.0)
-    assert data["economics_remaining_to_payback"] == pytest.approx(900.0)
+    assert data["economics_net_savings"] == pytest.approx(80.0)
+    assert data["economics_net_savings_today"] == pytest.approx(80.0)
+    assert data["economics_roi"] == pytest.approx(8.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(920.0)
     assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
         pytest.approx(80.0)
     )
@@ -4516,8 +4516,8 @@ def test_economics_net_savings_is_a_nonnegative_high_water_mark(hass) -> None:
         delta=EconomicsDelta(avoided_grid_cost_delta=15.0),
     )
     assert data["economics_operating_result"] == pytest.approx(95.0)
-    assert data["economics_net_savings"] == pytest.approx(100.0)
-    assert data["economics_net_savings_today"] == pytest.approx(100.0)
+    assert data["economics_net_savings"] == pytest.approx(95.0)
+    assert data["economics_net_savings_today"] == pytest.approx(95.0)
 
     data = _tick_with_delta(
         coordinator,
@@ -4529,6 +4529,9 @@ def test_economics_net_savings_is_a_nonnegative_high_water_mark(hass) -> None:
     assert data["economics_net_savings"] == pytest.approx(105.0)
     assert data["economics_net_savings_today"] == pytest.approx(105.0)
     assert data["economics_roi"] == pytest.approx(10.5)
+    assert coordinator.economics_diagnostics[
+        "operating_result_high_water_eur"
+    ] == pytest.approx(105.0)
 
 
 def test_economics_amounts_round_to_four_decimals(hass) -> None:
@@ -4857,10 +4860,10 @@ def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> Non
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
     assert data["economics_avoided_grid_cost"] == pytest.approx(1.1 * 0.30)
     assert data["economics_grid_charge_cost"] == pytest.approx(2.0 * 0.30)
-    # Der technische Roh-Cashflow bleibt nachvollziehbar; die sichtbare
-    # Netto-Ersparnis bleibt als nichtnegativer Höchststand bei 0 EUR.
-    assert data["economics_operating_result"] == pytest.approx(1.1 * 0.30 - 2.0 * 0.30)
-    assert data["economics_net_savings"] == pytest.approx(0.0)
+    # Roh-Cashflow und Nettoergebnis bleiben identisch nachvollziehbar.
+    expected_result = 1.1 * 0.30 - 2.0 * 0.30
+    assert data["economics_operating_result"] == pytest.approx(expected_result)
+    assert data["economics_net_savings"] == pytest.approx(expected_result)
     assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
         pytest.approx(1.1 * 0.30 - 2.0 * 0.30)
     )
@@ -5136,10 +5139,12 @@ def test_day_rollover_closes_the_previous_day_exactly_once(hass) -> None:
     assert closed_day.day == date(2026, 3, 10)
     assert closed_day.operating_result_eur == pytest.approx(3.0)
     assert closed_day.priced_discharge_kwh == pytest.approx(1.0)
-    # Der neue Tag beginnt frisch. Die Kosten senken den Roh-Cashflow,
-    # erzeugen aber keinen negativen Ersparnis-Zuwachs.
+    # Der neue Tag beginnt frisch; seine Kosten erscheinen als signiertes
+    # Tagesergebnis.
     assert coordinator._economics_current_day == date(2026, 3, 11)
-    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(0.0)
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(
+        -1.0
+    )
     assert coordinator._economics_current_day_priced_charge_kwh == pytest.approx(1.0)
 
 
@@ -5495,12 +5500,12 @@ async def test_a_restart_resumes_the_persisted_current_day(hass) -> None:
         coordinator,
         monotonic_value=1000.0,
         now=datetime(2026, 3, 10, 20, 0),
-        # Der Rohwert steigt von 0 auf 3 EUR und überschreitet damit den
-        # persistierten Höchststand von 2 EUR um genau 1 EUR.
+        # Der Rohwert steigt von 0 auf 3 EUR; der Tageswert folgt exakt
+        # diesem signierten Delta und nicht dem gespeicherten Diagnose-Peak.
         delta=EconomicsDelta(avoided_grid_cost_delta=3.0),
     )
     assert coordinator._economics_day_results == ()
-    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(3.0)
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(5.0)
 
     # Erster Tick am Folgetag schließt den (teils vor dem Neustart
     # akkumulierten) Tag mit dem vollständigen Ergebnis ab.
@@ -5512,7 +5517,7 @@ async def test_a_restart_resumes_the_persisted_current_day(hass) -> None:
     )
     assert len(coordinator._economics_day_results) == 1
     assert coordinator._economics_day_results[0].operating_result_eur == pytest.approx(
-        3.0
+        5.0
     )
     assert coordinator._economics_day_results[0].priced_discharge_kwh == pytest.approx(
         1.0
@@ -5537,6 +5542,27 @@ def test_roi_progress_and_remaining_are_computed_from_the_operating_result(
     assert data["economics_amortization_progress"] == pytest.approx(25.0)
     assert data["economics_remaining_to_payback"] == pytest.approx(750.0)
     assert data["economics_net_savings_today"] == pytest.approx(250.0)
+
+
+def test_negative_operating_result_produces_negative_roi_and_zero_progress(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=50.0),
+    )
+
+    assert data["economics_net_savings"] == pytest.approx(-50.0)
+    assert data["economics_net_savings_today"] == pytest.approx(-50.0)
+    assert data["economics_roi"] == pytest.approx(-5.0)
+    assert data["economics_amortization_progress"] == pytest.approx(0.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(1050.0)
 
 
 def test_prior_result_counts_towards_the_amortization_but_not_the_balance(
@@ -5663,8 +5689,8 @@ def test_roi_attributes_reconcile_the_gap_to_net_savings(hass) -> None:
     assert data["economics_roi"] == pytest.approx(65.0)
 
 
-def test_a_measured_payback_stays_fixed_even_if_the_result_drops(hass) -> None:
-    """Ein erreichter Peak bleibt auch nach späteren Kosten amortisiert."""
+def test_later_costs_can_move_the_current_result_below_payback(hass) -> None:
+    """Ein früherer Peak darf die aktuelle Amortisation nicht festhalten."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _INVESTMENT_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
@@ -5685,11 +5711,11 @@ def test_a_measured_payback_stays_fixed_even_if_the_result_drops(hass) -> None:
         pytest.approx(900.0)
     )
     assert data["economics_operating_result"] == pytest.approx(900.0)
-    assert data["economics_net_savings"] == pytest.approx(1200.0)
-    assert data["economics_roi"] == pytest.approx(120.0)
-    assert data["economics_amortization_progress"] == pytest.approx(100.0)
-    assert data["economics_remaining_to_payback"] == pytest.approx(0.0)
-    assert data["economics_net_savings_today"] == pytest.approx(1200.0)
+    assert data["economics_net_savings"] == pytest.approx(900.0)
+    assert data["economics_roi"] == pytest.approx(90.0)
+    assert data["economics_amortization_progress"] == pytest.approx(90.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(100.0)
+    assert data["economics_net_savings_today"] == pytest.approx(900.0)
 
     # Höhere Investitionskosten wirken unmittelbar auf den Restbetrag.
     coordinator.options = {
@@ -5699,7 +5725,7 @@ def test_a_measured_payback_stays_fixed_even_if_the_result_drops(hass) -> None:
     data = _tick_on(
         coordinator, monotonic_value=3000.0, now=datetime(2026, 3, 10, 19, 0)
     )
-    assert data["economics_remaining_to_payback"] == pytest.approx(3800.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(4100.0)
 
 
 def test_net_savings_today_publishes_the_timestamp_of_its_daily_reset(hass) -> None:

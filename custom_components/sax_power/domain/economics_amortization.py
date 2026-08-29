@@ -1,7 +1,7 @@
 """Pure ROI- und Amortisationsberechnung.
 
 Siehe anforderung.yaml, REQ-ECONOMICS-AMORTIZATION. Die aktuellen Werte
-bauen ausschließlich auf der persistierten Netto-Ersparnis auf. Lokale
+bauen ausschließlich auf dem aktuellen signierten Nettoergebnis auf. Lokale
 Tageswerte bleiben für den Tageszähler und die bestehende Store-Kompatibilität
 erhalten; eine künftige Amortisation wird nicht mehr prognostiziert.
 """

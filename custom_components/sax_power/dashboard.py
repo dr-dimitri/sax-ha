@@ -158,8 +158,8 @@ _SAVINGS_EXPLANATION_TEMPLATE = """\
 <summary><strong>Hinweise zur Berechnung und Datenbasis</strong></summary>
 <p><strong>Netto-Ersparnis:</strong> Grundlage sind vermiedene
 Netzbezugskosten minus Netzladekosten und entgangene Einspeisevergütung.
-Angezeigt wird ein gespeicherter, nichtnegativer Höchststand. Spätere Kosten
-verringern eine bereits festgehaltene Ersparnis nicht.</p>
+Spätere Kosten reduzieren das aktuelle Ergebnis; Mehrkosten erscheinen als
+negativer Wert.</p>
 <p><strong>Kalenderwerte:</strong> Sie stammen aus der
 Recorder-Langzeitstatistik der Netto-Ersparnis. Bei aktualisierten
 Installationen kann diese Aufzeichnung jünger als der angezeigte Bilanzbeginn
@@ -169,7 +169,7 @@ Recorder-Aufzeichnung ein. Eine frühere Auswahl erfindet keine Werte. Fehlt
 Recorder-Historie oder ist die Ergebnis-Entity vom Recorder ausgeschlossen,
 bleiben Wert und Diagramm unbekannt beziehungsweise leer. Schneidet die
 Auswahl einen manuellen Neustart der Wirtschaftlichkeitsbilanz, kann der
-Recorder die positiven Zuwächse vor und nach dem Neustart zusammenfassen.</p>
+Recorder die signierten Änderungen vor und nach dem Neustart zusammenfassen.</p>
 </details>
 """
 

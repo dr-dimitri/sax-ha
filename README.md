@@ -55,7 +55,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - optional einen Stromtarif hinterlegen, an dem sich die Wirtschaftlichkeit
   bemisst
 - daraus Netzladekosten, entgangene Einspeisevergütung, vermiedene
-  Netzkosten und eine nichtnegative Netto-Ersparnis bilanzieren
+  Netzkosten und ein signiertes Nettoergebnis bilanzieren
 - optional aus Investitionskosten ROI, Amortisationsfortschritt und den
   verbleibenden Restbetrag berechnen
 - optional ein vorbereitetes SAX-Power-Dashboard anlegen
@@ -497,7 +497,7 @@ Netzladekosten          = geladene Netzenergie (kWh) × Netzbezugspreis zum Lade
 PV-Opportunitätskosten  = geladene PV-Energie (kWh) × Einspeisevergütung
 Vermiedene Netzkosten   = monetarisierbare Entladung (kWh) × Netzbezugspreis zum Entladezeitpunkt
 Operativer Roh-Cashflow = Vermiedene Netzkosten − Netzladekosten − PV-Opportunitätskosten
-Netto-Ersparnis         = max(bisherige Netto-Ersparnis, operativer Roh-Cashflow, 0)
+Netto-Ersparnis         = operativer Roh-Cashflow
 Amortisationsstand      = Netto-Ersparnis + Bereits erwirtschafteter Ertrag
 ROI (%)                 = Amortisationsstand ÷ Investitionskosten × 100
 Amortisationsfortschritt (%) = ROI, auf 0 bis 100 % begrenzt
@@ -511,9 +511,8 @@ Restbetrag              = max(Investitionskosten − Amortisationsstand, 0)
   keine physikalische Einzelstromverfolgung.
 - Monatlicher Grundpreis, Finanzierungskosten, Wartung und
   Batteriealterung sind **nicht Bestandteil** dieser Rechnung - der
-  operative Roh-Cashflow bildet ausschließlich die reinen Arbeitspreis-
-  Zahlungsströme ab. Die sichtbare Netto-Ersparnis ist dessen historischer
-  Höchststand und fällt deshalb durch spätere Kosten nicht zurück.
+  operative Nettoergebnis bildet ausschließlich die reinen Arbeitspreis-
+  Zahlungsströme ab und sinkt deshalb auch durch spätere Kosten.
 - Eine Änderung des Tarifmodells oder der Investitionskosten wirkt
   ausschließlich prospektiv - bereits verbuchte Beträge werden nie
   rückwirkend neu berechnet.
@@ -577,18 +576,11 @@ Entladeenergie, nie ein Sollwert:
 - **Vermiedene Netzkosten**: entladene Energie zum jeweils zum
   Entladezeitpunkt gültigen Netzbezugspreis, also der Betrag, den der
   Hausverbrauch dadurch nicht aus dem Netz decken musste.
-- **Operativer Roh-Cashflow**: vermiedene Netzkosten abzüglich
-  Netzladekosten und PV-Opportunitätskosten. Dieser technische Wert kann
-  durch spätere Kosten sinken und auch negativ sein.
-- **Netto-Ersparnis**: ein gespeicherter Höchststand aus
-  dem operativen Roh-Cashflow. Sie beginnt bei 0 und fällt nie zurück: Sind
-  bereits 100 EUR erreicht, bleiben 100 EUR sichtbar, auch wenn spätere
-  Kosten den operativen Roh-Cashflow auf 80 EUR senken. Erst ein neuer
-  Höchststand erhöht die Ersparnis. Bei einem bisherigen Höchststand von 0
-  wird ein negativer Rohwert nicht per Absolutwert positiv umgedeutet,
-  sondern bleibt 0 EUR; ein früherer positiver Höchststand bleibt stehen.
-  Ladeverluste bleiben in den Kostenpositionen und im Diagnose-Rohwert
-  sichtbar.
+- **Operatives Nettoergebnis**: vermiedene Netzkosten abzüglich
+  Netzladekosten und PV-Opportunitätskosten. Es wird identisch als
+  **Operativer Roh-Cashflow** und **Netto-Ersparnis** veröffentlicht, kann
+  durch spätere Kosten sinken und auch negativ sein. Ladeverluste bleiben
+  dadurch unmittelbar im Ergebnis sichtbar.
 
 Die Sensoren **Aktueller Netzbezugspreis** und **Einspeisevergütung** zeigen
 den gerade angewendeten Tarif. Beim erstmaligen Aktivieren setzt die
@@ -601,26 +593,20 @@ verbuchte Werte bleiben unverändert.
 Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
 ist - ein deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
 
-Beim ersten Start nach einem Update von einem älteren Bilanzspeicher ist nur
-der aktuelle Roh-Cashflow sicher bekannt. Die Netto-Ersparnis beginnt deshalb
-ehrlich bei `max(0, aktueller Roh-Cashflow)`; ein früherer, damals noch nicht
-gespeicherter Höchststand kann nicht rückwirkend erfunden werden. Geldsummen
-und Bilanzbeginn bleiben erhalten. Gesamt- und Tages-Netto-Ersparnis sind neue
-Entities mit jeweils eigener Recorder-Historie: Bereits gespeicherte negative
-oder rückläufige Gesamt- und Tagesänderungen des technischen Roh-Cashflows
-werden nicht übernommen. Bei einer aktualisierten Installation kann die
-Zeitraumhistorie der Netto-Ersparnis deshalb jünger sein als der weiterhin
-angezeigte Bilanzbeginn.
+Beim ersten Start nach einem Update von einem älteren Bilanzspeicher wird das
+aktuelle Nettoergebnis verlustfrei aus den drei Geldsummen rekonstruiert.
+Geldsummen und Bilanzbeginn bleiben erhalten. Gesamt- und Tages-Nettoergebnis
+besitzen jeweils eine eigene Recorder-Historie; bei einer aktualisierten
+Installation kann diese deshalb jünger sein als der weiterhin angezeigte
+Bilanzbeginn.
 
 ## Ersparnisübersicht
 
-Der fünfte Tab **Ersparnis** fasst die **Netto-Ersparnis** bewusst kompakt
+Der fünfte Tab **Ersparnis** fasst das **Nettoergebnis** bewusst kompakt
 zusammen. Grundlage sind vermiedene Netzbezugskosten abzüglich
-Netzladekosten und entgangener Einspeisevergütung. Angezeigt wird ein
-gespeicherter, nichtnegativer Höchststand. Spätere Kosten verringern eine
-bereits festgehaltene Ersparnis nicht; ein echtes Ergebnis von 0 bleibt als
-0 EUR sichtbar. Die unmittelbar darüber erläuterte Upgrade-Grenze gilt auch
-für diese Darstellung.
+Netzladekosten und entgangener Einspeisevergütung. Spätere Kosten reduzieren
+den Wert; Mehrkosten werden negativ angezeigt. Ein echtes Ergebnis von 0
+bleibt als 0 EUR sichtbar.
 
 Die Erläuterungen zur Berechnung, zur Recorder-Datenbasis und zur freien
 Zeitraumauswahl sind nach
@@ -634,7 +620,7 @@ die dynamische Tarifinformation. Sie
 liest den tageszeitabhängigen Tarifplan aus der aktuellen Preis-Entity und
 reagiert deshalb ohne Dashboard-Neubau auf Tarifänderungen.
 
-Vier Karten zeigen die Zunahme der Netto-Ersparnis im laufenden
+Vier Karten zeigen die Änderung des Nettoergebnisses im laufenden
 Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
 laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus
 Home Assistants Recorder-Langzeitstatistik, nicht aus rollierenden
@@ -668,9 +654,9 @@ noch nicht verfügbare Statusdaten werden neutral benannt. Einen separaten
 technischen Wirtschaftlichkeits-Tab oder einen Link auf einen solchen Pfad
 gibt es nicht.
 
-0 ist ein echtes berechnetes Netto-Ergebnis; negative Netto-Ersparnisse sind
-durch den Höchststand ausgeschlossen und `unknown`/`unavailable` werden nicht
-als 0 ausgegeben. Der Gesamtwert gilt ausdrücklich **seit Bilanzbeginn**.
+0 ist ein echtes berechnetes Netto-Ergebnis; ein negativer Wert weist reale
+Mehrkosten seit Bilanzbeginn aus. `unknown`/`unavailable` werden nicht als 0
+ausgegeben.
 
 ### Amortisation
 
@@ -722,16 +708,16 @@ davon unterscheidbar.
 
 ## ROI und Amortisationsstand
 
-Mit hinterlegten **Investitionskosten (EUR)** setzt die Integration die
-[Netto-Ersparnis](#wirtschaftlichkeitsbilanz) in Bezug zur Investition:
+Mit hinterlegten **Investitionskosten (EUR)** setzt die Integration das
+[Nettoergebnis](#wirtschaftlichkeitsbilanz) in Bezug zur Investition:
 
 - **ROI**: Amortisationsstand in Prozent der Investitionskosten, über 100 %
   möglich.
 - **Amortisationsfortschritt**: derselbe Wert, auf 0 bis 100 % begrenzt.
 - **Restbetrag bis Amortisation**: Investitionskosten abzüglich
   Amortisationsstand, nie unter 0 EUR.
-- **Netto-Ersparnis heute**: der im laufenden Kalendertag neu erreichte
-  Zuwachs des Höchststands.
+- **Netto-Ersparnis heute**: das signierte Ergebnis des laufenden
+  Kalendertags.
 
 Für Anlagen, die schon vor Einrichtung der Integration liefen, kann
 **Bereits erwirtschafteter Ertrag (EUR)** hinterlegt werden. Dieser Vorlauf

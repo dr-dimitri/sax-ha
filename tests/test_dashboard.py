@@ -762,7 +762,8 @@ async def test_savings_view_collapses_static_explanations_into_one_control(
     assert json.dumps(view).count("</details>") == 1
     assert "Hinweise zur Berechnung und Datenbasis" in content
     assert "Netto-Ersparnis:" in content
-    assert "gespeicherter, nichtnegativer Höchststand" in content
+    assert "Spätere Kosten reduzieren das aktuelle Ergebnis" in content
+    assert "Mehrkosten erscheinen als" in content
     assert "Recorder-Langzeitstatistik der Netto-Ersparnis" in content
     assert "jünger als der angezeigte Bilanzbeginn" in content
     assert "Freier Zeitraum:" in content
@@ -770,7 +771,7 @@ async def test_savings_view_collapses_static_explanations_into_one_control(
     assert "vom Recorder ausgeschlossen" in content
     assert "unbekannt beziehungsweise leer" in content
     assert "manuellen Neustart" in content
-    assert "positiven Zuwächse vor und nach dem Neustart" in content
+    assert "signierten Änderungen vor und nach dem Neustart" in content
 
     explanatory_cards = [
         card["content"]

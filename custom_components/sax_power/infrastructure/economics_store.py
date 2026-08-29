@@ -6,10 +6,10 @@ Abweichung: Die drei Geldsummen dürfen wegen negativer Strompreise legitim
 schwanken und sogar negativ sein - anders als die monoton steigenden
 Energiezähler ist "der neue Wert ist kleiner als der alte" hier kein
 Korruptionsindiz und wird deshalb NICHT abgelehnt. Nur NaN/Inf/Fremdtypen
-gelten als korrupt. Der daraus fortgeschriebene
-`operating_result_high_water_eur` ist dagegen die nichtnegative,
-monoton steigende Netto-Ersparnis; ausschließlich ein kontrollierter
-Bilanzneustart darf ihn auf 0 zurücksetzen. `unpriced_charge_kwh`/
+gelten als korrupt. Der zusätzlich fortgeschriebene
+`operating_result_high_water_eur` ist nur ein nichtnegativer, monotoner
+Diagnose-Peak; ausschließlich ein kontrollierter Bilanzneustart darf ihn auf
+0 zurücksetzen. `unpriced_charge_kwh`/
 `unpriced_discharge_kwh` sind ebenfalls echte kumulierte Energiemengen
 (nur additiv) und bleiben monoton wie bei energy_store.py.
 `unvalued_inventory_kwh` ist ein Bestand (Gauge, kann sowohl durch Ladung
@@ -22,8 +22,10 @@ Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION, die
 kumulierten bepreisten Lade-/Entlademengen, den zuletzt verwendeten
 Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY sowie die
 Zeitabdeckung der Tages-Buckets (observed_seconds/day_length_seconds) und
-den Netto-Ersparnis-Höchststand. Minor-Version 7 migriert zusätzlich den
-nach alter Semantik noch unbekannt geführten Anfangsbestand auf 0 kWh -
+den historischen Diagnose-Peak. Minor-Version 7 migriert zusätzlich den
+nach alter Semantik noch unbekannt geführten Anfangsbestand auf 0 kWh;
+Minor-Version 8 verwirft die mit der früheren Peak-Semantik geführten
+Tageswerte (Issue #144) -
 siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
 jedem bestehenden Store NotImplementedError ausgelöst).
@@ -61,7 +63,9 @@ STORAGE_VERSION = 1
 # Bestand geführt. Seit Version 7 gilt er als mit 0 EUR beschafft. Der
 # Store-Migrationspfad setzt den verbliebenen Altbestand deshalb einmalig auf
 # 0, ohne Geldsummen, Bilanzbeginn oder Preisabdeckungszähler zurückzusetzen.
-STORAGE_MINOR_VERSION = 7
+# Minor-Version 8 startet nur die inkompatiblen Tages-Peak-Zuwächse neu; das
+# signierte Gesamtergebnis bleibt aus den drei Geldsummen rekonstruierbar.
+STORAGE_MINOR_VERSION = 8
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
@@ -164,31 +168,44 @@ class _EconomicsStore(Store[dict[str, Any]]):
     async def _async_migrate_func(
         self, old_major_version: int, old_minor_version: int, old_data: Any
     ) -> Any:
-        """Bewerte den in Altständen geführten Anfangsbestand einmalig neu."""
+        """Migriere Altbestand und inkompatible Tagesergebnis-Semantik."""
         if old_major_version != STORAGE_VERSION:
             raise NotImplementedError
         if old_minor_version >= STORAGE_MINOR_VERSION or not isinstance(old_data, dict):
             return old_data
 
         migrated = dict(old_data)
-        inventory = migrated.get("unvalued_inventory_kwh")
-        # Ein fehlender oder korrupter Kernwert muss weiterhin das gesamte
-        # Sieben-Felder-Bündel entwerten. Nur ein tatsächlich gültiger
-        # Altbestand wird migriert; damit repariert die Migration keine
-        # beschädigten Snapshots stillschweigend.
-        if (
-            isinstance(inventory, int | float)
-            and not isinstance(inventory, bool)
-            and math.isfinite(inventory)
-            and inventory >= 0
-        ):
-            migrated["unvalued_inventory_kwh"] = 0.0
-            if inventory > 0:
-                _LOGGER.info(
-                    "Bewerte gespeicherten Anfangsbestand von %.3f kWh "
-                    "bei der Migration mit 0 EUR",
-                    inventory,
-                )
+        if old_minor_version < 7:
+            inventory = migrated.get("unvalued_inventory_kwh")
+            # Ein fehlender oder korrupter Kernwert muss weiterhin das gesamte
+            # Sieben-Felder-Bündel entwerten. Nur ein tatsächlich gültiger
+            # Altbestand wird migriert; damit repariert die Migration keine
+            # beschädigten Snapshots stillschweigend.
+            if (
+                isinstance(inventory, int | float)
+                and not isinstance(inventory, bool)
+                and math.isfinite(inventory)
+                and inventory >= 0
+            ):
+                migrated["unvalued_inventory_kwh"] = 0.0
+                if inventory > 0:
+                    _LOGGER.info(
+                        "Bewerte gespeicherten Anfangsbestand von %.3f kWh "
+                        "bei der Migration mit 0 EUR",
+                        inventory,
+                    )
+        if old_minor_version < 8:
+            migrated["day_results"] = []
+            for key in (
+                "current_day",
+                "current_day_operating_result_eur",
+                "current_day_priced_charge_kwh",
+                "current_day_unpriced_charge_kwh",
+                "current_day_priced_discharge_kwh",
+                "current_day_unpriced_discharge_kwh",
+                "current_day_observed_seconds",
+            ):
+                migrated[key] = None
         return migrated
 
 
@@ -749,7 +766,7 @@ class EconomicsStateStore:
             _LOGGER.warning("Ungültigen Tageseintrag verworfen: kein Objekt: %r", entry)
             return None
         day = cls._validated_date(entry.get("day"), "Tagesdatum")
-        operating_result = cls._validated_nonnegative(
+        operating_result = cls._validated_amount(
             entry.get("operating_result_eur"), "Tagesergebnis"
         )
         priced_charge = cls._validated_nonnegative(
@@ -821,7 +838,7 @@ class EconomicsStateStore:
         """
         fields = {
             "current_day": cls._validated_date(raw.get("current_day"), "Laufender Tag"),
-            "current_day_operating_result_eur": cls._validated_nonnegative(
+            "current_day_operating_result_eur": cls._validated_amount(
                 raw.get("current_day_operating_result_eur"), "Laufendes Tagesergebnis"
             ),
             "current_day_priced_charge_kwh": cls._validated_nonnegative(

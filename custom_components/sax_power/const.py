@@ -755,7 +755,7 @@ ECONOMICS_INVESTMENT_COST_STEP = 0.01
 # Amortisationsfortschritt von 0 %, obwohl ein erheblicher Teil der
 # Investition längst zurückverdient ist. Der Wert wirkt AUSSCHLIESSLICH auf
 # ROI, Fortschritt und Restbetrag, nie auf
-# economics_net_savings: Dessen Netto-Ersparnis-Höchststand wird im
+# economics_net_savings: Dessen signiertes Nettoergebnis wird im
 # Dashboard als statistics-graph über `change` ausgewertet, ein Sprung
 # durch eine manuelle Eingabe würde dort als Tagesertrag erscheinen.
 #

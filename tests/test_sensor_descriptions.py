@@ -230,7 +230,7 @@ def test_grid_serving_forecast_is_kwh_or_unknown() -> None:
     assert description.value_fn({"grid_serving_forecast_kwh": None}) is None
 
 
-def test_net_savings_is_a_nonnegative_recorder_total() -> None:
+def test_net_savings_is_a_signed_recorder_total() -> None:
     raw_cashflow = _description_by_key("economics_operating_result")
     description = _description_by_key("economics_net_savings")
 

@@ -49,14 +49,11 @@ NO_DELTA = EconomicsDelta()
 def compute_operating_result_high_water(
     previous_high_water_eur: float, operating_result_eur: float
 ) -> float:
-    """Nichtnegative, niemals rückläufige Netto-Ersparnis.
+    """Nichtnegativer historischer Peak für Diagnose und Store-Kompatibilität.
 
-    Der operative Rohwert bleibt `vermiedene Kosten - Lade- und
-    PV-Opportunitätskosten`. Veröffentlicht wird jedoch der höchste seit
-    Bilanzbeginn erreichte Wert: Bereits erwirtschaftete Ersparnis geht durch
-    spätere Kosten nicht wieder verloren. Die 0-Untergrenze verhindert, dass
-    ein Verlust als negative Ersparnis erscheint; insbesondere wird kein
-    Betrag gebildet, der einen Verlust fälschlich positiv umdeuten würde.
+    Der Peak ist ausdrücklich keine Netto-Ersparnis und darf keine finanzielle
+    Hauptkennzahl speisen: spätere Kosten müssen Ergebnis, ROI und Tageswert
+    wieder reduzieren können (Issue #144).
     """
     return max(0.0, previous_high_water_eur, operating_result_eur)
 

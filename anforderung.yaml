@@ -60,7 +60,7 @@
 # REQ-CONTROL-CONFIG-BOOTSTRAP    done       Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen
 # REQ-ECONOMICS-TARIFFS           done       Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung
 # REQ-ENERGY-ORIGIN               done       Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)
-# REQ-ECONOMICS-ACCOUNTING        done       Kosten und nichtnegative Netto-Ersparnis aus Tarif und Energieherkunft bilanzieren
+# REQ-ECONOMICS-ACCOUNTING        done       Kosten und signiertes Nettoergebnis aus Tarif und Energieherkunft bilanzieren
 # REQ-ECONOMICS-AMORTIZATION      done       ROI und Amortisationsstand aus Investitionskosten und der Netto-Ersparnis (03/06)
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # REQ-ECONOMICS-SAVINGS-DASHBOARD done       Kompakter Ersparnis-Tab mit Zeiträumen und verständlichen Datenhinweisen
@@ -3073,7 +3073,7 @@ requirement_energy_origin:
 # ==============================================================================
 requirement_economics_accounting:
   id: REQ-ECONOMICS-ACCOUNTING
-  title: "Kosten und nichtnegative Netto-Ersparnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren"
+  title: "Kosten und signiertes Nettoergebnis aus Tarif (01/06) und Energieherkunft (02/06) bilanzieren"
   status: done
   description: >
     Bewertet ausschließlich tatsächlich gemessene Lade-/Entladeenergie, nie
@@ -3095,26 +3095,17 @@ requirement_economics_accounting:
     pv_opportunity_cost_delta = charged_from_pv_kwh * feed_in_price
     avoided_grid_cost_delta = monetizable_discharged_kwh * import_price_at_discharge
     operating_result_raw = avoided_grid_cost_total - grid_charge_cost_total - pv_opportunity_cost_total
-    net_savings = max(previous_net_savings, operating_result_raw, 0)
+    net_savings = operating_result_raw
     ```
 
-    operating_result_raw bleibt der ungerundete kumulierte operative
-    Cashflow, ist aus den drei Teilsummen jederzeit nachrechenbar und wird
-    aus Kompatibilitätsgründen weiter als economics_operating_result
-    veröffentlicht. Dieser technische Rohwert darf sinken und negativ
-    sein. Der getrennte Sensor economics_net_savings bedeutet dagegen
-    Netto-Ersparnis: SaxPowerCoordinator._accumulate_economics schreibt
-    nach jedem Delta den historischen Höchststand
-    operating_result_high_water_eur fort. Er beginnt bei 0, kann niemals
-    negativ werden und niemals sinken. Ein bereits erreichter Stand von
-    100 EUR bleibt daher auch dann 100 EUR, wenn spätere Lade- oder
-    PV-Opportunitätskosten den aktuellen Roh-Cashflow auf 80 EUR senken;
-    erst ein neuer Roh-Höchststand über 100 EUR erhöht die Ersparnis. Das
-    ist ausdrücklich kein abs(operating_result_raw): Bei einem bisherigen
-    Höchststand von 0 wird ein Verlust von -20 EUR nicht als +20 EUR
-    Ersparnis umgedeutet, sondern bleibt 0 EUR; ein früherer positiver
-    Höchststand bleibt erhalten.
-    Nur der kontrollierte Bilanzneustart darf den Höchststand auf 0 setzen.
+    operating_result_raw bleibt das ungerundete kumulierte Nettoergebnis,
+    ist aus den drei Teilsummen jederzeit nachrechenbar und wird identisch
+    als economics_operating_result und economics_net_savings veröffentlicht.
+    Spätere Lade- oder PV-Opportunitätskosten reduzieren beide Werte; ein
+    Verlust darf sie negativ machen. Der weiterhin persistierte
+    operating_result_high_water_eur ist nur ein abwärtskompatibler
+    Diagnose-Peak und speist weder Sensoren noch ROI, Tagesergebnis,
+    Fortschritt oder Restbetrag (Issue #144).
 
     Veröffentlicht werden alle Geld- und Prozentwerte dieser Anforderung
     sowie aus REQ-ECONOMICS-AMORTIZATION über SaxPowerCoordinator._rounded,
@@ -3130,8 +3121,8 @@ requirement_economics_accounting:
     und im operativen Roh-Cashflow sichtbar (Kosten für die volle geladene
     Energie, Nutzen nur für die tatsächlich gemessene, kleinere entladene
     Energie), ohne einen angenommenen Wirkungsgradfaktor oder eine fiktive
-    Nachbewertung des Lagerbestands. Sie verringern jedoch keinen bereits
-    erreichten Netto-Ersparnis-Höchststand.
+    Nachbewertung des Lagerbestands. Sie verringern das aktuelle
+    Nettoergebnis unmittelbar.
 
     Beim erstmaligen Aktivieren wird die bereits im Speicher vorhandene
     Energie mit 0 EUR angesetzt.
@@ -3234,8 +3225,8 @@ requirement_economics_accounting:
     device_class monetary, state_class total: technischer Roh-Cashflow,
     dessen bestehende Recorder-Historie unverändert bleibt),
     economics_net_savings (EUR, device_class monetary, state_class total
-    mit economics_started_at als last_reset: persistierter, nichtnegativer
-    Netto-Ersparnis-Höchststand mit eigener Recorder-Historie), sowie
+    mit economics_started_at als last_reset: signiertes aktuelles
+    Nettoergebnis mit eigener Recorder-Historie), sowie
     economics_current_import_price/economics_feed_in_price (EUR/kWh,
     state_class measurement).
 
@@ -3281,14 +3272,11 @@ requirement_economics_accounting:
     EnergyStateStore._origin_baseline, REQ-ENERGY-ORIGIN, übernommenes
     Muster). Ein korrupter Snapshot wird nie still auf 0 gesetzt.
 
-    Ein Store vor STORAGE_MINOR_VERSION 6 enthält keinen Höchststand. Beim
-    Laden ist ausschließlich max(0, operating_result_raw) aus den drei
-    vorhandenen Teilsummen als ehrlicher Startwert bekannt; ein früherer,
-    inzwischen unterschrittener Peak lässt sich ohne erfundene Historie
-    nicht rekonstruieren. Die alten day_results und der laufende
-    Tages-Cashflow werden in diesem Fall verworfen, weil max(Tag, 0) eine
-    bloße Erholung unterhalb eines früheren Peaks fälschlich als neue
-    Ersparnis zählen würde. Die Geldsummen und der
+    Ein Store vor STORAGE_MINOR_VERSION 6 enthält keinen Diagnose-Peak. Beim
+    Laden wird er abwärtskompatibel als max(0, operating_result_raw) aus den
+    drei vorhandenen Teilsummen initialisiert. Die alten day_results und der
+    laufende Tages-Cashflow werden wegen ihrer damaligen abweichenden
+    Store-Semantik weiterhin verworfen. Die Geldsummen und der
     Bilanzbeginn bleiben erhalten. economics_net_savings und
     economics_net_savings_today sind neue Entities und beginnen deshalb
     jeweils eine eigene Recorder-Historie, statt bestehende Gesamt- oder
@@ -3306,6 +3294,12 @@ requirement_economics_accounting:
     bepreiste und unbepreiste Preisabdeckungszähler bleiben unverändert. Ein
     fehlender oder ungültiger Bestandswert wird dabei nicht auf 0 repariert,
     sondern entwertet weiterhin das vollständige Kernbündel.
+
+    STORAGE_MINOR_VERSION 8 verwirft ausschließlich day_results und den
+    laufenden Tages-Bucket aus älteren Snapshot-Ständen, weil diese
+    Peak-Zuwächse statt signierter Tagesergebnisse enthalten. Die drei
+    Geldsummen, das daraus rekonstruierbare Gesamtergebnis, Bilanzbeginn,
+    Bestand und Preisabdeckungszähler bleiben unverändert.
 
     Scheitert das Laden selbst (I/O-Fehler, unbekannte künftige
     Storage-Hauptversion), bleiben Rechnung und Bootstrap normal im
@@ -3348,24 +3342,19 @@ requirement_economics_accounting:
        Ladeverlust-Rest, und eine spätere bepreiste Entladung wird
        nachweislich vollständig als vermiedener Netzbezug bewertet
        (Issue #132). Ohne bekannte Kapazität/SOC wird nicht gedeckelt."
-    - "Ladeverluste senken den operativen Roh-Cashflow über die gemessene
-       Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu benötigen;
-       der veröffentlichte Netto-Ersparnis-Höchststand bleibt dabei
-       nichtnegativ und fällt niemals zurück."
+    - "Ladeverluste senken das aktuelle Nettoergebnis über die gemessene
+       Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu benötigen."
     - "Die Folge Rohwert 100 -> 80 -> 95 -> 105 veröffentlicht exakt
-       Netto-Ersparnis 100 -> 100 -> 100 -> 105; bei einem bisherigen
-       Höchststand von 0 veröffentlicht ein negativer Rohwert weiterhin 0
-       und wird niemals per Absolutwert als Ersparnis umgedeutet
-       (tests/test_economics_accounting.py,
+       Nettoergebnis 100 -> 80 -> 95 -> 105; ein negativer Rohwert bleibt
+       negativ und senkt ROI sowie Tageswert (Issue #144,
        tests/test_coordinator.py)."
     - "Store-Drosselung, Korruption (inkl. eines unvollständigen
        Sieben-Felder-Bündels samt bereinigter Baseline), zwei Config
        Entries und Final-Flush sind getestet
        (tests/test_economics_persistence.py)."
-    - "Der Store persistiert den nichtnegativen Höchststand, lehnt einen
-       normalen rückläufigen Snapshot ab und erlaubt 0 nur über
-       async_reset; ein Alt-Store übernimmt max(0, aktueller Rohwert) und
-       startet die inkompatible Tageshistorie neu."
+    - "Der Store persistiert den nichtnegativen Diagnose-Peak weiterhin
+       abwärtskompatibel, verwendet ihn aber für keine finanzielle Kennzahl;
+       Tagesergebnisse dürfen endlich und negativ sein."
     - "Ein deaktivierter Tarif lässt die fünf monetären Sensoren None
        liefern, nie 0 - auch dann, wenn die Bilanz bereits vor der Pause
        initialisiert war (nicht nur bei einem nie aktivierten
@@ -3398,8 +3387,8 @@ requirement_economics_amortization:
   title: "ROI und aktueller Amortisationsstand aus Investitionskosten und Netto-Ersparnis (03/06)"
   status: done
   description: >
-    Baut ausschließlich auf der bereits bilanzierten, nichtnegativen
-    Netto-Ersparnis (REQ-ECONOMICS-ACCOUNTING) auf - ohne eigene Preis- oder
+    Baut ausschließlich auf dem bereits bilanzierten, signierten
+    Nettoergebnis (REQ-ECONOMICS-ACCOUNTING) auf - ohne eigene Preis- oder
     Energieherkunftslogik. Optionale, tarifunabhängige Investitionskosten
     (economics_investment_cost_eur, 0,01 bis 1.000.000 EUR, Schrittweite
     0,01) schalten die vier Amortisationssensoren frei. Leer oder ungültig
@@ -3432,7 +3421,8 @@ requirement_economics_amortization:
     die interne Rechen- und Recorder-Genauigkeit bleibt unverändert.
 
     economics_net_savings_today ist ein zyklisch zurückgesetzter monetary-
-    total-Sensor. Sein last_reset ist der späteste Zeitpunkt aus lokalem
+    total-Sensor und führt das signierte Tagesdelta der drei Geldsummen. Sein
+    last_reset ist der späteste Zeitpunkt aus lokalem
     Tagesbeginn, economics_started_at und last_restart_at. Eine Tarifpause
     blendet die vier aktuellen Werte auf None aus, lässt interne Summen und
     Reset-Zeitpunkt aber unverändert weiterbestehen.
@@ -3453,7 +3443,8 @@ requirement_economics_amortization:
   acceptance_criteria:
     - "ROI bleibt unklemmt; der Fortschritt wird auf 0..100 begrenzt und der
        Restbetrag bei 0 gefloort. Fehlende Investitionskosten oder Bilanzwerte
-       liefern None."
+       liefern None. Ein negatives Nettoergebnis ergibt einen negativen ROI
+       und Fortschritt 0."
     - "Der Vorlauf verschiebt ausschließlich ROI, Fortschritt und Restbetrag;
        economics_net_savings und economics_net_savings_today bleiben reine
        Messwerte."
@@ -3649,7 +3640,7 @@ requirement_economics_observability:
     beeinflusst keine Berechnung. Lehnt mit ServiceValidationError ab, wenn der Tarif
     deaktiviert ist oder die Bilanz noch nie initialisiert wurde. Setzt
     AUSSCHLIESSLICH zurück: die drei Economics-Geldsummen, den
-    Netto-Ersparnis-Höchststand, die vier Preisabdeckungszähler
+    den historischen Diagnose-Peak, die vier Preisabdeckungszähler
     (priced_*/unpriced_*), die Tages-Buckets (day_results und current_day
     einschließlich seiner Zähler), den Aktivierungs-/Revisionszeitpunkt
     (neu auf jetzt) und einen bereits erreichten
@@ -3735,9 +3726,9 @@ requirement_economics_savings_dashboard:
   description: >
     Das mitgelieferte Dashboard besitzt als fünften View "Ersparnis" mit
     Pfad ersparnis und Icon mdi:cash-multiple. Grundlage ist ausschließlich die
-    über die Entity Registry aufgelöste Entity economics_net_savings: der
-    persistierte, nichtnegative Höchststand des Roh-Cashflows aus vermiedenen
-    Netzbezugskosten minus Netzladekosten und PV-Opportunitätskosten. Die
+    über die Entity Registry aufgelöste Entity economics_net_savings: das
+    signierte Nettoergebnis aus vermiedenen Netzbezugskosten minus
+    Netzladekosten und PV-Opportunitätskosten. Die
     Anzeige aller Euro-Werte in diesem Tab verwendet zwei Nachkommastellen;
     interne Werte und Recorder-Historie behalten ihre bisherige Genauigkeit.
 

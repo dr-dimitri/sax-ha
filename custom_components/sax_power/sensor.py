@@ -766,10 +766,9 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     # lassen sie legitim sinken (siehe anforderung.yaml). Der daraus
     # abgeleitete operative Roh-Cashflow bleibt aus Kompatibilitätsgründen
     # ebenfalls TOTAL.
-    # Die neue Netto-Ersparnis ist ein persistierter, nichtnegativer
-    # Höchststand mit einer frischen Recorder-Historie. MONETARY erlaubt in
-    # Home Assistant ebenfalls nur TOTAL; der Bilanzbeginn kennzeichnet
-    # dessen einzigen kontrollierten Reset. Bei deaktiviertem Tarif liefert
+    # Das Nettoergebnis darf durch spätere Kosten sinken und negativ werden.
+    # MONETARY erlaubt in Home Assistant nur TOTAL; der Bilanzbeginn trennt
+    # dessen kontrollierte Bilanzabschnitte. Bei deaktiviertem Tarif liefert
     # value_fn None wie jeder andere nicht verfügbare Wert dieser Integration
     # - keine eigene HA-"unavailable"-Sonderbehandlung.
     SaxPowerSensorEntityDescription(

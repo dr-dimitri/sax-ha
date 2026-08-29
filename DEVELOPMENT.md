@@ -270,18 +270,14 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
   `INVENTORY_CAP_LOG_INTERVAL_SECONDS`; die insgesamt verworfene Menge steht
   als `inventory_capped_kwh` im Diagnose-Download.
 
-Der operative Roh-Cashflow (vermiedene Netzkosten − Netzladekosten −
+Das operative Nettoergebnis (vermiedene Netzkosten − Netzladekosten −
 PV-Opportunitätskosten) bleibt jederzeit aus den drei ungerundeten Teilsummen
-ableitbar. `_accumulate_economics` schreibt zusätzlich
-`_economics_operating_result_high_water_eur = max(0, bisheriger Höchststand,
-Roh-Cashflow)` fort. Nur dieser persistierte, nichtnegative Höchststand wird
-als `economics_net_savings`/Netto-Ersparnis veröffentlicht: 100 EUR bleiben
-bei einem späteren Rohwert von 80 EUR stehen und wachsen erst ab einem neuen
-Peak. `economics_operating_result` bleibt davon getrennt der technische
-Roh-Cashflow und kann sinken oder negativ sein. Das ist bewusst kein `abs` -
-ein Rohverlust von −20 EUR ergibt bei einem bisherigen Höchststand von 0
-weiterhin 0 EUR Ersparnis, nicht +20 EUR; ein früherer positiver Höchststand
-bleibt erhalten.
+ableitbar und wird identisch als `economics_operating_result` und
+`economics_net_savings` veröffentlicht. Es darf durch spätere Kosten sinken
+und negativ werden; ROI, Restbetrag und Tageswert verwenden denselben
+aktuellen Wert. `_economics_operating_result_high_water_eur` bleibt nur als
+abwärtskompatibler Diagnose-Peak im Store und beeinflusst keine finanzielle
+Kennzahl (Issue #144).
 
 Veröffentlicht werden alle Geld-/Prozentwerte über `coordinator._rounded`,
 das zusätzlich zur Rundung die negative Null auf `0.0` normalisiert:
@@ -330,7 +326,8 @@ eigener STORAGE_VERSION, eigenes Bootstrap-Fenster analog zu
 `EnergyStateStore`). Anders als die monoton steigenden Energiezähler dürfen
 die drei Geldsummen wegen negativer Strompreise sinken - "kleiner als der
 alte Wert" ist dort deshalb bewusst KEIN Ablehnungsgrund, nur
-NaN/Inf/Fremdtypen sind es. `operating_result_high_water_eur` sowie
+NaN/Inf/Fremdtypen sind es. Der nur diagnostische
+`operating_result_high_water_eur` sowie
 `unpriced_charge_kwh`/`unpriced_discharge_kwh` bleiben dagegen monotone,
 nichtnegative Summen; nur `async_reset` darf sie auf 0 setzen.
 `unvalued_inventory_kwh` ist ein
@@ -346,13 +343,10 @@ dem neuen Nullstand kombiniert werden. Das Höchststandsfeld gehört aus
 Migrationsgründen nicht zum
 alten Sieben-Felder-Kernbündel: Fehlt es in einem Store bis Minor-Version 5,
 startet es mit `max(0, aktueller Roh-Cashflow)`. Die alten `day_results` und
-der laufende Tageswert werden verworfen, weil sie Roh-Cashflows statt
-Peak-Zuwächsen enthalten und sich nicht ehrlich positiv klemmen lassen. Die
-neuen Entities
-`economics_net_savings` und `economics_net_savings_today` beginnen zugleich
-jeweils eine eigene Recorder-Historie, damit weder die Gesamt- noch die
-Tagesstatistik des technischen Roh-Cashflows als Netto-Ersparnis umgedeutet
-wird. Ihr Recorder-Beginn kann nach einem Update deshalb jünger als
+der laufende Tageswert werden wegen ihrer damaligen abweichenden
+Store-Semantik verworfen. `economics_net_savings` und
+`economics_net_savings_today` besitzen jeweils eine eigene Recorder-Historie.
+Ihr Recorder-Beginn kann nach einem Update deshalb jünger als
 `economics_started_at` sein. `_async_remove_stale_entities` entfernt den in
 früheren Snapshot-Ständen bereits angelegten Registry-Eintrag
 `economics_result_today` über seinen exakt benannten Suffix; die neue Unique-ID
@@ -362,6 +356,9 @@ Minor-Version 7 setzt den aus älteren Snapshot-Ständen geladenen
 Bilanzstart bereits vorhandenen Speicherinhalt noch als unbekannt. Die
 Store-Version ist zugleich die dauerhafte Migrationsmarkierung; Geldsummen,
 Bilanzbeginn und Preisabdeckungszähler bleiben unverändert.
+Minor-Version 8 startet nur `day_results` und den laufenden Tages-Bucket neu,
+weil ältere Snapshot-Stände dort Peak-Zuwächse statt signierter Ergebnisse
+gespeichert haben. Das Gesamtergebnis bleibt aus den drei Geldsummen erhalten.
 `notify_tariff_revision()` (aufgerufen aus
 `__init__.async_update_options`) merkt sich nur einen rein diagnostischen
 Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
@@ -384,7 +381,7 @@ neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
 ROI, den auf 0..100 geklemmten Fortschritt und den bei 0 gefloorten
 Restbetrag. `SaxPowerCoordinator._publish_amortization` addiert den optionalen
 Vorlauf-Ertrag ausschließlich für diese drei Werte und veröffentlicht daneben
-den laufenden Tageszuwachs der Netto-Ersparnis.
+das signierte Nettoergebnis des laufenden Tages.
 
 Die frühere 30-Tage-Amortisationsprognose ist entfernt:
 `compute_amortization_forecast` wird nicht mehr angeboten, und

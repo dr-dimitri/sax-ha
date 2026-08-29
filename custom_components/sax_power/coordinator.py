@@ -531,10 +531,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_grid_charge_cost_eur: float | None = None
         self._economics_pv_opportunity_cost_eur: float | None = None
         self._economics_avoided_grid_cost_eur: float | None = None
-        # Persistierter, nichtnegativer Höchststand des operativen
-        # Roh-Ergebnisses. Nur dieser Wert wird als Netto-Ersparnis
-        # veröffentlicht; spätere Kosten dürfen bereits erwirtschaftete
-        # Ersparnis nicht wieder abziehen.
+        # Persistierter, nichtnegativer Diagnose-Peak des operativen
+        # Ergebnisses. Er bleibt für Store-Kompatibilität und Diagnose
+        # erhalten, speist aber keine finanzielle Kennzahl (Issue #144).
         self._economics_operating_result_high_water_eur: float | None = None
         self._economics_unvalued_inventory_kwh: float | None = None
         self._economics_unpriced_charge_kwh: float | None = None
@@ -955,7 +954,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 self._economics_operating_result_high_water_eur = current_high_water
                 self._economics_current_day_operating_result_eur += (
-                    current_high_water - previous_high_water
+                    current_raw_result - previous_raw_result
                 )
                 self._economics_current_day_priced_charge_kwh += (
                     delta.priced_charge_kwh_delta
@@ -1214,9 +1213,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             }
             return
 
-        # Exakt derselbe persistierte Höchststand, den
-        # economics_net_savings veröffentlicht
-        # (_publish_economics_balance) - die reine Messung ohne Vorlauf.
+        # Exakt dasselbe aktuelle Nettoergebnis, das economics_net_savings
+        # veröffentlicht (_publish_economics_balance) - die reine Messung
+        # ohne Vorlauf. Ein historischer Peak würde normale spätere Kosten
+        # aus ROI und Restbetrag ausblenden (Issue #144).
         measured_result = self._net_savings_eur()
         # Der Vorlauf-Ertrag geht ausschließlich hier ein, nicht in
         # _publish_economics_balance: economics_net_savings bleibt der
@@ -1521,21 +1521,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._async_schedule_economics_save()
 
     def _net_savings_eur(self) -> float | None:
-        """Aktueller nichtnegativer Höchststand des operativen Ergebnisses."""
+        """Aktuelles signiertes Nettoergebnis aus den drei Geldsummen."""
         if (
             self._economics_avoided_grid_cost_eur is None
             or self._economics_grid_charge_cost_eur is None
             or self._economics_pv_opportunity_cost_eur is None
         ):
             return None
-        raw_result = (
+        return (
             self._economics_avoided_grid_cost_eur
             - self._economics_grid_charge_cost_eur
             - self._economics_pv_opportunity_cost_eur
-        )
-        return compute_operating_result_high_water(
-            self._economics_operating_result_high_water_eur or 0.0,
-            raw_result,
         )
 
     def _publish_economics_balance(
@@ -1569,9 +1565,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _rounded(self._net_savings_eur(), 4) if monetary_available else None
         )
         # SensorDeviceClass.MONETARY erlaubt in Home Assistant nur
-        # state_class TOTAL. Der explizite Reset-Zeitpunkt kennzeichnet den
-        # einzigen erlaubten Rücksprung dieses sonst monotonen Werts: den
-        # kontrollierten Bilanzneustart.
+        # state_class TOTAL. Der Reset-Zeitpunkt trennt kontrollierte
+        # Bilanzabschnitte; normale Rückgänge durch Kosten bleiben echte
+        # signierte Änderungen innerhalb desselben Abschnitts.
         data["economics_net_savings_last_reset"] = self._economics_started_at
 
     def notify_tariff_revision(self) -> None:
@@ -1645,13 +1641,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._economics_last_restart_at = state.last_restart_at
             self._economics_last_restart_reason = state.last_restart_reason
         if state is not None and state.initialized:
-            # Stores bis Minor-Version 5 enthalten Tages-Cashflows statt
-            # Zuwächsen des neuen Höchststands. Sie lassen sich nicht
-            # zuverlässig umdeuten: max(Tag, 0) würde eine bloße Erholung
-            # unterhalb eines älteren Peaks als neue Ersparnis zählen.
-            # Deshalb startet die Tageshistorie neu. Bei einem ansonsten
-            # vollständigen Alt-Store bleiben die drei Rohsummen und die
-            # daraus sicher ableitbare aktuelle 0-Untergrenze erhalten.
+            # Stores bis Minor-Version 5 enthalten Tageswerte mit einer
+            # anderen Snapshot-Semantik. Deshalb startet ihre Tageshistorie
+            # neu; die drei Rohsummen und ihr aktuelles signiertes Ergebnis
+            # bleiben vollständig erhalten.
             self._economics_day_results = (
                 () if legacy_result_history else state.day_results
             )
@@ -1789,7 +1782,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Service `sax_power.restart_economics_accounting`).
 
         Setzt AUSSCHLIESSLICH die drei Economics-Geldsummen, den
-        Netto-Ersparnis-Höchststand, die Preisabdeckungszähler
+        historischen Diagnose-Peak, die Preisabdeckungszähler
         (priced_*/unpriced_*), die Tages-Buckets, den
         Aktivierungs-/Revisionszeitpunkt und einen bereits erreichten
         Payback-Zeitpunkt zurück, setzt den unbewerteten Bestand wie beim

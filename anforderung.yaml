@@ -3256,6 +3256,17 @@ requirement_economics_accounting:
     economics_current_import_price/economics_feed_in_price (EUR/kWh,
     state_class measurement).
 
+    Alle fünf kumulativen monetären TOTAL-Sensoren (drei Kosten-/Nutzen-
+    Rohsummen, operatives Ergebnis und Netto-Ersparnis) verwenden denselben
+    Coordinator-Schlüssel economics_balance_last_reset =
+    economics_started_at als last_reset. Der bisherige Schlüssel
+    economics_net_savings_last_reset bleibt als kompatibler Alias erhalten.
+    Bootstrap und bestätigter Bilanzneustart setzen den persistierten
+    Zeitpunkt; Tarifpause, normale positive/negative Preisbewegungen und
+    Reload lassen ihn unverändert. Recorder trennt dadurch Bilanzabschnitte,
+    statt einen kontrollierten Sprung auf 0 als Geld-Delta zu verbuchen
+    (Issue #151).
+
     Die internen Werte unvalued_inventory_kwh, unpriced_charge_kwh und
     unpriced_discharge_kwh werden nicht als eigene Home-Assistant-Sensoren
     veröffentlicht. Sie dienen ausschließlich Persistenz, Diagnose und
@@ -3685,12 +3696,14 @@ requirement_economics_observability:
     einschließlich seiner Zähler), den Aktivierungs-/Revisionszeitpunkt
     (neu auf jetzt) und einen bereits erreichten
     Payback-Zeitpunkt (auf None) - setzt den unbewerteten Bestand dabei wie
-    beim erstmaligen Aktivieren auf 0. economics_net_savings ist ein
-    total-Sensor und
-    meldet diesen neuen Aktivierungszeitpunkt als last_reset, damit der
-    kontrollierte Rücksprung auf 0 keine negative Recorder-Änderung erzeugt.
-    economics_operating_result bleibt als technischer Roh-Cashflow ohne
-    last_reset erhalten.
+    beim erstmaligen Aktivieren auf 0. Alle fünf kumulativen Geldsensoren
+    melden diesen neuen Aktivierungszeitpunkt über den gemeinsamen
+    Coordinator-Schlüssel economics_balance_last_reset als last_reset, damit
+    ihre kontrollierten Rücksprünge auf 0 keine falschen Recorder-Änderungen
+    erzeugen. Normale Preis- und Ergebnisbewegungen sowie ein Reload
+    verändern diesen Zeitpunkt nicht.
+    economics_net_savings_last_reset bleibt als kompatibler Alias erhalten
+    (Issue #151).
     Rührt NIEMALS `energy_charged`/`energy_discharged` oder die
     Herkunftszähler aus REQ-ENERGY-ORIGIN an - keine
     `total_increasing`-Entity darf durch diesen Service zurückspringen.
@@ -3749,6 +3762,11 @@ requirement_economics_observability:
        vollständig unverändert), setzt den unbewerteten Bestand auf 0 und
        lässt alle Energie-/Herkunftszähler unangetastet
        (tests/test_coordinator.py, tests/test_init.py)."
+    - "Alle fünf kumulativen Geldsensoren verwenden denselben persistierten
+       Bilanzbeginn als last_reset. Ein echter Recorder-Test weist für alle
+       vier Rohsummen nach, dass auch ein Neustart nach negativem operativem
+       Ergebnis keinen falschen Geldsprung erzeugt
+       (tests/test_economics_recorder.py, Issue #151)."
     - "Diagnostics enthalten Status, Store-Zustand, Preisabdeckungszähler
        und - nur bei dynamischem Tarif - die Sensor-Entity-ID, aber keine
        neue identifizierende Information (tests/test_diagnostics.py)."

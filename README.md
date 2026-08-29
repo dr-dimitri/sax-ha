@@ -609,6 +609,11 @@ Geldsummen und Bilanzbeginn bleiben erhalten. Gesamt- und Tages-Nettoergebnis
 besitzen jeweils eine eigene Recorder-Historie; bei einer aktualisierten
 Installation kann diese deshalb jünger sein als der weiterhin angezeigte
 Bilanzbeginn.
+Alle fünf kumulativen Geldsensoren melden denselben Bilanzbeginn als
+`last_reset`. Ein bestätigter Bilanzneustart beginnt damit für Home Assistants
+Langzeitstatistik einen neuen Abschnitt, statt den Sprung auf 0 als
+künstliche Kosten- oder Ertragsänderung zu verbuchen. Normale Rückgänge durch
+negative Preise oder spätere Kosten ändern diesen Zeitpunkt nicht.
 
 ## Ersparnisübersicht
 

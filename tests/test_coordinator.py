@@ -4549,6 +4549,7 @@ def test_economics_net_savings_tracks_the_current_signed_result(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _INVESTMENT_OPTIONS
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0), soc=0)
+    balance_started_at = coordinator._economics_started_at
 
     data = _tick_with_delta(
         coordinator,
@@ -4570,6 +4571,7 @@ def test_economics_net_savings_tracks_the_current_signed_result(hass) -> None:
     assert data["economics_operating_result"] == pytest.approx(80.0)
     assert data["economics_net_savings"] == pytest.approx(80.0)
     assert data["economics_net_savings_today"] == pytest.approx(80.0)
+    assert data["economics_balance_last_reset"] == balance_started_at
     assert data["economics_roi"] == pytest.approx(8.0)
     assert data["economics_remaining_to_payback"] == pytest.approx(920.0)
     assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
@@ -4595,10 +4597,29 @@ def test_economics_net_savings_tracks_the_current_signed_result(hass) -> None:
     assert data["economics_operating_result"] == pytest.approx(105.0)
     assert data["economics_net_savings"] == pytest.approx(105.0)
     assert data["economics_net_savings_today"] == pytest.approx(105.0)
+    assert data["economics_balance_last_reset"] == balance_started_at
     assert data["economics_roi"] == pytest.approx(10.5)
     assert coordinator.economics_diagnostics[
         "operating_result_high_water_eur"
     ] == pytest.approx(105.0)
+
+
+def test_negative_price_movement_keeps_balance_last_reset(hass) -> None:
+    """Fallende Rohsummen sind kein Bilanzneustart (Issue #151)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0), soc=0)
+    balance_started_at = coordinator._economics_started_at
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=-20.0),
+    )
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(-20.0)
+    assert data["economics_balance_last_reset"] == balance_started_at
 
 
 def test_economics_amounts_round_to_four_decimals(hass) -> None:
@@ -6443,6 +6464,7 @@ async def test_restart_mid_day_moves_the_last_reset_of_net_savings_today(hass) -
     assert data["economics_net_savings"] == pytest.approx(250.0)
     previous_started_at = coordinator._economics_started_at
     assert data["economics_net_savings_today_last_reset"] == previous_started_at
+    assert data["economics_balance_last_reset"] == previous_started_at
     assert data["economics_net_savings_last_reset"] == previous_started_at
 
     coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
@@ -6463,6 +6485,7 @@ async def test_restart_mid_day_moves_the_last_reset_of_net_savings_today(hass) -
     assert data["economics_net_savings_today"] == pytest.approx(0.0)
     assert data["economics_net_savings_today_last_reset"] == restarted_at
     assert data["economics_net_savings"] == pytest.approx(0.0)
+    assert data["economics_balance_last_reset"] == restarted_at
     assert data["economics_net_savings_last_reset"] == restarted_at
 
     # Am Folgetag zählt wieder der Tagesbeginn - der (ältere) Neustart darf
@@ -6477,6 +6500,7 @@ async def test_restart_mid_day_moves_the_last_reset_of_net_savings_today(hass) -
         date(2026, 3, 11)
     )
     assert data["economics_net_savings_last_reset"] == restarted_at
+    assert data["economics_balance_last_reset"] == restarted_at
 
 
 async def test_restart_economics_accounting_keeps_old_state_if_save_fails(

@@ -1057,6 +1057,9 @@ async def test_load_restores_an_already_initialized_balance(hass) -> None:
     assert coordinator._economics_started_at == started_at
     assert coordinator._economics_grid_charge_cost_eur == 10.0
     assert coordinator._economics_operating_result_high_water_eur == 4.0
+    data: dict[str, object] = {}
+    coordinator._publish_economics_balance(data, monetary_available=True)
+    assert data["economics_balance_last_reset"] == started_at
     await coordinator.async_shutdown()
 
 
@@ -1126,6 +1129,7 @@ async def test_load_migrates_the_current_result_but_discards_legacy_day_cashflow
     coordinator._publish_economics_balance(data, monetary_available=True)
     assert data["economics_operating_result"] == pytest.approx(100.0)
     assert data["economics_net_savings"] == pytest.approx(100.0)
+    assert data["economics_balance_last_reset"] == started_at
     assert data["economics_net_savings_last_reset"] == started_at
     await coordinator.async_shutdown()
 
@@ -1346,6 +1350,7 @@ async def test_load_drops_all_dependent_history_from_an_incomplete_current_store
     ):
         coordinator._accumulate_energy(data)
     assert data["economics_net_savings_today_last_reset"] == bootstrap_at
+    assert data["economics_balance_last_reset"] == bootstrap_at
     assert data["economics_net_savings_last_reset"] == bootstrap_at
     await coordinator.async_shutdown()
     assert persisted["operating_result_high_water_eur"] == 0.0
@@ -1392,6 +1397,7 @@ async def test_bootstrap_values_existing_energy_at_zero(hass) -> None:
     assert data["economics_grid_charge_cost"] == 0.0
     assert data["economics_operating_result"] == 0.0
     assert data["economics_net_savings"] == 0.0
+    assert data["economics_balance_last_reset"] == coordinator._economics_started_at
     assert data["economics_net_savings_last_reset"] == coordinator._economics_started_at
     await coordinator.async_shutdown()
 

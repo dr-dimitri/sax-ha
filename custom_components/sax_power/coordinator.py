@@ -1646,6 +1646,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # state_class TOTAL. Der Reset-Zeitpunkt trennt kontrollierte
         # Bilanzabschnitte; normale Rückgänge durch Kosten bleiben echte
         # signierte Änderungen innerhalb desselben Abschnitts.
+        data["economics_balance_last_reset"] = self._economics_started_at
+        # Kompatibler Alias für bereits bestehende Tests/Consumers des zuerst
+        # eingeführten Netto-Ersparnis-Sensors (Issue #151).
         data["economics_net_savings_last_reset"] = self._economics_started_at
 
     def notify_tariff_revision(self) -> None:

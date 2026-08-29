@@ -60,7 +60,7 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
     mit einem kontrollierten Reset gedacht: ohne diesen Zeitpunkt deutet die
     Langzeitstatistik den Sprung auf 0 als negativen Zuwachs. Das betrifft den
     täglichen Reset von economics_net_savings_today ebenso wie den ausschließlich
-    manuell möglichen Bilanzneustart von economics_net_savings.
+    manuell möglichen Bilanzneustart aller kumulativen Geldsensoren.
     """
 
     value_fn: Callable[[dict[str, Any]], StateType | date | datetime]
@@ -779,6 +779,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
         value_fn=_direct("economics_grid_charge_cost"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_pv_opportunity_cost",
@@ -788,6 +789,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
         value_fn=_direct("economics_pv_opportunity_cost"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_avoided_grid_cost",
@@ -797,6 +799,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
         value_fn=_direct("economics_avoided_grid_cost"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_operating_result",
@@ -806,6 +809,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=4,
         value_fn=_direct("economics_operating_result"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_net_savings",
@@ -815,7 +819,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=CURRENCY_EURO,
         suggested_display_precision=2,
         value_fn=_direct("economics_net_savings"),
-        last_reset_fn=_last_reset("economics_net_savings_last_reset"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
     ),
     SaxPowerSensorEntityDescription(
         key="economics_current_import_price",

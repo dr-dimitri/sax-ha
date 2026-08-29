@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import CURRENCY_EURO, EntityCategory, UnitOfEnergy, UnitOfPower
 from homeassistant.helpers import entity_registry as er
@@ -230,23 +231,26 @@ def test_grid_serving_forecast_is_kwh_or_unknown() -> None:
     assert description.value_fn({"grid_serving_forecast_kwh": None}) is None
 
 
-def test_net_savings_is_a_signed_recorder_total() -> None:
-    raw_cashflow = _description_by_key("economics_operating_result")
-    description = _description_by_key("economics_net_savings")
+@pytest.mark.parametrize(
+    "key",
+    (
+        "economics_grid_charge_cost",
+        "economics_pv_opportunity_cost",
+        "economics_avoided_grid_cost",
+        "economics_operating_result",
+        "economics_net_savings",
+    ),
+)
+def test_economics_totals_share_the_balance_last_reset(key: str) -> None:
+    description = _description_by_key(key)
+    started_at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
 
-    assert raw_cashflow.device_class == SensorDeviceClass.MONETARY
-    assert raw_cashflow.state_class == SensorStateClass.TOTAL
-    assert raw_cashflow.last_reset_fn is None
     assert description.device_class == SensorDeviceClass.MONETARY
     assert description.state_class == SensorStateClass.TOTAL
     assert description.native_unit_of_measurement == CURRENCY_EURO
-    assert description.suggested_display_precision == 2
     assert description.last_reset_fn is not None
-
-    started_at = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
-    assert (
-        description.last_reset_fn({"economics_net_savings_last_reset": started_at})
-        == started_at
+    assert description.last_reset_fn({"economics_balance_last_reset": started_at}) == (
+        started_at
     )
 
 

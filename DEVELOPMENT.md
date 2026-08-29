@@ -498,7 +498,12 @@ Speichern fehl, bleibt der bisherige Zustand vollständig unverändert
 freier Grund dieses Neustarts werden zusätzlich als
 `last_restart_at`/`last_restart_reason` persistiert und erscheinen im
 Diagnose-Download - rein informativ, ohne Rückwirkung auf die
-Berechnung.
+Berechnung. Alle fünf kumulativen Geldsensoren verwenden den neuen
+Aktivierungszeitpunkt als gemeinsames `last_reset`; so trennt der Recorder
+den Bilanzabschnitt für jede Rohsumme sowie Ergebnis und Netto-Ersparnis,
+ohne den gewollten Sprung auf 0 als Geldänderung zu verbuchen. Normale
+Preis- und Ergebnisbewegungen oder ein Reload ändern diesen Zeitpunkt nicht
+(Issue #151).
 
 Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 3 erweitert.
 `priced_charge_kwh`/`priced_discharge_kwh` sind wie die bestehenden

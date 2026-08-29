@@ -606,7 +606,9 @@ async def test_savings_status_hint_is_last_and_renders_every_state(hass) -> None
         ),
         "storage_error": (
             "Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers "
-            "angehalten. Bitte die **Home-Assistant-Reparaturen** prüfen."
+            "angehalten. Bitte in den **Home-Assistant-Reparaturen** das "
+            "Korrupt-Backup wiederherstellen; bloßes Neuladen startet keine neue "
+            "Bilanz."
         ),
         "unknown": "Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.",
         "unavailable": ("Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar."),

@@ -143,7 +143,8 @@ _SAVINGS_STATUS_TEMPLATE = """\
     ~ 'unvollständig sein.' }}
 {%- elif status == 'storage_error' %}
 {{- 'Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers '
-    ~ 'angehalten. Bitte die **Home-Assistant-Reparaturen** prüfen.' }}
+    ~ 'angehalten. Bitte in den **Home-Assistant-Reparaturen** das '
+    ~ 'Korrupt-Backup wiederherstellen; bloßes Neuladen startet keine neue Bilanz.' }}
 {%- else %}
 {{- 'Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.' }}
 {%- endif %}

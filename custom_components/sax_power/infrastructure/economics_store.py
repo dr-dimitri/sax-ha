@@ -22,9 +22,9 @@ Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION, die
 kumulierten bepreisten Lade-/Entlademengen, den zuletzt verwendeten
 Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY sowie die
 Zeitabdeckung der Tages-Buckets (observed_seconds/day_length_seconds) und
-den historischen Diagnose-Peak. Minor-Version 7 migriert zusätzlich den
-nach alter Semantik noch unbekannt geführten Anfangsbestand auf 0 kWh;
-Minor-Version 8 verwirft die mit der früheren Peak-Semantik geführten
+den historischen Diagnose-Peak. Die für Minor-Version 7 zeitweise
+vorgesehene Bestands-Nullsetzung wird wegen Issue #147 nicht mehr
+ausgeführt; Minor-Version 8 verwirft die mit der früheren Peak-Semantik geführten
 Tageswerte (Issue #144) -
 siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
@@ -39,6 +39,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
@@ -58,16 +59,23 @@ from ..domain.economics_amortization import (
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-# Minor-Version 7 ändert die Semantik des beim Bilanzstart bereits vorhandenen
-# Speicherinhalts: Bis einschließlich Version 6 wurde er als unbewerteter
-# Bestand geführt. Seit Version 7 gilt er als mit 0 EUR beschafft. Der
-# Store-Migrationspfad setzt den verbliebenen Altbestand deshalb einmalig auf
-# 0, ohne Geldsummen, Bilanzbeginn oder Preisabdeckungszähler zurückzusetzen.
+# Minor-Version 7 war als Markierung einer Bestandsmigration vorgesehen; der
+# Bestand bleibt seit Issue #147 auch aus älteren Stores unverändert erhalten.
 # Minor-Version 8 startet nur die inkompatiblen Tages-Peak-Zuwächse neu; das
 # signierte Gesamtergebnis bleibt aus den drei Geldsummen rekonstruierbar.
 STORAGE_MINOR_VERSION = 8
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
+
+
+class EconomicsStoreLoadError(HomeAssistantError):
+    """Ein vorhandener Store wurde von Home Assistant als leer verworfen."""
+
+
+def _store_file_presence(path_value: str) -> tuple[bool, bool]:
+    """(kanonische Datei, Korrupt-Backup) ohne Zugriff auf Core-Interna."""
+    path = Path(path_value)
+    return path.exists(), any(path.parent.glob(f"{path.name}.corrupt.*"))
 
 
 @dataclass(frozen=True)
@@ -252,9 +260,26 @@ class EconomicsStateStore:
         self._write_and_verify_lock = asyncio.Lock()
 
     async def async_load(self) -> EconomicsState | None:
-        """Load the balance, rejecting invalid fields independently."""
+        """Load the balance, distinguishing new from Core-quarantined data."""
+        path = self._store.path
+        existed_before, corrupt_before = await self._hass.async_add_executor_job(
+            _store_file_presence, path
+        )
         raw = await self._store.async_load()
         if raw is None:
+            existed_after, corrupt_after = await self._hass.async_add_executor_job(
+                _store_file_presence, path
+            )
+            if existed_before or corrupt_before or existed_after or corrupt_after:
+                # Store.async_load() benennt syntaktisch defektes JSON selbst
+                # in .corrupt.* um und gibt None wie bei einer Neuinstallation
+                # zurück. Read-only ist ein zusätzliches Sicherheitsnetz gegen
+                # jeden versehentlichen Ersatzwrite dieser Instanz.
+                self._store.make_read_only()
+                raise EconomicsStoreLoadError(
+                    "Vorhandener Wirtschaftlichkeits-Store ist unlesbar; "
+                    "Korrupt-Backup wiederherstellen oder bewusst neu beginnen"
+                )
             return None
         if not isinstance(raw, dict):
             _LOGGER.warning(

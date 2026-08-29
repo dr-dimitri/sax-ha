@@ -1670,15 +1670,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
             # Der vorhandene Store ist unlesbar, aber nicht zwangsläufig
             # leer - ein anschließend aus lauter Nullen neu gebootstrapptes
-            # Bilanz-Objekt darf ihn deshalb nie überschreiben. Rechnung und
-            # Bootstrap laufen trotzdem normal weiter (nur im
-            # Arbeitsspeicher, analog zu ControlConfigLoadStatus.FAILED) -
-            # ein Neuladen des Config Entry ist der einzige Weg, die Sperre
-            # wieder aufzuheben.
+            # Bilanz-Objekt darf ihn deshalb nie überschreiben. Bootstrap
+            # und Akkumulation bleiben bis zur Wiederherstellung eingefroren.
             _LOGGER.warning(
                 "Wirtschaftlichkeitszustand konnte nicht geladen werden; "
-                "Änderungen wirken bis zu einem Neuladen des Config Entry "
-                "nur im Arbeitsspeicher: %s",
+                "Bilanz bleibt bis zur Wiederherstellung eingefroren: %s",
                 err,
             )
             self._economics_store_loaded = True

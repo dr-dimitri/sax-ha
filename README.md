@@ -748,7 +748,7 @@ der Wirtschaftlichkeitsbilanz gerade zu trauen ist:
 | Status | Bedeutung |
 | --- | --- |
 | Deaktiviert | Kein Tarif konfiguriert (siehe [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)) |
-| Speicherfehler | Der interne Bilanz-Speicher ist unlesbar - die Bilanz pausiert, bis die Integration neu geladen wird |
+| Speicherfehler | Der interne Bilanz-Speicher ist unlesbar - die Bilanz bleibt bis zur Wiederherstellung eingefroren; bloßes Neuladen setzt sie nicht zurück |
 | Preis nicht verfügbar | Seit über 6 Stunden kein gültiger Netzbezugspreis (bei einem Fest-/Zeitfenstertarif sofort, wenn die gespeicherte Konfiguration selbst ungültig ist) |
 | Herkunft nicht verfügbar | Die Herkunftsaufteilung aus [Herkunft der Ladeenergie](#herkunft-der-ladeenergie) läuft gerade nicht |
 | Teilweise Preisabdeckung | Mehr als 5 % der heute geladenen oder entladenen Energie konnte nicht bepreist werden |
@@ -767,6 +767,11 @@ Bleibt der interne Bilanz-Speicher länger als 6 Stunden unlesbar oder
 liegt ebenso lange kein gültiger Netzbezugspreis vor, erscheint zusätzlich
 ein Reparaturhinweis unter **Einstellungen → System → Reparaturen**, der
 sich automatisch wieder auflöst, sobald die Ursache behoben ist.
+Hat Home Assistant eine beschädigte Datei als `.corrupt.*` gesichert, wird
+diese Sicherung niemals automatisch durch eine neue Nullbilanz ersetzt.
+Spiele einen gültigen Store aus einem Backup an den ursprünglichen Pfad
+zurück und lade die Integration danach neu. Ein bloßer Config-Entry-Reload
+gilt weder als Reparatur noch als Zustimmung zu einer neuen Nullbilanz.
 
 Bei einer fehlerhaften Konfiguration (z. B. einem versehentlich falsch
 eingegebenen Tarif) lässt sich über den Service **Wirtschaftlichkeitsbilanz

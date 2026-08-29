@@ -3643,6 +3643,20 @@ requirement_economics_observability:
     unsicherbaren Fortschritt zu verlieren. Die Energiezähler und die
     Herkunftsaufteilung aus 02/06 laufen davon unberührt weiter.
 
+    Home Assistants Store behandelt syntaktisch beschädigtes JSON speziell:
+    Core benennt die Datei in `<path>.corrupt.<timestamp>` um, legt ein
+    Repair an und gibt None zurück. EconomicsStateStore prüft deshalb vor
+    dem öffentlichen Store.async_load asynchron im Executor sowohl den
+    kanonischen Pfad als auch passende Korrupt-Backups und prüft nach einem
+    None erneut. None gilt nur ohne jede vorherige oder aktuelle Datei als
+    Neuinstallation. Andernfalls wird EconomicsStoreLoadError ausgelöst und
+    der Store read-only gesetzt; der Coordinator wechselt in storage_error,
+    plant keinen Save und bleibt auch beim zweiten Reload eingefroren. Ein
+    bewusst zurückgespielter gültiger kanonischer Store lädt trotz eines
+    verbleibenden Korrupt-Backups normal. Wiederherstellungsweg ist das
+    Zurückspielen eines gültigen Backups; bloßes Reload ist weder Reparatur
+    noch Zustimmung zu einer Nullbilanz (Issue #150).
+
     Diagnostics (diagnostics.py, Schlüssel "economics"): zusätzlich zu den
     bereits vorhandenen Rohsummen/Zeitstempeln jetzt auch `status`,
     `store_write_blocked`, `store_minor_version`, `priced_charge_kwh`/

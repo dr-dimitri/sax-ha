@@ -359,11 +359,11 @@ Ihr Recorder-Beginn kann nach einem Update deshalb jünger als
 früheren Snapshot-Ständen bereits angelegten Registry-Eintrag
 `economics_result_today` über seinen exakt benannten Suffix; die neue Unique-ID
 bleibt davon unberührt.
-Minor-Version 7 setzt den aus älteren Snapshot-Ständen geladenen
-`unvalued_inventory_kwh` einmalig auf 0: Diese Stände führten den beim
-Bilanzstart bereits vorhandenen Speicherinhalt noch als unbekannt. Die
-Store-Version ist zugleich die dauerhafte Migrationsmarkierung; Geldsummen,
-Bilanzbeginn und Preisabdeckungszähler bleiben unverändert.
+Minor-Version 7 hatte zeitweise vorgesehen, einen geladenen
+`unvalued_inventory_kwh` auf 0 zu setzen. Diese Migration wird bewusst nicht
+mehr ausgeführt: Der Bestand kann aus realen Preis- oder Herkunftslücken nach
+dem Bilanzstart stammen und muss deshalb auch aus älteren Snapshot-Ständen
+unverändert übernommen werden (Issue #147).
 Minor-Version 8 startet nur `day_results` und den laufenden Tages-Bucket neu,
 weil ältere Snapshot-Stände dort Peak-Zuwächse statt signierter Ergebnisse
 gespeichert haben. Das Gesamtergebnis bleibt aus den drei Geldsummen erhalten.

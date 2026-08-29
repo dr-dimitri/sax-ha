@@ -129,16 +129,11 @@ async def test_store_round_trips_the_full_balance(hass) -> None:
     assert loaded.initialized is True
 
 
-async def test_real_minor_six_store_values_its_remaining_inventory_at_zero(
+async def test_real_minor_six_store_preserves_its_remaining_inventory(
     hass, hass_storage
 ) -> None:
-    """Ein bereits installierter Snapshot übernimmt die neue Startbewertung.
-
-    Minor-Version 6 führte den beim Bilanzstart vorhandenen Speicherinhalt
-    noch als unbewertet. Die Migration verwirft ausschließlich diesen
-    verbleibenden Bestand; Geldhistorie, Bilanzbeginn und die kumulierten
-    Preisabdeckungszähler bleiben erhalten.
-    """
+    """Issue #147: Ein alter Bestand kann aus realen Preislücken stammen und
+    darf deshalb bei der Migration nicht als Anfangsbestand verworfen werden."""
     started_at = dt_util.utcnow() - timedelta(days=7)
     payload = EconomicsStateStore._serialize(
         _full_state(
@@ -159,17 +154,17 @@ async def test_real_minor_six_store_values_its_remaining_inventory_at_zero(
     loaded = await EconomicsStateStore(hass, "zero-valued-inventory").async_load()
 
     assert loaded is not None
-    assert loaded.unvalued_inventory_kwh == 0.0
+    assert loaded.unvalued_inventory_kwh == 3.5
     assert loaded.grid_charge_cost_eur == 10.0
     assert loaded.economics_started_at == started_at
     assert loaded.unpriced_charge_kwh == 1.25
     assert loaded.unpriced_discharge_kwh == 0.5
     envelope = hass_storage[f"{STORAGE_KEY_PREFIX}.zero-valued-inventory"]
     assert envelope["minor_version"] == STORAGE_MINOR_VERSION
-    assert envelope["data"]["unvalued_inventory_kwh"] == 0.0
+    assert envelope["data"]["unvalued_inventory_kwh"] == 3.5
 
-    # Die neue Minor-Version ist die dauerhafte Migrationsmarkierung: Ein
-    # weiterer Reload darf keinen anderen Teil der Bilanz mehr verändern.
+    # Die Migration bleibt idempotent und verändert auch beim zweiten Laden
+    # weder Bestand noch einen anderen Teil der Bilanz.
     assert (
         await EconomicsStateStore(hass, "zero-valued-inventory").async_load() == loaded
     )

@@ -3296,13 +3296,13 @@ requirement_economics_accounting:
     Removed-Entity-Cleanup gelöscht, statt dauerhaft unavailable zu bleiben;
     die neue Unique-ID economics_net_savings_today bleibt davon unberührt.
 
-    STORAGE_MINOR_VERSION 7 migriert den in älteren Snapshot-Ständen noch
-    unbekannt geführten Anfangsbestand einmalig auf
-    unvalued_inventory_kwh = 0. Die neue Store-Minor-Version dient als
-    dauerhafte Migrationsmarkierung; Geldsummen, economics_started_at sowie
-    bepreiste und unbepreiste Preisabdeckungszähler bleiben unverändert. Ein
-    fehlender oder ungültiger Bestandswert wird dabei nicht auf 0 repariert,
-    sondern entwertet weiterhin das vollständige Kernbündel.
+    Die ursprünglich für STORAGE_MINOR_VERSION 7 vorgesehene Nullsetzung
+    von unvalued_inventory_kwh wird nicht mehr ausgeführt: Aus dem Store ist
+    nicht unterscheidbar, ob der Bestand beim Bilanzstart oder später durch
+    einen realen Preis-/Herkunftsausfall entstand. Auch Stores vor Minor 7
+    übernehmen einen gültigen Bestand deshalb unverändert und idempotent;
+    ein fehlender oder ungültiger Wert entwertet weiterhin das vollständige
+    Kernbündel (Issue #147).
 
     STORAGE_MINOR_VERSION 8 verwirft ausschließlich day_results und den
     laufenden Tages-Bucket aus älteren Snapshot-Ständen, weil diese

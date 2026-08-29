@@ -175,25 +175,6 @@ class _EconomicsStore(Store[dict[str, Any]]):
             return old_data
 
         migrated = dict(old_data)
-        if old_minor_version < 7:
-            inventory = migrated.get("unvalued_inventory_kwh")
-            # Ein fehlender oder korrupter Kernwert muss weiterhin das gesamte
-            # Sieben-Felder-Bündel entwerten. Nur ein tatsächlich gültiger
-            # Altbestand wird migriert; damit repariert die Migration keine
-            # beschädigten Snapshots stillschweigend.
-            if (
-                isinstance(inventory, int | float)
-                and not isinstance(inventory, bool)
-                and math.isfinite(inventory)
-                and inventory >= 0
-            ):
-                migrated["unvalued_inventory_kwh"] = 0.0
-                if inventory > 0:
-                    _LOGGER.info(
-                        "Bewerte gespeicherten Anfangsbestand von %.3f kWh "
-                        "bei der Migration mit 0 EUR",
-                        inventory,
-                    )
         if old_minor_version < 8:
             migrated["day_results"] = []
             for key in (

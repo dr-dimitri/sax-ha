@@ -2798,6 +2798,17 @@ requirement_economics_tariffs:
     bekannten Attributnamen, damit ein gleichnamiges Attribut anderer
     Bedeutung die Auswertung nicht blockiert.
 
+    Explizite Start-/Endzeitpunkte von Forecast-Slots werden für Identität,
+    Deduplizierung, Sortierung, Dauer, Endeprüfung, Überlappung,
+    Planungshorizont, Future-Filter, günstigste Auswahl und next_start auf
+    einer gemeinsamen UTC-Instant-Zeitachse verglichen. Offset-behaftete
+    Slots der doppelten Herbststunde bleiben damit getrennt und jeweils eine
+    reale Stunde lang; lokale Ausgabe behält den zutreffenden Offset/Fold.
+    Naive Zeitstempel werden ausdrücklich als lokale Home-Assistant-Zeit
+    interpretiert. Dies gilt für Ladeplanung und dynamische Tarifquote
+    gemeinsam; statische tägliche Tarifzeiten bleiben bewusst reine
+    Wanduhrzeiten und gelten in beiden Folds gleich (Issue #149).
+
     Zeitfensterregeln für "time_of_use": Intervalle sind halboffen (Start
     inklusive, Ende exklusive); start == end ist ungültig und bedeutet
     ausdrücklich nicht "ganzer Tag"; ein Fenster darf Mitternacht

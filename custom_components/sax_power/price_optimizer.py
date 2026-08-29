@@ -19,7 +19,7 @@ import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence, Sized
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -111,7 +111,8 @@ class PriceSlot:
     price: float
 
     def overlaps(self, moment: datetime) -> bool:
-        return self.start <= moment < self.end
+        instant = _instant(moment)
+        return _instant(self.start) <= instant < _instant(self.end)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +168,24 @@ EMPTY_PLAN = PricePlan()
 # --------------------------------------------------------------------------
 # Preisdaten einlesen
 # --------------------------------------------------------------------------
+def _instant(value: datetime) -> datetime:
+    """Eindeutiger UTC-Zeitpunkt für sämtliche Slotvergleiche.
+
+    Datetimes ohne Offset sind Anbieter-Wandzeiten und werden in der lokalen
+    Home-Assistant-Zeitzone interpretiert. Offset-behaftete Werte bleiben
+    dadurch über beide Folds der Herbstumstellung eindeutig (Issue #149).
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return value.astimezone(UTC)
+
+
+def _local_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return dt_util.as_local(value)
+
+
 def _unit_factor(configured_unit: str, sensor_unit: Any) -> float:
     """Umrechnungsfaktor auf EUR/kWh (siehe domain/price_units.py).
 
@@ -189,11 +208,11 @@ def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
     benötigt.
     """
     if isinstance(value, datetime):
-        return dt_util.as_local(value)
+        return _local_datetime(value)
     if isinstance(value, str):
         parsed = dt_util.parse_datetime(value)
         if parsed is not None:
-            return dt_util.as_local(parsed)
+            return _local_datetime(parsed)
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if base_day is None:
@@ -283,14 +302,17 @@ def _finalize_slots(
     (Fallback DEFAULT_PRICE_SLOT_MINUTES). Damit funktionieren sowohl
     stündliche als auch viertelstündliche Preisdaten ohne Sonderfall.
     """
-    by_start: dict[datetime, tuple[datetime | None, float]] = {}
+    by_start: dict[datetime, tuple[datetime, datetime | None, float]] = {}
     for start, end, price in raw:
-        by_start.setdefault(start, (end, price))
-    starts = sorted(by_start)
-    if not starts:
+        by_start.setdefault(_instant(start), (start, end, price))
+    instants = sorted(by_start)
+    if not instants:
         return []
 
-    gaps = [(starts[i + 1] - starts[i]).total_seconds() for i in range(len(starts) - 1)]
+    gaps = [
+        (instants[i + 1] - instants[i]).total_seconds()
+        for i in range(len(instants) - 1)
+    ]
     positive_gaps = [gap for gap in gaps if gap > 0]
     default_seconds = (
         min(positive_gaps)
@@ -299,13 +321,15 @@ def _finalize_slots(
     )
 
     slots: list[PriceSlot] = []
-    for index, start in enumerate(starts):
-        end, price = by_start[start]
-        if end is None or end <= start:
-            if index + 1 < len(starts):
-                end = starts[index + 1]
+    for index, start_instant in enumerate(instants):
+        start, end, price = by_start[start_instant]
+        if end is None or _instant(end) <= start_instant:
+            if index + 1 < len(instants):
+                end = by_start[instants[index + 1]][0]
             else:
-                end = start + timedelta(seconds=default_seconds)
+                end = (start_instant + timedelta(seconds=default_seconds)).astimezone(
+                    start.tzinfo
+                )
         slots.append(PriceSlot(start=start, end=end, price=price * factor))
     return slots
 
@@ -418,12 +442,13 @@ def _cheapest_slots(
     target = timedelta(hours=hours)
     collected = timedelta()
     chosen: list[PriceSlot] = []
-    for slot in sorted(slots, key=lambda item: (item.price, item.start)):
+    now_instant = _instant(now)
+    for slot in sorted(slots, key=lambda item: (item.price, _instant(item.start))):
         if collected >= target:
             break
         chosen.append(slot)
-        collected += slot.end - max(slot.start, now)
-    return sorted(chosen, key=lambda item: item.start)
+        collected += _instant(slot.end) - max(_instant(slot.start), now_instant)
+    return sorted(chosen, key=lambda item: _instant(item.start))
 
 
 def _smart_required_hours(ctx: PriceChargeContext) -> tuple[float | None, float]:
@@ -472,8 +497,13 @@ def compute_plan(
     if not ctx.enabled or ctx.strategy == PRICE_STRATEGY_OFF:
         return PricePlan(status=PRICE_STATUS_OFF, current_price=price_now)
 
-    horizon_end = now + timedelta(hours=PRICE_PLAN_HORIZON_HOURS)
-    future = [slot for slot in slots if slot.end > now and slot.start < horizon_end]
+    now_instant = _instant(now)
+    horizon_end = now_instant + timedelta(hours=PRICE_PLAN_HORIZON_HOURS)
+    future = [
+        slot
+        for slot in slots
+        if _instant(slot.end) > now_instant and _instant(slot.start) < horizon_end
+    ]
     if not future:
         return PricePlan(
             status=PRICE_STATUS_NO_PRICE_DATA,
@@ -520,7 +550,10 @@ def compute_plan(
         status = PRICE_STATUS_CHARGING
         next_start = next(slot.start for slot in selected if slot.overlaps(now))
     else:
-        next_start = next((slot.start for slot in selected if slot.start > now), None)
+        next_start = next(
+            (slot.start for slot in selected if _instant(slot.start) > now_instant),
+            None,
+        )
 
     return PricePlan(
         status=status,

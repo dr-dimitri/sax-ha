@@ -179,6 +179,13 @@ lassen sich nicht ineinander überführen. Weil beide Felder auf derselben Seite
 untereinanderstehen, sagen die `data_description`-Texte in `strings.json` das
 ausdrücklich (Anwenderbericht zu #135/#137).
 
+Explizit zeitgestempelte Preis-Slots werden für Identität, Sortierung,
+Dauer, Überlappung, Horizont und Auswahl ausschließlich als UTC-Instants
+verglichen. Die lokale Zeitzone bleibt Darstellung; dadurch bleiben die
+beiden realen 02-Uhr-Slots der herbstlichen Zeitumstellung getrennt. Naive
+Anbieter-Zeitstempel werden weiterhin als lokale Home-Assistant-Zeit
+interpretiert (Issue #149).
+
 Kein Formularschema darf einen Validator enthalten, den
 `voluptuous_serialize` nicht für das Frontend übersetzen kann - eine
 gewöhnliche Python-Funktion in einem `vol.All` gehört dazu. Der Fehler fliegt

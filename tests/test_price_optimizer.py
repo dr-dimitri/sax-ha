@@ -15,6 +15,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.components import persistent_notification
@@ -61,6 +62,7 @@ from custom_components.sax_power.price_optimizer import (
     PricePlan,
     PriceSlot,
     compute_plan,
+    current_price,
     parse_price_slots,
 )
 from custom_components.sax_power.repairs import async_create_fix_flow
@@ -170,6 +172,63 @@ def test_parse_price_slots_data_attribute_with_start_time() -> None:
     assert slots[0].end == _local(13)
     # Letzter Slot ohne Nachfolger: Länge aus dem kleinsten bekannten Abstand.
     assert slots[1].end == _local(14)
+
+
+def test_explicit_slots_keep_both_autumn_folds() -> None:
+    berlin = ZoneInfo("Europe/Berlin")
+    first = datetime(2026, 10, 25, 2, 30, tzinfo=berlin, fold=0)
+    second = datetime(2026, 10, 25, 2, 30, tzinfo=berlin, fold=1)
+    state = _FakeState(
+        forecast=[
+            {
+                "start": "2026-10-25T02:00:00+02:00",
+                "end": "2026-10-25T02:00:00+01:00",
+                "price": 0.10,
+            },
+            {
+                "start": "2026-10-25T02:00:00+01:00",
+                "end": "2026-10-25T03:00:00+01:00",
+                "price": 0.30,
+            },
+        ]
+    )
+
+    slots = parse_price_slots(state, now=first)
+
+    assert len(slots) == 2
+    assert current_price(slots, first) == pytest.approx(0.10)
+    assert current_price(slots, second) == pytest.approx(0.30)
+    assert [
+        slot.end.astimezone(UTC) - slot.start.astimezone(UTC) for slot in slots
+    ] == [timedelta(hours=1), timedelta(hours=1)]
+    plan = compute_plan(
+        datetime(2026, 10, 25, 1, 59, tzinfo=berlin),
+        slots,
+        _ctx(strategy=PRICE_STRATEGY_RELATIVE, hours=2),
+    )
+    assert len(plan.slots) == 2
+    assert sum(
+        (slot.end.astimezone(UTC) - slot.start.astimezone(UTC) for slot in plan.slots),
+        timedelta(),
+    ) == timedelta(hours=2)
+
+
+def test_explicit_slot_across_spring_jump_has_one_real_hour() -> None:
+    berlin = ZoneInfo("Europe/Berlin")
+    state = _FakeState(
+        forecast=[
+            {
+                "start": "2026-03-29T01:00:00+01:00",
+                "end": "2026-03-29T03:00:00+02:00",
+                "price": 0.20,
+            }
+        ]
+    )
+
+    slot = parse_price_slots(state, now=datetime(2026, 3, 29, 1, 30, tzinfo=berlin))[0]
+
+    assert slot.end.astimezone(UTC) - slot.start.astimezone(UTC) == timedelta(hours=1)
+    assert slot.overlaps(datetime(2026, 3, 29, 1, 30, tzinfo=berlin))
 
 
 def test_parse_price_slots_converts_cent_via_unit() -> None:

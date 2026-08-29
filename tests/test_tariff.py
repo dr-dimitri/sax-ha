@@ -38,6 +38,10 @@ from custom_components.sax_power.const import (
     economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.domain.economics_accounting import (
+    compute_economics_delta,
+)
+from custom_components.sax_power.domain.energy_accounting import ZERO_DELTA
 from custom_components.sax_power.domain.price_units import unit_factor
 from custom_components.sax_power.domain.tariff import (
     DailyPriceWindow,
@@ -597,6 +601,60 @@ async def test_dynamic_awattar_forecast_normalizes_eur_per_mwh(hass) -> None:
 
     assert quote is not None
     assert quote.price_eur_kwh == pytest.approx(0.08)
+
+
+async def test_dynamic_forecast_quotes_and_values_both_autumn_folds(hass) -> None:
+    first = datetime(2026, 10, 25, 2, 30, tzinfo=BERLIN, fold=0)
+    second = datetime(2026, 10, 25, 2, 30, tzinfo=BERLIN, fold=1)
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.10",
+        {
+            "unit_of_measurement": "EUR/kWh",
+            "forecast": [
+                {
+                    "start": "2026-10-25T02:00:00+02:00",
+                    "end": "2026-10-25T02:00:00+01:00",
+                    "price": 0.10,
+                },
+                {
+                    "start": "2026-10-25T02:00:00+01:00",
+                    "end": "2026-10-25T03:00:00+01:00",
+                    "price": 0.30,
+                },
+            ],
+        },
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    first_quote = coordinator.tariff_provider.quote(first).quote
+    second_quote = coordinator.tariff_provider.quote(second).quote
+
+    assert first_quote is not None
+    assert second_quote is not None
+    assert first_quote.price_eur_kwh == pytest.approx(0.10)
+    assert second_quote.price_eur_kwh == pytest.approx(0.30)
+    assert first_quote.valid_from.astimezone(ZoneInfo("UTC")) == datetime(
+        2026, 10, 25, 0, 0, tzinfo=ZoneInfo("UTC")
+    )
+    assert second_quote.valid_from.astimezone(ZoneInfo("UTC")) == datetime(
+        2026, 10, 25, 1, 0, tzinfo=ZoneInfo("UTC")
+    )
+    first_value = compute_economics_delta(
+        ZERO_DELTA, 1.0, 0.0, first_quote.price_eur_kwh, 0.08
+    )
+    second_value = compute_economics_delta(
+        ZERO_DELTA, 1.0, 0.0, second_quote.price_eur_kwh, 0.08
+    )
+    assert first_value.avoided_grid_cost_delta == pytest.approx(0.10)
+    assert second_value.avoided_grid_cost_delta == pytest.approx(0.30)
 
 
 # --------------------------------------------------------------------------

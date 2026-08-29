@@ -320,7 +320,7 @@ stehen folgende Angaben zur Verfügung:
 | --- | --- |
 | Strompreis-Sensor | Sensor mit aktuellem Preis und, je nach Strategie, zukünftigen Preisen |
 | Attribut mit der Preisvorschau | Optionaler Attributname, falls die automatische Erkennung nicht passt |
-| Preis-Einheit | Automatische Erkennung oder feste Auswahl von EUR/kWh beziehungsweise ct/kWh |
+| Preis-Einheit | Automatische Erkennung oder feste Auswahl von EUR/kWh, ct/kWh, EUR/MWh beziehungsweise ct/MWh |
 | PV-Prognose-Sensor | Optional für die Strategie „Smart“ und das netzdienliche Laden |
 | Nutzbarer Anteil der PV-Prognose | Erwarteter Anteil der Prognose, der zum Laden verfügbar ist |
 

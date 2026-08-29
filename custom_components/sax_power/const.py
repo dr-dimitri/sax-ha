@@ -505,7 +505,15 @@ CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
 PRICE_UNIT_AUTO = "auto"
 PRICE_UNIT_EUR_KWH = "eur_kwh"
 PRICE_UNIT_CT_KWH = "ct_kwh"
-PRICE_UNITS = (PRICE_UNIT_AUTO, PRICE_UNIT_EUR_KWH, PRICE_UNIT_CT_KWH)
+PRICE_UNIT_EUR_MWH = "eur_mwh"
+PRICE_UNIT_CT_MWH = "ct_mwh"
+PRICE_UNITS = (
+    PRICE_UNIT_AUTO,
+    PRICE_UNIT_EUR_KWH,
+    PRICE_UNIT_CT_KWH,
+    PRICE_UNIT_EUR_MWH,
+    PRICE_UNIT_CT_MWH,
+)
 DEFAULT_PRICE_UNIT = PRICE_UNIT_AUTO
 
 # -- Strategien (select.SaxPowerPriceStrategySelect) -----------------------

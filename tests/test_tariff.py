@@ -33,6 +33,8 @@ from custom_components.sax_power.const import (
     CONF_PRICE_UNIT,
     ECONOMICS_TOU_WINDOW_COUNT,
     PRICE_UNIT_CT_KWH,
+    PRICE_UNIT_CT_MWH,
+    PRICE_UNIT_EUR_MWH,
     economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -547,15 +549,54 @@ def test_time_is_parsed_with_and_without_seconds() -> None:
         ("auto", "Cent/kWh", 0.01),
         ("auto", "EUR/kWh", 1.0),
         ("auto", "€/kWh", 1.0),
+        ("auto", "Eur/MWh", 0.001),
+        ("auto", " EUR / MWh ", 0.001),
+        ("auto", "€/MWh", 0.001),
+        ("auto", "ct/MWh", 0.00001),
+        ("auto", "Cent/MWh", 0.00001),
         ("auto", None, 1.0),
         ("auto", "kWh", None),
         ("auto", "%", None),
+        ("auto", "USD/MWh", None),
         (PRICE_UNIT_CT_KWH, "EUR/kWh", 0.01),
+        (PRICE_UNIT_EUR_MWH, None, 0.001),
+        (PRICE_UNIT_CT_MWH, "W", 0.00001),
     ],
 )
 def test_unit_factor(configured, sensor_unit, expected) -> None:
     """Dieselbe Einheitenlogik nutzen Ladeplanung und Wirtschaftlichkeit."""
     assert unit_factor(configured, sensor_unit) == expected
+
+
+async def test_dynamic_awattar_forecast_normalizes_eur_per_mwh(hass) -> None:
+    now = _local(2026, 8, 29, 12)
+    hass.states.async_set(
+        "sensor.strompreis",
+        "80",
+        {
+            "unit_of_measurement": "Eur/MWh",
+            "forecast": [
+                {
+                    "start": now.isoformat(),
+                    "end": (now + timedelta(hours=1)).isoformat(),
+                    "marketprice": 80,
+                }
+            ],
+        },
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    quote = coordinator.tariff_provider.quote(now).quote
+
+    assert quote is not None
+    assert quote.price_eur_kwh == pytest.approx(0.08)
 
 
 # --------------------------------------------------------------------------

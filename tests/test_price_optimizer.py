@@ -184,6 +184,26 @@ def test_parse_price_slots_converts_cent_via_unit() -> None:
     assert slots[0].price == pytest.approx(0.25)
 
 
+@pytest.mark.parametrize(("marketprice", "expected"), [(80, 0.08), (1, 0.001)])
+def test_parse_awattar_marketprice_converts_eur_per_mwh(
+    marketprice: float, expected: float
+) -> None:
+    state = _FakeState(
+        unit_of_measurement="Eur/MWh",
+        forecast=[
+            {
+                "start": _local(12).isoformat(),
+                "end": _local(13).isoformat(),
+                "marketprice": marketprice,
+            }
+        ],
+    )
+
+    slots = parse_price_slots(state, now=_now(), unit=PRICE_UNIT_AUTO)
+
+    assert slots[0].price == pytest.approx(expected)
+
+
 def test_parse_price_slots_explicit_unit_overrides_sensor_unit() -> None:
     """Fehlt am Sensor eine (brauchbare) Einheit, lässt sie sich erzwingen."""
     state = _FakeState(today=[25.0] * 24)

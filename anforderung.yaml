@@ -2775,7 +2775,13 @@ requirement_economics_tariffs:
     Einheitenumrechnung liegt gemeinsam mit der Ladeplanung in
     domain/price_units.unit_factor; die Preisvorschau wird mit derselben
     Funktion price_optimizer.parse_price_slots gelesen wie für den
-    Ladeplan. Sobald der Sensor überhaupt eine Preisvorschau mitbringt
+    Ladeplan. Die automatische Erkennung wertet Währung und Energie-Nenner
+    gemeinsam aus und normalisiert EUR/kWh, ct/kWh, EUR/MWh und ct/MWh auf
+    EUR/kWh; Leerzeichen, Groß-/Kleinschreibung sowie EUR/Euro/€ und
+    ct/Cent werden normalisiert. Fremde Währungen oder Einheiten bleiben
+    ungültig. Dieselben vier Einheiten stehen als explizite stabile
+    Options-Werte zur Korrektur fehlender oder falscher Sensor-Metadaten
+    bereit (Issue #148). Sobald der Sensor überhaupt eine Preisvorschau mitbringt
     (price_optimizer.has_price_forecast), ist sie verbindlich: Weder eine
     Vorschau, die den Auswertungszeitpunkt nicht abdeckt, noch eine
     vorhandene, aber unlesbare Vorschau darf durch den Sensorzustand ersetzt

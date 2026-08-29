@@ -27,6 +27,8 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_PRICE_SENSOR,
+    CONF_PRICE_UNIT,
     CONF_PV_FORECAST_SENSOR,
     ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
     GRID_CHARGE_WRITE_INTERVAL,
@@ -34,6 +36,7 @@ from custom_components.sax_power.const import (
     MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_SETPOINT_POWER,
+    PRICE_UNIT_AUTO,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
@@ -4454,6 +4457,34 @@ def test_economics_grid_charge_cost_matches_the_grid_share(hass) -> None:
     assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
     assert data["economics_pv_opportunity_cost"] == 0.0
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
+
+
+def test_economics_grid_charge_normalizes_eur_per_mwh(hass) -> None:
+    """Issue #148: 80 EUR/MWh sind 0,08 EUR/kWh, nicht 80 EUR/kWh."""
+    hass.states.async_set("sensor.strompreis", "80", {"unit_of_measurement": "Eur/MWh"})
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_PRICE_SENSOR: "sensor.strompreis",
+        CONF_PRICE_UNIT: PRICE_UNIT_AUTO,
+    }
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.08)
+    assert coordinator.economics_diagnostics["unpriced_charge_kwh"] == 0.0
 
 
 def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:

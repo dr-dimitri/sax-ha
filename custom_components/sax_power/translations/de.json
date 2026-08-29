@@ -716,7 +716,7 @@
         "data_description": {
           "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Er hat zwei getrennte Aufgaben: Für das preisoptimierte Laden liefert er immer die Zeitfenster der Modi „Relativ“ und „Smart“ (aus seinen Preisvorschau-Attributen). Für die Wirtschaftlichkeit ist er nur beim Tarifmodell „Dynamisch“ die Preisquelle - dort ist er Pflicht. Bei „Festpreis“ und „Tageszeitabhängig“ rechnet die Wirtschaftlichkeit ausschließlich mit den Preisen, die auf der Folgeseite eingegeben werden: Ein dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, kein täglich wiederkehrendes Tagesprofil - beide Formate lassen sich nicht ineinander überführen.",
           "price_attribute": "Nur ausfüllen, wenn die automatische Erkennung fehlschlägt - z. B. „raw_today“, „data“ oder „forecast“.",
-          "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh wird intern in EUR/kWh umgerechnet.",
+          "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh sowie EUR/MWh und ct/MWh werden intern in EUR/kWh umgerechnet.",
           "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Gemeinsame Quelle für den Modus „Smart“ und den optionalen Mindestwert des netzdienlichen Ladens.",
           "pv_forecast_factor": "Nur für den Modus „Smart“: Wie viel der Prognose tatsächlich im Speicher landen dürfte - deckt Eigenverbrauch, Wetterunsicherheit und Verluste ab. Der Mindestwert des netzdienlichen Ladens vergleicht dagegen den unveränderten Sensorwert.",
           "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Festpreis“ rechnet mit einem ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ rechnet mit einem täglich wiederkehrenden Preisprofil: ein Grundpreis plus bis zu acht abweichende Zeitfenster, einzugeben auf der nächsten Seite. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung. Nur „Dynamisch“ verwendet den Strompreis-Sensor; das preisoptimierte Laden nutzt ihn unabhängig vom Tarifmodell weiter.",
@@ -886,7 +886,9 @@
       "options": {
         "auto": "Automatisch (aus dem Sensor)",
         "eur_kwh": "EUR/kWh",
-        "ct_kwh": "ct/kWh"
+        "ct_kwh": "ct/kWh",
+        "eur_mwh": "EUR/MWh",
+        "ct_mwh": "ct/MWh"
       }
     },
     "economics_tariff_type": {

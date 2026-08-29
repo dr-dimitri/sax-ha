@@ -11,13 +11,29 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..const import PRICE_UNIT_CT_KWH, PRICE_UNIT_EUR_KWH
+from ..const import (
+    PRICE_UNIT_CT_KWH,
+    PRICE_UNIT_CT_MWH,
+    PRICE_UNIT_EUR_KWH,
+    PRICE_UNIT_EUR_MWH,
+)
 
-# Einheitentexte, die eindeutig auf Cent bzw. Euro hindeuten. Bewusst als
-# Teilstring geprüft: die Sensoren schreiben "ct/kWh", "EUR/kWh", "€/kWh",
-# "Cent/kWh" und Mischformen davon.
-_CENT_MARKERS = ("ct", "cent", "¢")
-_EURO_MARKERS = ("eur", "€")
+_EXPLICIT_FACTORS = {
+    PRICE_UNIT_EUR_KWH: 1.0,
+    PRICE_UNIT_CT_KWH: 0.01,
+    PRICE_UNIT_EUR_MWH: 0.001,
+    PRICE_UNIT_CT_MWH: 0.00001,
+}
+_CURRENCY_FACTORS = {
+    "eur": 1.0,
+    "euro": 1.0,
+    "€": 1.0,
+    "ct": 0.01,
+    "cent": 0.01,
+    "cents": 0.01,
+    "¢": 0.01,
+}
+_ENERGY_FACTORS = {"kwh": 1.0, "mwh": 0.001}
 
 
 def unit_factor(configured_unit: str, sensor_unit: Any) -> float | None:
@@ -29,15 +45,17 @@ def unit_factor(configured_unit: str, sensor_unit: Any) -> float | None:
     korrigieren), eine gesetzte, aber nicht preisartige Einheit ("kWh",
     "W", "%") dagegen als Fehler - dort steht kein Arbeitspreis.
     """
-    if configured_unit == PRICE_UNIT_CT_KWH:
-        return 0.01
-    if configured_unit == PRICE_UNIT_EUR_KWH:
-        return 1.0
-    unit = str(sensor_unit or "").strip().lower()
+    if configured_unit in _EXPLICIT_FACTORS:
+        return _EXPLICIT_FACTORS[configured_unit]
+    unit = "".join(str(sensor_unit or "").lower().split())
     if not unit:
         return 1.0
-    if any(marker in unit for marker in _CENT_MARKERS):
-        return 0.01
-    if any(marker in unit for marker in _EURO_MARKERS):
-        return 1.0
-    return None
+    parts = unit.split("/")
+    if len(parts) != 2:
+        return None
+    currency, energy = parts
+    currency_factor = _CURRENCY_FACTORS.get(currency)
+    energy_factor = _ENERGY_FACTORS.get(energy)
+    if currency_factor is None or energy_factor is None:
+        return None
+    return currency_factor * energy_factor

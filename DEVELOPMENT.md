@@ -255,11 +255,15 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
 - `_bootstrap_economics_if_ready` setzt den unbewerteten Bestand unabhängig
   von Kapazität und SOC auf 0: Der beim erstmaligen Aktivieren bereits
   vorhandene Speicherinhalt wird mit 0 EUR angesetzt. Am geräteseitig
-  gemeldeten SOC-Minimum verwirft `min_soc_inventory_correction` weiterhin
-  einen rechnerisch nie ganz auf 0 gelaufenen Rest aus späteren Preislücken
-  und protokolliert die Korrektur diagnostisch.
-- `capacity_inventory_correction` deckelt den Bestand bei jedem Tick auf den
-  tatsächlichen Speicherinhalt (`capacity_kwh * battery_soc / 100`). Ohne
+  gemeldeten SOC-Minimum verwirft `min_soc_inventory_correction` einen Rest
+  erst nach echter Entladung und zwei frischen Stillstands-Ticks. Aktuelle
+  Ladedeltas werden dadurch nie anhand eines noch unveränderten SOC gelöscht
+  (Issue #145).
+- `capacity_inventory_correction` deckelt den Bestand nach demselben
+  bestätigten Stillstand auf den konservativen oberen Rand der SOC-Stufe
+  (`capacity_kwh * (battery_soc + Messquantum) / 100`). Das Messquantum kommt
+  aus dem SunSpec-SOC-Skalierungsfaktor, bei ungültigem Faktor aus einem
+  konservativen Prozentpunkt. Ohne
   diesen Deckel bliebe die
   Ladeverlust-Differenz jedes *unbepreisten* Zyklus (geladen > entladen)
   dauerhaft im Bestand liegen und würde später bepreist geladene Entladung

@@ -56,7 +56,6 @@ from custom_components.sax_power.const import (
     economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import (
-    INVENTORY_CAP_LOG_INTERVAL_SECONDS,
     OBSERVED_TIME_SAVE_GRANULARITY_SECONDS,
     SaxPowerCoordinator,
     _clamp_int,
@@ -73,6 +72,7 @@ from custom_components.sax_power.domain.registers import (
     decode_int16,
     decode_uint16,
 )
+from custom_components.sax_power.domain.sunspec import BatteryScaleFactors
 from custom_components.sax_power.domain.tariff import (
     QuoteResult,
     QuoteUnavailable,
@@ -4700,18 +4700,18 @@ def test_soc_minimum_correction_resets_the_inventory_and_logs(hass, caplog) -> N
     _bootstrap_economics(coordinator, soc=50)
     coordinator._economics_unvalued_inventory_kwh = 5.0
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
-        data = {
-            "storage_power_active": 0,
-            "smartmeter_power": 0,
-            "battery_soc": 5,  # == battery_soc_min
-            "battery_capacity": 10000,
-            "battery_soc_min": 5,
-        }
-        with caplog.at_level("INFO"):
-            coordinator._accumulate_energy(data)
+    # Erst eine echte Entladung bis zum Minimum, dann zwei frische
+    # Stillstands-Ticks: ein bloßer SOC-Messwert am Minimum reicht nach einer
+    # Ladung wegen seiner Quantisierung nicht aus (Issue #145).
+    _economics_tick(
+        coordinator,
+        at=4600.0,
+        storage_power_active=1000,
+        soc=5,
+    )
+    _economics_tick(coordinator, at=4610.0, soc=5)
+    with caplog.at_level("INFO"):
+        _economics_tick(coordinator, at=4620.0, soc=5)
 
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
     assert "SOC-Minimum" in caplog.text
@@ -4740,13 +4740,13 @@ def _economics_tick(
     return data
 
 
-def test_unvalued_inventory_is_capped_at_the_physical_storage_content(
+def test_unvalued_inventory_is_capped_after_confirmed_idle_with_soc_resolution(
     hass, caplog
 ) -> None:
     """Der unbewertete Bestand ist ein Lagerbestand: 7 kWh unbepreiste
     Ladung heben den SOC wegen der Ladeverluste nur um 6,3 kWh - der
-    Bestand darf den tatsächlichen Speicherinhalt trotzdem nicht
-    überschreiten (Issue #132)."""
+    Bestand darf den konservativen oberen Rand der SOC-Stufe trotzdem nicht
+    überschreiten (Issues #132/#145)."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=0)
@@ -4761,11 +4761,17 @@ def test_unvalued_inventory_is_capped_at_the_physical_storage_content(
             smartmeter_power=7000,
             soc=63,
         )
+        # Während der Ladung bleibt das vollständige Delta erhalten. Erst
+        # zwei frische Stillstands-Messpunkte erlauben die Korrektur.
+        assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(7.0)
+        _economics_tick(coordinator, at=4610.0, soc=63)
+        assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(7.0)
+        _economics_tick(coordinator, at=4620.0, soc=63)
 
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(6.3)
-    assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.7)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(6.4)
+    assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.6)
     assert coordinator.economics_diagnostics["inventory_capped_kwh"] == pytest.approx(
-        0.7
+        0.6
     )
     assert "Speicherinhalt gedeckelt" in caplog.text
     # Der unbepreiste Ladezähler bleibt von der Deckelung unberührt - er
@@ -4773,17 +4779,15 @@ def test_unvalued_inventory_is_capped_at_the_physical_storage_content(
     assert coordinator._economics_unpriced_charge_kwh == pytest.approx(7.0)
 
 
-def test_inventory_cap_logs_at_most_once_per_interval(hass, caplog) -> None:
-    """Der Deckel greift während einer unbepreisten Ladung an nahezu jedem
-    Poll-Intervall erneut - geloggt wird trotzdem nur gedrosselt, gezählt
-    dagegen vollständig (INVENTORY_CAP_LOG_INTERVAL_SECONDS)."""
+def test_unpriced_charge_accumulates_within_the_same_soc_step(hass, caplog) -> None:
+    """Quantisierte SOC-Werte dürfen aktuelle Ladedeltas nicht löschen."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=10)
     coordinator._economics_unvalued_inventory_kwh = 1.0
 
     # Tarifpause: jeder Tick lädt 0,01 kWh unbepreist nach, der gemeldete
-    # SOC bleibt im selben Prozentschritt - der Deckel greift jedes Mal.
+    # SOC bleibt im selben Prozentschritt.
     coordinator.options = {}
     with caplog.at_level("INFO"):
         for at in (1010.0, 1020.0, 1030.0):
@@ -4795,22 +4799,50 @@ def test_inventory_cap_logs_at_most_once_per_interval(hass, caplog) -> None:
                 soc=10,
             )
 
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.0)
-    assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.03)
-    assert caplog.text.count("Speicherinhalt gedeckelt") == 1
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.03)
+    assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.0)
+    assert "Speicherinhalt gedeckelt" not in caplog.text
 
-    # Nach Ablauf der Drosselung wird wieder genau einmal geloggt.
-    caplog.clear()
-    with caplog.at_level("INFO"):
-        _economics_tick(
-            coordinator,
-            at=1030.0 + INVENTORY_CAP_LOG_INTERVAL_SECONDS,
-            storage_power_active=-3600,
-            smartmeter_power=3600,
-            soc=10,
-        )
+    # Auch nach bestätigtem Stillstand liegt 1,03 kWh unter dem konservativen
+    # oberen Rand der ganzzahligen 10-%-Stufe (1,1 kWh).
+    _economics_tick(coordinator, at=1040.0, soc=10)
+    _economics_tick(coordinator, at=1050.0, soc=10)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.03)
 
-    assert caplog.text.count("Speicherinhalt gedeckelt") == 1
+
+def test_inventory_cap_uses_the_sunspec_soc_resolution(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._battery_scale_factors = BatteryScaleFactors(soc=to_unsigned16(-1))
+
+    assert coordinator._economics_soc_resolution_percent() == pytest.approx(0.1)
+
+
+def test_charge_at_min_soc_stays_unvalued_until_it_is_discharged(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=5)
+
+    coordinator.options = {}
+    _economics_tick(
+        coordinator,
+        at=1010.0,
+        storage_power_active=-3600,
+        smartmeter_power=3600,
+        soc=5,
+    )
+    _economics_tick(coordinator, at=1020.0, soc=5)
+    _economics_tick(coordinator, at=1030.0, soc=5)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.01)
+
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    data = _economics_tick(
+        coordinator,
+        at=1040.0,
+        storage_power_active=3600,
+        soc=5,
+    )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
+    assert data["economics_avoided_grid_cost"] == pytest.approx(0.0)
 
 
 def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> None:
@@ -4825,7 +4857,7 @@ def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> Non
     _bootstrap_economics(coordinator, soc=0)
 
     # Tarifpause: 7 kWh geladen, der SOC steigt verlustbedingt nur um
-    # 6,3 kWh - der Bestand wird auf diese 6,3 kWh gedeckelt.
+    # 6,3 kWh. Während der Bewegung wird noch nicht korrigiert.
     coordinator.options = {}
     _economics_tick(
         coordinator,
@@ -4834,38 +4866,43 @@ def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> Non
         smartmeter_power=7000,
         soc=63,
     )
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(6.3)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(7.0)
 
     # ... und wieder entladen bis auf 0,7 kWh Restinhalt (SOC 7 %, also
     # deutlich über dem Minimum von 5 %).
     _economics_tick(coordinator, at=8200.0, storage_power_active=5600, soc=7)
-    # Ohne den Deckel stünden hier 1,4 statt 0,7 kWh unbewerteter Bestand.
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.7)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.4)
+
+    # Zwei Stillstands-Ticks bestätigen SOC 7 %. Bei ganzzahligem SOC ist
+    # der konservative obere Rand 8 % beziehungsweise 0,8 kWh.
+    _economics_tick(coordinator, at=8210.0, soc=7)
+    _economics_tick(coordinator, at=8220.0, soc=7)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.8)
 
     # Tarif wieder da: 2 kWh bepreist geladen (1,8 kWh landen im Speicher),
     # danach dieselben 1,8 kWh entladen.
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _economics_tick(
         coordinator,
-        at=11800.0,
+        at=11820.0,
         storage_power_active=-2000,
         smartmeter_power=2000,
         soc=25,
     )
-    data = _economics_tick(coordinator, at=15400.0, storage_power_active=1800, soc=7)
+    data = _economics_tick(coordinator, at=15420.0, storage_power_active=1800, soc=7)
 
-    # 0,7 kWh gehen als unbewerteter Bestand ab, die restlichen 1,1 kWh
-    # sind vermiedener Netzbezug - ohne den Deckel wären es nur 0,4 kWh
-    # (0,12 statt 0,33 EUR) gewesen.
+    # 0,8 kWh gehen als konservativ unbewerteter Bestand ab, die restliche
+    # 1,0 kWh ist vermiedener Netzbezug - ohne den Deckel wären es nur
+    # 0,4 kWh gewesen.
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
-    assert data["economics_avoided_grid_cost"] == pytest.approx(1.1 * 0.30)
+    assert data["economics_avoided_grid_cost"] == pytest.approx(1.0 * 0.30)
     assert data["economics_grid_charge_cost"] == pytest.approx(2.0 * 0.30)
     # Roh-Cashflow und Nettoergebnis bleiben identisch nachvollziehbar.
-    expected_result = 1.1 * 0.30 - 2.0 * 0.30
+    expected_result = 1.0 * 0.30 - 2.0 * 0.30
     assert data["economics_operating_result"] == pytest.approx(expected_result)
     assert data["economics_net_savings"] == pytest.approx(expected_result)
     assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
-        pytest.approx(1.1 * 0.30 - 2.0 * 0.30)
+        pytest.approx(expected_result)
     )
 
 
@@ -4922,9 +4959,29 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
         )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
-    # Sind beide wieder da, greift der Deckel sofort.
+    # Bekannte Kapazität/SOC genügen nicht, solange die Bewegung selbst
+    # unbekannt ist: None darf nicht als bestätigter Stillstand gelten.
+    coordinator._economics_inventory_idle_confirmations = 0
+    for at in (12_000.0, 12_010.0):
+        with patch(
+            "custom_components.sax_power.coordinator.monotonic", return_value=at
+        ):
+            coordinator._accumulate_energy(
+                {
+                    "storage_power_active": None,
+                    "smartmeter_power": 0,
+                    "battery_soc": 50,
+                    "battery_capacity": 10000,
+                    "battery_soc_min": 5,
+                }
+            )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
+
+    # Sind Bewegung, Kapazität und SOC wieder bekannt, greifen erneut zwei
+    # bestätigte Stillstands-Ticks.
     _economics_tick(coordinator, at=15400.0, soc=50)
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.0)
+    _economics_tick(coordinator, at=15410.0, soc=50)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.1)
 
 
 def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:

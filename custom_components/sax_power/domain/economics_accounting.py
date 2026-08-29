@@ -14,6 +14,7 @@ den zu diesem Zeitpunkt vermiedenen Netzbezug wert.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from .energy_accounting import EnergyDelta
@@ -159,13 +160,18 @@ def min_soc_inventory_correction(
 
 
 def capacity_inventory_correction(
-    unvalued_inventory_kwh: float, capacity_kwh: float | None, soc: float | None
+    unvalued_inventory_kwh: float,
+    capacity_kwh: float | None,
+    soc: float | None,
+    soc_resolution_percent: float,
 ) -> float | None:
     """Deckel des unbewerteten Bestands auf den Speicherinhalt, oder None.
 
     Der unbewertete Bestand ist ein Lagerbestand und kann nie größer sein
-    als die tatsächlich im Speicher liegende Energie (`capacity_kwh * soc /
-    100` - genau die Größe, mit der er auch initialisiert wird). Ohne
+    als die anhand des quantisierten SOC sicher mögliche Energie. Ein
+    gemeldeter SOC ist eine Stufengrenze; deshalb verwendet der Deckel den
+    konservativen oberen Rand `soc + soc_resolution_percent` (Issue #145).
+    Ohne
     diesen Deckel bliebe nach jedem unbepreisten Zyklus die Ladeverlust-
     Differenz (geladen > entladen) dauerhaft als Rest im Bestand liegen und
     würde später eine bereits bepreist geladene Entladung fälschlich als
@@ -179,9 +185,15 @@ def capacity_inventory_correction(
     liegt ohnehin nicht über dem Speicherinhalt); der Aufrufer soll die
     Korrektur diagnostisch protokollieren.
     """
-    if capacity_kwh is None or soc is None:
+    if (
+        capacity_kwh is None
+        or soc is None
+        or not math.isfinite(soc_resolution_percent)
+        or soc_resolution_percent <= 0
+    ):
         return None
-    stored_kwh = max(capacity_kwh * soc / 100, 0.0)
+    upper_soc = 0.0 if soc <= 0 else min(soc + soc_resolution_percent, 100.0)
+    stored_kwh = max(capacity_kwh * upper_soc / 100, 0.0)
     if unvalued_inventory_kwh <= stored_kwh:
         return None
     return stored_kwh

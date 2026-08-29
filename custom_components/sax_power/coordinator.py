@@ -162,12 +162,16 @@ OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
 
 #: Mindestabstand zwischen zwei Log-Zeilen der Bestandsdeckelung
 #: (capacity_inventory_correction, REQ-ECONOMICS-ACCOUNTING). Der Deckel
-#: greift während einer längeren unbepreisten Ladung an nahezu jedem
-#: Poll-Intervall erneut (der Bestand wächst stetig, der gemeldete SOC nur
-#: in ganzen Prozentschritten) - ungedrosselt entstünden daraus stündlich
-#: hunderte identischer INFO-Zeilen. Die kumulierte Korrekturmenge steht
+#: kann bei mehreren bestätigten, sinkenden SOC-Stufen wiederholt greifen -
+#: ungedrosselt entstünden daraus viele identische INFO-Zeilen. Die
+#: kumulierte Korrekturmenge steht
 #: unabhängig davon jederzeit vollständig im Diagnose-Download.
 INVENTORY_CAP_LOG_INTERVAL_SECONDS = 3600.0
+
+# Nach einer Bewegung kann der quantisierte SOC noch denselben alten Wert
+# melden. Zwei aufeinanderfolgende frische Stillstands-Ticks verhindern, dass
+# gerade nachweislich geladene unbepreiste Energie gelöscht wird (Issue #145).
+INVENTORY_CORRECTION_IDLE_CONFIRMATIONS = 2
 
 
 def _rounded(value: float | None, digits: int) -> float | None:
@@ -175,9 +179,8 @@ def _rounded(value: float | None, digits: int) -> float | None:
 
     `round(-0.0001, 2)` ergibt -0.0, und Home Assistant zeigt das als
     "-0,0" an - ein Vorzeichen, das dem Anwender einen Verlust meldet, den
-    die gerundete Zahl selbst gar nicht mehr ausweist. Die Netto-Ersparnis
-    selbst ist nichtnegativ; die Normalisierung bleibt für negative
-    Kostenkomponenten und defensive Formeleingaben nötig. Der Vergleich
+    die gerundete Zahl selbst gar nicht mehr ausweist. Die Normalisierung
+    bleibt für negative Ergebnis- und Kostenwerte nötig. Der Vergleich
     `== 0` trifft +0.0 und -0.0 gleichermaßen und lässt jeden tatsächlich
     von 0 verschiedenen Wert unangetastet.
     """
@@ -547,6 +550,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # beides beeinflusst keine Berechnung.
         self._economics_inventory_capped_kwh: float = 0.0
         self._economics_inventory_cap_logged_at: float | None = None
+        self._economics_inventory_idle_confirmations = (
+            INVENTORY_CORRECTION_IDLE_CONFIRMATIONS
+        )
+        self._economics_inventory_discharged_since_charge = False
         # ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION): lokale
         # Kalendertag-Buckets, unabhängig vom Sieben-Felder-Bündel oben -
         # siehe _advance_economics_day. day_results sind abgeschlossene
@@ -987,41 +994,67 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                 )
 
-            # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
-            # Bestandskorrektur betrifft die Integrität des unbewerteten
-            # Bestands selbst, nicht die aktuelle Bepreisung.
-            correction = min_soc_inventory_correction(
-                self._economics_unvalued_inventory_kwh,
-                data.get("battery_soc"),
-                data.get("battery_soc_min"),
-            )
-            if correction is not None:
-                _LOGGER.info(
-                    "Wirtschaftlichkeit: unbewerteter Bestand am SOC-Minimum "
-                    "auf 0 korrigiert (war %.3f kWh, %s)",
-                    self._economics_unvalued_inventory_kwh,
-                    dt_util.utcnow().isoformat(),
+            charging_now = self._economics_is_charging(data, charge_delta)
+            if charging_now:
+                self._economics_inventory_idle_confirmations = 0
+                self._economics_inventory_discharged_since_charge = False
+            elif self._economics_is_discharging(data, discharged_kwh):
+                self._economics_inventory_idle_confirmations = 0
+                self._economics_inventory_discharged_since_charge = True
+            elif self._economics_is_stationary(data):
+                self._economics_inventory_idle_confirmations = min(
+                    self._economics_inventory_idle_confirmations + 1,
+                    INVENTORY_CORRECTION_IDLE_CONFIRMATIONS,
                 )
-                self._economics_unvalued_inventory_kwh = correction
-                changed = True
+            else:
+                # Ein fehlender Leistungswert ist kein bestätigter
+                # Stillstand. Ohne Bewegungsqualität darf keine Korrektur
+                # freigeschaltet werden (Issue #145).
+                self._economics_inventory_idle_confirmations = 0
 
-            # Der Bestand ist ein Lagerbestand und kann nie mehr Energie
-            # umfassen, als tatsächlich im Speicher liegt: sonst bliebe die
-            # Ladeverlust-Differenz jedes unbepreisten Zyklus dauerhaft
-            # darin liegen und würde später bepreist geladene Entladung als
-            # unbewertet abbuchen (Issue #132). Läuft wie die
-            # SOC-Minimum-Korrektur unabhängig vom aktuellen Tarifzustand.
-            capped = capacity_inventory_correction(
-                self._economics_unvalued_inventory_kwh,
-                _economics_capacity_kwh(data.get("battery_capacity")),
-                data.get("battery_soc"),
-            )
-            if capped is not None:
-                self._note_inventory_cap_correction(
-                    self._economics_unvalued_inventory_kwh, capped
+            if (
+                self._economics_inventory_idle_confirmations
+                >= INVENTORY_CORRECTION_IDLE_CONFIRMATIONS
+            ):
+                # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
+                # Bestandskorrektur betrifft die Integrität des unbewerteten
+                # Bestands selbst, nicht die aktuelle Bepreisung.
+                correction = (
+                    min_soc_inventory_correction(
+                        self._economics_unvalued_inventory_kwh,
+                        data.get("battery_soc"),
+                        data.get("battery_soc_min"),
+                    )
+                    if self._economics_inventory_discharged_since_charge
+                    else None
                 )
-                self._economics_unvalued_inventory_kwh = capped
-                changed = True
+                if correction is not None:
+                    _LOGGER.info(
+                        "Wirtschaftlichkeit: unbewerteter Bestand am "
+                        "SOC-Minimum auf 0 korrigiert (war %.3f kWh, %s)",
+                        self._economics_unvalued_inventory_kwh,
+                        dt_util.utcnow().isoformat(),
+                    )
+                    self._economics_unvalued_inventory_kwh = correction
+                    self._economics_inventory_discharged_since_charge = False
+                    changed = True
+
+                # Der Bestand ist ein Lagerbestand und kann nie mehr Energie
+                # umfassen, als anhand des quantisierten SOC sicher im Speicher
+                # liegen kann. Der obere Rand verhindert das Löschen gerade
+                # geladener Energie innerhalb derselben SOC-Stufe (Issue #145).
+                capped = capacity_inventory_correction(
+                    self._economics_unvalued_inventory_kwh,
+                    _economics_capacity_kwh(data.get("battery_capacity")),
+                    data.get("battery_soc"),
+                    self._economics_soc_resolution_percent(),
+                )
+                if capped is not None:
+                    self._note_inventory_cap_correction(
+                        self._economics_unvalued_inventory_kwh, capped
+                    )
+                    self._economics_unvalued_inventory_kwh = capped
+                    changed = True
 
         if changed:
             self._async_schedule_economics_save()
@@ -1041,8 +1074,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Zählt die verworfene Menge vollständig für den Diagnose-Download
         mit, loggt aber höchstens alle INVENTORY_CAP_LOG_INTERVAL_SECONDS
-        eine Zeile - der Deckel greift während einer unbepreisten Ladung an
-        nahezu jedem Poll-Intervall erneut (siehe Konstante).
+        eine Zeile (siehe Konstante).
         """
         self._economics_inventory_capped_kwh += previous_kwh - capped_kwh
         now = monotonic()
@@ -1059,6 +1091,52 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._economics_inventory_capped_kwh,
             dt_util.utcnow().isoformat(),
         )
+
+    @staticmethod
+    def _economics_is_charging(
+        data: dict[str, Any], charge_delta: EnergyDelta | None
+    ) -> bool:
+        """Aktive oder im aktuellen Intervall verbuchte Ladung erkennen."""
+        if charge_delta is not None and charge_delta.charged_kwh > 0:
+            return True
+        power = data.get("storage_power_active")
+        return (
+            isinstance(power, int | float)
+            and not isinstance(power, bool)
+            and math.isfinite(power)
+            and power < 0
+        )
+
+    @staticmethod
+    def _economics_is_discharging(data: dict[str, Any], discharged_kwh: float) -> bool:
+        """Aktive oder im aktuellen Intervall verbuchte Entladung erkennen."""
+        if discharged_kwh > 0:
+            return True
+        power = data.get("storage_power_active")
+        return (
+            isinstance(power, int | float)
+            and not isinstance(power, bool)
+            and math.isfinite(power)
+            and power > 0
+        )
+
+    @staticmethod
+    def _economics_is_stationary(data: dict[str, Any]) -> bool:
+        """Nur einen sicher gemessenen Nullwert als Stillstand werten."""
+        power = data.get("storage_power_active")
+        return (
+            isinstance(power, int | float)
+            and not isinstance(power, bool)
+            and math.isfinite(power)
+            and power == 0
+        )
+
+    def _economics_soc_resolution_percent(self) -> float:
+        """Messquantum des Battery-SOC in Prozent, konservativ 1 %."""
+        exponent = to_signed16(self._battery_scale_factors.soc)
+        if not -10 <= exponent <= 10:
+            return 1.0
+        return 10.0**exponent
 
     def _net_savings_today_last_reset(self) -> datetime | None:
         """Zeitpunkt, zu dem economics_net_savings_today zuletzt auf 0 sprang.

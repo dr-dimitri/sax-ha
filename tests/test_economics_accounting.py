@@ -234,24 +234,29 @@ def test_min_soc_correction_is_a_noop_once_inventory_is_already_zero() -> None:
 # Deckelung auf den Speicherinhalt (Issue #132)
 # --------------------------------------------------------------------------
 def test_inventory_cap_needs_both_values_known() -> None:
-    assert capacity_inventory_correction(9.0, None, 50) is None
-    assert capacity_inventory_correction(9.0, 10.0, None) is None
+    assert capacity_inventory_correction(9.0, None, 50, 1.0) is None
+    assert capacity_inventory_correction(9.0, 10.0, None, 1.0) is None
+    assert capacity_inventory_correction(9.0, 10.0, 50, float("nan")) is None
 
 
 def test_inventory_cap_only_applies_above_the_physical_content() -> None:
-    assert capacity_inventory_correction(4.0, 10.0, 50) is None
-    assert capacity_inventory_correction(5.0, 10.0, 50) is None
-    assert capacity_inventory_correction(5.5, 10.0, 50) == pytest.approx(5.0)
+    assert capacity_inventory_correction(4.0, 10.0, 50, 1.0) is None
+    assert capacity_inventory_correction(5.1, 10.0, 50, 1.0) is None
+    assert capacity_inventory_correction(5.5, 10.0, 50, 1.0) == pytest.approx(5.1)
+
+
+def test_inventory_cap_uses_the_actual_soc_measurement_resolution() -> None:
+    assert capacity_inventory_correction(5.5, 10.0, 50, 0.1) == pytest.approx(5.01)
 
 
 def test_inventory_cap_never_returns_a_negative_content() -> None:
     """Ein (theoretisch) negativ gemeldeter SOC darf keinen negativen
     Bestand erzeugen - der Bestand kennt nur 0 als Untergrenze."""
-    assert capacity_inventory_correction(1.0, 10.0, -5) == 0.0
+    assert capacity_inventory_correction(1.0, 10.0, -5, 1.0) == 0.0
 
 
 def test_inventory_cap_empties_the_inventory_at_an_empty_storage() -> None:
-    assert capacity_inventory_correction(0.7, 10.0, 0) == 0.0
+    assert capacity_inventory_correction(0.7, 10.0, 0, 1.0) == 0.0
 
 
 def test_charging_losses_of_an_unpriced_cycle_leave_a_residual_without_the_cap() -> (
@@ -270,7 +275,7 @@ def test_charging_losses_of_an_unpriced_cycle_leave_a_residual_without_the_cap()
     assert inventory == pytest.approx(0.7)  # Ladeverlust-Rest
 
     # Der Deckel räumt ihn ab, sobald der Speicher tatsächlich leer ist.
-    assert capacity_inventory_correction(inventory, 10.0, 0) == 0.0
+    assert capacity_inventory_correction(inventory, 10.0, 0, 1.0) == 0.0
 
 
 def test_economics_delta_equality_and_default() -> None:

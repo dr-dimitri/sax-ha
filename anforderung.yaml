@@ -3143,18 +3143,20 @@ requirement_economics_accounting:
     danach verbleibende Rest ("monetizable_discharged_kwh") ist bepreist.
     Fehlt der Importpreis bei einer monetarisierbaren Entladung, zählt sie
     als unpriced_discharge_kwh und wird nicht später rückwirkend bewertet
-    (ebenso wenig wie unpriced_charge_kwh). Erreicht battery_soc das
-    geräteseitig gemeldete battery_soc_min (beide numerisch,
-    domain.economics_accounting.min_soc_inventory_correction), wird ein
-    rechnerisch nie ganz auf 0 gelaufener Rest von unvalued_inventory_kwh
-    verworfen und mit Zeitstempel diagnostisch geloggt - keine nutzbare
-    unbekannte Energie kann an diesem Punkt mehr vorhanden sein.
+    (ebenso wenig wie unpriced_charge_kwh). Minimum- und Kapazitätskorrektur
+    laufen niemals während einer Lade- oder Entladebewegung. Nach einer
+    Bewegung sind zwei aufeinanderfolgende frische Stillstands-Ticks nötig.
+    Ein Rest am geräteseitig gemeldeten battery_soc_min wird nur verworfen,
+    wenn seit der letzten Ladung tatsächlich entladen wurde; so kann eine
+    gerade geladene Energiemenge innerhalb derselben quantisierten SOC-Stufe
+    nicht verschwinden (Issue #145).
 
-    unvalued_inventory_kwh ist ein Lagerbestand und wird deshalb bei JEDEM
-    Tick zusätzlich auf den tatsächlichen Speicherinhalt capacity_kwh *
-    battery_soc / 100 gedeckelt
-    (domain.economics_accounting.capacity_inventory_correction, aus dem
-    SunSpec-Block). Ohne
+    unvalued_inventory_kwh ist ein Lagerbestand und wird nach bestätigtem
+    Stillstand zusätzlich auf den konservativen oberen Rand des gemessenen
+    Speicherinhalts gedeckelt: capacity_kwh * (battery_soc + SOC-Messquantum)
+    / 100, maximal capacity_kwh. Das Messquantum folgt dem SunSpec-SOC-
+    Skalierungsfaktor, bei ungültigem Faktor konservativ 1 Prozentpunkt
+    (domain.economics_accounting.capacity_inventory_correction). Ohne
     diesen Deckel bliebe die Ladeverlust-Differenz jedes UNBEPREISTEN
     Zyklus (geladen > entladen, siehe oben) dauerhaft als Rest im Bestand
     liegen und würde später eine bereits bepreist geladene Entladung als
@@ -3169,10 +3171,8 @@ requirement_economics_accounting:
     kein plausibler Messwert, sondern ein gestörter SunSpec-Block. Die
     Korrektur wird wie die SOC-Minimum-Korrektur mit
     Zeitstempel und Betrag geloggt, jedoch höchstens einmal je
-    SaxPowerCoordinator.INVENTORY_CAP_LOG_INTERVAL_SECONDS (während einer
-    unbepreisten Ladung greift der Deckel an nahezu jedem Poll-Intervall
-    erneut, weil der Bestand stetig wächst, der gemeldete SOC aber nur in
-    ganzen Prozentschritten); die seither insgesamt verworfene Menge steht
+    SaxPowerCoordinator.INVENTORY_CAP_LOG_INTERVAL_SECONDS; die seither
+    insgesamt verworfene Menge steht
     ungedrosselt im Diagnose-Download (Schlüssel inventory_capped_kwh, rein
     diagnostisch, nicht persistiert).
 
@@ -3337,11 +3337,11 @@ requirement_economics_accounting:
     - "Negative Preise, fehlende Preise (Ladung wie Entladung),
        Tarifwechsel (prospektiv, keine rückwirkende Neuberechnung),
        SOC-Minimum-Korrektur, Neustart und Unload sind getestet."
-    - "Der unbewertete Bestand überschreitet nie den tatsächlichen
-       Speicherinhalt: nach einem unbepreisten Zyklus verfällt der
-       Ladeverlust-Rest, und eine spätere bepreiste Entladung wird
-       nachweislich vollständig als vermiedener Netzbezug bewertet
-       (Issue #132). Ohne bekannte Kapazität/SOC wird nicht gedeckelt."
+    - "Aktuelle Ladedeltas bleiben am Mindest-SOC und innerhalb derselben
+       quantisierten SOC-Stufe vollständig erhalten. Erst bestätigter
+       Stillstand erlaubt eine Deckelung auf den konservativen oberen
+       Stufenrand; ein echtes Entladen bis zum Minimum kann einen Rest
+       weiterhin beseitigen (Issues #132/#145)."
     - "Ladeverluste senken das aktuelle Nettoergebnis über die gemessene
        Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu benötigen."
     - "Die Folge Rohwert 100 -> 80 -> 95 -> 105 veröffentlicht exakt

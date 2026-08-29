@@ -302,7 +302,6 @@
         "name": "Wirtschaftlichkeit Status",
         "state": {
           "disabled": "Deaktiviert",
-          "waiting_for_initial_state": "Wartet auf Initialwerte",
           "active": "Aktiv",
           "partial_price_coverage": "Teilweise Preisabdeckung",
           "price_unavailable": "Preis nicht verfügbar",
@@ -324,15 +323,6 @@
       },
       "economics_net_savings": {
         "name": "Netto-Ersparnis"
-      },
-      "economics_unvalued_inventory": {
-        "name": "Unbewerteter Energiebestand"
-      },
-      "economics_unpriced_charge": {
-        "name": "Unbepreiste Ladeenergie"
-      },
-      "economics_unpriced_discharge": {
-        "name": "Unbepreiste Entladeenergie"
       },
       "economics_current_import_price": {
         "name": "Aktueller Netzbezugspreis"
@@ -578,9 +568,6 @@
     },
     "economics_restart_not_ready": {
       "message": "Ein Bilanzneustart ist nur möglich, solange die Wirtschaftlichkeit aktiviert und bereits initialisiert ist."
-    },
-    "economics_restart_missing_initial_values": {
-      "message": "Bilanzneustart benötigt aktuell bekannte Speicherkapazität und Ladezustand (SunSpec-Modus gerade nicht erreichbar?)."
     }
   },
   "services": {

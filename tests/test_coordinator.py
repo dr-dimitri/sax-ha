@@ -4453,7 +4453,7 @@ def test_economics_grid_charge_cost_matches_the_grid_share(hass) -> None:
 
     assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
     assert data["economics_pv_opportunity_cost"] == 0.0
-    assert data["economics_unvalued_inventory"] == pytest.approx(5.0)
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
 
 
 def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
@@ -4634,37 +4634,44 @@ def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
     assert data["economics_avoided_grid_cost"] is None
     assert data["economics_operating_result"] is None
     assert data["economics_net_savings"] is None
-    assert data["economics_unvalued_inventory"] is None
     assert data["economics_current_import_price"] is None
     assert data["economics_feed_in_price"] is None
     assert coordinator._economics_started_at is None
 
 
-def test_economics_bootstrap_waits_for_a_plausible_capacity(hass) -> None:
-    """Eine gemeldete Kapazität von 0 ist ein gestörter SunSpec-Block, kein
-    Messwert: die Bilanz wartet, statt mit einem Anfangsbestand von 0 zu
-    starten und die erste Entladung als kostenlosen Gewinn zu verbuchen."""
+def test_economics_bootstrap_values_existing_energy_at_zero(hass) -> None:
+    """Der Bilanzstart hängt nicht von SunSpec-Kapazität oder SOC ab."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
 
-    data = _economics_tick(coordinator, at=1000.0, soc=50, capacity_wh=0)
-
-    assert coordinator._economics_started_at is None
-    assert coordinator._economics_unvalued_inventory_kwh is None
-    assert data["economics_unvalued_inventory"] is None
-
-    data = _economics_tick(coordinator, at=1010.0, soc=50)
+    _economics_tick(coordinator, at=1000.0, soc=50, capacity_wh=0)
 
     assert coordinator._economics_started_at is not None
-    assert data["economics_unvalued_inventory"] == pytest.approx(5.0)
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+
+
+def test_existing_energy_can_create_savings_after_bootstrap(hass) -> None:
+    """Bereits vorhandene Energie hat Kosten von 0 EUR und wird deshalb
+    nicht vor der ersten monetarisierbaren Entladung abgezogen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    data = _economics_tick(
+        coordinator,
+        at=4600.0,
+        storage_power_active=1000,
+        soc=40,
+    )
+
+    assert data["economics_avoided_grid_cost"] == pytest.approx(0.30)
+    assert data["economics_net_savings"] == pytest.approx(0.30)
 
 
 def test_economics_current_price_sensors_track_the_tariff_independently_of_bootstrap(
     hass,
 ) -> None:
-    """economics_current_import_price/economics_feed_in_price sind reine
-    Durchreichungen - sie zeigen den Tarif bereits, bevor Kapazität/SOC
-    bekannt sind und die Bilanz selbst noch wartet."""
+    """Preis-Sensoren und Bilanzstart benötigen keine SunSpec-Initialwerte."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
 
@@ -4678,7 +4685,8 @@ def test_economics_current_price_sensors_track_the_tariff_independently_of_boots
         }
         coordinator._accumulate_energy(data)
 
-    assert coordinator._economics_started_at is None
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
     assert data["economics_current_import_price"] == pytest.approx(0.30)
     assert data["economics_feed_in_price"] == pytest.approx(0.08)
 
@@ -4687,7 +4695,7 @@ def test_soc_minimum_correction_resets_the_inventory_and_logs(hass, caplog) -> N
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=50)
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.0)
+    coordinator._economics_unvalued_inventory_kwh = 5.0
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
@@ -4703,7 +4711,6 @@ def test_soc_minimum_correction_resets_the_inventory_and_logs(hass, caplog) -> N
             coordinator._accumulate_energy(data)
 
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
-    assert data["economics_unvalued_inventory"] == 0.0
     assert "SOC-Minimum" in caplog.text
 
 
@@ -4744,7 +4751,7 @@ def test_unvalued_inventory_is_capped_at_the_physical_storage_content(
 
     coordinator.options = {}  # Tarifpause -> Ladung bleibt unbepreist
     with caplog.at_level("INFO"):
-        data = _economics_tick(
+        _economics_tick(
             coordinator,
             at=4600.0,
             storage_power_active=-7000,
@@ -4753,7 +4760,6 @@ def test_unvalued_inventory_is_capped_at_the_physical_storage_content(
         )
 
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(6.3)
-    assert data["economics_unvalued_inventory"] == pytest.approx(6.3)
     assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.7)
     assert coordinator.economics_diagnostics["inventory_capped_kwh"] == pytest.approx(
         0.7
@@ -4771,7 +4777,7 @@ def test_inventory_cap_logs_at_most_once_per_interval(hass, caplog) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=10)
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.0)
+    coordinator._economics_unvalued_inventory_kwh = 1.0
 
     # Tarifpause: jeder Tick lädt 0,01 kWh unbepreist nach, der gemeldete
     # SOC bleibt im selben Prozentschritt - der Deckel greift jedes Mal.
@@ -4914,9 +4920,8 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
     # Sind beide wieder da, greift der Deckel sofort.
-    data = _economics_tick(coordinator, at=15400.0, soc=50)
+    _economics_tick(coordinator, at=15400.0, soc=50)
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.0)
-    assert data["economics_unvalued_inventory"] == pytest.approx(5.0)
 
 
 def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
@@ -5881,7 +5886,7 @@ def test_economics_status_is_disabled_without_a_tariff(hass) -> None:
     assert data["economics_status"] == EconomicsStatus.DISABLED.value
 
 
-def test_economics_status_waits_for_initial_state(hass) -> None:
+def test_economics_status_needs_no_initial_battery_state(hass) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
 
@@ -5899,7 +5904,9 @@ def test_economics_status_waits_for_initial_state(hass) -> None:
         }
         coordinator._accumulate_energy(data)
 
-    assert data["economics_status"] == EconomicsStatus.WAITING_FOR_INITIAL_STATE.value
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert data["economics_status"] == EconomicsStatus.ORIGIN_UNAVAILABLE.value
 
 
 def test_economics_status_is_active_once_healthy(hass) -> None:
@@ -6218,16 +6225,18 @@ async def test_restart_economics_accounting_rejects_before_first_bootstrap(
         await coordinator.async_restart_economics_accounting()
 
 
-async def test_restart_economics_accounting_rejects_without_current_battery_data(
+async def test_restart_economics_accounting_needs_no_current_battery_data(
     hass,
 ) -> None:
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator._economics_store.async_reset = AsyncMock(return_value=True)
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
     coordinator.data = {}
 
-    with pytest.raises(ServiceValidationError):
-        await coordinator.async_restart_economics_accounting()
+    await coordinator.async_restart_economics_accounting()
+
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
 
 
 async def test_restart_economics_accounting_resets_money_but_not_energy(hass) -> None:
@@ -6258,7 +6267,7 @@ async def test_restart_economics_accounting_resets_money_but_not_energy(hass) ->
     assert coordinator._economics_day_results == ()
     assert coordinator._economics_current_day is None
     assert coordinator._economics_payback_achieved_at is None
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.0)
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
     # Energie-/Herkunftszähler aus REQ-ENERGY-ORIGIN bleiben unangetastet.
     assert coordinator._energy_charged_kwh == 12.5
     assert coordinator._energy_discharged_kwh == 9.0

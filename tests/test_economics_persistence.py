@@ -1189,7 +1189,13 @@ async def test_load_drops_all_dependent_history_from_an_incomplete_current_store
     assert coordinator._economics_current_day is None
     assert coordinator._economics_payback_achieved_at is None
 
-    bootstrap_at = dt_util.utcnow() + timedelta(seconds=1)
+    # Mittags UTC liegt der Bootstrap in jeder von Home Assistant
+    # unterstützten Zeitzone nach dem lokalen Tagesbeginn. Damit prüft der
+    # Test die Reset-Priorität statt zufällig von der Ausführungsuhrzeit
+    # abzuhängen.
+    bootstrap_at = dt_util.utcnow().replace(hour=12, minute=0, second=0) + timedelta(
+        days=1
+    )
     data = {
         "storage_power_active": 0,
         "battery_capacity": 10_000,
@@ -1223,7 +1229,7 @@ async def test_load_drops_all_dependent_history_from_an_incomplete_current_store
     assert persisted["payback_achieved_at"] is None
 
 
-async def test_bootstrap_waits_for_numeric_capacity_and_soc(hass) -> None:
+async def test_bootstrap_needs_no_numeric_capacity_or_soc(hass) -> None:
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
     coordinator._economics_store.async_load = AsyncMock(return_value=None)
     await coordinator.async_load_economics_state()
@@ -1234,13 +1240,13 @@ async def test_bootstrap_waits_for_numeric_capacity_and_soc(hass) -> None:
     ):
         coordinator._accumulate_energy(data)
 
-    assert coordinator._economics_started_at is None
-    assert data["economics_grid_charge_cost"] is None
-    assert data["economics_unvalued_inventory"] is None
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert data["economics_grid_charge_cost"] == 0.0
     await coordinator.async_shutdown()
 
 
-async def test_bootstrap_sets_the_initial_inventory_once_data_is_known(hass) -> None:
+async def test_bootstrap_values_existing_energy_at_zero(hass) -> None:
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
     coordinator._economics_store.async_load = AsyncMock(return_value=None)
     coordinator._economics_store.async_delay_save = MagicMock(return_value=True)
@@ -1259,8 +1265,7 @@ async def test_bootstrap_sets_the_initial_inventory_once_data_is_known(hass) -> 
 
     assert coordinator._economics_started_at is not None
     assert coordinator._economics_operating_result_high_water_eur == 0.0
-    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(4.0)
-    assert data["economics_unvalued_inventory"] == pytest.approx(4.0)
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
     assert data["economics_grid_charge_cost"] == 0.0
     assert data["economics_operating_result"] == 0.0
     assert data["economics_net_savings"] == 0.0

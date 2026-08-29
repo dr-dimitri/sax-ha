@@ -3133,27 +3133,22 @@ requirement_economics_accounting:
     Nachbewertung des Lagerbestands. Sie verringern jedoch keinen bereits
     erreichten Netto-Ersparnis-Höchststand.
 
-    "Ehrlicher Start": Beim erstmaligen Aktivieren steckt bereits Energie
-    unbekannter Herkunft im Speicher.
-    SaxPowerCoordinator._bootstrap_economics_if_ready wartet, bis
-    battery_capacity (plausibel, also > 0) und battery_soc numerisch
-    verfügbar sind (beide aus demselben SunSpec-Modus-Block wie
-    battery_soc_min, mit demselben
-    Skalierungsfaktor - bewusst nicht die Basic-Mode-SOC), und
-    initialisiert dann einmalig unvalued_inventory_kwh = capacity_kwh *
-    battery_soc / 100 sowie economics_started_at (UTC) - vorher bleibt die
-    gesamte Bilanz wartend/unbekannt. Läuft nur einmal: Ein
-    zwischenzeitliches
-    Deaktivieren/Reaktivieren des Tarifs setzt weder Bestand noch
-    Startzeitpunkt zurück. Nicht bepreisbare neue Ladeenergie (ein
+    Beim erstmaligen Aktivieren wird die bereits im Speicher vorhandene
+    Energie mit 0 EUR angesetzt.
+    SaxPowerCoordinator._bootstrap_economics_if_ready initialisiert deshalb unabhängig von
+    battery_capacity und battery_soc einmalig unvalued_inventory_kwh = 0
+    sowie economics_started_at (UTC). Der höchstens 7 kWh große
+    Anfangsbestand ist für die Amortisationsrechnung vernachlässigbar und
+    wird weder als unbekannte noch als unbepreiste Energie geführt. Läuft
+    nur einmal: Ein zwischenzeitliches Deaktivieren/Reaktivieren des Tarifs
+    setzt weder Bestand noch Startzeitpunkt zurück. Nicht bepreisbare neue
+    Ladeenergie (ein
     fehlender Preis für Netz bzw. PV - eine unbekannte Herkunft gibt es
     seit REQ-ENERGY-ORIGIN nicht mehr)
     erhöht unvalued_inventory_kwh und den passenden
     unpriced_charge-Zähler statt einen Preis zu erfinden. Jede Entladung
     verbraucht zuerst min(discharge_delta, unvalued_inventory_kwh) - dieser
-    Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst
-    entstünde beim Entladen von Alt-/Unbekannt-Bestand ein kostenloser
-    Scheingewinn, der Kernfehler des verworfenen Issues #42); nur der
+    Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert; nur der
     danach verbleibende Rest ("monetizable_discharged_kwh") ist bepreist.
     Fehlt der Importpreis bei einer monetarisierbaren Entladung, zählt sie
     als unpriced_discharge_kwh und wird nicht später rückwirkend bewertet
@@ -3167,25 +3162,21 @@ requirement_economics_accounting:
     unvalued_inventory_kwh ist ein Lagerbestand und wird deshalb bei JEDEM
     Tick zusätzlich auf den tatsächlichen Speicherinhalt capacity_kwh *
     battery_soc / 100 gedeckelt
-    (domain.economics_accounting.capacity_inventory_correction, dieselbe
-    Größe wie beim "Ehrlichen Start", aus demselben SunSpec-Block). Ohne
+    (domain.economics_accounting.capacity_inventory_correction, aus dem
+    SunSpec-Block). Ohne
     diesen Deckel bliebe die Ladeverlust-Differenz jedes UNBEPREISTEN
     Zyklus (geladen > entladen, siehe oben) dauerhaft als Rest im Bestand
     liegen und würde später eine bereits bepreist geladene Entladung als
     unbewertet abbuchen - economics_avoided_grid_cost und damit
     economics_operating_result fielen mit jedem Preisausfall weiter zu
-    niedrig aus, und der Diagnosesensor economics_unvalued_inventory
-    könnte einen physikalisch unmöglichen, über der Speicherkapazität
-    liegenden Bestand melden. Der Vorsichtsgedanke aus #42 bleibt
+    niedrig aus. Der Vorsichtsgedanke aus #42 bleibt
     unberührt: er verlangt nur, dass der Bestand nicht zu KLEIN ist. Ist
     Kapazität oder SOC gerade nicht numerisch bekannt (SunSpec nicht
     erreichbar), wird nicht gedeckelt - nie gegen einen unbekannten Wert
     klemmen. Als unbekannt gilt dabei auch eine gemeldete Kapazität von 0
     oder darunter (SaxPowerCoordinator._economics_capacity_kwh): das ist
-    kein plausibler Messwert, sondern ein gestörter SunSpec-Block, und
-    würde sowohl den gesamten Bestand verwerfen als auch (im Bootstrap)
-    einen Anfangsbestand von 0 setzen - beides erzeugte beim nächsten
-    Entladen genau den kostenlosen Scheingewinn aus #42. Die Korrektur wird wie die SOC-Minimum-Korrektur mit
+    kein plausibler Messwert, sondern ein gestörter SunSpec-Block. Die
+    Korrektur wird wie die SOC-Minimum-Korrektur mit
     Zeitstempel und Betrag geloggt, jedoch höchstens einmal je
     SaxPowerCoordinator.INVENTORY_CAP_LOG_INTERVAL_SECONDS (während einer
     unbepreisten Ladung greift der Deckel an nahezu jedem Poll-Intervall
@@ -3223,9 +3214,8 @@ requirement_economics_accounting:
     einer Pause auf None statt
     auf die weiter mitlaufenden internen Summen - ein deaktivierter Tarif
     darf keinen falschen Nullgewinn suggerieren, aber auch keine sichtbaren
-    Beträge zeigen. unvalued_inventory_kwh/unpriced_charge_kwh/
-    unpriced_discharge_kwh sind keine Geldwerte und bleiben davon
-    unberührt sichtbar. Die Herkunfts-/Energiesensoren aus 02/06 bleiben
+    Beträge zeigen. Die internen Bestands- und Preisabdeckungszähler bleiben
+    davon unberührt. Die Herkunfts-/Energiesensoren aus 02/06 bleiben
     ebenfalls unberührt und weiterhin verfügbar.
     economics_current_import_price/economics_feed_in_price sind reine
     Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und
@@ -3245,14 +3235,14 @@ requirement_economics_accounting:
     dessen bestehende Recorder-Historie unverändert bleibt),
     economics_net_savings (EUR, device_class monetary, state_class total
     mit economics_started_at als last_reset: persistierter, nichtnegativer
-    Netto-Ersparnis-Höchststand mit eigener Recorder-Historie),
-    economics_unvalued_inventory
-    (kWh, device_class energy_storage, state_class measurement,
-    Diagnose - ein Bestand/Gauge, kein kumulierter Zähler),
-    economics_unpriced_charge/economics_unpriced_discharge (kWh,
-    device_class energy, state_class total), sowie
+    Netto-Ersparnis-Höchststand mit eigener Recorder-Historie), sowie
     economics_current_import_price/economics_feed_in_price (EUR/kWh,
     state_class measurement).
+
+    Die internen Werte unvalued_inventory_kwh, unpriced_charge_kwh und
+    unpriced_discharge_kwh werden nicht als eigene Home-Assistant-Sensoren
+    veröffentlicht. Sie dienen ausschließlich Persistenz, Diagnose und
+    Preisabdeckungsstatus.
 
     Persistenz: neuer versionierter EconomicsStateStore
     (infrastructure/economics_store.py) pro Config Entry, eigener
@@ -3335,9 +3325,13 @@ requirement_economics_accounting:
     - "PV-Ladung wird mit der Einspeisevergütung bewertet; reine
        Netz-/PV-/Mischladung stimmen mit der Herkunftsaufteilung aus
        02/06 überein (tests/test_economics_accounting.py)."
-    - "Der Anfangsbestand und unbepreiste Ladung können keinen
-       kostenlosen Gewinn erzeugen: Entladung aus unvalued_inventory_kwh
-       erzeugt nachweislich 0 EUR vermiedenen Geldwert."
+    - "Der beim Bilanzstart bereits vorhandene Speicherinhalt wird mit
+       0 EUR angesetzt: Der Bootstrap startet unabhängig von Kapazität und
+       SOC mit unvalued_inventory_kwh = 0; seine erste Entladung kann damit
+       vollständig als vermiedener Netzbezug eingehen."
+    - "Später unbepreiste Ladung kann keinen kostenlosen Gewinn erzeugen:
+       Entladung aus unvalued_inventory_kwh erzeugt nachweislich 0 EUR
+       vermiedenen Geldwert."
     - "Negative Preise, fehlende Preise (Ladung wie Entladung),
        Tarifwechsel (prospektiv, keine rückwirkende Neuberechnung),
        SOC-Minimum-Korrektur, Neustart und Unload sind getestet."
@@ -3373,6 +3367,10 @@ requirement_economics_accounting:
        weiterhin als unbewertet nachgeführt; eine nach dem Reaktivieren
        erfolgende Entladung dieser Energie erzeugt nachweislich 0 EUR
        vermiedenen Geldwert (kein kostenloser Scheingewinn)."
+    - "unvalued_inventory_kwh, unpriced_charge_kwh und
+       unpriced_discharge_kwh bleiben interne Diagnosewerte und werden nicht
+       als Sensor-Entities registriert; vorhandene Registry-Einträge dieser
+       drei entfallenen Sensoren werden beim Setup entfernt."
     - "Eine außerhalb von 0 bis 2 EUR/kWh liegende, aber endliche
        gespeicherte Einspeisevergütung ergibt None statt eines
        ungeprüften Rohwerts (SaxTariffProvider.feed_in_price_eur_kwh)."
@@ -3472,12 +3470,12 @@ requirement_economics_observability:
     ohne selbst neue Geldwerte zu berechnen.
 
     Read-only Enum-Sensor `economics_status`
-    (domain.economics_status.EconomicsStatus) mit sieben stabilen
+    (domain.economics_status.EconomicsStatus) mit sechs stabilen
     Zuständen. Priorität bei gleichzeitig zutreffenden Problemen (höchste
     zuerst, domain.economics_status.compute_economics_status):
     `disabled` (ausschließlich bei deaktiviertem Tarif, schlägt dabei jeden
-    anderen Zustand) > `storage_error` > `waiting_for_initial_state` >
-    `price_unavailable` > `origin_unavailable` > `partial_price_coverage` >
+    anderen Zustand) > `storage_error` > `price_unavailable` >
+    `origin_unavailable` > `partial_price_coverage` >
     `active`. Attribute: `reason` (redundant zum Sensorzustand),
     `tariff_type`, `price_sensor_entity_id` (nur bei dynamischem Tarif -
     eine Entity-ID ist keine identifizierende Information),
@@ -3641,16 +3639,15 @@ requirement_economics_observability:
     (`EconomicsState.last_restart_at`/`last_restart_reason`, unabhängig
     vom Sieben-Felder-Bündel) und im Diagnose-Download angezeigt -
     beeinflusst keine Berechnung. Lehnt mit ServiceValidationError ab, wenn der Tarif
-    deaktiviert ist, die Bilanz noch nie initialisiert wurde, oder
-    Speicherkapazität/Ladezustand gerade nicht bekannt sind. Setzt
+    deaktiviert ist oder die Bilanz noch nie initialisiert wurde. Setzt
     AUSSCHLIESSLICH zurück: die drei Economics-Geldsummen, den
     Netto-Ersparnis-Höchststand, die vier Preisabdeckungszähler
     (priced_*/unpriced_*), die Tages-Buckets (day_results und current_day
     einschließlich seiner Zähler), den Aktivierungs-/Revisionszeitpunkt
     (neu auf jetzt) und einen bereits erreichten
-    Payback-Zeitpunkt (auf None) - initialisiert den unbekannten
-    Anfangsbestand dabei erneut wie beim erstmaligen Aktivieren (03/06,
-    "Ehrlicher Start"). economics_net_savings ist ein total-Sensor und
+    Payback-Zeitpunkt (auf None) - setzt den unbewerteten Bestand dabei wie
+    beim erstmaligen Aktivieren auf 0. economics_net_savings ist ein
+    total-Sensor und
     meldet diesen neuen Aktivierungszeitpunkt als last_reset, damit der
     kontrollierte Rücksprung auf 0 keine negative Recorder-Änderung erzeugt.
     economics_operating_result bleibt als technischer Roh-Cashflow ohne
@@ -3679,7 +3676,7 @@ requirement_economics_observability:
     REQ-ECONOMICS-SAVINGS-DASHBOARD verständlich eingeordnet; einen eigenen
     technischen Wirtschaftlichkeits-Tab gibt es nicht.
   acceptance_criteria:
-    - "Jeder der sieben Status ist einzeln erreichbar; kombinierte,
+    - "Jeder der sechs Status ist einzeln erreichbar; kombinierte,
        gleichzeitig zutreffende Probleme ergeben genau den einen Status
        mit der höchsten Priorität (tests/test_economics_status.py,
        tests/test_coordinator.py)."
@@ -3710,7 +3707,7 @@ requirement_economics_observability:
        unberührt weiter (tests/test_economics_persistence.py)."
     - "Der Bilanzneustart verlangt confirm=true, ist atomar (ein
        fehlgeschlagener Speicherversuch lässt den In-Memory-Zustand
-       vollständig unverändert), initialisiert den Anfangsbestand neu und
+       vollständig unverändert), setzt den unbewerteten Bestand auf 0 und
        lässt alle Energie-/Herkunftszähler unangetastet
        (tests/test_coordinator.py, tests/test_init.py)."
     - "Diagnostics enthalten Status, Store-Zustand, Preisabdeckungszähler
@@ -3773,9 +3770,8 @@ requirement_economics_savings_dashboard:
 
     Als fünftes Kartenobjekt bündelt genau eine Core-markdown-Karte die dauerhaft
     gleichbleibenden Erklärungen in einem standardmäßig geschlossenen
-    details-Element. Bei positivem economics_unvalued_inventory ergänzt sie
-    den formatierten Anfangsbestand mit drei Dezimalstellen und Sensor-Einheit.
-    Eine separate Anfangsbestandskarte existiert nicht.
+    details-Element. Der bereits beim Bilanzstart vorhandene Speicherinhalt
+    und interne unbepreiste Energiemengen werden dort nicht dargestellt.
 
     Als sechstes und letztes Kartenobjekt steht der selbst ausblendende
     Statushinweis.
@@ -3813,7 +3809,7 @@ requirement_economics_savings_dashboard:
        Einspeisevergütung als EUR/kWh mit vier Nachkommastellen."
     - "Freie Auswahl, Statistik und Diagramm teilen exakt
        energy_sax_power_savings; das Diagramm hat keinen period-Schlüssel."
-    - "Anfangsbestand und Statuszustände sind mit gerenderten Template-Tests
-       abgesichert; fehlende Entities erzeugen keine ungültigen Karten."
+    - "Statuszustände sind mit gerenderten Template-Tests abgesichert;
+       fehlende Entities erzeugen keine ungültigen Karten."
     - "Create, Reinstall und die Erkennung veralteter Dashboardstände bleiben
        mit fünf Views getestet."

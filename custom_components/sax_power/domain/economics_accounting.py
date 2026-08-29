@@ -80,11 +80,11 @@ def compute_economics_delta(
     Entladeseite: Jede Entladung verbraucht zuerst aus dem unbewerteten
     Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser Anteil
     erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert, weil für ihn nie eine
-    Kostenbuchung stattfand: Andernfalls entstünde beim Entladen von
-    Alt-/Unbekannt-Bestand ein kostenloser Scheingewinn (der Fehler aus dem
-    verworfenen Issue #42). Nur der danach verbleibende, tatsächlich
-    bepreist geladene Rest ("monetizable") ist den aktuellen
-    Netzbezugspreis wert; fehlt dieser Preis, zählt der Rest als
+    Kostenbuchung stattfand: Andernfalls würde eine vorausgegangene
+    Preislücke einen kostenlosen Scheingewinn erzeugen. Nur der danach
+    verbleibende monetarisierbare Rest (bepreist geladen oder beim
+    Bilanzstart mit 0 EUR angesetzt) ist den aktuellen Netzbezugspreis wert;
+    fehlt dieser Preis, zählt der Rest als
     `unpriced_discharge` und wird ebenfalls nicht rückwirkend bewertet.
 
     `unvalued_inventory_kwh` ist der VOR diesem Intervall gültige Bestand -
@@ -137,22 +137,6 @@ def compute_economics_delta(
         priced_charge_kwh_delta=priced_charge,
         priced_discharge_kwh_delta=priced_discharge,
     )
-
-
-def initial_unvalued_inventory_kwh(
-    capacity_kwh: float | None, soc: float | None
-) -> float | None:
-    """Anfangsbestand beim erstmaligen Aktivieren der Auswertung.
-
-    Bereits im Speicher liegende Energie ist zu diesem Zeitpunkt
-    unbekannter Herkunft und darf beim ersten Entladen keinen kostenlosen
-    Gewinn erzeugen (siehe anforderung.yaml, REQ-ECONOMICS-ACCOUNTING,
-    "Ehrlicher Start"). None, solange Kapazität oder SOC nicht numerisch
-    bekannt sind - der Aufrufer wartet dann mit der Aktivierung.
-    """
-    if capacity_kwh is None or soc is None:
-        return None
-    return capacity_kwh * soc / 100
 
 
 def min_soc_inventory_correction(

@@ -133,8 +133,10 @@ SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
 #: Snapshot-Ständen vor REQ-ECONOMICS-ACCOUNTING darf nicht als neue
 #: Netto-Ersparnis-Historie weitergeführt werden. Auch die entfallene
 #: Amortisationsprognose darf nicht als drei dauerhaft nicht verfügbare
-#: Entities zurückbleiben. Ohne diese Bereinigung blieben die alten Entities
-#: dauerhaft "nicht verfügbar" in der Registry.
+#: Entities zurückbleiben. Die internen Werte für unbewertete bzw.
+#: unbepreiste Energie werden ebenfalls nicht mehr als Sensoren veröffentlicht.
+#: Ohne diese Bereinigung blieben die alten Entities dauerhaft "nicht
+#: verfügbar" in der Registry.
 _REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
     (Platform.SENSOR, "energy_charged_origin_unknown"),
     (Platform.SENSOR, "energy_origin_coverage"),
@@ -142,6 +144,9 @@ _REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
     (Platform.SENSOR, "economics_average_daily_result_30d"),
     (Platform.SENSOR, "economics_projected_annual_result"),
     (Platform.SENSOR, "economics_estimated_payback_date"),
+    (Platform.SENSOR, "economics_unvalued_inventory"),
+    (Platform.SENSOR, "economics_unpriced_charge"),
+    (Platform.SENSOR, "economics_unpriced_discharge"),
 )
 
 

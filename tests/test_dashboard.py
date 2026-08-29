@@ -593,10 +593,6 @@ async def test_savings_status_hint_is_last_and_renders_every_state(hass) -> None
             "„Geräte & Dienste → SAX Power Home → Konfigurieren → "
             "Wirtschaftlichkeit“ konfigurieren."
         ),
-        "waiting_for_initial_state": (
-            "Die Wirtschaftlichkeitsberechnung wartet auf Speicherkapazität "
-            "und Ladezustand."
-        ),
         "price_unavailable": (
             "Der Strompreis ist derzeit nicht verfügbar. Aktuelle Zeitraumwerte "
             "können unvollständig sein."
@@ -628,12 +624,8 @@ async def test_savings_status_hint_is_last_and_renders_every_state(hass) -> None
         assert rendered == message, status_state
 
 
-async def test_savings_inventory_is_merged_into_explanation_and_renders_sensor_value(
-    hass,
-) -> None:
-    status = _register(hass, "sensor", "economics_status")
+async def test_savings_explanation_follows_the_period_cards(hass) -> None:
     _register(hass, "sensor", "economics_net_savings")
-    inventory = _register(hass, "sensor", "economics_unvalued_inventory")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 
@@ -643,91 +635,10 @@ async def test_savings_inventory_is_merged_into_explanation_and_renders_sensor_v
     free_period = _savings_free_period_block(view)
     assert view["cards"].index(free_period) > view["cards"].index(grid)
     assert view["cards"].index(card) == view["cards"].index(free_period) + 1
-    assert not any(
-        candidate["type"] == "conditional"
-        and candidate["conditions"][0].get("condition") == "numeric_state"
-        for candidate in view["cards"]
-    )
     content = card["content"]
-    assert repr(inventory) in content
-
-    rendered = template.Template(content, hass).async_render(parse_result=False)
-    assert "Beim Start der Bilanz" not in rendered
-    for state in ("0", "-0.001", "unknown", "unavailable"):
-        hass.states.async_set(
-            inventory,
-            state,
-            {"unit_of_measurement": "kWh"},
-        )
-        rendered = template.Template(content, hass).async_render(parse_result=False)
-        assert "Beim Start der Bilanz" not in rendered, state
-
-    hass.states.async_set(
-        inventory,
-        "1.23456",
-        {"unit_of_measurement": "kWh"},
-    )
-    rendered = template.Template(content, hass).async_render(parse_result=False)
-    normalized = " ".join(rendered.split())
-    assert (
-        "<p>Beim Start der Bilanz waren bereits <strong>1,235 kWh</strong> "
-        "im Speicher. Für diese Energie sind Herkunft und Preis unbekannt. "
-        "Ihre Entladung wird deshalb korrekt mit <strong>0 €</strong> bewertet. "
-        "Sobald dieser Anfangsbestand abgebaut ist, kann weitere bepreiste "
-        "Entladung in die Netto-Ersparnis eingehen. Das ist kein Messfehler.</p>"
-        in normalized
-    )
-
-    hass.states.async_set(status, "active")
-    hass.states.async_set(
-        inventory,
-        "0",
-        {"unit_of_measurement": "kWh"},
-    )
-    assert (
-        template.Template(_savings_status_card(view)["content"], hass).async_render(
-            parse_result=False
-        )
-        == ""
-    )
-    assert "Beim Start der Bilanz" not in template.Template(content, hass).async_render(
-        parse_result=False
-    )
-
-
-async def test_savings_explanation_handles_missing_inventory_entity(
-    hass,
-) -> None:
-    _register(hass, "sensor", "economics_net_savings")
-
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
-
-    view = _savings_view(config)
-    assert not any(
-        card["type"] == "conditional"
-        and card["conditions"][0].get("condition") == "numeric_state"
-        for card in view["cards"]
-    )
-    content = _savings_explanation_card(view)["content"]
-    assert "set inventory_entity = none" in content
     rendered = template.Template(content, hass).async_render(parse_result=False)
     assert "<details>" in rendered
     assert "Beim Start der Bilanz" not in rendered
-
-
-async def test_savings_inventory_explanation_remains_available_without_result_entity(
-    hass,
-) -> None:
-    inventory = _register(hass, "sensor", "economics_unvalued_inventory")
-    hass.states.async_set(inventory, "2", {"unit_of_measurement": "kWh"})
-
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
-
-    content = _savings_explanation_card(_savings_view(config))["content"]
-    rendered = template.Template(content, hass).async_render(parse_result=False)
-    assert "Beim Start der Bilanz waren bereits <strong>2,000 kWh</strong>" in (
-        " ".join(rendered.split())
-    )
 
 
 async def test_savings_view_is_fifth_with_expected_title_and_icon(hass) -> None:
@@ -744,7 +655,6 @@ async def test_savings_view_uses_requested_card_order(hass) -> None:
     _register(hass, "sensor", "economics_net_savings")
     _register(hass, "sensor", "economics_current_import_price")
     _register(hass, "sensor", "economics_status")
-    _register(hass, "sensor", "economics_unvalued_inventory")
 
     config = await async_build_dashboard_config(hass, ENTRY_ID)
 

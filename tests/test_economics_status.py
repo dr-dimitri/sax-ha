@@ -19,7 +19,6 @@ from custom_components.sax_power.domain.economics_status import (
 _FULLY_HEALTHY = {
     "tariff_enabled": True,
     "storage_error": False,
-    "started": True,
     "price_unavailable": False,
     "origin_unavailable": False,
     "priced_charge_kwh_today": 10.0,
@@ -44,7 +43,6 @@ def test_disabled_wins_over_every_other_problem() -> None:
             **_UNPRICED_DAY,
             "tariff_enabled": False,
             "storage_error": True,
-            "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
         }
@@ -58,25 +56,11 @@ def test_storage_error_wins_over_lower_priority_problems() -> None:
             **_FULLY_HEALTHY,
             **_UNPRICED_DAY,
             "storage_error": True,
-            "started": False,
             "price_unavailable": True,
             "origin_unavailable": True,
         }
     )
     assert status is EconomicsStatus.STORAGE_ERROR
-
-
-def test_waiting_for_initial_state_wins_over_lower_priority_problems() -> None:
-    status = compute_economics_status(
-        **{
-            **_FULLY_HEALTHY,
-            **_UNPRICED_DAY,
-            "started": False,
-            "price_unavailable": True,
-            "origin_unavailable": True,
-        }
-    )
-    assert status is EconomicsStatus.WAITING_FOR_INITIAL_STATE
 
 
 def test_price_unavailable_wins_over_origin_and_coverage() -> None:
@@ -149,8 +133,8 @@ def test_a_negligible_gap_stays_active(day: dict[str, float]) -> None:
 
 def test_unknown_coverage_does_not_count_as_partial() -> None:
     """None (Zähler noch nicht initialisiert) ist kein Abdeckungsproblem -
-    das wird bereits durch waiting_for_initial_state/storage_error
-    abgedeckt, bevor die Abdeckung überhaupt geprüft wird."""
+    das wird bereits durch storage_error abgedeckt, bevor die Abdeckung
+    überhaupt geprüft wird."""
     status = compute_economics_status(
         **{
             **_FULLY_HEALTHY,

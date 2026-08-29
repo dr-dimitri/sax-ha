@@ -59,6 +59,14 @@ def test_amortization_forecast_entities_are_no_longer_published() -> None:
     assert "economics_estimated_payback_date" not in keys
 
 
+def test_internal_unpriced_energy_values_are_not_published_as_entities() -> None:
+    keys = {description.key for description in SENSOR_DESCRIPTIONS}
+
+    assert "economics_unvalued_inventory" not in keys
+    assert "economics_unpriced_charge" not in keys
+    assert "economics_unpriced_discharge" not in keys
+
+
 def test_roi_attributes_format_prior_result_with_two_decimal_places() -> None:
     """Der rohe Vorlauf bleibt numerisch; die Core-Attributzeile erhält
     daneben eine Anzeigeform mit exakt zwei Nachkommastellen."""

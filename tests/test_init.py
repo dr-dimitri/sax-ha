@@ -282,7 +282,7 @@ async def test_restart_economics_accounting_service_reason_is_optional(hass) -> 
 # Entfallene Entities früherer Versionen
 # --------------------------------------------------------------------------
 async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
-    """Entfallene Herkunfts-, Tages- und Prognosesensoren werden entfernt.
+    """Entfallene Herkunfts-, Wirtschafts- und Prognosesensoren werden entfernt.
 
     Home Assistant räumt sie nicht selbst weg; sie blieben sonst dauerhaft
     als "nicht verfügbar" in Registry, Dashboards und Automationen stehen.
@@ -304,6 +304,9 @@ async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
             "economics_average_daily_result_30d",
             "economics_projected_annual_result",
             "economics_estimated_payback_date",
+            "economics_unvalued_inventory",
+            "economics_unpriced_charge",
+            "economics_unpriced_discharge",
         )
     ]
     kept = [

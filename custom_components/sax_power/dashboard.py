@@ -133,9 +133,6 @@ _SAVINGS_STATUS_TEMPLATE = """\
 {{- 'Die Wirtschaftlichkeitsberechnung ist deaktiviert. Bitte unter '
     ~ '„Geräte & Dienste → SAX Power Home → Konfigurieren → '
     ~ 'Wirtschaftlichkeit“ konfigurieren.' }}
-{%- elif status == 'waiting_for_initial_state' %}
-{{- 'Die Wirtschaftlichkeitsberechnung wartet auf Speicherkapazität '
-    ~ 'und Ladezustand.' }}
 {%- elif status == 'price_unavailable' %}
 {{- 'Der Strompreis ist derzeit nicht verfügbar. Aktuelle Zeitraumwerte '
     ~ 'können unvollständig sein.' }}
@@ -155,9 +152,7 @@ _SAVINGS_STATUS_TEMPLATE = """\
 # Dauerhaft gleichbleibender Erklärungstext des Ersparnis-Tabs. Das native
 # HTML-Element details ist in der Allowlist des zu Home Assistant 2026.8.2
 # gehörenden Markdown-Renderers enthalten. Ohne open-Attribut beginnt es
-# bewusst geschlossen; der zustandsabhängige Anfangsbestand bleibt innerhalb
-# des Elements abrufbar (REQ-ECONOMICS-SAVINGS-DASHBOARD).
-_SAVINGS_INVENTORY_ENTITY_PLACEHOLDER = "__SAVINGS_INVENTORY_ENTITY__"
+# bewusst geschlossen (REQ-ECONOMICS-SAVINGS-DASHBOARD).
 _SAVINGS_EXPLANATION_TEMPLATE = """\
 <details>
 <summary><strong>Hinweise zur Berechnung und Datenbasis</strong></summary>
@@ -175,20 +170,6 @@ Recorder-Historie oder ist die Ergebnis-Entity vom Recorder ausgeschlossen,
 bleiben Wert und Diagramm unbekannt beziehungsweise leer. Schneidet die
 Auswahl einen manuellen Neustart der Wirtschaftlichkeitsbilanz, kann der
 Recorder die positiven Zuwächse vor und nach dem Neustart zusammenfassen.</p>
-{%- set inventory_entity = __SAVINGS_INVENTORY_ENTITY__ %}
-{%- set inventory = states(inventory_entity)
-    if inventory_entity is not none else 'unknown' %}
-{%- set unit = state_attr(inventory_entity, 'unit_of_measurement')
-    if inventory_entity is not none else none %}
-{%- if is_number(inventory) and inventory | float > 0 %}
-{%- set formatted = ('%.3f' | format(inventory | float)) | replace('.', ',') %}
-{%- set display = formatted ~ ' ' ~ unit if unit else formatted %}
-<p>Beim Start der Bilanz waren bereits <strong>{{ display }}</strong> im
-Speicher. Für diese Energie sind Herkunft und Preis unbekannt. Ihre Entladung
-wird deshalb korrekt mit <strong>0 €</strong> bewertet. Sobald dieser
-Anfangsbestand abgebaut ist, kann weitere bepreiste Entladung in die
-Netto-Ersparnis eingehen. Das ist kein Messfehler.</p>
-{%- endif %}
 </details>
 """
 
@@ -480,18 +461,11 @@ def _savings_status_card(status_entity_id: str | None) -> dict[str, Any]:
     }
 
 
-def _savings_explanation_card(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
-    """Bündelt statische Hinweise und den optionalen Anfangsbestand."""
-    inventory_entity_id = _entity_id(
-        hass, "sensor", f"{entry_id}_economics_unvalued_inventory"
-    )
-    content = _SAVINGS_EXPLANATION_TEMPLATE.replace(
-        _SAVINGS_INVENTORY_ENTITY_PLACEHOLDER,
-        _jinja_entity(inventory_entity_id),
-    )
+def _savings_explanation_card() -> dict[str, Any]:
+    """Bündelt die statischen Hinweise zur Berechnung und Datenbasis."""
     return {
         "type": "markdown",
-        "content": content,
+        "content": _SAVINGS_EXPLANATION_TEMPLATE,
     }
 
 
@@ -788,7 +762,7 @@ async def async_build_dashboard_config(
     tariff_plan_card = _tariff_plan_card(hass, entry_id)
 
     savings_status_card = _savings_status_card(status_entity_id)
-    savings_explanation_card = _savings_explanation_card(hass, entry_id)
+    savings_explanation_card = _savings_explanation_card()
     savings_result_entity_id = _entity_id(
         hass, "sensor", f"{entry_id}_economics_net_savings"
     )

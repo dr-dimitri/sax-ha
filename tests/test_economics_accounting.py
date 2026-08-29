@@ -16,7 +16,6 @@ from custom_components.sax_power.domain.economics_accounting import (
     capacity_inventory_correction,
     compute_economics_delta,
     compute_operating_result_high_water,
-    initial_unvalued_inventory_kwh,
     min_soc_inventory_correction,
 )
 from custom_components.sax_power.domain.energy_accounting import (
@@ -211,18 +210,6 @@ def test_pv_charge_efficiency_losses_reduce_the_result_without_a_factor() -> Non
     assert lossless.avoided_grid_cost_delta - discharge.avoided_grid_cost_delta == (
         pytest.approx(0.1 * 0.30)
     )
-
-
-# --------------------------------------------------------------------------
-# Anfangsbestand
-# --------------------------------------------------------------------------
-def test_initial_inventory_waits_for_numeric_capacity_and_soc() -> None:
-    assert initial_unvalued_inventory_kwh(None, 50.0) is None
-    assert initial_unvalued_inventory_kwh(10.0, None) is None
-
-
-def test_initial_inventory_is_capacity_times_soc_share() -> None:
-    assert initial_unvalued_inventory_kwh(10.0, 40) == pytest.approx(4.0)
 
 
 # --------------------------------------------------------------------------

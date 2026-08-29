@@ -96,7 +96,6 @@ from .domain.economics_accounting import (
     capacity_inventory_correction,
     compute_economics_delta,
     compute_operating_result_high_water,
-    initial_unvalued_inventory_kwh,
     min_soc_inventory_correction,
 )
 from .domain.economics_amortization import (
@@ -193,10 +192,9 @@ def _economics_capacity_kwh(capacity_wh: Any) -> float | None:
 
     Eine gemeldete Kapazität von 0 (oder negativ) ist kein plausibler
     Messwert, sondern ein noch nicht gefüllter bzw. gestörter
-    SunSpec-Block. Sie darf weder einen Anfangsbestand von 0 bootstrappen
-    noch den unbewerteten Bestand auf 0 deckeln - beides verwürfe einen
-    real vorhandenen Bestand und erzeugte beim nächsten Entladen exakt den
-    kostenlosen Scheingewinn aus dem verworfenen Issue #42.
+    SunSpec-Block. Sie darf den internen unbewerteten Bestand nicht auf 0
+    deckeln - das verwürfe eine während einer Preislücke tatsächlich
+    geladene Energiemenge.
     price_optimizer._context behandelt denselben Rohwert aus demselben
     Grund als unbekannt.
     """
@@ -525,10 +523,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # None-bis-Bootstrap-Logik, zusätzlich gebunden an
         # SaxTariffProvider.config.enabled - solange der Tarif deaktiviert
         # ist, bleibt die gesamte Bilanz unangetastet (siehe
-        # _accumulate_economics). unvalued_inventory_kwh ist der noch nicht
-        # bepreiste Energiebestand im Speicher (Anfangsbestand beim
-        # erstmaligen Aktivieren plus seither nicht bepreisbar geladene
-        # Energie, abzüglich seither entladener unbewerteter Energie).
+        # _accumulate_economics). unvalued_inventory_kwh ist der seit dem
+        # Bilanzstart nicht bepreiste Energiebestand im Speicher, abzüglich
+        # seither entladener unbewerteter Energie. Der beim Start bereits
+        # vorhandene Speicherinhalt wird bewusst mit 0 EUR angesetzt und
+        # gehört deshalb nicht zu diesem Bestand.
         self._economics_grid_charge_cost_eur: float | None = None
         self._economics_pv_opportunity_cost_eur: float | None = None
         self._economics_avoided_grid_cost_eur: float | None = None
@@ -873,10 +872,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if tariff_enabled:
             self._bootstrap_economics_if_ready(data)
         if self._economics_started_at is None:
-            # Nie aktiviert, oder aktiviert, aber Kapazität/SOC noch nicht
-            # numerisch bekannt (SunSpec-Modus nicht erreichbar) - die
-            # Bilanz wartet, statt mit einem erfundenen Anfangsbestand zu
-            # starten.
+            # Nie aktiviert, oder wegen eines unlesbaren Stores blockiert.
             self._publish_economics_balance(data, monetary_available=False)
             self._publish_amortization(data, monetary_available=False)
             self._publish_economics_status(
@@ -1375,8 +1371,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Fasst zusammen, ob und warum die Wirtschaftlichkeitsbilanz gerade
         vertrauenswürdig ist - eine Geldzahl ohne Aussage zur Datenqualität
         ist irreführend. Läuft unabhängig vom `frozen`/Bootstrap-Zweig in
-        _accumulate_economics, damit auch waiting_for_initial_state und
-        storage_error sichtbar werden, bevor die Bilanz je gestartet ist.
+        _accumulate_economics, damit auch storage_error sichtbar wird,
+        bevor die Bilanz je gestartet ist.
 
         Den Zustand bestimmen ausschließlich die Abdeckungen des LAUFENDEN
         Kalendertages (dieselben Tages-Buckets wie in
@@ -1403,7 +1399,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         status = compute_economics_status(
             tariff_enabled=tariff_enabled,
             storage_error=self._economics_store_write_blocked,
-            started=self._economics_started_at is not None,
             price_unavailable=self._economics_price_unavailable,
             origin_unavailable=not self._energy_origin_initialized(),
             priced_charge_kwh_today=self._economics_current_day_priced_charge_kwh,
@@ -1490,23 +1485,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
         }
 
-    def _bootstrap_economics_if_ready(self, data: dict[str, Any]) -> None:
+    def _bootstrap_economics_if_ready(self, _data: dict[str, Any]) -> None:
         """Startet die Bilanz beim erstmaligen Aktivieren.
 
-        Wartet, bis battery_capacity und battery_soc numerisch bekannt
-        sind - beide stammen wie battery_soc_min aus demselben
-        SunSpec-Modus-Block (Model 802) und teilen sich denselben
-        Skalierungsfaktor, der dafür erreichbar sein muss. Bewusst NICHT
-        die Basic-Mode-SOC (data["soc"]), damit Anfangsbestand und
-        SOC-Minimum-Korrektur konsistent aus derselben Quelle wie
-        battery_soc_min stammen. Der Anfangsbestand (unvalued_inventory_kwh)
-        macht die zu diesem Zeitpunkt bereits im Speicher liegende Energie
-        unbekannter Herkunft sichtbar, statt sie beim ersten Entladen als
-        kostenlosen Gewinn zu verbuchen (siehe anforderung.yaml,
-        REQ-ECONOMICS-ACCOUNTING, "Ehrlicher Start"). Läuft nur einmal: Ist
-        economics_started_at bereits gesetzt (laufender Betrieb oder aus
-        dem Store geladen), passiert hier nichts mehr - auch nicht nach
-        einem zwischenzeitlichen Deaktivieren/Reaktivieren des Tarifs.
+        Der beim Start bereits vorhandene Speicherinhalt wird mit 0 EUR
+        angesetzt. Die Bilanz startet deshalb unabhängig von Kapazität und
+        Ladezustand mit einem unbewerteten Bestand von 0 kWh. Läuft nur
+        einmal: Ist economics_started_at bereits gesetzt (laufender Betrieb
+        oder aus dem Store geladen), passiert hier nichts mehr - auch nicht
+        nach einem zwischenzeitlichen Deaktivieren/Reaktivieren des Tarifs.
 
         Läuft außerdem NICHT, solange der Store als unlesbar gilt
         (_economics_store_write_blocked, REQ-ECONOMICS-OBSERVABILITY,
@@ -1521,17 +1508,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or self._economics_store_write_blocked
         ):
             return
-        inventory = initial_unvalued_inventory_kwh(
-            _economics_capacity_kwh(data.get("battery_capacity")),
-            data.get("battery_soc"),
-        )
-        if inventory is None:
-            return
         self._economics_grid_charge_cost_eur = 0.0
         self._economics_pv_opportunity_cost_eur = 0.0
         self._economics_avoided_grid_cost_eur = 0.0
         self._economics_operating_result_high_water_eur = 0.0
-        self._economics_unvalued_inventory_kwh = inventory
+        self._economics_unvalued_inventory_kwh = 0.0
         self._economics_unpriced_charge_kwh = 0.0
         self._economics_unpriced_discharge_kwh = 0.0
         self._economics_priced_charge_kwh = 0.0
@@ -1566,9 +1547,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ausschließlich die fünf monetären Sensoren (device_class monetary)
         auf None aus - ein deaktivierter Tarif darf keinen Betrag mehr
         zeigen, unabhängig davon, dass intern (siehe _accumulate_economics)
-        weiter akkumuliert wird. Bestand und Unpriced-Zähler sind keine
-        Geldwerte und bleiben deshalb auch während einer Tarifpause
-        sichtbar.
+        weiter akkumuliert wird. Die internen Bestands- und
+        Preisabdeckungszähler bleiben davon unberührt.
         """
         grid_cost = self._economics_grid_charge_cost_eur if monetary_available else None
         pv_cost = (
@@ -1593,21 +1573,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # einzigen erlaubten Rücksprung dieses sonst monotonen Werts: den
         # kontrollierten Bilanzneustart.
         data["economics_net_savings_last_reset"] = self._economics_started_at
-        data["economics_unvalued_inventory"] = (
-            None
-            if self._economics_unvalued_inventory_kwh is None
-            else round(self._economics_unvalued_inventory_kwh, 3)
-        )
-        data["economics_unpriced_charge"] = (
-            None
-            if self._economics_unpriced_charge_kwh is None
-            else round(self._economics_unpriced_charge_kwh, 3)
-        )
-        data["economics_unpriced_discharge"] = (
-            None
-            if self._economics_unpriced_discharge_kwh is None
-            else round(self._economics_unpriced_discharge_kwh, 3)
-        )
 
     def notify_tariff_revision(self) -> None:
         """Options-Änderung: Zeitpunkt der letzten Tarifrevision merken.
@@ -1827,9 +1792,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Netto-Ersparnis-Höchststand, die Preisabdeckungszähler
         (priced_*/unpriced_*), die Tages-Buckets, den
         Aktivierungs-/Revisionszeitpunkt und einen bereits erreichten
-        Payback-Zeitpunkt zurück, initialisiert den unbekannten
-        Anfangsbestand erneut wie beim erstmaligen Aktivieren (03/06) - und
-        rührt dabei nie `energy_charged`/`energy_discharged` oder die
+        Payback-Zeitpunkt zurück, setzt den unbewerteten Bestand wie beim
+        erstmaligen Aktivieren auf 0 - und rührt dabei nie
+        `energy_charged`/`energy_discharged` oder die
         Herkunftszähler aus REQ-ENERGY-ORIGIN an. `reason` ist rein
         diagnostisch: er wird zusammen mit dem UTC-Zeitpunkt dieses
         Neustarts persistiert (EconomicsState.last_restart_at/
@@ -1855,19 +1820,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_key="economics_restart_not_ready",
             )
 
-        current_data = self.data or {}
-        inventory = initial_unvalued_inventory_kwh(
-            _economics_capacity_kwh(current_data.get("battery_capacity")),
-            current_data.get("battery_soc"),
-        )
-        if inventory is None:
-            raise ServiceValidationError(
-                "Bilanzneustart benötigt aktuell bekannte Speicherkapazität "
-                "und Ladezustand (SunSpec-Modus gerade nicht erreichbar?)",
-                translation_domain=DOMAIN,
-                translation_key="economics_restart_missing_initial_values",
-            )
-
         now = dt_util.utcnow()
         new_state = replace(
             self._economics_state(),
@@ -1875,7 +1827,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             pv_opportunity_cost_eur=0.0,
             avoided_grid_cost_eur=0.0,
             operating_result_high_water_eur=0.0,
-            unvalued_inventory_kwh=inventory,
+            unvalued_inventory_kwh=0.0,
             unpriced_charge_kwh=0.0,
             unpriced_discharge_kwh=0.0,
             priced_charge_kwh=0.0,
@@ -1904,7 +1856,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_pv_opportunity_cost_eur = 0.0
         self._economics_avoided_grid_cost_eur = 0.0
         self._economics_operating_result_high_water_eur = 0.0
-        self._economics_unvalued_inventory_kwh = inventory
+        self._economics_unvalued_inventory_kwh = 0.0
         self._economics_unpriced_charge_kwh = 0.0
         self._economics_unpriced_discharge_kwh = 0.0
         self._economics_priced_charge_kwh = 0.0

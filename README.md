@@ -590,27 +590,16 @@ Entladeenergie, nie ein Sollwert:
   Ladeverluste bleiben in den Kostenpositionen und im Diagnose-Rohwert
   sichtbar.
 
-Zusätzlich zeigen zwei Diagnosesensoren, welcher Anteil der Ladeenergie
-(noch) nicht bewertet werden konnte: **Unbepreiste Ladeenergie**/
-**Unbepreiste Entladeenergie** (z. B. weil der dynamische Preis-Sensor
-kurzzeitig ausgefallen war) sowie der **Unbewertete Energiebestand**
-(Herkunft-unbekannt- und unbepreist geladene Energie, die noch im Speicher
-liegt). Die Sensoren **Aktueller Netzbezugspreis** und
-**Einspeisevergütung** zeigen den gerade angewendeten Tarif.
-
-**Ehrlicher Start:** Bereits vor der Aktivierung im Speicher liegende
-Energie ist unbekannter Herkunft. Damit ihr späteres Entladen keinen
-kostenlosen Scheingewinn erzeugt, initialisiert die Integration beim
-erstmaligen Aktivieren den unbewerteten Energiebestand aus der aktuellen
-Kapazität und dem aktuellen Ladezustand - jede Entladung verbraucht zuerst
-diesen Bestand, ohne dabei vermiedene Netzkosten zu erzeugen. Erst danach
-gilt eine Entladung als vermiedener Netzbezug. Eine spätere Tarifänderung
-wirkt ausschließlich auf künftige Beträge; bereits verbuchte Werte bleiben
-unverändert.
+Die Sensoren **Aktueller Netzbezugspreis** und **Einspeisevergütung** zeigen
+den gerade angewendeten Tarif. Beim erstmaligen Aktivieren setzt die
+Integration die bereits im Speicher vorhandene Energie mit 0 EUR an. Sie wird
+nicht als unbekannte Energiemenge nachgeführt; bei maximal 7 kWh ist ihr
+einmaliger Einfluss auf die Amortisationsrechnung vernachlässigbar. Eine
+spätere Tarifänderung wirkt ausschließlich auf künftige Beträge; bereits
+verbuchte Werte bleiben unverändert.
 
 Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
-ist oder die Bilanz noch auf Kapazität/Ladezustand wartet - ein
-deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
+ist - ein deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
 
 Beim ersten Start nach einem Update von einem älteren Bilanzspeicher ist nur
 der aktuelle Roh-Cashflow sicher bekannt. Die Netto-Ersparnis beginnt deshalb
@@ -633,8 +622,8 @@ bereits festgehaltene Ersparnis nicht; ein echtes Ergebnis von 0 bleibt als
 0 EUR sichtbar. Die unmittelbar darüber erläuterte Upgrade-Grenze gilt auch
 für diese Darstellung.
 
-Die Erläuterungen zur Berechnung, zur Recorder-Datenbasis, zur freien
-Zeitraumauswahl und zum gegebenenfalls vorhandenen Anfangsbestand sind nach
+Die Erläuterungen zur Berechnung, zur Recorder-Datenbasis und zur freien
+Zeitraumauswahl sind nach
 den Zeitraumwerten unter **Hinweise zur Berechnung und Datenbasis**
 zusammengefasst und
 standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
@@ -667,29 +656,17 @@ Ertrag bleibt zeitlich nicht zuordenbar und wird deshalb ausschließlich in der
 ROI-/Amortisationsdarstellung berücksichtigt, nicht in Tag, Woche, Monat oder
 Jahr.
 
-### Status und unbewerteter Anfangsbestand
+### Status
 
 Im gesunden Zustand `active` bleibt der Tab ruhig: Der Statushinweis am Ende
 des Tabs blendet sich vollständig aus. Nur wenn Handlungsbedarf besteht oder
 ein Wert ohne Kontext missverständlich wäre, erscheint genau ein kurzer
-Hinweis. Er erklärt einen deaktivierten Tarif, das Warten auf Kapazität und
-Ladezustand, einen fehlenden Strompreis, unbekannte Ladeenergieherkunft,
+Hinweis. Er erklärt einen deaktivierten Tarif, einen fehlenden Strompreis,
+unbekannte Ladeenergieherkunft,
 teilweise Preisabdeckung oder einen angehaltenen Bilanz-Store. Unbekannte oder
 noch nicht verfügbare Statusdaten werden neutral benannt. Einen separaten
 technischen Wirtschaftlichkeits-Tab oder einen Link auf einen solchen Pfad
 gibt es nicht.
-
-Innerhalb der eingeklappten Hinweiskarte erklärt ein zusätzlicher Absatz den
-unbewerteten Anfangsbestand. Ist dessen vorhandener Sensorzustand positiv,
-lautet die Aussage mit dem aktuellen, auf drei
-Dezimalstellen formatierten kWh-Wert: Beim Start der Bilanz waren bereits
-**X,XXX kWh** im Speicher; Herkunft und Preis dieser Energie sind unbekannt,
-deshalb wird ihre Entladung korrekt mit **0 €** bewertet. Sobald dieser
-Bestand abgebaut ist, kann weitere bepreiste Entladung in die Netto-Ersparnis
-eingehen. Das ist kein Messfehler. Bei 0, einem negativen oder unbekannten
-Zustand sowie einer fehlenden Entity fehlt der Absatz. Eine separate Karte
-für den Anfangsbestand gibt es nicht. Der Hinweis
-schätzt weder Restdauer noch Ladezyklen oder künftige Ersparnis.
 
 0 ist ein echtes berechnetes Netto-Ergebnis; negative Netto-Ersparnisse sind
 durch den Höchststand ausgeschlossen und `unknown`/`unavailable` werden nicht
@@ -775,7 +752,6 @@ der Wirtschaftlichkeitsbilanz gerade zu trauen ist:
 | Status | Bedeutung |
 | --- | --- |
 | Deaktiviert | Kein Tarif konfiguriert (siehe [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)) |
-| Wartet auf Initialwerte | Tarif aktiv, aber Speicherkapazität/Ladezustand noch nicht bekannt |
 | Speicherfehler | Der interne Bilanz-Speicher ist unlesbar - die Bilanz pausiert, bis die Integration neu geladen wird |
 | Preis nicht verfügbar | Seit über 6 Stunden kein gültiger Netzbezugspreis (bei einem Fest-/Zeitfenstertarif sofort, wenn die gespeicherte Konfiguration selbst ungültig ist) |
 | Herkunft nicht verfügbar | Die Herkunftsaufteilung aus [Herkunft der Ladeenergie](#herkunft-der-ladeenergie) läuft gerade nicht |
@@ -800,8 +776,8 @@ Bei einer fehlerhaften Konfiguration (z. B. einem versehentlich falsch
 eingegebenen Tarif) lässt sich über den Service **Wirtschaftlichkeitsbilanz
 neu starten** (`sax_power.restart_economics_accounting`) eine neue,
 prospektive Bilanz beginnen: Alle bisherigen Geldsummen, Preisabdeckungs-
-zähler und die Amortisationshistorie werden zurückgesetzt, der unbekannte
-Anfangsbestand wird wie bei der erstmaligen Aktivierung neu ermittelt. Der
+zähler und die Amortisationshistorie werden zurückgesetzt, der interne
+unbewertete Bestand wird wie bei der erstmaligen Aktivierung auf 0 gesetzt. Der
 Aufruf verlangt zur Sicherheit das Feld **Bestätigen** exakt auf „wahr“
 gesetzt und akzeptiert optional einen freien **Grund**-Text, der
 ausschließlich im Diagnose-Download erscheint. Die Energiezähler

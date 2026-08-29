@@ -302,7 +302,6 @@
         "name": "Economics status",
         "state": {
           "disabled": "Disabled",
-          "waiting_for_initial_state": "Waiting for initial state",
           "active": "Active",
           "partial_price_coverage": "Partial price coverage",
           "price_unavailable": "Price unavailable",
@@ -324,15 +323,6 @@
       },
       "economics_net_savings": {
         "name": "Net savings"
-      },
-      "economics_unvalued_inventory": {
-        "name": "Unvalued energy inventory"
-      },
-      "economics_unpriced_charge": {
-        "name": "Unpriced charge energy"
-      },
-      "economics_unpriced_discharge": {
-        "name": "Unpriced discharge energy"
       },
       "economics_current_import_price": {
         "name": "Current import price"
@@ -578,9 +568,6 @@
     },
     "economics_restart_not_ready": {
       "message": "A balance restart is only possible while economics is enabled and already initialized."
-    },
-    "economics_restart_missing_initial_values": {
-      "message": "Restarting the balance needs a currently known battery capacity and state of charge (is the SunSpec mode reachable?)."
     }
   },
   "services": {

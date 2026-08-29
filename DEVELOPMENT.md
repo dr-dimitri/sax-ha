@@ -243,31 +243,30 @@ keine zweite Riemann-Summe. Die reine Rechnung liegt in
 
 - `compute_economics_delta` bewertet ein Intervall: Netzladung kostet den
   Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
-  Preis, wird nichts erfunden - die Energie erhöht stattdessen `unvalued_inventory_kwh` (unbewerteter Bestand) und
-  einen `unpriced_charge`-Zähler. Jede Entladung verbraucht zuerst aus
+  Preis, wird nichts erfunden - die Energie erhöht stattdessen
+  `unvalued_inventory_kwh` (unbewerteter Bestand) und einen
+  `unpriced_charge`-Zähler. Jede Entladung verbraucht zuerst aus
   diesem Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser
-  Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst entstünde
-  beim Entladen von Alt-/Unbekannt-Bestand ein kostenloser Scheingewinn,
-  der Kernfehler des verworfenen Issues #42). Nur der danach verbleibende,
-  tatsächlich bepreist geladene Rest ("monetizable") ist den aktuellen
-  Netzbezugspreis wert.
-- `initial_unvalued_inventory_kwh`/`min_soc_inventory_correction` decken
-  den "Ehrlichen Start" ab: Der Anfangsbestand
-  (`battery_capacity * battery_soc / 100`) wird einmalig beim erstmaligen
-  Aktivieren gesetzt (`SaxPowerCoordinator._bootstrap_economics_if_ready`,
-  wartet auf numerisch bekannte `battery_capacity`/`battery_soc` - beide
-  aus demselben SunSpec-Modus-Block wie `battery_soc_min`, bewusst nicht
-  die Basic-Mode-SOC), und am geräteseitig gemeldeten SOC-Minimum
-  (`data["battery_soc_min"]`) wird ein rechnerisch nie ganz auf 0
-  gelaufener Rest verworfen und diagnostisch geloggt.
+  Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst würde eine
+  vorausgegangene Preislücke einen kostenlosen Scheingewinn erzeugen). Nur
+  der danach verbleibende,
+  monetarisierbare Rest (bepreist geladen oder beim Bilanzstart mit 0 EUR
+  angesetzt) ist den aktuellen Netzbezugspreis wert.
+- `_bootstrap_economics_if_ready` setzt den unbewerteten Bestand unabhängig
+  von Kapazität und SOC auf 0: Der beim erstmaligen Aktivieren bereits
+  vorhandene Speicherinhalt wird mit 0 EUR angesetzt. Am geräteseitig
+  gemeldeten SOC-Minimum verwirft `min_soc_inventory_correction` weiterhin
+  einen rechnerisch nie ganz auf 0 gelaufenen Rest aus späteren Preislücken
+  und protokolliert die Korrektur diagnostisch.
 - `capacity_inventory_correction` deckelt den Bestand bei jedem Tick auf den
-  tatsächlichen Speicherinhalt (`capacity_kwh * battery_soc / 100`, dieselbe
-  Größe wie der Anfangsbestand). Ohne diesen Deckel bliebe die
+  tatsächlichen Speicherinhalt (`capacity_kwh * battery_soc / 100`). Ohne
+  diesen Deckel bliebe die
   Ladeverlust-Differenz jedes *unbepreisten* Zyklus (geladen > entladen)
   dauerhaft im Bestand liegen und würde später bepreist geladene Entladung
   als unbewertet abbuchen (Issue #132). Ist Kapazität oder SOC gerade
-  unbekannt, wird nicht gedeckelt - als unbekannt gilt (wie im Bootstrap und
-  in `price_optimizer._context`) auch eine gemeldete Kapazität von 0. Geloggt wird höchstens einmal je
+  unbekannt, wird nicht gedeckelt - als unbekannt gilt (wie in
+  `price_optimizer._context`) auch eine gemeldete Kapazität von 0. Geloggt
+  wird höchstens einmal je
   `INVENTORY_CAP_LOG_INTERVAL_SECONDS`; die insgesamt verworfene Menge steht
   als `inventory_capped_kwh` im Diagnose-Download.
 
@@ -314,12 +313,12 @@ geladene Energie landet dadurch automatisch im unbewerteten Bestand statt
 unbeobachtet zu bleiben - andernfalls würde eine nach dem Reaktivieren
 erfolgende Entladung dieser Energie fälschlich vollständig als vermiedenen
 Netzbezug monetarisieren (derselbe Scheingewinn-Fehler wie bei #42, nur
-über den Umweg einer Pause statt des Anfangsbestands). Nur die
+über den Umweg einer Pause). Nur die
 VERÖFFENTLICHTEN fünf monetären Sensoren blenden während einer Pause auf
 `None` (`_publish_economics_balance(..., monetary_available=...)`) statt
-auf die weiter mitlaufenden internen Summen; `unvalued_inventory_kwh`/
-`unpriced_charge_kwh`/`unpriced_discharge_kwh` sind keine Geldwerte und
-bleiben sichtbar. `economics_current_import_price`/
+auf die weiter mitlaufenden internen Summen. `unvalued_inventory_kwh`,
+`unpriced_charge_kwh` und `unpriced_discharge_kwh` bleiben rein intern und
+werden nicht als Entities veröffentlicht. `economics_current_import_price`/
 `economics_feed_in_price` sind reine Durchreichungen des aktuellen Tarifs
 und unabhängig vom Bilanz-Bootstrap immer aktuell -
 `SaxTariffProvider.feed_in_price_eur_kwh` validiert dafür selbst den
@@ -405,10 +404,9 @@ Macht sichtbar, ob und warum die Bilanz gerade vertrauenswürdig ist, ohne
 selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
 `domain/economics_status.py`:
 
-- `EconomicsStatus` (sieben Werte) und `compute_economics_status(...)`
+- `EconomicsStatus` (sechs Werte) und `compute_economics_status(...)`
   bilden eine feste Prioritätsreihenfolge aus mehreren, ggf. gleichzeitig
-  zutreffenden Booleans ab: `disabled` > `storage_error` >
-  `waiting_for_initial_state` > `price_unavailable` >
+  zutreffenden Booleans ab: `disabled` > `storage_error` > `price_unavailable` >
   `origin_unavailable` > `partial_price_coverage` > `active`. `disabled`
   gilt ausschließlich bei deaktiviertem Tarif und schlägt dabei jeden
   anderen Zustand.
@@ -430,8 +428,8 @@ selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
 
 `SaxPowerCoordinator._publish_economics_status` (aufgerufen am Ende von
 `_accumulate_economics`, unabhängig vom `frozen`-Zweig, damit auch
-`waiting_for_initial_state`/`storage_error` sichtbar werden, bevor die
-Bilanz je gestartet ist) setzt das zusammen:
+`storage_error` sichtbar wird, bevor die Bilanz je gestartet ist) setzt das
+zusammen:
 
 - Zwei neue Lifetime-Zähler `_economics_priced_charge_kwh`/
   `_economics_priced_discharge_kwh` (Gegenstück zu den bestehenden
@@ -471,8 +469,8 @@ Kontrollierter Bilanzneustart
 `sax_power.restart_economics_accounting`, `confirm` muss exakt `true`
 sein): setzt ausschließlich die drei Geldsummen, die vier
 Preisabdeckungszähler, die Tages-Buckets und den Aktivierungs-/
-Payback-Zeitpunkt zurück, initialisiert den Anfangsbestand erneut wie bei
-der erstmaligen Aktivierung - rührt niemals `energy_charged`/
+Payback-Zeitpunkt zurück, setzt den unbewerteten Bestand wie bei der
+erstmaligen Aktivierung auf 0 - rührt niemals `energy_charged`/
 `energy_discharged` oder die Herkunftszähler an. Speichert atomar über
 `EconomicsStateStore.async_reset` VOR jeder In-Memory-Änderung: dessen
 `_valid_snapshot` prüft weiterhin Endlichkeit/Wertebereich, überspringt
@@ -558,9 +556,7 @@ Block besitzt keine eigene Markdown-Überschrift "Amortisation".
 Home Assistants Recorder. `_savings_free_period_block` verbindet
 `energy-date-selection`, statistic und statistics-graph über
 `energy_sax_power_savings`, ohne eine separate Markdown-Überschrift "Freier
-Zeitraum". Die eingeklappte Erklärung ergänzt den
-unbewerteten Anfangsbestand nur bei positivem Sensorwert; der Statushinweis
-rendert im gesunden Zustand leer.
+Zeitraum". Der Statushinweis rendert im gesunden Zustand leer.
 
 Fehlende Registry-Entities werden weiterhin einzeln ausgelassen. Ohne
 `economics_net_savings` entfallen KPI-Grid, seine Detailzeile und der gesamte
@@ -1107,7 +1103,7 @@ tests/
 │                                  monetarisierbare Entladung, fehlender Preis bei
 │                                  Entladung wird nicht rückwirkend bewertet,
 │                                  Ladeverlust-Sichtbarkeit ohne angenommenen
-│                                  Wirkungsgradfaktor, Anfangsbestand sowie
+│                                  Wirkungsgradfaktor sowie
 │                                  SOC-Minimum-Korrektur
 ├── test_economics_persistence.py    Persistenz der Wirtschaftlichkeitsbilanz
 │                                  (REQ-ECONOMICS-ACCOUNTING): Store-Round-Trip, negative
@@ -1119,8 +1115,8 @@ tests/
 │                                  nach einem unvollständigen Sieben-Felder-Bündel ohne an
 │                                  der alten Teil-Baseline zu scheitern, zwei getrennte
 │                                  Config Entries, Drosselung/Sofort-Flush sowie der
-│                                  Coordinator-Bootstrap (wartet auf Kapazität/SOC,
-│                                  deaktivierter Tarif bootstrapped nicht, Shutdown-Flush,
+│                                  Coordinator-Bootstrap (Anfangsbestand 0 ohne
+│                                  Kapazität/SOC, deaktivierter Tarif bootstrapped nicht, Shutdown-Flush,
 │                                  Tarifrevisions-Zeitstempel); zusätzlich die
 │                                  Tages-Buckets/Payback-Erweiterung (REQ-ECONOMICS-
 │                                  AMORTIZATION): Round-Trip von day_results/current_day/
@@ -1139,7 +1135,7 @@ tests/
 │                                  test_coordinator.py
 ├── test_economics_status.py         Reine Status-/Abdeckungsableitung
 │                                  (REQ-ECONOMICS-OBSERVABILITY,
-│                                  domain/economics_status.py): jeder der sieben Status
+│                                  domain/economics_status.py): jeder der sechs Status
 │                                  einzeln sowie kombinierte, gleichzeitig zutreffende
 │                                  Probleme (Priorität), Preisabdeckung energiebasiert mit
 │                                  100 % bei Nenner 0; die Coordinator-seitige Verdrahtung

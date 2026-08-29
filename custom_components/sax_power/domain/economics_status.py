@@ -1,7 +1,7 @@
 """Pure status/coverage derivation für die Wirtschaftlichkeitsauswertung.
 
 Siehe anforderung.yaml, REQ-ECONOMICS-OBSERVABILITY. Framework-unabhängig:
-bekommt bereits ausgewertete Zustände (Store-Fehler, Bootstrap, Preis-
+bekommt bereits ausgewertete Zustände (Store-Fehler, Preis-
 Verfügbarkeit, Herkunfts-/Preisabdeckung) als einfache Werte übergeben -
 keine eigene Uhr, kein Zugriff auf Coordinator/Options/hass.
 """
@@ -39,13 +39,12 @@ class EconomicsStatus(StrEnum):
     """Stabile, maschinenlesbare Zustände des Status-Sensors economics_status.
 
     Priorität (höchste zuerst): DISABLED (unabhängig von allem anderen,
-    solange der Tarif deaktiviert ist) > STORAGE_ERROR >
-    WAITING_FOR_INITIAL_STATE > PRICE_UNAVAILABLE > ORIGIN_UNAVAILABLE >
+    solange der Tarif deaktiviert ist) > STORAGE_ERROR > PRICE_UNAVAILABLE >
+    ORIGIN_UNAVAILABLE >
     PARTIAL_PRICE_COVERAGE > ACTIVE - siehe compute_economics_status.
     """
 
     DISABLED = "disabled"
-    WAITING_FOR_INITIAL_STATE = "waiting_for_initial_state"
     ACTIVE = "active"
     PARTIAL_PRICE_COVERAGE = "partial_price_coverage"
     PRICE_UNAVAILABLE = "price_unavailable"
@@ -57,7 +56,6 @@ def compute_economics_status(
     *,
     tariff_enabled: bool,
     storage_error: bool,
-    started: bool,
     price_unavailable: bool,
     origin_unavailable: bool,
     priced_charge_kwh_today: float | None,
@@ -96,8 +94,6 @@ def compute_economics_status(
         return EconomicsStatus.DISABLED
     if storage_error:
         return EconomicsStatus.STORAGE_ERROR
-    if not started:
-        return EconomicsStatus.WAITING_FOR_INITIAL_STATE
     if price_unavailable:
         return EconomicsStatus.PRICE_UNAVAILABLE
     if origin_unavailable:
@@ -124,8 +120,7 @@ def is_price_coverage_partial(
     einem noch leeren Tagesbucket auf 0 % Abdeckung laufen, die absolute
     allein würde jeden längeren Preisausfall an einem energiereichen Tag
     verschweigen. Zähler, die noch nicht initialisiert sind (None), sind
-    kein Abdeckungsproblem - das deckt bereits
-    waiting_for_initial_state/storage_error ab.
+    kein Abdeckungsproblem - das deckt bereits storage_error ab.
     """
     if priced_kwh is None or unpriced_kwh is None:
         return False

@@ -1045,6 +1045,9 @@ async def _async_missing_dashboard_views(
             "economics_average_daily_result_30d",
             "economics_projected_annual_result",
             "economics_estimated_payback_date",
+            "economics_unvalued_inventory",
+            "economics_unpriced_charge",
+            "economics_unpriced_discharge",
         )
     ):
         outdated_paths.add("ersparnis")

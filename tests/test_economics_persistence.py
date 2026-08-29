@@ -33,6 +33,7 @@ from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.infrastructure.economics_store import (
     ECONOMICS_SAVE_DELAY,
     STORAGE_KEY_PREFIX,
+    STORAGE_MINOR_VERSION,
     EconomicsState,
     EconomicsStateStore,
 )
@@ -126,6 +127,76 @@ async def test_store_round_trips_the_full_balance(hass) -> None:
 
     assert loaded == state
     assert loaded.initialized is True
+
+
+async def test_real_minor_six_store_values_its_remaining_inventory_at_zero(
+    hass, hass_storage
+) -> None:
+    """Ein bereits installierter Snapshot übernimmt die neue Startbewertung.
+
+    Minor-Version 6 führte den beim Bilanzstart vorhandenen Speicherinhalt
+    noch als unbewertet. Die Migration verwirft ausschließlich diesen
+    verbleibenden Bestand; Geldhistorie, Bilanzbeginn und die kumulierten
+    Preisabdeckungszähler bleiben erhalten.
+    """
+    started_at = dt_util.utcnow() - timedelta(days=7)
+    payload = EconomicsStateStore._serialize(
+        _full_state(
+            started_at,
+            unvalued_inventory_kwh=3.5,
+            unpriced_charge_kwh=1.25,
+            unpriced_discharge_kwh=0.5,
+        )
+    )
+    _seed_real_store(
+        hass_storage,
+        "zero-valued-inventory",
+        payload,
+        version=1,
+        minor_version=6,
+    )
+
+    loaded = await EconomicsStateStore(hass, "zero-valued-inventory").async_load()
+
+    assert loaded is not None
+    assert loaded.unvalued_inventory_kwh == 0.0
+    assert loaded.grid_charge_cost_eur == 10.0
+    assert loaded.economics_started_at == started_at
+    assert loaded.unpriced_charge_kwh == 1.25
+    assert loaded.unpriced_discharge_kwh == 0.5
+    envelope = hass_storage[f"{STORAGE_KEY_PREFIX}.zero-valued-inventory"]
+    assert envelope["minor_version"] == STORAGE_MINOR_VERSION
+    assert envelope["data"]["unvalued_inventory_kwh"] == 0.0
+
+    # Die neue Minor-Version ist die dauerhafte Migrationsmarkierung: Ein
+    # weiterer Reload darf keinen anderen Teil der Bilanz mehr verändern.
+    assert (
+        await EconomicsStateStore(hass, "zero-valued-inventory").async_load() == loaded
+    )
+
+
+async def test_real_minor_six_store_does_not_repair_an_invalid_inventory(
+    hass, hass_storage
+) -> None:
+    """Die Semantikmigration darf einen korrupten Kernstand nicht heilen."""
+    payload = EconomicsStateStore._serialize(_full_state(dt_util.utcnow()))
+    payload["unvalued_inventory_kwh"] = -1
+    _seed_real_store(
+        hass_storage,
+        "invalid-legacy-inventory",
+        payload,
+        version=1,
+        minor_version=6,
+    )
+
+    loaded = await EconomicsStateStore(hass, "invalid-legacy-inventory").async_load()
+
+    assert loaded is not None
+    assert loaded.unvalued_inventory_kwh is None
+    assert loaded.initialized is False
+    envelope = hass_storage[f"{STORAGE_KEY_PREFIX}.invalid-legacy-inventory"]
+    assert envelope["minor_version"] == STORAGE_MINOR_VERSION
+    assert envelope["data"]["unvalued_inventory_kwh"] == -1
 
 
 async def test_store_allows_negative_money_sums(hass) -> None:
@@ -1089,7 +1160,10 @@ async def test_real_minor_five_store_starts_fresh_daily_net_savings_history(
     )
 
     await coordinator.async_shutdown()
-    assert hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"]["minor_version"] == 6
+    assert (
+        hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"]["minor_version"]
+        == STORAGE_MINOR_VERSION
+    )
     assert (
         hass_storage[f"{STORAGE_KEY_PREFIX}.{entry_id}"]["data"][
             "operating_result_high_water_eur"

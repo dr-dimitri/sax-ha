@@ -3299,6 +3299,14 @@ requirement_economics_accounting:
     Removed-Entity-Cleanup gelöscht, statt dauerhaft unavailable zu bleiben;
     die neue Unique-ID economics_net_savings_today bleibt davon unberührt.
 
+    STORAGE_MINOR_VERSION 7 migriert den in älteren Snapshot-Ständen noch
+    unbekannt geführten Anfangsbestand einmalig auf
+    unvalued_inventory_kwh = 0. Die neue Store-Minor-Version dient als
+    dauerhafte Migrationsmarkierung; Geldsummen, economics_started_at sowie
+    bepreiste und unbepreiste Preisabdeckungszähler bleiben unverändert. Ein
+    fehlender oder ungültiger Bestandswert wird dabei nicht auf 0 repariert,
+    sondern entwertet weiterhin das vollständige Kernbündel.
+
     Scheitert das Laden selbst (I/O-Fehler, unbekannte künftige
     Storage-Hauptversion), bleiben Rechnung und Bootstrap normal im
     Arbeitsspeicher aktiv (analog zu ControlConfigLoadStatus.FAILED), aber
@@ -3787,7 +3795,11 @@ requirement_economics_savings_dashboard:
     Gespeicherte veraltete Dashboardstände werden weiterhin nur gemeldet und
     niemals automatisch überschrieben. sax_power.reinstall_dashboard erzeugt
     deterministisch alle fünf Views; Erstanlage und normale Create-Aufrufe
-    bleiben idempotent.
+    bleiben idempotent. Die Veraltet-Erkennung umfasst auch Referenzen auf die
+    entfallenen Sensoren economics_unvalued_inventory,
+    economics_unpriced_charge und economics_unpriced_discharge, damit alte
+    Dashboardtexte nach dem Registry-Cleanup nicht unbemerkt gespeichert
+    bleiben.
   acceptance_criteria:
     - "Die View-Reihenfolge endet exakt mit ersparnis; Titel, Pfad und das
        Icon mdi:cash-multiple sind regression-getestet. Ein View mit dem Pfad
@@ -3812,4 +3824,5 @@ requirement_economics_savings_dashboard:
     - "Statuszustände sind mit gerenderten Template-Tests abgesichert;
        fehlende Entities erzeugen keine ungültigen Karten."
     - "Create, Reinstall und die Erkennung veralteter Dashboardstände bleiben
-       mit fünf Views getestet."
+       mit fünf Views getestet; ein gespeicherter Verweis auf einen
+       entfallenen Wirtschaftlichkeitssensor löst den Reparaturhinweis aus."

@@ -22,7 +22,8 @@ Tages-Buckets/Payback-Erweiterung aus REQ-ECONOMICS-AMORTIZATION, die
 kumulierten bepreisten Lade-/Entlademengen, den zuletzt verwendeten
 Bilanzneustart-Grund aus REQ-ECONOMICS-OBSERVABILITY sowie die
 Zeitabdeckung der Tages-Buckets (observed_seconds/day_length_seconds) und
-den Netto-Ersparnis-Höchststand -
+den Netto-Ersparnis-Höchststand. Minor-Version 7 migriert zusätzlich den
+nach alter Semantik noch unbekannt geführten Anfangsbestand auf 0 kWh -
 siehe den ausführlichen Kommentar bei infrastructure/energy_store.py,
 STORAGE_VERSION für die Begründung (ein Hauptversionssprung hätte bei
 jedem bestehenden Store NotImplementedError ausgelöst).
@@ -55,7 +56,12 @@ from ..domain.economics_amortization import (
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 6
+# Minor-Version 7 ändert die Semantik des beim Bilanzstart bereits vorhandenen
+# Speicherinhalts: Bis einschließlich Version 6 wurde er als unbewerteter
+# Bestand geführt. Seit Version 7 gilt er als mit 0 EUR beschafft. Der
+# Store-Migrationspfad setzt den verbliebenen Altbestand deshalb einmalig auf
+# 0, ohne Geldsummen, Bilanzbeginn oder Preisabdeckungszähler zurückzusetzen.
+STORAGE_MINOR_VERSION = 7
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
@@ -152,6 +158,40 @@ class EconomicsState:
         )
 
 
+class _EconomicsStore(Store[dict[str, Any]]):
+    """Home-Assistant-Store mit fachlicher Minor-Version-Migration."""
+
+    async def _async_migrate_func(
+        self, old_major_version: int, old_minor_version: int, old_data: Any
+    ) -> Any:
+        """Bewerte den in Altständen geführten Anfangsbestand einmalig neu."""
+        if old_major_version != STORAGE_VERSION:
+            raise NotImplementedError
+        if old_minor_version >= STORAGE_MINOR_VERSION or not isinstance(old_data, dict):
+            return old_data
+
+        migrated = dict(old_data)
+        inventory = migrated.get("unvalued_inventory_kwh")
+        # Ein fehlender oder korrupter Kernwert muss weiterhin das gesamte
+        # Sieben-Felder-Bündel entwerten. Nur ein tatsächlich gültiger
+        # Altbestand wird migriert; damit repariert die Migration keine
+        # beschädigten Snapshots stillschweigend.
+        if (
+            isinstance(inventory, int | float)
+            and not isinstance(inventory, bool)
+            and math.isfinite(inventory)
+            and inventory >= 0
+        ):
+            migrated["unvalued_inventory_kwh"] = 0.0
+            if inventory > 0:
+                _LOGGER.info(
+                    "Bewerte gespeicherten Anfangsbestand von %.3f kWh "
+                    "bei der Migration mit 0 EUR",
+                    inventory,
+                )
+        return migrated
+
+
 class EconomicsStateStore:
     """Persist the operative money balance per config entry.
 
@@ -180,7 +220,7 @@ class EconomicsStateStore:
         on_persist_failed: Callable[[], None] | None = None,
     ) -> None:
         self._hass = hass
-        self._store: Store[dict[str, Any]] = Store(
+        self._store: Store[dict[str, Any]] = _EconomicsStore(
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY_PREFIX}.{entry_id}",

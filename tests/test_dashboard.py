@@ -1506,6 +1506,39 @@ async def test_dashboard_with_removed_amortization_forecast_is_reported(hass) ->
     assert issue.translation_placeholders["views"] == "Ersparnis"
 
 
+async def test_dashboard_with_removed_inventory_reference_is_reported(hass) -> None:
+    """Der vorherige Ersparnis-Tab behält sonst seine alte Jinja-Referenz.
+
+    Nach dem Registry-Cleanup wäre der Absatz lediglich unsichtbar; erst der
+    Reparaturhinweis ermöglicht dem Anwender, den gespeicherten Text und die
+    entfallene Entity-ID bewusst durch den aktuellen Stand zu ersetzen.
+    """
+    _register(hass, "sensor", "economics_net_savings")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    savings_view["cards"].append(
+        {
+            "type": "markdown",
+            "content": (
+                "{{ states('sensor.sax_power_economics_unvalued_inventory') }} "
+                "Beim Start der Bilanz waren bereits unbekannte kWh im Speicher."
+            ),
+        }
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
+
+
 async def test_savings_dashboard_with_old_headings_and_missing_tariff_is_reported(
     hass,
 ) -> None:

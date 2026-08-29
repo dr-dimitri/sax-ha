@@ -357,6 +357,11 @@ wird. Ihr Recorder-Beginn kann nach einem Update deshalb jünger als
 früheren Snapshot-Ständen bereits angelegten Registry-Eintrag
 `economics_result_today` über seinen exakt benannten Suffix; die neue Unique-ID
 bleibt davon unberührt.
+Minor-Version 7 setzt den aus älteren Snapshot-Ständen geladenen
+`unvalued_inventory_kwh` einmalig auf 0: Diese Stände führten den beim
+Bilanzstart bereits vorhandenen Speicherinhalt noch als unbekannt. Die
+Store-Version ist zugleich die dauerhafte Migrationsmarkierung; Geldsummen,
+Bilanzbeginn und Preisabdeckungszähler bleiben unverändert.
 `notify_tariff_revision()` (aufgerufen aus
 `__init__.async_update_options`) merkt sich nur einen rein diagnostischen
 Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
@@ -557,6 +562,13 @@ Home Assistants Recorder. `_savings_free_period_block` verbindet
 `energy-date-selection`, statistic und statistics-graph über
 `energy_sax_power_savings`, ohne eine separate Markdown-Überschrift "Freier
 Zeitraum". Der Statushinweis rendert im gesunden Zustand leer.
+
+Die Prüfung gespeicherter Dashboardstände erkennt auch die drei entfallenen
+Sensor-Suffixe `economics_unvalued_inventory`, `economics_unpriced_charge` und
+`economics_unpriced_discharge`. Damit bleibt die alte Jinja-Referenz auf den
+Anfangsbestand nach dem Registry-Cleanup nicht unbemerkt im Dashboard; der
+Reparaturhinweis bietet eine bewusste Neuinstallation an, ohne Anpassungen
+automatisch zu überschreiben.
 
 Fehlende Registry-Entities werden weiterhin einzeln ausgelassen. Ohne
 `economics_net_savings` entfallen KPI-Grid, seine Detailzeile und der gesamte

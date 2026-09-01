@@ -5,22 +5,28 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import (
     _async_register_services,
+    _async_remove_stale_entities,
     async_setup_entry,
     async_update_options,
 )
 from custom_components.sax_power.const import (
+    ATTR_CONFIRM,
     ATTR_DEVICE_ID,
     ATTR_POWER,
+    ATTR_REASON,
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
     DOMAIN,
     MAX_SETPOINT_POWER,
     MIN_SETPOINT_POWER,
+    SERVICE_RESTART_ECONOMICS_ACCOUNTING,
     SERVICE_START_GRID_CHARGE,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -99,6 +105,7 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     coordinator = MagicMock()
     coordinator.options = {}
     coordinator.price_planner.async_setup = MagicMock()
+    coordinator.tariff_provider.async_setup = MagicMock()
     coordinator.async_apply_price_plan = AsyncMock()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
@@ -117,6 +124,10 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     hass.config_entries.async_reload.assert_not_called()
     assert coordinator.options == {CONF_PRICE_SENSOR: "sensor.strompreis"}
     coordinator.price_planner.async_setup.assert_called_once()
+    # Auch die Tarifkonfiguration der Wirtschaftlichkeitsauswertung wird
+    # live übernommen (REQ-ECONOMICS-TARIFFS): async_setup registriert die
+    # Zustandsbeobachter des dynamischen Preis-Sensors idempotent neu.
+    coordinator.tariff_provider.async_setup.assert_called_once()
     coordinator.async_apply_price_plan.assert_awaited_once()
 
 
@@ -196,3 +207,165 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
     ]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     await coordinator.async_shutdown()
+
+
+# -- restart_economics_accounting (REQ-ECONOMICS-OBSERVABILITY) -------------
+async def test_restart_economics_accounting_service_requires_confirm_true(
+    hass,
+) -> None:
+    coordinator = MagicMock()
+    coordinator.async_restart_economics_accounting = AsyncMock()
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        with pytest.raises(vol.Invalid):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+                {ATTR_DEVICE_ID: "device", ATTR_CONFIRM: False},
+                blocking=True,
+            )
+
+    coordinator.async_restart_economics_accounting.assert_not_awaited()
+
+
+async def test_restart_economics_accounting_service_delegates_to_coordinator(
+    hass,
+) -> None:
+    coordinator = MagicMock()
+    coordinator.async_restart_economics_accounting = AsyncMock()
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+            {
+                ATTR_DEVICE_ID: "device",
+                ATTR_CONFIRM: True,
+                ATTR_REASON: "Tarifwechsel",
+            },
+            blocking=True,
+        )
+
+    coordinator.async_restart_economics_accounting.assert_awaited_once_with(
+        reason="Tarifwechsel"
+    )
+
+
+async def test_restart_economics_accounting_service_reason_is_optional(hass) -> None:
+    coordinator = MagicMock()
+    coordinator.async_restart_economics_accounting = AsyncMock()
+
+    with patch(
+        "custom_components.sax_power._coordinator_for_device",
+        return_value=coordinator,
+    ):
+        _async_register_services(hass)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+            {ATTR_DEVICE_ID: "device", ATTR_CONFIRM: True},
+            blocking=True,
+        )
+
+    coordinator.async_restart_economics_accounting.assert_awaited_once_with(reason=None)
+
+
+# --------------------------------------------------------------------------
+# Entfallene Entities früherer Versionen
+# --------------------------------------------------------------------------
+async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
+    """Entfallene Herkunfts-, Wirtschafts- und Prognosesensoren werden entfernt.
+
+    Home Assistant räumt sie nicht selbst weg; sie blieben sonst dauerhaft
+    als "nicht verfügbar" in Registry, Dashboards und Automationen stehen.
+    """
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, entry_id="entry")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    stale = [
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{suffix}",
+            config_entry=entry,
+        ).entity_id
+        for suffix in (
+            "energy_charged_origin_unknown",
+            "energy_origin_coverage",
+            "economics_result_today",
+            "economics_average_daily_result_30d",
+            "economics_projected_annual_result",
+            "economics_estimated_payback_date",
+            "economics_unvalued_inventory",
+            "economics_unpriced_charge",
+            "economics_unpriced_discharge",
+        )
+    ]
+    kept = [
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{suffix}",
+            config_entry=entry,
+        ).entity_id
+        for suffix in ("energy_charged_from_grid", "economics_net_savings_today")
+    ]
+
+    _async_remove_stale_entities(hass, entry)
+
+    for entity_id in stale:
+        assert registry.async_get(entity_id) is None
+    for entity_id in kept:
+        assert registry.async_get(entity_id) is not None
+
+
+async def test_removing_stale_entities_is_a_noop_without_them(hass) -> None:
+    """Der Regelfall - eine frische Installation, die diese Entities nie
+    hatte - darf dabei nichts anfassen."""
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, entry_id="fresh")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    before = set(registry.entities)
+
+    _async_remove_stale_entities(hass, entry)
+
+    assert set(registry.entities) == before
+
+
+async def test_update_options_is_a_noop_when_only_entry_data_changed(hass) -> None:
+    """async_update_entry löst diesen Listener auch bei einer reinen
+    entry.data-Änderung aus (etwa beim Wegklicken des Dashboard-Hinweises).
+    Ohne unveränderte Options darf dabei weder der diagnostische
+    Tarifrevisions-Zeitstempel zurückgesetzt noch ein Modbus-Schreibpfad
+    angestoßen werden."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=VALID_INPUT, options={CONF_PRICE_SENSOR: "sensor.preis"}
+    )
+    entry.add_to_hass(hass)
+    coordinator = MagicMock()
+    coordinator.options = dict(entry.options)
+    coordinator.async_apply_price_plan = AsyncMock()
+    hass.data[DOMAIN] = {entry.entry_id: {DATA_COORDINATOR: coordinator}}
+
+    await async_update_options(hass, entry)
+
+    coordinator.notify_tariff_revision.assert_not_called()
+    coordinator.async_apply_price_plan.assert_not_called()
+    coordinator.price_planner.async_setup.assert_not_called()
+
+    # Gegenprobe: Eine echte Options-Änderung wird weiterhin angewendet.
+    hass.config_entries.async_update_entry(
+        entry, options={CONF_PRICE_SENSOR: "sensor.anderer_preis"}
+    )
+    await async_update_options(hass, entry)
+
+    coordinator.notify_tariff_revision.assert_called_once()
+    coordinator.async_apply_price_plan.assert_awaited_once()

@@ -6,7 +6,8 @@ import asyncio
 import logging
 import math
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from time import monotonic
 from typing import Any
@@ -21,6 +22,10 @@ from pymodbus.exceptions import ModbusException
 
 from .application.calibration import CalibrationState, evaluate_calibration
 from .application.charge_policy import ChargePolicyInput, evaluate_charge_policy
+from .application.economics import (
+    investment_cost_eur_from_options,
+    prior_result_eur_from_options,
+)
 from .application.ports import ModbusClient
 from .const import (
     ALL_MONTHS,
@@ -31,6 +36,7 @@ from .const import (
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
+    ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
     GRID_CHARGE_WRITE_INTERVAL,
     ISSUE_CONTROL_CONFIG_UNREADABLE,
     ISSUE_CONTROL_CONFIG_UNRESOLVED,
@@ -85,6 +91,25 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
+from .domain.economics_accounting import (
+    EconomicsDelta,
+    capacity_inventory_correction,
+    compute_economics_delta,
+    compute_operating_result_high_water,
+    min_soc_inventory_correction,
+)
+from .domain.economics_amortization import (
+    MAX_STORED_DAYS,
+    DayEconomicsResult,
+    compute_amortization_progress_percent,
+    compute_remaining_to_payback_eur,
+    compute_roi_percent,
+)
+from .domain.economics_status import (
+    compute_economics_status,
+    compute_price_coverage_percent,
+)
+from .domain.energy_accounting import EnergyDelta, compute_charge_delta
 from .domain.registers import (
     to_signed16,
     to_unsigned16,
@@ -96,20 +121,89 @@ from .domain.sunspec import (
     decode_high_block,
     decode_low_blocks,
 )
+from .domain.tariff import (
+    QuoteResult,
+    QuoteUnavailable,
+    TariffType,
+    active_window,
+    sorted_windows,
+    window_as_mapping,
+)
 from .domain.validation import clamp_float as _clamp_float
 from .domain.validation import clamp_int as _clamp_int
 from .domain.validation import round_half_up
+from .economics import SaxTariffProvider
 from .infrastructure.calibration_store import CalibrationStateStore
 from .infrastructure.control_store import (
     ControlConfig,
     ControlConfigLoadStatus,
     ControlConfigStore,
 )
+from .infrastructure.economics_store import (
+    STORAGE_MINOR_VERSION as ECONOMICS_STORE_MINOR_VERSION,
+)
+from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .price_optimizer import PricePlan, SaxPricePlanner
 
 _LOGGER = logging.getLogger(__name__)
+
+#: Raster (Sekunden), in dem allein die fortlaufende Beobachtungsdauer des
+#: laufenden Tages ein verzögertes Speichern auslöst. Sie wächst bei JEDEM
+#: verbuchten Intervall; ohne dieses Raster schriebe der Store auch auf
+#: einem völlig ruhenden System dauerhaft alle ECONOMICS_SAVE_DELAY
+#: Sekunden (Flash-Verschleiß auf SD-Karten-Installationen). 15 Minuten
+#: sind rund 1 % eines Kalendertages. Mehr Beobachtungsdauer kann ein
+#: ungeplanter Neustart nicht verlieren. Jede andere
+#: Änderung (Geld, Energie, Tagesabschluss) speichert unverändert sofort
+#: und nimmt den aktuellen Stand dabei ohnehin mit.
+OBSERVED_TIME_SAVE_GRANULARITY_SECONDS = 900.0
+
+#: Mindestabstand zwischen zwei Log-Zeilen der Bestandsdeckelung
+#: (capacity_inventory_correction, REQ-ECONOMICS-ACCOUNTING). Der Deckel
+#: kann bei mehreren bestätigten, sinkenden SOC-Stufen wiederholt greifen -
+#: ungedrosselt entstünden daraus viele identische INFO-Zeilen. Die
+#: kumulierte Korrekturmenge steht
+#: unabhängig davon jederzeit vollständig im Diagnose-Download.
+INVENTORY_CAP_LOG_INTERVAL_SECONDS = 3600.0
+
+# Nach einer Bewegung kann der quantisierte SOC noch denselben alten Wert
+# melden. Zwei aufeinanderfolgende frische Stillstands-Ticks verhindern, dass
+# gerade nachweislich geladene unbepreiste Energie gelöscht wird (Issue #145).
+INVENTORY_CORRECTION_IDLE_CONFIRMATIONS = 2
+
+
+def _rounded(value: float | None, digits: int) -> float | None:
+    """Auf `digits` gerundeter Geld-/Prozentwert ohne negative Null.
+
+    `round(-0.0001, 2)` ergibt -0.0, und Home Assistant zeigt das als
+    "-0,0" an - ein Vorzeichen, das dem Anwender einen Verlust meldet, den
+    die gerundete Zahl selbst gar nicht mehr ausweist. Die Normalisierung
+    bleibt für negative Ergebnis- und Kostenwerte nötig. Der Vergleich
+    `== 0` trifft +0.0 und -0.0 gleichermaßen und lässt jeden tatsächlich
+    von 0 verschiedenen Wert unangetastet.
+    """
+    if value is None:
+        return None
+    rounded = round(value, digits)
+    return 0.0 if rounded == 0 else rounded
+
+
+def _economics_capacity_kwh(capacity_wh: Any) -> float | None:
+    """Speicherkapazität (Wh) als kWh, oder None bei unbekanntem Rohwert.
+
+    Eine gemeldete Kapazität von 0 (oder negativ) ist kein plausibler
+    Messwert, sondern ein noch nicht gefüllter bzw. gestörter
+    SunSpec-Block. Sie darf den internen unbewerteten Bestand nicht auf 0
+    deckeln - das verwürfe eine während einer Preislücke tatsächlich
+    geladene Energiemenge.
+    price_optimizer._context behandelt denselben Rohwert aus demselben
+    Grund als unbekannt.
+    """
+    if capacity_wh is None or capacity_wh <= 0:
+        return None
+    return float(capacity_wh) / 1000
 
 
 _MONTH_NAMES_DE = {
@@ -283,6 +377,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._calibration_store = CalibrationStateStore(hass, entry_id)
         self._energy_store = EnergyStateStore(hass, entry_id)
         self._energy_store_loaded = False
+        # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): eigener
+        # Store, eigenes Bootstrap-Fenster - siehe async_load_economics_state
+        # und _bootstrap_economics_if_ready weiter unten.
+        self._economics_store = EconomicsStateStore(
+            hass, entry_id, on_persist_failed=self._on_economics_persist_failed
+        )
+        self._economics_store_loaded = False
+        # Bleibt bis zu einem erfolgreichen Neuladen des Config Entry
+        # gesetzt, wenn der vorhandene Store beim Start nicht gelesen
+        # werden konnte (siehe async_load_economics_state) - verhindert,
+        # dass ein anschließend aus lauter Nullen neu gebootstrapptes
+        # Bilanz-Objekt den eigentlich vorhandenen, nur unlesbaren Store
+        # überschreibt (analog zu _control_store_write_blocked).
+        self._economics_store_write_blocked = False
         # Versionierter, vom sichtbaren Entity-Zustand unabhängiger Snapshot
         # aller softwareseitigen Steuerwerte (REQ-CONTROL-CONFIG-BOOTSTRAP).
         self._control_store = ControlConfigStore(hass, entry_id)
@@ -359,6 +467,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
+        # Wirtschaftlichkeit: bestimmt den zu einem Zeitpunkt gültigen
+        # Netzbezugspreis (REQ-ECONOMICS-TARIFFS). Ohne konfigurierten
+        # Tarif liefert er ausschließlich "deaktiviert" und greift in
+        # nichts ein - insbesondere nicht in die Ladeplanung.
+        self.tariff_provider = SaxTariffProvider(hass, self)
         self._sun_charge_task: asyncio.Task | None = None
         # Bleibt bis zur erfolgreich quittierten Rückkehr in Registermodus 0
         # gesetzt. Dadurch geht der Rücksetzauftrag nach einem transienten
@@ -402,6 +515,88 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_charged_kwh: float | None = None
         self._energy_discharged_kwh: float | None = None
         self._energy_last_ts: float | None = None
+        # Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN): dieselbe
+        # None-bis-Initialisierung wie oben, zusätzlich als Dreiergruppe
+        # (zwei Zähler + Startzeitpunkt) - siehe
+        # _bootstrap_energy_origin sowie EnergyState.origin_initialized.
+        self._energy_grid_charged_kwh: float | None = None
+        self._energy_pv_charged_kwh: float | None = None
+        self._origin_accounting_started_at: datetime | None = None
+        # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): dieselbe
+        # None-bis-Bootstrap-Logik, zusätzlich gebunden an
+        # SaxTariffProvider.config.enabled - solange der Tarif deaktiviert
+        # ist, bleibt die gesamte Bilanz unangetastet (siehe
+        # _accumulate_economics). unvalued_inventory_kwh ist der seit dem
+        # Bilanzstart nicht bepreiste Energiebestand im Speicher, abzüglich
+        # seither entladener unbewerteter Energie. Der beim Start bereits
+        # vorhandene Speicherinhalt wird bewusst mit 0 EUR angesetzt und
+        # gehört deshalb nicht zu diesem Bestand.
+        self._economics_grid_charge_cost_eur: float | None = None
+        self._economics_pv_opportunity_cost_eur: float | None = None
+        self._economics_avoided_grid_cost_eur: float | None = None
+        # Persistierter, nichtnegativer Diagnose-Peak des operativen
+        # Ergebnisses. Er bleibt für Store-Kompatibilität und Diagnose
+        # erhalten, speist aber keine finanzielle Kennzahl (Issue #144).
+        self._economics_operating_result_high_water_eur: float | None = None
+        self._economics_unvalued_inventory_kwh: float | None = None
+        self._economics_unpriced_charge_kwh: float | None = None
+        self._economics_unpriced_discharge_kwh: float | None = None
+        self._economics_started_at: datetime | None = None
+        self._last_tariff_revision_at: datetime | None = None
+        # Reine Diagnose der Bestandsdeckelung (Issue #132): wie viel
+        # unbewerteter Bestand seit dem Start dieses Coordinators verworfen
+        # wurde und wann darüber zuletzt geloggt wurde (monotonic, siehe
+        # INVENTORY_CAP_LOG_INTERVAL_SECONDS). Bewusst nicht persistiert -
+        # beides beeinflusst keine Berechnung.
+        self._economics_inventory_capped_kwh: float = 0.0
+        self._economics_inventory_cap_logged_at: float | None = None
+        self._economics_inventory_idle_confirmations = (
+            INVENTORY_CORRECTION_IDLE_CONFIRMATIONS
+        )
+        self._economics_inventory_discharged_since_charge = False
+        # ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION): lokale
+        # Kalendertag-Buckets, unabhängig vom Sieben-Felder-Bündel oben -
+        # siehe _advance_economics_day. day_results sind abgeschlossene
+        # Tage (älteste zuerst, höchstens MAX_STORED_DAYS); current_day und
+        # die sechs Werte bilden zusammen den noch laufenden Tag und werden
+        # nur gemeinsam gesetzt oder verworfen (siehe _start_economics_day).
+        self._economics_day_results: tuple[DayEconomicsResult, ...] = ()
+        self._economics_current_day: date | None = None
+        self._economics_current_day_operating_result_eur: float | None = None
+        self._economics_current_day_priced_charge_kwh: float | None = None
+        self._economics_current_day_unpriced_charge_kwh: float | None = None
+        self._economics_current_day_priced_discharge_kwh: float | None = None
+        self._economics_current_day_unpriced_discharge_kwh: float | None = None
+        # Tatsächlich beobachtete Zeit des laufenden Tages (Sekunden,
+        # Issue #131) - gespeist aus derselben Riemann-Summe wie die
+        # Energie selbst (_accumulate_energy), keine zweite Uhr.
+        self._economics_current_day_observed_seconds: float | None = None
+        # Legacy-Feld aus älteren Stores. Die Prognose wurde entfernt; der
+        # Wert wird nur unverändert geladen und gespeichert, damit ein
+        # bestehender Store keinen abweichenden Snapshot erhält.
+        self._economics_payback_achieved_at: datetime | None = None
+        # Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY): kumulierte,
+        # seit economics_started_at tatsächlich bepreiste Lade-/
+        # Entlademenge - Gegenstück zu den beiden unpriced-Zählern oben, für
+        # charge_price_coverage_percent/discharge_price_coverage_percent.
+        self._economics_priced_charge_kwh: float | None = None
+        self._economics_priced_discharge_kwh: float | None = None
+        # Seit wann ununterbrochen kein gültiger Netzbezugspreis mehr
+        # vorlag (monotonic) - None, solange zuletzt ein Preis vorlag.
+        # _economics_price_unavailable ist der daraus abgeleitete, fertig
+        # ausgewertete Status (Karenzzeit bzw. sofortiger
+        # Konfigurationsfehler bei Fest-/Zeitfenstertarif, siehe
+        # _update_economics_price_availability) - unabhängig vom
+        # persistierten Zustand, nur zur Laufzeit gültig.
+        self._economics_price_unavailable_since: float | None = None
+        self._economics_price_unavailable = False
+        self._economics_last_successful_quote_at: datetime | None = None
+        # Zeitpunkt und optionaler Grund des zuletzt ausgeführten
+        # kontrollierten Bilanzneustarts (siehe
+        # async_restart_economics_accounting) - rein diagnostisch,
+        # persistiert für den lokalen Diagnose-Download.
+        self._economics_last_restart_at: datetime | None = None
+        self._economics_last_restart_reason: str | None = None
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -423,8 +618,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._self_diagnostics = SelfDiagnostics(hass, entry_id)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        data = dict(await self._async_read_basic())
-        data.update(await self._async_read_extended())
+        try:
+            data = dict(await self._async_read_basic())
+            data.update(await self._async_read_extended())
+        except UpdateFailed:
+            # Die Riemann-Baseline darf einen Ausfall nicht überbrücken:
+            # _energy_last_ts wird ausschließlich in _accumulate_energy
+            # fortgeschrieben, das bei einem fehlgeschlagenen Basic-Read gar
+            # nicht mehr erreicht wird. Ohne dieses Verwerfen verbuchte der
+            # erste erfolgreiche Tick nach einem stundenlangen Geräte-/
+            # Netzausfall die GESAMTE Ausfallzeit mit der zuletzt bekannten
+            # Leistung als Energie und zählte sie zusätzlich als beobachtete
+            # Zeit des Kalendertages (REQ-ECONOMICS-AMORTIZATION), obwohl in
+            # dieser Zeit nichts gemessen wurde - der Tag sähe damit
+            # vollständig beobachtet aus, genau den Fall soll die
+            # Zeitabdeckung ausschließen.
+            self._energy_last_ts = None
+            raise
         self._accumulate_energy(data)
 
         calibration_changed = await self._async_update_cell_calibration(data["soc"])
@@ -476,25 +686,49 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_charged_kwh/_energy_discharged_kwh bleiben zusätzlich
         so lange None (statt bei 0.0 zu starten), bis der unabhängige Store
         geladen oder einmalig ein numerischer RestoreEntity-Altzustand
-        migriert wurde."""
+        migriert wurde.
+
+        Die Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN,
+        domain.energy_accounting.compute_charge_delta) läuft in derselben
+        Riemann-Summe mit - dieselbe elapsed_hours, derselbe
+        charged_kwh-Zuwachs wie oben, keine zweite Uhr. Entladung bleibt
+        davon unberührt: compute_charge_delta liefert bei Entladeleistung
+        ausschließlich Nullen. Die Wirtschaftlichkeitsbilanz
+        (REQ-ECONOMICS-ACCOUNTING) erhält denselben charge_delta sowie den
+        rohen, noch ungerundeten Entladezuwachs dieses Intervalls - auch
+        das keine zweite Uhr, sondern dieselbe Berechnung wie oben."""
         now = monotonic()
         power = data.get("storage_power_active")
         last_ts = self._energy_last_ts
         self._energy_last_ts = now
         changed = False
+        charge_delta: EnergyDelta | None = None
+        discharge_kwh = 0.0
+        # Nur Intervalle, die tatsächlich verbucht werden, gelten als
+        # beobachtete Zeit des Kalendertages (REQ-ECONOMICS-AMORTIZATION,
+        # Zeitabdeckung): Ein Neustart (last_ts is None) und eine Phase
+        # ohne Leistungswert (SunSpec nicht erreichbar) sind exakt die
+        # Lücken, die der Tag später als Unvollständigkeit ausweisen soll.
+        observed_seconds = 0.0
 
         if last_ts is not None and power is not None:
+            observed_seconds = now - last_ts
             elapsed_hours = (now - last_ts) / 3600
-            if self._energy_charged_kwh is not None:
-                charge_w = -power if power < 0 else 0
-                increment = charge_w * elapsed_hours / 1000
-                self._energy_charged_kwh += increment
-                changed = changed or increment > 0
+            charge_delta = compute_charge_delta(
+                power, data.get("smartmeter_power"), elapsed_hours
+            )
+            discharge_w = power if power > 0 else 0
+            discharge_kwh = discharge_w * elapsed_hours / 1000
+            if charge_delta is not None:  # power ist hier bekannt
+                if self._energy_charged_kwh is not None:
+                    self._energy_charged_kwh += charge_delta.charged_kwh
+                    changed = changed or charge_delta.charged_kwh > 0
+                if self._energy_grid_charged_kwh is not None:
+                    self._energy_grid_charged_kwh += charge_delta.grid_kwh
+                    self._energy_pv_charged_kwh += charge_delta.pv_kwh
             if self._energy_discharged_kwh is not None:
-                discharge_w = power if power > 0 else 0
-                increment = discharge_w * elapsed_hours / 1000
-                self._energy_discharged_kwh += increment
-                changed = changed or increment > 0
+                self._energy_discharged_kwh += discharge_kwh
+                changed = changed or discharge_kwh > 0
 
         if changed:
             self._async_schedule_energy_save()
@@ -509,23 +743,1391 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._energy_discharged_kwh is not None
             else None
         )
+        data["energy_charged_from_grid"] = (
+            round(self._energy_grid_charged_kwh, 3)
+            if self._energy_grid_charged_kwh is not None
+            else None
+        )
+        data["energy_charged_from_pv"] = (
+            round(self._energy_pv_charged_kwh, 3)
+            if self._energy_pv_charged_kwh is not None
+            else None
+        )
+        data["energy_origin_attributes"] = self._energy_origin_attributes()
+        self._accumulate_economics(data, charge_delta, discharge_kwh, observed_seconds)
+
+    def _energy_origin_attributes(self) -> dict[str, Any]:
+        """Startzeitpunkt der Herkunftszählung als Sensorattribut
+        (REQ-ENERGY-ORIGIN).
+
+        Die drei Zähler energy_charged, energy_charged_from_grid/_pv und
+        die Geldbilanz aus REQ-ECONOMICS-ACCOUNTING beginnen zu drei
+        verschiedenen Zeitpunkten: der Gesamtzähler mit der ersten
+        Installation, die Herkunft mit _bootstrap_energy_origin, die
+        Geldbilanz erst mit dem ersten vollständig gespeicherten Tarif.
+        Ihre Werte sind deshalb NICHT gegeneinander verrechenbar - genau
+        das legt das Dashboard aber nahe, weil es sie untereinander zeigt
+        (Anwenderbericht: 2,44 kWh PV-Ladung neben 0,0084 EUR
+        PV-Opportunitätskosten, was 0,112 kWh entspricht; beide Werte
+        waren korrekt). economics_started_at ist als Attribut des
+        Status-Sensors längst sichtbar, sein Gegenstück hier war es
+        nirgends - auch nicht im Diagnose-Download.
+        """
+        return {
+            "origin_accounting_started_at": (
+                None
+                if self._origin_accounting_started_at is None
+                else self._origin_accounting_started_at.isoformat()
+            ),
+        }
+
+    def _energy_origin_initialized(self) -> bool:
+        """Ob die Herkunftszählung läuft (siehe _bootstrap_energy_origin).
+
+        Seit dem Wegfall der Kategorie "Herkunft unbekannt" ist jede
+        gezählte Ladeenergie genau einer Quelle zugeordnet - eine
+        Abdeckungsquote wäre damit konstant 100 % und sagte nichts mehr
+        aus. Übrig bleibt genau die eine Aussage, die der
+        Wirtschaftlichkeitsstatus braucht: ob überhaupt schon gezählt
+        wird (REQ-ENERGY-ORIGIN).
+        """
+        return (
+            self._energy_grid_charged_kwh is not None
+            and self._energy_pv_charged_kwh is not None
+        )
+
+    # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) ---------------
+    def _accumulate_economics(
+        self,
+        data: dict[str, Any],
+        charge_delta: EnergyDelta | None,
+        discharged_kwh: float,
+        observed_seconds: float,
+    ) -> None:
+        """Bewertet die Ladeenergie-Herkunft dieses Intervalls in Geld.
+
+        Bewusst außerhalb jeder Ladeentscheidung: reine Nachbetrachtung
+        bereits gemessener Energie, kein Modbus-Write.
+
+        `observed_seconds` ist die Dauer genau dieses verbuchten Intervalls
+        (aus _accumulate_energy, dieselbe Riemann-Summe) und wächst in den
+        laufenden Tag hinein - daraus entsteht dessen Zeitabdeckung
+        (REQ-ECONOMICS-AMORTIZATION). Ein Intervall über Mitternacht hinweg
+        zählt dabei vollständig zum neuen Tag, exakt wie seine Energie und
+        sein Geldwert; die dadurch fehlende Restsekunden des Vortages sind
+        gegenüber der Schwelle von 5 % eines Tages bedeutungslos.
+
+        economics_current_import_price/economics_feed_in_price sind reine
+        Durchreichungen des aktuellen Tarifs (SaxTariffProvider) und werden
+        unabhängig vom Bilanz-Bootstrap immer aktualisiert - sie beschreiben
+        den JETZT gültigen Tarif, nicht die kumulierte Bilanz.
+
+        Der Bootstrap (siehe _bootstrap_economics_if_ready) läuft nur,
+        solange der Tarif aktiv ist - "beim erstmaligen Aktivieren" (siehe
+        anforderung.yaml, REQ-ECONOMICS-ACCOUNTING). Ist die Bilanz aber
+        einmal gestartet, akkumuliert sie AUCH während einer späteren
+        Tarifpause (tariff_type=disabled) unverändert weiter: current_price/
+        feed_in_price sind während der Pause bereits None (SaxTariffProvider
+        liefert das für einen deaktivierten Tarif von sich aus), jede in
+        dieser Zeit geladene Energie landet dadurch automatisch im
+        unbewerteten Bestand. Würde die Akkumulation stattdessen komplett
+        pausieren, bliebe in der Pause geladene Energie unbeobachtet und
+        eine spätere Entladung würde beim Reaktivieren fälschlich vollständig
+        als vermiedener Netzbezug monetarisiert - ein kostenloser
+        Scheingewinn, exakt der bei #42 vermiedene Fehler. Nur die
+        VERÖFFENTLICHTEN monetären Sensoren blenden während einer Pause auf
+        None statt auf die (weiter mitlaufenden) internen Summen (siehe
+        _publish_economics_balance) - kein falscher Nullgewinn, aber auch
+        keine sichtbaren Beträge, solange der Tarif aus ist.
+        """
+        # Zeitpunkt bewusst einmal bestimmt und weitergereicht: Preis und
+        # die Tarifplan-Attribute darunter müssen denselben Moment
+        # beschreiben, sonst könnte ein Fensterwechsel zwischen beiden
+        # Aufrufen ein Fenster ausweisen, das zum gemeldeten Preis gar
+        # nicht gehört (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+        moment = dt_util.now()
+        quote_result = self.tariff_provider.quote(moment)
+        current_price = quote_result.price_eur_kwh
+        feed_in_price = self.tariff_provider.feed_in_price_eur_kwh
+        data["economics_current_import_price"] = (
+            None if current_price is None else round(current_price, 5)
+        )
+        data["economics_price_attributes"] = self._tariff_plan_attributes(
+            quote_result, moment, feed_in_price
+        )
+        data["economics_feed_in_price"] = (
+            None if feed_in_price is None else round(feed_in_price, 5)
+        )
+
+        tariff_enabled = self.tariff_provider.config.enabled
+        if tariff_enabled:
+            self._update_economics_price_availability(
+                quote_result, current_price, monotonic()
+            )
+        else:
+            # Re-Aktivierung soll ohne einen stehen gebliebenen
+            # Karenzzeit-Countdown aus einer früheren Deaktivierung starten.
+            self._economics_price_unavailable_since = None
+            self._economics_price_unavailable = False
+
+        # REQ-ECONOMICS-OBSERVABILITY: ein unlesbarer Store darf weder einen
+        # frischen 0-Bootstrap im Arbeitsspeicher starten noch eine bereits
+        # laufende Bilanz weiter akkumulieren - siehe
+        # _bootstrap_economics_if_ready sowie den Docstring dort.
+        frozen = self._economics_store_write_blocked
+        if tariff_enabled:
+            self._bootstrap_economics_if_ready(data)
+        if self._economics_started_at is None:
+            # Nie aktiviert, oder wegen eines unlesbaren Stores blockiert.
+            self._publish_economics_balance(data, monetary_available=False)
+            self._publish_amortization(data, monetary_available=False)
+            self._publish_economics_status(
+                data,
+                tariff_enabled=tariff_enabled,
+                current_price=current_price,
+                feed_in_price=feed_in_price,
+            )
+            return
+
+        changed = False
+        if not frozen:
+            delta: EconomicsDelta | None = None
+            if charge_delta is not None:
+                delta = compute_economics_delta(
+                    charge_delta,
+                    discharged_kwh,
+                    self._economics_unvalued_inventory_kwh,
+                    current_price,
+                    feed_in_price,
+                )
+
+            # Tageswechsel-Erkennung VOR der Anwendung des aktuellen Deltas,
+            # damit der Tageszähler das erste Delta eines neuen Tages nicht
+            # noch dem abgeschlossenen Vortag zurechnet.
+            if self._advance_economics_day():
+                changed = True
+
+            if (
+                observed_seconds > 0
+                and self._economics_current_day_observed_seconds is not None
+            ):
+                # Die beobachtete Zeit muss einen Neustart überleben, sonst
+                # sähe jeder Neustart den laufenden Tag als unvollständiger
+                # an, als er tatsächlich war. Anders als die Geldsummen
+                # bewegt sie sich aber bei JEDEM verbuchten Intervall -
+                # deshalb löst sie das Speichern nur beim Überschreiten des
+                # nächsten Rasterschritts aus (siehe
+                # OBSERVED_TIME_SAVE_GRANULARITY_SECONDS).
+                previous = self._economics_current_day_observed_seconds
+                self._economics_current_day_observed_seconds = (
+                    previous + observed_seconds
+                )
+                changed = changed or (
+                    self._economics_current_day_observed_seconds
+                    // OBSERVED_TIME_SAVE_GRANULARITY_SECONDS
+                    > previous // OBSERVED_TIME_SAVE_GRANULARITY_SECONDS
+                )
+
+            if delta is not None:
+                previous_raw_result = (
+                    self._economics_avoided_grid_cost_eur
+                    - self._economics_grid_charge_cost_eur
+                    - self._economics_pv_opportunity_cost_eur
+                )
+                previous_high_water = self._economics_operating_result_high_water_eur
+                if previous_high_water is None:
+                    previous_high_water = max(0.0, previous_raw_result)
+                self._economics_grid_charge_cost_eur += delta.grid_charge_cost_delta
+                self._economics_pv_opportunity_cost_eur += (
+                    delta.pv_opportunity_cost_delta
+                )
+                self._economics_avoided_grid_cost_eur += delta.avoided_grid_cost_delta
+                self._economics_unvalued_inventory_kwh += (
+                    delta.unvalued_inventory_delta_kwh
+                )
+                self._economics_unpriced_charge_kwh += delta.unpriced_charge_delta_kwh
+                self._economics_unpriced_discharge_kwh += (
+                    delta.unpriced_discharge_delta_kwh
+                )
+                self._economics_priced_charge_kwh += delta.priced_charge_kwh_delta
+                self._economics_priced_discharge_kwh += delta.priced_discharge_kwh_delta
+                current_raw_result = (
+                    self._economics_avoided_grid_cost_eur
+                    - self._economics_grid_charge_cost_eur
+                    - self._economics_pv_opportunity_cost_eur
+                )
+                current_high_water = compute_operating_result_high_water(
+                    previous_high_water, current_raw_result
+                )
+                self._economics_operating_result_high_water_eur = current_high_water
+                self._economics_current_day_operating_result_eur += (
+                    current_raw_result - previous_raw_result
+                )
+                self._economics_current_day_priced_charge_kwh += (
+                    delta.priced_charge_kwh_delta
+                )
+                self._economics_current_day_unpriced_charge_kwh += (
+                    delta.unpriced_charge_delta_kwh
+                )
+                self._economics_current_day_priced_discharge_kwh += (
+                    delta.priced_discharge_kwh_delta
+                )
+                self._economics_current_day_unpriced_discharge_kwh += (
+                    delta.unpriced_discharge_delta_kwh
+                )
+                # Auch ein gültiger Preis von exakt 0 EUR/kWh bewegt
+                # priced_charge_kwh_delta/priced_discharge_kwh_delta, ohne
+                # einen der übrigen sechs Werte zu verändern - ohne die
+                # beiden hier würde eine solche Bewegung kein verzögertes
+                # Speichern auslösen und der Tageszähler könnte einen
+                # ungeplanten Neustart nicht überleben.
+                changed = changed or any(
+                    (
+                        delta.grid_charge_cost_delta,
+                        delta.pv_opportunity_cost_delta,
+                        delta.avoided_grid_cost_delta,
+                        delta.unvalued_inventory_delta_kwh,
+                        delta.unpriced_charge_delta_kwh,
+                        delta.unpriced_discharge_delta_kwh,
+                        delta.priced_charge_kwh_delta,
+                        delta.priced_discharge_kwh_delta,
+                    )
+                )
+
+            charging_now = self._economics_is_charging(data, charge_delta)
+            if charging_now:
+                self._economics_inventory_idle_confirmations = 0
+                self._economics_inventory_discharged_since_charge = False
+            elif self._economics_is_discharging(data, discharged_kwh):
+                self._economics_inventory_idle_confirmations = 0
+                self._economics_inventory_discharged_since_charge = True
+            elif self._economics_is_stationary(data):
+                self._economics_inventory_idle_confirmations = min(
+                    self._economics_inventory_idle_confirmations + 1,
+                    INVENTORY_CORRECTION_IDLE_CONFIRMATIONS,
+                )
+            else:
+                # Ein fehlender Leistungswert ist kein bestätigter
+                # Stillstand. Ohne Bewegungsqualität darf keine Korrektur
+                # freigeschaltet werden (Issue #145).
+                self._economics_inventory_idle_confirmations = 0
+
+            if (
+                self._economics_inventory_idle_confirmations
+                >= INVENTORY_CORRECTION_IDLE_CONFIRMATIONS
+            ):
+                # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
+                # Bestandskorrektur betrifft die Integrität des unbewerteten
+                # Bestands selbst, nicht die aktuelle Bepreisung.
+                correction = (
+                    min_soc_inventory_correction(
+                        self._economics_unvalued_inventory_kwh,
+                        data.get("battery_soc"),
+                        data.get("battery_soc_min"),
+                    )
+                    if self._economics_inventory_discharged_since_charge
+                    else None
+                )
+                if correction is not None:
+                    _LOGGER.info(
+                        "Wirtschaftlichkeit: unbewerteter Bestand am "
+                        "SOC-Minimum auf 0 korrigiert (war %.3f kWh, %s)",
+                        self._economics_unvalued_inventory_kwh,
+                        dt_util.utcnow().isoformat(),
+                    )
+                    self._economics_unvalued_inventory_kwh = correction
+                    self._economics_inventory_discharged_since_charge = False
+                    changed = True
+
+                # Der Bestand ist ein Lagerbestand und kann nie mehr Energie
+                # umfassen, als anhand des quantisierten SOC sicher im Speicher
+                # liegen kann. Der obere Rand verhindert das Löschen gerade
+                # geladener Energie innerhalb derselben SOC-Stufe (Issue #145).
+                capped = capacity_inventory_correction(
+                    self._economics_unvalued_inventory_kwh,
+                    _economics_capacity_kwh(data.get("battery_capacity")),
+                    data.get("battery_soc"),
+                    self._economics_soc_resolution_percent(),
+                )
+                if capped is not None:
+                    self._note_inventory_cap_correction(
+                        self._economics_unvalued_inventory_kwh, capped
+                    )
+                    self._economics_unvalued_inventory_kwh = capped
+                    changed = True
+
+        if changed:
+            self._async_schedule_economics_save()
+        self._publish_economics_balance(data, monetary_available=tariff_enabled)
+        self._publish_amortization(data, monetary_available=tariff_enabled)
+        self._publish_economics_status(
+            data,
+            tariff_enabled=tariff_enabled,
+            current_price=current_price,
+            feed_in_price=feed_in_price,
+        )
+
+    def _note_inventory_cap_correction(
+        self, previous_kwh: float, capped_kwh: float
+    ) -> None:
+        """Protokolliert eine Deckelung des unbewerteten Bestands.
+
+        Zählt die verworfene Menge vollständig für den Diagnose-Download
+        mit, loggt aber höchstens alle INVENTORY_CAP_LOG_INTERVAL_SECONDS
+        eine Zeile (siehe Konstante).
+        """
+        self._economics_inventory_capped_kwh += previous_kwh - capped_kwh
+        now = monotonic()
+        last = self._economics_inventory_cap_logged_at
+        if last is not None and now - last < INVENTORY_CAP_LOG_INTERVAL_SECONDS:
+            return
+        self._economics_inventory_cap_logged_at = now
+        _LOGGER.info(
+            "Wirtschaftlichkeit: unbewerteter Bestand auf den tatsächlichen "
+            "Speicherinhalt gedeckelt (war %.3f kWh, jetzt %.3f kWh, "
+            "insgesamt %.3f kWh verworfen, %s)",
+            previous_kwh,
+            capped_kwh,
+            self._economics_inventory_capped_kwh,
+            dt_util.utcnow().isoformat(),
+        )
+
+    @staticmethod
+    def _economics_is_charging(
+        data: dict[str, Any], charge_delta: EnergyDelta | None
+    ) -> bool:
+        """Aktive oder im aktuellen Intervall verbuchte Ladung erkennen."""
+        if charge_delta is not None and charge_delta.charged_kwh > 0:
+            return True
+        power = data.get("storage_power_active")
+        return (
+            isinstance(power, int | float)
+            and not isinstance(power, bool)
+            and math.isfinite(power)
+            and power < 0
+        )
+
+    @staticmethod
+    def _economics_is_discharging(data: dict[str, Any], discharged_kwh: float) -> bool:
+        """Aktive oder im aktuellen Intervall verbuchte Entladung erkennen."""
+        if discharged_kwh > 0:
+            return True
+        power = data.get("storage_power_active")
+        return (
+            isinstance(power, int | float)
+            and not isinstance(power, bool)
+            and math.isfinite(power)
+            and power > 0
+        )
+
+    @staticmethod
+    def _economics_is_stationary(data: dict[str, Any]) -> bool:
+        """Nur einen sicher gemessenen Nullwert als Stillstand werten."""
+        power = data.get("storage_power_active")
+        return (
+            isinstance(power, int | float)
+            and not isinstance(power, bool)
+            and math.isfinite(power)
+            and power == 0
+        )
+
+    def _economics_soc_resolution_percent(self) -> float:
+        """Messquantum des Battery-SOC in Prozent, konservativ 1 %."""
+        exponent = to_signed16(self._battery_scale_factors.soc)
+        if not -10 <= exponent <= 10:
+            return 1.0
+        return 10.0**exponent
+
+    def _net_savings_today_last_reset(self) -> datetime | None:
+        """Zeitpunkt, zu dem economics_net_savings_today zuletzt auf 0 sprang.
+
+        Ein zyklisch zurückgesetzter total-Sensor muss diesen Zeitpunkt
+        mitliefern, sonst verbucht die Langzeitstatistik den Sprung auf 0
+        nicht als Reset, sondern als negativen Zuwachs in Höhe des
+        bisherigen Tagesergebnisses (Issue #133).
+
+        Normalfall ist der Beginn des laufenden Tages in derselben lokalen
+        Zeitzone, aus der auch die Tageswechsel-Erkennung ihr Datum bezieht
+        (_advance_economics_day). Ein neuer Bilanz-Bootstrap nach einem
+        unvollständigen Store sowie ein manueller Bilanzneustart können den
+        Tageszähler aber mitten am Tag auf 0 setzen, ohne das Datum zu ändern.
+        Deshalb gilt der späteste Zeitpunkt aus Tagesbeginn,
+        economics_started_at und last_restart_at. Die beiden Bilanzzeitpunkte
+        sind persistiert und überstehen einen Home-Assistant-Neustart, ohne
+        dass sich der gemeldete Reset nachträglich verschiebt.
+        """
+        if self._economics_current_day is None:
+            return None
+        day_start = dt_util.start_of_local_day(self._economics_current_day)
+        candidates = (
+            day_start,
+            self._economics_started_at,
+            self._economics_last_restart_at,
+        )
+        return max(candidate for candidate in candidates if candidate is not None)
+
+    def _start_economics_day(self, day: date) -> None:
+        self._economics_current_day = day
+        self._economics_current_day_operating_result_eur = 0.0
+        self._economics_current_day_priced_charge_kwh = 0.0
+        self._economics_current_day_unpriced_charge_kwh = 0.0
+        self._economics_current_day_priced_discharge_kwh = 0.0
+        self._economics_current_day_unpriced_discharge_kwh = 0.0
+        self._economics_current_day_observed_seconds = 0.0
+
+    def _advance_economics_day(self) -> bool:
+        """Erkennt einen lokalen Kalendertagswechsel (REQ-ECONOMICS-
+        AMORTIZATION).
+
+        Läuft bei jedem Poll-Tick mit einem existierenden Datenpunkt mit,
+        ohne eigenen Timer - das lokale Datum kommt bewusst aus
+        `dt_util.now()` (Home-Assistant-Zeitzone), nicht aus UTC, damit ein
+        Tag dem tatsächlichen Kalendertag am Aufstellort entspricht. Ein
+        DST-Tag mit 23 oder 25 Stunden wird dabei NICHT auf 24h normiert -
+        er bleibt einfach ein Tag mit entsprechend weniger/mehr
+        Datenpunkten (Regel 1). Idempotent gegenüber einem Neustart (der
+        laufende Tag ist persistiert, siehe async_load_economics_state) und
+        einer doppelten Verarbeitung desselben Ticks: Nur ein tatsächlicher
+        Wechsel des lokalen Datums schließt genau einmal einen Tag ab.
+
+        Bewusst OHNE das aktuelle Delta: Muss vor dessen Anwendung auf die
+        Gesamtsummen laufen, damit der geschlossene Tag exakt den am Ende des
+        Vortags erreichten Stand sieht (siehe _accumulate_economics).
+        """
+        today_local = dt_util.now().date()
+        if self._economics_current_day is None:
+            self._start_economics_day(today_local)
+            return True
+        if today_local != self._economics_current_day:
+            self._close_economics_day()
+            self._start_economics_day(today_local)
+            return True
+        return False
+
+    def _close_economics_day(self) -> None:
+        """Schließt den laufenden Kalendertag ab und hängt ihn an die
+        Tageshistorie an.
+
+        Wird ausschließlich von _advance_economics_day bei einem erkannten
+        Datumswechsel aufgerufen, bevor der neue Tag über
+        _start_economics_day beginnt - `_economics_current_day` und seine
+        sechs Werte sind an dieser Stelle deshalb garantiert gesetzt (float,
+        kein None).
+
+        Die Tageslänge wird hier festgeschrieben (nicht erst beim Lesen der
+        Historie), damit ein DST-Tag mit 23/25 Stunden dauerhaft an seiner
+        tatsächlichen Länge gemessen wird und eine spätere Änderung der
+        Zeitzone historische Tage nicht rückwirkend umbewertet.
+        """
+        closed_day = DayEconomicsResult(
+            day=self._economics_current_day,
+            operating_result_eur=self._economics_current_day_operating_result_eur,
+            priced_charge_kwh=self._economics_current_day_priced_charge_kwh,
+            unpriced_charge_kwh=self._economics_current_day_unpriced_charge_kwh,
+            priced_discharge_kwh=self._economics_current_day_priced_discharge_kwh,
+            unpriced_discharge_kwh=self._economics_current_day_unpriced_discharge_kwh,
+            observed_seconds=self._economics_current_day_observed_seconds,
+            day_length_seconds=self._local_day_length_seconds(
+                self._economics_current_day
+            ),
+        )
+        self._economics_day_results = (*self._economics_day_results, closed_day)[
+            -MAX_STORED_DAYS:
+        ]
+
+    @staticmethod
+    def _local_day_length_seconds(day: date) -> float:
+        """Tatsächliche Länge eines lokalen Kalendertages in Sekunden.
+
+        23 h/25 h an den DST-Umstellungstagen, sonst 24 h - der Nenner der
+        Zeitabdeckung (REQ-ECONOMICS-AMORTIZATION, Regel 1). Die Grenzen
+        kommen aus dt_util.start_of_local_day, derselben
+        Home-Assistant-Zeitzone, aus der auch die Tageswechsel-Erkennung
+        ihr Datum bezieht (_advance_economics_day).
+        """
+        start = dt_util.start_of_local_day(day)
+        next_start = dt_util.start_of_local_day(day + timedelta(days=1))
+        # Bewusst über UTC: Python ignoriert bei der Subtraktion zweier
+        # datetimes mit DEMSELBEN tzinfo-Objekt dessen Offset komplett und
+        # rechnet reine Wanduhrzeit - ein DST-Tag käme dabei immer auf
+        # exakt 24 h heraus, also genau auf den Wert, den diese Methode
+        # vermeiden soll.
+        return (dt_util.as_utc(next_start) - dt_util.as_utc(start)).total_seconds()
+
+    def _publish_amortization(
+        self, data: dict[str, Any], *, monetary_available: bool
+    ) -> None:
+        """Veröffentlicht den Amortisationsstand (REQ-ECONOMICS-
+        AMORTIZATION) in coordinator.data.
+
+        `monetary_available=False` (deaktivierter Tarif) blendet die vier
+        Geldwert-Sensoren nach derselben Regel wie
+        _publish_economics_balance auf None aus (ROI, Fortschritt, Restbetrag,
+        Tagesergebnis) - aus demselben Grund: kein sichtbarer Betrag, solange
+        der Tarif aus ist,
+        obwohl intern weiter akkumuliert wird.
+
+        Fehlende/ungültige Investitionskosten deaktivieren dagegen ALLE
+        vier Sensoren dieser Anforderung unabhängig vom Tarifstatus.
+        """
+        investment_cost = investment_cost_eur_from_options(self.options)
+        # Trägt die Sichtbarkeit der Investitionskarte im Dashboard: Eine
+        # Core-"conditional"-Karte kann ausschließlich den ZUSTAND einer
+        # Entity prüfen, nie ein Attribut (siehe dashboard.py, #139) -
+        # dieses Flag ist deshalb ein eigener Binary-Sensor.
+        data["economics_investment_configured"] = investment_cost is not None
+        if investment_cost is None:
+            for key in (
+                "economics_roi",
+                "economics_amortization_progress",
+                "economics_remaining_to_payback",
+                "economics_net_savings_today",
+                "economics_net_savings_today_last_reset",
+            ):
+                data[key] = None
+            data["economics_roi_attributes"] = {
+                "prior_result_eur": None,
+                "measured_operating_result_eur": None,
+            }
+            return
+
+        # Exakt dasselbe aktuelle Nettoergebnis, das economics_net_savings
+        # veröffentlicht (_publish_economics_balance) - die reine Messung
+        # ohne Vorlauf. Ein historischer Peak würde normale spätere Kosten
+        # aus ROI und Restbetrag ausblenden (Issue #144).
+        measured_result = self._net_savings_eur()
+        # Der Vorlauf-Ertrag geht ausschließlich hier ein, nicht in
+        # _publish_economics_balance: economics_net_savings bleibt der
+        # von dieser Integration selbst gemessene Betrag (siehe
+        # const.CONF_ECONOMICS_PRIOR_RESULT). Er wird bewusst nur zu einer
+        # bereits laufenden Bilanz addiert - stünde er auch für sich
+        # allein, zeigte das Dashboard einen ROI aus reiner Handeingabe,
+        # während daneben jeder gemessene Geldwert unbekannt ist.
+        prior_result = prior_result_eur_from_options(self.options)
+        operating_result = (
+            None if measured_result is None else measured_result + prior_result
+        )
+        published_operating_result = operating_result if monetary_available else None
+        roi_percent = compute_roi_percent(published_operating_result, investment_cost)
+        remaining_to_payback = compute_remaining_to_payback_eur(
+            investment_cost, published_operating_result
+        )
+        data["economics_roi"] = _rounded(roi_percent, 2)
+        data["economics_amortization_progress"] = (
+            None
+            if roi_percent is None
+            else _rounded(compute_amortization_progress_percent(roi_percent), 2)
+        )
+        data["economics_remaining_to_payback"] = _rounded(remaining_to_payback, 2)
+
+        current_day_result = (
+            self._economics_current_day_operating_result_eur
+            if monetary_available
+            else None
+        )
+        data["economics_net_savings_today"] = _rounded(current_day_result, 4)
+        data["economics_net_savings_today_last_reset"] = (
+            self._net_savings_today_last_reset()
+        )
+
+        # Ohne diese beiden Attribute stünden im Dashboard drei Zahlen
+        # nebeneinander, die sich nicht zur Deckung bringen lassen: ein
+        # operatives Ergebnis von 250 EUR, ein Restbetrag von 350 EUR und
+        # ein ROI von 65 % bei 1000 EUR Investition. Erst der hier
+        # ausgewiesene Vorlauf-Ertrag erklärt die Differenz.
+        data["economics_roi_attributes"] = {
+            "prior_result_eur": prior_result,
+            # Bewusst measured_result, nicht operating_result: Das Attribut
+            # soll die Differenz zum Sensor economics_net_savings
+            # AUFLÖSEN. Stünde hier der bereits um den Vorlauf erhöhte
+            # Betrag, zeigte es genau die Zahl nicht, gegen die der Leser
+            # abgleicht.
+            "measured_operating_result_eur": _rounded(measured_result, 2),
+        }
+
+    # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
+    def _update_economics_price_availability(
+        self, quote_result: QuoteResult, current_price: float | None, now: float
+    ) -> None:
+        """Verfolgt, seit wann ununterbrochen kein gültiger Netzbezugspreis
+        mehr vorlag, und leitet daraus _economics_price_unavailable ab.
+
+        Ein ungültig GESPEICHERTER Fest-/Zeitfenstertarif
+        (QuoteUnavailable.TARIFF_INCOMPLETE, z. B. ein fehlender Pflichtpreis
+        oder eine kaputte Zeitfenstergruppe) ist ein sofortiger
+        Konfigurationsfehler - anders als ein transienter Ausfall des
+        dynamischen Preis-Sensors gilt dafür keine Karenzzeit. Läuft nur,
+        solange der Tarif aktiv ist (siehe Aufrufer _accumulate_economics).
+        """
+        if current_price is not None:
+            self._economics_price_unavailable_since = None
+            self._economics_price_unavailable = False
+            self._economics_last_successful_quote_at = dt_util.utcnow()
+            return
+        if quote_result.reason is QuoteUnavailable.TARIFF_INCOMPLETE:
+            self._economics_price_unavailable = True
+            return
+        if self._economics_price_unavailable_since is None:
+            self._economics_price_unavailable_since = now
+        self._economics_price_unavailable = (
+            now - self._economics_price_unavailable_since
+            >= ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD
+        )
+
+    def _tariff_plan_attributes(
+        self,
+        quote_result: QuoteResult,
+        moment: datetime,
+        feed_in_price: float | None,
+    ) -> dict[str, Any]:
+        """Der hinterlegte Tarifplan als Attribute des Preis-Sensors.
+
+        REQ-ECONOMICS-SAVINGS-DASHBOARD: Der reine Preiswert beantwortet weder
+        "habe ich meinen Tarif richtig eingetragen?" noch "welches Fenster
+        liefert diesen Preis gerade, und wann ändert er sich wieder?". Die
+        Konfiguration liegt sonst ausschließlich in entry.options und ist
+        damit nur im Options Flow einsehbar - dort aber immer im
+        Bearbeitungsmodus und ohne jeden Bezug zur aktuellen Uhrzeit.
+
+        Die tageszeitabhängigen Felder (base_price_eur_kwh, windows) sind
+        bei jeder anderen Tarifart None statt eines Restwerts aus einer
+        früheren Konfiguration: ein sichtbarer Tarifplan, der gar nicht
+        gilt, wäre irreführender als gar keiner.
+        """
+        config = self.tariff_provider.config
+        quote = quote_result.quote
+        time_of_use = config.tariff_type is TariffType.TIME_OF_USE
+        # Ohne gültigen Quote (z. B. TARIFF_INCOMPLETE nach einem von Hand
+        # bearbeiteten Store) gilt gerade überhaupt kein Preis - dann darf
+        # auch kein Fenster als "jetzt geltend" erscheinen. Die
+        # Fensterliste selbst bleibt sichtbar: genau sie braucht der
+        # Anwender, um den Konfigurationsfehler zu finden.
+        window = active_window(config, moment) if quote is not None else None
+        return {
+            "tariff_type": str(config.tariff_type),
+            "quote_source": None if quote is None else str(quote.source),
+            "unavailable_reason": (
+                None if quote_result.reason is None else str(quote_result.reason)
+            ),
+            "active_window": None if window is None else window_as_mapping(window),
+            # Der nächste PREISwechsel, nicht das Ende der Gültigkeit:
+            # Beim Festpreis unbegrenzt (valid_until ist None), beim
+            # dynamischen Tarif das Ende des Vorschau-Slots. Ein
+            # tageszeitabhängiger Tarif ganz ohne Zeitfenster ist zwar eine
+            # gültige Konfiguration, verhält sich aber wie ein Festpreis;
+            # sein valid_until ist dort der bloße Tagesumbruch
+            # (domain.tariff._segment_bounds) und würde einen Preiswechsel
+            # um Mitternacht melden, den es nicht gibt.
+            "next_price_change_at": (
+                None
+                if quote is None
+                or quote.valid_until is None
+                or (time_of_use and not config.windows)
+                else quote.valid_until.isoformat()
+            ),
+            "base_price_eur_kwh": (
+                config.tou_base_price_eur_kwh if time_of_use else None
+            ),
+            "feed_in_price_eur_kwh": feed_in_price,
+            "windows": (
+                [window_as_mapping(entry) for entry in sorted_windows(config)]
+                if time_of_use
+                else None
+            ),
+        }
+
+    def _publish_economics_status(
+        self,
+        data: dict[str, Any],
+        *,
+        tariff_enabled: bool,
+        current_price: float | None,
+        feed_in_price: float | None,
+    ) -> None:
+        """Veröffentlicht economics_status samt Diagnoseattributen.
+
+        Fasst zusammen, ob und warum die Wirtschaftlichkeitsbilanz gerade
+        vertrauenswürdig ist - eine Geldzahl ohne Aussage zur Datenqualität
+        ist irreführend. Läuft unabhängig vom `frozen`/Bootstrap-Zweig in
+        _accumulate_economics, damit auch storage_error sichtbar wird,
+        bevor die Bilanz je gestartet ist.
+
+        Den Zustand bestimmen ausschließlich die Abdeckungen des LAUFENDEN
+        Kalendertages (dieselben Tages-Buckets wie in
+        REQ-ECONOMICS-AMORTIZATION, keine zusätzlichen Zähler) - die
+        kumulierten Lifetime-Quoten bleiben als Langzeitinformation
+        daneben erhalten, taugen aber nicht als Auslöser, weil sie nie
+        zurückgehen (Issue #134, siehe compute_economics_status).
+        """
+        charge_coverage = compute_price_coverage_percent(
+            self._economics_priced_charge_kwh, self._economics_unpriced_charge_kwh
+        )
+        discharge_coverage = compute_price_coverage_percent(
+            self._economics_priced_discharge_kwh,
+            self._economics_unpriced_discharge_kwh,
+        )
+        charge_coverage_today = compute_price_coverage_percent(
+            self._economics_current_day_priced_charge_kwh,
+            self._economics_current_day_unpriced_charge_kwh,
+        )
+        discharge_coverage_today = compute_price_coverage_percent(
+            self._economics_current_day_priced_discharge_kwh,
+            self._economics_current_day_unpriced_discharge_kwh,
+        )
+        status = compute_economics_status(
+            tariff_enabled=tariff_enabled,
+            storage_error=self._economics_store_write_blocked,
+            price_unavailable=self._economics_price_unavailable,
+            origin_unavailable=not self._energy_origin_initialized(),
+            priced_charge_kwh_today=self._economics_current_day_priced_charge_kwh,
+            unpriced_charge_kwh_today=self._economics_current_day_unpriced_charge_kwh,
+            priced_discharge_kwh_today=(
+                self._economics_current_day_priced_discharge_kwh
+            ),
+            unpriced_discharge_kwh_today=(
+                self._economics_current_day_unpriced_discharge_kwh
+            ),
+        )
+        data["economics_status"] = status.value
+        price_entity_id = (
+            self.tariff_provider.price_entity_id
+            if self.tariff_provider.config.tariff_type is TariffType.DYNAMIC
+            else None
+        )
+        data["economics_status_attributes"] = {
+            # Redundant zum Sensorzustand, aber Teil desselben
+            # Attributsatzes - siehe die analoge average_daily_result_eur-
+            # Ergänzung bei REQ-ECONOMICS-AMORTIZATION.
+            "reason": status.value,
+            "tariff_type": str(self.tariff_provider.config.tariff_type),
+            "price_sensor_entity_id": price_entity_id,
+            "economics_started_at": (
+                None
+                if self._economics_started_at is None
+                else self._economics_started_at.isoformat()
+            ),
+            "last_tariff_revision_at": (
+                None
+                if self._last_tariff_revision_at is None
+                else self._last_tariff_revision_at.isoformat()
+            ),
+            "last_successful_quote_at": (
+                None
+                if self._economics_last_successful_quote_at is None
+                else self._economics_last_successful_quote_at.isoformat()
+            ),
+            "current_import_price_eur_kwh": (
+                None if current_price is None else round(current_price, 5)
+            ),
+            "feed_in_price_eur_kwh": (
+                None if feed_in_price is None else round(feed_in_price, 5)
+            ),
+            "priced_charge_kwh": (
+                None
+                if self._economics_priced_charge_kwh is None
+                else round(self._economics_priced_charge_kwh, 3)
+            ),
+            "unpriced_charge_kwh": (
+                None
+                if self._economics_unpriced_charge_kwh is None
+                else round(self._economics_unpriced_charge_kwh, 3)
+            ),
+            "priced_discharge_kwh": (
+                None
+                if self._economics_priced_discharge_kwh is None
+                else round(self._economics_priced_discharge_kwh, 3)
+            ),
+            "unpriced_discharge_kwh": (
+                None
+                if self._economics_unpriced_discharge_kwh is None
+                else round(self._economics_unpriced_discharge_kwh, 3)
+            ),
+            "charge_price_coverage_percent": (
+                None if charge_coverage is None else round(charge_coverage, 1)
+            ),
+            "discharge_price_coverage_percent": (
+                None if discharge_coverage is None else round(discharge_coverage, 1)
+            ),
+            # Die beiden Tageswerte bestimmen den Zustand (Issue #134) -
+            # die kumulierten Quoten darüber bleiben als
+            # Langzeitinformation daneben stehen.
+            "charge_price_coverage_percent_today": (
+                None
+                if charge_coverage_today is None
+                else round(charge_coverage_today, 1)
+            ),
+            "discharge_price_coverage_percent_today": (
+                None
+                if discharge_coverage_today is None
+                else round(discharge_coverage_today, 1)
+            ),
+        }
+
+    def _bootstrap_economics_if_ready(self, _data: dict[str, Any]) -> None:
+        """Startet die Bilanz beim erstmaligen Aktivieren.
+
+        Der beim Start bereits vorhandene Speicherinhalt wird mit 0 EUR
+        angesetzt. Die Bilanz startet deshalb unabhängig von Kapazität und
+        Ladezustand mit einem unbewerteten Bestand von 0 kWh. Läuft nur
+        einmal: Ist economics_started_at bereits gesetzt (laufender Betrieb
+        oder aus dem Store geladen), passiert hier nichts mehr - auch nicht
+        nach einem zwischenzeitlichen Deaktivieren/Reaktivieren des Tarifs.
+
+        Läuft außerdem NICHT, solange der Store als unlesbar gilt
+        (_economics_store_write_blocked, REQ-ECONOMICS-OBSERVABILITY,
+        Status storage_error) - sonst würde eine aus lauter Nullen frisch
+        gebootstrappte Bilanz im Arbeitsspeicher weiterlaufen, obwohl sie
+        nie gesichert werden kann. Ohne diesen Neustart bleibt der Zustand
+        stattdessen bis zu einem erfolgreichen Neuladen des Config Entry
+        unverändert `None` ("wartend"), statt unbeobachtet zu akkumulieren.
+        """
+        if (
+            self._economics_started_at is not None
+            or self._economics_store_write_blocked
+        ):
+            return
+        self._economics_grid_charge_cost_eur = 0.0
+        self._economics_pv_opportunity_cost_eur = 0.0
+        self._economics_avoided_grid_cost_eur = 0.0
+        self._economics_operating_result_high_water_eur = 0.0
+        self._economics_unvalued_inventory_kwh = 0.0
+        self._economics_unpriced_charge_kwh = 0.0
+        self._economics_unpriced_discharge_kwh = 0.0
+        self._economics_priced_charge_kwh = 0.0
+        self._economics_priced_discharge_kwh = 0.0
+        self._economics_started_at = dt_util.utcnow()
+        self._async_schedule_economics_save()
+
+    def _net_savings_eur(self) -> float | None:
+        """Aktuelles signiertes Nettoergebnis aus den drei Geldsummen."""
+        if (
+            self._economics_avoided_grid_cost_eur is None
+            or self._economics_grid_charge_cost_eur is None
+            or self._economics_pv_opportunity_cost_eur is None
+        ):
+            return None
+        return (
+            self._economics_avoided_grid_cost_eur
+            - self._economics_grid_charge_cost_eur
+            - self._economics_pv_opportunity_cost_eur
+        )
+
+    def _publish_economics_balance(
+        self, data: dict[str, Any], *, monetary_available: bool
+    ) -> None:
+        """Veröffentlicht die Bilanz in coordinator.data.
+
+        `monetary_available=False` (deaktivierter Tarif) blendet
+        ausschließlich die fünf monetären Sensoren (device_class monetary)
+        auf None aus - ein deaktivierter Tarif darf keinen Betrag mehr
+        zeigen, unabhängig davon, dass intern (siehe _accumulate_economics)
+        weiter akkumuliert wird. Die internen Bestands- und
+        Preisabdeckungszähler bleiben davon unberührt.
+        """
+        grid_cost = self._economics_grid_charge_cost_eur if monetary_available else None
+        pv_cost = (
+            self._economics_pv_opportunity_cost_eur if monetary_available else None
+        )
+        avoided_cost = (
+            self._economics_avoided_grid_cost_eur if monetary_available else None
+        )
+        data["economics_grid_charge_cost"] = _rounded(grid_cost, 4)
+        data["economics_pv_opportunity_cost"] = _rounded(pv_cost, 4)
+        data["economics_avoided_grid_cost"] = _rounded(avoided_cost, 4)
+        data["economics_operating_result"] = (
+            None
+            if grid_cost is None or pv_cost is None or avoided_cost is None
+            else _rounded(avoided_cost - grid_cost - pv_cost, 4)
+        )
+        data["economics_net_savings"] = (
+            _rounded(self._net_savings_eur(), 4) if monetary_available else None
+        )
+        # SensorDeviceClass.MONETARY erlaubt in Home Assistant nur
+        # state_class TOTAL. Der Reset-Zeitpunkt trennt kontrollierte
+        # Bilanzabschnitte; normale Rückgänge durch Kosten bleiben echte
+        # signierte Änderungen innerhalb desselben Abschnitts.
+        data["economics_balance_last_reset"] = self._economics_started_at
+        # Kompatibler Alias für bereits bestehende Tests/Consumers des zuerst
+        # eingeführten Netto-Ersparnis-Sensors (Issue #151).
+        data["economics_net_savings_last_reset"] = self._economics_started_at
+
+    def notify_tariff_revision(self) -> None:
+        """Options-Änderung: Zeitpunkt der letzten Tarifrevision merken.
+
+        Rein diagnostisch. Aktualisiert bei jeder Options-Flow-Änderung,
+        nicht nur bei tariff-relevanten Feldern - die Genauigkeit "nur bei
+        echter Tarifänderung" wäre für einen reinen Diagnosewert
+        unverhältnismäßiger Aufwand. Historische Beträge bleiben davon
+        unberührt: Eine Tarifänderung wirkt ausschließlich prospektiv, weil
+        jeder künftige Delta-Schritt einfach den dann aktuellen Preis
+        verwendet (siehe _accumulate_economics) - nichts wird rückwirkend
+        neu berechnet.
+        """
+        self._last_tariff_revision_at = dt_util.utcnow()
+        self._async_schedule_economics_save()
+
+    async def async_load_economics_state(self) -> None:
+        """Load the persisted money balance before the first device refresh."""
+        try:
+            state = await self._economics_store.async_load()
+        except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
+            # Der vorhandene Store ist unlesbar, aber nicht zwangsläufig
+            # leer - ein anschließend aus lauter Nullen neu gebootstrapptes
+            # Bilanz-Objekt darf ihn deshalb nie überschreiben. Bootstrap
+            # und Akkumulation bleiben bis zur Wiederherstellung eingefroren.
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand konnte nicht geladen werden; "
+                "Bilanz bleibt bis zur Wiederherstellung eingefroren: %s",
+                err,
+            )
+            self._economics_store_loaded = True
+            self._economics_store_write_blocked = True
+            return
+
+        legacy_result_history = (
+            state is not None and state.operating_result_high_water_eur is None
+        )
+        if state is not None and state.initialized:
+            self._economics_grid_charge_cost_eur = state.grid_charge_cost_eur
+            self._economics_pv_opportunity_cost_eur = state.pv_opportunity_cost_eur
+            self._economics_avoided_grid_cost_eur = state.avoided_grid_cost_eur
+            raw_result = (
+                state.avoided_grid_cost_eur
+                - state.grid_charge_cost_eur
+                - state.pv_opportunity_cost_eur
+            )
+            self._economics_operating_result_high_water_eur = (
+                compute_operating_result_high_water(
+                    state.operating_result_high_water_eur or 0.0,
+                    raw_result,
+                )
+            )
+            self._economics_unvalued_inventory_kwh = state.unvalued_inventory_kwh
+            self._economics_unpriced_charge_kwh = state.unpriced_charge_kwh
+            self._economics_unpriced_discharge_kwh = state.unpriced_discharge_kwh
+            self._economics_started_at = state.economics_started_at
+            # REQ-ECONOMICS-OBSERVABILITY: additiv zum Sieben-Felder-Bündel
+            # oben - ein Store aus der Zeit davor kennt diese beiden Felder
+            # noch nicht und beginnt die Abdeckungszählung transparent bei 0
+            # ab jetzt, analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN
+            # (siehe _bootstrap_energy_origin).
+            self._economics_priced_charge_kwh = state.priced_charge_kwh or 0.0
+            self._economics_priced_discharge_kwh = state.priced_discharge_kwh or 0.0
+        if state is not None:
+            self._last_tariff_revision_at = state.last_tariff_revision_at
+            self._economics_last_restart_at = state.last_restart_at
+            self._economics_last_restart_reason = state.last_restart_reason
+        if state is not None and state.initialized:
+            # Stores bis Minor-Version 5 enthalten Tageswerte mit einer
+            # anderen Snapshot-Semantik. Deshalb startet ihre Tageshistorie
+            # neu; die drei Rohsummen und ihr aktuelles signiertes Ergebnis
+            # bleiben vollständig erhalten.
+            self._economics_day_results = (
+                () if legacy_result_history else state.day_results
+            )
+            self._economics_payback_achieved_at = state.payback_achieved_at
+            if not legacy_result_history and state.current_day is not None:
+                self._economics_current_day = state.current_day
+                self._economics_current_day_operating_result_eur = (
+                    state.current_day_operating_result_eur
+                )
+                self._economics_current_day_priced_charge_kwh = (
+                    state.current_day_priced_charge_kwh
+                )
+                self._economics_current_day_unpriced_charge_kwh = (
+                    state.current_day_unpriced_charge_kwh
+                )
+                self._economics_current_day_priced_discharge_kwh = (
+                    state.current_day_priced_discharge_kwh
+                )
+                self._economics_current_day_unpriced_discharge_kwh = (
+                    state.current_day_unpriced_discharge_kwh
+                )
+                self._economics_current_day_observed_seconds = (
+                    state.current_day_observed_seconds
+                )
+        self._economics_store_loaded = True
+
+    def _economics_state(self) -> EconomicsState:
+        return EconomicsState(
+            grid_charge_cost_eur=self._economics_grid_charge_cost_eur,
+            pv_opportunity_cost_eur=self._economics_pv_opportunity_cost_eur,
+            avoided_grid_cost_eur=self._economics_avoided_grid_cost_eur,
+            operating_result_high_water_eur=(
+                self._economics_operating_result_high_water_eur
+            ),
+            unvalued_inventory_kwh=self._economics_unvalued_inventory_kwh,
+            unpriced_charge_kwh=self._economics_unpriced_charge_kwh,
+            unpriced_discharge_kwh=self._economics_unpriced_discharge_kwh,
+            economics_started_at=self._economics_started_at,
+            last_tariff_revision_at=self._last_tariff_revision_at,
+            day_results=self._economics_day_results,
+            current_day=self._economics_current_day,
+            current_day_operating_result_eur=(
+                self._economics_current_day_operating_result_eur
+            ),
+            current_day_priced_charge_kwh=(
+                self._economics_current_day_priced_charge_kwh
+            ),
+            current_day_unpriced_charge_kwh=(
+                self._economics_current_day_unpriced_charge_kwh
+            ),
+            current_day_priced_discharge_kwh=(
+                self._economics_current_day_priced_discharge_kwh
+            ),
+            current_day_unpriced_discharge_kwh=(
+                self._economics_current_day_unpriced_discharge_kwh
+            ),
+            current_day_observed_seconds=(self._economics_current_day_observed_seconds),
+            payback_achieved_at=self._economics_payback_achieved_at,
+            priced_charge_kwh=self._economics_priced_charge_kwh,
+            priced_discharge_kwh=self._economics_priced_discharge_kwh,
+            last_restart_at=self._economics_last_restart_at,
+            last_restart_reason=self._economics_last_restart_reason,
+        )
+
+    def _async_schedule_economics_save(self) -> None:
+        if self._economics_store_write_blocked:
+            return
+        state = self._economics_state()
+        if not (self._economics_store_loaded and state.initialized):
+            return
+        if not self._economics_store.async_delay_save(state):
+            # _accept() hat den Snapshot bereits synchron als korrupt/
+            # regressiv abgelehnt (siehe infrastructure/economics_store.py)
+            # - ab hier ist der gespeicherte Zustand nicht mehr
+            # vertrauenswürdig. Ein erst NACH der Verzögerung auftretender
+            # echter Schreibfehler kann an dieser Stelle noch nicht bekannt
+            # sein (async_delay_save schreibt asynchron) und wird
+            # stattdessen über _on_economics_persist_failed gemeldet.
+            # Status storage_error, keine weitere Akkumulation, bis ein
+            # Neuladen des Config Entry eine frische Instanz erzeugt
+            # (REQ-ECONOMICS-OBSERVABILITY) - siehe auch
+            # async_load_economics_state für den spiegelbildlichen Fall
+            # eines Ladefehlers.
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand beim Speichern abgelehnt - "
+                "Bilanz wird eingefroren, bis der Config Entry neu geladen "
+                "wird"
+            )
+            self._economics_store_write_blocked = True
+
+    def _on_economics_persist_failed(self) -> None:
+        """Callback aus EconomicsStateStore (siehe deren Klassen-Docstring):
+        meldet einen erst nach der Verzögerung von async_delay_save
+        erkannten, tatsächlichen Schreibfehler (Lese-Rückprobe gegen die
+        Datei) - der synchrone Rückgabewert von async_delay_save deckt nur
+        die sofortige _accept()-Ablehnung ab, nicht das asynchrone
+        Schreibergebnis selbst."""
+        if self._economics_store_write_blocked:
+            return
+        _LOGGER.warning(
+            "Wirtschaftlichkeitszustand konnte im Hintergrund nicht "
+            "gespeichert werden - Bilanz wird eingefroren, bis der Config "
+            "Entry neu geladen wird"
+        )
+        self._economics_store_write_blocked = True
+
+    async def _async_flush_economics_state(self) -> None:
+        if self._economics_store_write_blocked:
+            return
+        state = self._economics_state()
+        if not self._economics_store_loaded or not state.initialized:
+            return
+        try:
+            saved = await self._economics_store.async_save(state)
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand konnte beim Entladen nicht "
+                "gespeichert werden: %s",
+                err,
+            )
+            self._economics_store_write_blocked = True
+            return
+        if not saved:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand beim Entladen abgelehnt - "
+                "Bilanz wird eingefroren, bis der Config Entry neu geladen "
+                "wird"
+            )
+            self._economics_store_write_blocked = True
+
+    async def async_restart_economics_accounting(
+        self, *, reason: str | None = None
+    ) -> None:
+        """Kontrollierter Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY,
+        Service `sax_power.restart_economics_accounting`).
+
+        Setzt AUSSCHLIESSLICH die drei Economics-Geldsummen, den
+        historischen Diagnose-Peak, die Preisabdeckungszähler
+        (priced_*/unpriced_*), die Tages-Buckets, den
+        Aktivierungs-/Revisionszeitpunkt und einen bereits erreichten
+        Payback-Zeitpunkt zurück, setzt den unbewerteten Bestand wie beim
+        erstmaligen Aktivieren auf 0 - und rührt dabei nie
+        `energy_charged`/`energy_discharged` oder die
+        Herkunftszähler aus REQ-ENERGY-ORIGIN an. `reason` ist rein
+        diagnostisch: er wird zusammen mit dem UTC-Zeitpunkt dieses
+        Neustarts persistiert (EconomicsState.last_restart_at/
+        last_restart_reason) und im Diagnose-Download angezeigt -
+        beeinflusst aber keine Berechnung.
+
+        Speichert atomar VOR jeder In-Memory-Änderung: schlägt das
+        Speichern fehl, bleibt der bisherige Zustand vollständig und
+        unverändert bestehen (kein halb angewendeter Neustart). Keine
+        rückwirkende Neuberechnung und kein automatischer Reset bei einer
+        späteren Tarif-/Investitionsänderung - das war schon vorher so und
+        ändert sich durch diesen Service nicht.
+        """
+        economics_ready = (
+            self.tariff_provider.config.enabled
+            and self._economics_started_at is not None
+        )
+        if not economics_ready:
+            raise ServiceValidationError(
+                "Ein Bilanzneustart ist nur möglich, solange die "
+                "Wirtschaftlichkeit aktiviert und bereits initialisiert ist",
+                translation_domain=DOMAIN,
+                translation_key="economics_restart_not_ready",
+            )
+
+        now = dt_util.utcnow()
+        new_state = replace(
+            self._economics_state(),
+            grid_charge_cost_eur=0.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=0.0,
+            operating_result_high_water_eur=0.0,
+            unvalued_inventory_kwh=0.0,
+            unpriced_charge_kwh=0.0,
+            unpriced_discharge_kwh=0.0,
+            priced_charge_kwh=0.0,
+            priced_discharge_kwh=0.0,
+            economics_started_at=now,
+            last_tariff_revision_at=now,
+            day_results=(),
+            current_day=None,
+            current_day_operating_result_eur=None,
+            current_day_priced_charge_kwh=None,
+            current_day_unpriced_charge_kwh=None,
+            current_day_priced_discharge_kwh=None,
+            current_day_unpriced_discharge_kwh=None,
+            current_day_observed_seconds=None,
+            payback_achieved_at=None,
+            last_restart_at=now,
+            last_restart_reason=reason,
+        )
+        if not await self._economics_store.async_reset(new_state):
+            raise HomeAssistantError(
+                "Bilanzneustart konnte nicht gespeichert werden - der "
+                "bisherige Zustand bleibt unverändert bestehen"
+            )
+
+        self._economics_grid_charge_cost_eur = 0.0
+        self._economics_pv_opportunity_cost_eur = 0.0
+        self._economics_avoided_grid_cost_eur = 0.0
+        self._economics_operating_result_high_water_eur = 0.0
+        self._economics_unvalued_inventory_kwh = 0.0
+        self._economics_unpriced_charge_kwh = 0.0
+        self._economics_unpriced_discharge_kwh = 0.0
+        self._economics_priced_charge_kwh = 0.0
+        self._economics_priced_discharge_kwh = 0.0
+        self._economics_started_at = now
+        self._last_tariff_revision_at = now
+        self._economics_day_results = ()
+        self._economics_current_day = None
+        self._economics_current_day_operating_result_eur = None
+        self._economics_current_day_priced_charge_kwh = None
+        self._economics_current_day_unpriced_charge_kwh = None
+        self._economics_current_day_priced_discharge_kwh = None
+        self._economics_current_day_unpriced_discharge_kwh = None
+        self._economics_current_day_observed_seconds = None
+        self._economics_payback_achieved_at = None
+        self._economics_price_unavailable_since = None
+        self._economics_price_unavailable = False
+        self._economics_last_restart_at = now
+        self._economics_last_restart_reason = reason
+        _LOGGER.info(
+            "Wirtschaftlichkeitsbilanz manuell neu gestartet (%s)%s",
+            now.isoformat(),
+            f" - Grund: {reason}" if reason else "",
+        )
+
+    @property
+    def energy_diagnostics(self) -> dict[str, Any]:
+        """Interner Zählerzustand für den Diagnose-Download (diagnostics.py).
+
+        Gegenstück zu economics_diagnostics: die ungerundeten Rohsummen und
+        vor allem origin_accounting_started_at. Ohne diesen Zeitstempel
+        ließ sich aus einem Diagnose-Download nicht entscheiden, ob eine
+        Differenz zwischen Herkunftszählern und Geldbilanz ein Rechenfehler
+        ist oder nur zwei verschiedene Zählzeiträume - siehe
+        _energy_origin_attributes.
+        """
+        return {
+            "origin_accounting_started_at": (
+                None
+                if self._origin_accounting_started_at is None
+                else self._origin_accounting_started_at.isoformat()
+            ),
+            "charged_kwh": self._energy_charged_kwh,
+            "discharged_kwh": self._energy_discharged_kwh,
+            "grid_charged_kwh": self._energy_grid_charged_kwh,
+            "pv_charged_kwh": self._energy_pv_charged_kwh,
+        }
+
+    @property
+    def economics_diagnostics(self) -> dict[str, Any]:
+        """Interner Bilanzzustand für den Diagnose-Download (diagnostics.py).
+
+        Anders als coordinator.data (nur die zuletzt veröffentlichten,
+        gerundeten Sensorwerte) zeigt dies zusätzlich die beiden
+        Zeitstempel sowie die ungerundeten Rohsummen.
+        """
+        return {
+            "started_at": (
+                None
+                if self._economics_started_at is None
+                else self._economics_started_at.isoformat()
+            ),
+            "last_tariff_revision_at": (
+                None
+                if self._last_tariff_revision_at is None
+                else self._last_tariff_revision_at.isoformat()
+            ),
+            "grid_charge_cost_eur": self._economics_grid_charge_cost_eur,
+            "pv_opportunity_cost_eur": self._economics_pv_opportunity_cost_eur,
+            "avoided_grid_cost_eur": self._economics_avoided_grid_cost_eur,
+            "operating_result_raw_eur": (
+                None
+                if self._economics_avoided_grid_cost_eur is None
+                or self._economics_grid_charge_cost_eur is None
+                or self._economics_pv_opportunity_cost_eur is None
+                else self._economics_avoided_grid_cost_eur
+                - self._economics_grid_charge_cost_eur
+                - self._economics_pv_opportunity_cost_eur
+            ),
+            "operating_result_high_water_eur": (
+                self._economics_operating_result_high_water_eur
+            ),
+            "unvalued_inventory_kwh": self._economics_unvalued_inventory_kwh,
+            "unpriced_charge_kwh": self._economics_unpriced_charge_kwh,
+            "unpriced_discharge_kwh": self._economics_unpriced_discharge_kwh,
+            "inventory_capped_kwh": self._economics_inventory_capped_kwh,
+            "day_results": [
+                {
+                    "day": day.day.isoformat(),
+                    "operating_result_eur": day.operating_result_eur,
+                    "priced_charge_kwh": day.priced_charge_kwh,
+                    "unpriced_charge_kwh": day.unpriced_charge_kwh,
+                    "priced_discharge_kwh": day.priced_discharge_kwh,
+                    "unpriced_discharge_kwh": day.unpriced_discharge_kwh,
+                    "observed_seconds": day.observed_seconds,
+                    "day_length_seconds": day.day_length_seconds,
+                }
+                for day in self._economics_day_results
+            ],
+            "current_day": (
+                None
+                if self._economics_current_day is None
+                else self._economics_current_day.isoformat()
+            ),
+            "current_day_operating_result_eur": (
+                self._economics_current_day_operating_result_eur
+            ),
+            "current_day_priced_charge_kwh": (
+                self._economics_current_day_priced_charge_kwh
+            ),
+            "current_day_unpriced_charge_kwh": (
+                self._economics_current_day_unpriced_charge_kwh
+            ),
+            "current_day_priced_discharge_kwh": (
+                self._economics_current_day_priced_discharge_kwh
+            ),
+            "current_day_unpriced_discharge_kwh": (
+                self._economics_current_day_unpriced_discharge_kwh
+            ),
+            "current_day_observed_seconds": (
+                self._economics_current_day_observed_seconds
+            ),
+            "payback_achieved_at": (
+                None
+                if self._economics_payback_achieved_at is None
+                else self._economics_payback_achieved_at.isoformat()
+            ),
+            # -- REQ-ECONOMICS-OBSERVABILITY -------------------------------
+            "status": (self.data or {}).get("economics_status"),
+            "store_write_blocked": self._economics_store_write_blocked,
+            "store_minor_version": ECONOMICS_STORE_MINOR_VERSION,
+            "priced_charge_kwh": self._economics_priced_charge_kwh,
+            "priced_discharge_kwh": self._economics_priced_discharge_kwh,
+            "price_unavailable": self._economics_price_unavailable,
+            "last_successful_quote_at": (
+                None
+                if self._economics_last_successful_quote_at is None
+                else self._economics_last_successful_quote_at.isoformat()
+            ),
+            "last_restart_at": (
+                None
+                if self._economics_last_restart_at is None
+                else self._economics_last_restart_at.isoformat()
+            ),
+            "last_restart_reason": self._economics_last_restart_reason,
+        }
 
     async def async_load_energy_state(self) -> None:
         """Load the independent counters before the first device refresh."""
         try:
             state = await self._energy_store.async_load()
-        except (HomeAssistantError, OSError, ValueError) as err:
+        except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
+            # NotImplementedError: Home Assistant meldet damit einen Store
+            # mit einer Hauptversion, für die es hier keine Migration gibt
+            # (siehe infrastructure/energy_store.py, STORAGE_VERSION-
+            # Kommentar) - typischerweise ein Downgrade auf eine ältere
+            # Integrationsversion nach einem zwischenzeitlichen Update.
             _LOGGER.warning(
                 "Energiezählerzustand konnte nicht geladen werden; "
                 "warte auf einen numerischen Altzustand: %s",
                 err,
             )
-        else:
-            if state is not None:
-                self._energy_charged_kwh = state.charged_kwh
-                self._energy_discharged_kwh = state.discharged_kwh
-        finally:
             self._energy_store_loaded = True
+            return
+
+        if state is not None:
+            self._energy_charged_kwh = state.charged_kwh
+            self._energy_discharged_kwh = state.discharged_kwh
+        self._bootstrap_energy_origin(state)
+        self._energy_store_loaded = True
+
+    def _bootstrap_energy_origin(self, state: EnergyState | None) -> None:
+        """Startet die Herkunftszählung transparent ab jetzt.
+
+        Läuft nur, wenn der Store selbst erfolgreich gelesen wurde - state
+        ist hier None nur bei einer frischen Installation (kein
+        gespeichertes Objekt), nicht bei einem I/O-Fehler; der bleibt in
+        async_load_energy_state unbehandelt, damit ein defekter Store
+        keinen stillen Nullstart der Herkunft auslöst.
+
+        Ein bereits vollständig initialisierter Store
+        (state.origin_initialized) übernimmt seine Werte unverändert. In
+        jedem anderen Fall - brandneuer Eintrag, Version-1-Snapshot ohne
+        diese Felder, oder ein einzelnes beim Laden verworfenes Feld -
+        beginnt die Herkunftszählung jetzt bei 0 mit dem aktuellen
+        UTC-Zeitpunkt als origin_accounting_started_at. Historische
+        Ladeenergie wird dabei nicht rückwirkend zugeordnet (siehe
+        anforderung.yaml, REQ-ENERGY-ORIGIN); der bestehende
+        energy_charged-Gesamtzähler bleibt davon unberührt. Der neue Stand
+        wird bewusst nicht sofort geschrieben, sondern über den normalen
+        Speicherpfad (Änderung oder Shutdown-Flush) persistiert - kein
+        zusätzlicher Schreibvorgang allein durch das Laden.
+        """
+        if state is not None and state.origin_initialized:
+            self._energy_grid_charged_kwh = state.grid_charged_kwh
+            self._energy_pv_charged_kwh = state.pv_charged_kwh
+            self._origin_accounting_started_at = state.origin_accounting_started_at
+            return
+        self._energy_grid_charged_kwh = 0.0
+        self._energy_pv_charged_kwh = 0.0
+        self._origin_accounting_started_at = dt_util.utcnow()
 
     def restore_energy_charged(self, value_kwh: float | None) -> None:
         """Migrate a numeric legacy RestoreEntity charge counter once."""
@@ -569,6 +2171,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return EnergyState(
             charged_kwh=self._energy_charged_kwh,
             discharged_kwh=self._energy_discharged_kwh,
+            grid_charged_kwh=self._energy_grid_charged_kwh,
+            pv_charged_kwh=self._energy_pv_charged_kwh,
+            origin_accounting_started_at=self._origin_accounting_started_at,
         )
 
     def _async_schedule_energy_save(self) -> None:
@@ -2978,6 +4583,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grid_serving_start=self._grid_serving_start,
                 grid_serving_end=self._grid_serving_end,
                 grid_serving_months=frozenset(self._grid_serving_months),
+                economics_tariff_enabled=self.tariff_provider.config.enabled,
+                economics_price_unavailable=self._economics_price_unavailable,
             ),
             monotonic(),
         )
@@ -2989,8 +4596,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # __init__.async_unload_entry) unbemerkt im Hintergrund weiter.
         await super().async_shutdown()
         await self._async_flush_energy_state()
+        await self._async_flush_economics_state()
         await self._async_flush_control_state()
         self.price_planner.async_shutdown()
+        self.tariff_provider.async_shutdown()
         # Kein Stop-via-Service: Dieser würde nach dem manuellen Reset eine
         # konfigurierte Automatik erneut anwenden. Beim Shutdown werden unter
         # demselben Control-Lock stattdessen alle neuen Entscheidungen

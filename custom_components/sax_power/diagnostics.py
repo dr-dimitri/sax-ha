@@ -75,4 +75,17 @@ async def async_get_config_entry_diagnostics(
         # Preis-Sensor, dessen Attributformat nicht erkannt wurde (siehe
         # price_optimizer.parse_price_slots).
         "price_plan": coordinator.price_planner.plan_attributes,
+        # Tarifmodell der Wirtschaftlichkeitsauswertung samt aktuellem
+        # Quote bzw. dem maschinenlesbaren Grund, warum keiner bestimmbar
+        # ist (REQ-ECONOMICS-TARIFFS).
+        "tariff": coordinator.tariff_provider.diagnostics,
+        # Interner Zählerzustand samt Startzeitpunkt der Herkunftszählung -
+        # ohne ihn ist im Download nicht erkennbar, dass Gesamtzähler,
+        # Herkunftszähler und Geldbilanz zu verschiedenen Zeitpunkten
+        # begonnen haben (REQ-ENERGY-ORIGIN).
+        "energy": coordinator.energy_diagnostics,
+        # Interner Bilanzzustand (Zeitstempel, ungerundete Rohsummen) -
+        # coordinator_data enthält bereits die gerundeten, veröffentlichten
+        # economics_*-Sensorwerte (REQ-ECONOMICS-ACCOUNTING).
+        "economics": coordinator.economics_diagnostics,
     }

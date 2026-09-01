@@ -34,6 +34,23 @@ CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
 CONF_CREATE_DASHBOARD = "create_dashboard"
 DEFAULT_CREATE_DASHBOARD = True
 
+# Genau wegen dieses einmaligen Flags bekommt ein bestehendes Dashboard die
+# Tabs einer neueren Version nie zu sehen: Nach der Ersteinrichtung wird
+# das Dashboard nie wieder gebaut, und async_create_dashboard fasst ein
+# vorhandenes ohne force nicht an. Ohne Hinweis merkt der Anwender davon
+# nichts - der Tab fehlt einfach, und der einzige Ausweg (der Dienst
+# sax_power.reinstall_dashboard) ist nur dem bekannt, der die
+# Dokumentation gelesen hat (Anwenderbericht zu #138). Das Issue meldet
+# deshalb ausschließlich ein VORHANDENES, aber unvollständiges Dashboard:
+# Ein bewusst gelöschtes darf nicht durch eine Reparaturaufforderung
+# zurückgeholt werden - genau das verhindert der Reset oben.
+ISSUE_DASHBOARD_OUTDATED = "dashboard_outdated"
+
+# Wer den Hinweis einmal ablehnt, soll ihn nicht bei jedem Neustart erneut
+# sehen: Ein umgebautes Dashboard, dem bewusst Tabs fehlen, ist ein
+# legitimer Zustand.
+CONF_DASHBOARD_UPDATE_DISMISSED = "dashboard_update_dismissed"
+
 DEFAULT_PORT = 502
 DEFAULT_SLAVE_ID_BASIC = 64
 # SunSpec-Modus (siehe modbus.pdf, offizielle sax-power.net-Dokumentation):
@@ -488,7 +505,15 @@ CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
 PRICE_UNIT_AUTO = "auto"
 PRICE_UNIT_EUR_KWH = "eur_kwh"
 PRICE_UNIT_CT_KWH = "ct_kwh"
-PRICE_UNITS = (PRICE_UNIT_AUTO, PRICE_UNIT_EUR_KWH, PRICE_UNIT_CT_KWH)
+PRICE_UNIT_EUR_MWH = "eur_mwh"
+PRICE_UNIT_CT_MWH = "ct_mwh"
+PRICE_UNITS = (
+    PRICE_UNIT_AUTO,
+    PRICE_UNIT_EUR_KWH,
+    PRICE_UNIT_CT_KWH,
+    PRICE_UNIT_EUR_MWH,
+    PRICE_UNIT_CT_MWH,
+)
 DEFAULT_PRICE_UNIT = PRICE_UNIT_AUTO
 
 # -- Strategien (select.SaxPowerPriceStrategySelect) -----------------------
@@ -651,3 +676,130 @@ ISSUE_CONTROL_CONFIG_UNRESOLVED = "control_config_unresolved"
 # Zustand tatsächlich anhält.
 PRICE_SENSOR_MISSING_GRACE_PERIOD = 6 * 3600  # Sekunden
 SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD = 3600  # Sekunden
+
+# ==========================================================================
+# Wirtschaftlichkeitsauswertung: Tarifmodell (siehe anforderung.yaml,
+# REQ-ECONOMICS-TARIFFS)
+# ==========================================================================
+# Vollständig optional und standardmäßig deaktiviert: solange
+# CONF_ECONOMICS_TARIFF_TYPE auf "disabled" steht, verhält sich die
+# Integration exakt wie bisher. Die stabilen Options-Werte der Tarifarten
+# stehen als TariffType in domain/tariff.py; hier liegen nur die
+# Options-Flow-Schlüssel und die Wertebereiche der Eingabefelder.
+CONF_ECONOMICS_TARIFF_TYPE = "economics_tariff_type"
+CONF_ECONOMICS_FEED_IN_PRICE = "economics_feed_in_price_eur_kwh"
+CONF_ECONOMICS_FIXED_IMPORT_PRICE = "economics_fixed_import_price_eur_kwh"
+CONF_ECONOMICS_TOU_BASE_PRICE = "economics_tou_base_price_eur_kwh"
+
+# Genau acht optionale Zeitfenstergruppen. Jede wird im Options Flow als
+# eigene Section dargestellt und liegt deshalb als verschachteltes Mapping
+# mit den drei Feldern unten in entry.options.
+ECONOMICS_TOU_WINDOW_COUNT = 8
+ECONOMICS_TOU_WINDOW_PREFIX = "economics_tou_window_"
+CONF_ECONOMICS_WINDOW_START = "start"
+CONF_ECONOMICS_WINDOW_END = "end"
+CONF_ECONOMICS_WINDOW_PRICE = "price_eur_kwh"
+
+
+def economics_tou_window_key(index: int) -> str:
+    """Options-Schlüssel der 1-basierten Zeitfenstergruppe `index`."""
+    return f"{ECONOMICS_TOU_WINDOW_PREFIX}{index}"
+
+
+ECONOMICS_TOU_WINDOW_KEYS = tuple(
+    economics_tou_window_key(index)
+    for index in range(1, ECONOMICS_TOU_WINDOW_COUNT + 1)
+)
+
+# Sämtliche zur Wirtschaftlichkeitskonfiguration gehörenden Schlüssel. Beim
+# Wechsel der Tarifart entfernt der Options Flow daraus alles, was zur neuen
+# Tarifart nicht mehr passt (siehe config_flow.SaxPowerOptionsFlow) - sonst
+# bliebe ein alter Festpreis unsichtbar in entry.options stehen und würde
+# nach einem späteren Rückwechsel wieder aktiv.
+ECONOMICS_OPTION_KEYS = (
+    CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+    *ECONOMICS_TOU_WINDOW_KEYS,
+)
+
+# Einspeisevergütung: der entgangene Erlös und damit der Beschaffungspreis
+# jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt. Bei
+# jeder aktivierten Auswertung deshalb Pflichtfeld - PV-Energie darf
+# niemals als kostenlos bewertet werden.
+MIN_ECONOMICS_FEED_IN_PRICE = 0.0
+MAX_ECONOMICS_FEED_IN_PRICE = 2.0
+
+# Arbeitspreise dürfen negativ sein: an die Börse gekoppelte Tarife weisen
+# zeitweise negative Arbeitspreise aus.
+MIN_ECONOMICS_IMPORT_PRICE = -2.0
+MAX_ECONOMICS_IMPORT_PRICE = 5.0
+
+# Vier Nachkommastellen entsprechen der üblichen Auflösung von
+# Arbeitspreisangaben (0,3421 EUR/kWh). Der NumberSelector von Home
+# Assistant lässt als kleinste Schrittweite nur 0,001 zu, deshalb ist das
+# Eingabefeld frei ("any") und der Options Flow rundet den eingegebenen
+# Wert selbst auf diese Schrittweite (config_flow._round_to_price_step).
+ECONOMICS_PRICE_STEP = 0.0001
+ECONOMICS_PRICE_DECIMALS = 4
+
+# ==========================================================================
+# Wirtschaftlichkeitsauswertung: ROI und Amortisationsstand (siehe
+# anforderung.yaml, REQ-ECONOMICS-AMORTIZATION)
+# ==========================================================================
+# Unabhängig von der Tarifart (ECONOMICS_OPTION_KEYS) - ein Tarifwechsel
+# darf die Investitionskosten nicht löschen, deshalb bewusst NICHT Teil
+# dieser Liste. Leer/None deaktiviert sämtliche Investitions-/
+# Amortisationssensoren, ohne die übrige Wirtschaftlichkeitsbilanz
+# (REQ-ECONOMICS-ACCOUNTING) zu berühren.
+CONF_ECONOMICS_INVESTMENT_COST = "economics_investment_cost_eur"
+MIN_ECONOMICS_INVESTMENT_COST = 0.01
+MAX_ECONOMICS_INVESTMENT_COST = 1_000_000.0
+ECONOMICS_INVESTMENT_COST_STEP = 0.01
+
+# Bereits vor dieser Integration erwirtschafteter Ertrag (EUR). Wer den
+# Speicher schon jahrelang betreibt, hätte sonst einen
+# Amortisationsfortschritt von 0 %, obwohl ein erheblicher Teil der
+# Investition längst zurückverdient ist. Der Wert wirkt AUSSCHLIESSLICH auf
+# ROI, Fortschritt und Restbetrag, nie auf
+# economics_net_savings: Dessen signiertes Nettoergebnis wird im
+# Dashboard als statistics-graph über `change` ausgewertet, ein Sprung
+# durch eine manuelle Eingabe würde dort als Tagesertrag erscheinen.
+#
+# 0 ist ein gültiger, ausdrücklicher Wert ("kein Vorlauf") - anders als
+# bei den Investitionskosten gibt es hier keinen Grund, ihn von
+# "nicht konfiguriert" zu unterscheiden.
+CONF_ECONOMICS_PRIOR_RESULT = "economics_prior_result_eur"
+MIN_ECONOMICS_PRIOR_RESULT = 0.0
+MAX_ECONOMICS_PRIOR_RESULT = 1_000_000.0
+ECONOMICS_PRIOR_RESULT_STEP = 0.01
+
+# ==========================================================================
+# Wirtschaftlichkeitsauswertung: Datenqualität, Diagnose und Bilanzneustart
+# (siehe anforderung.yaml, REQ-ECONOMICS-OBSERVABILITY)
+# ==========================================================================
+# Wie PRICE_SENSOR_MISSING_GRACE_PERIOD (6h) - kurze Preisaussetzer sollen
+# den Status economics_status nicht sofort auf price_unavailable kippen.
+# Ausnahme: ein ungültig GESPEICHERTER Fest-/Zeitfenstertarif
+# (QuoteUnavailable.TARIFF_INCOMPLETE) ist ein sofortiger Konfigurations-
+# fehler, kein transienter Preisausfall - dafür gilt keine Karenzzeit (siehe
+# SaxPowerCoordinator._update_economics_price_availability).
+ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD = 6 * 3600  # Sekunden
+
+# Rein informatives (is_fixable=False), selbstheilendes Issue, analog zu
+# ISSUE_PRICE_SENSOR_MISSING - aber für den Netzbezugspreis der
+# Wirtschaftlichkeitsauswertung statt für das preisoptimierte Laden.
+ISSUE_ECONOMICS_PRICE_UNAVAILABLE = "economics_price_unavailable"
+
+# Kontrollierter Bilanzneustart: setzt ausschließlich die Economics-
+# Geldsummen, Preisabdeckungszähler, Tages-Buckets, Start-/Revisionszeit und
+# den Amortisations-Erreichungszeitpunkt zurück - nie die Energie-/
+# Herkunftszähler aus REQ-ENERGY-ORIGIN (siehe
+# SaxPowerCoordinator.async_restart_economics_accounting).
+SERVICE_RESTART_ECONOMICS_ACCOUNTING = "restart_economics_accounting"
+ATTR_CONFIRM = "confirm"
+ATTR_REASON = "reason"
+# Nur in lokaler Diagnose-/Store-Historie sichtbar, keine harte
+# Verarbeitungsgrenze außer der Eingabelänge selbst.
+MAX_ECONOMICS_RESTART_REASON_LENGTH = 120

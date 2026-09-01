@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Sized
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -49,10 +49,9 @@ from .const import (
     PRICE_STRATEGY_ABSOLUTE,
     PRICE_STRATEGY_OFF,
     PRICE_STRATEGY_SMART,
-    PRICE_UNIT_CT_KWH,
-    PRICE_UNIT_EUR_KWH,
 )
 from .domain.forecast import normalize_energy_kwh
+from .domain.price_units import unit_factor
 
 if TYPE_CHECKING:
     from .coordinator import SaxPowerCoordinator
@@ -112,7 +111,8 @@ class PriceSlot:
     price: float
 
     def overlaps(self, moment: datetime) -> bool:
-        return self.start <= moment < self.end
+        instant = _instant(moment)
+        return _instant(self.start) <= instant < _instant(self.end)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -168,22 +168,35 @@ EMPTY_PLAN = PricePlan()
 # --------------------------------------------------------------------------
 # Preisdaten einlesen
 # --------------------------------------------------------------------------
-def _unit_factor(configured_unit: str, sensor_unit: Any) -> float:
-    """Umrechnungsfaktor auf EUR/kWh.
+def _instant(value: datetime) -> datetime:
+    """Eindeutiger UTC-Zeitpunkt für sämtliche Slotvergleiche.
 
-    "auto" wertet die Einheit des Sensors aus: alles, was nach Cent aussieht
-    (ct, cent, ¢), wird durch 100 geteilt. Ist keine Einheit hinterlegt,
-    bleibt der Wert unverändert - eine Fehlinterpretation lässt sich dann
-    über CONF_PRICE_UNIT explizit korrigieren.
+    Datetimes ohne Offset sind Anbieter-Wandzeiten und werden in der lokalen
+    Home-Assistant-Zeitzone interpretiert. Offset-behaftete Werte bleiben
+    dadurch über beide Folds der Herbstumstellung eindeutig (Issue #149).
     """
-    if configured_unit == PRICE_UNIT_CT_KWH:
-        return 0.01
-    if configured_unit == PRICE_UNIT_EUR_KWH:
-        return 1.0
-    unit = str(sensor_unit or "").lower()
-    if "ct" in unit or "cent" in unit or "¢" in unit:
-        return 0.01
-    return 1.0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return value.astimezone(UTC)
+
+
+def _local_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return dt_util.as_local(value)
+
+
+def _unit_factor(configured_unit: str, sensor_unit: Any) -> float:
+    """Umrechnungsfaktor auf EUR/kWh (siehe domain/price_units.py).
+
+    Anders als die Wirtschaftlichkeitsauswertung interpretiert die
+    Ladeplanung eine fremde Einheit nicht als Fehler, sondern rechnet den
+    Wert unverändert weiter: Ein Plan mit auffällig falschen Preisen ist im
+    Preis-Sensor sofort sichtbar und über CONF_PRICE_UNIT korrigierbar,
+    während ein plötzlich planloser Ladevorgang nur schwer zuzuordnen wäre.
+    """
+    factor = unit_factor(configured_unit, sensor_unit)
+    return 1.0 if factor is None else factor
 
 
 def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
@@ -195,11 +208,11 @@ def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
     benötigt.
     """
     if isinstance(value, datetime):
-        return dt_util.as_local(value)
+        return _local_datetime(value)
     if isinstance(value, str):
         parsed = dt_util.parse_datetime(value)
         if parsed is not None:
-            return dt_util.as_local(parsed)
+            return _local_datetime(parsed)
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if base_day is None:
@@ -289,14 +302,17 @@ def _finalize_slots(
     (Fallback DEFAULT_PRICE_SLOT_MINUTES). Damit funktionieren sowohl
     stündliche als auch viertelstündliche Preisdaten ohne Sonderfall.
     """
-    by_start: dict[datetime, tuple[datetime | None, float]] = {}
+    by_start: dict[datetime, tuple[datetime, datetime | None, float]] = {}
     for start, end, price in raw:
-        by_start.setdefault(start, (end, price))
-    starts = sorted(by_start)
-    if not starts:
+        by_start.setdefault(_instant(start), (start, end, price))
+    instants = sorted(by_start)
+    if not instants:
         return []
 
-    gaps = [(starts[i + 1] - starts[i]).total_seconds() for i in range(len(starts) - 1)]
+    gaps = [
+        (instants[i + 1] - instants[i]).total_seconds()
+        for i in range(len(instants) - 1)
+    ]
     positive_gaps = [gap for gap in gaps if gap > 0]
     default_seconds = (
         min(positive_gaps)
@@ -305,13 +321,15 @@ def _finalize_slots(
     )
 
     slots: list[PriceSlot] = []
-    for index, start in enumerate(starts):
-        end, price = by_start[start]
-        if end is None or end <= start:
-            if index + 1 < len(starts):
-                end = starts[index + 1]
+    for index, start_instant in enumerate(instants):
+        start, end, price = by_start[start_instant]
+        if end is None or _instant(end) <= start_instant:
+            if index + 1 < len(instants):
+                end = by_start[instants[index + 1]][0]
             else:
-                end = start + timedelta(seconds=default_seconds)
+                end = (start_instant + timedelta(seconds=default_seconds)).astimezone(
+                    start.tzinfo
+                )
         slots.append(PriceSlot(start=start, end=end, price=price * factor))
     return slots
 
@@ -352,6 +370,52 @@ def parse_price_slots(
     return []
 
 
+def has_price_forecast(state: Any, *, attribute: str | None = None) -> bool:
+    """Ob der Sensor überhaupt eine Preisvorschau mitbringt.
+
+    Bewusst getrennt von parse_price_slots: eine leere Slot-Liste bedeutet
+    dort sowohl "gar keine Vorschau vorhanden" als auch "Vorschau vorhanden,
+    aber vollständig unlesbar". Für die Ladeplanung ist beides gleich
+    (kein Plan), für die Wirtschaftlichkeit nicht - eine vorhandene, aber
+    unbrauchbare Vorschau darf nicht stillschweigend durch den
+    Sensorzustand ersetzt werden (siehe economics.SaxTariffProvider).
+
+    Ein über CONF_PRICE_ATTRIBUTE ausdrücklich benanntes Attribut zählt
+    schon dann als Vorschau, wenn es überhaupt einen nicht leeren Wert hat:
+    Der Anwender hat genau dieses Attribut als Preisquelle bestimmt, also
+    ist ein Typwechsel (etwa auf ein Mapping oder einen String) eine
+    unlesbare Vorschau und keine fehlende. Ohne ausdrückliche Angabe wird
+    dagegen nur geraten - dann gilt ausschließlich die Listenform der
+    bekannten Attributnamen als Vorschau, damit ein gleichnamiges Attribut
+    mit anderer Bedeutung nicht fälschlich als solche durchgeht.
+    """
+    if state is None:
+        return False
+    attributes: Mapping[str, Any] = getattr(state, "attributes", {}) or {}
+    if attribute:
+        return _has_value(attributes.get(attribute))
+    return any(
+        isinstance(attributes.get(name), (list, tuple)) and attributes.get(name)
+        for group in ATTRIBUTE_GROUPS
+        for name in group
+    )
+
+
+def _has_value(value: Any) -> bool:
+    """Ob ein Attribut überhaupt einen Inhalt hat.
+
+    Bewusst nicht bool(value): Ein Attribut, das auf den skalaren Wert 0
+    oder False wechselt, ist vorhanden - nur eben nicht lesbar. Leer sind
+    ausschließlich ein fehlender/None-Wert und ein leerer Container
+    (Liste, Tupel, Mapping, String).
+    """
+    if value is None:
+        return False
+    if isinstance(value, Sized):
+        return len(value) > 0
+    return True
+
+
 def current_price(slots: Sequence[PriceSlot], moment: datetime) -> float | None:
     for slot in slots:
         if slot.overlaps(moment):
@@ -378,12 +442,13 @@ def _cheapest_slots(
     target = timedelta(hours=hours)
     collected = timedelta()
     chosen: list[PriceSlot] = []
-    for slot in sorted(slots, key=lambda item: (item.price, item.start)):
+    now_instant = _instant(now)
+    for slot in sorted(slots, key=lambda item: (item.price, _instant(item.start))):
         if collected >= target:
             break
         chosen.append(slot)
-        collected += slot.end - max(slot.start, now)
-    return sorted(chosen, key=lambda item: item.start)
+        collected += _instant(slot.end) - max(_instant(slot.start), now_instant)
+    return sorted(chosen, key=lambda item: _instant(item.start))
 
 
 def _smart_required_hours(ctx: PriceChargeContext) -> tuple[float | None, float]:
@@ -432,8 +497,13 @@ def compute_plan(
     if not ctx.enabled or ctx.strategy == PRICE_STRATEGY_OFF:
         return PricePlan(status=PRICE_STATUS_OFF, current_price=price_now)
 
-    horizon_end = now + timedelta(hours=PRICE_PLAN_HORIZON_HOURS)
-    future = [slot for slot in slots if slot.end > now and slot.start < horizon_end]
+    now_instant = _instant(now)
+    horizon_end = now_instant + timedelta(hours=PRICE_PLAN_HORIZON_HOURS)
+    future = [
+        slot
+        for slot in slots
+        if _instant(slot.end) > now_instant and _instant(slot.start) < horizon_end
+    ]
     if not future:
         return PricePlan(
             status=PRICE_STATUS_NO_PRICE_DATA,
@@ -480,7 +550,10 @@ def compute_plan(
         status = PRICE_STATUS_CHARGING
         next_start = next(slot.start for slot in selected if slot.overlaps(now))
     else:
-        next_start = next((slot.start for slot in selected if slot.start > now), None)
+        next_start = next(
+            (slot.start for slot in selected if _instant(slot.start) > now_instant),
+            None,
+        )
 
     return PricePlan(
         status=status,

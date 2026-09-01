@@ -15,7 +15,13 @@ from unittest.mock import AsyncMock, MagicMock
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.application.calibration import CalibrationState
-from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
+from custom_components.sax_power.const import (
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_TARIFF_TYPE,
+    DATA_COORDINATOR,
+    DOMAIN,
+)
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.diagnostics import (
     TO_REDACT,
@@ -98,3 +104,114 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     assert diagnostics["state"]["grid_serving_forecast_threshold_kwh"] == 0
     assert diagnostics["state"]["grid_serving_forecast_kwh"] is None
     assert diagnostics["state"]["grid_serving_forecast_allowed"] is True
+
+
+async def test_diagnostics_includes_the_tariff_state(hass) -> None:
+    """Der Diagnose-Download weist den Tarifzustand aus - inklusive des
+    maschinenlesbaren Grundes, wenn kein Preis bestimmbar ist (siehe
+    anforderung.yaml, REQ-ECONOMICS-TARIFFS)."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["tariff"]["tariff_type"] == "disabled"
+    assert diagnostics["tariff"]["quote_price_eur_kwh"] is None
+    assert diagnostics["tariff"]["quote_unavailable_reason"] == "tariff_disabled"
+
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: "fixed",
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3421,
+    }
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["tariff"]["feed_in_price_eur_kwh"] == 0.0786
+    assert diagnostics["tariff"]["quote_price_eur_kwh"] == 0.3421
+    assert diagnostics["tariff"]["quote_source"] == "fixed"
+    assert diagnostics["tariff"]["quote_unavailable_reason"] is None
+    # Ein Fest-/Zeitfenstertarif hat keine Sensor-Quelle.
+    assert diagnostics["tariff"]["price_sensor_entity_id"] is None
+
+
+async def test_diagnostics_includes_the_dynamic_price_sensor_entity_id(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: eine Entity-ID ist keine identifizierende
+    Information (anders als Host/Seriennummer) und wird deshalb
+    unredigiert gezeigt."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: "dynamic",
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        "price_sensor": "sensor.strompreis",
+    }
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["tariff"]["price_sensor_entity_id"] == "sensor.strompreis"
+
+
+async def test_diagnostics_includes_the_economics_balance(hass) -> None:
+    """Der Diagnose-Download weist den internen Bilanzzustand aus -
+    Zeitstempel und ungerundete Rohsummen, die in coordinator_data nicht
+    stehen (siehe anforderung.yaml, REQ-ECONOMICS-ACCOUNTING)."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["started_at"] is None
+    assert diagnostics["economics"]["grid_charge_cost_eur"] is None
+    assert diagnostics["economics"]["operating_result_high_water_eur"] is None
+
+    started_at = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
+    coordinator._economics_started_at = started_at
+    coordinator._economics_grid_charge_cost_eur = 1.23456
+    coordinator._economics_operating_result_high_water_eur = 3.45678
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["started_at"] == started_at.isoformat()
+    assert diagnostics["economics"]["grid_charge_cost_eur"] == 1.23456
+    assert diagnostics["economics"]["operating_result_high_water_eur"] == 3.45678
+
+
+async def test_diagnostics_includes_the_energy_origin_start(hass) -> None:
+    """REQ-ENERGY-ORIGIN: Ohne den Startzeitpunkt der Herkunftszählung ist
+    aus einem Download nicht zu entscheiden, ob eine Differenz zwischen
+    Herkunftszählern und Geldbilanz ein Rechenfehler ist oder nur zwei
+    verschieden alte Zählzeiträume."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["energy"]["origin_accounting_started_at"] is None
+    assert diagnostics["energy"]["pv_charged_kwh"] is None
+
+    started_at = datetime(2026, 8, 26, 8, 0, tzinfo=UTC)
+    coordinator._origin_accounting_started_at = started_at
+    coordinator._energy_pv_charged_kwh = 2.4421234
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["energy"]["origin_accounting_started_at"] == (
+        started_at.isoformat()
+    )
+    assert diagnostics["energy"]["pv_charged_kwh"] == 2.4421234
+
+
+async def test_diagnostics_includes_the_economics_data_quality_state(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Status, Store-Zustand und
+    Preisabdeckungszähler landen ebenfalls im Diagnose-Download."""
+    entry, coordinator = _make_entry_with_coordinator(hass)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["store_write_blocked"] is False
+    assert diagnostics["economics"]["store_minor_version"] >= 3
+    assert diagnostics["economics"]["priced_charge_kwh"] is None
+    assert diagnostics["economics"]["price_unavailable"] is False
+
+    coordinator._economics_store_write_blocked = True
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["economics"]["store_write_blocked"] is True

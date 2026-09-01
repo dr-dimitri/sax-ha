@@ -8,18 +8,21 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
+    ATTR_CONFIRM,
     ATTR_DEVICE_ID,
     ATTR_ENABLED,
     ATTR_END,
     ATTR_FORCE,
     ATTR_POWER,
+    ATTR_REASON,
     ATTR_START,
     CONF_CREATE_DASHBOARD,
     CONF_SCAN_INTERVAL,
@@ -29,9 +32,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID_EXTENDED,
     DOMAIN,
+    MAX_ECONOMICS_RESTART_REASON_LENGTH,
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_REINSTALL_DASHBOARD,
+    SERVICE_RESTART_ECONOMICS_ACCOUNTING,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
     SERVICE_SET_TIMED_CHARGE_WINDOW,
@@ -39,7 +44,7 @@ from .const import (
     SERVICE_STOP_GRID_CHARGE,
 )
 from .coordinator import SaxPowerCoordinator
-from .dashboard import async_create_dashboard
+from .dashboard import async_check_dashboard_up_to_date, async_create_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +56,15 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.TIME,
 ]
+
+
+def _require_confirm_true(value: Any) -> Any:
+    """`confirm` muss exakt True sein - eine fehlende oder falsch
+    geschriebene Bestätigung darf niemals als "ja" durchgehen."""
+    coerced = cv.boolean(value)
+    if coerced is not True:
+        raise vol.Invalid("confirm muss genau 'true' sein")
+    return coerced
 
 
 def _coerce_grid_charge_power(value: Any) -> Any:
@@ -95,10 +109,72 @@ SERVICE_SET_PRICE_CHARGE_ENABLED_SCHEMA = vol.Schema(
         vol.Optional(ATTR_FORCE, default=False): cv.boolean,
     }
 )
+# `confirm` muss exakt True sein (REQ-ECONOMICS-OBSERVABILITY) - eine
+# Automation, die den Bilanzneustart versehentlich ohne bewusste
+# Bestätigung aufruft, darf keine Geldsummen zurücksetzen. `reason` ist
+# rein diagnostisch (lokaler Diagnose-Download) und auf eine sinnvolle
+# Länge begrenzt.
+SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        vol.Required(ATTR_CONFIRM): _require_confirm_true,
+        vol.Optional(ATTR_REASON): vol.All(
+            cv.string, vol.Length(max=MAX_ECONOMICS_RESTART_REASON_LENGTH)
+        ),
+    }
+)
+
+
+#: Entities früherer Versionen, die es nicht mehr gibt - als Suffix der
+#: unique_id (siehe SaxPowerEntity._apply_identity: "<entry_id>_<suffix>").
+#: Die Herkunftskategorie "Herkunft unbekannt" ist entfallen
+#: (REQ-ENERGY-ORIGIN), und mit ihr der zugehörige Abdeckungsgrad, der
+#: seither konstant 100 % wäre. Der Tages-Roh-Cashflow aus den
+#: Snapshot-Ständen vor REQ-ECONOMICS-ACCOUNTING darf nicht als neue
+#: Netto-Ersparnis-Historie weitergeführt werden. Auch die entfallene
+#: Amortisationsprognose darf nicht als drei dauerhaft nicht verfügbare
+#: Entities zurückbleiben. Die internen Werte für unbewertete bzw.
+#: unbepreiste Energie werden ebenfalls nicht mehr als Sensoren veröffentlicht.
+#: Ohne diese Bereinigung blieben die alten Entities dauerhaft "nicht
+#: verfügbar" in der Registry.
+_REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
+    (Platform.SENSOR, "energy_charged_origin_unknown"),
+    (Platform.SENSOR, "energy_origin_coverage"),
+    (Platform.SENSOR, "economics_result_today"),
+    (Platform.SENSOR, "economics_average_daily_result_30d"),
+    (Platform.SENSOR, "economics_projected_annual_result"),
+    (Platform.SENSOR, "economics_estimated_payback_date"),
+    (Platform.SENSOR, "economics_unvalued_inventory"),
+    (Platform.SENSOR, "economics_unpriced_charge"),
+    (Platform.SENSOR, "economics_unpriced_discharge"),
+)
+
+
+@callback
+def _async_remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Entfernt Entities früherer Versionen aus der Entity-Registry.
+
+    Home Assistant räumt eine weggefallene Entity nicht von selbst auf: Sie
+    bleibt mit ihrem letzten Zustand als "nicht verfügbar" in der Registry
+    und damit in jedem Dashboard und jeder Automation stehen, in der sie
+    verwendet wurde. Bewusst nur exakt benannte Suffixe statt eines
+    Abgleichs gegen alle aktuellen Beschreibungen - der würde bei einer
+    noch nicht geladenen Plattform jede Entity dieser Plattform löschen.
+    """
+    registry = er.async_get(hass)
+    for platform, suffix in _REMOVED_ENTITY_SUFFIXES:
+        entity_id = registry.async_get_entity_id(
+            platform, DOMAIN, f"{entry.entry_id}_{suffix}"
+        )
+        if entity_id is None:
+            continue
+        _LOGGER.info("Entferne die entfallene Entity %s", entity_id)
+        registry.async_remove(entity_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SAX Power from a config entry."""
+    _async_remove_stale_entities(hass, entry)
     client = AsyncModbusTcpClient(
         host=entry.data[CONF_HOST],
         port=entry.data.get(CONF_PORT, 502),
@@ -125,6 +201,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_load_calibration_state()
     await coordinator.async_load_energy_state()
+    # Wie async_load_energy_state: muss vor dem ersten Refresh stehen, da
+    # dessen Bootstrap (siehe SaxPowerCoordinator._bootstrap_economics_if_ready)
+    # bereits im ersten Refresh laufen kann (REQ-ECONOMICS-ACCOUNTING).
+    await coordinator.async_load_economics_state()
     # Muss vor dem ersten Refresh stehen: der Coordinator kennt danach die
     # vollständige gespeicherte Ladekonfiguration und sperrt bis
     # async_finish_bootstrap() unten jede steuernde Entscheidung. Sonst
@@ -152,12 +232,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_CREATE_DASHBOARD: False}
         )
+    else:
+        # Genau der Fall, den das Flag oben erzeugt: Ab jetzt wird das
+        # Dashboard nie wieder gebaut. Ergänzt eine neuere Version einen
+        # Tab, fehlt er einem bestehenden Dashboard stillschweigend - der
+        # Hinweis darauf ist die einzige Stelle, an der der Anwender davon
+        # überhaupt erfährt (siehe dashboard.py, #138).
+        await async_check_dashboard_up_to_date(hass, entry)
 
     # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
     # sofort einmal aus und braucht dafür die vollständige Konfiguration -
     # entweder aus dem Store (Regelfall) oder aus dem einmaligen
     # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
     coordinator.price_planner.async_setup()
+    # Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS): registriert
+    # den Zustandsbeobachter des dynamischen Preis-Sensors. Ohne
+    # konfigurierten Tarif passiert hier nichts.
+    coordinator.tariff_provider.async_setup()
     # Schließt das Bootstrap-Fenster: ab hier ist die Konfiguration
     # vollständig, und genau eine Ladeentscheidung wird angewendet - statt
     # während des Entity-Setups eine Kette von Teilkonfigurationen
@@ -197,13 +288,32 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     SaxPricePlanner.async_setup ist bewusst idempotent (räumt seine alten
     Zustandsbeobachter ab und registriert sie mit den aktuellen Optionen
     neu), ohne Entities, Modbus-Verbindung oder eine laufende
-    Lade-Automatik anzutasten."""
+    Lade-Automatik anzutasten. Für die Tarifkonfiguration der
+    Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS) gilt dasselbe:
+    SaxTariffProvider.async_setup registriert den Zustandsbeobachter des
+    dynamischen Preis-Sensors nach demselben idempotenten Muster neu, sodass
+    ein Tarif- oder Sensorwechsel weder einen Listener auf der alten Quelle
+    zurücklässt noch einen zweiten auf derselben anlegt."""
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if entry_data is None:
         return
     coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
+    if coordinator.options == entry.options:
+        # hass.config_entries.async_update_entry löst diesen Listener auch
+        # aus, wenn ausschließlich entry.DATA geschrieben wurde - etwa beim
+        # Wegklicken des Dashboard-Hinweises (repairs.py,
+        # CONF_DASHBOARD_UPDATE_DISMISSED). Ohne diese Abkürzung setzte
+        # eine solche reine Datenänderung den diagnostischen Zeitstempel
+        # der letzten Tarifrevision zurück und liefe durch
+        # async_apply_price_plan bis in einen Modbus-Schreibpfad, obwohl
+        # sich an den Options nichts geändert hat.
+        return
     coordinator.options = dict(entry.options)
     coordinator.price_planner.async_setup()
+    coordinator.tariff_provider.async_setup()
+    # REQ-ECONOMICS-ACCOUNTING: rein diagnostischer Zeitstempel der letzten
+    # Tarifrevision - beeinflusst keine bereits verbuchten Beträge.
+    coordinator.notify_tariff_revision()
     await coordinator.async_apply_price_plan()
 
 
@@ -294,6 +404,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
         await async_create_dashboard(hass, entry, force=True)
 
+    async def _async_restart_economics_accounting(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.async_restart_economics_accounting(
+            reason=call.data.get(ATTR_REASON)
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_START_GRID_CHARGE,
@@ -341,4 +457,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_REINSTALL_DASHBOARD,
         _async_reinstall_dashboard_service,
         schema=SERVICE_STOP_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+        _async_restart_economics_accounting,
+        schema=SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA,
     )

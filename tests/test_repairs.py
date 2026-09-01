@@ -16,13 +16,19 @@ from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
+    CONF_DASHBOARD_UPDATE_DISMISSED,
+    CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
     DOMAIN,
+    ISSUE_DASHBOARD_OUTDATED,
+    ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
     ISSUE_EMPTY_CHARGE_WINDOW,
     ISSUE_MAX_SOC_BELOW_MIN_SOC,
     ISSUE_NO_ACTIVE_MONTHS,
+    ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
     ISSUE_PRICE_SENSOR_MISSING,
     ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
@@ -34,6 +40,11 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.price_optimizer import PricePlan
+from custom_components.sax_power.repairs import (
+    ChargeConflictRepairFlow,
+    DashboardOutdatedRepairFlow,
+    async_create_fix_flow,
+)
 
 
 def _make_client() -> MagicMock:
@@ -429,6 +440,94 @@ async def test_no_active_months_issue_clears_once_a_month_is_selected(hass) -> N
 
 
 # ===========================================================================
+# 6. Wirtschaftlichkeit: Netzbezugspreis nicht verfügbar
+# (REQ-ECONOMICS-OBSERVABILITY) - die Karenzzeit/Sofortfehler-Logik selbst
+# sitzt bereits im Coordinator (_update_economics_price_availability, siehe
+# tests/test_coordinator.py); hier nur die Zustandsflanke der Issue-
+# Erzeugung/-Löschung anhand des bereits fertig ausgewerteten Flags.
+# ===========================================================================
+async def test_economics_price_unavailable_issue_triggers_when_flagged(hass) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is not None
+
+
+async def test_economics_price_unavailable_issue_not_recreated_every_cycle(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+
+    with patch(
+        "custom_components.sax_power.coordinator.ir.async_create_issue"
+    ) as mock_create:
+        coordinator._async_check_self_diagnostics()
+        coordinator._async_check_self_diagnostics()
+
+    assert mock_create.call_count == 1
+
+
+async def test_economics_price_unavailable_issue_clears_once_price_returns(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is not None
+
+    coordinator._economics_price_unavailable = False
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+async def test_economics_price_unavailable_issue_clears_after_a_reload(hass) -> None:
+    """Ein Neuladen des Config Entry erzeugt eine frische SelfDiagnostics-
+    Instanz mit zurückgesetztem In-Memory-Flag - ein davor angelegtes,
+    in der Registry noch vorhandenes Issue muss trotzdem gelöscht werden,
+    sobald der Preis wieder gültig ist (nicht erst nach einem erneuten
+    Sichtbarwerden des Problems)."""
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_ECONOMICS_TARIFF_TYPE: "fixed"}
+    coordinator._economics_price_unavailable = True
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is not None
+
+    # Simuliert den Neustart der SelfDiagnostics-Instanz bei einem Neuladen
+    # des Config Entry - das Issue bleibt in der Registry bestehen.
+    from custom_components.sax_power.infrastructure.self_diagnostics import (
+        SelfDiagnostics,
+    )
+
+    coordinator._self_diagnostics = SelfDiagnostics(hass, coordinator.entry_id)
+    coordinator._economics_price_unavailable = False
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+async def test_economics_price_unavailable_issue_not_triggered_when_disabled(
+    hass,
+) -> None:
+    """Ein deaktivierter Tarif zeigt keinen Preis-Issue, selbst wenn das
+    Flag aus einer früheren Aktivierung noch True wäre."""
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {}
+    coordinator._economics_price_unavailable = True
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+# ===========================================================================
 # Kein falsch-positives Issue bei unauffälliger Konfiguration
 # ===========================================================================
 async def test_no_issues_created_for_a_healthy_default_configuration(hass) -> None:
@@ -444,3 +543,83 @@ async def test_no_issues_created_for_a_healthy_default_configuration(hass) -> No
     assert _get_issue(hass, f"{ISSUE_EMPTY_CHARGE_WINDOW}_grid_serving") is None
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_timed_charge") is None
     assert _get_issue(hass, f"{ISSUE_NO_ACTIVE_MONTHS}_grid_serving") is None
+    assert _get_issue(hass, ISSUE_ECONOMICS_PRICE_UNAVAILABLE) is None
+
+
+# --------------------------------------------------------------------------
+# Hinweis auf ein veraltetes Dashboard (#138)
+# --------------------------------------------------------------------------
+async def test_fix_flow_is_chosen_by_issue_key(hass) -> None:
+    """Die issue_id trägt die Entry-ID als Suffix und taugt deshalb nicht
+    zum Vergleich - verzweigt wird über den issue_key aus den Issue-Daten.
+    Ohne diese Verzweigung bekäme jedes künftige fixierbare Issue den
+    Ladekonflikt-Dialog."""
+    dashboard_flow = await async_create_fix_flow(
+        hass,
+        f"{ISSUE_DASHBOARD_OUTDATED}_entry",
+        {"entry_id": "entry", "issue_key": ISSUE_DASHBOARD_OUTDATED},
+    )
+    conflict_flow = await async_create_fix_flow(
+        hass,
+        f"{ISSUE_PRICE_CHARGE_CONFLICT}_entry",
+        {"entry_id": "entry", "issue_key": ISSUE_PRICE_CHARGE_CONFLICT},
+    )
+
+    assert isinstance(dashboard_flow, DashboardOutdatedRepairFlow)
+    assert isinstance(conflict_flow, ChargeConflictRepairFlow)
+
+
+async def test_dashboard_repair_rebuilds_on_confirm(hass) -> None:
+    """Bestätigen baut das Dashboard neu - mit force, weil ein vorhandenes
+    Dashboard sonst unangetastet bliebe (genau der gemeldete Zustand)."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id="dash_entry", data={})
+    entry.add_to_hass(hass)
+    flow = DashboardOutdatedRepairFlow(
+        {"entry_id": entry.entry_id, "issue_key": ISSUE_DASHBOARD_OUTDATED}
+    )
+    flow.hass = hass
+
+    with patch(
+        "custom_components.sax_power.repairs.async_create_dashboard",
+        new=AsyncMock(),
+    ) as rebuild:
+        result = await flow.async_step_confirm()
+
+    assert result["type"] == "create_entry"
+    assert rebuild.await_args.args[1] is entry
+    assert rebuild.await_args.kwargs["force"] is True
+    assert not entry.data.get(CONF_DASHBOARD_UPDATE_DISMISSED)
+
+
+async def test_dashboard_repair_remembers_a_declined_hint(hass) -> None:
+    """Abbrechen ändert nichts am Dashboard und merkt sich das dauerhaft -
+    ein bewusst umgebautes Dashboard ist ein legitimer Zustand."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id="dash_entry", data={})
+    entry.add_to_hass(hass)
+    flow = DashboardOutdatedRepairFlow(
+        {"entry_id": entry.entry_id, "issue_key": ISSUE_DASHBOARD_OUTDATED}
+    )
+    flow.hass = hass
+
+    with patch(
+        "custom_components.sax_power.repairs.async_create_dashboard",
+        new=AsyncMock(),
+    ) as rebuild:
+        result = await flow.async_step_cancel()
+    await hass.async_block_till_done()
+
+    assert result["type"] == "create_entry"
+    rebuild.assert_not_awaited()
+    assert entry.data[CONF_DASHBOARD_UPDATE_DISMISSED] is True
+
+
+async def test_dashboard_repair_survives_a_removed_entry(hass) -> None:
+    """Der Config Entry kann zwischen Anlegen des Issues und Öffnen des
+    Dialogs entfernt worden sein - der Flow darf daran nicht scheitern."""
+    flow = DashboardOutdatedRepairFlow(
+        {"entry_id": "gibt_es_nicht", "issue_key": ISSUE_DASHBOARD_OUTDATED}
+    )
+    flow.hass = hass
+
+    assert (await flow.async_step_confirm())["type"] == "create_entry"
+    assert (await flow.async_step_cancel())["type"] == "create_entry"

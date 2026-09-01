@@ -129,6 +129,12 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[SaxPowerBinarySensorEntityDescription, ...] = 
         is_on_fn=_data_flag("grid_serving_active"),
     ),
     SaxPowerBinarySensorEntityDescription(
+        key="economics_investment_configured",
+        translation_key="economics_investment_configured",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on_fn=_data_flag("economics_investment_configured"),
+    ),
+    SaxPowerBinarySensorEntityDescription(
         key="max_soc_clamped",
         translation_key="max_soc_clamped",
         is_on_fn=_coordinator_property(lambda coordinator: coordinator.max_soc_clamped),

@@ -13,18 +13,24 @@ from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components import sax_power
+from custom_components.sax_power import binary_sensor, sensor  # noqa: F401
 from custom_components.sax_power.const import (
+    CONF_DASHBOARD_UPDATE_DISMISSED,
     DATA_COORDINATOR,
     DOMAIN,
+    ISSUE_DASHBOARD_OUTDATED,
     SERVICE_CREATE_DASHBOARD,
     SERVICE_REINSTALL_DASHBOARD,
 )
 from custom_components.sax_power.dashboard import (
     DASHBOARD_URL_PATH,
     async_build_dashboard_config,
+    async_check_dashboard_up_to_date,
     async_create_dashboard,
 )
 
@@ -62,7 +68,7 @@ def _iter_entity_ids(cards: list[dict[str, Any]]):
 
 async def test_build_dashboard_config_resolves_registered_entities(hass) -> None:
     """Nur tatsächlich in der Entity Registry vorhandene Entities landen in
-    den Karten; die vier Tabs (Views) sind immer vorhanden."""
+    den Karten; die fünf Tabs (Views) sind immer vorhanden."""
     soc_entity_id = _register(hass, "sensor", "soc")
     storage_switch_entity_id = _register(hass, "switch", "storage_switch")
     grid_serving_switch_entity_id = _register(hass, "switch", "grid_serving_enabled")
@@ -77,6 +83,7 @@ async def test_build_dashboard_config_resolves_registered_entities(hass) -> None
         "ladeautomatik",
         "netzdienliches-laden",
         "dynamisches-laden",
+        "ersparnis",
     ]
 
     general_entities = set(_iter_entity_ids(config["views"][0]["cards"]))
@@ -257,13 +264,21 @@ async def test_price_charge_forecast_follows_status_with_dynamic_name(hass) -> N
 
 
 async def test_build_dashboard_config_skips_cards_without_entities(hass) -> None:
-    """Ohne jede registrierte Entity bleiben alle vier Views vorhanden, aber
-    ohne Karten - kein Fehler, keine leeren Platzhalterkarten."""
+    """Ohne registrierte Entity bleiben alle fünf Views vorhanden.
+
+    Die ersten vier Views bleiben kartenlos; im Ersparnis-View bleiben der
+    neutrale Status-Fallback und der statische Einordnungstext, aber keine
+    leeren Entity-/Grid-Karten.
+    """
     config = await async_build_dashboard_config(hass, "unbekannter_entry")
 
-    assert len(config["views"]) == 4
-    for view in config["views"]:
+    assert len(config["views"]) == 5
+    for view in config["views"][:4]:
         assert view["cards"] == []
+    assert [card["type"] for card in config["views"][4]["cards"]] == [
+        "markdown",
+        "markdown",
+    ]
 
 
 async def test_build_dashboard_config_status_card_removed(hass) -> None:
@@ -522,6 +537,424 @@ async def test_build_dashboard_config_month_switch_labels_are_bare_month_names(
         assert months_card["entities"][0]["name"] == "January"
 
 
+# ===========================================================================
+# Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+# ===========================================================================
+def _savings_view(config: dict[str, Any]) -> dict[str, Any]:
+    return next(view for view in config["views"] if view["path"] == "ersparnis")
+
+
+def _savings_status_card(view: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "markdown"
+        and card.get("show_empty") is False
+        and "status_entity" in card.get("content", "")
+    )
+
+
+def _savings_explanation_card(view: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "markdown" and "<details>" in card["content"]
+    )
+
+
+async def test_savings_status_hint_is_last_and_renders_every_state(hass) -> None:
+    missing_config = await async_build_dashboard_config(hass, ENTRY_ID)
+    missing_view = _savings_view(missing_config)
+    missing_card = _savings_status_card(missing_view)
+    assert missing_card == missing_view["cards"][-1]
+    assert missing_card["type"] == "markdown"
+    assert missing_card["show_empty"] is False
+    assert "set status_entity = none" in missing_card["content"]
+    missing_rendered = template.Template(missing_card["content"], hass).async_render(
+        parse_result=False
+    )
+    assert missing_rendered == (
+        "Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar."
+    )
+
+    status = _register(hass, "sensor", "economics_status")
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    view = _savings_view(config)
+    card = _savings_status_card(view)
+    assert card == view["cards"][-1]
+    assert card["type"] == "markdown"
+    assert card["show_empty"] is False
+    assert repr(status) in card["content"]
+
+    messages = {
+        "active": "",
+        "disabled": (
+            "Die Wirtschaftlichkeitsberechnung ist deaktiviert. Bitte unter "
+            "„Geräte & Dienste → SAX Power Home → Konfigurieren → "
+            "Wirtschaftlichkeit“ konfigurieren."
+        ),
+        "price_unavailable": (
+            "Der Strompreis ist derzeit nicht verfügbar. Aktuelle Zeitraumwerte "
+            "können unvollständig sein."
+        ),
+        "origin_unavailable": (
+            "Die Herkunft der Ladeenergie ist derzeit nicht bestimmbar."
+        ),
+        "partial_price_coverage": (
+            "Für einen Teil der Energie fehlte heute ein Preis. Das Ergebnis "
+            "kann unvollständig sein."
+        ),
+        "storage_error": (
+            "Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers "
+            "angehalten. Bitte in den **Home-Assistant-Reparaturen** das "
+            "Korrupt-Backup wiederherstellen; bloßes Neuladen startet keine neue "
+            "Bilanz."
+        ),
+        "unknown": "Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.",
+        "unavailable": ("Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar."),
+        "future_status": (
+            "Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar."
+        ),
+    }
+    for status_state, message in messages.items():
+        hass.states.async_set(status, status_state)
+
+        rendered = template.Template(card["content"], hass).async_render(
+            parse_result=False
+        )
+
+        assert rendered == message, status_state
+
+
+async def test_savings_explanation_follows_the_period_cards(hass) -> None:
+    _register(hass, "sensor", "economics_net_savings")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    card = _savings_explanation_card(view)
+    grid = next(candidate for candidate in view["cards"] if candidate["type"] == "grid")
+    free_period = _savings_free_period_block(view)
+    assert view["cards"].index(free_period) > view["cards"].index(grid)
+    assert view["cards"].index(card) == view["cards"].index(free_period) + 1
+    content = card["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+    assert "<details>" in rendered
+    assert "Beim Start der Bilanz" not in rendered
+
+
+async def test_savings_view_is_fifth_with_expected_title_and_icon(hass) -> None:
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert config["views"][4] == _savings_view(config)
+    assert config["views"][4]["title"] == "Ersparnis"
+    assert config["views"][4]["icon"] == "mdi:cash-multiple"
+
+
+async def test_savings_view_uses_requested_card_order(hass) -> None:
+    _register(hass, "binary_sensor", "economics_investment_configured")
+    _register(hass, "sensor", "economics_amortization_progress")
+    _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_current_import_price")
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    cards = _savings_view(config)["cards"]
+    assert len(cards) == 6
+    assert cards[0]["type"] == "vertical-stack"
+    assert cards[0]["cards"][0]["type"] == "conditional"
+    assert cards[1]["type"] == "grid"
+    assert cards[2] == _tariff_plan_card(_savings_view(config))
+    assert cards[3]["type"] == "vertical-stack"
+    assert any(
+        nested["type"] == "energy-date-selection" for nested in cards[3]["cards"]
+    )
+    assert cards[4] == _savings_explanation_card(_savings_view(config))
+    assert cards[5] == _savings_status_card(_savings_view(config))
+
+
+async def test_savings_view_uses_exact_calendar_statistics(hass) -> None:
+    result = _register(hass, "sensor", "economics_net_savings")
+    result_today = _register(hass, "sensor", "economics_net_savings_today")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    grid = next(card for card in view["cards"] if card["type"] == "grid")
+    assert grid["columns"] == 2
+    assert grid["square"] is False
+    assert grid["cards"] == [
+        {
+            "type": "statistic",
+            "entity": result,
+            "name": name,
+            "stat_type": "change",
+            "period": {"calendar": {"period": period}},
+        }
+        for name, period in (
+            ("Heute bisher", "day"),
+            ("Diese Woche bisher", "week"),
+            ("Dieser Monat bisher", "month"),
+            ("Dieses Jahr bisher", "year"),
+        )
+    ]
+    assert result_today not in json.dumps(view)
+    assert "offset" not in json.dumps(grid)
+
+
+async def test_savings_view_places_prior_result_directly_below_remaining(hass) -> None:
+    result = _register(hass, "sensor", "economics_net_savings")
+    status = _register(hass, "sensor", "economics_status")
+    configured = _register(hass, "binary_sensor", "economics_investment_configured")
+    _register(hass, "sensor", "economics_amortization_progress")
+    remaining = _register(hass, "sensor", "economics_remaining_to_payback")
+    roi = _register(hass, "sensor", "economics_roi")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    block = _savings_payback_block(view)
+    assert block["cards"][1]["conditions"] == [{"entity": configured, "state": "on"}]
+    details = _configured_payback_stack(block)["cards"][1]
+    assert details["type"] == "entities"
+    assert details["state_color"] is True
+    assert details["entities"][0]["entity"] == remaining
+    assert details["entities"][1:] == [
+        {
+            "type": "attribute",
+            "entity": roi,
+            "attribute": "prior_result_eur_formatted",
+            "name": "Bereits vor Bilanzbeginn berücksichtigt",
+            "suffix": "€",
+        },
+        {"entity": result, "name": "Netto-Ersparnis"},
+        {
+            "type": "attribute",
+            "entity": status,
+            "attribute": "economics_started_at",
+            "name": "Bilanzbeginn",
+        },
+    ]
+    assert not any(
+        card.get("title") == "Gesamt seit Bilanzbeginn" for card in view["cards"]
+    )
+    assert "fixed_period" not in json.dumps(view)
+
+
+async def test_savings_view_collapses_static_explanations_into_one_control(
+    hass,
+) -> None:
+    _register(hass, "sensor", "economics_net_savings")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    card = _savings_explanation_card(view)
+    assert card["type"] == "markdown"
+    content = card["content"]
+    assert content.startswith("<details>\n<summary>")
+    assert content.endswith("</details>\n")
+    assert "<details open" not in content
+    assert content.count("<details>") == 1
+    assert content.count("</details>") == 1
+    assert content.count("<summary>") == 1
+    assert content.count("</summary>") == 1
+    assert json.dumps(view).count("<details>") == 1
+    assert json.dumps(view).count("</details>") == 1
+    assert "Hinweise zur Berechnung und Datenbasis" in content
+    assert "Netto-Ersparnis:" in content
+    assert "Spätere Kosten reduzieren das aktuelle Ergebnis" in content
+    assert "Mehrkosten erscheinen als" in content
+    assert "Recorder-Langzeitstatistik der Netto-Ersparnis" in content
+    assert "jünger als der angezeigte Bilanzbeginn" in content
+    assert "Freier Zeitraum:" in content
+    assert "Eine frühere Auswahl erfindet keine Werte" in content
+    assert "vom Recorder ausgeschlossen" in content
+    assert "unbekannt beziehungsweise leer" in content
+    assert "manuellen Neustart" in content
+    assert "signierten Änderungen vor und nach dem Neustart" in content
+
+    explanatory_cards = [
+        card["content"]
+        for card in view["cards"]
+        if card["type"] == "markdown"
+        and "Recorder-Langzeitstatistik" in card["content"]
+    ]
+    assert explanatory_cards == [content]
+
+
+async def test_savings_view_omits_data_cards_without_result_entity(hass) -> None:
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    assert [card["type"] for card in view["cards"]] == ["markdown", "markdown"]
+    assert not any(card["type"] == "grid" for card in view["cards"])
+    assert not any(
+        card.get("title") == "Gesamt seit Bilanzbeginn" for card in view["cards"]
+    )
+
+
+def _savings_free_period_block(view: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "vertical-stack"
+        and any(nested["type"] == "energy-date-selection" for nested in card["cards"])
+    )
+
+
+async def test_savings_free_period_cards_share_the_exact_collection_key(
+    hass,
+) -> None:
+    result = _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_avoided_grid_cost")
+    _register(hass, "sensor", "economics_grid_charge_cost")
+    _register(hass, "sensor", "economics_pv_opportunity_cost")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    block = _savings_free_period_block(_savings_view(config))
+    assert [card["type"] for card in block["cards"]] == [
+        "energy-date-selection",
+        "statistic",
+        "statistics-graph",
+    ]
+    selection, statistic, graph = block["cards"]
+    assert selection == {
+        "type": "energy-date-selection",
+        "collection_key": "energy_sax_power_savings",
+        "disable_compare": True,
+    }
+    assert statistic == {
+        "type": "statistic",
+        "entity": result,
+        "name": "Netto-Ersparnis im gewählten Zeitraum",
+        "period": "energy_date_selection",
+        "stat_type": "change",
+        "collection_key": "energy_sax_power_savings",
+    }
+    assert graph == {
+        "type": "statistics-graph",
+        "title": "Verlauf im gewählten Zeitraum",
+        "entities": [result],
+        "stat_types": ["change"],
+        "chart_type": "bar",
+        "energy_date_selection": True,
+        "collection_key": "energy_sax_power_savings",
+    }
+    assert "period" not in graph
+
+
+async def test_savings_free_period_has_no_separate_heading(hass) -> None:
+    _register(hass, "sensor", "economics_net_savings")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    block = _savings_free_period_block(_savings_view(config))
+    assert block["cards"][0]["type"] == "energy-date-selection"
+    assert "### Freier Zeitraum" not in json.dumps(block)
+
+
+async def test_savings_free_period_is_fully_omitted_without_result_entity(
+    hass,
+) -> None:
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    serialized = json.dumps(_savings_view(config))
+    assert "energy-date-selection" not in serialized
+    assert "energy_sax_power_savings" not in serialized
+    assert "Verlauf im gewählten Zeitraum" not in serialized
+
+
+def _savings_payback_block(view: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card
+        for card in view["cards"]
+        if card["type"] == "vertical-stack"
+        and card["cards"][0].get("type") == "conditional"
+        and "Amortisationswerte" in card["cards"][0].get("card", {}).get("content", "")
+    )
+
+
+def _configured_payback_stack(block: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        card["card"]
+        for card in block["cards"]
+        if card["type"] == "conditional" and card["conditions"][0].get("state") == "on"
+    )
+
+
+async def test_savings_payback_block_uses_runtime_investment_gate(hass) -> None:
+    configured = _register(hass, "binary_sensor", "economics_investment_configured")
+    progress = _register(hass, "sensor", "economics_amortization_progress")
+    remaining = _register(hass, "sensor", "economics_remaining_to_payback")
+    roi = _register(hass, "sensor", "economics_roi")
+    result = _register(hass, "sensor", "economics_net_savings")
+    status = _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    view = _savings_view(config)
+    block = _savings_payback_block(view)
+    free_period = _savings_free_period_block(view)
+    assert view["cards"].index(block) < view["cards"].index(free_period)
+    assert [card["type"] for card in block["cards"]] == [
+        "conditional",
+        "conditional",
+    ]
+    disabled, enabled = block["cards"]
+    assert disabled["conditions"] == [{"entity": configured, "state": "off"}]
+    assert disabled["card"] == {
+        "type": "markdown",
+        "content": (
+            "Für die Amortisationswerte bitte die Investitionskosten "
+            "unter „Geräte & Dienste → SAX Power Home → Konfigurieren → "
+            "Wirtschaftlichkeit“ hinterlegen."
+        ),
+    }
+    assert enabled["conditions"] == [{"entity": configured, "state": "on"}]
+
+    stack = enabled["card"]
+    assert [card["type"] for card in stack["cards"]] == ["gauge", "entities"]
+    gauge = stack["cards"][0]
+    assert gauge["entity"] == progress
+    assert gauge["min"] == 0
+    assert gauge["max"] == 100
+    assert gauge["segments"] == [{"from": 0, "color": "blue"}]
+    assert [row["entity"] for row in stack["cards"][1]["entities"]] == [
+        remaining,
+        roi,
+        result,
+        status,
+    ]
+    assert stack["cards"][1]["entities"][1] == {
+        "type": "attribute",
+        "entity": roi,
+        "attribute": "prior_result_eur_formatted",
+        "name": "Bereits vor Bilanzbeginn berücksichtigt",
+        "suffix": "€",
+    }
+
+
+async def test_savings_payback_block_is_omitted_without_investment_gate(
+    hass,
+) -> None:
+    _register(hass, "sensor", "economics_amortization_progress")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert not any(
+        card["type"] == "vertical-stack"
+        and any(nested.get("type") == "conditional" for nested in card["cards"])
+        for card in _savings_view(config)["cards"]
+    )
+
+
 async def test_create_dashboard_skipped_without_lovelace(hass) -> None:
     """Ohne geladene Lovelace-Komponente (z. B. in den meisten Unit-Tests)
     darf async_create_dashboard nicht fehlschlagen, sondern nur überspringen."""
@@ -555,7 +988,7 @@ async def test_create_dashboard_registers_panel_and_is_idempotent(hass) -> None:
         assert DASHBOARD_URL_PATH in hass.data[LOVELACE_DATA].dashboards
         dashboard_storage = hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 4
+        assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()
         assert (
             mock_register_panel.call_args.kwargs["frontend_url_path"]
@@ -591,7 +1024,7 @@ async def test_create_dashboard_force_overwrites_existing_config(hass) -> None:
         await async_create_dashboard(hass, entry, force=True)
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 4
+        assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()  # weiterhin kein zweiter Panel-Aufruf
 
 
@@ -691,5 +1124,629 @@ async def test_reinstall_dashboard_service_resets_existing_dashboard_for_device(
         )
 
         saved_config = await dashboard_storage.async_load(False)
-        assert len(saved_config["views"]) == 4
+        assert len(saved_config["views"]) == 5
         mock_register_panel.assert_called_once()  # kein zweiter Panel-Aufruf
+
+
+# --------------------------------------------------------------------------
+# Tarifplan-Karte (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+# --------------------------------------------------------------------------
+def _tariff_plan_card(view: dict[str, Any]) -> dict[str, Any] | None:
+    """Die Markdown-Karte, die den Tarifplan rendert.
+
+    Bewusst KEINE "conditional"-Karte: deren Bedingungen können nur den
+    Zustand einer Entity prüfen, nie ein Attribut (#139). Die Karte
+    entscheidet stattdessen selbst, ob sie etwas ausgibt.
+    """
+    return next(
+        (
+            card
+            for card in view["cards"]
+            if card["type"] == "markdown" and "tariff_type" in card.get("content", "")
+        ),
+        None,
+    )
+
+
+async def test_savings_view_tariff_plan_card_is_gated_by_tariff_type(hass) -> None:
+    """Der Preis-Sensor existiert bei jeder Tarifart; ein Tagesplan ergibt
+    aber nur beim tageszeitabhängigen Tarif Sinn. Die Karte entscheidet das
+    zur Laufzeit selbst: Bei jeder anderen Tarifart rendert die Vorlage zu
+    einer leeren Zeichenkette, und show_empty blendet die Karte dann aus.
+    Eine "conditional"-Karte kann das nicht leisten - ihre Bedingungen
+    prüfen nur den Zustand einer Entity, nie ein Attribut (#139)."""
+    _register(hass, "sensor", "economics_current_import_price")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    card = _tariff_plan_card(_savings_view(config))
+    assert card is not None
+    assert card["type"] == "markdown"
+    assert card["show_empty"] is False
+    # Ein Kartentitel bliebe als leerer Kasten stehen - die Überschrift
+    # gehört deshalb in den bedingten Teil des Inhalts.
+    assert "title" not in card
+    assert "### Tarifplan" in card["content"]
+
+
+async def test_savings_view_tariff_plan_card_reads_only_sensor_attributes(
+    hass,
+) -> None:
+    """Die Karte darf keine eigene Kopie der Tarifkonfiguration enthalten -
+    sonst zeigte sie nach einer Options-Änderung veraltete Preise, ohne
+    dass das jemand bemerkt."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    content = _tariff_plan_card(_savings_view(config))["content"]
+    assert f"'{price}'" in content
+    for attribute in (
+        "tariff_type",
+        "windows",
+        "active_window",
+        "base_price_eur_kwh",
+        "feed_in_price_eur_kwh",
+        "next_price_change_at",
+    ):
+        assert f"'{attribute}'" in content
+
+
+async def test_savings_view_tariff_plan_card_omitted_without_price_sensor(
+    hass,
+) -> None:
+    """Ohne registrierten Preis-Sensor hat die Karte keine Datenquelle."""
+    _register(hass, "sensor", "economics_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    assert _tariff_plan_card(_savings_view(config)) is None
+
+
+async def test_savings_view_tariff_plan_card_renders_a_table(hass) -> None:
+    """Die Vorlage wird hier wirklich gerendert, nicht nur auf Zeichenketten
+    geprüft. Genau diese Lücke - Code, den nur das Frontend je ausführt -
+    hat in #135 dafür gesorgt, dass eine unbrauchbare Konfigurationsseite
+    mit grüner Testsuite ausgeliefert wurde."""
+    # timestamp_custom rechnet in die lokale Zeitzone von Home Assistant um;
+    # der Coordinator liefert den Zeitstempel bereits als Ortszeit, beide
+    # müssen für eine nachvollziehbare Erwartung dieselbe Zone meinen.
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "0.21",
+        {
+            "tariff_type": "time_of_use",
+            "windows": [
+                {"start": "06:00:00", "end": "08:00:00", "price_eur_kwh": 0.41},
+                {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21},
+            ],
+            "active_window": {
+                "start": "22:00:00",
+                "end": "06:00:00",
+                "price_eur_kwh": 0.21,
+            },
+            "base_price_eur_kwh": 0.30,
+            "feed_in_price_eur_kwh": 0.08,
+            "next_price_change_at": "2026-03-11T06:00:00+01:00",
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_savings_view(config))["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    lines = [line for line in rendered.splitlines() if line.startswith("|")]
+    # Kopfzeile, Trennzeile, zwei Fenster, Grundpreis.
+    assert len(lines) == 5
+    assert lines[2] == "|  | 06:00 | 08:00 | 0.4100 EUR/kWh |"
+    assert lines[3] == "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |"
+    assert lines[4].endswith("0.3000 EUR/kWh (Grundpreis) |")
+    assert "**jetzt**" not in lines[4]
+    assert "**Einspeisevergütung:** 0.0800 EUR/kWh" in rendered
+    assert "Nächster Preiswechsel: 06:00 Uhr" in rendered
+
+
+async def test_savings_view_tariff_plan_card_marks_the_base_price(hass) -> None:
+    """Außerhalb aller Fenster gilt der Grundpreis - dann trägt seine Zeile
+    die Markierung, und ohne bekannten nächsten Wechsel entfällt der
+    Hinweis darunter ersatzlos."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "0.30",
+        {
+            "tariff_type": "time_of_use",
+            "windows": [
+                {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+            ],
+            "active_window": None,
+            "base_price_eur_kwh": 0.30,
+            "next_price_change_at": None,
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_savings_view(config))["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    lines = [line for line in rendered.splitlines() if line.startswith("|")]
+    assert lines[3] == "| **jetzt** | – | – | 0.3000 EUR/kWh (Grundpreis) |"
+    assert "**jetzt**" not in lines[2]
+    assert "Preiswechsel" not in rendered
+
+
+async def test_savings_view_tariff_plan_card_survives_missing_attributes(
+    hass,
+) -> None:
+    """Zwischen Neustart und erstem Coordinator-Tick trägt der Sensor noch
+    keine Attribute. Eine Vorlage, die dabei eine Exception wirft, zeigt im
+    Dashboard nur eine rote Fehlerkarte - hier bleibt sie stattdessen leer
+    und die Karte blendet sich aus."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(price, "unknown", {})
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_savings_view(config))["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert rendered.strip() == ""
+
+
+async def test_savings_view_tariff_plan_card_is_empty_for_other_tariffs(
+    hass,
+) -> None:
+    """Ein Festpreis hat keinen Tagesplan: Die Vorlage rendert zu einer
+    leeren Zeichenkette, damit show_empty die Karte ausblenden kann."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "0.30",
+        {
+            "tariff_type": "fixed",
+            "windows": None,
+            "active_window": None,
+            "base_price_eur_kwh": None,
+            "next_price_change_at": None,
+            "unavailable_reason": None,
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_savings_view(config))["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert rendered.strip() == ""
+
+
+async def test_savings_view_tariff_plan_card_marks_nothing_without_a_price(
+    hass,
+) -> None:
+    """Gilt gerade kein Preis, ist auch `active_window` None - ohne
+    zusätzliche Abfrage von `unavailable_reason` träfe die Markierung
+    "jetzt" dann fälschlich den Grundpreis (Review-Befund). Stattdessen
+    nennt die Karte den Grund."""
+    price = _register(hass, "sensor", "economics_current_import_price")
+    hass.states.async_set(
+        price,
+        "unknown",
+        {
+            "tariff_type": "time_of_use",
+            "windows": [
+                {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+            ],
+            "active_window": None,
+            "unavailable_reason": "tariff_incomplete",
+            "base_price_eur_kwh": None,
+            "next_price_change_at": None,
+        },
+    )
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+    content = _tariff_plan_card(_savings_view(config))["content"]
+    rendered = template.Template(content, hass).async_render(parse_result=False)
+
+    assert "**jetzt**" not in rendered
+    assert "Derzeit gilt kein Preis (tariff_incomplete)" in rendered
+    # Die Fensterliste bleibt sichtbar - genau sie braucht der Anwender,
+    # um den Konfigurationsfehler zu finden.
+    assert "| 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered
+
+
+# --------------------------------------------------------------------------
+# Hinweis auf ein veraltetes Dashboard (#138)
+# --------------------------------------------------------------------------
+def _lovelace(hass) -> None:
+    hass.data[LOVELACE_DATA] = LovelaceData(
+        resource_mode="storage", dashboards={}, resources=None, yaml_dashboards={}
+    )
+
+
+async def _existing_dashboard(hass, entry) -> Any:
+    """Legt das Dashboard an und gibt seinen Storage zurück."""
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await async_create_dashboard(hass, entry)
+    return hass.data[LOVELACE_DATA].dashboards[DASHBOARD_URL_PATH]
+
+
+def _issue(hass, entry_id: str):
+    return ir.async_get(hass).async_get_issue(
+        DOMAIN, f"{ISSUE_DASHBOARD_OUTDATED}_{entry_id}"
+    )
+
+
+def _replace_dashboard_values(node: Any, replacements: dict[str, str]) -> Any:
+    if isinstance(node, dict):
+        return {
+            key: _replace_dashboard_values(value, replacements)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_replace_dashboard_values(value, replacements) for value in node]
+    return replacements.get(node, node) if isinstance(node, str) else node
+
+
+async def test_outdated_dashboard_is_reported(hass) -> None:
+    """Das Dashboard wird nur bei der Ersteinrichtung gebaut. Ergänzt eine
+    neuere Version einen Tab, fehlt er einem bestehenden Dashboard
+    stillschweigend - ohne diesen Hinweis erfährt der Anwender davon nie
+    (Anwenderbericht zu #138)."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+
+    # Ein Dashboard aus einer Version, die den Ersparnis-Tab noch nicht kannte.
+    stored = await storage.async_load(False)
+    await storage.async_save(
+        {"views": [v for v in stored["views"] if v["path"] != "ersparnis"]}
+    )
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.is_fixable
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+
+
+async def test_dashboard_with_removed_economics_view_is_reported(hass) -> None:
+    """Der alte technische View löst eine bewusste Neuinstallation aus."""
+    _register(hass, "sensor", "soc")
+    _register(hass, "sensor", "economics_net_savings")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    stored["views"].insert(
+        4,
+        {
+            "title": "Wirtschaftlichkeit",
+            "path": "wirtschaftlichkeit",
+            "icon": "mdi:cash-multiple",
+            "cards": [],
+        },
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
+
+
+async def test_complete_dashboard_is_not_reported(hass) -> None:
+    _register(hass, "sensor", "soc")
+    _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_net_savings_today")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    await _existing_dashboard(hass, entry)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_snapshot_dashboard_with_old_cashflow_entities_is_reported(
+    hass,
+) -> None:
+    """Gleiche fünf Pfade dürfen eine veraltete Ersparnis-Entity nicht tarnen."""
+    _register(hass, "sensor", "soc")
+    raw_result = _register(hass, "sensor", "economics_operating_result")
+    net_savings = _register(hass, "sensor", "economics_net_savings")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    stale = _replace_dashboard_values(stored, {net_savings: raw_result})
+    await storage.async_save(stale)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    # Wie bei fehlenden Tabs bleibt jede Nutzeranpassung bis zur bewussten
+    # Bestätigung des Reparatur-Flows unangetastet.
+    assert await storage.async_load(False) == stale
+
+
+async def test_dashboard_with_removed_amortization_forecast_is_reported(hass) -> None:
+    """Die entfernten Prognosefelder lösen für den Ersparnis-View aus."""
+    _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_net_savings_today")
+    _register(hass, "sensor", "economics_amortization_progress")
+    _register(hass, "binary_sensor", "economics_investment_configured")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    savings_view["cards"].append(
+        {
+            "type": "entity",
+            "entity": ("sensor.sax_power_economics_estimated_payback_date"),
+        }
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+
+
+async def test_dashboard_with_removed_inventory_reference_is_reported(hass) -> None:
+    """Der vorherige Ersparnis-Tab behält sonst seine alte Jinja-Referenz.
+
+    Nach dem Registry-Cleanup wäre der Absatz lediglich unsichtbar; erst der
+    Reparaturhinweis ermöglicht dem Anwender, den gespeicherten Text und die
+    entfallene Entity-ID bewusst durch den aktuellen Stand zu ersetzen.
+    """
+    _register(hass, "sensor", "economics_net_savings")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    savings_view["cards"].append(
+        {
+            "type": "markdown",
+            "content": (
+                "{{ states('sensor.sax_power_economics_unvalued_inventory') }} "
+                "Beim Start der Bilanz waren bereits unbekannte kWh im Speicher."
+            ),
+        }
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
+
+
+async def test_savings_dashboard_with_old_headings_and_missing_tariff_is_reported(
+    hass,
+) -> None:
+    """Der vorherige Fünf-Karten-Stand verlangt eine bewusste Neuinstallation."""
+    _register(hass, "sensor", "economics_net_savings")
+    _register(hass, "sensor", "economics_net_savings_today")
+    _register(hass, "sensor", "economics_current_import_price")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    savings_view["cards"] = [
+        card
+        for card in savings_view["cards"]
+        if not (card["type"] == "markdown" and "tariff_type" in card.get("content", ""))
+    ]
+    savings_view["cards"][0]["cards"].insert(
+        0, {"type": "markdown", "content": "### Amortisation"}
+    )
+    free_period = _savings_free_period_block(savings_view)
+    free_period["cards"].insert(
+        0, {"type": "markdown", "content": "### Freier Zeitraum"}
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
+
+
+async def test_savings_dashboard_without_feed_in_tariff_label_is_reported(
+    hass,
+) -> None:
+    """Eine bereits vorhandene Tarifkarte braucht nach der Ergänzung der
+    Einspeisevergütung ebenfalls eine bewusste Neuinstallation."""
+    _register(hass, "sensor", "economics_current_import_price")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    savings_view = next(view for view in stored["views"] if view["path"] == "ersparnis")
+    tariff_card = _tariff_plan_card(savings_view)
+    assert tariff_card is not None
+    tariff_card["content"] = tariff_card["content"].replace(
+        "feed_in_price_eur_kwh", "legacy_feed_in_price"
+    )
+    await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stored
+
+
+async def test_savings_dashboard_with_unformatted_prior_result_is_reported(
+    hass,
+) -> None:
+    """Die alte Attributzeile ohne feste Nachkommastellen braucht eine
+    bewusste Neuinstallation des Ersparnis-Tabs."""
+    _register(hass, "binary_sensor", "economics_investment_configured")
+    _register(hass, "sensor", "economics_roi")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    stale = _replace_dashboard_values(
+        stored, {"prior_result_eur_formatted": "prior_result_eur"}
+    )
+    await storage.async_save(stale)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders["views"] == "Ersparnis"
+    assert await storage.async_load(False) == stale
+
+
+async def test_missing_dashboard_is_not_reported(hass) -> None:
+    """Ein gar nicht vorhandenes Dashboard ist eine bewusste Entscheidung
+    des Anwenders (siehe const.CONF_CREATE_DASHBOARD) - eine
+    Reparaturaufforderung würde genau das Dashboard zurückholen, das er
+    gerade gelöscht hat."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_dismissed_hint_is_not_reported_again(hass) -> None:
+    """Wer den Hinweis einmal ablehnt, soll ihn nicht bei jedem Neustart
+    erneut sehen."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id=ENTRY_ID,
+        data={CONF_DASHBOARD_UPDATE_DISMISSED: True},
+    )
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    await storage.async_save({"views": []})
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_outdated_issue_disappears_after_the_dashboard_is_rebuilt(hass) -> None:
+    """Selbstheilung: Wer den Dienst sax_power.reinstall_dashboard von Hand
+    aufruft, darf den Hinweis nicht behalten."""
+    _register(hass, "sensor", "soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    await storage.async_save({"views": []})
+    await async_check_dashboard_up_to_date(hass, entry)
+    assert _issue(hass, ENTRY_ID) is not None
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await async_create_dashboard(hass, entry, force=True)
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_dashboard_check_swallows_unexpected_errors(hass) -> None:
+    """Wie der gesamte übrige Dashboard-Code eine rein optionale
+    Komfortfunktion auf nicht-öffentlichen Lovelace-Interna - ein Fehler
+    darf die Integration niemals blockieren."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+
+    with patch(
+        "custom_components.sax_power.dashboard._async_missing_dashboard_views",
+        side_effect=RuntimeError("Lovelace-Interna geändert"),
+    ):
+        await async_check_dashboard_up_to_date(hass, entry)  # darf nicht raisen
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+# --------------------------------------------------------------------------
+# Bedingungen von "conditional"-Karten (#139)
+# --------------------------------------------------------------------------
+def _iter_all_cards(cards: list[dict[str, Any]]):
+    """Läuft rekursiv durch ALLE Karten, auch durch conditional/stack."""
+    for card in cards:
+        yield card
+        yield from _iter_all_cards(card.get("cards", []))
+        if (nested := card.get("card")) is not None:
+            yield from _iter_all_cards([nested])
+
+
+async def test_no_conditional_card_tests_an_attribute(hass) -> None:
+    """Die Bedingungen einer Core-"conditional"-Karte prüfen ausschließlich
+    den ZUSTAND einer Entity - einen Schlüssel `attribute` kennen sie
+    nicht.
+
+    Er wird nicht etwa abgelehnt, sondern stillschweigend ignoriert: Der
+    Vergleich läuft weiter gegen den Zustand. Eine so gebaute Karte ist
+    damit dauerhaft unsichtbar (`state` trifft nie zu) oder dauerhaft
+    sichtbar (`state_not` trifft immer zu) - beides ohne jede
+    Fehlermeldung, in der gespeicherten YAML-Konfiguration unauffällig und
+    nur im laufenden Dashboard zu bemerken. Genau so blieben die
+    Tarifplan-Karte unsichtbar und die Investitionskarte dauerhaft
+    sichtbar (Anwenderbericht zu #139)."""
+    reg = er.async_get(hass)
+    for entity_domain, suffixes in (
+        ("sensor", [d.key for d in sax_power.sensor.SENSOR_DESCRIPTIONS]),
+        (
+            "binary_sensor",
+            [d.key for d in sax_power.binary_sensor.BINARY_SENSOR_DESCRIPTIONS],
+        ),
+    ):
+        for suffix in suffixes:
+            reg.async_get_or_create(entity_domain, DOMAIN, f"{ENTRY_ID}_{suffix}")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    conditions = [
+        condition
+        for view in config["views"]
+        for card in _iter_all_cards(view["cards"])
+        for condition in card.get("conditions", [])
+    ]
+    assert conditions, "Keine conditional-Karte gefunden - Test greift ins Leere"
+    for condition in conditions:
+        assert "attribute" not in condition, (
+            f"Bedingung prüft ein Attribut: {condition} - "
+            "wird von Home Assistant ignoriert"
+        )

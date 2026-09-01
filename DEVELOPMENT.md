@@ -29,12 +29,22 @@ custom_components/sax_power/
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          SunSpec-Blockdecodierung (sunspec.py),
-│                          Zeitfenster und Wertevalidierung
+│                          Zeitfenster und Wertevalidierung, Preis-Einheiten
+│                          (price_units.py), das Tarifmodell (tariff.py), die
+│                          Herkunftsbilanzregel der Ladeenergie
+│                          (energy_accounting.py), die Geldbilanz darauf
+│                          (economics_accounting.py) sowie den ROI-/
+│                          Amortisationsstand darüber
+│                          (economics_amortization.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
-│                          Vollkalibrierung sowie der injizierbare Modbus-Client-Port
+│                          Vollkalibrierung, die Abbildung der Tarif-Options auf
+│                          das Domänenmodell (economics.py) sowie der
+│                          injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
-│                          Repair-Issues sowie die drei versionierten Stores
-│                          (Kalibrierung, Energiezähler, Ladeeinstellungen)
+│                          Repair-Issues sowie die vier versionierten Stores
+│                          (Kalibrierung, Energiezähler inkl. Herkunft der
+│                          Ladeenergie, Wirtschaftlichkeitsbilanz,
+│                          Ladeeinstellungen)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
@@ -48,13 +58,21 @@ custom_components/sax_power/
 │                          einer beliebigen Preis-Sensor-Entity, Ladeplanung je
 │                          Strategie, gemeinsame Prognosequelle,
 │                          60-Sekunden-Takt - ohne Modbus-Zugriff
+├── economics.py          Home-Assistant-Adapter des Tarifmodells
+│                          (SaxTariffProvider): liest Options und Preis-Sensor
+│                          und liefert den geltenden Netzbezugspreis als Quote,
+│                          siehe anforderung.yaml REQ-ECONOMICS-TARIFFS. Die
+│                          Geldbilanz selbst (REQ-ECONOMICS-ACCOUNTING) hat
+│                          keinen eigenen Adapter - sie läuft im Coordinator
+│                          mit (_accumulate_economics, siehe unten), weil sie
+│                          keine eigenen HA-Zustandsbeobachter braucht
 ├── entity.py             Basisklasse mit gemeinsamer DeviceInfo,
 │                          _assign_ids() (unique_id + vom Gerätenamen
 │                          unabhängige entity_id, siehe
 │                          REQ-STABLE-DEVICE-IDENTITY),
 │                          initial_config_value() (Config-Entry-Fallback)
 ├── __init__.py            Setup/Teardown des Config Entry, Service-Registrierung
-├── sensor.py              ~60 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
+├── sensor.py              ~90 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
 │                          plus zwei RestoreEntity-Energiezähler (energy_charged/
 │                          energy_discharged) fürs Energy-Dashboard
 ├── number.py              Max. SOC (einzige SOC-Einstellung, auch Ziel-SOC für
@@ -70,10 +88,11 @@ custom_components/sax_power/
 ├── repairs.py             Bestätigungsdialog für den Konflikt zwischen Netzladung
 │                          und preisoptimiertem Laden
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
-│                          + coordinator.data + Ladeplan, IP-Adresse redigiert
-├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (4 Tabs), optional in
+│                          + coordinator.data + Ladeplan + Roh-/Startwerte der
+│                          Energie- und Geldzähler, IP-Adresse redigiert
+├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
-│                          REQ-BUNDLED-DASHBOARD
+│                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-SAVINGS-DASHBOARD
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
@@ -129,6 +148,448 @@ Ladevorgang ausgelöst, bis die neu erzeugte Instanz die
 ursprünglich gemeldeter Bug, siehe `anforderung.yaml`,
 REQ-DYNAMIC-PRICE-CHARGE.
 
+Derselbe Options Flow konfiguriert zusätzlich das Tarifmodell der
+Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS). Die Tarifart steht als
+`economics_tariff_type` auf der ersten Seite; anschließend verzweigt der Flow
+in genau einen tarifspezifischen Schritt (`economics_fixed`,
+`economics_time_of_use`, `economics_dynamic`) oder speichert bei
+`disabled` sofort. Beim Speichern übernimmt der Flow ausschließlich die zur
+gewählten Tarifart gehörenden Schlüssel und verwirft alle übrigen aus
+`ECONOMICS_OPTION_KEYS` - ein alter Festpreis darf nach einem Rückwechsel
+nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
+`section`-Blöcke und liegen deshalb als verschachtelte Mappings in
+`entry.options`.
+
+Der **Strompreis-Sensor** (`price_sensor`, erste Seite) hat zwei getrennte
+Aufgaben, die sich leicht verwechseln lassen:
+
+| Tarifmodell | Preisquelle der Wirtschaftlichkeit | Strompreis-Sensor |
+|---|---|---|
+| `disabled` | keine | nur preisoptimiertes Laden |
+| `fixed` | ein fester Arbeitspreis aus dem Options Flow | nur preisoptimiertes Laden |
+| `time_of_use` | Grundpreis + bis zu acht Zeitfenster aus dem Options Flow | nur preisoptimiertes Laden |
+| `dynamic` | der Strompreis-Sensor | Pflichtfeld |
+
+Für das preisoptimierte Laden ist der Sensor immer die Quelle, unabhängig vom
+Tarifmodell. Für die Wirtschaftlichkeit ist er es nur beim dynamischen Tarif.
+Beim tageszeitabhängigen Tarif ist er ausdrücklich unbrauchbar: Ein
+dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, das
+Tarifmodell dagegen ein täglich wiederkehrendes Profil - die beiden Formate
+lassen sich nicht ineinander überführen. Weil beide Felder auf derselben Seite
+untereinanderstehen, sagen die `data_description`-Texte in `strings.json` das
+ausdrücklich (Anwenderbericht zu #135/#137).
+
+Explizit zeitgestempelte Preis-Slots werden für Identität, Sortierung,
+Dauer, Überlappung, Horizont und Auswahl ausschließlich als UTC-Instants
+verglichen. Die lokale Zeitzone bleibt Darstellung; dadurch bleiben die
+beiden realen 02-Uhr-Slots der herbstlichen Zeitumstellung getrennt. Naive
+Anbieter-Zeitstempel werden weiterhin als lokale Home-Assistant-Zeit
+interpretiert (Issue #149).
+
+Kein Formularschema darf einen Validator enthalten, den
+`voluptuous_serialize` nicht für das Frontend übersetzen kann - eine
+gewöhnliche Python-Funktion in einem `vol.All` gehört dazu. Der Fehler fliegt
+erst *nach* dem Flow-Schritt in der Websocket-Schicht, der Dialog zeigt
+deshalb nur „Unknown error occurred", und der Schritt ist überhaupt nicht
+erreichbar (#135). Die Preisfelder sind deshalb nackte `NumberSelector` (die
+prüfen den Wertebereich selbst), und die Rundung auf 0,0001 EUR/kWh erfolgt
+im Schritt (`_round_price_fields`). `tests/test_config_flow.py` führt die
+Serialisierung für jeden Schritt beider Flows und für jedes Modulschema aus;
+die übrigen Tests rufen den Flow über die Python-API auf und überspringen
+diese Schicht.
+
+Die Preisfelder der Folgeseiten sind im Schema `vol.Optional` und werden
+erst im Schritt selbst geprüft (`_missing_prices` → Feldfehler
+`economics_price_required`): Ein `vol.Required` scheitert schon in der
+Schema-Validierung von Home Assistant, also *vor* dem Schritt, und zeigt die
+unübersetzte Rohmeldung `required key not provided`. Pflicht bleiben die
+Preise dadurch unverändert. Aus demselben Grund lassen die Folgeseiten
+fremde Schlüssel zu (`vol.ALLOW_EXTRA`) und behandeln eine erneut
+abgeschickte erste Seite als Wiederholung genau dieser Seite
+(`_async_repeat_init`) - schickt das Frontend die erste Seite zweimal ab
+(Doppelklick, oder Enter im Eingabefeld plus Klick auf „Absenden"), prüft
+Home Assistant deren Werte gegen das Schema der bereits erreichten
+Folgeseite, was sonst als Wand aus `extra keys not allowed @ data[...]` im
+Dialog landet. Die wiederholte erste Seite prüft `_async_repeat_init` dabei
+selbst gegen `STEP_OPTIONS_SCHEMA` (auf diesem Weg wendet Home Assistant es
+nicht mehr an); was nicht passt, gilt als unvollständige Eingabe der
+Folgeseite. `add_suggested_values_to_schema` baut das Schema neu auf und
+verliert dabei `extra`; `_suggested` setzt es deshalb wieder.
+
+Die Auswertung selbst ist dreigeteilt: `domain/tariff.py` enthält die reinen
+Typen (`TariffType`, `DailyPriceWindow`, `TariffConfig`, `PriceQuote`) samt
+Zeitfensterregeln und der Bewertung der nicht-dynamischen Tarife,
+`application/economics.py` bildet gespeicherte Options auf diese Typen ab, und
+`economics.py` ist der einzige Ort, der dafür `hass.states` liest.
+`SaxTariffProvider.async_setup()` folgt demselben idempotenten Muster wie
+`SaxPricePlanner.async_setup()` und wird von `async_update_options` erneut
+aufgerufen. Ein fehlender oder unbrauchbarer Preis ist immer `None` plus ein
+`QuoteUnavailable`-Grund - nie 0 EUR/kWh, weil ein stiller Nullpreis
+Netzbezug als kostenlos bewerten und jede spätere Rechnung unbemerkt
+verfälschen würde. `domain.tariff.validate_tariff()` läuft dafür vor jeder
+Quote-Erzeugung und prüft für **alle** Tarifarten die Einspeisevergütung und
+die tarifeigenen Pflichtpreise gegen ihren Wertebereich; der Options Flow
+allein genügt nicht, weil `entry.options` auch von Hand bearbeitet sein kann.
+Derselbe Wertebereich gilt für den normalisierten Preis des dynamischen
+Tarifs. Eine vorhandene Preisvorschau ist verbindlich
+(`price_optimizer.has_price_forecast()` trennt "keine Vorschau" von "Vorschau
+vorhanden, aber unlesbar") - der Sensorzustand ersetzt sie nie. Ein über
+`CONF_PRICE_ATTRIBUTE` ausdrücklich benanntes Attribut zählt dabei schon bei
+jedem nicht leeren Wert als Vorschau; nur die Auto-Erkennung verlangt die
+Listenform der bekannten Attributnamen. Die Zuordnung eines Zeitfensters erfolgt ausschließlich
+über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
+Sonderfall.
+
+### Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING)
+
+Läuft in `SaxPowerCoordinator._accumulate_economics`, aufgerufen am Ende von
+`_accumulate_energy` mit demselben `EnergyDelta` (02/06) und demselben
+rohen, ungerundeten Entladezuwachs dieses Intervalls - keine zweite Uhr,
+keine zweite Riemann-Summe. Die reine Rechnung liegt in
+`domain/economics_accounting.py`:
+
+- `compute_economics_delta` bewertet ein Intervall: Netzladung kostet den
+  Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
+  Preis, wird nichts erfunden - die Energie erhöht stattdessen
+  `unvalued_inventory_kwh` (unbewerteter Bestand) und einen
+  `unpriced_charge`-Zähler. Dasselbe gilt bei fehlendem Smartmeter:
+  `EnergyDelta.origin_known=False` erhält die Qualitätslücke trotz des
+  kompatiblen physischen Netz-Fallbacks bis zur Geldbilanz. Jede Entladung
+  verbraucht zuerst aus
+  diesem Bestand (`min(discharged_kwh, unvalued_inventory_kwh)`) - dieser
+  Anteil erzeugt AUSDRÜCKLICH keinen vermiedenen Geldwert (sonst würde eine
+  vorausgegangene Preislücke einen kostenlosen Scheingewinn erzeugen). Nur
+  der danach verbleibende,
+  monetarisierbare Rest (bepreist geladen oder beim Bilanzstart mit 0 EUR
+  angesetzt) ist den aktuellen Netzbezugspreis wert.
+- `_bootstrap_economics_if_ready` setzt den unbewerteten Bestand unabhängig
+  von Kapazität und SOC auf 0: Der beim erstmaligen Aktivieren bereits
+  vorhandene Speicherinhalt wird mit 0 EUR angesetzt. Am geräteseitig
+  gemeldeten SOC-Minimum verwirft `min_soc_inventory_correction` einen Rest
+  erst nach echter Entladung und zwei frischen Stillstands-Ticks. Aktuelle
+  Ladedeltas werden dadurch nie anhand eines noch unveränderten SOC gelöscht
+  (Issue #145).
+- `capacity_inventory_correction` deckelt den Bestand nach demselben
+  bestätigten Stillstand auf den konservativen oberen Rand der SOC-Stufe
+  (`capacity_kwh * (battery_soc + Messquantum) / 100`). Das Messquantum kommt
+  aus dem SunSpec-SOC-Skalierungsfaktor, bei ungültigem Faktor aus einem
+  konservativen Prozentpunkt. Ohne
+  diesen Deckel bliebe die
+  Ladeverlust-Differenz jedes *unbepreisten* Zyklus (geladen > entladen)
+  dauerhaft im Bestand liegen und würde später bepreist geladene Entladung
+  als unbewertet abbuchen (Issue #132). Ist Kapazität oder SOC gerade
+  unbekannt, wird nicht gedeckelt - als unbekannt gilt (wie in
+  `price_optimizer._context`) auch eine gemeldete Kapazität von 0. Geloggt
+  wird höchstens einmal je
+  `INVENTORY_CAP_LOG_INTERVAL_SECONDS`; die insgesamt verworfene Menge steht
+  als `inventory_capped_kwh` im Diagnose-Download.
+
+Das operative Nettoergebnis (vermiedene Netzkosten − Netzladekosten −
+PV-Opportunitätskosten) bleibt jederzeit aus den drei ungerundeten Teilsummen
+ableitbar und wird identisch als `economics_operating_result` und
+`economics_net_savings` veröffentlicht. Es darf durch spätere Kosten sinken
+und negativ werden; ROI, Restbetrag und Tageswert verwenden denselben
+aktuellen Wert. `_economics_operating_result_high_water_eur` bleibt nur als
+abwärtskompatibler Diagnose-Peak im Store und beeinflusst keine finanzielle
+Kennzahl (Issue #144).
+
+Veröffentlicht werden alle Geld-/Prozentwerte über `coordinator._rounded`,
+das zusätzlich zur Rundung die negative Null auf `0.0` normalisiert:
+`round(-0.0001, 2)` ergibt `-0.0`, und Home Assistant zeigt das als „−0,0"
+an - ein Vorzeichen, das die gerundete Zahl selbst gar nicht mehr ausweist.
+Die durchgereichten Preise bleiben
+bewusst außen vor: Dort ist ein negatives Vorzeichen eine Aussage über den
+Tarif.
+
+Drei Zählungen, drei Startzeitpunkte: `energy_charged` läuft seit der
+Installation, die Herkunftszähler seit `_bootstrap_energy_origin`, die
+Geldbilanz erst seit dem ersten vollständig gespeicherten Tarif. Ihre Werte
+sind deshalb NICHT gegeneinander verrechenbar, obwohl das Dashboard sie
+untereinander zeigt - ein Anwenderbericht las 2,44 kWh PV-Ladung neben
+0,0084 EUR PV-Opportunitätskosten (= 0,112 kWh bei 0,075 EUR/kWh) als
+Rechenfehler, obwohl beide Werte korrekt waren. Sichtbar gemacht wird das
+über `origin_accounting_started_at` (Attribut beider Herkunftssensoren,
+`coordinator._energy_origin_attributes`, plus Abschnitt `energy` im
+Diagnose-Download) neben dem längst vorhandenen `economics_started_at`
+sowie über die bewertete Menge `priced_charge_kwh`/`priced_discharge_kwh`
+in der Geldkarte, aus der sich jeder Betrag zurückrechnen lässt.
+
+Der einmalige Bootstrap läuft nur, solange `SaxTariffProvider.config.enabled`
+wahr ist. Nach dem Bootstrap akkumuliert `_accumulate_economics` aber AUCH
+während einer späteren Tarifpause unverändert weiter: `current_price`/
+`feed_in_price` sind während der Pause bereits `None` (der Tarif-Adapter
+liefert das für einen deaktivierten Tarif von sich aus), pausenweise
+geladene Energie landet dadurch automatisch im unbewerteten Bestand statt
+unbeobachtet zu bleiben - andernfalls würde eine nach dem Reaktivieren
+erfolgende Entladung dieser Energie fälschlich vollständig als vermiedenen
+Netzbezug monetarisieren (derselbe Scheingewinn-Fehler wie bei #42, nur
+über den Umweg einer Pause). Nur die
+VERÖFFENTLICHTEN fünf monetären Sensoren blenden während einer Pause auf
+`None` (`_publish_economics_balance(..., monetary_available=...)`) statt
+auf die weiter mitlaufenden internen Summen. `unvalued_inventory_kwh`,
+`unpriced_charge_kwh` (fehlender Preis oder fehlende Herkunftsmessung) und
+`unpriced_discharge_kwh` bleiben rein intern und
+werden nicht als Entities veröffentlicht. `economics_current_import_price`/
+`economics_feed_in_price` sind reine Durchreichungen des aktuellen Tarifs
+und unabhängig vom Bilanz-Bootstrap immer aktuell -
+`SaxTariffProvider.feed_in_price_eur_kwh` validiert dafür selbst den
+Wertebereich (`is_valid_feed_in_price`), weil `validate_tariff()` nur die
+Quote-Erzeugung schützt, nicht diese separat gelesene Property.
+
+Persistenz: `infrastructure/economics_store.py` (`EconomicsStateStore`,
+eigener STORAGE_VERSION, eigenes Bootstrap-Fenster analog zu
+`EnergyStateStore`). Anders als die monoton steigenden Energiezähler dürfen
+die drei Geldsummen wegen negativer Strompreise sinken - "kleiner als der
+alte Wert" ist dort deshalb bewusst KEIN Ablehnungsgrund, nur
+NaN/Inf/Fremdtypen sind es. Der nur diagnostische
+`operating_result_high_water_eur` sowie
+`unpriced_charge_kwh`/`unpriced_discharge_kwh` bleiben dagegen monotone,
+nichtnegative Summen; nur `async_reset` darf sie auf 0 setzen.
+`unvalued_inventory_kwh` ist ein
+Bestand (Gauge) ohne Monotonieprüfung. `economics_started_at` ist wie
+`origin_accounting_started_at` (02/06) einmalig gesetzt und danach
+unveränderlich; ein unvollständiges Sieben-Felder-Bündel wird beim Laden
+komplett neu gebootstrapped, und die interne Monotonie-Baseline wird in
+diesem Fall ebenfalls komplett bereinigt (siehe
+`EnergyStateStore._origin_baseline` für dasselbe, aus einem Review-Befund
+gelernte Muster). Tageshistorie, laufender Tag und Payback-Zeitpunkt werden
+dann ebenfalls verworfen: Sie gehören zur alten Bilanz und dürfen nicht mit
+dem neuen Nullstand kombiniert werden. Das Höchststandsfeld gehört aus
+Migrationsgründen nicht zum
+alten Sieben-Felder-Kernbündel: Fehlt es in einem Store bis Minor-Version 5,
+startet es mit `max(0, aktueller Roh-Cashflow)`. Die alten `day_results` und
+der laufende Tageswert werden wegen ihrer damaligen abweichenden
+Store-Semantik verworfen. `economics_net_savings` und
+`economics_net_savings_today` besitzen jeweils eine eigene Recorder-Historie.
+Ihr Recorder-Beginn kann nach einem Update deshalb jünger als
+`economics_started_at` sein. `_async_remove_stale_entities` entfernt den in
+früheren Snapshot-Ständen bereits angelegten Registry-Eintrag
+`economics_result_today` über seinen exakt benannten Suffix; die neue Unique-ID
+bleibt davon unberührt.
+Minor-Version 7 hatte zeitweise vorgesehen, einen geladenen
+`unvalued_inventory_kwh` auf 0 zu setzen. Diese Migration wird bewusst nicht
+mehr ausgeführt: Der Bestand kann aus realen Preis- oder Herkunftslücken nach
+dem Bilanzstart stammen und muss deshalb auch aus älteren Snapshot-Ständen
+unverändert übernommen werden (Issue #147).
+Minor-Version 8 startet nur `day_results` und den laufenden Tages-Bucket neu,
+weil ältere Snapshot-Stände dort Peak-Zuwächse statt signierter Ergebnisse
+gespeichert haben. Das Gesamtergebnis bleibt aus den drei Geldsummen erhalten.
+`notify_tariff_revision()` (aufgerufen aus
+`__init__.async_update_options`) merkt sich nur einen rein diagnostischen
+Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
+ausschließlich prospektiv, weil jedes künftige Delta einfach den dann
+aktuellen Preis verwendet; nichts wird rückwirkend neu berechnet.
+
+Scheitert `EconomicsStateStore.async_load()` selbst (I/O-Fehler, unbekannte
+künftige Storage-Hauptversion), setzt `async_load_economics_state`
+`_economics_store_write_blocked` - Rechnung und Bootstrap laufen normal im
+Arbeitsspeicher weiter (analog zu `ControlConfigLoadStatus.FAILED`), aber
+`_async_schedule_economics_save`/`_async_flush_economics_state` verweigern
+jeden Schreibversuch, bis ein Neuladen des Config Entry eine frische
+Coordinator-Instanz erzeugt. Ohne diese Sperre würde eine aus lauter Nullen
+neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
+überschreiben und dessen Inhalt endgültig verlieren.
+
+### ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION)
+
+`domain/economics_amortization.py` enthält nur noch die reinen Formeln für
+ROI, den auf 0..100 geklemmten Fortschritt und den bei 0 gefloorten
+Restbetrag. `SaxPowerCoordinator._publish_amortization` addiert den optionalen
+Vorlauf-Ertrag ausschließlich für diese drei Werte und veröffentlicht daneben
+das signierte Nettoergebnis des laufenden Tages.
+
+Die frühere 30-Tage-Amortisationsprognose ist entfernt:
+`compute_amortization_forecast` wird nicht mehr angeboten, und
+`economics_average_daily_result_30d`,
+`economics_projected_annual_result` sowie
+`economics_estimated_payback_date` werden weder berechnet noch als Entities
+registriert. Historische Tages-Buckets und `payback_achieved_at` bleiben im
+Store-Format, damit bestehende gespeicherte Zustände ohne Datenverlust geladen
+werden können; der Coordinator schreibt den Payback-Zeitpunkt nicht weiter
+fort.
+
+`economics_net_savings` und `economics_net_savings_today` behalten intern
+vier Nachkommastellen. Ihre Sensorbeschreibungen setzen
+`suggested_display_precision=2`, sodass Home Assistant Währungswerte mit zwei
+Nachkommastellen darstellt, ohne Recorder- oder Rechengenauigkeit zu verlieren.
+Das ROI-Attribut `prior_result_eur` bleibt numerisch; Dashboardzeilen ergänzen
+dafür eine separate, auf exakt zwei Nachkommastellen festgelegte Anzeigeform
+und explizit das Suffix `€`.
+### Datenqualität, Diagnose und Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY)
+
+Macht sichtbar, ob und warum die Bilanz gerade vertrauenswürdig ist, ohne
+selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
+`domain/economics_status.py`:
+
+- `EconomicsStatus` (sechs Werte) und `compute_economics_status(...)`
+  bilden eine feste Prioritätsreihenfolge aus mehreren, ggf. gleichzeitig
+  zutreffenden Booleans ab: `disabled` > `storage_error` > `price_unavailable` >
+  `origin_unavailable` > `partial_price_coverage` > `active`. `disabled`
+  gilt ausschließlich bei deaktiviertem Tarif und schlägt dabei jeden
+  anderen Zustand.
+- `compute_price_coverage_percent(priced_kwh, unpriced_kwh)` ist
+  energiebasiert (nicht tickbasiert) und liefert bei Nenner 0 100 % -
+  dieselbe Formel wie `DayEconomicsResult.price_coverage_percent` (04/06).
+- `partial_price_coverage` bewertet nur den LAUFENDEN Kalendertag (die
+  Tages-Buckets aus 04/06) und erst, wenn die Lücke sowohl absolut
+  (`MIN_UNPRICED_KWH_FOR_PARTIAL`) als auch relativ
+  (`PRICE_COVERAGE_THRESHOLD_PERCENT`, 95 %) ins Gewicht fällt -
+  `is_price_coverage_partial`. Die relative Schwelle allein genügt nicht:
+  kurz nach Mitternacht ist der Tagesbucket leer, ein einziges
+  unbepreistes Intervall stünde dort auf 0 % Abdeckung. Aus den Lifetime-Zählern
+  abgeleitet, die nie zurückgehen, kippte sonst eine einzige unbepreiste
+  Kilowattstunde den Sensor dauerhaft - `active` wäre nur noch über einen
+  Bilanzneustart erreichbar, der die gesamte Geldbilanz verwirft
+  (Issue #134). Die Lifetime-Quoten bleiben Attribute, sind aber kein
+  Zustandsauslöser.
+
+`SaxPowerCoordinator._publish_economics_status` (aufgerufen am Ende von
+`_accumulate_economics`, unabhängig vom `frozen`-Zweig, damit auch
+`storage_error` sichtbar wird, bevor die Bilanz je gestartet ist) setzt das
+zusammen:
+
+- Zwei neue Lifetime-Zähler `_economics_priced_charge_kwh`/
+  `_economics_priced_discharge_kwh` (Gegenstück zu den bestehenden
+  `unpriced_*`-Zählern, aus denselben `EconomicsDelta.priced_charge_kwh_delta`/
+  `priced_discharge_kwh_delta` wie die Tages-Buckets) ergeben
+  `charge_price_coverage_percent`/`discharge_price_coverage_percent`.
+  `origin_unavailable` ist wahr, wenn `_energy_origin_initialized()`
+  (02/06) falsch liefert.
+- `_update_economics_price_availability` verfolgt monotonic, seit wann
+  ununterbrochen kein gültiger Preis mehr vorlag.
+  `QuoteUnavailable.TARIFF_INCOMPLETE` (ungültig gespeicherter Fest-/
+  Zeitfenstertarif) ist ein sofortiger Konfigurationsfehler ohne
+  Karenzzeit; jeder andere Grund braucht
+  `ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD` (6h, wie beim
+  preisoptimierten Laden). Das Ergebnis (`_economics_price_unavailable`)
+  ist die alleinige Quelle sowohl für den Status-Sensor als auch für das
+  Repair-Issue `economics_price_unavailable`
+  (`SelfDiagnostics._check_economics_price_unavailable`, keine doppelte
+  Karenzzeit-Logik). Die Löschung prüft dabei zusätzlich zum lokalen
+  In-Memory-Flag den tatsächlichen Issue-Registry-Zustand
+  (`ir.async_get_issue`): Das Flag lebt nur im Arbeitsspeicher der
+  jeweiligen `SelfDiagnostics`-Instanz und startet nach jedem Neuladen
+  des Config Entry wieder bei `False`, während ein zuvor angelegtes
+  Issue in der Registry weiterbestehen kann - ohne die zusätzliche
+  Registry-Prüfung bliebe ein solches Issue nach einem Reload dauerhaft
+  bestehen, selbst wenn der Preis inzwischen wieder gültig ist.
+- Ein Speicherfehler (`_economics_store_write_blocked`) ergibt
+  `storage_error` UND verhindert - Abweichung von REQ-ECONOMICS-
+  ACCOUNTING - sowohl einen frischen 0-Bootstrap im Arbeitsspeicher
+  (`_bootstrap_economics_if_ready`) als auch jede weitere Akkumulation
+  (`_accumulate_economics` wickelt den gesamten Mutationsblock in
+  `if not frozen:`). Die Energiezähler/Herkunftsaufteilung aus 02/06
+  laufen davon unberührt weiter.
+
+Kontrollierter Bilanzneustart
+(`SaxPowerCoordinator.async_restart_economics_accounting`, Service
+`sax_power.restart_economics_accounting`, `confirm` muss exakt `true`
+sein): setzt ausschließlich die drei Geldsummen, die vier
+Preisabdeckungszähler, die Tages-Buckets und den Aktivierungs-/
+Payback-Zeitpunkt zurück, setzt den unbewerteten Bestand wie bei der
+erstmaligen Aktivierung auf 0 - rührt niemals `energy_charged`/
+`energy_discharged` oder die Herkunftszähler an. Speichert atomar über
+`EconomicsStateStore.async_reset` VOR jeder In-Memory-Änderung: dessen
+`_valid_snapshot` prüft weiterhin Endlichkeit/Wertebereich, überspringt
+aber bewusst die Monotonie-/Unveränderlichkeits-Baseline aus `_accept` -
+ein gewollter Reset auf 0 ist kein Korruptionsindiz. Schlägt das
+Speichern fehl, bleibt der bisherige Zustand vollständig unverändert
+(kein halb angewendeter Neustart). Zeitpunkt (UTC) und optionaler
+freier Grund dieses Neustarts werden zusätzlich als
+`last_restart_at`/`last_restart_reason` persistiert und erscheinen im
+Diagnose-Download - rein informativ, ohne Rückwirkung auf die
+Berechnung. Alle fünf kumulativen Geldsensoren verwenden den neuen
+Aktivierungszeitpunkt als gemeinsames `last_reset`; so trennt der Recorder
+den Bilanzabschnitt für jede Rohsumme sowie Ergebnis und Netto-Ersparnis,
+ohne den gewollten Sprung auf 0 als Geldänderung zu verbuchen. Normale
+Preis- und Ergebnisbewegungen oder ein Reload ändern diesen Zeitpunkt nicht
+(Issue #151).
+
+Persistenz: `EconomicsStateStore` um `STORAGE_MINOR_VERSION` 3 erweitert.
+`priced_charge_kwh`/`priced_discharge_kwh` sind wie die bestehenden
+`unpriced_*`-Zähler echte monotone Summen und unabhängig vom
+Sieben-Felder-Bündel - ein älterer Store beginnt ihre Zählung transparent
+bei 0 ab jetzt. `STORAGE_MINOR_VERSION` 4 ergänzt zusätzlich
+`last_restart_at`/`last_restart_reason` (Zeitpunkt und optionaler
+Freitext-Grund des zuletzt ausgeführten `restart_economics_accounting`) -
+rein diagnostisch, ohne Einfluss auf eine Berechnung, siehe unten.
+`STORAGE_MINOR_VERSION` 5 trägt die Zeitabdeckung: `observed_seconds`/
+`day_length_seconds` je abgeschlossenem Tag sowie
+`current_day_observed_seconds` im Bündel des laufenden Tages. Ein
+FEHLENDES Feld eines abgeschlossenen Tages stammt aus einem älteren Store
+und macht den Tag nur unvollständig (er bleibt als Historie erhalten); ein
+vorhandener, aber ungültiger Wert bleibt ein Korruptionsindiz und verwirft
+den Tageseintrag. Beim laufenden Tag gilt diese Nachsicht bewusst nicht -
+ohne bekannte Beobachtungsdauer ließe er sich nur mit einer erfundenen
+Abdeckung abschließen, und verloren geht dabei nur der ohnehin
+unvollständige laufende Tag.
+
+Ein von `EconomicsStateStore._accept`/`_valid_snapshot` abgelehnter oder ein
+technisch fehlgeschlagener Schreibversuch (verzögert wie beim finalen
+Speichern beim Entladen) setzt `SaxPowerCoordinator.
+_economics_store_write_blocked` - die Bilanz friert daraufhin ein (Status
+`storage_error`) statt unbemerkt weiter zu akkumulieren, bis der Config
+Entry neu geladen wird.
+
+Home Assistants `Store` fängt eine echte `WriteError`/`SerializationError`
+beim Schreiben intern ab und kehrt regulär zurück
+(`Store._async_handle_write_data`), ohne sie an den Aufrufer
+weiterzureichen - weder `Store.async_save()` noch der über
+`Store.async_delay_save()` verzögerte Pfad melden einen solchen Fehler
+zurück, ein synchron abgelehnter Snapshot allein deckt diesen Fall also
+nicht ab. `EconomicsStateStore` verzichtet deshalb bewusst auf
+`Store.async_delay_save()` und verwaltet die Verzögerung selbst
+(`async_call_later`, mit einem `EVENT_HOMEASSISTANT_FINAL_WRITE`-
+Sicherheitsnetz analog zu `Store._async_ensure_final_write_listener`, damit
+weder ein letzter Schreibvorgang bei einem Home-Assistant-Shutdown verloren
+geht noch ein über das Programmende hinaus offener Timer bestehen bleibt):
+`_write_and_verify` liest nach jedem Schreibversuch den soeben
+geschriebenen Schlüssel über die öffentliche `Store.async_load()`-API
+zurück und vergleicht ihn mit den beabsichtigten Daten - eine schweigend
+verschluckte `WriteError` lässt die Datei unverändert und wird dadurch als
+Abweichung sichtbar. Beim sofortigen Pfad (`async_save`/`async_reset`)
+fließt das Ergebnis direkt in den Rückgabewert ein (ein so erkannter
+stiller Fehlschlag lässt `restart_economics_accounting` deshalb korrekt
+mit `HomeAssistantError` fehlschlagen, statt fälschlich Erfolg zu melden
+und den bisherigen Zustand unverändert zu lassen); beim zeitversetzten
+Pfad, der keinen wartenden Aufrufer mehr hat, über den optionalen
+`on_persist_failed`-Callback
+(`SaxPowerCoordinator._on_economics_persist_failed`).
+
+### Dashboard-Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+
+Der fünfte View verwendet `economics_net_savings` für alle Kalender- und
+freien Zeitraumwerte. Die vollständige Top-Level-Reihenfolge lautet:
+Amortisationsblock, KPI-Grid, Tarifinformation, freier Zeitraum, eingeklappte
+Hinweise, Statushinweis. `_tariff_plan_card` erzeugt die Tarifinformation
+direkt aus den Attributen des aktuellen Netzbezugspreis-Sensors.
+
+`_savings_payback_block` wird über
+`economics_investment_configured` zur Laufzeit ein- oder ausgeblendet. Im
+aktiven Zweig folgt auf die blaue Fortschritts-Gauge eine einzige
+`entities`-Karte mit Restbetrag, Vorlaufbetrag, Netto-Ersparnis und
+Bilanzbeginn. Der Vorlauf nutzt seine zweistellig formatierte Anzeige und trägt
+`suffix: "€"`. Prognose-Tile,
+Prognoseerklärung, Durchschnitt und Jahreshochrechnung sind entfernt. Die
+frühere separate Karte "Gesamt seit Bilanzbeginn" existiert nicht mehr. Der
+Block besitzt keine eigene Markdown-Überschrift "Amortisation".
+
+`_calendar_statistic_card` überlässt Tag, Woche, Monat und Jahr vollständig
+Home Assistants Recorder. `_savings_free_period_block` verbindet
+`energy-date-selection`, statistic und statistics-graph über
+`energy_sax_power_savings`, ohne eine separate Markdown-Überschrift "Freier
+Zeitraum". Der Statushinweis rendert im gesunden Zustand leer.
+
+Die Prüfung gespeicherter Dashboardstände erkennt auch die drei entfallenen
+Sensor-Suffixe `economics_unvalued_inventory`, `economics_unpriced_charge` und
+`economics_unpriced_discharge`. Damit bleibt die alte Jinja-Referenz auf den
+Anfangsbestand nach dem Registry-Cleanup nicht unbemerkt im Dashboard; der
+Reparaturhinweis bietet eine bewusste Neuinstallation an, ohne Anpassungen
+automatisch zu überschreiben.
+
+Fehlende Registry-Entities werden weiterhin einzeln ausgelassen. Ohne
+`economics_net_savings` entfallen KPI-Grid, seine Detailzeile und der gesamte
+freie Zeitraum, ohne ungültige IDs oder leere Container zu erzeugen.
 ## Datenfluss
 
 `config_flow.py` sammelt Host/Port/Slave-IDs/Intervall und validiert die
@@ -621,6 +1082,97 @@ tests/
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)
+├── test_tariff.py                  Tarifmodell der Wirtschaftlichkeitsauswertung
+│                                  (REQ-ECONOMICS-TARIFFS): Festpreis, Grundpreis und acht
+│                                  Zeitfenster (halboffen, über Mitternacht, angrenzend,
+│                                  überlappend), beide Sommerzeitwechsel, Abbildung der
+│                                  Options auf das Domänenmodell (inkl. einer vorhandenen,
+│                                  aber unvollständigen/unlesbaren Zeitfenstergruppe, die
+│                                  TARIFF_INCOMPLETE auslösen muss statt stillschweigend
+│                                  zu verschwinden), dynamischer Tarif am gemeinsamen
+│                                  Preis-Sensor samt aller Gründe für einen fehlenden
+│                                  Preis sowie der Lebenszyklus der Zustandsbeobachter
+├── test_energy_accounting.py        Reine Bilanzregel der Ladeenergie-Herkunft
+│                                  (REQ-ENERGY-ORIGIN, domain/energy_accounting.py):
+│                                  reine PV-/Netzladung, gemischte Ladung, Einspeisung
+│                                  während des Ladens, Netzbezug größer/kleiner als die
+│                                  Ladeleistung, fehlender Smartmeter-Wert (zählt
+│                                  konservativ als Netzladung) sowie die
+│                                  Delta-Invariante (grid + pv == charged) über
+│                                  viele zufällige Intervalle ohne kumulative Drift
+├── test_energy_persistence.py       Persistenz der Energiezähler inkl. Herkunft
+│                                  (REQ-ENERGY-DASHBOARD/REQ-ENERGY-ORIGIN):
+│                                  Store-Round-Trip, unabhängige Feldvalidierung
+│                                  (auch für die beiden Herkunftszähler und den
+│                                  Startzeitpunkt), Drosselung/Sofort-Flush, rückläufige
+│                                  Snapshots, RestoreEntity-Migrationspfad von
+│                                  energy_charged/-discharged, Version-1-Migration ohne
+│                                  erfundene Historie (inkl. eines echten, unentpackten
+│                                  Store-Envelopes über die hass_storage-Fixture -
+│                                  Regressionstest gegen einen versehentlichen
+│                                  Hauptversionssprung, der Home Assistants
+│                                  NotImplementedError-Migrationsverhalten unbemerkt
+│                                  ausgelöst hätte), bereits initialisierter Store,
+│                                  Store-Ladefehler lässt die Herkunft uninitialisiert,
+│                                  Wiederanlauf nach einem unvollständigen
+│                                  Herkunfts-Bündel ohne an der alten Teil-Baseline zu
+│                                  scheitern, Migration eines Minor-Version-2-Snapshots
+│                                  (Restbestand "Herkunft unbekannt" wandert auf den
+│                                  Netzzähler), zwei getrennte Config Entries sowie die
+│                                  Coordinator-Verdrahtung (Rundung, Entladung und
+│                                  SunSpec-Ausfall bleiben unverändert) in
+│                                  test_coordinator.py
+├── test_economics_accounting.py     Reine Geldbilanz (REQ-ECONOMICS-ACCOUNTING,
+│                                  domain/economics_accounting.py): Netz-/PV-/gemischte
+│                                  Ladung, fehlender
+│                                  Netzbezugs-/Einspeisepreis macht Ladung unbepreist statt
+│                                  erfunden, negative Preise ohne Clamping, Entladung aus
+│                                  unbewertetem Bestand ohne vermiedenen Geldwert (Regression
+│                                  zum verworfenen Issue #42), teilweise/vollständig
+│                                  monetarisierbare Entladung, fehlender Preis bei
+│                                  Entladung wird nicht rückwirkend bewertet,
+│                                  Ladeverlust-Sichtbarkeit ohne angenommenen
+│                                  Wirkungsgradfaktor sowie
+│                                  SOC-Minimum-Korrektur
+├── test_economics_persistence.py    Persistenz der Wirtschaftlichkeitsbilanz
+│                                  (REQ-ECONOMICS-ACCOUNTING): Store-Round-Trip, negative
+│                                  Geldsummen ausdrücklich erlaubt (keine
+│                                  Monotonieprüfung), unabhängige Feldvalidierung,
+│                                  rückläufige unpriced-Zähler abgelehnt, der
+│                                  unvalued_inventory-Bestand darf dagegen sinken,
+│                                  unveränderlicher Aktivierungszeitpunkt, Wiederanlauf
+│                                  nach einem unvollständigen Sieben-Felder-Bündel ohne an
+│                                  der alten Teil-Baseline zu scheitern, zwei getrennte
+│                                  Config Entries, Drosselung/Sofort-Flush sowie der
+│                                  Coordinator-Bootstrap (Anfangsbestand 0 ohne
+│                                  Kapazität/SOC, deaktivierter Tarif bootstrapped nicht, Shutdown-Flush,
+│                                  Tarifrevisions-Zeitstempel); zusätzlich die
+│                                  Tages-Buckets/Payback-Erweiterung (REQ-ECONOMICS-
+│                                  AMORTIZATION): Round-Trip von day_results/current_day/
+│                                  payback_achieved_at, ein kaputter Tageseintrag verwirft
+│                                  nur sich selbst, das Sieben-Felder-Bündel des laufenden Tages
+│                                  wird als Ganzes verworfen, Kappung auf MAX_STORED_DAYS
+│                                  sowie der unveränderliche Payback-Zeitpunkt
+├── test_economics_amortization.py   Reine ROI-/Amortisationsberechnung
+│                                  (REQ-ECONOMICS-AMORTIZATION,
+│                                  domain/economics_amortization.py): ROI unklemmt
+│                                  (negativ, über 100 %), Fortschritts-Klemmung auf
+│                                  0..100 und Restbetrag auf 0 gefloort; die
+│                                  Coordinator-seitige Verdrahtung von ROI-/Restbetrags-/
+│                                  Tagesergebnis-Sensoren samt Tarifpause-Maskierung und
+│                                  Investitionskostenänderung liegt in
+│                                  test_coordinator.py
+├── test_economics_status.py         Reine Status-/Abdeckungsableitung
+│                                  (REQ-ECONOMICS-OBSERVABILITY,
+│                                  domain/economics_status.py): jeder der sechs Status
+│                                  einzeln sowie kombinierte, gleichzeitig zutreffende
+│                                  Probleme (Priorität), Preisabdeckung energiebasiert mit
+│                                  100 % bei Nenner 0; die Coordinator-seitige Verdrahtung
+│                                  (Preisausfall-Karenzzeit vs. sofortiger
+│                                  Konfigurationsfehler, Herkunfts-/Preisabdeckung aus
+│                                  echten Zählern, Speicherfehler-Freeze, kontrollierter
+│                                  Bilanzneustart inkl. Atomarität) liegt in
+│                                  test_coordinator.py/test_init.py
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen
 │                                  (REQ-CONTROL-CONFIG-BOOTSTRAP): Store-Round-Trip, korrupter/
 │                                  unvollständiger/unlesbarer Store (inkl. dauerhafter
@@ -633,11 +1185,23 @@ tests/
 │                                  über einen simulierten Neustart hinweg samt Issue-Lebenszyklus,
 │                                  Max-SOC-Hold über den Neustart und Verfügbarkeit der
 │                                  Konfigurations-Entities
-├── test_repairs.py                 Fünf Selbstdiagnose-Issues (coordinator.
+├── test_repairs.py                 Sechs Selbstdiagnose-Issues (coordinator.
 │                                  _async_check_self_diagnostics): Auslösen nach Karenzzeit,
 │                                  Idempotenz (kein erneutes Anlegen bei unverändertem
 │                                  Problemzustand), Selbstheilung sobald die Ursache behoben
-│                                  ist - siehe anforderung.yaml REQ-SELF-DIAGNOSIS-REPAIRS
+│                                  ist - fünf davon siehe anforderung.yaml
+│                                  REQ-SELF-DIAGNOSIS-REPAIRS, das sechste
+│                                  (economics_price_unavailable) REQ-ECONOMICS-OBSERVABILITY
+├── test_dashboard.py                Mitgeliefertes Lovelace-Dashboard (REQ-BUNDLED-DASHBOARD/
+│                                  REQ-ECONOMICS-SAVINGS-DASHBOARD): Entity-Auflösung/-Auslassung
+│                                  je Tab, Gauge-Karten, geräteprefix-freie Labels für alle fünf
+│                                  Views einschließlich "Ersparnis", Karten-/Entity-Reihenfolge,
+│                                  Bilanzbeginn/Vorlaufbetrag als Attributzeilen,
+│                                  create_dashboard-Idempotenz und reinstall_dashboard-Service
+├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Ersparnis-Tab: je ein PV-Lade-,
+│                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
+│                                  Herkunftsaufteilung und die Geldsensoren bis zur
+│                                  Dashboard-Entityauflösung
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

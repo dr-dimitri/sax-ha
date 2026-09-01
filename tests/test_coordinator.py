@@ -3,24 +3,40 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+import math
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from homeassistant.components import persistent_notification
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     ALL_MONTHS,
     CELL_CALIBRATION_INTERVAL,
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE,
+    CONF_ECONOMICS_INVESTMENT_COST,
+    CONF_ECONOMICS_PRIOR_RESULT,
+    CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_ECONOMICS_TOU_BASE_PRICE,
+    CONF_ECONOMICS_WINDOW_END,
+    CONF_ECONOMICS_WINDOW_PRICE,
+    CONF_ECONOMICS_WINDOW_START,
+    CONF_PRICE_SENSOR,
+    CONF_PRICE_UNIT,
     CONF_PV_FORECAST_SENSOR,
+    ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_MANUAL_CHARGE_POWER,
     MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_SETPOINT_POWER,
+    PRICE_UNIT_AUTO,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
@@ -40,8 +56,10 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
     SUN_IC_MIN_WRITE_INTERVAL,
+    economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import (
+    OBSERVED_TIME_SAVE_GRANULARITY_SECONDS,
     SaxPowerCoordinator,
     _clamp_int,
     _grid_serving_pause_status,
@@ -49,11 +67,19 @@ from custom_components.sax_power.coordinator import (
     to_unsigned16,
     windows_overlap,
 )
+from custom_components.sax_power.domain.economics_accounting import EconomicsDelta
+from custom_components.sax_power.domain.economics_status import EconomicsStatus
 from custom_components.sax_power.domain.registers import (
     apply_typed_sunssf,
     decode_bool16,
     decode_int16,
     decode_uint16,
+)
+from custom_components.sax_power.domain.sunspec import BatteryScaleFactors
+from custom_components.sax_power.domain.tariff import (
+    QuoteResult,
+    QuoteUnavailable,
+    TariffType,
 )
 
 
@@ -4211,3 +4237,2486 @@ def test_restore_energy_rejects_negative_values(hass, caplog) -> None:
     assert data["energy_charged"] is None
     assert data["energy_discharged"] is None
     assert "Ungültigen RestoreEntity-Altzustand" in caplog.text
+
+
+# -- Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN) ----------------------------
+# Die physikalischen Bilanzregel-Fälle (reine PV-/Netzladung, gemischt,
+# Einspeisung während Ladung, Netzbezug größer/kleiner Ladeleistung,
+# unbekannter Smartmeter-Wert, Delta-Invariante) sind reine Funktionstests
+# von domain.energy_accounting.compute_charge_delta, siehe
+# tests/test_energy_accounting.py. Hier nur die Verdrahtung in
+# coordinator.data: Rundung sowie dass Entladung und ein SunSpec-Ausfall
+# die Herkunftszähler unverändert lassen.
+
+
+def _seed_origin_accounting(coordinator: SaxPowerCoordinator) -> None:
+    """Startet die Herkunftszählung wie ein frisch geladener Store.
+
+    Reine In-Memory-Vorbereitung für Coordinator-Tests, die keinen echten
+    Store-Ladevorgang durchlaufen (siehe _make_coordinator) - identisch zu
+    dem, was SaxPowerCoordinator._bootstrap_energy_origin bei einer frischen
+    Installation setzt.
+    """
+    coordinator._bootstrap_energy_origin(None)
+
+
+def test_accumulate_energy_origin_rounds_to_three_decimals(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": 400}
+        coordinator._accumulate_energy(data)
+
+    # 1000 W Ladeleistung über 3s, davon 400 W Netzbezug, Rest PV.
+    assert data["energy_charged"] == round(1000 * (3 / 3600) / 1000, 3)
+    assert data["energy_charged_from_grid"] == round(400 * (3 / 3600) / 1000, 3)
+    assert data["energy_charged_from_pv"] == round(600 * (3 / 3600) / 1000, 3)
+
+
+def test_accumulate_energy_discharge_leaves_origin_counters_untouched(hass) -> None:
+    """Entladung darf keinen Herkunftszähler verändern."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": 1500})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": 1500, "smartmeter_power": -500}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_discharged"] == 1.5
+    assert data["energy_charged_from_grid"] == 0.0
+    assert data["energy_charged_from_pv"] == 0.0
+
+
+def test_accumulate_energy_skips_origin_when_storage_power_unknown(hass) -> None:
+    """Ein SunSpec-Ausfall (storage_power_active None) darf keinen Reset,
+    Rücksprung oder Nachholsprung der Herkunftszähler auslösen - exakt wie
+    für energy_charged/energy_discharged."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {"storage_power_active": -1000, "smartmeter_power": 1000}
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100000.0
+    ):
+        coordinator._accumulate_energy(
+            {"storage_power_active": None, "smartmeter_power": None}
+        )
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100010.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": 1000}
+        coordinator._accumulate_energy(data)
+
+    # Nur die 10s seit der Wiederkehr fließen ein, nicht die ~99000s
+    # Ausfallzeit davor.
+    assert data["energy_charged_from_grid"] == round(1000 * (10 / 3600) / 1000, 3)
+    assert data["energy_charged_from_pv"] == 0.0
+
+
+def test_accumulate_energy_origin_stays_none_before_bootstrap(hass) -> None:
+    """Ohne initialisierte Herkunftszählung (kein Store geladen) bleiben die
+    drei neuen Zähler und die Abdeckung None, exakt wie energy_charged vor
+    dem Restore."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": 500}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 1.0
+    assert data["energy_charged_from_grid"] is None
+    assert data["energy_charged_from_pv"] is None
+
+
+def test_missing_smartmeter_value_counts_as_grid_charge(hass) -> None:
+    """Fehlt der Smartmeter-Wert, landet die Ladeenergie vollständig auf dem
+    Netzzähler statt in einer eigenen Kategorie - PV + Netz ergibt damit
+    immer die Gesamtladung (REQ-ENERGY-ORIGIN)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy({"storage_power_active": -1000})
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {"storage_power_active": -1000, "smartmeter_power": None}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 1.0
+    assert data["energy_charged_from_grid"] == 1.0
+    assert data["energy_charged_from_pv"] == 0.0
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        # Weitere 1 kWh, diesmal mit Messwert und komplett als PV.
+        data = {"storage_power_active": -1000, "smartmeter_power": -2000}
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == 2.0
+    assert data["energy_charged_from_grid"] == 1.0
+    assert data["energy_charged_from_pv"] == 1.0
+    assert (
+        data["energy_charged_from_grid"] + data["energy_charged_from_pv"]
+        == data["energy_charged"]
+    )
+
+
+# -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) --------------------
+# Die reine Geldbilanz (compute_economics_delta) ist erschöpfend in
+# tests/test_economics_accounting.py getestet, Store/Bootstrap/Shutdown in
+# tests/test_economics_persistence.py. Hier nur die Verdrahtung über
+# _accumulate_energy -> _accumulate_economics: Rundung, Ableitung von
+# operating_result, SOC-Minimum-Korrektur im echten Datenfluss, prospektiver
+# Tarifwechsel sowie der deaktivierte Tarif.
+
+_FIXED_TARIFF_OPTIONS = {
+    CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+    CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+    CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.30,
+}
+
+
+def _bootstrap_economics(coordinator, *, soc: int, capacity_wh: int = 10000) -> None:
+    """Erster Tick: setzt nur die Zeitbasis und bootstrapped die Bilanz -
+    noch kein Delta, exakt wie beim echten ersten Refresh nach Aktivierung."""
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": 0,
+                "smartmeter_power": 0,
+                "battery_soc": soc,
+                "battery_capacity": capacity_wh,
+                "battery_soc_min": 5,
+            }
+        )
+
+
+def test_economics_grid_charge_cost_matches_the_grid_share(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
+    assert data["economics_pv_opportunity_cost"] == 0.0
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+
+
+def test_economics_grid_charge_normalizes_eur_per_mwh(hass) -> None:
+    """Issue #148: 80 EUR/MWh sind 0,08 EUR/kWh, nicht 80 EUR/kWh."""
+    hass.states.async_set("sensor.strompreis", "80", {"unit_of_measurement": "Eur/MWh"})
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_PRICE_SENSOR: "sensor.strompreis",
+        CONF_PRICE_UNIT: PRICE_UNIT_AUTO,
+    }
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.08)
+    assert coordinator.economics_diagnostics["unpriced_charge_kwh"] == 0.0
+
+
+def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": -500,  # Einspeisung während des Ladens
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_pv_opportunity_cost"] == pytest.approx(0.08)
+    assert data["economics_grid_charge_cost"] == 0.0
+
+
+def test_missing_smartmeter_keeps_origin_counter_but_not_money_value(hass) -> None:
+    """Issue #146: Der kompatible physische Netz-Fallback darf nicht als
+    gemessene Herkunft in die Geldbilanz gelangen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    _seed_origin_accounting(coordinator)
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": None,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged_from_grid"] == pytest.approx(1.0)
+    assert data["energy_charged_from_pv"] == 0.0
+    assert data["economics_grid_charge_cost"] == 0.0
+    assert data["economics_pv_opportunity_cost"] == 0.0
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+    assert coordinator.economics_diagnostics["priced_charge_kwh"] == 0.0
+    assert coordinator.economics_diagnostics["unpriced_charge_kwh"] == pytest.approx(
+        1.0
+    )
+    assert coordinator.economics_diagnostics["unvalued_inventory_kwh"] == pytest.approx(
+        1.0
+    )
+
+
+def test_economics_net_savings_tracks_the_current_signed_result(hass) -> None:
+    """Spätere Kosten reduzieren Ergebnis, Tageswert und ROI (Issue #144)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0), soc=0)
+    balance_started_at = coordinator._economics_started_at
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=100.0),
+    )
+    assert data["economics_operating_result"] == pytest.approx(100.0)
+    assert data["economics_net_savings"] == pytest.approx(100.0)
+    assert data["economics_net_savings_today"] == pytest.approx(100.0)
+    assert data["economics_roi"] == pytest.approx(10.0)
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 10, 11, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=20.0),
+    )
+    assert data["economics_operating_result"] == pytest.approx(80.0)
+    assert data["economics_net_savings"] == pytest.approx(80.0)
+    assert data["economics_net_savings_today"] == pytest.approx(80.0)
+    assert data["economics_balance_last_reset"] == balance_started_at
+    assert data["economics_roi"] == pytest.approx(8.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(920.0)
+    assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
+        pytest.approx(80.0)
+    )
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=4000.0,
+        now=datetime(2026, 3, 10, 12, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=15.0),
+    )
+    assert data["economics_operating_result"] == pytest.approx(95.0)
+    assert data["economics_net_savings"] == pytest.approx(95.0)
+    assert data["economics_net_savings_today"] == pytest.approx(95.0)
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=5000.0,
+        now=datetime(2026, 3, 10, 13, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=10.0),
+    )
+    assert data["economics_operating_result"] == pytest.approx(105.0)
+    assert data["economics_net_savings"] == pytest.approx(105.0)
+    assert data["economics_net_savings_today"] == pytest.approx(105.0)
+    assert data["economics_balance_last_reset"] == balance_started_at
+    assert data["economics_roi"] == pytest.approx(10.5)
+    assert coordinator.economics_diagnostics[
+        "operating_result_high_water_eur"
+    ] == pytest.approx(105.0)
+
+
+def test_negative_price_movement_keeps_balance_last_reset(hass) -> None:
+    """Fallende Rohsummen sind kein Bilanzneustart (Issue #151)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0), soc=0)
+    balance_started_at = coordinator._economics_started_at
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=-20.0),
+    )
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(-20.0)
+    assert data["economics_balance_last_reset"] == balance_started_at
+
+
+def test_economics_amounts_round_to_four_decimals(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 1 / 3,
+    }
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == round(1 / 3, 4)
+
+
+def test_tariff_switch_is_prospective_not_retroactive(hass) -> None:
+    """Eine Tarifänderung wirkt nur auf künftige Deltas - der bereits
+    verbuchte Betrag zum alten Preis bleibt unverändert."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS  # 0.30 EUR/kWh
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+    cost_after_first_hour = coordinator._economics_grid_charge_cost_eur
+    assert cost_after_first_hour == pytest.approx(0.30)
+
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.50,
+    }
+    coordinator.notify_tariff_revision()
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "smartmeter_power": 1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    # 0.30 (alter Tarif, erste Stunde) + 0.50 (neuer Tarif, zweite Stunde).
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.80)
+    assert coordinator._last_tariff_revision_at is not None
+
+
+def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.restore_energy_charged(0.0)
+    coordinator.options = {}  # kein Tarif konfiguriert
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+            }
+        )
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        data = {
+            "storage_power_active": -1000,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["energy_charged"] == pytest.approx(1.0)
+    assert data["economics_grid_charge_cost"] is None
+    assert data["economics_pv_opportunity_cost"] is None
+    assert data["economics_avoided_grid_cost"] is None
+    assert data["economics_operating_result"] is None
+    assert data["economics_net_savings"] is None
+    assert data["economics_current_import_price"] is None
+    assert data["economics_feed_in_price"] is None
+    assert coordinator._economics_started_at is None
+
+
+def test_economics_bootstrap_values_existing_energy_at_zero(hass) -> None:
+    """Der Bilanzstart hängt nicht von SunSpec-Kapazität oder SOC ab."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+
+    _economics_tick(coordinator, at=1000.0, soc=50, capacity_wh=0)
+
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+
+
+def test_existing_energy_can_create_savings_after_bootstrap(hass) -> None:
+    """Bereits vorhandene Energie hat Kosten von 0 EUR und wird deshalb
+    nicht vor der ersten monetarisierbaren Entladung abgezogen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    data = _economics_tick(
+        coordinator,
+        at=4600.0,
+        storage_power_active=1000,
+        soc=40,
+    )
+
+    assert data["economics_avoided_grid_cost"] == pytest.approx(0.30)
+    assert data["economics_net_savings"] == pytest.approx(0.30)
+
+
+def test_economics_current_price_sensors_track_the_tariff_independently_of_bootstrap(
+    hass,
+) -> None:
+    """Preis-Sensoren und Bilanzstart benötigen keine SunSpec-Initialwerte."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": None,
+            "battery_capacity": None,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert data["economics_current_import_price"] == pytest.approx(0.30)
+    assert data["economics_feed_in_price"] == pytest.approx(0.08)
+
+
+def test_soc_minimum_correction_resets_the_inventory_and_logs(hass, caplog) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+    coordinator._economics_unvalued_inventory_kwh = 5.0
+
+    # Erst eine echte Entladung bis zum Minimum, dann zwei frische
+    # Stillstands-Ticks: ein bloßer SOC-Messwert am Minimum reicht nach einer
+    # Ladung wegen seiner Quantisierung nicht aus (Issue #145).
+    _economics_tick(
+        coordinator,
+        at=4600.0,
+        storage_power_active=1000,
+        soc=5,
+    )
+    _economics_tick(coordinator, at=4610.0, soc=5)
+    with caplog.at_level("INFO"):
+        _economics_tick(coordinator, at=4620.0, soc=5)
+
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert "SOC-Minimum" in caplog.text
+
+
+def _economics_tick(
+    coordinator,
+    *,
+    at: float,
+    storage_power_active: int = 0,
+    smartmeter_power: int = 0,
+    soc: int,
+    soc_min: int = 5,
+    capacity_wh: int = 10000,
+) -> dict:
+    """Ein Poll-Tick der Bilanz zu einem festen monotonic-Zeitpunkt."""
+    with patch("custom_components.sax_power.coordinator.monotonic", return_value=at):
+        data = {
+            "storage_power_active": storage_power_active,
+            "smartmeter_power": smartmeter_power,
+            "battery_soc": soc,
+            "battery_capacity": capacity_wh,
+            "battery_soc_min": soc_min,
+        }
+        coordinator._accumulate_energy(data)
+    return data
+
+
+def test_unvalued_inventory_is_capped_after_confirmed_idle_with_soc_resolution(
+    hass, caplog
+) -> None:
+    """Der unbewertete Bestand ist ein Lagerbestand: 7 kWh unbepreiste
+    Ladung heben den SOC wegen der Ladeverluste nur um 6,3 kWh - der
+    Bestand darf den konservativen oberen Rand der SOC-Stufe trotzdem nicht
+    überschreiten (Issues #132/#145)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=0)
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+
+    coordinator.options = {}  # Tarifpause -> Ladung bleibt unbepreist
+    with caplog.at_level("INFO"):
+        _economics_tick(
+            coordinator,
+            at=4600.0,
+            storage_power_active=-7000,
+            smartmeter_power=7000,
+            soc=63,
+        )
+        # Während der Ladung bleibt das vollständige Delta erhalten. Erst
+        # zwei frische Stillstands-Messpunkte erlauben die Korrektur.
+        assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(7.0)
+        _economics_tick(coordinator, at=4610.0, soc=63)
+        assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(7.0)
+        _economics_tick(coordinator, at=4620.0, soc=63)
+
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(6.4)
+    assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.6)
+    assert coordinator.economics_diagnostics["inventory_capped_kwh"] == pytest.approx(
+        0.6
+    )
+    assert "Speicherinhalt gedeckelt" in caplog.text
+    # Der unbepreiste Ladezähler bleibt von der Deckelung unberührt - er
+    # zählt tatsächlich geladene Energie, keinen Bestand.
+    assert coordinator._economics_unpriced_charge_kwh == pytest.approx(7.0)
+
+
+def test_unpriced_charge_accumulates_within_the_same_soc_step(hass, caplog) -> None:
+    """Quantisierte SOC-Werte dürfen aktuelle Ladedeltas nicht löschen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=10)
+    coordinator._economics_unvalued_inventory_kwh = 1.0
+
+    # Tarifpause: jeder Tick lädt 0,01 kWh unbepreist nach, der gemeldete
+    # SOC bleibt im selben Prozentschritt.
+    coordinator.options = {}
+    with caplog.at_level("INFO"):
+        for at in (1010.0, 1020.0, 1030.0):
+            _economics_tick(
+                coordinator,
+                at=at,
+                storage_power_active=-3600,
+                smartmeter_power=3600,
+                soc=10,
+            )
+
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.03)
+    assert coordinator._economics_inventory_capped_kwh == pytest.approx(0.0)
+    assert "Speicherinhalt gedeckelt" not in caplog.text
+
+    # Auch nach bestätigtem Stillstand liegt 1,03 kWh unter dem konservativen
+    # oberen Rand der ganzzahligen 10-%-Stufe (1,1 kWh).
+    _economics_tick(coordinator, at=1040.0, soc=10)
+    _economics_tick(coordinator, at=1050.0, soc=10)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.03)
+
+
+def test_inventory_cap_uses_the_sunspec_soc_resolution(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._battery_scale_factors = BatteryScaleFactors(soc=to_unsigned16(-1))
+
+    assert coordinator._economics_soc_resolution_percent() == pytest.approx(0.1)
+
+
+def test_charge_at_min_soc_stays_unvalued_until_it_is_discharged(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=5)
+
+    coordinator.options = {}
+    _economics_tick(
+        coordinator,
+        at=1010.0,
+        storage_power_active=-3600,
+        smartmeter_power=3600,
+        soc=5,
+    )
+    _economics_tick(coordinator, at=1020.0, soc=5)
+    _economics_tick(coordinator, at=1030.0, soc=5)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.01)
+
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    data = _economics_tick(
+        coordinator,
+        at=1040.0,
+        storage_power_active=3600,
+        soc=5,
+    )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
+    assert data["economics_avoided_grid_cost"] == pytest.approx(0.0)
+
+
+def test_capped_inventory_stops_swallowing_a_later_priced_discharge(hass) -> None:
+    """Regression zu Issue #132: der Ladeverlust-Rest eines unbepreisten
+    Zyklus darf eine spätere, ganz normal bepreist geladene Entladung nicht
+    als unbewertet abbuchen und so den vermiedenen Netzbezug dauerhaft zu
+    niedrig ausweisen. Der Speicher bleibt dabei durchgehend über seinem
+    SOC-Minimum - die bestehende Minimum-Korrektur greift also nie und kann
+    den Deckel nicht ersetzen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=0)
+
+    # Tarifpause: 7 kWh geladen, der SOC steigt verlustbedingt nur um
+    # 6,3 kWh. Während der Bewegung wird noch nicht korrigiert.
+    coordinator.options = {}
+    _economics_tick(
+        coordinator,
+        at=4600.0,
+        storage_power_active=-7000,
+        smartmeter_power=7000,
+        soc=63,
+    )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(7.0)
+
+    # ... und wieder entladen bis auf 0,7 kWh Restinhalt (SOC 7 %, also
+    # deutlich über dem Minimum von 5 %).
+    _economics_tick(coordinator, at=8200.0, storage_power_active=5600, soc=7)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.4)
+
+    # Zwei Stillstands-Ticks bestätigen SOC 7 %. Bei ganzzahligem SOC ist
+    # der konservative obere Rand 8 % beziehungsweise 0,8 kWh.
+    _economics_tick(coordinator, at=8210.0, soc=7)
+    _economics_tick(coordinator, at=8220.0, soc=7)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.8)
+
+    # Tarif wieder da: 2 kWh bepreist geladen (1,8 kWh landen im Speicher),
+    # danach dieselben 1,8 kWh entladen.
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _economics_tick(
+        coordinator,
+        at=11820.0,
+        storage_power_active=-2000,
+        smartmeter_power=2000,
+        soc=25,
+    )
+    data = _economics_tick(coordinator, at=15420.0, storage_power_active=1800, soc=7)
+
+    # 0,8 kWh gehen als konservativ unbewerteter Bestand ab, die restliche
+    # 1,0 kWh ist vermiedener Netzbezug - ohne den Deckel wären es nur
+    # 0,4 kWh gewesen.
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
+    assert data["economics_avoided_grid_cost"] == pytest.approx(1.0 * 0.30)
+    assert data["economics_grid_charge_cost"] == pytest.approx(2.0 * 0.30)
+    # Roh-Cashflow und Nettoergebnis bleiben identisch nachvollziehbar.
+    expected_result = 1.0 * 0.30 - 2.0 * 0.30
+    assert data["economics_operating_result"] == pytest.approx(expected_result)
+    assert data["economics_net_savings"] == pytest.approx(expected_result)
+    assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
+        pytest.approx(expected_result)
+    )
+
+
+def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> None:
+    """Gegen einen unbekannten Wert wird nie geklemmt: fehlt Kapazität oder
+    SOC (SunSpec-Modus nicht erreichbar), bleibt der Bestand unverändert."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+    coordinator._economics_unvalued_inventory_kwh = 9.0
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": 0,
+                "smartmeter_power": 0,
+                "battery_soc": None,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": 0,
+                "smartmeter_power": 0,
+                "battery_soc": 50,
+                "battery_capacity": None,
+                "battery_soc_min": 5,
+            }
+        )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
+
+    # Eine gemeldete Kapazität von 0 ist kein plausibler Messwert, sondern
+    # ein gestörter Block - sonst würde der gesamte Bestand verworfen und
+    # die nächste Entladung erzeugte den Scheingewinn aus Issue #42.
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=11800.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": 0,
+                "smartmeter_power": 0,
+                "battery_soc": 50,
+                "battery_capacity": 0,
+                "battery_soc_min": 5,
+            }
+        )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
+
+    # Bekannte Kapazität/SOC genügen nicht, solange die Bewegung selbst
+    # unbekannt ist: None darf nicht als bestätigter Stillstand gelten.
+    coordinator._economics_inventory_idle_confirmations = 0
+    for at in (12_000.0, 12_010.0):
+        with patch(
+            "custom_components.sax_power.coordinator.monotonic", return_value=at
+        ):
+            coordinator._accumulate_energy(
+                {
+                    "storage_power_active": None,
+                    "smartmeter_power": 0,
+                    "battery_soc": 50,
+                    "battery_capacity": 10000,
+                    "battery_soc_min": 5,
+                }
+            )
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
+
+    # Sind Bewegung, Kapazität und SOC wieder bekannt, greifen erneut zwei
+    # bestätigte Stillstands-Ticks.
+    _economics_tick(coordinator, at=15400.0, soc=50)
+    _economics_tick(coordinator, at=15410.0, soc=50)
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(5.1)
+
+
+def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
+    """Wird während einer Tarifpause geladen, darf die spätere Entladung
+    nach der Reaktivierung keinen vermiedenen Geldwert erzeugen - die
+    Ladung kam nie mit Kosten hinein (Review-Regression: sonst kostenloser
+    Scheingewinn analog zum verworfenen Issue #42)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=0)  # unbewerteter Bestand startet bei 0
+
+    # Tarif pausieren, dann 1 kWh aus dem Netz laden.
+    coordinator.options = {}
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 20,  # deutlich über battery_soc_min
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.0)
+    assert coordinator._economics_unpriced_charge_kwh == pytest.approx(1.0)
+    assert coordinator._economics_grid_charge_cost_eur == 0.0
+
+    # Reaktivieren und exakt dieselbe Menge wieder entladen.
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": 1000,
+            "smartmeter_power": 0,
+            "battery_soc": 10,
+            "battery_capacity": 10000,
+            "battery_soc_min": 5,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_avoided_grid_cost"] == 0.0
+    assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
+
+
+def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
+    hass,
+) -> None:
+    """Bei deaktiviertem Tarif müssen die fünf monetären Sensoren None
+    liefern (Akzeptanzkriterium) - der interne Stand bleibt dabei erhalten
+    und die Sensoren zeigen ihn nach der Reaktivierung unverändert wieder."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics(coordinator, soc=50)
+
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
+    ):
+        coordinator._accumulate_energy(
+            {
+                "storage_power_active": -1000,
+                "smartmeter_power": 1000,
+                "battery_soc": 50,
+                "battery_capacity": 10000,
+                "battery_soc_min": 5,
+            }
+        )
+    assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
+
+    coordinator.options = {}
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] is None
+    assert data["economics_pv_opportunity_cost"] is None
+    assert data["economics_avoided_grid_cost"] is None
+    assert data["economics_operating_result"] is None
+    assert data["economics_net_savings"] is None
+    # Interner Stand ist NICHT auf 0 zurückgesetzt worden.
+    assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
+
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=11800.0
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": 50,
+            "battery_capacity": 10000,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
+
+
+# -- ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION) -----------------
+# Die reinen Formeln sind in tests/test_economics_amortization.py getestet.
+# Hier folgt die Coordinator-Verdrahtung einschließlich Tageswechsel,
+# Tarifpause sowie ROI-/Restbetrags-/Tagesergebnis-Sensoren.
+
+_INVESTMENT_OPTIONS = {
+    **_FIXED_TARIFF_OPTIONS,
+    CONF_ECONOMICS_INVESTMENT_COST: 1000.0,
+}
+
+
+def _tick_on(
+    coordinator,
+    *,
+    monotonic_value: float,
+    now: datetime,
+    storage_power_active: int = 0,
+    smartmeter_power: int = 0,
+    soc: int = 50,
+    capacity_wh: int = 10000,
+    soc_min: int = 5,
+) -> dict:
+    """Ein Poll-Tick zu einem festen (monotonic-, wall-clock-)Zeitpunkt -
+    dt_util.now() bestimmt dabei das für die Tagesbuchhaltung maßgebliche
+    lokale Datum, unabhängig von der (nur für die Energiemengen
+    relevanten) monotonic-Uhr."""
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.monotonic",
+            return_value=monotonic_value,
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=now,
+        ),
+    ):
+        data = {
+            "storage_power_active": storage_power_active,
+            "smartmeter_power": smartmeter_power,
+            "battery_soc": soc,
+            "battery_capacity": capacity_wh,
+            "battery_soc_min": soc_min,
+        }
+        coordinator._accumulate_energy(data)
+    return data
+
+
+def _tick_with_delta(
+    coordinator, *, monotonic_value: float, now: datetime, delta: EconomicsDelta
+) -> dict:
+    """Wie _tick_on, aber mit einem exakt vorgegebenen EconomicsDelta - für
+    deterministische Tagesergebnisse, unabhängig von der eigentlichen
+    Energiemengen-/Preisrechnung (bereits in
+    tests/test_economics_accounting.py abgedeckt). storage_power_active
+    ungleich 0 sorgt lediglich dafür, dass _accumulate_energy überhaupt ein
+    charge_delta != None berechnet, das dann durch `delta` ersetzt wird."""
+    with patch(
+        "custom_components.sax_power.coordinator.compute_economics_delta",
+        return_value=delta,
+    ):
+        return _tick_on(
+            coordinator,
+            monotonic_value=monotonic_value,
+            now=now,
+            storage_power_active=-1000,
+        )
+
+
+def _bootstrap_economics_on(coordinator, *, now: datetime, soc: int = 50) -> None:
+    aware_now = (
+        now if now.tzinfo is not None else now.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    )
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=dt_util.as_utc(aware_now),
+    ):
+        _tick_on(coordinator, monotonic_value=1000.0, now=now, soc=soc)
+
+
+def test_day_rollover_closes_the_previous_day_exactly_once(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    day0 = datetime(2026, 3, 10, 9, 0)
+    _bootstrap_economics_on(coordinator, now=day0)
+    assert coordinator._economics_current_day == date(2026, 3, 10)
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(
+            avoided_grid_cost_delta=3.0, priced_discharge_kwh_delta=1.0
+        ),
+    )
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(3.0)
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 9, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=1.0, priced_charge_kwh_delta=1.0),
+    )
+
+    assert len(coordinator._economics_day_results) == 1
+    closed_day = coordinator._economics_day_results[0]
+    assert closed_day.day == date(2026, 3, 10)
+    assert closed_day.operating_result_eur == pytest.approx(3.0)
+    assert closed_day.priced_discharge_kwh == pytest.approx(1.0)
+    # Der neue Tag beginnt frisch; seine Kosten erscheinen als signiertes
+    # Tagesergebnis.
+    assert coordinator._economics_current_day == date(2026, 3, 11)
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(
+        -1.0
+    )
+    assert coordinator._economics_current_day_priced_charge_kwh == pytest.approx(1.0)
+
+
+def test_several_ticks_on_the_same_day_do_not_close_it(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    day0 = datetime(2026, 3, 10, 9, 0)
+    _bootstrap_economics_on(coordinator, now=day0)
+
+    for hour, monotonic_value in ((11, 2000.0), (15, 3000.0), (20, 4000.0)):
+        _tick_with_delta(
+            coordinator,
+            monotonic_value=monotonic_value,
+            now=datetime(2026, 3, 10, hour, 0),
+            delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+        )
+
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day == date(2026, 3, 10)
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(3.0)
+
+
+def test_a_zero_price_movement_still_schedules_a_save(hass) -> None:
+    """Ein gültiger Preis von exakt 0 EUR/kWh bewegt ausschließlich
+    priced_charge_kwh_delta/priced_discharge_kwh_delta, ohne einen der
+    sechs ursprünglichen Delta-Felder zu verändern - trotzdem muss das
+    verzögerte Speichern angestoßen werden, sonst überlebt der
+    Tageszähler keinen ungeplanten Neustart."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    coordinator._async_schedule_economics_save = MagicMock()
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=1.0, priced_discharge_kwh_delta=0.5
+        ),
+    )
+
+    coordinator._async_schedule_economics_save.assert_called_once()
+
+
+def test_a_repeated_identical_tick_after_a_rollover_closes_only_once(hass) -> None:
+    """Doppelte Verarbeitung desselben Ticks (z. B. ein erneuter Aufruf mit
+    demselben lokalen Datum) darf keinen zweiten Tagesabschluss auslösen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=3.0),
+    )
+
+    next_day = datetime(2026, 3, 11, 9, 0)
+    _tick_with_delta(
+        coordinator, monotonic_value=3000.0, now=next_day, delta=EconomicsDelta()
+    )
+    assert len(coordinator._economics_day_results) == 1
+
+    # Derselbe Tick noch einmal, exakt gleiches Datum.
+    _tick_with_delta(
+        coordinator, monotonic_value=3600.0, now=next_day, delta=EconomicsDelta()
+    )
+
+    assert len(coordinator._economics_day_results) == 1
+    assert coordinator._economics_current_day == date(2026, 3, 11)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        # Deutschland 2026: Umstellung auf Sommerzeit 29.03. (23h-Tag).
+        (datetime(2026, 3, 29, 1, 0), datetime(2026, 3, 30, 1, 0)),
+        # Umstellung auf Winterzeit 25.10. (25h-Tag).
+        (datetime(2026, 10, 25, 1, 0), datetime(2026, 10, 26, 1, 0)),
+    ],
+)
+def test_dst_transition_day_still_closes_exactly_once(hass, before, after) -> None:
+    """Ein 23h- oder 25h-DST-Tag wird nicht auf 24h normiert - die
+    Tageserkennung beruht ausschließlich auf dem lokalen Kalenderdatum
+    (Regel 1), nicht auf verstrichener Zeit."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=before)
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=before + timedelta(hours=1),
+        delta=EconomicsDelta(avoided_grid_cost_delta=2.0),
+    )
+
+    _tick_with_delta(
+        coordinator, monotonic_value=3000.0, now=after, delta=EconomicsDelta()
+    )
+
+    assert len(coordinator._economics_day_results) == 1
+    assert coordinator._economics_day_results[0].day == before.date()
+    assert coordinator._economics_current_day == after.date()
+
+
+def test_observed_time_of_a_day_comes_from_the_accounted_intervals(hass) -> None:
+    """Issue #131: Die Zeitabdeckung eines Tages speist sich aus derselben
+    Riemann-Summe wie die Energie (keine zweite Uhr) - der allererste Tick
+    nach einem Start setzt nur die Zeitbasis und zählt deshalb nicht mit."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    assert coordinator._economics_current_day_observed_seconds == 0.0
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+    )
+
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+
+def test_an_interval_without_a_power_value_is_not_observed_time(hass) -> None:
+    """Ohne Leistungswert (SunSpec nicht erreichbar) wird keine Energie
+    verbucht - genau diese Lücke soll der Tag später als Unvollständigkeit
+    ausweisen, statt sie als beobachtet zu zählen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    _tick_on(
+        coordinator,
+        monotonic_value=1000.0 + 7200,
+        now=datetime(2026, 3, 10, 11, 0),
+        storage_power_active=None,
+    )
+
+    assert coordinator._economics_current_day_observed_seconds == 0.0
+
+
+def test_a_closed_day_carries_its_observed_time_and_length(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+    )
+
+    # Das Intervall über Mitternacht zählt vollständig zum neuen Tag -
+    # wie seine Energie und sein Geldwert auch.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 7200,
+        now=datetime(2026, 3, 11, 9, 0),
+        delta=EconomicsDelta(),
+    )
+
+    closed = coordinator._economics_day_results[0]
+    assert closed.observed_seconds == pytest.approx(3600.0)
+    assert closed.day_length_seconds == pytest.approx(86400.0)
+    assert closed.is_fully_observed is False
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected_length"),
+    [
+        # Deutschland 2026: Umstellung auf Sommerzeit 29.03. (23h-Tag).
+        (datetime(2026, 3, 29, 1, 0), datetime(2026, 3, 30, 1, 0), 23 * 3600),
+        # Umstellung auf Winterzeit 25.10. (25h-Tag).
+        (datetime(2026, 10, 25, 1, 0), datetime(2026, 10, 26, 1, 0), 25 * 3600),
+    ],
+)
+async def test_a_closed_dst_day_is_measured_against_its_actual_length(
+    hass, before, after, expected_length
+) -> None:
+    """Regel 1: Der Nenner der Zeitabdeckung ist die tatsächliche Länge des
+    lokalen Kalendertages (23/24/25 h), nicht pauschal 24 h."""
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    try:
+        coordinator = _make_coordinator(hass, _make_client())
+        coordinator.options = _FIXED_TARIFF_OPTIONS
+        _bootstrap_economics_on(coordinator, now=before)
+        _tick_with_delta(
+            coordinator,
+            monotonic_value=2000.0,
+            now=before + timedelta(hours=1),
+            delta=EconomicsDelta(avoided_grid_cost_delta=1.0),
+        )
+
+        _tick_with_delta(
+            coordinator, monotonic_value=3000.0, now=after, delta=EconomicsDelta()
+        )
+    finally:
+        await hass.config.async_set_time_zone("UTC")
+
+    assert coordinator._economics_day_results[0].day_length_seconds == pytest.approx(
+        expected_length
+    )
+
+
+async def test_a_restart_resumes_the_persisted_observed_time(hass) -> None:
+    """Ohne persistierte Beobachtungsdauer sähe jeder Neustart den
+    laufenden Tag als unvollständiger an, als er tatsächlich war."""
+    from custom_components.sax_power.infrastructure.economics_store import (
+        EconomicsState,
+    )
+
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=EconomicsState(
+            grid_charge_cost_eur=0.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=0.0,
+            operating_result_high_water_eur=2.0,
+            unvalued_inventory_kwh=0.0,
+            unpriced_charge_kwh=0.0,
+            unpriced_discharge_kwh=0.0,
+            economics_started_at=dt_util.utcnow(),
+            current_day=date(2026, 3, 10),
+            current_day_operating_result_eur=2.0,
+            current_day_priced_charge_kwh=0.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=0.0,
+            current_day_unpriced_discharge_kwh=0.0,
+            current_day_observed_seconds=70_000.0,
+        )
+    )
+    await coordinator.async_load_economics_state()
+    assert coordinator._economics_current_day_observed_seconds == 70_000.0
+
+    _tick_on(coordinator, monotonic_value=500.0, now=datetime(2026, 3, 10, 23, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=500.0 + 3600,
+        now=datetime(2026, 3, 11, 0, 30),
+        delta=EconomicsDelta(),
+    )
+
+    closed = coordinator._economics_day_results[0]
+    assert closed.day == date(2026, 3, 10)
+    assert closed.observed_seconds == pytest.approx(70_000.0)
+
+
+def test_observed_time_schedules_a_save_once_per_granularity_step(hass) -> None:
+    """Die beobachtete Zeit bewegt sich auch ohne jede Energiebewegung und
+    muss einen ungeplanten Neustart überleben - sie darf den Store aber
+    nicht dauerhaft alle ECONOMICS_SAVE_DELAY Sekunden schreiben lassen,
+    auch nicht auf einem völlig ruhenden System."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    coordinator._async_schedule_economics_save = MagicMock()
+
+    # Innerhalb desselben Rasterschritts: kein Speichern allein deswegen.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + OBSERVED_TIME_SAVE_GRANULARITY_SECONDS / 2,
+        now=datetime(2026, 3, 10, 9, 7),
+        delta=EconomicsDelta(),
+    )
+    coordinator._async_schedule_economics_save.assert_not_called()
+
+    # Erst der Rasterschritt selbst löst genau einmal aus.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + OBSERVED_TIME_SAVE_GRANULARITY_SECONDS + 1,
+        now=datetime(2026, 3, 10, 9, 16),
+        delta=EconomicsDelta(),
+    )
+    coordinator._async_schedule_economics_save.assert_called_once()
+
+
+async def test_a_failed_update_drops_the_riemann_baseline(hass) -> None:
+    """Ein fehlgeschlagener Basic-Read überspringt _accumulate_energy
+    komplett - ohne Verwerfen der Baseline verbuchte der erste
+    erfolgreiche Tick danach die gesamte Ausfallzeit als Energie und als
+    beobachtete Zeit des Tages (Issue #131), obwohl nichts gemessen
+    wurde."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(),
+    )
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+    coordinator._async_read_basic = AsyncMock(side_effect=UpdateFailed("Modbus weg"))
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert coordinator._energy_last_ts is None
+
+    # Der erste Tick nach dem Ausfall setzt nur wieder die Zeitbasis -
+    # die 12 Stunden Ausfall zählen nicht als beobachtete Zeit.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0 + 3600 + 43_200,
+        now=datetime(2026, 3, 10, 22, 0),
+        delta=EconomicsDelta(),
+    )
+
+    assert coordinator._economics_current_day_observed_seconds == pytest.approx(3600.0)
+
+
+async def test_a_restart_resumes_the_persisted_current_day(hass) -> None:
+    """Der laufende Tag ist persistiert (EconomicsState.current_day/-
+    Zähler) - ein Neustart mittendrin darf weder einen zusätzlichen
+    Tagesabschluss erzeugen noch bereits akkumulierte Werte verwerfen."""
+    started_at = dt_util.utcnow()
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    from custom_components.sax_power.infrastructure.economics_store import (
+        EconomicsState,
+    )
+
+    coordinator._economics_store.async_load = AsyncMock(
+        return_value=EconomicsState(
+            grid_charge_cost_eur=0.0,
+            pv_opportunity_cost_eur=0.0,
+            avoided_grid_cost_eur=0.0,
+            operating_result_high_water_eur=2.0,
+            unvalued_inventory_kwh=0.0,
+            unpriced_charge_kwh=0.0,
+            unpriced_discharge_kwh=0.0,
+            economics_started_at=started_at,
+            current_day=date(2026, 3, 10),
+            current_day_operating_result_eur=2.0,
+            current_day_priced_charge_kwh=0.0,
+            current_day_unpriced_charge_kwh=0.0,
+            current_day_priced_discharge_kwh=1.0,
+            current_day_unpriced_discharge_kwh=0.0,
+        )
+    )
+    await coordinator.async_load_economics_state()
+    assert coordinator._economics_current_day == date(2026, 3, 10)
+
+    # Erster Refresh nach dem Neustart setzt nur die Zeitbasis (wie beim
+    # allerersten Tick nach jedem Neustart) - noch ohne Delta.
+    _tick_on(coordinator, monotonic_value=500.0, now=datetime(2026, 3, 10, 19, 30))
+
+    # Neustart am selben Tag: kein Abschluss, Zähler laufen weiter.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=1000.0,
+        now=datetime(2026, 3, 10, 20, 0),
+        # Der Rohwert steigt von 0 auf 3 EUR; der Tageswert folgt exakt
+        # diesem signierten Delta und nicht dem gespeicherten Diagnose-Peak.
+        delta=EconomicsDelta(avoided_grid_cost_delta=3.0),
+    )
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(5.0)
+
+    # Erster Tick am Folgetag schließt den (teils vor dem Neustart
+    # akkumulierten) Tag mit dem vollständigen Ergebnis ab.
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 11, 9, 0),
+        delta=EconomicsDelta(),
+    )
+    assert len(coordinator._economics_day_results) == 1
+    assert coordinator._economics_day_results[0].operating_result_eur == pytest.approx(
+        5.0
+    )
+    assert coordinator._economics_day_results[0].priced_discharge_kwh == pytest.approx(
+        1.0
+    )
+
+
+def test_roi_progress_and_remaining_are_computed_from_the_operating_result(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    assert data["economics_roi"] == pytest.approx(25.0)
+    assert data["economics_amortization_progress"] == pytest.approx(25.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(750.0)
+    assert data["economics_net_savings_today"] == pytest.approx(250.0)
+
+
+def test_negative_operating_result_produces_negative_roi_and_zero_progress(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=50.0),
+    )
+
+    assert data["economics_net_savings"] == pytest.approx(-50.0)
+    assert data["economics_net_savings_today"] == pytest.approx(-50.0)
+    assert data["economics_roi"] == pytest.approx(-5.0)
+    assert data["economics_amortization_progress"] == pytest.approx(0.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(1050.0)
+
+
+def test_prior_result_counts_towards_the_amortization_but_not_the_balance(
+    hass,
+) -> None:
+    """Der vor der Integration erwirtschaftete Ertrag verschiebt ROI,
+    Fortschritt und Restbetrag, lässt die gemessene Netto-Ersparnis und das
+    Tagesergebnis aber unangetastet (REQ-ECONOMICS-AMORTIZATION): Die
+    Ersparnis-Verlaufsgrafik wertet economics_net_savings über `change`
+    aus - ein Offset dort erschiene als Tagesertrag."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 400.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    # 250 EUR gemessen + 400 EUR Vorlauf = 650 von 1000 EUR.
+    assert data["economics_roi"] == pytest.approx(65.0)
+    assert data["economics_amortization_progress"] == pytest.approx(65.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(350.0)
+
+    # Unverändert die reine Messung.
+    assert data["economics_net_savings"] == pytest.approx(250.0)
+    assert data["economics_net_savings_today"] == pytest.approx(250.0)
+
+
+def test_prior_result_can_complete_the_payback_on_its_own(hass) -> None:
+    """Ein Vorlauf, der zusammen mit dem gemessenen Ergebnis die
+    Investitionskosten erreicht, schließt die Amortisation ab - der
+    Fortschritt wird dabei wie bisher auf 100 % geklemmt, der ROI nicht."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 900.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    assert data["economics_roi"] == pytest.approx(115.0)
+    assert data["economics_amortization_progress"] == pytest.approx(100.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(0.0)
+
+
+def test_an_out_of_range_prior_result_is_ignored_instead_of_clamped(hass) -> None:
+    """Ein von Hand verstellter Vorlauf außerhalb des Wertebereichs gilt
+    wie ein fehlender - ein stillschweigend geklammerter Betrag wäre
+    schlechter als gar keiner, weil er unbemerkt in die Amortisation
+    einginge."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: -50.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    assert data["economics_roi"] == pytest.approx(25.0)
+
+
+def test_prior_result_alone_does_not_produce_an_roi_without_a_balance(hass) -> None:
+    """Ohne laufende Bilanz bleiben die Amortisationssensoren unbekannt,
+    auch mit hinterlegtem Vorlauf: Ein ROI aus reiner Handeingabe neben
+    lauter unbekannten Geldwerten wäre irreführend."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 400.0,
+    }
+
+    data: dict[str, object] = {}
+    coordinator._publish_amortization(data, monetary_available=True)
+
+    assert data["economics_roi"] is None
+    assert data["economics_amortization_progress"] is None
+    assert data["economics_remaining_to_payback"] is None
+
+
+def test_roi_attributes_reconcile_the_gap_to_net_savings(hass) -> None:
+    """Die ROI-Attribute lösen auf, warum ROI und Netto-Ersparnis
+    auseinanderfallen: Sie nennen den Vorlauf und - bewusst ohne ihn - den
+    rein gemessenen Betrag, also genau die Zahl, die der Sensor
+    economics_net_savings daneben zeigt."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_PRIOR_RESULT: 400.0,
+    }
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    attributes = data["economics_roi_attributes"]
+    assert attributes["prior_result_eur"] == pytest.approx(400.0)
+    assert attributes["measured_operating_result_eur"] == pytest.approx(250.0)
+    assert attributes["measured_operating_result_eur"] == pytest.approx(
+        data["economics_net_savings"]
+    )
+    # 250 + 400 = 650 von 1000 EUR - die Attribute erklären die 65 %.
+    assert data["economics_roi"] == pytest.approx(65.0)
+
+
+def test_later_costs_can_move_the_current_result_below_payback(hass) -> None:
+    """Ein früherer Peak darf die aktuelle Amortisation nicht festhalten."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=1200.0),
+    )
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2500.0,
+        now=datetime(2026, 3, 10, 18, 0),
+        delta=EconomicsDelta(grid_charge_cost_delta=300.0),
+    )
+    assert coordinator.economics_diagnostics["operating_result_raw_eur"] == (
+        pytest.approx(900.0)
+    )
+    assert data["economics_operating_result"] == pytest.approx(900.0)
+    assert data["economics_net_savings"] == pytest.approx(900.0)
+    assert data["economics_roi"] == pytest.approx(90.0)
+    assert data["economics_amortization_progress"] == pytest.approx(90.0)
+    assert data["economics_remaining_to_payback"] == pytest.approx(100.0)
+    assert data["economics_net_savings_today"] == pytest.approx(900.0)
+
+    # Höhere Investitionskosten wirken unmittelbar auf den Restbetrag.
+    coordinator.options = {
+        **_INVESTMENT_OPTIONS,
+        CONF_ECONOMICS_INVESTMENT_COST: 5000.0,
+    }
+    data = _tick_on(
+        coordinator, monotonic_value=3000.0, now=datetime(2026, 3, 10, 19, 0)
+    )
+    assert data["economics_remaining_to_payback"] == pytest.approx(4100.0)
+
+
+def test_net_savings_today_publishes_the_timestamp_of_its_daily_reset(hass) -> None:
+    """economics_net_savings_today ist ein zyklisch zurückgesetzter
+    total-Sensor: ohne last_reset verbucht die Langzeitstatistik den
+    Sprung auf 0 um Mitternacht als negativen Zuwachs in Höhe des
+    Tagesergebnisses (Issue #133)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=2.5),
+    )
+
+    assert data["economics_net_savings_today"] == pytest.approx(2.5)
+    assert data["economics_net_savings_today_last_reset"] == (
+        coordinator._economics_started_at
+    )
+
+    # Mitternacht: der Tageswert beginnt wieder bei 0 - der Reset-Zeitpunkt
+    # zieht mit und macht den Sprung als Reset erkennbar.
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 0, 10),
+        delta=EconomicsDelta(),
+    )
+
+    assert data["economics_net_savings_today"] == pytest.approx(0.0)
+    assert data["economics_net_savings_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 11)
+    )
+
+
+def test_net_savings_today_last_reset_survives_a_tariff_pause(hass) -> None:
+    """Während einer Tarifpause blendet nur der Geldwert aus; der
+    Reset-Zeitpunkt läuft weiter mit, damit der Sensor nach dem
+    Reaktivieren nicht ohne Reset-Bezug wieder auftaucht (ein
+    unknown-Zustand fließt ohnehin nicht in die Statistik)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    coordinator.options = {CONF_ECONOMICS_INVESTMENT_COST: 1000.0}
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(),
+    )
+
+    assert data["economics_net_savings_today"] is None
+    assert data["economics_net_savings_today_last_reset"] == (
+        coordinator._economics_started_at
+    )
+
+
+def test_net_savings_today_last_reset_is_none_without_investment_cost(hass) -> None:
+    """Ohne Investitionskosten ist der Sensor selbst abgeschaltet - dann
+    gibt es auch keinen Reset-Zeitpunkt zu melden."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=2.5),
+    )
+
+    assert data["economics_net_savings_today"] is None
+    assert data["economics_net_savings_today_last_reset"] is None
+
+
+def test_roi_sensors_are_none_without_a_configured_investment_cost(hass) -> None:
+    """Ohne Investitionskosten liefern alle vier Sensoren None."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    assert data["economics_roi"] is None
+    assert data["economics_amortization_progress"] is None
+    assert data["economics_remaining_to_payback"] is None
+    assert data["economics_net_savings_today"] is None
+
+
+def test_roi_and_net_savings_today_hide_during_a_tariff_pause_but_survive_it(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+
+    coordinator.options = {}
+    data = _tick_on(
+        coordinator, monotonic_value=3000.0, now=datetime(2026, 3, 10, 18, 0)
+    )
+    assert data["economics_roi"] is None
+    assert data["economics_net_savings_today"] is None
+    # Interner Stand bleibt erhalten.
+    assert coordinator._economics_current_day_operating_result_eur == pytest.approx(
+        250.0
+    )
+
+    coordinator.options = _INVESTMENT_OPTIONS
+    data = _tick_on(
+        coordinator, monotonic_value=4000.0, now=datetime(2026, 3, 10, 19, 0)
+    )
+    assert data["economics_roi"] == pytest.approx(25.0)
+    assert data["economics_net_savings_today"] == pytest.approx(250.0)
+
+
+def test_investment_cost_change_takes_effect_immediately_without_altering_history(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    assert data["economics_roi"] == pytest.approx(25.0)  # 250 / 1000 EUR
+
+    coordinator.options = {
+        **_FIXED_TARIFF_OPTIONS,
+        CONF_ECONOMICS_INVESTMENT_COST: 500.0,
+    }
+    data = _tick_on(
+        coordinator, monotonic_value=3000.0, now=datetime(2026, 3, 10, 18, 0)
+    )
+    assert data["economics_roi"] == pytest.approx(50.0)  # 250 / 500 EUR, sofort wirksam
+    # Der bereits akkumulierte operative Betrag ist unverändert geblieben.
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(250.0)
+
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    data = _tick_on(
+        coordinator, monotonic_value=4000.0, now=datetime(2026, 3, 10, 19, 0)
+    )
+    assert data["economics_roi"] is None
+
+
+# -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) --------------------
+_BROKEN_FIXED_TARIFF_OPTIONS = {
+    CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+    CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+    # CONF_ECONOMICS_FIXED_IMPORT_PRICE fehlt bewusst -> TARIFF_INCOMPLETE.
+}
+
+
+def _mark_origin_initialized(coordinator) -> None:
+    coordinator._energy_grid_charged_kwh = 0.0
+    coordinator._energy_pv_charged_kwh = 0.0
+
+
+def test_economics_status_is_disabled_without_a_tariff(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {}
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["economics_status"] == EconomicsStatus.DISABLED.value
+
+
+def test_economics_status_needs_no_initial_battery_state(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+
+    with (
+        patch("custom_components.sax_power.coordinator.monotonic", return_value=1000.0),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2026, 3, 10, 9, 0),
+        ),
+    ):
+        data = {
+            "storage_power_active": 0,
+            "battery_soc": None,
+            "battery_capacity": None,
+        }
+        coordinator._accumulate_energy(data)
+
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    assert data["economics_status"] == EconomicsStatus.ORIGIN_UNAVAILABLE.value
+
+
+def test_economics_status_is_active_once_healthy(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+
+
+def test_economics_status_reports_storage_error(hass) -> None:
+    """Ein unlesbarer Store friert die Bilanz ein - Status storage_error,
+    kein Bootstrap im Arbeitsspeicher (siehe test_economics_persistence.py
+    für den vollen Lade-/Speicherpfad)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator._economics_store_write_blocked = True
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["economics_status"] == EconomicsStatus.STORAGE_ERROR.value
+    assert coordinator._economics_started_at is None
+
+
+def test_economics_status_price_unavailable_after_grace_period(hass) -> None:
+    """Ein transienter Ausfall des dynamischen Preis-Sensors braucht die
+    volle Karenzzeit, bevor der Status kippt."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    with patch.object(
+        coordinator.tariff_provider,
+        "quote",
+        return_value=QuoteResult(reason=QuoteUnavailable.PRICE_SENSOR_UNAVAILABLE),
+    ):
+        data = _tick_on(
+            coordinator, monotonic_value=2000.0, now=datetime(2026, 3, 10, 10, 0)
+        )
+        assert data["economics_status"] != EconomicsStatus.PRICE_UNAVAILABLE.value
+
+        data = _tick_on(
+            coordinator,
+            monotonic_value=2000.0 + ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
+            now=datetime(2026, 3, 10, 12, 0),
+        )
+        assert data["economics_status"] == EconomicsStatus.PRICE_UNAVAILABLE.value
+
+
+def test_economics_status_price_unavailable_immediately_for_broken_fixed_tariff(
+    hass,
+) -> None:
+    """Ein ungültig gespeicherter Fest-/Zeitfenstertarif ist ein sofortiger
+    Konfigurationsfehler - keine 6h-Karenzzeit."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    coordinator.options = _BROKEN_FIXED_TARIFF_OPTIONS
+    data = _tick_on(
+        coordinator, monotonic_value=2000.0, now=datetime(2026, 3, 10, 10, 0)
+    )
+
+    assert data["economics_status"] == EconomicsStatus.PRICE_UNAVAILABLE.value
+
+
+def test_energy_origin_attributes_publish_the_accounting_start(hass) -> None:
+    """REQ-ENERGY-ORIGIN: Der Startzeitpunkt der Herkunftszählung hängt als
+    Attribut an den Herkunftssensoren - Gegenstück zu economics_started_at.
+    Ohne ihn lassen sich die verschieden alten Zähler und die Geldbilanz
+    nicht auseinanderhalten (Anwenderbericht zu 2,44 kWh PV-Ladung neben
+    0,0084 EUR PV-Opportunitätskosten)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    started_at = datetime(2026, 3, 1, 8, 0, tzinfo=UTC)
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=started_at,
+    ):
+        coordinator._bootstrap_energy_origin(None)
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["energy_origin_attributes"] == {
+        "origin_accounting_started_at": started_at.isoformat()
+    }
+    assert coordinator.energy_diagnostics["origin_accounting_started_at"] == (
+        started_at.isoformat()
+    )
+
+
+def test_energy_origin_attributes_stay_empty_before_the_bootstrap(hass) -> None:
+    """Ein noch nicht gelesener Store (Ladefehler) darf keinen erfundenen
+    Startzeitpunkt melden - das Attribut ist dann ausdrücklich None."""
+    coordinator = _make_coordinator(hass, _make_client())
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    assert data["energy_origin_attributes"] == {"origin_accounting_started_at": None}
+
+
+def test_economics_amounts_never_publish_a_negative_zero(hass) -> None:
+    """Ein winziger negativer Rohbetrag darf nicht als "-0,0" erscheinen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=-0.00001),
+    )
+
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(-0.00001)
+    for key in (
+        "economics_operating_result",
+        "economics_net_savings",
+        "economics_avoided_grid_cost",
+        "economics_roi",
+        "economics_net_savings_today",
+    ):
+        # `== 0.0` allein trifft auch -0.0 - das Vorzeichen ist hier die
+        # eigentliche Aussage.
+        assert data[key] == 0.0, key
+        assert math.copysign(1.0, data[key]) > 0, key
+
+
+def test_economics_status_origin_unavailable_without_origin_counters(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    assert coordinator._energy_grid_charged_kwh is None
+
+    data = _tick_on(
+        coordinator, monotonic_value=2000.0, now=datetime(2026, 3, 10, 10, 0)
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ORIGIN_UNAVAILABLE.value
+
+
+def test_economics_status_partial_price_coverage_from_unpriced_charge(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=1.0, unpriced_charge_delta_kwh=1.0
+        ),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+    attributes = data["economics_status_attributes"]
+    assert attributes["charge_price_coverage_percent"] == pytest.approx(50.0)
+    assert attributes["reason"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+
+
+def test_economics_status_recovers_on_the_next_day_after_a_price_gap(hass) -> None:
+    """partial_price_coverage meldet eine Lücke des LAUFENDEN Tages. Aus
+    der Lifetime-Quote (die nie zurückgeht) wäre der Zustand dagegen nur
+    noch über einen Bilanzneustart zu verlassen, der die gesamte
+    Geldbilanz verwirft (Issue #134)."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=1.0, unpriced_charge_delta_kwh=1.0
+        ),
+    )
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+
+    # Nächster Kalendertag, wieder vollständig bepreist: der Tagesbucket
+    # startet bei 0/0, der Zustand kehrt zurück auf active.
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 0, 10),
+        delta=EconomicsDelta(priced_charge_kwh_delta=1.0),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+    attributes = data["economics_status_attributes"]
+    assert attributes["charge_price_coverage_percent_today"] == pytest.approx(100.0)
+    # Die Lifetime-Quote bleibt als Langzeitinformation erhalten - sie ist
+    # nur kein Zustandsauslöser mehr.
+    assert attributes["charge_price_coverage_percent"] == pytest.approx(66.7)
+
+
+@pytest.mark.parametrize(
+    ("priced_kwh", "unpriced_kwh", "expected_coverage"),
+    [
+        # Relativ verschwindende Lücke an einem energiereichen Tag.
+        pytest.param(100.0, 0.001, 100.0, id="relatively_negligible"),
+        # Erster Tick nach einem Neustart: der Tagesbucket ist noch leer,
+        # die relative Quote steht dadurch auf 0 % - 10 Wh dürfen den
+        # Sensor trotzdem nicht den ganzen Tag warnen lassen.
+        pytest.param(0.0, 0.01, 0.0, id="tiny_gap_in_an_almost_empty_day"),
+    ],
+)
+def test_economics_status_tolerates_a_negligible_unpriced_share(
+    hass, priced_kwh: float, unpriced_kwh: float, expected_coverage: float
+) -> None:
+    """Eine einzelne unbepreiste Kilowattstunde (z. B. der erste Tick nach
+    einem Neustart, bevor die Preis-Integration ihre Entity angelegt hat)
+    darf den Sensor nicht auf partial_price_coverage kippen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            priced_charge_kwh_delta=priced_kwh,
+            unpriced_charge_delta_kwh=unpriced_kwh,
+        ),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+    assert data["economics_status_attributes"][
+        "charge_price_coverage_percent_today"
+    ] == pytest.approx(expected_coverage)
+
+
+def test_economics_status_stays_active_while_unvalued_inventory_is_discharged(
+    hass,
+) -> None:
+    """Entladung aus dem unbewerteten Bestand ist weder bepreiste noch
+    unbepreiste Entladung: gemeldet wird die Lücke an dem Tag, an dem die
+    nicht bepreisbare LADUNG stattfand. Ein späterer Tag, an dem dieser
+    Bestand entladen wird, ist rechnerisch einwandfrei (Ergebnis korrekt
+    0 EUR, nicht unbekannt) und bleibt deshalb active."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    _mark_origin_initialized(coordinator)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 10, 0),
+        delta=EconomicsDelta(
+            unpriced_charge_delta_kwh=10.0, unvalued_inventory_delta_kwh=10.0
+        ),
+    )
+    assert data["economics_status"] == EconomicsStatus.PARTIAL_PRICE_COVERAGE.value
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 11, 10, 0),
+        delta=EconomicsDelta(unvalued_inventory_delta_kwh=-10.0),
+    )
+
+    assert data["economics_status"] == EconomicsStatus.ACTIVE.value
+    assert data["economics_net_savings_today"] == pytest.approx(0.0)
+
+
+def test_economics_status_attributes_contain_expected_diagnostics(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _mark_origin_initialized(coordinator)
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
+    )
+
+    attributes = data["economics_status_attributes"]
+    assert attributes["tariff_type"] == "fixed"
+    assert attributes["price_sensor_entity_id"] is None
+    assert attributes["economics_started_at"] is not None
+    assert attributes["current_import_price_eur_kwh"] == pytest.approx(0.30)
+    assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
+
+
+# -- Kontrollierter Bilanzneustart (REQ-ECONOMICS-OBSERVABILITY) -------------
+async def test_restart_economics_accounting_rejects_when_disabled(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {}
+
+    with pytest.raises(ServiceValidationError):
+        await coordinator.async_restart_economics_accounting()
+
+
+async def test_restart_economics_accounting_rejects_before_first_bootstrap(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+
+    with pytest.raises(ServiceValidationError):
+        await coordinator.async_restart_economics_accounting()
+
+
+async def test_restart_economics_accounting_needs_no_current_battery_data(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator._economics_store.async_reset = AsyncMock(return_value=True)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    coordinator.data = {}
+
+    await coordinator.async_restart_economics_accounting()
+
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+
+
+async def test_restart_economics_accounting_resets_money_but_not_energy(hass) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    coordinator._economics_store.async_reset = AsyncMock(return_value=True)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    coordinator._economics_payback_achieved_at = dt_util.utcnow()
+    coordinator._energy_charged_kwh = 12.5
+    coordinator._energy_discharged_kwh = 9.0
+    coordinator._energy_grid_charged_kwh = 5.0
+    coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
+
+    await coordinator.async_restart_economics_accounting(reason="Testneustart")
+
+    assert coordinator._economics_avoided_grid_cost_eur == 0.0
+    assert coordinator._economics_grid_charge_cost_eur == 0.0
+    assert coordinator._economics_pv_opportunity_cost_eur == 0.0
+    assert coordinator._economics_operating_result_high_water_eur == 0.0
+    assert coordinator._economics_unpriced_charge_kwh == 0.0
+    assert coordinator._economics_priced_charge_kwh == 0.0
+    assert coordinator._economics_day_results == ()
+    assert coordinator._economics_current_day is None
+    assert coordinator._economics_payback_achieved_at is None
+    assert coordinator._economics_unvalued_inventory_kwh == 0.0
+    # Energie-/Herkunftszähler aus REQ-ENERGY-ORIGIN bleiben unangetastet.
+    assert coordinator._energy_charged_kwh == 12.5
+    assert coordinator._energy_discharged_kwh == 9.0
+    assert coordinator._energy_grid_charged_kwh == 5.0
+    coordinator._economics_store.async_reset.assert_awaited_once()
+    reset_state = coordinator._economics_store.async_reset.await_args.args[0]
+    assert reset_state.operating_result_high_water_eur == 0.0
+
+
+async def test_restart_mid_day_moves_the_last_reset_of_net_savings_today(hass) -> None:
+    """Ein Bilanzneustart markiert beide zurückgesetzten Recorder-Totals."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _INVESTMENT_OPTIONS
+    coordinator._economics_store.async_reset = AsyncMock(return_value=True)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    assert data["economics_net_savings_today"] == pytest.approx(250.0)
+    assert data["economics_net_savings"] == pytest.approx(250.0)
+    previous_started_at = coordinator._economics_started_at
+    assert data["economics_net_savings_today_last_reset"] == previous_started_at
+    assert data["economics_balance_last_reset"] == previous_started_at
+    assert data["economics_net_savings_last_reset"] == previous_started_at
+
+    coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
+    restarted_at = datetime(2026, 3, 10, 16, 0, tzinfo=UTC)
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.utcnow",
+        return_value=restarted_at,
+    ):
+        await coordinator.async_restart_economics_accounting()
+
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=3000.0,
+        now=datetime(2026, 3, 10, 17, 0),
+        delta=EconomicsDelta(),
+    )
+
+    assert data["economics_net_savings_today"] == pytest.approx(0.0)
+    assert data["economics_net_savings_today_last_reset"] == restarted_at
+    assert data["economics_net_savings"] == pytest.approx(0.0)
+    assert data["economics_balance_last_reset"] == restarted_at
+    assert data["economics_net_savings_last_reset"] == restarted_at
+
+    # Am Folgetag zählt wieder der Tagesbeginn - der (ältere) Neustart darf
+    # den Reset-Zeitpunkt nicht dauerhaft festhalten.
+    data = _tick_with_delta(
+        coordinator,
+        monotonic_value=4000.0,
+        now=datetime(2026, 3, 11, 0, 10),
+        delta=EconomicsDelta(),
+    )
+    assert data["economics_net_savings_today_last_reset"] == dt_util.start_of_local_day(
+        date(2026, 3, 11)
+    )
+    assert data["economics_net_savings_last_reset"] == restarted_at
+    assert data["economics_balance_last_reset"] == restarted_at
+
+
+async def test_restart_economics_accounting_keeps_old_state_if_save_fails(
+    hass,
+) -> None:
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    coordinator._economics_store.async_reset = AsyncMock(return_value=False)
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_restart_economics_accounting()
+
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(250.0)
+    assert coordinator._economics_operating_result_high_water_eur == pytest.approx(
+        250.0
+    )
+
+
+async def test_restart_economics_accounting_keeps_old_state_if_write_is_silently_lost(
+    hass,
+) -> None:
+    """Home Assistants Store fängt eine echte WriteError intern ab und
+    kehrt regulär zurück (siehe EconomicsStateStore-Klassen-Docstring) -
+    ohne die Lese-Rückprobe in EconomicsStateStore._write_and_verify würde
+    async_reset hier fälschlich True melden, obwohl der Neustart nie auf
+    der Platte gelandet ist. Anders als
+    test_restart_economics_accounting_keeps_old_state_if_save_fails (mockt
+    EconomicsStateStore.async_reset direkt) verwendet dieser Test die
+    echte EconomicsStateStore und simuliert den Fehler erst eine Ebene
+    tiefer, im zugrunde liegenden Home-Assistant-Store."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
+    _tick_with_delta(
+        coordinator,
+        monotonic_value=2000.0,
+        now=datetime(2026, 3, 10, 15, 0),
+        delta=EconomicsDelta(avoided_grid_cost_delta=250.0),
+    )
+    coordinator.data = {"battery_capacity": 10000, "battery_soc": 50}
+    coordinator._economics_store._store.async_save = AsyncMock()
+    coordinator._economics_store._store.async_load = AsyncMock(
+        return_value={"stale": True}
+    )
+
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_restart_economics_accounting()
+
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(250.0)
+    assert coordinator._economics_operating_result_high_water_eur == pytest.approx(
+        250.0
+    )
+
+
+# --------------------------------------------------------------------------
+# Anzeige des Tarifplans (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+# --------------------------------------------------------------------------
+_TOU_TARIFF_OPTIONS = {
+    CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+    CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+    CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+    economics_tou_window_key(1): {
+        CONF_ECONOMICS_WINDOW_START: "22:00:00",
+        CONF_ECONOMICS_WINDOW_END: "06:00:00",
+        CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+    },
+    economics_tou_window_key(2): {
+        CONF_ECONOMICS_WINDOW_START: "06:00:00",
+        CONF_ECONOMICS_WINDOW_END: "08:00:00",
+        CONF_ECONOMICS_WINDOW_PRICE: 0.41,
+    },
+}
+
+
+def test_tariff_plan_attributes_show_the_active_window(hass) -> None:
+    """Der Preiswert allein sagt nicht, welches Fenster ihn liefert und
+    wann er sich wieder ändert - der Sensor trägt beides als Attribute."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _TOU_TARIFF_OPTIONS
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 30)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["tariff_type"] == "time_of_use"
+    assert attributes["quote_source"] == "time_of_use_window"
+    assert attributes["unavailable_reason"] is None
+    assert attributes["active_window"] == {
+        "start": "22:00:00",
+        "end": "06:00:00",
+        "price_eur_kwh": 0.21,
+    }
+    assert data["economics_current_import_price"] == pytest.approx(0.21)
+    # Das Fenster läuft über Mitternacht: der nächste Wechsel liegt am
+    # Folgetag um 06:00 Ortszeit.
+    assert attributes["next_price_change_at"].startswith("2026-03-11T06:00:00")
+
+
+def test_tariff_plan_attributes_list_windows_sorted_by_start(hass) -> None:
+    """Die Fensterliste ist die Grundlage der Dashboard-Karte und deshalb
+    nach Beginn sortiert, nicht in der Reihenfolge der Eingabegruppen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = _TOU_TARIFF_OPTIONS
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 12, 0)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["base_price_eur_kwh"] == pytest.approx(0.30)
+    assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
+    assert attributes["windows"] == [
+        {"start": "06:00:00", "end": "08:00:00", "price_eur_kwh": 0.41},
+        {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21},
+    ]
+    # Mittags gilt der Grundpreis - kein Fenster darf als aktiv gelten.
+    assert attributes["active_window"] is None
+    assert attributes["quote_source"] == "time_of_use_base"
+
+
+def test_tariff_plan_attributes_are_empty_for_a_fixed_tariff(hass) -> None:
+    """Zeitfenster einer früheren Konfiguration bleiben zwar in den
+    Options stehen, gelten aber nicht mehr - ein sichtbarer Tarifplan, der
+    gar nicht gilt, wäre irreführender als gar keiner."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {**_TOU_TARIFF_OPTIONS, **_FIXED_TARIFF_OPTIONS}
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 30)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["tariff_type"] == "fixed"
+    assert attributes["windows"] is None
+    assert attributes["base_price_eur_kwh"] is None
+    assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
+    assert attributes["active_window"] is None
+    # Ein Festpreis gilt unbegrenzt und wechselt deshalb nie.
+    assert attributes["next_price_change_at"] is None
+
+
+def test_tariff_plan_attributes_name_the_reason_without_a_price(hass) -> None:
+    """Ohne Preis muss die Karte erklären können, warum - der Grund ist
+    derselbe maschinenlesbare QuoteUnavailable wie überall sonst."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {}
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 30)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert attributes["tariff_type"] == "disabled"
+    assert attributes["quote_source"] is None
+    assert attributes["unavailable_reason"] == "tariff_disabled"
+    assert data["economics_current_import_price"] is None
+
+
+def test_tariff_plan_reports_no_price_change_without_windows(hass) -> None:
+    """Alle acht Gruppen leer zu lassen ist eine gültige Konfiguration; sie
+    verhält sich dann wie ein Festpreis. Der zugrunde liegende Quote trägt
+    dort trotzdem den bloßen Tagesumbruch als Gültigkeitsende
+    (domain.tariff._segment_bounds) - als "nächster Preiswechsel" gemeldet
+    wäre das ein Wechsel um Mitternacht, den es nicht gibt."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+    }
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 14, 0)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert data["economics_current_import_price"] == pytest.approx(0.30)
+    assert attributes["windows"] == []
+    assert attributes["next_price_change_at"] is None
+
+
+def test_tariff_plan_marks_no_active_window_without_a_price(hass) -> None:
+    """Ein von Hand bearbeiteter Store kann Fenster ohne Grundpreis
+    enthalten (TARIFF_INCOMPLETE). Dann gilt gerade gar kein Preis - kein
+    Fenster darf als "jetzt geltend" erscheinen, die Fensterliste bleibt
+    für die Fehlersuche aber sichtbar."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        # Grundpreis fehlt bewusst.
+        economics_tou_window_key(1): {
+            CONF_ECONOMICS_WINDOW_START: "22:00:00",
+            CONF_ECONOMICS_WINDOW_END: "06:00:00",
+            CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+        },
+    }
+
+    data = _tick_on(
+        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 23, 0)
+    )
+
+    attributes = data["economics_price_attributes"]
+    assert data["economics_current_import_price"] is None
+    assert attributes["unavailable_reason"] == "tariff_incomplete"
+    assert attributes["active_window"] is None
+    assert attributes["next_price_change_at"] is None
+    assert attributes["windows"] == [
+        {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+    ]

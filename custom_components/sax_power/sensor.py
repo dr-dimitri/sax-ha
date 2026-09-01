@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -22,6 +22,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    CURRENCY_EURO,
     PERCENTAGE,
     EntityCategory,
     UnitOfApparentPower,
@@ -42,6 +43,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import SaxPowerCoordinator
+from .domain.economics_status import EconomicsStatus
 from .entity import SaxPowerEntity
 
 
@@ -53,10 +55,17 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
     Sensoren, deren Zustand allein die Nachvollziehbarkeit nicht hergibt -
     aktuell der Statussensor des preisoptimierten Ladens, der damit die
     zugrundeliegenden Preise und die geplanten Ladefenster mitliefert.
+
+    `last_reset_fn` ist optional und nur für `state_class: total`-Sensoren
+    mit einem kontrollierten Reset gedacht: ohne diesen Zeitpunkt deutet die
+    Langzeitstatistik den Sprung auf 0 als negativen Zuwachs. Das betrifft den
+    täglichen Reset von economics_net_savings_today ebenso wie den ausschließlich
+    manuell möglichen Bilanzneustart aller kumulativen Geldsensoren.
     """
 
-    value_fn: Callable[[dict[str, Any]], StateType | datetime]
+    value_fn: Callable[[dict[str, Any]], StateType | date | datetime]
     attributes_fn: Callable[[SaxPowerCoordinator], dict[str, Any]] | None = None
+    last_reset_fn: Callable[[dict[str, Any]], datetime | None] | None = None
 
 
 def _direct(key: str) -> Callable[[dict[str, Any]], StateType]:
@@ -93,6 +102,76 @@ def _negative_part(key: str) -> Callable[[dict[str, Any]], StateType]:
         return -value if value < 0 else 0
 
     return value_fn
+
+
+def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Vorlauf-Ertrag und das rein gemessene Ergebnis dahinter
+    (REQ-ECONOMICS-AMORTIZATION).
+
+    Der ROI bezieht den vor der Einrichtung erwirtschafteten Ertrag mit
+    ein, economics_net_savings dagegen nicht - ohne diese Attribute
+    ließe sich die Differenz zwischen beiden nirgends nachvollziehen.
+    """
+    if coordinator.data is None:
+        return {}
+    attributes = dict(coordinator.data.get("economics_roi_attributes") or {})
+    prior_result = attributes.get("prior_result_eur")
+    # Core-Attributzeilen formatieren Zahlen mit höchstens zwei Stellen und
+    # können keine Mindestpräzision konfigurieren. Der numerische Wert bleibt
+    # für Automationen erhalten; nur das Dashboard nutzt diese Anzeigeform.
+    attributes["prior_result_eur_formatted"] = (
+        f"{prior_result:.2f}"
+        if isinstance(prior_result, int | float)
+        and not isinstance(prior_result, bool)
+        and math.isfinite(prior_result)
+        else None
+    )
+    return attributes
+
+
+def _energy_origin_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Startzeitpunkt der Herkunftszählung (REQ-ENERGY-ORIGIN) an beiden
+    Herkunftssensoren.
+
+    Gegenstück zu economics_started_at am Status-Sensor: Beide Zählungen
+    beginnen zu unterschiedlichen Zeitpunkten, ihre Werte sind deshalb
+    nicht gegeneinander verrechenbar (siehe
+    SaxPowerCoordinator._energy_origin_attributes).
+    """
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("energy_origin_attributes") or {}
+
+
+def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Diagnoseattribute des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY)."""
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("economics_status_attributes") or {}
+
+
+def _economics_price_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Hinterlegter Tarifplan und aktives Zeitfenster (REQ-ECONOMICS-
+    DASHBOARD) als Zusatzattribute des Netzbezugspreis-Sensors."""
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("economics_price_attributes") or {}
+
+
+def _last_reset(key: str) -> Callable[[dict[str, Any]], datetime | None]:
+    """Reset-Zeitpunkt eines zyklisch zurückgesetzten Zählers.
+
+    Der Coordinator veröffentlicht ihn bereits als zeitzonenbehaftetes
+    datetime; hier wird nur noch der Typ abgesichert, damit ein aus einem
+    unerwarteten Zustand stammender Fremdtyp nicht als last_reset in die
+    Langzeitstatistik gerät.
+    """
+
+    def last_reset_fn(data: dict[str, Any]) -> datetime | None:
+        value = data.get(key)
+        return value if isinstance(value, datetime) else None
+
+    return last_reset_fn
 
 
 def _bool_text(
@@ -648,6 +727,156 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("battery_cell_voltage_avg"),
     ),
+    # -- Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN) ------------------------
+    # Anders als energy_charged/energy_discharged (SaxPowerEnergySensor
+    # unten) ohne RestoreEntity: Es gibt keinen sichtbaren Alt-Zustand zu
+    # migrieren, der versionierte Store (infrastructure/energy_store.py)
+    # ist von Anfang an die alleinige, bereits beim Coordinator-Start
+    # initialisierte Quelle - genau wie bei jedem anderen berechneten Wert
+    # aus coordinator.data.
+    SaxPowerSensorEntityDescription(
+        key="energy_charged_from_grid",
+        translation_key="energy_charged_from_grid",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_charged_from_grid"),
+        attributes_fn=_energy_origin_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
+        key="energy_charged_from_pv",
+        translation_key="energy_charged_from_pv",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_charged_from_pv"),
+        attributes_fn=_energy_origin_attributes,
+    ),
+    # -- Datenqualität/Diagnose (REQ-ECONOMICS-OBSERVABILITY) ----------------
+    SaxPowerSensorEntityDescription(
+        key="economics_status",
+        translation_key="economics_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=[status.value for status in EconomicsStatus],
+        value_fn=_direct("economics_status"),
+        attributes_fn=_economics_status_attributes,
+    ),
+    # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) ----------------
+    # Die drei Rohsummen nutzen state_class TOTAL: Negative Strompreise
+    # lassen sie legitim sinken (siehe anforderung.yaml). Der daraus
+    # abgeleitete operative Roh-Cashflow bleibt aus Kompatibilitätsgründen
+    # ebenfalls TOTAL.
+    # Das Nettoergebnis darf durch spätere Kosten sinken und negativ werden.
+    # MONETARY erlaubt in Home Assistant nur TOTAL; der Bilanzbeginn trennt
+    # dessen kontrollierte Bilanzabschnitte. Bei deaktiviertem Tarif liefert
+    # value_fn None wie jeder andere nicht verfügbare Wert dieser Integration
+    # - keine eigene HA-"unavailable"-Sonderbehandlung.
+    SaxPowerSensorEntityDescription(
+        key="economics_grid_charge_cost",
+        translation_key="economics_grid_charge_cost",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_grid_charge_cost"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_pv_opportunity_cost",
+        translation_key="economics_pv_opportunity_cost",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_pv_opportunity_cost"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_avoided_grid_cost",
+        translation_key="economics_avoided_grid_cost",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_avoided_grid_cost"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_operating_result",
+        translation_key="economics_operating_result",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=4,
+        value_fn=_direct("economics_operating_result"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_net_savings",
+        translation_key="economics_net_savings",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_net_savings"),
+        last_reset_fn=_last_reset("economics_balance_last_reset"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_current_import_price",
+        translation_key="economics_current_import_price",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/kWh",
+        suggested_display_precision=4,
+        value_fn=_direct("economics_current_import_price"),
+        attributes_fn=_economics_price_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_feed_in_price",
+        translation_key="economics_feed_in_price",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="EUR/kWh",
+        suggested_display_precision=4,
+        value_fn=_direct("economics_feed_in_price"),
+    ),
+    # -- ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION) -------------
+    # Ohne konfigurierte Investitionskosten (economics_investment_cost_eur)
+    # liefert value_fn für alle vier Sensoren None wie jeder andere nicht
+    # verfügbare Wert dieser Integration.
+    SaxPowerSensorEntityDescription(
+        key="economics_roi",
+        translation_key="economics_roi",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_roi"),
+        attributes_fn=_economics_roi_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_amortization_progress",
+        translation_key="economics_amortization_progress",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_amortization_progress"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_remaining_to_payback",
+        translation_key="economics_remaining_to_payback",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_remaining_to_payback"),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="economics_net_savings_today",
+        translation_key="economics_net_savings_today",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=CURRENCY_EURO,
+        suggested_display_precision=2,
+        value_fn=_direct("economics_net_savings_today"),
+        last_reset_fn=_last_reset("economics_net_savings_today_last_reset"),
+    ),
 )
 
 
@@ -704,7 +933,7 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         self._assign_ids("sensor", description.key)
 
     @property
-    def native_value(self) -> StateType | datetime:
+    def native_value(self) -> StateType | date | datetime:
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
@@ -714,6 +943,14 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         if (attributes_fn := self.entity_description.attributes_fn) is None:
             return None
         return attributes_fn(self.coordinator)
+
+    @property
+    def last_reset(self) -> datetime | None:
+        if (last_reset_fn := self.entity_description.last_reset_fn) is None:
+            return None
+        if self.coordinator.data is None:
+            return None
+        return last_reset_fn(self.coordinator.data)
 
 
 class SaxPowerForecastSensor(SaxPowerSensor):

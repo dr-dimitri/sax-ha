@@ -2373,11 +2373,13 @@ requirement_dhcp_discovery:
     Eintrag konfiguriert ist (unabhängig von Port/Slave-IDs) und bricht in
     diesem Fall mit "already_configured" ab. Danach wird die MAC-Adresse
     (normiert über homeassistant.helpers.device_registry.format_mac) als
-    Flow-unique_id gesetzt und per _abort_if_unique_id_configured
-    dedupliziert - SAX Speicher senden ihren DHCP-Lease wiederholt, ohne
-    diese Prüfung würde jeder weitere Broadcast eine zusätzliche
-    "Erkannt"-Karte für dasselbe physische Gerät erzeugen
-    ("already_in_progress").
+    dauerhafte Flow- und Config-Entry-unique_id gesetzt. Der gemeinsame
+    Verbindungsschritt darf diese ID nicht durch "host:port" ersetzen.
+    _abort_if_unique_id_configured aktualisiert bei einem späteren Lease
+    derselben MAC ausschließlich CONF_HOST des vorhandenen Eintrags, plant
+    bei einem geladenen Eintrag genau einen Reload und bricht mit
+    "already_configured" ab. Wiederholte Broadcasts während eines noch
+    laufenden Flows werden weiterhin als "already_in_progress" dedupliziert.
 
     Anschließend leitet async_step_dhcp in den normalen async_step_user
     weiter und merkt die entdeckte IP in self._discovered_ip vor; die
@@ -2390,7 +2392,11 @@ requirement_dhcp_discovery:
     müssen weiterhin bestätigt bzw. bei Bedarf angepasst werden, DHCP
     liefert nur die IP-Adresse. Ein manueller Start der Ersteinrichtung
     (ohne vorherige Discovery) bleibt unverändert möglich, das Host-Feld
-    ist dann wie bisher leer.
+    ist dann wie bisher leer und die unique_id bleibt "host:port". Beim
+    Reconfigure bleibt eine vorhandene normierte MAC-ID erhalten; nur
+    manuelle Einträge führen ihre "host:port"-ID auf die neue Verbindung
+    nach. Host-/Port-Abgleiche verhindern dabei Kollisionen mit anderen
+    bereits konfigurierten Einträgen.
   requirements:
     - "manifest.json enthält einen dhcp-Footprint (Hostname-Präfix
        \"sax*\")."
@@ -2400,6 +2406,11 @@ requirement_dhcp_discovery:
     - "Das Host-Feld der Ersteinrichtung wird bei per DHCP ausgelöster
        Ersteinrichtung mit der entdeckten IP vorbelegt, bleibt bei
        manuellem Start aber leer."
+    - "Ein per DHCP angelegter Config Entry behält die normierte MAC-Adresse
+       als unique_id; ein späterer Lease derselben MAC aktualisiert nur
+       CONF_HOST und lädt einen aktiven Eintrag genau einmal neu."
+    - "Reconfigure bewahrt MAC-basierte IDs, führt manuelle host:port-IDs
+       weiterhin nach und verhindert Zielkollisionen mit anderen Einträgen."
   acceptance_criteria:
     - "tests/test_config_flow.py deckt ab, dass DHCP-Discovery in den
        user-Schritt mit vorbelegtem Host-Feld weiterleitet und der Flow ab
@@ -2409,6 +2420,13 @@ requirement_dhcp_discovery:
     - "tests/test_config_flow.py deckt ab, dass ein zweiter Broadcast
        derselben MAC-Adresse während eines laufenden Discovery-Flows mit
        \"already_in_progress\" abbricht."
+    - "tests/test_config_flow.py deckt den vollständigen DHCP-Setup bis zum
+       Config Entry ab und prüft dessen normierte MAC-unique_id."
+    - "tests/test_config_flow.py deckt ab, dass dieselbe MAC mit neuer IP
+       den bestehenden Host aktualisiert, genau einen Reload plant und mit
+       \"already_configured\" abbricht."
+    - "tests/test_config_flow.py deckt Reconfigure für MAC- und manuelle
+       host:port-IDs ab."
 
 # ==============================================================================
 # ANFORDERUNG: ENTITY-KATEGORISIERUNG (DIAGNOSTIC)

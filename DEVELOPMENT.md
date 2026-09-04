@@ -132,6 +132,12 @@ SunSpec-Erreichbarkeit, Anzahl angelegter Entities als
 ermittelt), siehe anforderung.yaml REQ-SETUP-FINISH-SUMMARY. Der Config Entry
 wird erst hier angelegt.
 
+Ein durch DHCP entdeckter Speicher verwendet seine normierte MAC-Adresse
+dagegen dauerhaft als Config-Entry-ID. Ein späterer Lease derselben MAC kann
+dadurch die geänderte IP im vorhandenen Eintrag nachführen und einen Reload
+auslösen, ohne einen zweiten Eintrag anzulegen. Beim Reconfigure bleibt diese
+MAC-ID erhalten; nur manuell angelegte Einträge führen ihre `host:port`-ID mit.
+
 Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
 preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als
 Entity abbilden lassen (Auswahl der Quell-Sensoren und deren Interpretation);

@@ -368,6 +368,7 @@ async def test_dhcp_discovery_prefills_host(hass) -> None:
     read_result.isError.return_value = False
     read_result.registers = [50] * 115
     client.read_holding_registers = AsyncMock(return_value=read_result)
+    client.write_register = AsyncMock(return_value=read_result)
     client.close = MagicMock()
 
     with (
@@ -383,6 +384,14 @@ async def test_dhcp_discovery_prefills_host(hass) -> None:
         )
         assert result2["type"] == FlowResultType.FORM
         assert result2["step_id"] == "grid_charge"
+
+        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
+        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
+        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
+
+        assert result5["type"] == FlowResultType.CREATE_ENTRY
+        assert result5["result"].unique_id == "aa:bb:cc:dd:ee:ff"
+        assert result5["result"].data["host"] == "192.168.1.77"
 
 
 async def test_dhcp_discovery_aborts_if_host_already_configured(hass) -> None:
@@ -435,13 +444,57 @@ async def test_dhcp_discovery_deduplicates_repeated_broadcasts(hass) -> None:
     assert second["reason"] == "already_in_progress"
 
 
-async def test_reconfigure_flow_updates_host(hass) -> None:
+async def test_dhcp_discovery_updates_host_for_configured_mac(hass) -> None:
+    """Ein neuer DHCP-Lease derselben MAC führt die IP des vorhandenen
+    Eintrags nach und plant genau einen Reload statt einer Discovery-Karte."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        unique_id="aa:bb:cc:dd:ee:ff",
+        source=config_entries.SOURCE_DHCP,
+    )
+    entry.add_to_hass(hass)
+    entry.mock_state(hass, config_entries.ConfigEntryState.LOADED)
+
+    try:
+        with patch.object(
+            hass.config_entries, "async_schedule_reload"
+        ) as schedule_reload:
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": config_entries.SOURCE_DHCP},
+                data=DhcpServiceInfo(
+                    ip="192.168.1.77",
+                    hostname="sax-1234",
+                    macaddress="aabbccddeeff",
+                ),
+            )
+
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "already_configured"
+        assert entry.data["host"] == "192.168.1.77"
+        assert entry.unique_id == "aa:bb:cc:dd:ee:ff"
+        schedule_reload.assert_called_once_with(entry.entry_id)
+    finally:
+        # Der Eintrag ist nur für die Reload-Entscheidung als geladen markiert;
+        # ein echter Setup-Lauf, den das Fixture entladen müsste, fand nicht statt.
+        entry.mock_state(hass, config_entries.ConfigEntryState.NOT_LOADED)
+
+
+@pytest.mark.parametrize(
+    ("unique_id", "expected_unique_id"),
+    [
+        ("192.168.1.50:502", "192.168.1.99:502"),
+        ("aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"),
+    ],
+)
+async def test_reconfigure_flow_updates_host(
+    hass, unique_id: str, expected_unique_id: str
+) -> None:
     """IP-Adresse (und andere Verbindungsdaten) müssen nach der
     Ersteinrichtung über die Oberfläche änderbar sein und persistiert
     werden (Config-Entry-Reconfigure-Flow, Kontextmenü "Neu konfigurieren")."""
-    entry = MockConfigEntry(
-        domain=DOMAIN, data=VALID_INPUT, unique_id="192.168.1.50:502"
-    )
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, unique_id=unique_id)
     entry.add_to_hass(hass)
 
     client = MagicMock()
@@ -473,7 +526,35 @@ async def test_reconfigure_flow_updates_host(hass) -> None:
         assert result2["type"] == FlowResultType.ABORT
         assert result2["reason"] == "reconfigure_successful"
         assert entry.data["host"] == "192.168.1.99"
-        assert entry.unique_id == "192.168.1.99:502"
+        assert entry.unique_id == expected_unique_id
+
+
+async def test_reconfigure_flow_rejects_another_entries_target(hass) -> None:
+    """Auch eine erhaltene MAC-ID darf nicht auf die Verbindung eines
+    anderen, manuell angelegten Eintrags umkonfiguriert werden."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        unique_id="aa:bb:cc:dd:ee:ff",
+        source=config_entries.SOURCE_DHCP,
+    )
+    entry.add_to_hass(hass)
+    other_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**VALID_INPUT, "host": "192.168.1.99"},
+        unique_id="192.168.1.99:502",
+    )
+    other_entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**VALID_INPUT, "host": "192.168.1.99"}
+    )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data["host"] == "192.168.1.50"
+    assert entry.unique_id == "aa:bb:cc:dd:ee:ff"
 
 
 async def test_reconfigure_flow_cannot_connect(hass) -> None:

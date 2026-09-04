@@ -3911,16 +3911,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Nullregelung) setzen, statt passiv auf den Timeout
                 # (Register 40050) zu warten, damit der Speicher wieder im
                 # normalen Betriebsmodus arbeitet.
-                released_price_slot = self._max_soc_hold_is_price_slot_bound
                 await self.async_stop_sun_charge()
                 self._max_soc_hold_is_window_bound = False
                 self._max_soc_hold_is_price_slot_bound = False
                 self._max_soc_grid_import_wait_cycles = 0
-                # Die am Slotende bewusst freigegebene Sperre darf bei
+                # Die am Fenster-/Slotende bewusst freigegebene Sperre darf bei
                 # unverändertem SOC im nächsten Poll nicht sofort als
                 # geräteweite Sperre neu entstehen. Unterhalb des Zielwerts
                 # wurde der Latch bereits weiter oben regulär gelöscht.
-                if released_price_slot and soc_reached:
+                if soc_reached:
                     self._max_soc_released_for_discharge = True
             else:
                 # Geräteunabhängige Max-SOC-Sperre (siehe Abschnitt oben):

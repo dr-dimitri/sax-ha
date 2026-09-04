@@ -2312,14 +2312,14 @@ async def test_enforce_grid_charge_max_soc_clamp_stays_within_charge_window(
         await coordinator.async_stop_sun_charge()
 
 
+@pytest.mark.parametrize("window_kind", ["timed", "grid_serving"])
 async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_ends(
-    hass,
+    hass, window_kind: str
 ) -> None:
-    """Wurde die Max-SOC-Sperre WÄHREND des Netzladung-Zeitfensters
+    """Wurde die Max-SOC-Sperre WÄHREND eines Ladezeitfensters
     ausgelöst, muss sie spätestens am Fensterende aktiv aufgehoben werden
-    (Register 40051 zurück auf SmartMeter-Nullregelung), statt unbegrenzt
-    im Sollwertmodus zu bleiben - auch wenn der SOC weiterhin >= Max. SOC
-    ist (was bei gehaltenem 0-%-Sollwert nie von selbst der Fall wäre)."""
+    und in den Folgepolls aufgehoben bleiben, bis der SOC real unter den
+    Zielwert fällt. Danach darf eine neue Überschreitung wieder klemmen."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -2327,10 +2327,17 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_en
 
     coordinator = _make_coordinator(hass, client)
     coordinator.data = {"soc": 90, "ic_max_power_reference": 4600, "ic_timeout": 300}
-    await coordinator.async_set_timed_charge_start(dt_time(1, 0))
-    await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    if window_kind == "timed":
+        await coordinator.async_set_timed_charge_start(dt_time(1, 0))
+        await coordinator.async_set_timed_charge_end(dt_time(5, 0))
+    else:
+        await coordinator.async_set_grid_serving_start(dt_time(1, 0))
+        await coordinator.async_set_grid_serving_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_timed_charge_enabled(True)
+    if window_kind == "timed":
+        await coordinator.async_set_timed_charge_enabled(True)
+    else:
+        await coordinator.async_set_grid_serving_enabled(True)
 
     try:
         with _patched_now(2):
@@ -2338,19 +2345,41 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_en
         await asyncio.sleep(0.1)
         assert coordinator._max_soc_hold_is_window_bound is True
 
+        client.write_register.reset_mock()
         with _patched_now(6):  # nach Fensterende (Netzladung Ende = 5:00)
-            await coordinator._async_enforce_grid_charge({"soc": 90})
+            for _ in range(5):
+                await coordinator._async_enforce_grid_charge({"soc": 90})
         await asyncio.sleep(0.1)
 
         assert coordinator.max_soc_clamped is False
         assert coordinator.sun_charge_active is False
         assert coordinator._max_soc_hold_is_window_bound is False
-        assert coordinator._max_soc_released_for_discharge is False
-        client.write_register.assert_awaited_with(
+        assert coordinator._max_soc_released_for_discharge is True
+        client.write_register.assert_awaited_once_with(
             address=REG_SUN_IC_CONTROL_MODE,
             value=SUN_IC_CONTROL_MODE_SMARTMETER,
             device_id=100,
         )
+
+        client.write_register.reset_mock()
+        with _patched_now(6):
+            await coordinator._async_enforce_grid_charge({"soc": 89})
+            await coordinator._async_enforce_grid_charge({"soc": 91})
+
+        assert coordinator._max_soc_released_for_discharge is False
+        assert coordinator.max_soc_clamped is True
+        assert client.write_register.await_args_list == [
+            call(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SETPOINT,
+                device_id=100,
+            ),
+            call(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT,
+                value=0,
+                device_id=100,
+            ),
+        ]
     finally:
         await coordinator.async_stop_sun_charge()
 

@@ -441,9 +441,11 @@ requirement_timed_soc_charge:
        Die separate Zeitfenster-/Preis-Slot-Bindung
        (_max_soc_hold_is_window_bound) bleibt davon unberührt und hält bzw.
        beendet ihre Sperre weiterhin am jeweiligen Fenster-/Slotende. Endet
-       ein Preis-Slot bei weiterhin erreichtem SOC, nutzt die aktive Freigabe
-       denselben Latch, damit die geräteweite Sperre nicht schon im nächsten
-       Poll erneut entsteht; ein realer SOC-Abfall löscht ihn wie gewohnt.
+       ein solcher Zeitraum bei weiterhin erreichtem SOC, nutzt die aktive
+       Freigabe denselben Latch, damit die geräteweite Sperre nicht schon im
+       nächsten Poll erneut entsteht; ein realer SOC-Abfall löscht ihn wie
+       gewohnt. Das gilt gleichermaßen für zeitgesteuerte, netzdienliche und
+       preisoptimierte Zeiträume.
 
        Ohne den Netzbezug-Trigger
        würde die Sperre in diesem Fall de facto dauerhaft bestehen bleiben
@@ -631,9 +633,11 @@ requirement_timed_soc_charge:
        zeitgesteuerten Ladens bei Zielerreichung/Fensterende/
        Deaktivierung SOWIE die Max-SOC-Sperre unabhängig vom
        zeitgesteuerten Laden - Aktivierung bei Zielerreichung, Freigabe
-       beim Unterschreiten), die Watt-zu-Prozent-Umrechnung (inkl.
-       Klemmung auf ±100 %) sowie das Schreibintervall
-       (_sun_ic_write_interval) ab."
+       beim Unterschreiten - sowie die dauerhafte Freigabe nach dem Ende
+       eines zeitgesteuerten oder netzdienlichen Fensters über mehrere
+       Folgepolls bis zu einer realen SOC-Unterschreitung), die Watt-zu-
+       Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
+       Schreibintervall (_sun_ic_write_interval) ab."
     - "Gezielte Schreibpfadtests prüfen: fehlende/0-Referenzleistung und
        ungültiger Scale Factor ohne jeden Write; Fehler auf 40051 ohne
        Sollwert-Write; Fehler auf 40049 mit unmittelbarer Reihenfolge

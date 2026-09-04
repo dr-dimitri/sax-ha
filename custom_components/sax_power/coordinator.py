@@ -423,6 +423,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._control_bootstrap_pending = False
         self._max_soc_clamped = False
         self._max_soc_hold_is_window_bound = False
+        self._max_soc_hold_is_price_slot_bound = False
         self._max_soc_grid_import_wait_cycles = 0
         self._max_soc_released_for_discharge = False
         self._last_effective_max_soc: int | None = None
@@ -2460,24 +2461,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # PV-Überschuss auf den Zielwert geladener Speicher aktiv dort gehalten,
     # statt durch die geräteeigene Automatik (SmartMeter-Nullregelung)
     # darüber hinaus weitergeladen oder unterhalb des Zielwerts
-    # leergefahren zu werden. Fällt der SOC wieder unter den Zielwert,
-    # wird Register 40051 zurück auf 0 gesetzt.
+    # leergefahren zu werden. Fällt der SOC wieder unter den Zielwert, wird
+    # Register 40051 zurück auf 0 gesetzt - außer die unten beschriebene
+    # Preis-Slot-Bindung hält den erreichten Zustand noch bis zum Slotende.
     #
-    # Wurde die Sperre dagegen INNERHALB eines Netzlade- oder netzdienlich-
-    # Zeitfensters ausgelöst (_max_soc_hold_is_window_bound), gilt sie nur
-    # bis zum Ende genau dieses Zeitfensters: solange das Fenster noch läuft,
-    # wird Register 40051 periodisch auf 1 nachgeschrieben (sonst fällt das
-    # Gerät nach Ablauf des Timeouts, Register 40050, von selbst auf
-    # Nullregelung zurück); ist das Fenster vorbei, wird Register 40051
-    # aktiv auf 0 zurückgesetzt, statt den Speicher unbegrenzt im
-    # Sollwertmodus zu halten - siehe _async_enforce_grid_charge.
+    # Wurde die Sperre dagegen INNERHALB eines Netzlade-, netzdienlichen oder
+    # ausgewählten Preis-Ladeslots ausgelöst
+    # (_max_soc_hold_is_window_bound), gilt sie nur bis zum Ende genau dieses
+    # Fensters/Slots: solange es/er noch läuft, wird Register 40051 periodisch
+    # auf 1 nachgeschrieben (sonst fällt das Gerät nach Ablauf des Timeouts,
+    # Register 40050, von selbst auf Nullregelung zurück); ist das Fenster
+    # bzw. der Slot vorbei, wird Register 40051 aktiv auf 0 zurückgesetzt,
+    # statt den Speicher unbegrenzt im Sollwertmodus zu halten - siehe
+    # _async_enforce_grid_charge.
     #
-    # Außerhalb jedes Zeitfensters gilt die Sperre grundsätzlich unbegrenzt,
-    # ABER: bei gehaltenem 0-%-Sollwert deckt der Speicher den Hausverbrauch
-    # nicht mehr mit (Register 40049 = 0 heißt Netto-Leistungsfluss = 0, kein
-    # Laden UND kein Entladen), der SOC fällt dadurch im Normalfall nie von
-    # selbst unter den Zielwert. Deshalb wertet _async_enforce_grid_charge in
-    # diesem Fall zusätzlich am Smart Meter gemessenen Netzbezug
+    # Außerhalb jedes Zeitfensters und ausgewählten Preis-Slots gilt die
+    # Sperre grundsätzlich unbegrenzt, ABER: bei gehaltenem 0-%-Sollwert
+    # deckt der Speicher den Hausverbrauch nicht mehr mit (Register 40049 = 0
+    # heißt Netto-Leistungsfluss = 0, kein Laden UND kein Entladen), der SOC
+    # fällt dadurch im Normalfall nie von selbst unter den Zielwert. Deshalb
+    # wertet _async_enforce_grid_charge in diesem Fall zusätzlich am Smart
+    # Meter gemessenen Netzbezug
     # (smartmeter_power > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT) als
     # Freigabe-Trigger aus - mit derselben Zyklen-Hysterese
     # (_cycles_confirmed/_max_soc_grid_import_wait_cycles,
@@ -3604,14 +3608,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            und Register 40049 auf 0 % gehalten (siehe Max-SOC-Abschnitt
            oben) - unabhängig davon, ob zeitgesteuertes oder netzdienliches
            Laden aktiviert ist. Wurde die Sperre INNERHALB eines der beiden
-           Zeitfenster ausgelöst, gilt sie nur bis zu dessen Ende - danach
-           wird Register 40051 aktiv auf 0 (Nullregelung) zurückgesetzt.
-           Außerhalb jedes Zeitfensters (z. B. bei einem rein durch
-           PV-Überschuss via Nullregelung vollen Speicher) gilt die Sperre
-           dagegen unbegrenzt, bis entweder der SOC unter den Zielwert
-           fällt ODER am Smart Meter über mehrere Zyklen hinweg Netzbezug
-           gemessen wird (siehe _max_soc_hold_is_window_bound sowie den
-           Max-SOC-Abschnitt oben zum Netzbezug-Freigabe-Trigger).
+           Zeitfenster oder eines ausgewählten Preis-Ladeslots ausgelöst,
+           gilt sie nur bis zu dessen Ende - danach wird Register 40051
+           aktiv auf 0 (Nullregelung) zurückgesetzt. Innerhalb desselben
+           Preis-Ladeslots hält sie auch bei einem kleinen SOC-Abfall weiter
+           0 %, damit die Preisstrategie nicht erneut zu laden beginnt.
+           Außerhalb jedes Zeitfensters und ausgewählten Preis-Slots (z. B.
+           bei einem rein durch PV-Überschuss via Nullregelung vollen
+           Speicher) gilt die Sperre dagegen unbegrenzt, bis entweder der
+           SOC unter den Zielwert fällt ODER am Smart Meter über mehrere
+           Zyklen hinweg Netzbezug gemessen wird (siehe
+           _max_soc_hold_is_window_bound sowie den Max-SOC-Abschnitt oben
+           zum Netzbezug-Freigabe-Trigger).
         2. Erst wenn die Max-SOC-Sperre nicht greift, übernimmt ein über
            start_grid_charge angeforderter strikt negativer manueller
            Ladesollwert. Er hat Vorrang vor allen Automatiken und bleibt bis
@@ -3845,6 +3853,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         grid_serving_eligible = policy.grid_serving_eligible
         price_should_charge = policy.price_should_charge
         price_should_pause = policy.price_should_pause
+        price_slot_hold_active = (
+            self._max_soc_hold_is_price_slot_bound and price_plan.charge_now
+        )
+        max_soc_hold_active = soc_reached or price_slot_hold_active
         self._grid_serving_forecast_kwh = grid_serving_forecast_kwh
         self._grid_serving_forecast_allowed = grid_serving_forecast_allowed
         self._grid_serving_window_active = grid_serving_window_active
@@ -3867,34 +3879,54 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         max_soc_clamped_now = False
         manual_charge_active_now = False
-        if soc_reached:
+        if max_soc_hold_active:
             in_timed_window = policy.timed_window_active
             in_grid_serving_window = policy.grid_serving_window_active
-            if in_timed_window or in_grid_serving_window:
-                # Ziel-SOC wurde innerhalb eines Netzlade-/netzdienlich-
-                # Zeitfensters erreicht (oder die Sperre läuft von einem
-                # solchen Fenster weiter) - Sperre bleibt gebunden an dieses
-                # Fenster, damit sie spätestens an dessen Ende aktiv
-                # aufgehoben wird, statt wie die geräteunabhängige
-                # Max-SOC-Sperre unten unbegrenzt zu halten.
+            in_price_slot = (
+                price_plan.charge_now
+                and not in_timed_window
+                and not in_grid_serving_window
+            )
+            if (
+                price_slot_hold_active
+                or in_timed_window
+                or in_grid_serving_window
+                or in_price_slot
+            ):
+                # Ziel-SOC wurde innerhalb eines Netzlade-/netzdienlichen
+                # Zeitfensters oder eines ausgewählten Preis-Ladeslots
+                # erreicht (oder die Preis-Slot-Sperre läuft trotz kleinem
+                # SOC-Abfall weiter). Sie bleibt an diesen Zeitraum gebunden,
+                # damit weder Netzbezug sie vorzeitig freigibt noch die
+                # Preisstrategie im selben Slot erneut lädt.
                 self._max_soc_hold_is_window_bound = True
+                if not price_slot_hold_active:
+                    self._max_soc_hold_is_price_slot_bound = in_price_slot
                 self._max_soc_grid_import_wait_cycles = 0
                 await self.async_start_sun_charge(0)
                 max_soc_clamped_now = True
             elif self._max_soc_hold_is_window_bound:
-                # Das Zeitfenster, während dessen die Sperre ausgelöst wurde,
+                # Der Zeitraum, während dessen die Sperre ausgelöst wurde,
                 # ist vorbei - Register 40051 aktiv zurück auf 0 (SmartMeter-
                 # Nullregelung) setzen, statt passiv auf den Timeout
                 # (Register 40050) zu warten, damit der Speicher wieder im
                 # normalen Betriebsmodus arbeitet.
+                released_price_slot = self._max_soc_hold_is_price_slot_bound
                 await self.async_stop_sun_charge()
                 self._max_soc_hold_is_window_bound = False
+                self._max_soc_hold_is_price_slot_bound = False
                 self._max_soc_grid_import_wait_cycles = 0
+                # Die am Slotende bewusst freigegebene Sperre darf bei
+                # unverändertem SOC im nächsten Poll nicht sofort als
+                # geräteweite Sperre neu entstehen. Unterhalb des Zielwerts
+                # wurde der Latch bereits weiter oben regulär gelöscht.
+                if released_price_slot and soc_reached:
+                    self._max_soc_released_for_discharge = True
             else:
                 # Geräteunabhängige Max-SOC-Sperre (siehe Abschnitt oben):
-                # SOC wurde außerhalb jedes Netzlade-/netzdienlich-
-                # Zeitfensters erreicht/überschritten (z. B. durch die
-                # geräteeigene Nullregelung bei PV-Überschuss). Ein
+                # SOC wurde außerhalb jedes Netzlade-/netzdienlichen
+                # Zeitfensters und ausgewählten Preis-Slots erreicht (z. B.
+                # durch die geräteeigene Nullregelung bei PV-Überschuss). Ein
                 # gehaltener 0-%-Sollwert lässt den SOC nie von selbst unter
                 # den Zielwert fallen (der Speicher deckt den Hausverbrauch
                 # währenddessen nicht mit) - deshalb zusätzlich Netzbezug am
@@ -3934,6 +3966,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             grid_serving_active_now = False
         else:
             self._max_soc_hold_is_window_bound = False
+            self._max_soc_hold_is_price_slot_bound = False
             self._max_soc_grid_import_wait_cycles = 0
             manual_charge_active_now = self._grid_charge_power is not None
             if manual_charge_active_now:
@@ -3999,16 +4032,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._sun_charge_commanded_mode, UNKNOWN_LABEL
             )
 
-        self._timed_charge_active = timed_should_charge and not manual_charge_active_now
+        self._timed_charge_active = (
+            timed_should_charge
+            and not max_soc_hold_active
+            and not manual_charge_active_now
+        )
         self._grid_serving_active = grid_serving_active_now
         self._price_charge_active = (
-            price_should_charge and not soc_reached and not manual_charge_active_now
+            price_should_charge
+            and not max_soc_hold_active
+            and not manual_charge_active_now
         )
         self._price_charge_status = self._price_charge_status_text(
             price_plan,
             charging=self._price_charge_active,
             paused_neutral_band=price_should_pause,
-            soc_reached=soc_reached,
+            soc_reached=max_soc_hold_active,
             pv_surplus_active=pv_surplus_active,
             timed_should_charge=timed_should_charge or manual_charge_active_now,
             grid_serving_window_active=grid_serving_window_active,

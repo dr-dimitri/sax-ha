@@ -51,10 +51,12 @@ from custom_components.sax_power.const import (
     PRICE_STRATEGY_SMART,
     PRICE_UNIT_AUTO,
     PRICE_UNIT_CT_KWH,
+    PV_SURPLUS_HYSTERESIS_CYCLES,
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
     SUN_IC_CONTROL_MODE_SETPOINT,
+    SUN_IC_CONTROL_MODE_SMARTMETER,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
 from custom_components.sax_power.price_optimizer import (
@@ -688,6 +690,78 @@ async def test_price_charge_paused_by_max_soc_lock(hass) -> None:
 
         assert coordinator.price_charge_active is False
         assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_MAX_SOC
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_price_charge_max_soc_hold_remains_bound_to_selected_slot(
+    hass,
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Nach erreichtem Max-SOC bleibt der
+    0-%-Sollwert trotz bestätigtem Netzbezug und SOC-Abfall bis zum Ende des
+    ausgewählten Preis-Slots aktiv; danach folgt aktiv die Nullregelung."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 79,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    await _enable_price_charge(coordinator)
+    coordinator.price_planner.plan = _charging_plan()
+    grid_import_data = {
+        "soc": 80,
+        "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+    }
+
+    try:
+        await coordinator._async_enforce_grid_charge({"soc": 79})
+        assert coordinator.price_charge_active is True
+
+        for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES + 1):
+            await coordinator._async_enforce_grid_charge(grid_import_data)
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.price_charge_active is False
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_MAX_SOC
+        assert coordinator._max_soc_hold_is_window_bound is True
+        assert coordinator._max_soc_released_for_discharge is False
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
+
+        client.write_register.reset_mock()
+        await coordinator._async_enforce_grid_charge(
+            {
+                "soc": 79,
+                "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
+            }
+        )
+
+        assert coordinator.max_soc_clamped is True
+        assert coordinator.price_charge_active is False
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_MAX_SOC
+        client.write_register.assert_not_awaited()
+
+        coordinator.price_planner.plan = _waiting_plan()
+        await coordinator._async_enforce_grid_charge(grid_import_data)
+
+        assert coordinator.max_soc_clamped is False
+        assert coordinator.sun_charge_active is False
+        assert coordinator._max_soc_hold_is_window_bound is False
+        assert coordinator._max_soc_released_for_discharge is True
+        client.write_register.assert_awaited_once_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+
+        client.write_register.reset_mock()
+        await coordinator._async_enforce_grid_charge(grid_import_data)
+        assert coordinator.max_soc_clamped is False
+        client.write_register.assert_not_awaited()
     finally:
         await coordinator.async_stop_sun_charge()
 

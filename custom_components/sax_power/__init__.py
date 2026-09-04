@@ -179,85 +179,146 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         host=entry.data[CONF_HOST],
         port=entry.data.get(CONF_PORT, 502),
     )
+    coordinator: SaxPowerCoordinator | None = None
     try:
-        connected = await client.connect()
-    except OSError as err:
-        raise ConfigEntryNotReady(
-            f"Kann nicht mit {entry.data[CONF_HOST]} verbinden: {err}"
-        ) from err
-    if not connected:
-        raise ConfigEntryNotReady(f"Kann nicht mit {entry.data[CONF_HOST]} verbinden")
+        try:
+            connected = await client.connect()
+        except OSError as err:
+            raise ConfigEntryNotReady(
+                f"Kann nicht mit {entry.data[CONF_HOST]} verbinden: {err}"
+            ) from err
+        if not connected:
+            raise ConfigEntryNotReady(
+                f"Kann nicht mit {entry.data[CONF_HOST]} verbinden"
+            )
 
-    coordinator = SaxPowerCoordinator(
-        hass,
-        client,
-        slave_id=entry.data[CONF_SLAVE_ID_BASIC],
-        slave_id_extended=entry.data.get(
-            CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED
-        ),
-        scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        entry_id=entry.entry_id,
-        options=entry.options,
-    )
-    await coordinator.async_load_calibration_state()
-    await coordinator.async_load_energy_state()
-    # Wie async_load_energy_state: muss vor dem ersten Refresh stehen, da
-    # dessen Bootstrap (siehe SaxPowerCoordinator._bootstrap_economics_if_ready)
-    # bereits im ersten Refresh laufen kann (REQ-ECONOMICS-ACCOUNTING).
-    await coordinator.async_load_economics_state()
-    # Muss vor dem ersten Refresh stehen: der Coordinator kennt danach die
-    # vollständige gespeicherte Ladekonfiguration und sperrt bis
-    # async_finish_bootstrap() unten jede steuernde Entscheidung. Sonst
-    # würde der erste Refresh aus reinen Defaults heraus auswerten und z. B.
-    # Register 40051 auf Modus 0 setzen, obwohl ein gespeichertes
-    # Ladefenster gerade aktiv ist (anforderung.yaml,
-    # REQ-CONTROL-CONFIG-BOOTSTRAP).
-    await coordinator.async_load_control_state()
-    await coordinator.async_config_entry_first_refresh()
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    if entry.data.get(CONF_CREATE_DASHBOARD):
-        # Braucht die soeben registrierten Entities, deshalb erst nach dem
-        # Plattform-Setup möglich. Absichtlich VOR der Registrierung des
-        # Update-Listeners direkt unten: hass.config_entries.async_update_entry
-        # löst dessen Reload-Listener aus, sobald er registriert ist - hier
-        # ist er das noch nicht, der Reset dieses einmaligen Flags soll aber
-        # gerade keinen zusätzlichen Reload direkt nach der Ersteinrichtung
-        # auslösen. Siehe const.py, CONF_CREATE_DASHBOARD.
-        await async_create_dashboard(hass, entry)
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_CREATE_DASHBOARD: False}
+        coordinator = SaxPowerCoordinator(
+            hass,
+            client,
+            slave_id=entry.data[CONF_SLAVE_ID_BASIC],
+            slave_id_extended=entry.data.get(
+                CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED
+            ),
+            scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            entry_id=entry.entry_id,
+            options=entry.options,
         )
-    else:
-        # Genau der Fall, den das Flag oben erzeugt: Ab jetzt wird das
-        # Dashboard nie wieder gebaut. Ergänzt eine neuere Version einen
-        # Tab, fehlt er einem bestehenden Dashboard stillschweigend - der
-        # Hinweis darauf ist die einzige Stelle, an der der Anwender davon
-        # überhaupt erfährt (siehe dashboard.py, #138).
-        await async_check_dashboard_up_to_date(hass, entry)
+        await coordinator.async_load_calibration_state()
+        await coordinator.async_load_energy_state()
+        # Wie async_load_energy_state: muss vor dem ersten Refresh stehen, da
+        # dessen Bootstrap (siehe SaxPowerCoordinator._bootstrap_economics_if_ready)
+        # bereits im ersten Refresh laufen kann (REQ-ECONOMICS-ACCOUNTING).
+        await coordinator.async_load_economics_state()
+        # Muss vor dem ersten Refresh stehen: der Coordinator kennt danach die
+        # vollständige gespeicherte Ladekonfiguration und sperrt bis
+        # async_finish_bootstrap() unten jede steuernde Entscheidung. Sonst
+        # würde der erste Refresh aus reinen Defaults heraus auswerten und z. B.
+        # Register 40051 auf Modus 0 setzen, obwohl ein gespeichertes
+        # Ladefenster gerade aktiv ist (anforderung.yaml,
+        # REQ-CONTROL-CONFIG-BOOTSTRAP).
+        await coordinator.async_load_control_state()
+        await coordinator.async_config_entry_first_refresh()
+    except BaseException:
+        await _async_rollback_failed_setup(
+            hass, entry, client, coordinator, platforms_started=False
+        )
+        raise
 
-    # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
-    # sofort einmal aus und braucht dafür die vollständige Konfiguration -
-    # entweder aus dem Store (Regelfall) oder aus dem einmaligen
-    # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
-    coordinator.price_planner.async_setup()
-    # Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS): registriert
-    # den Zustandsbeobachter des dynamischen Preis-Sensors. Ohne
-    # konfigurierten Tarif passiert hier nichts.
-    coordinator.tariff_provider.async_setup()
-    # Schließt das Bootstrap-Fenster: ab hier ist die Konfiguration
-    # vollständig, und genau eine Ladeentscheidung wird angewendet - statt
-    # während des Entity-Setups eine Kette von Teilkonfigurationen
-    # (REQ-CONTROL-CONFIG-BOOTSTRAP).
-    await coordinator.async_finish_bootstrap()
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
+    try:
+        hass.data.setdefault(DOMAIN, {})
+        hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
 
-    _async_register_services(hass)
+        # Schon der erste Plattform-Forward kann teilweise Entities anlegen,
+        # bevor ein späterer Forward fehlschlägt. Der Fehlerpfad dieses
+        # zweiten Setup-Abschnitts versucht deshalb stets einen Unload.
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+        if entry.data.get(CONF_CREATE_DASHBOARD):
+            # Braucht die soeben registrierten Entities, deshalb erst nach dem
+            # Plattform-Setup möglich. Absichtlich VOR der Registrierung des
+            # Update-Listeners direkt unten: hass.config_entries.async_update_entry
+            # löst dessen Reload-Listener aus, sobald er registriert ist - hier
+            # ist er das noch nicht, der Reset dieses einmaligen Flags soll aber
+            # gerade keinen zusätzlichen Reload direkt nach der Ersteinrichtung
+            # auslösen. Siehe const.py, CONF_CREATE_DASHBOARD.
+            await async_create_dashboard(hass, entry)
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_CREATE_DASHBOARD: False}
+            )
+        else:
+            # Genau der Fall, den das Flag oben erzeugt: Ab jetzt wird das
+            # Dashboard nie wieder gebaut. Ergänzt eine neuere Version einen
+            # Tab, fehlt er einem bestehenden Dashboard stillschweigend - der
+            # Hinweis darauf ist die einzige Stelle, an der der Anwender davon
+            # überhaupt erfährt (siehe dashboard.py, #138).
+            await async_check_dashboard_up_to_date(hass, entry)
+
+        # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
+        # sofort einmal aus und braucht dafür die vollständige Konfiguration -
+        # entweder aus dem Store (Regelfall) oder aus dem einmaligen
+        # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
+        coordinator.price_planner.async_setup()
+        # Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS): registriert
+        # den Zustandsbeobachter des dynamischen Preis-Sensors. Ohne
+        # konfigurierten Tarif passiert hier nichts.
+        coordinator.tariff_provider.async_setup()
+        # Schließt das Bootstrap-Fenster: ab hier ist die Konfiguration
+        # vollständig, und genau eine Ladeentscheidung wird angewendet - statt
+        # während des Entity-Setups eine Kette von Teilkonfigurationen
+        # (REQ-CONTROL-CONFIG-BOOTSTRAP).
+        await coordinator.async_finish_bootstrap()
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
+
+        _async_register_services(hass)
+    except BaseException:
+        await _async_rollback_failed_setup(
+            hass, entry, client, coordinator, platforms_started=True
+        )
+        raise
     return True
+
+
+async def _async_rollback_failed_setup(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: AsyncModbusTcpClient,
+    coordinator: SaxPowerCoordinator | None,
+    *,
+    platforms_started: bool,
+) -> None:
+    """Release every resource acquired by an incomplete setup attempt."""
+    if platforms_started:
+        try:
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        except BaseException:  # noqa: BLE001
+            # Cleanup darf den ursprünglichen Setup-Fehler nicht maskieren.
+            _LOGGER.exception(
+                "Teilweise geladene Plattformen konnten nach einem "
+                "fehlgeschlagenen Setup nicht vollständig entladen werden"
+            )
+
+    if coordinator is not None:
+        try:
+            # Ein unvollständiger Bootstrap besitzt keinen sicher bestätigten
+            # Gerätesollzustand. Timer, Listener und Store-Writes werden
+            # beendet, ohne Register 40051 auf Basis von Defaults zu ändern.
+            await coordinator.async_shutdown(reset_device=False)
+        except BaseException:  # noqa: BLE001
+            # Der Client-Close muss auch nach einem abgebrochenen Cleanup folgen.
+            _LOGGER.exception(
+                "Coordinator konnte nach einem fehlgeschlagenen Setup nicht "
+                "vollständig beendet werden"
+            )
+
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    try:
+        client.close()
+    except BaseException:  # noqa: BLE001
+        # Den ursprünglichen Setup-Fehler bewahren.
+        _LOGGER.exception(
+            "Modbus-Client konnte nach einem fehlgeschlagenen Setup nicht "
+            "geschlossen werden"
+        )
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:

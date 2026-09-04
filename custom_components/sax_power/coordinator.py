@@ -4638,6 +4638,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
         self.price_planner.async_shutdown()
         self.tariff_provider.async_shutdown()
+        await self.price_planner.async_flush_cycle_state()
         await self._async_flush_energy_state()
         await self._async_flush_economics_state()
         await self._async_flush_control_state()

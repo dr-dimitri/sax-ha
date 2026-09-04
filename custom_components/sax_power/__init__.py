@@ -217,6 +217,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Ladefenster gerade aktiv ist (anforderung.yaml,
         # REQ-CONTROL-CONFIG-BOOTSTRAP).
         await coordinator.async_load_control_state()
+        # Der feste 24-Stunden-Zyklus der relativen/Smart-Preisplanung muss
+        # vor deren erster Auswertung bekannt sein. Sonst würde ein Neustart
+        # bereits verbrauchte Ladedauer wieder freigeben (Issue #154).
+        await coordinator.price_planner.async_load_cycle_state()
         await coordinator.async_config_entry_first_refresh()
     except BaseException:
         await _async_rollback_failed_setup(

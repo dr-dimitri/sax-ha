@@ -337,14 +337,19 @@ Anschließend die gewünschte **Strategie** wählen und den Schalter
 | Smart / PV-optimiert | Berücksichtigt zusätzlich Ladezustand, Speicherkapazität und PV-Prognose |
 
 Für **Relativ** und **Smart** wird ein Preis-Sensor mit zukünftigen Preisen
-benötigt. Die Planung betrachtet die bekannten Preise der kommenden 24
-Stunden. Sind noch keine Preise für den nächsten Tag verfügbar, plant die
-Integration mit den bereits bekannten Zeiträumen.
+benötigt. Beim Aktivieren einer dieser Strategien beginnt ein fester
+24-Stunden-Planungszyklus. Sind noch keine Preise für den nächsten Tag
+verfügbar, plant die Integration zunächst mit den bekannten Zeiträumen und
+ordnet noch nicht begonnene Ladefenster neu, sobald weitere Preise eintreffen.
+Bereits verstrichene ausgewählte Zeit bleibt dabei verbraucht; regelmäßige
+Neuberechnungen und ein Home-Assistant-Neustart verlängern die eingestellte
+Ladedauer nicht. Teilweise nutzbare Stunden- oder Viertelstunden-Slots werden
+zeitanteilig auf das verbleibende Budget angerechnet.
 
 Bei der Smart-Strategie reduziert eine erwartete PV-Erzeugung den aus dem Netz
 zu ladenden Energiebedarf. Deckt die Prognose den Bedarf vollständig, findet
 keine Netzladung statt. Die Einstellung **Anzahl Stunden** bleibt die maximale
-zulässige Ladedauer.
+zulässige Ladedauer je Planungszyklus.
 
 #### Preisgrenze und Neutralpreis
 

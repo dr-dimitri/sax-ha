@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import (
+    SOURCE_DHCP,
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
@@ -91,6 +93,8 @@ from .sensor import SENSOR_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
+_MAC_UNIQUE_ID_PATTERN = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
+
 # Feste Entity-Anzahl je Plattform für die Zusammenfassung auf der
 # Abschlussseite der Ersteinrichtung (async_step_finish). sensor.py/
 # binary_sensor.py und die zwölf Monats-Schalter je Mechanismus in switch.py
@@ -119,6 +123,14 @@ def _expected_entity_count() -> int:
         + _ENTITY_COUNT_TIME
         + _ENTITY_COUNT_SWITCH_FIXED
         + _ENTITY_COUNT_MONTH_SWITCH_SETS * len(ALL_MONTHS)
+    )
+
+
+def _is_mac_unique_id(unique_id: str | None) -> bool:
+    """Return whether an entry ID is a normalized network MAC address."""
+    return (
+        unique_id is not None
+        and _MAC_UNIQUE_ID_PATTERN.fullmatch(unique_id) is not None
     )
 
 
@@ -296,18 +308,17 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         """DHCP-Discovery (siehe anforderung.yaml, REQ-DHCP-DISCOVERY).
 
         Bricht ab, wenn der Host bereits über einen bestehenden Eintrag
-        konfiguriert ist (unabhängig von Port/Slave-IDs), sowie - über die
-        MAC-Adresse als Flow-unique_id - wenn für dasselbe physische Gerät
-        bereits ein anderer Discovery-Flow läuft. Letzteres ist nötig, weil
-        Geräte ihren DHCP-Lease wiederholt broadcasten und Home Assistant
-        dafür bei jedem Broadcast erneut async_step_dhcp aufruft - ohne
-        diese Prüfung würde jede Wiederholung eine weitere
-        "Erkannt"-Karte erzeugen.
+        konfiguriert ist (unabhängig von Port/Slave-IDs). Die MAC-Adresse
+        bleibt die dauerhafte unique_id eines per DHCP eingerichteten
+        Speichers: bei einer späteren Lease mit neuer IP wird nur der Host
+        des vorhandenen Eintrags aktualisiert und dessen Reload geplant.
+        Dieselbe ID verhindert zugleich parallele Discovery-Flows für
+        wiederholte Broadcasts desselben Geräts.
         """
         self._async_abort_entries_match({CONF_HOST: discovery_info.ip})
 
         await self.async_set_unique_id(format_mac(discovery_info.macaddress))
-        self._abort_if_unique_id_configured()
+        self._abort_if_unique_id_configured(updates={CONF_HOST: discovery_info.ip})
 
         self._discovered_ip = discovery_info.ip
         self.context["title_placeholders"] = {"host": discovery_info.ip}
@@ -347,6 +358,12 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 # konfigurierten Eintrag aus; der eigene (zu ändernde)
                 # Eintrag wird dabei automatisch ausgenommen.
                 self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
+            elif self.source == SOURCE_DHCP:
+                # Die vom DHCP-Schritt gesetzte MAC bleibt die Geräte-ID.
+                # Der erneute Zielabgleich schützt auch dann vor Kollisionen,
+                # wenn der Anwender die vorbelegte IP im Formular ändert.
+                self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
+                self._abort_if_unique_id_configured()
             else:
                 await self.async_set_unique_id(f"{host}:{port}")
                 self._abort_if_unique_id_configured()
@@ -361,10 +378,15 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_response"
             else:
                 if reconfigure_entry is not None:
+                    unique_id = (
+                        reconfigure_entry.unique_id
+                        if _is_mac_unique_id(reconfigure_entry.unique_id)
+                        else f"{host}:{port}"
+                    )
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
                         data=user_input,
-                        unique_id=f"{host}:{port}",
+                        unique_id=unique_id,
                     )
                 # Ersteinrichtung: Verbindungsdaten merken und weiter zum
                 # optionalen Netzladung-Schritt, bevor der Eintrag angelegt

@@ -1631,10 +1631,32 @@ requirement_dynamic_price_charge:
                  Obergrenze. Fehlen Kapazität, SOC oder Ladeleistung,
                  verhält sich smart wie relative.
 
-    Planungshorizont ist ein gleitendes Fenster von
-    PRICE_PLAN_HORIZON_HOURS (24 h) über die jeweils bekannten Preisdaten
-    (Rest von heute plus ggf. bereits veröffentlichtes Morgen), nicht der
-    Kalendertag.
+    Relative und Smart-Strategie planen innerhalb eines festen
+    PRICE_PLAN_HORIZON_HOURS-Zyklus von 24 realen Stunden, nicht in einem
+    bei jeder Auswertung erneut nach vorn geschobenen Fenster. Sein Anker
+    ist die erste Auswertung nach dem Aktivieren bzw. Umschalten auf die
+    jeweilige budgetierte Strategie; nach Ablauf beginnt der Folgezyklus
+    exakt an der vorigen Zyklusgrenze. Ausschalten oder der Wechsel zu
+    einer anderen Strategie beendet den laufenden Zyklus. Bereits
+    veröffentlichte Morgenpreise fließen ein, sofern sie vor dem festen
+    Zyklusende liegen; neu hinzukommende Preise dürfen noch nicht
+    begonnene Fenster ersetzen.
+
+    Die ausgewählte Gesamtdauer bleibt dabei auf das einmalige Zyklusbudget
+    begrenzt: Bei jeder Neuplanung werden verstrichene Teile zuvor
+    ausgewählter Slots abgezogen, auch bei einem teilweise abgelaufenen
+    Stunden- oder Viertelstunden-Slot. Der letzte ausgewählte Slot wird bei
+    Bedarf sekundengenau gekürzt, statt das Budget um eine ganze
+    Slot-Länge zu überschreiten. Timerläufe und inhaltsgleiche Sensor-
+    Updates füllen das Budget nicht wieder auf. Im Smart-Modus bildet der
+    beim Zyklusstart berechnete Bedarf das anfängliche Budget; ändert sich
+    eine bedarfsrelevante Eingangsgröße tatsächlich (SOC, Kapazität,
+    Ladeleistung, Ziel-SOC, PV-Prognose/-Faktor oder die konfigurierte
+    Stundenobergrenze), wird nur der ab jetzt verbleibende Bedarf neu
+    bemessen und bereits verbrauchte Zeit nie freigegeben. Zyklusanker,
+    Budget und ausgewählte Intervalle liegen in einem eigenen,
+    Config-Entry-spezifischen Store; ein Home-Assistant-Neustart innerhalb
+    des Zyklus eröffnet daher kein frisches Kontingent.
 
     Leistung: lädt wie das zeitgesteuerte Laden immer mit maximal möglicher
     Leistung, keine eigene (oder geteilte) Watt-Einstellung (siehe
@@ -1769,7 +1791,8 @@ requirement_dynamic_price_charge:
        (Netzladung aktiv), Pausiert (Preisband). Seine
        Attribute führen Strategie, aktuellen Preis, wirksame Preisgrenze,
        Neutralpreis, benötigte Stunden, eingerechnete PV-Prognose, die
-       konfigurierten Quell-Sensoren und die geplanten Zeitfenster mit."
+       konfigurierten Quell-Sensoren, Start/Ende des festen Planungszyklus,
+       das verbleibende Zeitbudget und die geplanten Zeitfenster mit."
     - "Services: sax_power.refresh_price_plan (sofortige Neuberechnung) und
        sax_power.set_price_charge_enabled (nicht-interaktives Schalten mit
        optionalem force)."
@@ -1800,7 +1823,14 @@ requirement_dynamic_price_charge:
        Viertelstunden, ct-Umrechnung, Attribut-Override, unbrauchbare
        Daten), Planberechnung je Strategie inkl. Planungshorizont,
        Smart-Modus mit und ohne ausreichende PV-Prognose sowie ohne
-       Kapazität, Schreibpfad und Rückkehr in die Nullregelung, Abbruch bei
+       Kapazität; zusätzlich begrenzen test_compute_plan_clips_last_quarter_
+       hour_to_exact_duration, test_relative_replanning_never_refills_
+       elapsed_budget, test_replanning_replaces_future_slots_without_
+       extending_budget, test_smart_replanning_does_not_refill_unchanged_
+       required_duration und test_price_cycle_survives_restart_without_
+       refilling_budget das feste Zeitbudget bei Teilslots, wiederholter
+       Auswertung, neuen Morgenpreisen, Smart-Bedarf und HA-Neustart;
+       Schreibpfad und Rückkehr in die Nullregelung, Abbruch bei
        Max-SOC/PV-Überschuss, Vorrang des zeitgesteuerten Ladens,
        Konfliktdialog (Anlegen, Bestätigen, Abbrechen, force), das
        Restore-Verhalten der Select-/Switch-Entities sowie die

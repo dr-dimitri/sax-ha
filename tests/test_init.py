@@ -190,6 +190,11 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
             new=AsyncMock(side_effect=lambda: order.append("control")),
         ),
         patch(
+            "custom_components.sax_power.coordinator.SaxPricePlanner."
+            "async_load_cycle_state",
+            new=AsyncMock(side_effect=lambda: order.append("price_cycle")),
+        ),
+        patch(
             "custom_components.sax_power.SaxPowerCoordinator."
             "async_config_entry_first_refresh",
             new=AsyncMock(side_effect=lambda: order.append("refresh")),
@@ -206,6 +211,7 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
         "calibration",
         "energy",
         "control",
+        "price_cycle",
         "refresh",
         "platforms",
         "bootstrap_done",
@@ -230,6 +236,7 @@ async def test_failed_first_refresh_closes_unpublished_resources(hass) -> None:
     coordinator.async_load_energy_state = AsyncMock()
     coordinator.async_load_economics_state = AsyncMock()
     coordinator.async_load_control_state = AsyncMock()
+    coordinator.price_planner.async_load_cycle_state = AsyncMock()
     coordinator.async_config_entry_first_refresh = AsyncMock(
         side_effect=ConfigEntryNotReady("erster Refresh fehlgeschlagen")
     )

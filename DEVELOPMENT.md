@@ -1100,8 +1100,9 @@ tests/
 │                                  Entry hinterlegte Netzladung-Werte)
 ├── test_price_optimizer.py         Preisoptimiertes Laden: Einlesen der Attributformate
 │                                  verbreiteter Strompreis-Integrationen, Planberechnung je
-│                                  Strategie (inkl. Planungshorizont und PV-Prognose im
-│                                  Smart-Modus), Schreibpfad und Abbruchgründe im Coordinator,
+│                                  Strategie (inkl. persistentem 24-h-Zeitbudget,
+│                                  Teilslots, Planungshorizont und PV-Prognose im Smart-Modus),
+│                                  Schreibpfad und Abbruchgründe im Coordinator,
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)

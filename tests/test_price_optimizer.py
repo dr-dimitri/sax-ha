@@ -489,6 +489,156 @@ def test_compute_plan_smart_falls_back_to_hours_without_capacity() -> None:
     assert len(plan.slots) == 2
 
 
+def test_compute_plan_clips_last_quarter_hour_to_exact_duration() -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Teilslots dürfen das Zeitbudget nicht
+    überschreiten - weder am bereits laufenden Anfang noch am Planende."""
+    now = _local(12, 7)
+    slots = [
+        PriceSlot(
+            start=_local(12) + timedelta(minutes=15 * index),
+            end=_local(12) + timedelta(minutes=15 * (index + 1)),
+            price=0.1 + index / 100,
+        )
+        for index in range(8)
+    ]
+
+    plan = compute_plan(
+        now,
+        slots,
+        _ctx(strategy=PRICE_STRATEGY_RELATIVE, hours=1),
+    )
+
+    assert plan.slots[0].start == now
+    assert plan.slots[-1].end == _local(13, 7)
+    assert sum(
+        (slot.end - slot.start for slot in plan.slots), timedelta()
+    ) == timedelta(hours=1)
+
+
+def test_relative_replanning_never_refills_elapsed_budget(hass) -> None:
+    """Issue #154: Acht ansteigende Stunden dürfen durch rollende
+    Neuberechnung nicht acht statt der konfigurierten drei Stunden laden."""
+    coordinator = _make_coordinator(hass)
+    planner = coordinator.price_planner
+    ctx = _ctx(strategy=PRICE_STRATEGY_RELATIVE, hours=3)
+    slots = _slots(*[0.1 + index / 100 for index in range(8)])
+
+    for hour in range(8):
+        planner._compute_budgeted_plan(_local(12 + hour), slots, ctx)
+
+    cycle = planner._cycle_state
+    assert cycle is not None
+    assert sum(
+        (interval.end - interval.start for interval in cycle.intervals),
+        timedelta(),
+    ) == timedelta(hours=3)
+
+
+def test_replanning_replaces_future_slots_without_extending_budget(hass) -> None:
+    """Neue Morgenpreise dürfen den Restplan verbessern; Timer und ein
+    identischer Sensor-Event dürfen die Gesamtdauer aber nicht vergrößern."""
+    coordinator = _make_coordinator(hass)
+    planner = coordinator.price_planner
+    ctx = _ctx(strategy=PRICE_STRATEGY_RELATIVE, hours=3)
+    first_slots = _slots(0.10, 0.20, 0.30, 0.40)
+    initial = planner._compute_budgeted_plan(_local(12), first_slots, ctx)
+    original_state = planner._cycle_state
+
+    repeated = planner._compute_budgeted_plan(_local(12), first_slots, ctx)
+
+    assert repeated == initial
+    assert planner._cycle_state == original_state
+
+    updated_slots = [
+        *first_slots,
+        PriceSlot(_local(0, day=16), _local(1, day=16), 0.01),
+        PriceSlot(_local(1, day=16), _local(2, day=16), 0.02),
+    ]
+    replanned = planner._compute_budgeted_plan(_local(13), updated_slots, ctx)
+    cycle = planner._cycle_state
+
+    assert [slot.start for slot in replanned.slots] == [
+        _local(0, day=16),
+        _local(1, day=16),
+    ]
+    assert cycle is not None
+    assert sum(
+        (interval.end - interval.start for interval in cycle.intervals),
+        timedelta(),
+    ) == timedelta(hours=3)
+
+
+def test_smart_replanning_does_not_refill_unchanged_required_duration(hass) -> None:
+    """Auch der berechnete Smart-Bedarf ist ein Zyklusbudget und kein bei
+    jedem 60-Sekunden-Tick neu gewährtes Kontingent."""
+    coordinator = _make_coordinator(hass)
+    planner = coordinator.price_planner
+    ctx = _ctx(
+        strategy=PRICE_STRATEGY_SMART,
+        hours=3,
+        current_soc=40,
+        target_soc=80,
+        capacity_kwh=10.0,
+        charge_power_w=3000,
+        pv_forecast_kwh=None,
+    )
+    slots = _slots(*[0.1 + index / 100 for index in range(8)])
+
+    planner._compute_budgeted_plan(_local(12), slots, ctx)
+    planner._compute_budgeted_plan(_local(13), slots, ctx)
+    cycle = planner._cycle_state
+
+    assert cycle is not None
+    assert cycle.budget_seconds == pytest.approx(4 / 3 * 3600)
+    assert sum(
+        (interval.end - interval.start).total_seconds() for interval in cycle.intervals
+    ) == pytest.approx(4 / 3 * 3600)
+
+
+async def test_price_cycle_survives_restart_without_refilling_budget(hass) -> None:
+    """Ein HA-Neustart im laufenden Zyklus darf vergangene Auswahl nicht
+    vergessen und dadurch wieder die vollen drei Stunden freigeben."""
+    entry_id = "price-cycle-restart"
+    coordinator = SaxPowerCoordinator(
+        hass,
+        _make_client(),
+        slave_id=64,
+        slave_id_extended=100,
+        scan_interval=10,
+        entry_id=entry_id,
+    )
+    planner = coordinator.price_planner
+    await planner.async_load_cycle_state()
+    ctx = _ctx(strategy=PRICE_STRATEGY_RELATIVE, hours=3)
+    slots = _slots(*[0.1 + index / 100 for index in range(8)])
+    planner._compute_budgeted_plan(_local(12), slots, ctx)
+    await planner.async_flush_cycle_state()
+
+    restarted = SaxPowerCoordinator(
+        hass,
+        _make_client(),
+        slave_id=64,
+        slave_id_extended=100,
+        scan_interval=10,
+        entry_id=entry_id,
+    )
+    await restarted.price_planner.async_load_cycle_state()
+    replanned = restarted.price_planner._compute_budgeted_plan(
+        _local(13, 30), slots, ctx
+    )
+    cycle = restarted.price_planner._cycle_state
+
+    assert cycle is not None
+    assert cycle.anchor == _local(12).astimezone(UTC)
+    assert sum(
+        (slot.end - slot.start for slot in replanned.slots), timedelta()
+    ) == timedelta(hours=1, minutes=30)
+    assert sum(
+        (interval.end - interval.start for interval in cycle.intervals),
+        timedelta(),
+    ) == timedelta(hours=3)
+
+
 # ===========================================================================
 # 3. Zusammenspiel mit dem Coordinator
 # ===========================================================================

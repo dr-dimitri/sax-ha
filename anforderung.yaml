@@ -52,6 +52,7 @@
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
+# REQ-SETUP-ROLLBACK              done       Fehlgeschlagene Setup-Versuche geben Client, Plattformen, Listener und Timer vollständig frei
 # REQ-SELF-DIAGNOSIS-REPAIRS      done       Fünf zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen
 # REQ-STABLE-DEVICE-IDENTITY      done       Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen
 # REQ-DHCP-DISCOVERY              done       Automatische Netzwerk-Discovery per DHCP - IP-Feld der Ersteinrichtung vorbelegt
@@ -2176,6 +2177,52 @@ requirement_setup_finish_summary:
        korrekt mit allen zuvor gesammelten Daten (Verbindung,
        Netzladung-Vorbelegung, Dashboard-Entscheidung) angelegt wird,
        jetzt aber erst nach Bestätigung der Abschlussseite."
+
+# ==============================================================================
+# ANFORDERUNG: ROLLBACK FEHLGESCHLAGENER SETUP-VERSUCHE
+# ==============================================================================
+requirement_setup_rollback:
+  id: REQ-SETUP-ROLLBACK
+  title: "Fehlgeschlagene Setup-Versuche geben alle Laufzeitressourcen frei"
+  status: done
+  description: >
+    __init__.async_setup_entry behandelt den Aufbau eines Config Entry als
+    zusammenhängenden Ressourcenbesitz. Jeder Abbruch nach Erzeugung des
+    AsyncModbusTcpClient schließt den Client genau einmal. Existiert bereits
+    ein SaxPowerCoordinator, beendet sein Fehlerpfad den Coordinator-Timer,
+    Planner- und Tarif-Listener sowie vorgemerkte Store-Schreibvorgänge.
+    Wurde hass.data bereits befüllt oder das Plattform-Forwarding begonnen,
+    werden die Plattformen zuerst entladen und der Eintrag anschließend aus
+    hass.data entfernt. Ein Setup-Retry beginnt damit ohne Verbindung,
+    Listener, Timer oder teilweise veröffentlichte Entities des vorherigen
+    Versuchs.
+
+    Der Fehlerpfad ruft SaxPowerCoordinator.async_shutdown mit
+    reset_device=False auf. Dadurch wartet er einen eventuell begonnenen
+    periodischen Writer ab und beendet ihn, schreibt aber keinen neuen
+    Steuermodus auf das physische Gerät. Ein unvollständiger Bootstrap darf
+    weder sichere Anwenderwerte voraussetzen noch Register 40051 aus
+    unbestätigten Defaultwerten auf Modus 0 setzen. Beim regulären Unload
+    bleibt reset_device=True der Standard; dort wird die Gerätefreigabe wie
+    bisher ausgeführt und der Client erst danach geschlossen.
+  requirements:
+    - "Jeder fehlgeschlagene Setup-Versuch schließt seinen Modbus-Client und
+       entfernt seinen etwaigen Eintrag aus hass.data."
+    - "Nach begonnenem Plattform-Setup werden teilweise geladene Plattformen
+       entladen; Coordinator, Planner, Tarif-Listener und Store-Timer werden
+       beendet."
+    - "Das Fehler-Cleanup führt keinen zusätzlichen Modbus-Steuerwrite aus;
+       der reguläre Unload behält seine Gerätefreigabe bei."
+  acceptance_criteria:
+    - "tests/test_init.py deckt einen erfolgreichen TCP-Connect mit
+       ConfigEntryNotReady beim ersten Refresh ab: Client-Close genau einmal,
+       kein Eintrag in hass.data und kein Plattform-Unload vor Veröffentlichung."
+    - "tests/test_init.py deckt einen späten Bootstrap-Fehler nach
+       Plattform-Forwarding, Planner-/Tarif-Registrierung und vorgemerktem
+       Store-Write ab: Plattform-Unload, leere Listener-/Timerlisten, kein
+       Modbus-Write und bereinigtes hass.data."
+    - "tests/test_init.py deckt ab, dass ein erfolgreicher Setup den Client
+       offen lässt und erst der reguläre Unload ihn schließt."
 
 # ==============================================================================
 # ANFORDERUNG: SELBSTDIAGNOSE / ERWEITERTE REPAIRS

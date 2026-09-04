@@ -787,6 +787,16 @@ getrennte Stores.
    schließt das Fenster, schreibt den vollständigen Snapshot fest und wendet
    unter dem vorhandenen Control-Lock **genau eine** Ladeentscheidung an.
 
+Jeder Fehler innerhalb dieser Sequenz läuft durch
+`__init__._async_rollback_failed_setup` (REQ-SETUP-ROLLBACK). Nach bereits
+begonnenem Plattform-Forwarding werden zuerst die Plattformen entladen;
+danach beendet der Coordinator Timer, Planner-/Tarif-Listener und ausstehende
+Store-Writes, `hass.data` wird bereinigt und der Modbus-Client geschlossen.
+Dieser Fehlerpfad verwendet `coordinator.async_shutdown(reset_device=False)`:
+ein unvollständiger Bootstrap darf keinen zusätzlichen Gerätesteuer-Write aus
+noch unbestätigten Einstellungen ableiten. Nur der reguläre Unload verwendet
+den Standard `reset_device=True` und gibt das Gerät aktiv auf Modus 0 frei.
+
 Ohne diese Reihenfolge wertete der erste Refresh reine Defaults aus
 (Automatiken aus, Max-SOC 100 %) und konnte Register 40051 auf Modus 0
 setzen, obwohl ein gespeichertes Ladefenster gerade aktiv war - der

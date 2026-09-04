@@ -6,14 +6,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import (
+    PLATFORMS,
     _async_register_services,
     _async_remove_stale_entities,
     async_setup_entry,
+    async_unload_entry,
     async_update_options,
 )
 from custom_components.sax_power.const import (
@@ -21,6 +23,8 @@ from custom_components.sax_power.const import (
     ATTR_DEVICE_ID,
     ATTR_POWER,
     ATTR_REASON,
+    CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
     DATA_COORDINATOR,
     DOMAIN,
@@ -28,6 +32,7 @@ from custom_components.sax_power.const import (
     MIN_SETPOINT_POWER,
     SERVICE_RESTART_ECONOMICS_ACCOUNTING,
     SERVICE_START_GRID_CHARGE,
+    SUN_IC_CONTROL_MODE_SETPOINT,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 
@@ -205,8 +210,126 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
         "platforms",
         "bootstrap_done",
     ]
-    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    await coordinator.async_shutdown()
+    client.close.assert_not_called()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    assert await async_unload_entry(hass, entry) is True
+    client.close.assert_called_once_with()
+
+
+async def test_failed_first_refresh_closes_unpublished_resources(hass) -> None:
+    """REQ-SETUP-ROLLBACK: Nach erfolgreichem TCP-Connect muss auch ein
+    fehlgeschlagener erster Refresh Client und Coordinator genau einmal
+    aufräumen, ohne den Coordinator in hass.data zu veröffentlichen."""
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT, entry_id="entry")
+    entry.add_to_hass(hass)
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    client.close = MagicMock()
+    coordinator = MagicMock()
+    coordinator.async_load_calibration_state = AsyncMock()
+    coordinator.async_load_energy_state = AsyncMock()
+    coordinator.async_load_economics_state = AsyncMock()
+    coordinator.async_load_control_state = AsyncMock()
+    coordinator.async_config_entry_first_refresh = AsyncMock(
+        side_effect=ConfigEntryNotReady("erster Refresh fehlgeschlagen")
+    )
+    coordinator.async_shutdown = AsyncMock()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator",
+            return_value=coordinator,
+        ),
+        pytest.raises(ConfigEntryNotReady, match="erster Refresh fehlgeschlagen"),
+    ):
+        await async_setup_entry(hass, entry)
+
+    coordinator.async_shutdown.assert_awaited_once_with(reset_device=False)
+    client.close.assert_called_once_with()
+    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    hass.config_entries.async_unload_platforms.assert_not_awaited()
+
+
+async def test_late_setup_failure_rolls_back_platforms_and_listeners(hass) -> None:
+    """REQ-SETUP-ROLLBACK: Scheitert der Bootstrap erst nach Plattformen,
+    Planner und Tarif-Listenern, verschwinden sämtliche Laufzeitressourcen.
+    Das Cleanup darf insbesondere keinen Modbus-Steuerwrite auslösen."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options={
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: "dynamic",
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+        entry_id="entry",
+    )
+    entry.add_to_hass(hass)
+    client = MagicMock()
+    client.connected = True
+    client.connect = AsyncMock(return_value=True)
+    client.close = MagicMock()
+    client.write_register = AsyncMock()
+    coordinator = SaxPowerCoordinator(
+        hass,
+        client,
+        slave_id=64,
+        slave_id_extended=100,
+        scan_interval=10,
+        entry_id=entry.entry_id,
+        options=entry.options,
+    )
+    coordinator.async_load_calibration_state = AsyncMock()
+    coordinator.async_load_energy_state = AsyncMock()
+    coordinator.async_load_economics_state = AsyncMock()
+    coordinator.async_load_control_state = AsyncMock()
+    coordinator.async_config_entry_first_refresh = AsyncMock()
+    # Ein regulärer Shutdown würde bei diesem beobachteten Gerätezustand
+    # Register 40051 zurücksetzen. Der Setup-Rollback darf das nicht tun.
+    coordinator._last_observed_ic_control_mode = SUN_IC_CONTROL_MODE_SETPOINT
+
+    async def _fail_after_runtime_resources_started() -> None:
+        assert coordinator.price_planner._unsub
+        assert coordinator.tariff_provider._unsub
+        coordinator._control_store.async_delay_save(
+            coordinator.control_config(), delay=3600
+        )
+        assert coordinator._control_store._save_scheduled is True
+        raise RuntimeError("Bootstrap fehlgeschlagen")
+
+    coordinator.async_finish_bootstrap = AsyncMock(
+        side_effect=_fail_after_runtime_resources_started
+    )
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    with (
+        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
+        patch(
+            "custom_components.sax_power.SaxPowerCoordinator",
+            return_value=coordinator,
+        ),
+        patch(
+            "custom_components.sax_power.async_check_dashboard_up_to_date",
+            new=AsyncMock(),
+        ),
+        pytest.raises(RuntimeError, match="Bootstrap fehlgeschlagen"),
+    ):
+        await async_setup_entry(hass, entry)
+
+    hass.config_entries.async_unload_platforms.assert_awaited_once_with(
+        entry, PLATFORMS
+    )
+    assert not coordinator.price_planner._unsub
+    assert not coordinator.tariff_provider._unsub
+    assert coordinator._control_store._pending is None
+    assert coordinator._control_store._save_scheduled is False
+    assert coordinator._control_store._store._delay_handle is None
+    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    client.write_register.assert_not_awaited()
+    client.close.assert_called_once_with()
 
 
 # -- restart_economics_accounting (REQ-ECONOMICS-OBSERVABILITY) -------------

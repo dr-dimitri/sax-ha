@@ -4627,24 +4627,34 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             monotonic(),
         )
 
-    async def async_shutdown(self) -> None:
+    async def async_shutdown(self, *, reset_device: bool = True) -> None:
         # super().async_shutdown() (DataUpdateCoordinator) storniert den
         # periodischen Poll-Timer sowie den Debounced-Refresh - ohne diesen
         # Aufruf lief der Timer beim Entladen des Config Entry (siehe
         # __init__.async_unload_entry) unbemerkt im Hintergrund weiter.
         await super().async_shutdown()
+        # Externe Zustandsänderungen und der Preisintervall-Timer dürfen
+        # während der folgenden Store-Flushes keine neuen Entscheidungen
+        # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
+        self.price_planner.async_shutdown()
+        self.tariff_provider.async_shutdown()
         await self._async_flush_energy_state()
         await self._async_flush_economics_state()
         await self._async_flush_control_state()
-        self.price_planner.async_shutdown()
-        self.tariff_provider.async_shutdown()
         # Kein Stop-via-Service: Dieser würde nach dem manuellen Reset eine
-        # konfigurierte Automatik erneut anwenden. Beim Shutdown werden unter
-        # demselben Control-Lock stattdessen alle neuen Entscheidungen
-        # ausgesperrt, der gemeinsame Writer abgewartet und Modus 0 versucht.
+        # konfigurierte Automatik erneut anwenden. Beim regulären Shutdown
+        # werden unter demselben Control-Lock stattdessen alle neuen
+        # Entscheidungen ausgesperrt, der gemeinsame Writer abgewartet und
+        # Modus 0 versucht. Ein fehlgeschlagener Setup-Bootstrap verwendet
+        # reset_device=False: dessen Konfiguration ist noch nicht sicher
+        # bestätigt und darf deshalb keinen zusätzlichen Register-Write
+        # auslösen (REQ-SETUP-ROLLBACK).
         async with self._charge_control_lock:
             self._grid_charge_power = None
-            await self.async_stop_sun_charge()
+            if reset_device:
+                await self.async_stop_sun_charge()
+            else:
+                await self._async_cancel_sun_charge_task()
         ir.async_delete_issue(
             self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

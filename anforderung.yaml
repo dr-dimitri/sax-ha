@@ -390,18 +390,24 @@ requirement_timed_soc_charge:
        würde sonst ungeprüft übernommen.
 
        Wurde der Ziel-SOC dabei INNERHALB des Netzladung- oder des
-       netzdienlichen Zeitfensters erreicht (_max_soc_hold_is_window_bound),
-       gilt die Sperre nur bis zum Ende genau dieses Zeitfensters: Register
+       netzdienlichen Zeitfensters beziehungsweise eines vom Preisplan
+       ausgewählten Ladeslots erreicht (_max_soc_hold_is_window_bound), gilt
+       die Sperre nur bis zum Ende genau dieses Zeitfensters/Slots: Register
        40051 wird bis dahin periodisch auf 1 nachgeschrieben (Timeout siehe
        Register 40050/REG_SUN_IC_TIMEOUT), danach aktiv auf 0 zurückgesetzt,
        damit der Speicher wieder von der geräteeigenen SmartMeter-
        Nullregelung gesteuert wird - ohne diesen aktiven Rücksprung bliebe
        die Sperre unbegrenzt bestehen, da ein gehaltener 0-%-Sollwert den
-       SOC nie von selbst unter den Zielwert fallen lässt.
+       SOC nie von selbst unter den Zielwert fallen lässt. Die Preis-Slot-
+       Bindung bleibt auch bei einem zwischenzeitlichen SOC-Abfall aktiv;
+       andernfalls würde der weiterhin ausgewählte Slot sofort erneut aus
+       dem Netz laden. Bestätigter Netzbezug gibt nur die geräteweite Sperre
+       außerhalb solcher Ladezeiträume frei, niemals eine gebundene Sperre.
 
-       Wurde der Ziel-SOC dagegen AUSSERHALB jedes Zeitfensters erreicht
-       (z. B. rein durch PV-Überschuss via Nullregelung, ohne aktives
-       zeitgesteuertes oder netzdienliches Laden), gilt die Sperre
+       Wurde der Ziel-SOC dagegen AUSSERHALB jedes Zeitfensters und ohne
+       ausgewählten Preis-Ladeslot erreicht (z. B. rein durch PV-Überschuss
+       via Nullregelung, ohne aktives zeitgesteuertes, netzdienliches oder
+       preisoptimiertes Laden), gilt die Sperre
        grundsätzlich unbegrenzt - ABER: da ein gehaltener 0-%-Sollwert auch
        hier den SOC im Normalfall nie von selbst unter den Zielwert fallen
        lässt (der Speicher deckt den Hausverbrauch währenddessen nicht mit,
@@ -432,9 +438,12 @@ requirement_timed_soc_charge:
        Freigabe bei, eine Zielabsenkung löscht sie als neue Überschreitung.
        Das gilt sowohl für async_set_max_soc als auch für Beginn und Ende der
        periodischen Zellkalibrierung (effektiver Zielwert temporär 100 %).
-       Die separate Zeitfensterbindung (_max_soc_hold_is_window_bound) bleibt
-       davon unberührt und hält bzw. beendet ihre Sperre weiterhin am
-       jeweiligen Fensterende.
+       Die separate Zeitfenster-/Preis-Slot-Bindung
+       (_max_soc_hold_is_window_bound) bleibt davon unberührt und hält bzw.
+       beendet ihre Sperre weiterhin am jeweiligen Fenster-/Slotende. Endet
+       ein Preis-Slot bei weiterhin erreichtem SOC, nutzt die aktive Freigabe
+       denselben Latch, damit die geräteweite Sperre nicht schon im nächsten
+       Poll erneut entsteht; ein realer SOC-Abfall löscht ihn wie gewohnt.
 
        Ohne den Netzbezug-Trigger
        würde die Sperre in diesem Fall de facto dauerhaft bestehen bleiben
@@ -1630,6 +1639,19 @@ requirement_dynamic_price_charge:
     Netzladung UND löst zusätzlich die Max-SOC-Sperre aus (genau wie beim
     zeitgesteuerten Laden).
 
+    Erreicht der Speicher Max. SOC, während price_planner.plan.charge_now
+    einen aktuell ausgewählten Preis-Ladeslot meldet, wird die Max-SOC-
+    Sperre an diesen Slot gebunden. Dafür ist bewusst das rohe Planmerkmal
+    maßgeblich: price_should_charge ist bei erreichtem Ziel-SOC bereits
+    False und kann den Slot dann nicht mehr identifizieren. Der Sollwert
+    bleibt bis charge_now False wird bei 0 %, auch nach bestätigtem
+    Netzbezug und auch wenn der SOC innerhalb desselben Slots wieder unter
+    den Zielwert fällt. Dadurch startet kein zweiter Ladevorgang im selben
+    günstigen Slot; der Status bleibt "Pausiert (Max. SOC)". Am Slotende
+    setzt der Coordinator Register 40051 aktiv auf SmartMeter-Nullregelung
+    zurück und verhindert bei unverändert erreichtem SOC per Freigabe-Latch
+    ein sofortiges erneutes Sperren im Folge-Poll.
+
     Vorrang innerhalb von _async_enforce_grid_charge: Max-SOC-Sperre >
     manuelle Netzladung > zeitgesteuertes Laden > netzdienliches Laden >
     preisoptimiertes Laden.
@@ -1786,7 +1808,11 @@ requirement_dynamic_price_charge:
        price_charge_neutral_band, test_grid_serving_takes_priority_over_
        price_charge_active_charging) - ein aktives Zeitfenster des
        netzdienlichen Ladens blockiert sowohl das aktive preisoptimierte
-       Laden als auch dessen Pausezone, nicht umgekehrt."
+       Laden als auch dessen Pausezone, nicht umgekehrt; außerdem bindet
+       test_price_charge_max_soc_hold_remains_bound_to_selected_slot die
+       Max-SOC-Sperre an den ausgewählten Preis-Slot, hält sie trotz
+       Netzbezug und SOC-Abfall und weist die aktive Rückkehr zur
+       SmartMeter-Nullregelung am Slotende nach."
     - "tests/test_number.py deckt die Vorbelegung und Klemmung der drei
        neuen Number-Entities (Preisgrenze, Neutralpreis, Anzahl Stunden)
        ab."

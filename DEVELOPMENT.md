@@ -623,7 +623,11 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    aktiviert ist (z. B. auch bei einem durch PV-Überschuss vollen Speicher).
    Verhindert dauerhaftes Volladen auf 100 % (Batterie-Lebensdauer); der
    Speicher entlädt sich währenddessen nicht automatisch zur
-   Eigenverbrauchsdeckung.
+   Eigenverbrauchsdeckung. Wird der Zielwert in einem ausgewählten
+   Preis-Ladeslot erreicht, hält `_max_soc_hold_is_price_slot_bound` diesen
+   Zustand auch bei einem kleinen SOC-Abfall bis `price_plan.charge_now`
+   wieder `False` wird. So kann derselbe Slot keinen zweiten Ladezyklus
+   starten; am Slotende folgt aktiv die SmartMeter-Nullregelung.
 2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + im
    aktiven Monat + kein PV-Überschuss** (`timed_should_charge`):
    Leistungsvorgabe = `MIN_SETPOINT_POWER` (sättigt in

@@ -243,6 +243,14 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         ),
     ),
     SaxPowerSensorEntityDescription(
+        key="timed_charge_discharge_status",
+        translation_key="timed_charge_discharge_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=["normal", "grid_charging", "discharge_blocked"],
+        icon="mdi:battery-lock",
+        value_fn=_direct("timed_charge_discharge_status"),
+    ),
+    SaxPowerSensorEntityDescription(
         key="grid_serving_active_text",
         translation_key="grid_serving_active_text",
         entity_category=EntityCategory.DIAGNOSTIC,

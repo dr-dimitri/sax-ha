@@ -21,12 +21,22 @@ from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 
 from .application.calibration import CalibrationState, evaluate_calibration
-from .application.charge_policy import ChargePolicyInput, evaluate_charge_policy
+from .application.charge_policy import (
+    ChargePolicyInput,
+    evaluate_charge_policy,
+    timed_discharge_hold_active,
+    timed_discharge_pv_power,
+)
 from .application.economics import (
     investment_cost_eur_from_options,
     prior_result_eur_from_options,
 )
 from .application.ports import ModbusClient
+from .application.timed_discharge import (
+    TimedDischargeState,
+    completed_window_extended,
+    window_end,
+)
 from .const import (
     ALL_MONTHS,
     CELL_CALIBRATION_INTERVAL,
@@ -145,6 +155,7 @@ from .infrastructure.economics_store import (
 from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
+from .infrastructure.timed_discharge_store import TimedDischargeStateStore
 from .price_optimizer import PricePlan, SaxPricePlanner
 
 _LOGGER = logging.getLogger(__name__)
@@ -443,6 +454,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_min_soc: int | None = None
         self._timed_charge_armed = False
         self._timed_charge_pv_surplus_cycles = 0
+        self._timed_discharge_store = TimedDischargeStateStore(hass, entry_id)
+        self._timed_discharge_state: TimedDischargeState | None = None
+        self._timed_discharge_last_window_end: datetime | None = None
+        self._timed_charge_discharge_status: str | None = "normal"
+        self._timed_charge_grid_measured = False
+        self._timed_charge_confirmation_cycles = 0
+        self._timed_charge_start_revision = 0
+        self._timed_charge_started_at = float("inf")
+        self._timed_discharge_last_sample_revision = 0
+        self._high_sample_revision = 0
+        self._high_sample_time: float | None = None
+        self._high_sample_started_at: float | None = None
+        self._high_sample_control_mode: int | None = None
+        self._sun_charge_timed_discharge = False
         self._grid_serving_enabled = False
         self._grid_serving_start: dt_time | None = None
         self._grid_serving_end: dt_time | None = None
@@ -626,6 +651,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data = dict(await self._async_read_basic())
             data.update(await self._async_read_extended())
         except UpdateFailed:
+            self._high_sample_time = None
+            self._timed_charge_grid_measured = False
+            self._timed_charge_confirmation_cycles = 0
+            if self._sun_charge_timed_discharge:
+                # REQ-TIMED-SOC-CHARGE: Never repeat stale PV power after
+                # the Basic read bypassed the regular charge decision.
+                async with self._charge_control_lock:
+                    if self._sun_charge_timed_discharge:
+                        try:
+                            if self._timed_discharge_is_active(dt_util.utcnow()):
+                                await self.async_start_sun_charge(
+                                    0, timed_discharge_hold=True
+                                )
+                            else:
+                                await self.async_stop_sun_charge()
+                                await self._async_set_timed_discharge_state(
+                                    None,
+                                    retain_expiry=self._timed_charge_enabled
+                                    and not self._price_charge_enabled,
+                                )
+                        except HomeAssistantError:
+                            _LOGGER.exception(
+                                "Entladesperre: sicherer 0-W-Sollwert fehlgeschlagen"
+                            )
             # Die Riemann-Baseline darf einen Ausfall nicht überbrücken:
             # _energy_last_ts wird ausschließlich in _accumulate_energy
             # fortgeschrieben, das bei einem fehlgeschlagenen Basic-Read gar
@@ -660,6 +709,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         können."""
         plan = self.price_planner.plan
         data["timed_charge_active"] = self._timed_charge_active
+        data["timed_charge_discharge_status"] = self._timed_charge_discharge_status
         data["grid_serving_active"] = self._grid_serving_active
         data["grid_serving_window_active"] = self._grid_serving_window_active
         data["grid_serving_forecast_kwh"] = self._grid_serving_forecast_kwh
@@ -2320,6 +2370,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 self._extended_unavailable_since = monotonic()
             self._extended_available = False
+            self._high_sample_time = None
             self._high_data = {}
             return {}
 
@@ -2343,6 +2394,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ic_power_setpoint_sf_raw = decoded.ic_power_setpoint_sf_raw
         self._high_data = dict(decoded.values)
         self._high_last_read = now
+        self._high_sample_revision += 1
+        self._high_sample_started_at = now
+        self._high_sample_control_mode = decoded.values.get("ic_control_mode")
+        self._high_sample_time = monotonic()
         return self._high_data
 
     async def _async_read_low_block(self) -> dict[str, Any]:
@@ -3053,20 +3108,33 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             SUN_IC_MIN_WRITE_INTERVAL, min(timeout // 2, GRID_CHARGE_WRITE_INTERVAL)
         )
 
-    async def _async_write_sun_charge_setpoint(self, power: int | None = None) -> None:
+    async def _async_write_sun_charge_setpoint(
+        self, power: int | None = None, *, timed_discharge_hold: bool = False
+    ) -> None:
         """Write mode and setpoint as one best-effort atomic sequence."""
         async with self._sun_charge_write_lock:
-            await self._async_write_sun_charge_setpoint_unlocked(power)
+            await self._async_write_sun_charge_setpoint_unlocked(
+                power, timed_discharge_hold=timed_discharge_hold
+            )
 
     async def _async_write_sun_charge_setpoint_unlocked(
-        self, power: int | None = None
+        self, power: int | None = None, *, timed_discharge_hold: bool = False
     ) -> None:
         """Execute one sequence while the Immediate Controls lock is held."""
         requested_power = self._sun_charge_power if power is None else power
         # REQ-TIMED-SOC-CHARGE: Jede Voraussetzung und der endgültige
         # int16-Rohwert müssen feststehen, bevor Modus 1 das Gerät aus seiner
         # sicheren SmartMeter-Nullregelung nimmt.
-        setpoint_raw = self._watts_to_ic_setpoint_raw(requested_power, self.data or {})
+        # Zero is representable with every scale factor. The new hold must
+        # remain renewable when a read failed but writes still work.
+        setpoint_raw = (
+            0
+            if timed_discharge_hold and requested_power == 0
+            else self._watts_to_ic_setpoint_raw(
+                requested_power,
+                self._high_data if timed_discharge_hold else self.data or {},
+            )
+        )
         try:
             await self.async_write_extended_register(
                 REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT
@@ -3113,7 +3181,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error(message)
             raise HomeAssistantError(message) from setpoint_error
 
-    async def async_start_sun_charge(self, power: int) -> None:
+    async def async_start_sun_charge(
+        self, power: int, *, timed_discharge_hold: bool = False
+    ) -> None:
         """Start (or update the setpoint of) periodic SunSpec-Modus grid-charge
         writes (Register 40049/40051).
 
@@ -3134,6 +3204,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(
                 f"power muss zwischen {MIN_SETPOINT_POWER} und 0 liegen"
             )
+        if timed_discharge_hold != self._sun_charge_timed_discharge:
+            # The PV hold needs its own short freshness/deadline checks.
+            # Price charging retains the existing refresh cadence.
+            await self._async_cancel_sun_charge_task()
         power_changed = power != self._sun_charge_power
         device_left_setpoint_mode = (
             self._last_observed_ic_control_mode == SUN_IC_CONTROL_MODE_SMARTMETER
@@ -3145,11 +3219,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # reine Task-Erzeugung ließ Status und tatsächlichen Steuermodus
             # kurzzeitig auseinanderlaufen (REQ-GRID-SERVING-CHARGE).
             try:
-                await self._async_write_sun_charge_setpoint(power)
+                await self._async_write_sun_charge_setpoint(
+                    power, timed_discharge_hold=timed_discharge_hold
+                )
             except HomeAssistantError:
                 self._clear_sun_charge_active_flags()
                 raise
             self._sun_charge_power = power
+            self._sun_charge_timed_discharge = timed_discharge_hold
             self._sun_charge_task = self.hass.async_create_background_task(
                 self._async_sun_charge_loop(), name="sax_power_sun_charge"
             )
@@ -3162,7 +3239,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # oder ein externer Schreiber 40051 zwischenzeitlich verändert
             # hat. Nicht bis zum nächsten periodischen Refresh warten.
             try:
-                await self._async_write_sun_charge_setpoint(power)
+                await self._async_write_sun_charge_setpoint(
+                    power, timed_discharge_hold=timed_discharge_hold
+                )
             except HomeAssistantError:
                 # Nach einer unvollständigen Sofortänderung darf der
                 # schlafende Task den alten Sollwert nicht später erneut
@@ -3179,6 +3258,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_serving_setpoint_active = False
         self._price_charge_active = False
         self._max_soc_clamped = False
+        self._timed_charge_discharge_status = None
+        if self.data is not None:
+            self.data["timed_charge_discharge_status"] = None
 
     async def _async_cancel_sun_charge_task(self) -> None:
         """Cancel and forget the periodic writer without another mode write."""
@@ -3212,6 +3294,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not needs_reset:
             return
         await self._async_cancel_sun_charge_task()
+        self._sun_charge_timed_discharge = False
         try:
             async with self._sun_charge_write_lock:
                 await self.async_write_extended_register(
@@ -3231,8 +3314,60 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_sun_charge_loop(self) -> None:
         try:
             while True:
-                await asyncio.sleep(self._sun_ic_write_interval())
-                await self._async_write_sun_charge_setpoint()
+                interval = self._sun_ic_write_interval()
+                if self._sun_charge_timed_discharge:
+                    interval = READ_BLOCK_EXT_HIGH_INTERVAL
+                    if self._timed_discharge_state is not None:
+                        interval = max(
+                            0,
+                            min(
+                                interval,
+                                (
+                                    self._timed_discharge_state.expires_at
+                                    - dt_util.utcnow()
+                                ).total_seconds(),
+                            ),
+                        )
+                await asyncio.sleep(interval)
+                if self._sun_charge_timed_discharge:
+                    async with self._charge_control_lock:
+                        if not self._sun_charge_timed_discharge:
+                            continue
+                        if not self._timed_discharge_is_active(dt_util.utcnow()):
+                            # This task cannot call async_stop_sun_charge:
+                            # that method would cancel and await itself.
+                            async with self._sun_charge_write_lock:
+                                await self.async_write_extended_register(
+                                    REG_SUN_IC_CONTROL_MODE,
+                                    SUN_IC_CONTROL_MODE_SMARTMETER,
+                                )
+                                self._sun_charge_reset_required = False
+                                self._record_ic_control_mode(
+                                    SUN_IC_CONTROL_MODE_SMARTMETER
+                                )
+                            self._sun_charge_timed_discharge = False
+                            self._timed_charge_discharge_status = "normal"
+                            if self._max_soc_clamped:
+                                self._max_soc_released_for_discharge = True
+                                self._max_soc_clamped = False
+                                self._max_soc_hold_is_window_bound = False
+                                self._max_soc_hold_is_price_slot_bound = False
+                            await self._async_set_timed_discharge_state(
+                                None,
+                                retain_expiry=self._timed_charge_enabled
+                                and not self._price_charge_enabled,
+                            )
+                            if self.data is not None:
+                                self._publish_charge_state(self.data)
+                                self.async_set_updated_data(self.data)
+                            return
+                        power = self._timed_discharge_pv_setpoint()
+                        await self._async_write_sun_charge_setpoint(
+                            power, timed_discharge_hold=True
+                        )
+                        self._sun_charge_power = power
+                else:
+                    await self._async_write_sun_charge_setpoint()
         except asyncio.CancelledError:
             raise
         except HomeAssistantError:
@@ -3254,6 +3389,136 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # tatsächliche Ladeleistung, weil er ohnehin fast immer auf 100 %
     # sättigte. Das eigene Netzladeziel bleibt unter dem globalen Max-SOC;
     # die Kalibrierungsausnahme folgt REQ-PERIODIC-FULL-CALIBRATION.
+
+    async def async_load_timed_discharge_state(self) -> None:
+        """Restore only a bounded, still-live proof of timed grid charging."""
+        try:
+            state = await self._timed_discharge_store.async_load()
+        except HomeAssistantError, OSError, ValueError:
+            _LOGGER.exception("Gespeicherte Netzlade-Entladesperre nicht lesbar")
+            return
+        if state is not None:
+            remaining = state.expires_at - dt_util.utcnow()
+            if -timedelta(hours=25) <= remaining <= timedelta(hours=25):
+                self._timed_discharge_last_window_end = state.expires_at
+                if remaining > timedelta(0):
+                    self._timed_discharge_state = state
+
+    async def _async_set_timed_discharge_state(
+        self, state: TimedDischargeState | None, *, retain_expiry: bool = False
+    ) -> None:
+        if self._timed_discharge_state == state and (
+            state is not None
+            or retain_expiry
+            or self._timed_discharge_last_window_end is None
+        ):
+            return
+        self._timed_discharge_state = state
+        if state is not None:
+            self._timed_discharge_last_window_end = state.expires_at
+        elif not retain_expiry:
+            self._timed_discharge_last_window_end = None
+        try:
+            await self._timed_discharge_store.async_save(
+                TimedDischargeState(self._timed_discharge_last_window_end)
+                if self._timed_discharge_last_window_end is not None
+                else None
+            )
+        except HomeAssistantError, OSError, ValueError:
+            _LOGGER.exception("Netzlade-Entladesperre konnte nicht gespeichert werden")
+
+    def _timed_discharge_is_active(self, now: datetime) -> bool:
+        return timed_discharge_hold_active(
+            now=now,
+            enabled=self._timed_charge_enabled,
+            price_enabled=self._price_charge_enabled,
+            expires_at=(
+                self._timed_discharge_state.expires_at
+                if self._timed_discharge_state is not None
+                else None
+            ),
+        )
+
+    def _timed_discharge_measurements_fresh(self) -> bool:
+        return (
+            self._extended_available
+            and self._high_sample_time is not None
+            and 0
+            <= monotonic() - self._high_sample_time
+            <= 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+        )
+
+    def _timed_discharge_pv_setpoint(self) -> int:
+        if (
+            not self._timed_discharge_measurements_fresh()
+            or self.data is None
+            or self.data.get("soc") is None
+            or self.data["soc"] >= self.effective_max_soc
+        ):
+            return 0
+        return timed_discharge_pv_power(
+            self._high_data.get("storage_power_active"),
+            self._high_data.get("smartmeter_power"),
+        )
+
+    async def _async_update_timed_discharge_proof(self, now: datetime) -> None:
+        """Count each HIGH sample once, only after a timed command owned it."""
+        if not self._timed_charge_enabled or self._price_charge_enabled:
+            await self._async_set_timed_discharge_state(None)
+            self._timed_charge_grid_measured = False
+            self._timed_charge_confirmation_cycles = 0
+            self._timed_discharge_last_sample_revision = self._high_sample_revision
+            return
+        if not self._timed_discharge_is_active(now):
+            await self._async_set_timed_discharge_state(None, retain_expiry=True)
+        if completed_window_extended(
+            now,
+            self._timed_charge_start,
+            self._timed_charge_end,
+            self._timed_discharge_last_window_end,
+        ):
+            self._timed_charge_grid_measured = False
+            self._timed_charge_confirmation_cycles = 0
+            return
+        if not self._timed_discharge_measurements_fresh():
+            self._timed_charge_grid_measured = False
+            self._timed_charge_confirmation_cycles = 0
+            return
+        if self._high_sample_revision == self._timed_discharge_last_sample_revision:
+            return
+        self._timed_discharge_last_sample_revision = self._high_sample_revision
+        storage = self._high_data.get("storage_power_active")
+        grid = self._high_data.get("smartmeter_power")
+        self._timed_charge_grid_measured = (
+            self._timed_charge_active
+            and self.sun_charge_active
+            and not self._sun_charge_timed_discharge
+            and self._grid_charge_power is None
+            and self._sun_charge_power < 0
+            and self._high_sample_control_mode == SUN_IC_CONTROL_MODE_SETPOINT
+            and self._high_sample_revision > self._timed_charge_start_revision
+            and self._high_sample_started_at is not None
+            and self._high_sample_started_at >= self._timed_charge_started_at
+            and all(
+                not isinstance(value, bool)
+                and isinstance(value, int | float)
+                and math.isfinite(value)
+                for value in (storage, grid)
+            )
+            and storage < -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+            and grid > SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+        )
+        confirmed = self._cycles_confirmed(
+            "_timed_charge_confirmation_cycles", self._timed_charge_grid_measured
+        )
+        if confirmed and self._timed_discharge_state is None:
+            expires_at = window_end(
+                now, self._timed_charge_start, self._timed_charge_end
+            )
+            if expires_at is not None and now.month in self._timed_charge_months:
+                await self._async_set_timed_discharge_state(
+                    TimedDischargeState(expires_at)
+                )
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -3786,6 +4051,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
         command_revision_before = self._sun_charge_command_revision
+        timed_was_active = self._timed_charge_active
+        await self._async_update_timed_discharge_proof(dt_util.now())
+        timed_hold_active = self._timed_discharge_is_active(dt_util.utcnow())
+        timed_window_completed = (
+            self._timed_charge_enabled
+            and not self._price_charge_enabled
+            and completed_window_extended(
+                dt_util.now(),
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_discharge_last_window_end,
+            )
+        )
 
         # Nach Reload/Neuinstallation kann der Speicher noch bis zum Ablauf
         # von Register 40050 im Sollwertmodus der vorherigen Instanz stehen,
@@ -3805,6 +4083,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         target_soc = self.effective_max_soc
         current_soc = data["soc"]
+        if timed_window_completed and self._last_effective_max_soc is None:
+            # Restore must perform the same one-time release as the original
+            # deadline, even when the edited window is still open (#165).
+            self._max_soc_hold_is_window_bound = True
         previous_soc = self._last_observed_soc
         self._last_observed_soc = current_soc
         if (
@@ -3859,6 +4141,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 timed_target_soc=timed_target_soc,
                 pv_surplus_active=pv_surplus_active,
                 timed_enabled=self._timed_charge_enabled,
+                timed_window_completed=timed_window_completed,
                 timed_start=self._timed_charge_start,
                 timed_end=self._timed_charge_end,
                 timed_months=self._timed_charge_months,
@@ -3902,7 +4185,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast_kwh=grid_serving_forecast_kwh,
             threshold_kwh=grid_serving_forecast_threshold,
         )
-        if not grid_serving_eligible:
+        if not grid_serving_eligible or timed_hold_active:
             self._grid_serving_setpoint_active = False
             self._grid_serving_wait_cycles = 0
             self._grid_serving_charge_confirm_cycles = 0
@@ -3912,7 +4195,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         max_soc_clamped_now = False
         manual_charge_active_now = False
         if max_soc_hold_active:
-            in_timed_window = policy.timed_window_active
+            in_timed_window = policy.timed_window_active or timed_hold_active
             in_grid_serving_window = policy.grid_serving_window_active
             in_price_slot = (
                 price_plan.charge_now
@@ -3936,7 +4219,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._max_soc_hold_is_price_slot_bound = in_price_slot
                 self._max_soc_grid_import_wait_cycles = 0
                 self._max_soc_recharge_confirm_cycles = 0
-                await self.async_start_sun_charge(0)
+                if timed_hold_active:
+                    await self.async_start_sun_charge(0, timed_discharge_hold=True)
+                else:
+                    await self.async_start_sun_charge(0)
                 max_soc_clamped_now = True
             elif self._max_soc_hold_is_window_bound:
                 # Der Zeitraum, während dessen die Sperre ausgelöst wurde,
@@ -4039,6 +4325,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # timed_should_charge aus), Reihenfolge daher unerheblich.
                 await self.async_start_sun_charge(MIN_SETPOINT_POWER)
                 grid_serving_active_now = False
+            elif timed_hold_active:
+                await self.async_start_sun_charge(
+                    self._timed_discharge_pv_setpoint(), timed_discharge_hold=True
+                )
+                grid_serving_active_now = False
             elif grid_serving_eligible:
                 # Vorrang vor der Neutralpreis-Pausezone: netzdienliches
                 # Laden schließt price_should_pause bereits über
@@ -4093,6 +4384,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and not max_soc_hold_active
             and not manual_charge_active_now
         )
+        if self._timed_charge_active and not timed_was_active:
+            self._timed_charge_start_revision = self._high_sample_revision
+            self._timed_charge_started_at = monotonic()
+            self._timed_charge_confirmation_cycles = 0
+            self._timed_charge_grid_measured = False
+        if self._timed_discharge_state is None:
+            self._timed_charge_discharge_status = (
+                None
+                if self._sun_charge_reset_required and not self.sun_charge_active
+                else "normal"
+            )
+        elif not self.sun_charge_active:
+            self._timed_charge_discharge_status = None
+        elif self._timed_charge_active and self._timed_charge_grid_measured:
+            self._timed_charge_discharge_status = "grid_charging"
+        else:
+            self._timed_charge_discharge_status = "discharge_blocked"
         self._grid_serving_active = grid_serving_active_now
         self._price_charge_active = (
             price_should_charge

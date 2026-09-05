@@ -676,6 +676,13 @@ async def async_build_dashboard_config(
             _entities_card(
                 hass,
                 entry_id,
+                "Entladestatus",
+                [("sensor", "timed_charge_discharge_status")],
+                translations,
+            ),
+            _entities_card(
+                hass,
+                entry_id,
                 "Einstellungen",
                 [
                     ("number", "timed_charge_max_soc"),
@@ -966,8 +973,9 @@ async def _async_missing_dashboard_views(
 
     Verglichen werden die Pfade, nicht die Titel: Der Pfad ist der stabile
     Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Der neue
-    Netzladeziel-Regler muss in einem vorhandenen Ladeautomatik-View stehen,
-    sofern seine Entity registriert ist (REQ-TIMED-SOC-CHARGE).
+    Netzladeziel-Regler und Entladestatus müssen in einem vorhandenen
+    Ladeautomatik-View stehen, sofern ihre Entities registriert sind
+    (REQ-TIMED-SOC-CHARGE).
     Auch fachlich veraltete Ersparnis-Views werden erkannt: Dazu zählen alte
     Entity-IDs, entfernte Überschriften, eine fehlende Tarifinformation und
     der inzwischen entfernte View `wirtschaftlichkeit`. Es wird weiterhin
@@ -999,15 +1007,16 @@ async def _async_missing_dashboard_views(
     }
 
     charging_view = stored_views.get("ladeautomatik")
-    timed_max_soc_entity_id = _entity_id(
-        hass, "number", f"{entry.entry_id}_timed_charge_max_soc"
-    )
-    if (
-        charging_view is not None
-        and timed_max_soc_entity_id is not None
-        and not _contains_dashboard_value(charging_view, timed_max_soc_entity_id)
-    ):
-        outdated_paths.add("ladeautomatik")
+    if charging_view is not None:
+        for domain, key in (
+            ("number", "timed_charge_max_soc"),
+            ("sensor", "timed_charge_discharge_status"),
+        ):
+            entity_id = _entity_id(hass, domain, f"{entry.entry_id}_{key}")
+            if entity_id is not None and not _contains_dashboard_value(
+                charging_view, entity_id
+            ):
+                outdated_paths.add("ladeautomatik")
 
     savings_view = stored_views.get("ersparnis")
     expected_savings_view = next(

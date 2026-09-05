@@ -112,6 +112,14 @@
       "timed_charge_active_text": {
         "name": "Timed charge active"
       },
+      "timed_charge_discharge_status": {
+        "name": "Discharge status",
+        "state": {
+          "normal": "Normal operation",
+          "grid_charging": "Grid charging",
+          "discharge_blocked": "Discharge stopped due to grid charging"
+        }
+      },
       "grid_serving_active_text": {
         "name": "Grid-serving charge active"
       },

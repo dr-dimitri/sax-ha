@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from homeassistant.components.lovelace import LovelaceData
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.helpers import device_registry as dr
@@ -443,8 +444,8 @@ async def test_build_dashboard_config_grid_serving_view(hass) -> None:
 async def test_build_dashboard_config_charging_view(hass) -> None:
     """Der Tab "Ladeautomatik" ist analog zu "Netzdienliches Laden"
     aufgebaut (Schalter, Zeitfenster-Karte, "Aktive Monate"-Karte), enthält
-    aber weder die globale Max-SOC-Einstellung noch die Status-Textanzeige - der
-    Schalter deckt deren Zustand bereits ab. Netzdienliche Entities landen
+    aber weder die globale Max-SOC-Einstellung noch die bisherige
+    Aktiv-Textanzeige. Netzdienliche Entities landen
     nicht mehr in diesem Tab, die sind jetzt im eigenen Tab."""
     grid_serving_switch = _register(hass, "switch", "grid_serving_enabled")
     grid_serving_start = _register(hass, "time", "grid_serving_start")
@@ -481,6 +482,32 @@ async def test_build_dashboard_config_charging_view(hass) -> None:
         card for card in charging_view["cards"] if card.get("title") == "Aktive Monate"
     )
     assert {row["entity"] for row in months_card["entities"]} == set(month_switches)
+
+
+async def test_charging_view_shows_discharge_status_directly_below_time_window(
+    hass,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Der neue Status gehört ausschließlich zur Ladeautomatik."""
+    hass.config.language = "de"
+    _register(hass, "time", "timed_charge_start")
+    _register(hass, "time", "timed_charge_end")
+    status = _register(hass, "sensor", "timed_charge_discharge_status")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    charging_view = next(
+        view for view in config["views"] if view["path"] == "ladeautomatik"
+    )
+    cards = charging_view["cards"]
+    window_index = next(
+        index for index, card in enumerate(cards) if card.get("title") == "Zeitfenster"
+    )
+    status_card = cards[window_index + 1]
+    assert status_card["title"] == "Entladestatus"
+    assert status_card["entities"] == [{"entity": status, "name": "Entladestatus"}]
+    for view in config["views"]:
+        if view["path"] != "ladeautomatik":
+            assert status not in set(_iter_entity_ids(view["cards"]))
 
 
 async def test_build_dashboard_config_grid_charge_soc_order_and_labels(hass) -> None:
@@ -1475,6 +1502,41 @@ async def test_dashboard_without_registered_grid_charge_target_is_not_reported(
     _lovelace(hass)
     await _existing_dashboard(hass, entry)
 
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+@pytest.mark.parametrize("status_in_other_view", [False, True])
+async def test_dashboard_upgrade_reports_missing_discharge_status_until_rebuilt(
+    hass, status_in_other_view: bool
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Die Reparatur prüft den Status im richtigen Tab."""
+    _register(hass, "time", "timed_charge_start")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    status = _register(hass, "sensor", "timed_charge_discharge_status")
+    if status_in_other_view:
+        stored["views"][0]["cards"].append(
+            {"type": "entities", "title": "Eigener Status", "entities": [status]}
+        )
+        await storage.async_save(stored)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.is_fixable
+    assert issue.translation_placeholders["views"] == "Ladeautomatik"
+    assert await storage.async_load(False) == stored
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await async_create_dashboard(hass, entry, force=True)
     await async_check_dashboard_up_to_date(hass, entry)
 
     assert _issue(hass, ENTRY_ID) is None

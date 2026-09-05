@@ -245,19 +245,12 @@ class EconomicsStateStore:
         # z. B. als "Lingering timer" in Tests).
         self._unsub_final_write_listener: CALLBACK_TYPE | None = None
         self._on_persist_failed = on_persist_failed
-        # Serialisiert die komplette save-then-load-Sequenz aus
-        # _write_and_verify pro Instanz: Store._data wird von
-        # Store.async_save() SOFORT überschrieben, unabhängig von einem
-        # eventuell noch laufenden anderen Schreibvorgang (nur die
-        # eigentliche Schreib-E/A ist über Store._write_lock serialisiert,
-        # nicht diese Zuweisung) - ohne dieses Lock könnte ein zweiter,
-        # überlappender Schreibversuch (z. B. ein bereits laufender
-        # verzögerter Write parallel zu async_reset()/dem Shutdown-Flush)
-        # Store.async_load() nach dem ersten Write dessen eigene, noch
-        # ausstehende Daten statt der soeben geschriebenen zurückgeben
-        # lassen und den ersten, tatsächlich erfolgreichen Write fälschlich
-        # als fehlgeschlagen melden.
-        self._write_and_verify_lock = asyncio.Lock()
+        # REQ-ECONOMICS-OBSERVABILITY: Ein Reset muss auch während seiner
+        # Datei-I/O vorgemerkte Altstände atomar ablösen. Die Generation
+        # schützt bereits wartende Sofort-Writes; der Lock umfasst zusätzlich
+        # das Entnehmen verzögerter Snapshots und den erfolgreichen Reset.
+        self._write_lock = asyncio.Lock()
+        self._generation = 0
 
     async def async_load(self) -> EconomicsState | None:
         """Load the balance, distinguishing new from Core-quarantined data."""
@@ -449,21 +442,24 @@ class EconomicsStateStore:
         koaleszierten Stand und meldet einen tatsächlichen Fehlschlag über
         `_on_persist_failed`, da hier (anders als bei `async_save`/
         `async_reset`) kein Aufrufer mehr auf einen Rückgabewert wartet."""
-        self._unsub_delayed_write = None
-        self._async_cleanup_final_write_listener()
-        state = self._pending
-        self._pending = None
-        if state is None:
-            return
-        if not await self._write_and_verify(state) and self._on_persist_failed:
-            self._on_persist_failed()
+        async with self._write_lock:
+            state = self._pending
+            self._cancel_delayed_write()
+            if state is None:
+                return
+            if not await self._write_and_verify(state) and self._on_persist_failed:
+                self._on_persist_failed()
 
     async def async_save(self, state: EconomicsState) -> bool:
-        """Immediately persist a final snapshot, cancelling a delayed write."""
+        """Persist a final snapshot unless a successful reset superseded it."""
+        generation = self._generation
         if not self._accept(state):
             return False
         self._cancel_delayed_write()
-        return await self._write_and_verify(state)
+        async with self._write_lock:
+            if generation != self._generation:
+                return True
+            return await self._write_and_verify(state)
 
     async def async_reset(self, state: EconomicsState) -> bool:
         """Persist a deliberate restart (REQ-ECONOMICS-OBSERVABILITY,
@@ -481,8 +477,12 @@ class EconomicsStateStore:
         """
         if not self._valid_snapshot(state):
             return False
-        self._cancel_delayed_write()
-        return await self._write_and_verify(state)
+        async with self._write_lock:
+            if not await self._write_and_verify(state):
+                return False
+            self._generation += 1
+            self._cancel_delayed_write()
+            return True
 
     def _cancel_delayed_write(self) -> None:
         self._pending = None
@@ -499,30 +499,27 @@ class EconomicsStateStore:
         lässt: `written` weicht dann von den gerade geschriebenen Daten ab
         (oder bleibt bei einem allerersten Schreibversuch `None`).
 
-        Die gesamte Sequenz läuft unter `_write_and_verify_lock`, damit ein
-        zweiter, überlappender Aufruf (siehe dessen Kommentar in
-        `__init__`) nicht zwischen diesen Save- und Load-Aufruf geraten
-        kann.
+        Der Aufrufer hält `_write_lock` über diese Sequenz und die zugehörige
+        Snapshot-/Reset-Verwaltung hinweg.
         """
-        async with self._write_and_verify_lock:
-            data = self._serialize(state)
-            try:
-                await self._store.async_save(data)
-                written = await self._store.async_load()
-            except (HomeAssistantError, OSError) as err:
-                _LOGGER.warning(
-                    "Wirtschaftlichkeitszustand konnte nicht gespeichert werden: %s",
-                    err,
-                )
-                return False
-            if written != data:
-                _LOGGER.warning(
-                    "Wirtschaftlichkeitszustand nach dem Speichern nicht wie "
-                    "erwartet lesbar - Schreibvorgang vermutlich fehlgeschlagen"
-                )
-                return False
-            self._last_persisted = state
-            return True
+        data = self._serialize(state)
+        try:
+            await self._store.async_save(data)
+            written = await self._store.async_load()
+        except (HomeAssistantError, OSError) as err:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand konnte nicht gespeichert werden: %s",
+                err,
+            )
+            return False
+        if written != data:
+            _LOGGER.warning(
+                "Wirtschaftlichkeitszustand nach dem Speichern nicht wie "
+                "erwartet lesbar - Schreibvorgang vermutlich fehlgeschlagen"
+            )
+            return False
+        self._last_persisted = state
+        return True
 
     @staticmethod
     def _valid_snapshot(state: EconomicsState) -> bool:

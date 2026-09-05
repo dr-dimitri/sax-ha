@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -29,6 +30,7 @@ from custom_components.sax_power.domain.economics_amortization import (
     MAX_STORED_DAYS,
     DayEconomicsResult,
 )
+from custom_components.sax_power.domain.energy_accounting import EnergyDelta
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.infrastructure.economics_store import (
     ECONOMICS_SAVE_DELAY,
@@ -111,6 +113,37 @@ def _seed_real_store(
         "key": f"{STORAGE_KEY_PREFIX}.{entry_id}",
         "data": payload,
     }
+
+
+def _pause_next_store_write(
+    store: EconomicsStateStore, *, fail: bool = False
+) -> tuple[asyncio.Event, asyncio.Event]:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original_save = store._store.async_save
+    first = True
+
+    async def save(data: dict) -> None:
+        nonlocal first
+        if first:
+            first = False
+            entered.set()
+            await release.wait()
+            if fail:
+                raise OSError("Reset-Schreibfehler")
+        await original_save(data)
+
+    store._store.async_save = AsyncMock(side_effect=save)
+    return entered, release
+
+
+async def _active_economics_coordinator(hass) -> SaxPowerCoordinator:
+    coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
+    await coordinator.async_load_energy_state()
+    await coordinator.async_load_economics_state()
+    coordinator._accumulate_economics({}, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0)
+    await coordinator._async_flush_economics_state()
+    return coordinator
 
 
 # --------------------------------------------------------------------------
@@ -937,6 +970,141 @@ async def test_concurrent_writes_do_not_falsely_fail_the_readback(hass) -> None:
 
     assert first_result is True
     assert second_result is True
+
+
+@pytest.mark.parametrize("concurrent_write", [None, "delayed", "flush"])
+async def test_reset_supersedes_polls_and_waiting_old_writes(
+    hass, concurrent_write: str | None
+) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Polls während Reset-I/O frieren die
+    neue Bilanz nicht ein; alte Timer/Flushes schreiben sie nie zurück (#168)."""
+    coordinator = await _active_economics_coordinator(hass)
+    store = coordinator._economics_store
+    old_start = coordinator._economics_started_at
+    entered, release = _pause_next_store_write(store)
+    reset = asyncio.create_task(coordinator.async_restart_economics_accounting())
+    await entered.wait()
+
+    coordinator._accumulate_economics({}, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
+    assert coordinator._economics_priced_charge_kwh == pytest.approx(1.01)
+    waiting_write = None
+    if concurrent_write == "delayed":
+        waiting_write = asyncio.create_task(
+            store._async_delayed_write(dt_util.utcnow())
+        )
+    elif concurrent_write == "flush":
+        waiting_write = asyncio.create_task(coordinator._async_flush_economics_state())
+    if waiting_write is not None:
+        await asyncio.sleep(0)
+        assert not waiting_write.done()
+
+    release.set()
+    await reset
+    if waiting_write is not None:
+        await waiting_write
+    assert store._pending is None
+    assert store._unsub_delayed_write is None
+    assert store._unsub_final_write_listener is None
+
+    data = {}
+    coordinator._accumulate_economics(data, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
+    assert data["economics_status"] == "active"
+    assert data["economics_net_savings"] == pytest.approx(-0.003)
+    assert not coordinator._economics_store_write_blocked
+    await coordinator._async_flush_economics_state()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=301))
+    await hass.async_block_till_done()
+
+    reloaded = await EconomicsStateStore(hass, coordinator.entry_id).async_load()
+    assert reloaded.economics_started_at != old_start
+    assert reloaded.economics_started_at == coordinator._economics_started_at
+    assert reloaded.priced_charge_kwh == pytest.approx(0.01)
+    assert reloaded.grid_charge_cost_eur == pytest.approx(0.003)
+
+
+@pytest.mark.parametrize("start_delayed_write", [False, True])
+async def test_failed_reset_preserves_concurrent_poll_and_pending_persistence(
+    hass, start_delayed_write: bool
+) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Ein fehlgeschlagener Reset erhält auch
+    den während seiner Datei-I/O gewachsenen Altstand und dessen Timer (#168)."""
+    coordinator = await _active_economics_coordinator(hass)
+    store = coordinator._economics_store
+    old_start = coordinator._economics_started_at
+    entered, release = _pause_next_store_write(store, fail=True)
+    reset = asyncio.create_task(coordinator.async_restart_economics_accounting())
+    await entered.wait()
+    coordinator._accumulate_economics({}, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
+    pending_write = None
+    if start_delayed_write:
+        pending_write = asyncio.create_task(
+            store._async_delayed_write(dt_util.utcnow())
+        )
+        await asyncio.sleep(0)
+        assert not pending_write.done()
+    release.set()
+    with pytest.raises(HomeAssistantError, match="Bilanzneustart"):
+        await reset
+    if pending_write is not None:
+        await pending_write
+
+    assert coordinator._economics_started_at == old_start
+    assert coordinator._economics_priced_charge_kwh == pytest.approx(1.01)
+    assert not coordinator._economics_store_write_blocked
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=301))
+    await hass.async_block_till_done()
+    reloaded = await EconomicsStateStore(hass, coordinator.entry_id).async_load()
+    assert reloaded.economics_started_at == old_start
+    assert reloaded.priced_charge_kwh == pytest.approx(1.01)
+    assert reloaded.grid_charge_cost_eur == pytest.approx(0.303)
+
+
+async def test_reset_waits_for_an_already_writing_old_snapshot(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Ein laufender Alt-Write endet vor dem
+    Reset und kann dessen erfolgreichen Stand nicht später ersetzen (#168)."""
+    store = EconomicsStateStore(hass, "reset-after-write")
+    old_start = dt_util.utcnow()
+    old_state = _full_state(old_start)
+    store.async_delay_save(old_state)
+    entered, release = _pause_next_store_write(store)
+    old_write = asyncio.create_task(store._async_delayed_write(dt_util.utcnow()))
+    await entered.wait()
+    reset_state = _full_state(old_start + timedelta(hours=1), grid_charge_cost_eur=0.0)
+    reset = asyncio.create_task(store.async_reset(reset_state))
+    await asyncio.sleep(0)
+    assert not reset.done()
+    release.set()
+    await old_write
+    assert await reset
+    assert (
+        await EconomicsStateStore(hass, "reset-after-write").async_load() == reset_state
+    )
+
+
+async def test_concurrent_coordinator_resets_serialize_their_snapshots(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Der zweite Service startet erst nach
+    Persistierung UND Coordinator-Umstellung des ersten Bilanzneustarts (#168)."""
+    coordinator = await _active_economics_coordinator(hass)
+    store = coordinator._economics_store
+    entered, release = _pause_next_store_write(store)
+    with patch.object(store, "async_reset", wraps=store.async_reset) as reset_store:
+        first = asyncio.create_task(
+            coordinator.async_restart_economics_accounting(reason="Erster Neustart")
+        )
+        await entered.wait()
+        second = asyncio.create_task(
+            coordinator.async_restart_economics_accounting(reason="Zweiter Neustart")
+        )
+        await asyncio.sleep(0)
+        assert reset_store.await_count == 1
+        release.set()
+        await asyncio.gather(first, second)
+
+    assert not coordinator._economics_store_write_blocked
+    reloaded = await EconomicsStateStore(hass, coordinator.entry_id).async_load()
+    assert reloaded.last_restart_reason == "Zweiter Neustart"
+    assert reloaded.economics_started_at == coordinator._economics_started_at
+    assert reloaded.priced_charge_kwh == coordinator._economics_priced_charge_kwh == 0.0
 
 
 # trotzdem erkannt werden - Store._async_handle_write_data fängt eine

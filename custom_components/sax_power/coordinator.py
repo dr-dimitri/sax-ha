@@ -425,8 +425,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_soc_hold_is_window_bound = False
         self._max_soc_hold_is_price_slot_bound = False
         self._max_soc_grid_import_wait_cycles = 0
+        self._max_soc_recharge_confirm_cycles = 0
         self._max_soc_released_for_discharge = False
         self._last_effective_max_soc: int | None = None
+        self._last_observed_soc: int | float | None = None
         # Nicht persistierter Auftrag des kompatiblen start_grid_charge-
         # Service. Die eigentliche Gerätesteuerung läuft ausschließlich über
         # _sun_charge_task und die zentrale Prioritätsentscheidung unter
@@ -2490,8 +2492,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # sofort aufheben. Register 40051 wird dann aktiv auf 0
     # (SmartMeter-Nullregelung) zurückgesetzt, damit die geräteeigene
     # Automatik den Hausverbrauch wieder aus dem Speicher decken kann.
-    # Diese bestätigte Freigabe bleibt verriegelt, solange der SOC nicht
-    # wirklich unter den wirksamen Zielwert fällt. Ohne diesen Latch würde
+    # Diese bestätigte Freigabe bleibt beim Entladen verriegelt; erneutes
+    # Laden oder steigender SOC hebt sie auf. Ohne diesen Latch würde
     # der nächste Poll bei unverändertem SOC sofort wieder 0 % anfordern und
     # die Register zwischen beiden Modi flattern lassen (REQ-TIMED-SOC-CHARGE).
 
@@ -3473,8 +3475,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         zurück, damit kurze Lastspitzen/Messausreißer am Smart Meter keinen
         Zustandswechsel auslösen - siehe const.PV_SURPLUS_HYSTERESIS_CYCLES
         sowie anforderung.yaml, REQ-TIMED-SOC-CHARGE/REQ-GRID-SERVING-CHARGE.
-        Von allen vier Stellen genutzt, die SMARTMETER_PV_SURPLUS_THRESHOLD_
-        WATT auswerten, damit sie sich einheitlich verhalten.
         """
         count = getattr(self, counter_attr) + 1 if condition else 0
         setattr(self, counter_attr, count)
@@ -3777,6 +3777,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         target_soc = self.effective_max_soc
         current_soc = data["soc"]
+        previous_soc = self._last_observed_soc
+        self._last_observed_soc = current_soc
         if (
             self._last_effective_max_soc is not None
             and target_soc < self._last_effective_max_soc
@@ -3903,6 +3905,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not price_slot_hold_active:
                     self._max_soc_hold_is_price_slot_bound = in_price_slot
                 self._max_soc_grid_import_wait_cycles = 0
+                self._max_soc_recharge_confirm_cycles = 0
                 await self.async_start_sun_charge(0)
                 max_soc_clamped_now = True
             elif self._max_soc_hold_is_window_bound:
@@ -3915,6 +3918,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._max_soc_hold_is_window_bound = False
                 self._max_soc_hold_is_price_slot_bound = False
                 self._max_soc_grid_import_wait_cycles = 0
+                self._max_soc_recharge_confirm_cycles = 0
                 # Die am Fenster-/Slotende bewusst freigegebene Sperre darf bei
                 # unverändertem SOC im nächsten Poll nicht sofort als
                 # geräteweite Sperre neu entstehen. Unterhalb des Zielwerts
@@ -3932,12 +3936,34 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Smart Meter als Freigabe-Trigger auswerten, mit
                 # Zyklen-Hysterese gegen kurze Lastspitzen.
                 if self._max_soc_released_for_discharge:
-                    # Nach bestätigter Freigabe darf derselbe unveränderte
-                    # SOC keinen neuen 0-%-Task erzeugen. stop ist nach der
-                    # ersten erfolgreichen Rücksetzung ein Write-freier No-Op.
-                    await self.async_stop_sun_charge()
+                    # Die Nullregelung kann nach dem Entladen wieder PV-Laden
+                    # beginnen, auch ohne vorherige Zielunterschreitung.
+                    # Netzleistung allein übersieht eine Batterie, die den
+                    # Überschuss bereits aufnimmt (REQ-TIMED-SOC-CHARGE).
+                    storage_power = data.get("storage_power_active")
+                    recharge_confirmed = self._cycles_confirmed(
+                        "_max_soc_recharge_confirm_cycles",
+                        pv_surplus_raw
+                        or (
+                            storage_power is not None
+                            and storage_power <= -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT
+                        ),
+                    )
+                    # Der Basic-SOC schützt auch bei fehlenden SunSpec-Werten
+                    # oder Ladung unterhalb der Leistungs-Toleranz.
+                    soc_increased = (
+                        previous_soc is not None and current_soc > previous_soc
+                    )
+                    if recharge_confirmed or soc_increased:
+                        self._max_soc_released_for_discharge = False
+                        self._max_soc_recharge_confirm_cycles = 0
+                        await self.async_start_sun_charge(0)
+                        max_soc_clamped_now = True
+                    else:
+                        await self.async_stop_sun_charge()
                     self._max_soc_grid_import_wait_cycles = 0
                 else:
+                    self._max_soc_recharge_confirm_cycles = 0
                     smartmeter_power = data.get("smartmeter_power")
                     # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_
                     # SURPLUS_THRESHOLD_WATT): positiv = Netzbezug.
@@ -3967,6 +3993,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._max_soc_hold_is_window_bound = False
             self._max_soc_hold_is_price_slot_bound = False
             self._max_soc_grid_import_wait_cycles = 0
+            self._max_soc_recharge_confirm_cycles = 0
             manual_charge_active_now = self._grid_charge_power is not None
             if manual_charge_active_now:
                 await self.async_start_sun_charge(self._grid_charge_power)

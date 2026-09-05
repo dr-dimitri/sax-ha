@@ -246,9 +246,9 @@ def _entry_values(
 ) -> tuple[datetime | None, datetime | None, float | None]:
     """(start, end, preis) eines einzelnen Listeneintrags.
 
-    Reine Zahlen (Tibber-Stil: 24 bzw. 96 Werte für einen Kalendertag)
-    werden gleichmäßig über den Tag verteilt, dafür wird `base_day`
-    benötigt. Dicts liefern Start (und optional Ende) selbst.
+    Reine Zahlen werden gleichmäßig über die reale Dauer des lokalen
+    Kalendertags verteilt, dafür wird `base_day` benötigt. Dicts liefern
+    Start (und optional Ende) selbst.
     """
     if isinstance(entry, Mapping):
         start = None
@@ -274,16 +274,21 @@ def _entry_values(
     price = _coerce_price(entry)
     if price is None or base_day is None or count <= 0:
         return None, None, price
-    slot = timedelta(days=1) / count
-    start = base_day + slot * index
-    return start, start + slot, price
+    day_start = _instant(base_day)
+    day_end = _instant(dt_util.start_of_local_day(base_day.date() + timedelta(days=1)))
+    day_duration = day_end - day_start
+    # REQ-DYNAMIC-PRICE-CHARGE: UTC erhält beide Herbststunden. Jede Grenze
+    # wird separat berechnet, damit gerundete Teildauern nicht kumulieren.
+    start = day_start + day_duration * index / count
+    end = day_start + day_duration * (index + 1) / count
+    return start.astimezone(base_day.tzinfo), end.astimezone(base_day.tzinfo), price
 
 
 def _base_day(attribute: str, now: datetime) -> datetime:
     """Lokale Mitternacht des Tages, auf den sich ein Attribut bezieht."""
     day = dt_util.start_of_local_day(now)
     if "tomorrow" in attribute:
-        return day + timedelta(days=1)
+        return dt_util.start_of_local_day(day.date() + timedelta(days=1))
     return day
 
 

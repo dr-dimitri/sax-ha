@@ -477,6 +477,60 @@ async def test_read_failure_replaces_stale_pv_power_with_zero(
     )
 
 
+@pytest.mark.parametrize("release", ["deadline", "disabled"])
+async def test_basic_outage_preserves_confirmed_charge_as_zero_hold(
+    charge_system: tuple[SaxPowerCoordinator, MagicMock], release: str
+) -> None:
+    """Issue #167: actual grid charging also needs the safe, bounded hold."""
+    coordinator, client = charge_system
+    await _confirm_grid_charge(coordinator)
+    assert coordinator._sun_charge_power < 0
+    assert not coordinator._sun_charge_timed_discharge
+    coordinator._async_read_basic = AsyncMock(side_effect=UpdateFailed("offline"))
+
+    await coordinator.async_refresh()
+
+    assert not coordinator.last_update_success
+    exception = coordinator.last_exception
+    assert coordinator._timed_discharge_state == TimedDischargeState(EXPIRES)
+    assert coordinator._sun_charge_timed_discharge
+    assert coordinator._sun_charge_power == 0
+    assert not coordinator._timed_charge_active
+    assert coordinator.data["timed_charge_discharge_status"] == "discharge_blocked"
+    client.write_register.assert_awaited_with(
+        address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100
+    )
+    await coordinator.price_planner._async_interval_evaluate(NOW)
+    assert not coordinator.last_update_success
+    client.write_register.reset_mock()
+
+    if release == "deadline":
+        await coordinator._async_cancel_sun_charge_task()
+        with (
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.utcnow",
+                return_value=EXPIRES,
+            ),
+            patch(
+                "custom_components.sax_power.coordinator.asyncio.sleep", new=AsyncMock()
+            ),
+        ):
+            await coordinator._async_sun_charge_loop()
+    else:
+        await coordinator.async_set_timed_charge_enabled(False)
+
+    assert coordinator._timed_discharge_state is None
+    assert not coordinator.sun_charge_active
+    assert coordinator.data["timed_charge_discharge_status"] == "normal"
+    assert not coordinator.last_update_success
+    assert coordinator.last_exception is exception
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+
+
 @pytest.mark.parametrize("no_valid_scale", [False, True])
 async def test_hold_writer_replaces_stale_pv_without_waiting_for_coordinator(
     charge_system: tuple[SaxPowerCoordinator, MagicMock], no_valid_scale: bool

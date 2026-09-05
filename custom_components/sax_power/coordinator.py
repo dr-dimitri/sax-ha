@@ -523,6 +523,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (i. d. R. kürzeren) Coordinator-Timer oben.
         self._basic_data: dict[str, Any] = {}
         self._basic_last_read: float | None = None
+        # REQ-TIMED-SOC-CHARGE: self.data survives failed polls and is also
+        # consumed by services/the price timer. Only a successful Basic
+        # read may restore their permission to use that SOC for charging.
+        self._basic_read_failed = False
         # Cache für den HIGH-Block (SunSpec-Modus, dynamische Werte):
         # _async_read_extended befüllt ihn nur alle
         # READ_BLOCK_EXT_HIGH_INTERVAL Sekunden neu.
@@ -651,30 +655,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data = dict(await self._async_read_basic())
             data.update(await self._async_read_extended())
         except UpdateFailed:
+            self._basic_read_failed = True
+            self._basic_last_read = None
             self._high_sample_time = None
             self._timed_charge_grid_measured = False
             self._timed_charge_confirmation_cycles = 0
-            if self._sun_charge_timed_discharge:
-                # REQ-TIMED-SOC-CHARGE: Never repeat stale PV power after
-                # the Basic read bypassed the regular charge decision.
+            if not self._control_bootstrap_pending:
                 async with self._charge_control_lock:
-                    if self._sun_charge_timed_discharge:
-                        try:
-                            if self._timed_discharge_is_active(dt_util.utcnow()):
-                                await self.async_start_sun_charge(
-                                    0, timed_discharge_hold=True
-                                )
-                            else:
-                                await self.async_stop_sun_charge()
-                                await self._async_set_timed_discharge_state(
-                                    None,
-                                    retain_expiry=self._timed_charge_enabled
-                                    and not self._price_charge_enabled,
-                                )
-                        except HomeAssistantError:
-                            _LOGGER.exception(
-                                "Entladesperre: sicherer 0-W-Sollwert fehlgeschlagen"
-                            )
+                    await self._async_suspend_charge_for_missing_soc()
             # Die Riemann-Baseline darf einen Ausfall nicht überbrücken:
             # _energy_last_ts wird ausschließlich in _accumulate_energy
             # fortgeschrieben, das bei einem fehlgeschlagenen Basic-Read gar
@@ -697,7 +685,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # REQ-CONTROL-CONFIG-BOOTSTRAP: Lesen ist während des Bootstraps
             # erlaubt, Steuern nicht - der erste Refresh läuft absichtlich
             # ohne Ladeentscheidung durch.
-            await self._async_enforce_grid_charge(data)
+            async with self._charge_control_lock:
+                # Recovery must evaluate the new SOC before a timer/service
+                # can resume a charge using the previous self.data snapshot.
+                self._basic_read_failed = False
+                await self._async_enforce_grid_charge_locked(data)
+        else:
+            self._basic_read_failed = False
         self._publish_charge_state(data)
         self._async_check_self_diagnostics()
         return data
@@ -2976,6 +2970,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Coordinator-Update gestartet werden"
             )
         async with self._charge_control_lock:
+            if self._basic_read_failed:
+                raise HomeAssistantError(
+                    "Netzladung benötigt einen erfolgreichen Basic-Mode-Read "
+                    "mit aktuellem SOC"
+                )
             previous_power = self._grid_charge_power
             self._grid_charge_power = power
             try:
@@ -3122,6 +3121,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Execute one sequence while the Immediate Controls lock is held."""
         requested_power = self._sun_charge_power if power is None else power
+        if requested_power < 0 and self._basic_read_failed:
+            raise HomeAssistantError(
+                "Negativer Ladesollwert ohne gültigen Basic-Mode-SOC gesperrt"
+            )
         # REQ-TIMED-SOC-CHARGE: Jede Voraussetzung und der endgültige
         # int16-Rohwert müssen feststehen, bevor Modus 1 das Gerät aus seiner
         # sicheren SmartMeter-Nullregelung nimmt.
@@ -3359,7 +3362,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             )
                             if self.data is not None:
                                 self._publish_charge_state(self.data)
-                                self.async_set_updated_data(self.data)
+                                self.async_update_listeners()
                             return
                         power = self._timed_discharge_pv_setpoint()
                         await self._async_write_sun_charge_setpoint(
@@ -3450,7 +3453,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _timed_discharge_pv_setpoint(self) -> int:
         if (
-            not self._timed_discharge_measurements_fresh()
+            self._basic_read_failed
+            or not self._timed_discharge_measurements_fresh()
             or self.data is None
             or self.data.get("soc") is None
             or self.data["soc"] >= self.effective_max_soc
@@ -3757,7 +3761,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.data is not None:
             await self._async_enforce_grid_charge(self.data)
             self._publish_charge_state(self.data)
-            self.async_set_updated_data(self.data)
+            self.async_update_listeners()
+
+    async def _async_suspend_charge_for_missing_soc(self) -> None:
+        """Apply the safe outage state while the charge-control lock is held."""
+        self._clear_sun_charge_active_flags()
+        try:
+            if self._timed_discharge_is_active(dt_util.utcnow()):
+                # A confirmed hold survives the outage, but no PV/grid
+                # charging is safe without its independent global SOC cap.
+                await self.async_start_sun_charge(0, timed_discharge_hold=True)
+                self._timed_charge_discharge_status = "discharge_blocked"
+            else:
+                await self.async_stop_sun_charge()
+                await self._async_set_timed_discharge_state(
+                    None,
+                    retain_expiry=self._timed_charge_enabled
+                    and not self._price_charge_enabled,
+                )
+                self._timed_charge_discharge_status = (
+                    None if self._sun_charge_reset_required else "normal"
+                )
+        except HomeAssistantError:
+            _LOGGER.exception("Ladesteuerung: sicherer Zustand ohne SOC fehlgeschlagen")
+        if self.data is not None:
+            self._publish_charge_state(self.data)
 
     def _cycles_confirmed(self, counter_attr: str, condition: bool) -> bool:
         """Zyklen-Hysterese für Vergleiche gegen
@@ -4050,6 +4078,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
+        if self._basic_read_failed:
+            await self._async_suspend_charge_for_missing_soc()
+            return
         command_revision_before = self._sun_charge_command_revision
         timed_was_active = self._timed_charge_active
         await self._async_update_timed_discharge_proof(dt_util.now())

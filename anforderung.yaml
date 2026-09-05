@@ -156,6 +156,10 @@ requirement_extended_mode_resilience:
        Zustand 'unbekannt' (tests/test_integration_live.py)."
     - "Unit-Tests decken sowohl den Übergang verfügbar -> nicht verfügbar
        als auch die Wiederherstellung ab (tests/test_coordinator.py)."
+    - "tests/test_charge_soc_availability.py deckt Basic-Ausfall während
+       aller Netzladearten, sichere Rücksetzung und Wiederanlauf mit neuem
+       SOC sowie Timer-/Service-Aufrufe ohne gültigen SOC ab. Steuerupdates
+       dürfen einen fehlgeschlagenen Read nicht als erfolgreich markieren."
 
 # ==============================================================================
 # ANFORDERUNG: TESTS GEGEN ECHTE SAX-HARDWARE
@@ -688,6 +692,28 @@ requirement_timed_soc_charge:
     alten oder undefinierten Sollwert in Modus 1 zurücklassen. Ein eigener
     Sequenz-Lock verhindert außerdem, dass periodische Wiederholung und
     sofortige Änderung ihre jeweiligen 40051/40049-Writes verschachteln.
+
+    Ein fehlgeschlagener Basic-Mode-Read entzieht sofort die SOC-Freigabe
+    für negative Sollwerte aller Ladearten, einschließlich manueller und
+    preisoptimierter Netzladung (Issue #167). Der laufende reguläre Writer
+    wird beendet und Register 40051 aktiv auf 0 zurückgesetzt; eine nicht
+    quittierte Rücksetzung bleibt zur Wiederholung vorgemerkt. Ein bereits
+    bestätigter zeitgesteuerter Netzladenachweis wechselt auch während noch
+    laufender Netzladung stattdessen auf den sicheren 0-W-Haltemodus bis zur
+    ursprünglichen Frist. Im bestätigten Haltemodus bleibt auch PV-Laden
+    während dieses Ausfalls gesperrt.
+    Ohne neuen erfolgreichen Basic-Read dürfen weder periodische Writer
+    noch Preisplan-Timer oder Einstellungsänderungen negative Sollwerte
+    anhand der alten coordinator.data erneut freigeben. Neue manuelle
+    Ladeaufträge werden währenddessen mit HomeAssistantError abgelehnt;
+    bestehende Aufträge dürfen nach Wiederherstellung mit dem dann real
+    gelesenen SOC und den aktuellen Grenzen erneut ausgewertet werden.
+    Der regulär innerhalb scan_interval wiederverwendete Basic-Cache bleibt
+    gültig, solange kein Read fehlgeschlagen ist. Die Wiederfreigabe wird
+    unter dem gemeinsamen Steuer-Lock zuerst mit dem neuen SOC ausgewertet.
+    Reine Steuerzustandsmeldungen, einschließlich der Entladesperren-Frist,
+    benachrichtigen Entity-Listener, ohne last_update_success zu verändern
+    oder einen fehlgeschlagenen Messdaten-Refresh als behoben darzustellen.
 
     Der Basic-Mode-P-Sollwert (Register 41) wird nur noch als Diagnosewert
     gelesen. Der manuelle start_grid_charge/stop_grid_charge-Service ist ein

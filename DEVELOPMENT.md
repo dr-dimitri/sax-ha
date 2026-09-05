@@ -1140,6 +1140,15 @@ explizit - ohne das würde der direkt danach ausgelöste `async_refresh()`
 sonst innerhalb des `scan_interval`-Fensters den alten, gecachten Wert
 liefern statt den soeben geschriebenen.
 
+Preisplan-Timer und Änderungen reiner Steuerwerte veröffentlichen ihre
+Ergebnisse mit `async_update_listeners()`. Sie ersetzen keinen erfolgreichen
+Messdaten-Refresh und verändern dessen Verfügbarkeit nicht. Nach einem
+Basic-Lesefehler sperrt der Coordinator negative Sollwerte bis zur erneuten
+Auswertung eines erfolgreich gelesenen SOC unter dem Steuer-Lock. Der
+Schreibpfad prüft dieselbe Sperre; ein bestätigter zeitgesteuerter
+Netzladenachweis darf währenddessen nur mit 0 W gehalten werden (Details:
+REQ-TIMED-SOC-CHARGE, Issue #167).
+
 ## Tests
 
 ```
@@ -1147,6 +1156,8 @@ tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
 ├── test_calibration.py           Reine 7-Tage-/Voll-SOC-Policy und versionierte
 │                                  UTC-Persistenz einschließlich ungültiger Daten
+├── test_charge_soc_availability.py Basic-Ausfall: Writer-Stopp, Timer/Services,
+│                                  SOC-gesteuerte Wiederaufnahme und Verfügbarkeit
 ├── test_sunspec_decoder.py       Reine Decodertests für domain/sunspec.py (ohne
 │                                  Coordinator/HA/pymodbus): alle vier SunSpec-Modelle,
 │                                  Signed/Unsigned/Sentinelwerte, ASCII-Register, unbekannte

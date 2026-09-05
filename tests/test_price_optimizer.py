@@ -12,6 +12,7 @@ Aufgeteilt in drei Blöcke:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -158,6 +159,119 @@ def test_parse_price_slots_quarter_hourly_entries() -> None:
 
     assert len(slots) == 96
     assert slots[0].end - slots[0].start == timedelta(minutes=15)
+
+
+@pytest.fixture
+def berlin_time_zone() -> Iterator[ZoneInfo]:
+    berlin = ZoneInfo("Europe/Berlin")
+    previous = dt_util.DEFAULT_TIME_ZONE
+    dt_util.set_default_time_zone(berlin)
+    try:
+        yield berlin
+    finally:
+        dt_util.set_default_time_zone(previous)
+
+
+@pytest.mark.parametrize("attribute", ["today", "tomorrow"])
+@pytest.mark.parametrize("slot_minutes", [60, 15])
+@pytest.mark.parametrize(
+    ("month", "day", "day_hours"), [(1, 15, 24), (3, 29, 23), (10, 25, 25)]
+)
+def test_numeric_price_arrays_cover_local_calendar_day(
+    berlin_time_zone: ZoneInfo,
+    attribute: str,
+    slot_minutes: int,
+    month: int,
+    day: int,
+    day_hours: int,
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Tagespreise behalten reale Tarifintervalle."""
+    day_start = datetime(2026, month, day, tzinfo=berlin_time_zone)
+    now = day_start - timedelta(days=attribute == "tomorrow")
+    count = day_hours * 60 // slot_minutes
+    prices = [index / 1000 for index in range(count)]
+
+    slots = parse_price_slots(_FakeState(**{attribute: prices}), now=now)
+
+    assert len(slots) == count
+    assert [slot.price for slot in slots] == prices
+    for index, slot in enumerate(slots):
+        assert slot.start.astimezone(UTC) == day_start.astimezone(UTC) + timedelta(
+            minutes=index * slot_minutes
+        )
+        assert slot.end.astimezone(UTC) == day_start.astimezone(UTC) + timedelta(
+            minutes=(index + 1) * slot_minutes
+        )
+    assert slots[-1].end.isoformat() == (day_start + timedelta(days=1)).isoformat()
+
+
+@pytest.mark.parametrize("attribute", ["today", "tomorrow"])
+@pytest.mark.parametrize(("month", "day"), [(1, 15), (3, 29), (10, 25)])
+def test_numeric_price_arrays_keep_exact_day_end_for_fractional_slots(
+    berlin_time_zone: ZoneInfo, attribute: str, month: int, day: int
+) -> None:
+    """Issue #105: Gerundete Teildauern dürfen die Tagesgrenze nicht verschieben."""
+    day_start = datetime(2026, month, day, tzinfo=berlin_time_zone)
+    now = day_start - timedelta(days=attribute == "tomorrow")
+
+    slots = parse_price_slots(_FakeState(**{attribute: [0.20] * 7}), now=now)
+
+    assert len(slots) == 7
+    assert slots[0].start.isoformat() == day_start.isoformat()
+    assert slots[-1].end.isoformat() == (day_start + timedelta(days=1)).isoformat()
+    assert all(
+        previous.end.astimezone(UTC) == following.start.astimezone(UTC)
+        for previous, following in zip(slots, slots[1:], strict=False)
+    )
+
+
+def test_numeric_price_arrays_report_spring_price_after_clock_change(
+    berlin_time_zone: ZoneInfo,
+) -> None:
+    """Issue #105: Nach dem Uhrsprung gilt um 03:30 der dritte Stundenpreis."""
+    now = datetime(2026, 3, 29, 3, 30, tzinfo=berlin_time_zone)
+    slots = parse_price_slots(
+        _FakeState(today=[index / 100 for index in range(23)]), now=now
+    )
+
+    assert current_price(slots, now) == pytest.approx(0.02)
+    assert compute_plan(now, slots, _ctx(max_price=0.02)).charge_now
+
+
+def test_numeric_price_arrays_preserve_autumn_folds_and_price_limit(
+    berlin_time_zone: ZoneInfo,
+) -> None:
+    """Issue #105: Ein verschobener Billigpreis darf keine Netzladung auslösen."""
+    day_start = datetime(2026, 10, 25, tzinfo=berlin_time_zone)
+    slots = parse_price_slots(
+        _FakeState(today=[index / 100 for index in range(25)]), now=day_start
+    )
+    first = datetime(2026, 10, 25, 2, 55, tzinfo=berlin_time_zone, fold=0)
+    second = datetime(2026, 10, 25, 2, 55, tzinfo=berlin_time_zone, fold=1)
+
+    assert slots[2].start.hour == slots[3].start.hour == 2
+    assert slots[2].start.fold == 0
+    assert slots[3].start.fold == 1
+    assert current_price(slots, first) == pytest.approx(0.02)
+    assert current_price(slots, second) == pytest.approx(0.03)
+
+    now = datetime(2026, 10, 25, 3, 5, tzinfo=berlin_time_zone)
+    plan = compute_plan(now, slots, _ctx(max_price=0.03))
+
+    assert plan.current_price == pytest.approx(0.04)
+    assert not plan.charge_now
+    relative = compute_plan(
+        first, slots, _ctx(strategy=PRICE_STRATEGY_RELATIVE, hours=2)
+    )
+    assert relative.charge_now
+    assert sum(
+        (
+            slot.end.astimezone(UTC) - slot.start.astimezone(UTC)
+            for slot in relative.slots
+        ),
+        timedelta(),
+    ) == timedelta(hours=2)
+    assert relative.slots[1].start.fold == 1
 
 
 def test_parse_price_slots_data_attribute_with_start_time() -> None:

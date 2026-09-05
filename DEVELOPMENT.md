@@ -196,6 +196,13 @@ beiden realen 02-Uhr-Slots der herbstlichen Zeitumstellung getrennt. Naive
 Anbieter-Zeitstempel werden weiterhin als lokale Home-Assistant-Zeit
 interpretiert (Issue #149).
 
+Numerische Preisarrays für `today`/`tomorrow` werden zwischen zwei lokalen
+Mitternachten über die reale UTC-Tagesdauer verteilt. Dadurch behalten auch
+23/25-Stunden- und 92/100-Viertelstundenlisten an Zeitumstellungstagen ihre
+Tarifintervalle. Jede Slotgrenze wird direkt aus Tagesdauer und Index
+berechnet; bei anderen Arraylängen verschiebt kumulierte Rundung deshalb
+nicht die letzte Grenze über Mitternacht hinaus (Issue #105).
+
 Kein Formularschema darf einen Validator enthalten, den
 `voluptuous_serialize` nicht für das Frontend übersetzen kann - eine
 gewöhnliche Python-Funktion in einem `vol.All` gehört dazu. Der Fehler fliegt

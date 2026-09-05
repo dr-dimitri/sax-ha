@@ -1763,6 +1763,18 @@ requirement_dynamic_price_charge:
     werden gleichermaßen unterstützt; ct/kWh wird anhand der Sensor-Einheit
     (oder einer expliziten Vorgabe) auf EUR/kWh umgerechnet.
 
+    Numerische Tagesarrays werden zwischen dem lokalen Tagesanfang und
+    dem Beginn des nächsten Kalendertags auf einer UTC-Zeitleiste verteilt
+    (Issue #105). So ergeben 23/24/25 Stundenwerte und 92/96/100
+    Viertelstundenwerte auch an Zeitumstellungstagen jeweils reale
+    Stunden- bzw. Viertelstunden-Slots; beide lokalen Herbststunden bleiben
+    unterschiedliche Zeitpunkte. Für andere Arraylängen werden die Grenzen
+    einzeln aus der realen Tagesdauer berechnet, damit Rundung sich nicht
+    aufsummiert und das letzte Ende exakt auf die nächste lokale
+    Mitternacht fällt. Morgenattribute beziehen sich auf den nächsten
+    lokalen Kalendertag. Explizite Start-/End-Zeitstempel werden weiterhin
+    unverändert nach den bestehenden Anbieterregeln interpretiert.
+
     Der Sensor "Aktueller Preis" (price_charge_current_price) liest den
     Preis des gerade laufenden Slots unabhängig von Strategie und
     Enabled-Schalter aus - er ist eine reine Info-Anzeige und bleibt daher
@@ -2027,6 +2039,11 @@ requirement_dynamic_price_charge:
        Max-SOC-Sperre an den ausgewählten Preis-Slot, hält sie trotz
        Netzbezug und SOC-Abfall und weist die aktive Rückkehr zur
        SmartMeter-Nullregelung am Slotende nach."
+    - "Die numerischen Preisarray-Tests prüfen today/tomorrow an normalen,
+       Frühjahrs- und Herbsttagen mit Stunden- und Viertelstundenwerten,
+       exakte Tagesgrenzen bei sieben Werten, beide Herbststunden sowie
+       Preisgrenze und reale Ladedauer. Die bestehenden expliziten
+       ISO-Slot-Tests sichern deren unveränderte Zeitinterpretation."
     - "tests/test_number.py deckt die Vorbelegung und Klemmung der drei
        neuen Number-Entities (Preisgrenze, Neutralpreis, Anzahl Stunden)
        ab."

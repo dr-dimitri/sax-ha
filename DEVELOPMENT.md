@@ -562,6 +562,22 @@ Pfad, der keinen wartenden Aufrufer mehr hat, über den optionalen
 `on_persist_failed`-Callback
 (`SaxPowerCoordinator._on_economics_persist_failed`).
 
+Ein Bilanzneustart und sämtliche Schreib-/Leseprüfungen sind über den
+Store-Lock serialisiert (Issue #168). Normale Polls dürfen während der
+Reset-Dateizugriffe weiterhin die bisherige Bilanz fortschreiben. Erst
+nach erfolgreicher Persistierung räumt der Reset deren ausstehende
+Snapshots, Timer und Final-Write-Listener auf. Bei einem Fehler bleiben
+auch die währenddessen hinzugekommenen Beträge und ihre geplante
+Persistierung erhalten. Verzögerte Writes entnehmen ihren Snapshot erst
+unter dem Lock; wartende Sofort-Writes erkennen über eine beim Aufruf
+erfasste Laufzeitgeneration, ob ein erfolgreicher Reset sie bereits
+abgelöst hat, und werden dann ohne Speicherfehler übersprungen. Damit
+kann auch ein gleichzeitig angeforderter Shutdown-Flush keinen Altstand
+zurückschreiben. Mehrere Service-Aufrufe serialisiert zusätzlich der
+Coordinator über seinen Reset-Lock. Die In-Memory-Umstellung nach einem
+erfolgreichen Store-Reset enthält keinen weiteren `await`, damit kein
+Poll einen alten Coordinator-Stand unter der neuen Generation vormerkt.
+
 ### Dashboard-Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
 
 Der fünfte View verwendet `economics_net_savings` für alle Kalender- und

@@ -631,6 +631,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # persistiert für den lokalen Diagnose-Download.
         self._economics_last_restart_at: datetime | None = None
         self._economics_last_restart_reason: str | None = None
+        self._economics_reset_lock = asyncio.Lock()
         # Basic Mode (Slave-ID self.slave_id) ist die Mindestanforderung für
         # jede Funktion der Integration und lässt das Update fehlschlagen
         # (UpdateFailed), wenn es nicht lesbar ist. Der SunSpec-Modus
@@ -1928,6 +1929,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         späteren Tarif-/Investitionsänderung - das war schon vorher so und
         ändert sich durch diesen Service nicht.
         """
+        async with self._economics_reset_lock:
+            await self._async_restart_economics_accounting_locked(reason=reason)
+
+    async def _async_restart_economics_accounting_locked(
+        self, *, reason: str | None
+    ) -> None:
+        """Serialize reset snapshots through their in-memory commit."""
         economics_ready = (
             self.tariff_provider.config.enabled
             and self._economics_started_at is not None
@@ -1972,6 +1980,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "bisherige Zustand bleibt unverändert bestehen"
             )
 
+        # REQ-ECONOMICS-OBSERVABILITY: Bis zur vollständigen Umstellung kein
+        # weiteres await; sonst könnte ein Poll einen alten Coordinator-Stand
+        # bereits unter der neuen Store-Generation vormerken.
         self._economics_grid_charge_cost_eur = 0.0
         self._economics_pv_opportunity_cost_eur = 0.0
         self._economics_avoided_grid_cost_eur = 0.0

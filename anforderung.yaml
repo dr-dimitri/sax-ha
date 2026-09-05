@@ -3975,7 +3975,7 @@ requirement_economics_observability:
     (`SaxPowerCoordinator._on_economics_persist_failed`). Die gesamte
     save-then-load-Sequenz aus `_write_and_verify` läuft dabei unter einem
     pro `EconomicsStateStore`-Instanz gehaltenen `asyncio.Lock`
-    (`_write_and_verify_lock`): `Store.async_save()` überschreibt
+    (`_write_lock`): `Store.async_save()` überschreibt
     `Store._data` sofort, unabhängig von einem eventuell noch laufenden
     anderen Schreibvorgang (nur die eigentliche Schreib-E/A ist über
     `Store._write_lock` serialisiert) - ein zweiter, überlappender
@@ -4054,7 +4054,20 @@ requirement_economics_observability:
     _accept, prüft aber weiterhin Endlichkeit/Wertebereich) VOR jeder
     In-Memory-Änderung: schlägt das Speichern fehl, bleibt der bisherige
     Zustand vollständig und unverändert bestehen (kein halb angewendeter
-    Neustart). Keine rückwirkende Neuberechnung und kein automatischer
+    Neustart). Während der asynchronen Reset-Persistierung dürfen normale
+    Polls die bisherige Bilanz weiterhin fortschreiben. Erst der erfolgreich
+    geschriebene und zurückgelesene Reset verwirft unter dem Store-Lock alle
+    ausstehenden Altstände und ihre Timer; bei Fehlschlag bleiben auch die
+    zwischenzeitlich hinzugekommenen Beträge und deren geplante Persistierung
+    erhalten. Ein verzögerter Write entnimmt seinen Snapshot erst unter
+    demselben Lock. Bereits wartende Sofort-Writes, etwa der Shutdown-Flush,
+    tragen die beim Aufruf erfasste Bilanzgeneration: Nach einem erfolgreichen
+    Reset werden Writes der alten Generation ohne Speicherfehler übersprungen.
+    Ein bereits laufender Alt-Write endet vor dem Reset. Ein eigener
+    Coordinator-Lock serialisiert mehrere Reset-Aufrufe einschließlich ihrer
+    Snapshot-Erfassung und der anschließenden synchronen In-Memory-Umstellung;
+    Modbus-Polls und Ladeentscheidungen warten nicht auf Reset-Dateizugriffe
+    (Issue #168). Keine rückwirkende Neuberechnung und kein automatischer
     Reset bei einer späteren Tarif-/Investitionsänderung - das gilt
     unverändert weiter.
 
@@ -4104,6 +4117,12 @@ requirement_economics_observability:
        vollständig unverändert), setzt den unbewerteten Bestand auf 0 und
        lässt alle Energie-/Herkunftszähler unangetastet
        (tests/test_coordinator.py, tests/test_init.py)."
+    - "Ein Poll während Reset-Datei-I/O darf weder storage_error auslösen
+       noch den erfolgreichen Reset später durch einen alten Timer-/Flush-
+       Snapshot ersetzen. Bereits laufende Writes und zwei parallele
+       Reset-Aufrufe sind serialisiert; ein fehlgeschlagener Reset erhält
+       den währenddessen gewachsenen Altstand samt verzögerter Persistierung
+       (tests/test_economics_persistence.py, Issue #168)."
     - "Alle fünf kumulativen Geldsensoren verwenden denselben persistierten
        Bilanzbeginn als last_reset. Ein echter Recorder-Test weist für alle
        vier Rohsummen nach, dass auch ein Neustart nach negativem operativem

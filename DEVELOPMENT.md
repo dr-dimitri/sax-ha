@@ -1146,8 +1146,10 @@ Messdaten-Refresh und verändern dessen Verfügbarkeit nicht. Nach einem
 Basic-Lesefehler sperrt der Coordinator negative Sollwerte bis zur erneuten
 Auswertung eines erfolgreich gelesenen SOC unter dem Steuer-Lock. Der
 Schreibpfad prüft dieselbe Sperre; ein bestätigter zeitgesteuerter
-Netzladenachweis darf währenddessen nur mit 0 W gehalten werden (Details:
-REQ-TIMED-SOC-CHARGE, Issue #167).
+Netzladenachweis darf währenddessen nur mit 0 W gehalten werden. Auch eine
+bereits angewendete Max-SOC-Sperre bleibt bei 0 W; bekannte Fenster- und
+Preis-Slotgrenzen gelten weiterhin, alte Leistungsmessungen lösen keine
+neue Freigabe aus (Details: REQ-TIMED-SOC-CHARGE, Issue #167).
 
 ## Tests
 

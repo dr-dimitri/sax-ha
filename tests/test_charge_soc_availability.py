@@ -222,3 +222,116 @@ async def test_failed_outage_reset_cancels_writer_and_retries_without_charging(
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
         device_id=100,
     )
+
+
+async def test_basic_failure_preserves_existing_global_max_soc_hold(
+    charge_system: tuple[SaxPowerCoordinator, MagicMock],
+) -> None:
+    """A read failure must not permit PV charging above an established cap."""
+    coordinator, client = charge_system
+    await coordinator.async_set_max_soc(30)
+    assert coordinator.max_soc_clamped and coordinator._sun_charge_power == 0
+    assert coordinator._timed_discharge_state is None
+    # This last power sample would release the cap if counted again by timers.
+    coordinator.data["smartmeter_power"] = 500
+    client.write_register.reset_mock()
+
+    await _fail_basic_read(coordinator, client)
+    for _ in range(3):
+        await coordinator.price_planner._async_interval_evaluate(NOW)
+
+    assert coordinator.max_soc_clamped
+    assert coordinator.sun_charge_active
+    assert coordinator._sun_charge_power == 0
+    assert not coordinator.last_update_success
+    client.write_register.assert_not_awaited()
+
+    # A transient writer failure must not erase the known reason to hold 0 W.
+    await coordinator._async_cancel_sun_charge_task()
+    client.write_register.side_effect = ModbusException("temporärer Schreibfehler")
+    await coordinator.price_planner._async_interval_evaluate(NOW)
+    assert not coordinator.sun_charge_active
+    client.write_register.side_effect = None
+    await coordinator.price_planner._async_interval_evaluate(NOW)
+    assert coordinator.max_soc_clamped and coordinator.sun_charge_active
+    client.write_register.assert_awaited_with(
+        address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "release"),
+    [
+        ("timed", "deadline"),
+        ("timed", "disabled"),
+        ("grid_serving", "deadline"),
+        ("grid_serving", "disabled"),
+        ("price", "deadline"),
+        ("price", "disabled"),
+        ("price", "price_limit"),
+    ],
+)
+async def test_existing_window_bound_cap_expires_even_without_basic_soc(
+    hass: HomeAssistant,
+    charge_system: tuple[SaxPowerCoordinator, MagicMock],
+    mode: str,
+    release: str,
+) -> None:
+    """Keeping a safe zero must still honor known window/slot boundaries."""
+    coordinator, client = charge_system
+    if mode == "timed":
+        await coordinator.async_set_timed_charge_enabled(True)
+    elif mode == "grid_serving":
+        coordinator._grid_serving_start = dt_time(1)
+        coordinator._grid_serving_end = dt_time(5)
+        await coordinator.async_set_grid_serving_enabled(True)
+    else:
+        coordinator.options = {
+            CONF_PRICE_SENSOR: "sensor.test_price",
+            CONF_PRICE_UNIT: PRICE_UNIT_EUR_KWH,
+        }
+        hass.states.async_set(
+            "sensor.test_price",
+            "0.10",
+            {
+                "raw_today": [
+                    {"start": NOW, "end": NOW + timedelta(hours=3), "value": 0.10}
+                ]
+            },
+        )
+        coordinator._price_charge_max_price = 0.20
+        coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
+        await coordinator.async_set_price_charge_enabled(True)
+    await coordinator.async_set_max_soc(30)
+    assert coordinator.max_soc_clamped
+    assert coordinator._max_soc_hold_is_window_bound
+    assert coordinator._timed_discharge_state is None
+
+    await _fail_basic_read(coordinator, client)
+    await coordinator.price_planner._async_interval_evaluate(NOW)
+    assert coordinator.max_soc_clamped and coordinator.sun_charge_active
+    client.write_register.reset_mock()
+
+    if release == "deadline":
+        later = NOW + timedelta(hours=3)
+        with patch(
+            "custom_components.sax_power.coordinator.dt_util.now", return_value=later
+        ):
+            await coordinator.price_planner._async_interval_evaluate(later)
+    elif release == "price_limit":
+        await coordinator.async_set_price_charge_max_price(0.05)
+    elif mode == "timed":
+        await coordinator.async_set_timed_charge_enabled(False)
+    elif mode == "grid_serving":
+        await coordinator.async_set_grid_serving_enabled(False)
+    else:
+        await coordinator.async_set_price_charge_enabled(False)
+
+    assert not coordinator.max_soc_clamped
+    assert not coordinator.sun_charge_active
+    assert not coordinator.last_update_success
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )

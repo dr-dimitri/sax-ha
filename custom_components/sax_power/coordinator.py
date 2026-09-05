@@ -527,6 +527,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # consumed by services/the price timer. Only a successful Basic
         # read may restore their permission to use that SOC for charging.
         self._basic_read_failed = False
+        self._max_soc_hold_during_basic_outage = False
         # Cache für den HIGH-Block (SunSpec-Modus, dynamische Werte):
         # _async_read_extended befüllt ihn nur alle
         # READ_BLOCK_EXT_HIGH_INTERVAL Sekunden neu.
@@ -689,6 +690,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Recovery must evaluate the new SOC before a timer/service
                 # can resume a charge using the previous self.data snapshot.
                 self._basic_read_failed = False
+                self._max_soc_hold_during_basic_outage = False
                 await self._async_enforce_grid_charge_locked(data)
         else:
             self._basic_read_failed = False
@@ -3349,6 +3351,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                     SUN_IC_CONTROL_MODE_SMARTMETER
                                 )
                             self._sun_charge_timed_discharge = False
+                            self._max_soc_hold_during_basic_outage = False
                             self._timed_charge_discharge_status = "normal"
                             if self._max_soc_clamped:
                                 self._max_soc_released_for_discharge = True
@@ -3765,15 +3768,32 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_suspend_charge_for_missing_soc(self) -> None:
         """Apply the safe outage state while the charge-control lock is held."""
+        had_max_soc_hold = (
+            self._max_soc_clamped or self._max_soc_hold_during_basic_outage
+        )
+        self._max_soc_hold_during_basic_outage = (
+            had_max_soc_hold and self._max_soc_outage_hold_still_required()
+        )
         self._clear_sun_charge_active_flags()
         try:
             if self._timed_discharge_is_active(dt_util.utcnow()):
                 # A confirmed hold survives the outage, but no PV/grid
                 # charging is safe without its independent global SOC cap.
                 await self.async_start_sun_charge(0, timed_discharge_hold=True)
+                self._max_soc_clamped = had_max_soc_hold
                 self._timed_charge_discharge_status = "discharge_blocked"
+            elif self._max_soc_hold_during_basic_outage:
+                # Losing the SOC cannot undo an already confirmed cap and
+                # thereby permit PV charging above that cap (Issue #167).
+                await self.async_start_sun_charge(0)
+                self._max_soc_clamped = True
+                self._timed_charge_discharge_status = "normal"
             else:
                 await self.async_stop_sun_charge()
+                if had_max_soc_hold and self._max_soc_hold_is_window_bound:
+                    self._max_soc_hold_is_window_bound = False
+                    self._max_soc_hold_is_price_slot_bound = False
+                    self._max_soc_released_for_discharge = True
                 await self._async_set_timed_discharge_state(
                     None,
                     retain_expiry=self._timed_charge_enabled
@@ -3786,6 +3806,49 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("Ladesteuerung: sicherer Zustand ohne SOC fehlgeschlagen")
         if self.data is not None:
             self._publish_charge_state(self.data)
+
+    def _max_soc_outage_hold_still_required(self) -> bool:
+        """Keep an established cap without treating old power as new evidence."""
+        if not self._max_soc_hold_is_window_bound:
+            return True
+        in_price_slot = (
+            self._price_charge_enabled
+            and self._price_charge_strategy != PRICE_STRATEGY_OFF
+            and self.price_planner.plan.charge_now
+        )
+        if self._max_soc_hold_is_price_slot_bound:
+            return in_price_slot
+        now = dt_util.now()
+        if (
+            self._timed_charge_enabled
+            and now.month in self._timed_charge_months
+            and is_time_in_window(
+                now.time(), self._timed_charge_start, self._timed_charge_end
+            )
+            and not completed_window_extended(
+                now,
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_discharge_last_window_end,
+            )
+        ):
+            return True
+        if (
+            self._grid_serving_enabled
+            and now.month in self._grid_serving_months
+            and is_time_in_window(
+                now.time(), self._grid_serving_start, self._grid_serving_end
+            )
+        ):
+            threshold = self.grid_serving_forecast_threshold_kwh
+            forecast = self.price_planner.forecast_kwh()
+            if (
+                self.price_planner.pv_forecast_entity_id is None
+                or threshold <= 0
+                or (forecast is not None and forecast >= threshold)
+            ):
+                return True
+        return in_price_slot
 
     def _cycles_confirmed(self, counter_attr: str, condition: bool) -> bool:
         """Zyklen-Hysterese für Vergleiche gegen

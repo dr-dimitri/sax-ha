@@ -695,9 +695,18 @@ requirement_timed_soc_charge:
 
     Ein fehlgeschlagener Basic-Mode-Read entzieht sofort die SOC-Freigabe
     für negative Sollwerte aller Ladearten, einschließlich manueller und
-    preisoptimierter Netzladung (Issue #167). Der laufende reguläre Writer
-    wird beendet und Register 40051 aktiv auf 0 zurückgesetzt; eine nicht
-    quittierte Rücksetzung bleibt zur Wiederholung vorgemerkt. Ein bereits
+    preisoptimierter Netzladung (Issue #167). Ein laufender Writer mit
+    negativem Sollwert wird beendet und Register 40051 aktiv auf 0
+    zurückgesetzt; eine nicht quittierte Rücksetzung bleibt zur Wiederholung
+    vorgemerkt. Eine zuvor angewendete Max-SOC-Sperre bleibt dagegen bei
+    0 W, damit der Lesefehler keine PV-Ladung über die bereits erreichte
+    Grenze freigibt. Ihr Haltegrund bleibt auch nach einem Schreibfehler
+    für die erneute sichere Anwendung erhalten. Alte Smartmeterwerte dürfen
+    diese Sperre nicht als neue Netzbezugsbestätigung freigeben. War die
+    Sperre an ein Zeitfenster oder einen Preis-Slot gebunden, gelten dessen
+    aktuelle Uhrzeiten, Monate, Aktivierung und Prognosefreigabe beziehungsweise
+    der aktuelle Preisplan weiterhin; Fenster-/Slotende oder Abschalten
+    geben sie auch ohne neuen SOC frei. Ein bereits
     bestätigter zeitgesteuerter Netzladenachweis wechselt auch während noch
     laufender Netzladung stattdessen auf den sicheren 0-W-Haltemodus bis zur
     ursprünglichen Frist. Im bestätigten Haltemodus bleibt auch PV-Laden

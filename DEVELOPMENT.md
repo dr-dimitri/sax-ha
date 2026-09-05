@@ -655,6 +655,12 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    eine frühere, konfigurierbare "Max. Netzladeleistung" wurde entfernt,
    weil der eingestellte Watt-Wert in der Praxis keinen Einfluss auf die
    tatsächliche Ladeleistung hatte).
+   Nach tatsächlich gemessener Netzladung merkt die Integration die feste
+   Ablaufzeit dieses Fensters. Endet/pausiert die Netzladung vorher, hält
+   der gemeinsame Writer die Entladung gesperrt und erlaubt über
+   `min(0, storage_power_active + smartmeter_power)` weiterhin PV-Laden.
+   Dieser Haltezustand greift vor der netzdienlichen Regelung; er ist bei
+   aktiviertem preisoptimiertem Laden immer inaktiv und wird verworfen.
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
    im eigenen aktiven Monat + optionale Mindest-PV-Prognose erfüllt + nicht
    bereits durch zeitgesteuertes Laden
@@ -757,8 +763,10 @@ direkt nach der Ersteinrichtung) explizit auf `MAX_SOC` (100) statt
 die zeitgesteuerte Netzladung. Sie beginnt unterhalb von "Netzladung
 Min. SOC" und lädt dank `_timed_charge_armed` bis zum eigenen Ziel weiter.
 Am Ziel setzt die Auswertung den Latch zurück und beendet die Netzladung;
-unterhalb des globalen Maximums wird die SmartMeter-Nullregelung freigegeben,
-sodass PV weiterhin bis zum globalen Ziel laden kann. Der globale
+nach gemessener Netzladung bleibt die Entladung bis zum Fensterende gesperrt,
+während PV weiterhin bis zum globalen Ziel laden kann. Ohne bestätigte
+Netzladung wird unterhalb des globalen Maximums die SmartMeter-Nullregelung
+freigegeben. Der globale
 "Max. SOC" bleibt führend: Er bestimmt dynamisch die Obergrenze des
 Netzladeziel-Sliders. Eine globale Absenkung reduziert sofort auch einen
 höheren Netzladezielwert und persistiert beide zusammen. Eine globale
@@ -771,6 +779,48 @@ Reparaturhinweis eine Neuinstallation an. Eigene Dashboard-Anpassungen
 werden durch die Prüfung nicht überschrieben; nach dem Aktualisieren
 verschwindet der Hinweis. Ohne registrierte Ziel-Entity wird kein fehlender
 Regler gemeldet.
+
+**Entladestatus nach Netzladung:** `application/timed_discharge.py` bestimmt
+die konkrete UTC-Ablaufzeit des aktiven lokalen Fensters (auch über
+Mitternacht und bei Zeitumstellung). Zwei frische HIGH-Messungen mit
+Netzbezug über 50 W und Batterieladung über 50 W setzen den Nachweis; beide
+müssen nach dem bestätigten zeitgesteuerten Start begonnen haben und den
+Steuermodus 1 melden. Eigene Messrevisionen, Messbeginn/-alter und die
+unveränderte Modusrückmeldung verhindern Nachweise durch wiederverwendete
+Setter-Daten oder optimistische Register-Updates. Ein reiner Ladeauftrag,
+PV-Laden oder preisoptimiertes/manuelles Laden setzt keinen Nachweis.
+
+`infrastructure/timed_discharge_store.py` speichert ausschließlich die
+bestätigte Ablaufzeit je Config Entry. Sie wird vor dem ersten Steuerlauf
+restauriert; ungültige oder über 25 Stunden entfernte Werte werden verworfen.
+Eine abgelaufene Frist aktiviert keine Sperre; bis zu 25 Stunden alte
+Fristen bleiben lediglich als Endmarker bekannt, damit ein nachträglich
+verlängertes Fenster denselben Ladezyklus auch nach Neustart nicht neu
+startet oder erneut an die globale Max-SOC-Sperre bindet. Das nächste
+reguläre Fenster bleibt möglich. Geänderte Uhrzeiten oder Monatsauswahlen
+verlängern diese Frist nicht. Ausschalten der Netzladung und Wechsel zum
+preisoptimierten Laden verwerfen den Nachweis und geben diese Sperre frei.
+Die Preisplanung, Neutralpreiszone und Preis-Slot-Bindung nutzen weiterhin
+ihre eigene Logik und die bisherige Writer-Kadenz.
+
+Im Haltezustand berechnet `application/charge_policy.py` aus Batterie- und
+Netzleistung einen ausschließlich nichtpositiven PV-Sollwert. Fehlende,
+ungültige oder über vier Sekunden alte Messwerte ergeben 0 W, ebenso ein
+erreichtes globales SOC-Ziel. Der Halte-Writer prüft alle zwei Sekunden
+zusätzlich die absolute Frist, auch wenn Basic-Lesefehler die normale
+Steuerentscheidung verhindern. Sein 0-%-Fallback bleibt ohne gelesene
+Leistungsreferenz/Skalierung schreibbar; der validierte SunSpec-Pfad und
+dessen Modus-Rollback bleiben erhalten. Die Regelung kann auf schnelle
+Last-/PV-Änderungen erst beim nächsten Mess-/Steuertakt reagieren.
+
+Das Dashboard zeigt im Tab „Ladeautomatik“ unmittelbar unter „Zeitfenster“
+die Karte „Entladestatus“. Der Enum-Sensor `timed_charge_discharge_status`
+zeigt „Normalbetrieb“, „Netzladen“ oder „Entladung wg. Netzladen gestoppt“.
+„Normalbetrieb“ beschreibt ausschließlich diesen Mechanismus. Nach einem
+Schreibfehler wird kein erfolgreich gehaltener Zustand behauptet.
+Die bestehende Dashboard-Reparatur erkennt die fehlende Karte anhand der
+registrierten Status-Entity und bewahrt eigene Anpassungen bis zur
+bewussten Neuinstallation.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils

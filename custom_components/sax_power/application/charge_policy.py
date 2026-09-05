@@ -6,11 +6,33 @@ all physical device writes remain in ``SaxPowerCoordinator``.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import time as dt_time
 
+from ..const import MIN_SETPOINT_POWER
 from ..domain.scheduling import is_time_in_window
+
+
+def timed_discharge_hold_active(
+    *, now: datetime, enabled: bool, price_enabled: bool, expires_at: datetime | None
+) -> bool:
+    """Keep the measured timed-charge hold separate from every price strategy."""
+    return enabled and not price_enabled and expires_at is not None and now < expires_at
+
+
+def timed_discharge_pv_power(storage_power: object, grid_power: object) -> int:
+    """REQ-TIMED-SOC-CHARGE: S + M is house demand minus generation."""
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        for value in (storage_power, grid_power)
+    ):
+        return 0
+    # int rounds toward zero, so quantization cannot request extra charging.
+    return int(max(MIN_SETPOINT_POWER, min(0, storage_power + grid_power)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +61,7 @@ class ChargePolicyInput:
     current_price: float | None
     price_limit: float | None
     neutral_price: float | None
+    timed_window_completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +82,7 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
     soc_reached = inputs.current_soc >= inputs.target_soc
     timed_window_active = (
         inputs.timed_enabled
+        and not inputs.timed_window_completed
         and inputs.now.month in inputs.timed_months
         and is_time_in_window(inputs.now.time(), inputs.timed_start, inputs.timed_end)
     )

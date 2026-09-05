@@ -112,6 +112,14 @@
       "timed_charge_active_text": {
         "name": "Zeitgesteuertes Laden aktiv"
       },
+      "timed_charge_discharge_status": {
+        "name": "Entladestatus",
+        "state": {
+          "normal": "Normalbetrieb",
+          "grid_charging": "Netzladen",
+          "discharge_blocked": "Entladung wg. Netzladen gestoppt"
+        }
+      },
       "grid_serving_active_text": {
         "name": "Netzdienliches Laden aktiv"
       },

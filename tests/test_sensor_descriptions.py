@@ -202,10 +202,53 @@ def test_core_entities_have_no_entity_category() -> None:
         "price_charge_next_start",
         "grid_serving_forecast",
         "grid_serving_pause_status",
+        "timed_charge_discharge_status",
     )
     for key in core_keys:
         description = _description_by_key(key)
         assert description.entity_category is None, key
+
+
+@pytest.mark.parametrize(
+    "status", ["normal", "grid_charging", "discharge_blocked", None]
+)
+def test_timed_charge_discharge_status_reports_coordinator_state(status) -> None:
+    """REQ-TIMED-SOC-CHARGE: Der Entladestatus folgt dem bestätigten Zustand."""
+    description = _description_by_key("timed_charge_discharge_status")
+    coordinator = MagicMock()
+    coordinator.data = {
+        "timed_charge_discharge_status": status,
+        "timed_charge_active": True,
+        "price_charge_active": True,
+    }
+    entity = SaxPowerSensor(coordinator, "test_entry_id", description)
+
+    assert entity.device_class == SensorDeviceClass.ENUM
+    assert entity.options == ["normal", "grid_charging", "discharge_blocked"]
+    assert entity.unique_id == "test_entry_id_timed_charge_discharge_status"
+    assert entity.native_value == status
+    assert description.value_fn({"timed_charge_active": True}) is None
+    coordinator.data = None
+    assert entity.native_value is None
+
+
+def test_timed_charge_discharge_status_translations_cover_all_states() -> None:
+    """REQ-TIMED-SOC-CHARGE: Alle Zustände besitzen lesbare Übersetzungen."""
+    expected_states = {
+        "normal": "Normalbetrieb",
+        "grid_charging": "Netzladen",
+        "discharge_blocked": "Entladung wg. Netzladen gestoppt",
+    }
+    for filename in ("strings.json", "translations/de.json"):
+        translated = _load(filename)["entity"]["sensor"][
+            "timed_charge_discharge_status"
+        ]
+        assert translated["name"] == "Entladestatus"
+        assert translated["state"] == expected_states
+    english = _load("translations/en.json")["entity"]["sensor"][
+        "timed_charge_discharge_status"
+    ]
+    assert set(english["state"]) == set(expected_states)
 
 
 def test_charge_discharge_power_preserves_storage_power_sign() -> None:

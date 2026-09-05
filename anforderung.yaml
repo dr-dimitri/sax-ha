@@ -377,11 +377,14 @@ requirement_timed_soc_charge:
        nicht automatisch zur Eigenverbrauchsdeckung, da Register 40049 = 0 %
        Netto-Leistungsfluss = 0 (weder Laden noch Entladen) erzwingt.
 
-       Beide Software-Einstellungen dieses Abschnitts ("Max. SOC",
-       "Netzladung Min. SOC") werden von ihrem jeweiligen Coordinator-Setter
-       (async_set_max_soc/async_set_timed_charge_min_soc,
-       coordinator._clamp_int) auf ihren gültigen Bereich geklemmt (0-100 %),
-       nicht nur vom NumberEntity-Schieberegler in der Oberfläche - der reguläre
+       Alle drei SOC-Einstellungen dieses Abschnitts ("Max. SOC",
+       "Netzladen Max. SOC", "Netzladung Min. SOC") werden von ihrem
+       jeweiligen Coordinator-Setter (async_set_max_soc/
+       async_set_timed_charge_max_soc/async_set_timed_charge_min_soc,
+       coordinator._clamp_int) auf ihren gültigen Bereich geklemmt:
+       0-100 % für Max. SOC und Min. SOC, 0 bis zum konfigurierten
+       Max. SOC für Netzladen Max. SOC. Die Validierung erfolgt
+       nicht nur im NumberEntity-Schieberegler in der Oberfläche - der reguläre
        Service-Call-Pfad (async_set_native_value) ist dadurch zwar bereits
        über native_min_value/native_max_value abgesichert, der
        RestoreEntity-Pfad beim Neustart (async_added_to_hass) ruft den
@@ -487,7 +490,8 @@ requirement_timed_soc_charge:
        konfigurierten Zeitfensters (time.py, "Start"/"Ende", HH:MM, darf
        über Mitternacht laufen), im aktiven Monat, "Netzladung Min. SOC"
        (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
-       zuvor unterschritten und noch nicht bis "Max. SOC" durchgeladen -
+       zuvor unterschritten und noch nicht bis "Netzladen Max. SOC"
+       durchgeladen -
        siehe Hysterese unten) UND kein über die einheitliche
        Zyklen-Hysterese (siehe unten "PV-Überschuss-Prüfung") bestätigter
        PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py,
@@ -499,21 +503,42 @@ requirement_timed_soc_charge:
        Einfluss auf die tatsächliche Ladeleistung hatte (er sättigte
        ohnehin fast immer auf denselben Prozentwert).
 
+       "Netzladen Max. SOC" (self._timed_charge_max_soc, NumberEntity
+       SaxPowerTimedChargeMaxSocNumber): eigener oberer Ziel-SOC nur für
+       die zeitgesteuerte Netzladung. Der Slider reicht von 0 % bis zum
+       konfigurierten "Max. SOC"; diese geräteweite Obergrenze bleibt
+       führend. Ein erstmalig fehlendes Netzladeziel übernimmt den
+       vorhandenen Max. SOC, auch beim Upgrade und nach einmaliger
+       RestoreEntity-Migration ohne Store. Erst nach Abschluss der Migration
+       wird der Wert festgeschrieben, unabhängig von der Entity-Reihenfolge.
+       Wird Max. SOC unter das Netzladeziel abgesenkt, wird dieses sofort
+       ebenfalls reduziert und gespeichert. Ein späteres Anheben von
+       Max. SOC erweitert nur den Sliderbereich, ohne das Netzladeziel
+       automatisch anzuheben. Änderungen am Netzladeziel gelten sofort.
+
+       Bei current_soc >= dem effektiven Netzladeziel wird die Netzladung
+       beendet und _timed_charge_armed zurückgesetzt. Liegt das Ziel unter
+       dem geräteweiten Max. SOC, gibt der gemeinsame Schreibpfad die
+       SmartMeter-Nullregelung frei; PV-Laden bleibt bis zum geräteweiten
+       Ziel möglich. Die neue Grenze erzeugt keine eigene geräteweite
+       Max-SOC-Sperre und begrenzt weder manuelle noch preisoptimierte
+       Netzladung. Während der bestehenden periodischen Zellkalibrierung
+       gilt für die Netzladung ebenfalls temporär ein effektives Ziel von
+       100 %, damit die Kalibrierung die nächste normale Lademöglichkeit
+       nutzen kann (REQ-PERIODIC-FULL-CALIBRATION). Beide konfigurierten
+       Max-SOC-Werte und die Slidergrenze bleiben dabei unverändert.
+
        "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
        SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
-       unterhalb dessen die Netzladung starten darf - im Unterschied zu
-       "Max. SOC" (oberes, geräteunabhängiges Ziel, s. o., von Netzladung
-       UND netzdienlichem Laden gemeinsam genutzt) eine reine
-       Netzladung-Einstellung, da nur Netzladung aktiv aus dem Netz lädt und
-       daher einen Schwellwert braucht, ab dem sich das lohnt.
+       unterhalb dessen die Netzladung starten darf.
        SaxPowerCoordinator._timed_charge_armed hält als Hysterese fest, ob
        der Schwellwert bereits unterschritten wurde: sobald current_soc <
        "Netzladung Min. SOC", wird _timed_charge_armed auf True gesetzt und
        bleibt es (auch wenn der SOC danach wieder über "Netzladung Min.
-       SOC" steigt), bis der SOC "Max. SOC" erreicht/überschreitet (dann
-       zurück auf False) - Netzladung lädt also einmal gestartet bis "Max.
-       SOC" durch, statt bei jedem erneuten Überschreiten von "Netzladung
-       Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
+       SOC" steigt), bis der SOC "Netzladen Max. SOC" erreicht/überschreitet
+       (dann zurück auf False) - Netzladung lädt also einmal gestartet bis
+       zu ihrem eigenen Ziel durch, statt bei jedem erneuten Überschreiten
+       von "Netzladung Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
        B. direkt nach der Ersteinrichtung) steht der Wert auf
        DEFAULT_TIMED_CHARGE_MIN_SOC (const.py, 20 %,
        SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt auf 0
@@ -614,18 +639,17 @@ requirement_timed_soc_charge:
     und preisoptimiertes Laden fordern stattdessen immer die maximal
     mögliche Ladeleistung an (siehe Punkt 2 oben).
 
-    "Max. SOC" und "Netzladung Min. SOC" sind reine Software-Zustände
-    (RestoreEntity, number.py) - "Max. SOC" ist dabei eine zentrale, von
-    Netzladung UND netzdienlichem Laden gemeinsam genutzte Einstellung,
-    "Netzladung Min. SOC" ist eine reine Netzladung-Einstellung (siehe
-    oben). Eine Änderung wirkt jeweils sofort (async_set_max_soc/
-    async_set_timed_charge_min_soc werten _async_enforce_grid_charge
-    unmittelbar neu aus statt erst beim nächsten Poll-Zyklus). Beide
-    persistieren über Neustarts hinweg; gibt es (z. B. direkt nach der
-    Ersteinrichtung) noch keinen gespeicherten Zustand, setzen sie sich
-    explizit auf MAX_SOC (100 %,
-    SaxPowerMaxSocNumber/SaxPowerTimedChargeMinSocNumber.
-    async_added_to_hass) statt "unbekannt"/0 zu bleiben.
+    "Max. SOC", "Netzladen Max. SOC" und "Netzladung Min. SOC" sind reine
+    Software-Zustände (number.py), die über den zentralen
+    Konfigurations-Store Neustarts überstehen. "Max. SOC" ist die
+    mechanismusübergreifende Obergrenze; Min. SOC und Netzladen Max. SOC
+    gelten nur für die zeitgesteuerte Netzladung. Alle drei Setter werten
+    _async_enforce_grid_charge unmittelbar neu aus. Ohne gespeicherten
+    Zustand gilt für Max. SOC 100 %, für Netzladen Max. SOC der vorhandene
+    Max. SOC und für Netzladung Min. SOC 20 %. Nur die schon früher
+    vorhandenen Number-Entities nutzen RestoreEntity zur einmaligen
+    Migration; das neue Netzladeziel wird zentral initialisiert (siehe
+    REQ-CONTROL-CONFIG-BOOTSTRAP).
 
     Aktiviert-Zustand sowie Start-/Endzeit des zeitgesteuerten Ladens
     ("Netzladung aktiv"/"Start"/"Ende", time.py) werden ebenfalls über
@@ -653,6 +677,16 @@ requirement_timed_soc_charge:
     Entry aktualisiert) hat darauf keinen Einfluss mehr, sobald einmal ein
     echter Zustand gespeichert wurde.
   acceptance_criteria:
+    - "Eigenes Netzladeziel: Tests prüfen Start unter Min. SOC, Weiterladen
+       oberhalb der Startschwelle, Ende exakt am Netzladen Max. SOC,
+       Rückkehr zur SmartMeter-Nullregelung unterhalb des globalen Maximums
+       und unveränderte geräteweite Max-SOC-Sperre. Zieländerungen sowie
+       globale Absenkungen wirken sofort; spätere globale Erhöhungen ändern
+       das Netzladeziel nicht. Während aktiver Kalibrierung gilt effektiv
+       100 %, ohne die konfigurierten Werte zu überschreiben."
+    - "tests/test_number.py prüft Anfangswert, Sliderbereich einschließlich
+       globalem Max. SOC 0 %, dynamische Absenkung und Erhöhung sowie
+       unveränderte UI-Werte während der Kalibrierung."
     - "tests/test_coordinator.py deckt _is_time_in_window (normales
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
        Fenster), _async_enforce_grid_charge (Start/Stop des
@@ -1971,8 +2005,15 @@ requirement_bundled_dashboard:
     jeweiligen Mechanismus, deren Label ebenfalls in beiden Tabs
     einheitlich nur noch der reine Monatsname ist (z. B. "Januar" statt
     "Netzladung aktiv im Januar"). Bei "Ladeautomatik" steckt zusätzlich
-    eine dritte Karte "Einstellungen" dazwischen (Mindest-SOC für den
-    Ladestart).
+    eine dritte Karte "Einstellungen" dazwischen: zuerst der Slider
+    "Netzladen Max. SOC" für das Netzladeziel, direkt darunter
+    "Netzladung Min. SOC" für den Ladestart (REQ-TIMED-SOC-CHARGE).
+    Fehlt der neue Regler in einem vorhandenen Storage-Dashboard, obwohl
+    seine Entity registriert ist, meldet der bestehende Dashboard-
+    Reparaturhinweis den Tab "Ladeautomatik" als veraltet. Erst die bewusste
+    Neuinstallation ergänzt ihn; die Prüfung überschreibt keine eigenen
+    Dashboard-Anpassungen. Nach Aktualisierung verschwindet der Hinweis.
+    Ohne registrierte Netzladeziel-Entity gibt es dafür keinen Hinweis.
     Weder die geräteweite Max-SOC-Sperre (die
     ist mechanismus-übergreifend und gehört fachlich nicht in einen
     einzelnen Automatik-Tab) noch die reinen Status-Textanzeigen
@@ -2079,6 +2120,11 @@ requirement_bundled_dashboard:
        sax_power.create_dashboard und sax_power.reinstall_dashboard
        end-to-end ab (Geräte-Lookup, Aufruf von async_create_dashboard mit
        force=False bzw. force=True)."
+    - "Der Dashboard-Upgrade-Test prüft einen vorhandenen Ladeautomatik-Tab
+       ohne den neuen Netzladeziel-Regler: Reparaturhinweis bei registrierter
+       Entity, unveränderter Karteninhalt bis zur Neuinstallation,
+       verschwundener Hinweis nach Aktualisierung und kein Fehlalarm ohne
+       registrierte Netzladeziel-Entity."
     - "tests/test_dashboard.py deckt die beiden Gauge-Karten ab (SOC:
        Entity, needle, segments-Schwellwerte 0/20/50 %; Zelltemperatur:
        Entity, needle, min/max, nicht-monotone segments 0/5/32; beide
@@ -2349,11 +2395,12 @@ requirement_self_diagnosis_repairs:
        self._extended_unavailable_since wird von _async_read_high_block auf
        derselben Zustandsflanke gesetzt/zurückgesetzt wie das bestehende
        Issue. translation_placeholders: slave_id.
-    3. ISSUE_MAX_SOC_BELOW_MIN_SOC ("Ziel-SOC liegt unter dem
-       Nachlade-Schwellwert"): max_soc < timed_charge_min_soc - "Max. SOC"
-       ist zugleich das Ziel-SOC des zeitgesteuerten Ladens, "Min. SOC" der
-       untere Start-Schwellwert; liegt Ersteres darunter, greift die
-       Max-SOC-Sperre schon, bevor der Ladestart überhaupt ausgelöst würde.
+    3. ISSUE_MAX_SOC_BELOW_MIN_SOC ("Netzladen Max. SOC liegt unter
+       Min. SOC"): timed_charge_max_soc < timed_charge_min_soc - das
+       Netzladeziel liegt unterhalb der Startschwelle. Die Netzladung endet
+       damit unterhalb der Startschwelle, ohne Hystereseabstand zwischen
+       Start und Stopp. Der Hinweis empfiehlt, Netzladen Max. SOC zu erhöhen
+       oder Netzladung Min. SOC zu senken.
        Kein Zustandsflanken-Timer nötig (statische Einstellungskombination,
        kein transienter Messwert) - schlägt sofort an.
        translation_placeholders: max_soc, min_soc.
@@ -2635,6 +2682,14 @@ requirement_periodic_full_calibration:
     während einer aktiven Phase ein anderer Wert unter 100 % gewählt, gilt
     nach Abschluss der zuletzt gewählte Wert.
 
+    Während dieser Phase verwendet auch die zeitgesteuerte Netzladung
+    unabhängig von ihrem eigenen "Netzladen Max. SOC" ein effektives Ziel
+    von 100 %. Ihre regulären Startbedingungen gelten weiter. Der
+    konfigurierte Netzladezielwert und dessen Sliderobergrenze (der
+    konfigurierte globale Max. SOC) bleiben sichtbar und persistent
+    unverändert. Nach der realen Volladung wirkt auch das eigene
+    Netzladeziel wieder unmittelbar (REQ-TIMED-SOC-CHARGE).
+
     Zwei leise Diagnose-Entities informieren ohne Benachrichtigungs-Pop-up:
     binary_sensor cell_calibration_active zeigt die fällige/laufende Phase,
     sensor next_cell_calibration zeigt den UTC-Zeitpunkt der nächsten
@@ -2672,7 +2727,7 @@ requirement_control_config_bootstrap:
   status: done
   description: >
     Sämtliche softwareseitigen Steuerwerte - Max. SOC, Netzladung
-    (aktiv/Zeitfenster/Monate/Min. SOC), netzdienliches Laden
+    (aktiv/Zeitfenster/Monate/Max. SOC/Min. SOC), netzdienliches Laden
     (aktiv/Zeitfenster/Monate/PV-Prognose-Mindestwert) und preisoptimiertes
     Laden (aktiv/Strategie/Preisgrenze/Neutralpreis/Anzahl Stunden) - liegen
     in einem versionierten Home-Assistant-Store, dessen Schlüssel die
@@ -2730,6 +2785,16 @@ requirement_control_config_bootstrap:
     sich die beiden Zeitfenster in Tageszeit UND aktiven Monaten, wird das
     Netzladefenster geleert (nur die Netzladung zieht aktiv Strom aus dem
     Netz).
+
+    Das eigene Netzladeziel timed_charge_max_soc wird auf den bereits
+    validierten globalen max_soc begrenzt. Fehlt es in einem älteren
+    Store, übernimmt es diesen vorhandenen globalen Wert. Bei erstmaliger
+    Migration ohne Store erfolgt die Initialisierung erst am Ende des
+    Bootstraps, nachdem der globale Wert aus RestoreEntity feststeht;
+    die Reihenfolge der Number-Entities beeinflusst das Ergebnis nicht.
+    Die neue Netzladeziel-Entity besitzt deshalb keinen eigenen
+    RestoreEntity-Pfad. Anschließend wird der Wert mit dem vollständigen
+    Snapshot persistiert und bleibt nach Neustart unverändert erhalten.
 
     Die RestoreEntity-Zustände der Konfigurations-Entities (number.py,
     switch.py, select.py, time.py) sind nur noch der einmalige

@@ -347,6 +347,9 @@
       "max_soc": {
         "name": "Max. SOC"
       },
+      "timed_charge_max_soc": {
+        "name": "Grid charge max. SOC"
+      },
       "timed_charge_min_soc": {
         "name": "Grid charge min. SOC"
       },
@@ -523,8 +526,8 @@
       "description": "Slave ID {slave_id} has been continuously unreachable for over an hour. Storage detail values, grid/smart meter values and all three charging automations (timed, grid-serving and price-optimised charging) are non-functional without this register block. Please check the network connection and the configured slave ID (SunSpec mode, default: 100)."
     },
     "max_soc_below_min_soc": {
-      "title": "Target SOC is below the recharge threshold",
-      "description": "\"Max. SOC\" ({max_soc} %) is below \"Grid charge min. SOC\" ({min_soc} %) - timed charging can therefore never start, because charging only starts once the SOC drops below min. SOC, while the max. SOC lock already kicks in before that. Please raise max. SOC to at least the value of min. SOC."
+      "title": "Grid charge max. SOC is below min. SOC",
+      "description": "\"Grid charge max. SOC\" ({max_soc} %) is below \"Grid charge min. SOC\" ({min_soc} %). Timed charging stops before reaching its start threshold again, leaving no gap between the start and stop thresholds. Please raise grid charge max. SOC or lower grid charge min. SOC."
     },
     "empty_charge_window": {
       "title": "Time window is empty",

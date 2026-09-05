@@ -442,13 +442,9 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # NICHT über den Basic-Mode-P-Sollwert (Register 41) - siehe
 # SaxPowerCoordinator._async_enforce_grid_charge.
 #
-# Nutzt den zentralen "Max. Netzladeleistung"-Grenzwert (Register 44
-# einmalig vorbelegt) als Leistung sowie "Max. SOC" (Fallback MAX_SOC oben)
-# als oberes Ziel - beide gemeinsam mit netzdienlichem Laden genutzt, keine
-# eigenen Einstellungen dafür. Der untere Start-Schwellwert "Netzladung
-# Min. SOC" ist dagegen eine reine, featurespezifische Netzladung-
-# Einstellung (number.py, SaxPowerTimedChargeMinSocNumber) - siehe
-# anforderung.yaml, REQ-TIMED-SOC-CHARGE.
+# Eigene Start-/Stoppschwellen für Netzladung, begrenzt durch den globalen
+# Max-SOC; andere Ladearten verwenden weiterhin nur das globale Limit
+# (anforderung.yaml, REQ-TIMED-SOC-CHARGE).
 #
 # Zusätzlicher Abbruchgrund neben Zeitfenster/Max-SOC: Sobald am Smart Meter
 # (data["smartmeter_power"], Register 40072 "Summenwirkleistung Netz", siehe

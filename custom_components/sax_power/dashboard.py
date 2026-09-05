@@ -678,6 +678,7 @@ async def async_build_dashboard_config(
                 entry_id,
                 "Einstellungen",
                 [
+                    ("number", "timed_charge_max_soc"),
                     ("number", "timed_charge_min_soc"),
                 ],
                 translations,
@@ -917,10 +918,10 @@ async def async_check_dashboard_up_to_date(
     würde (Anwenderbericht zu #138).
 
     Gemeldet wird ausschließlich ein VORHANDENES Dashboard, dem Tabs des
-    aktuellen Auslieferungsstands oder die neuen Netto-Ersparnis-Entities
-    fehlen. Letzteres erkennt gezielt die bereits veröffentlichten
-    Snapshot-Dashboards, deren unveränderte View-Pfade sonst einen aktuellen
-    Stand vortäuschen würden. Ein gar nicht vorhandenes Dashboard ist
+    aktuellen Auslieferungsstands, der Netzladeziel-Regler oder die neuen
+    Netto-Ersparnis-Entities fehlen. Letzteres erkennt gezielt die bereits
+    veröffentlichten Snapshot-Dashboards, deren unveränderte View-Pfade sonst
+    einen aktuellen Stand vortäuschen würden. Ein gar nicht vorhandenes Dashboard ist
     dagegen eine bewusste Entscheidung des Anwenders (siehe
     const.CONF_CREATE_DASHBOARD) und wird nicht angemahnt - eine
     Reparaturaufforderung würde genau das Dashboard zurückholen, das er
@@ -964,7 +965,9 @@ async def _async_missing_dashboard_views(
     """Titel fehlender oder fachlich veralteter Tabs.
 
     Verglichen werden die Pfade, nicht die Titel: Der Pfad ist der stabile
-    Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Für die
+    Bezeichner eines Views, der Titel dagegen ist Anzeigetext. Der neue
+    Netzladeziel-Regler muss in einem vorhandenen Ladeautomatik-View stehen,
+    sofern seine Entity registriert ist (REQ-TIMED-SOC-CHARGE).
     Auch fachlich veraltete Ersparnis-Views werden erkannt: Dazu zählen alte
     Entity-IDs, entfernte Überschriften, eine fehlende Tarifinformation und
     der inzwischen entfernte View `wirtschaftlichkeit`. Es wird weiterhin
@@ -994,6 +997,17 @@ async def _async_missing_dashboard_views(
     outdated_paths = {
         view["path"] for view in expected["views"] if view["path"] not in stored_views
     }
+
+    charging_view = stored_views.get("ladeautomatik")
+    timed_max_soc_entity_id = _entity_id(
+        hass, "number", f"{entry.entry_id}_timed_charge_max_soc"
+    )
+    if (
+        charging_view is not None
+        and timed_max_soc_entity_id is not None
+        and not _contains_dashboard_value(charging_view, timed_max_soc_entity_id)
+    ):
+        outdated_paths.add("ladeautomatik")
 
     savings_view = stored_views.get("ersparnis")
     expected_savings_view = next(

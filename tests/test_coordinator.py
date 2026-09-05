@@ -36,6 +36,7 @@ from custom_components.sax_power.const import (
     MAX_SETPOINT_POWER,
     MAX_SOC,
     MIN_SETPOINT_POWER,
+    PRICE_STRATEGY_ABSOLUTE,
     PRICE_UNIT_AUTO,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
@@ -81,6 +82,7 @@ from custom_components.sax_power.domain.tariff import (
     QuoteUnavailable,
     TariffType,
 )
+from custom_components.sax_power.price_optimizer import PricePlan
 
 
 @pytest.mark.parametrize(
@@ -1919,6 +1921,243 @@ async def test_timed_charge_min_soc_hysteresis_continues_until_max_soc(hass) -> 
 
 
 # -- Max-SOC-Sperre (unabhängig vom zeitgesteuerten Laden) -------------------
+
+
+async def test_timed_charge_own_target_stops_and_rearms_only_below_min(hass) -> None:
+    """REQ-TIMED-SOC-CHARGE: Teilziel gibt PV frei und erhält die Hysterese."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 90
+    coordinator._timed_charge_max_soc = 60
+    coordinator._timed_charge_min_soc = 40
+    coordinator._timed_charge_start = dt_time(1)
+    coordinator._timed_charge_end = dt_time(5)
+    coordinator.data = {"soc": 39, "ic_max_power_reference": 4600, "ic_timeout": 300}
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            assert coordinator._timed_charge_active is True
+
+            coordinator.data["soc"] = 59
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is True
+
+            client.write_register.reset_mock()
+            coordinator.data["soc"] = 60
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is False
+            assert coordinator._timed_charge_armed is False
+            assert coordinator.sun_charge_active is False
+            assert coordinator.max_soc_clamped is False
+            client.write_register.assert_awaited_once_with(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                device_id=100,
+            )
+
+            for soc in (59, 40):
+                coordinator.data["soc"] = soc
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator._timed_charge_active is False
+
+            await coordinator.async_set_timed_charge_max_soc(70)
+            assert coordinator._timed_charge_active is False
+
+            coordinator.data["soc"] = 39
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is True
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize(("value", "expected"), [(-10, 0), (50, 50), (100, 80)])
+async def test_timed_charge_own_target_setter_clamps_to_global_limit(
+    hass, value: int, expected: int
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Auch direkte Aufrufe beachten das globale Limit."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._max_soc = 80
+    try:
+        await coordinator.async_set_timed_charge_max_soc(value)
+        assert coordinator.timed_charge_max_soc == expected
+        assert coordinator.control_config().timed_charge_max_soc == expected
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize("lower_global_limit", [False, True])
+async def test_timed_charge_target_reduction_stops_immediately(
+    hass, lower_global_limit: bool
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Senkungen beenden aktive Sollwerte vor dem Poll."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 90
+    coordinator._timed_charge_max_soc = 80
+    coordinator._timed_charge_min_soc = 40
+    coordinator._timed_charge_start = dt_time(1)
+    coordinator._timed_charge_end = dt_time(5)
+    coordinator.data = {"soc": 39, "ic_max_power_reference": 4600, "ic_timeout": 300}
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            coordinator.data["soc"] = 60
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is True
+
+            client.write_register.reset_mock()
+            if lower_global_limit:
+                await coordinator.async_set_max_soc(50)
+            else:
+                await coordinator.async_set_timed_charge_max_soc(50)
+
+            assert coordinator.timed_charge_max_soc == 50
+            assert coordinator._timed_charge_active is False
+            assert coordinator._timed_charge_armed is False
+            assert coordinator.max_soc_clamped is lower_global_limit
+            assert coordinator.sun_charge_active is lower_global_limit
+            if lower_global_limit:
+                assert coordinator._sun_charge_power == 0
+            if not lower_global_limit:
+                client.write_register.assert_awaited_once_with(
+                    address=REG_SUN_IC_CONTROL_MODE,
+                    value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                    device_id=100,
+                )
+    finally:
+        await coordinator.async_shutdown()
+
+
+async def test_timed_charge_own_target_retries_failed_stop(hass) -> None:
+    """REQ-TIMED-SOC-CHARGE: Ein Resetfehler lässt keinen Ladetask weiterlaufen."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 90
+    coordinator._timed_charge_max_soc = 60
+    coordinator._timed_charge_min_soc = 40
+    coordinator._timed_charge_start = dt_time(1)
+    coordinator._timed_charge_end = dt_time(5)
+    coordinator.data = {"soc": 39, "ic_max_power_reference": 4600, "ic_timeout": 300}
+
+    try:
+        with _patched_now(2):
+            await coordinator.async_set_timed_charge_enabled(True)
+            coordinator.data["soc"] = 60
+            client.write_register.side_effect = TimeoutError
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.sun_charge_active is False
+            assert coordinator._sun_charge_reset_required is True
+
+            client.write_register.side_effect = None
+            client.write_register.reset_mock()
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            client.write_register.assert_awaited_once_with(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                device_id=100,
+            )
+            assert coordinator._sun_charge_reset_required is False
+            assert coordinator._timed_charge_active is False
+    finally:
+        client.write_register.side_effect = None
+        await coordinator.async_shutdown()
+
+
+async def test_timed_charge_calibration_keeps_configured_own_target(hass) -> None:
+    """REQ-PERIODIC-FULL-CALIBRATION: Ausnahme verändert keine SOC-Einstellungen."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._max_soc = 90
+    coordinator._timed_charge_max_soc = 60
+    coordinator._timed_charge_min_soc = 40
+    coordinator._timed_charge_start = dt_time(1)
+    coordinator._timed_charge_end = dt_time(5)
+    coordinator.data = {"soc": 39, "ic_max_power_reference": 4600, "ic_timeout": 300}
+    now = dt_util.utcnow()
+    coordinator._cell_calibration_state = CalibrationState(
+        last_full_charge_at=now - CELL_CALIBRATION_INTERVAL - timedelta(days=1)
+    )
+
+    try:
+        with _patched_now(2):
+            await coordinator._async_update_cell_calibration(39, now=now)
+            await coordinator.async_set_timed_charge_enabled(True)
+            coordinator.data["soc"] = 95
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is True
+            assert coordinator.effective_timed_charge_max_soc == 100
+            assert coordinator.timed_charge_max_soc == 60
+            assert coordinator.max_soc == 90
+
+            coordinator.data["soc"] = 100
+            await coordinator._async_update_cell_calibration(100, now=now)
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active is False
+            assert coordinator.effective_timed_charge_max_soc == 60
+            assert coordinator.control_config().timed_charge_max_soc == 60
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize("mode", ["pv", "grid_serving", "price", "manual"])
+async def test_timed_charge_own_target_does_not_limit_other_modes(
+    hass, mode: str
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Alle übrigen Ladearten behalten das globale Ziel."""
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator._max_soc = 90
+    coordinator._timed_charge_max_soc = 60
+    coordinator.data = {
+        "soc": 75,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SMARTMETER,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+        "storage_power_active": 0,
+    }
+    if mode == "grid_serving":
+        coordinator._grid_serving_enabled = True
+        coordinator._grid_serving_start = dt_time(1)
+        coordinator._grid_serving_end = dt_time(5)
+        coordinator.data["smartmeter_power"] = -300
+        coordinator.data["storage_power_active"] = -200
+    elif mode == "price":
+        coordinator._price_charge_enabled = True
+        coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
+        coordinator.price_planner.plan = PricePlan(charge_now=True)
+    elif mode == "manual":
+        coordinator._grid_charge_power = -1000
+    else:
+        coordinator.data["smartmeter_power"] = -300
+        coordinator.data["storage_power_active"] = -200
+
+    try:
+        with _patched_now(2):
+            for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+
+            assert coordinator._timed_charge_active is False
+            assert coordinator.max_soc_clamped is False
+            if mode == "pv":
+                assert coordinator.sun_charge_active is False
+                assert coordinator.data["ic_control_mode"] == (
+                    SUN_IC_CONTROL_MODE_SMARTMETER
+                )
+            elif mode == "grid_serving":
+                assert coordinator._grid_serving_active is True
+                assert coordinator._sun_charge_power == 0
+            else:
+                assert coordinator.sun_charge_active is True
+                assert coordinator._sun_charge_power < 0
+                assert coordinator._price_charge_active is (mode == "price")
+
+            coordinator.data["soc"] = 90
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+            assert coordinator._sun_charge_power == 0
+    finally:
+        await coordinator.async_shutdown()
 
 
 async def test_enforce_grid_charge_clamps_at_max_soc_even_without_timed_charge(

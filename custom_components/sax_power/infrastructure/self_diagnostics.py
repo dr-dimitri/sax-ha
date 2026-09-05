@@ -32,7 +32,7 @@ class DiagnosticSnapshot:
     extended_available: bool
     extended_unavailable_since: float | None
     slave_id_extended: int
-    max_soc: int | None
+    timed_max_soc: int | None
     timed_min_soc: int | None
     price_limit: float | None
     neutral_price: float | None
@@ -162,9 +162,9 @@ class SelfDiagnostics:
     def _check_max_soc_below_min_soc(self, snapshot: DiagnosticSnapshot) -> None:
         issue_id = f"{ISSUE_MAX_SOC_BELOW_MIN_SOC}_{self._entry_id}"
         problem = (
-            snapshot.max_soc is not None
+            snapshot.timed_max_soc is not None
             and snapshot.timed_min_soc is not None
-            and snapshot.max_soc < snapshot.timed_min_soc
+            and snapshot.timed_max_soc < snapshot.timed_min_soc
         )
         if not problem:
             if self._max_soc_below_min_soc_issue_active:
@@ -181,7 +181,7 @@ class SelfDiagnostics:
             severity=ir.IssueSeverity.WARNING,
             translation_key=ISSUE_MAX_SOC_BELOW_MIN_SOC,
             translation_placeholders={
-                "max_soc": str(snapshot.max_soc),
+                "max_soc": str(snapshot.timed_max_soc),
                 "min_soc": str(snapshot.timed_min_soc),
             },
         )

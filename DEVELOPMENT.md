@@ -75,8 +75,8 @@ custom_components/sax_power/
 ├── sensor.py              ~90 Sensoren, beschreibungsbasiert (eine Klasse, eine Liste),
 │                          plus zwei RestoreEntity-Energiezähler (energy_charged/
 │                          energy_discharged) fürs Energy-Dashboard
-├── number.py              Max. SOC (einzige SOC-Einstellung, auch Ziel-SOC für
-│                          Zeitfenster- und preisoptimiertes Laden), Netzladung
+├── number.py              Max. SOC (geräteweite Grenze und Ziel-SOC für
+│                          preisoptimiertes Laden), Netzladen Max. SOC und
 │                          Min. SOC, Mindest-PV-Prognose für netzdienliches
 │                          Laden, Preisgrenze/Anzahl Stunden
 │                          (preisoptimiertes Laden)
@@ -622,6 +622,10 @@ nächsten real gemessenen Volladung 100 %. `infrastructure/calibration_store.py`
 speichert Zeitstempel und Voll-SOC-Flanke pro Config Entry; `__init__.py` lädt
 sie vor dem ersten Refresh. Die Number-Entity behält stets den konfigurierten
 Wert, während Coordinator und Preisplaner den effektiven Wert verwenden.
+Auch das eigene Netzladeziel erhält während der Kalibrierung einen
+effektiven Wert von 100 %, bei unverändertem Benutzerwert und unveränderter
+Slidergrenze. Die Kalibrierung startet dabei weiterhin keine eigene
+Netzladung; die regulären Startbedingungen bleiben erforderlich.
 Reihenfolge/Priorität in `_async_enforce_grid_charge`:
 
 1. **SOC ≥ "Max. SOC"** (`soc_reached`): Leistungsvorgabe wird auf 0 %
@@ -644,7 +648,8 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    oder fallender SOC allein sperrt die Entladung weiterhin nicht; unterhalb
    des Zielwerts wird der Freigabe-Latch wie bisher zurückgesetzt.
 2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + im
-   aktiven Monat + kein PV-Überschuss** (`timed_should_charge`):
+   aktiven Monat + unter Netzladeziel + zuvor unter Min. SOC + kein
+   PV-Überschuss** (`timed_should_charge`):
    Leistungsvorgabe = `MIN_SETPOINT_POWER` (sättigt in
    `_watts_to_ic_setpoint_raw` auf -100 %, maximal mögliche Ladeleistung -
    eine frühere, konfigurierbare "Max. Netzladeleistung" wurde entfernt,
@@ -748,6 +753,25 @@ und setzt sich nur bei fehlendem Store UND fehlendem Vorzustand (z. B.
 direkt nach der Ersteinrichtung) explizit auf `MAX_SOC` (100) statt
 "unbekannt"/0 zu bleiben.
 
+**"Netzladen Max. SOC"** (`SaxPowerTimedChargeMaxSocNumber`) begrenzt nur
+die zeitgesteuerte Netzladung. Sie beginnt unterhalb von "Netzladung
+Min. SOC" und lädt dank `_timed_charge_armed` bis zum eigenen Ziel weiter.
+Am Ziel setzt die Auswertung den Latch zurück und beendet die Netzladung;
+unterhalb des globalen Maximums wird die SmartMeter-Nullregelung freigegeben,
+sodass PV weiterhin bis zum globalen Ziel laden kann. Der globale
+"Max. SOC" bleibt führend: Er bestimmt dynamisch die Obergrenze des
+Netzladeziel-Sliders. Eine globale Absenkung reduziert sofort auch einen
+höheren Netzladezielwert und persistiert beide zusammen. Eine globale
+Erhöhung erweitert nur den Sliderbereich und verändert den gewählten
+Netzladezielwert nicht. Das mitgelieferte Dashboard zeigt den neuen Slider
+in "Ladeautomatik" → "Einstellungen" direkt über "Netzladung Min. SOC".
+Bei vorhandenen Storage-Dashboards erkennt die Updateprüfung den fehlenden
+Regler, sobald seine Entity registriert ist, und bietet über den bestehenden
+Reparaturhinweis eine Neuinstallation an. Eigene Dashboard-Anpassungen
+werden durch die Prüfung nicht überschrieben; nach dem Aktualisieren
+verschwindet der Hinweis. Ohne registrierte Ziel-Entity wird kein fehlender
+Regler gemeldet.
+
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils
 `RestoreEntity`) fragen beim Start in dieser Reihenfolge: (0) stammt der
@@ -769,12 +793,21 @@ im Config Entry aktualisiert).
 Siehe `anforderung.yaml`, REQ-CONTROL-CONFIG-BOOTSTRAP.
 
 Alle softwareseitigen Steuerwerte (Max. SOC, beide Zeitfenster mit ihren
-Monats-Sets, Min. SOC, PV-Prognose-Mindestwert, die drei Automatik-Schalter,
-Ladestrategie und Preisparameter) liegen als ein Snapshot in einem
+Monats-Sets, Netzladen Max. SOC und Min. SOC, PV-Prognose-Mindestwert,
+die drei Automatik-Schalter, Ladestrategie und Preisparameter) liegen als
+ein Snapshot in einem
 versionierten Store: `infrastructure/control_store.py`
 (`ControlConfig`/`ControlConfigStore`, Schlüssel
 `sax_power.control.<entry_id>`). Mehrere Config Entries haben dadurch
 getrennte Stores.
+
+Der eigene Netzladezielwert `timed_charge_max_soc` übernimmt beim Upgrade
+eines älteren Stores ohne dieses Feld den validierten globalen `max_soc`.
+Bei einer einmaligen Migration ohne Store wird er erst am Bootstrap-Ende
+initialisiert, nachdem die vorhandene globale Einstellung wiederhergestellt
+ist. Die Entity-Reihenfolge beeinflusst den Anfangswert dadurch nicht;
+ein eigener RestoreEntity-Pfad ist für die neue Number-Entity überflüssig.
+Gespeicherte Netzladezielwerte werden auf den globalen Max. SOC begrenzt.
 
 `__init__.async_setup_entry` hält eine verbindliche Reihenfolge ein:
 

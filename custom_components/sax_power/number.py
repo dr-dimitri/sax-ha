@@ -45,6 +45,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
+            SaxPowerTimedChargeMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
             SaxPowerGridServingForecastThresholdNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
@@ -62,9 +63,9 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
     40051/40049), sowohl während des zeitgesteuerten Ladens als auch
     unabhängig davon - z. B. auch bei einem durch PV-Überschuss vollen
     Speicher (siehe coordinator.SaxPowerCoordinator._async_enforce_grid_charge).
-    Dient zusätzlich als Ziel-SOC für das zeitgesteuerte und das
-    preisoptimierte Laden (keine eigenen Einstellungen dafür, siehe
-    anforderung.yaml REQ-TIMED-SOC-CHARGE und REQ-DYNAMIC-PRICE-CHARGE).
+    Begrenzt zusätzlich den eigenen Zielwert des zeitgesteuerten Ladens
+    und dient als Ziel-SOC für das preisoptimierte Laden, siehe
+    anforderung.yaml REQ-TIMED-SOC-CHARGE und REQ-DYNAMIC-PRICE-CHARGE.
 
     Der Wert liegt im Konfigurations-Store des Coordinators (siehe
     anforderung.yaml, REQ-CONTROL-CONFIG-BOOTSTRAP) und ist dort bereits
@@ -115,6 +116,42 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
         self.async_write_ha_state()
 
 
+class SaxPowerTimedChargeMaxSocNumber(SaxPowerConfigEntity, NumberEntity):
+    """Ziel-SOC der Netzladung unterhalb der geräteweiten Max-SOC-Grenze.
+
+    Initialisierung und Persistenz übernimmt ausschließlich der zentrale
+    Konfigurations-Store, damit beim Upgrade der wiederhergestellte
+    Max-SOC unabhängig von der Entity-Startreihenfolge übernommen wird
+    (REQ-TIMED-SOC-CHARGE, REQ-CONTROL-CONFIG-BOOTSTRAP).
+    """
+
+    _attr_translation_key = "timed_charge_max_soc"
+    _attr_native_min_value = MIN_SOC
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._assign_ids("number", "timed_charge_max_soc")
+
+    @property
+    def native_max_value(self) -> int:
+        return (
+            self.coordinator.max_soc
+            if self.coordinator.max_soc is not None
+            else MAX_SOC
+        )
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.timed_charge_max_soc
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_timed_charge_max_soc(int(value))
+        self.async_write_ha_state()
+
+
 class SaxPowerTimedChargeMinSocNumber(
     RestoreEntity, SaxPowerConfigEntity, NumberEntity
 ):
@@ -122,7 +159,7 @@ class SaxPowerTimedChargeMinSocNumber(
     starten darf - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE und
     coordinator.SaxPowerCoordinator._async_enforce_grid_charge
     (_timed_charge_armed) für die Hysterese-Logik: einmal unterschritten,
-    lädt die Netzladung bis "Max. SOC" durch, statt bei jedem erneuten
+    lädt die Netzladung bis "Netzladen Max. SOC" durch, statt bei jedem erneuten
     Überschreiten von "Min. SOC" sofort wieder abzubrechen.
 
     Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),

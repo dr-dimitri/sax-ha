@@ -443,7 +443,7 @@ async def test_build_dashboard_config_grid_serving_view(hass) -> None:
 async def test_build_dashboard_config_charging_view(hass) -> None:
     """Der Tab "Ladeautomatik" ist analog zu "Netzdienliches Laden"
     aufgebaut (Schalter, Zeitfenster-Karte, "Aktive Monate"-Karte), enthält
-    aber weder die Max-SOC-Einstellung noch die Status-Textanzeige - der
+    aber weder die globale Max-SOC-Einstellung noch die Status-Textanzeige - der
     Schalter deckt deren Zustand bereits ab. Netzdienliche Entities landen
     nicht mehr in diesem Tab, die sind jetzt im eigenen Tab."""
     grid_serving_switch = _register(hass, "switch", "grid_serving_enabled")
@@ -451,6 +451,7 @@ async def test_build_dashboard_config_charging_view(hass) -> None:
     timed_charge_switch = _register(hass, "switch", "timed_charge_enabled")
     timed_charge_start = _register(hass, "time", "timed_charge_start")
     timed_charge_end = _register(hass, "time", "timed_charge_end")
+    timed_charge_max_soc = _register(hass, "number", "timed_charge_max_soc")
     timed_charge_min_soc = _register(hass, "number", "timed_charge_min_soc")
     max_soc = _register(hass, "number", "max_soc")
     timed_charge_active_text = _register(hass, "sensor", "timed_charge_active_text")
@@ -468,6 +469,7 @@ async def test_build_dashboard_config_charging_view(hass) -> None:
     assert timed_charge_switch in entities
     assert timed_charge_start in entities
     assert timed_charge_end in entities
+    assert timed_charge_max_soc in entities
     assert timed_charge_min_soc in entities
     assert entities.issuperset(month_switches)
     assert max_soc not in entities
@@ -479,6 +481,26 @@ async def test_build_dashboard_config_charging_view(hass) -> None:
         card for card in charging_view["cards"] if card.get("title") == "Aktive Monate"
     )
     assert {row["entity"] for row in months_card["entities"]} == set(month_switches)
+
+
+async def test_build_dashboard_config_grid_charge_soc_order_and_labels(hass) -> None:
+    """REQ-BUNDLED-DASHBOARD: Netzladen Max. SOC steht direkt über Min. SOC."""
+    hass.config.language = "de"
+    max_soc = _register(hass, "number", "timed_charge_max_soc")
+    min_soc = _register(hass, "number", "timed_charge_min_soc")
+
+    config = await async_build_dashboard_config(hass, ENTRY_ID)
+
+    charging_view = next(
+        view for view in config["views"] if view["path"] == "ladeautomatik"
+    )
+    settings = next(
+        card for card in charging_view["cards"] if card.get("title") == "Einstellungen"
+    )
+    assert settings["entities"] == [
+        {"entity": max_soc, "name": "Netzladen Max. SOC"},
+        {"entity": min_soc, "name": "Netzladung Min. SOC"},
+    ]
 
 
 async def test_build_dashboard_config_start_end_labels_are_generic(hass) -> None:
@@ -1412,6 +1434,50 @@ async def test_outdated_dashboard_is_reported(hass) -> None:
     assert issue is not None
     assert issue.is_fixable
     assert issue.translation_placeholders["views"] == "Ersparnis"
+
+
+async def test_dashboard_upgrade_reports_missing_grid_charge_target_until_rebuilt(
+    hass,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Bestandsanwender erfahren vom neuen Zielregler."""
+    _register(hass, "number", "timed_charge_min_soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    storage = await _existing_dashboard(hass, entry)
+    stored = await storage.async_load(False)
+    _register(hass, "number", "timed_charge_max_soc")
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    issue = _issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.is_fixable
+    assert issue.translation_placeholders["views"] == "Ladeautomatik"
+    assert await storage.async_load(False) == stored
+
+    with patch(
+        "custom_components.sax_power.dashboard.frontend.async_register_built_in_panel"
+    ):
+        await async_create_dashboard(hass, entry, force=True)
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
+
+
+async def test_dashboard_without_registered_grid_charge_target_is_not_reported(
+    hass,
+) -> None:
+    """REQ-BUNDLED-DASHBOARD: Nur tatsächlich vorhandene Entities fehlen."""
+    _register(hass, "number", "timed_charge_min_soc")
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    _lovelace(hass)
+    await _existing_dashboard(hass, entry)
+
+    await async_check_dashboard_up_to_date(hass, entry)
+
+    assert _issue(hass, ENTRY_ID) is None
 
 
 async def test_dashboard_with_removed_economics_view_is_reported(hass) -> None:

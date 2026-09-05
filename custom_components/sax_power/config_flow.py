@@ -365,6 +365,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
                 self._abort_if_unique_id_configured()
             else:
+                self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
                 await self.async_set_unique_id(f"{host}:{port}")
                 self._abort_if_unique_id_configured()
 

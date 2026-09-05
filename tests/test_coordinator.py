@@ -2070,6 +2070,181 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_two_grid_import_
         await coordinator.async_stop_sun_charge()
 
 
+async def _make_max_soc_discharge_release(
+    hass, trigger: str = "grid_serving_window", *, release_soc: int = 80
+) -> tuple[SaxPowerCoordinator, MagicMock]:
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 80
+    coordinator.data = {
+        "soc": release_soc,
+        "smartmeter_power": 0,
+        "storage_power_active": 0,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+    }
+    if trigger == "timed_window":
+        coordinator._timed_charge_enabled = True
+        coordinator._timed_charge_start = dt_time(10)
+        coordinator._timed_charge_end = dt_time(14)
+    else:
+        coordinator._grid_serving_enabled = True
+        coordinator._grid_serving_start = dt_time(10)
+        coordinator._grid_serving_end = dt_time(
+            18 if trigger == "forecast_missing" else 14
+        )
+    with _patched_now(15 if trigger == "grid_import" else 12):
+        await coordinator._async_enforce_grid_charge(coordinator.data)
+    assert coordinator.max_soc_clamped is True
+
+    if trigger == "forecast_missing":
+        coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.missing_pv"}
+        coordinator._grid_serving_forecast_threshold_kwh = 8
+    elif trigger == "grid_import":
+        coordinator.data["smartmeter_power"] = 100
+    with _patched_now(15):
+        for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+    assert coordinator.max_soc_clamped is False
+    assert coordinator._max_soc_released_for_discharge is True
+    client.write_register.reset_mock()
+    return coordinator, client
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    ["grid_serving_window", "timed_window", "forecast_missing", "grid_import"],
+)
+@pytest.mark.parametrize(
+    ("soc", "storage_power", "meter_power", "confirm_cycles"),
+    [
+        (80, -500, 0, PV_SURPLUS_HYSTERESIS_CYCLES),
+        (80, None, -500, PV_SURPLUS_HYSTERESIS_CYCLES),
+        (81, -10, 0, 1),
+        (81, None, None, 1),
+    ],
+)
+async def test_max_soc_discharge_release_reclamps_when_charging_resumes(
+    hass,
+    trigger: str,
+    soc: int,
+    storage_power: int | None,
+    meter_power: int | None,
+    confirm_cycles: int,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Entladefreigabe darf kein Volladen ermöglichen."""
+    coordinator, client = await _make_max_soc_discharge_release(hass, trigger)
+    coordinator.data.update(
+        soc=soc,
+        storage_power_active=storage_power,
+        smartmeter_power=meter_power,
+    )
+    try:
+        with _patched_now(15):
+            for _ in range(confirm_cycles - 1):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator.max_soc_clamped is False
+                client.write_register.assert_not_awaited()
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+            assert coordinator.sun_charge_active is True
+            assert coordinator._max_soc_released_for_discharge is False
+            client.write_register.assert_has_awaits(
+                [
+                    call(
+                        address=REG_SUN_IC_CONTROL_MODE,
+                        value=SUN_IC_CONTROL_MODE_SETPOINT,
+                        device_id=100,
+                    ),
+                    call(address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100),
+                ]
+            )
+            # Der SOC muss vor dem erneuten Schutz nie unter 80 % fallen.
+            coordinator.data.update(storage_power_active=0, smartmeter_power=-500)
+            for _ in range(5):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator.max_soc_clamped is True
+
+            # Nach erneutem Sperren muss Eigenverbrauch weiterhin möglich sein.
+            coordinator.data["smartmeter_power"] = 100
+            for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is False
+            client.write_register.reset_mock()
+            coordinator.data.update(storage_power_active=500, smartmeter_power=0)
+            for _ in range(5):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator.max_soc_clamped is False
+            client.write_register.assert_not_awaited()
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+@pytest.mark.parametrize("interruption", [None, 0, 500, -49])
+async def test_max_soc_recharge_confirmation_requires_consecutive_measurements(
+    hass, interruption: int | None
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Messlücken/Entladen unterbrechen die Bestätigung."""
+    coordinator, client = await _make_max_soc_discharge_release(hass)
+    try:
+        with _patched_now(15):
+            for power in (-500, interruption, -500):
+                coordinator.data["storage_power_active"] = power
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator.max_soc_clamped is False
+                client.write_register.assert_not_awaited()
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_max_soc_recharge_clamp_retries_failed_write(hass) -> None:
+    """REQ-TIMED-SOC-CHARGE: Ein Schreibfehler darf keine Freigabe erhalten."""
+    coordinator, client = await _make_max_soc_discharge_release(hass)
+    coordinator.data["soc"] = 81
+    try:
+        with _patched_now(15):
+            with patch.object(
+                coordinator,
+                "async_write_extended_register",
+                side_effect=HomeAssistantError("Modbus vorübergehend nicht erreichbar"),
+            ):
+                with pytest.raises(HomeAssistantError):
+                    await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.sun_charge_active is False
+            assert coordinator._max_soc_released_for_discharge is False
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+            client.write_register.assert_awaited_with(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100
+            )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
+async def test_max_soc_discharge_can_fall_above_target_then_reclamp_on_rise(
+    hass,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Auch nach Teilentladung gilt die SOC-Absicherung."""
+    coordinator, client = await _make_max_soc_discharge_release(hass, release_soc=85)
+    try:
+        with _patched_now(15):
+            for soc in (85, 84, 83):
+                coordinator.data["soc"] = soc
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator.max_soc_clamped is False
+                client.write_register.assert_not_awaited()
+            coordinator.data["soc"] = 84
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.max_soc_clamped is True
+            client.write_register.assert_awaited_with(
+                address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100
+            )
+    finally:
+        await coordinator.async_stop_sun_charge()
+
+
 async def test_max_soc_release_latch_resets_below_target_and_clamps_again(hass) -> None:
     """Nach echter SOC-Unterschreitung ist eine spätere Überschreitung neu."""
     client = _make_client()
@@ -2318,8 +2493,8 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_charge_window_en
 ) -> None:
     """Wurde die Max-SOC-Sperre WÄHREND eines Ladezeitfensters
     ausgelöst, muss sie spätestens am Fensterende aktiv aufgehoben werden
-    und in den Folgepolls aufgehoben bleiben, bis der SOC real unter den
-    Zielwert fällt. Danach darf eine neue Überschreitung wieder klemmen."""
+    und ohne erneutes Laden in den Folgepolls aufgehoben bleiben. Nach einer
+    Zielunterschreitung darf eine neue Überschreitung wieder klemmen."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False

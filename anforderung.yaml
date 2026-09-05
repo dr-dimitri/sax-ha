@@ -424,15 +424,36 @@ requirement_timed_soc_charge:
        wird Register 40051 aktiv auf 0 zurückgesetzt. Gleichzeitig setzt der
        Coordinator den Freigabe-Latch
        self._max_soc_released_for_discharge: Solange der SOC weiterhin auf
-       oder über dem wirksamen Zielwert liegt, bleibt die SmartMeter-
-       Nullregelung danach freigegeben und weitere Polls starten weder einen
-       neuen 0-%-Task noch schreiben sie Register 40051 erneut auf Modus 1.
+       oder über dem wirksamen Zielwert liegt und keine erneute Ladung
+       erkannt wird, bleibt die SmartMeter-Nullregelung danach freigegeben.
+       Weitere Polls starten weder einen neuen 0-%-Task noch schreiben sie
+       Register 40051 erneut auf Modus 1.
        Dadurch kann der Speicher den Hausverbrauch tatsächlich decken, statt
        nach jeweils zwei Polls zwischen Freigabe und Sperre zu flattern.
        max_soc_clamped ist während dieser Freigabe False und entspricht damit
-       dem tatsächlich gehaltenen Gerätemodus. Erst ein real gemessener SOC
+       dem tatsächlich gehaltenen Gerätemodus. Ein real gemessener SOC
        unter dem wirksamen Zielwert löscht den Latch; eine spätere neue
        Überschreitung aktiviert die Sperre wieder.
+
+       Die Entladefreigabe darf kein erneutes Laden über den Zielwert
+       erlauben: Bei weiterhin erreichtem Ziel-SOC löschen bestätigte
+       Batterieladung (storage_power_active <= -50 W) ODER Netzeinspeisung
+       (smartmeter_power < -50 W) den Latch und setzen sofort wieder
+       Register 40051 = 1 / 40049 = 0 %. Der eigene Zähler
+       self._max_soc_recharge_confirm_cycles verwendet dafür dieselbe
+       PV_SURPLUS_HYSTERESIS_CYCLES-Hysterese. Ohne ein solches Signal
+       wird er zurückgesetzt; Entladen, Stillstand oder fehlende
+       Leistungswerte allein lösen keine neue Sperre aus. Die zusätzliche
+       Batterieleistung ist nötig, weil der Speicher den PV-Überschuss
+       bereits aufnehmen und die Netzleistung dabei nahe 0 W halten kann.
+       Steigt der gemessene SOC während der Freigabe gegenüber der letzten
+       Auswertung, wird auch ohne Leistungsbestätigung sofort gesperrt:
+       Das schützt bei fehlenden SunSpec-Werten oder kleiner Ladeleistung
+       unterhalb der 50-W-Toleranz. Ein vorheriger SOC-Abfall unter den
+       Zielwert ist für diese erneute Sperre nicht erforderlich. Die
+       Freigabe wird vor dem Sperrversuch verworfen, damit ein Schreibfehler
+       beim nächsten Poll erneut zur Sperre führt. Späterer bestätigter
+       Netzbezug darf die Sperre weiterhin zum Entladen freigeben.
 
        Änderungen des wirksamen Zielwerts berücksichtigen denselben Latch:
        Eine Zielerhöhung unter den weiterhin höheren aktuellen SOC behält die
@@ -444,9 +465,11 @@ requirement_timed_soc_charge:
        beendet ihre Sperre weiterhin am jeweiligen Fenster-/Slotende. Endet
        ein solcher Zeitraum bei weiterhin erreichtem SOC, nutzt die aktive
        Freigabe denselben Latch, damit die geräteweite Sperre nicht schon im
-       nächsten Poll erneut entsteht; ein realer SOC-Abfall löscht ihn wie
-       gewohnt. Das gilt gleichermaßen für zeitgesteuerte, netzdienliche und
-       preisoptimierte Zeiträume.
+       nächsten Poll allein wegen eines unveränderten SOC erneut entsteht.
+       Der Schutz gegen erneutes Laden und der Reset bei Zielunterschreitung
+       gelten auch hier. Das gilt gleichermaßen für zeitgesteuerte,
+       netzdienliche und preisoptimierte Zeiträume sowie für das Ende des
+       effektiven netzdienlichen Fensters bei ausfallender PV-Prognose.
 
        Ohne den Netzbezug-Trigger
        würde die Sperre in diesem Fall de facto dauerhaft bestehen bleiben
@@ -528,8 +551,9 @@ requirement_timed_soc_charge:
 
     Zyklen-Hysterese (einheitlich): JEDER Vergleich gegen
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - hier der PV-Überschuss-Check von
-    Punkt 2/3 sowie der Netzbezug-Freigabe-Trigger der Max-SOC-Sperre von
-    Punkt 1, außerdem (siehe REQ-GRID-SERVING-CHARGE) Schritt a und b der
+    Punkt 2/3 sowie der Netzbezug-Freigabe-Trigger und der Schutz gegen
+    erneutes Laden der Max-SOC-Sperre von Punkt 1, außerdem (siehe
+    REQ-GRID-SERVING-CHARGE) Schritt a und b der
     Zustandsmaschine für netzdienliches Laden - läuft über dieselbe
     wiederverwendbare Hilfsmethode SaxPowerCoordinator._cycles_confirmed und
     dieselbe Konstante PV_SURPLUS_HYSTERESIS_CYCLES (const.py, 2): eine
@@ -539,6 +563,7 @@ requirement_timed_soc_charge:
     Verwendungsstelle ein eigenes self-Attribut, z. B.
     self._timed_charge_pv_surplus_cycles,
     self._max_soc_grid_import_wait_cycles,
+    self._max_soc_recharge_confirm_cycles,
     self._grid_serving_charge_confirm_cycles,
     self._grid_serving_release_confirm_cycles) sofort auf 0 zurück. Schützt
     einheitlich gegen kurze Lastspitzen/Messausreißer am Smart Meter, statt
@@ -634,9 +659,9 @@ requirement_timed_soc_charge:
        zeitgesteuerten Ladens bei Zielerreichung/Fensterende/
        Deaktivierung SOWIE die Max-SOC-Sperre unabhängig vom
        zeitgesteuerten Laden - Aktivierung bei Zielerreichung, Freigabe
-       beim Unterschreiten - sowie die dauerhafte Freigabe nach dem Ende
+       beim Unterschreiten - sowie die stabile Entladefreigabe nach dem Ende
        eines zeitgesteuerten oder netzdienlichen Fensters über mehrere
-       Folgepolls bis zu einer realen SOC-Unterschreitung), die Watt-zu-
+       Folgepolls ohne erneute Ladung), die Watt-zu-
        Prozent-Umrechnung (inkl. Klemmung auf ±100 %) sowie das
        Schreibintervall (_sun_ic_write_interval) ab."
     - "Gezielte Schreibpfadtests prüfen: fehlende/0-Referenzleistung und
@@ -654,11 +679,23 @@ requirement_timed_soc_charge:
        Zyklus ohne (oder mit zu geringem) Netzbezug zwischen zwei
        Netzbezug-Zyklen, sowie unveränderter Ablauf (Sperre bleibt
        unbegrenzt bestehen) bei fehlendem smartmeter_power. Nach bestätigter
-       Freigabe prüfen mindestens fünf weitere Polls bei SOC >= Zielwert,
-       dass kein erneuter Modus-1-/0-%-Write erfolgt. Weitere Tests decken
+       Freigabe prüfen mindestens fünf weitere Polls bei SOC >= Zielwert
+       ohne erneutes Laden, dass kein erneuter Modus-1-/0-%-Write erfolgt.
+       Weitere Tests decken
        Löschen des Latch unterhalb des Zielwerts, erneutes Klemmen bei einer
        späteren Überschreitung, Beibehalten bei Zielerhöhung, Löschen bei
        Zielabsenkung und unveränderte Zeitfensterbindung ab."
+    - "Regressionstests prüfen erneutes Sperren nach zeitgesteuertem oder
+       netzdienlichem Fensterende, ausfallender PV-Prognose und bestätigtem
+       Netzbezug: Batterieladung bei ausgeglichener Netzleistung und
+       Einspeisung ohne Batterieleistungswert lösen nach zwei Auswertungen
+       die 40051=1-/40049=0-Sequenz aus. Steigender SOC sperrt auch bei
+       kleiner oder fehlender Leistung sofort, ebenso nach vorheriger
+       Teilentladung oberhalb des Ziels. Messlücken, Entladung und kleine
+       Leistungen unterbrechen die Leistungsbestätigung. Schreibfehler
+       werden im nächsten Poll erneut angegangen, und späterer Netzbezug
+       ermöglicht wieder stabile Entladung. tests/test_price_optimizer.py
+       prüft den erneuten Schutz auch nach dem Ende eines Preis-Slots."
     - "tests/test_coordinator.py deckt zusätzlich die PV-Überschuss-Prüfung
        ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
        smartmeter_power unter -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (negativ

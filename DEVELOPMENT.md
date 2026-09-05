@@ -635,8 +635,14 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    wieder `False` wird. So kann derselbe Slot keinen zweiten Ladezyklus
    starten; am Slotende folgt aktiv die SmartMeter-Nullregelung. Endet eine
    gebundene Sperre bei weiterhin erreichtem SOC, hält der vorhandene
-   Freigabe-Latch die Nullregelung bis zu einem realen SOC-Abfall stabil -
-   auch nach zeitgesteuerten und netzdienlichen Fenstern.
+   Freigabe-Latch die Nullregelung beim Entladen stabil - auch nach
+   zeitgesteuerten und netzdienlichen Fenstern. Erneute Batterieladung ab
+   50 W oder Netzeinspeisung über 50 W über zwei Auswertungen hebt diese
+   Freigabe wieder auf und hält erneut 0 %. Steigender SOC löst die Sperre
+   auch ohne Leistungsbestätigung sofort aus, damit fehlende SunSpec-Werte
+   oder kleine Ladeleistungen kein Volladen ermöglichen. Ein unveränderter
+   oder fallender SOC allein sperrt die Entladung weiterhin nicht; unterhalb
+   des Zielwerts wird der Freigabe-Latch wie bisher zurückgesetzt.
 2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + im
    aktiven Monat + kein PV-Überschuss** (`timed_should_charge`):
    Leistungsvorgabe = `MIN_SETPOINT_POWER` (sättigt in

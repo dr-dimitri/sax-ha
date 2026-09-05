@@ -912,6 +912,17 @@ async def test_price_charge_max_soc_hold_remains_bound_to_selected_slot(
         await coordinator._async_enforce_grid_charge(grid_import_data)
         assert coordinator.max_soc_clamped is False
         client.write_register.assert_not_awaited()
+
+        # REQ-TIMED-SOC-CHARGE: Die Freigabe nach dem Preis-Slot darf
+        # späteres PV-Laden oberhalb des Zielwerts nicht unbegrenzt zulassen.
+        await coordinator._async_enforce_grid_charge({"soc": 81})
+        assert coordinator.max_soc_clamped is True
+        assert coordinator._max_soc_released_for_discharge is False
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=0,
+            device_id=100,
+        )
     finally:
         await coordinator.async_stop_sun_charge()
 

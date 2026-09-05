@@ -43,6 +43,7 @@ from custom_components.sax_power.infrastructure.control_store import (
 )
 from custom_components.sax_power.number import (
     SaxPowerMaxSocNumber,
+    SaxPowerTimedChargeMaxSocNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
 from custom_components.sax_power.select import SaxPowerPriceStrategySelect
@@ -162,6 +163,7 @@ async def test_store_round_trip_preserves_every_field(hass, hass_storage) -> Non
         timed_charge_start=dt_time(1, 30),
         timed_charge_end=dt_time(5, 45),
         timed_charge_months=frozenset({1, 11, 12}),
+        timed_charge_max_soc=65,
         timed_charge_min_soc=35,
         grid_serving_enabled=True,
         grid_serving_start=dt_time(11, 0),
@@ -206,6 +208,7 @@ async def test_store_drops_only_the_invalid_fields(hass, hass_storage) -> None:
         {
             **ACTIVE_WINDOW_PAYLOAD,
             "max_soc": 250,  # außerhalb [MIN_SOC, MAX_SOC]
+            "timed_charge_max_soc": True,
             "timed_charge_start": "kaputt",
             "price_charge_strategy": "gibt-es-nicht",
             "price_charge_hours": True,  # bool ist kein gültiger int-Wert
@@ -217,6 +220,7 @@ async def test_store_drops_only_the_invalid_fields(hass, hass_storage) -> None:
 
     assert loaded is not None
     assert loaded.max_soc is None
+    assert loaded.timed_charge_max_soc is None
     assert loaded.timed_charge_start is None
     assert loaded.price_charge_strategy is None
     assert loaded.price_charge_hours is None
@@ -267,12 +271,47 @@ def test_sanitized_fills_fields_missing_from_an_older_store() -> None:
     filled = ControlConfig(timed_charge_enabled=True).sanitized()
 
     assert filled.max_soc == MAX_SOC
+    assert filled.timed_charge_max_soc == MAX_SOC
     assert filled.timed_charge_min_soc == DEFAULT_TIMED_CHARGE_MIN_SOC
     assert filled.timed_charge_months == ALL_MONTHS
     assert filled.price_charge_strategy == DEFAULT_PRICE_STRATEGY
     assert filled.price_charge_hours == DEFAULT_PRICE_HOURS
     assert filled.timed_charge_start is None
     assert filled.timed_charge_end is None
+
+
+@pytest.mark.parametrize(
+    ("max_soc", "timed_charge_max_soc", "expected"),
+    [(80, None, 80), (80, 90, 80), (80, 65, 65), (80, 0, 0), (0, None, 0)],
+)
+def test_sanitized_initializes_and_caps_timed_charge_max_soc(
+    max_soc: int, timed_charge_max_soc: int | None, expected: int
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Der globale Max. SOC führt auch beim Store-Upgrade."""
+    config = ControlConfig(
+        max_soc=max_soc, timed_charge_max_soc=timed_charge_max_soc
+    ).sanitized()
+
+    assert config.max_soc == max_soc
+    assert config.timed_charge_max_soc == expected
+
+
+@pytest.mark.parametrize("invalid_value", [-1, 101, True, 65.5, "65"])
+async def test_store_invalid_timed_charge_max_soc_uses_global_limit(
+    hass, hass_storage, invalid_value
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Ungültige neue Werte übernehmen den gültigen Max. SOC."""
+    _seed_store(
+        hass_storage,
+        "entry",
+        {"max_soc": 85, "timed_charge_max_soc": invalid_value},
+    )
+
+    loaded = (await ControlConfigStore(hass, "entry").async_load()).config
+
+    assert loaded is not None
+    assert loaded.timed_charge_max_soc is None
+    assert loaded.sanitized().timed_charge_max_soc == 85
 
 
 def test_sanitized_resolves_mutually_exclusive_automations() -> None:
@@ -361,11 +400,123 @@ async def test_first_refresh_knows_the_complete_stored_configuration(
     assert coordinator.control_config_migration_pending is False
     assert coordinator.control_bootstrap_pending is True
     assert coordinator.max_soc == 90
+    assert coordinator.timed_charge_max_soc == 90
     assert coordinator.timed_charge_enabled is True
     assert coordinator.timed_charge_start == dt_time(1, 0)
     assert coordinator.timed_charge_end == dt_time(5, 0)
     assert coordinator.timed_charge_min_soc == 100
     assert coordinator.timed_charge_months == ALL_MONTHS
+
+
+@pytest.mark.parametrize(("stored_max_soc", "expected"), [(85, 85), (250, 100)])
+async def test_older_store_initializes_timed_charge_max_soc_before_bootstrap(
+    hass, hass_storage, stored_max_soc: int, expected: int
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Das Upgrade übernimmt den sanierten globalen Max. SOC."""
+    _seed_store(
+        hass_storage, "entry", {**ACTIVE_WINDOW_PAYLOAD, "max_soc": stored_max_soc}
+    )
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client, "entry")
+    _patched_reads(coordinator)
+
+    await coordinator.async_load_control_state()
+
+    assert coordinator.timed_charge_max_soc == expected
+    assert coordinator.control_bootstrap_pending is True
+    client.write_register.assert_not_awaited()
+
+    with _patched_now(8):
+        await coordinator.async_refresh()
+        await coordinator.async_finish_bootstrap()
+    await coordinator.async_shutdown()
+
+    saved = hass_storage[f"{STORAGE_KEY_PREFIX}.entry"]["data"]
+    assert saved["timed_charge_max_soc"] == expected
+    reloaded = _make_coordinator(hass, _make_client(), "entry")
+    await reloaded.async_load_control_state()
+    assert reloaded.timed_charge_max_soc == expected
+    await reloaded.async_shutdown()
+
+
+@pytest.mark.parametrize("max_entity_first", [False, True])
+@pytest.mark.parametrize("restored_max_soc", [None, 73])
+async def test_missing_store_initializes_timed_max_after_all_entities_restore(
+    hass, hass_storage, max_entity_first: bool, restored_max_soc: int | None
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Jede Entity-Reihenfolge liefert denselben Zielwert."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client, "entry")
+    _patched_reads(coordinator)
+    await coordinator.async_load_control_state()
+
+    max_entity = _prepare(
+        SaxPowerMaxSocNumber(coordinator, "entry"),
+        hass,
+        (
+            State("number.max_soc", str(restored_max_soc))
+            if restored_max_soc is not None
+            else None
+        ),
+    )
+    timed_max_entity = SaxPowerTimedChargeMaxSocNumber(coordinator, "entry")
+    timed_max_entity.hass = hass
+    timed_max_entity.async_write_ha_state = MagicMock()
+    entities = [max_entity, timed_max_entity]
+    if not max_entity_first:
+        entities.reverse()
+    for entity in entities:
+        await entity.async_added_to_hass()
+
+    assert coordinator.control_config().timed_charge_max_soc is None
+    assert f"{STORAGE_KEY_PREFIX}.entry" not in hass_storage
+    client.write_register.assert_not_awaited()
+
+    with _patched_now(8):
+        await coordinator.async_refresh()
+        await coordinator.async_finish_bootstrap()
+
+    expected = restored_max_soc if restored_max_soc is not None else MAX_SOC
+    assert coordinator.timed_charge_max_soc == expected
+    assert timed_max_entity.native_value == expected
+    saved = hass_storage[f"{STORAGE_KEY_PREFIX}.entry"]["data"]
+    assert saved["max_soc"] == expected
+    assert saved["timed_charge_max_soc"] == expected
+    await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize(
+    ("new_global_max_soc", "expected_timed_max_soc"), [(70, 70), (95, 80)]
+)
+async def test_timed_charge_max_soc_and_global_clamp_survive_reload(
+    hass, hass_storage, new_global_max_soc: int, expected_timed_max_soc: int
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Senken klemmt den Zielwert, Erhöhen zieht ihn nicht mit."""
+    _seed_store(
+        hass_storage,
+        "entry",
+        {**ACTIVE_WINDOW_PAYLOAD, "timed_charge_max_soc": 75},
+    )
+    coordinator = _make_coordinator(hass, _make_client(), "entry")
+    _patched_reads(coordinator)
+    await coordinator.async_load_control_state()
+    with _patched_now(8):
+        await coordinator.async_refresh()
+        await coordinator.async_finish_bootstrap()
+        await coordinator.async_set_timed_charge_max_soc(80)
+        await coordinator.async_set_max_soc(new_global_max_soc)
+
+    assert coordinator.timed_charge_max_soc == expected_timed_max_soc
+    await coordinator.async_shutdown()
+    saved = hass_storage[f"{STORAGE_KEY_PREFIX}.entry"]["data"]
+    assert saved["max_soc"] == new_global_max_soc
+    assert saved["timed_charge_max_soc"] == expected_timed_max_soc
+
+    reloaded = _make_coordinator(hass, _make_client(), "entry")
+    await reloaded.async_load_control_state()
+    assert reloaded.max_soc == new_global_max_soc
+    assert reloaded.timed_charge_max_soc == expected_timed_max_soc
+    await reloaded.async_shutdown()
 
 
 async def test_restart_in_an_active_window_never_writes_mode_zero(

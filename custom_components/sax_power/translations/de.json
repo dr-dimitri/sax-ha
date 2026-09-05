@@ -347,6 +347,9 @@
       "max_soc": {
         "name": "Max. SOC"
       },
+      "timed_charge_max_soc": {
+        "name": "Netzladen Max. SOC"
+      },
       "timed_charge_min_soc": {
         "name": "Netzladung Min. SOC"
       },
@@ -523,8 +526,8 @@
       "description": "Slave-ID {slave_id} ist seit über einer Stunde ununterbrochen nicht erreichbar. Speicherdetails, Netz-/Smart-Meter-Werte und alle drei Lade-Automatiken (zeitgesteuertes, netzdienliches und preisoptimiertes Laden) sind ohne diesen Registerblock funktionslos. Bitte Netzwerkverbindung und die konfigurierte Slave-ID (SunSpec-Modus, Standard: 100) prüfen."
     },
     "max_soc_below_min_soc": {
-      "title": "Ziel-SOC liegt unter dem Nachlade-Schwellwert",
-      "description": "\"Max. SOC\" ({max_soc} %) liegt unter \"Netzladung Min. SOC\" ({min_soc} %) - das zeitgesteuerte Laden kann so nie starten, weil der Ladestart erst unterhalb von Min. SOC ausgelöst wird, die Max-SOC-Sperre aber schon vorher greift. Bitte Max. SOC auf mindestens den Wert von Min. SOC anheben."
+      "title": "Netzladen Max. SOC liegt unter Min. SOC",
+      "description": "\"Netzladen Max. SOC\" ({max_soc} %) liegt unter \"Netzladung Min. SOC\" ({min_soc} %). Die Netzladung endet dadurch unterhalb ihrer Startschwelle; zwischen Start und Stopp fehlt der Hystereseabstand. Bitte Netzladen Max. SOC erhöhen oder Netzladung Min. SOC senken."
     },
     "empty_charge_window": {
       "title": "Zeitfenster ist leer",

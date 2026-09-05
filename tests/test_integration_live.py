@@ -514,6 +514,7 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
         registry = er.async_get(hass)
         max_soc_id = _entity_id(registry, entry.entry_id, "max_soc")
         min_soc_id = _entity_id(registry, entry.entry_id, "timed_charge_min_soc")
+        timed_max_soc_id = _entity_id(registry, entry.entry_id, "timed_charge_max_soc")
         start_id = _entity_id(registry, entry.entry_id, "timed_charge_start")
         end_id = _entity_id(registry, entry.entry_id, "timed_charge_end")
         enabled_id = _entity_id(registry, entry.entry_id, "timed_charge_enabled")
@@ -527,6 +528,14 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             "number",
             "set_value",
             {"entity_id": max_soc_id, "value": 90},
+            blocking=True,
+        )
+        assert hass.states.get(timed_max_soc_id).state == "90"
+        assert hass.states.get(timed_max_soc_id).attributes["max"] == 90
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": timed_max_soc_id, "value": 80},
             blocking=True,
         )
         # "Netzladung Min. SOC" muss über dem simulierten SOC (50 %) liegen,
@@ -588,6 +597,30 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
 
             await hass.async_block_till_done()
             assert hass.states.get(active_text_id).state == "Aktiv"
+            # REQ-TIMED-SOC-CHARGE: Das eigene Teilziel beendet den echten
+            # Sollwertmodus sofort, ohne die globale PV-Sperre auszulösen.
+            with patch(
+                "custom_components.sax_power.coordinator.dt_util.now",
+                return_value=datetime(2024, 1, 1, 2, 0),
+            ):
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": timed_max_soc_id, "value": 50},
+                    blocking=True,
+                )
+            assert coordinator.sun_charge_active is False
+            assert coordinator.max_soc_clamped is False
+            assert hass.states.get(active_text_id).state == "Inaktiv"
+            assert hass.states.get(max_soc_id).state == "90"
+
+            verify_client = AsyncModbusTcpClient(host="127.0.0.1", port=TEST_PORT + 2)
+            await verify_client.connect()
+            stopped_mode = await verify_client.read_holding_registers(
+                address=REG_SUN_IC_CONTROL_MODE, count=1, device_id=SLAVE_ID_EXTENDED
+            )
+            verify_client.close()
+            assert stopped_mode.registers[0] == SUN_IC_CONTROL_MODE_SMARTMETER
         finally:
             await coordinator.async_stop_sun_charge()
 

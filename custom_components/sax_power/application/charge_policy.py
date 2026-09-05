@@ -20,6 +20,7 @@ class ChargePolicyInput:
     now: datetime
     current_soc: int
     target_soc: int
+    timed_target_soc: int
     pv_surplus_active: bool
     timed_enabled: bool
     timed_start: dt_time | None
@@ -63,6 +64,7 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
     )
     timed_should_charge = (
         not soc_reached
+        and inputs.current_soc < inputs.timed_target_soc
         and not inputs.pv_surplus_active
         and timed_window_active
         and inputs.timed_min_soc is not None

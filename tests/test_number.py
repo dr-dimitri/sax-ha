@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.components.number import NumberMode
 from homeassistant.core import State
 
 from custom_components.sax_power.const import (
@@ -33,6 +34,7 @@ from custom_components.sax_power.number import (
     SaxPowerPriceChargeHoursNumber,
     SaxPowerPriceLimitNumber,
     SaxPowerPriceNeutralPriceNumber,
+    SaxPowerTimedChargeMaxSocNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
 
@@ -67,6 +69,60 @@ def _prepare_entity(entity, hass, entity_id: str, last_state: State | None) -> N
     # irrelevant.
     entity.async_write_ha_state = MagicMock()
     entity.async_get_last_state = AsyncMock(return_value=last_state)
+
+
+@pytest.mark.parametrize("max_soc", [None, 0, 65, 100])
+async def test_timed_charge_max_soc_uses_configured_global_limit(
+    coordinator, max_soc
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Anfangswert und Slidergrenze folgen Max. SOC."""
+    coordinator._max_soc = max_soc
+    entity = SaxPowerTimedChargeMaxSocNumber(coordinator, "test_entry_id")
+
+    expected = MAX_SOC if max_soc is None else max_soc
+    assert entity.native_value == expected
+    assert entity.native_max_value == expected
+    assert entity.native_min_value == MIN_SOC
+    assert entity.native_step == 1
+    assert entity.mode is NumberMode.SLIDER
+    assert entity.translation_key == "timed_charge_max_soc"
+
+
+async def test_timed_charge_max_soc_tracks_global_limit_changes(
+    hass, coordinator
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Absenken reduziert Ziel und Slidergrenze sofort."""
+    coordinator._max_soc = 90
+    coordinator.async_start_sun_charge = AsyncMock()
+    entity = SaxPowerTimedChargeMaxSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_timed_charge_max_soc", None)
+
+    await entity.async_set_native_value(80)
+    assert entity.native_value == 80
+    assert entity.native_max_value == 90
+
+    await coordinator.async_set_max_soc(60)
+    assert entity.native_value == 60
+    assert entity.native_max_value == 60
+
+    await coordinator.async_set_max_soc(95)
+    assert entity.native_value == 60
+    assert entity.native_max_value == 95
+
+
+async def test_timed_charge_max_soc_keeps_configured_limits_during_calibration(
+    hass, coordinator
+) -> None:
+    """REQ-PERIODIC-FULL-CALIBRATION: Der Override ändert keine Sliderwerte."""
+    coordinator._max_soc = 80
+    entity = SaxPowerTimedChargeMaxSocNumber(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_timed_charge_max_soc", None)
+    await entity.async_set_native_value(60)
+    coordinator._cell_calibration_active = True
+
+    assert entity.native_value == 60
+    assert entity.native_max_value == 80
+    assert coordinator.effective_timed_charge_max_soc == 100
 
 
 async def test_timed_charge_min_soc_seeds_to_default_on_fresh_install(

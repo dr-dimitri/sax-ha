@@ -439,6 +439,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
         self._timed_charge_months: set[int] = set(ALL_MONTHS)
+        self._timed_charge_max_soc: int | None = None
         self._timed_charge_min_soc: int | None = None
         self._timed_charge_armed = False
         self._timed_charge_pv_surplus_cycles = 0
@@ -2666,6 +2667,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             timed_charge_start=self._timed_charge_start,
             timed_charge_end=self._timed_charge_end,
             timed_charge_months=frozenset(self._timed_charge_months),
+            timed_charge_max_soc=self._timed_charge_max_soc,
             timed_charge_min_soc=self._timed_charge_min_soc,
             grid_serving_enabled=self._grid_serving_enabled,
             grid_serving_start=self._grid_serving_start,
@@ -2744,6 +2746,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_start = config.timed_charge_start
         self._timed_charge_end = config.timed_charge_end
         self._timed_charge_months = set(config.timed_charge_months or ())
+        self._timed_charge_max_soc = config.timed_charge_max_soc
         self._timed_charge_min_soc = config.timed_charge_min_soc
         self._grid_serving_enabled = bool(config.grid_serving_enabled)
         self._grid_serving_start = config.grid_serving_start
@@ -2772,6 +2775,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         der Konfiguration selbst entscheidet."""
         if not self._control_bootstrap_pending:
             return
+        # REQ-TIMED-SOC-CHARGE: Erst jetzt ist auch ein migrierter Max-SOC
+        # vollständig bekannt, unabhängig von der Entity-Startreihenfolge.
+        if self._timed_charge_max_soc is None:
+            self._timed_charge_max_soc = self.timed_charge_max_soc
         self._control_bootstrap_pending = False
         self._async_sync_unresolved_fields_issue()
         await self._async_persist_bootstrap_result()
@@ -2872,6 +2879,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ohne die sonst greifende NumberEntity-Min/Max-Validierung des
         regulären Service-Call-Pfads."""
         self._max_soc = _clamp_int(max_soc, MIN_SOC, MAX_SOC)
+        if self._timed_charge_max_soc is not None:
+            self._timed_charge_max_soc = self.timed_charge_max_soc
         self.clear_control_field_unresolved("max_soc")
         if self.data is not None and (current_soc := self.data.get("soc")) is not None:
             await self._async_update_cell_calibration(current_soc)
@@ -3243,10 +3252,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Netzladeleistung" (SaxPowerChargeLimitNumber) wurde entfernt: der
     # eingestellte Watt-Wert hatte in der Praxis keinen Einfluss auf die
     # tatsächliche Ladeleistung, weil er ohnehin fast immer auf 100 %
-    # sättigte. Der Ziel-SOC nutzt denselben Wert wie "Max. SOC"
-    # (self._max_soc, siehe Max-SOC-Abschnitt oben) - fehlt dieser (None),
-    # wird MAX_SOC (100 %) als Ziel angenommen. Das vermeidet redundante
-    # Einstellmöglichkeiten (siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE).
+    # sättigte. Das eigene Netzladeziel bleibt unter dem globalen Max-SOC;
+    # die Kalibrierungsausnahme folgt REQ-PERIODIC-FULL-CALIBRATION.
 
     @property
     def timed_charge_enabled(self) -> bool:
@@ -3267,6 +3274,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def timed_charge_min_soc(self) -> int | None:
         return self._timed_charge_min_soc
+
+    @property
+    def timed_charge_max_soc(self) -> int:
+        """Return the configured grid-charge target under the global limit."""
+        maximum = self._max_soc if self._max_soc is not None else MAX_SOC
+        if self._timed_charge_max_soc is None:
+            return maximum
+        return min(self._timed_charge_max_soc, maximum)
+
+    @property
+    def effective_timed_charge_max_soc(self) -> int:
+        """Apply the existing calibration exception only to the runtime target."""
+        if self._cell_calibration_active:
+            return MAX_SOC
+        return self.timed_charge_max_soc
+
+    async def async_set_timed_charge_max_soc(self, value: int | None) -> None:
+        """Set the grid-charge target and immediately reevaluate charging."""
+        maximum = self._max_soc if self._max_soc is not None else MAX_SOC
+        self._timed_charge_max_soc = _clamp_int(value, MIN_SOC, maximum)
+        await self._async_apply_grid_charge_change()
 
     async def async_set_timed_charge_enabled(
         self, enabled: bool, *, force: bool = False
@@ -3307,7 +3335,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
         unterhalb dessen die Netzladung starten darf - siehe
         _async_enforce_grid_charge/_timed_charge_armed für die
-        Hysterese-Logik (einmal unterschritten, wird bis zum "Max. SOC"
+        Hysterese-Logik (einmal unterschritten, wird bis zum "Netzladen Max. SOC"
         durchgeladen, statt bei jedem Überschreiten von Min. SOC sofort
         wieder abzubrechen). Klemmt auf [MIN_SOC, MAX_SOC], siehe
         async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
@@ -3644,7 +3672,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
            Schwellwert unterschritten hat - _timed_charge_armed hält diesen
            "unterschritten"-Zustand als Hysterese fest, damit einmal
-           gestartetes Laden bis zum Erreichen von "Max. SOC" durchläuft,
+           gestartetes Laden bis zum eigenen "Netzladen Max. SOC" durchläuft,
            statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
@@ -3790,7 +3818,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_effective_max_soc = target_soc
         if current_soc < target_soc:
             self._max_soc_released_for_discharge = False
-        if current_soc >= target_soc:
+        timed_target_soc = self.effective_timed_charge_max_soc
+        if current_soc >= timed_target_soc:
             self._timed_charge_armed = False
         elif (
             self._timed_charge_min_soc is not None
@@ -3827,6 +3856,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 now=now,
                 current_soc=current_soc,
                 target_soc=target_soc,
+                timed_target_soc=timed_target_soc,
                 pv_surplus_active=pv_surplus_active,
                 timed_enabled=self._timed_charge_enabled,
                 timed_start=self._timed_charge_start,
@@ -4636,7 +4666,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 extended_available=self._extended_available,
                 extended_unavailable_since=self._extended_unavailable_since,
                 slave_id_extended=self.slave_id_extended,
-                max_soc=self._max_soc,
+                timed_max_soc=self.timed_charge_max_soc,
                 timed_min_soc=self._timed_charge_min_soc,
                 price_limit=self._price_charge_max_price,
                 neutral_price=self._price_charge_neutral_price,

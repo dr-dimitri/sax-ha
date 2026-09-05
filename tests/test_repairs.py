@@ -248,6 +248,25 @@ async def test_max_soc_below_min_soc_issue_clears_once_raised(hass) -> None:
     assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is None
 
 
+async def test_timed_max_soc_below_min_soc_uses_own_target(hass) -> None:
+    """REQ-TIMED-SOC-CHARGE: Ein hohes globales Limit verdeckt keinen Konflikt."""
+    coordinator = _make_coordinator(hass)
+    coordinator._max_soc = 90
+    coordinator._timed_charge_max_soc = 30
+    coordinator._timed_charge_min_soc = 40
+
+    coordinator._async_check_self_diagnostics()
+
+    issue = _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC)
+    assert issue is not None
+    assert issue.translation_placeholders == {"max_soc": "30", "min_soc": "40"}
+
+    await coordinator.async_set_timed_charge_max_soc(60)
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is None
+
+
 # ===========================================================================
 # 3b. Neutralpreis nicht über der Preisgrenze (REQ-DYNAMIC-PRICE-CHARGE)
 # ===========================================================================

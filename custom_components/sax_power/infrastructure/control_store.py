@@ -129,7 +129,8 @@ class ControlConfig:
     SaxPowerCoordinator._notify_time_window_overlap). Deshalb unterscheidet
     erst `ControlConfig.sanitized()` beim Laden zwischen beidem: fehlende
     Nicht-Zeit-Felder bekommen den Hard-Default, ein geleertes Zeitfenster
-    bleibt leer.
+    bleibt leer. Netzladen Max. SOC übernimmt bei seiner Einführung den
+    gespeicherten globalen Max. SOC (REQ-TIMED-SOC-CHARGE).
     """
 
     max_soc: int | None = None
@@ -137,6 +138,7 @@ class ControlConfig:
     timed_charge_start: dt_time | None = None
     timed_charge_end: dt_time | None = None
     timed_charge_months: frozenset[int] | None = None
+    timed_charge_max_soc: int | None = None
     timed_charge_min_soc: int | None = None
     grid_serving_enabled: bool | None = None
     grid_serving_start: dt_time | None = None
@@ -171,7 +173,9 @@ class ControlConfig:
         Fehlende Felder (Store von vor der Einführung eines Feldes, oder von
         der Feldvalidierung verworfen) bekommen ihren Hard-Default -
         fail-safe: lieber der dokumentierte Default als ein aus einem
-        korrupten Wert abgeleiteter Zustand.
+        korrupten Wert abgeleiteter Zustand. Netzladen Max. SOC übernimmt
+        den sanierten globalen Max. SOC und darf diesen nicht überschreiten
+        (REQ-TIMED-SOC-CHARGE).
         """
         defaults: dict[str, Any] = {
             "max_soc": MAX_SOC,
@@ -195,6 +199,17 @@ class ControlConfig:
             if getattr(self, field) is None
         }
         config = replace(self, **filled) if filled else self
+        max_soc = config.max_soc if config.max_soc is not None else MAX_SOC
+        timed_charge_max_soc = min(
+            (
+                config.timed_charge_max_soc
+                if config.timed_charge_max_soc is not None
+                else max_soc
+            ),
+            max_soc,
+        )
+        if config.timed_charge_max_soc != timed_charge_max_soc:
+            config = replace(config, timed_charge_max_soc=timed_charge_max_soc)
         if config.timed_charge_enabled and config.price_charge_enabled:
             # Netzladung und preisoptimiertes Laden laden beide aktiv über
             # denselben SunSpec-Schreibpfad und schließen sich gegenseitig
@@ -304,6 +319,9 @@ class ControlConfigStore:
             ),
             timed_charge_months=_valid_months(
                 raw.get("timed_charge_months"), "Netzladung Monate"
+            ),
+            timed_charge_max_soc=_valid_int(
+                raw.get("timed_charge_max_soc"), MIN_SOC, MAX_SOC, "Netzladen Max. SOC"
             ),
             timed_charge_min_soc=_valid_int(
                 raw.get("timed_charge_min_soc"), MIN_SOC, MAX_SOC, "Netzladung Min. SOC"

@@ -137,6 +137,10 @@ dagegen dauerhaft als Config-Entry-ID. Ein späterer Lease derselben MAC kann
 dadurch die geänderte IP im vorhandenen Eintrag nachführen und einen Reload
 auslösen, ohne einen zweiten Eintrag anzulegen. Beim Reconfigure bleibt diese
 MAC-ID erhalten; nur manuell angelegte Einträge führen ihre `host:port`-ID mit.
+Auch ein manueller Einrichtungsversuch gleicht Host und Port vor der
+Verbindungsprüfung mit bestehenden Einträgen ab. So erzeugt dieselbe
+Verbindung trotz unterschiedlicher ID-Formate keinen zweiten Coordinator;
+der vorhandene Eintrag bleibt beim Abbruch unverändert.
 
 Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
 preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als

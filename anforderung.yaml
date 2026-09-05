@@ -2672,7 +2672,12 @@ requirement_dhcp_discovery:
     Reconfigure bleibt eine vorhandene normierte MAC-ID erhalten; nur
     manuelle Einträge führen ihre "host:port"-ID auf die neue Verbindung
     nach. Host-/Port-Abgleiche verhindern dabei Kollisionen mit anderen
-    bereits konfigurierten Einträgen.
+    bereits konfigurierten Einträgen. Auch die manuelle Ersteinrichtung
+    prüft vor der Verbindungsvalidierung auf bereits konfigurierte
+    Host-/Port-Kombinationen, unabhängig davon, ob deren unique_id eine
+    MAC-Adresse oder "host:port" ist. Ein Treffer bricht mit
+    "already_configured" ab, ohne den vorhandenen Eintrag zu verändern.
+    Ein anderer Host oder Port bleibt weiterhin konfigurierbar.
   requirements:
     - "manifest.json enthält einen dhcp-Footprint (Hostname-Präfix
        \"sax*\")."
@@ -2687,6 +2692,8 @@ requirement_dhcp_discovery:
        CONF_HOST und lädt einen aktiven Eintrag genau einmal neu."
     - "Reconfigure bewahrt MAC-basierte IDs, führt manuelle host:port-IDs
        weiterhin nach und verhindert Zielkollisionen mit anderen Einträgen."
+    - "Die manuelle Ersteinrichtung dedupliziert Host-/Port-Kombinationen
+       auch gegenüber per DHCP angelegten Einträgen vor jedem Modbus-Zugriff."
   acceptance_criteria:
     - "tests/test_config_flow.py deckt ab, dass DHCP-Discovery in den
        user-Schritt mit vorbelegtem Host-Feld weiterleitet und der Flow ab
@@ -2703,6 +2710,9 @@ requirement_dhcp_discovery:
        \"already_configured\" abbricht."
     - "tests/test_config_flow.py deckt Reconfigure für MAC- und manuelle
        host:port-IDs ab."
+    - "tests/test_config_flow.py prüft den manuellen Duplikatabbruch für
+       MAC- und host:port-IDs ohne Verbindungsvalidierung oder Änderung des
+       vorhandenen Eintrags; andere Hosts oder Ports bleiben zulässig."
 
 # ==============================================================================
 # ANFORDERUNG: ENTITY-KATEGORISIERUNG (DIAGNOSTIC)

@@ -8,6 +8,7 @@ import pytest
 import voluptuous as vol
 import voluptuous_serialize
 from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
@@ -339,6 +340,84 @@ async def test_user_flow_cannot_connect(hass) -> None:
         )
         assert result2["type"] == FlowResultType.FORM
         assert result2["errors"] == {"base": "cannot_connect"}
+
+
+@pytest.mark.parametrize(
+    ("source", "unique_id"),
+    [
+        (config_entries.SOURCE_DHCP, "aa:bb:cc:dd:ee:ff"),
+        (config_entries.SOURCE_USER, "192.168.1.50:502"),
+    ],
+)
+async def test_user_flow_rejects_configured_endpoint(
+    hass: HomeAssistant, source: str, unique_id: str
+) -> None:
+    """REQ-DHCP-DISCOVERY: Auch manuell darf keine zweite Steuerung entstehen."""
+    options = {CONF_PRICE_SENSOR: "sensor.strompreis"}
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options=options,
+        unique_id=unique_id,
+        source=source,
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.sax_power.config_flow._async_validate_connection"
+    ) as validate:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    validate.assert_not_awaited()
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    assert entry.unique_id == unique_id
+    assert entry.data == VALID_INPUT
+    assert entry.options == options
+    assert entry.source == source
+
+
+@pytest.mark.parametrize(
+    "connection_change", [{"port": 1502}, {"host": "192.168.1.99"}]
+)
+async def test_user_flow_allows_distinct_endpoint(
+    hass: HomeAssistant, connection_change: dict[str, str | int]
+) -> None:
+    """REQ-DHCP-DISCOVERY: Ein anderer Host oder Port bleibt konfigurierbar."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        unique_id="aa:bb:cc:dd:ee:ff",
+        source=config_entries.SOURCE_DHCP,
+    )
+    entry.add_to_hass(hass)
+    user_input = {**VALID_INPUT, **connection_change}
+
+    with patch(
+        "custom_components.sax_power.config_flow._async_validate_connection"
+    ) as validate:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "grid_charge"
+    validate.assert_awaited_once_with(
+        user_input["host"], user_input["port"], user_input["slave_id_basic"]
+    )
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    assert entry.unique_id == "aa:bb:cc:dd:ee:ff"
+    assert entry.data == VALID_INPUT
+    assert entry.source == config_entries.SOURCE_DHCP
 
 
 async def test_dhcp_discovery_prefills_host(hass) -> None:

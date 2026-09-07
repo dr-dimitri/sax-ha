@@ -143,6 +143,13 @@ def _energy_origin_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any
     return coordinator.data.get("energy_origin_attributes") or {}
 
 
+def _grid_energy_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Zählbeginn und Messverfahren für Netzenergie (REQ-GRID-ENERGY)."""
+    if coordinator.data is None:
+        return {}
+    return coordinator.data.get("grid_energy_attributes") or {}
+
+
 def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
     """Diagnoseattribute des Status-Sensors (REQ-ECONOMICS-OBSERVABILITY)."""
     if coordinator.data is None:
@@ -734,6 +741,25 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("battery_cell_voltage_avg"),
+    ),
+    # -- Gesamter Netzanschlusspunkt (REQ-GRID-ENERGY) ----------------------
+    SaxPowerSensorEntityDescription(
+        key="energy_imported_from_grid",
+        translation_key="energy_imported_from_grid",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_imported_from_grid"),
+        attributes_fn=_grid_energy_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
+        key="energy_exported_to_grid",
+        translation_key="energy_exported_to_grid",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("energy_exported_to_grid"),
+        attributes_fn=_grid_energy_attributes,
     ),
     # -- Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN) ------------------------
     # Anders als energy_charged/energy_discharged (SaxPowerEnergySensor

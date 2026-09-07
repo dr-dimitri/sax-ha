@@ -257,6 +257,48 @@ Listenform der bekannten Attributnamen. Die Zuordnung eines Zeitfensters erfolgt
 über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
 Sonderfall.
 
+### Gesamte Netzenergie (REQ-GRID-ENERGY)
+
+`energy_imported_from_grid` und `energy_exported_to_grid` integrieren die
+normalisierte `smartmeter_power` am gesamten Netzanschlusspunkt. Positiv
+bedeutet Bezug, negativ Einspeisung. Direkter Hausverbrauch ist enthalten;
+die Batterieladeleistung und die Tarifkonfiguration beeinflussen diese
+Zähler nicht. `energy_charged_from_grid` behält seine bisherige Bedeutung
+als geschätzter Netzstromanteil der Batterieladung.
+
+Der Coordinator hält zwischen zwei frischen SunSpec-HIGH-Messpunkten die
+vorherige Leistung (linke Riemannsumme). Der erste gültige Messpunkt setzt
+die Baseline; gecachte Refreshes zählen nicht erneut. Ungültige, fehlende
+oder veraltete Werte sowie Poll-Ausfälle verwerfen die Baseline. Das Alter
+einer Messung und der Abstand zweier Messpunkte dürfen jeweils höchstens
+`2 * READ_BLOCK_EXT_HIGH_INTERVAL` (derzeit vier Sekunden) betragen,
+unabhängig vom Basic-Mode-Intervall. Größere Lücken werden übersprungen.
+Erst ein neuer gültiger Messpunkt startet die nächste Messstrecke; keine
+verlorene Zeit wird nachgeholt. Die Schätzung bildet deshalb ausschließlich
+die beobachteten Zeiträume ab.
+
+Die beiden kWh-Sensoren nutzen `device_class: energy` und
+`state_class: total_increasing` und lesen unmittelbar aus
+`coordinator.data`. Die gemeinsamen `grid_energy_attributes` liefern
+`accounting_started_at` und `integration_method: left_riemann_sum`. Ihre
+Persistenz liegt in `EnergyStateStore` (Hauptversion 1, Minor-Version 4):
+`grid_imported_kwh`, `grid_exported_kwh` und
+`grid_accounting_started_at` bilden eine gemeinsam validierte Gruppe mit
+eigenem UTC-Zählbeginn. Vorhandene Summen bleiben bei einem Neustart
+erhalten, die Messbaseline wird neu begonnen. Offline-Zeit zählt nicht.
+
+Neue Einträge, ältere Snapshots ohne Netzenergiegruppe und teilweise
+korrupte Gruppen starten bei 0 kWh mit aktuellem UTC-Zählbeginn. Bei einer
+unvollständigen Gruppe wird auch deren interne Monotonie-Baseline
+verworfen, damit der neue Nullstand gespeichert werden kann. Die übrigen
+Energiezähler bleiben erhalten. Derselbe gedrosselte Schreibpfad und
+Shutdown-Flush speichern alle Energiezähler. Ein Store-Lesefehler lässt
+die Netzzähler unbekannt und sperrt Store-Schreibvorgänge bis zum
+erfolgreichen Reload. So kann eine Batterie-RestoreEntity keine
+unvollständigen Daten über eine möglicherweise noch lesbare Netz-Historie
+schreiben; numerische Batterie-Altzustände dürfen weiterhin angezeigt
+werden.
+
 ### Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING)
 
 Läuft in `SaxPowerCoordinator._accumulate_economics`, aufgerufen am Ende von
@@ -318,7 +360,8 @@ Die durchgereichten Preise bleiben
 bewusst außen vor: Dort ist ein negatives Vorzeichen eine Aussage über den
 Tarif.
 
-Drei Zählungen, drei Startzeitpunkte: `energy_charged` läuft seit der
+Die batteriebezogenen Zählungen beginnen zu drei Startzeitpunkten:
+`energy_charged` läuft seit der
 Installation, die Herkunftszähler seit `_bootstrap_energy_origin`, die
 Geldbilanz erst seit dem ersten vollständig gespeicherten Tarif. Ihre Werte
 sind deshalb NICHT gegeneinander verrechenbar, obwohl das Dashboard sie

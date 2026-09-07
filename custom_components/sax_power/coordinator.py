@@ -120,6 +120,7 @@ from .domain.economics_status import (
     compute_price_coverage_percent,
 )
 from .domain.energy_accounting import EnergyDelta, compute_charge_delta
+from .domain.grid_energy_accounting import compute_grid_energy_delta
 from .domain.registers import (
     to_signed16,
     to_unsigned16,
@@ -388,6 +389,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._calibration_store = CalibrationStateStore(hass, entry_id)
         self._energy_store = EnergyStateStore(hass, entry_id)
         self._energy_store_loaded = False
+        self._energy_store_write_blocked = False
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): eigener
         # Store, eigenes Bootstrap-Fenster - siehe async_load_economics_state
         # und _bootstrap_economics_if_ready weiter unten.
@@ -556,6 +558,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_grid_charged_kwh: float | None = None
         self._energy_pv_charged_kwh: float | None = None
         self._origin_accounting_started_at: datetime | None = None
+        self._grid_imported_kwh: float | None = None
+        self._grid_exported_kwh: float | None = None
+        self._grid_accounting_started_at: datetime | None = None
+        # REQ-GRID-ENERGY: Only distinct, fresh meter samples bound an interval;
+        # battery availability and cached coordinator refreshes are irrelevant.
+        self._grid_energy_last_sample: tuple[float, float] | None = None
+        self._grid_energy_last_revision: int | None = None
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): dieselbe
         # None-bis-Bootstrap-Logik, zusätzlich gebunden an
         # SaxTariffProvider.config.enabled - solange der Tarif deaktiviert
@@ -677,7 +686,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # vollständig beobachtet aus, genau den Fall soll die
             # Zeitabdeckung ausschließen.
             self._energy_last_ts = None
+            self._grid_energy_last_sample = None
             raise
+        self._accumulate_grid_energy(data)
         self._accumulate_energy(data)
 
         calibration_changed = await self._async_update_cell_calibration(data["soc"])
@@ -717,6 +728,63 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_next_start"] = plan.next_start
         data["price_charge_current_price"] = plan.current_price
         data["next_cell_calibration"] = self.next_cell_calibration_at
+
+    def _accumulate_grid_energy(self, data: dict[str, Any]) -> None:
+        """Publish persistent grid totals from measured intervals (REQ-GRID-ENERGY)."""
+        self._update_grid_energy()
+        data["energy_imported_from_grid"] = (
+            round(self._grid_imported_kwh, 3)
+            if self._grid_imported_kwh is not None
+            else None
+        )
+        data["energy_exported_to_grid"] = (
+            round(self._grid_exported_kwh, 3)
+            if self._grid_exported_kwh is not None
+            else None
+        )
+        data["grid_energy_attributes"] = {
+            "accounting_started_at": (
+                self._grid_accounting_started_at.isoformat()
+                if self._grid_accounting_started_at is not None
+                else None
+            ),
+            "integration_method": "left_riemann_sum",
+        }
+
+    def _update_grid_energy(self) -> None:
+        """Integrate the previous meter sample only across a fresh measured interval."""
+        sample_time = self._high_sample_time
+        revision = self._high_sample_revision
+        power = self._high_data.get("smartmeter_power")
+        max_age = 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+        if (
+            self._grid_imported_kwh is None
+            or self._grid_exported_kwh is None
+            or not self._extended_available
+            or sample_time is None
+            or not 0 <= monotonic() - sample_time <= max_age
+            or compute_grid_energy_delta(power, 0.0) is None
+        ):
+            self._grid_energy_last_sample = None
+            self._grid_energy_last_revision = revision
+            return
+        if revision == self._grid_energy_last_revision:
+            return
+        previous = self._grid_energy_last_sample
+        self._grid_energy_last_revision = revision
+        self._grid_energy_last_sample = (sample_time, power)
+        if previous is None:
+            return
+        elapsed_seconds = sample_time - previous[0]
+        if not 0 < elapsed_seconds <= max_age:
+            return
+        delta = compute_grid_energy_delta(previous[1], elapsed_seconds / 3600)
+        if delta is None:
+            return
+        self._grid_imported_kwh += delta.imported_kwh
+        self._grid_exported_kwh += delta.exported_kwh
+        if delta.imported_kwh or delta.exported_kwh:
+            self._async_schedule_energy_save()
 
     def _accumulate_energy(self, data: dict[str, Any]) -> None:
         """Akkumuliert geladene/entladene Energie (kWh) aus der aktuell
@@ -2034,6 +2102,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "discharged_kwh": self._energy_discharged_kwh,
             "grid_charged_kwh": self._energy_grid_charged_kwh,
             "pv_charged_kwh": self._energy_pv_charged_kwh,
+            "grid_imported_kwh": self._grid_imported_kwh,
+            "grid_exported_kwh": self._grid_exported_kwh,
+            "grid_accounting_started_at": (
+                self._grid_accounting_started_at.isoformat()
+                if self._grid_accounting_started_at is not None
+                else None
+            ),
         }
 
     @property
@@ -2151,13 +2226,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
             )
             self._energy_store_loaded = True
+            # REQ-GRID-ENERGY: Legacy battery restores must not overwrite an
+            # unreadable snapshot containing grid totals that have no entity backup.
+            self._energy_store_write_blocked = True
             return
 
         if state is not None:
             self._energy_charged_kwh = state.charged_kwh
             self._energy_discharged_kwh = state.discharged_kwh
         self._bootstrap_energy_origin(state)
+        self._bootstrap_grid_energy(state)
         self._energy_store_loaded = True
+        self._energy_store_write_blocked = False
+
+    def _bootstrap_grid_energy(self, state: EnergyState | None) -> None:
+        """Restore the grid group or start counting now, without inferring history."""
+        self._grid_energy_last_sample = None
+        self._grid_energy_last_revision = None
+        if state is not None and state.grid_initialized:
+            self._grid_imported_kwh = state.grid_imported_kwh
+            self._grid_exported_kwh = state.grid_exported_kwh
+            self._grid_accounting_started_at = state.grid_accounting_started_at
+            return
+        self._grid_imported_kwh = 0.0
+        self._grid_exported_kwh = 0.0
+        self._grid_accounting_started_at = dt_util.utcnow()
 
     def _bootstrap_energy_origin(self, state: EnergyState | None) -> None:
         """Startet die Herkunftszählung transparent ab jetzt.
@@ -2235,16 +2328,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             grid_charged_kwh=self._energy_grid_charged_kwh,
             pv_charged_kwh=self._energy_pv_charged_kwh,
             origin_accounting_started_at=self._origin_accounting_started_at,
+            grid_imported_kwh=self._grid_imported_kwh,
+            grid_exported_kwh=self._grid_exported_kwh,
+            grid_accounting_started_at=self._grid_accounting_started_at,
         )
 
     def _async_schedule_energy_save(self) -> None:
         state = self._energy_state()
-        if self._energy_store_loaded and state.initialized:
+        if (
+            self._energy_store_loaded
+            and not self._energy_store_write_blocked
+            and state.initialized
+        ):
             self._energy_store.async_delay_save(state)
 
     async def _async_flush_energy_state(self) -> None:
         state = self._energy_state()
-        if not self._energy_store_loaded or not state.initialized:
+        if (
+            not self._energy_store_loaded
+            or self._energy_store_write_blocked
+            or not state.initialized
+        ):
             return
         try:
             await self._energy_store.async_save(state)

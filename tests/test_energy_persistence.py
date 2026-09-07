@@ -213,10 +213,13 @@ async def test_store_rejects_corrupt_fields_independently(hass, caplog) -> None:
     assert "Ungültigen gespeicherten Energiezähler für Laden" in caplog.text
 
 
-_NO_ORIGIN = {
+_NO_DERIVED_COUNTERS = {
     "grid_charged_kwh": None,
     "pv_charged_kwh": None,
     "origin_accounting_started_at": None,
+    "grid_imported_kwh": None,
+    "grid_exported_kwh": None,
+    "grid_accounting_started_at": None,
 }
 
 
@@ -230,7 +233,11 @@ def test_store_throttles_frequent_updates_and_keeps_newest_state(hass) -> None:
 
     store._store.async_delay_save.assert_called_once()
     data_func = store._store.async_delay_save.call_args.args[0]
-    assert data_func() == {"charged_kwh": 1.1, "discharged_kwh": 2.0, **_NO_ORIGIN}
+    assert data_func() == {
+        "charged_kwh": 1.1,
+        "discharged_kwh": 2.0,
+        **_NO_DERIVED_COUNTERS,
+    }
 
 
 async def test_store_final_flush_writes_newest_state_immediately(hass) -> None:
@@ -242,7 +249,7 @@ async def test_store_final_flush_writes_newest_state_immediately(hass) -> None:
 
     assert await store.async_save(EnergyState(1.5, 2.25)) is True
     store._store.async_save.assert_awaited_once_with(
-        {"charged_kwh": 1.5, "discharged_kwh": 2.25, **_NO_ORIGIN}
+        {"charged_kwh": 1.5, "discharged_kwh": 2.25, **_NO_DERIVED_COUNTERS}
     )
 
 
@@ -524,6 +531,9 @@ async def test_numeric_legacy_state_migrates_without_new_snapshot(hass) -> None:
             grid_charged_kwh=0.0,
             pv_charged_kwh=0.0,
             origin_accounting_started_at=started_at,
+            grid_imported_kwh=0.0,
+            grid_exported_kwh=0.0,
+            grid_accounting_started_at=coordinator._grid_accounting_started_at,
         )
     )
     await coordinator.async_shutdown()
@@ -578,6 +588,9 @@ async def test_shutdown_flushes_exact_counter_during_basic_mode_outage(hass) -> 
             grid_charged_kwh=0.0,
             pv_charged_kwh=0.0,
             origin_accounting_started_at=started_at,
+            grid_imported_kwh=0.0,
+            grid_exported_kwh=0.0,
+            grid_accounting_started_at=coordinator._grid_accounting_started_at,
         )
     )
 

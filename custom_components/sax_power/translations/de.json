@@ -300,6 +300,12 @@
       "price_charge_current_price": {
         "name": "Aktueller Strompreis"
       },
+      "energy_imported_from_grid": {
+        "name": "Netzbezug gesamt"
+      },
+      "energy_exported_to_grid": {
+        "name": "Netzeinspeisung gesamt"
+      },
       "energy_charged_from_grid": {
         "name": "Geladene Energie aus dem Netz"
       },

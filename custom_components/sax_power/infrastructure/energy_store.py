@@ -45,7 +45,9 @@ _LOGGER = logging.getLogger(__name__)
 # auch das kommt ohne _async_migrate_func aus und arbeitet allein auf den
 # unverändert erhaltenen Rohdaten.
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 3
+# Minor-Version 4 ergänzt unabhängig startende Netzzähler (REQ-GRID-ENERGY),
+# ohne historische Batterie- oder Herkunftsbestände umzudeuten.
+STORAGE_MINOR_VERSION = 4
 STORAGE_KEY_PREFIX = f"{DOMAIN}.energy"
 ENERGY_SAVE_DELAY = 300
 
@@ -62,7 +64,9 @@ class EnergyState:
     Das steht nicht im Widerspruch zur unabhängigen Feldvalidierung beim
     Laden (siehe EnergyStateStore.async_load): Jedes Feld wird dort für
     sich geprüft und einzeln verworfen; erst der Coordinator entscheidet,
-    ob das verbleibende Herkunfts-Quartett insgesamt noch verwertbar ist.
+    ob die verbleibende Herkunftsgruppe insgesamt noch verwertbar ist.
+    Dasselbe gilt unabhängig davon für die Netzzähler und ihren eigenen
+    Startzeitpunkt (REQ-GRID-ENERGY).
     """
 
     charged_kwh: float | None = None
@@ -70,11 +74,18 @@ class EnergyState:
     grid_charged_kwh: float | None = None
     pv_charged_kwh: float | None = None
     origin_accounting_started_at: datetime | None = None
+    grid_imported_kwh: float | None = None
+    grid_exported_kwh: float | None = None
+    grid_accounting_started_at: datetime | None = None
 
     @property
     def initialized(self) -> bool:
         """Return whether at least one counter has a numeric baseline."""
-        return self.charged_kwh is not None or self.discharged_kwh is not None
+        return (
+            self.charged_kwh is not None
+            or self.discharged_kwh is not None
+            or self.grid_initialized
+        )
 
     @property
     def origin_initialized(self) -> bool:
@@ -91,9 +102,18 @@ class EnergyState:
             and self.origin_accounting_started_at is not None
         )
 
+    @property
+    def grid_initialized(self) -> bool:
+        """Return whether both grid counters and their start are available."""
+        return (
+            self.grid_imported_kwh is not None
+            and self.grid_exported_kwh is not None
+            and self.grid_accounting_started_at is not None
+        )
+
 
 class EnergyStateStore:
-    """Persist both monotonically increasing counters per config entry."""
+    """Persist monotonically increasing energy counters per config entry."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store: Store[dict[str, Any]] = Store(
@@ -107,7 +127,7 @@ class EnergyStateStore:
         self._save_scheduled = False
 
     async def async_load(self) -> EnergyState | None:
-        """Load both counters, rejecting invalid fields independently."""
+        """Load counters, rejecting invalid fields independently."""
         raw = await self._store.async_load()
         if raw is None:
             return None
@@ -143,8 +163,17 @@ class EnergyStateStore:
                 if legacy_unknown_origin
                 else self._validated_timestamp(raw.get("origin_accounting_started_at"))
             ),
+            grid_imported_kwh=self._validated_counter(
+                raw.get("grid_imported_kwh"), "Netzbezug"
+            ),
+            grid_exported_kwh=self._validated_counter(
+                raw.get("grid_exported_kwh"), "Netzeinspeisung"
+            ),
+            grid_accounting_started_at=self._validated_timestamp(
+                raw.get("grid_accounting_started_at"), "Netzzählung"
+            ),
         )
-        self._last_persisted = self._origin_baseline(state)
+        self._last_persisted = self._grid_baseline(self._origin_baseline(state))
         return state
 
     @classmethod
@@ -220,6 +249,22 @@ class EnergyStateStore:
             origin_accounting_started_at=None,
         )
 
+    @staticmethod
+    def _grid_baseline(state: EnergyState) -> EnergyState:
+        """Allow the coordinator to restart an incomplete grid group at zero.
+
+        Retaining a valid fragment as a monotonic baseline would reject the
+        group's fresh counters or start timestamp (REQ-GRID-ENERGY).
+        """
+        if state.grid_initialized:
+            return state
+        return replace(
+            state,
+            grid_imported_kwh=None,
+            grid_exported_kwh=None,
+            grid_accounting_started_at=None,
+        )
+
     @callback
     def async_delay_save(
         self, state: EnergyState, delay: float = ENERGY_SAVE_DELAY
@@ -262,10 +307,10 @@ class EnergyStateStore:
                 baseline.grid_charged_kwh,
             ),
             ("PV-Ladung (Herkunft)", state.pv_charged_kwh, baseline.pv_charged_kwh),
+            ("Netzbezug", state.grid_imported_kwh, baseline.grid_imported_kwh),
+            ("Netzeinspeisung", state.grid_exported_kwh, baseline.grid_exported_kwh),
         ):
-            if value is not None and (
-                not math.isfinite(value) or value < 0 or isinstance(value, bool)
-            ):
+            if value is not None and not self._is_valid_counter(value):
                 _LOGGER.warning(
                     "Ungültigen Energiezähler-Snapshot für %s verworfen: %r",
                     label,
@@ -297,18 +342,42 @@ class EnergyStateStore:
                 baseline.origin_accounting_started_at,
             )
             return False
+        if state.grid_accounting_started_at is not None and (
+            not isinstance(state.grid_accounting_started_at, datetime)
+            or state.grid_accounting_started_at.tzinfo is None
+            or state.grid_accounting_started_at.utcoffset() is None
+        ):
+            _LOGGER.warning(
+                "Ungültigen Startzeitpunkt der Netzzählung verworfen: %r",
+                state.grid_accounting_started_at,
+            )
+            return False
+        if (
+            baseline.grid_accounting_started_at is not None
+            and state.grid_accounting_started_at != baseline.grid_accounting_started_at
+        ):
+            _LOGGER.warning(
+                "Abweichenden Startzeitpunkt der Netzzählung verworfen: %r statt %r",
+                state.grid_accounting_started_at,
+                baseline.grid_accounting_started_at,
+            )
+            return False
         return True
 
     @staticmethod
-    def _validated_counter(value: Any, label: str) -> float | None:
+    def _is_valid_counter(value: Any) -> bool:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return False
+        try:
+            return math.isfinite(value) and value >= 0
+        except OverflowError:
+            return False
+
+    @classmethod
+    def _validated_counter(cls, value: Any, label: str) -> float | None:
         if value is None:
             return None
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, int | float)
-            or not math.isfinite(value)
-            or value < 0
-        ):
+        if not cls._is_valid_counter(value):
             _LOGGER.warning(
                 "Ungültigen gespeicherten Energiezähler für %s verworfen: %r",
                 label,
@@ -318,18 +387,23 @@ class EnergyStateStore:
         return float(value)
 
     @staticmethod
-    def _validated_timestamp(value: Any) -> datetime | None:
+    def _validated_timestamp(
+        value: Any, label: str = "Herkunftszählung"
+    ) -> datetime | None:
         if value is None:
             return None
-        parsed = dt_util.parse_datetime(value) if isinstance(value, str) else None
-        if parsed is None or parsed.tzinfo is None:
-            _LOGGER.warning(
-                "Ungültigen gespeicherten Startzeitpunkt der Herkunftszählung "
-                "verworfen: %r",
-                value,
-            )
-            return None
-        return dt_util.as_utc(parsed)
+        try:
+            parsed = dt_util.parse_datetime(value) if isinstance(value, str) else None
+            if parsed is not None and parsed.tzinfo is not None:
+                return dt_util.as_utc(parsed)
+        except ValueError, OverflowError:
+            pass
+        _LOGGER.warning(
+            "Ungültigen gespeicherten Startzeitpunkt der %s verworfen: %r",
+            label,
+            value,
+        )
+        return None
 
     @staticmethod
     def _serialize(state: EnergyState) -> dict[str, Any]:
@@ -341,6 +415,13 @@ class EnergyStateStore:
             "origin_accounting_started_at": (
                 state.origin_accounting_started_at.isoformat()
                 if state.origin_accounting_started_at is not None
+                else None
+            ),
+            "grid_imported_kwh": state.grid_imported_kwh,
+            "grid_exported_kwh": state.grid_exported_kwh,
+            "grid_accounting_started_at": (
+                state.grid_accounting_started_at.isoformat()
+                if state.grid_accounting_started_at is not None
                 else None
             ),
         }

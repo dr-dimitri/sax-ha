@@ -48,6 +48,7 @@
 # REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
+# REQ-CO2SAVER-ESTIMATED-INPUT     done       Netzenergie als gekennzeichnete Schätzquelle mit Messzeit und Lückenerkennung bereitstellen
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
@@ -3359,6 +3360,59 @@ requirement_grid_energy:
        Zusatzattribute und Übersetzungen sind getestet
        (tests/test_grid_energy_sensors.py). README.md und DEVELOPMENT.md
        erklären Messumfang, Rechenmethode, Zählbeginn und Ausfallverhalten."
+
+# ==============================================================================
+# ANFORDERUNG: CO2-SAVER-SCHÄTZQUELLE
+# ==============================================================================
+requirement_co2saver_estimated_input:
+  id: REQ-CO2SAVER-ESTIMATED-INPUT
+  title: "Netzenergie für den ausdrücklich aktivierten CO2-Saver-Schätzmodus bereitstellen"
+  status: done
+  description: >
+    energy_imported_from_grid und energy_exported_to_grid bleiben
+    richtungsgetrennte kumulative kWh-Zähler mit unveränderten Unique-IDs.
+    Die bestehende Veröffentlichung mit drei Nachkommastellen bleibt
+    erhalten. Die Auflösung von 1 Wh begrenzt auch die nachgelagerte
+    Schätzung; ein Wechsel auf ungerundete Werte könnte nach einem
+    zuvor aufgerundeten Stand einen falschen Zählerreset auslösen.
+
+    Beide Sensoren liefern aus derselben Coordinator-Aktualisierung die
+    gemeinsamen Zusatzattribute co2saver_source_type=power_integration,
+    co2saver_sample_time (zeitzonenbewusster UTC-Zeitstempel des letzten
+    frischen Software-Messpunkts), co2saver_segment_id (opake Kennung eines
+    lückenlosen Messabschnitts) und co2saver_sample_valid (Boolean).
+    Der Zeitpunkt beschreibt die Software-Beobachtung der Momentanleistung,
+    keinen vom Gerät gelieferten atomaren Energie-Messabschluss. Deshalb
+    wird ausdrücklich kein co2saver_period_end bereitgestellt; die Quellen
+    sind nur für den optionalen Schätzmodus aus CO2 Saver Issue #36 gedacht.
+
+    Nur ein neuer gültiger HIGH-Messpunkt aktualisiert den UTC-Zeitstempel,
+    auch bei 0 W. Gecachte Coordinator-Refreshes erneuern ihn nicht. Die
+    monotone Zeitbasis und die Frischegrenzen aus REQ-GRID-ENERGY gelten
+    weiterhin. Basic-/SunSpec-Ausfälle, ungültige Messwerte, veraltete
+    Daten und zu lange Messintervalle verwerfen die Messbaseline. Der
+    Gültigkeitswert wird false und die Messzeit null, solange keine neue
+    frische Baseline vorliegt. Eine Lücke nach gültigen Messungen ändert
+    die Abschnittskennung; wiederholte Ausfälle ohne neue Messung behalten
+    sie. So kann CO2 Saver auch einen Ausfall zwischen zwei eigenen Polls
+    anhand des Kennungswechsels erkennen und ohne Delta neu baselinen.
+    Ein rückläufiger UTC-Messzeitpunkt beginnt ebenfalls einen neuen
+    Abschnitt und verbucht das betroffene Intervall nicht.
+
+    Beim Neustart/Reload werden die kWh-Summen wie bisher restauriert,
+    aber eine neue Abschnittskennung erzeugt. Messzeit, Gültigkeit und
+    Abschnittskennung werden nicht als lückenlose Messung restauriert.
+    Sie sind live verfügbare, vom Recorder ausgeschlossene Zusatzattribute.
+    Der ursprüngliche accounting_started_at-Zählbeginn bleibt erhalten.
+  acceptance_criteria:
+    - "tests/test_co2saver_metadata.py prüft Startup, 0 W, gecachte Refreshes,
+       ungültige Werte, Zeitlücken, rückläufige UTC-Zeit, Neustart, gemeinsame
+       Metadaten und unveränderte kWh-Werte beider Entities."
+    - "tests/test_grid_energy_coordinator.py prüft den Abschnittswechsel
+       nach tatsächlichem Basic-/SunSpec-/Sentinel-Ausfall im Pollpfad."
+    - "README.md und DEVELOPMENT.md erklären die Wahl von Netzbezug und
+       Netzeinspeisung im optionalen CO2-Saver-Schätzmodus sowie dessen
+       Grenzen; weitere Pflichtquellen liefert SAX dadurch nicht automatisch."
 
 # ==============================================================================
 # ANFORDERUNG: HERKUNFT DER LADEENERGIE

@@ -300,6 +300,12 @@
       "price_charge_current_price": {
         "name": "Current electricity price"
       },
+      "energy_imported_from_grid": {
+        "name": "Total grid import"
+      },
+      "energy_exported_to_grid": {
+        "name": "Total grid export"
+      },
       "energy_charged_from_grid": {
         "name": "Charged energy from grid"
       },

@@ -45,6 +45,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 - Ladezustand, Lade- und Entladeleistung, Netzleistung, PV-Leistung sowie
   weitere Geräte- und Akkudaten anzeigen
 - Lade- und Entladeenergie im Home-Assistant-Energy-Dashboard erfassen
+- gesamten Netzbezug und gesamte Netzeinspeisung als kumulative kWh-Zähler erfassen
 - geladene Energie zusätzlich nach Netz, PV und unbekannter Herkunft
   aufteilen
 - Speicher ein- und ausschalten
@@ -534,6 +535,11 @@ stammt:
 Beide zusammen ergeben immer die Gesamtladung - eine dritte Kategorie gibt
 es nicht, denn physikalisch speist entweder die PV-Anlage oder das Netz.
 
+**Geladene Energie aus dem Netz** erfasst ausschließlich den geschätzten
+Netzstromanteil der Batterieladung. Der direkte Netzverbrauch des Hauses
+gehört zum separaten Sensor **Netzbezug gesamt** (siehe
+[Energy-Dashboard](#energy-dashboard)).
+
 Diese Aufteilung funktioniert unabhängig davon, ob unter
 [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
 eine Geldbewertung aktiviert ist, und ist eine **Schätzung anhand des
@@ -806,6 +812,29 @@ lassen sich direkt als Batteriesystem verwenden:
 Dort den ersten Sensor für die in den Speicher geladene und den zweiten für
 die aus dem Speicher entladene Energie auswählen. Die Zählerstände bleiben
 über Neustarts hinweg erhalten.
+
+Für den Stromnetz-Abschnitt stehen außerdem **Netzbezug gesamt** und
+**Netzeinspeisung gesamt** zur Verfügung. Dort den ersten Sensor als
+Netzverbrauch und den zweiten als Rückspeisung auswählen. Sie erfassen den
+gesamten Netzanschlusspunkt einschließlich des direkten Hausverbrauchs,
+unabhängig von der Batterieladung und einer Tarifkonfiguration.
+
+Die Netzenergiezähler integrieren die gemessene Netzleistung in kWh: Der
+letzte gültige Messwert gilt bis zur nächsten gültigen Messung (linke
+Riemannsumme). Es handelt sich um eine **Schätzung aus Momentanleistungen**.
+Bei fehlenden oder ungültigen Messwerten, Verbindungsfehlern und Messlücken
+von mehr als vier Sekunden pausiert die Zählung. Diese Zeiträume werden
+nach Wiederherstellung der Verbindung nicht nachträglich berechnet.
+Ohne gültige SunSpec-Netzleistung bleibt der bisherige Zählerstand erhalten.
+Bei einem Ausfall des Basic-Modus werden die Sensoren als nicht verfügbar
+angezeigt; ihre gespeicherten Summen bleiben erhalten.
+
+Beim ersten Einrichten oder nach dem Update auf diese Funktion beginnen
+beide Netzzähler bei 0 kWh. Ihr gemeinsamer Beginn steht im Attribut
+`accounting_started_at`, das Rechenverfahren unter `integration_method`.
+Die Zählerstände und der Beginn bleiben über Neustarts erhalten; Zeiträume
+mit ausgeschaltetem Home Assistant werden nicht gezählt. Bereits vor dem
+Zählbeginn bezogene oder eingespeiste Energie wird nicht rekonstruiert.
 
 ## Aktionen für Automationen
 

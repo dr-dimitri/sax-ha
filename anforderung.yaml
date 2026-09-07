@@ -47,6 +47,7 @@
 # REQ-LOW-INTERVAL-REGISTERS      done       Statische SunSpec-Register seltener abfragen als Messwerte
 # REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
+# REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
@@ -3262,6 +3263,102 @@ requirement_economics_tariffs:
        nie doppelt registriert."
     - "strings.json, translations/de.json, translations/en.json, README.md
        und DEVELOPMENT.md beschreiben das Tarifmodell."
+
+# ==============================================================================
+# ANFORDERUNG: GESAMTER NETZBEZUG UND GESAMTE EINSPEISUNG
+# ==============================================================================
+requirement_grid_energy:
+  id: REQ-GRID-ENERGY
+  title: "Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen"
+  status: done
+  description: >
+    Die Sensoren energy_imported_from_grid (Netzbezug gesamt) und
+    energy_exported_to_grid (Netzeinspeisung gesamt) erfassen den gesamten
+    Netzanschlusspunkt. Netzbezug schließt direkten Hausverbrauch ein und
+    ist unabhängig von der Batterieladeleistung; beide Zähler sind von den
+    Lade-/Entladezählern aus REQ-ENERGY-DASHBOARD, den Herkunftszählern aus
+    REQ-ENERGY-ORIGIN und einer aktivierten Tarifbewertung unabhängig.
+    Insbesondere bleibt energy_charged_from_grid ausschließlich die
+    geschätzte Herkunft der Batterieladung und erhält keine neue Bedeutung.
+
+    Der Coordinator integriert die normalisierte smartmeter_power aus
+    dem SunSpec-HIGH-Block. Positive Werte bedeuten Netzbezug, negative
+    Werte Einspeisung. Zwischen zwei frischen, gültigen Messungen wird die
+    vorherige Leistung über die verstrichene Zeit gehalten (linke
+    Riemannsumme): import_kwh += max(previous_power_w, 0) * elapsed_s /
+    3600000 und export_kwh += max(-previous_power_w, 0) * elapsed_s /
+    3600000. Der erste gültige Messpunkt setzt nur die Baseline. Gecachte
+    Coordinator-Refreshes verbuchen keine zusätzliche Energie.
+
+    Beide Endpunkte müssen gültige, endliche Messwerte mit gültiger
+    Zeitbasis sein. Fehlende, ungültige oder veraltete Werte sowie
+    Poll-Ausfälle verwerfen die Baseline. Das maximal zulässige Alter
+    einer Messung und der maximale Abstand zwischen zwei Messungen
+    betragen jeweils 2 * READ_BLOCK_EXT_HIGH_INTERVAL (derzeit 4 Sekunden),
+    unabhängig vom konfigurierten Basic-Mode-Aktualisierungsintervall.
+    Längere Zeitlücken werden übersprungen. Nach einer Unterbrechung setzt
+    erst ein gültiger frischer Messpunkt die neue Baseline; die verlorene
+    Zeit wird niemals nachgeholt. Ein Vorzeichenwechsel ordnet das letzte
+    Intervall deshalb noch dem vorherigen Messwert zu. Nullleistung
+    verändert keinen Zähler. Die Integration ist eine Messschätzung aus
+    Momentanleistungen, keine rückwirkende Rekonstruktion und kein direkt
+    ausgelesener Zählerstand des Netzbetreibers.
+
+    Beide Sensoren haben device_class energy, state_class
+    total_increasing und die Einheit kWh. Sie werden als SaxPowerSensor
+    unmittelbar aus coordinator.data veröffentlicht und lassen sich im
+    Home-Assistant-Energie-Dashboard als Netzverbrauch bzw. Rückspeisung
+    auswählen. Die gemeinsamen Zusatzattribute accounting_started_at und
+    integration_method (left_riemann_sum) stehen unter
+    coordinator.data['grid_energy_attributes']; der Zählbeginn ist ein
+    persistierter UTC-Zeitpunkt und macht den eigenständigen Bilanzzeitraum
+    sichtbar.
+
+    EnergyStateStore bleibt bei STORAGE_VERSION 1 und erhöht
+    STORAGE_MINOR_VERSION auf 4. EnergyState erhält grid_imported_kwh,
+    grid_exported_kwh und grid_accounting_started_at als zusammengehörige
+    Gruppe. Zählerstände sind endlich, nicht negativ und monoton; der
+    einmal gesetzte UTC-Zählbeginn bleibt unverändert. Neue Einträge und
+    ältere Snapshots ohne Netzenergiegruppe starten gemeinsam bei 0 kWh
+    mit aktuellem UTC-Zählbeginn, ohne historische Netzenergie zu erfinden.
+    Eine teilweise korrupte Gruppe startet ebenfalls gemeinsam neu; ihre
+    interne Monotonie-Baseline wird dabei vollständig verworfen, damit der
+    neue Nullstand tatsächlich persistiert werden kann. Lade-/Entlade- und
+    Herkunftszähler bleiben erhalten.
+
+    Die Netzenergie wird über denselben gedrosselten Store-Schreibpfad und
+    Shutdown-Flush wie die übrigen Energiezähler gespeichert. Ein Neustart
+    stellt beide Summen und den Zählbeginn wieder her, niemals die
+    Messbaseline: Während Home Assistant offline ist, entsteht kein
+    Energiezuwachs. Ein Store-Lesefehler lässt beide neuen Sensoren
+    ausdrücklich unbekannt, statt möglicherweise vorhandene Zählerstände
+    durch einen stillen Nullstart zu ersetzen. Store-Schreibvorgänge sind
+    dann bis zu einem erfolgreichen Reload gesperrt, damit der
+    RestoreEntity-Migrationspfad der Batteriezähler keinen unvollständigen
+    Snapshot über eine vorhandene Netz-Historie schreiben kann. Vorhandene
+    numerische Batterie-Restorezustände dürfen weiterhin angezeigt werden.
+    Ohne gültige SunSpec-Netzleistung bleiben initialisierte Zähler auf
+    ihrem bisherigen Stand (bei einer neuen Installation bei 0); bei einem
+    Basic-Mode-Ausfall sind die Sensoren wie die übrigen Coordinator-
+    Entities nicht verfügbar. Die intern gespeicherten Summen bleiben
+    jeweils erhalten.
+  requirements:
+    - "Positive, negative und wechselnde Netzleistung sowie Nullleistung
+       werden mit deterministischen Zeitintervallen geprüft. Direkter
+       Hausverbrauch wird auch bei ruhender Batterie vollständig gezählt."
+    - "Wiederholte gecachte Refreshes zählen nicht doppelt; der erste
+       frische Messpunkt startet ausschließlich die Baseline."
+    - "Fehlende, nicht endliche, veraltete Messwerte, Poll-Ausfälle und
+       Zeitlücken über zwei HIGH-Intervalle erzeugen keinen Zuwachs und
+       keinen späteren Nachholsprung, auch bei langem Basic-Intervall."
+    - "Neustart, Shutdown-Flush, getrennte Config Entries, Migration eines
+       Minor-Version-3-Snapshots, teilweise korrupte Netzenergiegruppen und
+       Store-Lesefehler sind getestet. Bestehende Energiezähler bleiben
+       erhalten."
+    - "Sensor-Metadaten, direkte Coordinator-Werte, eindeutige Entity-IDs,
+       Zusatzattribute und Übersetzungen sind getestet
+       (tests/test_grid_energy_sensors.py). README.md und DEVELOPMENT.md
+       erklären Messumfang, Rechenmethode, Zählbeginn und Ausfallverhalten."
 
 # ==============================================================================
 # ANFORDERUNG: HERKUNFT DER LADEENERGIE

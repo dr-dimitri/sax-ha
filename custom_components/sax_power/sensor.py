@@ -955,6 +955,11 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
     """Generischer Sensor: Wert wird per value_fn aus coordinator.data gelesen."""
 
     entity_description: SaxPowerSensorEntityDescription
+    # CO2 Saver consumes these live; restoring old sampling metadata would conceal
+    # an offline gap. Keep the high-cadence markers out of recorder attributes.
+    _unrecorded_attributes = frozenset(
+        {"co2saver_sample_time", "co2saver_segment_id", "co2saver_sample_valid"}
+    )
 
     def __init__(
         self,

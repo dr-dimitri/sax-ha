@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
@@ -565,6 +566,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # battery availability and cached coordinator refreshes are irrelevant.
         self._grid_energy_last_sample: tuple[float, float] | None = None
         self._grid_energy_last_revision: int | None = None
+        self._grid_energy_segment_id = uuid4().hex
+        self._grid_energy_sample_time: datetime | None = None
+        self._grid_energy_sample_valid = False
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): dieselbe
         # None-bis-Bootstrap-Logik, zusätzlich gebunden an
         # SaxTariffProvider.config.enabled - solange der Tarif deaktiviert
@@ -686,7 +690,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # vollständig beobachtet aus, genau den Fall soll die
             # Zeitabdeckung ausschließen.
             self._energy_last_ts = None
-            self._grid_energy_last_sample = None
+            self._invalidate_grid_energy_sample()
             raise
         self._accumulate_grid_energy(data)
         self._accumulate_energy(data)
@@ -749,7 +753,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else None
             ),
             "integration_method": "left_riemann_sum",
+            "co2saver_source_type": "power_integration",
+            "co2saver_sample_time": (
+                self._grid_energy_sample_time.isoformat()
+                if self._grid_energy_sample_time is not None
+                else None
+            ),
+            "co2saver_segment_id": self._grid_energy_segment_id,
+            "co2saver_sample_valid": self._grid_energy_sample_valid,
         }
+
+    def _invalidate_grid_energy_sample(self) -> None:
+        """Expose gaps even if they fall between two CO2 Saver polls."""
+        if self._grid_energy_sample_valid:
+            self._grid_energy_segment_id = uuid4().hex
+        self._grid_energy_last_sample = None
+        self._grid_energy_sample_valid = False
+        self._grid_energy_sample_time = None
 
     def _update_grid_energy(self) -> None:
         """Integrate the previous meter sample only across a fresh measured interval."""
@@ -757,27 +777,38 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         revision = self._high_sample_revision
         power = self._high_data.get("smartmeter_power")
         max_age = 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+        sample_age = monotonic() - sample_time if sample_time is not None else None
         if (
             self._grid_imported_kwh is None
             or self._grid_exported_kwh is None
             or not self._extended_available
             or sample_time is None
-            or not 0 <= monotonic() - sample_time <= max_age
+            or sample_age is None
+            or not 0 <= sample_age <= max_age
             or compute_grid_energy_delta(power, 0.0) is None
         ):
-            self._grid_energy_last_sample = None
+            self._invalidate_grid_energy_sample()
             self._grid_energy_last_revision = revision
             return
         if revision == self._grid_energy_last_revision:
             return
         previous = self._grid_energy_last_sample
+        # REQ-CO2SAVER-ESTIMATED-INPUT: This is a software observation time,
+        # never the co2saver_period_end of an atomic physical energy measurement.
+        observed_at = dt_util.utcnow() - timedelta(seconds=sample_age)
+        if (previous is not None and not 0 < sample_time - previous[0] <= max_age) or (
+            self._grid_energy_sample_time is not None
+            and observed_at < self._grid_energy_sample_time
+        ):
+            self._invalidate_grid_energy_sample()
+            previous = None
         self._grid_energy_last_revision = revision
         self._grid_energy_last_sample = (sample_time, power)
+        self._grid_energy_sample_time = observed_at
+        self._grid_energy_sample_valid = True
         if previous is None:
             return
         elapsed_seconds = sample_time - previous[0]
-        if not 0 < elapsed_seconds <= max_age:
-            return
         delta = compute_grid_energy_delta(previous[1], elapsed_seconds / 3600)
         if delta is None:
             return
@@ -2241,7 +2272,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _bootstrap_grid_energy(self, state: EnergyState | None) -> None:
         """Restore the grid group or start counting now, without inferring history."""
-        self._grid_energy_last_sample = None
+        self._invalidate_grid_energy_sample()
+        self._grid_energy_segment_id = uuid4().hex
         self._grid_energy_last_revision = None
         if state is not None and state.grid_initialized:
             self._grid_imported_kwh = state.grid_imported_kwh

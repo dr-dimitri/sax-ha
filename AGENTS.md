@@ -50,8 +50,21 @@ no venv activation needed. A local Home Assistant instance is available via
 with a `host` entry); it's skipped automatically otherwise - that's expected,
 not a failure.
 
-Every change must leave `pytest -v`, `ruff check`, and `black --check` clean
-before it's considered done.
+Choose local checks according to the change:
+
+- Documentation-only changes: review accuracy, referenced paths/links, and
+  `git diff --check`; no local Python tests or linters are required. A
+  release-only manifest version bump does not change this scope.
+- Code or test changes: run the affected tests and Ruff/Black during
+  development; before marking the PR ready, run the full `pytest -v`,
+  `ruff check custom_components scripts tests`, and
+  `black --check custom_components scripts tests` successfully.
+- Dependencies, configuration, build, or CI changes: validate the affected
+  tooling; also run the full Python checks above when runtime or test
+  behavior can be affected.
+
+Report which checks ran and any limitations. Required CI checks still
+apply to every PR, including documentation-only PRs.
 
 ## Code style
 
@@ -89,14 +102,21 @@ before it's considered done.
 
 ## Git workflow
 
-- Never commit directly to `main`. Every change goes on its own branch,
-  opened as a pull request against `main`.
+- Never commit directly to `main`. Make edits on a feature branch.
 - Before creating a new branch, update `main` first (`git fetch && git pull
   origin main --ff-only`) so the new branch starts from the current state.
-- Always create commits/branches/PRs.
-- After the pull request change to the main branch and delete the local feature Branche
-- Before every commit and pull request, inspect `.github/workflows/release.yaml`
-  and `.github/workflows/snapshot-release.yaml`. Apply exactly one matching
+- Read-only analysis, reviews, and local experiments do not require commits,
+  PRs, or release metadata. For completed changes intended for publication,
+  create commits and a PR against `main`, unless the user limits the task
+  to local work.
+- Creating a PR does not authorize merging it. Merge only when explicitly
+  requested. After creating the PR, return to `main` and delete the local
+  feature branch only once all changes are committed and pushed; preserve
+  the remote branch while the PR is open.
+- When preparing changes for publication, inspect
+  `.github/workflows/release.yaml` and `.github/workflows/snapshot-release.yaml`
+  before committing and creating the PR; reuse that inspection unless the
+  workflows change. Apply exactly one matching
   release label (`release:major`, `release:minor`, `release:patch`, or
   `release:snapshot`) to every pull request; use `release:patch` for
   documentation-only changes.

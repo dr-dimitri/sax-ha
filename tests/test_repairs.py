@@ -3,7 +3,7 @@
 
 Der Ladekonflikt-Bestätigungsdialog (repairs.ChargeConflictRepairFlow) wird
 bereits in tests/test_price_optimizer.py abgedeckt - hier geht es nur um
-die fünf zusätzlichen, rein informativen (nicht fixierbaren)
+die zusätzlichen, rein informativen (nicht fixierbaren)
 Selbstdiagnose-Issues aus SaxPowerCoordinator._async_check_self_diagnostics.
 Jede Prüfung wird auf drei Arten getestet: Auslösen (nach Ablauf der
 jeweiligen Karenzzeit, sofern vorhanden), Idempotenz (kein wiederholtes
@@ -12,9 +12,11 @@ verschwindet automatisch, sobald die Ursache behoben ist)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -39,6 +41,10 @@ from custom_components.sax_power.const import (
     SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.infrastructure.self_diagnostics import (
+    DiagnosticSnapshot,
+    SelfDiagnostics,
+)
 from custom_components.sax_power.price_optimizer import PricePlan
 from custom_components.sax_power.repairs import (
     ChargeConflictRepairFlow,
@@ -69,6 +75,89 @@ def _make_coordinator(hass) -> SaxPowerCoordinator:
 
 def _get_issue(hass, key: str):
     return ir.async_get(hass).async_get_issue(DOMAIN, f"{key}_test_entry_id")
+
+
+@pytest.mark.parametrize(
+    ("issue_key", "changes"),
+    [
+        (
+            ISSUE_PRICE_SENSOR_MISSING,
+            {"price_status": PRICE_STATUS_NO_PRICE_DATA},
+        ),
+        (
+            ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
+            {"extended_available": False, "extended_unavailable_since": 0.0},
+        ),
+        (ISSUE_MAX_SOC_BELOW_MIN_SOC, {"timed_max_soc": 10}),
+        (ISSUE_PRICE_NEUTRAL_BELOW_LIMIT, {"neutral_price": 0.1}),
+        (
+            f"{ISSUE_EMPTY_CHARGE_WINDOW}_timed_charge",
+            {"timed_enabled": True, "timed_end": dt_time(1)},
+        ),
+        (
+            f"{ISSUE_EMPTY_CHARGE_WINDOW}_grid_serving",
+            {"grid_serving_enabled": True, "grid_serving_end": dt_time(1)},
+        ),
+        (
+            f"{ISSUE_NO_ACTIVE_MONTHS}_timed_charge",
+            {"timed_enabled": True, "timed_months": frozenset()},
+        ),
+        (
+            f"{ISSUE_NO_ACTIVE_MONTHS}_grid_serving",
+            {"grid_serving_enabled": True, "grid_serving_months": frozenset()},
+        ),
+        (
+            ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
+            {"economics_price_unavailable": True},
+        ),
+    ],
+)
+@pytest.mark.parametrize("problem_persists_after_reload", [False, True])
+async def test_self_diagnostic_issue_clears_after_reload(
+    hass,
+    issue_key: str,
+    changes: dict[str, object],
+    problem_persists_after_reload: bool,
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS/REQ-ECONOMICS-OBSERVABILITY: Reload heilt."""
+    healthy = DiagnosticSnapshot(
+        price_status=PRICE_STATUS_WAITING,
+        price_entity_id="sensor.strompreis",
+        extended_available=True,
+        extended_unavailable_since=None,
+        slave_id_extended=100,
+        timed_max_soc=100,
+        timed_min_soc=20,
+        price_limit=0.2,
+        neutral_price=0.3,
+        timed_enabled=True,
+        timed_start=dt_time(1),
+        timed_end=dt_time(5),
+        timed_months=frozenset(range(1, 13)),
+        grid_serving_enabled=True,
+        grid_serving_start=dt_time(1),
+        grid_serving_end=dt_time(5),
+        grid_serving_months=frozenset(range(1, 13)),
+        economics_tariff_enabled=True,
+    )
+    problem = replace(healthy, **changes)
+    diagnostics = SelfDiagnostics(hass, "test_entry_id")
+    diagnostics.check(problem, 0.0)
+    after_grace = max(
+        PRICE_SENSOR_MISSING_GRACE_PERIOD,
+        SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
+    )
+    diagnostics.check(problem, after_grace)
+    issue = _get_issue(hass, issue_key)
+    assert issue is not None and issue.active
+
+    reloaded = SelfDiagnostics(hass, "test_entry_id")
+    if problem_persists_after_reload:
+        reloaded.check(problem, after_grace + 1)
+        assert _get_issue(hass, issue_key) is not None
+    reloaded.check(healthy, after_grace + 2)
+
+    assert _get_issue(hass, issue_key) is None
 
 
 # ===========================================================================
@@ -520,10 +609,6 @@ async def test_economics_price_unavailable_issue_clears_after_a_reload(hass) -> 
 
     # Simuliert den Neustart der SelfDiagnostics-Instanz bei einem Neuladen
     # des Config Entry - das Issue bleibt in der Registry bestehen.
-    from custom_components.sax_power.infrastructure.self_diagnostics import (
-        SelfDiagnostics,
-    )
-
     coordinator._self_diagnostics = SelfDiagnostics(hass, coordinator.entry_id)
     coordinator._economics_price_unavailable = False
 

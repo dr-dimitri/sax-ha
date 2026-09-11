@@ -332,6 +332,10 @@ def _grid_serving_pause_status(
     )
 
 
+class _SunChargeWriteError(HomeAssistantError):
+    """A setpoint sequence failure already logged by the write boundary."""
+
+
 class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinates Modbus reads/writes for a SAX Power storage system."""
 
@@ -708,7 +712,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # can resume a charge using the previous self.data snapshot.
                 self._basic_read_failed = False
                 self._max_soc_hold_during_basic_outage = False
-                await self._async_enforce_grid_charge_locked(data)
+                try:
+                    await self._async_enforce_grid_charge_locked(data)
+                except HomeAssistantError as err:
+                    # REQ-EXTENDED-MODE-RESILIENCE: gültige Messdaten bleiben
+                    # verfügbar; der nächste Poll versucht die Steuerung neu.
+                    if not isinstance(err, _SunChargeWriteError):
+                        _LOGGER.error(
+                            "Ladeentscheidung konnte nicht angewendet werden; "
+                            "Messwerte bleiben gültig, erneuter Versuch im "
+                            "nächsten Poll: %s",
+                            err,
+                        )
         else:
             self._basic_read_failed = False
         self._publish_charge_state(data)
@@ -3305,7 +3320,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Register 40051 abgebrochen: {err}"
             )
             _LOGGER.error(message)
-            raise HomeAssistantError(message) from err
+            raise _SunChargeWriteError(message) from err
 
         # Ab der quittierten Modusumschaltung bleibt der Rücksetzauftrag für
         # die spätere Freigabe bestehen; bei einer unvollständigen Sequenz
@@ -3339,7 +3354,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "SmartMeter-Nullregelung erfolgreich."
                 )
             _LOGGER.error(message)
-            raise HomeAssistantError(message) from setpoint_error
+            raise _SunChargeWriteError(message) from setpoint_error
 
     async def async_start_sun_charge(
         self,

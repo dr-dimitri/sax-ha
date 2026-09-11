@@ -157,6 +157,16 @@ requirement_extended_mode_resilience:
         gehalten werden, solange die Schreibzugriffe quittiert werden.
         Die Leistungsmessung zur Bestätigung des netzdienlichen Ladens
         bleibt erforderlich.
+      - Ein HomeAssistantError beim Anwenden der Ladeentscheidung im
+        Poll-Tick verwirft keinen erfolgreich gelesenen Messdatensatz:
+        Messwerte, aktueller Ladestatus und Selbstdiagnose werden weiterhin
+        veröffentlicht, last_update_success bleibt wahr. Der nächste Poll
+        versucht die Steuerung erneut. Bereits gemeldete Fehler der
+        Sollwertsequenz erzeugen keine zweite Fehlermeldung; andere
+        Steuerfehler werden kompakt ohne Traceback geloggt. Diese
+        Fehlerbehandlung gilt ausschließlich für den Poll-Pfad; Services
+        und Entity-Setter geben Fehler weiterhin an den Aufrufer zurück
+        (REQ-MANUAL-GRID-CHARGE / REQ-TIMED-SOC-CHARGE).
   acceptance_criteria:
     - "Live-Test gegen einen simulierten Modbus-Server ohne SunSpec-Modus-
        Gerät zeigt: Config Entry lädt erfolgreich, Basic-Mode-Sensoren
@@ -168,6 +178,14 @@ requirement_extended_mode_resilience:
        aller Netzladearten, sichere Rücksetzung und Wiederanlauf mit neuem
        SOC sowie Timer-/Service-Aufrufe ohne gültigen SOC ab. Steuerupdates
        dürfen einen fehlgeschlagenen Read nicht als erfolgreich markieren."
+    - "tests/test_control_write_resilience.py prüft fehlgeschlagene Mode-
+       und Sollwert-Writes während des Polls: frischer SOC und Ladestatus
+       bleiben verfügbar, die Selbstdiagnose läuft, Folgepolls wiederholen
+       die Entscheidung und melden nach erfolgreicher Quittung die aktive
+       Max-SOC-Sperre. Pro fehlgeschlagener Sequenz gibt es genau eine
+       Fehlermeldung ohne Traceback. Vorvalidierungsfehler bleiben ebenfalls
+       sichtbar, Basic-Read-Fehler bleiben UpdateFailed und explizite
+       Service-/Entity-Aufrufe reichen HomeAssistantError weiter."
 
 # ==============================================================================
 # ANFORDERUNG: TESTS GEGEN ECHTE SAX-HARDWARE

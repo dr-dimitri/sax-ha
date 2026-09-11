@@ -15,6 +15,8 @@ from __future__ import annotations
 
 _INT16_NOT_IMPLEMENTED = 0x8000
 _UINT16_NOT_IMPLEMENTED = 0xFFFF
+SUNSSF_MIN = -10
+SUNSSF_MAX = 10
 
 
 def to_signed16(value: int) -> int:
@@ -45,8 +47,12 @@ def decode_uint16(raw_value: int) -> int | None:
 
 def decode_sunssf(raw_scale_factor: int) -> int | None:
     """Decode a SunSpec scale-factor register (``sunssf``), encoded as
-    ``int16``. ``None`` on the "not implemented" sentinel (0x8000)."""
-    return decode_int16(raw_scale_factor)
+    ``int16``. ``None`` on the sentinel (0x8000) or outside -10..10
+    (REQ-SUNSPEC-DATATYPES)."""
+    scale_factor = decode_int16(raw_scale_factor)
+    if scale_factor is None or not SUNSSF_MIN <= scale_factor <= SUNSSF_MAX:
+        return None
+    return scale_factor
 
 
 def decode_bool16(raw_value: int) -> bool | None:
@@ -67,9 +73,10 @@ def apply_typed_sunssf(
     ``signed`` must match the value register's own declared type in
     modbus_llm.yaml (``int16`` -> True, ``uint16`` -> False) - the scale
     factor register itself is always ``sunssf``/``int16``. Returns ``None``
-    if either register carries its type's "not implemented" sentinel, so a
-    missing measurement never turns into a bogus 0 or an extreme value via
-    an unintended power-of-ten underflow/overflow.
+    if either register carries its type's "not implemented" sentinel or the
+    scale factor is outside -10..10, so a missing or invalid measurement
+    never turns into a bogus 0 or an extreme value via an unintended
+    power-of-ten underflow/overflow (REQ-SUNSPEC-DATATYPES).
     """
     value = decode_int16(raw_value) if signed else decode_uint16(raw_value)
     scale_factor = decode_sunssf(raw_scale_factor)

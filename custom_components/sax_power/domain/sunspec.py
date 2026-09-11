@@ -113,12 +113,19 @@ from .registers import (
     decode_ascii_registers,
     decode_bool16,
     decode_int16,
+    decode_sunssf,
     decode_uint16,
     to_unsigned16,
 )
 
 MANUFACTURER_REGISTER_COUNT = 4
 MODEL_REGISTER_COUNT = 3
+_BATTERY_SCALE_FACTOR_ADDRESSES = {
+    "capacity": REG_SUN_BATTERY_CAPACITY_SF,
+    "power": REG_SUN_BATTERY_POWER_SF,
+    "soc": REG_SUN_BATTERY_SOC_SF,
+    "cell_voltage": REG_SUN_BATTERY_CELL_VOLTAGE_SF,
+}
 
 
 class SunSpecDecodeError(ValueError):
@@ -199,6 +206,9 @@ class DecodedHighBlock:
     #: braucht. Bleibt Rohwert, weil dort eine eigene, strengere
     #: Sentinel-/Bereichsprüfung vor jedem Write stattfindet.
     ic_power_setpoint_sf_raw: int
+    #: Interne Registeradresse -> ungültiger signed Exponent (HIGH und LOW2).
+    #: Sentinelwerte sind regulär nicht implementierte Felder und fehlen hier.
+    invalid_scale_factors: Mapping[int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -647,15 +657,24 @@ def decode_high_block(
     """
     reg = _block_reader(high, READ_BLOCK_EXT_START, READ_BLOCK_EXT_COUNT, "HIGH-Block")
     values: dict[str, Any] = {}
+    invalid_scale_factors: dict[int, int] = {}
 
     for field in HIGH_BLOCK_FIELDS:
         match field:
             case ScaledField():
-                scale_factor_raw = (
-                    reg(field.scale_factor_address)
-                    if field.scale_factor_address is not None
-                    else getattr(scale_factors, field.battery_scale_factor)
-                )
+                if field.scale_factor_address is not None:
+                    scale_factor_address = field.scale_factor_address
+                    scale_factor_raw = reg(scale_factor_address)
+                else:
+                    scale_factor_address = _BATTERY_SCALE_FACTOR_ADDRESSES[
+                        field.battery_scale_factor
+                    ]
+                    scale_factor_raw = getattr(
+                        scale_factors, field.battery_scale_factor
+                    )
+                scale_factor = decode_int16(scale_factor_raw)
+                if scale_factor is not None and decode_sunssf(scale_factor_raw) is None:
+                    invalid_scale_factors[scale_factor_address] = scale_factor
                 value = apply_typed_sunssf(
                     reg(field.address), scale_factor_raw, signed=field.signed
                 )
@@ -681,4 +700,5 @@ def decode_high_block(
     return DecodedHighBlock(
         values=values,
         ic_power_setpoint_sf_raw=reg(REG_SUN_IC_POWER_SETPOINT_SF),
+        invalid_scale_factors=invalid_scale_factors,
     )

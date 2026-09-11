@@ -352,13 +352,29 @@ requirement_sunspec_datatypes:
 
     domain/registers.py stellt jetzt reine, typisierte Decoder bereit:
     decode_int16 (Sentinel 0x8000 -> None), decode_uint16 (auch für
-    enum16/bitfield16, Sentinel 0xFFFF -> None), decode_sunssf (= decode_int16,
-    eigener Name für Lesbarkeit an den sunssf-Aufrufstellen), decode_bool16
+    enum16/bitfield16, Sentinel 0xFFFF -> None), decode_sunssf (int16 mit
+    zusätzlicher Bereichsprüfung -10..+10 einschließlich der Grenzen;
+    Sentinel und jeder Exponent außerhalb liefern None), decode_bool16
     (0/1 als uint16, jeder andere Wert inkl. Sentinel -> None statt
     fälschlich True) sowie apply_typed_sunssf(raw_value, raw_scale_factor,
     *, signed=True), das Wert und Skalierungsfaktor VOR der Skalierung
-    getrennt decodiert und bei jedem Sentinel None statt eines berechneten
-    Werts liefert.
+    getrennt decodiert und bei jedem Sentinel oder ungültigen Exponenten
+    None statt eines berechneten Werts liefert. SUNSSF_MIN/SUNSSF_MAX
+    definieren den Bereich zentral; auch Sollwertschreiben und die
+    SOC-Auflösung der Geldbilanz verwenden decode_sunssf. Damit gelangen
+    weder extreme Zehnerpotenzen noch zu Null gerundete Unterläufe aus
+    ungültigen Exponenten in Sensorwerte, Energie- oder Geldzähler (Issue
+    #194). Gültige Skalierungen und deren Rundung bleiben unverändert.
+
+    decode_high_block liefert ungültige Faktoren mit ihrer Registeradresse
+    als Diagnosedaten zurück, einschließlich der zwischengespeicherten
+    LOW2-Faktoren. Der Coordinator warnt pro betroffenem Register einmal
+    während seiner Laufzeit mit Protokolladresse, Slave-ID und Exponent;
+    der normale Not-Implemented-Sentinel erzeugt keine Warnung. Betroffene
+    Messwerte bleiben unbekannt, andere Register und Basic Mode verfügbar.
+    Sobald wieder ein gültiger Faktor gelesen wird, erholt sich der
+    Messwert ohne Neustart und ohne nachträgliche Energieverbuchung der
+    ausgefallenen Messintervalle (REQ-EXTENDED-MODE-RESILIENCE).
 
     Die deklarative Feldtabelle HIGH_BLOCK_FIELDS in domain/sunspec.py und
     decode_identity dort wählen für jedes Register signed=True/False anhand
@@ -393,6 +409,23 @@ requirement_sunspec_datatypes:
     smartmeter_power/grid_power_active_l1/l2/l3 (REQ-SUNSPEC-MODE-CORRECTION)
     prüft dafür explizit auf None, bevor sie das unäre Minus anwendet.
   acceptance_criteria:
+    - "tests/test_sunspec_decoder.py prüft alle 65536 sunssf-Rohwerte:
+       Nur -10..+10 einschließlich der Grenzen sind gültig; signed- und
+       unsigned-Skalierung behalten für gültige Faktoren ihre Ergebnisse.
+       HIGH-/LOW2-Faktoren, gemeinsame Faktoren mehrerer Messwerte und
+       deterministische Zufallsblöcke sind abgedeckt."
+    - "tests/test_coordinator.py prüft je vier Refreshs mit Lade- und
+       Entladeleistung und Exponenten -32767, -11, 11, 100 und 32767:
+       last_update_success bleibt True, storage_power_active bleibt None,
+       Energie-, Herkunfts-, Netz- und Geldzähler bleiben unverändert,
+       auch nach Speichern und Laden. Je betroffenem Register entsteht
+       genau eine Warnung. Der nächste gültige Leistungswert verbucht nur
+       sein aktuelles Intervall. Ungültige Schreibfaktoren lösen weiterhin
+       HomeAssistantError vor dem Geräte-Write aus. Ein zusätzlicher Fuzztest
+       durchläuft vollständige Refreshs mit vier Extremmustern und 32
+       deterministischen Zufallsblöcken für HIGH/LOW2; Updates bleiben
+       erfolgreich, numerische Messwerte endlich und Warnungen je
+       Skalierungsregister dedupliziert."
     - "tests/test_coordinator.py deckt decode_int16/decode_uint16/
        decode_bool16/apply_typed_sunssf parametrisch ab: signiertes 0xFFFF
        -> -1, unsigniertes 0x8001 -> 32769, int16/sunssf-Sentinel 0x8000 ->

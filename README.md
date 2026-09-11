@@ -808,6 +808,34 @@ ausschließlich im Diagnose-Download erscheint. Die Energiezähler
 [Herkunft der Ladeenergie](#herkunft-der-ladeenergie) bleiben davon
 vollständig unberührt - es gibt keine rückwirkende Neuberechnung.
 
+### Bereits beschädigte Zähler durch ungültige SunSpec-Skalierung
+
+Ab Version 2.0.3 werden SunSpec-Skalierungsfaktoren außerhalb −10 bis +10
+verworfen. Betroffene Messwerte zeigen „unbekannt“; eine Warnung im Log nennt
+das Register. Bereits gespeicherte Ausreißer aus
+[Issue #194](https://github.com/dr-dimitri/sax-ha/issues/194) korrigiert das
+Update nicht automatisch.
+
+Für betroffene Installationen:
+
+1. Home Assistant stoppen und das Konfigurationsverzeichnis sichern. Einen
+   bekannten korrekten Energie-Store aus dem Backup wiederherstellen oder
+   im `data`-Objekt von `.storage/sax_power.energy.<entry_id>` die betroffenen
+   Zähler (`charged_kwh`, `discharged_kwh`, `grid_charged_kwh`,
+   `pv_charged_kwh`, gegebenenfalls `grid_imported_kwh`/`grid_exported_kwh`)
+   auf bekannte korrekte Werte setzen. Ein bewusst gewählter Neustart bei 0
+   verwirft die jeweilige bisherige Summe. Die Datei nicht bloß löschen:
+   Sonst kann Home Assistant den beschädigten Altstand über RestoreEntity
+   erneut importieren. Dateistruktur und übrige Felder erhalten.
+2. Home Assistant starten. Die Geldbilanz bei aktiviertem Tarif und bereits
+   initialisierter Bilanz über `sax_power.restart_economics_accounting`
+   mit dem betroffenen Gerät und `confirm: true` neu beginnen. Dabei gehen
+   ihre bisherigen Summen und Tagesbilanzen verloren; Energie- und
+   Herkunftszähler werden durch diesen Service nicht zurückgesetzt.
+3. Bereits aufgezeichnete Ausreißer zusätzlich in Home Assistants
+   [Statistikwerkzeugen](https://www.home-assistant.io/docs/tools/dev-tools/#statistics-tab)
+   korrigieren. Eine Store-Korrektur bereinigt die Langzeitstatistik nicht.
+
 ## Energy-Dashboard
 
 Die Sensoren **Geladene Energie (gesamt)** und **Entladene Energie (gesamt)**

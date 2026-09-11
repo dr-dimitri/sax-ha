@@ -686,7 +686,11 @@ requirement_timed_soc_charge:
     sofort zurück, auch ohne neue Revision; dieselbe Messung darf danach
     keine neue Bestätigung liefern. Einstellungsänderungen wirken weiterhin
     sofort. Das gilt ebenso bei fehlenden HIGH-Messwerten nach einem
-    SunSpec-Lesefehler. Die Zähler (je
+    SunSpec-Lesefehler. Auch die Wartezyklen des netzdienlichen Ladens nach
+    Schritt a werden nur durch neue HIGH-Messwerte verbraucht; die
+    Aktivierungsrevision zählt noch nicht zur Wartezeit und deren Messwerte
+    zählen noch nicht zur Freigabebestätigung in Schritt b
+    (REQ-GRID-SERVING-CHARGE). Die Zähler (je
     Verwendungsstelle ein eigenes self-Attribut, z. B.
     self._timed_charge_pv_surplus_cycles,
     self._max_soc_grid_import_wait_cycles,
@@ -1033,10 +1037,18 @@ requirement_grid_serving_charge:
        cycles), wechselt der Speicher aktiv in den Sollwertvorgabemodus UND
        die Ladung wird in demselben Aufruf auf 0 % gestoppt (Register 40049,
        async_start_sun_charge(0)). Danach werden zusätzlich einmalig
-       PV_SURPLUS_HYSTERESIS_CYCLES weitere Aktualisierungszyklen abgewartet
+       PV_SURPLUS_HYSTERESIS_CYCLES weitere frische HIGH-Messwerte abgewartet
        (self._grid_serving_wait_cycles), bevor Schritt b ausgewertet wird,
        damit sich Moduswechsel und gestoppter Sollwert am Gerät setzen
-       können.
+       können. Die Aktivierungsrevision wird sofort als verarbeitet markiert;
+       jede folgende _high_sample_revision verbraucht höchstens einen
+       Wartezyklus. Preis-/PV-Prognose-Sensor-Events, Planner-Timer und
+       Einstellungsänderungen ohne neue HIGH-Messung verkürzen die Wartezeit
+       nicht. Auch ein wiederholtes Ereignis auf der letzten Warterevision
+       darf Schritt b noch keine Freigabebestätigung liefern; diese beginnt
+       erst mit der nächsten frischen Messung. Eine verlorene Berechtigung,
+       zeitgesteuerter Haltezustand oder bereits bestätigter Netzbezug darf
+       die Wartezeit weiterhin sofort zurücksetzen, auch ohne neue Revision.
     a.1 Netzbezugs-Schutz, mit aktivem Sollwertvorgabemodus, UNABHÄNGIG von
        den Wartezyklen aus Schritt a (self._grid_serving_import_confirm_
        cycles): Solange der Sollwert bei 0 % gehalten wird, fließt kein
@@ -1462,7 +1474,11 @@ requirement_grid_serving_charge:
        einzelner Zyklus reicht noch nicht), und setzt danach zusätzlich
        zwei Wartezyklen; während dieser Wartezyklen bleibt Schritt b
        unterdrückt, selbst wenn die Netzeinspeisung zwischenzeitlich unter
-       den Schwellwert fällt; nach Ablauf der Wartezyklen bleibt die Ladung
+       den Schwellwert fällt. Preisplan- und Einstellungsereignisse ohne
+       neuen HIGH-Messwert verbrauchen weder die Wartezyklen noch zählen sie
+       Aktivierungs-/Warte-Messwerte vorzeitig für Schritt b; erst zwei neue
+       Warte-Messwerte und zwei weitere Freigabe-Messwerte geben wieder frei.
+       Nach Ablauf der Wartezyklen bleibt die Ladung
        bei weiterhin hoher Einspeisung bewusst bei 0 % gehalten (kein
        Wiederanstieg des Sollwerts mehr, im Unterschied zum alten
        Verhalten), Schritt b setzt erst bei über ebenso viele
@@ -1490,8 +1506,10 @@ requirement_grid_serving_charge:
        dem Schwellwert schaltet über dieselbe Zyklen-Hysterese aktiv zurück
        in die SmartMeter-Nullregelung, und zwar auch während der
        Wartezyklen aus Schritt a (durchbricht deren Unterdrückung, ein
-       einzelner Zyklus reicht noch nicht); anschließend wertet die
-       Zustandsmaschine wieder regulär ab Schritt a, sodass sie bei
+       einzelner Zyklus reicht noch nicht). Auch ein fehlgeschlagener
+       Rückschaltversuch wird mit bereits bestätigtem Netzbezug ohne weitere
+       Messung sofort wiederholt und setzt die Wartezeit zurück; anschließend
+       wertet die Zustandsmaschine wieder regulär ab Schritt a, sodass sie bei
        weiterhin hoher SAX-Ladeleistung nach erneuten
        PV_SURPLUS_HYSTERESIS_CYCLES Zyklen wieder eingreift.
        test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_

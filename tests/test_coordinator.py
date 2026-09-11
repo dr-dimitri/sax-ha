@@ -3517,6 +3517,7 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
             assert coordinator.grid_serving_active is True
 
             task = coordinator._sun_charge_task
+            assert coordinator._grid_serving_wait_cycles == PV_SURPLUS_HYSTERESIS_CYCLES
             assert task is not None
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
@@ -3545,6 +3546,7 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
 
         assert coordinator.grid_serving_active is False
         assert coordinator._grid_serving_setpoint_active is False
+        assert coordinator._grid_serving_wait_cycles == 0
         assert coordinator.sun_charge_active is False
         client.write_register.assert_awaited_once_with(
             address=REG_SUN_IC_CONTROL_MODE,
@@ -3625,13 +3627,15 @@ async def test_grid_serving_deactivation_wins_over_concurrent_activation(hass) -
         await coordinator.async_stop_sun_charge()
 
 
-async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -> None:
-    """Nach dem Auslösen von Schritt a wird Schritt b (Rückkehr in die
-    SmartMeter-Nullregelung bei Netzeinspeisung unter dem Schwellwert) für
-    die nächsten zwei Aufrufe von _async_enforce_grid_charge unterdrückt,
-    selbst wenn die Netzeinspeisung in der Zwischenzeit bereits unter den
-    Schwellwert fällt - erst der dritte Aufruf nach dem Trigger wertet
-    Schritt b wieder aus."""
+@pytest.mark.parametrize("event", ["price_plan", "setting"])
+async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(
+    hass, event: str
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Wartezeit und Schritt b brauchen neue Messungen.
+
+    Die Aktivierung und beide Warte-Messwerte dürfen auch bei erneuten
+    Preisplan-/Einstellungsereignissen keine Freigabebestätigung liefern.
+    """
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -3648,6 +3652,16 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
     await coordinator.async_set_grid_serving_start(dt_time(10, 0))
     await coordinator.async_set_grid_serving_end(dt_time(14, 0))
     await coordinator.async_set_max_soc(90)
+
+    async def apply_events(expected_wait_cycles: int) -> None:
+        for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            if event == "price_plan":
+                await coordinator.async_apply_price_plan()
+            else:
+                await coordinator.async_set_grid_serving_end(dt_time(14))
+            assert coordinator._grid_serving_wait_cycles == expected_wait_cycles
+            assert coordinator._grid_serving_release_confirm_cycles == 0
+            assert coordinator.grid_serving_active is True
 
     try:
         with _patched_now(12):
@@ -3666,18 +3680,21 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
             # Schwellwert - darf noch nicht zur Rückkehr in die
             # Nullregelung führen.
             coordinator.data["smartmeter_power"] = 0
+            await apply_events(PV_SURPLUS_HYSTERESIS_CYCLES)
 
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_wait_cycles == 1
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
+            await apply_events(1)
 
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_wait_cycles == 0
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
+            await apply_events(0)
 
             # Erst jetzt wertet Schritt b die Netzeinspeisung wieder aus -
             # auch dort greift dieselbe Zyklen-Hysterese, ein einzelner
@@ -3687,6 +3704,7 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
+            assert coordinator._grid_serving_release_confirm_cycles == 1
 
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
@@ -3697,8 +3715,9 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
         await coordinator.async_stop_sun_charge()
 
 
+@pytest.mark.parametrize("retry_same_sample", [False, True])
 async def test_enforce_grid_charge_grid_serving_import_protection_overrides_wait_cycles(
-    hass,
+    hass, retry_same_sample: bool
 ) -> None:
     """Schritt a.1 (Netzbezugs-Schutz): Tritt während der Wartezyklen nach
     Schritt a tatsächlicher Netzbezug (positiver smartmeter_power) über
@@ -3751,6 +3770,19 @@ async def test_enforce_grid_charge_grid_serving_import_protection_overrides_wait
             assert coordinator.sun_charge_active is True
 
             coordinator._high_sample_revision += 1
+            if retry_same_sample:
+                # Ein fehlgeschlagener Gerätezugriff lässt den Netzbezug
+                # bestätigt; sein Schutz muss ohne neue Messung erneut greifen.
+                with (
+                    patch.object(
+                        coordinator,
+                        "async_stop_sun_charge",
+                        side_effect=HomeAssistantError("Gerät vorübergehend offline"),
+                    ),
+                    pytest.raises(HomeAssistantError),
+                ):
+                    await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert coordinator._grid_serving_wait_cycles == 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is False

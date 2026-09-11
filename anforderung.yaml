@@ -151,6 +151,12 @@ requirement_extended_mode_resilience:
       - Zustandswechsel (verfügbar -> nicht verfügbar -> wieder verfügbar)
         werden geloggt und zusätzlich als Home-Assistant-Repair-Issue
         (extended_mode_unavailable) angezeigt.
+      - Ein Sollwert von exakt 0 W bleibt ohne gültigen SunSpec-Referenzwert
+        oder Skalierungsfaktor als Rohwert 0 schreibbar. Max-SOC-Sperre,
+        Neutralpreis-Pause und netzdienliche Ladepause können damit weiterhin
+        gehalten werden, solange die Schreibzugriffe quittiert werden.
+        Die Leistungsmessung zur Bestätigung des netzdienlichen Ladens
+        bleibt erforderlich.
   acceptance_criteria:
     - "Live-Test gegen einen simulierten Modbus-Server ohne SunSpec-Modus-
        Gerät zeigt: Config Entry lädt erfolgreich, Basic-Mode-Sensoren
@@ -320,14 +326,15 @@ requirement_sunspec_datatypes:
     über decode_uint16 geführt, statt einen Sentinel unbemerkt als riesigen
     Referenz-/Timeout-Wert zu übernehmen.
 
-    SaxPowerCoordinator._watts_to_ic_setpoint_raw (REQ-TIMED-SOC-CHARGE)
-    validierte den Skalierungsfaktor für Register 40049 bereits vor dieser
-    Änderung explizit (Bereich -10..10, schließt den Sentinel -32768
-    implizit aus) und bricht bei einem ungültigen
-    ic_max_power_reference/Skalierungsfaktor mit HomeAssistantError vor
-    jedem Schreibvorgang ab - das gilt unverändert weiter und profitiert
-    zusätzlich davon, dass ic_max_power_reference jetzt bereits als
-    decode_uint16-Ergebnis (None statt 65535) ankommt.
+    Negative Sollwerte validieren in _watts_to_ic_setpoint_raw den
+    Referenzwert Register 40053 und den Skalierungsfaktor Register 40049
+    (Bereich -10..10, ohne Sentinel -32768) vor jedem Schreibvorgang.
+    Die Ladeentscheidung reicht ihren aktuellen Messdatensatz bis in den
+    Schreibpfad durch; eine fehlende Referenz wird nicht durch einen alten
+    veröffentlichten Wert ersetzt. Nur der periodische Writer verwendet
+    ohne neue Entscheidung den zuletzt verfügbaren Datensatz. Exakt 0 W
+    benötigt weder Referenz noch Skalierungsfaktor und wird als Rohwert 0
+    geschrieben (REQ-EXTENDED-MODE-RESILIENCE).
 
     Downstream (Energieakkumulation, PV-Überschuss-Hysterese aller drei
     Verwendungsstellen, Preisplanung, sensor.py/binary_sensor.py) prüfen

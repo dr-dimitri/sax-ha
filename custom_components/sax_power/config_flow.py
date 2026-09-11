@@ -16,7 +16,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_PORT, CURRENCY_EURO
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import section
+from homeassistant.data_entry_flow import AbortFlow, section
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 from homeassistant.helpers.device_registry import format_mac
@@ -302,6 +302,14 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> SaxPowerOptionsFlow:
         return SaxPowerOptionsFlow()
 
+    @callback
+    def _async_abort_if_configured(self) -> None:
+        """Keep onboarding limited to one storage system (REQ-IP-CONFIGURABLE-UI)."""
+        # Das Manifest-Flag single_config_entry würde auch DHCP-IP-Updates
+        # vor async_step_dhcp sperren (REQ-DHCP-DISCOVERY).
+        if self._async_current_entries(include_ignore=False):
+            raise AbortFlow("single_instance_allowed")
+
     async def async_step_dhcp(
         self, discovery_info: DhcpServiceInfo
     ) -> ConfigFlowResult:
@@ -327,6 +335,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        self._async_abort_if_configured()
         return await self._async_step_connection(user_input, step_id="user")
 
     async def async_step_reconfigure(
@@ -419,6 +428,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         entity.initial_config_value sowie anforderung.yaml,
         REQ-TIMED-SOC-CHARGE.
         """
+        self._async_abort_if_configured()
         if user_input is not None:
             self._grid_charge_data = user_input
             return await self.async_step_dashboard()
@@ -440,6 +450,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         wird erst im nächsten, abschließenden Schritt angelegt (siehe
         async_step_finish).
         """
+        self._async_abort_if_configured()
         if user_input is not None:
             self._dashboard_data = user_input
             return await self.async_step_finish()
@@ -457,6 +468,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         existiert er noch nicht, ein zwischenzeitlicher Abbruch des Flows
         legt also keinen unvollständigen Eintrag an.
         """
+        self._async_abort_if_configured()
         if user_input is not None:
             return self.async_create_entry(
                 title="SAX Power Home",

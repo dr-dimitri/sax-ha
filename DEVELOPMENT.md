@@ -132,15 +132,28 @@ SunSpec-Erreichbarkeit, Anzahl angelegter Entities als
 ermittelt), siehe anforderung.yaml REQ-SETUP-FINISH-SUMMARY. Der Config Entry
 wird erst hier angelegt.
 
+Die Integration unterstützt derzeit einen Speicher pro Installation von
+Home Assistant (REQ-IP-CONFIGURABLE-UI). Deshalb prüfen alle Schritte der
+Ersteinrichtung auf eingerichtete Config Entries und brechen mit
+`single_instance_allowed` ab, auch wenn ein parallel gestarteter Flow seinen
+Eintrag zwischenzeitlich angelegt hat. Ignorierte Discovery-Merker zählen
+dabei nicht als Speicher; deaktivierte oder fehlerhaft geladene Einträge
+zählen weiterhin. Der Hinweis verweist für
+Verbindungsänderungen auf **Neu konfigurieren**. Reconfigure und Options
+bleiben nutzbar; bereits gespeicherte Mehrfacheinträge werden nicht verändert.
+Die Begrenzung passt zum globalen Dashboard unter `sax-power`, das keine
+getrennten Dashboards je Speicher bereitstellt.
+
 Ein durch DHCP entdeckter Speicher verwendet seine normierte MAC-Adresse
-dagegen dauerhaft als Config-Entry-ID. Ein späterer Lease derselben MAC kann
+dauerhaft als `unique_id` des Config Entry. Ein späterer Lease derselben MAC kann
 dadurch die geänderte IP im vorhandenen Eintrag nachführen und einen Reload
 auslösen, ohne einen zweiten Eintrag anzulegen. Beim Reconfigure bleibt diese
 MAC-ID erhalten; nur manuell angelegte Einträge führen ihre `host:port`-ID mit.
-Auch ein manueller Einrichtungsversuch gleicht Host und Port vor der
-Verbindungsprüfung mit bestehenden Einträgen ab. So erzeugt dieselbe
-Verbindung trotz unterschiedlicher ID-Formate keinen zweiten Coordinator;
-der vorhandene Eintrag bleibt beim Abbruch unverändert.
+DHCP prüft bekannte Hosts und MAC-Adressen vor der Einrichtungsbegrenzung,
+damit solche IP-Updates weiterhin möglich sind. Aus demselben Grund setzt das
+Manifest nicht `single_config_entry`: Home Assistant würde sonst weitere
+Discovery-Flows bereits vor diesem Abgleich blockieren. Die eigene Prüfung
+im Config Flow verhindert dagegen nur zusätzliche Einträge.
 
 Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
 preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als

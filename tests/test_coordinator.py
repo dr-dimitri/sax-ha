@@ -1687,7 +1687,9 @@ async def test_inactive_grid_serving_retries_failed_smartmeter_reset(hass) -> No
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
@@ -1700,6 +1702,7 @@ async def test_inactive_grid_serving_retries_failed_smartmeter_reset(hass) -> No
             assert coordinator._sun_charge_task is None
             assert coordinator._sun_charge_reset_required is True
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
 
         assert coordinator._sun_charge_reset_required is False
@@ -2135,6 +2138,7 @@ async def test_timed_charge_own_target_does_not_limit_other_modes(
     try:
         with _patched_now(2):
             for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
 
             assert coordinator._timed_charge_active is False
@@ -2153,6 +2157,7 @@ async def test_timed_charge_own_target_does_not_limit_other_modes(
                 assert coordinator._price_charge_active is (mode == "price")
 
             coordinator.data["soc"] = 90
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             assert coordinator._sun_charge_power == 0
@@ -2239,6 +2244,7 @@ async def test_enforce_grid_charge_max_soc_clamp_holds_on_single_grid_import_cyc
     await coordinator.async_set_max_soc(80)
 
     try:
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(
             {
                 "soc": 85,
@@ -2280,6 +2286,7 @@ async def test_enforce_grid_charge_max_soc_clamp_releases_after_two_grid_import_
     try:
         clamped_states = []
         for _ in range(7):
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(grid_import_data)
             clamped_states.append(coordinator.max_soc_clamped)
 
@@ -2333,6 +2340,7 @@ async def _make_max_soc_discharge_release(
             18 if trigger == "forecast_missing" else 14
         )
     with _patched_now(15 if trigger == "grid_import" else 12):
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(coordinator.data)
     assert coordinator.max_soc_clamped is True
 
@@ -2343,6 +2351,7 @@ async def _make_max_soc_discharge_release(
         coordinator.data["smartmeter_power"] = 100
     with _patched_now(15):
         for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
     assert coordinator.max_soc_clamped is False
     assert coordinator._max_soc_released_for_discharge is True
@@ -2381,9 +2390,11 @@ async def test_max_soc_discharge_release_reclamps_when_charging_resumes(
     try:
         with _patched_now(15):
             for _ in range(confirm_cycles - 1):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
                 assert coordinator.max_soc_clamped is False
                 client.write_register.assert_not_awaited()
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             assert coordinator.sun_charge_active is True
@@ -2401,17 +2412,20 @@ async def test_max_soc_discharge_release_reclamps_when_charging_resumes(
             # Der SOC muss vor dem erneuten Schutz nie unter 80 % fallen.
             coordinator.data.update(storage_power_active=0, smartmeter_power=-500)
             for _ in range(5):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
                 assert coordinator.max_soc_clamped is True
 
             # Nach erneutem Sperren muss Eigenverbrauch weiterhin möglich sein.
             coordinator.data["smartmeter_power"] = 100
             for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is False
             client.write_register.reset_mock()
             coordinator.data.update(storage_power_active=500, smartmeter_power=0)
             for _ in range(5):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
                 assert coordinator.max_soc_clamped is False
             client.write_register.assert_not_awaited()
@@ -2429,9 +2443,11 @@ async def test_max_soc_recharge_confirmation_requires_consecutive_measurements(
         with _patched_now(15):
             for power in (-500, interruption, -500):
                 coordinator.data["storage_power_active"] = power
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
                 assert coordinator.max_soc_clamped is False
                 client.write_register.assert_not_awaited()
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
     finally:
@@ -2450,9 +2466,11 @@ async def test_max_soc_recharge_clamp_retries_failed_write(hass) -> None:
                 side_effect=HomeAssistantError("Modbus vorübergehend nicht erreichbar"),
             ):
                 with pytest.raises(HomeAssistantError):
+                    coordinator._high_sample_revision += 1
                     await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.sun_charge_active is False
             assert coordinator._max_soc_released_for_discharge is False
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             client.write_register.assert_awaited_with(
@@ -2471,10 +2489,12 @@ async def test_max_soc_discharge_can_fall_above_target_then_reclamp_on_rise(
         with _patched_now(15):
             for soc in (85, 84, 83):
                 coordinator.data["soc"] = soc
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
                 assert coordinator.max_soc_clamped is False
                 client.write_register.assert_not_awaited()
             coordinator.data["soc"] = 84
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             client.write_register.assert_awaited_with(
@@ -2497,14 +2517,17 @@ async def test_max_soc_release_latch_resets_below_target_and_clamps_again(hass) 
 
     try:
         for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(grid_import_data)
         assert coordinator._max_soc_released_for_discharge is True
 
         client.write_register.reset_mock()
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge({"soc": 79, "smartmeter_power": 0})
         assert coordinator._max_soc_released_for_discharge is False
         assert coordinator.max_soc_clamped is False
 
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge({"soc": 81, "smartmeter_power": 0})
         assert coordinator.max_soc_clamped is True
         assert coordinator.sun_charge_active is True
@@ -2539,6 +2562,7 @@ async def test_max_soc_release_latch_handles_target_raise_and_lower(hass) -> Non
 
     try:
         for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
         assert coordinator._max_soc_released_for_discharge is True
 
@@ -2583,13 +2607,16 @@ async def test_max_soc_release_latch_waits_for_successful_mode_reset(hass) -> No
         "smartmeter_power": SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50,
     }
 
+    coordinator._high_sample_revision += 1
     await coordinator._async_enforce_grid_charge(grid_import_data)
+    coordinator._high_sample_revision += 1
     await coordinator._async_enforce_grid_charge(grid_import_data)
 
     assert coordinator._max_soc_released_for_discharge is False
     assert coordinator.max_soc_clamped is True
     assert coordinator._sun_charge_reset_required is True
 
+    # Die bestätigte Freigabe bleibt für den Write-Retry ohne neue Messung nutzbar.
     await coordinator._async_enforce_grid_charge(grid_import_data)
 
     assert coordinator._max_soc_released_for_discharge is True
@@ -2643,15 +2670,18 @@ async def test_enforce_grid_charge_max_soc_clamp_resets_grid_import_counter(
     no_import_data = {"soc": 85, "smartmeter_power": 0}
 
     try:
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(grid_import_data)
         await asyncio.sleep(0.1)
         assert coordinator._max_soc_grid_import_wait_cycles == 1
 
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(no_import_data)
         await asyncio.sleep(0.1)
         assert coordinator._max_soc_grid_import_wait_cycles == 0
         assert coordinator.max_soc_clamped is True
 
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(grid_import_data)
         await asyncio.sleep(0.1)
         assert coordinator._max_soc_grid_import_wait_cycles == 1
@@ -2806,7 +2836,8 @@ async def test_enforce_grid_charge_does_not_start_with_pv_surplus_above_threshol
 ) -> None:
     """Auch innerhalb des Zeitfensters darf zeitgesteuertes Laden nicht
     starten, sobald am Smart Meter mehr PV-Überschuss als
-    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT gemessen wird (negativer
+    SMARTMETER_PV_SURPLUS_THRESHOLD_WATT über zwei HIGH-Messwerte bestätigt ist
+    (negativer
     Anzeigewert = Überschuss aus der Dachphotovoltaik) - siehe
     anforderung.yaml, REQ-TIMED-SOC-CHARGE."""
     coordinator = _make_coordinator(hass, _make_client())
@@ -2821,6 +2852,9 @@ async def test_enforce_grid_charge_does_not_start_with_pv_surplus_above_threshol
     await coordinator.async_set_max_soc(90)
 
     with _patched_now(2):
+        for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+            coordinator._high_sample_revision += 1
+            await coordinator._async_enforce_grid_charge(coordinator.data)
         await coordinator.async_set_timed_charge_enabled(True)
         await asyncio.sleep(0.1)
 
@@ -2864,6 +2898,7 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
             coordinator.data["smartmeter_power"] = -(
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
             )
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -2873,6 +2908,7 @@ async def test_enforce_grid_charge_stops_when_pv_surplus_exceeds_threshold_mid_w
             # Erst der zweite aufeinanderfolgende Zyklus mit PV-Überschuss
             # über dem Schwellwert bestätigt die Hysterese und beendet die
             # Netzladung.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -2918,11 +2954,13 @@ async def test_enforce_grid_charge_pv_surplus_hysteresis_resets_on_drop(
             coordinator.data["smartmeter_power"] = -(
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 50
             )
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._timed_charge_pv_surplus_cycles == 1
 
             coordinator.data["smartmeter_power"] = 0
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._timed_charge_pv_surplus_cycles == 0
@@ -3413,6 +3451,7 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             await asyncio.sleep(0.1)
 
@@ -3420,6 +3459,7 @@ async def test_enforce_grid_charge_grid_serving_switches_to_setpoint_and_stops_c
             assert coordinator.sun_charge_active is False
             assert coordinator._grid_serving_charge_confirm_cycles == 1
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
         await asyncio.sleep(0.1)
 
@@ -3469,7 +3509,9 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
 
     try:
         with _patched_now(12, month=1):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
@@ -3553,7 +3595,9 @@ async def test_grid_serving_deactivation_wins_over_concurrent_activation(hass) -
             # Erster Zyklus füllt nur die Hysterese; der zweite will die
             # Ladepause einschalten und wird direkt vor dem Registerpfad
             # kontrolliert angehalten.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
+            coordinator._high_sample_revision += 1
             activation = asyncio.create_task(
                 coordinator._async_enforce_grid_charge(coordinator.data)
             )
@@ -3607,10 +3651,12 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             # Schritt a braucht selbst PV_SURPLUS_HYSTERESIS_CYCLES
             # aufeinanderfolgende Zyklen mit ausreichender SAX-Ladeleistung,
             # bevor der Sollwertvorgabemodus überhaupt aktiv wird.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._grid_serving_setpoint_active is True
@@ -3621,11 +3667,13 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
             # Nullregelung führen.
             coordinator.data["smartmeter_power"] = 0
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_wait_cycles == 1
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_wait_cycles == 0
             assert coordinator.grid_serving_active is True
@@ -3634,11 +3682,13 @@ async def test_enforce_grid_charge_grid_serving_holds_during_wait_cycles(hass) -
             # Erst jetzt wertet Schritt b die Netzeinspeisung wieder aus -
             # auch dort greift dieselbe Zyklen-Hysterese, ein einzelner
             # Aufruf unter dem Schwellwert reicht noch nicht.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is False
@@ -3681,7 +3731,9 @@ async def test_enforce_grid_charge_grid_serving_import_protection_overrides_wait
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._grid_serving_setpoint_active is True
@@ -3692,11 +3744,13 @@ async def test_enforce_grid_charge_grid_serving_import_protection_overrides_wait
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 1
             )
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_wait_cycles == 1
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is False
@@ -3715,9 +3769,11 @@ async def test_enforce_grid_charge_grid_serving_import_protection_overrides_wait
             coordinator.data["smartmeter_power"] = -(
                 SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 300
             )
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator._grid_serving_setpoint_active is False
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._grid_serving_setpoint_active is True
@@ -3755,14 +3811,17 @@ async def test_enforce_grid_charge_grid_serving_stays_stopped_while_feed_in_high
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             # Zweiter Zyklus bestätigt Schritt a (Zyklen-Hysterese) und
             # löst den Sollwertvorgabemodus tatsächlich aus.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             write_count_after_trigger = client.write_register.await_count
 
             for _ in range(3):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -3825,7 +3884,9 @@ async def test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_h
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -3846,6 +3907,7 @@ async def test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_h
 
             # Wartezyklen aus Schritt a sind noch nicht abgelaufen - auch
             # dieser Zweig muss selbstheilend neu starten.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._grid_serving_setpoint_active is True
@@ -3854,6 +3916,7 @@ async def test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_h
             # Wartezyklen ablaufen lassen, Task erneut sterben lassen, damit
             # auch der Halte-Zweig (nach Ablauf der Wartezyklen) geprüft ist.
             for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator._grid_serving_wait_cycles == 0
@@ -3865,6 +3928,7 @@ async def test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_h
                 pass
             assert coordinator.sun_charge_active is False
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -3903,6 +3967,7 @@ async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_th
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             coordinator._grid_serving_setpoint_active = True
             coordinator._grid_serving_wait_cycles = 0
@@ -3911,11 +3976,13 @@ async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_th
 
             # Ein einzelner Zyklus unter dem Schwellwert reicht wegen der
             # Hysterese noch nicht aus.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
             assert coordinator.sun_charge_active is True
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -3950,6 +4017,7 @@ async def test_enforce_grid_charge_grid_serving_inactive_without_sax_charge_powe
     await coordinator.async_set_max_soc(90)
 
     with _patched_now(12):
+        coordinator._high_sample_revision += 1
         await coordinator.async_set_grid_serving_enabled(True)
         await asyncio.sleep(0.1)
 
@@ -3975,6 +4043,7 @@ async def test_enforce_grid_charge_grid_serving_inactive_when_storage_power_miss
     await coordinator.async_set_max_soc(90)
 
     with _patched_now(12):
+        coordinator._high_sample_revision += 1
         await coordinator.async_set_grid_serving_enabled(True)
         await asyncio.sleep(0.1)
 
@@ -4002,12 +4071,14 @@ async def test_enforce_grid_charge_grid_serving_holds_when_feed_in_unknown(
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             coordinator._grid_serving_setpoint_active = True
             coordinator._grid_serving_wait_cycles = 0
             await coordinator.async_start_sun_charge(0)
             await asyncio.sleep(0.1)
 
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -4031,6 +4102,7 @@ async def test_enforce_grid_charge_grid_serving_inactive_outside_window(hass) ->
     await coordinator.async_set_max_soc(90)
 
     with _patched_now(20):
+        coordinator._high_sample_revision += 1
         await coordinator.async_set_grid_serving_enabled(True)
         await asyncio.sleep(0.1)
 
@@ -4053,6 +4125,7 @@ async def test_enforce_grid_charge_grid_serving_inactive_when_disabled(hass) -> 
     # grid_serving_enabled bleibt False (Default)
 
     with _patched_now(12):
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(coordinator.data)
 
     assert coordinator.grid_serving_active is False
@@ -4083,6 +4156,7 @@ async def test_enforce_grid_charge_max_soc_lock_takes_priority_over_grid_serving
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
         await asyncio.sleep(0.1)
 
@@ -4117,6 +4191,7 @@ async def test_grid_serving_releases_max_soc_task_when_target_is_raised(hass) ->
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             assert coordinator.sun_charge_active is True
@@ -4164,12 +4239,14 @@ async def test_grid_serving_releases_max_soc_task_when_calibration_starts(
 
     try:
         with _patched_now(12, month=8):
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             assert coordinator.sun_charge_active is True
 
             client.write_register.reset_mock()
             changed = await coordinator._async_update_cell_calibration(80, now=now)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
 
         assert changed is True
@@ -4230,6 +4307,7 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
     try:
         with _patched_now(12):
             # Kein PV-Überschuss -> nur zeitgesteuertes Laden kann greifen.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(
                 {**coordinator.data, "smartmeter_power": 0}
             )
@@ -4240,6 +4318,7 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
             # Erster Zyklus mit PV-Überschuss reicht wegen der
             # Zyklen-Hysterese noch nicht, um zeitgesteuertes Laden zu
             # beenden.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(grid_serving_data)
             await asyncio.sleep(0.1)
             assert coordinator._timed_charge_active is True
@@ -4249,6 +4328,7 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
             # PV-Überschuss: zeitgesteuertes Laden wird inaktiv, und
             # netzdienliches Laden beginnt selbst mit Schritt a seine
             # eigene Hysterese (noch nicht bestätigt).
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(grid_serving_data)
             await asyncio.sleep(0.1)
             assert coordinator._timed_charge_active is False
@@ -4257,6 +4337,7 @@ async def test_enforce_grid_charge_timed_charge_and_grid_serving_are_mutually_ex
             # Zweiter aufeinanderfolgender Zyklus mit ausreichender
             # SAX-Ladeleistung bestätigt Schritt a - netzdienliches Laden
             # übernimmt aktiv.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(grid_serving_data)
             await asyncio.sleep(0.1)
             assert coordinator._timed_charge_active is False
@@ -4359,10 +4440,12 @@ async def test_enforce_grid_charge_grid_serving_respects_active_months(hass) -> 
     await coordinator.async_set_max_soc(90)
     for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
         await coordinator.async_set_grid_serving_month(month, False)
+    coordinator._high_sample_revision += 1
     await coordinator.async_set_grid_serving_enabled(True)
 
     # Im Zeitfenster (12 Uhr), aber im Oktober - nicht in den aktiven Monaten.
     with _patched_now(12, month=10):
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(coordinator.data)
     assert coordinator.grid_serving_active is False
     assert coordinator.sun_charge_active is False
@@ -4387,13 +4470,16 @@ async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -
     await coordinator.async_set_max_soc(90)
     for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
         await coordinator.async_set_grid_serving_month(month, False)
+    coordinator._high_sample_revision += 1
     await coordinator.async_set_grid_serving_enabled(True)
 
     try:
         with _patched_now(12, month=7):
             # Zwei aufeinanderfolgende Zyklen wegen der Zyklen-Hysterese
             # von Schritt a (PV_SURPLUS_HYSTERESIS_CYCLES).
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
         await asyncio.sleep(0.1)
 
@@ -7163,3 +7249,137 @@ def test_tariff_plan_marks_no_active_window_without_a_price(hass) -> None:
     assert attributes["windows"] == [
         {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
     ]
+
+
+_HYSTERESIS_CASES = [
+    pytest.param(
+        "_timed_charge_pv_surplus_cycles",
+        {"smartmeter_power": -800},
+        {"_timed_charge_enabled": True},
+        "_timed_charge_active",
+        True,
+        False,
+        id="timed-pv-surplus",
+    ),
+    pytest.param(
+        "_max_soc_grid_import_wait_cycles",
+        {"soc": 85, "smartmeter_power": 800},
+        {"_max_soc": 80},
+        "_max_soc_clamped",
+        True,
+        False,
+        id="max-soc-grid-import",
+    ),
+    pytest.param(
+        "_max_soc_recharge_confirm_cycles",
+        {"soc": 80, "storage_power_active": -800},
+        {"_max_soc": 80, "_max_soc_released_for_discharge": True},
+        "_max_soc_clamped",
+        False,
+        True,
+        id="max-soc-recharge",
+    ),
+    pytest.param(
+        "_grid_serving_charge_confirm_cycles",
+        {"smartmeter_power": -800, "storage_power_active": -800},
+        {"_grid_serving_enabled": True},
+        "_grid_serving_setpoint_active",
+        False,
+        True,
+        id="grid-serving-charge",
+    ),
+    pytest.param(
+        "_grid_serving_release_confirm_cycles",
+        {},
+        {"_grid_serving_enabled": True, "_grid_serving_setpoint_active": True},
+        "_grid_serving_setpoint_active",
+        True,
+        False,
+        id="grid-serving-release",
+    ),
+    pytest.param(
+        "_grid_serving_import_confirm_cycles",
+        {"smartmeter_power": 800},
+        {
+            "_grid_serving_enabled": True,
+            "_grid_serving_setpoint_active": True,
+            "_grid_serving_wait_cycles": 100,
+        },
+        "_grid_serving_setpoint_active",
+        True,
+        False,
+        id="grid-serving-import",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("counter", "measurements", "settings", "state", "before", "after"),
+    _HYSTERESIS_CASES,
+)
+@pytest.mark.parametrize("interrupt_sample", [False, True], ids=["events", "missing"])
+async def test_hysteresis_counts_fresh_measurements_not_repeated_evaluations(
+    hass,
+    counter: str,
+    measurements: dict[str, int],
+    settings: dict[str, int | bool],
+    state: str,
+    before: bool,
+    after: bool,
+    interrupt_sample: bool,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE / REQ-GRID-SERVING-CHARGE / REQ-DYNAMIC-PRICE-CHARGE:
+    Events/Setter bestätigen keine Messausreißer; fehlende Werte resetten sofort.
+    """
+    coordinator = _make_coordinator(hass, _make_client())
+    coordinator.data = {
+        "soc": 50,
+        "smartmeter_power": 0,
+        "storage_power_active": 0,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "ic_control_mode": SUN_IC_CONTROL_MODE_SMARTMETER,
+        **measurements,
+    }
+    coordinator._timed_charge_start = coordinator._grid_serving_start = dt_time(10)
+    coordinator._timed_charge_end = coordinator._grid_serving_end = dt_time(18)
+    for name, value in settings.items():
+        setattr(coordinator, name, value)
+
+    try:
+        with _patched_now(12):
+            # Ohne einen erfolgreichen HIGH-Read existiert noch keine Bestätigung.
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert getattr(coordinator, counter) == 0
+
+            coordinator._high_sample_revision += 1
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert getattr(coordinator, counter) == 1
+            assert getattr(coordinator, state) is before
+
+            for _ in range(3):
+                await coordinator.async_apply_price_plan()
+                await coordinator.async_set_max_soc(coordinator._max_soc)
+                assert getattr(coordinator, counter) == 1
+                assert getattr(coordinator, state) is before
+
+            if interrupt_sample:
+                saved = coordinator.data.copy()
+                coordinator.data.pop("smartmeter_power")
+                coordinator.data.pop("storage_power_active")
+                # Ein fehlgeschlagener HIGH-Read erhöht die Revision nicht.
+                await coordinator.async_apply_price_plan()
+                assert getattr(coordinator, counter) == 0
+                coordinator.data.update(saved)
+                await coordinator.async_apply_price_plan()
+                assert getattr(coordinator, counter) == 0
+                coordinator._high_sample_revision += 1
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert getattr(coordinator, counter) == 1
+                assert getattr(coordinator, state) is before
+
+            coordinator._high_sample_revision += 1
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert getattr(coordinator, state) is after
+    finally:
+        await coordinator.async_shutdown(reset_device=False)

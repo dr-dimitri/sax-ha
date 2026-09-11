@@ -467,6 +467,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_started_at = float("inf")
         self._timed_discharge_last_sample_revision = 0
         self._high_sample_revision = 0
+        self._cycle_sample_revisions: dict[str, int] = {}
         self._high_sample_time: float | None = None
         self._high_sample_started_at: float | None = None
         self._high_sample_control_mode: int | None = None
@@ -4012,13 +4013,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Zyklen-Hysterese für Vergleiche gegen
         SMARTMETER_PV_SURPLUS_THRESHOLD_WATT: `condition` gilt erst als
         bestätigt (True), nachdem sie in PV_SURPLUS_HYSTERESIS_CYCLES
-        aufeinanderfolgenden Aufrufen True war. Ein einzelner False-Wert
+        aufeinanderfolgenden HIGH-Messwerten True war. Ein einzelner False-Wert
         setzt den in `counter_attr` (self-Attribut) gehaltenen Zähler sofort
         zurück, damit kurze Lastspitzen/Messausreißer am Smart Meter keinen
         Zustandswechsel auslösen - siehe const.PV_SURPLUS_HYSTERESIS_CYCLES
         sowie anforderung.yaml, REQ-TIMED-SOC-CHARGE/REQ-GRID-SERVING-CHARGE.
         """
-        count = getattr(self, counter_attr) + 1 if condition else 0
+        count = getattr(self, counter_attr)
+        revision = self._high_sample_revision
+        if not condition:
+            count = 0
+        elif revision != self._cycle_sample_revisions.get(counter_attr, 0):
+            # Events und Setter liefern keine neue Messung (REQ-TIMED-SOC-CHARGE).
+            count = min(count + 1, PV_SURPLUS_HYSTERESIS_CYCLES)
+        self._cycle_sample_revisions[counter_attr] = revision
         setattr(self, counter_attr, count)
         return count >= PV_SURPLUS_HYSTERESIS_CYCLES
 

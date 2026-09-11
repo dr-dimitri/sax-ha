@@ -718,11 +718,12 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
                 await hass.services.async_call(
                     "switch", "turn_on", {"entity_id": enabled_id}, blocking=True
                 )
-                # Der erste Aufruf füllt die einheitliche Zweizyklen-
-                # Hysterese, der zweite bestätigt die erkannte SAX-Ladung.
-                await coordinator._async_enforce_grid_charge(coordinator.data)
-                coordinator._publish_charge_state(coordinator.data)
-                coordinator.async_set_updated_data(coordinator.data)
+                # Preis-Events bestätigen die bereits ausgewertete Messung
+                # nicht erneut; dafür ist ein zweiter echter HIGH-Read nötig.
+                await coordinator.async_apply_price_plan()
+                assert coordinator.grid_serving_active is False
+                coordinator._high_last_read = float("-inf")
+                await coordinator.async_refresh()
                 await hass.async_block_till_done()
                 await asyncio.sleep(0.2)
 

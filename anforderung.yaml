@@ -654,19 +654,29 @@ requirement_timed_soc_charge:
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT - hier der PV-Überschuss-Check von
     Punkt 2/3 sowie der Netzbezug-Freigabe-Trigger und der Schutz gegen
     erneutes Laden der Max-SOC-Sperre von Punkt 1, außerdem (siehe
-    REQ-GRID-SERVING-CHARGE) Schritt a und b der
+    REQ-GRID-SERVING-CHARGE) Schritt a, a.1 und b der
     Zustandsmaschine für netzdienliches Laden - läuft über dieselbe
     wiederverwendbare Hilfsmethode SaxPowerCoordinator._cycles_confirmed und
     dieselbe Konstante PV_SURPLUS_HYSTERESIS_CYCLES (const.py, 2): eine
     Schwellwert-Über-/Unterschreitung zählt erst als bestätigt, nachdem sie
-    in so vielen aufeinanderfolgenden Poll-Zyklen in Folge vorlag; ein
-    einzelner gegenteiliger Messwert setzt den jeweiligen Zähler (je
+    in so vielen aufeinanderfolgenden, erfolgreich gelesenen HIGH-Messwerten
+    vorlag. Jeder Zähler berücksichtigt jede _high_sample_revision höchstens
+    einmal. Erneute Auswertungen durch Preis-/PV-Prognose-Sensor-Events,
+    Planner-Timer oder Einstellungsänderungen dürfen den vorhandenen Stand
+    verwenden, aber nicht erhöhen; das gilt auch für preisoptimiertes Laden
+    (REQ-DYNAMIC-PRICE-CHARGE). Ohne erfolgreichen HIGH-Read darf kein Zähler
+    steigen. Eine nicht mehr erfüllte Bedingung setzt den jeweiligen Zähler
+    sofort zurück, auch ohne neue Revision; dieselbe Messung darf danach
+    keine neue Bestätigung liefern. Einstellungsänderungen wirken weiterhin
+    sofort. Das gilt ebenso bei fehlenden HIGH-Messwerten nach einem
+    SunSpec-Lesefehler. Die Zähler (je
     Verwendungsstelle ein eigenes self-Attribut, z. B.
     self._timed_charge_pv_surplus_cycles,
     self._max_soc_grid_import_wait_cycles,
     self._max_soc_recharge_confirm_cycles,
     self._grid_serving_charge_confirm_cycles,
-    self._grid_serving_release_confirm_cycles) sofort auf 0 zurück. Schützt
+    self._grid_serving_release_confirm_cycles,
+    self._grid_serving_import_confirm_cycles) schützen
     einheitlich gegen kurze Lastspitzen/Messausreißer am Smart Meter, statt
     dass jede Verwendungsstelle unmittelbar auf einen einzelnen Messwert
     reagiert.
@@ -839,7 +849,7 @@ requirement_timed_soc_charge:
     - "Regressionstests prüfen erneutes Sperren nach zeitgesteuertem oder
        netzdienlichem Fensterende, ausfallender PV-Prognose und bestätigtem
        Netzbezug: Batterieladung bei ausgeglichener Netzleistung und
-       Einspeisung ohne Batterieleistungswert lösen nach zwei Auswertungen
+       Einspeisung ohne Batterieleistungswert lösen nach zwei HIGH-Messwerten
        die 40051=1-/40049=0-Sequenz aus. Steigender SOC sperrt auch bei
        kleiner oder fehlender Leistung sofort, ebenso nach vorheriger
        Teilentladung oberhalb des Ziels. Messlücken, Entladung und kleine
@@ -847,6 +857,13 @@ requirement_timed_soc_charge:
        werden im nächsten Poll erneut angegangen, und späterer Netzbezug
        ermöglicht wieder stabile Entladung. tests/test_price_optimizer.py
        prüft den erneuten Schutz auch nach dem Ende eines Preis-Slots."
+    - "test_hysteresis_counts_fresh_measurements_not_repeated_evaluations
+       prüft alle sechs Leistungs-Hysterese-Zähler über ihre tatsächlichen
+       Zustandsübergänge: Wiederholte Preisplan-Auswertung und Max-SOC-Setter
+       bestätigen dieselbe Messung nicht erneut. Erst zwei HIGH-Revisionen
+       lösen den Übergang aus. Fehlende HIGH-Werte setzen die Bestätigung
+       auch ohne neue Revision zurück; dieselbe Messung kann sie danach
+       nicht neu aufbauen. Revision 0 liefert keine Bestätigung."
     - "tests/test_coordinator.py deckt zusätzlich die PV-Überschuss-Prüfung
        ab: kein Start des zeitgesteuerten Ladens im Zeitfenster bei
        smartmeter_power unter -SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (negativ

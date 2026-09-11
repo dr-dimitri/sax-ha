@@ -1061,6 +1061,7 @@ async def test_price_charge_paused_by_pv_surplus(hass) -> None:
     }
     # Zyklen-Hysterese: erst nach mehreren bestätigten Zyklen wirksam.
     for _ in range(5):
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(data)
 
     assert coordinator.price_charge_active is False
@@ -1141,6 +1142,7 @@ async def test_price_charge_neutral_band_yields_to_pv_surplus(hass) -> None:
         "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500),
     }
     for _ in range(5):
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(data)
 
     assert coordinator.sun_charge_active is False
@@ -1199,11 +1201,13 @@ async def test_grid_serving_takes_priority_over_price_charge_neutral_band(hass) 
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             await asyncio.sleep(0.1)
             # Zweiter Zyklus bestätigt die Zyklen-Hysterese von Schritt a
             # (PV_SURPLUS_HYSTERESIS_CYCLES) - der erste allein reicht noch
             # nicht, netzdienliches Laden aktiv zu übernehmen.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -1241,11 +1245,13 @@ async def test_grid_serving_takes_priority_over_price_charge_active_charging(
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             await asyncio.sleep(0.1)
             # Zweiter Zyklus bestätigt die Zyklen-Hysterese von Schritt a
             # (PV_SURPLUS_HYSTERESIS_CYCLES) - der erste allein reicht noch
             # nicht, netzdienliches Laden aktiv zu übernehmen.
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -1292,6 +1298,7 @@ async def test_grid_serving_forecast_controls_effective_window(
     await coordinator.async_set_grid_serving_forecast_threshold_kwh(threshold)
 
     with _patched_now(12):
+        coordinator._high_sample_revision += 1
         await coordinator.async_set_grid_serving_enabled(True)
 
     assert coordinator.grid_serving_forecast_allowed is expected_allowed
@@ -1317,7 +1324,9 @@ async def test_missing_forecast_sensor_keeps_grid_serving_pause_active(hass) -> 
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
@@ -1355,6 +1364,7 @@ async def test_equal_forecast_keeps_grid_serving_pause_active(hass) -> None:
     await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
 
     with _patched_now(12):
+        coordinator._high_sample_revision += 1
         await coordinator.async_set_grid_serving_enabled(True)
 
     assert coordinator.grid_serving_forecast_allowed is True
@@ -1388,7 +1398,9 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
@@ -1456,7 +1468,9 @@ async def test_raised_forecast_threshold_stops_running_pause_immediately(hass) -
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
             assert coordinator.grid_serving_active is True
@@ -1493,8 +1507,10 @@ async def test_low_forecast_does_not_block_active_price_charge(hass) -> None:
 
     try:
         with _patched_now(12):
+            coordinator._high_sample_revision += 1
             await coordinator.async_set_grid_serving_enabled(True)
             coordinator.price_planner.plan = _charging_plan()
+            coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 

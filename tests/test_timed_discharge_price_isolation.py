@@ -181,6 +181,7 @@ async def test_price_neutral_band_uses_its_own_release_conditions(
         expected_status = PRICE_STATUS_PAUSED_PV_SURPLUS
 
     for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES + 1):
+        coordinator._high_sample_revision += 1
         await coordinator._async_enforce_grid_charge(coordinator.data)
 
     assert coordinator.price_charge_status == expected_status

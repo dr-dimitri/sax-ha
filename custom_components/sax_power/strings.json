@@ -51,6 +51,7 @@
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits konfiguriert.",
+      "single_instance_allowed": "Es kann derzeit nur ein SAX Speicher eingerichtet werden. Für Änderungen am vorhandenen Speicher bitte \"Neu konfigurieren\" verwenden.",
       "reconfigure_successful": "Die Verbindungsdaten wurden aktualisiert."
     }
   },

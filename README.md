@@ -93,6 +93,12 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 Die Einrichtung erfolgt unter **Einstellungen → Geräte & Dienste → Integration
 hinzufügen**. Dort nach **SAX Power** suchen und den Anweisungen folgen.
 
+Die Integration unterstützt derzeit **einen SAX-Speicher pro Installation von
+Home Assistant**. Ist bereits ein Speicher eingerichtet, wird eine weitere
+Einrichtung mit einem Hinweis abgebrochen. Zum Ändern der Verbindung beim
+bestehenden Eintrag **Neu konfigurieren** wählen; das funktioniert auch bei
+geänderter IP-Adresse.
+
 ### Verbindung zum Speicher
 
 | Feld | Beschreibung | Standard |

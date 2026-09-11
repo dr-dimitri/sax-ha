@@ -118,16 +118,46 @@ requirement_ip_configurable_ui:
     den neuen Daten neu. Eine Kollisionsprüfung verhindert Duplikate mit
     einem anderen bereits konfigurierten Speicher, ohne beim unveränderten
     Speichern der eigenen IP fälschlich abzubrechen.
+
+    Die Integration unterstützt derzeit höchstens einen SAX-Speicher pro
+    Home-Assistant-Installation. Sobald ein Speicher eingerichtet ist, bricht
+    eine weitere Ersteinrichtung bereits vor Anzeige des Verbindungsformulars
+    und vor jedem Modbus-Zugriff mit "single_instance_allowed" ab,
+    unabhängig von Host, Port und unique_id. Die Meldung erklärt die
+    Begrenzung und verweist für Verbindungsänderungen auf "Neu konfigurieren".
+    Ignorierte Discovery-Merker zählen nicht als eingerichteter Speicher;
+    deaktivierte oder fehlerhaft geladene Config Entries zählen weiterhin.
+    Auch die späteren Onboarding-Schritte prüfen vor dem Fortsetzen erneut,
+    ob inzwischen ein anderer Flow einen Eintrag angelegt hat. Reconfigure
+    und Options bestehender Einträge bleiben möglich. Bereits gespeicherte
+    Mehrfacheinträge werden weder gelöscht noch migriert. Das mitgelieferte
+    Dashboard bleibt global unter "sax-power" (REQ-BUNDLED-DASHBOARD).
   requirements:
     - "Reconfigure-Formular verwendet dieselben Felder wie die
        Ersteinrichtung (IP-Adresse, Port, Slave-IDs, Intervall)."
     - "Fehlermeldungen unterscheiden TCP-Verbindungsfehler
        ('cannot_connect') von einer Modbus-Fehlerantwort bei bestehender
        Verbindung ('invalid_response', z. B. falsche Slave-ID)."
+    - "user, grid_charge, dashboard und finish verhindern zusätzliche
+       Config Entries auch bei parallel begonnenen Einrichtungs-Flows;
+       vor dem Anlegen des Eintrags wird die Begrenzung erneut geprüft."
+    - "Der Abbruch single_instance_allowed enthält in allen angebotenen
+       Sprachen den Hinweis auf maximal einen Speicher und Neu konfigurieren."
   acceptance_criteria:
     - "tests/test_config_flow.py deckt sowohl erfolgreiche IP-Änderung
        (inkl. Persistierung + Neuladen) als auch fehlgeschlagene
-       Validierung (Daten bleiben unverändert) ab."
+       Validierung (Daten bleiben unverändert) ab; Reconfigure und Options
+       bleiben bei vorhandenem Eintrag erreichbar."
+    - "tests/test_config_flow.py prüft den frühzeitigen Abbruch einer
+       zweiten manuellen Einrichtung für gleiche und abweichende Hosts/Ports
+       sowie MAC- und host:port-IDs, ohne Verbindungsvalidierung oder
+       Änderung des vorhandenen Eintrags."
+    - "tests/test_config_flow_single_entry.py deckt konkurrierende
+       Einrichtungs-Flows in den späteren Onboarding-Schritten ab: Es
+       entsteht höchstens ein Config Entry."
+    - "tests/test_config_flow_single_entry.py prüft, dass ignorierte
+       Discovery-Merker die Einrichtung erlauben und deaktivierte oder
+       fehlerhaft geladene Einträge einen weiteren Speicher verhindern."
     - "README.md beschreibt, wie die IP-Adresse nachträglich geändert
        wird."
 
@@ -2776,9 +2806,16 @@ requirement_dhcp_discovery:
     "already_configured" ab. Wiederholte Broadcasts während eines noch
     laufenden Flows werden weiterhin als "already_in_progress" dedupliziert.
 
-    Anschließend leitet async_step_dhcp in den normalen async_step_user
-    weiter und merkt die entdeckte IP in self._discovered_ip vor; die
-    Formular-Vorbelegung in _async_step_connection nutzt sie als
+    Erst nach dem Host-/MAC-Abgleich greift die Begrenzung auf einen
+    Speicher (REQ-IP-CONFIGURABLE-UI): Ist bereits ein anderer Speicher
+    konfiguriert, bricht die Discovery mit "single_instance_allowed" ab.
+    Die Prüfung erfolgt im Config Flow, nicht über single_config_entry im
+    Manifest, damit Home Assistant DHCP-Flows für die IP-Aktualisierung
+    bestehender Einträge weiterhin zulässt.
+
+    Ohne vorhandenen Eintrag leitet async_step_dhcp in den normalen
+    async_step_user weiter und merkt die entdeckte IP in self._discovered_ip
+    vor. Die Formular-Vorbelegung in _async_step_connection nutzt sie als
     suggested_value für das Host-Feld, sofern kein Reconfigure-Kontext
     vorliegt. Die restliche Ersteinrichtung (Verbindungsprüfung,
     grid_charge/dashboard/finish-Schritte, siehe REQ-IP-CONFIGURABLE-UI,
@@ -2786,17 +2823,15 @@ requirement_dhcp_discovery:
     läuft unverändert weiter - Port, Slave-IDs und Aktualisierungsintervall
     müssen weiterhin bestätigt bzw. bei Bedarf angepasst werden, DHCP
     liefert nur die IP-Adresse. Ein manueller Start der Ersteinrichtung
-    (ohne vorherige Discovery) bleibt unverändert möglich, das Host-Feld
-    ist dann wie bisher leer und die unique_id bleibt "host:port". Beim
-    Reconfigure bleibt eine vorhandene normierte MAC-ID erhalten; nur
-    manuelle Einträge führen ihre "host:port"-ID auf die neue Verbindung
+    (ohne vorherige Discovery) bleibt ohne vorhandenen Eintrag möglich,
+    das Host-Feld ist dann leer und die unique_id bleibt "host:port".
+    Beim Reconfigure bleibt eine vorhandene normierte MAC-ID erhalten;
+    nur manuelle Einträge führen ihre "host:port"-ID auf die neue Verbindung
     nach. Host-/Port-Abgleiche verhindern dabei Kollisionen mit anderen
-    bereits konfigurierten Einträgen. Auch die manuelle Ersteinrichtung
-    prüft vor der Verbindungsvalidierung auf bereits konfigurierte
-    Host-/Port-Kombinationen, unabhängig davon, ob deren unique_id eine
-    MAC-Adresse oder "host:port" ist. Ein Treffer bricht mit
-    "already_configured" ab, ohne den vorhandenen Eintrag zu verändern.
-    Ein anderer Host oder Port bleibt weiterhin konfigurierbar.
+    bereits konfigurierten Einträgen. Die manuelle Ersteinrichtung bricht
+    bei jedem eingerichteten Speicher mit "single_instance_allowed" ab,
+    auch für einen anderen Host oder Port; der vorhandene Eintrag bleibt
+    dabei unverändert.
   requirements:
     - "manifest.json enthält einen dhcp-Footprint (Hostname-Präfix
        \"sax*\")."
@@ -2811,8 +2846,9 @@ requirement_dhcp_discovery:
        CONF_HOST und lädt einen aktiven Eintrag genau einmal neu."
     - "Reconfigure bewahrt MAC-basierte IDs, führt manuelle host:port-IDs
        weiterhin nach und verhindert Zielkollisionen mit anderen Einträgen."
-    - "Die manuelle Ersteinrichtung dedupliziert Host-/Port-Kombinationen
-       auch gegenüber per DHCP angelegten Einträgen vor jedem Modbus-Zugriff."
+    - "Discovery eines weiteren Speichers bricht mit single_instance_allowed
+       ab; der vorherige Host-/MAC-Abgleich erhält die IP-Aktualisierung
+       bestehender Einträge."
   acceptance_criteria:
     - "tests/test_config_flow.py deckt ab, dass DHCP-Discovery in den
        user-Schritt mit vorbelegtem Host-Feld weiterleitet und der Flow ab
@@ -2829,9 +2865,9 @@ requirement_dhcp_discovery:
        \"already_configured\" abbricht."
     - "tests/test_config_flow.py deckt Reconfigure für MAC- und manuelle
        host:port-IDs ab."
-    - "tests/test_config_flow.py prüft den manuellen Duplikatabbruch für
-       MAC- und host:port-IDs ohne Verbindungsvalidierung oder Änderung des
-       vorhandenen Eintrags; andere Hosts oder Ports bleiben zulässig."
+    - "tests/test_config_flow_single_entry.py prüft den Abbruch für eine
+       neue DHCP-MAC bei eingerichtetem Speicher ohne Verbindungsvalidierung
+       oder Änderung des vorhandenen Eintrags."
 
 # ==============================================================================
 # ANFORDERUNG: ENTITY-KATEGORISIERUNG (DIAGNOSTIC)

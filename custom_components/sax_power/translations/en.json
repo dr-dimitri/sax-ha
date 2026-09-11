@@ -51,6 +51,7 @@
     },
     "abort": {
       "already_configured": "This device is already configured.",
+      "single_instance_allowed": "Only one SAX storage system can currently be configured. To change the existing storage system, please use \"Reconfigure\".",
       "reconfigure_successful": "The connection details have been updated."
     }
   },

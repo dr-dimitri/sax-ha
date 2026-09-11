@@ -1166,6 +1166,15 @@ Information Model Specification V1.1, Abschnitt 6.4) und liefern dafür
 signed=True)` decodiert Wert und Skalierungsfaktor getrennt (`signed` muss
 zum in `modbus_llm.yaml` dokumentierten Datentyp des Werteregisters passen)
 und wendet erst danach `Wert × 10^sunssf` an - liefert `float | None`.
+`decode_sunssf` akzeptiert ausschließlich Exponenten von −10 bis +10
+einschließlich beider Grenzen (`SUNSSF_MIN`/`SUNSSF_MAX`); ungültige Faktoren
+liefern wie der Sentinel `None`. Auch Sollwertschreiben und SOC-Auflösung
+verwenden diesen Decoder. `decode_high_block` gibt ungültige Faktoren aus
+HIGH und LOW2 mit ihrer Registeradresse zurück. Der Coordinator protokolliert
+pro betroffenem Register einmal während seiner Laufzeit eine Warnung;
+Not-Implemented-Sentinels bleiben ohne Warnung. So bleiben Energie- und
+Geldzähler bei ungültiger Speicherleistung unverändert, während gültige
+Register weiter aktualisiert werden (Issue #194).
 `decode_ascii_registers` decodiert die als ASCII-Zeichenpaare codierten
 `str`-Register. Siehe anforderung.yaml, REQ-SUNSPEC-DATATYPES.
 

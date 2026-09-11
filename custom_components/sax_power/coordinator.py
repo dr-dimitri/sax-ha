@@ -122,6 +122,9 @@ from .domain.economics_status import (
 from .domain.energy_accounting import EnergyDelta, compute_charge_delta
 from .domain.grid_energy_accounting import compute_grid_energy_delta
 from .domain.registers import (
+    SUNSSF_MAX,
+    SUNSSF_MIN,
+    decode_sunssf,
     to_signed16,
     to_unsigned16,
 )
@@ -662,6 +665,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # erreichbarer Extended-Mode-Block dazu, dass ConfigEntryNotReady
         # ausgelöst wurde und die Integration gar keine Entities anlegte.
         self._extended_available = True
+        self._warned_invalid_scale_factor_registers: set[int] = set()
         # Zeitpunkt (monotonic), seit dem der SunSpec-Modus-Block
         # ununterbrochen nicht erreichbar ist - None, solange er erreichbar
         # ist. Von _async_read_high_block auf der Zustandsflanke gesetzt/
@@ -1281,8 +1285,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _economics_soc_resolution_percent(self) -> float:
         """Messquantum des Battery-SOC in Prozent, konservativ 1 %."""
-        exponent = to_signed16(self._battery_scale_factors.soc)
-        if not -10 <= exponent <= 10:
+        exponent = decode_sunssf(self._battery_scale_factors.soc)
+        if exponent is None:
             return 1.0
         return 10.0**exponent
 
@@ -2531,6 +2535,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         decoded = decode_high_block(
             extended_result.registers, self._battery_scale_factors
         )
+        # REQ-SUNSPEC-DATATYPES: Ein dauerhaft defektes Register darf das
+        # Log nicht im Zwei-Sekunden-Takt füllen.
+        for address, exponent in decoded.invalid_scale_factors.items():
+            if address not in self._warned_invalid_scale_factor_registers:
+                _LOGGER.warning(
+                    "Ungültiger SunSpec-Skalierungsfaktor in Register %s "
+                    "(Slave-ID %s): %s außerhalb %s..%s; betroffene Messwerte "
+                    "bleiben unbekannt",
+                    address + 40000,
+                    self.slave_id_extended,
+                    exponent,
+                    SUNSSF_MIN,
+                    SUNSSF_MAX,
+                )
+                self._warned_invalid_scale_factor_registers.add(address)
         # Für den Schreibpfad (Watt -> Prozent-Sollwert) zwischengespeichert,
         # siehe SaxPowerCoordinator._watts_to_ic_setpoint_raw - dort erfolgt
         # die Sentinel-Prüfung dieses Rohwerts eigenständig vor jedem Write.
@@ -3233,14 +3252,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Skalierungsfaktor für Register 40049 ist nicht gültig: "
                 f"{scale_factor_raw!r}."
             )
-        scale_factor = to_signed16(scale_factor_raw)
-        # SunSpec erlaubt für sunssf nur -10 bis +10; -32768 kennzeichnet
-        # einen nicht implementierten Wert. Die frühe Begrenzung verhindert
-        # zugleich unkontrolliert große Zehnerpotenzen im Schreibpfad.
-        if not -10 <= scale_factor <= 10:
+        scale_factor = decode_sunssf(scale_factor_raw)
+        if scale_factor is None:
             raise HomeAssistantError(
                 "Skalierungsfaktor für Register 40049 liegt außerhalb des "
-                f"SunSpec-Bereichs -10..10: {scale_factor}."
+                f"SunSpec-Bereichs {SUNSSF_MIN}..{SUNSSF_MAX}: "
+                f"{to_signed16(scale_factor_raw)}."
             )
         percent = (power_watts / max_power_reference) * 100
         percent = max(

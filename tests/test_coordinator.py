@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import random
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -40,8 +41,10 @@ from custom_components.sax_power.const import (
     PRICE_UNIT_AUTO,
     PV_SURPLUS_HYSTERESIS_CYCLES,
     READ_BLOCK_COUNT,
+    READ_BLOCK_EXT_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
     READ_BLOCK_EXT_LOW1_START,
+    READ_BLOCK_EXT_LOW2_COUNT,
     READ_BLOCK_EXT_LOW2_START,
     READ_BLOCK_EXT_LOW_INTERVAL,
     READ_BLOCK_EXT_START,
@@ -52,6 +55,8 @@ from custom_components.sax_power.const import (
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
     REG_SUN_IC_POWER_SETPOINT_SF,
+    REG_SUN_STORAGE_POWER_ACTIVE,
+    REG_SUN_STORAGE_POWER_ACTIVE_SF,
     REG_SUN_VERSION_MASTER,
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT,
     SUN_IC_CONTROL_MODE_SETPOINT,
@@ -76,7 +81,11 @@ from custom_components.sax_power.domain.registers import (
     decode_int16,
     decode_uint16,
 )
-from custom_components.sax_power.domain.sunspec import BatteryScaleFactors
+from custom_components.sax_power.domain.sunspec import (
+    HIGH_BLOCK_FIELDS,
+    BatteryScaleFactors,
+    ScaledField,
+)
 from custom_components.sax_power.domain.tariff import (
     QuoteResult,
     QuoteUnavailable,
@@ -1380,7 +1389,10 @@ async def test_sun_charge_rejects_invalid_power_before_write(
     client.write_register.assert_not_awaited()
 
 
-@pytest.mark.parametrize("scale_factor_raw", [to_unsigned16(-32768), to_unsigned16(-3)])
+@pytest.mark.parametrize(
+    "scale_factor_raw",
+    [to_unsigned16(value) for value in (-32768, -32767, -11, -3, 11, 100, 32767)],
+)
 async def test_sun_charge_rejects_invalid_scale_or_encoded_raw_before_write(
     hass, scale_factor_raw: int
 ) -> None:
@@ -4633,6 +4645,201 @@ async def test_month_restore_does_not_validate_overlap(hass) -> None:
 
 
 # -- Energy-Dashboard-Kompatibilität (REQ-ENERGY-DASHBOARD) ------------------
+
+
+@pytest.mark.parametrize("exponent", [-32767, -11, 11, 100, 32767])
+@pytest.mark.parametrize("power", [-1000, 1000])
+async def test_invalid_sunssf_preserves_counters_across_refreshes(
+    hass, caplog: pytest.LogCaptureFixture, exponent: int, power: int
+) -> None:
+    """REQ-SUNSPEC-DATATYPES/REQ-ENERGY-DASHBOARD/REQ-ECONOMICS-ACCOUNTING:
+    Ungültige Leistung bleibt unbekannt, ohne Bilanzschaden oder Updatefehler.
+    """
+    client = _make_client()
+    basic = [0] * READ_BLOCK_COUNT
+    basic[REG_SOC - READ_BLOCK_START] = 55
+    read = _make_read_side_effect(basic, extended_error=False)
+    scale_factor_raw = to_unsigned16(exponent)
+
+    def read_registers(*, address: int, count: int, device_id: int) -> MagicMock:
+        result = read(address=address, count=count, device_id=device_id)
+        if device_id == 100 and address == READ_BLOCK_EXT_START:
+            result.registers[REG_SUN_STORAGE_POWER_ACTIVE - address] = to_unsigned16(
+                power
+            )
+            result.registers[REG_SUN_STORAGE_POWER_ACTIVE_SF - address] = (
+                scale_factor_raw
+            )
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=read_registers)
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 100
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    await coordinator.async_load_energy_state()
+    await coordinator.async_load_economics_state()
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+    initial_energy = coordinator._energy_state()
+    initial_economics = None
+
+    try:
+        for tick in range(4):
+            with (
+                _patched_now(12, month=5),
+                patch(
+                    "custom_components.sax_power.coordinator.monotonic",
+                    return_value=1000.0 + tick * READ_BLOCK_EXT_HIGH_INTERVAL,
+                ),
+            ):
+                await coordinator.async_refresh()
+
+            assert coordinator.last_update_success is True
+            assert coordinator.extended_available is True
+            assert coordinator.data["soc"] == 55
+            assert coordinator.data["storage_power_active"] is None
+            for key in (
+                "energy_charged",
+                "energy_discharged",
+                "energy_charged_from_grid",
+                "energy_charged_from_pv",
+                "economics_grid_charge_cost",
+                "economics_pv_opportunity_cost",
+                "economics_avoided_grid_cost",
+            ):
+                assert coordinator.data[key] == 0.0, key
+            assert coordinator._energy_state() == initial_energy
+            if initial_economics is None:
+                initial_economics = coordinator._economics_state()
+            assert coordinator._economics_state() == initial_economics
+
+        warnings = [
+            record
+            for record in caplog.records
+            if "Ungültiger SunSpec-Skalierungsfaktor" in record.message
+        ]
+        assert len(warnings) == 1
+        assert "40030" in warnings[0].message
+        assert str(exponent) in warnings[0].message
+        await coordinator._async_flush_energy_state()
+        await coordinator._async_flush_economics_state()
+        assert await coordinator._energy_store.async_load() == initial_energy
+        assert await coordinator._economics_store.async_load() == initial_economics
+
+        scale_factor_raw = 0
+        with (
+            _patched_now(12, month=5),
+            patch(
+                "custom_components.sax_power.coordinator.monotonic",
+                return_value=1000.0 + 4 * READ_BLOCK_EXT_HIGH_INTERVAL,
+            ),
+        ):
+            await coordinator.async_refresh()
+        assert coordinator.last_update_success is True
+        assert coordinator.data["storage_power_active"] == power
+        energy = coordinator._energy_state()
+        expected_delta = abs(power) * READ_BLOCK_EXT_HIGH_INTERVAL / 3600 / 1000
+        assert energy.charged_kwh == pytest.approx(expected_delta if power < 0 else 0)
+        assert energy.discharged_kwh == pytest.approx(
+            expected_delta if power > 0 else 0
+        )
+    finally:
+        await coordinator.async_shutdown(reset_device=False)
+
+
+async def test_sunssf_fuzz_refreshes_remain_successful_and_finite(
+    hass, caplog: pytest.LogCaptureFixture
+) -> None:
+    """REQ-SUNSPEC-DATATYPES: Registerrauschen bleibt auch nach vollständigen
+    Refreshs isoliert; jedes fehlerhafte SF-Register warnt genau einmal.
+    """
+    rng = random.Random(194)
+    blocks = [
+        ([raw] * READ_BLOCK_EXT_COUNT, [raw] * READ_BLOCK_EXT_LOW2_COUNT)
+        for raw in (0x0000, 0x7FFF, 0x8000, 0xFFFF)
+    ]
+    blocks.extend(
+        (
+            [rng.randrange(0x10000) for _ in range(READ_BLOCK_EXT_COUNT)],
+            [rng.randrange(0x10000) for _ in range(READ_BLOCK_EXT_LOW2_COUNT)],
+        )
+        for _ in range(32)
+    )
+    low2_addresses = {"capacity": 110, "power": 111, "soc": 112, "cell_voltage": 114}
+    client = _make_client()
+    basic = [0] * READ_BLOCK_COUNT
+    basic[REG_SOC - READ_BLOCK_START] = 55
+    read = _make_read_side_effect(basic, extended_error=False)
+
+    def read_registers(*, address: int, count: int, device_id: int) -> MagicMock:
+        result = read(address=address, count=count, device_id=device_id)
+        if device_id == 100:
+            if address == READ_BLOCK_EXT_START:
+                result.registers = high
+            elif address == READ_BLOCK_EXT_LOW2_START:
+                result.registers = low2
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=read_registers)
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 100
+    coordinator.options = _FIXED_TARIFF_OPTIONS
+    await coordinator.async_load_energy_state()
+    await coordinator.async_load_economics_state()
+    coordinator.restore_energy_charged(0.0)
+    coordinator.restore_energy_discharged(0.0)
+
+    try:
+        for tick, (high, low2) in enumerate(blocks):
+            with (
+                _patched_now(12, month=5),
+                patch(
+                    "custom_components.sax_power.coordinator.monotonic",
+                    return_value=1000.0 + tick * (READ_BLOCK_EXT_LOW_INTERVAL + 1),
+                ),
+            ):
+                await coordinator.async_refresh()
+
+            assert coordinator.last_update_success is True
+            assert coordinator.extended_available is True
+            assert coordinator.data["soc"] == 55
+            for key, value in coordinator.data.items():
+                if isinstance(value, (int, float)):
+                    assert math.isfinite(value), (tick, key)
+            for field in HIGH_BLOCK_FIELDS:
+                if not isinstance(field, ScaledField):
+                    continue
+                value = coordinator.data[field.key]
+                assert value is None or abs(value) <= 65534 * 10**10, (tick, field.key)
+                raw_sf = (
+                    high[field.scale_factor_address - READ_BLOCK_EXT_START]
+                    if field.scale_factor_address is not None
+                    else low2[
+                        low2_addresses[field.battery_scale_factor]
+                        - READ_BLOCK_EXT_LOW2_START
+                    ]
+                )
+                if not -10 <= to_signed16(raw_sf) <= 10:
+                    assert value is None, (tick, field.key)
+
+        assert sum(
+            read.kwargs["address"] == READ_BLOCK_EXT_LOW2_START
+            for read in client.read_holding_registers.call_args_list
+        ) == len(blocks)
+        warnings = [
+            record
+            for record in caplog.records
+            if "Ungültiger SunSpec-Skalierungsfaktor" in record.message
+        ]
+        expected_addresses = {
+            field.scale_factor_address + 40000
+            for field in HIGH_BLOCK_FIELDS
+            if isinstance(field, ScaledField) and field.scale_factor_address is not None
+        } | {address + 40000 for address in low2_addresses.values()}
+        assert len(warnings) == len(expected_addresses)
+        assert {record.args[0] for record in warnings} == expected_addresses
+    finally:
+        await coordinator.async_shutdown(reset_device=False)
 
 
 def test_accumulate_energy_stays_none_before_restore(hass) -> None:

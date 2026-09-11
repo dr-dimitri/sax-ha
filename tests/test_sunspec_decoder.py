@@ -12,6 +12,9 @@ REQ-LOW-INTERVAL-REGISTERS (Aufteilung LOW/HIGH).
 
 from __future__ import annotations
 
+import math
+import random
+
 import pytest
 
 from custom_components.sax_power.const import (
@@ -23,7 +26,11 @@ from custom_components.sax_power.const import (
     READ_BLOCK_EXT_START,
     UNKNOWN_LABEL,
 )
-from custom_components.sax_power.domain.registers import to_unsigned16
+from custom_components.sax_power.domain.registers import (
+    apply_typed_sunssf,
+    decode_sunssf,
+    to_unsigned16,
+)
 from custom_components.sax_power.domain.sunspec import (
     DEFAULT_BATTERY_SCALE_FACTORS,
     HIGH_BLOCK_FIELDS,
@@ -87,6 +94,50 @@ def _low2(overrides: dict[int, int] | None = None) -> list[int]:
 
 def _high(overrides: dict[int, int] | None = None) -> list[int]:
     return _block(READ_BLOCK_EXT_START, READ_BLOCK_EXT_COUNT, overrides or {})
+
+
+def test_decode_sunssf_validates_complete_register_range() -> None:
+    """REQ-SUNSPEC-DATATYPES: nur Exponenten von -10 bis 10 sind gültig."""
+    for raw in range(0x10000):
+        exponent = raw if raw < 0x8000 else raw - 0x10000
+        expected = exponent if -10 <= exponent <= 10 else None
+
+        assert decode_sunssf(raw) == expected, f"sunssf raw={raw:#06x}"
+
+
+@pytest.mark.parametrize("signed", [True, False])
+def test_apply_typed_sunssf_validates_complete_register_range(signed: bool) -> None:
+    """REQ-SUNSPEC-DATATYPES: ungültige Exponenten erreichen kein 10**sf."""
+    value = -2 if signed else 65534
+    for raw in range(0x10000):
+        exponent = raw if raw < 0x8000 else raw - 0x10000
+        expected = round(value * 10**exponent, 3) if -10 <= exponent <= 10 else None
+
+        assert (
+            apply_typed_sunssf(0xFFFE, raw, signed=signed) == expected
+        ), f"sunssf raw={raw:#06x}, signed={signed}"
+
+
+@pytest.mark.parametrize(
+    ("raw", "signed", "value"),
+    [
+        (0x8001, True, -32767),
+        (0xFFFF, True, -1),
+        (0x7FFF, True, 32767),
+        (0x8000, False, 32768),
+        (0xFFFE, False, 65534),
+        (0, False, 0),
+    ],
+)
+def test_valid_sunssf_preserves_value_type_and_rounding(
+    raw: int, signed: bool, value: int
+) -> None:
+    """REQ-SUNSPEC-DATATYPES: gültige Faktoren erhalten Typ und Rundung."""
+    for exponent in range(-10, 11):
+        assert decode_sunssf(to_unsigned16(exponent)) == exponent
+        assert apply_typed_sunssf(raw, to_unsigned16(exponent), signed=signed) == round(
+            value * 10**exponent, 3
+        )
 
 
 # -- LOW-Block: Common Model (1) + Battery-Skalierungsfaktoren ---------------
@@ -402,6 +453,130 @@ def test_decode_high_block_battery_scale_factor_sentinel_yields_none() -> None:
     data = decode_high_block(high, scale_factors).values
 
     assert data["battery_soc"] is None
+
+
+def test_decode_high_block_invalid_high_scale_factors_are_isolated() -> None:
+    """REQ-SUNSPEC-DATATYPES: nur Werte am ungültigen sunssf werden unbekannt."""
+    decoded = decode_high_block(
+        _high(
+            {
+                29: 1500,
+                30: 11,
+                49: 100,
+                52: 11,
+                70: 50,
+                72: 250,
+                73: 100,
+                74: 80,
+                75: 70,
+                76: to_unsigned16(-11),
+                102: 55,
+            }
+        ),
+        DEFAULT_BATTERY_SCALE_FACTORS,
+    )
+
+    assert decoded.values["storage_power_active"] is None
+    assert decoded.values["ic_power_setpoint_pct"] is None
+    assert decoded.values["smartmeter_power"] is None
+    assert decoded.values["grid_power_active_l1"] is None
+    assert decoded.values["grid_power_active_l2"] is None
+    assert decoded.values["grid_power_active_l3"] is None
+    assert decoded.values["grid_frequency"] == 50
+    assert decoded.values["battery_soc"] == 55
+    assert decoded.ic_power_setpoint_sf_raw == 11
+    assert decoded.invalid_scale_factors == {30: 11, 52: 11, 76: -11}
+
+
+@pytest.mark.parametrize(
+    ("attribute", "address", "keys"),
+    [
+        ("capacity", 110, ["battery_capacity"]),
+        (
+            "power",
+            111,
+            ["battery_charge_power_available", "battery_discharge_power_available"],
+        ),
+        (
+            "soc",
+            112,
+            [
+                "battery_soc_max",
+                "battery_soc_min",
+                "battery_soc",
+                "battery_discharge_depth",
+            ],
+        ),
+        ("cell_voltage", 114, ["battery_cell_voltage_avg"]),
+    ],
+)
+def test_decode_high_block_reports_invalid_low2_scale_factors(
+    attribute: str, address: int, keys: list[str]
+) -> None:
+    """REQ-SUNSPEC-DATATYPES: LOW2-Diagnostik nennt das gemeinsame SF-Register."""
+    scale_factors = decode_low_blocks(
+        _low1(), _low2({address: to_unsigned16(-11)})
+    ).scale_factors
+    assert getattr(scale_factors, attribute) == to_unsigned16(-11)
+
+    decoded = decode_high_block(_high({29: 1500}), scale_factors)
+
+    for key in keys:
+        assert decoded.values[key] is None
+    assert decoded.values["storage_power_active"] == 1500
+    assert decoded.invalid_scale_factors == {address: -11}
+
+
+def test_decode_high_block_sunssf_sentinels_are_not_reported_as_invalid() -> None:
+    """REQ-SUNSPEC-DATATYPES: nicht implementierte SF sind kein Bereichsfehler."""
+    high = _high(
+        {
+            field.scale_factor_address: 0x8000
+            for field in HIGH_BLOCK_FIELDS
+            if isinstance(field, ScaledField) and field.scale_factor_address is not None
+        }
+    )
+    decoded = decode_high_block(
+        high,
+        BatteryScaleFactors(
+            capacity=0x8000, power=0x8000, soc=0x8000, cell_voltage=0x8000
+        ),
+    )
+
+    for field in HIGH_BLOCK_FIELDS:
+        if isinstance(field, ScaledField):
+            assert decoded.values[field.key] is None
+    assert decoded.invalid_scale_factors == {}
+
+
+def test_decode_high_block_fuzz_never_emits_unbounded_scaled_values() -> None:
+    """REQ-SUNSPEC-DATATYPES: 16-Bit-Rauschen darf weder crashen noch explodieren."""
+    rng = random.Random(194)
+    blocks = [
+        ([raw] * READ_BLOCK_EXT_COUNT, [raw] * READ_BLOCK_EXT_LOW2_COUNT)
+        for raw in (0x0000, 0x7FFF, 0x8000, 0xFFFF)
+    ]
+    blocks.extend(
+        (
+            [rng.randrange(0x10000) for _ in range(READ_BLOCK_EXT_COUNT)],
+            [rng.randrange(0x10000) for _ in range(READ_BLOCK_EXT_LOW2_COUNT)],
+        )
+        for _ in range(32)
+    )
+
+    for high, low2 in blocks:
+        scale_factors = decode_low_blocks(_low1(), low2).scale_factors
+        decoded = decode_high_block(high, scale_factors)
+
+        for field in HIGH_BLOCK_FIELDS:
+            if isinstance(field, ScaledField):
+                value = decoded.values[field.key]
+                assert value is None or (
+                    math.isfinite(value) and abs(value) <= 65534 * 10**10
+                ), field.key
+        for exponent in decoded.invalid_scale_factors.values():
+            assert exponent != -32768
+            assert not -10 <= exponent <= 10
 
 
 def test_decode_high_block_decodes_not_implemented_sentinels() -> None:

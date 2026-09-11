@@ -4273,10 +4273,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
               sofort auf 0 % gestoppt (async_start_sun_charge(0) - macht
               beides in einem Aufruf). Danach wird zusätzlich einmalig
               self._grid_serving_wait_cycles = PV_SURPLUS_HYSTERESIS_CYCLES
-              gesetzt: die folgenden Aufrufe von _async_enforce_grid_charge
-              tun in dieser Anzahl nichts weiter außer den Zähler
-              herunterzuzählen, damit der Moduswechsel/Stopp sich setzen
-              kann, bevor Schritt b neu bewertet wird.
+              gesetzt: erst weitere frische HIGH-Messwerte zählen die
+              Wartezyklen herunter, damit der Moduswechsel/Stopp sich setzen
+              kann. Schritt b zählt erst Messwerte nach dieser Wartephase.
            b. Erst wenn der Sollwertvorgabemodus aktiv ist (Schritt a
               ausgelöst UND die Wartezyklen abgelaufen sind) wird geprüft, ob
               die am Smart Meter gemessene Netzeinspeisung
@@ -4741,7 +4740,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         mit mindestens diesem Wert lädt, übernimmt die Software aktiv die
         Kontrolle (Sollwertvorgabemodus + Ladung auf 0 % gestoppt in einem
         Aufruf, async_start_sun_charge(0)) und wartet danach zusätzlich
-        einmalig PV_SURPLUS_HYSTERESIS_CYCLES Aufrufe dieser Methode ab
+        einmalig PV_SURPLUS_HYSTERESIS_CYCLES weitere HIGH-Messwerte ab
         (self._grid_serving_wait_cycles), bevor Schritt b greift - Register
         40051 und der gestoppte Sollwert sollen sich setzen können, bevor
         erneut ausgewertet wird.
@@ -4796,6 +4795,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.async_start_sun_charge(0)
                 self._grid_serving_setpoint_active = True
                 self._grid_serving_wait_cycles = PV_SURPLUS_HYSTERESIS_CYCLES
+                self._cycle_sample_revisions["_grid_serving_wait_cycles"] = (
+                    self._high_sample_revision
+                )
                 self._grid_serving_charge_confirm_cycles = 0
             return self._grid_serving_setpoint_active
 
@@ -4814,7 +4816,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
 
         if self._grid_serving_wait_cycles > 0:
-            self._grid_serving_wait_cycles -= 1
+            revision = self._high_sample_revision
+            if revision != self._cycle_sample_revisions.get(
+                "_grid_serving_wait_cycles", 0
+            ):
+                self._grid_serving_wait_cycles -= 1
+                self._cycle_sample_revisions["_grid_serving_wait_cycles"] = revision
+            # Warte-Messwerte zählen auch bei Events nicht für Schritt b
+            # (REQ-GRID-SERVING-CHARGE).
+            self._cycles_confirmed("_grid_serving_release_confirm_cycles", False)
             await self.async_start_sun_charge(0)
             return True
 

@@ -11,7 +11,6 @@ from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from time import monotonic
 from typing import Any
-from uuid import uuid4
 
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
@@ -575,9 +574,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # battery availability and cached coordinator refreshes are irrelevant.
         self._grid_energy_last_sample: tuple[float, float] | None = None
         self._grid_energy_last_revision: int | None = None
-        self._grid_energy_segment_id = uuid4().hex
-        self._grid_energy_sample_time: datetime | None = None
-        self._grid_energy_sample_valid = False
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): dieselbe
         # None-bis-Bootstrap-Logik, zusätzlich gebunden an
         # SaxTariffProvider.config.enabled - solange der Tarif deaktiviert
@@ -647,6 +643,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._economics_price_unavailable_since: float | None = None
         self._economics_price_unavailable = False
         self._economics_last_successful_quote_at: datetime | None = None
+        self._economics_quote_available = False
         # Zeitpunkt und optionaler Grund des zuletzt ausgeführten
         # kontrollierten Bilanzneustarts (siehe
         # async_restart_economics_accounting) - rein diagnostisch,
@@ -773,23 +770,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else None
             ),
             "integration_method": "left_riemann_sum",
-            "co2saver_source_type": "power_integration",
-            "co2saver_sample_time": (
-                self._grid_energy_sample_time.isoformat()
-                if self._grid_energy_sample_time is not None
-                else None
-            ),
-            "co2saver_segment_id": self._grid_energy_segment_id,
-            "co2saver_sample_valid": self._grid_energy_sample_valid,
         }
 
     def _invalidate_grid_energy_sample(self) -> None:
-        """Expose gaps even if they fall between two CO2 Saver polls."""
-        if self._grid_energy_sample_valid:
-            self._grid_energy_segment_id = uuid4().hex
+        """REQ-GRID-ENERGY: Never integrate across an unmeasured interval."""
         self._grid_energy_last_sample = None
-        self._grid_energy_sample_valid = False
-        self._grid_energy_sample_time = None
 
     def _update_grid_energy(self) -> None:
         """Integrate the previous meter sample only across a fresh measured interval."""
@@ -813,19 +798,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if revision == self._grid_energy_last_revision:
             return
         previous = self._grid_energy_last_sample
-        # REQ-CO2SAVER-ESTIMATED-INPUT: This is a software observation time,
-        # never the co2saver_period_end of an atomic physical energy measurement.
-        observed_at = dt_util.utcnow() - timedelta(seconds=sample_age)
-        if (previous is not None and not 0 < sample_time - previous[0] <= max_age) or (
-            self._grid_energy_sample_time is not None
-            and observed_at < self._grid_energy_sample_time
-        ):
+        if previous is not None and not 0 < sample_time - previous[0] <= max_age:
             self._invalidate_grid_energy_sample()
             previous = None
         self._grid_energy_last_revision = revision
         self._grid_energy_last_sample = (sample_time, power)
-        self._grid_energy_sample_time = observed_at
-        self._grid_energy_sample_valid = True
         if previous is None:
             return
         elapsed_seconds = sample_time - previous[0]
@@ -1039,6 +1016,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Karenzzeit-Countdown aus einer früheren Deaktivierung starten.
             self._economics_price_unavailable_since = None
             self._economics_price_unavailable = False
+            self._economics_quote_available = False
 
         # REQ-ECONOMICS-OBSERVABILITY: ein unlesbarer Store darf weder einen
         # frischen 0-Bootstrap im Arbeitsspeicher starten noch eine bereits
@@ -1532,8 +1510,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_price is not None:
             self._economics_price_unavailable_since = None
             self._economics_price_unavailable = False
-            self._economics_last_successful_quote_at = dt_util.utcnow()
+            if not self._economics_quote_available:
+                self._economics_last_successful_quote_at = dt_util.utcnow()
+            self._economics_quote_available = True
             return
+        self._economics_quote_available = False
         if quote_result.reason is QuoteUnavailable.TARIFF_INCOMPLETE:
             self._economics_price_unavailable = True
             return
@@ -2293,7 +2274,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _bootstrap_grid_energy(self, state: EnergyState | None) -> None:
         """Restore the grid group or start counting now, without inferring history."""
         self._invalidate_grid_energy_sample()
-        self._grid_energy_segment_id = uuid4().hex
         self._grid_energy_last_revision = None
         if state is not None and state.grid_initialized:
             self._grid_imported_kwh = state.grid_imported_kwh

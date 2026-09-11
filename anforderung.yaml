@@ -2494,6 +2494,15 @@ requirement_setup_rollback:
     unbestätigten Defaultwerten auf Modus 0 setzen. Beim regulären Unload
     bleibt reset_device=True der Standard; dort wird die Gerätefreigabe wie
     bisher ausgeführt und der Client erst danach geschlossen.
+
+    Mit Beginn des Shutdowns werden neue Ladeentscheidungen dauerhaft
+    gesperrt. Bereits gestartete Preis-/Prognose-Callbacks und Intervall-
+    Auswertungen werden nachverfolgt und vor dem abschließenden Gerätereset
+    abgewartet, damit keine quittierte Sollwertsequenz mittendrin abbricht.
+    Nach dem Shutdown dürfen weder verspätete Poll-/Planner-Aufrufe noch
+    Services oder Entity-Setter weitere Register schreiben oder einen neuen
+    Writer erzeugen. Automatische Auswertungen enden ohne Wirkung;
+    Anwenderbefehle melden einen HomeAssistantError zum beendeten Coordinator.
   requirements:
     - "Jeder fehlgeschlagene Setup-Versuch schließt seinen Modbus-Client und
        entfernt seinen etwaigen Eintrag aus hass.data."
@@ -2502,6 +2511,9 @@ requirement_setup_rollback:
        beendet."
     - "Das Fehler-Cleanup führt keinen zusätzlichen Modbus-Steuerwrite aus;
        der reguläre Unload behält seine Gerätefreigabe bei."
+    - "Shutdown sperrt neue Ladeentscheidungen auch für bereits auf den
+       Control-Lock wartende Aufrufe. Laufende Planner-Tasks und Writer sind
+       vor seiner Rückkehr beendet; danach sind alle Register-Writes gesperrt."
   acceptance_criteria:
     - "tests/test_init.py deckt einen erfolgreichen TCP-Connect mit
        ConfigEntryNotReady beim ersten Refresh ab: Client-Close genau einmal,
@@ -2512,6 +2524,10 @@ requirement_setup_rollback:
        Modbus-Write und bereinigtes hass.data."
     - "tests/test_init.py deckt ab, dass ein erfolgreicher Setup den Client
        offen lässt und erst der reguläre Unload ihn schließt."
+    - "tests/test_shutdown.py deckt verspätete Planner-/Poll-Auswertungen,
+       abgewiesene Anwenderbefehle, wartende Control-Lock-Aufrufe und das
+       vollständige Ende von Sensor-/Intervall-Tasks ab; eine laufende
+       Modus-/Sollwertsequenz endet vor dem finalen Modus-0-Reset."
 
 # ==============================================================================
 # ANFORDERUNG: SELBSTDIAGNOSE / ERWEITERTE REPAIRS

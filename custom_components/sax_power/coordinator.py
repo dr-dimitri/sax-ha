@@ -388,6 +388,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # kann ein älterer Aktiv-Zweig einen gerade ausgeführten Rücksprung in
         # die Nullregelung wieder überschreiben (REQ-GRID-SERVING-CHARGE).
         self._charge_control_lock = asyncio.Lock()
+        self._shutdown_started = False
+        self._shutdown_complete = False
+        self._shutdown_task: asyncio.Task[Any] | None = None
+        self._sun_charge_write_task: asyncio.Task[Any] | None = None
         self._max_soc: int | None = None
         self._cell_calibration_state = CalibrationState()
         self._cell_calibration_active = False
@@ -2629,6 +2633,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Schreiben ausgelöster coordinator.async_refresh() (siehe
         switch.SaxPowerStorageSwitch) kurzzeitig noch den alten,
         gecachten Wert liefern (siehe DEVELOPMENT.md, "Refresh-Verhalten")."""
+        self._raise_if_shutdown()
         await self._async_write_register(address, value, device_id=self.slave_id)
         self._basic_last_read = None
 
@@ -2649,6 +2654,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, address: int, value: int, *, device_id: int
     ) -> None:
         async with self._write_lock:
+            if self._shutdown_complete or (
+                self._shutdown_started
+                and asyncio.current_task()
+                not in (self._shutdown_task, self._sun_charge_write_task)
+            ):
+                self._raise_if_shutdown()
             try:
                 if not self.client.connected:
                     await self.client.connect()
@@ -3113,6 +3124,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_start_grid_charge(self, power: int) -> None:
         """Starte oder aktualisiere einen zentral arbitrierten Ladeauftrag."""
+        self._raise_if_shutdown()
         if (
             isinstance(power, bool)
             or not isinstance(power, int)
@@ -3135,6 +3147,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Coordinator-Update gestartet werden"
             )
         async with self._charge_control_lock:
+            self._raise_if_shutdown()
             if self._basic_read_failed:
                 raise HomeAssistantError(
                     "Netzladung benötigt einen erfolgreichen Basic-Mode-Read "
@@ -3154,6 +3167,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_stop_grid_charge(self) -> None:
         """Beende den Auftrag erst nach Task-Ende und sicherem Resetversuch."""
         async with self._charge_control_lock:
+            self._raise_if_shutdown()
             manual_charge_requested = self._grid_charge_power is not None
             sun_charge_writer_running = (
                 self._sun_charge_task is not None and not self._sun_charge_task.done()
@@ -3281,9 +3295,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Write mode and setpoint as one best-effort atomic sequence."""
         async with self._sun_charge_write_lock:
-            await self._async_write_sun_charge_setpoint_unlocked(
-                power, timed_discharge_hold=timed_discharge_hold, data=data
-            )
+            self._raise_if_shutdown()
+            self._sun_charge_write_task = asyncio.current_task()
+            try:
+                await self._async_write_sun_charge_setpoint_unlocked(
+                    power, timed_discharge_hold=timed_discharge_hold, data=data
+                )
+            finally:
+                self._sun_charge_write_task = None
 
     async def _async_write_sun_charge_setpoint_unlocked(
         self,
@@ -3375,6 +3394,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         GRID_CHARGE_WRITE_INTERVAL Sekunden später) - eine Einstellungs-
         änderung soll unmittelbar wirken.
         """
+        self._raise_if_shutdown()
         if (
             isinstance(power, bool)
             or not isinstance(power, int)
@@ -3404,6 +3424,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except HomeAssistantError:
                 self._clear_sun_charge_active_flags()
                 raise
+            if self._shutdown_started:
+                return
             self._sun_charge_power = power
             self._sun_charge_timed_discharge = timed_discharge_hold
             self._sun_charge_task = self.hass.async_create_background_task(
@@ -3508,8 +3530,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             ),
                         )
                 await asyncio.sleep(interval)
+                if self._shutdown_started:
+                    return
                 if self._sun_charge_timed_discharge:
                     async with self._charge_control_lock:
+                        if self._shutdown_started:
+                            return
                         if not self._sun_charge_timed_discharge:
                             continue
                         if not self._timed_discharge_is_active(dt_util.utcnow()):
@@ -3765,6 +3791,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         beim Start (switch.py), wo per Definition nie beide Features
         gleichzeitig aktiv gespeichert sein können.
         """
+        self._raise_if_shutdown()
         if enabled and self._price_charge_enabled:
             if not force:
                 self._async_create_charge_conflict_issue(ISSUE_TIMED_CHARGE_CONFLICT)
@@ -3914,7 +3941,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.clear_control_field_unresolved("timed_charge_months")
         await self._async_apply_grid_charge_change()
 
-    async def _async_apply_grid_charge_change(self, *, persist: bool = True) -> None:
+    def _raise_if_shutdown(self) -> None:
+        """Reject late user commands after ownership of the device ends."""
+        if self._shutdown_started:
+            raise HomeAssistantError(
+                "SAX Power wird entladen oder ist bereits beendet; "
+                "Steuerbefehle sind nicht mehr möglich"
+            )
+
+    async def _async_apply_grid_charge_change(
+        self, *, persist: bool = True, background: bool = False
+    ) -> None:
         """Re-evaluate Zeitfenster/Max-SOC/Netzladeleistung sofort nach einer
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
         warten.
@@ -3931,17 +3968,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         einer Anwenderänderung, deshalb entscheidet der Bootstrap selbst, ob
         und wie sie geschrieben wird (siehe _async_persist_bootstrap_result).
         """
-        if self._control_bootstrap_pending:
-            return
-        if persist:
-            self._async_schedule_control_save()
-        if self.data is not None:
-            await self._async_enforce_grid_charge(self.data)
-            self._publish_charge_state(self.data)
-            self.async_update_listeners()
+        async with self._charge_control_lock:
+            if background and self._shutdown_started:
+                return
+            self._raise_if_shutdown()
+            if self._control_bootstrap_pending:
+                return
+            if persist:
+                self._async_schedule_control_save()
+            if self.data is not None:
+                await self._async_enforce_grid_charge_locked(self.data)
+                self._publish_charge_state(self.data)
+                self.async_update_listeners()
 
     async def _async_suspend_charge_for_missing_soc(self) -> None:
         """Apply the safe outage state while the charge-control lock is held."""
+        if self._shutdown_started:
+            return
         had_max_soc_hold = (
             self._max_soc_clamped or self._max_soc_hold_during_basic_outage
         )
@@ -4322,6 +4365,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
+        if self._shutdown_started:
+            return
         if self._basic_read_failed:
             await self._async_suspend_charge_for_missing_soc()
             return
@@ -5137,11 +5182,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
-    async def async_apply_price_plan(self) -> None:
+    async def async_apply_price_plan(self, *, background: bool = True) -> None:
         """Vom Planner nach jeder periodischen Neuberechnung aufgerufen -
         wendet das Ergebnis sofort auf das Gerät an, statt bis zum nächsten
         Poll-Zyklus zu warten."""
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(background=background)
 
     def _price_charge_status_text(
         self,
@@ -5270,6 +5315,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def async_shutdown(self, *, reset_device: bool = True) -> None:
+        self._shutdown_started = True
         # super().async_shutdown() (DataUpdateCoordinator) storniert den
         # periodischen Poll-Timer sowie den Debounced-Refresh - ohne diesen
         # Aufruf lief der Timer beim Entladen des Config Entry (siehe
@@ -5278,7 +5324,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Externe Zustandsänderungen und der Preisintervall-Timer dürfen
         # während der folgenden Store-Flushes keine neuen Entscheidungen
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
-        self.price_planner.async_shutdown()
+        await self.price_planner.async_shutdown()
         self.tariff_provider.async_shutdown()
         await self.price_planner.async_flush_cycle_state()
         await self._async_flush_energy_state()
@@ -5293,11 +5339,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # bestätigt und darf deshalb keinen zusätzlichen Register-Write
         # auslösen (REQ-SETUP-ROLLBACK).
         async with self._charge_control_lock:
+            if self._shutdown_complete:
+                return
             self._grid_charge_power = None
-            if reset_device:
-                await self.async_stop_sun_charge()
-            else:
-                await self._async_cancel_sun_charge_task()
+            # A running sequence may establish its reset marker only after
+            # the next acknowledgement. Drain it before deciding whether
+            # a reset is needed or cancelling its writer (REQ-SETUP-ROLLBACK).
+            async with self._sun_charge_write_lock:
+                pass
+            self._shutdown_task = asyncio.current_task()
+            try:
+                if reset_device:
+                    await self.async_stop_sun_charge()
+                else:
+                    await self._async_cancel_sun_charge_task()
+            finally:
+                self._shutdown_task = None
+            # REQ-SETUP-ROLLBACK: Drain writes already inside the transport
+            # lock before closing the final gate; queued writes recheck it.
+            async with self._sun_charge_write_lock, self._write_lock:
+                self._shutdown_complete = True
+            self._clear_sun_charge_active_flags()
         ir.async_delete_issue(
             self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

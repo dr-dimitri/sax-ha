@@ -15,6 +15,7 @@ Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence, Sized
@@ -649,6 +650,8 @@ class SaxPricePlanner:
         self.coordinator = coordinator
         self.plan: PricePlan = EMPTY_PLAN
         self._unsub: list[Any] = []
+        self._pending_tasks: set[asyncio.Task[None]] = set()
+        self._shutdown = False
         self._cycle_store = PricePlanCycleStore(hass, coordinator.entry_id)
         self._cycle_state: PricePlanCycleState | None = None
         # Direkt instanziierte Coordinatoren in Unit-Tests laden bewusst
@@ -717,7 +720,9 @@ class SaxPricePlanner:
     @callback
     def async_setup(self) -> None:
         """Timer und Zustandsbeobachter registrieren (idempotent)."""
-        self.async_shutdown()
+        if self._shutdown:
+            return
+        self._async_remove_listeners()
         self._unsub.append(
             async_track_time_interval(
                 self.hass,
@@ -740,9 +745,18 @@ class SaxPricePlanner:
         self.evaluate()
 
     @callback
-    def async_shutdown(self) -> None:
+    def _async_remove_listeners(self) -> None:
         while self._unsub:
             self._unsub.pop()()
+
+    async def async_shutdown(self) -> None:
+        """Finish callbacks before the coordinator performs its final reset."""
+        self._shutdown = True
+        self._async_remove_listeners()
+        # REQ-SETUP-ROLLBACK: Cancelling a callback could interrupt its
+        # acknowledged mode/setpoint sequence before the rollback marker.
+        if self._pending_tasks:
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
 
     async def _async_interval_evaluate(self, _now: datetime) -> None:
         """Periodische Prüfung der Ladebedingungen (PRICE_EVAL_INTERVAL).
@@ -750,16 +764,29 @@ class SaxPricePlanner:
         Rechnet den Plan neu und lässt den Coordinator das Ergebnis sofort
         auf das Gerät anwenden, statt bis zu einem Poll-Zyklus zu warten.
         """
-        self.evaluate()
-        await self.coordinator.async_apply_price_plan()
+        if self._shutdown:
+            return
+        task = asyncio.current_task()
+        if task is not None:
+            self._pending_tasks.add(task)
+        try:
+            self.evaluate()
+            await self.coordinator.async_apply_price_plan()
+        finally:
+            if task is not None:
+                self._pending_tasks.discard(task)
 
     @callback
     def _async_source_changed(self, _event: Event[EventStateChangedData]) -> None:
+        if self._shutdown:
+            return
         self.evaluate()
-        self.hass.async_create_task(
+        task = self.hass.async_create_task(
             self.coordinator.async_apply_price_plan(),
             "sax_power_apply_forecast_or_price_change",
         )
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
 
     # -- Auswertung ---------------------------------------------------------
     def forecast_kwh(self) -> float | None:

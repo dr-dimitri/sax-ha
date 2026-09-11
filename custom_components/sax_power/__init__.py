@@ -447,7 +447,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _async_refresh_price_plan(call: ServiceCall) -> None:
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         coordinator.price_planner.evaluate()
-        await coordinator.async_apply_price_plan()
+        await coordinator.async_apply_price_plan(background=False)
 
     async def _async_set_price_charge_enabled(call: ServiceCall) -> None:
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])

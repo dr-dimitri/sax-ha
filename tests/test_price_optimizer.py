@@ -903,7 +903,9 @@ async def test_price_charge_writes_setpoint_when_plan_says_charge(hass) -> None:
     coordinator.price_planner.plan = _charging_plan()
 
     try:
-        await coordinator._async_enforce_grid_charge({"soc": 50})
+        await coordinator._async_enforce_grid_charge(
+            {"ic_max_power_reference": 4600, "soc": 50}
+        )
         await asyncio.sleep(0.1)
 
         assert coordinator.price_charge_active is True
@@ -979,7 +981,9 @@ async def test_price_charge_max_soc_hold_remains_bound_to_selected_slot(
     }
 
     try:
-        await coordinator._async_enforce_grid_charge({"soc": 79})
+        await coordinator._async_enforce_grid_charge(
+            {"ic_max_power_reference": 4600, "soc": 79}
+        )
         assert coordinator.price_charge_active is True
 
         for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES + 1):
@@ -1052,6 +1056,7 @@ async def test_price_charge_paused_by_pv_surplus(hass) -> None:
     # Vorzeichenkonvention: negativ = Einspeisung/PV-Überschuss.
     data = {
         "soc": 50,
+        "ic_max_power_reference": 4600,
         "smartmeter_power": -(SMARTMETER_PV_SURPLUS_THRESHOLD_WATT + 500),
     }
     # Zyklen-Hysterese: erst nach mehreren bestätigten Zyklen wirksam.
@@ -1519,7 +1524,9 @@ async def test_timed_charge_takes_priority_over_price_charge(hass) -> None:
             "custom_components.sax_power.coordinator.dt_util.now",
             return_value=datetime(2024, 1, 15, 2, 0),
         ):
-            await coordinator._async_enforce_grid_charge({"soc": 50})
+            await coordinator._async_enforce_grid_charge(
+                {"ic_max_power_reference": 4600, "soc": 50}
+            )
 
         assert coordinator._timed_charge_active is True
         assert coordinator.price_charge_active is False

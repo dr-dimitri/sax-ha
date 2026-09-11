@@ -1356,7 +1356,7 @@ async def test_sun_charge_rejects_missing_or_zero_reference_before_write(
     coordinator.data = {"ic_max_power_reference": reference}
 
     with pytest.raises(HomeAssistantError, match="Referenzwert Maximalleistung"):
-        await coordinator.async_start_sun_charge(0)
+        await coordinator.async_start_sun_charge(-1000)
 
     client.write_register.assert_not_awaited()
     assert coordinator._sun_charge_task is None

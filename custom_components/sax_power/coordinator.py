@@ -3257,16 +3257,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_write_sun_charge_setpoint(
-        self, power: int | None = None, *, timed_discharge_hold: bool = False
+        self,
+        power: int | None = None,
+        *,
+        timed_discharge_hold: bool = False,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Write mode and setpoint as one best-effort atomic sequence."""
         async with self._sun_charge_write_lock:
             await self._async_write_sun_charge_setpoint_unlocked(
-                power, timed_discharge_hold=timed_discharge_hold
+                power, timed_discharge_hold=timed_discharge_hold, data=data
             )
 
     async def _async_write_sun_charge_setpoint_unlocked(
-        self, power: int | None = None, *, timed_discharge_hold: bool = False
+        self,
+        power: int | None = None,
+        *,
+        timed_discharge_hold: bool = False,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Execute one sequence while the Immediate Controls lock is held."""
         requested_power = self._sun_charge_power if power is None else power
@@ -3277,15 +3285,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # REQ-TIMED-SOC-CHARGE: Jede Voraussetzung und der endgültige
         # int16-Rohwert müssen feststehen, bevor Modus 1 das Gerät aus seiner
         # sicheren SmartMeter-Nullregelung nimmt.
-        # Zero is representable with every scale factor. The new hold must
-        # remain renewable when a read failed but writes still work.
+        # REQ-EXTENDED-MODE-RESILIENCE: Zero is representable with every
+        # reference/scale factor, including when SunSpec reads fail.
+        if data is None:
+            data = self._high_data if timed_discharge_hold else self.data or {}
         setpoint_raw = (
             0
-            if timed_discharge_hold and requested_power == 0
-            else self._watts_to_ic_setpoint_raw(
-                requested_power,
-                self._high_data if timed_discharge_hold else self.data or {},
-            )
+            if requested_power == 0
+            else self._watts_to_ic_setpoint_raw(requested_power, data)
         )
         try:
             await self.async_write_extended_register(
@@ -3334,7 +3341,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError(message) from setpoint_error
 
     async def async_start_sun_charge(
-        self, power: int, *, timed_discharge_hold: bool = False
+        self,
+        power: int,
+        *,
+        timed_discharge_hold: bool = False,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Start (or update the setpoint of) periodic SunSpec-Modus grid-charge
         writes (Register 40049/40051).
@@ -3372,7 +3383,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # kurzzeitig auseinanderlaufen (REQ-GRID-SERVING-CHARGE).
             try:
                 await self._async_write_sun_charge_setpoint(
-                    power, timed_discharge_hold=timed_discharge_hold
+                    power, timed_discharge_hold=timed_discharge_hold, data=data
                 )
             except HomeAssistantError:
                 self._clear_sun_charge_active_flags()
@@ -3392,7 +3403,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # hat. Nicht bis zum nächsten periodischen Refresh warten.
             try:
                 await self._async_write_sun_charge_setpoint(
-                    power, timed_discharge_hold=timed_discharge_hold
+                    power, timed_discharge_hold=timed_discharge_hold, data=data
                 )
             except HomeAssistantError:
                 # Nach einer unvollständigen Sofortänderung darf der
@@ -4553,7 +4564,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._max_soc_recharge_confirm_cycles = 0
             manual_charge_active_now = self._grid_charge_power is not None
             if manual_charge_active_now:
-                await self.async_start_sun_charge(self._grid_charge_power)
+                await self.async_start_sun_charge(self._grid_charge_power, data=data)
                 grid_serving_active_now = False
             elif timed_should_charge or price_should_charge:
                 # MIN_SETPOINT_POWER sättigt in _watts_to_ic_setpoint_raw
@@ -4564,11 +4575,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # price_should_charge sind hier bereits gegenseitig
                 # ausschließend (price_should_charge schließt
                 # timed_should_charge aus), Reihenfolge daher unerheblich.
-                await self.async_start_sun_charge(MIN_SETPOINT_POWER)
+                await self.async_start_sun_charge(MIN_SETPOINT_POWER, data=data)
                 grid_serving_active_now = False
             elif timed_hold_active:
                 await self.async_start_sun_charge(
-                    self._timed_discharge_pv_setpoint(), timed_discharge_hold=True
+                    self._timed_discharge_pv_setpoint(),
+                    timed_discharge_hold=True,
+                    data=data,
                 )
                 grid_serving_active_now = False
             elif grid_serving_eligible:

@@ -654,6 +654,7 @@ class SaxPricePlanner:
         self._shutdown = False
         self._cycle_store = PricePlanCycleStore(hass, coordinator.entry_id)
         self._cycle_state: PricePlanCycleState | None = None
+        self._remaining_budget_hours: float | None = None
         # Direkt instanziierte Coordinatoren in Unit-Tests laden bewusst
         # keinen Store. Sie dürfen rechnen, aber dabei keine neue Datei
         # anlegen; im regulären Setup öffnet async_load_cycle_state diese
@@ -934,6 +935,9 @@ class SaxPricePlanner:
                 smart_inputs=smart_inputs,
             )
         )
+        # REQ-DYNAMIC-PRICE-CHARGE: Sensor attributes describe this plan;
+        # reading them between evaluations must not consume more budget.
+        self._remaining_budget_hours = available_hours
         return plan
 
     def _active_cycle(
@@ -1026,18 +1030,6 @@ class SaxPricePlanner:
         """Zusatzattribute für den Status-Sensor (Nachvollziehbarkeit)."""
         plan = self.plan
         cycle = self._cycle_state
-        consumed_seconds = (
-            0.0
-            if cycle is None
-            else _interval_seconds(
-                PricePlanInterval(
-                    interval.start,
-                    min(interval.end, _instant(dt_util.now())),
-                )
-                for interval in cycle.intervals
-                if interval.start < _instant(dt_util.now())
-            )
-        )
         return {
             "strategie": self.coordinator.price_charge_strategy,
             "aktueller_preis": (
@@ -1063,11 +1055,8 @@ class SaxPricePlanner:
             "planungszyklus_ende": None if cycle is None else cycle.end.isoformat(),
             "verbleibendes_zeitbudget_stunden": (
                 None
-                if cycle is None
-                else round(
-                    max(0.0, cycle.budget_seconds - consumed_seconds) / 3600,
-                    3,
-                )
+                if cycle is None or self._remaining_budget_hours is None
+                else round(self._remaining_budget_hours, 3)
             ),
             "geplante_fenster": [slot.as_dict() for slot in plan.slots],
         }

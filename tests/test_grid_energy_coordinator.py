@@ -256,7 +256,6 @@ async def test_wire_decoding_and_poll_failure_recovery(
     with patch(_CLOCK, return_value=2):
         data = await coordinator._async_update_data()
     assert data["energy_exported_to_grid"] == 0.001
-    original_segment = data["grid_energy_attributes"]["co2saver_segment_id"]
     fail = True
     coordinator._basic_last_read = None
     with patch(_CLOCK, return_value=4):
@@ -271,7 +270,6 @@ async def test_wire_decoding_and_poll_failure_recovery(
     with patch(_CLOCK, return_value=6):
         data = await coordinator._async_update_data()
     assert data["energy_exported_to_grid"] == 0.001
-    assert data["grid_energy_attributes"]["co2saver_segment_id"] != original_segment
     with patch(_CLOCK, return_value=8):
         data = await coordinator._async_update_data()
     assert data["energy_exported_to_grid"] == 0.002

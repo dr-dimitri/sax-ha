@@ -836,30 +836,6 @@ Die Zählerstände und der Beginn bleiben über Neustarts erhalten; Zeiträume
 mit ausgeschaltetem Home Assistant werden nicht gezählt. Bereits vor dem
 Zählbeginn bezogene oder eingespeiste Energie wird nicht rekonstruiert.
 
-### CO2 Saver anbinden
-
-In CO2 Saver bei der Einrichtung ausdrücklich den **Schätzmodus** wählen.
-Als **Netzbezug** den SAX-Sensor **Netzbezug gesamt** auswählen, als
-**Netzeinspeisung** den Sensor **Netzeinspeisung gesamt**. Der Sensor
-**Geladene Energie aus dem Netz** beschreibt ausschließlich Batterieladung
-und eignet sich nicht für diese Netzbezugsrolle.
-
-Hierfür wird eine CO2-Saver-Version mit dem optionalen Schätzmodus aus
-[Issue #36](https://github.com/dr-dimitri/co2-saver/issues/36) benötigt.
-SAX meldet den Zeitpunkt seiner letzten frischen Leistungsbeobachtung,
-deren Gültigkeit und einen Wechsel des Messabschnitts bei Ausfällen oder
-Neustarts. CO2 Saver beginnt nach solchen Wechseln mit einem neuen
-Ausgangswert; fehlende Zeiträume werden nicht nachgeholt.
-
-Die berechnete Energie und die daraus abgeleiteten CO₂-Ergebnisse sind
-**Schätzungen**. Die SAX-Netzzähler erfüllen nicht den strikten Vertrag
-für gemeinsam physisch erfasste Energiezähler. Zusätzlich benötigt CO2
-Saver die zur gewählten Topologie passenden Verbrauchs-, gegebenenfalls
-PV- und Speicherquellen. Diese werden durch die zwei Netzzähler nicht
-ersetzt. Bestehende strikt bilanzierte CO2-Saver-Einträge werden nicht
-nachträglich in Schätzungen umgewandelt; dafür einen eigenen Eintrag
-anlegen.
-
 ## Aktionen für Automationen
 
 Alle Aktionen werden unter **Entwicklertools → Aktionen** ausgeführt und über

@@ -299,33 +299,6 @@ unvollständigen Daten über eine möglicherweise noch lesbare Netz-Historie
 schreiben; numerische Batterie-Altzustände dürfen weiterhin angezeigt
 werden.
 
-### CO2-Saver-Schätzquelle (REQ-CO2SAVER-ESTIMATED-INPUT)
-
-Die Netzzähler behalten ihre bestehende 1-Wh-Auflösung bei. Ein nachträglicher
-Wechsel auf ungerundete Werte könnte nach einem aufgerundeten Altstand einen
-falschen Zählerreset erzeugen. Ihre gemeinsamen Attribute enthalten zusätzlich
-`co2saver_source_type: power_integration`,
-`co2saver_sample_time`, `co2saver_segment_id` und `co2saver_sample_valid`.
-`sample_time` ist die UTC-Zeit der Software-Beobachtung eines frischen
-HIGH-Messpunkts, auch bei Nullleistung. Cache-Refreshes erneuern sie nicht.
-Sie ist ausdrücklich kein garantiertes physisches Energieperiodenende;
-das Attribut `co2saver_period_end` wird nicht erzeugt.
-
-Ein UUID-basierter Messabschnitt bleibt bei gültigen Messungen stabil.
-Ausfälle, ungültige/veraltete Daten, zu lange Intervalle und rückläufige
-UTC-Zeit beginnen einen neuen Abschnitt. Während eines Ausfalls gilt
-`sample_valid: false` mit leerer Messzeit. Die nächste frische Baseline
-wird gültig, erzeugt aber keinen Zuwachs für die verlorene Zeit. Auch
-Neustart und Reload erzeugen eine neue Kennung, während die kWh-Summen
-und der ursprüngliche Zählbeginn erhalten bleiben. Ein Empfänger kann
-dadurch Lücken erkennen, die zwischen seinen eigenen Polls lagen.
-
-Die drei veränderlichen Metadaten sind ausschließlich live relevant und
-über `_unrecorded_attributes` von Recorder-Attributen ausgeschlossen.
-CO2 Saver persistiert seine zuletzt akzeptierte Quellkennung separat und
-verwirft bei einem Wechsel das übergreifende Delta. Die Nutzung erfordert
-den bewusst aktivierten Schätzmodus aus CO2 Saver Issue #36.
-
 ### Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING)
 
 Läuft in `SaxPowerCoordinator._accumulate_economics`, aufgerufen am Ende von

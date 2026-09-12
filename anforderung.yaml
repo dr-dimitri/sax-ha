@@ -2450,6 +2450,16 @@ requirement_vue_entity_binding:
     Hinweis und meldet nach Wiederverbindung Metadaten erneut an. Mount,
     Navigation, Metadatenaktualisierung und Wiederverbindung schreiben nichts.
 
+    Alle Schalter zeigen ihren bestätigten Ein-/Aus-Zustand ausschließlich
+    durch das Kontrollkästchen. Die zusätzliche Wertzeile einschließlich
+    Bestätigter Wert: beziehungsweise Confirmed value: entfällt in allen
+    Ansichten. Status- und Fehlerhinweise bleiben sichtbar und über
+    aria-describedby zugänglich; es gibt keine Verweise auf entfernte
+    Wertzeilen. Alle sichtbaren Kontrollkästchen messen einheitlich 22 mal
+    22 Pixel wie die Monatsauswahl, innerhalb einer mindestens 44 mal
+    44 Pixel großen, per Label zugeordneten Klickfläche. Bestätigungsdialoge,
+    Tastaturbedienung und HA-Serviceaufrufe bleiben erhalten.
+
     Einzelbedienkomponenten für switch, number, time und select rufen
     ausschließlich bestehende HA-Services auf: turn_on/turn_off, set_value
     und select_option mit der tatsächlichen Entity-ID. Schalter verwenden
@@ -2502,6 +2512,12 @@ requirement_vue_entity_binding:
        ungültige Eingaben und fehlende Berechtigungen erzeugen keine Schreibaktion."
     - "Servicefehler, doppelte Bedienung und verzögerte Zustandsbestätigung
        sind getestet; ausstehende Aktionen werden gemeinsam gesperrt."
+    - "Alle Schalter zeigen auf Deutsch und Englisch keine zusätzliche
+       Ein-/Aus-Wertzeile. Ihre Haken folgen bestätigten HA-Zuständen;
+       ausstehende Aktionen, Fehler und Nichtverfügbarkeit bleiben zugänglich."
+    - "Browserprüfungen messen alle Kontrollkästchen mit 22 mal 22 Pixel
+       und ihre Klickflächen mit mindestens 44 mal 44 Pixel auf Smartphone
+       und Desktop, in hellen und dunklen Themes."
     - "tests/test_control_response.py und tests/test_vue_dashboard_e2e.py
        prüfen Software-Entity- und Software-Serviceantworten samt HA-Zustand
        bei blockierter Geräteauswertung. Folgeänderungen gehen nicht verloren;
@@ -2609,7 +2625,7 @@ requirement_vue_charging:
     vorhandenen Texten. Die aktuelle Obergrenze des Netzladeziels wird
     aus dem max-Attribut der zugehörigen Number-Entity übernommen.
 
-    Die Bedienzeilen im Tab Zeitvariabler Tarif lassen den Präfix
+    Die Zahlen-Bedienzeilen im Tab Zeitvariabler Tarif lassen den Präfix
     Bestätigter Wert: beziehungsweise Confirmed value: weg. Der von HA
     bestätigte Wert bleibt auch während eines lokalen Zahlenentwurfs und
     einer ausstehenden Übernahme sichtbar und zugänglich. Die gemeinsame
@@ -2794,9 +2810,10 @@ requirement_vue_dynamic_charging:
     Hauptschalter, Strategie, Preisgrenzen, Anzahl Stunden und Max-SOC
     bestätigen die Softwarekonfiguration ohne Warten auf Modbus gemäß
     REQ-VUE-ENTITY-BINDING. In diesem Tab entfällt der Präfix Bestätigter Wert:
-    beziehungsweise Confirmed value: bei allen Bedienzeilen. Die bestätigten
-    Werte bleiben während lokaler Entwürfe und ausstehender Aktionen sichtbar
-    und zugänglich; die allgemeine Ansicht behält ihre Beschriftung.
+    beziehungsweise Confirmed value: bei Zahlen und Auswahllisten.
+    Die bestätigten Werte bleiben während lokaler Entwürfe und ausstehender Aktionen sichtbar
+    und zugänglich; die allgemeine Ansicht behält ihre Zahlenbeschriftung.
+    Schalter zeigen ihren Zustand gemäß REQ-VUE-ENTITY-BINDING am Haken.
 
     number.max_soc bezeichnet denselben globalen Wert wie in der allgemeinen
     Vue-Ansicht und in den HA-Entitäten. Bestätigte Werte, ausstehende Bedienaktionen

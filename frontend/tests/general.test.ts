@@ -509,29 +509,13 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
   });
 
   it.each([
-    [
-      "de",
-      "on",
-      "Speicher ausschalten?",
-      "Ausschalten",
-      "turn_off",
-      "Ein",
-      "Aus",
-    ],
-    [
-      "de",
-      "off",
-      "Speicher einschalten?",
-      "Einschalten",
-      "turn_on",
-      "Aus",
-      "Ein",
-    ],
-    ["en", "on", "Turn off the battery?", "Turn off", "turn_off", "On", "Off"],
-    ["en", "off", "Turn on the battery?", "Turn on", "turn_on", "Off", "On"],
+    ["de", "on", "Speicher ausschalten?", "Ausschalten", "turn_off"],
+    ["de", "off", "Speicher einschalten?", "Einschalten", "turn_on"],
+    ["en", "on", "Turn off the battery?", "Turn off", "turn_off"],
+    ["en", "off", "Turn on the battery?", "Turn on", "turn_on"],
   ] as const)(
     "confirms the %s storage action from %s exactly once and waits for HA state",
-    async (language, initial, title, action, service, before, after) => {
+    async (language, initial, title, action, service) => {
       const { root, callService, update } = await mount({
         keys: ["storage_switch"],
         language,
@@ -544,11 +528,12 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
         }),
       );
       const input = switchInput(root);
-      const confirmed = root.querySelector(".entity-control__value")!;
+      const feedback = root.querySelector(".entity-control__feedback")!;
       const dialog = await requestSwitch(root);
       expect(dialog.textContent).toContain(title);
       expect(input.checked).toBe(initial === "on");
-      expect(confirmed.textContent).toContain(before);
+      expect(root.querySelector(".entity-control__value")).toBeNull();
+      expect(input.getAttribute("aria-describedby")).toBe(feedback.id);
       expect(callService).not.toHaveBeenCalled();
       const confirm = dialogButton(dialog, action);
       confirm.click();
@@ -564,13 +549,18 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
       );
       expect(input.disabled).toBe(true);
       expect(input.checked).toBe(initial === "on");
+      expect(feedback.querySelector('[role="status"]')?.textContent).toBe(
+        language === "de"
+          ? "Änderung wird an Home Assistant gesendet …"
+          : "Sending change to Home Assistant …",
+      );
       finish();
       await flush();
       expect(input.checked).toBe(initial === "on");
-      expect(confirmed.textContent).toContain(before);
+      expect(root.querySelector(".entity-control__value")).toBeNull();
       await update("storage_switch", initial === "on" ? "off" : "on");
       expect(input.checked).toBe(initial !== "on");
-      expect(confirmed.textContent).toContain(after);
+      expect(root.querySelector(".entity-control__value")).toBeNull();
     },
   );
 

@@ -142,6 +142,31 @@ afterEach(() => {
 
 describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   it.each(["de", "en-GB"])(
+    "omits confirmed values for every switch across all views with valid feedback descriptions (%s)",
+    async (language) => {
+      const { root } = await mount(
+        [GeneralView, TimedChargingView, DynamicChargingView, GridServingView],
+        { language },
+      );
+      const switches = root.querySelectorAll<HTMLInputElement>(
+        'input[role="switch"]',
+      );
+      expect(switches.length).toBeGreaterThan(24);
+      for (const field of switches) {
+        const control = field.closest(".entity-control")!;
+        expect(control.querySelector(".entity-control__value")).toBeNull();
+        expect(
+          control.querySelector(".entity-control__description")?.children
+            .length ?? 1,
+        ).toBe(1);
+        expect(field.getAttribute("aria-describedby")).toBe(
+          control.querySelector(".entity-control__feedback")!.id,
+        );
+      }
+    },
+  );
+
+  it.each(["de", "en-GB"])(
     "omits the confirmed-value label only in both tariff views (%s)",
     async (language) => {
       const { root } = await mount(
@@ -325,7 +350,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
         root.querySelector(
           ":scope .charging-view > .entity-control .entity-control__value",
         ),
-      ).not.toBeNull();
+      ).toBeNull();
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-09-30T21:59:59Z"));
       const september = form(root, "September").querySelector("input")!;

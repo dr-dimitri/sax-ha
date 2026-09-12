@@ -200,7 +200,6 @@ const readOnlyMonths = computed(() =>
                 domain="switch"
                 :entity-key="month.key"
                 month-tile
-                hide-confirmed-value
               />
               <div v-else class="month-selection__missing">
                 <label class="month-selection__missing-target">
@@ -371,7 +370,6 @@ const readOnlyMonths = computed(() =>
   text-align: center;
   overflow-wrap: anywhere;
 }
-.month-selection .entity-control input[type="checkbox"],
 .month-selection__missing input[type="checkbox"] {
   flex-shrink: 0;
   width: 22px;

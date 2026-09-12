@@ -59,9 +59,12 @@ Implementierungsgrenzen und Ablauf stehen in `REQ-VUE-ENTITY-BINDING` und
 [DEVELOPMENT.md](../DEVELOPMENT.md).
 
 In den beiden Tarif-Tabs entfällt „Bestätigter Wert:“ (EN: „Confirmed value:“)
-vor den bestätigten Bedienwerten. Die Werte bleiben auch beim Bearbeiten und
+vor den bestätigten Zahlen- und Auswahlwerten. Die Werte bleiben auch beim Bearbeiten und
 bis zur HA-Bestätigung sichtbar und zugänglich. Die gemeinsame Zeitfenster-Zeile
-„Bestätigt:“ sowie die Beschriftungen anderer Ansichten bleiben erhalten.
+„Bestätigt:“ sowie Zahlen- und Auswahlbeschriftungen anderer Ansichten bleiben
+erhalten. Alle Schalter zeigen ausschließlich ihre 22 × 22 px großen Haken
+ohne zusätzliche Wertzeile; zugeordnete Labels bieten mindestens 44 × 44 px
+Klickfläche. Status und Fehler bleiben sichtbar und zugänglich.
 
 | Funktion | Verhalten | Automatisierte Prüfung |
 | --- | --- | --- |
@@ -74,7 +77,7 @@ bis zur HA-Bestätigung sichtbar und zugänglich. Die gemeinsame Zeitfenster-Zei
 | Auswahlfelder | `select.select_option`; erlaubte Werte aus `options`, Beschriftung aus den übersetzten Enum-Metadaten. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Bestätigung und Fehler | Ein laufender Aufruf sperrt alle Bedienelemente derselben Entität; eine gemeinsame Zeitfensteraktion sperrt beide Grenzen. Serviceantworten ersetzen keinen HA-Zustand. Fehler werden angezeigt; es gibt keinen automatischen erneuten Schreibversuch. | [Controls][control-tests], [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
 | Softwarekonfiguration | HA bestätigt angenommene Einstellungen unabhängig von Control-Lock und Modbus; Geräteaktivität erfordert weiterhin die quittierte Steuersequenz. | [Konfigurationsantworten][control-response-tests], [HA-E2E][ha-e2e-tests] |
-| Beschriftung der Tarifwerte | Beide Tarif-Tabs zeigen bestätigte Werte ohne „Bestätigter Wert:“/„Confirmed value:“; lokale Entwürfe ersetzen diese nicht. Gemeinsame Zeitfenster-Bestätigung und andere Ansichten bleiben erhalten. | [Controls][control-tests], [Ladeansichten][charging-tests] |
+| Beschriftung der Tarifwerte | Beide Tarif-Tabs zeigen bestätigte Zahlen- und Auswahlwerte ohne „Bestätigter Wert:“/„Confirmed value:“; lokale Entwürfe ersetzen diese nicht. Gemeinsame Zeitfenster-Bestätigung und Zahlen-/Auswahlbeschriftungen anderer Ansichten bleiben erhalten. Schalter verwenden in allen Ansichten Haken ohne Wertzeile. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Verbindung und Navigation | Ein gemeinsames Metadatenabo, Aufräumen bei Unmount, erneutes Abonnieren nach Reconnect, kein Schreiben bei Mount, Tabwechsel oder Reconnect. | [Panel][panel-tests], [HA-Kontext][ha-tests], [Browser][browser-tests] |
 
 Die bestätigten Hauptschalter `timed_charge_enabled` und
@@ -473,16 +476,15 @@ bereitgehaltene Snapshot-Veröffentlichung. Weitere Paketnachweise sind mit
 Commit und Prüfsummen in [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
 zugeordnet.
 
-### Screenshots vor der Zeitfenster- und Monatsauswahl-Umstellung
+### Aktuelle Dashboard-Screenshots
 
-Die 14 Bilder stammen aus dem Browserbericht von
-[CI-Lauf 34688788120](https://github.com/dr-dimitri/sax-ha/actions/runs/34688788120)
-vom 12.09.2026. Sie zeigen das einzige Dashboard **SAX Power** ohne
-Vue-/Vorschaukennzeichnung oder Einstieg zum alten Dashboard, die verdichteten
-Monatsraster mit 22-px-Kästchen und die Schalterbestätigung. Die Umgebung mit
-simulierten HA-Daten ist ausdrücklich als Testansicht gekennzeichnet.
-Die neuen gemeinsamen Zeitfenster mit verschiebbaren Marken und die
-aufklappbare Monatsauswahl mit Quartalsgruppen sind darin noch nicht enthalten.
+Die 14 Bilder wurden am 12.09.2026 mit Chromium aus dem lokal gebauten
+Produktionsbundle und der Browser-Fixture mit simulierten HA-Daten aufgenommen.
+Sie zeigen die gemeinsamen Zeitfenster mit verschiebbaren Marken,
+die aufgeklappte Monatsauswahl in Quartalsgruppen und die Speicherbestätigung.
+Alle Haken messen einheitlich 22 × 22 px und kommen ohne zusätzliche
+Ein-/Aus-Wertzeile aus. Die Hilfsleiste der Testumgebung ist für die
+Dokumentationsbilder ausgeblendet; die README kennzeichnet die Beispieldaten.
 
 | Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
 | --- | --- | --- |

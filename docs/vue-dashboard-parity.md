@@ -24,7 +24,7 @@ Die Navigation verwendet folgende Reihenfolge und Namen:
 | Zeitvariabler Tarif | Time-of-use tariff | `ladeautomatik` |
 | Dynamischer Tarif | Dynamic tariff | `dynamisches-laden` |
 | Netzdienliches Laden | Grid-serving charging | `netzdienliches-laden` |
-| Ersparnis | Savings | `ersparnis` |
+| Amortisation | Amortization | `ersparnis` |
 
 Die folgenden Schlüssel sind **Entity-Domain und Registry-Suffix**, keine
 fest programmierten Entity-IDs. Die tatsächliche ID wird aus dem SAX-Config-Entry
@@ -41,7 +41,7 @@ Bedienflächen. Die sichtbare native Checkbox misst nur 22 × 22 px; ihr
 zugeordnetes Label macht auch den umgebenden Bereich anklickbar. Bei sehr
 geringer Breite bleibt eine Spalte. Die Reihenfolge
 Januar bis Dezember bleibt im DOM und bei Tastaturbedienung unverändert. Die Geräteübersicht ordnet Skalen
-und Leistung links neben den Gerätedaten an. Ersparnis gruppiert Amortisation
+und Leistung links neben den Gerätedaten an. Amortisation gruppiert Fortschritt
 und Kalenderwerte neben dem Tarif; die freie Auswertung nutzt die volle Breite.
 Die Darstellung passt sich der verfügbaren Breite an. Beschriftungen und Werte
 werden nicht abgeschnitten, die Bedienflächen von Eingaben und Schaltflächen
@@ -60,10 +60,18 @@ Gerätezustände folgen weiterhin der quittierten Steuersequenz.
 | Fehlende Werte | Fehlende Metadaten lassen Zeilen und leere Karten entfallen. Registrierte `unknown`-/`unavailable`-Zustände bleiben erkennbar; es entsteht keine Ersatz-Null. | [Controls][control-tests], alle View-Tests |
 | Schalter | `switch.turn_on`/`turn_off` senden den ausdrücklich gewählten Zustand an die aufgelöste ID. | [HA-Kontext][ha-tests], [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Zahlen | `number.set_value`; endlicher Wert innerhalb der aktuellen Attribute `min`, `max`, `step`. Eingabe bleibt bis zur Übernahme lokal. | [Controls][control-tests], [Ladeansichten][charging-tests] |
-| Uhrzeiten | Gültiges `HH:MM[:SS]`, ohne eigene Zeitplanberechnung. Beide produktiven Zeitfenster übernehmen ihr vollständiges Paar über `sax_power.set_timed_charge_window` beziehungsweise `sax_power.set_grid_serving_window`; die allgemeine Einzelzeit-Komponente verwendet weiterhin `time.set_value`. | [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
+| Uhrzeiten | Eingabe `HH:MM` mit `step=60`, explizite Übernahme als `HH:MM:00`, ohne eigene Zeitplanberechnung. Beide produktiven Zeitfenster übernehmen ihr vollständiges Paar über `sax_power.set_timed_charge_window` beziehungsweise `sax_power.set_grid_serving_window`; die allgemeine Einzelzeit-Komponente verwendet weiterhin `time.set_value`. | [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
 | Auswahlfelder | `select.select_option`; erlaubte Werte aus `options`, Beschriftung aus den übersetzten Enum-Metadaten. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Bestätigung und Fehler | Ein laufender Aufruf sperrt alle Bedienelemente derselben Entität; eine gemeinsame Zeitfensteraktion sperrt beide Grenzen. Serviceantworten ersetzen keinen HA-Zustand. Fehler werden angezeigt; es gibt keinen automatischen erneuten Schreibversuch. | [Controls][control-tests], [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
 | Verbindung und Navigation | Ein gemeinsames Metadatenabo, Aufräumen bei Unmount, erneutes Abonnieren nach Reconnect, kein Schreiben bei Mount, Tabwechsel oder Reconnect. | [Panel][panel-tests], [HA-Kontext][ha-tests], [Browser][browser-tests] |
+
+Die bestätigten Hauptschalter `timed_charge_enabled` und
+`price_charge_enabled` steuern die Tarifnavigation: `on/off` zeigt nur
+Zeitvariabler Tarif, `off/on` nur Dynamischer Tarif und `off/off` beide.
+Fehlende, unbekannte, nicht verfügbare oder widersprüchlich beide aktive
+Schalter erhalten beide Zugänge. Verborgene Routen werden ohne Serviceaufruf
+zum sichtbaren Tarif ersetzt; dies gilt auch für Benutzer mit reinen
+Leserechten. [Paneltests](../frontend/tests/panel.test.ts) prüfen die Zustände und Navigation.
 
 ## Allgemeine Informationen
 
@@ -78,7 +86,7 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Leistung | `number.max_soc`, `sensor.charge_power`, `sensor.discharge_power`, `sensor.smartmeter_power` | Globaler Max-SOC mit HA-Grenzen; Leistungswerte mit ihren Einheiten. Label für `smartmeter_power`: Netzleistung. | [Allgemein][general-tests], [Ladeansichten][charging-tests]: gemeinsamer Max-SOC |
 | Gerät, erste Zeilen | `sensor.energy_charged`, `sensor.energy_discharged` | Vorhandene Energiezähler und ihre Einheiten; keine Frontend-Akkumulation und keine eigene Energie-Karte. | [Allgemein][general-tests]: Anordnung und fehlende optionale Zeilen |
 | Gerät | `sensor.sun_version_master`, `sensor.sun_version_gateway`, `sensor.sun_serial_number` | Optionale SunSpec-Daten; fehlende Zeilen und leere Karte werden ausgelassen. | [Allgemein][general-tests]: optionale Geräteinformationen |
-| Gerät, Fortsetzung | `sensor.storage_event_text`, `sensor.ic_control_mode_text`, `binary_sensor.cell_calibration_active`, `sensor.next_cell_calibration` | HA-Zustände/Enum-Texte, Steuermodus, Kalibrierstatus und lokalisierter Zeitpunkt. Hersteller, Modell und entfernte Statuskarten werden nicht wieder eingeführt. | [Allgemein][general-tests]: vollständige Reihenfolge, Live-Werte und Zeitformat |
+| Gerät, Fortsetzung | `sensor.storage_event_text`, `sensor.ic_control_mode_text`, `binary_sensor.cell_calibration_active`, `sensor.next_cell_calibration` | HA-Zustände/Enum-Texte, Steuermodus, Kalibrierstatus und lokalisiertes Datum ohne Uhrzeit. Hersteller, Modell und entfernte Statuskarten werden nicht wieder eingeführt. | [Allgemein][general-tests]: vollständige Reihenfolge, Live-Werte und Zeitformat |
 | Gerät, letzte Zeile | `switch.storage_switch` | Übersetzungsschlüssel `storage`; Bestätigungsdialog vor EIN und AUS. Abbrechen/Escape sowie Änderungen von Zustand, ID, Bedienrecht oder Verbindung verwerfen die Auswahl ohne Schreiben; Bestätigung sendet genau einen vorhandenen HA-Service. | [Allgemein][general-tests], [Controls][control-tests], [Browser][browser-tests] |
 
 ## Zeitvariabler Tarif
@@ -88,7 +96,7 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
 | --- | --- | --- | --- |
 | Hauptschalter | `switch.timed_charge_enabled` | Übersetzter Name „Netzladung aktiv“. | [Ladeansichten][charging-tests]: vollständige Reihenfolge |
-| Zeitfenster | `time.timed_charge_start`, `time.timed_charge_end` | Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, genaue Sekundenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
+| Zeitfenster | `time.timed_charge_start`, `time.timed_charge_end` | Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, Minutenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
 | Direkt danach: Entladestatus | `sensor.timed_charge_discharge_status` | `normal` → Normalbetrieb, `discharge_blocked` → Entladung wg. Netzladen gestoppt, `grid_charging` → Netzladen. | [Ladeansichten][charging-tests]: alle drei Live-Statuswechsel |
 | Einstellungen | `number.timed_charge_max_soc`, danach `number.timed_charge_min_soc` | Netzladeziel und Startschwelle. Die Obergrenze des Ziels folgt dessen HA-`max`-Attribut; kein zusätzlicher globaler Max-SOC in diesem Tab. | [Ladeansichten][charging-tests]: geänderte Grenze, ungültiger und gültiger Zielwert |
 | Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Januar bis Dezember mit Namen aus Metadaten. Keine zusätzliche Zeile „Bestätigter Wert“; Kontrollkästchen zeigen den bestätigten HA-Zustand, Fehler und Nichtverfügbarkeit bleiben sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, HA-bestätigte Monatsänderung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
@@ -127,7 +135,7 @@ bleibt die fachliche Implementierung. Diese Ansicht enthält keine Monatsschalte
 | Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
 | --- | --- | --- | --- |
 | Hauptschalter | `switch.grid_serving_enabled` | „Netzdienliches Laden aktiv“. | [Ladeansichten][charging-tests] |
-| Ladepause, Beginn/Ende | `time.grid_serving_start`, `time.grid_serving_end` | Dieselbe Zeitfenster-Komponente mit verschiebbaren Start-/Endmarken, Sekundenfeldern und gemeinsamer Übernahme innerhalb der Karte Ladepause. Die bestätigte Zeitspanne zeigt auf Deutsch ebenfalls „ Uhr“. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
+| Ladepause, Beginn/Ende | `time.grid_serving_start`, `time.grid_serving_end` | Dieselbe Zeitfenster-Komponente mit verschiebbaren Start-/Endmarken, Minutenfeldern und gemeinsamer Übernahme innerhalb der Karte Ladepause. Die bestätigte Zeitspanne zeigt auf Deutsch ebenfalls „ Uhr“. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
 | Ladepause, Prognose | `sensor.grid_serving_forecast` | Dynamischer `friendly_name` mit Tagesbezug und Einheit kWh; keine Berechnung in Vue. | [Ladeansichten][charging-tests]: Namenswechsel und nicht verfügbare Prognose |
 | Ladepause, Schwelle | `number.grid_serving_forecast_threshold` | „Mindest PV-Prognose“ mit HA-`min`/`max`/`step` und kWh. | [Ladeansichten][charging-tests], [Controls][control-tests] |
 | Ladepause, Status | `sensor.grid_serving_pause_status` | Bestehender HA-Statustext. | [Ladeansichten][charging-tests]: Live-Status |
@@ -141,8 +149,10 @@ Max-SOC-Regler. Die Pausenentscheidung bleibt bei `REQ-GRID-SERVING-CHARGE`.
 `TimeWindowControl.vue` ersetzt die getrennten Zeitfelder genau dieser beiden
 produktiven Paare. Start und Ende bilden einen lokalen Entwurf. Die beiden
 Marken auf einer 24-Stunden-Leiste lassen sich mit Maus, Touch und Tastatur
-verschieben; Ziehen verwendet ein Minutenraster. Die genauen Eingabefelder
-erlauben weiterhin Sekunden. Tagesfenster bilden einen Abschnitt, Fenster
+verschieben; Ziehen, Tastatur und Eingaben verwenden Minuten (HH:MM,
+`step=60`, maximal 23:59). Alte Sekunden bleiben bis zur ersten Bearbeitung
+in Bestätigung, Dauer und Fläche erhalten, ohne automatischen Schreibzugriff.
+Nach einer Bearbeitung übernimmt der Service beide Grenzen als HH:MM:00. Tagesfenster bilden einen Abschnitt, Fenster
 über Mitternacht zwei Abschnitte. Gleiche Grenzen bedeuten **leer**, nicht
 ganztägig; beide Marken bleiben einzeln erreichbar.
 
@@ -169,12 +179,12 @@ Schreibversuch aus.
 | --- | --- |
 | Zeitvariabler Tarif: `timed_charge_start` / `timed_charge_end` | Gemeinsame Leiste und atomare Übernahme über `set_timed_charge_window`. |
 | Netzdienliche Ladepause: `grid_serving_start` / `grid_serving_end` | Dieselbe Komponente, Übernahme über `set_grid_serving_window`. |
-| Dynamischer Tarif: geplanter nächster Start; Ersparnis: Tarifzeitfenster | Nur Anzeigen aus HA; keine editierbaren Zeitpaare. |
-| Ersparnis: Anfangs- und Enddatum | Recorder-Datumsfilter, weiterhin Datumseingaben. |
+| Dynamischer Tarif: geplanter nächster Start; Amortisation: Tarifzeitfenster | Nur Anzeigen aus HA; keine editierbaren Zeitpaare. |
+| Amortisation: Anfangs- und Enddatum | Recorder-Datumsfilter, weiterhin Datumseingaben. |
 | Bis zu acht TOU-Fenster im HA-Optionsflow | Außerhalb des Vue-Panels; keine Umstellung. |
 | Einzelzeit in der Controls-Entwicklungsvorschau | Komponentendemonstration, kein weiteres produktives Zeitfenster. |
 
-Zur Abnahme gehören Tages-, Mitternachts- und leere Fenster, Sekundenwerte,
+Zur Abnahme gehören Tages-, Mitternachts- und leere Fenster, vorhandene Altsekunden ohne Schreibaktion,
 Maus-/Touch-/Tastaturbedienung, Fokus und einzeln erreichbare Marken sowie
 DE/EN und helle/dunkle Themes auf Smartphone und Desktop. Der HA-Kontext muss
 atomare Payloads, gemeinsame Aktionssperren, verzögerte HA-Bestätigung und
@@ -184,7 +194,7 @@ HA-Servicetests prüfen die Rechte beider Grenzen und die bestehende
 und Screenshots belegen diese neue Bedienung noch nicht; der neue
 Abschlussnachweis wird erst nach dem zugehörigen Testlauf ergänzt.
 
-## Ersparnis
+## Amortisation
 
 `SavingsView.vue`, Pfad `ersparnis`, Anforderung `REQ-VUE-SAVINGS`.
 Alle Geldbeträge haben zwei Nachkommastellen, Tarifpreise vier; gerundet wird
@@ -293,6 +303,26 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
+### Minutenfelder, Tarifnavigation und Zellkalibrierung vom 12.09.2026
+
+Die aktuelle Ergänzung bestand lokal mit **278 Frontendtests** und
+**1.801 Python-Tests, zwei erwarteten Hardware-Skips**. TypeScript, Prettier,
+Produktionsbuild samt Modultest, Ruff, Black und Release-Metadaten waren
+erfolgreich. Die lokale Browserprobe am Produktionsbundle prüfte HH:MM ohne
+Sekundenfeld, minutengenaue gemeinsame Übernahme, die 22×22-Pixel-Speichercheckbox
+mit 44×44-Pixel-Klickfläche, das reine Kalibrierungsdatum sowie Tarifwechsel
+und verborgene Direktlinks ohne Serviceaktion. Desktop und eine dunkle
+390-Pixel-Ansicht wurden visuell kontrolliert.
+
+Der unabhängige Review gegen die Anforderungen fand einen zusätzlichen
+PV-Regelpfad, der vor seiner Leistungsentscheidung ebenfalls die Fälligkeit
+aktualisieren muss. Der Fehler wurde behoben und einschließlich Basic-Ausfall
+und Bootstrap durch Regressionstests abgesichert; das erneute Review ergab
+keine offenen materiellen Codebefunde. Die Kalibrierung gilt ab Tagesbeginn
+am dritten HA-lokalen Kalendertag, verwendet keine eigene Netzladung und
+belässt die gespeicherten Benutzergrenzen. Die späteren CI- und Paketnachweise
+zum veröffentlichten Commit stehen in PR #204.
+
 ### Gemeinsame Zeitfenster-Leisten vom 12.09.2026
 
 Die Umstellung beider editierbaren Zeitfenster wurde lokal mit **255
@@ -305,7 +335,8 @@ sekundengenauen Zuständen und Kontrollrechten auf beide Grenzen.
 Die lokale Browserprobe am gebauten Modul prüfte Mausziehen, Pfeiltasten,
 Tagesgrenzen, genaue Zeiteingaben, Servicefehler und erneute Übernahme.
 Desktop sowie dunkle Ansichten mit 390 und 320 Pixeln wurden visuell geprüft.
-Bei 320 Pixeln stehen die vollständigen Sekundenfelder untereinander; die
+Bei 320 Pixeln standen in diesem historischen Stand die vollständigen
+Sekundenfelder untereinander; die
 Skalenbeschriftungen überlappen nicht. Der unabhängige Review führte zu einem
 zusätzlichen Regressionstest für gemeinsam geänderte Registry-Geräte-IDs.
 
@@ -414,7 +445,7 @@ noch nicht enthalten.
 | Zeitvariabler Tarif | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
 | Dynamischer Tarif | [Screenshot](images/vue-dynamisches-laden-desktop-light-de.png) | [Screenshot](images/vue-dynamisches-laden-mobile-dark-en.png) |
 | Netzdienliches Laden | [Screenshot](images/vue-netzdienliches-laden-desktop-light-de.png) | [Screenshot](images/vue-netzdienliches-laden-mobile-dark-en.png) |
-| Ersparnis | [Screenshot](images/vue-ersparnis-desktop-light-de.png) | [Screenshot](images/vue-ersparnis-mobile-dark-en.png) |
+| Amortisation | [Screenshot](images/vue-ersparnis-desktop-light-de.png) | [Screenshot](images/vue-ersparnis-mobile-dark-en.png) |
 
 <details>
 <summary>Alle fünf Desktopansichten anzeigen</summary>

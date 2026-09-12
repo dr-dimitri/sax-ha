@@ -106,6 +106,24 @@ function displayValue(
   if (state.state === "unknown") return text.unknown;
   if (hass?.formatEntityState) return hass.formatEntityState(state);
   if (metadata.states[state.state]) return metadata.states[state.state];
+  if (state.attributes.device_class === "date") {
+    const date = new Date(`${state.state}T00:00:00Z`);
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(state.state) &&
+      !Number.isNaN(date.getTime()) &&
+      date.toISOString().slice(0, 10) === state.state
+    ) {
+      try {
+        return new Intl.DateTimeFormat(
+          hass?.locale?.language ?? hass?.language ?? language,
+          { dateStyle: "medium", timeZone: "UTC" },
+        ).format(date);
+      } catch {
+        return state.state;
+      }
+    }
+    return state.state;
+  }
   if (state.attributes.device_class === "timestamp") {
     const timestamp = new Date(state.state);
     if (!Number.isNaN(timestamp.getTime())) {

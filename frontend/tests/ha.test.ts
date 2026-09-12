@@ -283,6 +283,32 @@ describe("SAX entity binding (REQ-VUE-ENTITY-BINDING)", () => {
     );
   });
 
+  it.each([
+    ["de", "Pacific/Honolulu", "2026-09-15", "15.09.2026"],
+    ["en-US", "Pacific/Kiritimati", "2026-09-15", "Sep 15, 2026"],
+    ["de", "Europe/Berlin", "2026-02-30", "2026-02-30"],
+    ["de", "Europe/Berlin", "not-a-date", "not-a-date"],
+  ])(
+    "formats calendar dates without a timezone shift (%s, %s, %s)",
+    (language, zone, value, expected) => {
+      const item = metadata("sensor");
+      const { dashboard, hass, connection } = setup([item]);
+      hass.value = {
+        ...hass.value!,
+        language,
+        config: { time_zone: zone },
+        states: {
+          [item.entity_id]: state(item, {
+            state: value,
+            attributes: { device_class: "date" },
+          }),
+        },
+      };
+      connection.emit([item]);
+      expect(dashboard.entity("sensor", "target")?.displayValue).toBe(expected);
+    },
+  );
+
   it("waits for late HA/entry configuration without errors or writes", () => {
     const { dashboard, hass, entryId, connection } = setup();
     hass.value = undefined;

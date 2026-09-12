@@ -128,7 +128,9 @@ function example({ domain, key, entity_id }) {
     storage_event_text: "Normalbetrieb",
     ic_control_mode_text: "Normalbetrieb",
     cell_calibration_active: "off",
-    next_cell_calibration: "2026-09-14T05:00:00Z",
+    next_cell_calibration: "2026-09-14",
+    timed_charge_enabled: "off",
+    price_charge_enabled: "off",
     timed_charge_min_soc: "20",
     timed_charge_discharge_status: "normal",
     grid_serving_forecast: "24.3",
@@ -156,8 +158,8 @@ function example({ domain, key, entity_id }) {
     attributes.unit_of_measurement = "kWh";
   if (key === "grid_serving_forecast_threshold")
     attributes = { min: 0, max: 100, step: 0.1, unit_of_measurement: "kWh" };
-  if (["price_charge_next_start", "next_cell_calibration"].includes(key))
-    attributes.device_class = "timestamp";
+  if (key === "next_cell_calibration") attributes.device_class = "date";
+  if (key === "price_charge_next_start") attributes.device_class = "timestamp";
   if (key === "price_charge_current_price")
     attributes.unit_of_measurement = "EUR/kWh";
   if (key === "grid_serving_forecast")
@@ -184,6 +186,28 @@ function example({ domain, key, entity_id }) {
 let states = Object.fromEntries(
   definitions.map((item) => [item.entity_id, example(item)]),
 );
+const tariffModes = {
+  timed: ["on", "off"],
+  dynamic: ["off", "on"],
+  off: ["off", "off"],
+  both: ["on", "on"],
+};
+function setTariffMode(mode) {
+  for (const [index, key] of [
+    "timed_charge_enabled",
+    "price_charge_enabled",
+  ].entries()) {
+    const entityId = `switch.demo_${key}`;
+    states[entityId] = {
+      ...states[entityId],
+      state: tariffModes[mode][index],
+    };
+  }
+  sessionStorage.setItem("sax-demo-tariff", mode);
+}
+const savedTariff = sessionStorage.getItem("sax-demo-tariff");
+if (savedTariff && Object.hasOwn(tariffModes, savedTariff))
+  setTariffMode(savedTariff);
 const connection = {
   get connected() {
     return connected;
@@ -350,5 +374,23 @@ document.querySelector("#unavailable").onclick = () => {
 };
 document.querySelector("#failure").onclick = () => {
   rejectNext = true;
+};
+for (const mode of Object.keys(tariffModes)) {
+  document.querySelector(`#tariff-${mode}`).onclick = () => {
+    setTariffMode(mode);
+    update();
+  };
+}
+document.querySelector("#legacy-times").onclick = () => {
+  for (const kind of ["timed_charge", "grid_serving"]) {
+    for (const [boundary, value] of [
+      ["start", "22:00:17"],
+      ["end", "06:00:29"],
+    ]) {
+      const entityId = `time.demo_${kind}_${boundary}`;
+      states[entityId] = { ...states[entityId], state: value };
+    }
+  }
+  update();
 };
 update();

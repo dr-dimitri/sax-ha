@@ -169,7 +169,7 @@ provide(
   <div class="preview" :class="{ 'preview--dark': dark }">
     <header>
       <p>LOKALE DEMO · BEISPIELDATEN</p>
-      <h1>Ersparnis</h1>
+      <h1>Amortisation</h1>
       <div class="preview-controls">
         <label
           >Sprache

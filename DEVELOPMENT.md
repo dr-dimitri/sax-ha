@@ -127,7 +127,7 @@ keine Vue-/Vorschaukennzeichnung.
 
 Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
 Zeitvariabler Tarif (EN: Time-of-use tariff), Dynamischer Tarif (EN: Dynamic
-tariff), Netzdienliches Laden, Ersparnis. Die Pfade `ladeautomatik` und
+tariff), Netzdienliches Laden, Amortisation. Die Pfade `ladeautomatik` und
 `dynamisches-laden`, Entity-Schlüssel und Tarifkonfiguration bleiben erhalten.
 
 `ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
@@ -189,13 +189,25 @@ Alle Darstellungen einer Entität teilen ausstehende Aktionen und Fehler.
 Ein erfolgreich beantworteter Serviceaufruf verändert den angezeigten Zustand
 erst, wenn HA ihn tatsächlich meldet.
 
+Die Navigation blendet den jeweils anderen Tarif nur aus, wenn
+`timed_charge_enabled`/`price_charge_enabled` bestätigt `on`/`off` oder
+`off`/`on` melden. Bei beiden `off`, beiden `on`, fehlenden, unbekannten
+oder nicht verfügbaren Zuständen bleiben beide Tabs sichtbar. Leserechte
+genügen; Pending-Aktionen ändern die Navigation nicht optimistisch.
+Verborgene Deep Links, HA-Routen und History-Einträge werden per
+`replaceState` zum aktiven Tarif korrigiert, ohne Serviceaktion. Der Tab
+Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
+
 `TimeWindowControl.vue` ersetzt in den Ansichten Zeitvariabler Tarif und
 Netzdienliches Laden die getrennten Zeit-Bedienelemente. Es gibt genau zwei
 bearbeitbare Paare: `time.timed_charge_start`/`time.timed_charge_end` und
 `time.grid_serving_start`/`time.grid_serving_end`. Eine 24-Stunden-Leiste mit
-verschiebbaren Start-/Endmarken und genaue Eingaben mit Sekunden bearbeiten
-dasselbe lokale Entwurfspaar. Das Ziehen verwendet ein Minutenraster;
-die genaue Eingabe erhält Sekunden. Ein Start nach dem Ende erzeugt zwei
+verschiebbaren Start-/Endmarken und Eingaben im Format HH:MM bearbeiten
+dasselbe lokale Entwurfspaar. Eingaben verwenden `step=60`, Ziehen und
+Tastatur ein Minutenraster bis 23:59. Vorhandene Sekunden lösen beim Laden
+keine Änderung aus; bestätigte Spanne, Dauer und Fläche erhalten diese
+Präzision bis zur ersten Bearbeitung. Nach ausdrücklicher Übernahme werden
+beide Grenzen als HH:MM:00 gesendet. Ein Start nach dem Ende erzeugt zwei
 markierte Abschnitte über Mitternacht; identische Grenzen ergeben ein leeres
 Fenster. Die Darstellung berechnet keine Ladeberechtigung.
 
@@ -225,7 +237,7 @@ dunkle HA-Themes sowie mobile Ansichten und zeigen auf Deutsch den
 Uhr-Zusatz nur an der bestätigten Zeitspanne.
 
 Die geplanten Zeiten im dynamischen Tarif und die Tarifplan-Attribute unter
-Ersparnis bleiben reine Anzeigen. Die Recorder-Datumsfilter bleiben
+Amortisation bleiben reine Anzeigen. Die Recorder-Datumsfilter bleiben
 Datumseingaben. Die bis zu acht TOU-Fenster im HA-Optionsflow sind keine
 Zeitfenster-Eingaben dieses Vue-Panels; die separate Controls-Vorschau ist
 ebenfalls keine produktive Ansicht.
@@ -924,7 +936,7 @@ Coordinator über seinen Reset-Lock. Die In-Memory-Umstellung nach einem
 erfolgreichen Store-Reset enthält keinen weiteren `await`, damit kein
 Poll einen alten Coordinator-Stand unter der neuen Generation vormerkt.
 
-### Dashboard-Tab "Ersparnis" (REQ-VUE-SAVINGS)
+### Dashboard-Tab "Amortisation" (REQ-VUE-SAVINGS)
 
 `SavingsView.vue` verwendet `economics_net_savings` für alle Kalender- und
 freien Zeitraumwerte. Amortisation, Kalenderwerte, Tarifinformation, freie
@@ -960,8 +972,16 @@ sun_charge_loop`), der über den SunSpec-Modus schreibt: erst Register 40051
 (Steuermodus) auf Sollwertvorgabe, dann Register 40049 (Leistungsvorgabe %).
 Vor dieser Auswertung ermittelt `application/calibration.py` aus dem realen
 SOC und dem persistenten letzten Vollladezeitpunkt den effektiven Ziel-SOC.
-Bei einem Benutzerwert unter 100 % ist dieser nach sieben Tagen bis zur
-nächsten real gemessenen Volladung 100 %. `infrastructure/calibration_store.py`
+Bei einem Benutzerwert unter 100 % gilt am dritten lokalen Kalendertag
+nach der letzten Volladung ab 00:00 HA-Zeit bis zur nächsten real gemessenen
+Volladung das Ziel 100 %. Die zentrale Ladeauswertung aktualisiert die
+Fälligkeit vor jeder Entscheidung, auch bei Timer- und Serviceaufrufen vor
+dem nächsten Poll. Auch die laufende PV-Regelung prüft vor jedem neuen
+Sollwert. SOC-Fehler, Bootstrap und Shutdown bleiben gesperrt.
+`next_cell_calibration` ist ein nativer DATE-Sensor; sein lokales Datum wird
+im Dashboard ohne Uhrzeit und ohne Browser-Zeitzonenverschiebung angezeigt.
+Der Diagnosewert `next_cell_calibration_at` bleibt der zugehörige UTC-Zeitpunkt.
+`infrastructure/calibration_store.py`
 speichert Zeitstempel und Voll-SOC-Flanke pro Config Entry; `__init__.py` lädt
 sie vor dem ersten Refresh. Die Number-Entity behält stets den konfigurierten
 Wert, während Coordinator und Preisplaner den effektiven Wert verwenden.
@@ -1512,7 +1532,7 @@ neue Freigabe aus (Details: REQ-TIMED-SOC-CHARGE, Issue #167).
 ```
 tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
-├── test_calibration.py           Reine 7-Tage-/Voll-SOC-Policy und versionierte
+├── test_calibration.py           Reine 3-Kalendertage-/Voll-SOC-Policy und versionierte
 │                                  UTC-Persistenz einschließlich ungültiger Daten
 ├── test_charge_soc_availability.py Basic-Ausfall: Writer-Stopp, Timer/Services,
 │                                  SOC-gesteuerte Wiederaufnahme und Verfügbarkeit
@@ -1678,7 +1698,7 @@ tests/
 ├── test_vue_dashboard.py            Panel-Lebenszyklus und Hash-Assets
 ├── test_vue_dashboard_repairs.py    Dashboard-Update und Registrierung über HA-Reparaturen
 ├── test_vue_dashboard_e2e.py        Zwei native HA-Clients gegen lokalen Modbus-Simulator
-├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Ersparnis-Tab: je ein PV-Lade-,
+├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Amortisations-Tab: je ein PV-Lade-,
 │                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
 │                                  Herkunftsaufteilung und die Geldsensoren bis zur
 │                                  Dashboard-Metadatenauflösung

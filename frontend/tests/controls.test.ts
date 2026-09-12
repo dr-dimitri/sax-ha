@@ -45,13 +45,15 @@ async function mount(
     copies?: number;
     missing?: boolean;
     valueOnly?: boolean;
+    entityKey?: string;
+    confirmSwitch?: boolean;
   } = {},
 ) {
   const entityId = `${domain}.renamed_by_user`;
   const metadata: DashboardEntityMetadata = {
     entity_id: entityId,
     domain,
-    key: "example",
+    key: options.entityKey ?? "example",
     name: "Zielwert",
     states: { automatic: "Automatisch", manual: "Manuell" },
     can_control: options.canControl ?? true,
@@ -105,10 +107,14 @@ async function mount(
           "div",
           Array.from({ length: options.copies ?? 1 }, () =>
             options.valueOnly
-              ? h(EntityValue, { domain, entityKey: "example" })
+              ? h(EntityValue, {
+                  domain,
+                  entityKey: options.entityKey ?? "example",
+                })
               : h(EntityControl, {
                   domain: domain as "switch" | "number" | "time" | "select",
-                  entityKey: "example",
+                  entityKey: options.entityKey ?? "example",
+                  confirmSwitch: options.confirmSwitch,
                 }),
           ),
         );
@@ -232,7 +238,7 @@ describe("shared dashboard controls", () => {
       attributes: { unit_of_measurement: undefined },
     });
     expect(input(root).type).toBe("time");
-    expect(input(root).step).toBe("1");
+    expect(input(root).step).toBe("60");
     enter(root, "05:45");
     await flush();
     expect(callService).not.toHaveBeenCalled();
@@ -248,6 +254,103 @@ describe("shared dashboard controls", () => {
     expect(root.textContent).toContain("04:30:00");
     await updateState("05:45:00");
     expect(root.textContent).toContain("05:45:00");
+  });
+
+  it("shows legacy time states as minutes without writing and submits zero seconds explicitly", async () => {
+    const { root, callService, updateState } = await mount("time", {
+      state: "04:30:19",
+      attributes: { unit_of_measurement: undefined },
+    });
+    expect(input(root).value).toBe("04:30");
+    expect(input(root).step).toBe("60");
+    expect(root.textContent).toContain("Bestätigter Wert: 04:30:19");
+    expect(callService).not.toHaveBeenCalled();
+    enter(root, "04:30:45");
+    await flush();
+    expect(input(root).value).toBe("04:30");
+    expect(callService).not.toHaveBeenCalled();
+    submit(root);
+    await flush();
+    expect(callService).toHaveBeenCalledExactlyOnceWith(
+      "time",
+      "set_value",
+      { time: "04:30:00" },
+      { entity_id: "time.renamed_by_user" },
+      false,
+    );
+    expect(root.textContent).toContain("Bestätigter Wert: 04:30:19");
+    await updateState("05:45:27");
+    expect(input(root).value).toBe("05:45");
+    expect(callService).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["storage_switch", false, true],
+    ["example", true, true],
+    ["timed_charge_january", false, false],
+    ["timed_charge", false, false],
+  ] as const)(
+    "limits the compact switch target to storage or confirmation controls (%s, %s)",
+    async (entityKey, confirmSwitch, compact) => {
+      const { root } = await mount("switch", {
+        entityKey,
+        confirmSwitch,
+        state: "off",
+      });
+      const target = root.querySelector<HTMLLabelElement>(
+        ".entity-control__switch-target",
+      )!;
+      expect(
+        target.classList.contains("entity-control__switch-target--compact"),
+      ).toBe(compact);
+      expect(target.htmlFor).toBe(input(root).id);
+      expect(input(root).getAttribute("role")).toBe("switch");
+    },
+  );
+
+  it("retains explicit confirmation when the compact storage target is clicked", async () => {
+    const { root, callService } = await mount("switch", {
+      entityKey: "storage_switch",
+      confirmSwitch: true,
+      state: "off",
+    });
+    const dialog = root.querySelector("dialog")!;
+    dialog.showModal = vi.fn(() => {
+      dialog.open = true;
+    });
+    dialog.close = vi.fn(() => {
+      dialog.open = false;
+    });
+    root.querySelector<HTMLElement>(".entity-control__switch-target")!.click();
+    await flush();
+    expect(dialog.open).toBe(true);
+    expect(input(root).checked).toBe(false);
+    expect(callService).not.toHaveBeenCalled();
+    dialog.querySelectorAll("button")[1].click();
+    await flush();
+    expect(dialog.open).toBe(false);
+    expect(callService).toHaveBeenCalledExactlyOnceWith(
+      "switch",
+      "turn_on",
+      {},
+      { entity_id: "switch.renamed_by_user" },
+      false,
+    );
+    expect(input(root).checked).toBe(false);
+  });
+
+  it("keeps a read-only compact storage target disabled", async () => {
+    const { root, callService } = await mount("switch", {
+      entityKey: "storage_switch",
+      confirmSwitch: true,
+      state: "off",
+      canControl: false,
+    });
+    root.querySelector<HTMLElement>(".entity-control__switch-target")!.click();
+    await flush();
+    expect(input(root).disabled).toBe(true);
+    expect(root.querySelector("dialog")!.open).toBe(false);
+    expect(callService).not.toHaveBeenCalled();
   });
 
   it.each([

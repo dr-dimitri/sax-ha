@@ -215,11 +215,11 @@ afterEach(() => {
 });
 
 describe("paired time window control", () => {
-  it("shows the confirmed pair, seconds-capable fields and an overnight draft on two rail segments", async () => {
+  it("shows the confirmed pair, minute-only fields and an overnight draft on two rail segments", async () => {
     const { root, service } = await mount();
     expect(inputs(root).map((input) => [input.value, input.step])).toEqual([
-      ["22:00:00", "1"],
-      ["06:00:00", "1"],
+      ["22:00", "60"],
+      ["06:00", "60"],
     ]);
     expect(
       [...root.querySelectorAll("label")].map((label) => label.htmlFor),
@@ -238,14 +238,22 @@ describe("paired time window control", () => {
   });
 
   it.each<Kind>(["timed_charge", "grid_serving"])(
-    "submits %s once as a pair, preserves seconds and awaits actual HA confirmation",
+    "submits %s as a minute-aligned pair only after editing and awaits actual HA confirmation",
     async (kind) => {
       const { root, service, update } = await mount({
         kind,
         start: "01:00:17",
         end: "05:30:49",
       });
-      enter(root, "start", "02:15:33");
+      expect(inputs(root).map((input) => input.value)).toEqual([
+        "01:00",
+        "05:30",
+      ]);
+      expect(apply(root).disabled).toBe(true);
+      submit(root);
+      await flush();
+      expect(service).not.toHaveBeenCalled();
+      enter(root, "start", "02:15");
       await flush();
       expect(service).not.toHaveBeenCalled();
       expect(root.textContent).toContain("Entwurf:");
@@ -254,15 +262,15 @@ describe("paired time window control", () => {
       await flush();
       expect(service).toHaveBeenCalledExactlyOnceWith(
         kind,
-        "02:15:33",
-        "05:30:49",
+        "02:15:00",
+        "05:30:00",
       );
       expect(confirmed(root)).toContain("01:00:17 – 05:30:49 Uhr");
       expect(root.textContent).toContain(
         "Bestätigung durch Home Assistant ausstehend",
       );
-      await update("02:15:33", "05:30:49");
-      expect(confirmed(root)).toContain("02:15:33 – 05:30:49 Uhr");
+      await update("02:15:00", "05:30:00");
+      expect(confirmed(root)).toContain("02:15 – 05:30 Uhr");
       expect(apply(root).disabled).toBe(true);
       expect(root.textContent).not.toContain("ausstehend");
     },
@@ -281,11 +289,11 @@ describe("paired time window control", () => {
     expect(service).toHaveBeenCalledExactlyOnceWith(
       "timed_charge",
       "22:00:00",
-      "22:00",
+      "22:00:00",
     );
   });
 
-  it("adjusts independent markers with the keyboard without writing and exposes their full range", async () => {
+  it("adjusts independent markers within the minute range and waits for Apply before writing", async () => {
     const { root, service } = await mount({
       start: "08:00:19",
       end: "10:00:37",
@@ -294,18 +302,18 @@ describe("paired time window control", () => {
     press(start, "ArrowRight");
     await flush();
     expect(inputs(root).map((input) => input.value)).toEqual([
-      "08:01:00",
-      "10:00:37",
+      "08:01",
+      "10:00",
     ]);
     press(end, "PageDown");
     await flush();
-    expect(inputs(root)[1].value).toBe("09:45:00");
+    expect(inputs(root)[1].value).toBe("09:45");
     press(start, "Home");
     press(end, "End");
     await flush();
     expect(inputs(root).map((input) => input.value)).toEqual([
-      "00:00:00",
-      "23:59:59",
+      "00:00",
+      "23:59",
     ]);
     expect(end.getAttribute("aria-valuenow")).toBe(
       end.getAttribute("aria-valuemax"),
@@ -314,13 +322,20 @@ describe("paired time window control", () => {
     press(end, "ArrowRight");
     await flush();
     expect(inputs(root).map((input) => input.value)).toEqual([
-      "00:00:00",
-      "23:59:59",
+      "00:00",
+      "23:59",
     ]);
     expect(service).not.toHaveBeenCalled();
+    submit(root);
+    await flush();
+    expect(service).toHaveBeenCalledExactlyOnceWith(
+      "timed_charge",
+      "00:00:00",
+      "23:59:00",
+    );
   });
 
-  it("drags captured pointers in minute steps across midnight and leaves the other boundary exact", async () => {
+  it("drags captured pointers in minute steps across midnight without altering confirmed seconds", async () => {
     const { root, service } = await mount({
       start: "10:00:19",
       end: "12:00:37",
@@ -340,20 +355,28 @@ describe("paired time window control", () => {
     pointer(start, "pointerdown", 700);
     pointer(start, "pointermove", 1420, 9);
     await flush();
-    expect(inputs(root)[0].value).toBe("10:00:19");
+    expect(inputs(root)[0].value).toBe("10:00");
     pointer(start, "pointermove", 1420);
     pointer(start, "pointerup", 1420);
     await flush();
     expect(capture).toHaveBeenCalledWith(1);
     expect(inputs(root).map((input) => input.value)).toEqual([
-      "22:00:00",
-      "12:00:37",
+      "22:00",
+      "12:00",
     ]);
     expect(segments(root)).toHaveLength(2);
     expect(service).not.toHaveBeenCalled();
+    expect(confirmed(root)).toContain("10:00:19 – 12:00:37 Uhr");
+    submit(root);
+    await flush();
+    expect(service).toHaveBeenCalledExactlyOnceWith(
+      "timed_charge",
+      "22:00:00",
+      "12:00:00",
+    );
   });
 
-  it("does not round seconds or shift a marker when it is only clicked", async () => {
+  it("does not normalize confirmed seconds or enable Apply when a marker is only clicked", async () => {
     const { root, service } = await mount({ start: "10:00:19" });
     const rail = root.querySelector<HTMLElement>(".time-window-control__rail")!;
     vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
@@ -363,9 +386,68 @@ describe("paired time window control", () => {
     pointer(markers(root)[0], "pointerdown", 710);
     pointer(markers(root)[0], "pointerup", 710);
     await flush();
-    expect(inputs(root)[0].value).toBe("10:00:19");
+    expect(inputs(root)[0].value).toBe("10:00");
     expect(apply(root).disabled).toBe(true);
     expect(service).not.toHaveBeenCalled();
+  });
+
+  it("normalizes both legacy second values only after deliberate editing and Apply", async () => {
+    const { root, service } = await mount({
+      start: "10:00:19",
+      end: "12:00:37",
+    });
+    expect(inputs(root).map((input) => input.value)).toEqual([
+      "10:00",
+      "12:00",
+    ]);
+    expect(apply(root).disabled).toBe(true);
+    expect(root.textContent).not.toContain("Entwurf:");
+    enter(root, "start", "10:00");
+    await flush();
+    expect(apply(root).disabled).toBe(false);
+    expect(service).not.toHaveBeenCalled();
+    submit(root);
+    await flush();
+    expect(service).toHaveBeenCalledExactlyOnceWith(
+      "timed_charge",
+      "10:00:00",
+      "12:00:00",
+    );
+    expect(confirmed(root)).toContain("10:00:19 – 12:00:37 Uhr");
+  });
+
+  it("does not misrepresent a confirmed sub-minute interval as empty before editing", async () => {
+    const { root, service } = await mount({
+      start: "10:00:10",
+      end: "10:00:50",
+    });
+    expect(inputs(root).map((input) => input.value)).toEqual([
+      "10:00",
+      "10:00",
+    ]);
+    expect(root.textContent).toContain("Dauer: 40 Sek.");
+    expect(segments(root)).toHaveLength(1);
+    expect(apply(root).disabled).toBe(true);
+    enter(root, "start", "10:00");
+    await flush();
+    expect(root.textContent).toContain("Entwurf: Leeres Zeitfenster");
+    expect(segments(root)).toHaveLength(0);
+    expect(confirmed(root)).toContain("10:00:10 – 10:00:50 Uhr");
+    expect(service).not.toHaveBeenCalled();
+  });
+
+  it("removes seconds from supplied input text even when the visible minute is unchanged", async () => {
+    const { root, service } = await mount({ start: "10:00:19" });
+    enter(root, "start", "10:00:45");
+    await flush();
+    expect(inputs(root)[0].value).toBe("10:00");
+    submit(root);
+    await flush();
+    expect(service).toHaveBeenCalledExactlyOnceWith(
+      "timed_charge",
+      "10:00:00",
+      "06:00:00",
+    );
   });
 
   it("keeps the grab offset when a drag starts at the edge of the larger touch target", async () => {
@@ -380,7 +462,7 @@ describe("paired time window control", () => {
     pointer(marker, "pointermove", 721);
     pointer(marker, "pointerup", 721);
     await flush();
-    expect(inputs(root)[0].value).toBe("10:01:00");
+    expect(inputs(root)[0].value).toBe("10:01");
   });
 
   it("blocks duplicate submission and both fields and markers while the shared action is pending", async () => {
@@ -512,8 +594,8 @@ describe("paired time window control", () => {
     expect(inputs(root)[0].value).toBe("21:00");
     await update("22:00:00", "07:00:00");
     expect(inputs(root).map((input) => input.value)).toEqual([
-      "22:00:00",
-      "07:00:00",
+      "22:00",
+      "07:00",
     ]);
     expect(root.textContent).toContain("Der Entwurf wurde verworfen");
     submit(root);
@@ -522,7 +604,7 @@ describe("paired time window control", () => {
   });
 
   it("does not claim that a nonexistent draft was discarded on an ordinary HA update", async () => {
-    const { root, update } = await mount();
+    const { root, update } = await mount({ start: "22:00:19" });
     await update("21:00:00", "06:00:00");
     expect(confirmed(root)).toContain("21:00 – 06:00 Uhr");
     expect(root.textContent).not.toContain("verworfen");
@@ -539,7 +621,7 @@ describe("paired time window control", () => {
       ).toBe(true);
       expect(segments(root)).toHaveLength(0);
       await update("22:00:00", "06:00:00");
-      expect(inputs(root)[0].value).toBe("22:00:00");
+      expect(inputs(root)[0].value).toBe("22:00");
       expect(apply(root).disabled).toBe(true);
       expect(service).not.toHaveBeenCalled();
     },
@@ -565,7 +647,7 @@ describe("paired time window control", () => {
       ]),
     ) as Record<Boundary, DashboardEntity>;
     await flush();
-    expect(inputs(root)[0].value).toBe("22:00:00");
+    expect(inputs(root)[0].value).toBe("22:00");
     action.resolve(true);
     await flush();
     expect(root.textContent).not.toContain("ausstehend");
@@ -601,13 +683,13 @@ describe("paired time window control", () => {
     await flush();
     expect(release).toHaveBeenCalledExactlyOnceWith(1);
     expect(inputs(root).map((input) => input.value)).toEqual([
-      "22:00:00",
-      "06:00:00",
+      "22:00",
+      "06:00",
     ]);
     pointer(marker, "pointermove", 1400);
     pointer(marker, "pointerup", 1400);
     await flush();
-    expect(inputs(root)[0].value).toBe("22:00:00");
+    expect(inputs(root)[0].value).toBe("22:00");
     expect(apply(root).disabled).toBe(true);
     submit(root);
     await flush();
@@ -630,7 +712,7 @@ describe("paired time window control", () => {
     expect(root.textContent).toContain("Keine Verbindung");
     connected.value = true;
     await flush();
-    expect(inputs(root)[0].value).toBe("22:00:00");
+    expect(inputs(root)[0].value).toBe("22:00");
     expect(service).not.toHaveBeenCalled();
   });
 

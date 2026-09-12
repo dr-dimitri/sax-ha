@@ -21,6 +21,11 @@ const props = defineProps<{
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const entity = computed(() => dashboard?.entity(props.domain, props.entityKey));
+const compactSwitch = computed(
+  () =>
+    props.domain === "switch" &&
+    (props.confirmSwitch || props.entityKey === "storage_switch"),
+);
 const id = useId();
 const inputId = `sax-control-${id}`;
 const statusId = `sax-status-${id}`;
@@ -106,7 +111,19 @@ const status = computed(() => {
 
 function initialDraft(value: string): string {
   if (!entity.value?.available) return "";
-  return value;
+  return props.domain === "time" ? minute(value) : value;
+}
+
+function minute(value: string): string {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)
+    ? value.slice(0, 5)
+    : "";
+}
+
+function changeDraft(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  draft.value = props.domain === "time" ? minute(input.value) : input.value;
+  input.value = draft.value;
 }
 
 watch(
@@ -135,7 +152,11 @@ async function submitDraft(): Promise<void> {
     (props.domain !== "number" && props.domain !== "time")
   )
     return;
-  await dashboard.perform(props.domain, props.entityKey, draft.value);
+  await dashboard.perform(
+    props.domain,
+    props.entityKey,
+    props.domain === "time" && draft.value ? `${draft.value}:00` : draft.value,
+  );
 }
 
 function cancelConfirmation(): void {
@@ -231,6 +252,7 @@ async function changeSelect(event: Event): Promise<void> {
         v-if="domain === 'switch'"
         :for="inputId"
         class="entity-control__switch-target"
+        :class="{ 'entity-control__switch-target--compact': compactSwitch }"
       >
         <input
           :id="inputId"
@@ -260,14 +282,15 @@ async function changeSelect(event: Event): Promise<void> {
       <template v-else>
         <input
           :id="inputId"
-          v-model="draft"
+          :value="draft"
           :type="domain === 'number' ? 'number' : 'time'"
           :min="domain === 'number' ? numberAttribute('min') : undefined"
           :max="domain === 'number' ? numberAttribute('max') : undefined"
-          :step="domain === 'number' ? numberAttribute('step') : 1"
+          :step="domain === 'number' ? numberAttribute('step') : 60"
           :disabled="blocked"
           :aria-describedby="descriptionIds"
           required
+          @input="changeDraft"
         />
         <button type="submit" :disabled="blocked || draft === ''">
           {{ text.apply }}
@@ -376,6 +399,28 @@ async function changeSelect(event: Event): Promise<void> {
   margin: 0 8px;
   accent-color: var(--primary-color, #03a9f4);
   cursor: pointer;
+}
+
+.entity-control__switch-target--compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.entity-control__switch-target--compact:has(:disabled) {
+  cursor: not-allowed;
+}
+
+.entity-control__switch-target--compact input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin: 0;
+  padding: 0;
 }
 
 .entity-control button {

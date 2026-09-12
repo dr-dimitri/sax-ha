@@ -75,6 +75,7 @@ const text = computed(() =>
 );
 const start = ref("");
 const end = ref("");
+const edited = ref(false);
 const rail = ref<HTMLElement>();
 const localPending = ref(false);
 const awaiting = ref(false);
@@ -105,6 +106,10 @@ function display(value: string): string {
   if (parsed === null) return "—";
   const normalized = clock(parsed);
   return parsed % 60 ? normalized : normalized.slice(0, 5);
+}
+
+function minute(value: string): string {
+  return seconds(value) === null ? "" : value.slice(0, 5);
 }
 
 const confirmedStart = computed(() => startEntity.value?.state?.state ?? "");
@@ -138,8 +143,9 @@ const valid = computed(
 );
 const dirty = computed(
   () =>
-    seconds(start.value) !== seconds(confirmedStart.value) ||
-    seconds(end.value) !== seconds(confirmedEnd.value),
+    edited.value &&
+    (seconds(start.value) !== seconds(confirmedStart.value) ||
+      seconds(end.value) !== seconds(confirmedEnd.value)),
 );
 const pending = computed(
   () =>
@@ -172,9 +178,15 @@ const status = computed(() => {
   if (!valid.value) return text.value.invalid;
   return "";
 });
+const visibleStart = computed(() =>
+  edited.value || !available.value ? start.value : confirmedStart.value,
+);
+const visibleEnd = computed(() =>
+  edited.value || !available.value ? end.value : confirmedEnd.value,
+);
 const duration = computed(() => {
-  const from = seconds(start.value);
-  const to = seconds(end.value);
+  const from = seconds(visibleStart.value);
+  const to = seconds(visibleEnd.value);
   if (from === null || to === null) return "—";
   const elapsed = (to - from + 86400) % 86400;
   if (!elapsed) return text.value.empty;
@@ -191,8 +203,8 @@ const duration = computed(() => {
     .join(" · ");
 });
 const segments = computed(() => {
-  const from = seconds(start.value);
-  const to = seconds(end.value);
+  const from = seconds(visibleStart.value);
+  const to = seconds(visibleEnd.value);
   if (from === null || to === null || from === to) return [];
   const ranges =
     to > from
@@ -249,17 +261,19 @@ watch(
     const oldStart = typeof previous?.[2] === "string" ? previous[2] : "";
     const oldEnd = typeof previous?.[3] === "string" ? previous[3] : "";
     const wasDraft =
-      seconds(start.value) !== seconds(oldStart) ||
-      seconds(end.value) !== seconds(oldEnd);
+      edited.value &&
+      (seconds(start.value) !== seconds(oldStart) ||
+        seconds(end.value) !== seconds(oldEnd));
     const ownConfirmation = pending.value || awaiting.value;
     revision += 1;
     stopDrag();
     localPending.value = false;
     awaiting.value = false;
+    edited.value = false;
     discarded.value =
       !!previous?.length && wasDraft && !ownConfirmation && available.value;
-    start.value = available.value ? confirmedStart.value : "";
-    end.value = available.value ? confirmedEnd.value : "";
+    start.value = available.value ? minute(confirmedStart.value) : "";
+    end.value = available.value ? minute(confirmedEnd.value) : "";
   },
   { immediate: true, flush: "sync" },
 );
@@ -274,14 +288,17 @@ onBeforeUnmount(stopDrag);
 
 function edit(boundary: Boundary, value: string): void {
   if (blocked.value) return;
-  if (boundary === "start") start.value = value;
-  else end.value = value;
+  if (boundary === "start") start.value = minute(value);
+  else end.value = minute(value);
+  edited.value = true;
   awaiting.value = false;
   discarded.value = false;
 }
 
 function typeTime(boundary: Boundary, event: Event): void {
-  edit(boundary, (event.target as HTMLInputElement).value);
+  const input = event.target as HTMLInputElement;
+  edit(boundary, input.value);
+  input.value = boundary === "start" ? start.value : end.value;
 }
 
 function keyboard(boundary: Boundary, event: KeyboardEvent): void {
@@ -303,10 +320,10 @@ function keyboard(boundary: Boundary, event: KeyboardEvent): void {
     event.key === "Home"
       ? 0
       : event.key === "End"
-        ? 86399
+        ? 86340
         : Math.max(
             0,
-            Math.min(86399, Math.floor(value / 60) * 60 + delta[event.key]),
+            Math.min(86340, Math.floor(value / 60) * 60 + delta[event.key]),
           );
   edit(boundary, clock(next));
 }
@@ -321,6 +338,7 @@ function movePointer(event: PointerEvent): void {
     return;
   const bounds = rail.value.getBoundingClientRect();
   if (bounds.width <= 0) return;
+  if (!drag.moved && event.clientX === drag.originX) return;
   const minute = Math.max(
     0,
     Math.min(
@@ -370,8 +388,8 @@ async function submit(): Promise<void> {
   discarded.value = false;
   const success = await dashboard.performTimeWindow(
     props.kind,
-    start.value,
-    end.value,
+    `${start.value}:00`,
+    `${end.value}:00`,
   );
   if (current !== revision) return;
   localPending.value = false;
@@ -401,7 +419,7 @@ async function submit(): Promise<void> {
         <input
           :id="`${id}-${boundary.key}`"
           type="time"
-          step="1"
+          step="60"
           required
           :value="boundary.value"
           :disabled="blocked"
@@ -448,7 +466,7 @@ async function submit(): Promise<void> {
         :disabled="blocked || !valid"
         :aria-label="boundary.marker"
         aria-valuemin="0"
-        aria-valuemax="86399"
+        aria-valuemax="86340"
         :aria-valuenow="seconds(boundary.value) ?? 0"
         :aria-valuetext="`${display(boundary.value)}${text.unit ? ` ${text.unit}` : ''}`"
         :aria-describedby="`${id}-help ${id}-confirmed`"

@@ -105,7 +105,7 @@ const definitions = [
     "next_cell_calibration",
     "Nächste Zellkalibrierung",
     "Next cell calibration",
-    "2026-09-14T05:00:00Z",
+    "2026-09-14",
     "",
   ],
 ] as const;
@@ -120,9 +120,7 @@ const sampleStates: Record<string, HassEntity> = Object.fromEntries(
         attributes: {
           ...(unit ? { unit_of_measurement: unit } : {}),
           ...(domain === "number" ? { min: 0, max: 100, step: 1 } : {}),
-          ...(key === "next_cell_calibration"
-            ? { device_class: "timestamp" }
-            : {}),
+          ...(key === "next_cell_calibration" ? { device_class: "date" } : {}),
         },
       },
     ];

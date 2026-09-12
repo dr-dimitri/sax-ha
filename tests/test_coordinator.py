@@ -385,7 +385,7 @@ async def test_full_soc_completes_calibration_and_reapplies_user_target(hass) ->
     assert coordinator.effective_max_soc == 80
     assert coordinator._max_soc_released_for_discharge is False
     assert coordinator.last_full_charge_at == now
-    assert coordinator.next_cell_calibration_at == now + CELL_CALIBRATION_INTERVAL
+    assert coordinator.next_cell_calibration_date == date(2026, 8, 27)
     assert coordinator.max_soc_clamped is True
     coordinator.async_start_sun_charge.assert_awaited_once_with(0)
     coordinator._calibration_store.async_save.assert_awaited_once_with(
@@ -403,7 +403,8 @@ async def test_max_soc_changes_keep_latest_user_value_during_calibration(hass) -
         was_full=False,
     )
     coordinator._calibration_store.async_save = AsyncMock()
-    coordinator._async_apply_grid_charge_change = AsyncMock()
+    coordinator.async_start_sun_charge = AsyncMock()
+    coordinator.async_stop_sun_charge = AsyncMock()
     coordinator.price_planner.evaluate = MagicMock()
     await coordinator._async_update_cell_calibration(50, now=now)
 
@@ -4283,18 +4284,23 @@ async def test_grid_serving_releases_max_soc_task_when_calibration_starts(
     )
 
     try:
-        with _patched_now(12, month=8):
+        with (
+            _patched_now(12, month=8),
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.utcnow",
+                return_value=now - timedelta(days=1),
+            ) as utcnow,
+        ):
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             assert coordinator.sun_charge_active is True
 
             client.write_register.reset_mock()
-            changed = await coordinator._async_update_cell_calibration(80, now=now)
+            utcnow.return_value = now
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
 
-        assert changed is True
         assert coordinator.cell_calibration_active is True
         assert coordinator.effective_max_soc == MAX_SOC
         assert coordinator.max_soc_clamped is False

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import { SaxPowerVuePanel } from "../src/panel";
 import { tabPath, tabs } from "../src/tabs";
-import type { HassConnection, HomeAssistant } from "../src/types";
+import type {
+  DashboardMetadata,
+  HassConnection,
+  HomeAssistant,
+} from "../src/types";
 
 type PanelElement = InstanceType<typeof SaxPowerVuePanel>;
 
@@ -52,6 +56,65 @@ function selectedLink(element: PanelElement): HTMLAnchorElement | null {
   return shadow(element).querySelector('nav a[aria-current="page"]');
 }
 
+async function mountTariffs(
+  timed: string,
+  dynamic: string,
+  pathname = "/sax-power-vue/allgemein",
+  canControl = true,
+) {
+  let emit!: (message: DashboardMetadata) => void;
+  const listeners = new Map<string, () => void>();
+  const callService = vi.fn();
+  const connection: HassConnection = {
+    connected: true,
+    subscribeMessage: vi.fn(async (callback) => {
+      emit = callback;
+      return () => {};
+    }),
+    addEventListener: vi.fn((event, callback) => {
+      listeners.set(event, callback);
+    }),
+    removeEventListener: vi.fn(),
+  };
+  const metadata = ["timed_charge_enabled", "price_charge_enabled"].map(
+    (key) => ({
+      domain: "switch" as const,
+      key,
+      entity_id: `switch.renamed_${key}`,
+      name: key,
+      states: {},
+      can_control: canControl,
+    }),
+  );
+  const hass: HomeAssistant = {
+    language: "de",
+    connection,
+    states: {},
+    callService,
+  };
+  const element = await mount({ hass, pathname });
+  async function update(timed: string, dynamic: string) {
+    element.hass = {
+      ...hass,
+      states: Object.fromEntries(
+        metadata.map((item, index) => [
+          item.entity_id,
+          {
+            entity_id: item.entity_id,
+            state: index === 0 ? timed : dynamic,
+            attributes: {},
+          },
+        ]),
+      ),
+    };
+    await flush();
+  }
+  await update(timed, dynamic);
+  emit({ entities: metadata });
+  await flush();
+  return { element, callService, update, emit, connection, listeners };
+}
+
 afterEach(async () => {
   document.body.replaceChildren();
   await flush();
@@ -74,6 +137,87 @@ describe("dashboard paths", () => {
 });
 
 describe("Home Assistant panel", () => {
+  it.each([
+    ["off", "off", true, true],
+    ["on", "off", true, false],
+    ["off", "on", false, true],
+    ["on", "on", true, true],
+    ["on", "unknown", true, true],
+    ["unavailable", "on", true, true],
+  ])(
+    "shows tariffs from confirmed switches (%s/%s)",
+    async (timed, dynamic, showTimed, showDynamic) => {
+      const { element, callService } = await mountTariffs(timed, dynamic);
+      expect(
+        !!shadow(element).querySelector('nav a[href$="/ladeautomatik"]'),
+      ).toBe(showTimed);
+      expect(
+        !!shadow(element).querySelector('nav a[href$="/dynamisches-laden"]'),
+      ).toBe(showDynamic);
+      expect(
+        shadow(element).querySelector('nav a[href$="/ersparnis"]')?.textContent,
+      ).toBe("Amortisation");
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["on", "off", "dynamisches-laden", "ladeautomatik"],
+    ["off", "on", "ladeautomatik", "dynamisches-laden"],
+  ])(
+    "replaces a hidden deep link for read-only users (%s/%s)",
+    async (timed, dynamic, hidden, visible) => {
+      const replacement = vi.spyOn(window.history, "replaceState");
+      const { element, callService } = await mountTariffs(
+        timed,
+        dynamic,
+        `/sax-power-vue/${hidden}`,
+        false,
+      );
+      expect(window.location.pathname).toBe(`/sax-power-vue/${visible}`);
+      expect(selectedLink(element)?.getAttribute("href")).toBe(
+        `/sax-power-vue/${visible}`,
+      );
+      expect(replacement).toHaveBeenLastCalledWith(
+        null,
+        "",
+        `/sax-power-vue/${visible}`,
+      );
+      expect(
+        shadow(element).querySelectorAll("input:not(:disabled)"),
+      ).toHaveLength(0);
+      expect(callService).not.toHaveBeenCalled();
+      replacement.mockRestore();
+    },
+  );
+
+  it("reacts to HA activation, history, parent routes and disconnect without writes", async () => {
+    const { element, callService, update, emit, listeners } =
+      await mountTariffs("off", "off", "/sax-power-vue/ladeautomatik");
+    await update("off", "on");
+    expect(window.location.pathname).toBe("/sax-power-vue/dynamisches-laden");
+    window.history.pushState(null, "", "/sax-power-vue/ladeautomatik");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await flush();
+    expect(window.location.pathname).toBe("/sax-power-vue/dynamisches-laden");
+    element.route = { path: "/ladeautomatik", prefix: "/sax-power-vue" };
+    await flush();
+    expect(selectedLink(element)?.textContent?.trim()).toBe(
+      "Dynamischer Tarif",
+    );
+    await update("off", "off");
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+    await update("on", "off");
+    expect(window.location.pathname).toBe("/sax-power-vue/ladeautomatik");
+    listeners.get("disconnected")?.();
+    await update("on", "off");
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+    emit({ entities: [] });
+    await flush();
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+    expect(callService).not.toHaveBeenCalled();
+  });
+
   it("shares one metadata subscription across navigation and HA state updates", async () => {
     const unsubscribe = vi.fn();
     const subscribeMessage = vi.fn().mockResolvedValue(unsubscribe);
@@ -164,7 +308,7 @@ describe("Home Assistant panel", () => {
       "Zeitvariabler Tarif",
       "Dynamischer Tarif",
       "Netzdienliches Laden",
-      "Ersparnis",
+      "Amortisation",
     ]);
     expect(selectedLink(element)?.textContent?.trim()).toBe(
       "Allgemeine Informationen",
@@ -209,13 +353,15 @@ describe("Home Assistant panel", () => {
     expect(shadow(element).querySelector(".introduction")?.textContent).toBe(
       "Device values, charging settings and savings for your SAX Power battery.",
     );
-    expect(shadow(element).querySelector("h1")?.textContent).toBe("Savings");
+    expect(shadow(element).querySelector("h1")?.textContent).toBe(
+      "Amortization",
+    );
   });
 
   it("uses Home Assistant route properties and reacts to route changes", async () => {
     const element = await mount({ routePath: "/ersparnis" });
     expect(shadow(element).querySelector("h1")?.textContent?.trim()).toBe(
-      "Ersparnis",
+      "Amortisation",
     );
 
     element.route = { path: "/dynamisches-laden", prefix: "/sax-power-vue" };
@@ -252,7 +398,7 @@ describe("Home Assistant panel", () => {
       "Time-of-use tariff",
       "Dynamic tariff",
       "Grid-serving charging",
-      "Savings",
+      "Amortization",
     ]);
     expect(
       shadow(element).querySelector(".dashboard")?.getAttribute("lang"),

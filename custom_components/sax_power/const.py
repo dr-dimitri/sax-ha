@@ -372,10 +372,10 @@ SWITCH_STATE_UNKNOWN_LABEL = UNKNOWN_LABEL
 MIN_SOC = 0
 MAX_SOC = 100
 
-# REQ-PERIODIC-FULL-CALIBRATION: Nach diesem Zeitraum ohne tatsächlich
+# REQ-PERIODIC-FULL-CALIBRATION: Ab diesem lokalen Kalendertag ohne tatsächlich
 # gemessene 100 % wird der effektive Max-SOC bis zur nächsten Volladung
 # vorübergehend angehoben.
-CELL_CALIBRATION_INTERVAL = timedelta(days=7)
+CELL_CALIBRATION_INTERVAL = timedelta(days=3)
 
 # Sollwert Leistung P (Register 41) ist ein signed 16-bit Register.
 MIN_SETPOINT_POWER = -32768

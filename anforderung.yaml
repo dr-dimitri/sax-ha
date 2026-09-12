@@ -56,7 +56,7 @@
 # REQ-VUE-GENERAL                 done       Allgemeine Vue-Geräteübersicht mit Live-Werten und Bedienung (#199)
 # REQ-VUE-CHARGING                done       Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (#200)
 # REQ-VUE-DYNAMIC-CHARGING        done       Dynamischer Vue-Tarif, Strategie und gemeinsamer Max-SOC (#201)
-# REQ-VUE-SAVINGS                 done       Vue-Ersparnis, Tarifplan und native Recorder-Zeitraumauswertung (#202)
+# REQ-VUE-SAVINGS                 done       Vue-Amortisation, Tarifplan und native Recorder-Zeitraumauswertung (#202)
 # REQ-VUE-PARITY                  done       Funktionsmatrix, HA-Anbindung, Browser- und isolierte Paketprüfung (#203)
 # REQ-VUE-DASHBOARD-REPAIR        done       Eigenständige Vue-Aktualisierung über HA-Reparaturen (#205)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
@@ -66,7 +66,7 @@
 # REQ-STABLE-DEVICE-IDENTITY      done       Geräte-/Entity-Identität nur über interne, unveränderliche IDs - nie über einen änderbaren Namen
 # REQ-DHCP-DISCOVERY              done       Automatische Netzwerk-Discovery per DHCP - IP-Feld der Ersteinrichtung vorbelegt
 # REQ-DIAGNOSTIC-ENTITY-CATEGORY  done       Technische Detail-/Rohwerte als entity_category=diagnostic, Kernwerte bleiben sichtbar
-# REQ-PERIODIC-FULL-CALIBRATION   done       Alle 7 Tage temporär bis 100 % laden, um die Zell-/SOC-Kalibrierung zu ermöglichen
+# REQ-PERIODIC-FULL-CALIBRATION   done       Am dritten lokalen Kalendertag temporär bis 100 % laden, um die Zell-/SOC-Kalibrierung zu ermöglichen
 # REQ-CONTROL-CONFIG-BOOTSTRAP    done       Ladeeinstellungen versioniert persistiert und vor dem ersten steuernden Refresh geladen
 # REQ-ECONOMICS-TARIFFS           done       Optionales Tarifmodell: Netzbezugspreis in EUR/kWh je Zeitpunkt + Einspeisevergütung
 # REQ-ENERGY-ORIGIN               done       Geladene Energie nach Netz/PV/unbekannter Herkunft aufteilen (Schätzung am Netzanschlusspunkt)
@@ -2232,8 +2232,18 @@ requirement_vue_dashboard:
     in Deutsch und Englisch beschriftete Navigation zu
     Allgemeine Informationen (allgemein), Zeitvariabler Tarif (ladeautomatik),
     Dynamischer Tarif (dynamisches-laden), Netzdienliches Laden
-    (netzdienliches-laden) und Ersparnis (ersparnis), in dieser Reihenfolge.
-    Die englischen Tarif-Tabnamen sind Time-of-use tariff und Dynamic tariff.
+    (netzdienliches-laden) und Amortisation (ersparnis), in dieser Reihenfolge.
+    Die englischen Tarif-Tabnamen sind Time-of-use tariff und Dynamic tariff;
+    Amortisation heißt auf Englisch Amortization.
+    Die Tarifnavigation folgt ausschließlich den bestätigten Hauptschaltern
+    timed_charge_enabled und price_charge_enabled: on/off blendet den
+    dynamischen Tarif aus, off/on den zeitvariablen Tarif; bei off/off sind
+    beide sichtbar. Fehlende, unbekannte oder nicht verfügbare Zustände und
+    ein vorübergehendes on/on erhalten beide Zugänge. Leseberechtigte sehen
+    dieselbe Navigation; ausstehende oder fehlgeschlagene Services blenden
+    keinen Tab vor der Zustandsbestätigung aus. Verborgene Deep Links,
+    HA-Routen sowie Zurück/Vorwärts-Ziele werden ohne Serviceaufruf und
+    ohne zusätzlichen History-Eintrag zum aktiven Tarif ersetzt.
     URL-Pfade, Entity-Schlüssel und Tarifkonfiguration bleiben unverändert.
     Alle fünf Ansichten zeigen die vorhandenen Entitäten und Bedienfunktionen. Die
     gemeinsame Datenanbindung ist in REQ-VUE-ENTITY-BINDING beschrieben,
@@ -2251,8 +2261,10 @@ requirement_vue_dashboard:
     Breite. Monatsnamen bleiben mindestens 14 Pixel groß, Bedienflächen
     mindestens 44 mal 44 Pixel. Die sichtbaren nativen Monatskästchen sind
     22 mal 22 Pixel groß; zugeordnete Labels stellen die größere Klickfläche
-    bereit. Bei sehr geringer Breite bleibt eine Spalte;
-    die DOM-/Tastaturreihenfolge bleibt Januar bis Dezember. In der Ersparnis stehen Übersicht und Tarif nebeneinander;
+    bereit. Der Speicherschalter verwendet dasselbe 22-Pixel-Kästchen in
+    einer mindestens 44 mal 44 Pixel großen Klickfläche; die Sicherheitsabfrage
+    bleibt beim Ein- und Ausschalten erhalten. Bei sehr geringer Breite bleibt eine Spalte;
+    die DOM-/Tastaturreihenfolge bleibt Januar bis Dezember. In der Amortisationsansicht stehen Übersicht und Tarif nebeneinander;
     Datumsauswahl und Diagramm nutzen die volle Breite.
     Inhalte bleiben vollständig sichtbar; es gibt keine festen Kartenhöhen,
     abgeschnittenen Werte oder verkleinerten normalen Beschriftungen.
@@ -2512,9 +2524,14 @@ requirement_vue_charging:
 
     Die beiden editierbaren Zeitfenster verwenden dieselbe Komponente
     TimeWindowControl. Eine 24-Stunden-Leiste mit getrennt verschiebbaren
-    Start- und Endmarken sowie genaue Eingabefelder mit Sekunden bearbeiten
-    ein gemeinsames lokales Entwurfspaar. Das Ziehen rastet auf Minuten ein;
-    genaue Eingaben erhalten Sekunden. Maus, Touch und Tastatur sind
+    Start- und Endmarken sowie Eingabefelder im Format HH:MM bearbeiten
+    ein gemeinsames lokales Entwurfspaar. Eingaben mit step=60, Ziehen und
+    Tastatur verwenden Minuten bis 23:59, ohne Sekunden-Eingabemöglichkeit.
+    Vorhandene HA-Sekunden lösen beim Laden keine Schreibaktion und keinen
+    geänderten Entwurf aus; bestätigte Spanne, Dauer und Fläche erhalten diese
+    Präzision bis zur ersten Bearbeitung. Erst nach einer bewussten Änderung
+    übernimmt Übernehmen beide Grenzen als HH:MM:00. Dies gilt auch für die
+    Einzelzeit-Komponente der Controls-Vorschau. Maus, Touch und Tastatur sind
     unterstützt, mit sichtbarem Fokus, zugänglichen Start-/Endbeschriftungen
     und mindestens 44 mal 44 Pixel großen Bedienflächen. Beide Fenster
     bleiben auf mobilen und breiten Ansichten sowie mit hellen und dunklen
@@ -2522,7 +2539,8 @@ requirement_vue_charging:
 
     Ein Fenster über Mitternacht wird auf der Leiste in zwei Abschnitte
     geteilt. Gleiche Start- und Endzeit bedeuten ein leeres Fenster, niemals
-    24 Stunden. Die Leiste ist ausschließlich eine Darstellung des Entwurfs.
+    24 Stunden. Die Leiste zeigt bis zur ersten Bearbeitung den bestätigten
+    Zeitraum, danach ausschließlich den lokalen Entwurf.
     Erst die gemeinsame Schaltfläche Übernehmen sendet beide Grenzen atomar
     über den vorhandenen set_timed_charge_window- beziehungsweise
     set_grid_serving_window-Service (REQ-VUE-ENTITY-BINDING). Die bestehende
@@ -2561,9 +2579,9 @@ requirement_vue_charging:
     - "22:00 bis 06:00 wird als zwei Abschnitte über Mitternacht dargestellt
        und ohne eigene Zeitplanlogik mit genau einem atomaren HA-Service
        übertragen. Gleiche Grenzen zeigen ein leeres Fenster; Tagesfenster,
-       Mitternachtsgrenzen und genaue Sekunden bleiben korrekt."
+       Mitternachtsgrenzen und unbearbeitete Altsekunden bleiben korrekt."
     - "Ziehen mit Maus oder Touch und Tastaturbedienung verändern nur den
-       gemeinsamen Entwurf. Die genaue Eingabe erlaubt Sekunden. Erst
+       gemeinsamen Entwurf. Die Eingabe erlaubt ausschließlich HH:MM. Erst
        Übernehmen schreibt; eine Serviceantwort ohne HA-Zustandsänderung
        verändert die bestätigte Anzeige nicht."
     - "HA-Änderungen einer Zeitgrenze ersetzen den gesamten Entwurf;
@@ -2643,7 +2661,7 @@ requirement_vue_dynamic_charging:
 # ==============================================================================
 requirement_vue_savings:
   id: REQ-VUE-SAVINGS
-  title: "Vue-Ersparnis, Tarifplan und native Recorder-Zeitraumauswertung (Issue #202)"
+  title: "Vue-Amortisation, Tarifplan und native Recorder-Zeitraumauswertung (Issue #202)"
   status: done
   description: >
     Der Vue-Pfad ersparnis verwendet dieselbe Wirtschaftlichkeitsbilanz
@@ -3401,12 +3419,18 @@ requirement_diagnostic_entity_category:
 # ==============================================================================
 requirement_periodic_full_calibration:
   id: REQ-PERIODIC-FULL-CALIBRATION
-  title: "Reduzierten Max-SOC alle sieben Tage temporär bis 100 % anheben"
+  title: "Reduzierten Max-SOC am dritten lokalen Kalendertag bis 100 % anheben"
   status: done
   description: >
     Bei einem vom Benutzer konfigurierten "Max. SOC" unter 100 % hebt die
-    Integration den effektiven Ziel-SOC sieben Tage nach der letzten real
-    gemessenen Volladung vorübergehend auf 100 % an. Der konfigurierte Wert
+    Integration den effektiven Ziel-SOC am dritten Kalendertag nach der letzten
+    real gemessenen Volladung ab 00:00 in der HA-Zeitzone vorübergehend auf
+    100 % an. Es gilt das lokale Datum, nicht eine Frist von exakt 72 Stunden.
+    Beispiel: Volladung am 12.09. um 17:30 → fällig am 15.09. ab Tagesbeginn.
+    Die Fälligkeit wird vor jeder regulären Ladeentscheidung ausgewertet,
+    auch bei Timer- und Serviceaufrufen vor dem nächsten Poll, damit der erste
+    Ladezyklus des Fälligkeitstags bereits das Kalibrierungsziel verwendet. Auch der laufende PV-Regler aktualisiert die
+    Fälligkeit vor seiner eigenen Leistungsentscheidung. Der konfigurierte Wert
     der RestoreEntity-Number bleibt dabei unverändert sichtbar und
     persistent; Coordinator und Preisplaner verwenden während der fälligen
     Phase ausschließlich den effektiven Zielwert. Die Phase endet erst bei
@@ -3445,8 +3469,9 @@ requirement_periodic_full_calibration:
 
     Zwei leise Diagnose-Entities informieren ohne Benachrichtigungs-Pop-up:
     binary_sensor cell_calibration_active zeigt die fällige/laufende Phase,
-    sensor next_cell_calibration zeigt den UTC-Zeitpunkt der nächsten
-    Fälligkeit mit device_class timestamp. Diagnostics exportieren
+    sensor next_cell_calibration zeigt das Datum der nächsten lokalen
+    Fälligkeit mit device_class date. Die Anzeige enthält keine Uhrzeit
+    und verschiebt das Datum nicht durch die Browser-Zeitzone. Diagnostics exportieren
     konfigurierten und effektiven Max-SOC, Aktivzustand sowie letzten und
     nächsten Zeitpunkt.
   requirements:
@@ -3454,19 +3479,25 @@ requirement_periodic_full_calibration:
        Assistant- oder pymodbus-Abhängigkeit; Persistenz liegt im
        infrastructure-Adapter, Modbus-Orchestrierung ausschließlich im
        Coordinator."
-    - "Fälligkeit gilt exakt ab last_full_charge_at + 7 Tage und bleibt bei
-       konfiguriertem Max-SOC < 100 % bis zum realen SOC 100 aktiv."
+    - "Fälligkeit beginnt am lokalen Datum von last_full_charge_at plus drei
+       Kalendertagen ab 00:00 HA-Zeit, auch bei Sommerzeitwechsel sowie
+       Monats-/Jahreswechsel. Sie bleibt bei Max-SOC < 100 % bis SOC 100 aktiv."
+    - "Vor regulären Ladeentscheidungen aktualisiert der Coordinator den
+       Kalibrierungsstatus unter dem Control-Lock. SOC-Ausfall, ungültige
+       SOC-Werte, laufender Bootstrap und Shutdown erlauben keinen
+       Kalibrierungsstart oder unsichere Geräteaktion."
     - "price_optimizer.py und _async_enforce_grid_charge verwenden den
        effektiven Ziel-SOC, number.py weiterhin nur den Benutzerwert."
     - "Ein Storage-Fehler darf den laufenden Coordinator-/Modbus-Updatepfad
        nicht abbrechen."
   acceptance_criteria:
-    - "tests/test_calibration.py deckt Erstinitialisierung, exakte
-       Fälligkeit, Voll-SOC-Flanken, Einstellungswechsel, UTC-Persistenz und
+    - "tests/test_calibration.py deckt Erstinitialisierung, lokale Tagesgrenzen,
+       DST, Voll-SOC-Flanken, Einstellungswechsel, UTC-Persistenz und
        ungültige Storage-Daten ab."
     - "tests/test_coordinator.py deckt Freigabe ohne erzwungene Netzladung,
        Abschluss bei SOC 100, Wiederanwendung des Benutzerwerts, Neustart-
-       Wiederherstellung und tolerierte Storage-Fehler ab."
+       Wiederherstellung und tolerierte Storage-Fehler ab. Service-/Timerstarts
+       vor dem früheren Volladungszeitpunkt verwenden bereits das Ziel 100 %."
     - "Tests der Sensor-, Binary-Sensor- und Diagnoseplattform decken beide
        Status-Entities, diagnostic-Kategorisierung, Übersetzungen und die
        exportierten Zustandswerte ab."
@@ -4832,7 +4863,7 @@ requirement_economics_observability:
     davor kennt sie noch nicht und beginnt ihre Zählung transparent bei 0
     ab jetzt (analog zur Herkunftszählung aus REQ-ENERGY-ORIGIN).
 
-    Der Status wird im Ersparnis-Tab nach
+    Der Status wird im Amortisations-Tab nach
     REQ-VUE-SAVINGS verständlich eingeordnet; einen eigenen
     technischen Wirtschaftlichkeits-Tab gibt es nicht.
   acceptance_criteria:

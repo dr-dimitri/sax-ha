@@ -140,7 +140,7 @@ Das Dashboard enthält fünf Bereiche:
 | Zeitvariabler Tarif | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
 | Dynamischer Tarif | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
 | Netzdienliches Laden | Hauptschalter, Ladepause, aktuelle PV-Prognose, Prognoseschwelle, Status und zwölf Monatsschalter. |
-| Ersparnis | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
+| Amortisation | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
 
 Auf breiten Bildschirmen nutzen die Ansichten mehrere Spalten und kleinere
 Kartenabstände. Die Geräteübersicht stellt Skalen und Leistung neben die
@@ -152,6 +152,11 @@ umgebende Bereich lässt sich anklicken. Die Darstellung richtet sich nach dem
 verfügbaren Platz neben der HA-Seitenleiste; Inhalte bleiben vollständig
 sichtbar und per Tastatur bedienbar.
 
+Ist **Zeitvariabler Tarif** eingeschaltet, wird **Dynamischer Tarif**
+ausgeblendet; umgekehrt gilt dasselbe. Sind beide ausgeschaltet, sind beide
+Tabs sichtbar. Bei fehlenden oder unbekannten Zuständen bleiben beide
+zugänglich. Ein Link auf einen ausgeblendeten Tarif führt zum aktiven Tarif.
+
 Änderungen an den Home-Assistant-Entitäten erscheinen direkt im Dashboard.
 Zahlen und Uhrzeiten werden erst mit **Übernehmen** gesendet; die Anzeige des
 bestätigten Werts folgt der Rückmeldung von Home Assistant. Wertebereiche,
@@ -162,13 +167,20 @@ verfügbare Werte bleiben als solche erkennbar.
 Die Zeitfenster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
 zeigen jeweils eine 24-Stunden-Leiste mit verschiebbaren Marken für Start
 und Ende. Die Marken lassen sich mit Maus, Touch und Tastatur bedienen;
-die genauen Eingabefelder erlauben weiterhin Sekunden. Beide Grenzen bleiben
+die Eingabefelder zeigen ausschließlich Stunden und Minuten (HH:MM). Beide
+Grenzen bleiben
 ein Entwurf, bis **Übernehmen** sie gemeinsam an Home Assistant sendet.
 Die bestätigte Zeitspanne ändert sich erst mit dessen Zustandsmeldung.
+Vorhandene Sekunden werden beim Öffnen nicht verändert. Nach einer bewussten
+Bearbeitung übernimmt **Übernehmen** beide Grenzen minutengenau mit Sekunden
+auf 00.
 Ein Fenster von 22:00 bis 06:00 wird an Mitternacht geteilt dargestellt;
 gleiche Start- und Endzeit ergeben ein leeres Fenster. Änderungen an den
 bestätigten Grenzen, etwa durch eine Automation, ersetzen den gesamten
 Entwurf. Andere Livewerte verändern die Eingabe nicht.
+
+Der Speicherschalter verwendet dieselbe kleine Checkbox wie die Monatsauswahl,
+mit großer Klickfläche und Sicherheitsabfrage.
 
 Die Monatsraster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
 zeigen den bestätigten Zustand direkt am Kontrollkästchen; die zusätzliche
@@ -276,14 +288,18 @@ schafft eine Reserve und kann dabei helfen, den Akku im Alltag zu schonen.
 
 ### Regelmäßige Zellkalibrierung
 
-Ist Max. SOC kleiner als 100 %, erlaubt die Integration alle sieben Tage eine
-vollständige Ladung zur Zellkalibrierung. Die eingestellte Grenze bleibt dabei
+Ist Max. SOC kleiner als 100 %, wird die Zellkalibrierung am dritten
+Kalendertag nach der letzten vollständigen Ladung fällig, ab Tagesbeginn
+in der Home-Assistant-Zeitzone. Bereits der erste reguläre Ladezyklus an
+diesem Tag verwendet das Ziel 100 %. Die eingestellte Grenze bleibt dabei
 unverändert; nur für diesen Kalibrierungsvorgang darf der Speicher 100 %
 erreichen. Die Funktion startet keine zusätzliche Netzladung, sondern nutzt
 die nächste reguläre Lademöglichkeit.
 
 Die Diagnose-Entitäten **Zellkalibrierung aktiv** und **Nächste
-Zellkalibrierung** zeigen den aktuellen Zustand und den nächsten Termin.
+Zellkalibrierung** zeigen den aktuellen Zustand und das nächste Datum ohne
+Uhrzeit. Beispiel: Volladung am 12. September → nächste Fälligkeit am
+15. September, unabhängig von der Uhrzeit der letzten Volladung.
 
 ## Ladefunktionen
 
@@ -498,7 +514,7 @@ Formate lassen sich nicht ineinander überführen. Für das preisoptimierte
 Laden bleibt der Sensor unabhängig vom Tarifmodell die Quelle; für die
 Wirtschaftlichkeit ist er es nur beim Tarifmodell **Dynamisch**.
 
-Der hinterlegte Tarifplan ist im Dashboard-Tab **Ersparnis**
+Der hinterlegte Tarifplan ist im Dashboard-Tab **Amortisation**
 sichtbar: eine Tabelle aus Beginn, Ende und Arbeitspreis, sortiert nach
 Beginn, mit dem Grundpreis als letzter Zeile. Die gerade geltende Zeile ist
 mit **jetzt** markiert, darunter steht der nächste Preiswechsel. Damit lässt
@@ -690,7 +706,7 @@ negative Preise oder spätere Kosten ändern diesen Zeitpunkt nicht.
 
 ## Ersparnisübersicht
 
-Der fünfte Tab **Ersparnis** fasst das **Nettoergebnis** bewusst kompakt
+Der fünfte Tab **Amortisation** fasst das **Nettoergebnis** bewusst kompakt
 zusammen. Grundlage sind vermiedene Netzbezugskosten abzüglich
 Netzladekosten und entgangener Einspeisevergütung. Spätere Kosten reduzieren
 den Wert; Mehrkosten werden negativ angezeigt. Ein echtes Ergebnis von 0
@@ -753,7 +769,7 @@ Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
 **Restbetrag bis Amortisation**. Direkt danach folgt der optionale
 Vorlauf-Ertrag als **Bereits vor Bilanzbeginn berücksichtigt** mit der Einheit
 **€** und exakt zwei Nachkommastellen, anschließend **Netto-Ersparnis** und
-**Bilanzbeginn**. Alle Währungsangaben im Ersparnis-Tab erscheinen mit zwei
+**Bilanzbeginn**. Alle Währungsangaben im Amortisations-Tab erscheinen mit zwei
 Nachkommastellen; intern und im Recorder bleibt die höhere Rechengenauigkeit
 erhalten. Die Karte trägt die Überschrift **Amortisation**.
 

@@ -109,12 +109,16 @@ test("compact views retain readable controls and all entities across available p
             const month =
               control.matches("input[type='checkbox']") &&
               control.closest(".charging-view__rows--months");
-            const target = month
+            const compactCheckbox =
+              month ||
+              (control.matches("input[type='checkbox']") &&
+                control.closest(".entity-control__switch-target--compact"));
+            const target = compactCheckbox
               ? control.closest(".entity-control__switch-target")
               : control;
             if (!target) {
               violations.push(
-                `${name(control)} is missing its month click target`,
+                `${name(control)} is missing its checkbox click target`,
               );
               continue;
             }
@@ -122,11 +126,11 @@ test("compact views retain readable controls and all entities across available p
             const rect = target.getBoundingClientRect();
             if (rect.height < 43.5)
               violations.push(`${name(control)} target height ${rect.height}`);
-            if (month && rect.width < 43.5)
+            if (compactCheckbox && rect.width < 43.5)
               violations.push(
-                `${name(control)} month target width ${rect.width}`,
+                `${name(control)} checkbox target width ${rect.width}`,
               );
-            if (month) {
+            if (compactCheckbox) {
               const indicator = control.getBoundingClientRect();
               if (
                 indicator.width < 20 ||
@@ -282,6 +286,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
   const panel = page.locator("sax-power-vue-panel");
   const english = testInfo.project.name.endsWith("en");
   const input = panel.locator("input[role='switch']");
+  const target = panel.locator(".entity-control__switch-target--compact");
   const dialog = panel.locator("dialog.entity-control__confirmation");
   const actions = page.locator("#actions");
   const cancel = dialog.getByRole("button", {
@@ -300,6 +305,21 @@ test("storage requires confirmation in both directions and cancellation keeps th
   await expect(
     device.locator(".general-view__rows > :last-child input[role='switch']"),
   ).toHaveCount(1);
+  await expect(target).toHaveCount(1);
+  expect(
+    await target.evaluate((element) => {
+      const area = element.getBoundingClientRect();
+      const indicator = element.querySelector("input")!.getBoundingClientRect();
+      return (
+        area.width >= 44 &&
+        area.height >= 44 &&
+        indicator.width === 22 &&
+        indicator.height === 22 &&
+        area.left + 4 < indicator.left &&
+        area.top + 4 < indicator.top
+      );
+    }),
+  ).toBe(true);
   for (const [index, initial] of [true, false].entries()) {
     const title = english
       ? initial
@@ -320,7 +340,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
         ? "Keine Aktion"
         : '1: switch.turn_off {"entity_id":"switch.demo_storage_switch"}';
     await expect(input).toBeChecked({ checked: initial });
-    await input.click();
+    await target.click({ position: { x: 4, y: 4 } });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAccessibleName(title);
     await expect(cancel).toBeFocused();
@@ -337,7 +357,8 @@ test("storage requires confirmation in both directions and cancellation keeps th
     await expect(dialog).toBeHidden();
     await expect(input).toBeChecked({ checked: initial });
     await expect(actions).toHaveText(previousAction);
-    await input.click();
+    await input.focus();
+    await page.keyboard.press("Space");
     await expect(cancel).toBeFocused();
     await cancel.click();
     await expect(dialog).toBeHidden();
@@ -369,14 +390,14 @@ test("one dashboard with five complete views, local assets and responsive screen
           "Zeitvariabler Tarif",
           "Dynamischer Tarif",
           "Netzdienliches Laden",
-          "Ersparnis",
+          "Amortisation",
         ]
       : [
           "General information",
           "Time-of-use tariff",
           "Dynamic tariff",
           "Grid-serving charging",
-          "Savings",
+          "Amortization",
         ],
   );
   expect(
@@ -430,10 +451,10 @@ test("one dashboard with five complete views, local assets and responsive screen
           window.locator(".time-window-control__confirmed"),
         ).toContainText("Uhr");
       await expect(window.locator("input[type=time]").nth(0)).toHaveValue(
-        /22:00(?::00)?/,
+        "22:00",
       );
       await expect(window.locator("input[type=time]").nth(1)).toHaveValue(
-        /06:00(?::00)?/,
+        "06:00",
       );
     }
     const overflow = await page.evaluate(
@@ -514,9 +535,9 @@ test("overnight times, months, native strategy options and negative prices", asy
   await panel.locator("nav a[href$='/ladeautomatik']").click();
   await expect(panel.getByRole("switch")).toHaveCount(13);
   const times = panel.locator("input[type=time]");
-  await expect(times.nth(0)).toHaveValue(/22:00(?::00)?/);
-  await expect(times.nth(1)).toHaveValue(/06:00(?::00)?/);
-  await times.nth(0).fill("23:15:00");
+  await expect(times.nth(0)).toHaveValue("22:00");
+  await expect(times.nth(1)).toHaveValue("06:00");
+  await times.nth(0).fill("23:15");
   await panel
     .locator("form")
     .filter({ has: page.locator("input[type=time]") })
@@ -617,13 +638,14 @@ test("overnight times, months, native strategy options and negative prices", asy
   await expect(price).toHaveValue("-0.125");
 });
 
-test("both time windows support dragging, keyboard and exact atomic submission", async ({
+test("both minute-only time windows support dragging, keyboard and atomic submission", async ({
   page,
   context,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   const mobile = testInfo.project.name.startsWith("mobile");
   let actions = 0;
+  await page.locator("#legacy-times").click();
   for (const [path, kind] of [
     ["ladeautomatik", "timed_charge"],
     ["netzdienliches-laden", "grid_serving"],
@@ -640,13 +662,17 @@ test("both time windows support dragging, keyboard and exact atomic submission",
     await expect(window.locator(".time-window-control__segment")).toHaveCount(
       2,
     );
-    await inputs.nth(0).fill("22:00:17");
-    await inputs.nth(1).fill("06:00:29");
+    await expect(inputs.nth(0)).toHaveAttribute("step", "60");
+    await expect(inputs.nth(1)).toHaveAttribute("step", "60");
+    await expect(confirmed).toContainText("22:00:17");
+    await expect(confirmed).toContainText("06:00:29");
+    await expect(apply).toBeDisabled();
     await markers.nth(0).click();
-    await expect(inputs.nth(0)).toHaveValue("22:00:17");
+    await expect(inputs.nth(0)).toHaveValue("22:00");
+    await expect(apply).toBeDisabled();
     await markers.nth(0).press("ArrowRight");
-    await expect(inputs.nth(0)).toHaveValue("22:01:00");
-    await expect(inputs.nth(1)).toHaveValue("06:00:29");
+    await expect(inputs.nth(0)).toHaveValue("22:01");
+    await expect(inputs.nth(1)).toHaveValue("06:00");
     await expect(confirmed).toContainText("22:00");
     await expect(page.locator("#actions")).toHaveText(before);
 
@@ -683,11 +709,11 @@ test("both time windows support dragging, keyboard and exact atomic submission",
       await page.mouse.move(to.x, to.y, { steps: 8 });
       await page.mouse.up();
     }
-    await expect(inputs.nth(0)).toHaveValue("12:00:00");
-    await expect(inputs.nth(1)).toHaveValue("06:00:29");
+    await expect(inputs.nth(0)).toHaveValue("12:00");
+    await expect(inputs.nth(1)).toHaveValue("06:00");
     await expect(page.locator("#actions")).toHaveText(before);
 
-    await inputs.nth(1).fill("12:00:00");
+    await inputs.nth(1).fill("12:00");
     await expect(window.locator(".time-window-control__segment")).toHaveCount(
       0,
     );
@@ -705,18 +731,22 @@ test("both time windows support dragging, keyboard and exact atomic submission",
     expect(same[0].x).toBeCloseTo(same[1].x);
     expect(same[0].y + same[0].height).toBeLessThanOrEqual(same[1].y);
     await markers.nth(1).press("Home");
-    await expect(inputs.nth(1)).toHaveValue("00:00:00");
+    await expect(inputs.nth(1)).toHaveValue("00:00");
     await markers.nth(1).press("End");
-    await expect(inputs.nth(1)).toHaveValue("23:59:59");
-    await inputs.nth(0).fill("23:15:17");
-    await inputs.nth(1).fill("06:30:29");
+    await expect(inputs.nth(1)).toHaveValue("23:59");
+    await expect(markers.nth(1)).toHaveAttribute("aria-valuemax", "86340");
+    await expect(markers.nth(1)).toHaveAttribute("aria-valuenow", "86340");
+    await inputs.nth(0).fill("23:15");
+    await inputs.nth(1).fill("06:30");
     await apply.click();
     actions += 1;
     await expect(page.locator("#actions")).toHaveText(
-      `${actions}: sax_power.set_${kind}_window {"device_id":"demo-device","start":"23:15:17","end":"06:30:29"}`,
+      `${actions}: sax_power.set_${kind}_window {"device_id":"demo-device","start":"23:15:00","end":"06:30:00"}`,
     );
-    await expect(confirmed).toContainText("23:15:17");
-    await expect(confirmed).toContainText("06:30:29");
+    await expect(confirmed).toContainText("23:15");
+    await expect(confirmed).toContainText("06:30");
+    await expect(confirmed).not.toContainText(":17");
+    await expect(confirmed).not.toContainText(":29");
     await expect(apply).toBeDisabled();
     if (mobile) {
       await page.setViewportSize({ width: 320, height: 1100 });
@@ -765,14 +795,14 @@ test("failed time-window submission preserves both confirmed values and can be r
   const confirmed = window.locator(".time-window-control__confirmed");
   const apply = window.locator("button[type=submit]");
   await page.locator("#failure").click();
-  await inputs.nth(0).fill("10:00:00");
-  await inputs.nth(1).fill("15:00:00");
+  await inputs.nth(0).fill("10:00");
+  await inputs.nth(1).fill("15:00");
   await apply.click();
   await expect(window.getByRole("alert")).toBeVisible();
   await expect(confirmed).toContainText("22:00");
   await expect(confirmed).toContainText("06:00");
-  await expect(inputs.nth(0)).toHaveValue("10:00:00");
-  await expect(inputs.nth(1)).toHaveValue("15:00:00");
+  await expect(inputs.nth(0)).toHaveValue("10:00");
+  await expect(inputs.nth(1)).toHaveValue("15:00");
   await apply.click();
   await expect(confirmed).toContainText("10:00");
   await expect(confirmed).toContainText("15:00");
@@ -823,6 +853,99 @@ test("one inclusive date selection drives signed chart and accessible table", as
   await expect(panel.locator(".savings-explanation")).toHaveAttribute(
     "open",
     "",
+  );
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("tariff tabs follow confirmed HA states and keep both choices available when no exclusive tariff is known", async ({
+  page,
+}) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const timed = panel.locator("nav a[href$='/ladeautomatik']");
+  const dynamic = panel.locator("nav a[href$='/dynamisches-laden']");
+  await expect(panel.locator("nav a")).toHaveCount(5);
+  await page.locator("#tariff-timed").click();
+  await expect(panel.locator("nav a")).toHaveCount(4);
+  await expect(timed).toBeVisible();
+  await expect(dynamic).toHaveCount(0);
+  await expect(page).toHaveURL(/allgemein$/);
+  await timed.click();
+  await page.locator("#tariff-dynamic").click();
+  await expect(page).toHaveURL(/dynamisches-laden$/);
+  await expect(dynamic).toHaveAttribute("aria-current", "page");
+  await expect(timed).toHaveCount(0);
+  await expect(panel.getByRole("heading", { level: 1 })).toBeFocused();
+  await page.locator("#tariff-off").click();
+  await expect(panel.locator("nav a")).toHaveCount(5);
+  await expect(timed).toBeVisible();
+  await expect(dynamic).toBeVisible();
+  await page.locator("#tariff-both").click();
+  await expect(panel.locator("nav a")).toHaveCount(5);
+  await page.locator("#tariff-timed").click();
+  await expect(page).toHaveURL(/ladeautomatik$/);
+  await page.locator("#unavailable").click();
+  await expect(panel.locator("nav a")).toHaveCount(5);
+  await page.locator("#unavailable").click();
+  await expect(panel.locator("nav a")).toHaveCount(4);
+  await expect(dynamic).toHaveCount(0);
+  await page.locator("#connection").click();
+  await expect(panel.locator("nav a")).toHaveCount(5);
+  await page.locator("#connection").click();
+  await expect(panel.locator("nav a")).toHaveCount(4);
+  await expect(timed).toBeVisible();
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("hidden tariff deep links, reload and history resolve to the active tariff without service actions", async ({
+  page,
+}) => {
+  const panel = page.locator("sax-power-vue-panel");
+  await page.locator("#tariff-timed").click();
+  await page.goto("/sax-power-vue/dynamisches-laden");
+  await expect(page).toHaveURL(/ladeautomatik$/);
+  await expect(panel.locator("nav [aria-current='page']")).toHaveAttribute(
+    "href",
+    "/sax-power-vue/ladeautomatik",
+  );
+  await expect(panel.locator("nav a[href$='/dynamisches-laden']")).toHaveCount(
+    0,
+  );
+  await page.reload();
+  await expect(page).toHaveURL(/ladeautomatik$/);
+  await expect(panel.locator(".time-window-control")).toBeVisible();
+  await panel.locator("nav a[href$='/netzdienliches-laden']").click();
+  await page.locator("#tariff-dynamic").click();
+  await expect(page).toHaveURL(/netzdienliches-laden$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/dynamisches-laden$/);
+  await expect(panel.locator("nav [aria-current='page']")).toHaveAttribute(
+    "href",
+    "/sax-power-vue/dynamisches-laden",
+  );
+  await expect(panel.locator("nav a[href$='/ladeautomatik']")).toHaveCount(0);
+  await page.goForward();
+  await expect(page).toHaveURL(/netzdienliches-laden$/);
+  await expect(panel.locator(".time-window-control")).toBeVisible();
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("next cell calibration displays only the calendar date in the HA language", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const row = page.locator("sax-power-vue-panel .entity-value").filter({
+    has: page.getByText(
+      english ? "Next cell calibration" : "Nächste Zellkalibrierung",
+      { exact: true },
+    ),
+  });
+  const expectedDate = new Intl.DateTimeFormat(english ? "en-GB" : "de-DE", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date("2026-09-14T00:00:00Z"));
+  await expect(row.locator(".entity-value__state")).toHaveText(expectedDate);
+  await expect(row.locator(".entity-value__state")).not.toContainText(
+    /\d{1,2}:\d{2}/,
   );
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

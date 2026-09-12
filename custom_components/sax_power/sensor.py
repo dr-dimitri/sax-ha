@@ -303,7 +303,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     SaxPowerSensorEntityDescription(
         key="next_cell_calibration",
         translation_key="next_cell_calibration",
-        device_class=SensorDeviceClass.TIMESTAMP,
+        device_class=SensorDeviceClass.DATE,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_direct("next_cell_calibration"),
     ),

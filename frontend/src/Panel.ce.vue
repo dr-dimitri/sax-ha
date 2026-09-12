@@ -42,7 +42,31 @@ const showSidebarButton = computed(
 );
 const basePath = computed(() => `/${props.panel?.url_path || "sax-power-vue"}`);
 const path = ref(props.route?.path ?? window.location.pathname);
-const activePath = computed(() => tabPath(path.value, basePath.value));
+const exclusiveTariff = computed(() => {
+  const timed = dashboard.entity("switch", "timed_charge_enabled");
+  const dynamic = dashboard.entity("switch", "price_charge_enabled");
+  if (!timed?.available || !dynamic?.available) return undefined;
+  if (timed.state?.state === "on" && dynamic.state?.state === "off")
+    return "ladeautomatik";
+  if (dynamic.state?.state === "on" && timed.state?.state === "off")
+    return "dynamisches-laden";
+  return undefined;
+});
+const visibleTabs = computed(() =>
+  tabs.filter(
+    (tab) =>
+      !exclusiveTariff.value ||
+      !["ladeautomatik", "dynamisches-laden"].includes(tab.path) ||
+      tab.path === exclusiveTariff.value,
+  ),
+);
+const requestedPath = computed(() => tabPath(path.value, basePath.value));
+const activePath = computed(() =>
+  exclusiveTariff.value &&
+  ["ladeautomatik", "dynamisches-laden"].includes(requestedPath.value)
+    ? exclusiveTariff.value
+    : requestedPath.value,
+);
 const activeTab = computed(() =>
   tabs.find((tab) => tab.path === activePath.value),
 );
@@ -53,6 +77,21 @@ watch(
   (value) => {
     if (value !== undefined) path.value = value;
   },
+);
+
+watch(
+  [requestedPath, activePath],
+  ([requested, active]) => {
+    if (requested === active) return;
+    const target = `${basePath.value}/${active}`;
+    path.value = target;
+    window.history.replaceState(null, "", target);
+    window.dispatchEvent(
+      new CustomEvent("location-changed", { detail: { replace: true } }),
+    );
+    void nextTick(() => heading.value?.focus());
+  },
+  { immediate: true },
 );
 
 function syncLocation(): void {
@@ -122,7 +161,7 @@ function openSidebar(): void {
 
     <nav class="navigation" :aria-label="text.navigation">
       <a
-        v-for="tab in tabs"
+        v-for="tab in visibleTabs"
         :key="tab.path"
         :href="`${basePath}/${tab.path}`"
         :aria-current="activePath === tab.path ? 'page' : undefined"

@@ -19,7 +19,7 @@ export const tabs = [
     de: "Netzdienliches Laden",
     en: "Grid-serving charging",
   },
-  { path: "ersparnis", de: "Ersparnis", en: "Savings" },
+  { path: "ersparnis", de: "Amortisation", en: "Amortization" },
 ] as const;
 
 export type Language = "de" | "en";

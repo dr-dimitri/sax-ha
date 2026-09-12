@@ -20,7 +20,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 
-from .application.calibration import CalibrationState, evaluate_calibration
+from .application.calibration import (
+    CalibrationState,
+    calibration_due_at,
+    evaluate_calibration,
+)
 from .application.charge_policy import (
     ChargePolicyInput,
     evaluate_charge_policy,
@@ -707,9 +711,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._accumulate_grid_energy(data)
         self._accumulate_energy(data)
 
-        calibration_changed = await self._async_update_cell_calibration(data["soc"])
-        if calibration_changed:
-            self.price_planner.evaluate()
         if not self._control_bootstrap_pending:
             # REQ-CONTROL-CONFIG-BOOTSTRAP: Lesen ist während des Bootstraps
             # erlaubt, Steuern nicht - der erste Refresh läuft absichtlich
@@ -733,6 +734,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
         else:
             self._basic_read_failed = False
+            await self._async_update_cell_calibration(data["soc"])
         self._publish_charge_state(data)
         self._async_check_self_diagnostics()
         return data
@@ -754,7 +756,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_status"] = self._price_charge_status
         data["price_charge_next_start"] = plan.next_start
         data["price_charge_current_price"] = plan.current_price
-        data["next_cell_calibration"] = self.next_cell_calibration_at
+        data["next_cell_calibration"] = self.next_cell_calibration_date
 
     def _accumulate_grid_energy(self, data: dict[str, Any]) -> None:
         """Publish persistent grid totals from measured intervals (REQ-GRID-ENERGY)."""
@@ -2747,7 +2749,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         last_full_charge_at = self.last_full_charge_at
         if last_full_charge_at is None:
             return None
-        return last_full_charge_at + CELL_CALIBRATION_INTERVAL
+        return calibration_due_at(
+            last_full_charge_at,
+            CELL_CALIBRATION_INTERVAL,
+            dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC,
+        )
+
+    @property
+    def next_cell_calibration_date(self) -> date | None:
+        due_at = self.next_cell_calibration_at
+        if due_at is None:
+            return None
+        time_zone = dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC
+        return due_at.astimezone(time_zone).date()
 
     @property
     def max_soc_clamped(self) -> bool:
@@ -2771,6 +2785,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, current_soc: int | float, *, now: datetime | None = None
     ) -> bool:
         """Evaluate and persist calibration edges; return active-state change."""
+        if (
+            isinstance(current_soc, bool)
+            or not isinstance(current_soc, int | float)
+            or not math.isfinite(current_soc)
+            or not MIN_SOC <= current_soc <= MAX_SOC
+        ):
+            return False
         decision = evaluate_calibration(
             now=now or dt_util.utcnow(),
             current_soc=current_soc,
@@ -2778,6 +2799,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             state=self._cell_calibration_state,
             interval=CELL_CALIBRATION_INTERVAL,
             maximum_soc=MAX_SOC,
+            time_zone=dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC,
         )
         active_changed = decision.calibration_active != self._cell_calibration_active
         self._cell_calibration_state = decision.state
@@ -3106,8 +3128,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._timed_charge_max_soc is not None:
             self._timed_charge_max_soc = self.timed_charge_max_soc
         self.clear_control_field_unresolved("max_soc")
-        if self.data is not None and (current_soc := self.data.get("soc")) is not None:
-            await self._async_update_cell_calibration(current_soc)
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
@@ -3531,7 +3551,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return
                 if self._sun_charge_timed_discharge:
                     async with self._charge_control_lock:
-                        if self._shutdown_started:
+                        if self._shutdown_started or self._control_bootstrap_pending:
                             return
                         if not self._sun_charge_timed_discharge:
                             continue
@@ -3564,6 +3584,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 self._publish_charge_state(self.data)
                                 self.async_update_listeners()
                             return
+                        # REQ-PERIODIC-FULL-CALIBRATION: Dieser PV-Regler trifft
+                        # zwischen Polls eigene neue Leistungsentscheidungen.
+                        if (
+                            not self._basic_read_failed
+                            and self.data is not None
+                            and (current_soc := self.data.get("soc")) is not None
+                            and await self._async_update_cell_calibration(current_soc)
+                        ):
+                            self.price_planner.evaluate()
+                            self._publish_charge_state(self.data)
+                            self.async_update_listeners()
                         power = self._timed_discharge_pv_setpoint()
                         await self._async_write_sun_charge_setpoint(
                             power, timed_discharge_hold=True
@@ -4408,11 +4439,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
-        if self._shutdown_started:
+        if self._shutdown_started or self._control_bootstrap_pending:
             return
-        if self._basic_read_failed:
+        current_soc = data.get("soc")
+        if (
+            self._basic_read_failed
+            or isinstance(current_soc, bool)
+            or not isinstance(current_soc, int | float)
+            or not math.isfinite(current_soc)
+            or not MIN_SOC <= current_soc <= MAX_SOC
+        ):
             await self._async_suspend_charge_for_missing_soc()
             return
+        # REQ-PERIODIC-FULL-CALIBRATION: Timer/Services können den ersten
+        # Ladezyklus des Fälligkeitstags vor dem nächsten Poll beginnen.
+        if await self._async_update_cell_calibration(current_soc):
+            self.price_planner.evaluate()
         command_revision_before = self._sun_charge_command_revision
         timed_was_active = self._timed_charge_active
         await self._async_update_timed_discharge_proof(dt_util.now())
@@ -4445,7 +4487,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._sun_charge_reset_required = True
 
         target_soc = self.effective_max_soc
-        current_soc = data["soc"]
         if timed_window_completed and self._last_effective_max_soc is None:
             # Restore must perform the same one-time release as the original
             # deadline, even when the edited window is still open (#165).

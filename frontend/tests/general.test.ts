@@ -93,7 +93,7 @@ async function mount(
               : item.key.startsWith("energy_")
                 ? { unit_of_measurement: "kWh" }
                 : item.key === "next_cell_calibration"
-                  ? { device_class: "timestamp" }
+                  ? { device_class: "date" }
                   : {};
       return [
         item.entity_id,
@@ -106,7 +106,7 @@ async function mount(
               : item.domain === "binary_sensor"
                 ? "off"
                 : item.key === "next_cell_calibration"
-                  ? "2026-09-14T05:00:00+00:00"
+                  ? "2026-09-14"
                   : "42"),
           attributes,
         },
@@ -460,9 +460,9 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
     );
   });
 
-  it("uses live HA formatting, enum state, timestamp and renamed entity IDs", async () => {
+  it("uses live HA formatting, enum state, calendar date and renamed entity IDs", async () => {
     const { root, hass, callService, update } = await mount();
-    expect(root.textContent).toContain("14.09.2026, 07:00");
+    expect(root.textContent).toContain("14.09.2026");
     expect(root.textContent).toContain("Aus");
     await update("charge_power", "1250.5");
     expect(root.textContent).toContain("1.250,5 W");

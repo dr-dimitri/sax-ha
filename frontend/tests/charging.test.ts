@@ -224,7 +224,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
       if (language === "de") expect(confirmed()).toContain("Uhr");
       const start =
         control.querySelector<HTMLInputElement>('input[type="time"]')!;
-      start.value = "23:15:27";
+      start.value = "23:15";
       start.dispatchEvent(new Event("input", { bubbles: true }));
       await flush();
       expect(callService).not.toHaveBeenCalled();
@@ -238,7 +238,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
           `set_${prefix}_window`,
           {
             device_id: "charging-preview-device",
-            start: "23:15:27",
+            start: "23:15:00",
             end: "06:00:00",
           },
           undefined,
@@ -246,9 +246,9 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
         ],
       ]);
       expect(confirmed()).toContain("22:00");
-      await update(`${prefix}_start`, "23:15:27");
-      expect(start.value).toBe("23:15:27");
-      expect(confirmed()).toContain("23:15:27");
+      await update(`${prefix}_start`, "23:15:00");
+      expect(start.value).toBe("23:15");
+      expect(confirmed()).toContain("23:15");
     },
   );
 

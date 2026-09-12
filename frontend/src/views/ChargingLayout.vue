@@ -191,14 +191,14 @@ const text = computed(() =>
   padding-top: 16px;
   border-top: 1px solid var(--divider-color, #e0e0e0);
 }
-.charging-view__rows .entity-control {
+.charging-view__rows > .entity-control {
   border: 0;
   border-radius: 0;
   padding: 0 0 16px;
   border-bottom: 1px solid var(--divider-color, #e0e0e0);
   box-shadow: none;
 }
-.charging-view__rows .entity-control:last-child {
+.charging-view__rows > .entity-control:last-child {
   padding-bottom: 0;
   border-bottom: 0;
 }
@@ -244,14 +244,14 @@ const text = computed(() =>
   .charging-view__rows {
     gap: 12px;
   }
-  .charging-view__rows .entity-control {
+  .charging-view__rows > .entity-control {
     gap: 8px 12px;
     padding-bottom: 12px;
   }
-  .charging-view__rows .entity-control:last-child {
+  .charging-view__rows > .entity-control:last-child {
     padding-bottom: 0;
   }
-  .charging-view__rows .entity-control__description {
+  .charging-view__rows > .entity-control .entity-control__description {
     flex-basis: 120px;
   }
   .charging-view__rows--columns {

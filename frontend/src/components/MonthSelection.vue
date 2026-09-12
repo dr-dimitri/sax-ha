@@ -231,11 +231,13 @@ const readOnlyMonths = computed(() =>
 }
 .month-selection__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 .month-selection__overview {
+  flex: 1 1 180px;
   min-width: 0;
   overflow-wrap: anywhere;
 }

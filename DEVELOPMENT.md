@@ -90,10 +90,7 @@ custom_components/sax_power/
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan + Roh-/Startwerte der
 │                          Energie- und Geldzähler, IP-Adresse redigiert
-├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
-│                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
-│                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-SAVINGS-DASHBOARD
-├── vue_dashboard.py        Optionales Vue-Panel neben Lovelace, siehe
+├── vue_dashboard.py        Dashboard SAX Power als optionales Vue-Panel, siehe
 │                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
 ├── dashboard_api.py        Berechtigungsgefiltertes Entity-Metadatenabo für Vue,
 │                          siehe REQ-VUE-ENTITY-BINDING
@@ -108,14 +105,17 @@ frontend/             Vue-/TypeScript-Quellen, Build, Komponenten-/Browser-Tests
 .devcontainer/         VS Code DevContainer für lokale Entwicklung
 ```
 
-### Paralleles Vue-Panel
+### Dashboard SAX Power
 
 `vue_dashboard.py` bindet das Custom Element `sax-power-vue-panel` über
 Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
 in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
 ordnet die Entity-Anbindung dem Config Entry zu. Die fünf Views unter
-`frontend/src/views/` bilden die fachlichen Inhalte des Lovelace-Dashboards ab:
+`frontend/src/views/` bilden das einzige mitgelieferte Dashboard **SAX Power**.
+Der technische Pfad `/sax-power-vue`, das Custom Element und die bestehenden
+Config-Schlüssel bleiben kompatibel; UI-Name und Aktivierungsoption tragen
+keine Vue-/Vorschaukennzeichnung.
 
 | View | Anforderungen | Aufgabe |
 | --- | --- | --- |
@@ -128,15 +128,14 @@ ordnet die Entity-Anbindung dem Config Entry zu. Die fünf Views unter
 Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
 Zeitvariabler Tarif (EN: Time-of-use tariff), Dynamischer Tarif (EN: Dynamic
 tariff), Netzdienliches Laden, Ersparnis. Die Pfade `ladeautomatik` und
-`dynamisches-laden`, Entity-Schlüssel und Tarifkonfiguration bleiben erhalten;
-die geänderten Tabnamen gelten ausschließlich für Vue.
+`dynamisches-laden`, Entity-Schlüssel und Tarifkonfiguration bleiben erhalten.
 
 `ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
 Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
 `EntityValue`-Komponenten wie die allgemeine Ansicht. Es berechnet keine
 Zeitfenster, Ladeberechtigungen oder Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
-[Paritätsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
+[Funktionsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
 
 Die beiden Monatsraster in `TimedChargingView.vue` und `GridServingView.vue`
 lassen die zusätzliche Zeile „Bestätigter Wert“ weg. Kontrollkästchen folgen
@@ -152,15 +151,18 @@ keine Monatsschalter.
 Die Ansichten wechseln ab 860 px Inhaltsbreite in ihr kompaktes Desktoplayout;
 die HA-Seitenleiste zählt deshalb nicht als nutzbarer Kartenplatz. Normale
 Schriftgrößen, mindestens 44 px hohe Eingaben und natürliche Kartenhöhen
-bleiben erhalten. Die breiten Ansichten nutzen zwei Spalten und ein Raster
-für Monatsschalter; die schmale Darstellung behält ihre bisherigen Abstände.
+bleiben erhalten. Monatsschalter nutzen auch auf schmalen Ansichten ein
+kompaktes Raster mit knappen Innenabständen und mehr Spalten nach verfügbarem
+Platz. Ihre Beschriftungen bleiben mindestens 14 px groß und die Bedienflächen
+mindestens 44 × 44 px. Bei sehr geringer Breite bleibt eine Spalte. DOM- und
+Tastaturreihenfolge bleiben Januar bis Dezember.
 Die Gerätekarte beginnt mit `energy_charged`/`energy_discharged` und endet mit
-`storage_switch`; es gibt keine separate Energie-Karte. Nur der Vue-
+`storage_switch`; es gibt keine separate Energie-Karte. Nur der
 Speicherschalter verlangt vor beiden Zielzuständen eine Dialogbestätigung.
 Abbrechen/Escape sowie Änderungen an Ausgangszustand, aufgelöster Entity-ID,
 Bedienberechtigung oder Verbindung verwerfen die offene Auswahl ohne Service.
 Eine gültige Bestätigung verwendet einmal den bestehenden HA-Schalterservice.
-Lovelace-Layout und die übrigen Schalter werden davon nicht verändert.
+Die übrigen Schalter benötigen diesen zusätzlichen Dialog nicht.
 
 `dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
 `sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
@@ -225,15 +227,23 @@ Option erhält die vorhandene Auswahl. Der Options-Listener synchronisiert
 das Panel direkt; eine reine Änderung dieser Option setzt weder den Planner
 neu auf noch löst sie eine Modbus-Aktion aus. Setup registriert das aktivierte
 Panel erneut, Unload entfernt es. Fehler der optionalen Oberfläche blockieren
-die Batterieintegration nicht. Lovelace-Einmalanlage, Neuinstallation und
-Reparaturhinweise bleiben eigenständig.
+die Batterieintegration nicht.
+
+Der Lovelace-Builder, dessen Anlageoption, Create-/Reinstall-Services,
+Veraltet-Reparatur und Lovelace-Abhängigkeit sind entfernt. Die Migration
+bereinigt `create_dashboard` und `dashboard_update_dismissed` in `entry.data`
+und `entry.options` sowie `dashboard_outdated_<entry_id>` in der Issue Registry.
+Sie schreibt weder in den Lovelace-Storage noch löscht sie gespeicherte
+Dashboards oder Karten. Das bestehende Dashboard-Opt-in einschließlich
+explizitem `False` bleibt erhalten. Die aktive Implementierung benötigt
+keine Lovelace-Konfiguration oder parallelen Dashboard-Einstieg.
 
 `REQ-VUE-DASHBOARD-REPAIR` ergänzt einen eigenen Reparaturablauf für Vue.
 Der SHA-256-Hash des lokalen Bundles identifiziert den Stand auch zwischen
 Snapshots mit derselben Manifest-Version. `vue_dashboard_version` hält den
 bestätigten Stand; `vue_dashboard_dismissed_version` unterdrückt nur den
 konkret abgelehnten Hinweis. Neue Aktivierungen beginnen mit einer Baseline;
-bereits aktivierte ältere Vorschauen ohne Marker erhalten einen neutralen
+bereits aktivierte ältere Dashboardstände ohne Marker erhalten einen neutralen
 einmaligen Hinweis zum Neuladen. Ein Fehler bei der Registrierung kann auch
 für einen schon bestätigten Bundle-Stand eine Reparatur auslösen.
 
@@ -273,16 +283,17 @@ vorhandene Snapshot-Packprogramm übernimmt dieselben Bytes. Der privilegierte
 Snapshot-Workflow führt weiterhin keinen Frontend-Build aus PR-Code aus.
 `tests/test_frontend_package.py` prüft Source- und Snapshot-Paketierung,
 `tests/test_vue_dashboard.py` den Panel-Lebenszyklus und
-`tests/test_config_flow.py` die unabhängigen Dashboard-Optionen.
+`tests/test_config_flow.py` die Dashboard-Aktivierung; `tests/test_init.py`
+prüft die Bereinigung alter Metadaten ohne Änderung gespeicherter Dashboards.
 `tests/test_dashboard_api.py` prüft das echte WebSocket-Protokoll einschließlich
 Berechtigungen und Registry-Änderungen. Die Frontend-Tests decken Live-Zustände,
 Bedienvalidierung, ausstehende Aktionen und den Abo-Lebenszyklus ab.
 `tests/test_vue_dashboard_e2e.py` startet die Integration mit einem lokalen
 Modbus-TCP-Simulator und zwei echten HA-WebSocket-Clients: Änderungen über
-beide Dashboard-Zugänge sind gegenseitig sichtbar und verursachen weder einen
-zweiten Modbus-Client noch zusätzliche Geräteabfragen durch das Öffnen der
-Oberflächen. Die genaue Abgrenzung zu Browser- und Hardwareprüfungen steht in
-der Paritätsmatrix. `tests/test_vue_dashboard_restart.py` ergänzt zwei getrennte
+Dashboard und reguläre HA-Services sind gegenseitig sichtbar und verursachen
+weder einen zweiten Modbus-Client noch zusätzliche Geräteabfragen durch das
+Öffnen der Oberfläche. Die genaue Abgrenzung zu Browser- und Hardwareprüfungen
+steht in der Funktionsmatrix. `tests/test_vue_dashboard_restart.py` ergänzt zwei getrennte
 HA-Läufe mit tatsächlich über HA-Storage gespeicherten Optionen und Bundle-Hash.
 
 Ein heruntergeladenes Stable-Quellarchiv oder Snapshot-ZIP kann aus dem
@@ -347,8 +358,8 @@ Verbindung mit demselben Testread, bevor die Daten gespeichert werden. Nur
 Schritte, bevor der Eintrag angelegt wird - `async_step_reconfigure`
 überspringt sie alle: `async_step_grid_charge` (Vorbelegung für das
 zeitgesteuerte Laden, siehe `STEP_GRID_CHARGE_SCHEMA`), `async_step_dashboard`
-(Dashboard anlegen ja/nein, siehe `STEP_DASHBOARD_SCHEMA` und
-REQ-BUNDLED-DASHBOARD) und zuletzt `async_step_finish` - eine reine
+(Dashboard aktivieren ja/nein, Standard `False`, siehe `STEP_DASHBOARD_SCHEMA`
+und REQ-VUE-DASHBOARD) und zuletzt `async_step_finish` - eine reine
 Zusammenfassungsseite ohne eigene Eingabefelder (Firmware, Seriennummer,
 SunSpec-Erreichbarkeit, Anzahl angelegter Entities als
 `description_placeholders`, per Testread über `_async_read_finish_summary`
@@ -868,40 +879,21 @@ Coordinator über seinen Reset-Lock. Die In-Memory-Umstellung nach einem
 erfolgreichen Store-Reset enthält keinen weiteren `await`, damit kein
 Poll einen alten Coordinator-Stand unter der neuen Generation vormerkt.
 
-### Dashboard-Tab "Ersparnis" (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+### Dashboard-Tab "Ersparnis" (REQ-VUE-SAVINGS)
 
-Der fünfte View verwendet `economics_net_savings` für alle Kalender- und
-freien Zeitraumwerte. Die vollständige Top-Level-Reihenfolge lautet:
-Amortisationsblock, KPI-Grid, Tarifinformation, freier Zeitraum, eingeklappte
-Hinweise, Statushinweis. `_tariff_plan_card` erzeugt die Tarifinformation
-direkt aus den Attributen des aktuellen Netzbezugspreis-Sensors.
+`SavingsView.vue` verwendet `economics_net_savings` für alle Kalender- und
+freien Zeitraumwerte. Amortisation, Kalenderwerte, Tarifinformation, freie
+Auswertung, eingeklappte Hinweise und Statushinweis folgen der oben
+beschriebenen Funktionsmatrix. Daten kommen aus den vorhandenen HA-Entitäten
+und dem nativen Recorder-Adapter; Darstellung und Datumswahl sind in Vue
+implementiert. Es gibt keine generierten Lovelace-Karten oder gespeicherten
+Dashboard-Templates.
 
-`_savings_payback_block` wird über
-`economics_investment_configured` zur Laufzeit ein- oder ausgeblendet. Im
-aktiven Zweig folgt auf die blaue Fortschritts-Gauge eine einzige
-`entities`-Karte mit Restbetrag, Vorlaufbetrag, Netto-Ersparnis und
-Bilanzbeginn. Der Vorlauf nutzt seine zweistellig formatierte Anzeige und trägt
-`suffix: "€"`. Prognose-Tile,
-Prognoseerklärung, Durchschnitt und Jahreshochrechnung sind entfernt. Die
-frühere separate Karte "Gesamt seit Bilanzbeginn" existiert nicht mehr. Der
-Block besitzt keine eigene Markdown-Überschrift "Amortisation".
+Fehlt `economics_net_savings`, entfallen Kalenderwerte, dessen Detailzeile
+und die freie Auswertung. Fehlende optionale Entitäten erzeugen keine leeren
+Karten. Die abgelöste REQ-ECONOMICS-SAVINGS-DASHBOARD verweist auf diese
+aktuelle Implementierung.
 
-`_calendar_statistic_card` überlässt Tag, Woche, Monat und Jahr vollständig
-Home Assistants Recorder. `_savings_free_period_block` verbindet
-`energy-date-selection`, statistic und statistics-graph über
-`energy_sax_power_savings`, ohne eine separate Markdown-Überschrift "Freier
-Zeitraum". Der Statushinweis rendert im gesunden Zustand leer.
-
-Die Prüfung gespeicherter Dashboardstände erkennt auch die drei entfallenen
-Sensor-Suffixe `economics_unvalued_inventory`, `economics_unpriced_charge` und
-`economics_unpriced_discharge`. Damit bleibt die alte Jinja-Referenz auf den
-Anfangsbestand nach dem Registry-Cleanup nicht unbemerkt im Dashboard; der
-Reparaturhinweis bietet eine bewusste Neuinstallation an, ohne Anpassungen
-automatisch zu überschreiben.
-
-Fehlende Registry-Entities werden weiterhin einzeln ausgelassen. Ohne
-`economics_net_savings` entfallen KPI-Grid, seine Detailzeile und der gesamte
-freie Zeitraum, ohne ungültige IDs oder leere Container zu erzeugen.
 ## Datenfluss
 
 `config_flow.py` sammelt Host/Port/Slave-IDs/Intervall und validiert die
@@ -1077,14 +1069,9 @@ freigegeben. Der globale
 Netzladeziel-Sliders. Eine globale Absenkung reduziert sofort auch einen
 höheren Netzladezielwert und persistiert beide zusammen. Eine globale
 Erhöhung erweitert nur den Sliderbereich und verändert den gewählten
-Netzladezielwert nicht. Das mitgelieferte Dashboard zeigt den neuen Slider
-in "Ladeautomatik" → "Einstellungen" direkt über "Netzladung Min. SOC".
-Bei vorhandenen Storage-Dashboards erkennt die Updateprüfung den fehlenden
-Regler, sobald seine Entity registriert ist, und bietet über den bestehenden
-Reparaturhinweis eine Neuinstallation an. Eigene Dashboard-Anpassungen
-werden durch die Prüfung nicht überschrieben; nach dem Aktualisieren
-verschwindet der Hinweis. Ohne registrierte Ziel-Entity wird kein fehlender
-Regler gemeldet.
+Netzladezielwert nicht. Das Dashboard zeigt den Regler unter
+"Zeitvariabler Tarif" → "Einstellungen" direkt über "Netzladung Min. SOC".
+Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
 
 **Entladestatus nach Netzladung:** `application/timed_discharge.py` bestimmt
 die konkrete UTC-Ablaufzeit des aktiven lokalen Fensters (auch über
@@ -1119,14 +1106,11 @@ Leistungsreferenz/Skalierung schreibbar; der validierte SunSpec-Pfad und
 dessen Modus-Rollback bleiben erhalten. Die Regelung kann auf schnelle
 Last-/PV-Änderungen erst beim nächsten Mess-/Steuertakt reagieren.
 
-Das Dashboard zeigt im Tab „Ladeautomatik“ unmittelbar unter „Zeitfenster“
+Das Dashboard zeigt im Tab „Zeitvariabler Tarif“ unmittelbar unter „Zeitfenster“
 die Karte „Entladestatus“. Der Enum-Sensor `timed_charge_discharge_status`
 zeigt „Normalbetrieb“, „Netzladen“ oder „Entladung wg. Netzladen gestoppt“.
 „Normalbetrieb“ beschreibt ausschließlich diesen Mechanismus. Nach einem
 Schreibfehler wird kein erfolgreich gehaltener Zustand behauptet.
-Die bestehende Dashboard-Reparatur erkennt die fehlende Karte anhand der
-registrierten Status-Entity und bewahrt eigene Anpassungen bis zur
-bewussten Neuinstallation.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils
@@ -1633,16 +1617,14 @@ tests/
 │                                  ist - fünf davon siehe anforderung.yaml
 │                                  REQ-SELF-DIAGNOSIS-REPAIRS, das sechste
 │                                  (economics_price_unavailable) REQ-ECONOMICS-OBSERVABILITY
-├── test_dashboard.py                Mitgeliefertes Lovelace-Dashboard (REQ-BUNDLED-DASHBOARD/
-│                                  REQ-ECONOMICS-SAVINGS-DASHBOARD): Entity-Auflösung/-Auslassung
-│                                  je Tab, Gauge-Karten, geräteprefix-freie Labels für alle fünf
-│                                  Views einschließlich "Ersparnis", Karten-/Entity-Reihenfolge,
-│                                  Bilanzbeginn/Vorlaufbetrag als Attributzeilen,
-│                                  create_dashboard-Idempotenz und reinstall_dashboard-Service
+├── test_dashboard_api.py            Entity-Metadaten, Rechte und Registry-Änderungen
+├── test_vue_dashboard.py            Panel-Lebenszyklus und Hash-Assets
+├── test_vue_dashboard_repairs.py    Dashboard-Update und Registrierung über HA-Reparaturen
+├── test_vue_dashboard_e2e.py        Zwei native HA-Clients gegen lokalen Modbus-Simulator
 ├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Ersparnis-Tab: je ein PV-Lade-,
 │                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
 │                                  Herkunftsaufteilung und die Geldsensoren bis zur
-│                                  Dashboard-Entityauflösung
+│                                  Dashboard-Metadatenauflösung
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

@@ -59,7 +59,6 @@ export interface HomeAssistant {
     notifyOnError?: boolean,
     returnResponse?: boolean,
   ): Promise<unknown>;
-  panels?: Readonly<Record<string, unknown>>;
   dockedSidebar?: "docked" | "always_hidden" | "auto";
   kioskMode?: boolean;
 }

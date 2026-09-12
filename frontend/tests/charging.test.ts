@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createApp,
@@ -434,33 +433,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
 });
 
 describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
-  it("matches the existing dashboard entity order and labels with all current strategy options", async () => {
-    const source = readFileSync(
-      "../custom_components/sax_power/dashboard.py",
-      "utf8",
-    );
-    const priceView = source.slice(
-      source.indexOf("    price_view = _view("),
-      source.indexOf(
-        "    status_entity_id =",
-        source.indexOf("    price_view = _view("),
-      ),
-    );
-    const keys = [
-      ...priceView.matchAll(/\("(?:select|number|sensor)", "([^"]+)"\)/g),
-    ].map((match) => match[1]);
-    expect(keys).toEqual([
-      "price_charge_strategy",
-      "price_charge_max_price",
-      "price_charge_neutral_price",
-      "price_charge_hours",
-      "max_soc",
-      "price_charge_active_text",
-      "price_charge_status_text",
-      "grid_serving_forecast",
-      "price_charge_next_start",
-      "price_charge_current_price",
-    ]);
+  it("renders the dynamic charging controls and status values with all strategy options", async () => {
     const { root, callService } = await mount(DynamicChargingView);
     expect(names(root)).toEqual([
       "Preisoptimiertes Laden aktiv",

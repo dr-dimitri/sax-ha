@@ -79,10 +79,10 @@ async def test_panel_is_opt_in(hass: HomeAssistant) -> None:
     assert not frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
 
 
-async def test_panel_uses_local_hashed_module_and_preserves_lovelace(
+async def test_panel_uses_local_hashed_module_and_preserves_existing_user_panel(
     hass: HomeAssistant, vue_entry: MockConfigEntry, panel_environment
 ) -> None:
-    """Vue erhält einen separaten Einstieg; die Lovelace-Konfiguration bleibt gleich."""
+    """Die Panel-Registrierung verändert keine bereits gespeicherte Nutzeransicht."""
     register_static, asset = panel_environment
     frontend.async_register_built_in_panel(
         hass,
@@ -357,10 +357,6 @@ async def test_integration_setup_and_unload_manage_optional_panel(
         patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
         patch(
             "custom_components.sax_power.SaxPowerCoordinator", return_value=coordinator
-        ),
-        patch(
-            "custom_components.sax_power.async_check_dashboard_up_to_date",
-            new=AsyncMock(),
         ),
         patch.object(
             hass.config_entries, "async_forward_entry_setups", new=AsyncMock()

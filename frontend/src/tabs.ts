@@ -38,12 +38,8 @@ export const messages = {
   de: {
     navigation: "Dashboard-Bereiche",
     menu: "Seitenleiste öffnen",
-    preview: "Vorschau",
     introduction:
-      "Dieses Dashboard zeigt dieselben Gerätewerte und Einstellungen wie Ihre bisherige Ansicht.",
-    introductionStandalone:
       "Gerätewerte, Ladeeinstellungen und Ersparnis Ihres SAX-Power-Speichers.",
-    existing: "Bestehendes Dashboard öffnen",
     loading: "Home Assistant wird geladen …",
     missingEntry:
       "Diesem Dashboard ist noch kein SAX-Power-Gerät zugeordnet. Bitte laden Sie die Integration neu.",
@@ -55,12 +51,8 @@ export const messages = {
   en: {
     navigation: "Dashboard sections",
     menu: "Open sidebar",
-    preview: "Preview",
     introduction:
-      "This dashboard shows the same device values and settings as your existing dashboard.",
-    introductionStandalone:
       "Device values, charging settings and savings for your SAX Power battery.",
-    existing: "Open existing dashboard",
     loading: "Loading Home Assistant …",
     missingEntry:
       "No SAX Power device is assigned to this dashboard yet. Please reload the integration.",

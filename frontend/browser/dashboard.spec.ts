@@ -108,6 +108,13 @@ test("compact views retain readable controls and all entities across available p
             const rect = control.getBoundingClientRect();
             if (rect.height < 43.5)
               violations.push(`${name(control)} height ${rect.height}`);
+            if (
+              control.closest(".charging-view__rows--months") &&
+              rect.width < 43.5
+            )
+              violations.push(
+                `${name(control)} month target width ${rect.width}`,
+              );
             if (parseFloat(getComputedStyle(control).fontSize) < 13.99)
               violations.push(
                 `${name(control)} font ${getComputedStyle(control).fontSize}`,
@@ -179,12 +186,22 @@ test("compact views retain readable controls and all entities across available p
               violations.push(`${name(label)} extends outside its card`);
           }
           const bounds = host.getBoundingClientRect();
+          const months = section.querySelector(".charging-view__rows--months");
+          const monthColumns = months
+            ? new Set(
+                [...months.querySelectorAll(".entity-control")].map((tile) =>
+                  Math.round(tile.getBoundingClientRect().left),
+                ),
+              ).size
+            : null;
           return {
             panelWidth: bounds.width,
             panelHeight: bounds.height,
             pageWidth: document.documentElement.scrollWidth,
             viewportWidth: window.innerWidth,
             controlCount: controls.length,
+            monthColumns,
+            monthsHeight: months?.getBoundingClientRect().height ?? null,
             violations,
           };
         }, mobile);
@@ -211,6 +228,12 @@ test("compact views retain readable controls and all entities across available p
       );
       expect(geometry.controlCount, description).toBeGreaterThan(0);
       expect(geometry.violations, description).toEqual([]);
+      if (geometry.monthsHeight !== null) {
+        expect(geometry.monthColumns, description).toBe(mobile ? 2 : 6);
+        expect(geometry.monthsHeight, description).toBeLessThanOrEqual(
+          mobile ? 400 : 180,
+        );
+      }
       if (!mobile)
         expect(geometry.panelHeight, description).toBeLessThanOrEqual(
           heightBudgets[tab.path],
@@ -301,7 +324,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
   }
 });
 
-test("five complete views, local assets, responsive screenshots and parallel entry", async ({
+test("one dashboard with five complete views, local assets and responsive screenshots", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
@@ -336,9 +359,10 @@ test("five complete views, local assets, responsive screenshots and parallel ent
   ]);
   await expect(
     page
-      .getByRole("navigation", { name: "Parallele Dashboard-Einstiege" })
+      .getByRole("navigation", { name: "Dashboard-Einstieg" })
       .getByRole("link"),
-  ).toHaveCount(2);
+  ).toHaveCount(1);
+  await expect(panel.locator(".header")).toHaveText("SAX Power");
   for (const tab of tabs) {
     await panel.locator(`nav a[href='/sax-power-vue/${tab.path}']`).click();
     await expect(panel.getByRole("heading", { level: 1 })).toHaveText(
@@ -445,7 +469,7 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
 
 test("overnight times, months, native strategy options and negative prices", async ({
   page,
-}) => {
+}, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/ladeautomatik']").click();
   await expect(panel.getByRole("switch")).toHaveCount(13);
@@ -460,8 +484,50 @@ test("overnight times, months, native strategy options and negative prices", asy
     .getByRole("button")
     .click();
   await expect(page.locator("#actions")).toContainText('"time":"23:15:00"');
-  await panel.getByRole("switch").nth(1).click();
-  await expect(panel.getByRole("switch").nth(1)).not.toBeChecked();
+  const months = panel.locator(".charging-view__rows--months");
+  const firstMonth = months.getByRole("switch").first();
+  await firstMonth.focus();
+  await expect(firstMonth).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(firstMonth).not.toBeChecked();
+  await page.locator("#failure").click();
+  const secondMonth = months.getByRole("switch").nth(1);
+  await secondMonth.click();
+  await expect(secondMonth).toBeChecked();
+  await expect(months.getByRole("alert")).toBeVisible();
+  const longName = testInfo.project.name.endsWith("en")
+    ? "February – additional custom month description"
+    : "Februar – zusätzliche individuelle Monatsbeschreibung";
+  // Stress only text geometry; metadata and service behavior have separate assertions.
+  await months
+    .locator(".entity-control__name")
+    .nth(1)
+    .evaluate((label, name) => {
+      label.textContent = name;
+    }, longName);
+  await expect(secondMonth).toHaveAccessibleName(longName);
+  const errorFits = await months.getByRole("alert").evaluate((message) => {
+    const error = message.getBoundingClientRect();
+    const form = message.closest("form")!;
+    const tile = form.getBoundingClientRect();
+    const name = form
+      .querySelector(".entity-control__name")!
+      .getBoundingClientRect();
+    const input = form.querySelector("input")!.getBoundingClientRect();
+    const overlapping =
+      Math.min(name.right, input.right) > Math.max(name.left, input.left) &&
+      Math.min(name.bottom, input.bottom) > Math.max(name.top, input.top);
+    return (
+      error.left >= tile.left &&
+      error.right <= tile.right &&
+      error.bottom <= tile.bottom &&
+      name.left >= tile.left &&
+      name.right <= tile.right &&
+      name.bottom <= tile.bottom &&
+      !overlapping
+    );
+  });
+  expect(errorFits).toBe(true);
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
   await expect(panel.getByRole("switch")).toHaveCount(13);
   await expect(

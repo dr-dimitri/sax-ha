@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
@@ -19,7 +18,6 @@ from pytest_homeassistant_custom_component.typing import (
 )
 
 from custom_components.sax_power.const import (
-    CONF_CREATE_DASHBOARD,
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
     DOMAIN,
@@ -58,7 +56,7 @@ async def _state_event(
                 return
 
 
-async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
+async def test_dashboard_clients_share_services_states_and_one_modbus_client(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
     unused_tcp_port: int,
@@ -85,7 +83,6 @@ async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
             "slave_id_basic": 64,
             "slave_id_extended": 100,
             "scan_interval": 3600,
-            CONF_CREATE_DASHBOARD: True,
             CONF_VUE_DASHBOARD_ENABLED: True,
             CONF_VUE_DASHBOARD_VERSION: "",
         },
@@ -93,7 +90,6 @@ async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
     entry.add_to_hass(hass)
     try:
         assert await async_setup_component(hass, "frontend", {})
-        assert await async_setup_component(hass, "lovelace", {})
         with patch("custom_components.sax_power.AsyncModbusTcpClient", create_client):
             assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -111,29 +107,24 @@ async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
         reads = modbus.read_holding_registers.call_count
         writes = modbus.write_register.call_count
 
-        vue = await hass_ws_client(hass)
-        lovelace = await hass_ws_client(hass)
-        await vue.send_json(
-            {
-                "id": 1,
-                "type": "sax_power/dashboard/subscribe",
-                "entry_id": entry.entry_id,
-                "language": "de",
-            }
-        )
-        await _result(vue, 1)
-        entities = (await vue.receive_json())["event"]["entities"]
-        assert (
-            next(item for item in entities if item["key"] == "max_soc")["entity_id"]
-            == limit_id
-        )
-        await lovelace.send_json(
-            {"id": 1, "type": "lovelace/config", "url_path": "sax-power"}
-        )
-        config = await _result(lovelace, 1)
-        assert len(config["views"]) == 5
-        assert limit_id in str(config)
-        for client in (vue, lovelace):
+        first = await hass_ws_client(hass)
+        second = await hass_ws_client(hass)
+        for client in (first, second):
+            await client.send_json(
+                {
+                    "id": 1,
+                    "type": "sax_power/dashboard/subscribe",
+                    "entry_id": entry.entry_id,
+                    "language": "de",
+                }
+            )
+            await _result(client, 1)
+            entities = (await client.receive_json())["event"]["entities"]
+            assert (
+                next(item for item in entities if item["key"] == "max_soc")["entity_id"]
+                == limit_id
+            )
+        for client in (first, second):
             await client.send_json(
                 {"id": 2, "type": "subscribe_events", "event_type": "state_changed"}
             )
@@ -143,8 +134,8 @@ async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
         assert modbus.write_register.call_count == writes
 
         for sender, observer, action, state in (
-            (vue, lovelace, "turn_off", "off"),
-            (lovelace, vue, "turn_on", "on"),
+            (first, second, "turn_off", "off"),
+            (second, first, "turn_on", "on"),
         ):
             before = modbus.write_register.call_count
             await sender.send_json(
@@ -161,7 +152,7 @@ async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
             assert hass.states.get(switch_id).state == state
             assert modbus.write_register.call_count == before + 1
 
-        await vue.send_json(
+        await first.send_json(
             {
                 "id": 5,
                 "type": "call_service",
@@ -171,20 +162,15 @@ async def test_parallel_dashboards_share_services_states_and_one_modbus_client(
                 "target": {"entity_id": limit_id},
             }
         )
-        await _state_event(lovelace, limit_id, "90")
+        await _state_event(second, limit_id, "90")
         assert hass.states.get(limit_id).state == "90"
 
-        device = dr.async_get(hass).async_get_device(
-            identifiers={(DOMAIN, entry.entry_id)}
-        )
-        assert device is not None
+        assert "sax-power" not in hass.data[frontend.DATA_PANELS]
         for service in ("create_dashboard", "reinstall_dashboard"):
-            await hass.services.async_call(
-                DOMAIN, service, {"device_id": device.id}, blocking=True
-            )
-            assert hass.data[frontend.DATA_PANELS][VUE_DASHBOARD_URL_PATH] is panel
-        await vue.close()
-        await lovelace.close()
+            assert not hass.services.has_service(DOMAIN, service)
+        assert hass.data[frontend.DATA_PANELS][VUE_DASHBOARD_URL_PATH] is panel
+        await first.close()
+        await second.close()
         assert len(clients) == 1
     finally:
         await hass.config_entries.async_unload(entry.entry_id)

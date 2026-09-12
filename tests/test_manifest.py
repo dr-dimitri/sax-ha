@@ -81,7 +81,6 @@ def test_dashboard_apis_are_declared_as_optional_after_dependencies(
     """REQ-VUE-DASHBOARD: Keep optional dashboard API imports valid for hassfest."""
     assert manifest["after_dependencies"] == [
         "http",
-        "lovelace",
         "recorder",
         "websocket_api",
     ]

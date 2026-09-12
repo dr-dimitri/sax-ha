@@ -31,6 +31,9 @@ def test_only_installed_python_and_complete_frontend_are_used() -> None:
     assert sys.flags.isolated
     assert Path.cwd().resolve() == INSTALLATION_ROOT
     assert (PACKAGE_ROOT / "manifest.json").is_file()
+    assert not (PACKAGE_ROOT / "dashboard.py").exists()
+    manifest = json.loads((PACKAGE_ROOT / "manifest.json").read_text())
+    assert "lovelace" not in manifest.get("after_dependencies", [])
     for name, module in list(sys.modules.items()):
         if name.startswith("custom_components.sax_power"):
             module_path = Path(module.__file__).resolve()
@@ -49,6 +52,7 @@ def test_only_installed_python_and_complete_frontend_are_used() -> None:
             (PACKAGE_ROOT / "translations" / f"{language}.json").read_text()
         )
         assert "vue_dashboard_update" in translations["issues"]
+        assert "dashboard_outdated" not in translations["issues"]
 
 
 async def test_installed_asset_and_repair_hash_are_served_by_home_assistant(
@@ -74,6 +78,7 @@ async def test_installed_asset_and_repair_hash_are_served_by_home_assistant(
     ) as modbus_connect:
         assert await vue_dashboard.async_sync_vue_dashboard(hass, entry)
         panels = hass.data[frontend.DATA_PANELS]
+        assert panels[vue_dashboard.VUE_DASHBOARD_URL_PATH].sidebar_title == "SAX Power"
         module_url = panels[vue_dashboard.VUE_DASHBOARD_URL_PATH].config[
             "_panel_custom"
         ]["module_url"]

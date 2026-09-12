@@ -239,28 +239,50 @@ const text = computed(() =>
     min-height: 44px;
     padding-block: 8px;
   }
-  .charging-view__rows--months {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .charging-view__rows--months .entity-control,
-  .charging-view__rows--months .entity-control:last-child {
-    gap: 8px;
-    padding: 10px 12px;
-    border: 1px solid var(--divider-color, #e0e0e0);
-    border-radius: 8px;
-  }
-  .charging-view__rows--months .entity-control__description {
-    flex-basis: 0;
-  }
-  .charging-view__rows--months .entity-control__input {
-    flex-shrink: 0;
-  }
 }
 
-@container sax-content (min-width: 960px) {
+.charging-view__rows--months {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+  gap: 8px;
+}
+.charging-view__rows--months .entity-control,
+.charging-view__rows--months .entity-control:last-child {
+  min-width: 0;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--divider-color, #e0e0e0);
+  border-radius: 8px;
+}
+.charging-view__rows--months .entity-control__description {
+  flex-basis: 0;
+}
+.charging-view__rows--months .entity-control__name {
+  font-size: 14px;
+  line-height: 1.3;
+}
+.charging-view__rows--months .entity-control__input {
+  flex-shrink: 0;
+}
+.charging-view__rows--months .entity-control input[type="checkbox"] {
+  width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+}
+.charging-view__rows--months .entity-control__feedback {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+@container sax-content (min-width: 600px) {
   .charging-view__rows--months {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@container sax-content (min-width: 960px) {
+  .charging-view__rows--months {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 </style>

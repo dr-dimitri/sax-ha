@@ -28,7 +28,6 @@ from .application.economics import parse_price, parse_time
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
-    CONF_CREATE_DASHBOARD,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
@@ -52,7 +51,6 @@ from .const import (
     CONF_VUE_DASHBOARD_DISMISSED_VERSION,
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
-    DEFAULT_CREATE_DASHBOARD,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
@@ -179,12 +177,9 @@ STEP_GRID_CHARGE_SCHEMA = vol.Schema(
 )
 
 # Dritter, optionaler Schritt der Ersteinrichtung (siehe async_step_dashboard):
-# bietet an, das mitgelieferte Lovelace-Dashboard anzulegen (dashboard.py).
+# bietet an, das Dashboard in der Seitenleiste zu aktivieren.
 STEP_DASHBOARD_SCHEMA = vol.Schema(
     {
-        vol.Optional(
-            CONF_CREATE_DASHBOARD, default=DEFAULT_CREATE_DASHBOARD
-        ): cv.boolean,
         vol.Optional(
             CONF_VUE_DASHBOARD_ENABLED, default=DEFAULT_VUE_DASHBOARD_ENABLED
         ): cv.boolean,
@@ -458,17 +453,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_dashboard(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Dritter, optionaler Schritt der Ersteinrichtung: bietet an, das
-        mitgelieferte Lovelace-Dashboard anzulegen (siehe dashboard.py).
-
-        Das Dashboard selbst kann hier noch nicht gebaut werden - dafür
-        müssen die Entities erst existieren, was erst nach Anlage des
-        Eintrags und Weiterleitung an die Plattformen der Fall ist. Dieser
-        Schritt merkt nur die Entscheidung des Anwenders vor;
-        __init__.async_setup_entry führt sie später aus. Der Eintrag selbst
-        wird erst im nächsten, abschließenden Schritt angelegt (siehe
-        async_step_finish).
-        """
+        """Merke die dauerhafte Dashboard-Auswahl für das spätere Panel-Setup vor."""
         self._async_abort_if_configured()
         if user_input is not None:
             self._dashboard_data = user_input

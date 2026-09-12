@@ -265,7 +265,7 @@ afterEach(() => {
 });
 
 describe("REQ-VUE-SAVINGS: economics view", () => {
-  it("keeps Lovelace order, signed values, full precision and the collapsed explanation", async () => {
+  it("shows payback, calendar periods and tariffs with signed full-precision values", async () => {
     const { root, callWS, callService } = await mount();
     expect(
       [...root.querySelectorAll("h2")].map((element) => element.textContent),

@@ -9,7 +9,6 @@ type PanelElement = InstanceType<typeof SaxPowerVuePanel>;
 const germanHass: HomeAssistant = {
   language: "de",
   states: {},
-  panels: { "sax-power": {} },
 };
 
 async function flush(): Promise<void> {
@@ -177,8 +176,11 @@ describe("Home Assistant panel", () => {
         .map((style) => style.textContent)
         .join("\n"),
     ).toContain("--primary-background-color");
-    expect(root.querySelector(".existing-link")?.getAttribute("href")).toBe(
-      "/sax-power",
+    expect(root.querySelector(".header")?.textContent?.trim()).toBe(
+      "SAX Power",
+    );
+    expect(root.querySelector(".introduction")?.textContent).toBe(
+      "Gerätewerte, Ladeeinstellungen und Ersparnis Ihres SAX-Power-Speichers.",
     );
     expect(element.children).toHaveLength(0);
   });
@@ -192,20 +194,22 @@ describe("Home Assistant panel", () => {
     );
   });
 
-  it("does not advertise an existing dashboard when none is registered", async () => {
+  it("localizes the dashboard description and preserves the open view", async () => {
     const element = await mount({
       pathname: "/sax-power-vue/ersparnis",
       hass: { language: "de", states: {} },
     });
 
-    expect(shadow(element).querySelector(".existing-link")).toBeNull();
     expect(
       shadow(element).querySelector(".savings-view")?.textContent,
     ).toContain("Hinweise zur Berechnung und Datenbasis");
 
-    element.hass = germanHass;
+    element.hass = { language: "en", states: {} };
     await flush();
-    expect(shadow(element).querySelector(".existing-link")).not.toBeNull();
+    expect(shadow(element).querySelector(".introduction")?.textContent).toBe(
+      "Device values, charging settings and savings for your SAX Power battery.",
+    );
+    expect(shadow(element).querySelector("h1")?.textContent).toBe("Savings");
   });
 
   it("uses Home Assistant route properties and reacts to route changes", async () => {

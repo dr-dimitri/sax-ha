@@ -14,6 +14,7 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
@@ -25,7 +26,6 @@ from .const import (
     ATTR_POWER,
     ATTR_REASON,
     ATTR_START,
-    CONF_CREATE_DASHBOARD,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
@@ -40,9 +40,7 @@ from .const import (
     DEFAULT_SLAVE_ID_EXTENDED,
     DOMAIN,
     MAX_ECONOMICS_RESTART_REASON_LENGTH,
-    SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH_PRICE_PLAN,
-    SERVICE_REINSTALL_DASHBOARD,
     SERVICE_RESTART_ECONOMICS_ACCOUNTING,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
@@ -51,7 +49,6 @@ from .const import (
     SERVICE_STOP_GRID_CHARGE,
 )
 from .coordinator import SaxPowerCoordinator
-from .dashboard import async_check_dashboard_up_to_date, async_create_dashboard
 from .domain.tariff import TariffType
 from .vue_dashboard import async_sync_vue_dashboard, async_unload_vue_dashboard
 
@@ -181,8 +178,24 @@ def _async_remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> Non
         registry.async_remove(entity_id)
 
 
+@callback
+def _async_remove_legacy_dashboard_metadata(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Entferne überholte Metadaten, ohne gespeicherte Nutzer-Dashboards anzufassen."""
+    legacy_keys = {"create_dashboard", "dashboard_update_dismissed"}
+    data = {key: value for key, value in entry.data.items() if key not in legacy_keys}
+    options = {
+        key: value for key, value in entry.options.items() if key not in legacy_keys
+    }
+    if data != entry.data or options != entry.options:
+        hass.config_entries.async_update_entry(entry, data=data, options=options)
+    ir.async_delete_issue(hass, DOMAIN, f"dashboard_outdated_{entry.entry_id}")
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SAX Power from a config entry."""
+    _async_remove_legacy_dashboard_metadata(hass, entry)
     _async_remove_stale_entities(hass, entry)
     client = AsyncModbusTcpClient(
         host=entry.data[CONF_HOST],
@@ -246,26 +259,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # bevor ein späterer Forward fehlschlägt. Der Fehlerpfad dieses
         # zweiten Setup-Abschnitts versucht deshalb stets einen Unload.
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-        if entry.data.get(CONF_CREATE_DASHBOARD):
-            # Braucht die soeben registrierten Entities, deshalb erst nach dem
-            # Plattform-Setup möglich. Absichtlich VOR der Registrierung des
-            # Update-Listeners direkt unten: hass.config_entries.async_update_entry
-            # löst dessen Reload-Listener aus, sobald er registriert ist - hier
-            # ist er das noch nicht, der Reset dieses einmaligen Flags soll aber
-            # gerade keinen zusätzlichen Reload direkt nach der Ersteinrichtung
-            # auslösen. Siehe const.py, CONF_CREATE_DASHBOARD.
-            await async_create_dashboard(hass, entry)
-            hass.config_entries.async_update_entry(
-                entry, data={**entry.data, CONF_CREATE_DASHBOARD: False}
-            )
-        else:
-            # Genau der Fall, den das Flag oben erzeugt: Ab jetzt wird das
-            # Dashboard nie wieder gebaut. Ergänzt eine neuere Version einen
-            # Tab, fehlt er einem bestehenden Dashboard stillschweigend - der
-            # Hinweis darauf ist die einzige Stelle, an der der Anwender davon
-            # überhaupt erfährt (siehe dashboard.py, #138).
-            await async_check_dashboard_up_to_date(hass, entry)
 
         # Erst nach dem Plattform-Setup: der Planner wertet beim Registrieren
         # sofort einmal aus und braucht dafür die vollständige Konfiguration -
@@ -400,9 +393,8 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if coordinator.options == entry.options:
         # hass.config_entries.async_update_entry löst diesen Listener auch
         # aus, wenn ausschließlich entry.DATA geschrieben wurde - etwa beim
-        # Wegklicken des Dashboard-Hinweises (repairs.py,
-        # CONF_DASHBOARD_UPDATE_DISMISSED). Ohne diese Abkürzung setzte
-        # eine solche reine Datenänderung den diagnostischen Zeitstempel
+        # Bestätigen eines Dashboard-Versionsstands (repairs.py). Ohne diese
+        # Abkürzung setzte eine reine Datenänderung den diagnostischen Zeitstempel
         # der letzten Tarifrevision zurück und liefe durch
         # async_apply_price_plan bis in einen Modbus-Schreibpfad, obwohl
         # sich an den Options nichts geändert hat.
@@ -451,14 +443,6 @@ def _coordinator_for_device(hass: HomeAssistant, device_id: str) -> SaxPowerCoor
     return hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
 
 
-def _entry_for_device(hass: HomeAssistant, device_id: str) -> ConfigEntry:
-    entry_id = _entry_id_for_device(hass, device_id)
-    entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
-        raise HomeAssistantError(f"Kein Config Entry {entry_id} gefunden")
-    return entry
-
-
 def _async_register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_START_GRID_CHARGE):
         return
@@ -501,14 +485,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "den Service mit force: true aufrufen."
             )
 
-    async def _async_create_dashboard_service(call: ServiceCall) -> None:
-        entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
-        await async_create_dashboard(hass, entry)
-
-    async def _async_reinstall_dashboard_service(call: ServiceCall) -> None:
-        entry = _entry_for_device(hass, call.data[ATTR_DEVICE_ID])
-        await async_create_dashboard(hass, entry, force=True)
-
     async def _async_restart_economics_accounting(call: ServiceCall) -> None:
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_restart_economics_accounting(
@@ -550,18 +526,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_PRICE_CHARGE_ENABLED,
         _async_set_price_charge_enabled,
         schema=SERVICE_SET_PRICE_CHARGE_ENABLED_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_CREATE_DASHBOARD,
-        _async_create_dashboard_service,
-        schema=SERVICE_STOP_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REINSTALL_DASHBOARD,
-        _async_reinstall_dashboard_service,
-        schema=SERVICE_STOP_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

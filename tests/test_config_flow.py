@@ -60,8 +60,8 @@ async def test_user_flow_success(hass) -> None:
     abgeschickt, gelten die Hard-Defaults aus const.py (deaktiviert,
     Zeitfenster 00:00-00:05), siehe anforderung.yaml REQ-TIMED-SOC-CHARGE.
     Danach folgt der dritte, optionale Schritt "dashboard" (siehe
-    anforderung.yaml REQ-BUNDLED-DASHBOARD) - unverändert abgeschickt bleibt
-    dessen Default (Dashboard anlegen) aktiv."""
+    anforderung.yaml REQ-VUE-DASHBOARD) - unverändert abgeschickt bleibt
+    das Dashboard deaktiviert."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -111,7 +111,7 @@ async def test_user_flow_success(hass) -> None:
         assert result5["data"]["timed_charge_enabled"] is False
         assert result5["data"]["timed_charge_start"] == "00:00:00"
         assert result5["data"]["timed_charge_end"] == "00:05:00"
-        assert result5["data"]["create_dashboard"] is True
+        assert "create_dashboard" not in result5["data"]
         assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
 
 
@@ -166,7 +166,7 @@ async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
 async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
     """Der dritte Schritt ("dashboard") lässt sich abwählen - der Wert landet
     dann als False im Config Entry, siehe anforderung.yaml
-    REQ-BUNDLED-DASHBOARD."""
+    REQ-VUE-DASHBOARD."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -192,22 +192,21 @@ async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
         )
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
         result4 = await hass.config_entries.flow.async_configure(
-            result3["flow_id"], {"create_dashboard": False}
+            result3["flow_id"], {CONF_VUE_DASHBOARD_ENABLED: False}
         )
         assert result4["type"] == FlowResultType.FORM
         assert result4["step_id"] == "finish"
 
         result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
         assert result5["type"] == FlowResultType.CREATE_ENTRY
-        assert result5["data"]["create_dashboard"] is False
+        assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
 
 
-@pytest.mark.parametrize("lovelace_enabled", [False, True])
 @pytest.mark.parametrize("vue_enabled", [False, True])
-async def test_dashboard_choices_are_independent(
-    hass: HomeAssistant, lovelace_enabled: bool, vue_enabled: bool
+async def test_dashboard_choice_is_persisted(
+    hass: HomeAssistant, vue_enabled: bool
 ) -> None:
-    """REQ-VUE-DASHBOARD: Beide Oberflächen haben eine unabhängige Auswahl."""
+    """REQ-VUE-DASHBOARD: Die einzige Dashboard-Auswahl wird dauerhaft gespeichert."""
     with (
         patch("custom_components.sax_power.config_flow._async_validate_connection"),
         patch(
@@ -226,7 +225,6 @@ async def test_dashboard_choices_are_independent(
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {
-                "create_dashboard": lovelace_enabled,
                 CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
             },
         )
@@ -234,7 +232,7 @@ async def test_dashboard_choices_are_independent(
         await hass.async_block_till_done()
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"]["create_dashboard"] is lovelace_enabled
+    assert "create_dashboard" not in result["data"]
     assert result["data"][CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
     assert result["data"][CONF_VUE_DASHBOARD_VERSION] == ""
 
@@ -264,7 +262,7 @@ async def test_vue_options_preserve_or_override_onboarding_choice(
     """REQ-VUE-DASHBOARD: Abwahl bleibt dauerhaft vor dem Setup-Opt-in wirksam."""
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={**VALID_INPUT, "create_dashboard": False, **initial_data},
+        data={**VALID_INPUT, **initial_data},
         options=initial_options,
     )
     entry.add_to_hass(hass)
@@ -284,7 +282,6 @@ async def test_vue_options_preserve_or_override_onboarding_choice(
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is expected
-    assert entry.data["create_dashboard"] is False
 
 
 @pytest.mark.parametrize("tariff_type", [TariffType.DISABLED, TariffType.FIXED])

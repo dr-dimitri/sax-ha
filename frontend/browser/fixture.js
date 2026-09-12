@@ -212,7 +212,6 @@ function update() {
       first_weekday: "mon",
     },
     config: { time_zone: "Europe/Berlin" },
-    panels: { "sax-power": {}, "sax-power-vue": {} },
     states: unavailable
       ? Object.fromEntries(
           Object.entries(states).map(([id, item]) => [

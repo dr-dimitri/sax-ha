@@ -1,17 +1,22 @@
-# Vue-Dashboard: Funktionsparität und Prüfnachweise
+# Dashboard SAX Power: Funktionen und Prüfnachweise
 
-Das optionale Panel **SAX Power (Vue)** unter `/sax-power-vue` bildet die
-fünf Ansichten des mitgelieferten Lovelace-Dashboards `/sax-power` ab. Maßstab
-ist deren fachliche Funktion, nicht eine identische Kartenimplementierung.
-Die Anforderungen stehen in [anforderung.yaml](../anforderung.yaml), die
-Referenzansichten in [dashboard.py](../custom_components/sax_power/dashboard.py).
-Die Zuordnung deckt die Issues [#196](https://github.com/dr-dimitri/sax-ha/issues/196)
-bis [#203](https://github.com/dr-dimitri/sax-ha/issues/203) sowie die
-Vue-Reparatur [#205](https://github.com/dr-dimitri/sax-ha/issues/205) ab.
+Das optionale Panel **SAX Power** unter `/sax-power-vue` ist das einzige
+mitgelieferte Dashboard. Es verwendet Vue; der kompatible URL-Pfad und die
+technischen Schlüssel bleiben erhalten. Die Aktivierungsoption ist
+standardmäßig ausgeschaltet. Die Anforderungen stehen in
+[anforderung.yaml](../anforderung.yaml), die Views unter
+[frontend/src/views](../frontend/src/views).
 
-Die aktuelle Vue-Navigation verwendet folgende Reihenfolge und Namen. Die
-Umbenennung verändert weder URL-Pfade noch Entity-Schlüssel, Tarifkonfiguration
-oder bestehende Lovelace-Bezeichnungen.
+Die folgende Matrix beschreibt die aktuelle Implementierung der Issues
+[#196](https://github.com/dr-dimitri/sax-ha/issues/196) bis
+[#203](https://github.com/dr-dimitri/sax-ha/issues/203) sowie die
+Dashboard-Reparatur [#205](https://github.com/dr-dimitri/sax-ha/issues/205).
+Die Lovelace-Anforderungen sind abgelöst; bereits in Home Assistant gespeicherte
+Dashboards und Karten bleiben beim Upgrade erhalten. Die Entfernung des alten
+Builders verändert keine Geräte-Entitäten, Services zur Gerätesteuerung oder
+Tarifkonfiguration.
+
+Die Navigation verwendet folgende Reihenfolge und Namen:
 
 | Deutsch | Englisch | Pfad unter `/sax-power-vue` |
 | --- | --- | --- |
@@ -29,12 +34,16 @@ Entitäten und Lese-/Bedienberechtigungen werden dadurch berücksichtigt.
 ## Gemeinsame Daten- und Bedienregeln
 
 Breite Ansichten verwenden ein kompaktes Layout anhand der tatsächlich
-verfügbaren Panelbreite: zwei Kartenspalten ab 860 px Inhaltsbreite und drei
-Monatsspalten, ab 960 px vier Monatsspalten. Die Geräteübersicht ordnet Skalen
+verfügbaren Panelbreite: zwei Kartenspalten ab 860 px Inhaltsbreite.
+Monatsraster nutzen mehrere Spalten und knappe Innenabstände auch auf dem
+Smartphone, mit mindestens 14 px großen Namen und 44 × 44 px großen
+Bedienflächen. Bei sehr geringer Breite bleibt eine Spalte. Die Reihenfolge
+Januar bis Dezember bleibt im DOM und bei Tastaturbedienung unverändert. Die Geräteübersicht ordnet Skalen
 und Leistung links neben den Gerätedaten an. Ersparnis gruppiert Amortisation
 und Kalenderwerte neben dem Tarif; die freie Auswertung nutzt die volle Breite.
-Die mobile Darstellung bleibt geräumig. Beschriftungen und Werte werden nicht
-abgeschnitten, Eingaben und Schaltflächen bleiben mindestens 44 px hoch.
+Die Darstellung passt sich der verfügbaren Breite an. Beschriftungen und Werte
+werden nicht abgeschnitten, Eingaben und Schaltflächen bleiben mindestens
+44 px hoch.
 
 | Funktion | Verhalten | Automatisierte Prüfung |
 | --- | --- | --- |
@@ -51,9 +60,8 @@ abgeschnitten, Eingaben und Schaltflächen bleiben mindestens 44 px hoch.
 ## Allgemeine Informationen
 
 `GeneralView.vue`, Pfad `allgemein`, Anforderung `REQ-VUE-GENERAL`.
-Die Tabellenreihenfolge entspricht der Vue-Anzeige. Ihre Gerätekarte fasst
-Energiezähler und Speicherschalter mit den Gerätedaten zusammen; das bestehende
-Lovelace-Layout bleibt unverändert.
+Die Tabellenreihenfolge entspricht der Anzeige. Die Gerätekarte fasst
+Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 
 | Bereich | Domain und Schlüssel | Attribute, Grenzen und Sichtbarkeit | Prüfung |
 | --- | --- | --- | --- |
@@ -93,14 +101,14 @@ Sollwertwiederholung. Beides verbleibt bei `REQ-TIMED-SOC-CHARGE` im Backend.
 | 2 | `number.price_charge_max_price` | Netzbezug und Laden bis; negative Preise innerhalb der HA-Grenzen, aktuelle Einheit. | [Ladeansichten][charging-tests]: negative Eingabe, geänderte Einheit, Grenzen/Schrittweite |
 | 3 | `number.price_charge_neutral_price` | Netzbezug ohne Laden bis; gleiche gemeinsame Validierung. | [Ladeansichten][charging-tests]: Fehler, expliziter Wiederholungsversuch, bestätigter Altwert |
 | 4 | `number.price_charge_hours` | Anzahl Stunden; aktuelle HA-Grenzen und Einheit. | [Ladeansichten][charging-tests], [Controls][control-tests] |
-| 5 | `number.max_soc` | Derselbe globale Max-SOC wie unter Allgemein und in Lovelace. | [Ladeansichten][charging-tests]: gemeinsamer Zustand und laufender Aufruf in beiden Vue-Views; [HA-E2E][parallel-tests] |
+| 5 | `number.max_soc` | Derselbe globale Max-SOC wie unter Allgemein und in den HA-Entitäten. | [Ladeansichten][charging-tests]: gemeinsamer Zustand und laufender Aufruf in beiden Vue-Views; [HA-E2E][ha-e2e-tests] |
 | 6 | `sensor.price_charge_active_text` | Aktiv; bestehender HA-Text. | [Ladeansichten][charging-tests]: Reihenfolge und Zustände |
 | 7 | `sensor.price_charge_status_text` | Status, einschließlich deaktivierter Automatik. | [Ladeansichten][charging-tests]: deaktivierter Zustand |
 | 8 | `sensor.grid_serving_forecast` | Dynamischer Tagesname und kWh. | [Ladeansichten][charging-tests]: Live-Name und HA-Formatierung |
 | 9 | `sensor.price_charge_next_start` | Nächster Start; HA-Zeitzone, Sprache und Zeitformat. `unknown` bleibt unbekannt. | [Ladeansichten][charging-tests]: lokaler Zeitstempel und unbekannter Start |
 | 10 | `sensor.price_charge_current_price` | Aktueller Strompreis mit tatsächlicher Einheit; fehlender Preis bleibt nicht verfügbar. | [Ladeansichten][charging-tests]: negativer und fehlender Preis |
 
-Der Frontend-Test vergleicht diese zehn Schlüssel direkt mit `dashboard.py`.
+Der Frontend-Test prüft diese zehn Schlüssel und ihre Reihenfolge ausdrücklich.
 Vue ermittelt keine Strategie oder Ladezeiten; `REQ-DYNAMIC-PRICE-CHARGE`
 bleibt die fachliche Implementierung. Diese Ansicht enthält keine Monatsschalter.
 
@@ -176,17 +184,17 @@ Balkenauflösung behauptet. Die Recorder-Tests belegen die gleichen Ergebnisse
 für dieselben Grenzen und dieselbe angeforderte Auflösung, einschließlich
 der Sommerzeitfälle in Europa/Berlin.
 
-## Parallelbetrieb, Lebenszyklus und Reparaturen
+## Lebenszyklus, Migration und Reparaturen
 
 | Fall | Erwartetes Verhalten | Prüfung |
 | --- | --- | --- |
-| Neuinstallation und Bestandsinstallation | Vue bleibt ein unabhängiges Opt-in; alle Kombinationen mit der Lovelace-Einmalanlage sind gültig. Optionen haben Vorrang vor Setup-Daten. | [Config Flow](../tests/test_config_flow.py), [Initialisierung](../tests/test_init.py) |
-| Aktivieren, Deaktivieren, Reload, Unload, Neustart | Ein eigenes Panel, einmalige statische Route pro HA-Lauf; Abschalten entfernt nur den eigenen Vue-Eintrag. | [Panel-Lebenszyklus][lifecycle-tests], [Vue-Reparaturen][repair-tests], [Neustart][restart-tests] |
-| Zwei Oberflächen | Zwei echte HA-WebSocket-Clients sehen Änderungen aus beiden Richtungen. Das Öffnen liest/schreibt keine zusätzlichen Register; eine Aktion verursacht genau ihren bestehenden Geräteaufruf. | [HA-E2E mit Modbus-Simulator][parallel-tests] |
-| Lovelace-Erstellung/-Neuinstallation | `sax_power.create_dashboard` und `sax_power.reinstall_dashboard` erhalten Bedeutung und Ziel. Eigene Lovelace-Anpassungen werden nur bei ausdrücklichem Neuaufbau ersetzt. | [Lovelace-Dashboard](../tests/test_dashboard.py), [HA-E2E][parallel-tests] |
-| Lovelace-Veraltet-Reparatur | Betrifft das vorhandene Storage-Dashboard; der Vue-Panelstand bleibt unabhängig. | [Lovelace-Reparaturen](../tests/test_repairs.py), [HA-E2E][parallel-tests] |
-| Vue-Bundlewechsel | SHA-256 erkennt neue Inhalte auch bei unveränderter Manifestversion; registriert erst bei Bestätigung den aktuellen Stand. Anschließendes vollständiges Browser-Neuladen ist ein eigener Dialogschritt. | [Vue-Reparaturen][repair-tests], [Paket-Worker][package-worker] |
-| Ablehnen, Fehler, alter Dialog | Ablehnen unterdrückt nur denselben Stand. Fehler sind wiederholbar; ein alter Dialog quittiert kein neues Update. Fremde Panels, deaktivierte/entfernte Einträge und Reconfigure sind berücksichtigt. | [Vue-Reparaturen][repair-tests], [Panel-Lebenszyklus][lifecycle-tests] |
+| Neuinstallation und Bestandsinstallation | Die einzige Dashboard-Auswahl bleibt ein Opt-in mit Standard `False`. Optionen haben Vorrang vor Setup-Daten, auch bei explizitem `False`. | [Config Flow](../tests/test_config_flow.py), [Initialisierung](../tests/test_init.py) |
+| Aktivieren, Deaktivieren, Reload, Unload, Neustart | Ein Panel SAX Power, einmalige statische Route pro HA-Lauf; Abschalten entfernt nur den eigenen Eintrag. | [Panel-Lebenszyklus][lifecycle-tests], [Dashboard-Reparaturen][repair-tests], [Neustart][restart-tests] |
+| HA-Zustände und Bedienung | Zwei echte HA-WebSocket-Clients prüfen Dashboard-Metadaten und reguläre HA-Services. Das Öffnen liest/schreibt keine zusätzlichen Register; eine Aktion verursacht genau ihren bestehenden Geräteaufruf. | [HA-E2E mit Modbus-Simulator][ha-e2e-tests] |
+| Legacy-Migration | `create_dashboard` und `dashboard_update_dismissed` werden aus Entry-Daten und Optionen entfernt; `dashboard_outdated_<entry_id>` wird aus der Issue Registry entfernt. Dashboard-Opt-in und gespeicherte HA-/Lovelace-Dashboards samt Karten bleiben erhalten. | [Initialisierung](../tests/test_init.py), [Config Flow](../tests/test_config_flow.py) |
+| Entfernte Implementierung | Kein Lovelace-Builder, keine Create-/Reinstall-Services, kein Veraltet-Reparaturflow und keine Lovelace-Abhängigkeit. Die aktuelle Oberfläche zeigt keinen parallelen Dashboard-Einstieg. | [HA-E2E][ha-e2e-tests], [Panel][panel-tests], [Browser][browser-tests], [Paket-Worker][package-worker] |
+| Bundlewechsel | SHA-256 erkennt neue Inhalte auch bei unveränderter Manifestversion; registriert erst bei Bestätigung den aktuellen Stand. Anschließendes vollständiges Browser-Neuladen ist ein eigener Dialogschritt. | [Dashboard-Reparaturen][repair-tests], [Paket-Worker][package-worker] |
+| Ablehnen, Fehler, alter Dialog | Ablehnen unterdrückt nur denselben Stand. Fehler sind wiederholbar; ein alter Dialog quittiert kein neues Update. Fremde Panels, deaktivierte/entfernte Einträge und Reconfigure sind berücksichtigt. | [Dashboard-Reparaturen][repair-tests], [Panel-Lebenszyklus][lifecycle-tests] |
 
 Der native HA-E2E-Test verwendet einen **lokalen Modbus-TCP-Simulator**, keine
 physische Batterie. Die Browserprüfungen verwenden einen simulierten HA-Kontext.
@@ -201,14 +209,14 @@ Die Testbasis ist **Home Assistant 2026.8.2**,
 stehen in [requirements_test.txt](../requirements_test.txt), der HA-Mindeststand
 in [hacs.json](../hacs.json). CI verwendet diese Versionen. Neue HA-Versionen
 benötigen insbesondere bei Änderungen an Recorder-/Frontend-APIs einen erneuten
-Paritätslauf; sie werden hier nicht pauschal als geprüft bezeichnet.
+Funktionslauf; sie werden hier nicht pauschal als geprüft bezeichnet.
 
 | Prüfung | Umfang und Ausführung |
 | --- | --- |
 | Python | `pytest -v`, `ruff check custom_components scripts tests`, `black --check custom_components scripts tests`; reale Hardwaretests werden ohne verfügbares Testgerät übersprungen. |
 | Frontend | Im Verzeichnis `frontend`: `npm ci`, `npm run check`, `npm test`, `npm run build`; Build enthält den Test des echten ES-Moduls ohne Node-Laufzeitglobals im Browser. |
 | Chromium | `npx playwright install chromium`, dann `npm run test:browser`; [Konfiguration](../frontend/playwright.config.ts) und [Testfälle][browser-tests]. Vier Projekte: Desktop 1440×1000 und Smartphone 390×844, jeweils DE/hell und EN/dunkel. |
-| Browserdaten | `browser/server.mjs` liefert das **Produktionsbundle** unter `127.0.0.1:5190`; eine ausdrücklich als Vorschau gekennzeichnete HA-Fixture liefert die Testzustände. Geprüft werden alle Tabs, Bedienung, Fokus/Tastatur, History/Reload, Fehler, Reconnect, Zeitfenster und Datumswahl. |
+| Browserdaten | `browser/server.mjs` liefert das **Produktionsbundle** unter `127.0.0.1:5190`; eine ausdrücklich als Simulation gekennzeichnete HA-Fixture liefert die Testzustände. Geprüft werden alle Tabs, Bedienung, Fokus/Tastatur, History/Reload, Fehler, Reconnect, Zeitfenster und Datumswahl. |
 | CI-Artefakte | Der Browserlauf erzeugt Screenshots aller fünf Ansichten je Projekt sowie Berichte und Fehlertraces im Artefakt `vue-dashboard-browser-report`. Das Vorhandensein einer Testdefinition allein belegt noch keinen erfolgreichen Lauf. |
 | Reproduzierbarkeit | CI baut aus `package-lock.json` und vergleicht das komplette Verzeichnis `custom_components/sax_power/frontend` mit Git. Keine nicht eingecheckten Zusatzassets; Vue und Styles sind im lokalen Modul enthalten. |
 | Saubere Installation | [Pakettests][package-tests] installieren ein GitHub-Stable-Quellarchiv mit Wurzelpräfix sowie ein Snapshot-ZIP in getrennte temporäre Bäume und starten isolierte Python-Prozesse. |
@@ -229,144 +237,40 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
-### Abnahme der Tarif-Tabnamen und Anzeigeänderungen vom 12.09.2026
+### Historische Prüfnachweise vom 12.09.2026
 
-Der Code aus
-[Commit 936eaeae6c97](https://github.com/dr-dimitri/sax-ha/commit/936eaeae6c972fe99e53f2f6d40af58ded6a80ab)
-bestand den vollständigen
-[CI-Lauf 34685941171](https://github.com/dr-dimitri/sax-ha/actions/runs/34685941171).
-Der Browserbericht gehört zum zugehörigen PR-Testmerge `8f37e3d8cad` und weist
-**28 bestandene Browserfälle, keine Fehler, keine erst nach Wiederholung
-bestandenen Fälle und keine übersprungenen Fälle** aus. Die vier Browserprojekte
-prüfen Deutsch/hell und Englisch/dunkel auf Desktop und Smartphone.
+Die folgenden Ergebnisse betreffen den jeweiligen früheren Code- und
+Paketstand. Sie belegen noch nicht die Entfernung des Lovelace-Dashboards,
+das Branding **SAX Power** oder die weitere Verdichtung der Monatsraster.
+Die Browserläufe verwenden simulierte HA-Daten; physische Hardware wurde
+nicht getestet. Die damaligen Python-Gesamtsuiten umfassten 1.813 bestandene
+Tests und zwei erwartete Hardware-Skips.
 
-Geprüft sind die neuen Tabnamen **Zeitvariabler Tarif / Time-of-use tariff**
-und **Dynamischer Tarif / Dynamic tariff**, die Reihenfolge mit dem dynamischen
-Tarif vor netzdienlichem Laden und die weiterhin unveränderten URL-Pfade.
-Die beiden Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
-Kontrollkästchen, Bedienung und HA-Rückmeldungen bleiben erhalten. Nur bestätigte
-deutsche Zeitfensterwerte des zeitvariablen Tarifs erhalten „ Uhr“.
-Komponententests prüfen außerdem unbekannte/nicht verfügbare Werte sowie
-unveränderte Eingaben und Service-Payloads.
+| Historischer Stand | Code und CI | Ergebnis |
+| --- | --- | --- |
+| Tarif-Tabnamen, Reihenfolge und Uhr-Suffix | [936eaeae6c97](https://github.com/dr-dimitri/sax-ha/commit/936eaeae6c972fe99e53f2f6d40af58ded6a80ab), [CI 34685941171](https://github.com/dr-dimitri/sax-ha/actions/runs/34685941171) | Vollständige CI erfolgreich; 202 Komponententests und 28 Browserfälle ohne Wiederholung oder Skips. |
+| Kompakte Desktopansichten | [e6cf1672d17b](https://github.com/dr-dimitri/sax-ha/commit/e6cf1672d17b35ffd586bb85b4dec12d567cb089), [CI 34684553344](https://github.com/dr-dimitri/sax-ha/actions/runs/34684553344) | 199 Komponenten- und 28 Browserfälle; Prüfung mehrerer verfügbarer Panelbreiten. |
+| Gerätekarte und Schaltbestätigung | [639695e5e347](https://github.com/dr-dimitri/sax-ha/commit/639695e5e3479f802c568704f3ae34f3e5bd473c), [CI 34683284222](https://github.com/dr-dimitri/sax-ha/actions/runs/34683284222) | 199 Komponenten- und 24 Browserfälle; beide Schaltrichtungen und Abbruch geprüft. |
+| Erste vollständige Paketabnahme | [acb49d089767](https://github.com/dr-dimitri/sax-ha/commit/acb49d089767f45bc25cbaa41c47728f083a1a84), [CI 34681752310](https://github.com/dr-dimitri/sax-ha/actions/runs/34681752310) | 186 Komponenten- und 20 Browserfälle; isolierte Installation von Snapshot und Quellarchiv samt HA-HTTP-Route und Reparatur. |
 
-Für diesen Stand bestanden **202 Komponententests** sowie die lokale
-Python-Gesamtsuite mit **1.813 Tests und zwei erwarteten Hardware-Skips**.
-Typprüfung, Formatierung, Ruff/Black, Produktionsmodul-Smoke und reproduzierbarer
-Build waren erfolgreich. Die Browser verwenden das gebaute Produktionsmodul
-mit simuliertem HA-Kontext; an einer physischen Batterie wurde nicht getestet.
-Die isolierte Prüfung des abschließenden Snapshot-Pakets wird mit dessen
-Commit und Prüfsummen im [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
-festgehalten.
+Das historisch geprüfte Paket `snapshot-pr-204-acb49d089767` enthielt 57 Dateien,
+Manifest `2.0.3-snapshot.pr204.shaacb49d089767`, ZIP-SHA-256
+`d0f406fd06d367dbf82b30cd197e0f0e4dbde5521e26f1b77c9756fbbfd72ac3` und
+Bundle-SHA-256 `dc3d1df0032f8e6d8ba500c2ffb942e8f463188c016202932fbdcb1d419ac1dd`.
+Der Tag bezeichnet einen historischen Prüfgegenstand, keine dauerhaft
+bereitgehaltene Snapshot-Veröffentlichung. Weitere Paketnachweise sind mit
+Commit und Prüfsummen in [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
+zugeordnet.
 
-### Frühere Abnahme der kompakten Desktopansichten
+### Screenshots des bisherigen Stands
 
-Dieser Nachweis vom 12.09.2026 verwendet die damaligen Tabnamen und betrifft
-den Stand vor der Umbenennung und Neusortierung sowie den anschließenden
-Änderungen an Monatsrastern und bestätigten Zeitfensterwerten.
-
-[Commit e6cf1672d17b](https://github.com/dr-dimitri/sax-ha/commit/e6cf1672d17b35ffd586bb85b4dec12d567cb089)
-bestand am 12.09.2026 den vollständigen
-[CI-Lauf 34684553344](https://github.com/dr-dimitri/sax-ha/actions/runs/34684553344),
-einschließlich **199 Komponententests und 28 Browserfällen ohne Wiederholung
-oder übersprungene Browserfälle**. Die lokale Python-Gesamtsuite bestand mit
-1.813 Tests und zwei erwarteten Hardware-Skips. Der zusätzliche Browserfall
-vergleicht Entitäten und Bedienflächen über mehrere Panelbreiten und prüft
-Abmessungen, Schriftgrößen, Überlagerungen und Seitenüberläufe.
-
-Bei 1366 × 768 px Browsergröße reserviert der Test 256 px für eine simulierte
-HA-Seitenleiste. Die verbleibenden 1110 px Panelbreite ergeben folgende
-gerundete Höhen, einschließlich Panelkopf und Navigation, ohne Fixture-Leiste:
-
-| Ansicht | Vorher, lokale Browserprobe | Kompakt, CI | Weniger Höhe |
-| --- | --- | --- | --- |
-| Allgemeine Informationen | 1483 px | 762 px | 49 % |
-| Ladeautomatik | 2087 px | 977 px | 53 % |
-| Netzdienliches Laden | 1879 px | 937 px | 50 % |
-| Dynamisches Laden | 1136 px | 754 px | 34 % |
-| Ersparnis | 2059 px | 1492 px | 28 % |
-
-Die Vorher-Messung verwendet denselben deutschen Fixture-Inhalt aus
-Commit `f725cbe97b0c`, ebenfalls bei 1110 px Panelbreite. Zusätzlich geprüft
-wurden 1440 × 900 px ohne reservierte Seitenleiste sowie 390 × 844 px mobil,
-jeweils Deutsch/hell und Englisch/dunkel. Alle Inhalte bleiben vorhanden;
-höhere Texte oder eigene Entity-Namen dürfen Karten natürlich verlängern.
-Die Messwerte gelten für die dokumentierte Testansicht, nicht pauschal für
-alle HA-Themes und benutzerdefinierten Beschriftungen.
-
-### Frühere Abnahme der Gerätekarte und Schaltbestätigung
-
-[Commit 639695e5e347](https://github.com/dr-dimitri/sax-ha/commit/639695e5e3479f802c568704f3ae34f3e5bd473c)
-bestand am 12.09.2026 den vollständigen
-[CI-Lauf 34683284222](https://github.com/dr-dimitri/sax-ha/actions/runs/34683284222):
-Python, Ruff/Black, Release-Metadaten, HACS, hassfest, Frontend-Typen und
-Formatierung, **199 Komponententests**, Produktionsmodul-Smoke und
-reproduzierbarer Build. Lokal bestanden **1.813 Python-Tests** bei zwei
-erwarteten Hardware-Skips; es fand kein Test an einer echten Batterie statt.
-
-Alle **24 Browserfälle** bestanden ohne Wiederholung oder übersprungene Fälle.
-Die zusätzliche Prüfung bestätigt in allen vier Browserprojekten beide
-Schaltrichtungen, Abbrechen, Escape und Enter auf der vorausgewählten
-Abbruchaktion. Vor ausdrücklicher Bestätigung bleibt der HA-Zustand erhalten
-und es wird kein Service aufgerufen. Der damalige Browserbericht zeigt das
-gebaute Produktionsmodul mit simuliertem HA-Kontext. Die 13 zusätzlichen
-Komponententests prüfen außerdem ungültig
-gewordene Dialoge und doppelte Bestätigungen.
-
-### Frühere Paketabnahme vom 12.09.2026
-
-Der folgende Nachweis betrifft den Stand vor der geänderten allgemeinen
-Gerätekarte und deren Schalterbestätigung. Er ist keine Abnahme dieser
-anschließenden Änderungen.
-
-Am 12.09.2026 wurde
-[Commit acb49d089767](https://github.com/dr-dimitri/sax-ha/commit/acb49d089767f45bc25cbaa41c47728f083a1a84)
-in [CI-Lauf 34681752310](https://github.com/dr-dimitri/sax-ha/actions/runs/34681752310)
-erfolgreich geprüft: Python, Ruff/Black, HACS, hassfest, Frontend-Typen und
-Formatierung, 186 Komponententests, Produktionsmodul-Smoke, reproduzierbarer
-Build sowie alle **20 Browserfälle ohne Wiederholung oder übersprungene Fälle**.
-Die Browserabnahme verwendet Chromium mit simulierten HA-Antworten; echte
-HA-WebSockets, Recorder, Storage und Modbus-Simulator werden separat geprüft.
-Ein Test an einer echten Batterie fand nicht statt; die zwei Hardwaretests
-wurden erwartungsgemäß übersprungen.
-
-Das damalige Paket `snapshot-pr-204-acb49d089767` wurde heruntergeladen und
-mit `verify_dashboard_package.py` in einer frischen
-HA-Umgebung installiert. **Ergebnis: bestanden**, einschließlich vollständigem
-Reparaturablauf, neuer Bundle-Hash-URL und identischen ausgelieferten HTTP-Bytes.
-Der Helper bestätigte 57 installierte Dateien ohne Rückgriff auf das Repository.
-Tag und Prüfsummen bezeichnen den historischen Prüfgegenstand; sie sind kein
-Verweis auf eine dauerhaft bereitgehaltene Snapshot-Veröffentlichung. Der
-Commit- und CI-Nachweis bleibt davon unabhängig.
-
-| Nachweis | Wert |
-| --- | --- |
-| Manifest des getesteten Snapshots | `2.0.3-snapshot.pr204.shaacb49d089767` |
-| SHA-256 des heruntergeladenen Snapshot-ZIPs | `d0f406fd06d367dbf82b30cd197e0f0e4dbde5521e26f1b77c9756fbbfd72ac3` |
-| SHA-256 des getesteten Vue-Bundles | `dc3d1df0032f8e6d8ba500c2ffb942e8f463188c016202932fbdcb1d419ac1dd` |
-| GitHub-Quellarchiv, ebenfalls isoliert bestanden | [Commit c6563461ee36](https://github.com/dr-dimitri/sax-ha/commit/c6563461ee3662c858ca318f41ab20462f71bf5f), Manifest `2.0.3`, identisches Vue-Bundle |
-| SHA-256 dieses Quellarchivs | `f5cfcf7904db9681f25d52a872ad0d75c47872866784ea1f97ee1a62bf4f037b` |
-
-Die drei zusätzlichen [Neustarttests][restart-tests] schreiben Config-Entry-Daten
-und Optionen über den regulären HA-Final-Write und laden sie in einer zweiten
-HA-Instanz erneut aus dem Storage. Sie prüfen Aktivierung, Vorrang einer späteren
-Deaktivierung und ein während des Stillstands installiertes Bundle samt neuem
-Reparaturhinweis. Geräte- und Plattformgrenzen sind dabei gemockt; Storage,
-Config-Entry-Laden, Panel und Issue Registry sind echt. Die anschließend erneut
-ausgeführte lokale Gesamtsuite ergab **1.813 bestandene Tests und zwei erwartete
-Hardware-Skips**; Ruff und Black sind erfolgreich.
-
-### Aktuelle Screenshots
-
-Alle Bilder stammen aus dem Browserbericht von
+Diese Bilder stammen aus
 [CI-Lauf 34685941171](https://github.com/dr-dimitri/sax-ha/actions/runs/34685941171)
-vom 12.09.2026. Sie zeigen die neuen Tabnamen und ihre Reihenfolge, die
-Monatsraster ohne zusätzliche Bestätigter-Wert-Zeile und das deutsche
-Uhr-Suffix im Zeitfenster. Die kompakten Desktopansichten und die geräumige
-Mobilansicht bleiben erhalten. Der hell abgesetzte Testbereich kennzeichnet
-simulierte Daten und zeigt beide
-Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
-Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,
-während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
+vom 12.09.2026, **vor der Entfernung des alten Dashboards und der weiteren
+Verdichtung der Monatsraster**. Die dort sichtbaren Vue-/Vorschaukennzeichnungen
+und Links auf das alte Dashboard gehören zum damaligen Stand und sind kein
+Bestandteil der aktuellen Oberfläche. Die Bilder dokumentieren ausschließlich
+diese frühere Abnahme; aktuelle Screenshots folgen erst aus einem neuen CI-Lauf.
 
 | Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
 | --- | --- | --- |
@@ -402,7 +306,7 @@ während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
 [panel-tests]: ../frontend/tests/panel.test.ts
 [browser-tests]: ../frontend/browser/dashboard.spec.ts
 [statistics-tests]: ../tests/test_dashboard_statistics.py
-[parallel-tests]: ../tests/test_vue_dashboard_e2e.py
+[ha-e2e-tests]: ../tests/test_vue_dashboard_e2e.py
 [lifecycle-tests]: ../tests/test_vue_dashboard.py
 [repair-tests]: ../tests/test_vue_dashboard_repairs.py
 [package-tests]: ../tests/test_frontend_package.py

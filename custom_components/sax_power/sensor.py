@@ -158,8 +158,7 @@ def _economics_status_attributes(coordinator: SaxPowerCoordinator) -> dict[str, 
 
 
 def _economics_price_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
-    """Hinterlegter Tarifplan und aktives Zeitfenster (REQ-ECONOMICS-
-    DASHBOARD) als Zusatzattribute des Netzbezugspreis-Sensors."""
+    """Tarifplan und aktives Zeitfenster als Sensorattribute (REQ-VUE-SAVINGS)."""
     if coordinator.data is None:
         return {}
     return coordinator.data.get("economics_price_attributes") or {}
@@ -994,7 +993,7 @@ class SaxPowerForecastSensor(SaxPowerSensor):
     """PV-Prognose mit täglich aktualisiertem Datum im Anzeigenamen."""
 
     # Der dynamische Text ist bereits der vollständige Anzeigename und kein
-    # gerätebezogener Namensbestandteil (siehe REQ-BUNDLED-DASHBOARD).
+    # gerätebezogener Namensbestandteil (siehe REQ-VUE-CHARGING).
     _attr_has_entity_name = False
 
     def __init__(

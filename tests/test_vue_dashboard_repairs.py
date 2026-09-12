@@ -129,20 +129,16 @@ async def test_native_repair_registers_new_bundle_and_requires_reload_confirmati
     assert _issue(hass, entry).data["version"] == version
 
     manager, flow_id = await _flow(hass, entry)
-    with patch(
-        "custom_components.sax_power.repairs.async_create_dashboard"
-    ) as lovelace:
-        result = await manager.async_configure(flow_id, {"next_step_id": "confirm"})
-        assert result["type"] == "form" and result["step_id"] == "reload"
-        assert _panel(hass) is not old_panel
-        assert version in _panel(hass).config["_panel_custom"]["module_url"]
-        assert _issue(hass, entry) is not None
-        assert entry.data[CONF_VUE_DASHBOARD_VERSION] == "previous-snapshot"
-        result = await manager.async_configure(flow_id, {})
+    result = await manager.async_configure(flow_id, {"next_step_id": "confirm"})
+    assert result["type"] == "form" and result["step_id"] == "reload"
+    assert _panel(hass) is not old_panel
+    assert version in _panel(hass).config["_panel_custom"]["module_url"]
+    assert _issue(hass, entry) is not None
+    assert entry.data[CONF_VUE_DASHBOARD_VERSION] == "previous-snapshot"
+    result = await manager.async_configure(flow_id, {})
     assert result["type"] == "create_entry"
     assert entry.data[CONF_VUE_DASHBOARD_VERSION] == version
     assert _issue(hass, entry) is None
-    lovelace.assert_not_called()
     hass.http.async_register_static_paths.assert_awaited_once()
     await async_unload_vue_dashboard(hass, entry)
     assert await async_sync_vue_dashboard(hass, entry)

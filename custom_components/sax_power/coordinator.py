@@ -995,7 +995,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # die Tarifplan-Attribute darunter müssen denselben Moment
         # beschreiben, sonst könnte ein Fensterwechsel zwischen beiden
         # Aufrufen ein Fenster ausweisen, das zum gemeldeten Preis gar
-        # nicht gehört (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+        # nicht gehört (REQ-VUE-SAVINGS).
         moment = dt_util.now()
         quote_result = self.tariff_provider.quote(moment)
         current_price = quote_result.price_eur_kwh
@@ -1423,10 +1423,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         vier Sensoren dieser Anforderung unabhängig vom Tarifstatus.
         """
         investment_cost = investment_cost_eur_from_options(self.options)
-        # Trägt die Sichtbarkeit der Investitionskarte im Dashboard: Eine
-        # Core-"conditional"-Karte kann ausschließlich den ZUSTAND einer
-        # Entity prüfen, nie ein Attribut (siehe dashboard.py, #139) -
-        # dieses Flag ist deshalb ein eigener Binary-Sensor.
+        # REQ-VUE-SAVINGS: Der bestehende Binary-Sensor hält die
+        # Sichtbarkeitsbedingung unabhängig von einzelnen Geldwerten stabil.
         data["economics_investment_configured"] = investment_cost is not None
         if investment_cost is None:
             for key in (
@@ -1537,7 +1535,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> dict[str, Any]:
         """Der hinterlegte Tarifplan als Attribute des Preis-Sensors.
 
-        REQ-ECONOMICS-SAVINGS-DASHBOARD: Der reine Preiswert beantwortet weder
+        REQ-VUE-SAVINGS: Der reine Preiswert beantwortet weder
         "habe ich meinen Tarif richtig eingetragen?" noch "welches Fenster
         liefert diesen Preis gerade, und wann ändert er sich wieder?". Die
         Konfiguration liegt sonst ausschließlich in entry.options und ist

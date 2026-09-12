@@ -3,10 +3,8 @@
 Enthält den Bestätigungsdialog für den Konflikt zwischen
 Netzladung (zeitgesteuertes Laden) und preisoptimiertem Laden - beide
 laden aktiv aus dem Netz über denselben SunSpec-Schreibpfad und dürfen
-deshalb nicht gleichzeitig aktiv sein - sowie das Nachrüsten fehlender
-Tabs im mitgelieferten Dashboard (siehe
-dashboard.async_check_dashboard_up_to_date). Ein eigener Flow erneuert das
-optionale Vue-Panel und erinnert an das notwendige Browser-Neuladen
+deshalb nicht gleichzeitig aktiv sein. Ein weiterer Flow aktualisiert das
+Dashboard und erinnert an das notwendige Browser-Neuladen
 (REQ-VUE-DASHBOARD-REPAIR).
 
 Home Assistant kennt für das Umlegen eines Schalters keinen synchronen
@@ -32,15 +30,14 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import issue_registry as ir
 
 from .const import (
-    CONF_DASHBOARD_UPDATE_DISMISSED,
+    CHARGE_CONFLICT_ISSUES,
     DATA_COORDINATOR,
     DOMAIN,
-    ISSUE_DASHBOARD_OUTDATED,
     ISSUE_PRICE_CHARGE_CONFLICT,
+    ISSUE_TIMED_CHARGE_CONFLICT,
     ISSUE_VUE_DASHBOARD_UPDATE,
 )
 from .coordinator import SaxPowerCoordinator
-from .dashboard import async_create_dashboard
 from .vue_dashboard import (
     async_finish_vue_dashboard_repair,
     async_sync_vue_dashboard,
@@ -58,8 +55,6 @@ async def async_create_fix_flow(
     kein fester Wert, gegen den sich vergleichen ließe.
     """
     issue_data = data or {}
-    if issue_data.get("issue_key") == ISSUE_DASHBOARD_OUTDATED:
-        return DashboardOutdatedRepairFlow(issue_data)
     if issue_data.get("issue_key") == ISSUE_VUE_DASHBOARD_UPDATE:
         return VueDashboardRepairFlow(issue_data)
     return ChargeConflictRepairFlow(issue_data)
@@ -80,6 +75,10 @@ class ChargeConflictRepairFlow(RepairsFlow):
         self._issue_key: str = issue_data.get("issue_key", "")
 
     def _coordinator(self) -> SaxPowerCoordinator | None:
+        # Bereits geöffnete Dialoge entfallener Reparaturen dürfen keinen
+        # anderen Ladewechsel auslösen oder einen aktuellen Konflikt quittieren.
+        if self._issue_key not in CHARGE_CONFLICT_ISSUES:
+            return None
         entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
         if entry_data is None:
             return None
@@ -103,7 +102,7 @@ class ChargeConflictRepairFlow(RepairsFlow):
         if (coordinator := self._coordinator()) is not None:
             if self._issue_key == ISSUE_PRICE_CHARGE_CONFLICT:
                 await coordinator.async_set_price_charge_enabled(True, force=True)
-            else:
+            elif self._issue_key == ISSUE_TIMED_CHARGE_CONFLICT:
                 await coordinator.async_set_timed_charge_enabled(True, force=True)
         return self.async_create_entry(title="", data={})
 
@@ -118,53 +117,6 @@ class ChargeConflictRepairFlow(RepairsFlow):
         """
         if (coordinator := self._coordinator()) is not None:
             coordinator.async_dismiss_charge_conflict()
-        return self.async_create_entry(title="", data={})
-
-
-class DashboardOutdatedRepairFlow(RepairsFlow):
-    """Fehlende Tabs im mitgelieferten Dashboard nachrüsten - oder nicht.
-
-    Beide Wege sind endgültig: Das Nachrüsten baut das Dashboard neu und
-    überschreibt dabei eigene Änderungen daran (es gibt keinen Weg, nur
-    einen einzelnen Tab zu ergänzen, ohne den Rest anzufassen). Das
-    Ablehnen merkt sich die Integration dauerhaft im Config Entry, damit
-    der Hinweis nicht bei jedem Neustart erneut erscheint - ein bewusst
-    umgebautes Dashboard ist ein legitimer Zustand.
-    """
-
-    def __init__(self, issue_data: dict[str, Any]) -> None:
-        super().__init__()
-        self._entry_id: str = issue_data.get("entry_id", "")
-
-    def _entry(self) -> ConfigEntry | None:
-        return self.hass.config_entries.async_get_entry(self._entry_id)
-
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["confirm", "cancel"])
-
-    async def async_step_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Dashboard auf den aktuellen Auslieferungsstand bringen.
-
-        force=True, weil ein vorhandenes Dashboard sonst unangetastet
-        bliebe - genau das ist ja der gemeldete Zustand.
-        """
-        if (entry := self._entry()) is not None:
-            await async_create_dashboard(self.hass, entry, force=True)
-        return self.async_create_entry(title="", data={})
-
-    async def async_step_cancel(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Nichts ändern und künftig nicht mehr danach fragen."""
-        if (entry := self._entry()) is not None:
-            self.hass.config_entries.async_update_entry(
-                entry,
-                data={**entry.data, CONF_DASHBOARD_UPDATE_DISMISSED: True},
-            )
         return self.async_create_entry(title="", data={})
 
 

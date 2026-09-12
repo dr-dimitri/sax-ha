@@ -1,4 +1,4 @@
-"""Optionales Vue-Panel neben dem Lovelace-Dashboard (REQ-VUE-DASHBOARD)."""
+"""Optionales SAX-Power-Dashboard (REQ-VUE-DASHBOARD)."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from .dashboard_api import async_register_dashboard_api
 _LOGGER = logging.getLogger(__name__)
 
 VUE_DASHBOARD_URL_PATH = "sax-power-vue"
-VUE_DASHBOARD_TITLE = "SAX Power (Vue)"
+VUE_DASHBOARD_TITLE = "SAX Power"
 VUE_DASHBOARD_ICON = "mdi:battery-charging-100"
 VUE_DASHBOARD_ELEMENT = "sax-power-vue-panel"
 VUE_DASHBOARD_ASSET_URL = "/sax_power/frontend/sax-power-vue.js"

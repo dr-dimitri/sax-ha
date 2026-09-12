@@ -53,10 +53,6 @@ def _setup_boundaries(
         patch(
             "custom_components.sax_power.SaxPowerCoordinator", return_value=coordinator
         ),
-        patch(
-            "custom_components.sax_power.async_check_dashboard_up_to_date",
-            new=AsyncMock(),
-        ),
         patch.object(
             hass.config_entries, "async_forward_entry_setups", new=AsyncMock()
         ),

@@ -7332,7 +7332,7 @@ async def test_restart_economics_accounting_keeps_old_state_if_write_is_silently
 
 
 # --------------------------------------------------------------------------
-# Anzeige des Tarifplans (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+# Anzeige des Tarifplans (REQ-VUE-SAVINGS)
 # --------------------------------------------------------------------------
 _TOU_TARIFF_OPTIONS = {
     CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,

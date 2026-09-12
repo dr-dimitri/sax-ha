@@ -35,9 +35,6 @@ const language = computed(() =>
   props.hass?.language.toLowerCase().startsWith("de") ? "de" : "en",
 );
 const text = computed(() => messages[language.value]);
-const hasExistingDashboard = computed(() =>
-  Boolean(props.hass?.panels?.["sax-power"]),
-);
 const showSidebarButton = computed(
   () =>
     !props.hass?.kioskMode &&
@@ -119,9 +116,8 @@ function openSidebar(): void {
           <path d="M9 3h6M8 5h8a1 1 0 0 1 1 1v14H7V6a1 1 0 0 1 1-1Z" />
           <path d="m13 8-3 5h4l-3 5" />
         </svg>
-        <span>SAX Power <span class="variant">(Vue)</span></span>
+        <span>SAX Power</span>
       </div>
-      <span class="preview">{{ text.preview }}</span>
     </header>
 
     <nav class="navigation" :aria-label="text.navigation">
@@ -140,21 +136,7 @@ function openSidebar(): void {
       <p v-if="dashboard.error.value" class="status" role="alert">
         {{ dashboard.error.value }}
       </p>
-      <div class="introduction">
-        <p>
-          {{
-            hasExistingDashboard
-              ? text.introduction
-              : text.introductionStandalone
-          }}
-        </p>
-        <a
-          v-if="hasExistingDashboard"
-          class="existing-link"
-          href="/sax-power"
-          >{{ text.existing }}</a
-        >
-      </div>
+      <p class="introduction">{{ text.introduction }}</p>
 
       <section class="section" aria-labelledby="section-heading">
         <h1 id="section-heading" ref="heading" tabindex="-1">
@@ -224,11 +206,6 @@ function openSidebar(): void {
   font-weight: 500;
 }
 
-.variant {
-  font-size: 16px;
-  font-weight: 400;
-}
-
 .header svg {
   fill: none;
   stroke: currentColor;
@@ -240,14 +217,6 @@ function openSidebar(): void {
 .brand-icon {
   width: 30px;
   height: 30px;
-}
-
-.preview {
-  margin-left: auto;
-  border: 1px solid currentColor;
-  border-radius: 12px;
-  padding: 3px 10px;
-  font-size: 12px;
 }
 
 .menu-button {
@@ -311,24 +280,9 @@ main {
 }
 
 .introduction {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-  margin-bottom: 24px;
+  margin: 0 0 24px;
   line-height: 1.6;
-}
-
-.introduction p {
-  margin: 0;
   color: var(--secondary-text-color, #666);
-}
-
-.existing-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
 }
 
 .section {
@@ -391,7 +345,6 @@ h2 {
   }
 
   .introduction {
-    gap: 4px 24px;
     margin-bottom: 12px;
   }
 
@@ -428,7 +381,6 @@ h2 {
   }
 
   .introduction {
-    gap: 0;
     margin-bottom: 16px;
   }
 

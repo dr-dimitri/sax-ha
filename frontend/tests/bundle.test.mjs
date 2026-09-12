@@ -36,6 +36,7 @@ test("production module runs independently in a browser context", async () => {
     await Promise.resolve();
 
     const root = element.shadowRoot;
+    assert.equal(root.querySelector(".header").textContent.trim(), "SAX Power");
     assert.equal(root.querySelector("h1").textContent.trim(), "Ersparnis");
     assert.equal(root.querySelectorAll("nav a").length, 5);
     assert.match(

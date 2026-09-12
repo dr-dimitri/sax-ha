@@ -30,10 +30,7 @@ const port = Number(process.env.SAX_PREVIEW_PORT ?? 5190);
 createServer(async (request, response) => {
   const pathname = new URL(request.url, "http://localhost").pathname;
   const route = routes.get(pathname);
-  const page =
-    pathname === "/" ||
-    pathname === "/sax-power" ||
-    pathname.startsWith("/sax-power-vue");
+  const page = pathname === "/" || pathname.startsWith("/sax-power-vue");
   if (!route && !page) {
     response.writeHead(404).end();
     return;

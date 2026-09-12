@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, h, nextTick, provide, shallowRef, type App } from "vue";
 import GeneralView from "../src/views/GeneralView.vue";
@@ -246,22 +245,7 @@ afterEach(() => {
 });
 
 describe("REQ-VUE-GENERAL: general dashboard view", () => {
-  it("preserves the Lovelace entity set and groups energy first and storage last in Device", async () => {
-    const source = readFileSync(
-      "../custom_components/sax_power/dashboard.py",
-      "utf8",
-    );
-    const general = source
-      .split("general_view = _view(")[1]
-      .split("charging_view = _view(")[0];
-    const lovelaceEntities = [
-      ...general.matchAll(
-        /"(sensor|binary_sensor|switch|number)"\s*,\s*"([a-z_]+)"/g,
-      ),
-    ].map((match) => [match[1], match[2]]);
-    expect(entities.map(([domain, key]) => `${domain}.${key}`).sort()).toEqual(
-      lovelaceEntities.map(([domain, key]) => `${domain}.${key}`).sort(),
-    );
+  it("renders all general entities with energy first and storage last in Device", async () => {
     const { root, callService } = await mount();
     expect(
       [
@@ -311,7 +295,7 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
     expect(callService).not.toHaveBeenCalled();
   });
 
-  it("shows both scales and the same gauge color ranges as Lovelace", async () => {
+  it("shows the SOC and temperature scales with their specified color ranges", async () => {
     const { root } = await mount({
       keys: ["soc", "storage_max_cell_temp"],
       values: { soc: "50", storage_max_cell_temp: "32" },

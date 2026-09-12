@@ -34,18 +34,17 @@
       },
       "dashboard": {
         "title": "Dashboard (optional)",
-        "description": "Optional das Dashboard „SAX Power“ mit allgemeinen Informationen, Ladeautomatik, netzdienlichem Laden, dynamischem Laden und Ersparnis anlegen. Zusätzlich lässt sich die separate Vue-Vorschau aktivieren.",
+        "description": "Optional das Dashboard „SAX Power“ mit allgemeinen Informationen, zeitvariablem Tarif, dynamischem Tarif, netzdienlichem Laden und Ersparnis aktivieren.",
         "data": {
-          "create_dashboard": "Dashboard anlegen",
-          "vue_dashboard_enabled": "Vue-Dashboard aktivieren (Vorschau)"
+          "vue_dashboard_enabled": "Dashboard aktivieren"
         },
         "data_description": {
-          "vue_dashboard_enabled": "Ergänzt den separaten Seitenleisteneintrag „SAX Power (Vue)“. Diese Vorschau enthält zunächst die Navigation; Messwerte und Bedienfunktionen folgen. Das bestehende Dashboard bleibt erhalten."
+          "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis."
         }
       },
       "finish": {
         "title": "Einrichtung abgeschlossen",
-        "description": "Firmware: {firmware}\nSeriennummer: {serial_number}\nSunSpec-Modus: {sunspec_status}\n\n{entity_count} Entities wurden angelegt.\n\nDas mitgelieferte Dashboard wurde entsprechend der vorherigen Auswahl angelegt (oder übersprungen) und lässt sich jederzeit über den Service \"sax_power.create_dashboard\" nachträglich anlegen.\n\nPreisoptimiertes Laden ist bewusst nicht Teil der Ersteinrichtung und lässt sich jederzeit über \"Konfigurieren\" bei dieser Integration einrichten."
+        "description": "Firmware: {firmware}\nSeriennummer: {serial_number}\nSunSpec-Modus: {sunspec_status}\n\n{entity_count} Entities wurden angelegt.\n\nDas Dashboard wird entsprechend der vorherigen Auswahl aktiviert. Du kannst die Auswahl jederzeit über „Konfigurieren“ bei dieser Integration ändern.\n\nPreisoptimiertes Laden ist bewusst nicht Teil der Ersteinrichtung und lässt sich jederzeit über \"Konfigurieren\" bei dieser Integration einrichten."
       }
     },
     "flow_title": "SAX Power Home ({host})",
@@ -568,48 +567,33 @@
       "title": "Einige Ladeeinstellungen konnten nicht automatisch übernommen werden",
       "description": "Folgende Einstellungen standen beim ersten Start dieser Version auf einem nicht auswertbaren Altzustand (unbekannt/nicht verfügbar) und wurden deshalb auf ihren sicheren Vorgabewert gesetzt, statt den vorherigen Wert zu übernehmen: {fields}. Bitte diese Einstellungen prüfen und bei Bedarf erneut wie gewünscht setzen - danach verschwindet dieser Hinweis automatisch."
     },
-    "dashboard_outdated": {
-      "title": "Dashboard „{dashboard}“ ist nicht auf dem aktuellen Stand",
-      "fix_flow": {
-        "step": {
-          "init": {
-            "title": "Dashboard „{dashboard}“ aktualisieren?",
-            "description": "Im mitgelieferten Dashboard fehlen Tabs oder vorhandene Bereiche verwenden einen älteren Stand: **{views}**.\n\nDas Dashboard wird nur bei der Ersteinrichtung angelegt und danach nie wieder verändert - eigene Anpassungen bleiben dadurch erhalten, neue oder aktualisierte Inhalte kommen aber auch nicht von selbst hinzu.\n\n**Bestätigen**: Das Dashboard wird auf den aktuellen Auslieferungsstand zurückgesetzt. Die genannten Bereiche sind danach aktuell; eigene Änderungen am Dashboard gehen dabei verloren.\n**Abbrechen**: Es ändert sich nichts, und dieser Hinweis erscheint nicht erneut.",
-            "menu_options": {
-              "confirm": "Bestätigen - Dashboard neu aufbauen",
-              "cancel": "Abbrechen - Dashboard so lassen"
-            }
-          }
-        }
-      }
-    },
     "vue_dashboard_update": {
-      "title": "Update the Vue dashboard and reload it in your browser",
+      "title": "Dashboard aktualisieren und im Browser neu laden",
       "fix_flow": {
         "step": {
           "init": {
-            "title": "Update the Vue dashboard",
-            "description": "A different version is available for the enabled Vue dashboard, an earlier preview has not been acknowledged yet, or the panel could not be registered.\n\nThis repair registers only the Vue dashboard again using the bundled version. Your Lovelace dashboard and charging settings are preserved. Afterwards, every open browser needs a full reload to use the new interface.\n\n**Later** dismisses this version only. A subsequent version change will be reported again.",
+            "title": "Dashboard aktualisieren",
+            "description": "Für das aktivierte Dashboard steht eine andere Version bereit, ein früherer Stand wurde noch nicht bestätigt oder das Panel konnte nicht registriert werden.\n\nDie Reparatur registriert das Dashboard mit der mitgelieferten Version neu. Die Ladeeinstellungen bleiben erhalten. Bereits geöffnete Browser benötigen anschließend ein vollständiges Neuladen, damit die neue Oberfläche verwendet wird.\n\nMit **Später** wird nur dieser Stand ausgeblendet. Ein weiterer Versionswechsel wird wieder gemeldet.",
             "menu_options": {
-              "confirm": "Update Vue dashboard",
-              "cancel": "Later – dismiss this version"
+              "confirm": "Dashboard aktualisieren",
+              "cancel": "Später – diesen Stand ausblenden"
             }
           },
           "confirm": {
-            "title": "Retry the Vue dashboard update",
-            "description": "Registration has not succeeded yet. Check the Home Assistant log and try again. If the integration has been updated in the meantime, close this dialog and open the current repair issue."
+            "title": "Dashboard erneut aktualisieren",
+            "description": "Die Registrierung war noch nicht erfolgreich. Prüfe das Home-Assistant-Protokoll und versuche es erneut. Wurde die Integration inzwischen aktualisiert, schließe diesen Dialog und öffne den aktuellen Reparaturhinweis."
           },
           "reload": {
-            "title": "Vue dashboard registered – reload your browser",
-            "description": "The Vue dashboard has been registered using the current bundled version. Complete this step, then **fully reload every open Home Assistant page** (browser: reload the page; Companion app: reload the frontend). Switching dashboard tabs is not enough.\n\nYour browser will then use the new Vue interface."
+            "title": "Dashboard ist registriert – Browser neu laden",
+            "description": "Das Dashboard wurde mit der aktuellen mitgelieferten Version registriert. Schließe diesen Schritt ab und lade anschließend **jede geöffnete Home-Assistant-Seite vollständig neu** (Browser: Seite neu laden; Companion-App: Frontend neu laden). Ein Wechsel zwischen Dashboard-Tabs reicht nicht aus.\n\nDer Browser verwendet danach die neue Oberfläche."
           }
         },
         "error": {
-          "update_failed": "The Vue dashboard could not be updated. The issue has not been marked as fixed."
+          "update_failed": "Das Dashboard konnte nicht aktualisiert werden. Das Problem wurde nicht als behoben markiert."
         },
         "abort": {
-          "no_longer_available": "The integration or enabled Vue dashboard is no longer available.",
-          "update_changed": "The dashboard version or its availability has changed in the meantime. Open the current repair issue again; the new version was not acknowledged."
+          "no_longer_available": "Die Integration oder das aktivierte Dashboard ist nicht mehr verfügbar.",
+          "update_changed": "Der Dashboard-Stand oder seine Verfügbarkeit hat sich inzwischen geändert. Öffne den aktuellen Reparaturhinweis erneut; der neue Stand wurde nicht bestätigt."
         }
       }
     }
@@ -711,26 +695,6 @@
         }
       }
     },
-    "create_dashboard": {
-      "name": "Dashboard anlegen",
-      "description": "Legt das mitgelieferte Dashboard \"SAX Power\" nachträglich an - z. B. wenn es bei der Ersteinrichtung abgewählt oder später gelöscht wurde. Tut nichts, wenn es bereits existiert.",
-      "fields": {
-        "device_id": {
-          "name": "Gerät",
-          "description": "Das SAX Power Gerät."
-        }
-      }
-    },
-    "reinstall_dashboard": {
-      "name": "Dashboard neu installieren",
-      "description": "Setzt das Dashboard \"SAX Power\" auf den Auslieferungszustand zurück - überschreibt ein vorhandenes Dashboard mit der aktuell gebauten Konfiguration oder legt es neu an, falls es zwischenzeitlich gelöscht wurde.",
-      "fields": {
-        "device_id": {
-          "name": "Gerät",
-          "description": "Das SAX Power Gerät."
-        }
-      }
-    },
     "restart_economics_accounting": {
       "name": "Wirtschaftlichkeitsbilanz neu starten",
       "description": "Setzt die Wirtschaftlichkeitsbilanz kontrolliert zurück (Geldsummen, Netto-Ersparnis, Preisabdeckungszähler, Tages-Buckets und Aktivierungszeitpunkt) - rührt niemals Energiezähler oder Herkunftsaufteilung an.",
@@ -764,7 +728,7 @@
           "economics_tariff_type": "Tarifmodell für die Wirtschaftlichkeit",
           "economics_investment_cost_eur": "Investitionskosten (EUR)",
           "economics_prior_result_eur": "Bereits erwirtschafteter Ertrag (EUR)",
-          "vue_dashboard_enabled": "Vue-Dashboard aktivieren (Vorschau)"
+          "vue_dashboard_enabled": "Dashboard aktivieren"
         },
         "data_description": {
           "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Er hat zwei getrennte Aufgaben: Für das preisoptimierte Laden liefert er immer die Zeitfenster der Modi „Relativ“ und „Smart“ (aus seinen Preisvorschau-Attributen). Für die Wirtschaftlichkeit ist er nur beim Tarifmodell „Dynamisch“ die Preisquelle - dort ist er Pflicht. Bei „Festpreis“ und „Tageszeitabhängig“ rechnet die Wirtschaftlichkeit ausschließlich mit den Preisen, die auf der Folgeseite eingegeben werden: Ein dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, kein täglich wiederkehrendes Tagesprofil - beide Formate lassen sich nicht ineinander überführen.",
@@ -775,7 +739,7 @@
           "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Festpreis“ rechnet mit einem ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ rechnet mit einem täglich wiederkehrenden Preisprofil: ein Grundpreis plus bis zu acht abweichende Zeitfenster, einzugeben auf der nächsten Seite. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung. Nur „Dynamisch“ verwendet den Strompreis-Sensor; das preisoptimierte Laden nutzt ihn unabhängig vom Tarifmodell weiter.",
           "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt und Restbetrag bis zur Amortisation; verrechnet wird gegen das laufende, signierte Nettoergebnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
           "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt und Restbetrag; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf.",
-          "vue_dashboard_enabled": "Ergänzt den separaten Seitenleisteneintrag „SAX Power (Vue)“. Diese Vorschau enthält zunächst die Navigation; Messwerte und Bedienfunktionen folgen. Das bestehende Dashboard bleibt erhalten."
+          "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis."
         }
       },
       "economics_fixed": {

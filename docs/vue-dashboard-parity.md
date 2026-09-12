@@ -47,11 +47,21 @@ Die Darstellung passt sich der verfügbaren Breite an. Beschriftungen und Werte
 werden nicht abgeschnitten, die Bedienflächen von Eingaben und Schaltflächen
 bleiben mindestens 44 px hoch.
 
-Gültige Monatsänderungen bestätigen Serviceantwort und HA-Schalterzustand
-ohne Warten auf die Geräteauswertung. Der Coordinator führt die notwendige
-Auswertung weiterhin über seinen gemeinsamen Control-Lock aus. Eine bestätigte
-Monatsauswahl beschreibt die angenommene Konfiguration; Aktivitäts- und
+Gültige Softwarekonfiguration bestätigt Serviceantwort und HA-Zustand ohne
+Warten auf die Geräteauswertung. Das gilt für die drei Ladehauptschalter,
+Monate, Max-SOC, Netzladeziel/Min-SOC, Preisgrenzen, Anzahl Stunden, Strategie,
+Prognoseschwelle sowie einzelne und atomare Zeitfenster. Der Coordinator
+merkt die Konfiguration sofort zum Speichern vor und wertet den neuesten
+Stand im gemeinsamen Worker unter dem Control-Lock aus. Eine bestätigte
+Konfiguration beschreibt den angenommenen Anwenderwert; Aktivitäts- und
 Gerätezustände folgen weiterhin der quittierten Steuersequenz.
+Implementierungsgrenzen und Ablauf stehen in `REQ-VUE-ENTITY-BINDING` und
+[DEVELOPMENT.md](../DEVELOPMENT.md).
+
+In den beiden Tarif-Tabs entfällt „Bestätigter Wert:“ (EN: „Confirmed value:“)
+vor den bestätigten Bedienwerten. Die Werte bleiben auch beim Bearbeiten und
+bis zur HA-Bestätigung sichtbar und zugänglich. Die gemeinsame Zeitfenster-Zeile
+„Bestätigt:“ sowie die Beschriftungen anderer Ansichten bleiben erhalten.
 
 | Funktion | Verhalten | Automatisierte Prüfung |
 | --- | --- | --- |
@@ -63,6 +73,8 @@ Gerätezustände folgen weiterhin der quittierten Steuersequenz.
 | Uhrzeiten | Eingabe `HH:MM` mit `step=60`, explizite Übernahme als `HH:MM:00`, ohne eigene Zeitplanberechnung. Beide produktiven Zeitfenster übernehmen ihr vollständiges Paar über `sax_power.set_timed_charge_window` beziehungsweise `sax_power.set_grid_serving_window`; die allgemeine Einzelzeit-Komponente verwendet weiterhin `time.set_value`. | [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
 | Auswahlfelder | `select.select_option`; erlaubte Werte aus `options`, Beschriftung aus den übersetzten Enum-Metadaten. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Bestätigung und Fehler | Ein laufender Aufruf sperrt alle Bedienelemente derselben Entität; eine gemeinsame Zeitfensteraktion sperrt beide Grenzen. Serviceantworten ersetzen keinen HA-Zustand. Fehler werden angezeigt; es gibt keinen automatischen erneuten Schreibversuch. | [Controls][control-tests], [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
+| Softwarekonfiguration | HA bestätigt angenommene Einstellungen unabhängig von Control-Lock und Modbus; Geräteaktivität erfordert weiterhin die quittierte Steuersequenz. | [Konfigurationsantworten][control-response-tests], [HA-E2E][ha-e2e-tests] |
+| Beschriftung der Tarifwerte | Beide Tarif-Tabs zeigen bestätigte Werte ohne „Bestätigter Wert:“/„Confirmed value:“; lokale Entwürfe ersetzen diese nicht. Gemeinsame Zeitfenster-Bestätigung und andere Ansichten bleiben erhalten. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Verbindung und Navigation | Ein gemeinsames Metadatenabo, Aufräumen bei Unmount, erneutes Abonnieren nach Reconnect, kein Schreiben bei Mount, Tabwechsel oder Reconnect. | [Panel][panel-tests], [HA-Kontext][ha-tests], [Browser][browser-tests] |
 
 Die bestätigten Hauptschalter `timed_charge_enabled` und
@@ -409,7 +421,18 @@ Test an einer physischen Batterie statt. Die finale isolierte Paketprüfung
 wird mit dem tatsächlichen Commit und den Prüfsummen in
 [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204) festgehalten.
 
-### Bestätigung der Monatskonfiguration
+### Bestätigung der Softwarekonfiguration
+
+[test_control_response.py](../tests/test_control_response.py) und
+[test_vue_dashboard_e2e.py](../tests/test_vue_dashboard_e2e.py) prüfen die
+Software-Entity- und Software-Serviceaufrufe bei blockierter Geräteauswertung:
+Serviceantwort und HA-Zustandsereignis müssen vor Freigabe der Sperre eintreffen.
+Die Tests sichern auch die gemeinsame Auswertung aufeinanderfolgender
+Änderungen, Speicherung, getrennte Aktivitätsbestätigung und die Ablehnung
+nach Shutdown vor einer Mutation ab. Der Hinweis auf eine ausstehende
+Serviceantwort bleibt dadurch nicht wegen eines Modbus-Zugriffs stehen.
+
+### Frühere Korrektur der Monatsbestätigung
 
 Der HA-WebSocket-Test in [test_vue_dashboard_e2e.py](../tests/test_vue_dashboard_e2e.py)
 bestätigt alle zwölf Monatsschalter beider Gruppen bereits bei absichtlich
@@ -489,6 +512,7 @@ aufklappbare Monatsauswahl mit Quartalsgruppen sind darin noch nicht enthalten.
 [metadata-tests]: ../tests/test_dashboard_api.py
 [ha-tests]: ../frontend/tests/ha.test.ts
 [control-tests]: ../frontend/tests/controls.test.ts
+[control-response-tests]: ../tests/test_control_response.py
 [general-tests]: ../frontend/tests/general.test.ts
 [charging-tests]: ../frontend/tests/charging.test.ts
 [savings-tests]: ../frontend/tests/savings.test.ts

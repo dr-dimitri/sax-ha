@@ -101,9 +101,13 @@ class ChargeConflictRepairFlow(RepairsFlow):
         """
         if (coordinator := self._coordinator()) is not None:
             if self._issue_key == ISSUE_PRICE_CHARGE_CONFLICT:
-                await coordinator.async_set_price_charge_enabled(True, force=True)
+                await coordinator.async_set_price_charge_enabled(
+                    True, force=True, defer_device_update=True
+                )
             elif self._issue_key == ISSUE_TIMED_CHARGE_CONFLICT:
-                await coordinator.async_set_timed_charge_enabled(True, force=True)
+                await coordinator.async_set_timed_charge_enabled(
+                    True, force=True, defer_device_update=True
+                )
         return self.async_create_entry(title="", data={})
 
     async def async_step_cancel(

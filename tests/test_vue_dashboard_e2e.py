@@ -180,6 +180,200 @@ async def test_dashboard_clients_share_services_states_and_one_modbus_client(
         await server.shutdown()
 
 
+async def test_configuration_services_confirm_without_waiting_for_device_control(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    unused_tcp_port: int,
+) -> None:
+    """REQ-VUE-ENTITY-BINDING: GUI-Konfiguration quittiert vor dem Geräteabgleich."""
+    server = _modbus_server(
+        unused_tcp_port, _build_basic_registers(), _build_extended_registers()
+    )
+    await server.serve_forever(background=True)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": unused_tcp_port,
+            "slave_id_basic": 64,
+            "slave_id_extended": 100,
+            "scan_interval": 3600,
+        },
+    )
+    entry.add_to_hass(hass)
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        registry = er.async_get(hass)
+        sender = await hass_ws_client(hass)
+        observer = await hass_ws_client(hass)
+        await observer.send_json(
+            {"id": 1, "type": "subscribe_events", "event_type": "state_changed"}
+        )
+        await _result(observer, 1)
+
+        def entity_id(domain: str, key: str) -> str:
+            resolved = registry.async_get_entity_id(
+                domain, DOMAIN, f"{entry.entry_id}_{key}"
+            )
+            assert resolved
+            return resolved
+
+        actions = [
+            ("switch", "timed_charge_enabled", "turn_on", {}, "on"),
+            ("switch", "timed_charge_enabled", "turn_off", {}, "off"),
+            ("switch", "price_charge_enabled", "turn_on", {}, "on"),
+            ("switch", "price_charge_enabled", "turn_off", {}, "off"),
+            ("switch", "grid_serving_enabled", "turn_on", {}, "on"),
+            ("switch", "grid_serving_enabled", "turn_off", {}, "off"),
+            ("number", "timed_charge_min_soc", "set_value", {"value": 30}, "30"),
+            ("number", "timed_charge_max_soc", "set_value", {"value": 90}, "90"),
+            ("number", "max_soc", "set_value", {"value": 85}, "85"),
+            ("number", "price_charge_max_price", "set_value", {"value": -0.1}, "-0.1"),
+            (
+                "number",
+                "price_charge_neutral_price",
+                "set_value",
+                {"value": 0.2},
+                "0.2",
+            ),
+            ("number", "price_charge_hours", "set_value", {"value": 4}, "4"),
+            (
+                "number",
+                "grid_serving_forecast_threshold",
+                "set_value",
+                {"value": 20},
+                "20.0",
+            ),
+            (
+                "select",
+                "price_charge_strategy",
+                "select_option",
+                {"option": "relative"},
+                "relative",
+            ),
+            (
+                "time",
+                "timed_charge_start",
+                "set_value",
+                {"time": "01:00:00"},
+                "01:00:00",
+            ),
+            ("time", "timed_charge_end", "set_value", {"time": "05:00:00"}, "05:00:00"),
+            (
+                "time",
+                "grid_serving_start",
+                "set_value",
+                {"time": "06:00:00"},
+                "06:00:00",
+            ),
+            ("time", "grid_serving_end", "set_value", {"time": "10:00:00"}, "10:00:00"),
+        ]
+        with patch.object(
+            coordinator.client,
+            "write_register",
+            wraps=coordinator.client.write_register,
+        ) as write:
+            async with coordinator._charge_control_lock:
+                worker = None
+                for request_id, (domain, key, service, data, expected) in enumerate(
+                    actions, 1
+                ):
+                    target = entity_id(domain, key)
+                    await sender.send_json(
+                        {
+                            "id": request_id,
+                            "type": "call_service",
+                            "domain": domain,
+                            "service": service,
+                            "service_data": data,
+                            "target": {"entity_id": target},
+                        }
+                    )
+                    await _result(sender, request_id)
+                    await _state_event(observer, target, expected)
+                    assert hass.states.get(target).state == expected
+                    write.assert_not_called()
+                    worker = worker or coordinator._month_control_task
+                    assert coordinator._month_control_task is worker
+
+                device_id = registry.async_get(
+                    entity_id("switch", "timed_charge_enabled")
+                ).device_id
+                for request_id, (prefix, start, end) in enumerate(
+                    [
+                        ("timed_charge", "02:00:00", "04:00:00"),
+                        ("grid_serving", "07:00:00", "11:00:00"),
+                    ],
+                    30,
+                ):
+                    await sender.send_json(
+                        {
+                            "id": request_id,
+                            "type": "call_service",
+                            "domain": DOMAIN,
+                            "service": f"set_{prefix}_window",
+                            "service_data": {
+                                "device_id": device_id,
+                                "start": start,
+                                "end": end,
+                            },
+                        }
+                    )
+                    await _result(sender, request_id)
+                    await _state_event(
+                        observer, entity_id("time", f"{prefix}_start"), start
+                    )
+                    assert (
+                        hass.states.get(entity_id("time", f"{prefix}_end")).state == end
+                    )
+                    write.assert_not_called()
+
+                await sender.send_json(
+                    {
+                        "id": 40,
+                        "type": "call_service",
+                        "domain": "switch",
+                        "service": "turn_on",
+                        "target": {
+                            "entity_id": entity_id("switch", "timed_charge_enabled")
+                        },
+                    }
+                )
+                await _result(sender, 40)
+                await sender.send_json(
+                    {
+                        "id": 41,
+                        "type": "call_service",
+                        "domain": DOMAIN,
+                        "service": "set_price_charge_enabled",
+                        "service_data": {
+                            "device_id": device_id,
+                            "enabled": True,
+                            "force": True,
+                        },
+                    }
+                )
+                await _result(sender, 41)
+                assert (
+                    hass.states.get(entity_id("switch", "timed_charge_enabled")).state
+                    == "off"
+                )
+                assert (
+                    hass.states.get(entity_id("switch", "price_charge_enabled")).state
+                    == "on"
+                )
+                write.assert_not_called()
+                assert coordinator._month_control_task is worker
+            await worker
+        await sender.close()
+        await observer.close()
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await server.shutdown()
+
+
 @pytest.mark.parametrize("prefix", ["timed_charge", "grid_serving"])
 async def test_month_services_confirm_while_device_control_is_busy(
     hass: HomeAssistant,
@@ -386,7 +580,9 @@ async def test_dashboard_window_service_confirms_both_renamed_entities_atomicall
                 entity_id: hass.states.get(entity_id).state for entity_id in expected
             } == expected
             set_window.assert_awaited_once_with(
-                time.fromisoformat(start), time.fromisoformat(end)
+                time.fromisoformat(start),
+                time.fromisoformat(end),
+                defer_device_update=True,
             )
             set_start.assert_not_awaited()
             set_end.assert_not_awaited()

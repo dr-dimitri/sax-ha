@@ -499,14 +499,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await _async_check_time_window_permissions(hass, call, "timed_charge")
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_set_timed_charge_window(
-            call.data[ATTR_START], call.data[ATTR_END]
+            call.data[ATTR_START], call.data[ATTR_END], defer_device_update=True
         )
 
     async def _async_set_grid_serving_window(call: ServiceCall) -> None:
         await _async_check_time_window_permissions(hass, call, "grid_serving")
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_set_grid_serving_window(
-            call.data[ATTR_START], call.data[ATTR_END]
+            call.data[ATTR_START], call.data[ATTR_END], defer_device_update=True
         )
 
     async def _async_refresh_price_plan(call: ServiceCall) -> None:
@@ -517,7 +517,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _async_set_price_charge_enabled(call: ServiceCall) -> None:
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         applied = await coordinator.async_set_price_charge_enabled(
-            call.data[ATTR_ENABLED], force=call.data[ATTR_FORCE]
+            call.data[ATTR_ENABLED],
+            force=call.data[ATTR_FORCE],
+            defer_device_update=True,
         )
         if not applied:
             raise HomeAssistantError(

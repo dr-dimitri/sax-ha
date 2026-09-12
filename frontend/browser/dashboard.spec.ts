@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { tabs } from "../src/tabs";
+import type { HomeAssistant } from "../src/types";
 
 const pageErrors = new WeakMap<Page, string[]>();
 
@@ -458,6 +459,27 @@ test("one dashboard with five complete views, local assets and responsive screen
       tab[language],
     );
     await expect(panel.locator(".placeholder")).toHaveCount(0);
+    await expect(panel).not.toContainText(
+      /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
+    );
+    if (tab.path === "ladeautomatik" || tab.path === "dynamisches-laden") {
+      await expect(panel).not.toContainText(
+        /Bestätigter Wert:|Confirmed value:/,
+      );
+      await expect(
+        panel.locator(".entity-control__value").filter({ hasText: "80 %" }),
+      ).toHaveCount(1);
+      await expect(
+        panel.locator(".entity-control__value").filter({
+          hasText:
+            tab.path === "ladeautomatik"
+              ? "20 %"
+              : language === "de"
+                ? "-0,05 EUR/kWh"
+                : "-0.05 EUR/kWh",
+        }),
+      ).toHaveCount(tab.path === "ladeautomatik" ? 1 : 2);
+    }
     if (tab.path === "ersparnis") {
       await expect(panel.locator(".savings-chart")).toBeVisible();
     } else {
@@ -1018,6 +1040,61 @@ test("one inclusive date selection drives signed chart and accessible table", as
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
+test("both tariff switches clear pending feedback after the simulated HA service completes", async ({
+  page,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const pending = testInfo.project.name.endsWith("en")
+    ? "Sending change to Home Assistant …"
+    : "Änderung wird an Home Assistant gesendet …";
+  for (const path of ["ladeautomatik", "dynamisches-laden"]) {
+    await panel.locator(`nav a[href$='/${path}']`).click();
+    const control = panel.locator(".charging-view > .entity-control");
+    const input = control.getByRole("switch");
+    await expect(input).not.toBeChecked();
+    await expect(control).toHaveAttribute("aria-busy", "false");
+    await expect(panel).not.toContainText(pending);
+    await panel.evaluate((element) => {
+      const host = element as HTMLElement & { hass: HomeAssistant };
+      const service = host.hass.callService!;
+      const completion = new Promise<void>((resolve) => {
+        host.addEventListener("finish-simulated-service", () => resolve(), {
+          once: true,
+        });
+      });
+      host.hass = {
+        ...host.hass,
+        callService: async (...args) => {
+          await completion;
+          return service(...args);
+        },
+      };
+    });
+    await input.click();
+    await expect(input).toBeDisabled();
+    await expect(input).not.toBeChecked();
+    await expect(control).toHaveAttribute("aria-busy", "true");
+    await expect(control.getByRole("status")).toHaveText(pending);
+
+    await panel.locator("nav a[href$='/allgemein']").click();
+    await panel.locator(`nav a[href$='/${path}']`).click();
+    await expect(input).toBeDisabled();
+    await expect(control.getByRole("status")).toHaveText(pending);
+    await panel.evaluate((element) => {
+      element.dispatchEvent(new Event("finish-simulated-service"));
+    });
+    await expect(input).toBeChecked();
+    await expect(input).toBeEnabled();
+    await expect(control).toHaveAttribute("aria-busy", "false");
+    await expect(panel).not.toContainText(pending);
+
+    await input.click();
+    await expect(input).not.toBeChecked();
+    await expect(input).toBeEnabled();
+    await expect(panel).not.toContainText(pending);
+  }
+});
+
 test("tariff tabs follow confirmed HA states and keep both choices available when no exclusive tariff is known", async ({
   page,
 }) => {
@@ -1031,9 +1108,15 @@ test("tariff tabs follow confirmed HA states and keep both choices available whe
   await expect(dynamic).toHaveCount(0);
   await expect(page).toHaveURL(/allgemein$/);
   await timed.click();
+  await expect(panel).not.toContainText(
+    /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
+  );
   await page.locator("#tariff-dynamic").click();
   await expect(page).toHaveURL(/dynamisches-laden$/);
   await expect(dynamic).toHaveAttribute("aria-current", "page");
+  await expect(panel).not.toContainText(
+    /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
+  );
   await expect(timed).toHaveCount(0);
   await expect(panel.getByRole("heading", { level: 1 })).toBeFocused();
   await page.locator("#tariff-off").click();

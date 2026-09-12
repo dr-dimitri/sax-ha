@@ -3137,7 +3137,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
             )
 
-    async def async_set_max_soc(self, max_soc: int | None) -> None:
+    async def async_set_max_soc(
+        self, max_soc: int | None, *, defer_device_update: bool = False
+    ) -> None:
         """Set (or clear with None) the software-side max charge SOC.
 
         Klemmt auf [MIN_SOC, MAX_SOC] statt den Wert ungeprüft zu
@@ -3145,12 +3147,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Restaurieren eines gespeicherten Zustands auf (async_added_to_hass),
         ohne die sonst greifende NumberEntity-Min/Max-Validierung des
         regulären Service-Call-Pfads."""
+        self._raise_if_shutdown()
         self._max_soc = _clamp_int(max_soc, MIN_SOC, MAX_SOC)
         if self._timed_charge_max_soc is not None:
             self._timed_charge_max_soc = self.timed_charge_max_soc
         self.clear_control_field_unresolved("max_soc")
         self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     # -- Manueller Netzladeauftrag (kompatible Service-API) -------------------
     # start_grid_charge/stop_grid_charge bleiben als Automation-API erhalten,
@@ -3861,14 +3866,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return MAX_SOC
         return self.timed_charge_max_soc
 
-    async def async_set_timed_charge_max_soc(self, value: int | None) -> None:
+    async def async_set_timed_charge_max_soc(
+        self, value: int | None, *, defer_device_update: bool = False
+    ) -> None:
         """Set the grid-charge target and immediately reevaluate charging."""
+        self._raise_if_shutdown()
         maximum = self._max_soc if self._max_soc is not None else MAX_SOC
         self._timed_charge_max_soc = _clamp_int(value, MIN_SOC, maximum)
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     async def async_set_timed_charge_enabled(
-        self, enabled: bool, *, force: bool = False
+        self,
+        enabled: bool,
+        *,
+        force: bool = False,
+        defer_device_update: bool = False,
     ) -> bool:
         """Netzladung ein-/ausschalten. Gibt zurück, ob die Änderung
         übernommen wurde.
@@ -3900,10 +3914,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.clear_control_field_unresolved("timed_charge_enabled")
         self.async_dismiss_charge_conflict()
         self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
         return True
 
-    async def async_set_timed_charge_min_soc(self, value: int | None) -> None:
+    async def async_set_timed_charge_min_soc(
+        self, value: int | None, *, defer_device_update: bool = False
+    ) -> None:
         """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
         unterhalb dessen die Netzladung starten darf - siehe
         _async_enforce_grid_charge/_timed_charge_armed für die
@@ -3912,11 +3930,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wieder abzubrechen). Klemmt auf [MIN_SOC, MAX_SOC], siehe
         async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
         NumberEntity-Validierung)."""
+        self._raise_if_shutdown()
         self._timed_charge_min_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
         self.clear_control_field_unresolved("timed_charge_min_soc")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_timed_charge_start(self, value: dt_time) -> None:
+    async def async_set_timed_charge_start(
+        self, value: dt_time, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         if self._windows_overlap_with_months(
             value,
             self._timed_charge_end,
@@ -3939,9 +3963,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._timed_charge_start = value
         self.clear_control_field_unresolved("timed_charge_start")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_timed_charge_end(self, value: dt_time) -> None:
+    async def async_set_timed_charge_end(
+        self, value: dt_time, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         if self._windows_overlap_with_months(
             self._timed_charge_start,
             value,
@@ -3964,9 +3993,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._timed_charge_end = value
         self.clear_control_field_unresolved("timed_charge_end")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_timed_charge_window(self, start: dt_time, end: dt_time) -> None:
+    async def async_set_timed_charge_window(
+        self,
+        start: dt_time,
+        end: dt_time,
+        *,
+        defer_device_update: bool = False,
+    ) -> None:
         """Setzt Start und Ende der Netzladung atomar in einem Aufruf.
 
         Anders als async_set_timed_charge_start/-end (die je nur eine der
@@ -3977,6 +4014,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         nicht beabsichtigtes Zwischenfenster kann die Prüfung dadurch nicht
         mehr fälschlich als Überschneidung erkennen (siehe anforderung.yaml,
         REQ-GRID-SERVING-CHARGE)."""
+        self._raise_if_shutdown()
         if self._windows_overlap_with_months(
             start,
             end,
@@ -4002,7 +4040,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_end = end
         self.clear_control_field_unresolved("timed_charge_start")
         self.clear_control_field_unresolved("timed_charge_end")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     async def async_set_timed_charge_month(
         self, month: int, enabled: bool, validate: bool = True
@@ -4042,22 +4082,26 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._async_schedule_month_control_change()
 
     def _async_schedule_month_control_change(self) -> None:
-        """Bestätige Monatskonfiguration unabhängig vom laufenden Geräteabgleich."""
+        """Bestätige Softwarekonfiguration unabhängig vom laufenden Geräteabgleich."""
+        self._raise_if_shutdown()
         if self._control_bootstrap_pending:
             return
         self._async_schedule_control_save()
         self._month_control_revision += 1
+        # REQ-VUE-CHARGING: Fenster-Services und erzwungene Tarifwechsel
+        # bestätigen auch die übrigen betroffenen Konfigurations-Entities.
+        self.async_update_listeners()
         if self._month_control_task is None:
             # REQ-VUE-CHARGING: Die HA-Entity bestätigt bereits die angenommene
             # Konfiguration; Aktivitätswerte folgen weiterhin erst Geräte-ACKs.
             self._month_control_task = self.hass.async_create_task(
                 self._async_apply_month_control_changes(),
-                name="sax_power_month_control",
+                name="sax_power_configuration_control",
                 eager_start=False,
             )
 
     async def _async_apply_month_control_changes(self) -> None:
-        """Fasse Monatsänderungen zusammen und verarbeite jeden neueren Endstand."""
+        """Fasse Konfigurationsänderungen zusammen und verarbeite den neuesten Stand."""
         try:
             while not self._shutdown_started:
                 async with self._charge_control_lock:
@@ -4070,7 +4114,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         except HomeAssistantError as err:
                             if not isinstance(err, _SunChargeWriteError):
                                 _LOGGER.error(
-                                    "Monatskonfiguration konnte noch nicht auf das "
+                                    "Ladekonfiguration konnte noch nicht auf das "
                                     "Gerät angewendet werden; erneuter Versuch im "
                                     "nächsten Poll: %s",
                                     err,
@@ -4094,16 +4138,21 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     async def _async_apply_grid_charge_change(
-        self, *, persist: bool = True, background: bool = False
+        self,
+        *,
+        persist: bool = True,
+        background: bool = False,
+        defer_device_update: bool = False,
     ) -> None:
         """Re-evaluate Zeitfenster/Max-SOC/Netzladeleistung sofort nach einer
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
         warten.
 
         Direkte Einstellungsänderungen merken hier ihren Konfigurations-Snapshot
-        zum Speichern vor; Monatsänderungen tun dies bereits bei der Annahme
-        und wenden denselben Geräteabgleich in einem separaten Task unter dem
-        Control-Lock an (REQ-VUE-CHARGING).
+        zum Speichern vor. UI- und Software-Serviceaufrufe verwenden
+        `defer_device_update=True`: Wie Monatsänderungen bestätigen sie ihre
+        Konfiguration bei der Annahme und wenden den Geräteabgleich in einem
+        gemeinsamen Task unter dem Control-Lock an (REQ-VUE-CHARGING).
         Während des Bootstraps passiert
         beides nicht: die Setter restaurieren dann nur noch Altzustände, und
         eine Teilkonfiguration darf weder das Gerät steuern noch den
@@ -4114,6 +4163,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         einer Anwenderänderung, deshalb entscheidet der Bootstrap selbst, ob
         und wie sie geschrieben wird (siehe _async_persist_bootstrap_result).
         """
+        if defer_device_update:
+            self._async_schedule_month_control_change()
+            return
         async with self._charge_control_lock:
             if background and self._shutdown_started:
                 return
@@ -5119,24 +5171,35 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def grid_serving_window_active(self) -> bool:
         return self._grid_serving_window_active
 
-    async def async_set_grid_serving_enabled(self, enabled: bool) -> None:
+    async def async_set_grid_serving_enabled(
+        self, enabled: bool, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         self._grid_serving_enabled = enabled
         self.clear_control_field_unresolved("grid_serving_enabled")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     async def async_set_grid_serving_forecast_threshold_kwh(
-        self, value: float | None
+        self, value: float | None, *, defer_device_update: bool = False
     ) -> None:
         """Set and immediately apply the optional minimum PV forecast."""
+        self._raise_if_shutdown()
         self._grid_serving_forecast_threshold_kwh = _clamp_float(
             round_half_up(value),
             MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
             MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
         )
         self.clear_control_field_unresolved("grid_serving_forecast_threshold_kwh")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_grid_serving_start(self, value: dt_time) -> None:
+    async def async_set_grid_serving_start(
+        self, value: dt_time, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         if self._windows_overlap_with_months(
             value,
             self._grid_serving_end,
@@ -5159,9 +5222,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._grid_serving_start = value
         self.clear_control_field_unresolved("grid_serving_start")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_grid_serving_end(self, value: dt_time) -> None:
+    async def async_set_grid_serving_end(
+        self, value: dt_time, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         if self._windows_overlap_with_months(
             self._grid_serving_start,
             value,
@@ -5184,13 +5252,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._grid_serving_end = value
         self.clear_control_field_unresolved("grid_serving_end")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_grid_serving_window(self, start: dt_time, end: dt_time) -> None:
+    async def async_set_grid_serving_window(
+        self,
+        start: dt_time,
+        end: dt_time,
+        *,
+        defer_device_update: bool = False,
+    ) -> None:
         """Analog zu async_set_timed_charge_window, für das netzdienliche
         Laden - siehe dort für den Hintergrund (Vermeidung falscher
         Erkennung einer Überschneidung durch Zwischenzustände beim
         getrennten Setzen von Start- und Ende-Entity)."""
+        self._raise_if_shutdown()
         if self._windows_overlap_with_months(
             start,
             end,
@@ -5216,7 +5293,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_end = end
         self.clear_control_field_unresolved("grid_serving_start")
         self.clear_control_field_unresolved("grid_serving_end")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     async def async_set_grid_serving_month(
         self, month: int, enabled: bool, validate: bool = True
@@ -5309,11 +5388,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self.price_planner.plan
 
     async def async_set_price_charge_enabled(
-        self, enabled: bool, *, force: bool = False
+        self,
+        enabled: bool,
+        *,
+        force: bool = False,
+        defer_device_update: bool = False,
     ) -> bool:
         """Preisoptimiertes Laden ein-/ausschalten. Gibt zurück, ob die
         Änderung übernommen wurde - siehe async_set_timed_charge_enabled für
         die gemeinsame Konfliktbehandlung mit der Netzladung."""
+        self._raise_if_shutdown()
         if enabled and self._timed_charge_enabled:
             if not force:
                 self._async_create_charge_conflict_issue(ISSUE_PRICE_CHARGE_CONFLICT)
@@ -5323,10 +5407,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.clear_control_field_unresolved("price_charge_enabled")
         self.async_dismiss_charge_conflict()
         self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
         return True
 
-    async def async_set_price_charge_strategy(self, strategy: str) -> None:
+    async def async_set_price_charge_strategy(
+        self, strategy: str, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         if strategy not in PRICE_STRATEGIES:
             raise HomeAssistantError(
                 f"Unbekannte Strategie {strategy!r} - erlaubt sind: "
@@ -5335,22 +5424,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_strategy = strategy
         self.clear_control_field_unresolved("price_charge_strategy")
         self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_price_charge_max_price(self, value: float | None) -> None:
+    async def async_set_price_charge_max_price(
+        self, value: float | None, *, defer_device_update: bool = False
+    ) -> None:
         """Preisgrenze für den Modus "Absoluter Preis" (EUR/kWh).
 
         Klemmt auf [MIN_PRICE_LIMIT, MAX_PRICE_LIMIT], siehe async_set_max_soc
         für die Begründung (RestoreEntity-Pfad ohne NumberEntity-Validierung).
         """
+        self._raise_if_shutdown()
         self._price_charge_max_price = _clamp_float(
             value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
         )
         self.clear_control_field_unresolved("price_charge_max_price")
         self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_price_charge_neutral_price(self, value: float | None) -> None:
+    async def async_set_price_charge_neutral_price(
+        self, value: float | None, *, defer_device_update: bool = False
+    ) -> None:
         """Neutralpreis (EUR/kWh) - oberhalb der Preisgrenze liegender
         Schwellwert, ab dem sich die Entladung aus dem Speicher wieder
         lohnt (siehe const.py, DEFAULT_PRICE_NEUTRAL, sowie
@@ -5362,17 +5460,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wird stattdessen von _check_price_neutral_below_limit als
         Reparaturhinweis gemeldet, statt den Wert stillschweigend zu
         verwerfen."""
+        self._raise_if_shutdown()
         self._price_charge_neutral_price = _clamp_float(
             value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
         )
         self.clear_control_field_unresolved("price_charge_neutral_price")
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
-    async def async_set_price_charge_hours(self, value: int | None) -> None:
+    async def async_set_price_charge_hours(
+        self, value: int | None, *, defer_device_update: bool = False
+    ) -> None:
+        self._raise_if_shutdown()
         self._price_charge_hours = _clamp_int(value, MIN_PRICE_HOURS, MAX_PRICE_HOURS)
         self.clear_control_field_unresolved("price_charge_hours")
         self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     async def async_apply_price_plan(self, *, background: bool = True) -> None:
         """Vom Planner nach jeder periodischen Neuberechnung aufgerufen -
@@ -5519,7 +5625,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.price_planner.async_shutdown()
         self.tariff_provider.async_shutdown()
         # REQ-GRID-SERVING-CHARGE: Eine begonnene Modus-/Sollwertsequenz nie
-        # abbrechen; das Shutdown-Gate sperrt weitere Monatsentscheidungen.
+        # abbrechen; das Shutdown-Gate sperrt weitere Konfigurationsentscheidungen.
         if self._month_control_task is not None:
             await self._month_control_task
         await self.price_planner.async_flush_cycle_state()

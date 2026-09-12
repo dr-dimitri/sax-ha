@@ -9,6 +9,7 @@ import type { EntityDomain } from "../types";
 
 const props = defineProps<{
   switchKey: string;
+  hideConfirmedLabel?: boolean;
   cards: readonly {
     key: string;
     group?: string;
@@ -97,7 +98,12 @@ const text = computed(() =>
     >
       {{ text.empty }}
     </p>
-    <EntityControl v-if="hasSwitch" domain="switch" :entity-key="switchKey" />
+    <EntityControl
+      v-if="hasSwitch"
+      domain="switch"
+      :entity-key="switchKey"
+      :hide-confirmed-label="hideConfirmedLabel"
+    />
     <div v-if="groups.length" class="charging-view__cards">
       <div
         v-for="group in groups"
@@ -142,6 +148,7 @@ const text = computed(() =>
                 "
                 :domain="domain"
                 :entity-key="key"
+                :hide-confirmed-label="hideConfirmedLabel"
               />
               <EntityValue v-else :domain="domain" :entity-key="key" />
             </template>

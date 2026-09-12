@@ -157,11 +157,15 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         return self.coordinator.timed_charge_enabled
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_timed_charge_enabled(True)
+        await self.coordinator.async_set_timed_charge_enabled(
+            True, defer_device_update=True
+        )
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_timed_charge_enabled(False)
+        await self.coordinator.async_set_timed_charge_enabled(
+            False, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -209,11 +213,15 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         return self.coordinator.grid_serving_enabled
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_grid_serving_enabled(True)
+        await self.coordinator.async_set_grid_serving_enabled(
+            True, defer_device_update=True
+        )
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_grid_serving_enabled(False)
+        await self.coordinator.async_set_grid_serving_enabled(
+            False, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -347,9 +355,13 @@ class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         return self.coordinator.price_charge_enabled
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_price_charge_enabled(True)
+        await self.coordinator.async_set_price_charge_enabled(
+            True, defer_device_update=True
+        )
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_price_charge_enabled(False)
+        await self.coordinator.async_set_price_charge_enabled(
+            False, defer_device_update=True
+        )
         self.async_write_ha_state()

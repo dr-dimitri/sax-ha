@@ -39,5 +39,9 @@ const cards = [
 </script>
 
 <template>
-  <ChargingLayout switch-key="timed_charge_enabled" :cards="cards" />
+  <ChargingLayout
+    switch-key="timed_charge_enabled"
+    :cards="cards"
+    hide-confirmed-label
+  />
 </template>

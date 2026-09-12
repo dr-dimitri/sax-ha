@@ -600,7 +600,7 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             await hass.async_block_till_done()
             assert hass.states.get(active_text_id).state == "Aktiv"
             # REQ-TIMED-SOC-CHARGE: Das eigene Teilziel beendet den echten
-            # Sollwertmodus sofort, ohne die globale PV-Sperre auszulösen.
+            # Sollwertmodus ohne nächsten Poll oder globale PV-Sperre.
             with patch(
                 "custom_components.sax_power.coordinator.dt_util.now",
                 return_value=datetime(
@@ -613,6 +613,10 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
                     {"entity_id": timed_max_soc_id, "value": 50},
                     blocking=True,
                 )
+                assert hass.states.get(timed_max_soc_id).state == "50"
+                # REQ-VUE-ENTITY-BINDING: Die Konfiguration quittiert vor I/O;
+                # der Aktivitätswert darf erst nach Gerätebestätigung folgen.
+                await hass.async_block_till_done()
             assert coordinator.sun_charge_active is False
             assert coordinator.max_soc_clamped is False
             assert hass.states.get(active_text_id).state == "Inaktiv"

@@ -275,7 +275,7 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
       "Diese Woche bisher",
       "Dieser Monat bisher",
       "Dieses Jahr bisher",
-      "Tarifplan (tageszeitabhängig)",
+      "Tarifpreisfenster",
       "Freier Zeitraum",
     ]);
     expect(root.textContent).toContain("750,01 €");
@@ -356,7 +356,7 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
     expect(root.textContent).toContain("0,2568 EUR/kWh");
     expect(root.textContent).toContain("0,0800 EUR/kWh");
     expect(root.textContent).toContain("29.03.2026, 12:00");
-    expect(root.querySelectorAll(".savings-current")).toHaveLength(1);
+    expect(root.querySelectorAll(".tariff-plan__current")).toHaveLength(1);
     await update("economics_current_import_price", "unavailable", {
       ...attrs.economics_current_import_price,
       active_window: null,
@@ -364,20 +364,20 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
       feed_in_price_eur_kwh: null,
       unavailable_reason: "missing_base_price",
     });
-    expect(root.querySelectorAll(".savings-current")).toHaveLength(0);
+    expect(root.querySelectorAll(".tariff-plan__current")).toHaveLength(0);
     expect(root.textContent).toContain("missing_base_price");
     expect(root.textContent).not.toContain("0,0000 EUR/kWh");
     await update("economics_current_import_price", ".35", {
       ...attrs.economics_current_import_price,
       active_window: null,
     });
-    expect(root.querySelector(".savings-current")?.textContent).toContain(
+    expect(root.querySelector(".tariff-plan__current")?.textContent).toContain(
       "Grundpreis",
     );
     await update("economics_current_import_price", ".35", {
       tariff_type: "fixed",
     });
-    expect(root.textContent).not.toContain("Tarifplan");
+    expect(root.textContent).not.toContain("Tarifpreisfenster");
   });
   it("shows an honest empty Recorder result and keeps zero distinct from missing", async () => {
     const { root } = await mount({ response: result(null) });
@@ -469,7 +469,7 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
         ...attrs.economics_current_import_price,
         active_window: null,
       });
-      expect(root.querySelector(".savings-current")).toBeNull();
+      expect(root.querySelector(".tariff-plan__current")).toBeNull();
       expect(root.textContent).toContain("Derzeit gilt kein Preis");
     },
   );

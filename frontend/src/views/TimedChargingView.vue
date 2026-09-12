@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import ChargingLayout from "./ChargingLayout.vue";
+import TariffPlan from "../components/TariffPlan.vue";
+import type { HomeAssistant } from "../types";
+
+defineProps<{ hass?: HomeAssistant }>();
 
 const cards = [
   {
     key: "window",
     group: "schedule",
     timeWindow: "timed_charge",
-    title: { de: "Zeitfenster", en: "Time window" },
+    title: { de: "Netzladezeitfenster", en: "Grid charging window" },
     entities: [
       ["time", "timed_charge_start"],
       ["time", "timed_charge_end"],
@@ -39,9 +43,31 @@ const cards = [
 </script>
 
 <template>
-  <ChargingLayout
-    switch-key="timed_charge_enabled"
-    :cards="cards"
-    hide-confirmed-label
-  />
+  <div class="timed-charging-view">
+    <ChargingLayout
+      switch-key="timed_charge_enabled"
+      :cards="cards"
+      hide-confirmed-label
+    />
+    <TariffPlan :hass="hass" class="timed-charging-view__tariff" />
+  </div>
 </template>
+
+<style>
+.timed-charging-view {
+  min-width: 0;
+}
+.timed-charging-view__tariff {
+  margin-top: 20px;
+}
+@media (max-width: 600px) {
+  .timed-charging-view__tariff {
+    margin-top: 16px;
+  }
+}
+@container sax-content (min-width: 860px) {
+  .timed-charging-view__tariff {
+    margin-top: 16px;
+  }
+}
+</style>

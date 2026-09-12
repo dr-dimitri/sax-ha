@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import WebSocketGenerator
@@ -31,6 +32,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
     DOMAIN,
+    ECONOMICS_TOU_WINDOW_KEYS,
     economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -228,27 +230,107 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     assert states["economics_investment_configured"]["state"] == "on"
 
 
+@pytest.mark.parametrize("window_count", [1, 2, 8])
+@pytest.mark.parametrize(
+    "moment",
+    [
+        datetime(2026, 6, 1, 23, 0),
+        datetime(2026, 6, 2, 0, 0),
+        datetime(2026, 6, 2, 6, 0),
+        datetime(2026, 6, 2, 20, 0),
+    ],
+    ids=["overnight-start", "midnight", "adjacent-boundary", "base-price"],
+)
 async def test_tariff_plan_reaches_the_dashboard_session(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
     dashboard_entry: MockConfigEntry,
+    window_count: int,
+    moment: datetime,
 ) -> None:
-    """REQ-VUE-SAVINGS: Options -> Sensorattribute -> Dashboard-Metadaten/States.
+    """REQ-VUE-CHARGING/-SAVINGS: Optionsflow -> Modell -> Sensor -> Dashboard.
 
-    Das Frontend rendert den übertragenen Tarifplan; dieser Test sichert den
-    tatsächlichen HA-Vertrag mit Preisen und Zeitfenster über Mitternacht ab.
+    Beide Ansichten erhalten alle gespeicherten Fenster in Planreihenfolge,
+    auch über Mitternacht und an direkt angrenzenden Fenstergrenzen.
     """
     await hass.config.async_set_time_zone("Europe/Berlin")
-    coordinator = _make_coordinator(hass)
-    coordinator.options = {
-        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
-        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
-        CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
-        economics_tou_window_key(1): {
-            CONF_ECONOMICS_WINDOW_START: "22:00:00",
-            CONF_ECONOMICS_WINDOW_END: "06:00:00",
-            CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+    profile = (
+        ("22:00:00", "06:00:00", 0.2101),
+        ("06:00:00", "08:00:00", 0.2202),
+        ("08:00:00", "10:00:00", 0.2303),
+        ("10:00:00", "12:00:00", 0.2404),
+        ("12:00:00", "14:00:00", 0.2505),
+        ("14:00:00", "16:00:00", 0.2606),
+        ("16:00:00", "18:00:00", 0.2707),
+        ("18:00:00", "20:00:00", 0.2808),
+    )[:window_count]
+    windows = [
+        {"start": start, "end": end, "price_eur_kwh": price}
+        for start, end, price in profile
+    ]
+    options_windows = {key: {} for key in ECONOMICS_TOU_WINDOW_KEYS}
+    options_windows.update(
+        {
+            economics_tou_window_key(index): {
+                CONF_ECONOMICS_WINDOW_START: start,
+                CONF_ECONOMICS_WINDOW_END: end,
+                CONF_ECONOMICS_WINDOW_PRICE: price,
+            }
+            for index, (start, end, price) in enumerate(profile, start=1)
+        }
+    )
+    result = await hass.config_entries.options.async_init(dashboard_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
+    )
+    assert result["step_id"] == "economics_time_of_use"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+            CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+            **options_windows,
         },
+    )
+    await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert {
+        key: dashboard_entry.options[key] for key in ECONOMICS_TOU_WINDOW_KEYS
+    } == options_windows
+
+    coordinator = _make_coordinator(hass)
+    coordinator.options = dict(dashboard_entry.options)
+    config = coordinator.tariff_provider.config
+    assert config.windows_valid
+    assert [
+        {
+            "start": window.start.isoformat(),
+            "end": window.end.isoformat(),
+            "price_eur_kwh": window.price_eur_kwh,
+        }
+        for window in config.windows
+    ] == windows
+
+    if moment.hour in (23, 0):
+        active_window = windows[0]
+        next_change = "2026-06-02T06:00:00+02:00"
+    elif moment.hour == 6 and window_count > 1:
+        active_window = windows[1]
+        next_change = "2026-06-02T08:00:00+02:00"
+    else:
+        active_window = None
+        next_change = "2026-06-02T22:00:00+02:00"
+    expected_price = active_window["price_eur_kwh"] if active_window else 0.30
+    expected_attributes = {
+        "tariff_type": "time_of_use",
+        "quote_source": "time_of_use_window" if active_window else "time_of_use_base",
+        "unavailable_reason": None,
+        "active_window": active_window,
+        "next_price_change_at": next_change,
+        "base_price_eur_kwh": 0.30,
+        "feed_in_price_eur_kwh": 0.08,
+        "windows": sorted(windows, key=lambda window: window["start"]),
     }
     coordinator._energy_charged_kwh = 0.0
     coordinator._energy_discharged_kwh = 0.0
@@ -257,7 +339,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
         patch("custom_components.sax_power.coordinator.monotonic", return_value=1000.0),
         patch(
             "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2026, 6, 1, 23, 0),
+            return_value=moment,
         ),
     ):
         data = {
@@ -279,6 +361,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
     )
     assert description.attributes_fn is not None
     attributes = description.attributes_fn(coordinator)
+    assert attributes == expected_attributes
 
     price_entity_id = _register(hass, "sensor", "economics_current_import_price")
     hass.states.async_set(price_entity_id, str(data[description.key]), attributes)
@@ -286,18 +369,5 @@ async def test_tariff_plan_reaches_the_dashboard_session(
     states = await _dashboard_states(hass, hass_ws_client, dashboard_entry)
     price = states["economics_current_import_price"]
     assert price["entity_id"] == price_entity_id
-    assert float(price["state"]) == 0.21
-    assert price["attributes"] == {
-        "tariff_type": "time_of_use",
-        "quote_source": "time_of_use_window",
-        "unavailable_reason": None,
-        "active_window": {
-            "start": "22:00:00",
-            "end": "06:00:00",
-            "price_eur_kwh": 0.21,
-        },
-        "next_price_change_at": "2026-06-02T06:00:00+02:00",
-        "base_price_eur_kwh": 0.30,
-        "feed_in_price_eur_kwh": 0.08,
-        "windows": [{"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}],
-    }
+    assert float(price["state"]) == expected_price
+    assert price["attributes"] == expected_attributes

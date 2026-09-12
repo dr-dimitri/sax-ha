@@ -74,7 +74,10 @@ async function mount(
         h(
           "div",
           (Array.isArray(view) ? view : [view]).map((component) =>
-            h(component),
+            h(
+              component,
+              component === TimedChargingView ? { hass: hass.value } : {},
+            ),
           ),
         );
     },
@@ -195,7 +198,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(
       [...root.querySelectorAll("h2")].map((item) => item.textContent),
     ).toEqual([
-      "Zeitfenster",
+      "Netzladezeitfenster",
       "Entladestatus",
       "Einstellungen",
       "Aktive Monate",
@@ -623,7 +626,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(
       [...root.querySelectorAll("h2")].map((item) => item.textContent),
     ).toEqual([
-      "Time window",
+      "Grid charging window",
       "Discharge status",
       "Settings",
       "Active months",

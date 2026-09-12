@@ -2616,7 +2616,8 @@ requirement_vue_charging:
     stammen aus den übersetzten HA-Metadaten.
 
     Zeitvariabler Tarif beginnt mit switch.timed_charge_enabled. Danach folgen
-    Zeitfenster mit time.timed_charge_start und time.timed_charge_end,
+    Netzladezeitfenster (EN: Grid charging window) mit time.timed_charge_start
+    und time.timed_charge_end,
     direkt darunter Entladestatus mit sensor.timed_charge_discharge_status,
     Einstellungen mit number.timed_charge_max_soc vor
     number.timed_charge_min_soc und Aktive Monate mit den zwölf Schaltern
@@ -2624,6 +2625,22 @@ requirement_vue_charging:
     HA-Zustände normal, discharge_blocked und grid_charging mit ihren
     vorhandenen Texten. Die aktuelle Obergrenze des Netzladeziels wird
     aus dem max-Attribut der zugehörigen Number-Entity übernommen.
+
+    Nach diesen Ladekarten zeigt der Tab über die volle Breite dieselbe
+    gemeinsame Tarifpreisfenster-Karte (EN: Tariff price windows) wie
+    Amortisation nach REQ-VUE-SAVINGS (Issue #219).
+    Sichtbarkeit und Inhalt folgen ausschließlich dem aktuellen Zustand von
+    sensor.economics_current_import_price: bei tariff_type=time_of_use
+    erscheinen alle konfigurierten windows in der vom Sensor gelieferten
+    Reihenfolge, bei anderen Tarifarten oder fehlender Entität entfällt die Karte.
+    Auch zwei oder acht Fenster, Mitternachtsfenster und angrenzende Grenzen
+    werden vollständig dargestellt. active_window, Grundpreis,
+    Einspeisevergütung, nächster Preiswechsel und Nichtverfügbarkeit werden
+    live aus den Sensorattributen übernommen. Preise haben vier
+    Nachkommastellen; der Browser berechnet weder aktive Fenster noch Preise.
+    Die Preisfenster bleiben reine Anzeigen und verändern weder das einzelne
+    Netzladezeitfenster noch die Ladeberechtigung. Ein Tarifwechsel, Mount
+    oder erneutes Rendern löst keinen HA-Service und keinen Registerzugriff aus.
 
     Die Zahlen-Bedienzeilen im Tab Zeitvariabler Tarif lassen den Präfix
     Bestätigter Wert: beziehungsweise Confirmed value: weg. Der von HA
@@ -2725,6 +2742,16 @@ requirement_vue_charging:
   acceptance_criteria:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
+    - "frontend/tests/tariff-plan.test.ts prüft die gemeinsame Tarifpreisfenster-Karte:
+       Sie erscheint bei time_of_use in
+       Zeitvariabler Tarif und Amortisation; fixed, dynamic, disabled und eine
+       fehlende Entity erzeugen keine Karte. DE/EN, alle acht Fenster,
+       Mitternacht, Live-Fenster-/Tarifwechsel, Grundpreis, leere Fensterliste
+       und Nichtverfügbarkeit sind ohne Serviceaufruf abgesichert."
+    - "tests/test_config_flow.py und tests/test_economics_dashboard_e2e.py
+       prüfen ein, zwei und acht Fenster vom Optionsflow über gespeicherte
+       Options und Tarifmodell bis zu Sensorattributen und authentifizierten
+       Dashboard-States, einschließlich Mitternacht und angrenzender Grenzen."
     - "Zeitvariabler Tarif zeigt auf Deutsch und Englisch bestätigte Werte
        ohne Präfix; lokale Entwürfe ersetzen diese Werte nicht. Die gemeinsame
        Zeitfenster-Bestätigung und Beschriftungen anderer Ansichten bleiben erhalten."
@@ -2847,7 +2874,7 @@ requirement_vue_savings:
     und deren Recorder-Netto-Ersparnis. Er ersetzt die abgelöste
     Lovelace-spezifische REQ-ECONOMICS-SAVINGS-DASHBOARD.
     Die Blöcke erscheinen in der Reihenfolge Amortisation, Kalenderwerte,
-    Tarifplan, freie Datumsauswahl mit Zeitraumwert und Balkendiagramm,
+    Tarifpreisfenster, freie Datumsauswahl mit Zeitraumwert und Balkendiagramm,
     eingeklappte Berechnungshinweise und höchstens ein Wirtschaftsstatushinweis.
 
     binary_sensor.economics_investment_configured entscheidet über den
@@ -2860,12 +2887,18 @@ requirement_vue_savings:
     leeren Zeilen. Geldbeträge erhalten zwei, Tarifpreise und Einspeisevergütung
     vier Nachkommastellen; die interne Genauigkeit bleibt unverändert.
 
-    Der Tarifplan ist ausschließlich sichtbar, wenn die Attribute von
+    Die mit Zeitvariabler Tarif gemeinsam verwendete Tarifpreisfenster-Karte
+    (EN: Tariff price windows) ist ausschließlich sichtbar, wenn die Attribute von
     sensor.economics_current_import_price tariff_type=time_of_use melden.
     windows, active_window, base_price_eur_kwh, feed_in_price_eur_kwh,
     next_price_change_at und unavailable_reason sind die einzige
-    Datenquelle. Tarifwechsel werden live übernommen; ein fehlender Preis
-    wird weder zu Null noch zum gültigen aktiven Grundpreis umgedeutet.
+    Datenquelle. Alle bis zu acht konfigurierten Fenster bleiben in der
+    vom Sensor gelieferten Reihenfolge sichtbar, auch über Mitternacht und bei
+    angrenzenden Grenzen. Tarifwechsel werden live übernommen; ein fehlender
+    Preis wird weder zu Null noch zum gültigen aktiven Grundpreis umgedeutet.
+    Eine leere Fensterliste zeigt weiterhin die verfügbaren übrigen Tarifdaten.
+    Die gemeinsame Komponente führt keine Tarifberechnung und keinen
+    Serviceaufruf aus; die HA-Options bleiben der Ort zur Preiseingabe.
 
     sax_power/dashboard/statistics ist eine authentifizierte, nur lesende
     HA-WebSocket-Abfrage für die registrierte economics_net_savings-Entity

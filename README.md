@@ -96,7 +96,7 @@ Die Screenshots zeigen das Dashboard mit Beispieldaten.
 | Bereich | Das findest du dort |
 | --- | --- |
 | Allgemeine Informationen | Ladezustand, Leistung, Temperatur, Energiezähler und Speicherschalter |
-| Zeitvariabler Tarif | Feste Ladezeiten, Monate, Startschwelle und Netzladeziel |
+| Zeitvariabler Tarif | Feste Ladezeiten, Monate, Startschwelle, Netzladeziel und Tarifpreisfenster |
 | Dynamischer Tarif | Preisstrategie, Preisgrenzen und nächster Ladestart |
 | Netzdienliches Laden | PV-Ladepause, Monate und Prognoseschwelle |
 | Amortisation | Netto-Ersparnis, Tarifplan und Auswertung eigener Zeiträume |
@@ -278,7 +278,9 @@ Bei einem aktiven Tarif gehört die **Einspeisevergütung** dazu. Alle Preise
 werden als Brutto-Arbeitspreise in EUR/kWh erfasst. Beim tageszeitabhängigen
 Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
-hinterlegten Plan siehst du im Tab **Amortisation**.
+hinterlegten Plan siehst du unter **Tarifpreisfenster** in den Tabs
+**Zeitvariabler Tarif** und **Amortisation**. Diese Preisfenster dienen der
+Geldbilanz; das **Netzladezeitfenster** stellst du separat ein.
 
 Für den dynamischen Tarif muss ein Strompreis-Sensor ausgewählt sein.
 Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt

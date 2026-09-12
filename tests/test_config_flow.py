@@ -1162,7 +1162,11 @@ async def test_missing_tariff_price_is_reported_on_its_field(
     assert CONF_ECONOMICS_TARIFF_TYPE not in entry.options
 
 
-async def test_options_flow_stores_time_of_use_windows(hass) -> None:
+@pytest.mark.parametrize("window_count", [1, 2, 8])
+async def test_options_flow_stores_time_of_use_windows(
+    hass: HomeAssistant, window_count: int
+) -> None:
+    """REQ-VUE-CHARGING/-SAVINGS: Alle Tarifpreisfenster bleiben gespeichert."""
     entry = _economics_entry(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1173,11 +1177,22 @@ async def test_options_flow_stores_time_of_use_windows(hass) -> None:
     assert result["step_id"] == "economics_time_of_use"
 
     windows = _empty_windows()
-    windows[economics_tou_window_key(1)] = {
-        CONF_ECONOMICS_WINDOW_START: "22:00:00",
-        CONF_ECONOMICS_WINDOW_END: "06:00:00",
-        CONF_ECONOMICS_WINDOW_PRICE: 0.21,
-    }
+    profile = (
+        ("22:00:00", "06:00:00", 0.2101),
+        ("06:00:00", "08:00:00", 0.2202),
+        ("08:00:00", "10:00:00", 0.2303),
+        ("10:00:00", "12:00:00", 0.2404),
+        ("12:00:00", "14:00:00", 0.2505),
+        ("14:00:00", "16:00:00", 0.2606),
+        ("16:00:00", "18:00:00", 0.2707),
+        ("18:00:00", "20:00:00", 0.2808),
+    )
+    for index, (start, end, price) in enumerate(profile[:window_count], start=1):
+        windows[economics_tou_window_key(index)] = {
+            CONF_ECONOMICS_WINDOW_START: start,
+            CONF_ECONOMICS_WINDOW_END: end,
+            CONF_ECONOMICS_WINDOW_PRICE: price,
+        }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
@@ -1190,9 +1205,25 @@ async def test_options_flow_stores_time_of_use_windows(hass) -> None:
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_ECONOMICS_TOU_BASE_PRICE] == 0.32
-    stored = entry.options[economics_tou_window_key(1)]
-    assert stored[CONF_ECONOMICS_WINDOW_START] == "22:00:00"
-    assert stored[CONF_ECONOMICS_WINDOW_PRICE] == 0.21
+    assert {key: entry.options[key] for key in ECONOMICS_TOU_WINDOW_KEYS} == windows
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
+    )
+    assert result["step_id"] == "economics_time_of_use"
+    suggested = {
+        key.schema: {
+            field.schema: field.description["suggested_value"]
+            for field in section.schema.schema
+            if isinstance(field.description, dict)
+            and "suggested_value" in field.description
+        }
+        for key, section in result["data_schema"].schema.items()
+        if key.schema in ECONOMICS_TOU_WINDOW_KEYS
+    }
+    assert suggested == windows
 
 
 async def test_options_flow_rejects_an_incomplete_window(hass) -> None:

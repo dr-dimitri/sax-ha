@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { computed, inject, ref, useId, watch } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  useId,
+  watch,
+} from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 
 const props = defineProps<{
   domain: "switch" | "number" | "time" | "select";
   entityKey: string;
+  confirmSwitch?: boolean;
 }>();
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
@@ -14,6 +24,14 @@ const inputId = `sax-control-${id}`;
 const statusId = `sax-status-${id}`;
 const valueId = `sax-value-${id}`;
 const draft = ref("");
+const dialog = ref<HTMLDialogElement>();
+const confirmation = shallowRef<{
+  entityId: string;
+  domain: string;
+  key: string;
+  sourceState: string;
+  desired: boolean;
+} | null>(null);
 const state = computed(() => entity.value?.state?.state ?? "");
 const attributes = computed(() => entity.value?.state?.attributes ?? {});
 const options = computed(() => {
@@ -32,6 +50,15 @@ const text = computed(() =>
         unavailable: "Nicht verfügbar",
         readOnly: "Keine Berechtigung zum Ändern",
         pending: "Änderung wird an Home Assistant gesendet …",
+        cancel: "Abbrechen",
+        turnOn: "Einschalten",
+        turnOff: "Ausschalten",
+        confirmationTitle: confirmation.value?.desired
+          ? "Speicher einschalten?"
+          : "Speicher ausschalten?",
+        confirmationQuestion: confirmation.value?.desired
+          ? "Möchten Sie den Speicher wirklich einschalten?"
+          : "Möchten Sie den Speicher wirklich ausschalten?",
       }
     : {
         apply: "Apply",
@@ -40,6 +67,15 @@ const text = computed(() =>
         unavailable: "Unavailable",
         readOnly: "You do not have permission to change this setting",
         pending: "Sending change to Home Assistant …",
+        cancel: "Cancel",
+        turnOn: "Turn on",
+        turnOff: "Turn off",
+        confirmationTitle: confirmation.value?.desired
+          ? "Turn on the battery?"
+          : "Turn off the battery?",
+        confirmationQuestion: confirmation.value?.desired
+          ? "Do you really want to turn on the battery?"
+          : "Do you really want to turn off the battery?",
       },
 );
 
@@ -78,8 +114,53 @@ function optionLabel(value: string): string {
 }
 
 async function submitDraft(): Promise<void> {
-  if (blocked.value || !dashboard) return;
+  if (
+    blocked.value ||
+    !dashboard ||
+    (props.domain !== "number" && props.domain !== "time")
+  )
+    return;
   await dashboard.perform(props.domain, props.entityKey, draft.value);
+}
+
+function cancelConfirmation(): void {
+  confirmation.value = null;
+  if (dialog.value?.open) dialog.value.close();
+}
+
+function closedConfirmation(): void {
+  if (!dialog.value?.open) confirmation.value = null;
+}
+
+// REQ-VUE-GENERAL: confirmation applies only to the state and entity shown.
+watch(
+  [
+    () => entity.value?.metadata.entity_id,
+    state,
+    blocked,
+    () => props.domain,
+    () => props.entityKey,
+    () => props.confirmSwitch,
+  ],
+  cancelConfirmation,
+  { flush: "sync" },
+);
+onBeforeUnmount(cancelConfirmation);
+
+async function confirmChange(): Promise<void> {
+  const request = confirmation.value;
+  cancelConfirmation();
+  if (
+    !request ||
+    blocked.value ||
+    !dashboard ||
+    request.entityId !== entity.value?.metadata.entity_id ||
+    request.sourceState !== state.value ||
+    request.domain !== props.domain ||
+    request.key !== props.entityKey
+  )
+    return;
+  await dashboard.perform(props.domain, props.entityKey, request.desired);
 }
 
 async function changeSwitch(event: Event): Promise<void> {
@@ -88,6 +169,20 @@ async function changeSwitch(event: Event): Promise<void> {
   // REQ-VUE-ENTITY-BINDING: service acknowledgement is not a state update.
   input.checked = state.value === "on";
   if (blocked.value || !dashboard) return;
+  if (props.confirmSwitch && entity.value) {
+    const request = {
+      entityId: entity.value.metadata.entity_id,
+      domain: props.domain,
+      key: props.entityKey,
+      sourceState: state.value,
+      desired,
+    };
+    confirmation.value = request;
+    await nextTick();
+    if (confirmation.value === request && !blocked.value)
+      dialog.value?.showModal();
+    return;
+  }
   await dashboard.perform(props.domain, props.entityKey, desired);
 }
 
@@ -166,6 +261,30 @@ async function changeSelect(event: Event): Promise<void> {
       </p>
       <p v-else-if="status" role="status">{{ status }}</p>
     </div>
+    <dialog
+      v-if="confirmSwitch"
+      ref="dialog"
+      class="entity-control__confirmation"
+      :aria-labelledby="`${id}-confirmation-title`"
+      :aria-describedby="`${id}-confirmation-question`"
+      @cancel.prevent="cancelConfirmation"
+      @close="closedConfirmation"
+    >
+      <h3 :id="`${id}-confirmation-title`">{{ text.confirmationTitle }}</h3>
+      <p :id="`${id}-confirmation-question`">{{ text.confirmationQuestion }}</p>
+      <div class="entity-control__confirmation-actions">
+        <button type="button" autofocus @click="cancelConfirmation">
+          {{ text.cancel }}
+        </button>
+        <button
+          type="button"
+          :disabled="blocked || !confirmation"
+          @click="confirmChange"
+        >
+          {{ confirmation?.desired ? text.turnOn : text.turnOff }}
+        </button>
+      </div>
+    </dialog>
   </form>
 </template>
 
@@ -269,5 +388,38 @@ async function changeSelect(event: Event): Promise<void> {
 
 .entity-control__error {
   color: var(--error-color, #b71c1c);
+}
+
+.entity-control__confirmation {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 24px;
+  border: 1px solid var(--divider-color, #767676);
+  border-radius: 12px;
+  background: var(--card-background-color, #fff);
+  color: var(--primary-text-color, #212121);
+  overflow: auto;
+}
+
+.entity-control__confirmation::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.entity-control__confirmation h3 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.entity-control__confirmation p {
+  margin: 16px 0 24px;
+  line-height: 1.6;
+}
+
+.entity-control__confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>

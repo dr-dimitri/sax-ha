@@ -2357,16 +2357,27 @@ requirement_vue_general:
     Informationsträger. unknown, unavailable und nichtnumerische Werte
     erscheinen ohne vermeintliche Nullwerte oder Zeigerpositionen.
 
-    Danach folgen der Hauptschalter switch.storage_switch und die Karten
-    Leistung, Energie und Gerät in dieser Reihenfolge. Leistung enthält
+    Danach folgen die Karten Leistung und Gerät in dieser Reihenfolge.
+    Leistung enthält
     number.max_soc als Bedienfeld sowie sensor.charge_power,
     sensor.discharge_power und sensor.smartmeter_power (Netzleistung).
-    Energie enthält sensor.energy_charged und sensor.energy_discharged.
-    Gerät enthält sensor.sun_version_master, sensor.sun_version_gateway,
+    Gerät beginnt mit sensor.energy_charged und sensor.energy_discharged.
+    Danach folgen sensor.sun_version_master, sensor.sun_version_gateway,
     sensor.sun_serial_number, sensor.storage_event_text,
     sensor.ic_control_mode_text (Steuermodus), binary_sensor.cell_calibration_active
-    und sensor.next_cell_calibration. Domains und Schlüssel bezeichnen hier
+    und sensor.next_cell_calibration. switch.storage_switch steht als letzte
+    Zeile der Gerätekarte. Eine eigene Energie-Karte entfällt. Diese Anordnung
+    gilt ausschließlich für Vue; das Lovelace-Layout bleibt unverändert.
+    Domains und Schlüssel bezeichnen hier
     Registry-Metadaten, keine fest konstruierten Entity-IDs.
+
+    Der Vue-Speicherschalter öffnet vor dem Ein- und vor dem Ausschalten einen
+    nativen Bestätigungsdialog. Erst die ausdrückliche Bestätigung sendet
+    genau einen bestehenden HA-Schalterservice für den angezeigten Zielzustand.
+    Abbrechen, Escape sowie Änderungen an Ausgangszustand, Entity-ID,
+    Bedienberechtigung oder Verbindung verwerfen die offene Auswahl ohne
+    Schreibaktion. Die übrigen Schalter benötigen diesen zusätzlichen
+    Dialog nicht. Bestätigte HA-Zustände bleiben maßgeblich.
 
     Fehlende optionale Entitäten werden ausgelassen; eine Karte ohne
     verfügbare Metadaten wird nicht erzeugt. Registrierte Entitäten mit
@@ -2380,12 +2391,16 @@ requirement_vue_general:
     reagiert auch auf Änderungen aus Lovelace oder Automationen und führt
     beim Öffnen, Rendern oder Tabwechsel keine Schreibaktionen aus.
   acceptance_criteria:
-    - "Entitäten, Kartenreihenfolge und Beschriftungen entsprechen dem
-       bestehenden allgemeinen Lovelace-Tab."
+    - "Die Entitäten und Beschriftungen entsprechen dem allgemeinen
+       Lovelace-Tab; Vue ordnet Energiezähler zuerst und Speicherschalter zuletzt
+       in der Gerätekarte an, ohne zusätzliche Energie-Karte."
     - "Grenzen 20/50 Prozent und 5/32 Grad sowie nicht verfügbare Werte
        sind getestet; Farbskalen besitzen eine verständliche Textalternative."
     - "Hauptschalter und Max-SOC verwenden gemeinsame Validierung,
        ausstehende Aktionen und bestätigte HA-Zustände."
+    - "Ein- und Ausschalten erfordern jeweils eine Bestätigung. Abbrechen,
+       Escape sowie Zustands-, ID-, Rechte- oder Verbindungswechsel schreiben
+       nichts; gültige Bestätigung ruft genau einen bestehenden HA-Service auf."
     - "Optionale Gerätedaten fehlen ohne leere Karten; weder Hersteller,
        Modell noch die entfernte Statuskarte werden angezeigt."
     - "Komponenten-/Produktionsmodultests und Browserproben decken Livewerte,

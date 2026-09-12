@@ -171,7 +171,7 @@ Alle fünf Bereiche des bestehenden Dashboards sind enthalten:
 
 | Bereich | Inhalt |
 | --- | --- |
-| Allgemeine Informationen | Ladezustand, Zelltemperatur, Leistung, Energie, Gerätedaten, Speicherschalter und globaler Max-SOC. |
+| Allgemeine Informationen | Ladezustand, Zelltemperatur und Leistung mit globalem Max-SOC; unter Gerät zuerst geladene/entladene Energie, danach Gerätedaten und zuletzt der Speicherschalter. |
 | Ladeautomatik | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
 | Netzdienliches Laden | Hauptschalter, Ladepause, aktuelle PV-Prognose, Prognoseschwelle, Status und zwölf Monatsschalter. |
 | Dynamisches Laden | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
@@ -184,6 +184,14 @@ bestätigten Werts folgt der Rückmeldung von Home Assistant. Wertebereiche,
 Schrittweiten und Strategieoptionen entsprechen den vorhandenen Entitäten.
 Fehlende optionale Entitäten werden ausgelassen; unbekannte oder nicht
 verfügbare Werte bleiben als solche erkennbar.
+
+In der Vue-Ansicht **Allgemeine Informationen** stehen beide Energiezähler
+am Anfang der Karte **Gerät**; eine eigene Energie-Karte entfällt. Der
+Speicherschalter bildet die letzte Gerätezeile. Vor dem Ein- **und** Ausschalten
+erscheint ein Bestätigungsdialog. **Abbrechen** oder Escape sendet keine Aktion.
+Ändern sich während des Dialogs Zustand, Entität, Berechtigung oder Verbindung,
+wird die offene Auswahl verworfen. Die Anordnung und diese Bestätigung gelten
+für das Vue-Dashboard; Lovelace behält seine vorhandene Darstellung.
 
 Die Ersparnis-Auswertung verwendet die vorhandene Recorder-Statistik der
 Netto-Ersparnis. Anfangs- und Enddatum gelten als vollständige Tage in der

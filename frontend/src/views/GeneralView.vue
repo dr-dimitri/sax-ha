@@ -12,7 +12,6 @@ const text = computed(() =>
   dashboard?.language.value === "de"
     ? {
         power: "Leistung",
-        energy: "Energie",
         device: "Gerät",
         low: "Niedrig",
         medium: "Mittel",
@@ -23,7 +22,6 @@ const text = computed(() =>
       }
     : {
         power: "Power",
-        energy: "Energy",
         device: "Device",
         low: "Low",
         medium: "Medium",
@@ -34,7 +32,7 @@ const text = computed(() =>
       },
 );
 const definitions: {
-  title: "power" | "energy" | "device";
+  title: "power" | "device";
   entities: readonly (readonly [EntityDomain, string])[];
 }[] = [
   {
@@ -47,15 +45,10 @@ const definitions: {
     ],
   },
   {
-    title: "energy",
+    title: "device",
     entities: [
       ["sensor", "energy_charged"],
       ["sensor", "energy_discharged"],
-    ],
-  },
-  {
-    title: "device",
-    entities: [
       ["sensor", "sun_version_master"],
       ["sensor", "sun_version_gateway"],
       ["sensor", "sun_serial_number"],
@@ -63,6 +56,7 @@ const definitions: {
       ["sensor", "ic_control_mode_text"],
       ["binary_sensor", "cell_calibration_active"],
       ["sensor", "next_cell_calibration"],
+      ["switch", "storage_switch"],
     ],
   },
 ];
@@ -82,12 +76,7 @@ const hasGauge = computed(() =>
     dashboard?.entity("sensor", "storage_max_cell_temp"),
   ),
 );
-const hasSwitch = computed(() =>
-  Boolean(dashboard?.entity("switch", "storage_switch")),
-);
-const hasEntities = computed(
-  () => hasGauge.value || hasSwitch.value || cards.value.length > 0,
-);
+const hasEntities = computed(() => hasGauge.value || cards.value.length > 0);
 </script>
 
 <template>
@@ -126,11 +115,6 @@ const hasEntities = computed(
         ]"
       />
     </div>
-    <EntityControl
-      v-if="hasSwitch"
-      domain="switch"
-      entity-key="storage_switch"
-    />
     <section
       v-for="card in cards"
       :key="card.title"
@@ -144,9 +128,10 @@ const hasEntities = computed(
           :key="`${domain}.${key}`"
         >
           <EntityControl
-            v-if="domain === 'number'"
+            v-if="domain === 'number' || domain === 'switch'"
             :domain="domain"
             :entity-key="key"
+            :confirm-switch="domain === 'switch' && key === 'storage_switch'"
           />
           <EntityValue v-else :domain="domain" :entity-key="key" />
         </template>
@@ -194,7 +179,7 @@ const hasEntities = computed(
   border-bottom: 1px solid var(--divider-color, #e0e0e0);
   box-shadow: none;
 }
-.general-view__rows .entity-control:only-child {
+.general-view__rows .entity-control:last-child {
   padding-bottom: 0;
   border-bottom: 0;
 }

@@ -20,6 +20,87 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
+test("storage requires confirmation in both directions and cancellation keeps the HA state", async ({
+  page,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const english = testInfo.project.name.endsWith("en");
+  const input = panel.locator("input[role='switch']");
+  const dialog = panel.locator("dialog.entity-control__confirmation");
+  const actions = page.locator("#actions");
+  const cancel = dialog.getByRole("button", {
+    name: english ? "Cancel" : "Abbrechen",
+    exact: true,
+  });
+  const device = panel.locator(".general-view__card").filter({
+    has: page.getByRole("heading", {
+      name: english ? "Device" : "Gerät",
+      exact: true,
+    }),
+  });
+  await expect(panel.locator(".general-view__card > h2")).toHaveText(
+    english ? ["Power", "Device"] : ["Leistung", "Gerät"],
+  );
+  await expect(
+    device.locator(".general-view__rows > :last-child input[role='switch']"),
+  ).toHaveCount(1);
+  for (const [index, initial] of [true, false].entries()) {
+    const title = english
+      ? initial
+        ? "Turn off the battery?"
+        : "Turn on the battery?"
+      : initial
+        ? "Speicher ausschalten?"
+        : "Speicher einschalten?";
+    const label = english
+      ? initial
+        ? "Turn off"
+        : "Turn on"
+      : initial
+        ? "Ausschalten"
+        : "Einschalten";
+    const previousAction =
+      index === 0
+        ? "Keine Aktion"
+        : '1: switch.turn_off {"entity_id":"switch.demo_storage_switch"}';
+    await expect(input).toBeChecked({ checked: initial });
+    await input.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleName(title);
+    await expect(cancel).toBeFocused();
+    await expect(input).toBeChecked({ checked: initial });
+    await expect(actions).toHaveText(previousAction);
+    await testInfo.attach(
+      `vue-storage-confirm-${initial ? "off" : "on"}-${testInfo.project.name}`,
+      {
+        body: await page.screenshot({ fullPage: false }),
+        contentType: "image/png",
+      },
+    );
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(input).toBeChecked({ checked: initial });
+    await expect(actions).toHaveText(previousAction);
+    await input.click();
+    await expect(cancel).toBeFocused();
+    await cancel.click();
+    await expect(dialog).toBeHidden();
+    await expect(actions).toHaveText(previousAction);
+    await input.click();
+    await expect(cancel).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeHidden();
+    await expect(actions).toHaveText(previousAction);
+    await input.click();
+    await dialog.getByRole("button", { name: label, exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(input).toBeChecked({ checked: !initial });
+    await expect(actions).toHaveText(
+      `${index + 1}: switch.${initial ? "turn_off" : "turn_on"} {"entity_id":"switch.demo_storage_switch"}`,
+    );
+  }
+});
+
 test("five complete views, local assets, responsive screenshots and parallel entry", async ({
   page,
 }, testInfo) => {

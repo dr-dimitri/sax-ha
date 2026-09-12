@@ -31,17 +31,19 @@ Entitäten und Lese-/Bedienberechtigungen werden dadurch berücksichtigt.
 ## Allgemeine Informationen
 
 `GeneralView.vue`, Pfad `allgemein`, Anforderung `REQ-VUE-GENERAL`.
-Die Tabellenreihenfolge entspricht der Anzeige.
+Die Tabellenreihenfolge entspricht der Vue-Anzeige. Ihre Gerätekarte fasst
+Energiezähler und Speicherschalter mit den Gerätedaten zusammen; das bestehende
+Lovelace-Layout bleibt unverändert.
 
 | Bereich | Domain und Schlüssel | Attribute, Grenzen und Sichtbarkeit | Prüfung |
 | --- | --- | --- | --- |
 | Ladezustand | `sensor.soc` | Skala 0–100 %, unter 20 rot, ab 20 gelb, ab 50 grün; tatsächlicher Wert und Bereich zusätzlich als Text. | [Allgemein][general-tests]: Grenzwerte, ungültige Zustände, zugänglicher Meter |
 | Zelltemperatur | `sensor.storage_max_cell_temp` | Skala 0–40 °C, unter 5 rot, 5 bis unter 32 grün, ab 32 rot. Außerhalb der Skala wird nur der Zeiger begrenzt, der tatsächliche Wert bleibt sichtbar. | [Allgemein][general-tests]: 5-/32-°C-Grenzen und Werte außerhalb der Skala |
-| Hauptschalter | `switch.storage_switch` | Bestehende HA-Schalterentität; der Übersetzungsschlüssel lautet `storage`. | [Allgemein][general-tests], [Metadaten-API][metadata-tests] |
 | Leistung | `number.max_soc`, `sensor.charge_power`, `sensor.discharge_power`, `sensor.smartmeter_power` | Globaler Max-SOC mit HA-Grenzen; Leistungswerte mit ihren Einheiten. Label für `smartmeter_power`: Netzleistung. | [Allgemein][general-tests], [Ladeansichten][charging-tests]: gemeinsamer Max-SOC |
-| Energie | `sensor.energy_charged`, `sensor.energy_discharged` | Vorhandene Energiezähler und ihre Einheiten; keine Frontend-Akkumulation. | [Allgemein][general-tests] |
+| Gerät, erste Zeilen | `sensor.energy_charged`, `sensor.energy_discharged` | Vorhandene Energiezähler und ihre Einheiten; keine Frontend-Akkumulation und keine eigene Energie-Karte. | [Allgemein][general-tests]: Anordnung und fehlende optionale Zeilen |
 | Gerät | `sensor.sun_version_master`, `sensor.sun_version_gateway`, `sensor.sun_serial_number` | Optionale SunSpec-Daten; fehlende Zeilen und leere Karte werden ausgelassen. | [Allgemein][general-tests]: optionale Geräteinformationen |
 | Gerät, Fortsetzung | `sensor.storage_event_text`, `sensor.ic_control_mode_text`, `binary_sensor.cell_calibration_active`, `sensor.next_cell_calibration` | HA-Zustände/Enum-Texte, Steuermodus, Kalibrierstatus und lokalisierter Zeitpunkt. Hersteller, Modell und entfernte Statuskarten werden nicht wieder eingeführt. | [Allgemein][general-tests]: vollständige Reihenfolge, Live-Werte und Zeitformat |
+| Gerät, letzte Zeile | `switch.storage_switch` | Übersetzungsschlüssel `storage`; Bestätigungsdialog vor EIN und AUS. Abbrechen/Escape sowie Änderungen von Zustand, ID, Bedienrecht oder Verbindung verwerfen die Auswahl ohne Schreiben; Bestätigung sendet genau einen vorhandenen HA-Service. | [Allgemein][general-tests], [Controls][control-tests], [Browser][browser-tests] |
 
 ## Ladeautomatik
 
@@ -207,9 +209,14 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
-### Stand der releasebezogenen Abnahme
+### Historische Abnahme vom 12.09.2026
 
-Am 12.09.2026 wurde Commit `acb49d089767f45bc25cbaa41c47728f083a1a84`
+Der folgende Nachweis betrifft den Stand vor der geänderten allgemeinen
+Gerätekarte und deren Schalterbestätigung. Er ist keine Abnahme dieser
+anschließenden Änderungen.
+
+Am 12.09.2026 wurde
+[Commit acb49d089767](https://github.com/dr-dimitri/sax-ha/commit/acb49d089767f45bc25cbaa41c47728f083a1a84)
 in [CI-Lauf 34681752310](https://github.com/dr-dimitri/sax-ha/actions/runs/34681752310)
 erfolgreich geprüft: Python, Ruff/Black, HACS, hassfest, Frontend-Typen und
 Formatierung, 186 Komponententests, Produktionsmodul-Smoke, reproduzierbarer
@@ -219,19 +226,21 @@ HA-WebSockets, Recorder, Storage und Modbus-Simulator werden separat geprüft.
 Ein Test an einer echten Batterie fand nicht statt; die zwei Hardwaretests
 wurden erwartungsgemäß übersprungen.
 
-Der daraus veröffentlichte
-[Snapshot](https://github.com/dr-dimitri/sax-ha/releases/tag/snapshot-pr-204-acb49d089767)
-wurde heruntergeladen und mit `verify_dashboard_package.py` in einer frischen
+Das damalige Paket `snapshot-pr-204-acb49d089767` wurde heruntergeladen und
+mit `verify_dashboard_package.py` in einer frischen
 HA-Umgebung installiert. **Ergebnis: bestanden**, einschließlich vollständigem
 Reparaturablauf, neuer Bundle-Hash-URL und identischen ausgelieferten HTTP-Bytes.
 Der Helper bestätigte 57 installierte Dateien ohne Rückgriff auf das Repository.
+Tag und Prüfsummen bezeichnen den historischen Prüfgegenstand; sie sind kein
+Verweis auf eine dauerhaft bereitgehaltene Snapshot-Veröffentlichung. Der
+Commit- und CI-Nachweis bleibt davon unabhängig.
 
 | Nachweis | Wert |
 | --- | --- |
 | Manifest des getesteten Snapshots | `2.0.3-snapshot.pr204.shaacb49d089767` |
 | SHA-256 des heruntergeladenen Snapshot-ZIPs | `d0f406fd06d367dbf82b30cd197e0f0e4dbde5521e26f1b77c9756fbbfd72ac3` |
 | SHA-256 des getesteten Vue-Bundles | `dc3d1df0032f8e6d8ba500c2ffb942e8f463188c016202932fbdcb1d419ac1dd` |
-| GitHub-Quellarchiv, ebenfalls isoliert bestanden | Commit `c6563461ee3662c858ca318f41ab20462f71bf5f`, Manifest `2.0.3`, identisches Vue-Bundle |
+| GitHub-Quellarchiv, ebenfalls isoliert bestanden | [Commit c6563461ee36](https://github.com/dr-dimitri/sax-ha/commit/c6563461ee3662c858ca318f41ab20462f71bf5f), Manifest `2.0.3`, identisches Vue-Bundle |
 | SHA-256 dieses Quellarchivs | `f5cfcf7904db9681f25d52a872ad0d75c47872866784ea1f97ee1a62bf4f037b` |
 
 Die drei zusätzlichen [Neustarttests][restart-tests] schreiben Config-Entry-Daten
@@ -245,7 +254,9 @@ Hardware-Skips**; Ruff und Black sind erfolgreich.
 
 ### Screenshots
 
-Die unveränderten Bilder stammen aus dem erfolgreichen Browserlauf oben. Der
+Die Bilder stammen aus dem oben datierten Browserlauf. Die beiden Bilder der
+allgemeinen Informationen zeigen bis zu ihrer Aktualisierung noch die bisherige
+Kartenanordnung. Die übrigen Ansichten bleiben unverändert. Der
 hell abgesetzte Testbereich kennzeichnet simulierte Daten und zeigt beide
 Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
 Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,

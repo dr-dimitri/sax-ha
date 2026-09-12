@@ -132,6 +132,15 @@ Zeitfenster, Ladeberechtigungen oder Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
 [Paritätsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
 
+`GeneralView.vue` ordnet nach den Skalen die Karten Leistung und Gerät an.
+Die Gerätekarte beginnt mit `energy_charged`/`energy_discharged` und endet mit
+`storage_switch`; es gibt keine separate Energie-Karte. Nur der Vue-
+Speicherschalter verlangt vor beiden Zielzuständen eine Dialogbestätigung.
+Abbrechen/Escape sowie Änderungen an Ausgangszustand, aufgelöster Entity-ID,
+Bedienberechtigung oder Verbindung verwerfen die offene Auswahl ohne Service.
+Eine gültige Bestätigung verwendet einmal den bestehenden HA-Schalterservice.
+Lovelace-Layout und die übrigen Schalter werden davon nicht verändert.
+
 `dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
 `sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
 die tatsächlichen Entity-IDs, Domains, stabilen Schlüssel, übersetzten Namen und

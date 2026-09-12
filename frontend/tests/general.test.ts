@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, h, nextTick, provide, shallowRef, type App } from "vue";
 import GeneralView from "../src/views/GeneralView.vue";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "../src/ha";
@@ -13,6 +13,13 @@ import type {
 } from "../src/types";
 
 const applications: App[] = [];
+const dialogMethods = {
+  showModal: Object.getOwnPropertyDescriptor(
+    HTMLDialogElement.prototype,
+    "showModal",
+  ),
+  close: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close"),
+};
 const entities: readonly (readonly [EntityDomain, string])[] = [
   ["sensor", "soc"],
   ["sensor", "storage_max_cell_temp"],
@@ -108,15 +115,24 @@ async function mount(
     }),
   );
   let emitMetadata: (data: DashboardMetadata) => void = () => {};
+  let connected = true;
+  const listeners = new Map<string, Set<() => void>>();
   const connection: HassConnection = {
-    connected: true,
+    get connected() {
+      return connected;
+    },
     async subscribeMessage<T>(callback: (message: T) => void) {
       emitMetadata = (data) => callback(data as T);
       if (!options.deferMetadata) emitMetadata({ entities: metadata });
       return () => {};
     },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(event, callback) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(callback);
+    },
+    removeEventListener(event, callback) {
+      listeners.get(event)?.delete(callback);
+    },
   };
   const callService = vi
     .fn<NonNullable<HomeAssistant["callService"]>>()
@@ -150,6 +166,12 @@ async function mount(
     root,
     hass,
     callService,
+    metadata,
+    async disconnect() {
+      connected = false;
+      for (const callback of listeners.get("disconnected") ?? []) callback();
+      await flush();
+    },
     async emit(items = metadata) {
       emitMetadata({ entities: items });
       await flush();
@@ -168,13 +190,63 @@ async function mount(
   };
 }
 
+beforeEach(() => {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.open = true;
+      },
+    },
+    close: {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.open = false;
+        this.dispatchEvent(new Event("close"));
+      },
+    },
+  });
+});
+
+function switchInput(root: HTMLElement): HTMLInputElement {
+  return root.querySelector<HTMLInputElement>('input[role="switch"]')!;
+}
+
+async function requestSwitch(root: HTMLElement): Promise<HTMLDialogElement> {
+  const input = switchInput(root);
+  input.checked = !input.checked;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  await flush();
+  const dialog = root.querySelector<HTMLDialogElement>(
+    "dialog.entity-control__confirmation[open]",
+  );
+  expect(dialog).not.toBeNull();
+  return dialog!;
+}
+
+function dialogButton(
+  dialog: HTMLDialogElement,
+  label: string,
+): HTMLButtonElement {
+  const button = [...dialog.querySelectorAll("button")].find(
+    (item) => item.textContent?.trim() === label,
+  );
+  expect(button).toBeDefined();
+  return button!;
+}
+
 afterEach(() => {
   for (const app of applications.splice(0)) app.unmount();
   document.body.replaceChildren();
+  for (const [name, descriptor] of Object.entries(dialogMethods)) {
+    if (descriptor)
+      Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
+  }
 });
 
 describe("REQ-VUE-GENERAL: general dashboard view", () => {
-  it("preserves every entity and the card order of the existing Lovelace view", async () => {
+  it("preserves the Lovelace entity set and groups energy first and storage last in Device", async () => {
     const source = readFileSync(
       "../custom_components/sax_power/dashboard.py",
       "utf8",
@@ -187,7 +259,9 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
         /"(sensor|binary_sensor|switch|number)"\s*,\s*"([a-z_]+)"/g,
       ),
     ].map((match) => [match[1], match[2]]);
-    expect(entities).toEqual(lovelaceEntities);
+    expect(entities.map(([domain, key]) => `${domain}.${key}`).sort()).toEqual(
+      lovelaceEntities.map(([domain, key]) => `${domain}.${key}`).sort(),
+    );
     const { root, callService } = await mount();
     expect(
       [
@@ -195,12 +269,42 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
           ".entity-gauge h2, .entity-control__name, .entity-value__name",
         ),
       ].map((item) => item.textContent),
-    ).toEqual(entities.map(([, key]) => names[key]));
+    ).toEqual(
+      [
+        "soc",
+        "storage_max_cell_temp",
+        "max_soc",
+        "charge_power",
+        "discharge_power",
+        "smartmeter_power",
+        "energy_charged",
+        "energy_discharged",
+        "sun_version_master",
+        "sun_version_gateway",
+        "sun_serial_number",
+        "storage_event_text",
+        "ic_control_mode_text",
+        "cell_calibration_active",
+        "next_cell_calibration",
+        "storage_switch",
+      ].map((key) => names[key]),
+    );
     expect(
       [...root.querySelectorAll(".general-view__card h2")].map(
         (item) => item.textContent,
       ),
-    ).toEqual(["Leistung", "Energie", "Gerät"]);
+    ).toEqual(["Leistung", "Gerät"]);
+    const device = [...root.querySelectorAll(".general-view__card")].find(
+      (card) => card.querySelector("h2")?.textContent === "Gerät",
+    )!;
+    const deviceRows = [
+      ...device.querySelectorAll(".entity-control__name, .entity-value__name"),
+    ].map((item) => item.textContent);
+    expect(deviceRows.slice(0, 2)).toEqual([
+      "Energie geladen",
+      "Energie entladen",
+    ]);
+    expect(deviceRows.at(-1)).toBe("Speicher");
     expect(root.textContent).toContain("Netzleistung");
     expect(root.textContent).toContain("Steuermodus");
     expect(root.querySelectorAll("input")).toHaveLength(2);
@@ -409,7 +513,7 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
       [...root.querySelectorAll(".general-view__card h2")].map(
         (item) => item.textContent,
       ),
-    ).toEqual(["Power", "Energy", "Device"]);
+    ).toEqual(["Power", "Device"]);
     expect(root.textContent).toContain("Confirmed value");
     expect(
       [...root.querySelectorAll(".entity-gauge__range")].map(
@@ -419,4 +523,155 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
     await emit([]);
     expect(root.textContent).toBe("No entities are available for this view.");
   });
+
+  it.each([
+    [
+      "de",
+      "on",
+      "Speicher ausschalten?",
+      "Ausschalten",
+      "turn_off",
+      "Ein",
+      "Aus",
+    ],
+    [
+      "de",
+      "off",
+      "Speicher einschalten?",
+      "Einschalten",
+      "turn_on",
+      "Aus",
+      "Ein",
+    ],
+    ["en", "on", "Turn off the battery?", "Turn off", "turn_off", "On", "Off"],
+    ["en", "off", "Turn on the battery?", "Turn on", "turn_on", "Off", "On"],
+  ] as const)(
+    "confirms the %s storage action from %s exactly once and waits for HA state",
+    async (language, initial, title, action, service, before, after) => {
+      const { root, callService, update } = await mount({
+        keys: ["storage_switch"],
+        language,
+        values: { storage_switch: initial },
+      });
+      let finish!: () => void;
+      callService.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const input = switchInput(root);
+      const confirmed = root.querySelector(".entity-control__value")!;
+      const dialog = await requestSwitch(root);
+      expect(dialog.textContent).toContain(title);
+      expect(input.checked).toBe(initial === "on");
+      expect(confirmed.textContent).toContain(before);
+      expect(callService).not.toHaveBeenCalled();
+      const confirm = dialogButton(dialog, action);
+      confirm.click();
+      confirm.click();
+      await flush();
+      expect(root.querySelector("dialog[open]")).toBeNull();
+      expect(callService).toHaveBeenCalledExactlyOnceWith(
+        "switch",
+        service,
+        {},
+        { entity_id: "switch.renamed_storage_switch" },
+        false,
+      );
+      expect(input.disabled).toBe(true);
+      expect(input.checked).toBe(initial === "on");
+      finish();
+      await flush();
+      expect(input.checked).toBe(initial === "on");
+      expect(confirmed.textContent).toContain(before);
+      await update("storage_switch", initial === "on" ? "off" : "on");
+      expect(input.checked).toBe(initial !== "on");
+      expect(confirmed.textContent).toContain(after);
+    },
+  );
+
+  it.each(["on", "off"])(
+    "cancels storage from %s by button or Escape without a service call",
+    async (initial) => {
+      const { root, callService } = await mount({
+        keys: ["storage_switch"],
+        values: { storage_switch: initial },
+      });
+      const dialog = await requestSwitch(root);
+      dialogButton(dialog, "Abbrechen").click();
+      await flush();
+      expect(root.querySelector("dialog[open]")).toBeNull();
+      expect(switchInput(root).checked).toBe(initial === "on");
+      const reopened = await requestSwitch(root);
+      if (reopened.dispatchEvent(new Event("cancel", { cancelable: true }))) {
+        reopened.close();
+      }
+      await flush();
+      expect(root.querySelector("dialog[open]")).toBeNull();
+      expect(switchInput(root).checked).toBe(initial === "on");
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not bypass storage confirmation through a form submission", async () => {
+    const { root, callService } = await mount({ keys: ["storage_switch"] });
+    const form = switchInput(root).closest("form")!;
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+    expect(callService).not.toHaveBeenCalled();
+    expect(root.querySelector("dialog[open]")).toBeNull();
+    const dialog = await requestSwitch(root);
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await flush();
+    expect(dialog.open).toBe(true);
+    expect(callService).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "state",
+    "entity_id",
+    "permission",
+    "unavailable",
+    "removed",
+    "disconnect",
+  ])(
+    "invalidates an open storage confirmation when %s changes",
+    async (change) => {
+      const { root, metadata, hass, emit, update, disconnect, callService } =
+        await mount({
+          keys: ["storage_switch"],
+        });
+      const dialog = await requestSwitch(root);
+      const staleConfirm = dialogButton(dialog, "Ausschalten");
+      if (change === "state") await update("storage_switch", "off");
+      if (change === "unavailable")
+        await update("storage_switch", "unavailable");
+      if (change === "permission")
+        await emit(metadata.map((item) => ({ ...item, can_control: false })));
+      if (change === "entity_id") {
+        const entityId = "switch.new_storage_id";
+        hass.value = {
+          ...hass.value,
+          states: {
+            ...hass.value.states,
+            [entityId]: {
+              ...hass.value.states[metadata[0].entity_id],
+              entity_id: entityId,
+            },
+          },
+        };
+        await emit(metadata.map((item) => ({ ...item, entity_id: entityId })));
+      }
+      if (change === "removed") await emit([]);
+      if (change === "disconnect") await disconnect();
+      expect(root.querySelector("dialog[open]")).toBeNull();
+      staleConfirm.click();
+      await flush();
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
 });

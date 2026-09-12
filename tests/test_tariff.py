@@ -259,6 +259,114 @@ def test_fall_back_prices_both_occurrences_of_the_repeated_hour_alike() -> None:
     assert evaluate_static_tariff(config, second).quote.price_eur_kwh == 0.10
 
 
+@pytest.mark.parametrize(
+    ("start", "end", "moment", "valid_from", "valid_until"),
+    [
+        (
+            "02:15",
+            "02:45",
+            "2026-10-25T02:30:00+02:00",
+            "2026-10-25T02:15:00+02:00",
+            "2026-10-25T02:45:00+02:00",
+        ),
+        (
+            "02:15",
+            "02:45",
+            "2026-10-25T02:30:00+01:00",
+            "2026-10-25T02:15:00+01:00",
+            "2026-10-25T02:45:00+01:00",
+        ),
+        (
+            "01:30",
+            "02:30",
+            "2026-10-25T02:45:00+02:00",
+            "2026-10-25T02:30:00+02:00",
+            "2026-10-25T02:00:00+01:00",
+        ),
+        (
+            "01:30",
+            "02:30",
+            "2026-10-25T02:15:00+01:00",
+            "2026-10-25T02:00:00+01:00",
+            "2026-10-25T02:30:00+01:00",
+        ),
+        (
+            "02:30",
+            "04:00",
+            "2026-10-25T02:45:00+02:00",
+            "2026-10-25T02:30:00+02:00",
+            "2026-10-25T02:00:00+01:00",
+        ),
+        (
+            "02:30",
+            "04:00",
+            "2026-10-25T02:15:00+01:00",
+            "2026-10-25T02:00:00+01:00",
+            "2026-10-25T02:30:00+01:00",
+        ),
+        (
+            "02:00",
+            "03:00",
+            "2026-10-25T02:30:00+02:00",
+            "2026-10-25T02:00:00+02:00",
+            "2026-10-25T03:00:00+01:00",
+        ),
+        (
+            "02:30",
+            "04:00",
+            "2026-03-29T03:15:00+02:00",
+            "2026-03-29T03:00:00+02:00",
+            "2026-03-29T04:00:00+02:00",
+        ),
+        (
+            "01:00",
+            "02:30",
+            "2026-03-29T03:15:00+02:00",
+            "2026-03-29T03:00:00+02:00",
+            "2026-03-30T01:00:00+02:00",
+        ),
+        (
+            "02:15",
+            "02:45",
+            "2026-03-29T03:15:00+02:00",
+            "2026-03-28T02:45:00+01:00",
+            "2026-03-30T02:15:00+02:00",
+        ),
+        (
+            "02:30",
+            "04:00",
+            "2026-03-29T01:45:00+01:00",
+            "2026-03-28T04:00:00+01:00",
+            "2026-03-29T03:00:00+02:00",
+        ),
+    ],
+)
+def test_tou_quote_bounds_follow_real_price_changes_across_dst(
+    start: str, end: str, moment: str, valid_from: str, valid_until: str
+) -> None:
+    """REQ-ECONOMICS-TARIFFS: Gültigkeit folgt echten Zeitpunkten, auch am Sprung."""
+    config = _config(
+        tariff_type=TariffType.TIME_OF_USE,
+        tou_base_price_eur_kwh=0.30,
+        windows=(_window(start, end, 0.10),),
+    )
+    now = datetime.fromisoformat(moment).astimezone(BERLIN)
+
+    quote = evaluate_static_tariff(config, now).quote
+
+    assert dt_util.as_utc(quote.valid_from) == dt_util.as_utc(
+        datetime.fromisoformat(valid_from)
+    )
+    assert dt_util.as_utc(quote.valid_until) == dt_util.as_utc(
+        datetime.fromisoformat(valid_until)
+    )
+    assert (
+        dt_util.as_utc(quote.valid_from)
+        <= dt_util.as_utc(now)
+        < dt_util.as_utc(quote.valid_until)
+    )
+
+
 # --------------------------------------------------------------------------
 # Zeitfensterregeln
 # --------------------------------------------------------------------------
@@ -908,6 +1016,41 @@ async def test_dynamic_forecast_outside_the_price_range_is_rejected(hass) -> Non
 
     assert result.quote is None
     assert result.reason is QuoteUnavailable.PRICE_OUT_OF_RANGE
+
+
+async def test_missing_forecast_price_never_extends_the_previous_quote(hass) -> None:
+    """REQ-ECONOMICS-TARIFFS: Lücken erhalten keinen alten oder Ersatzpreis."""
+    start = _local(2026, 8, 29, 12)
+    hass.states.async_set(
+        "sensor.strompreis",
+        "0.25",
+        {
+            "forecast": [
+                {"start": start.isoformat(), "price": 0.10},
+                {
+                    "start": (start + timedelta(hours=1)).isoformat(),
+                    "price": None,
+                },
+                {
+                    "start": (start + timedelta(hours=2)).isoformat(),
+                    "price": 0.30,
+                },
+            ]
+        },
+    )
+    coordinator = _coordinator(
+        hass,
+        {
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.DYNAMIC.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        },
+    )
+
+    result = coordinator.tariff_provider.quote(start + timedelta(hours=1, minutes=30))
+
+    assert result.quote is None
+    assert result.reason is QuoteUnavailable.PRICE_FORECAST_OUT_OF_RANGE
 
 
 async def test_unreadable_price_forecast_does_not_fall_back_to_the_state(hass) -> None:

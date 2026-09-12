@@ -414,6 +414,68 @@ def test_parse_price_slots_returns_empty_without_usable_data(state: object) -> N
     assert parse_price_slots(state, now=_now()) == []
 
 
+@pytest.mark.parametrize("invalid_price", [None, "unavailable", "nan", True])
+def test_invalid_price_keeps_its_slot_boundary(invalid_price: object) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Fehlende Preise verlängern keine Ladefreigabe."""
+    state = _FakeState(
+        forecast=[
+            {"start": _local(12).isoformat(), "price": 0.10},
+            {"start": _local(13).isoformat(), "price": invalid_price},
+            {"start": _local(14).isoformat(), "price": 0.30},
+        ]
+    )
+
+    slots = parse_price_slots(state, now=_now())
+    plan = compute_plan(_local(13, 30), slots, _ctx())
+
+    assert slots[0].end == _local(13)
+    assert current_price(slots, _local(13, 30)) is None
+    assert not plan.charge_now
+
+
+@pytest.mark.parametrize(
+    ("prices", "expected"),
+    [([None, 0.10], 0.10), ([0.10, None], 0.10), ([0.10, 0.20], 0.10)],
+)
+def test_duplicate_forecast_starts_keep_the_first_readable_price(
+    prices: list[float | None], expected: float
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Eine bloße Grenze verdrängt keinen Preis."""
+    state = _FakeState(
+        forecast=[
+            *({"start": _local(12).isoformat(), "price": price} for price in prices),
+            {"start": _local(13).isoformat(), "price": 0.30},
+        ]
+    )
+
+    slots = parse_price_slots(state, now=_now())
+
+    assert len(slots) == 2
+    assert current_price(slots, _now()) == pytest.approx(expected)
+    assert slots[0].end == _local(13)
+
+
+@pytest.mark.parametrize(
+    "invalid_start",
+    ["2024-02-30T12:00:00", "2024-01-15T25:00:00", float("nan"), float("inf")],
+)
+def test_malformed_forecast_timestamps_do_not_abort_planning(
+    invalid_start: object,
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Einzelne defekte Anbieterwerte isolieren."""
+    state = _FakeState(
+        forecast=[
+            {"start": invalid_start, "price": 0.05},
+            {"start": _local(12).isoformat(), "price": 0.30},
+        ]
+    )
+
+    slots = parse_price_slots(state, now=_now())
+
+    assert len(slots) == 1
+    assert current_price(slots, _now()) == pytest.approx(0.30)
+
+
 # ===========================================================================
 # 2. Planberechnung
 # ===========================================================================
@@ -1270,6 +1332,8 @@ async def test_grid_serving_takes_priority_over_price_charge_active_charging(
         (8.0, "8.0", "kWh", True),
         (8.0, "8100", "Wh", True),
         (8.0, "0.0081", "MWh", True),
+        (8.0, "8500", "W", False),
+        (8.0, "1e308", "MWh", False),
         (8.0, "unknown", "kWh", False),
         (8.0, "unavailable", "kWh", False),
         (8.0, "kein Wert", "kWh", False),

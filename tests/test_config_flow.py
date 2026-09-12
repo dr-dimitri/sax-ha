@@ -54,6 +54,61 @@ VALID_INPUT = {
 }
 
 
+@pytest.mark.parametrize("reconfigure", [False, True])
+@pytest.mark.parametrize("registers", [[], [65535], [101], [-1], [True], [50.5]])
+async def test_connection_rejects_unusable_soc_response(
+    hass: HomeAssistant, reconfigure: bool, registers: list[object]
+) -> None:
+    """REQ-IP-CONFIGURABLE-UI: Defekte Testreads speichern keine Verbindung."""
+    entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT)
+    if reconfigure:
+        entry.add_to_hass(hass)
+        result = await entry.start_reconfigure_flow(hass)
+    else:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+    client = MagicMock()
+    client.connect = AsyncMock(return_value=True)
+    response = MagicMock()
+    response.isError.return_value = False
+    response.registers = registers
+    client.read_holding_registers = AsyncMock(return_value=response)
+
+    with patch(
+        "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
+        return_value=client,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**VALID_INPUT, "host": "192.168.1.99"}
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_response"}
+    assert entry.data == VALID_INPUT
+    assert len(hass.config_entries.async_entries(DOMAIN)) == int(reconfigure)
+    client.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("port", 0),
+        ("port", 65536),
+        ("slave_id_basic", -1),
+        ("slave_id_basic", 256),
+        ("slave_id_extended", -1),
+        ("slave_id_extended", 256),
+    ],
+)
+def test_connection_schema_rejects_invalid_protocol_address(
+    field: str, value: int
+) -> None:
+    """REQ-IP-CONFIGURABLE-UI: Transportgrenzen gelten bereits im Formular."""
+    with pytest.raises(vol.Invalid):
+        config_flow.STEP_CONNECTION_SCHEMA({**VALID_INPUT, field: value})
+
+
 async def test_user_flow_success(hass) -> None:
     """Ersteinrichtung: Nach erfolgreicher Verbindungsvalidierung folgt der
     zweite, optionale Schritt "grid_charge" - wird er unverändert (leer)

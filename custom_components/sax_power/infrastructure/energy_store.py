@@ -13,6 +13,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
+from .storage_load import async_load_checked
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class EnergyStateStore:
     """Persist monotonically increasing energy counters per config entry."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        self._hass = hass
         self._store: Store[dict[str, Any]] = Store(
             hass,
             STORAGE_VERSION,
@@ -128,7 +130,7 @@ class EnergyStateStore:
 
     async def async_load(self) -> EnergyState | None:
         """Load counters, rejecting invalid fields independently."""
-        raw = await self._store.async_load()
+        raw = await async_load_checked(self._hass, self._store)
         if raw is None:
             return None
         if not isinstance(raw, dict):

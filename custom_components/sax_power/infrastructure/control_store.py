@@ -44,6 +44,7 @@ from ..const import (
     PRICE_STRATEGIES,
 )
 from ..domain.scheduling import windows_overlap
+from .storage_load import async_load_checked
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -262,6 +263,7 @@ class ControlConfigStore:
     """Persist one charge control snapshot per config entry."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        self._hass = hass
         self._store: Store[dict[str, Any]] = Store(
             hass,
             STORAGE_VERSION,
@@ -284,7 +286,7 @@ class ControlConfigStore:
         sich selbst und lässt den Rest der Konfiguration stehen.
         """
         try:
-            raw = await self._store.async_load()
+            raw = await async_load_checked(self._hass, self._store)
         except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
             # NotImplementedError: Home Assistant meldet damit einen Store
             # mit einer Hauptversion, für die es hier keine Migration gibt -

@@ -146,6 +146,10 @@ requirement_ip_configurable_ui:
     - "Fehlermeldungen unterscheiden TCP-Verbindungsfehler
        ('cannot_connect') von einer Modbus-Fehlerantwort bei bestehender
        Verbindung ('invalid_response', z. B. falsche Slave-ID)."
+    - "Port (1–65535) und Modbus-TCP-Slave-IDs (0–255) werden bereits im
+       Formular begrenzt. Der Testread muss einen ganzzahligen SOC von
+       0 bis 100 liefern; leere oder fachlich ungültige Antworten melden
+       invalid_response und ändern keine gespeicherte Verbindung."
     - "user, grid_charge, dashboard und finish verhindern zusätzliche
        Config Entries auch bei parallel begonnenen Einrichtungs-Flows;
        vor dem Anlegen des Eintrags wird die Begrenzung erneut geprüft."
@@ -185,6 +189,11 @@ requirement_extended_mode_resilience:
         die betroffenen Sensoren zeigen "unbekannt", Basic-Mode-Daten
         bleiben unverändert verfügbar. Bei Wiederherstellung werden die
         SunSpec-Sensoren automatisch wieder befüllt.
+      - Unvollständige Registerblöcke gelten ebenfalls als Read-Fehler.
+        Ein Basic-Block mit ungültigem SOC wird abgelehnt und entzieht die
+        SOC-Freigabe wie ein Verbindungsfehler. Ein unvollständiger
+        SunSpec-HIGH-Block lässt die Basic-Daten verfügbar; fehlgeschlagene
+        LOW-Decodierungen bewahren den zuletzt gültigen LOW-Cache.
       - Zustandswechsel (verfügbar -> nicht verfügbar -> wieder verfügbar)
         werden geloggt und zusätzlich als Home-Assistant-Repair-Issue
         (extended_mode_unavailable) angezeigt.
@@ -215,6 +224,9 @@ requirement_extended_mode_resilience:
        aller Netzladearten, sichere Rücksetzung und Wiederanlauf mit neuem
        SOC sowie Timer-/Service-Aufrufe ohne gültigen SOC ab. Steuerupdates
        dürfen einen fehlgeschlagenen Read nicht als erfolgreich markieren."
+    - "Unvollständige Basic-/SunSpec-Blöcke und SOC außerhalb 0–100 werden
+       als erwartete Read-Fehler behandelt; nach vollständigen Antworten
+       erholt sich die Integration automatisch."
     - "tests/test_control_write_resilience.py prüft fehlgeschlagene Mode-
        und Sollwert-Writes während des Polls: frischer SOC und Ladestatus
        bleiben verfügbar, die Selbstdiagnose läuft, Folgepolls wiederholen
@@ -804,7 +816,9 @@ requirement_timed_soc_charge:
     Sequenz-Lock verhindert außerdem, dass periodische Wiederholung und
     sofortige Änderung ihre jeweiligen 40051/40049-Writes verschachteln.
 
-    Ein fehlgeschlagener Basic-Mode-Read entzieht sofort die SOC-Freigabe
+    Ein fehlgeschlagener Basic-Mode-Read, einschließlich eines unvollständigen
+    Blocks, eines nicht ganzzahligen SOC oder eines SOC außerhalb 0–100,
+    entzieht sofort die SOC-Freigabe
     für negative Sollwerte aller Ladearten, einschließlich manueller und
     preisoptimierter Netzladung (Issue #167). Ein laufender Writer mit
     negativem Sollwert wird beendet und Register 40051 aktiv auf 0
@@ -1207,7 +1221,10 @@ requirement_grid_serving_charge:
     auswählbare CONF_PV_FORECAST_SENSOR als gemeinsame Quelle verwendet.
     price_optimizer.SaxPricePlanner.forecast_kwh liest dessen Zustand;
     domain.forecast.normalize_energy_kwh normalisiert endliche Zahlen aus
-    Wh/kWh/MWh auf kWh. Der Vergleich nutzt bewusst den rohen normalisierten
+    Wh/kWh/MWh auf kWh. Eine fehlende Einheit bleibt aus Kompatibilität
+    als kWh interpretierbar; Wahrheitswerte, fremde Einheiten (z. B. W)
+    sowie ein Überlauf bei der Umrechnung ergeben keine gültige Prognose.
+    Der Vergleich nutzt bewusst den rohen normalisierten
     Prognosewert und NICHT CONF_PV_FORECAST_FACTOR, weil dieser Faktor nur
     den nutzbaren Anteil für die Bedarfsrechnung der Smart-Preisstrategie
     beschreibt. Ist kein CONF_PV_FORECAST_SENSOR ausgewählt, entfällt die
@@ -1272,6 +1289,12 @@ requirement_grid_serving_charge:
     Rücksetzauftrag erhalten und es läuft kein Task weiter. Beim Deaktivieren
     bleibt die Reihenfolge unverändert: Schleife beenden, anschließend
     40051 = 0 schreiben.
+    Ein Schreibfehler löscht die bestätigte Aktivität, bewahrt aber eine
+    bereits bestehende netzdienliche Halteabsicht für den nächsten Versuch.
+    Das gilt auch bei erneut fehlgeschlagenem Wiederanlauf; weiterhin hohe
+    Einspeisung darf die zuvor bestätigte Ladepause nicht versehentlich
+    freigeben. Deaktivierung, Fensterende, entzogene Prognosefreigabe und
+    der SOC-Ausfallpfad dürfen die Halteabsicht weiterhin aufheben.
     Meldet ein späterer Read trotz laufender Schleife wieder 40051 = 0,
     schreibt async_start_sun_charge beide Aktivregister sofort erneut. Damit
     wird auch eine zwischenzeitliche Geräte-Rücksetzung oder ein externer
@@ -1908,6 +1931,15 @@ requirement_dynamic_price_charge:
     (Start, Ende, Preis in EUR/kWh). Stunden- und Viertelstunden-Auflösung
     werden gleichermaßen unterstützt; ct/kWh wird anhand der Sensor-Einheit
     (oder einer expliziten Vorgabe) auf EUR/kWh umgerechnet.
+
+    Einträge mit ungültigem Preis behalten ihren lesbaren Startzeitpunkt
+    als Grenze des vorherigen Slots ohne explizites Ende. Eine Preislücke
+    darf deshalb niemals den vorherigen günstigen Preis verlängern.
+    Bei mehrfach vorhandenem Startzeitpunkt gewinnt der erste gültige
+    Preis; eine bloße Grenze ohne Preis darf diesen nicht verdrängen.
+    Ungültige Kalenderdaten und nicht endliche numerische Zeitstempel
+    werden ohne Ausnahme verworfen; die übrigen gültigen Slots bleiben
+    für Ladeplanung und die gemeinsame Tarifbewertung verwendbar.
 
     Numerische Tagesarrays werden zwischen dem lokalen Tagesanfang und
     dem Beginn des nächsten Kalendertags auf einer UTC-Zeitleiste verteilt
@@ -3539,7 +3571,10 @@ requirement_control_config_bootstrap:
     (ControlConfigLoadStatus): LOADED (lesbarer Store, alleinige Quelle),
     MISSING (noch kein Store - nur dann darf migriert werden) oder FAILED
     (vorhandener, aber nicht verwertbarer Store: I/O-Fehler, kein Objekt,
-    oder eine unbekannte künftige Storage-Hauptversion). Bei FAILED gelten
+    syntaktisch defektes JSON oder eine unbekannte künftige
+    Storage-Hauptversion). Auch nach einer JSON-Quarantäne durch Home
+    Assistant bleibt der Store bei weiteren Ladeversuchen FAILED, bis
+    eine gültige Datei wiederhergestellt wurde. Bei FAILED gelten
     die sicheren Vorgabewerte, es wird NICHT migriert, und der vorhandene
     Store wird für die gesamte Lebensdauer dieser Coordinator-Instanz nicht
     mehr automatisch überschrieben - auch keine einzelne, danach bewusst
@@ -3833,7 +3868,13 @@ requirement_economics_tariffs:
     lokale Wanduhrzeit, weshalb die Sommerzeitumstellung keinen Sonderfall
     braucht - die im Frühjahr übersprungene Ortszeit tritt nie auf, und
     beide Vorkommen der im Herbst doppelten Stunde treffen dasselbe
-    Fenster. Änderungen gelten nur für zukünftige Messintervalle; bereits
+    Fenster. Die Gültigkeitsgrenzen der Tarifquote und der nächste
+    Preiswechsel werden dagegen auf der realen UTC-Zeitachse bestimmt:
+    Beide Vorkommen einer Herbstgrenze bleiben getrennt, übersprungene
+    Frühjahrsgrenzen entfallen. Ändert der Zeitsprung selbst das aktive
+    Tariffenster, bildet er eine Abschnittsgrenze. Das aktuelle Intervall
+    enthält stets den ausgewerteten Zeitpunkt und endet in dessen Zukunft.
+    Änderungen gelten nur für zukünftige Messintervalle; bereits
     persistierte Geldbeträge werden nie rückwirkend neu bewertet.
 
     Architektur: domain/tariff.py enthält die reinen, Home-Assistant-freien
@@ -3978,7 +4019,10 @@ requirement_grid_energy:
     Messbaseline: Während Home Assistant offline ist, entsteht kein
     Energiezuwachs. Ein Store-Lesefehler lässt beide neuen Sensoren
     ausdrücklich unbekannt, statt möglicherweise vorhandene Zählerstände
-    durch einen stillen Nullstart zu ersetzen. Store-Schreibvorgänge sind
+    durch einen stillen Nullstart zu ersetzen. Das gilt auch für
+    syntaktisch defektes JSON und weitere Ladeversuche nach einer
+    Home-Assistant-Quarantäne, solange keine gültige Datei wiederhergestellt
+    wurde. Store-Schreibvorgänge sind
     dann bis zu einem erfolgreichen Reload gesperrt, damit der
     RestoreEntity-Migrationspfad der Batteriezähler keinen unvollständigen
     Snapshot über eine vorhandene Netz-Historie schreiben kann. Vorhandene

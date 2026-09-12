@@ -14,6 +14,7 @@ from homeassistant.components import persistent_notification
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
+from pymodbus.exceptions import ModbusException
 
 from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
@@ -739,6 +740,65 @@ async def test_low_block_failure_does_not_fail_update(hass) -> None:
     assert data["soc"] == 55
     assert data["storage_power_active"] == 0
     assert "sun_manufacturer" not in data
+
+
+@pytest.mark.parametrize(
+    "short_block",
+    [READ_BLOCK_EXT_START, READ_BLOCK_EXT_LOW1_START, READ_BLOCK_EXT_LOW2_START],
+)
+@pytest.mark.parametrize("has_cached_read", [False, True])
+async def test_short_sunspec_response_keeps_basic_available_and_recovers(
+    hass, short_block: int, has_cached_read: bool
+) -> None:
+    """REQ-EXTENDED-MODE-RESILIENCE: decoder failures follow block outage rules."""
+    client = _make_client()
+    short_response = False
+
+    def read(*, address: int, count: int, device_id: int) -> MagicMock:
+        result = MagicMock()
+        result.isError.return_value = False
+        result.registers = [0] * count
+        if device_id == 64:
+            result.registers[REG_SOC - READ_BLOCK_START] = 55
+        elif address == READ_BLOCK_EXT_LOW1_START:
+            result.registers[REG_SUN_VERSION_MASTER - READ_BLOCK_EXT_LOW1_START] = 61
+        if short_response and device_id == 100 and address == short_block:
+            result.registers = result.registers[:-1]
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=read)
+    coordinator = _make_coordinator(hass, client)
+    if has_cached_read:
+        await coordinator.async_refresh()
+        assert coordinator.last_update_success
+        coordinator._high_last_read = None
+        coordinator._low_block_last_read = None
+    short_response = True
+
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert coordinator.data["soc"] == 55
+    if short_block == READ_BLOCK_EXT_START:
+        assert not coordinator.extended_available
+        assert coordinator._high_sample_time is None
+        assert "storage_power_active" not in coordinator.data
+    else:
+        assert coordinator.extended_available
+        assert coordinator.data["storage_power_active"] == 0
+        assert coordinator._low_block_last_read is None
+        if has_cached_read:
+            assert coordinator.data["sun_version_master"] == 61
+        else:
+            assert "sun_version_master" not in coordinator.data
+
+    short_response = False
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert coordinator.extended_available
+    assert coordinator.data["storage_power_active"] == 0
+    assert coordinator.data["sun_version_master"] == 61
 
 
 async def test_extended_read_passes_block_slices_to_the_decoders(hass) -> None:
@@ -3983,6 +4043,79 @@ async def test_enforce_grid_charge_grid_serving_restarts_dead_write_task_while_h
         assert coordinator.sun_charge_active is True
     finally:
         await coordinator.async_stop_sun_charge()
+
+
+@pytest.mark.parametrize("failure_step", ["mode", "setpoint"])
+async def test_grid_serving_recovers_held_pause_after_actual_writer_failure(
+    hass, failure_step: str
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: a write failure cannot authorize fresh PV charging."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator._max_soc = 90
+    coordinator._grid_serving_enabled = True
+    coordinator._grid_serving_start = dt_time(10)
+    coordinator._grid_serving_end = dt_time(14)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": -500,
+        "storage_power_active": -100,
+    }
+
+    try:
+        with _patched_now(12):
+            for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
+                coordinator._high_sample_revision += 1
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator.grid_serving_active
+            coordinator.data["storage_power_active"] = 0
+            await coordinator._async_cancel_sun_charge_task()
+            error = ModbusException("Temporärer Schreibfehler")
+            success = client.write_register.return_value
+            client.write_register.side_effect = (
+                [error] if failure_step == "mode" else [success, error, success]
+            )
+            with patch.object(coordinator, "_sun_ic_write_interval", return_value=0):
+                coordinator._sun_charge_task = asyncio.create_task(
+                    coordinator._async_sun_charge_loop()
+                )
+                with pytest.raises(HomeAssistantError):
+                    await coordinator._sun_charge_task
+
+            assert not coordinator.grid_serving_active
+            assert not coordinator.sun_charge_active
+            client.write_register.side_effect = ModbusException(
+                "Erneuter Schreibfehler"
+            )
+            with pytest.raises(HomeAssistantError):
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert not coordinator.grid_serving_active
+            assert not coordinator.sun_charge_active
+            client.write_register.side_effect = None
+            client.write_register.reset_mock()
+            coordinator._high_sample_revision += 1
+
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+
+            assert coordinator.grid_serving_active
+            assert coordinator.sun_charge_active
+            assert coordinator._sun_charge_power == 0
+            assert client.write_register.await_args_list == [
+                call(
+                    address=REG_SUN_IC_CONTROL_MODE,
+                    value=SUN_IC_CONTROL_MODE_SETPOINT,
+                    device_id=100,
+                ),
+                call(address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100),
+            ]
+
+            await coordinator.async_set_grid_serving_enabled(False)
+            assert not coordinator._grid_serving_setpoint_active
+            assert not coordinator.sun_charge_active
+    finally:
+        await coordinator.async_shutdown()
 
 
 async def test_enforce_grid_charge_grid_serving_reverts_to_nullregelung_below_threshold(

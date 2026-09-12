@@ -104,6 +104,7 @@ const text = computed(() =>
       :entity-key="switchKey"
       :hide-confirmed-label="hideConfirmedLabel"
     />
+    <slot name="mode" />
     <div v-if="groups.length" class="charging-view__cards">
       <div
         v-for="group in groups"

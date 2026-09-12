@@ -206,7 +206,6 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(names(root)).toEqual([
       "Netzladung aktiv",
       "Entladestatus",
-      "Netzlademodus",
       "Netzladen Max. SOC",
       "Netzladung Min. SOC",
       "Januar",
@@ -640,6 +639,105 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(names(root).filter((name) => name === "January")).toHaveLength(2);
     expect(names(root)).toContain("December");
     expect(root.textContent).toContain("PV forecast tomorrow");
+  });
+});
+
+describe("REQ-HEMS-CONFIGURATION: exclusive timed charging mode", () => {
+  it.each(["de", "en"])(
+    "switches both ways through one select and waits for the confirmed state (%s)",
+    async (language) => {
+      const { root, callService, update } = await mount(TimedChargingView, {
+        language,
+      });
+      const control = root.querySelector(".timed-charge-mode")!;
+      const radios = [
+        ...control.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+      ];
+      const checked = () =>
+        radios.filter((radio) => radio.checked).map((radio) => radio.value);
+      expect(checked()).toEqual(["standard"]);
+      expect(root.querySelector("select")).toBeNull();
+      for (const desired of ["adaptive", "standard"]) {
+        const original = desired === "adaptive" ? "standard" : "adaptive";
+        radios.find((radio) => radio.value === desired)!.click();
+        await flush();
+        expect(checked()).toEqual([original]);
+        expect(callService).toHaveBeenLastCalledWith(
+          "select",
+          "select_option",
+          { option: desired },
+          { entity_id: "select.renamed_timed_charge_mode" },
+          false,
+        );
+        expect(control.textContent).not.toContain("…");
+        await update("timed_charge_mode", desired);
+        expect(checked()).toEqual([desired]);
+      }
+      expect(callService).toHaveBeenCalledTimes(2);
+      radios[0].click();
+      await flush();
+      expect(callService).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps one confirmed option during pending and failure, then supports retry", async () => {
+    const { root, callService, update } = await mount(TimedChargingView);
+    let reject!: (reason: Error) => void;
+    callService.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    const radios = [
+      ...root.querySelectorAll<HTMLInputElement>(".timed-charge-mode input"),
+    ];
+    radios[1].click();
+    await flush();
+    expect(radios.every((radio) => radio.disabled)).toBe(true);
+    expect(radios[0].checked).toBe(true);
+    expect(radios[1].checked).toBe(false);
+    radios[0].click();
+    expect(callService).toHaveBeenCalledTimes(1);
+    reject(new Error("failure"));
+    await flush();
+    expect(
+      root.querySelector('.timed-charge-mode [role="alert"]'),
+    ).not.toBeNull();
+    expect(radios.every((radio) => !radio.disabled)).toBe(true);
+    expect(radios[0].checked).toBe(true);
+    radios[1].click();
+    await flush();
+    await update("timed_charge_mode", "adaptive");
+    expect(radios[1].checked).toBe(true);
+    expect(radios[0].checked).toBe(false);
+    expect(root.querySelector('.timed-charge-mode [role="alert"]')).toBeNull();
+  });
+
+  it("disables unknown or forbidden modes and reflects external changes without writes", async () => {
+    const { root, callService, update, emit, metadata } =
+      await mount(TimedChargingView);
+    const radios = [
+      ...root.querySelectorAll<HTMLInputElement>(".timed-charge-mode input"),
+    ];
+    for (const state of ["unknown", "unavailable", "future_mode"]) {
+      await update("timed_charge_mode", state);
+      expect(radios.every((radio) => radio.disabled && !radio.checked)).toBe(
+        true,
+      );
+    }
+    await update("timed_charge_mode", "adaptive");
+    expect(radios[1].checked).toBe(true);
+    await emit(
+      metadata.map((item) =>
+        item.key === "timed_charge_mode"
+          ? { ...item, can_control: false }
+          : item,
+      ),
+    );
+    expect(radios.every((radio) => radio.disabled)).toBe(true);
+    expect(radios[1].checked).toBe(true);
+    expect(callService).not.toHaveBeenCalled();
   });
 });
 

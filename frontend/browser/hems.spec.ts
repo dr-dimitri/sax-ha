@@ -18,6 +18,55 @@ test.beforeEach(async ({ page }, testInfo) => {
     await page.locator("#theme").click();
 });
 
+test("REQ-HEMS-CONFIGURATION: exactly one timed mode with keyboard, failure and reconnect", async ({
+  page,
+}, testInfo) => {
+  await page.evaluate(() => window.saxDemoHems("timed"));
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator("nav a[href='/sax-power-vue/ladeautomatik']").click();
+  const control = panel.locator(".timed-charge-mode");
+  const standard = control.locator('input[value="standard"]');
+  const adaptive = control.locator('input[value="adaptive"]');
+  await expect(adaptive).toBeChecked();
+  await adaptive.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(standard).toBeChecked();
+  await expect(adaptive).not.toBeChecked();
+  await expect(page.locator("#actions")).toContainText('"option":"standard"');
+  await page.locator("#failure").click();
+  await adaptive.click();
+  await expect(control.getByRole("alert")).toBeVisible();
+  await expect(standard).toBeChecked();
+  await expect(adaptive).not.toBeChecked();
+  await adaptive.click();
+  await expect(adaptive).toBeChecked();
+  await expect(standard).not.toBeChecked();
+  await expect(control.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator("#actions")).toContainText(
+    "3: select.select_option",
+  );
+  expect(
+    await control.evaluate((el) => el.scrollWidth - el.clientWidth),
+  ).toBeLessThanOrEqual(1);
+  await control.screenshot({
+    path: testInfo.outputPath("timed-charge-mode.png"),
+  });
+  await page.locator("#unavailable").click();
+  await expect(standard).toBeDisabled();
+  await expect(adaptive).toBeDisabled();
+  await expect(control.locator("input:checked")).toHaveCount(0);
+  await page.locator("#unavailable").click();
+  await expect(adaptive).toBeChecked();
+  await page.locator("#connection").click();
+  await expect(control).toHaveCount(0);
+  await page.locator("#connection").click();
+  await expect(adaptive).toBeChecked();
+  await expect(control.locator("input:checked")).toHaveCount(1);
+  await expect(page.locator("#actions")).toContainText(
+    "3: select.select_option",
+  );
+});
+
 for (const tariff of ["timed", "dynamic"] as const) {
   test(`REQ-HEMS-FORECAST-UNCERTAINTY: ${tariff} explains evidence and preserves unknown values`, async ({
     page,

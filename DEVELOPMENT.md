@@ -2076,7 +2076,13 @@ Der ControlStore ergänzt `timed_charge_mode` mit sicherem Upgrade-Default
 `standard`; die zusätzliche Preisstrategie heißt `adaptive`. Die bisherigen
 vier Preisstrategien bleiben unverändert. Der neue HEMS-Statussensor trägt
 begrenzte Attribute, der separate Timestamp-Sensor die nächste echte Prüfung.
-Beide Dashboard-Tarifansichten verwenden `frontend/src/components/HemsCard.vue`
+Der Zeittarif stellt `timed_charge_mode` mit `TimedChargeMode.vue` als
+exklusive Zweifachauswahl direkt unter seinem Hauptschalter dar. Beide Positionen
+schreiben dieselbe bestehende HA-Select-Entity; eine zweite Aktivierungsvariable
+existiert nicht. Native Radiobuttons unterstützen Tastaturbedienung und zeigen
+erst den tatsächlich gemeldeten HA-Zustand. Fehler behalten die alte Auswahl,
+unbekannte Zustände und Verbindungsabbrüche sperren beide Positionen.
+Die HEMS-Erklärungen nutzen `frontend/src/components/HemsCard.vue`
 und dieselben DE/EN-Grundtexte ohne eigene Energieberechnung. Erklärung und aufklappbare
 Qualitätsdetails unterscheiden berechneten Bedarf, quittierten Ladebefehl,
 Ausführungssperre und Kalibrierungsmehrenergie. Im dynamischen `adaptive`-Modus

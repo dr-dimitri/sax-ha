@@ -5293,6 +5293,7 @@ requirement_hems_configuration:
   status: done
   requirements:
     - "Moduswahl und neue Preisstrategie sind HA-Select-Entities. Softwarekonfiguration wird unabhängig von Geräte-ACK bestätigt; Aktivität erst nach quittierter Ausführung."
+    - "Der Zeittarif zeigt direkt unter seinem Hauptschalter einen zweistufigen Umschalter Ladesteuerung: Min-/Max-SOC oder Bedarfsgesteuert. Beide Positionen schreiben dieselbe Select-Entity standard/adaptive; nur eine Steuerung ist ausgewählt und wirksam. Kurze Erklärungen, native Tastaturbedienung und gemeinsame Zeit-/Monatsgrenzen sind sichtbar. Auswahl erst nach HA-Zustandsänderung übernehmen; Fehler behalten die bisherige Auswahl. Unbekannt/Verbindungsabbruch zeigt keine aktive Position und sperrt die Eingabe, Reconnect schreibt nichts."
     - "Options Flow wählt PV-Anbieter und passenden Integrationseintrag, optional Solcast-Frischesensor, maximale Solcast-Datenalter und beide Wirkungsgradannahmen. Ungültige Quellenzuordnung wird am Feld erklärt."
     - "Die gemeinsamen Min-/Max-SOC-Grenzen bleiben im dynamischen adaptive-Modus direkt bedienbar, auch wenn der zeitvariable Tarif-Tab ausgeblendet ist. Min-SOC ist dann Reserve, Max-SOC eine Obergrenze des berechneten Ziels."
 

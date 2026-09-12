@@ -2,6 +2,7 @@
 import ChargingLayout from "./ChargingLayout.vue";
 import TariffPlan from "../components/TariffPlan.vue";
 import HemsCard from "../components/HemsCard.vue";
+import TimedChargeMode from "../components/TimedChargeMode.vue";
 import type { HomeAssistant } from "../types";
 
 defineProps<{ hass?: HomeAssistant }>();
@@ -27,7 +28,6 @@ const cards = [
     key: "settings",
     title: { de: "Einstellungen", en: "Settings" },
     entities: [
-      ["select", "timed_charge_mode"],
       ["number", "timed_charge_max_soc"],
       ["number", "timed_charge_min_soc"],
     ],
@@ -50,7 +50,9 @@ const cards = [
       switch-key="timed_charge_enabled"
       :cards="cards"
       hide-confirmed-label
-    />
+    >
+      <template #mode><TimedChargeMode /></template>
+    </ChargingLayout>
     <HemsCard tariff="timed" :hass="hass" />
     <TariffPlan :hass="hass" class="timed-charging-view__tariff" />
   </div>

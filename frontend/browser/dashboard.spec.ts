@@ -136,11 +136,14 @@ test("compact views retain readable controls and all entities across available p
           const targets: Element[] = [];
           for (const control of controls) {
             const checkbox = control.matches("input[type='checkbox']");
+            const radio = control.matches("input[type='radio']");
             const month =
               checkbox && control.closest(".charging-view__rows--months");
-            const target = checkbox
-              ? control.closest(".entity-control__switch-target")
-              : control;
+            const target = radio
+              ? control.closest("label")
+              : checkbox
+                ? control.closest(".entity-control__switch-target")
+                : control;
             if (!target) {
               violations.push(
                 `${name(control)} is missing its checkbox click target`,
@@ -178,7 +181,7 @@ test("compact views retain readable controls and all entities across available p
             const card = month
               ? control.closest("form")!
               : (control.closest(
-                  ".general-view__card, .charging-view__card, .savings-card",
+                  ".general-view__card, .charging-view__card, .savings-card, .timed-charge-mode",
                 ) ?? control.closest("form")!);
             const bounds = card.getBoundingClientRect();
             if (

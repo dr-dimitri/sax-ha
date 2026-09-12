@@ -253,8 +253,11 @@ Der Status und **Nächster Start** zeigen, worauf die Automatik gerade wartet.
 
 ### Bedarfsgesteuerte Nachtregelung (HEMS)
 
-Im zeitvariablen Tarif wählst du unter **Netzlademodus** zusätzlich zum
-bisherigen **Min-/Max-SOC** den Modus **Bedarfsgesteuert**. Im dynamischen Tarif
+Im zeitvariablen Tarif wechselst du direkt unter dem Hauptschalter über
+**Ladesteuerung** zwischen **Min-/Max-SOC** und **Bedarfsgesteuert**.
+Es ist immer nur die ausgewählte Steuerung wirksam; Fenster und aktive Monate
+gelten für beide. Der Hauptschalter schaltet die gewählte Steuerung ein oder aus.
+Im dynamischen Tarif
 heißt dieselbe Regelung **Bedarfsgesteuert / Nachtbrücke** und benötigt eine
 Preisvorschau. Sie schätzt den Bedarf aus der SAX-Entladeenergie der letzten
 standardmäßig sieben Tage und prüft alle fünf Minuten, wie viel Netzladung bis zur tragfähigen

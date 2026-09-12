@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -25,6 +26,7 @@ def _evaluate(
     soc: int = 50,
     max_soc: int | None = 80,
     state: CalibrationState | None = None,
+    time_zone=UTC,
 ):
     return evaluate_calibration(
         now=now,
@@ -33,6 +35,7 @@ def _evaluate(
         state=state or CalibrationState(),
         interval=CELL_CALIBRATION_INTERVAL,
         maximum_soc=MAX_SOC,
+        time_zone=time_zone,
     )
 
 
@@ -40,17 +43,18 @@ def test_first_valid_soc_establishes_baseline_without_immediate_calibration() ->
     decision = _evaluate()
 
     assert decision.state == CalibrationState(NOW, was_full=False)
-    assert decision.next_calibration_at == NOW + timedelta(days=7)
+    assert decision.next_calibration_at == datetime(2026, 8, 27, tzinfo=UTC)
     assert decision.calibration_active is False
     assert decision.effective_max_soc == 80
     assert decision.state_changed is True
 
 
-def test_calibration_becomes_due_at_exactly_seven_days() -> None:
+def test_calibration_becomes_due_at_start_of_third_calendar_day() -> None:
     state = CalibrationState(NOW, was_full=False)
 
-    before = _evaluate(now=NOW + timedelta(days=7) - timedelta(seconds=1), state=state)
-    due = _evaluate(now=NOW + timedelta(days=7), state=state)
+    midnight = datetime(2026, 8, 27, tzinfo=UTC)
+    before = _evaluate(now=midnight - timedelta(seconds=1), state=state)
+    due = _evaluate(now=midnight, state=state)
 
     assert before.calibration_active is False
     assert before.effective_max_soc == 80
@@ -86,11 +90,46 @@ def test_reaching_full_resets_due_date_once() -> None:
     assert reached.state == CalibrationState(NOW, was_full=True)
     assert reached.calibration_active is False
     assert reached.effective_max_soc == 80
-    assert reached.next_calibration_at == NOW + timedelta(days=7)
+    assert reached.next_calibration_at == datetime(2026, 8, 27, tzinfo=UTC)
     assert reached.state_changed is True
     assert still_full.state == reached.state
     assert still_full.next_calibration_at == reached.next_calibration_at
     assert still_full.state_changed is False
+
+
+@pytest.mark.parametrize(
+    "baseline, due",
+    [
+        ("2026-03-27T20:17:00+00:00", "2026-03-29T22:00:00+00:00"),
+        ("2026-10-23T19:17:00+00:00", "2026-10-25T23:00:00+00:00"),
+        ("2026-08-23T22:30:00+00:00", "2026-08-26T22:00:00+00:00"),
+    ],
+)
+def test_due_day_observes_ha_timezone_midnight_and_dst(baseline: str, due: str) -> None:
+    """Der lokale Baseline-Tag zählt; Zeitumstellungen ändern keine Kalendertage."""
+    due_at = datetime.fromisoformat(due)
+    state = CalibrationState(datetime.fromisoformat(baseline), was_full=False)
+    before = _evaluate(
+        now=due_at - timedelta(microseconds=1),
+        state=state,
+        time_zone=ZoneInfo("Europe/Berlin"),
+    )
+    at = _evaluate(now=due_at, state=state, time_zone=ZoneInfo("Europe/Berlin"))
+    assert before.calibration_active is False
+    assert at.calibration_active is True
+    assert at.next_calibration_at == due_at
+    assert at.state == state
+
+
+def test_initial_full_soc_baseline_keeps_its_day_while_staying_full() -> None:
+    initial = _evaluate(soc=100)
+    still_full = _evaluate(now=NOW + timedelta(days=4), soc=100, state=initial.state)
+    below_full = _evaluate(now=NOW + timedelta(days=4), soc=99, state=still_full.state)
+    assert initial.state == CalibrationState(NOW, was_full=True)
+    assert still_full.state == initial.state
+    assert still_full.state_changed is False
+    assert still_full.calibration_active is False
+    assert below_full.calibration_active is True
 
 
 def test_new_full_edge_is_detected_after_soc_drops() -> None:

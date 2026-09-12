@@ -181,36 +181,3 @@ restart_economics_accounting:
       required: false
       selector:
         text:
-
-create_dashboard:
-  name: Dashboard anlegen
-  description: >-
-    Legt das mitgelieferte Dashboard "SAX Power" nachträglich an - z. B. wenn
-    es bei der Ersteinrichtung abgewählt oder später gelöscht wurde. Tut
-    nichts, wenn es bereits existiert.
-  fields:
-    device_id:
-      name: Gerät
-      description: Das SAX Power Gerät.
-      required: true
-      selector:
-        device:
-          integration: sax_power
-
-reinstall_dashboard:
-  name: Dashboard neu installieren
-  description: >-
-    Setzt das Dashboard "SAX Power" auf den Auslieferungszustand zurück -
-    überschreibt ein vorhandenes Dashboard mit der aktuell gebauten
-    Konfiguration (z. B. nach manuellen Änderungen) oder legt es neu an,
-    falls es zwischenzeitlich gelöscht wurde. Panel-Registrierung und
-    Sidebar-Sichtbarkeit bleiben dabei unverändert, es wird nur der
-    Karteninhalt neu geschrieben.
-  fields:
-    device_id:
-      name: Gerät
-      description: Das SAX Power Gerät.
-      required: true
-      selector:
-        device:
-          integration: sax_power

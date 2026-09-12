@@ -53,8 +53,34 @@ def test_hacs_minimum_matches_tested_home_assistant_version() -> None:
     assert hacs["homeassistant"] == tested_version
 
 
-def test_lovelace_is_declared_as_optional_after_dependency(
+def test_frontend_test_dependency_matches_home_assistant_manifest() -> None:
+    """REQ-VUE-DASHBOARD: HTTP tests need the frontend package pinned by HA."""
+    frontend_manifest = json.loads(
+        files("homeassistant")
+        .joinpath("components/frontend/manifest.json")
+        .read_text(encoding="utf-8")
+    )
+    frontend_requirement = next(
+        requirement
+        for requirement in frontend_manifest["requirements"]
+        if requirement.startswith("home-assistant-frontend==")
+    )
+    tested_requirements = (ROOT / "requirements_test.txt").read_text(encoding="utf-8")
+    frontend_test_requirements = [
+        line
+        for line in tested_requirements.splitlines()
+        if line.startswith("home-assistant-frontend")
+    ]
+
+    assert frontend_test_requirements == [frontend_requirement]
+
+
+def test_dashboard_apis_are_declared_as_optional_after_dependencies(
     manifest: dict[str, object],
 ) -> None:
-    """Keep optional dashboard API access valid according to hassfest."""
-    assert manifest["after_dependencies"] == ["lovelace"]
+    """REQ-VUE-DASHBOARD: Keep optional dashboard API imports valid for hassfest."""
+    assert manifest["after_dependencies"] == [
+        "http",
+        "recorder",
+        "websocket_api",
+    ]

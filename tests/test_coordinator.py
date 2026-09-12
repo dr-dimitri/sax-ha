@@ -386,7 +386,7 @@ async def test_full_soc_completes_calibration_and_reapplies_user_target(hass) ->
     assert coordinator.effective_max_soc == 80
     assert coordinator._max_soc_released_for_discharge is False
     assert coordinator.last_full_charge_at == now
-    assert coordinator.next_cell_calibration_at == now + CELL_CALIBRATION_INTERVAL
+    assert coordinator.next_cell_calibration_date == date(2026, 8, 27)
     assert coordinator.max_soc_clamped is True
     coordinator.async_start_sun_charge.assert_awaited_once_with(0)
     coordinator._calibration_store.async_save.assert_awaited_once_with(
@@ -404,7 +404,8 @@ async def test_max_soc_changes_keep_latest_user_value_during_calibration(hass) -
         was_full=False,
     )
     coordinator._calibration_store.async_save = AsyncMock()
-    coordinator._async_apply_grid_charge_change = AsyncMock()
+    coordinator.async_start_sun_charge = AsyncMock()
+    coordinator.async_stop_sun_charge = AsyncMock()
     coordinator.price_planner.evaluate = MagicMock()
     await coordinator._async_update_cell_calibration(50, now=now)
 
@@ -3601,6 +3602,7 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
                 await coordinator.async_set_grid_serving_enabled(False)
             elif deactivation == "month":
                 await coordinator.async_set_grid_serving_month(1, False)
+                await coordinator._month_control_task
             elif deactivation == "window":
                 await coordinator.async_set_grid_serving_window(
                     dt_time(14), dt_time(16)
@@ -4415,18 +4417,23 @@ async def test_grid_serving_releases_max_soc_task_when_calibration_starts(
     )
 
     try:
-        with _patched_now(12, month=8):
+        with (
+            _patched_now(12, month=8),
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.utcnow",
+                return_value=now - timedelta(days=1),
+            ) as utcnow,
+        ):
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
             assert coordinator.max_soc_clamped is True
             assert coordinator.sun_charge_active is True
 
             client.write_register.reset_mock()
-            changed = await coordinator._async_update_cell_calibration(80, now=now)
+            utcnow.return_value = now
             coordinator._high_sample_revision += 1
             await coordinator._async_enforce_grid_charge(coordinator.data)
 
-        assert changed is True
         assert coordinator.cell_calibration_active is True
         assert coordinator.effective_max_soc == MAX_SOC
         assert coordinator.max_soc_clamped is False
@@ -4586,6 +4593,7 @@ async def test_enforce_grid_charge_timed_charge_active_in_active_month(hass) -> 
     await coordinator.async_set_max_soc(90)
     for month in set(ALL_MONTHS) - {11, 12, 1}:
         await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator._month_control_task
     await coordinator.async_set_timed_charge_enabled(True)
 
     try:
@@ -4647,6 +4655,7 @@ async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -
     await coordinator.async_set_max_soc(90)
     for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
         await coordinator.async_set_grid_serving_month(month, False)
+    await coordinator._month_control_task
     coordinator._high_sample_revision += 1
     await coordinator.async_set_grid_serving_enabled(True)
 
@@ -7465,7 +7474,7 @@ async def test_restart_economics_accounting_keeps_old_state_if_write_is_silently
 
 
 # --------------------------------------------------------------------------
-# Anzeige des Tarifplans (REQ-ECONOMICS-SAVINGS-DASHBOARD)
+# Anzeige des Tarifplans (REQ-VUE-SAVINGS)
 # --------------------------------------------------------------------------
 _TOU_TARIFF_OPTIONS = {
     CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,

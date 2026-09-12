@@ -107,10 +107,9 @@ class SaxPowerEntity(CoordinatorEntity[SaxPowerCoordinator]):
         REQ-STABLE-ENTITY-ID): Bietet Home Assistant nach der
         Ersteinrichtung an, das Gerät umzubenennen/einem Bereich
         zuzuordnen, und aktiviert der Anwender dabei "Entity-IDs
-        aktualisieren", würde sich sonst auch die entity_id ändern - das
-        mitgelieferte Dashboard (dashboard.py) referenziert zu diesem
-        Zeitpunkt aber bereits die ursprüngliche entity_id fest und würde
-        die Entity nicht mehr finden. Ein expliziter `self.entity_id` wird
+        aktualisieren", würde sich sonst auch die entity_id ändern - bestehende
+        Automationen und vom Nutzer gespeicherte Ansichten könnten die
+        Entity dann nicht mehr finden. Ein expliziter `self.entity_id` wird
         von Home Assistant unverändert als Vorschlag übernommen und bleibt
         über spätere Umbenennungen des Geräts hinweg stabil.
         """

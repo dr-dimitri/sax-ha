@@ -34,14 +34,17 @@
       },
       "dashboard": {
         "title": "Dashboard (optional)",
-        "description": "Creates a ready-made \"SAX Power\" dashboard with the most important sensors and settings, organized into the \"General information\", \"Automatic charging\" and \"Dynamic price charging\" tabs. Can be removed again at any time under Settings -> Dashboards.",
+        "description": "Optionally enable the “SAX Power” dashboard with general information, time-of-use tariff, dynamic tariff, grid-serving charging and savings.",
         "data": {
-          "create_dashboard": "Create dashboard"
+          "vue_dashboard_enabled": "Enable dashboard"
+        },
+        "data_description": {
+          "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings."
         }
       },
       "finish": {
         "title": "Setup complete",
-        "description": "Firmware: {firmware}\nSerial number: {serial_number}\nSunSpec mode: {sunspec_status}\n\n{entity_count} entities were created.\n\nThe bundled dashboard was created (or skipped) according to your previous choice, and can be created later at any time via the \"sax_power.create_dashboard\" service.\n\nPrice-optimized charging is deliberately not part of the initial setup and can be configured at any time via \"Configure\" on this integration."
+        "description": "Firmware: {firmware}\nSerial number: {serial_number}\nSunSpec mode: {sunspec_status}\n\n{entity_count} entities were created.\n\nThe dashboard will be enabled according to your previous choice. You can change this at any time via “Configure” on this integration.\n\nPrice-optimized charging is deliberately not part of the initial setup and can be configured at any time via \"Configure\" on this integration."
       }
     },
     "flow_title": "SAX Power Home ({host})",
@@ -564,18 +567,33 @@
       "title": "Some charging settings could not be restored automatically",
       "description": "The following settings had a value that could not be evaluated (unknown/unavailable) on the first start of this version and were therefore set to their safe default instead of the previous value: {fields}. Please review these settings and set them again as desired - this notice disappears automatically once resolved."
     },
-    "dashboard_outdated": {
-      "title": "Dashboard “{dashboard}” is out of date",
+    "vue_dashboard_update": {
+      "title": "Update the dashboard and reload it in your browser",
       "fix_flow": {
         "step": {
           "init": {
-            "title": "Update dashboard “{dashboard}”?",
-            "description": "The bundled dashboard is missing tabs or existing sections use an older version: **{views}**.\n\nThe dashboard is only built during initial setup and never touched afterwards - that keeps your own changes intact, but new or updated content does not appear on its own.\n\n**Confirm**: the dashboard is reset to the current shipped state. The listed sections will then be up to date; your own changes to the dashboard are lost.\n**Cancel**: nothing changes, and this notice will not appear again.",
+            "title": "Update the dashboard",
+            "description": "A different version is available for the enabled dashboard, an earlier version has not been acknowledged yet, or the panel could not be registered.\n\nThis repair registers the dashboard again using the bundled version. Charging settings are preserved. Afterwards, every open browser needs a full reload to use the new interface.\n\n**Later** dismisses this version only. A subsequent version change will be reported again.",
             "menu_options": {
-              "confirm": "Confirm - rebuild the dashboard",
-              "cancel": "Cancel - leave the dashboard as it is"
+              "confirm": "Update dashboard",
+              "cancel": "Later – dismiss this version"
             }
+          },
+          "confirm": {
+            "title": "Retry the dashboard update",
+            "description": "Registration has not succeeded yet. Check the Home Assistant log and try again. If the integration has been updated in the meantime, close this dialog and open the current repair issue."
+          },
+          "reload": {
+            "title": "dashboard registered – reload your browser",
+            "description": "The dashboard has been registered using the current bundled version. Complete this step, then **fully reload every open Home Assistant page** (browser: reload the page; Companion app: reload the frontend). Switching dashboard tabs is not enough.\n\nYour browser will then use the new interface."
           }
+        },
+        "error": {
+          "update_failed": "The dashboard could not be updated. The issue has not been marked as fixed."
+        },
+        "abort": {
+          "no_longer_available": "The integration or enabled dashboard is no longer available.",
+          "update_changed": "The dashboard version or its availability has changed in the meantime. Open the current repair issue again; the new version was not acknowledged."
         }
       }
     }
@@ -677,26 +695,6 @@
         }
       }
     },
-    "create_dashboard": {
-      "name": "Create dashboard",
-      "description": "Creates the bundled \"SAX Power\" dashboard after the fact - e.g. if it was declined during initial setup or deleted later. Does nothing if it already exists.",
-      "fields": {
-        "device_id": {
-          "name": "Device",
-          "description": "The SAX Power device."
-        }
-      }
-    },
-    "reinstall_dashboard": {
-      "name": "Reinstall dashboard",
-      "description": "Resets the \"SAX Power\" dashboard to its default state - overwrites an existing dashboard with the currently built configuration, or recreates it if it was deleted in the meantime.",
-      "fields": {
-        "device_id": {
-          "name": "Device",
-          "description": "The SAX Power device."
-        }
-      }
-    },
     "restart_economics_accounting": {
       "name": "Restart economics accounting",
       "description": "Deliberately resets the economics balance (money sums, net savings, price-coverage counters, day buckets and activation time) - never touches energy counters or the charge-origin split.",
@@ -719,7 +717,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Price-optimised charging and PV forecast",
+        "title": "Dashboard, charging and economics",
         "description": "Sources and base settings for price-optimised charging and the shared PV forecast. The integration does not fetch prices or forecasts itself; it uses existing sensor entities. Day-to-day controls are entities on the SAX device.",
         "data": {
           "price_sensor": "Electricity price sensor",
@@ -729,7 +727,8 @@
           "pv_forecast_factor": "Usable share of the PV forecast (%)",
           "economics_tariff_type": "Economics tariff model",
           "economics_investment_cost_eur": "Investment cost (EUR)",
-          "economics_prior_result_eur": "Result earned before setup (EUR)"
+          "economics_prior_result_eur": "Result earned before setup (EUR)",
+          "vue_dashboard_enabled": "Enable dashboard"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative” and “smart” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
@@ -739,7 +738,8 @@
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
           "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress and the remaining-to-payback amount, offset against the running signed net result. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
-          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result."
+          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result.",
+          "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings."
         }
       },
       "economics_fixed": {

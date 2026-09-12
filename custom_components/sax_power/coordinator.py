@@ -20,7 +20,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 
-from .application.calibration import CalibrationState, evaluate_calibration
+from .application.calibration import (
+    CalibrationState,
+    calibration_due_at,
+    evaluate_calibration,
+)
 from .application.charge_policy import (
     ChargePolicyInput,
     evaluate_charge_policy,
@@ -391,6 +395,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # kann ein älterer Aktiv-Zweig einen gerade ausgeführten Rücksprung in
         # die Nullregelung wieder überschreiben (REQ-GRID-SERVING-CHARGE).
         self._charge_control_lock = asyncio.Lock()
+        self._month_control_task: asyncio.Task[None] | None = None
+        self._month_control_revision = 0
         self._shutdown_started = False
         self._shutdown_complete = False
         self._shutdown_task: asyncio.Task[Any] | None = None
@@ -706,9 +712,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._accumulate_grid_energy(data)
         self._accumulate_energy(data)
 
-        calibration_changed = await self._async_update_cell_calibration(data["soc"])
-        if calibration_changed:
-            self.price_planner.evaluate()
         if not self._control_bootstrap_pending:
             # REQ-CONTROL-CONFIG-BOOTSTRAP: Lesen ist während des Bootstraps
             # erlaubt, Steuern nicht - der erste Refresh läuft absichtlich
@@ -732,6 +735,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
         else:
             self._basic_read_failed = False
+            await self._async_update_cell_calibration(data["soc"])
         self._publish_charge_state(data)
         self._async_check_self_diagnostics()
         return data
@@ -753,7 +757,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_status"] = self._price_charge_status
         data["price_charge_next_start"] = plan.next_start
         data["price_charge_current_price"] = plan.current_price
-        data["next_cell_calibration"] = self.next_cell_calibration_at
+        data["next_cell_calibration"] = self.next_cell_calibration_date
 
     def _accumulate_grid_energy(self, data: dict[str, Any]) -> None:
         """Publish persistent grid totals from measured intervals (REQ-GRID-ENERGY)."""
@@ -996,7 +1000,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # die Tarifplan-Attribute darunter müssen denselben Moment
         # beschreiben, sonst könnte ein Fensterwechsel zwischen beiden
         # Aufrufen ein Fenster ausweisen, das zum gemeldeten Preis gar
-        # nicht gehört (REQ-ECONOMICS-SAVINGS-DASHBOARD).
+        # nicht gehört (REQ-VUE-SAVINGS).
         moment = dt_util.now()
         quote_result = self.tariff_provider.quote(moment)
         current_price = quote_result.price_eur_kwh
@@ -1424,10 +1428,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         vier Sensoren dieser Anforderung unabhängig vom Tarifstatus.
         """
         investment_cost = investment_cost_eur_from_options(self.options)
-        # Trägt die Sichtbarkeit der Investitionskarte im Dashboard: Eine
-        # Core-"conditional"-Karte kann ausschließlich den ZUSTAND einer
-        # Entity prüfen, nie ein Attribut (siehe dashboard.py, #139) -
-        # dieses Flag ist deshalb ein eigener Binary-Sensor.
+        # REQ-VUE-SAVINGS: Der bestehende Binary-Sensor hält die
+        # Sichtbarkeitsbedingung unabhängig von einzelnen Geldwerten stabil.
         data["economics_investment_configured"] = investment_cost is not None
         if investment_cost is None:
             for key in (
@@ -1538,7 +1540,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> dict[str, Any]:
         """Der hinterlegte Tarifplan als Attribute des Preis-Sensors.
 
-        REQ-ECONOMICS-SAVINGS-DASHBOARD: Der reine Preiswert beantwortet weder
+        REQ-VUE-SAVINGS: Der reine Preiswert beantwortet weder
         "habe ich meinen Tarif richtig eingetragen?" noch "welches Fenster
         liefert diesen Preis gerade, und wann ändert er sich wieder?". Die
         Konfiguration liegt sonst ausschließlich in entry.options und ist
@@ -2762,7 +2764,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         last_full_charge_at = self.last_full_charge_at
         if last_full_charge_at is None:
             return None
-        return last_full_charge_at + CELL_CALIBRATION_INTERVAL
+        return calibration_due_at(
+            last_full_charge_at,
+            CELL_CALIBRATION_INTERVAL,
+            dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC,
+        )
+
+    @property
+    def next_cell_calibration_date(self) -> date | None:
+        due_at = self.next_cell_calibration_at
+        if due_at is None:
+            return None
+        time_zone = dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC
+        return due_at.astimezone(time_zone).date()
 
     @property
     def max_soc_clamped(self) -> bool:
@@ -2786,6 +2800,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, current_soc: int | float, *, now: datetime | None = None
     ) -> bool:
         """Evaluate and persist calibration edges; return active-state change."""
+        if (
+            isinstance(current_soc, bool)
+            or not isinstance(current_soc, int | float)
+            or not math.isfinite(current_soc)
+            or not MIN_SOC <= current_soc <= MAX_SOC
+        ):
+            return False
         decision = evaluate_calibration(
             now=now or dt_util.utcnow(),
             current_soc=current_soc,
@@ -2793,6 +2814,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             state=self._cell_calibration_state,
             interval=CELL_CALIBRATION_INTERVAL,
             maximum_soc=MAX_SOC,
+            time_zone=dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC,
         )
         active_changed = decision.calibration_active != self._cell_calibration_active
         self._cell_calibration_state = decision.state
@@ -3121,8 +3143,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._timed_charge_max_soc is not None:
             self._timed_charge_max_soc = self.timed_charge_max_soc
         self.clear_control_field_unresolved("max_soc")
-        if self.data is not None and (current_soc := self.data.get("soc")) is not None:
-            await self._async_update_cell_calibration(current_soc)
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change()
 
@@ -3551,7 +3571,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return
                 if self._sun_charge_timed_discharge:
                     async with self._charge_control_lock:
-                        if self._shutdown_started:
+                        if self._shutdown_started or self._control_bootstrap_pending:
                             return
                         if not self._sun_charge_timed_discharge:
                             continue
@@ -3584,6 +3604,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 self._publish_charge_state(self.data)
                                 self.async_update_listeners()
                             return
+                        # REQ-PERIODIC-FULL-CALIBRATION: Dieser PV-Regler trifft
+                        # zwischen Polls eigene neue Leistungsentscheidungen.
+                        if (
+                            not self._basic_read_failed
+                            and self.data is not None
+                            and (current_soc := self.data.get("soc")) is not None
+                            and await self._async_update_cell_calibration(current_soc)
+                        ):
+                            self.price_planner.evaluate()
+                            self._publish_charge_state(self.data)
+                            self.async_update_listeners()
                         power = self._timed_discharge_pv_setpoint()
                         await self._async_write_sun_charge_setpoint(
                             power, timed_discharge_hold=True
@@ -3934,6 +3965,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         restauriert werden, könnte eine Validierung während dieser
         Zwischenzustände fälschlich fehlschlagen, obwohl der jeweils
         gespeicherte Endzustand gar nicht überlappt."""
+        self._raise_if_shutdown()
         new_months = set(self._timed_charge_months)
         if enabled:
             new_months.add(month)
@@ -3956,7 +3988,51 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Schalter einzeln auf und darf eine für ein ANDERES Monat
             # gesetzte Markierung nicht versehentlich mit löschen.
             self.clear_control_field_unresolved("timed_charge_months")
-        await self._async_apply_grid_charge_change()
+        self._async_schedule_month_control_change()
+
+    def _async_schedule_month_control_change(self) -> None:
+        """Bestätige Monatskonfiguration unabhängig vom laufenden Geräteabgleich."""
+        if self._control_bootstrap_pending:
+            return
+        self._async_schedule_control_save()
+        self._month_control_revision += 1
+        if self._month_control_task is None:
+            # REQ-VUE-CHARGING: Die HA-Entity bestätigt bereits die angenommene
+            # Konfiguration; Aktivitätswerte folgen weiterhin erst Geräte-ACKs.
+            self._month_control_task = self.hass.async_create_task(
+                self._async_apply_month_control_changes(),
+                name="sax_power_month_control",
+                eager_start=False,
+            )
+
+    async def _async_apply_month_control_changes(self) -> None:
+        """Fasse Monatsänderungen zusammen und verarbeite jeden neueren Endstand."""
+        try:
+            while not self._shutdown_started:
+                async with self._charge_control_lock:
+                    if self._shutdown_started or self._control_bootstrap_pending:
+                        return
+                    revision = self._month_control_revision
+                    if self.data is not None:
+                        try:
+                            await self._async_enforce_grid_charge_locked(self.data)
+                        except HomeAssistantError as err:
+                            if not isinstance(err, _SunChargeWriteError):
+                                _LOGGER.error(
+                                    "Monatskonfiguration konnte noch nicht auf das "
+                                    "Gerät angewendet werden; erneuter Versuch im "
+                                    "nächsten Poll: %s",
+                                    err,
+                                )
+                            self._clear_sun_charge_active_flags()
+                        self._publish_charge_state(self.data)
+                        self.async_update_listeners()
+                # REQ-GRID-SERVING-CHARGE: Eine Änderung während einer laufenden
+                # Modbussequenz muss nach deren Abschluss erneut ausgewertet werden.
+                if revision == self._month_control_revision:
+                    return
+        finally:
+            self._month_control_task = None
 
     def _raise_if_shutdown(self) -> None:
         """Reject late user commands after ownership of the device ends."""
@@ -3973,9 +4049,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
         warten.
 
-        Gemeinsamer Endpunkt aller async_set_*-Setter: hier - und nur hier -
-        wird der Konfigurations-Snapshot zum Speichern vorgemerkt
-        (REQ-CONTROL-CONFIG-BOOTSTRAP). Während des Bootstraps passiert
+        Direkte Einstellungsänderungen merken hier ihren Konfigurations-Snapshot
+        zum Speichern vor; Monatsänderungen tun dies bereits bei der Annahme
+        und wenden denselben Geräteabgleich in einem separaten Task unter dem
+        Control-Lock an (REQ-VUE-CHARGING).
+        Während des Bootstraps passiert
         beides nicht: die Setter restaurieren dann nur noch Altzustände, und
         eine Teilkonfiguration darf weder das Gerät steuern noch den
         vollständigen gespeicherten Stand überschreiben.
@@ -4381,11 +4459,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monate aktiv. Ist für ein Feature kein einziger Monat ausgewählt,
         ist es ganzjährig inaktiv (analog zu einem leeren Zeitfenster).
         """
-        if self._shutdown_started:
+        if self._shutdown_started or self._control_bootstrap_pending:
             return
-        if self._basic_read_failed:
+        current_soc = data.get("soc")
+        if (
+            self._basic_read_failed
+            or isinstance(current_soc, bool)
+            or not isinstance(current_soc, int | float)
+            or not math.isfinite(current_soc)
+            or not MIN_SOC <= current_soc <= MAX_SOC
+        ):
             await self._async_suspend_charge_for_missing_soc()
             return
+        # REQ-PERIODIC-FULL-CALIBRATION: Timer/Services können den ersten
+        # Ladezyklus des Fälligkeitstags vor dem nächsten Poll beginnen.
+        if await self._async_update_cell_calibration(current_soc):
+            self.price_planner.evaluate()
         command_revision_before = self._sun_charge_command_revision
         timed_was_active = self._timed_charge_active
         await self._async_update_timed_discharge_proof(dt_util.now())
@@ -4418,7 +4507,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._sun_charge_reset_required = True
 
         target_soc = self.effective_max_soc
-        current_soc = data["soc"]
         if timed_window_completed and self._last_effective_max_soc is None:
             # Restore must perform the same one-time release as the original
             # deadline, even when the edited window is still open (#165).
@@ -5059,6 +5147,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Analog zu async_set_timed_charge_month, für das netzdienliche
         Laden."""
+        self._raise_if_shutdown()
         new_months = set(self._grid_serving_months)
         if enabled:
             new_months.add(month)
@@ -5077,7 +5166,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if validate:
             # Siehe async_set_timed_charge_month für den Hintergrund.
             self.clear_control_field_unresolved("grid_serving_months")
-        await self._async_apply_grid_charge_change()
+        self._async_schedule_month_control_change()
 
     # -- Preisoptimiertes Laden ------------------------------------------------
     # Dritte Lade-Automatik neben zeitgesteuertem und netzdienlichem Laden
@@ -5353,6 +5442,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
         await self.price_planner.async_shutdown()
         self.tariff_provider.async_shutdown()
+        # REQ-GRID-SERVING-CHARGE: Eine begonnene Modus-/Sollwertsequenz nie
+        # abbrechen; das Shutdown-Gate sperrt weitere Monatsentscheidungen.
+        if self._month_control_task is not None:
+            await self._month_control_task
         await self.price_planner.async_flush_cycle_state()
         await self._async_flush_energy_state()
         await self._async_flush_economics_state()

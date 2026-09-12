@@ -8,7 +8,7 @@ ohne dass für jeden einzelnen Sensor ein eigener Test geschrieben werden muss.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -398,11 +398,22 @@ def test_net_savings_today_last_reset_ignores_a_missing_or_foreign_value() -> No
     assert entity.last_reset is None
 
 
-def test_next_cell_calibration_is_a_diagnostic_timestamp() -> None:
+def test_next_cell_calibration_is_a_diagnostic_date() -> None:
     description = _description_by_key("next_cell_calibration")
 
     assert description.entity_category == EntityCategory.DIAGNOSTIC
-    assert description.device_class == "timestamp"
+    assert description.device_class == "date"
+
+    coordinator = MagicMock()
+    coordinator.data = {"next_cell_calibration": date(2026, 9, 12)}
+    entity = SaxPowerSensor(coordinator, "test_entry_id", description)
+    entity.platform_data = SimpleNamespace(
+        platform_name="sax_power",
+        domain="sensor",
+        default_language_platform_translations={},
+    )
+    assert entity.native_value == date(2026, 9, 12)
+    assert entity.state == "2026-09-12"
 
 
 def test_value_fn_handles_missing_extended_data() -> None:

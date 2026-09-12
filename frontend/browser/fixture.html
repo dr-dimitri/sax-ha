@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAX Power – Dashboard-Abnahme mit simuliertem Home Assistant</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font:
+          14px Arial,
+          sans-serif;
+      }
+      .test-tools {
+        padding: 12px;
+        background: #eef3f8;
+        color: #172b40;
+      }
+      .test-tools p {
+        margin: 0 0 10px;
+      }
+      .test-tools button,
+      .test-tools a {
+        display: inline-block;
+        padding: 10px;
+        margin: 3px;
+      }
+      #actions {
+        display: block;
+        overflow-wrap: anywhere;
+        margin: 8px;
+      }
+      body.dark {
+        --primary-background-color: #111820;
+        --secondary-background-color: #293846;
+        --card-background-color: #202b35;
+        --primary-text-color: #edf3f8;
+        --secondary-text-color: #bfcbd5;
+        --divider-color: #52616d;
+        --ha-card-border-color: #52616d;
+        --primary-color: #70c6ff;
+        --app-header-background-color: #253849;
+        --app-header-text-color: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="test-tools" aria-label="Simulierte Home-Assistant-Sitzung">
+      <p>Lokale Abnahme · ausschließlich simulierte HA-Zustände und Aktionen</p>
+      <nav aria-label="Dashboard-Einstieg">
+        <a href="/sax-power-vue/allgemein">SAX Power</a>
+      </nav>
+      <button id="language">English / Deutsch</button>
+      <button id="theme">Theme wechseln</button>
+      <button id="connection">Verbindung unterbrechen / herstellen</button>
+      <button id="external">Externe Max-SOC-Änderung: 75 %</button>
+      <button id="unavailable">Verfügbarkeit wechseln</button>
+      <button id="failure">Nächste Aktion ablehnen</button>
+      <button id="tariff-timed">HA: Zeitvariabler Tarif aktiv</button>
+      <button id="tariff-dynamic">HA: Dynamischer Tarif aktiv</button>
+      <button id="tariff-off">HA: Beide Tarife aus</button>
+      <button id="tariff-both">HA: Beide Tarife ein</button>
+      <button id="legacy-times">HA: Gespeicherte Zeiten mit Sekunden</button>
+      <output id="actions" aria-label="Simulierte Aktionen"
+        >Keine Aktion</output
+      >
+    </div>
+    <sax-power-vue-panel></sax-power-vue-panel>
+    <script type="module" src="/fixture.js"></script>
+  </body>
+</html>

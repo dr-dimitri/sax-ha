@@ -1,7 +1,7 @@
 {
   "domain": "sax_power",
   "name": "SAX Power Home",
-  "after_dependencies": ["lovelace"],
+  "after_dependencies": ["http", "recorder", "websocket_api"],
   "codeowners": ["@dr-dimitri"],
   "config_flow": true,
   "dhcp": [{ "hostname": "sax*" }],
@@ -10,5 +10,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dr-dimitri/sax-ha/issues",
   "requirements": ["pymodbus==3.13.1"],
-  "version": "2.0.4"
+  "version": "3.0.0"
 }

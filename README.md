@@ -59,12 +59,12 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
   Netzkosten und ein signiertes Nettoergebnis bilanzieren
 - optional aus Investitionskosten ROI, Amortisationsfortschritt und den
   verbleibenden Restbetrag berechnen
-- optional ein vorbereitetes SAX-Power-Dashboard anlegen
+- optional das Dashboard SAX Power aktivieren
 - alle Funktionen vollständig lokal im eigenen Netzwerk nutzen
 
 ## Voraussetzungen
 
-- Home Assistant mit HACS oder Zugriff auf das Verzeichnis
+- Home Assistant ab **2026.8.2** mit HACS oder Zugriff auf das Verzeichnis
   `custom_components`
 - SAX Power Home oder SAX Power Home Plus im selben Netzwerk wie Home Assistant
 - aktivierte Modbus-TCP-Verbindung am Speicher
@@ -124,40 +124,114 @@ Das preisoptimierte Laden wird nach der Einrichtung über **Konfigurieren** bei
 der Integration eingerichtet. So kann dort direkt der bereits vorhandene
 Strompreis-Sensor ausgewählt werden.
 
-### Mitgeliefertes Dashboard
+### Dashboard SAX Power
 
-Auf Wunsch legt die Integration bei der Einrichtung ein Dashboard namens
-**SAX Power** an. Es enthält Übersichten für:
+Die Option **Dashboard aktivieren** zeigt **SAX Power** in der Seitenleiste
+unter `/sax-power-vue`. Sie ist standardmäßig ausgeschaltet und kann bei der
+Einrichtung oder später unter **Einstellungen → Geräte & Dienste → SAX Power
+Home → Konfigurieren** geändert werden. Die Auswahl bleibt nach einem Neustart
+erhalten. Der bestehende URL-Pfad bleibt für gespeicherte Links gültig.
 
-- allgemeine Informationen,
-- zeitgesteuertes Laden,
-- netzdienliches Laden,
-- dynamisches Laden,
-- Ersparnis (kompakte Netto-Ergebnisse für heute, diese Woche, diesen Monat,
-  dieses Jahr und insgesamt seit Bilanzbeginn, Tarifinformation,
-  Amortisationsstand und verständliche Statushinweise; ausschließlich aus
-  der vorhandenen Wirtschaftlichkeitsbilanz).
+Das Dashboard enthält fünf Bereiche:
 
-![Dashboard mit allgemeinen Informationen zum SAX-Power-Speicher](docs/images/dashboard/allgemeine_information.png)
+| Bereich | Inhalt |
+| --- | --- |
+| Allgemeine Informationen | Ladezustand, Zelltemperatur und Leistung mit globalem Max-SOC; unter Gerät zuerst geladene/entladene Energie, danach Gerätedaten und zuletzt der Speicherschalter. |
+| Zeitvariabler Tarif | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
+| Dynamischer Tarif | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
+| Netzdienliches Laden | Hauptschalter, Ladepause, aktuelle PV-Prognose, Prognoseschwelle, Status und zwölf Monatsschalter. |
+| Amortisation | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
 
-*Allgemeine Informationen mit Ladezustand, Leistung, Energie und Gerätedaten.*
+Auf breiten Bildschirmen nutzen die Ansichten mehrere Spalten und kleinere
+Kartenabstände. Die Geräteübersicht stellt Skalen und Leistung neben die
+Gerätedaten. Die Monatsschalter nutzen auch auf dem Smartphone mehrere
+Spalten und knappe Innenabstände; bei sehr wenig Platz wird daraus eine Spalte.
+Beschriftungen bleiben mindestens 14 px groß, Bedienflächen mindestens
+44 × 44 px. Die sichtbaren Monatskästchen sind 22 × 22 px groß; auch der
+umgebende Bereich lässt sich anklicken. Die Darstellung richtet sich nach dem
+verfügbaren Platz neben der HA-Seitenleiste; Inhalte bleiben vollständig
+sichtbar und per Tastatur bedienbar.
 
-Das Dashboard erscheint in der Seitenleiste und kann wie jedes andere
-Home-Assistant-Dashboard angepasst oder entfernt werden.
+Ist **Zeitvariabler Tarif** eingeschaltet, wird **Dynamischer Tarif**
+ausgeblendet; umgekehrt gilt dasselbe. Sind beide ausgeschaltet, sind beide
+Tabs sichtbar. Bei fehlenden oder unbekannten Zuständen bleiben beide
+zugänglich. Ein Link auf einen ausgeblendeten Tarif führt zum aktiven Tarif.
 
-Falls es später angelegt werden soll, steht unter **Entwicklertools → Aktionen**
-die Aktion `sax_power.create_dashboard` zur Verfügung. Mit
-`sax_power.reinstall_dashboard` lässt es sich auf den aktuellen
-Auslieferungszustand zurücksetzen. Dabei werden eigene Änderungen am Dashboard
-überschrieben.
+Änderungen an den Home-Assistant-Entitäten erscheinen direkt im Dashboard.
+Zahlen und Uhrzeiten werden erst mit **Übernehmen** gesendet; die Anzeige des
+bestätigten Werts folgt der Rückmeldung von Home Assistant. Wertebereiche,
+Schrittweiten und Strategieoptionen entsprechen den vorhandenen Entitäten.
+Fehlende optionale Entitäten werden ausgelassen; unbekannte oder nicht
+verfügbare Werte bleiben als solche erkennbar.
 
-Das Dashboard wird **nur bei der Ersteinrichtung** angelegt und danach nicht
-mehr verändert – eigene Anpassungen bleiben dadurch erhalten. Bringt ein
-Update der Integration einen neuen Tab oder eine fachlich notwendige
-Aktualisierung der Ersparnisbereiche mit, fehlt diese einem bestehenden
-Dashboard deshalb. Home Assistant meldet das unter **Einstellungen → System →
-Reparaturen** und bietet dort an, das Dashboard neu aufzubauen; wer das
-ablehnt, wird nicht erneut gefragt.
+Die Zeitfenster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
+zeigen jeweils eine 24-Stunden-Leiste mit verschiebbaren Marken für Start
+und Ende. Die Marken lassen sich mit Maus, Touch und Tastatur bedienen;
+die Eingabefelder zeigen ausschließlich Stunden und Minuten (HH:MM). Beide
+Grenzen bleiben
+ein Entwurf, bis **Übernehmen** sie gemeinsam an Home Assistant sendet.
+Die bestätigte Zeitspanne ändert sich erst mit dessen Zustandsmeldung.
+Vorhandene Sekunden werden beim Öffnen nicht verändert. Nach einer bewussten
+Bearbeitung übernimmt **Übernehmen** beide Grenzen minutengenau mit Sekunden
+auf 00.
+Ein Fenster von 22:00 bis 06:00 wird an Mitternacht geteilt dargestellt;
+gleiche Start- und Endzeit ergeben ein leeres Fenster. Änderungen an den
+bestätigten Grenzen, etwa durch eine Automation, ersetzen den gesamten
+Entwurf. Andere Livewerte verändern die Eingabe nicht.
+
+Der Speicherschalter verwendet dieselbe kleine Checkbox wie die Monatsauswahl,
+mit großer Klickfläche und Sicherheitsabfrage.
+
+Die Monatsraster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
+zeigen den bestätigten Zustand direkt am Kontrollkästchen; die zusätzliche
+Zeile **Bestätigter Wert** entfällt dort. Fehler und Nichtverfügbarkeit bleiben
+sichtbar. Eine gültige Monatsauswahl wird direkt von Home Assistant bestätigt,
+auch wenn die Geräteauswertung gerade beschäftigt ist. Beide Zeitfenster
+zeigen ihre bestätigte Zeitspanne in einer gemeinsamen Zeile; auf Deutsch
+mit dem Zusatz **Uhr**, etwa **22:00–06:00 Uhr**. Unbekannte oder nicht
+verfügbare Werte und die englische Anzeige erhalten diesen Zusatz nicht;
+Eingabefelder und übertragene Uhrzeiten bleiben ohne Sprachzusatz.
+
+Unter **Allgemeine Informationen** stehen beide Energiezähler
+am Anfang der Karte **Gerät**; eine eigene Energie-Karte entfällt. Der
+Speicherschalter bildet die letzte Gerätezeile. Vor dem Ein- **und** Ausschalten
+erscheint ein Bestätigungsdialog. **Abbrechen** oder Escape sendet keine Aktion.
+Ändern sich während des Dialogs Zustand, Entität, Berechtigung oder Verbindung,
+wird die offene Auswahl verworfen.
+
+Die Ersparnis-Auswertung verwendet die vorhandene Recorder-Statistik der
+Netto-Ersparnis. Anfangs- und Enddatum gelten als vollständige Tage in der
+HA-Zeitzone; Wert und Diagramm verwenden dieselbe Auswahl. Ohne aufgezeichnete
+Daten entsteht keine Ersatzberechnung aus dem aktuellen Sensorwert. Neue
+Recorder-Statistiken aktualisieren die Auswertung; **Aktualisieren** lädt sie
+auch auf Wunsch neu. Geldbeträge erscheinen mit zwei, Tarifpreise mit vier
+Nachkommastellen. Die [Funktions- und Testübersicht](docs/vue-dashboard-parity.md)
+beschreibt Datenquellen, Prüfumfang und bekannte Grenzen.
+
+Zum Entfernen des Seitenleisteneintrags die Option wieder ausschalten.
+Das wirkt direkt, ohne die Batterieintegration neu zu starten. Das Dashboard
+wird mit der Integration lokal ausgeliefert und benötigt auf dem
+Home-Assistant-Gerät weder Node noch einen Entwicklungsserver oder ein CDN.
+Die dokumentierte Testbasis ist Home Assistant **2026.8.2**.
+
+Die Integration liefert ausschließlich dieses Dashboard aus. Die frühere
+Lovelace-Erstellung, deren Neuinstallationsaktionen und Veraltet-Reparatur
+entfallen. Beim Upgrade werden zugehörige alte Integrationsoptionen und
+Reparaturhinweise bereinigt. Bereits in Home Assistant gespeicherte
+Lovelace-Dashboards und eigene Karten werden dabei weder gelöscht noch
+überschrieben; sie lassen sich weiterhin über Home Assistant verwalten.
+
+Bei einer neuen Dashboard-Version oder einem Registrierungsfehler erscheint
+ein eigener Hinweis unter **Einstellungen → System → Reparaturen**. Dort lässt
+sich **SAX Power** mit den aktuell installierten Dateien neu registrieren.
+Die Reparatur installiert kein Integrationsupdate; dieses wird zuvor wie
+gewohnt über HACS beziehungsweise das Integrationspaket eingespielt.
+Anschließend die Home-Assistant-Seite im Browser vollständig neu laden, damit
+auch eine schon geöffnete Ansicht den neuen Dashboard-Code verwendet. Der
+Dialog erläutert diesen Schritt; bei einem Fehler bleibt die Reparatur offen.
+Bei älteren, bereits aktivierten Dashboardständen erscheint dieser Hinweis
+einmalig auch zum erstmaligen Abgleich des Browserstands. Ein abgelehnter
+Hinweis gilt nur für die jeweilige Version; spätere Updates können wieder gemeldet werden.
 
 ## Wichtige Entitäten
 
@@ -214,14 +288,18 @@ schafft eine Reserve und kann dabei helfen, den Akku im Alltag zu schonen.
 
 ### Regelmäßige Zellkalibrierung
 
-Ist Max. SOC kleiner als 100 %, erlaubt die Integration alle sieben Tage eine
-vollständige Ladung zur Zellkalibrierung. Die eingestellte Grenze bleibt dabei
+Ist Max. SOC kleiner als 100 %, wird die Zellkalibrierung am dritten
+Kalendertag nach der letzten vollständigen Ladung fällig, ab Tagesbeginn
+in der Home-Assistant-Zeitzone. Bereits der erste reguläre Ladezyklus an
+diesem Tag verwendet das Ziel 100 %. Die eingestellte Grenze bleibt dabei
 unverändert; nur für diesen Kalibrierungsvorgang darf der Speicher 100 %
 erreichen. Die Funktion startet keine zusätzliche Netzladung, sondern nutzt
 die nächste reguläre Lademöglichkeit.
 
 Die Diagnose-Entitäten **Zellkalibrierung aktiv** und **Nächste
-Zellkalibrierung** zeigen den aktuellen Zustand und den nächsten Termin.
+Zellkalibrierung** zeigen den aktuellen Zustand und das nächste Datum ohne
+Uhrzeit. Beispiel: Volladung am 12. September → nächste Fälligkeit am
+15. September, unabhängig von der Uhrzeit der letzten Volladung.
 
 ## Ladefunktionen
 
@@ -248,10 +326,6 @@ Die zeitgesteuerte Netzladung lädt den Speicher in einem festgelegten
 Zeitfenster aus dem Netz. Sie eignet sich beispielsweise für einen günstigen
 Nachttarif oder zur Vorbereitung auf einen erwarteten hohen Verbrauch.
 
-![Dashboard für die zeitgesteuerte Netzladung](docs/images/dashboard/netzladen.png)
-
-*Zeitfenster, Startschwelle und aktive Monate der Netzladung.*
-
 Benötigte Einstellungen:
 
 - **Netzladung aktiv**
@@ -274,10 +348,6 @@ die Netzladung beendet und der Speicher nutzt die Sonnenenergie.
 Das netzdienliche Laden verschiebt die Aufnahme von PV-Überschuss in ein
 späteres Zeitfenster. Dadurch bleibt morgens mehr freie Speicherkapazität für
 die ertragreiche Mittagszeit und Einspeisespitzen können reduziert werden.
-
-![Dashboard für das netzdienliche Laden](docs/images/dashboard/netzdienliches_laden.png)
-
-*Ladepause, PV-Prognose und aktive Monate des netzdienlichen Ladens.*
 
 Typische Einstellungen sind beispielsweise die Monate Mai bis August und eine
 Ladepause am Vormittag. Außerhalb der ausgewählten Monate und Zeiten arbeitet
@@ -313,10 +383,6 @@ vorhandenen Strompreis-Sensor. Die Integration selbst ruft keine Strompreise
 von einem Anbieter ab. Geeignet sind beispielsweise Sensoren von Tibber,
 Nordpool, EPEX Spot, ENTSO-E oder aWATTar sowie entsprechend aufgebaute
 Template-Sensoren.
-
-![Dashboard für das preisoptimierte Laden](docs/images/dashboard/preisoptimiertes_laden.png)
-
-*Strategie, Preisgrenzen, Status und Planung des preisoptimierten Ladens.*
 
 #### Einrichtung
 
@@ -383,13 +449,20 @@ dürfen sich in denselben Monaten nicht überschneiden. Die Integration prüft
 dies automatisch.
 
 - Bei einer unzulässigen Monatsauswahl wird die Änderung abgelehnt.
-- Bei einer unzulässigen Änderung von Start oder Ende wird die geänderte Zeit
-  geleert und Home Assistant zeigt eine Benachrichtigung an.
+- Bei einer unzulässigen Änderung einer einzelnen Start- oder Ende-Entität
+  wird die geänderte Zeit geleert und Home Assistant zeigt eine
+  Benachrichtigung an.
+- Das Dashboard übernimmt Start und Ende gemeinsam. Die Integration prüft
+  das fertige Ziel-Fenster; bei einer Überschneidung leert sie beide Grenzen
+  und zeigt ebenfalls eine Benachrichtigung an. Geleerte Zeitwerte werden
+  über die nativen Zeit-Entitäten in Home Assistant neu gesetzt; das
+  Dashboard sperrt die Bedienung bei unbekannten Werten.
 
 Zeitlich identische Fenster sind zulässig, wenn sie ausschließlich in
-verschiedenen Monaten aktiv sind. Für Automationen können Start und Ende mit
-den Aktionen `sax_power.set_timed_charge_window` und
-`sax_power.set_grid_serving_window` gemeinsam gesetzt werden.
+verschiedenen Monaten aktiv sind. Das Dashboard verwendet die vorhandenen
+Aktionen `sax_power.set_timed_charge_window` und
+`sax_power.set_grid_serving_window`. Auch Automationen können damit Start und
+Ende gemeinsam setzen, ohne einen Zwischenzustand aus neuer und alter Grenze.
 
 ## Tarifmodell für die Wirtschaftlichkeit
 
@@ -441,7 +514,7 @@ Formate lassen sich nicht ineinander überführen. Für das preisoptimierte
 Laden bleibt der Sensor unabhängig vom Tarifmodell die Quelle; für die
 Wirtschaftlichkeit ist er es nur beim Tarifmodell **Dynamisch**.
 
-Der hinterlegte Tarifplan ist im Dashboard-Tab **Ersparnis**
+Der hinterlegte Tarifplan ist im Dashboard-Tab **Amortisation**
 sichtbar: eine Tabelle aus Beginn, Ende und Arbeitspreis, sortiert nach
 Beginn, mit dem Grundpreis als letzter Zeile. Die gerade geltende Zeile ist
 mit **jetzt** markiert, darunter steht der nächste Preiswechsel. Damit lässt
@@ -566,8 +639,8 @@ Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
 0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
 zugeordnet, der bestehende Gesamtzähler **Geladene Energie (gesamt)** bleibt
 davon unberührt. Beide Herkunftssensoren führen diesen Startzeitpunkt als
-Attribut `origin_accounting_started_at` mit; im Dashboard steht er als Zeile
-**Beginn der Herkunftszählung**.
+Attribut `origin_accounting_started_at` mit; es lässt sich bei der jeweiligen
+Entity in Home Assistant einsehen.
 
 Dieser Zeitpunkt ist wichtig, sobald daneben eine
 [Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz) läuft: Sie beginnt
@@ -575,9 +648,8 @@ erst mit dem ersten vollständig gespeicherten Tarif und damit in aller Regel
 später als die Herkunftszählung. **Die Zähler der beiden Abschnitte sind
 deshalb nicht gegeneinander verrechenbar** - 2,44 kWh geladene PV-Energie
 neben 0,0084 EUR PV-Opportunitätskosten ist kein Widerspruch, wenn die
-Bilanz von diesen 2,44 kWh nur die letzten 0,112 kWh erlebt hat. Vergleichbar
-sind die Beträge ausschließlich mit den Zeilen **Bewertete Ladung**/
-**Bewertete Entladung** derselben Karte.
+Bilanz von diesen 2,44 kWh nur die letzten 0,112 kWh erlebt hat. Vergleiche
+benötigen dieselben Zeiträume und die in diesen Zeiträumen bewerteten Mengen.
 
 ## Wirtschaftlichkeitsbilanz
 
@@ -634,7 +706,7 @@ negative Preise oder spätere Kosten ändern diesen Zeitpunkt nicht.
 
 ## Ersparnisübersicht
 
-Der fünfte Tab **Ersparnis** fasst das **Nettoergebnis** bewusst kompakt
+Der fünfte Tab **Amortisation** fasst das **Nettoergebnis** bewusst kompakt
 zusammen. Grundlage sind vermiedene Netzbezugskosten abzüglich
 Netzladekosten und entgangener Einspeisevergütung. Spätere Kosten reduzieren
 den Wert; Mehrkosten werden negativ angezeigt. Ein echtes Ergebnis von 0
@@ -657,16 +729,16 @@ Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
 laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus
 Home Assistants Recorder-Langzeitstatistik, nicht aus rollierenden
 24-/7-/30-/365-Stunden-Fenstern. Fehlt für einen Zeitraum noch eine Statistik
-oder ist die Entity vom Recorder ausgeschlossen, bleibt der Core-Zustand
-`unknown`/`unavailable`; die Integration ersetzt fehlende Daten nicht durch
-0 EUR.
+oder ist die Entity vom Recorder ausgeschlossen, bleibt die Auswertung leer
+beziehungsweise nicht verfügbar. Die Integration ersetzt fehlende Daten nicht
+durch 0 EUR.
 
 Der aktuelle Zustand des fortlaufenden Sensors `economics_net_savings` und
 der sichtbare **Bilanzbeginn** stehen im Amortisationsblock direkt unter dem
-Restbetrag. Der Gesamtwert ist keine Recorder-Differenz. Die
+Vorlaufbetrag. Der Gesamtwert ist keine Recorder-Differenz. Die
 Kalenderwerte umfassen die Zuwächse seit Beginn der Recorder-Aufzeichnung und
 können deshalb bei einem Zeitraum über einen manuellen Bilanzneustart durch
-den expliziten `last_reset` positive Zuwächse des vorherigen und des aktuellen
+den expliziten `last_reset` signierte Änderungen des vorherigen und des aktuellen
 Bilanzabschnitts zusammenfassen. Sie dürfen dadurch vor dem sichtbaren
 Bilanzbeginn beginnen, rekonstruieren aber keine Daten vor dem Recorder-Start.
 Ein optional eingetragener, bereits vor dem Bilanzbeginn erwirtschafteter
@@ -697,10 +769,9 @@ Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
 **Restbetrag bis Amortisation**. Direkt danach folgt der optionale
 Vorlauf-Ertrag als **Bereits vor Bilanzbeginn berücksichtigt** mit der Einheit
 **€** und exakt zwei Nachkommastellen, anschließend **Netto-Ersparnis** und
-**Bilanzbeginn**. Alle Währungsangaben im Ersparnis-Tab erscheinen mit zwei
+**Bilanzbeginn**. Alle Währungsangaben im Amortisations-Tab erscheinen mit zwei
 Nachkommastellen; intern und im Recorder bleibt die höhere Rechengenauigkeit
-erhalten. Eine separate sichtbare Überschrift **Amortisation** besitzt dieser
-Block nicht.
+erhalten. Die Karte trägt die Überschrift **Amortisation**.
 
 Ohne Investitionskosten verweist der Block auf **Geräte & Dienste → SAX Power
 Home → Konfigurieren → Wirtschaftlichkeit**. Die Anzeige reagiert direkt auf
@@ -712,28 +783,25 @@ voraussichtliche Datum, der 30-Tage-Durchschnitt, die Jahreshochrechnung und
 die zugehörigen Prognosehinweise entfallen.
 ### Freier Zeitraum
 
-Unter den festen Werten lässt sich ein beliebiger Datumsbereich auswählen -
-zum Beispiel die letzten drei, sechs oder zwölf Monate. Datumswähler,
-Netto-Ergebnis und Balkendiagramm sind über den eigenen Schlüssel
-`energy_sax_power_savings` miteinander verbunden und beeinflussen dadurch
-keine Energy-Karten in anderen Ansichten. Die Vergleichsfunktion bleibt
-deaktiviert, solange der Tab keinen gesondert beschrifteten Vergleichswert
-ausgibt. Der Block beginnt direkt mit dem Datumswähler und besitzt keine
-separate sichtbare Überschrift **Freier Zeitraum**.
+Unter **Freier Zeitraum** lässt sich ein beliebiger Datumsbereich auswählen,
+zum Beispiel die letzten drei, sechs oder zwölf Monate. Anfangs- und Enddatum
+werden mit **Zeitraum anzeigen** gemeinsam bestätigt und umfassen jeweils
+den ganzen Tag in der HA-Zeitzone. Diese Auswahl steuert Netto-Ergebnis und Balkendiagramm;
+andere Home-Assistant-Ansichten werden dadurch nicht verändert.
 
 Auch diese Auswertung verwendet ausschließlich die Recorder-Langzeitstatistik
 von `economics_net_savings`: Der Einzelwert ist dessen Änderung im
 gewählten Zeitraum, das Diagramm enthält keine zusätzlichen Kosten- oder
-Ertragsreihen. Home Assistant wählt abhängig von der Zeitspanne selbst die
-passende Stunden-, Tages- oder Monatsauflösung. Der neue Sensor trennt diese
-Historie vom technischen Roh-Cashflow; eine zweite Berechnung im Dashboard
+Ertragsreihen. Der Recorder-Adapter wählt für die HA-lokalen Kalendertage nach
+der nativen HA-Heuristik Stunden-, Tages- oder Monatsauflösung. Der Sensor
+trennt diese Historie vom technischen Roh-Cashflow; eine zweite Berechnung im Dashboard
 gibt es nicht.
 
 Eine Auswahl vor dem sichtbaren Bilanzbeginn erfindet keine rückwirkenden
 Werte. Existiert dort Recorder-Historie aus einem früheren Bilanzabschnitt,
 kann sie jedoch angezeigt werden; schneidet die Auswahl den manuellen
-Neustart, kann die dargestellte Änderung positive Zuwächse aus beiden
-Bilanzabschnitten enthalten. Fehlt Recorder-Historie oder ist die
+Neustart, kann das Ergebnis signierte Änderungen aus beiden Bilanzabschnitten
+enthalten. Fehlt Recorder-Historie oder ist die
 Ergebnis-Entity vom Recorder ausgeschlossen, bleiben Wert und Diagramm
 unbekannt beziehungsweise leer; ein mathematisches Ergebnis von 0 bleibt
 davon unterscheidbar.
@@ -883,8 +951,6 @@ das Feld `device_id` dem gewünschten SAX-Power-Gerät zugeordnet.
 | `sax_power.set_grid_serving_window` | Start und Ende des netzdienlichen Ladens gemeinsam setzen |
 | `sax_power.refresh_price_plan` | Ladeplan nach aktualisierten Preisdaten sofort neu berechnen |
 | `sax_power.set_price_charge_enabled` | Preisoptimiertes Laden per Automation schalten |
-| `sax_power.create_dashboard` | Mitgeliefertes Dashboard nachträglich anlegen |
-| `sax_power.reinstall_dashboard` | Dashboard auf den Auslieferungszustand zurücksetzen |
 
 Die für eine Aktion verfügbaren Felder und Beschreibungen zeigt Home Assistant
 direkt im Aktionseditor an. Für den normalen Betrieb werden die manuellen

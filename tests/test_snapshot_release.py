@@ -153,6 +153,8 @@ def test_privileged_workflow_never_executes_pull_request_code() -> None:
     assert "python -I scripts/release_metadata.py" in workflow
     assert "python source" not in workflow
     assert "source/scripts" not in workflow
+    assert "npm " not in workflow
+    assert "setup-node" not in workflow
     assert workflow.count("persist-credentials: false") == 2
 
 

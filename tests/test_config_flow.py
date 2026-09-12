@@ -30,6 +30,9 @@ from custom_components.sax_power.const import (
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
+    CONF_VUE_DASHBOARD_DISMISSED_VERSION,
+    CONF_VUE_DASHBOARD_ENABLED,
+    CONF_VUE_DASHBOARD_VERSION,
     DOMAIN,
     ECONOMICS_TOU_WINDOW_KEYS,
     PRICE_UNIT_CT_KWH,
@@ -112,8 +115,8 @@ async def test_user_flow_success(hass) -> None:
     abgeschickt, gelten die Hard-Defaults aus const.py (deaktiviert,
     Zeitfenster 00:00-00:05), siehe anforderung.yaml REQ-TIMED-SOC-CHARGE.
     Danach folgt der dritte, optionale Schritt "dashboard" (siehe
-    anforderung.yaml REQ-BUNDLED-DASHBOARD) - unverändert abgeschickt bleibt
-    dessen Default (Dashboard anlegen) aktiv."""
+    anforderung.yaml REQ-VUE-DASHBOARD) - unverändert abgeschickt bleibt
+    das Dashboard deaktiviert."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -163,7 +166,8 @@ async def test_user_flow_success(hass) -> None:
         assert result5["data"]["timed_charge_enabled"] is False
         assert result5["data"]["timed_charge_start"] == "00:00:00"
         assert result5["data"]["timed_charge_end"] == "00:05:00"
-        assert result5["data"]["create_dashboard"] is True
+        assert "create_dashboard" not in result5["data"]
+        assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
 
 
 async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
@@ -217,7 +221,7 @@ async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
 async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
     """Der dritte Schritt ("dashboard") lässt sich abwählen - der Wert landet
     dann als False im Config Entry, siehe anforderung.yaml
-    REQ-BUNDLED-DASHBOARD."""
+    REQ-VUE-DASHBOARD."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -243,14 +247,151 @@ async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
         )
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
         result4 = await hass.config_entries.flow.async_configure(
-            result3["flow_id"], {"create_dashboard": False}
+            result3["flow_id"], {CONF_VUE_DASHBOARD_ENABLED: False}
         )
         assert result4["type"] == FlowResultType.FORM
         assert result4["step_id"] == "finish"
 
         result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
         assert result5["type"] == FlowResultType.CREATE_ENTRY
-        assert result5["data"]["create_dashboard"] is False
+        assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
+
+
+@pytest.mark.parametrize("vue_enabled", [False, True])
+async def test_dashboard_choice_is_persisted(
+    hass: HomeAssistant, vue_enabled: bool
+) -> None:
+    """REQ-VUE-DASHBOARD: Die einzige Dashboard-Auswahl wird dauerhaft gespeichert."""
+    with (
+        patch("custom_components.sax_power.config_flow._async_validate_connection"),
+        patch(
+            "custom_components.sax_power.config_flow._async_read_finish_summary",
+            return_value={"sunspec_available": False},
+        ),
+        patch("custom_components.sax_power.async_setup_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert "create_dashboard" not in result["data"]
+    assert result["data"][CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
+    assert result["data"][CONF_VUE_DASHBOARD_VERSION] == ""
+
+
+@pytest.mark.parametrize(
+    ("initial_data", "initial_options", "submitted", "expected"),
+    [
+        ({}, {}, {}, False),
+        ({CONF_VUE_DASHBOARD_ENABLED: True}, {}, {}, True),
+        ({}, {CONF_VUE_DASHBOARD_ENABLED: True}, {}, True),
+        ({}, {}, {CONF_VUE_DASHBOARD_ENABLED: True}, True),
+        (
+            {CONF_VUE_DASHBOARD_ENABLED: True},
+            {},
+            {CONF_VUE_DASHBOARD_ENABLED: False},
+            False,
+        ),
+    ],
+)
+async def test_vue_options_preserve_or_override_onboarding_choice(
+    hass: HomeAssistant,
+    initial_data: dict,
+    initial_options: dict,
+    submitted: dict,
+    expected: bool,
+) -> None:
+    """REQ-VUE-DASHBOARD: Abwahl bleibt dauerhaft vor dem Setup-Opt-in wirksam."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**VALID_INPUT, **initial_data},
+        options=initial_options,
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    suggested = {
+        key.schema: key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if isinstance(key.description, dict) and "suggested_value" in key.description
+    }
+    assert suggested[CONF_VUE_DASHBOARD_ENABLED] is initial_options.get(
+        CONF_VUE_DASHBOARD_ENABLED, initial_data.get(CONF_VUE_DASHBOARD_ENABLED, False)
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submitted
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is expected
+
+
+@pytest.mark.parametrize("tariff_type", [TariffType.DISABLED, TariffType.FIXED])
+@pytest.mark.parametrize("existing_version", [None, "last-confirmed-bundle"])
+async def test_vue_first_activation_marker_preserves_reactivation_history(
+    hass: HomeAssistant, tariff_type: TariffType, existing_version: str | None
+) -> None:
+    """REQ-VUE-DASHBOARD-REPAIR: Nur das erste Aktivieren setzt eine neue Baseline."""
+    data = dict(VALID_INPUT)
+    if existing_version is not None:
+        data[CONF_VUE_DASHBOARD_VERSION] = existing_version
+        data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] = "last-ignored-bundle"
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=data, options={CONF_VUE_DASHBOARD_ENABLED: False}
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_VUE_DASHBOARD_ENABLED: True,
+            CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value,
+        },
+    )
+    if tariff_type is TariffType.FIXED:
+        assert result["type"] == FlowResultType.FORM
+        assert entry.data == data
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3,
+                CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+            },
+        )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is True
+    assert entry.data[CONF_VUE_DASHBOARD_VERSION] == (existing_version or "")
+    if existing_version is not None:
+        assert entry.data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] == "last-ignored-bundle"
+
+
+async def test_vue_legacy_enabled_options_do_not_invent_confirmed_baseline(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-VUE-DASHBOARD-REPAIR: Alte Snapshots behalten ihren Reload-Hinweis."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options={CONF_VUE_DASHBOARD_ENABLED: True},
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_VUE_DASHBOARD_VERSION not in entry.data
 
 
 async def test_finish_step_shows_summary_placeholders(hass) -> None:
@@ -657,6 +798,39 @@ async def test_reconfigure_flow_updates_host(
         assert result2["reason"] == "reconfigure_successful"
         assert entry.data["host"] == "192.168.1.99"
         assert entry.unique_id == expected_unique_id
+
+
+@pytest.mark.parametrize("vue_enabled", [False, True])
+async def test_reconfigure_preserves_vue_onboarding_choice(
+    hass: HomeAssistant, vue_enabled: bool
+) -> None:
+    """REQ-VUE-DASHBOARD: Neue Verbindungsdaten ändern keine Dashboard-Auswahl."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **VALID_INPUT,
+            CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
+            CONF_VUE_DASHBOARD_VERSION: "confirmed-hash",
+            CONF_VUE_DASHBOARD_DISMISSED_VERSION: "ignored-hash",
+        },
+        unique_id="192.168.1.50:502",
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.sax_power.config_flow._async_validate_connection"),
+        patch.object(hass.config_entries, "async_reload", return_value=True),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**VALID_INPUT, "host": "192.168.1.99"}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["host"] == "192.168.1.99"
+    assert entry.data[CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
+    assert entry.data[CONF_VUE_DASHBOARD_VERSION] == "confirmed-hash"
+    assert entry.data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] == "ignored-hash"
 
 
 async def test_reconfigure_flow_rejects_another_entries_target(hass) -> None:

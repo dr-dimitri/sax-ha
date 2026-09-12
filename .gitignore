@@ -1,6 +1,10 @@
 # macOS
 .DS_Store
 
+# Vue dashboard dependencies and local coverage
+frontend/node_modules/
+frontend/coverage/
+
 # Home Assistant local dev/test data (see config/configuration.yaml)
 config/.storage/
 config/.cloud/

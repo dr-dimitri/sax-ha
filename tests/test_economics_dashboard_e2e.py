@@ -1,6 +1,6 @@
 """End-to-End-Test der Wirtschaftlichkeits-Kette bis zum Ersparnis-Tab.
 
-Tarifauflösung -> Herkunft -> Geldsensoren -> Dashboard-Entityauflösung,
+Tarifauflösung -> Herkunft -> Geldsensoren -> authentifizierte Dashboard-Sitzung,
 über je einen PV-Lade-, Netzlade- und Entladeabschnitt hinweg.
 
 Bewusst auf Coordinator-/Dashboard-Ebene statt über einen echten Modbus-
@@ -12,11 +12,14 @@ Registerzugriffe.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers import template
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -31,14 +34,14 @@ from custom_components.sax_power.const import (
     economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
-from custom_components.sax_power.dashboard import async_build_dashboard_config
+from custom_components.sax_power.dashboard_api import async_register_dashboard_api
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
 
 ENTRY_ID = "e2e_entry"
 
 
-def _make_coordinator(hass) -> SaxPowerCoordinator:
+def _make_coordinator(hass: HomeAssistant) -> SaxPowerCoordinator:
     client = MagicMock()
     client.connected = True
     client.connect = AsyncMock(return_value=True)
@@ -52,16 +55,55 @@ def _make_coordinator(hass) -> SaxPowerCoordinator:
     )
 
 
-def _register(hass, entity_domain: str, suffix: str) -> str:
+@pytest.fixture
+def dashboard_entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID, data={})
+    entry.add_to_hass(hass)
+    async_register_dashboard_api(hass)
+    return entry
+
+
+def _register(hass: HomeAssistant, entity_domain: str, suffix: str) -> str:
     entry = er.async_get(hass).async_get_or_create(
-        entity_domain, DOMAIN, f"{ENTRY_ID}_{suffix}"
+        entity_domain,
+        DOMAIN,
+        f"{ENTRY_ID}_{suffix}",
+        config_entry=hass.config_entries.async_get_entry(ENTRY_ID),
+        suggested_object_id=f"store_{suffix}",
     )
     return entry.entity_id
 
 
+async def _dashboard_states(
+    hass: HomeAssistant, hass_ws_client: WebSocketGenerator, entry: MockConfigEntry
+) -> dict[str, Any]:
+    client = await hass_ws_client(hass)
+    try:
+        await client.send_json(
+            {
+                "id": 1,
+                "type": "sax_power/dashboard/subscribe",
+                "entry_id": entry.entry_id,
+                "language": "de",
+            }
+        )
+        assert (await client.receive_json())["success"]
+        metadata = (await client.receive_json())["event"]["entities"]
+        await client.send_json({"id": 2, "type": "get_states"})
+        response = await client.receive_json()
+        assert response["success"]
+        states = {item["entity_id"]: item for item in response["result"]}
+        return {item["key"]: states[item["entity_id"]] for item in metadata}
+    finally:
+        await client.close()
+
+
 async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
-    hass,
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    dashboard_entry: MockConfigEntry,
 ) -> None:
+    """REQ-VUE-SAVINGS: Geldwerte erreichen die authentifizierte Dashboard-Sitzung."""
     coordinator = _make_coordinator(hass)
     coordinator.options = {
         CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
@@ -158,45 +200,44 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
         pytest.approx(0.30 - 0.30 - 0.08)
     )
 
-    # -- Dashboard-Entityauflösung (REQ-ECONOMICS-SAVINGS-DASHBOARD) ------
-    status_id = _register(hass, "sensor", "economics_status")
-    import_price_id = _register(hass, "sensor", "economics_current_import_price")
-    result_id = _register(hass, "sensor", "economics_net_savings")
-    roi_id = _register(hass, "sensor", "economics_roi")
-    progress_id = _register(hass, "sensor", "economics_amortization_progress")
-    _register(hass, "binary_sensor", "economics_investment_configured")
+    coordinator.data = discharge_tick
+    keys = (
+        "economics_status",
+        "economics_current_import_price",
+        "economics_net_savings",
+        "economics_roi",
+        "economics_amortization_progress",
+    )
+    for key in keys:
+        entity_id = _register(hass, "sensor", key)
+        description = next(item for item in SENSOR_DESCRIPTIONS if item.key == key)
+        attributes = (
+            description.attributes_fn(coordinator) if description.attributes_fn else {}
+        )
+        hass.states.async_set(entity_id, str(discharge_tick[key]), attributes)
+    investment_id = _register(hass, "binary_sensor", "economics_investment_configured")
+    hass.states.async_set(investment_id, "on")
 
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
-    savings_view = next(view for view in config["views"] if view["path"] == "ersparnis")
-
-    def _entity_ids(cards):
-        for card in cards:
-            if card["type"] in ("grid", "vertical-stack"):
-                yield from _entity_ids(card["cards"])
-            elif card["type"] == "conditional":
-                yield from _entity_ids([card["card"]])
-            elif card["type"] == "entities":
-                for row in card["entities"]:
-                    yield row["entity"] if isinstance(row, dict) else row
-            elif "entity" in card:
-                yield card["entity"]
-
-    resolved = set(_entity_ids(savings_view["cards"]))
-    for entity_id in (result_id, roi_id, progress_id):
-        assert entity_id in resolved
-    serialized = str(savings_view)
-    assert status_id in serialized
-    assert import_price_id in serialized
+    states = await _dashboard_states(hass, hass_ws_client, dashboard_entry)
+    assert set(states) == {*keys, "economics_investment_configured"}
+    assert states["economics_status"]["state"] == "active"
+    assert float(states["economics_current_import_price"]["state"]) == 0.30
+    assert float(states["economics_net_savings"]["state"]) == pytest.approx(-0.08)
+    assert float(states["economics_roi"]["state"]) == pytest.approx(-0.01)
+    assert float(states["economics_amortization_progress"]["state"]) == 0.0
+    assert states["economics_investment_configured"]["state"] == "on"
 
 
-async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
-    """Ganze Kette des Tarifplans (REQ-ECONOMICS-SAVINGS-DASHBOARD): Options ->
-    Coordinator-Attribute -> Sensor-Entity -> gerenderte Dashboard-Karte.
+async def test_tariff_plan_reaches_the_dashboard_session(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    dashboard_entry: MockConfigEntry,
+) -> None:
+    """REQ-VUE-SAVINGS: Options -> Sensorattribute -> Dashboard-Metadaten/States.
 
-    Jedes Glied für sich ist bereits abgedeckt; hier geht es darum, dass
-    die Attributnamen an allen drei Stellen dieselben sind - ein
-    umbenanntes Attribut fiele sonst erst im Dashboard des Anwenders auf,
-    als leere Karte ohne jede Fehlermeldung."""
+    Das Frontend rendert den übertragenen Tarifplan; dieser Test sichert den
+    tatsächlichen HA-Vertrag mit Preisen und Zeitfenster über Mitternacht ab.
+    """
     await hass.config.async_set_time_zone("Europe/Berlin")
     coordinator = _make_coordinator(hass)
     coordinator.options = {
@@ -242,16 +283,21 @@ async def test_tariff_plan_reaches_the_dashboard_card(hass) -> None:
     price_entity_id = _register(hass, "sensor", "economics_current_import_price")
     hass.states.async_set(price_entity_id, str(data[description.key]), attributes)
 
-    config = await async_build_dashboard_config(hass, ENTRY_ID)
-    savings_view = next(view for view in config["views"] if view["path"] == "ersparnis")
-    card = next(
-        entry
-        for entry in savings_view["cards"]
-        if entry["type"] == "markdown" and "tariff_type" in entry.get("content", "")
-    )
-    rendered = template.Template(card["content"], hass).async_render(parse_result=False)
-
-    assert "| **jetzt** | 22:00 | 06:00 | 0.2100 EUR/kWh |" in rendered
-    assert "0.3000 EUR/kWh (Grundpreis)" in rendered
-    assert "**Einspeisevergütung:** 0.0800 EUR/kWh" in rendered
-    assert "Nächster Preiswechsel: 06:00 Uhr" in rendered
+    states = await _dashboard_states(hass, hass_ws_client, dashboard_entry)
+    price = states["economics_current_import_price"]
+    assert price["entity_id"] == price_entity_id
+    assert float(price["state"]) == 0.21
+    assert price["attributes"] == {
+        "tariff_type": "time_of_use",
+        "quote_source": "time_of_use_window",
+        "unavailable_reason": None,
+        "active_window": {
+            "start": "22:00:00",
+            "end": "06:00:00",
+            "price_eur_kwh": 0.21,
+        },
+        "next_price_change_at": "2026-06-02T06:00:00+02:00",
+        "base_price_eur_kwh": 0.30,
+        "feed_in_price_eur_kwh": 0.08,
+        "windows": [{"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}],
+    }

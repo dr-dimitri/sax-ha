@@ -8,11 +8,13 @@ import pytest
 import voluptuous as vol
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import (
     PLATFORMS,
     _async_register_services,
+    _async_remove_legacy_dashboard_metadata,
     _async_remove_stale_entities,
     async_setup_entry,
     async_unload_entry,
@@ -26,6 +28,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
+    CONF_VUE_DASHBOARD_ENABLED,
     DATA_COORDINATOR,
     DOMAIN,
     MAX_SETPOINT_POWER,
@@ -43,6 +46,86 @@ VALID_INPUT = {
     "slave_id_extended": 100,
     "scan_interval": 10,
 }
+
+
+@pytest.mark.parametrize("vue_enabled", [False, True])
+async def test_legacy_dashboard_cleanup_preserves_saved_dashboards_and_opt_in(
+    hass, hass_storage, vue_enabled: bool
+) -> None:
+    """REQ-VUE-DASHBOARD: Nur entfallene Metadaten werden beim Upgrade entfernt."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            **VALID_INPUT,
+            "create_dashboard": True,
+            "dashboard_update_dismissed": True,
+            CONF_VUE_DASHBOARD_ENABLED: True,
+        },
+        options={
+            CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
+            CONF_PRICE_SENSOR: "sensor.preis",
+            "create_dashboard": False,
+        },
+    )
+    entry.add_to_hass(hass)
+    coordinator = MagicMock()
+    hass.data[DOMAIN] = {entry.entry_id: {DATA_COORDINATOR: coordinator}}
+    saved_dashboard = {
+        "version": 1,
+        "data": {"config": {"views": [{"title": "Eigene Ansicht", "cards": []}]}},
+    }
+    hass_storage["lovelace.sax_power"] = saved_dashboard
+    issue_id = f"dashboard_outdated_{entry.entry_id}"
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="dashboard_outdated",
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "unrelated_issue",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="unrelated_issue",
+    )
+    registry = ir.async_get(hass)
+    assert registry.async_get_issue(DOMAIN, issue_id) is not None
+
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_update_entry",
+            wraps=hass.config_entries.async_update_entry,
+        ) as update,
+        patch("homeassistant.core.ServiceRegistry.async_call") as service_call,
+    ):
+        _async_remove_legacy_dashboard_metadata(hass, entry)
+        _async_remove_legacy_dashboard_metadata(hass, entry)
+        await hass.async_block_till_done()
+    update.assert_called_once()
+    service_call.assert_not_called()
+    assert not coordinator.mock_calls
+    assert entry.data == {**VALID_INPUT, CONF_VUE_DASHBOARD_ENABLED: True}
+    assert entry.options == {
+        CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
+        CONF_PRICE_SENSOR: "sensor.preis",
+    }
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+    assert registry.async_get_issue(DOMAIN, "unrelated_issue") is not None
+    assert hass_storage["lovelace.sax_power"] == saved_dashboard
+
+
+async def test_removed_dashboard_services_are_not_registered(hass) -> None:
+    """Die entfernten Anlage-/Neuinstallationsaktionen werden nicht mehr angeboten."""
+    _async_register_services(hass)
+    assert not hass.services.has_service(DOMAIN, "create_dashboard")
+    assert not hass.services.has_service(DOMAIN, "reinstall_dashboard")
+    assert hass.services.has_service(DOMAIN, SERVICE_START_GRID_CHARGE)
 
 
 @pytest.mark.parametrize(
@@ -324,10 +407,6 @@ async def test_late_setup_failure_rolls_back_platforms_and_listeners(hass) -> No
         patch(
             "custom_components.sax_power.SaxPowerCoordinator",
             return_value=coordinator,
-        ),
-        patch(
-            "custom_components.sax_power.async_check_dashboard_up_to_date",
-            new=AsyncMock(),
         ),
         pytest.raises(RuntimeError, match="Bootstrap fehlgeschlagen"),
     ):

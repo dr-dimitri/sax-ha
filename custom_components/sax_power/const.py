@@ -20,36 +20,14 @@ CONF_TIMED_CHARGE_START = "timed_charge_start"
 CONF_TIMED_CHARGE_END = "timed_charge_end"
 CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
 
-# Dritter, optionaler Schritt der Ersteinrichtung (siehe async_step_dashboard
-# in config_flow.py sowie dashboard.py): legt bei Zustimmung einmalig das
-# mitgelieferte Lovelace-Dashboard an. __init__.async_setup_entry setzt
-# diesen Wert nach dem (Versuch des) Anlegens wieder auf False zurück -
-# absichtlich VOR der Registrierung des Options-Update-Listeners, damit
-# dieser interne Reset nicht selbst einen ungewollten Reload der gesamten
-# Integration auslöst. Ohne den Reset würde jeder spätere Reload/Neustart
-# versuchen, das Dashboard erneut anzulegen - dashboard.py ist zwar
-# idempotent (legt es nur an, falls es nicht schon existiert), ein vom
-# Anwender bewusst gelöschtes Dashboard würde sonst aber ungewollt wieder
-# auftauchen. Siehe anforderung.yaml REQ-BUNDLED-DASHBOARD.
-CONF_CREATE_DASHBOARD = "create_dashboard"
-DEFAULT_CREATE_DASHBOARD = True
-
-# Genau wegen dieses einmaligen Flags bekommt ein bestehendes Dashboard die
-# Tabs einer neueren Version nie zu sehen: Nach der Ersteinrichtung wird
-# das Dashboard nie wieder gebaut, und async_create_dashboard fasst ein
-# vorhandenes ohne force nicht an. Ohne Hinweis merkt der Anwender davon
-# nichts - der Tab fehlt einfach, und der einzige Ausweg (der Dienst
-# sax_power.reinstall_dashboard) ist nur dem bekannt, der die
-# Dokumentation gelesen hat (Anwenderbericht zu #138). Das Issue meldet
-# deshalb ausschließlich ein VORHANDENES, aber unvollständiges Dashboard:
-# Ein bewusst gelöschtes darf nicht durch eine Reparaturaufforderung
-# zurückgeholt werden - genau das verhindert der Reset oben.
-ISSUE_DASHBOARD_OUTDATED = "dashboard_outdated"
-
-# Wer den Hinweis einmal ablehnt, soll ihn nicht bei jedem Neustart erneut
-# sehen: Ein umgebautes Dashboard, dem bewusst Tabs fehlen, ist ein
-# legitimer Zustand.
-CONF_DASHBOARD_UPDATE_DISMISSED = "dashboard_update_dismissed"
+# REQ-VUE-DASHBOARD: dauerhaftes, optionales Dashboard.
+CONF_VUE_DASHBOARD_ENABLED = "vue_dashboard_enabled"
+DEFAULT_VUE_DASHBOARD_ENABLED = False
+# REQ-VUE-DASHBOARD-REPAIR: Ein leerer Stand markiert eine neue Aktivierung;
+# fehlende Metadaten kennzeichnen bereits aktivierte ältere Snapshots.
+CONF_VUE_DASHBOARD_VERSION = "vue_dashboard_version"
+CONF_VUE_DASHBOARD_DISMISSED_VERSION = "vue_dashboard_dismissed_version"
+ISSUE_VUE_DASHBOARD_UPDATE = "vue_dashboard_update"
 
 DEFAULT_PORT = 502
 DEFAULT_SLAVE_ID_BASIC = 64
@@ -394,10 +372,10 @@ SWITCH_STATE_UNKNOWN_LABEL = UNKNOWN_LABEL
 MIN_SOC = 0
 MAX_SOC = 100
 
-# REQ-PERIODIC-FULL-CALIBRATION: Nach diesem Zeitraum ohne tatsächlich
+# REQ-PERIODIC-FULL-CALIBRATION: Ab diesem lokalen Kalendertag ohne tatsächlich
 # gemessene 100 % wird der effektive Max-SOC bis zur nächsten Volladung
 # vorübergehend angehoben.
-CELL_CALIBRATION_INTERVAL = timedelta(days=7)
+CELL_CALIBRATION_INTERVAL = timedelta(days=3)
 
 # Sollwert Leistung P (Register 41) ist ein signed 16-bit Register.
 MIN_SETPOINT_POWER = -32768
@@ -610,21 +588,6 @@ SERVICE_REFRESH_PRICE_PLAN = "refresh_price_plan"
 SERVICE_SET_PRICE_CHARGE_ENABLED = "set_price_charge_enabled"
 ATTR_ENABLED = "enabled"
 ATTR_FORCE = "force"
-
-# Legt das mitgelieferte Dashboard nachträglich an (dashboard.py) - für
-# Anwender, die es in der Ersteinrichtung abgewählt haben, es versehentlich
-# gelöscht haben, oder deren Eintrag vor Einführung dieses Features angelegt
-# wurde (siehe anforderung.yaml, REQ-BUNDLED-DASHBOARD). Idempotent: legt es
-# nur an, falls es nicht schon existiert.
-SERVICE_CREATE_DASHBOARD = "create_dashboard"
-
-# Setzt ein ggf. bereits vorhandenes Dashboard auf den Auslieferungszustand
-# zurück (dashboard.async_create_dashboard mit force=True) - z. B. nach
-# manuellen Änderungen. Ersetzt den früheren Reinstall-Button (button.py):
-# ButtonEntities auf der Geräteseite wurden vom Anwender nicht zuverlässig
-# gefunden; ein über Entwicklertools -> Aktionen aufrufbarer Service ist in
-# Home Assistant der robustere, immer sichtbare Weg dafür.
-SERVICE_REINSTALL_DASHBOARD = "reinstall_dashboard"
 
 # ==========================================================================
 # Selbstdiagnose / erweiterte Repairs (siehe anforderung.yaml,

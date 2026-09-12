@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta, tzinfo
+
+
+def calibration_due_at(
+    last_full_charge_at: datetime, interval: timedelta, time_zone: tzinfo
+) -> datetime:
+    """Begin the due local calendar day, independent of full-charge time and DST."""
+    due_date = last_full_charge_at.astimezone(time_zone).date() + interval
+    return datetime.combine(due_date, time.min, time_zone).astimezone(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +41,7 @@ def evaluate_calibration(
     state: CalibrationState,
     interval: timedelta,
     maximum_soc: int,
+    time_zone: tzinfo = UTC,
 ) -> CalibrationDecision:
     """Evaluate calibration state without Home Assistant dependencies.
 
@@ -63,7 +72,7 @@ def evaluate_calibration(
     last_full_charge_at = updated_state.last_full_charge_at
     if last_full_charge_at is None:  # pragma: no cover - type narrowing guard
         raise AssertionError("Kalibrierungs-Baseline fehlt")
-    next_calibration_at = last_full_charge_at + interval
+    next_calibration_at = calibration_due_at(last_full_charge_at, interval, time_zone)
     calibration_active = (
         configured_max_soc is not None
         and configured_max_soc < maximum_soc

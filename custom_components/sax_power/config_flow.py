@@ -28,7 +28,6 @@ from .application.economics import parse_price, parse_time
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
-    CONF_CREATE_DASHBOARD,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
@@ -49,7 +48,9 @@ from .const import (
     CONF_TIMED_CHARGE_ENABLED,
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
-    DEFAULT_CREATE_DASHBOARD,
+    CONF_VUE_DASHBOARD_DISMISSED_VERSION,
+    CONF_VUE_DASHBOARD_ENABLED,
+    CONF_VUE_DASHBOARD_VERSION,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
@@ -59,6 +60,7 @@ from .const import (
     DEFAULT_TIMED_CHARGE_ENABLED,
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
+    DEFAULT_VUE_DASHBOARD_ENABLED,
     DOMAIN,
     ECONOMICS_INVESTMENT_COST_STEP,
     ECONOMICS_OPTION_KEYS,
@@ -177,11 +179,11 @@ STEP_GRID_CHARGE_SCHEMA = vol.Schema(
 )
 
 # Dritter, optionaler Schritt der Ersteinrichtung (siehe async_step_dashboard):
-# bietet an, das mitgelieferte Lovelace-Dashboard anzulegen (dashboard.py).
+# bietet an, das Dashboard in der Seitenleiste zu aktivieren.
 STEP_DASHBOARD_SCHEMA = vol.Schema(
     {
         vol.Optional(
-            CONF_CREATE_DASHBOARD, default=DEFAULT_CREATE_DASHBOARD
+            CONF_VUE_DASHBOARD_ENABLED, default=DEFAULT_VUE_DASHBOARD_ENABLED
         ): cv.boolean,
     }
 )
@@ -406,9 +408,21 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                         if _is_mac_unique_id(reconfigure_entry.unique_id)
                         else f"{host}:{port}"
                     )
+                    updated_data = dict(user_input)
+                    for dashboard_key in (
+                        CONF_VUE_DASHBOARD_ENABLED,
+                        CONF_VUE_DASHBOARD_VERSION,
+                        CONF_VUE_DASHBOARD_DISMISSED_VERSION,
+                    ):
+                        # REQ-VUE-DASHBOARD: Das dauerhafte Setup-Opt-in
+                        # muss einen Wechsel der Verbindungsdaten überleben.
+                        if dashboard_key in reconfigure_entry.data:
+                            updated_data[dashboard_key] = reconfigure_entry.data[
+                                dashboard_key
+                            ]
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
-                        data=user_input,
+                        data=updated_data,
                         unique_id=unique_id,
                     )
                 # Ersteinrichtung: Verbindungsdaten merken und weiter zum
@@ -452,17 +466,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_dashboard(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Dritter, optionaler Schritt der Ersteinrichtung: bietet an, das
-        mitgelieferte Lovelace-Dashboard anzulegen (siehe dashboard.py).
-
-        Das Dashboard selbst kann hier noch nicht gebaut werden - dafür
-        müssen die Entities erst existieren, was erst nach Anlage des
-        Eintrags und Weiterleitung an die Plattformen der Fall ist. Dieser
-        Schritt merkt nur die Entscheidung des Anwenders vor;
-        __init__.async_setup_entry führt sie später aus. Der Eintrag selbst
-        wird erst im nächsten, abschließenden Schritt angelegt (siehe
-        async_step_finish).
-        """
+        """Merke die dauerhafte Dashboard-Auswahl für das spätere Panel-Setup vor."""
         self._async_abort_if_configured()
         if user_input is not None:
             self._dashboard_data = user_input
@@ -489,6 +493,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     **self._connection_data,
                     **self._grid_charge_data,
                     **self._dashboard_data,
+                    CONF_VUE_DASHBOARD_VERSION: "",
                 },
             )
 
@@ -535,6 +540,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
 # oft noch gar nicht. Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 STEP_OPTIONS_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_VUE_DASHBOARD_ENABLED): cv.boolean,
         vol.Optional(CONF_PRICE_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
@@ -808,6 +814,15 @@ class SaxPowerOptionsFlow(OptionsFlow):
                     if key not in ECONOMICS_OPTION_KEYS
                 }
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
+                self._base_options.setdefault(
+                    CONF_VUE_DASHBOARD_ENABLED,
+                    self.config_entry.options.get(
+                        CONF_VUE_DASHBOARD_ENABLED,
+                        self.config_entry.data.get(
+                            CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+                        ),
+                    ),
+                )
                 return await self._async_step_for_tariff(tariff_type)
 
         # Bewusst _suggested statt add_suggested_values_to_schema auf den
@@ -831,6 +846,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
         tarifspezifischen Altwerte.
         """
         if tariff_type is TariffType.DISABLED:
+            self._mark_vue_activation()
             return self.async_create_entry(title="", data=self._base_options)
         if tariff_type is TariffType.FIXED:
             return await self.async_step_economics_fixed()
@@ -942,6 +958,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
         """
         known = {str(marker) for marker in schema.schema}
         rounded = _round_price_fields(user_input)
+        self._mark_vue_activation()
         return self.async_create_entry(
             title="",
             data={
@@ -949,6 +966,23 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 **{key: value for key, value in rounded.items() if key in known},
             },
         )
+
+    def _mark_vue_activation(self) -> None:
+        """REQ-VUE-DASHBOARD-REPAIR: Erstaktivierung braucht keine Reload-Erinnerung."""
+        previously_enabled = self.config_entry.options.get(
+            CONF_VUE_DASHBOARD_ENABLED,
+            self.config_entry.data.get(
+                CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+            ),
+        )
+        if (
+            not previously_enabled
+            and self._base_options.get(CONF_VUE_DASHBOARD_ENABLED)
+            and CONF_VUE_DASHBOARD_VERSION not in self.config_entry.data
+        ):
+            data = {**self.config_entry.data, CONF_VUE_DASHBOARD_VERSION: ""}
+            data.pop(CONF_VUE_DASHBOARD_DISMISSED_VERSION, None)
+            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
     def _suggested(
         self, schema: vol.Schema, user_input: dict[str, Any] | None = None
@@ -965,7 +999,14 @@ class SaxPowerOptionsFlow(OptionsFlow):
         weiterhin an der Schema-Validierung (siehe _async_repeat_init).
         """
         with_values = self.add_suggested_values_to_schema(
-            schema, {**self.config_entry.options, **(user_input or {})}
+            schema,
+            {
+                CONF_VUE_DASHBOARD_ENABLED: self.config_entry.data.get(
+                    CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+                ),
+                **self.config_entry.options,
+                **(user_input or {}),
+            },
         )
         return vol.Schema(with_values.schema, extra=schema.extra)
 

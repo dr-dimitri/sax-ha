@@ -252,7 +252,8 @@ Modbus-TCP-Simulator und zwei echten HA-WebSocket-Clients: Änderungen über
 beide Dashboard-Zugänge sind gegenseitig sichtbar und verursachen weder einen
 zweiten Modbus-Client noch zusätzliche Geräteabfragen durch das Öffnen der
 Oberflächen. Die genaue Abgrenzung zu Browser- und Hardwareprüfungen steht in
-der Paritätsmatrix.
+der Paritätsmatrix. `tests/test_vue_dashboard_restart.py` ergänzt zwei getrennte
+HA-Läufe mit tatsächlich über HA-Storage gespeicherten Optionen und Bundle-Hash.
 
 Ein heruntergeladenes Stable-Quellarchiv oder Snapshot-ZIP kann aus dem
 Repository-Root mit der vorhandenen Python-Testumgebung geprüft werden:

@@ -159,7 +159,7 @@ der Sommerzeitfälle in Europa/Berlin.
 | Fall | Erwartetes Verhalten | Prüfung |
 | --- | --- | --- |
 | Neuinstallation und Bestandsinstallation | Vue bleibt ein unabhängiges Opt-in; alle Kombinationen mit der Lovelace-Einmalanlage sind gültig. Optionen haben Vorrang vor Setup-Daten. | [Config Flow](../tests/test_config_flow.py), [Initialisierung](../tests/test_init.py) |
-| Aktivieren, Deaktivieren, Reload, Unload | Ein eigenes Panel, einmalige statische Route pro HA-Lauf; Abschalten entfernt nur den eigenen Vue-Eintrag. | [Panel-Lebenszyklus][lifecycle-tests], [Vue-Reparaturen][repair-tests] |
+| Aktivieren, Deaktivieren, Reload, Unload, Neustart | Ein eigenes Panel, einmalige statische Route pro HA-Lauf; Abschalten entfernt nur den eigenen Vue-Eintrag. | [Panel-Lebenszyklus][lifecycle-tests], [Vue-Reparaturen][repair-tests], [Neustart][restart-tests] |
 | Zwei Oberflächen | Zwei echte HA-WebSocket-Clients sehen Änderungen aus beiden Richtungen. Das Öffnen liest/schreibt keine zusätzlichen Register; eine Aktion verursacht genau ihren bestehenden Geräteaufruf. | [HA-E2E mit Modbus-Simulator][parallel-tests] |
 | Lovelace-Erstellung/-Neuinstallation | `sax_power.create_dashboard` und `sax_power.reinstall_dashboard` erhalten Bedeutung und Ziel. Eigene Lovelace-Anpassungen werden nur bei ausdrücklichem Neuaufbau ersetzt. | [Lovelace-Dashboard](../tests/test_dashboard.py), [HA-E2E][parallel-tests] |
 | Lovelace-Veraltet-Reparatur | Betrifft das vorhandene Storage-Dashboard; der Vue-Panelstand bleibt unabhängig. | [Lovelace-Reparaturen](../tests/test_repairs.py), [HA-E2E][parallel-tests] |
@@ -209,18 +209,70 @@ im Produktionsmodul- und Browserlauf geprüft.
 
 ### Stand der releasebezogenen Abnahme
 
-Die Matrix beschreibt die implementierte Testabdeckung. Für die konkrete
-Auslieferung sind zusätzlich der getestete Commit, der erfolgreiche CI-Lauf
-und das Ergebnis des Helpers für das veröffentlichte Snapshot-ZIP festzuhalten.
-Dieser Abschnitt enthält derzeit noch keinen Nachweis für ein neu
-veröffentlichtes Paket oder einen Test an echter Hardware.
+Am 12.09.2026 wurde Commit `acb49d089767f45bc25cbaa41c47728f083a1a84`
+in [CI-Lauf 34681752310](https://github.com/dr-dimitri/sax-ha/actions/runs/34681752310)
+erfolgreich geprüft: Python, Ruff/Black, HACS, hassfest, Frontend-Typen und
+Formatierung, 186 Komponententests, Produktionsmodul-Smoke, reproduzierbarer
+Build sowie alle **20 Browserfälle ohne Wiederholung oder übersprungene Fälle**.
+Die Browserabnahme verwendet Chromium mit simulierten HA-Antworten; echte
+HA-WebSockets, Recorder, Storage und Modbus-Simulator werden separat geprüft.
+Ein Test an einer echten Batterie fand nicht statt; die zwei Hardwaretests
+wurden erwartungsgemäß übersprungen.
+
+Der daraus veröffentlichte
+[Snapshot](https://github.com/dr-dimitri/sax-ha/releases/tag/snapshot-pr-204-acb49d089767)
+wurde heruntergeladen und mit `verify_dashboard_package.py` in einer frischen
+HA-Umgebung installiert. **Ergebnis: bestanden**, einschließlich vollständigem
+Reparaturablauf, neuer Bundle-Hash-URL und identischen ausgelieferten HTTP-Bytes.
+Der Helper bestätigte 57 installierte Dateien ohne Rückgriff auf das Repository.
+
+| Nachweis | Wert |
+| --- | --- |
+| Manifest des getesteten Snapshots | `2.0.3-snapshot.pr204.shaacb49d089767` |
+| SHA-256 des heruntergeladenen Snapshot-ZIPs | `d0f406fd06d367dbf82b30cd197e0f0e4dbde5521e26f1b77c9756fbbfd72ac3` |
+| SHA-256 des getesteten Vue-Bundles | `dc3d1df0032f8e6d8ba500c2ffb942e8f463188c016202932fbdcb1d419ac1dd` |
+| GitHub-Quellarchiv, ebenfalls isoliert bestanden | Commit `c6563461ee3662c858ca318f41ab20462f71bf5f`, Manifest `2.0.3`, identisches Vue-Bundle |
+| SHA-256 dieses Quellarchivs | `f5cfcf7904db9681f25d52a872ad0d75c47872866784ea1f97ee1a62bf4f037b` |
+
+Die drei zusätzlichen [Neustarttests][restart-tests] schreiben Config-Entry-Daten
+und Optionen über den regulären HA-Final-Write und laden sie in einer zweiten
+HA-Instanz erneut aus dem Storage. Sie prüfen Aktivierung, Vorrang einer späteren
+Deaktivierung und ein während des Stillstands installiertes Bundle samt neuem
+Reparaturhinweis. Geräte- und Plattformgrenzen sind dabei gemockt; Storage,
+Config-Entry-Laden, Panel und Issue Registry sind echt. Die anschließend erneut
+ausgeführte lokale Gesamtsuite ergab **1.813 bestandene Tests und zwei erwartete
+Hardware-Skips**; Ruff und Black sind erfolgreich.
 
 ### Screenshots
 
-Die Browserprüfung erstellt Bilder aller fünf Tabs und zeigt den Link zum
-parallel vorhandenen Dashboard. Ausgewählte geprüfte Bilder werden unter
-`docs/images/vue-*.png` abgelegt und hier nach ihrer Erzeugung verlinkt.
-Derzeit sind in diesem Bericht noch keine neuen Vue-Screenshots eingebettet.
+Die unveränderten Bilder stammen aus dem erfolgreichen Browserlauf oben. Der
+hell abgesetzte Testbereich kennzeichnet simulierte Daten und zeigt beide
+Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
+Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,
+während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
+
+| Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
+| --- | --- | --- |
+| Allgemeine Informationen | [Screenshot](images/vue-allgemein-desktop-light-de.png) | [Screenshot](images/vue-allgemein-mobile-dark-en.png) |
+| Ladeautomatik | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
+| Netzdienliches Laden | [Screenshot](images/vue-netzdienliches-laden-desktop-light-de.png) | [Screenshot](images/vue-netzdienliches-laden-mobile-dark-en.png) |
+| Dynamisches Laden | [Screenshot](images/vue-dynamisches-laden-desktop-light-de.png) | [Screenshot](images/vue-dynamisches-laden-mobile-dark-en.png) |
+| Ersparnis | [Screenshot](images/vue-ersparnis-desktop-light-de.png) | [Screenshot](images/vue-ersparnis-mobile-dark-en.png) |
+
+<details>
+<summary>Alle fünf Desktopansichten anzeigen</summary>
+
+![Allgemeine Informationen mit simulierten HA-Daten](images/vue-allgemein-desktop-light-de.png)
+
+![Ladeautomatik mit simulierten HA-Daten](images/vue-ladeautomatik-desktop-light-de.png)
+
+![Netzdienliches Laden mit simulierten HA-Daten](images/vue-netzdienliches-laden-desktop-light-de.png)
+
+![Dynamisches Laden mit simulierten HA-Daten](images/vue-dynamisches-laden-desktop-light-de.png)
+
+![Ersparnis mit simulierten HA-Daten](images/vue-ersparnis-desktop-light-de.png)
+
+</details>
 
 [metadata-tests]: ../tests/test_dashboard_api.py
 [ha-tests]: ../frontend/tests/ha.test.ts
@@ -236,3 +288,4 @@ Derzeit sind in diesem Bericht noch keine neuen Vue-Screenshots eingebettet.
 [repair-tests]: ../tests/test_vue_dashboard_repairs.py
 [package-tests]: ../tests/test_frontend_package.py
 [package-worker]: ../scripts/dashboard_package_smoke.py
+[restart-tests]: ../tests/test_vue_dashboard_restart.py

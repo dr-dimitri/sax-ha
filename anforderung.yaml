@@ -2601,7 +2601,9 @@ requirement_vue_parity:
     zweiten Modbus-Client; eine ausdrückliche Aktion wird nicht wiederholt.
     Bestehende Lovelace-Erstellung, Neuinstallation und Veraltet-Reparatur
     bleiben vom Vue-Panel getrennt. Setup, Reload, Unload, Reconnect und
-    ausgeschaltetes Vue-Panel haben eigene Regressionstests.
+    ausgeschaltetes Vue-Panel haben eigene Regressionstests. Zwei getrennte
+    HA-Instanzen prüfen außerdem nach regulärer Speicherung und erneutem
+    Config-Entry-Laden die Aktivierungsoption und den bestätigten Bundle-Hash.
 
     scripts/verify_dashboard_package.py installiert ein Stable-Quellarchiv
     oder Snapshot-ZIP in einen frischen temporären Baum. Ein isolierter
@@ -2627,6 +2629,8 @@ requirement_vue_parity:
        und erzeugen Bilder aller fünf Tabs samt parallelem Einstieg."
     - "tests/test_vue_dashboard_e2e.py prüft bidirektionale HA-Änderungen
        gegen simuliertes Modbus-TCP ohne zweite Verbindung oder doppelte Aktionen."
+    - "tests/test_vue_dashboard_restart.py prüft gespeicherte Aktivierung,
+       deaktivierte Optionen und ein im Stillstand aktualisiertes Bundle nach HA-Neustart."
     - "tests/test_frontend_package.py prüft Stable-Quellarchiv- und Snapshot-
        Layout in getrennten HA-Prozessen ohne Rückgriff auf Repository-Module."
     - "Die Abnahme benennt ausgeführte Prüfungen, getesteten Commit/Paket-Hash,

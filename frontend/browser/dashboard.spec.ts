@@ -119,14 +119,10 @@ test("compact views retain readable controls and all entities across available p
           ].filter(visible);
           const targets: Element[] = [];
           for (const control of controls) {
+            const checkbox = control.matches("input[type='checkbox']");
             const month =
-              control.matches("input[type='checkbox']") &&
-              control.closest(".charging-view__rows--months");
-            const compactCheckbox =
-              month ||
-              (control.matches("input[type='checkbox']") &&
-                control.closest(".entity-control__switch-target--compact"));
-            const target = compactCheckbox
+              checkbox && control.closest(".charging-view__rows--months");
+            const target = checkbox
               ? control.closest(".entity-control__switch-target")
               : control;
             if (!target) {
@@ -139,18 +135,13 @@ test("compact views retain readable controls and all entities across available p
             const rect = target.getBoundingClientRect();
             if (rect.height < 43.5)
               violations.push(`${name(control)} target height ${rect.height}`);
-            if (compactCheckbox && rect.width < 43.5)
+            if (checkbox && rect.width < 43.5)
               violations.push(
                 `${name(control)} checkbox target width ${rect.width}`,
               );
-            if (compactCheckbox) {
+            if (checkbox) {
               const indicator = control.getBoundingClientRect();
-              if (
-                indicator.width < 20 ||
-                indicator.width > 24 ||
-                indicator.height < 20 ||
-                indicator.height > 24
-              )
+              if (indicator.width !== 22 || indicator.height !== 22)
                 violations.push(
                   `${name(control)} visible checkbox ${indicator.width}×${indicator.height}`,
                 );
@@ -319,7 +310,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
   const panel = page.locator("sax-power-vue-panel");
   const english = testInfo.project.name.endsWith("en");
   const input = panel.locator("input[role='switch']");
-  const target = panel.locator(".entity-control__switch-target--compact");
+  const target = panel.locator(".entity-control__switch-target");
   const dialog = panel.locator("dialog.entity-control__confirmation");
   const actions = page.locator("#actions");
   const cancel = dialog.getByRole("button", {
@@ -527,6 +518,12 @@ test("one dashboard with five complete views, local assets and responsive screen
       () => document.documentElement.scrollWidth > window.innerWidth,
     );
     expect(overflow).toBe(false);
+    await expect(
+      panel
+        .locator(".entity-control")
+        .filter({ has: page.getByRole("switch") })
+        .locator(".entity-control__value"),
+    ).toHaveCount(0);
     await testInfo.attach(`vue-${tab.path}-${testInfo.project.name}`, {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",

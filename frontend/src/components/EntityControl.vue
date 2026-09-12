@@ -16,18 +16,12 @@ const props = defineProps<{
   entityKey: string;
   confirmSwitch?: boolean;
   hideConfirmedLabel?: boolean;
-  hideConfirmedValue?: boolean;
   monthTile?: boolean;
   timeUnit?: boolean;
 }>();
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const entity = computed(() => dashboard?.entity(props.domain, props.entityKey));
-const compactSwitch = computed(
-  () =>
-    props.domain === "switch" &&
-    (props.confirmSwitch || props.entityKey === "storage_switch"),
-);
 const id = useId();
 const inputId = `sax-control-${id}`;
 const statusId = `sax-status-${id}`;
@@ -51,7 +45,7 @@ const options = computed(() => {
 });
 const language = computed(() => dashboard?.language.value ?? "en");
 const descriptionIds = computed(() =>
-  props.hideConfirmedValue ? statusId : `${valueId} ${statusId}`,
+  props.domain === "switch" ? statusId : `${valueId} ${statusId}`,
 );
 const confirmedDisplayValue = computed(() => {
   const value = entity.value?.displayValue;
@@ -275,7 +269,7 @@ async function changeSelect(event: Event): Promise<void> {
           entity.name
         }}</label>
         <p
-          v-if="!hideConfirmedValue"
+          v-if="domain !== 'switch'"
           :id="valueId"
           class="entity-control__value"
         >
@@ -289,7 +283,6 @@ async function changeSelect(event: Event): Promise<void> {
           v-if="domain === 'switch'"
           :for="inputId"
           class="entity-control__switch-target"
-          :class="{ 'entity-control__switch-target--compact': compactSwitch }"
         >
           <input
             :id="inputId"
@@ -412,7 +405,16 @@ async function changeSelect(event: Event): Promise<void> {
 }
 
 .entity-control__switch-target {
-  display: contents;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.entity-control__switch-target:has(:disabled) {
+  cursor: not-allowed;
 }
 
 .entity-control input,
@@ -433,32 +435,14 @@ async function changeSelect(event: Event): Promise<void> {
 }
 
 .entity-control input[type="checkbox"] {
-  width: 28px;
-  margin: 0 8px;
-  accent-color: var(--primary-color, #03a9f4);
-  cursor: pointer;
-}
-
-.entity-control__switch-target--compact {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  min-height: 44px;
-  cursor: pointer;
-}
-
-.entity-control__switch-target--compact:has(:disabled) {
-  cursor: not-allowed;
-}
-
-.entity-control__switch-target--compact input[type="checkbox"] {
   flex-shrink: 0;
   width: 22px;
   height: 22px;
   min-height: 22px;
   margin: 0;
   padding: 0;
+  accent-color: var(--primary-color, #03a9f4);
+  cursor: pointer;
 }
 
 .entity-control button {

@@ -314,13 +314,13 @@ describe("shared dashboard controls", () => {
   });
 
   it.each([
-    ["storage_switch", false, true],
-    ["example", true, true],
-    ["timed_charge_january", false, false],
-    ["timed_charge", false, false],
+    ["storage_switch", false],
+    ["example", true],
+    ["timed_charge_january", false],
+    ["timed_charge", false],
   ] as const)(
-    "limits the compact switch target to storage or confirmation controls (%s, %s)",
-    async (entityKey, confirmSwitch, compact) => {
+    "provides the shared labelled switch target for every control (%s, %s)",
+    async (entityKey, confirmSwitch) => {
       const { root } = await mount("switch", {
         entityKey,
         confirmSwitch,
@@ -329,15 +329,87 @@ describe("shared dashboard controls", () => {
       const target = root.querySelector<HTMLLabelElement>(
         ".entity-control__switch-target",
       )!;
-      expect(
-        target.classList.contains("entity-control__switch-target--compact"),
-      ).toBe(compact);
       expect(target.htmlFor).toBe(input(root).id);
       expect(input(root).getAttribute("role")).toBe("switch");
     },
   );
 
-  it("retains explicit confirmation when the compact storage target is clicked", async () => {
+  it.each(["de", "en-GB"])(
+    "omits switch value text while preserving accessible pending and error feedback (%s)",
+    async (language) => {
+      const { root, callService, updateState } = await mount("switch", {
+        language,
+        state: "off",
+      });
+      const field = input(root);
+      const feedback = root.querySelector(".entity-control__feedback")!;
+      expect(root.textContent).toBe("Zielwert");
+      expect(root.querySelector(".entity-control__value")).toBeNull();
+      expect(field.getAttribute("aria-describedby")).toBe(feedback.id);
+      expect(field.checked).toBe(false);
+      await updateState("on");
+      expect(field.checked).toBe(true);
+      expect(root.textContent).toBe("Zielwert");
+
+      const action = deferred();
+      callService.mockReturnValueOnce(action.promise);
+      root
+        .querySelector<HTMLElement>(".entity-control__switch-target")!
+        .click();
+      await flush();
+      expect(field.checked).toBe(true);
+      expect(field.disabled).toBe(true);
+      expect(feedback.querySelector('[role="status"]')?.textContent).toBe(
+        language === "de"
+          ? "Änderung wird an Home Assistant gesendet …"
+          : "Sending change to Home Assistant …",
+      );
+
+      action.reject(new Error("internal diagnostic"));
+      await flush();
+      expect(field.disabled).toBe(false);
+      expect(field.checked).toBe(true);
+      expect(feedback.querySelector('[role="alert"]')?.textContent).toContain(
+        language === "de"
+          ? "Die Änderung ist fehlgeschlagen"
+          : "The change failed",
+      );
+      expect(root.textContent).not.toContain("internal diagnostic");
+      expect(root.querySelector(".entity-control__value")).toBeNull();
+    },
+  );
+
+  it.each(["de", "en-GB"])(
+    "keeps unavailable and read-only switch feedback accessible without a value row (%s)",
+    async (language) => {
+      const { root, updateState, callService, emitMetadata, metadata } =
+        await mount("switch", { language, state: "unavailable" });
+      const field = input(root);
+      const feedback = root.querySelector(".entity-control__feedback")!;
+      expect(field.disabled).toBe(true);
+      expect(field.getAttribute("aria-describedby")).toBe(feedback.id);
+      expect(feedback.querySelector('[role="status"]')?.textContent).toBe(
+        language === "de" ? "Nicht verfügbar" : "Unavailable",
+      );
+      expect(root.querySelector(".entity-control__value")).toBeNull();
+
+      emitMetadata([{ ...metadata, can_control: false }]);
+      await updateState("on");
+      expect(field.disabled).toBe(true);
+      expect(feedback.querySelector('[role="status"]')?.textContent).toBe(
+        language === "de"
+          ? "Keine Berechtigung zum Ändern"
+          : "You do not have permission to change this setting",
+      );
+      root
+        .querySelector<HTMLElement>(".entity-control__switch-target")!
+        .click();
+      await flush();
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains explicit confirmation when the storage target is clicked", async () => {
     const { root, callService } = await mount("switch", {
       entityKey: "storage_switch",
       confirmSwitch: true,
@@ -368,7 +440,7 @@ describe("shared dashboard controls", () => {
     expect(input(root).checked).toBe(false);
   });
 
-  it("keeps a read-only compact storage target disabled", async () => {
+  it("keeps a read-only storage target disabled", async () => {
     const { root, callService } = await mount("switch", {
       entityKey: "storage_switch",
       confirmSwitch: true,

@@ -5,1018 +5,470 @@
 <h1 align="center">SAX Power Home für Home Assistant</h1>
 
 <p align="center">
-  Lokale Einbindung und intelligente Ladesteuerung für SAX Power Home und
-  SAX Power Home Plus.
+  Den Speicher im Blick. Laden, wenn es passt.
 </p>
 
-Die Integration verbindet einen SAX Power Heimspeicher direkt über das lokale
-Netzwerk mit Home Assistant. Messwerte, Einstellungen und Ladefunktionen stehen
-als Entitäten zur Verfügung und lassen sich in Dashboards und Automationen
-verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
+Diese Integration verbindet deinen **SAX Power Home oder Home Plus** über
+Modbus TCP mit Home Assistant. Du siehst, was der Speicher gerade macht,
+legst Ladezeiten und Ladegrenzen fest und kannst seine Ersparnis verfolgen.
+Alles läuft im lokalen Netzwerk, ohne Cloud-Konto und ohne YAML-Konfiguration.
 
-## Inhaltsverzeichnis
+![SAX Power Dashboard: Ladezustand, Leistung und Gerätedaten](docs/images/vue-allgemein-desktop-light-de.png)
 
-- [Funktionen](#funktionen)
-- [Voraussetzungen](#voraussetzungen)
-- [Installation](#installation)
-- [Einrichtung](#einrichtung)
-- [Wichtige Entitäten](#wichtige-entitäten)
-- [Max-SOC-Sperre](#max-soc-sperre)
-- [Ladefunktionen](#ladefunktionen)
-  - [Zeitgesteuerte Netzladung](#zeitgesteuerte-netzladung)
-  - [Netzdienliches Laden](#netzdienliches-laden)
-  - [Preisoptimiertes Laden](#preisoptimiertes-laden)
-- [Zeitfenster und Überschneidungen](#zeitfenster-und-überschneidungen)
-- [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
-- [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)
-- [Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz)
-- [Ersparnisübersicht](#ersparnisübersicht)
-- [ROI und Amortisationsstand](#roi-und-amortisationsstand)
-- [Datenqualität, Diagnose und Bilanzneustart](#datenqualität-diagnose-und-bilanzneustart)
-- [Energy-Dashboard](#energy-dashboard)
-- [Aktionen für Automationen](#aktionen-für-automationen)
-- [Verbindung nachträglich ändern](#verbindung-nachträglich-ändern)
-- [Diagnose und Fehlersuche](#diagnose-und-fehlersuche)
-- [Bekannte Einschränkungen](#bekannte-einschränkungen)
-- [Hilfe und Entwicklung](#hilfe-und-entwicklung)
+- **Messwerte:** Ladezustand, Leistung, Temperatur und Energiezähler für eigene
+  Dashboards und Automationen.
+- **Ladesteuerung:** feste Ladezeiten, günstige Börsenpreise oder eine
+  Ladepause für die PV-Mittagsspitze.
+- **Ladegrenze:** einen maximalen Ladezustand für Netz- und PV-Ladung festlegen.
+- **Wirtschaftlichkeit:** Kosten, Netto-Ersparnis und Amortisationsstand mit
+  deinem Tarif berechnen.
+- **Dashboard:** eine eigene SAX-Power-Ansicht für Computer und Smartphone,
+  auf Deutsch und Englisch, im hellen oder dunklen Design.
 
-## Funktionen
-
-- Ladezustand, Lade- und Entladeleistung, Netzleistung, PV-Leistung sowie
-  weitere Geräte- und Akkudaten anzeigen
-- Lade- und Entladeenergie im Home-Assistant-Energy-Dashboard erfassen
-- gesamten Netzbezug und gesamte Netzeinspeisung als kumulative kWh-Zähler erfassen
-- geladene Energie zusätzlich nach Netz, PV und unbekannter Herkunft
-  aufteilen
-- Speicher ein- und ausschalten
-- maximalen Ladezustand festlegen
-- zeitgesteuert aus dem Netz laden
-- PV-Ladung für eine bessere Nutzung der Mittagsspitze verschieben
-- bei dynamischen Stromtarifen in günstigen Zeiträumen laden
-- optional einen Stromtarif hinterlegen, an dem sich die Wirtschaftlichkeit
-  bemisst
-- daraus Netzladekosten, entgangene Einspeisevergütung, vermiedene
-  Netzkosten und ein signiertes Nettoergebnis bilanzieren
-- optional aus Investitionskosten ROI, Amortisationsfortschritt und den
-  verbleibenden Restbetrag berechnen
-- optional das Dashboard SAX Power aktivieren
-- alle Funktionen vollständig lokal im eigenen Netzwerk nutzen
+[Installation](#installation) · [Einrichtung](#einrichtung) ·
+[Dashboard](#dashboard) · [Ladefunktionen](#ladefunktionen) ·
+[Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit) ·
+[Fehlersuche](#diagnose-und-fehlersuche)
 
 ## Voraussetzungen
 
-- Home Assistant ab **2026.8.2** mit HACS oder Zugriff auf das Verzeichnis
-  `custom_components`
-- SAX Power Home oder SAX Power Home Plus im selben Netzwerk wie Home Assistant
-- aktivierte Modbus-TCP-Verbindung am Speicher
-- für erweiterte Messwerte und Ladefunktionen eine kompatible Firmware
-  (Master V61/Gateway V54 oder neuer empfohlen)
+- **Home Assistant ab 2026.8.2**
+- **SAX Power Home oder Home Plus** mit aktiviertem Modbus TCP, im selben
+  Netzwerk wie Home Assistant
+- Für erweiterte Messwerte und Ladefunktionen: kompatible Firmware,
+  empfohlen **Master V61 / Gateway V54 oder neuer**
+
+Derzeit wird **ein SAX-Speicher je Home-Assistant-Installation** unterstützt.
 
 ## Installation
 
-### Installation über HACS
+### Über HACS
 
-1. In Home Assistant **HACS → Integrationen** öffnen.
-2. Über das Menü oben rechts **Benutzerdefinierte Repositories** auswählen.
-3. `https://github.com/dr-dimitri/sax-ha` als Repository eintragen und als
-   Kategorie **Integration** wählen.
-4. Nach **SAX Power Home** suchen und die Integration installieren.
-5. Home Assistant neu starten.
+1. **HACS → Integrationen → Benutzerdefinierte Repositories** öffnen.
+2. `https://github.com/dr-dimitri/sax-ha` eintragen und **Integration** wählen.
+3. Nach **SAX Power Home** suchen und installieren.
+4. Home Assistant neu starten.
 
-### Manuelle Installation
+### Manuell
 
-1. Das Verzeichnis `custom_components/sax_power` in das Verzeichnis
-   `custom_components` der Home-Assistant-Konfiguration kopieren.
-2. Home Assistant neu starten.
+Den Ordner [`custom_components/sax_power`](custom_components/sax_power) in
+`custom_components` deiner Home-Assistant-Konfiguration kopieren und
+Home Assistant neu starten.
 
 ## Einrichtung
 
-Die Einrichtung erfolgt unter **Einstellungen → Geräte & Dienste → Integration
-hinzufügen**. Dort nach **SAX Power** suchen und den Anweisungen folgen.
+Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach
+**SAX Power** suchen. Du brauchst die IP-Adresse des Speichers; die übrigen
+Verbindungswerte kannst du normalerweise übernehmen:
 
-Die Integration unterstützt derzeit **einen SAX-Speicher pro Installation von
-Home Assistant**. Ist bereits ein Speicher eingerichtet, wird eine weitere
-Einrichtung mit einem Hinweis abgebrochen. Zum Ändern der Verbindung beim
-bestehenden Eintrag **Neu konfigurieren** wählen; das funktioniert auch bei
-geänderter IP-Adresse.
-
-### Verbindung zum Speicher
-
-| Feld | Beschreibung | Standard |
-| --- | --- | --- |
-| IP-Adresse | Lokale IP-Adresse des Speichers | – |
-| Port | Modbus-TCP-Port | 502 |
-| Slave-ID (Basic Mode) | Verbindung für Grundfunktionen | 64 |
-| Slave-ID (SunSpec-Modus) | Verbindung für erweiterte Mess- und Ladefunktionen | 100 |
-| Aktualisierungsintervall | Intervall für grundlegende Messwerte | 10 Sekunden |
-
-Home Assistant prüft die Verbindung vor dem Abschluss der Einrichtung. Falls
-die Prüfung fehlschlägt, zunächst IP-Adresse, Port und Erreichbarkeit des
-Speichers kontrollieren. Bei einem Modbus-Fehler sind meist die Slave-IDs oder
-die Firmware des Speichers die Ursache.
-
-### Netzladung vorbelegen
-
-Im nächsten Schritt können der Schalter sowie Start- und Endzeit der
-zeitgesteuerten Netzladung vorbelegt werden. Diese Angaben sind optional und
-lassen sich später jederzeit über die Entitäten des Geräts ändern.
-
-Das preisoptimierte Laden wird nach der Einrichtung über **Konfigurieren** bei
-der Integration eingerichtet. So kann dort direkt der bereits vorhandene
-Strompreis-Sensor ausgewählt werden.
-
-### Dashboard SAX Power
-
-Die Option **Dashboard aktivieren** zeigt **SAX Power** in der Seitenleiste
-unter `/sax-power-vue`. Sie ist standardmäßig ausgeschaltet und kann bei der
-Einrichtung oder später unter **Einstellungen → Geräte & Dienste → SAX Power
-Home → Konfigurieren** geändert werden. Die Auswahl bleibt nach einem Neustart
-erhalten. Der bestehende URL-Pfad bleibt für gespeicherte Links gültig.
-
-Das Dashboard enthält fünf Bereiche:
-
-| Bereich | Inhalt |
+| Einstellung | Standard |
 | --- | --- |
-| Allgemeine Informationen | Ladezustand, Zelltemperatur und Leistung mit globalem Max-SOC; unter Gerät zuerst geladene/entladene Energie, danach Gerätedaten und zuletzt der Speicherschalter. |
-| Zeitvariabler Tarif | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
-| Dynamischer Tarif | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
-| Netzdienliches Laden | Hauptschalter, Ladepause, aktuelle PV-Prognose, Prognoseschwelle, Status und zwölf Monatsschalter. |
-| Amortisation | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
+| Port | 502 |
+| Slave-ID, Basic Mode | 64 |
+| Slave-ID, SunSpec-Modus | 100 |
+| Aktualisierungsintervall der grundlegenden Messwerte | 10 Sekunden |
 
-Auf breiten Bildschirmen nutzen die Ansichten mehrere Spalten und kleinere
-Kartenabstände. Die Geräteübersicht stellt Skalen und Leistung neben die
-Gerätedaten. Die Monatsschalter nutzen auch auf dem Smartphone mehrere
-Spalten und knappe Innenabstände; bei sehr wenig Platz wird daraus eine Spalte.
-Beschriftungen bleiben mindestens 14 px groß, Bedienflächen mindestens
-44 × 44 px. Die sichtbaren Monatskästchen sind 22 × 22 px groß; auch der
-umgebende Bereich lässt sich anklicken. Die Darstellung richtet sich nach dem
-verfügbaren Platz neben der HA-Seitenleiste; Inhalte bleiben vollständig
-sichtbar und per Tastatur bedienbar.
+Die Verbindung wird vor dem Speichern geprüft. Im Anschluss kannst du die
+zeitgesteuerte Netzladung vorbelegen und das Dashboard aktivieren.
 
-Ist **Zeitvariabler Tarif** eingeschaltet, wird **Dynamischer Tarif**
-ausgeblendet; umgekehrt gilt dasselbe. Sind beide ausgeschaltet, sind beide
-Tabs sichtbar. Bei fehlenden oder unbekannten Zuständen bleiben beide
-zugänglich. Ein Link auf einen ausgeblendeten Tarif führt zum aktiven Tarif.
+Weitere Optionen findest du unter **Einstellungen → Geräte & Dienste →
+SAX Power Home → Konfigurieren**: Strompreis-Sensor, PV-Prognose,
+Wirtschaftlichkeit und Dashboard. Ladezeiten, Monate und Ladegrenzen änderst
+du direkt im Dashboard oder über die Entitäten des Geräts. Die Einstellungen
+bleiben nach einem Neustart erhalten.
 
-Änderungen an den Home-Assistant-Entitäten erscheinen direkt im Dashboard.
-Zahlen und Uhrzeiten werden erst mit **Übernehmen** gesendet; die Anzeige des
-bestätigten Werts folgt der Rückmeldung von Home Assistant. Wertebereiche,
-Schrittweiten und Strategieoptionen entsprechen den vorhandenen Entitäten.
-Fehlende optionale Entitäten werden ausgelassen; unbekannte oder nicht
-verfügbare Werte bleiben als solche erkennbar.
+### Verbindung nachträglich ändern
 
-Die Zeitfenster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
-zeigen jeweils eine 24-Stunden-Leiste mit verschiebbaren Marken für Start
-und Ende. Die Marken lassen sich mit Maus, Touch und Tastatur bedienen;
-die Eingabefelder zeigen ausschließlich Stunden und Minuten (HH:MM). Beide
-Grenzen bleiben
-ein Entwurf, bis **Übernehmen** sie gemeinsam an Home Assistant sendet.
-Die bestätigte Zeitspanne ändert sich erst mit dessen Zustandsmeldung.
-Vorhandene Sekunden werden beim Öffnen nicht verändert. Nach einer bewussten
-Bearbeitung übernimmt **Übernehmen** beide Grenzen minutengenau mit Sekunden
-auf 00.
-Ein Fenster von 22:00 bis 06:00 wird an Mitternacht geteilt dargestellt;
-gleiche Start- und Endzeit ergeben ein leeres Fenster. Änderungen an den
-bestätigten Grenzen, etwa durch eine Automation, ersetzen den gesamten
-Entwurf. Andere Livewerte verändern die Eingabe nicht.
+Hat der Speicher eine neue IP-Adresse, wähle beim bestehenden
+Integrationseintrag **Neu konfigurieren**. Dort lassen sich auch Port,
+Slave-IDs und Aktualisierungsintervall ändern. Nach erfolgreicher Prüfung
+lädt Home Assistant die Integration neu.
 
-Der Speicherschalter verwendet dieselbe kleine Checkbox wie die Monatsauswahl,
-mit großer Klickfläche und Sicherheitsabfrage.
+## Dashboard
 
-Die Monatsraster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
-zeigen den bestätigten Zustand direkt am Kontrollkästchen; die zusätzliche
-Zeile **Bestätigter Wert** entfällt dort. Fehler und Nichtverfügbarkeit bleiben
-sichtbar. Eine gültige Monatsauswahl wird direkt von Home Assistant bestätigt,
-auch wenn die Geräteauswertung gerade beschäftigt ist. Beide Zeitfenster
-zeigen ihre bestätigte Zeitspanne in einer gemeinsamen Zeile; auf Deutsch
-mit dem Zusatz **Uhr**, etwa **22:00–06:00 Uhr**. Unbekannte oder nicht
-verfügbare Werte und die englische Anzeige erhalten diesen Zusatz nicht;
-Eingabefelder und übertragene Uhrzeiten bleiben ohne Sprachzusatz.
+Mit **Dashboard aktivieren** erscheint **SAX Power** in der Seitenleiste.
+Die Option ist anfangs ausgeschaltet und lässt sich jederzeit unter
+**Konfigurieren** ändern. Das Dashboard wird mit der Integration ausgeliefert;
+eine zusätzliche Installation ist nicht nötig.
 
-Unter **Allgemeine Informationen** stehen beide Energiezähler
-am Anfang der Karte **Gerät**; eine eigene Energie-Karte entfällt. Der
-Speicherschalter bildet die letzte Gerätezeile. Vor dem Ein- **und** Ausschalten
-erscheint ein Bestätigungsdialog. **Abbrechen** oder Escape sendet keine Aktion.
-Ändern sich während des Dialogs Zustand, Entität, Berechtigung oder Verbindung,
-wird die offene Auswahl verworfen.
+Die Screenshots zeigen das Dashboard mit Beispieldaten.
 
-Die Ersparnis-Auswertung verwendet die vorhandene Recorder-Statistik der
-Netto-Ersparnis. Anfangs- und Enddatum gelten als vollständige Tage in der
-HA-Zeitzone; Wert und Diagramm verwenden dieselbe Auswahl. Ohne aufgezeichnete
-Daten entsteht keine Ersatzberechnung aus dem aktuellen Sensorwert. Neue
-Recorder-Statistiken aktualisieren die Auswertung; **Aktualisieren** lädt sie
-auch auf Wunsch neu. Geldbeträge erscheinen mit zwei, Tarifpreise mit vier
-Nachkommastellen. Die [Funktions- und Testübersicht](docs/vue-dashboard-parity.md)
-beschreibt Datenquellen, Prüfumfang und bekannte Grenzen.
+| Bereich | Das findest du dort |
+| --- | --- |
+| Allgemeine Informationen | Ladezustand, Leistung, Temperatur, Energiezähler und Speicherschalter |
+| Zeitvariabler Tarif | Feste Ladezeiten, Monate, Startschwelle und Netzladeziel |
+| Dynamischer Tarif | Preisstrategie, Preisgrenzen und nächster Ladestart |
+| Netzdienliches Laden | PV-Ladepause, Monate und Prognoseschwelle |
+| Amortisation | Netto-Ersparnis, Tarifplan und Auswertung eigener Zeiträume |
 
-Zum Entfernen des Seitenleisteneintrags die Option wieder ausschalten.
-Das wirkt direkt, ohne die Batterieintegration neu zu starten. Das Dashboard
-wird mit der Integration lokal ausgeliefert und benötigt auf dem
-Home-Assistant-Gerät weder Node noch einen Entwicklungsserver oder ein CDN.
-Die dokumentierte Testbasis ist Home Assistant **2026.8.2**.
+Schalter und Monatsauswahl zeigen ihren Zustand direkt am Haken. Zahlen
+und Uhrzeiten sendest du mit **Übernehmen**. Die Zeitfenster lassen sich
+über die 24-Stunden-Leiste verschieben oder als Uhrzeit eingeben; Start und
+Ende werden gemeinsam übernommen. Vor dem Ein- oder Ausschalten des
+Speichers erscheint eine Bestätigung.
 
-Die Integration liefert ausschließlich dieses Dashboard aus. Die frühere
-Lovelace-Erstellung, deren Neuinstallationsaktionen und Veraltet-Reparatur
-entfallen. Beim Upgrade werden zugehörige alte Integrationsoptionen und
-Reparaturhinweise bereinigt. Bereits in Home Assistant gespeicherte
-Lovelace-Dashboards und eigene Karten werden dabei weder gelöscht noch
-überschrieben; sie lassen sich weiterhin über Home Assistant verwalten.
+Zeitvariabler und dynamischer Tarif können nicht gleichzeitig aktiv sein.
+Das Dashboard zeigt den eingeschalteten Tarif und blendet den anderen aus.
+Sind beide ausgeschaltet, stehen beide zur Auswahl.
 
-Bei einer neuen Dashboard-Version oder einem Registrierungsfehler erscheint
-ein eigener Hinweis unter **Einstellungen → System → Reparaturen**. Dort lässt
-sich **SAX Power** mit den aktuell installierten Dateien neu registrieren.
-Die Reparatur installiert kein Integrationsupdate; dieses wird zuvor wie
-gewohnt über HACS beziehungsweise das Integrationspaket eingespielt.
-Anschließend die Home-Assistant-Seite im Browser vollständig neu laden, damit
-auch eine schon geöffnete Ansicht den neuen Dashboard-Code verwendet. Der
-Dialog erläutert diesen Schritt; bei einem Fehler bleibt die Reparatur offen.
-Bei älteren, bereits aktivierten Dashboardständen erscheint dieser Hinweis
-einmalig auch zum erstmaligen Abgleich des Browserstands. Ein abgelehnter
-Hinweis gilt nur für die jeweilige Version; spätere Updates können wieder gemeldet werden.
+<details>
+<summary>So sieht das Dashboard auf dem Smartphone aus</summary>
+
+<p>
+  <img src="docs/images/vue-allgemein-mobile-dark-en.png" alt="Geräteübersicht auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+  <img src="docs/images/vue-ladeautomatik-mobile-dark-en.png" alt="Zeitfenster und Monatsauswahl auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+</p>
+
+</details>
+
+Nach einem Dashboard-Update kann unter **Einstellungen → System →
+Reparaturen** ein Hinweis erscheinen. Folge den Schritten und lade danach
+die Home-Assistant-Seite im Browser vollständig neu. Das Integrationsupdate
+selbst installierst du wie gewohnt über HACS. Bestehende eigene
+Lovelace-Dashboards bleiben erhalten.
 
 ## Wichtige Entitäten
 
-Home Assistant ordnet die Entitäten automatisch dem SAX-Power-Gerät zu. Weniger
-häufig benötigte Detailwerte befinden sich im Bereich **Diagnose** der
-Geräteseite.
+Die Gerätewerte findest du beim SAX-Power-Gerät. Selten benötigte Detailwerte
+findest du dort unter **Diagnose**.
 
-### Messwerte
-
-Zu den wichtigsten Messwerten gehören:
-
-- Ladezustand des Speichers
-- getrennte Lade- und Entladeleistung sowie eine kombinierte Leistung
-- Netzbezug und Netzeinspeisung
-- PV-Leistung, sofern sie vom verwendeten Smart Meter bereitgestellt wird
-- Zelltemperatur
-- verfügbare Lade- und Entladeleistung
-- Geräte-, Firmware- und Akkustatus
-
-Bei der **Netzleistung** gilt die in Home Assistant übliche Darstellung:
-Positive Werte stehen für Netzbezug, negative Werte für Einspeisung.
-
-Die **Lade-/Entladeleistung** bildet beide Flussrichtungen in einer Entität
-ab: Positive Werte stehen für Entladung, negative Werte für Ladung.
-
-Die PV-Leistung ist laut Hersteller nur mit dem Smart Meter ADW200 vollständig
-verfügbar. Bei anderen Smart-Meter-Modellen kann dieser Wert dauerhaft 0 W
-anzeigen, obwohl die übrigen Netzwerte korrekt vorliegen.
-
-### Einstellungen und Schalter
-
-| Entität | Funktion |
+| Entität | Bedeutung |
 | --- | --- |
-| Max. SOC | Obergrenze für den Ladezustand und gemeinsames Ladeziel |
-| Netzladung Min. SOC | Ladezustand, unterhalb dessen die zeitgesteuerte Netzladung startet |
+| Ladezustand | Aktuelle Speicherfüllung in Prozent, auch SOC genannt |
+| Netzleistung | Positiv: Netzbezug; negativ: Einspeisung |
+| Lade-/Entladeleistung | Positiv: Entladung; negativ: Ladung |
+| Max. SOC | Globale Ladegrenze für den Speicher |
+| Netzladen Max. SOC | Eigenes Ziel der zeitgesteuerten Netzladung, höchstens Max. SOC |
+| Netzladung Min. SOC | Startschwelle der zeitgesteuerten Netzladung |
 | Speicher On/Off | Speicher ein- oder ausschalten |
-| Netzladung aktiv | Zeitgesteuerte Netzladung ein- oder ausschalten |
-| Netzdienliches Laden aktiv | Verschieben der PV-Ladung ein- oder ausschalten |
-| Preisoptimiertes Laden aktiv | Laden nach Strompreis ein- oder ausschalten |
-| Start / Ende | Zeitfenster für Netzladung und netzdienliches Laden |
-| Januar bis Dezember | Monate auswählen, in denen das jeweilige Zeitfenster gilt |
 
-Alle Einstellungen bleiben nach einem Neustart von Home Assistant erhalten.
+Dazu kommen getrennte Lade- und Entladeleistung, PV-Leistung, Zelltemperatur,
+Energiezähler sowie Geräte-, Firmware- und Akkustatus. Die PV-Leistung ist
+laut Hersteller nur mit dem Smart Meter **ADW200** vollständig verfügbar.
+Andere Modelle können hier dauerhaft 0 W melden.
 
 ## Max-SOC-Sperre
 
-Mit **Max. SOC** wird der gewünschte maximale Ladezustand festgelegt. Sobald
-dieser Wert erreicht ist, beendet die Integration den Ladevorgang. Die Grenze
-gilt sowohl für die Ladefunktionen der Integration als auch beim Laden mit
-PV-Überschuss. Bei 100 % ist die Begrenzung praktisch deaktiviert.
+**Max. SOC** begrenzt den Ladezustand für die Ladefunktionen der Integration
+und für PV-Überschuss. Mit 80 % bleibt beispielsweise Platz im Speicher;
+bei 100 % greift keine niedrigere Ladegrenze.
 
-Beispiel: Mit **Max. SOC = 80 %** lädt der Speicher bis höchstens 80 %. Das
-schafft eine Reserve und kann dabei helfen, den Akku im Alltag zu schonen.
+Die Sperre pausiert **Laden und Entladen**. Wird die Grenze innerhalb eines
+Ladezeitfensters erreicht, bleibt die Pause bis zu dessen Ende aktiv.
+Außerhalb solcher Zeitfenster gibt anhaltender Netzbezug den Speicher wieder
+für den Hausverbrauch frei.
 
 ### Regelmäßige Zellkalibrierung
 
-Ist Max. SOC kleiner als 100 %, wird die Zellkalibrierung am dritten
-Kalendertag nach der letzten vollständigen Ladung fällig, ab Tagesbeginn
-in der Home-Assistant-Zeitzone. Bereits der erste reguläre Ladezyklus an
-diesem Tag verwendet das Ziel 100 %. Die eingestellte Grenze bleibt dabei
-unverändert; nur für diesen Kalibrierungsvorgang darf der Speicher 100 %
-erreichen. Die Funktion startet keine zusätzliche Netzladung, sondern nutzt
-die nächste reguläre Lademöglichkeit.
+Bei einer Grenze unter 100 % nutzt die Integration regelmäßig eine volle
+Ladung zur Zellkalibrierung: Am dritten Kalendertag nach der letzten
+Volladung wird das Ladeziel vorübergehend auf 100 % gesetzt. Die Funktion
+wartet auf die nächste reguläre Lademöglichkeit und startet dafür keine
+zusätzliche Netzladung. Deine eingestellten Grenzen bleiben erhalten.
 
 Die Diagnose-Entitäten **Zellkalibrierung aktiv** und **Nächste
-Zellkalibrierung** zeigen den aktuellen Zustand und das nächste Datum ohne
-Uhrzeit. Beispiel: Volladung am 12. September → nächste Fälligkeit am
-15. September, unabhängig von der Uhrzeit der letzten Volladung.
+Zellkalibrierung** zeigen Status und Datum. Eine Volladung am 12. September
+bedeutet also: nächste Fälligkeit am 15. September.
 
 ## Ladefunktionen
 
-Die Integration bietet drei unabhängig konfigurierbare Ladefunktionen:
-
-| Funktion | Zweck |
-| --- | --- |
-| [Zeitgesteuerte Netzladung](#zeitgesteuerte-netzladung) | Zu festgelegten Zeiten bis zum gewünschten Ladezustand aus dem Netz laden |
-| [Netzdienliches Laden](#netzdienliches-laden) | PV-Ladung in ertragreiche Tageszeiten verschieben |
-| [Preisoptimiertes Laden](#preisoptimiertes-laden) | Bei dynamischen Tarifen günstige Zeiträume nutzen |
-
-Max. SOC gilt als gemeinsame Obergrenze für alle Ladefunktionen. Die
-zeitgesteuerte und die preisoptimierte Netzladung können nicht gleichzeitig
-aktiv sein. Home Assistant zeigt beim Wechsel eine Bestätigung an und schaltet
-die bisher aktive Funktion erst nach Zustimmung aus.
-
-Das netzdienliche Laden hat in seinem wirksamen Zeitfenster Vorrang vor dem
-preisoptimierten Laden. Außerhalb dieses Zeitfensters läuft die
-Preisoptimierung wie gewohnt weiter.
+Die zeitgesteuerte und die preisoptimierte Netzladung sind Alternativen.
+Beim Umschalten fragt Home Assistant nach, bevor es die bisher aktive
+Funktion ausschaltet. Netzdienliches Laden lässt sich zusätzlich nutzen
+und hat während seiner wirksamen Ladepause Vorrang vor der Preisoptimierung.
 
 ### Zeitgesteuerte Netzladung
 
-Die zeitgesteuerte Netzladung lädt den Speicher in einem festgelegten
-Zeitfenster aus dem Netz. Sie eignet sich beispielsweise für einen günstigen
-Nachttarif oder zur Vorbereitung auf einen erwarteten hohen Verbrauch.
+Im Dashboard heißt dieser Bereich **Zeitvariabler Tarif**. Er passt zu
+festen günstigen Tarifzeiten, etwa einem Nachttarif.
 
-Benötigte Einstellungen:
+![Zeitvariabler Tarif mit Zeitfenster, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
 
-- **Netzladung aktiv**
-- **Start** und **Ende**
-- gewünschte Monate
-- **Netzladung Min. SOC** als Startschwelle
-- **Max. SOC** als Ladeziel
+Schalte **Netzladung aktiv** ein und wähle Start, Ende sowie die gewünschten
+Monate. **Netzladung Min. SOC** bestimmt, wann eine Ladung beginnen darf;
+**Netzladen Max. SOC** bestimmt das Ziel. Das Ziel kann unter der globalen
+Grenze **Max. SOC** liegen, etwa um Platz für späteren PV-Ertrag zu lassen.
 
-Beispiel: Bei einem Zeitfenster von 01:00 bis 05:00 Uhr, Min. SOC von 40 % und
-Max. SOC von 90 % startet die Netzladung nur, wenn der Ladezustand unter 40 %
-liegt. Anschließend lädt sie bis 90 % oder bis zum Ende des Zeitfensters.
+**Beispiel:** Von 01:00 bis 05:00 Uhr, Startschwelle 40 %, Netzladeziel 70 %
+und globale Grenze 90 %. Liegt der Speicher im Zeitfenster unter 40 %, lädt
+er bis 70 % oder bis 05:00 Uhr. PV-Strom darf anschließend weiter bis 90 %
+laden. Nach tatsächlich erfolgter Netzladung bleibt die Entladung bis zum
+Fensterende gesperrt; den Zustand zeigt **Entladestatus**.
 
-Zeitfenster über Mitternacht, etwa 23:00 bis 05:00 Uhr, werden unterstützt.
-Sind Start und Ende identisch oder ist eine Zeit nicht gesetzt, bleibt die
-Funktion inaktiv. Wenn ausreichend eigener PV-Strom zur Verfügung steht, wird
-die Netzladung beendet und der Speicher nutzt die Sonnenenergie.
+Erkennt die Integration ausreichend PV-Überschuss, beendet sie die
+Netzladung und der Speicher kann Sonnenstrom nutzen.
 
 ### Netzdienliches Laden
 
-Das netzdienliche Laden verschiebt die Aufnahme von PV-Überschuss in ein
-späteres Zeitfenster. Dadurch bleibt morgens mehr freie Speicherkapazität für
-die ertragreiche Mittagszeit und Einspeisespitzen können reduziert werden.
+Eine Ladepause hält morgens Kapazität frei, damit der Speicher mehr von der
+PV-Mittagsspitze aufnehmen kann. Typisch wäre eine Pause von 08:00 bis
+13:00 Uhr in den Monaten Mai bis August.
 
-Typische Einstellungen sind beispielsweise die Monate Mai bis August und eine
-Ladepause am Vormittag. Außerhalb der ausgewählten Monate und Zeiten arbeitet
-der Speicher normal.
+![Netzdienliches Laden mit Ladepause, PV-Prognose und Monaten](docs/images/vue-netzdienliches-laden-desktop-light-de.png)
 
-Benötigte Einstellungen:
+Aktiviere **Netzdienliches Laden**, lege Start und Ende der Ladepause fest
+und wähle die Monate. Außerhalb dieser Zeiten arbeitet der Speicher normal.
 
-- **Netzdienliches Laden aktiv**
-- **Start** und **Ende** der Ladepause
-- gewünschte Monate
-- optional **Mindest-PV-Prognose**
-
-#### Mindest-PV-Prognose
-
-Über **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren** kann
-ein PV-Prognose-Sensor ausgewählt werden. Die Einstellung **Netzdienliches
-Laden Mindest-PV-Prognose** bestimmt anschließend, ab welcher erwarteten
-PV-Energie die Ladepause gilt.
-
-- **0 kWh:** Die Prognoseprüfung ist ausgeschaltet.
-- Prognose erreicht den Mindestwert: Die Ladepause wird angewendet.
-- Prognose liegt darunter oder ist nicht verfügbar: Der Speicher darf bereits
-  früher laden.
-
-Beispiel: Für eine Ladepause von 08:00 bis 13:00 Uhr und einen Mindestwert von
-8 kWh greift die Pause nur an Tagen, an denen mindestens 8 kWh PV-Ertrag
-prognostiziert werden.
+Optional kannst du unter **Konfigurieren** einen PV-Prognose-Sensor wählen.
+Die **Mindest-PV-Prognose** entscheidet dann, ob die Pause sinnvoll ist:
+Bei 8 kWh gilt sie nur, wenn mindestens 8 kWh Ertrag erwartet werden.
+Liegt die Prognose darunter oder fehlt sie, darf der Speicher früher laden.
+Mit **0 kWh** schaltest du die Prognoseprüfung aus.
 
 ### Preisoptimiertes Laden
 
-Das preisoptimierte Laden verwendet einen bereits in Home Assistant
-vorhandenen Strompreis-Sensor. Die Integration selbst ruft keine Strompreise
-von einem Anbieter ab. Geeignet sind beispielsweise Sensoren von Tibber,
-Nordpool, EPEX Spot, ENTSO-E oder aWATTar sowie entsprechend aufgebaute
-Template-Sensoren.
+Der Bereich **Dynamischer Tarif** nutzt einen vorhandenen Strompreis-Sensor,
+zum Beispiel von Tibber, Nordpool, EPEX Spot, ENTSO-E oder aWATTar.
+Die Integration ruft selbst keine Preise vom Anbieter ab.
 
-#### Einrichtung
+![Dynamischer Tarif mit Strategie, Preisgrenzen und Ladestatus](docs/images/vue-dynamisches-laden-desktop-light-de.png)
 
-Unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
-stehen folgende Angaben zur Verfügung:
+Wähle unter **Konfigurieren** den Strompreis-Sensor. Preis-Einheit und
+Vorschauattribut werden automatisch erkannt und lassen sich bei Bedarf
+vorgeben. Unterstützt werden EUR/kWh, ct/kWh, EUR/MWh und ct/MWh.
+Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion.
 
-| Feld | Beschreibung |
+| Strategie | Wann wird geladen? |
 | --- | --- |
-| Strompreis-Sensor | Sensor mit aktuellem Preis und, je nach Strategie, zukünftigen Preisen |
-| Attribut mit der Preisvorschau | Optionaler Attributname, falls die automatische Erkennung nicht passt |
-| Preis-Einheit | Automatische Erkennung oder feste Auswahl von EUR/kWh, ct/kWh, EUR/MWh beziehungsweise ct/MWh |
-| PV-Prognose-Sensor | Optional für die Strategie „Smart“ und das netzdienliche Laden |
-| Nutzbarer Anteil der PV-Prognose | Erwarteter Anteil der Prognose, der zum Laden verfügbar ist |
+| Manuell / Aus | Preisautomatik aus; Einstellungen bleiben erhalten |
+| Absoluter Preis | Sobald der aktuelle Preis die Preisgrenze nicht überschreitet |
+| Relativ / Günstigste Stunden | In der gewählten Anzahl der günstigsten Stunden |
+| Smart / PV-optimiert | Wie Relativ, zusätzlich abgestimmt auf Speicherfüllung und erwarteten PV-Ertrag |
 
-Anschließend die gewünschte **Strategie** wählen und den Schalter
-**Preisoptimiertes Laden aktiv** einschalten.
+**Relativ** und **Smart** benötigen eine Preisvorschau. Sie planen in festen
+24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
+verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
+**Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
+Prognose den Bedarf vollständig, entfällt die Netzladung. **Anzahl Stunden**
+bleibt die Obergrenze; das Ladeziel ist **Max. SOC**.
 
-#### Strategien
+Der **Neutralpreis** muss über der Preisgrenze liegen. Liegt der aktuelle
+Preis zwischen beiden Grenzen, pausiert der Speicher, sofern gerade keine
+Netzladung läuft und kein ausreichender PV-Überschuss erkannt wird. Der
+Hausverbrauch kommt dann aus dem Netz. Ab dem Neutralpreis steht der
+Speicher wieder für den normalen Betrieb zur Verfügung.
+Der Status und **Nächster Start** zeigen, worauf die Automatik gerade wartet.
 
-| Strategie | Verhalten |
-| --- | --- |
-| Manuell / Aus | Preisautomatik ist ausgeschaltet, Einstellungen bleiben erhalten |
-| Absoluter Preis | Lädt, solange der aktuelle Preis die festgelegte Preisgrenze nicht überschreitet |
-| Relativ / Günstigste Stunden | Nutzt die eingestellte Anzahl der günstigsten Stunden im verfügbaren Vorschauzeitraum |
-| Smart / PV-optimiert | Berücksichtigt zusätzlich Ladezustand, Speicherkapazität und PV-Prognose |
+### Zeitfenster und Überschneidungen
 
-Für **Relativ** und **Smart** wird ein Preis-Sensor mit zukünftigen Preisen
-benötigt. Beim Aktivieren einer dieser Strategien beginnt ein fester
-24-Stunden-Planungszyklus. Sind noch keine Preise für den nächsten Tag
-verfügbar, plant die Integration zunächst mit den bekannten Zeiträumen und
-ordnet noch nicht begonnene Ladefenster neu, sobald weitere Preise eintreffen.
-Bereits verstrichene ausgewählte Zeit bleibt dabei verbraucht; regelmäßige
-Neuberechnungen und ein Home-Assistant-Neustart verlängern die eingestellte
-Ladedauer nicht. Teilweise nutzbare Stunden- oder Viertelstunden-Slots werden
-zeitanteilig auf das verbleibende Budget angerechnet.
+Zeitfenster dürfen über Mitternacht reichen. Gleiche Start- und Endzeiten
+oder fehlende Zeiten bedeuten ein inaktives Fenster.
 
-Bei der Smart-Strategie reduziert eine erwartete PV-Erzeugung den aus dem Netz
-zu ladenden Energiebedarf. Deckt die Prognose den Bedarf vollständig, findet
-keine Netzladung statt. Die Einstellung **Anzahl Stunden** bleibt die maximale
-zulässige Ladedauer je Planungszyklus.
-
-#### Preisgrenze und Neutralpreis
-
-Die beiden Preiswerte teilen den Tarif in drei Bereiche:
-
-| Preisbereich | Verhalten |
-| --- | --- |
-| Geplanter günstiger Zeitraum | Speicher wird aus dem Netz geladen |
-| Preis zwischen Preisgrenze und Neutralpreis | Speicher pausiert; der Hausverbrauch wird aus dem Netz gedeckt |
-| Preis ab Neutralpreis | Speicher steht wieder für den normalen Betrieb zur Verfügung |
-
-Der Neutralpreis muss über der Preisgrenze liegen. Andernfalls weist Home
-Assistant unter **Einstellungen → Geräte & Dienste → Reparaturen** darauf hin.
-
-Der Sensor **Preisoptimiertes Laden Status** erklärt den aktuellen Zustand,
-beispielsweise **Lade aus Netz**, **Warten auf Preisabfall**, **Keine
-Preisdaten** oder **PV-Prognose deckt Bedarf**. Der Sensor **Nächster Start**
-zeigt das nächste geplante Ladefenster.
-
-## Zeitfenster und Überschneidungen
-
-Die Zeitfenster der zeitgesteuerten Netzladung und des netzdienlichen Ladens
-dürfen sich in denselben Monaten nicht überschneiden. Die Integration prüft
-dies automatisch.
-
-- Bei einer unzulässigen Monatsauswahl wird die Änderung abgelehnt.
-- Bei einer unzulässigen Änderung einer einzelnen Start- oder Ende-Entität
-  wird die geänderte Zeit geleert und Home Assistant zeigt eine
-  Benachrichtigung an.
-- Das Dashboard übernimmt Start und Ende gemeinsam. Die Integration prüft
-  das fertige Ziel-Fenster; bei einer Überschneidung leert sie beide Grenzen
-  und zeigt ebenfalls eine Benachrichtigung an. Geleerte Zeitwerte werden
-  über die nativen Zeit-Entitäten in Home Assistant neu gesetzt; das
-  Dashboard sperrt die Bedienung bei unbekannten Werten.
-
-Zeitlich identische Fenster sind zulässig, wenn sie ausschließlich in
-verschiedenen Monaten aktiv sind. Das Dashboard verwendet die vorhandenen
-Aktionen `sax_power.set_timed_charge_window` und
-`sax_power.set_grid_serving_window`. Auch Automationen können damit Start und
-Ende gemeinsam setzen, ohne einen Zwischenzustand aus neuer und alter Grenze.
+Netzladung und netzdienliches Laden dürfen sich **in denselben Monaten nicht
+überschneiden**. Eine unzulässige Monatsauswahl wird abgelehnt. Bei einer
+überschneidenden Zeitänderung leert die Integration die betroffene Zeit;
+beim gemeinsamen Übernehmen im Dashboard beide Grenzen. Home Assistant
+zeigt dazu eine Benachrichtigung. Setze geleerte Zeiten über die
+Zeit-Entitäten auf der Geräteseite neu.
 
 ## Tarifmodell für die Wirtschaftlichkeit
 
-Damit die Integration bewerten kann, was eine Kilowattstunde aus dem Netz
-tatsächlich kostet, lässt sich unter **Einstellungen → Geräte & Dienste →
-SAX Power Home → Konfigurieren** ein Tarifmodell hinterlegen. Die
-Konfiguration ist vollständig optional: Solange **Deaktiviert** eingestellt
-ist, arbeitet die Integration exakt wie bisher. Bestehende Installationen
-werden nicht automatisch umgestellt.
+Unter **Konfigurieren** kannst du einen Tarif für die Geldbilanz hinterlegen.
+Das ist optional; Messwerte und Ladesteuerung funktionieren auch ohne diese
+Auswertung.
 
-| Tarifmodell | Bedeutung |
+| Tarifmodell | Eingaben |
 | --- | --- |
-| Deaktiviert | Keine Wirtschaftlichkeitsauswertung (Vorgabe) |
-| Festpreis | Ein ganztägig konstanter Arbeitspreis |
-| Tageszeitabhängig | Ein Grundpreis und bis zu acht abweichende Zeitfenster |
-| Dynamisch | Der aktuelle Preis aus dem bereits ausgewählten Strompreis-Sensor |
+| Deaktiviert | Keine Geldbilanz; Grundeinstellung |
+| Festpreis | Ein Arbeitspreis für den ganzen Tag |
+| Tageszeitabhängig | Ein Standard-Arbeitspreis und bis zu acht abweichende Zeitfenster |
+| Dynamisch | Derselbe Strompreis-Sensor wie beim preisoptimierten Laden |
 
-Bei jedem aktivierten Tarif ist zusätzlich die **Einspeisevergütung**
-erforderlich. Sie ist der entgangene Erlös und damit der Beschaffungspreis
-jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt – PV-Strom
-gilt in dieser Rechnung nie als kostenlos.
+Bei einem aktiven Tarif gehört die **Einspeisevergütung** dazu. Alle Preise
+werden als Brutto-Arbeitspreise in EUR/kWh erfasst. Beim tageszeitabhängigen
+Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
+der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
+hinterlegten Plan siehst du im Tab **Amortisation**.
 
-Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh. Monatlicher
-Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und
-sonstige Fixkosten gehören ausdrücklich nicht dazu.
+Für den dynamischen Tarif muss ein Strompreis-Sensor ausgewählt sein.
+Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt
+abdecken. Fehlerhafte oder fehlende Preise werden als unbekannt behandelt.
+Tarifänderungen gelten sofort für kommende Messintervalle; frühere Beträge
+werden nicht neu berechnet.
 
-### Tageszeitabhängige Zeitfenster
+### Wirtschaftlichkeitsbilanz
 
-- Ein Zeitfenster beginnt einschließlich seiner Startzeit und endet
-  ausschließlich seiner Endzeit.
-- Start und Ende dürfen nicht gleich sein; das ergibt kein Zeitfenster und
-  bedeutet auch nicht „ganzer Tag“.
-- Ein Zeitfenster darf über Mitternacht gehen.
-- Zwei Zeitfenster dürfen sich nicht überschneiden. Angrenzende Grenzen
-  (Ende des einen = Beginn des nächsten) sind erlaubt.
-- Außerhalb aller Zeitfenster gilt der Grundpreis.
-- Maßgeblich ist die in Home Assistant eingestellte Zeitzone. In der Nacht
-  der Sommerzeitumstellung gilt die Ortszeit: die im Frühjahr übersprungene
-  Stunde tritt nicht auf, die im Herbst doppelte Stunde wird beide Male
-  gleich bewertet.
-- Jede der acht Gruppen wird entweder vollständig ausgefüllt oder bleibt
-  ganz leer.
-
-Der **Strompreis-Sensor** auf der ersten Seite wird für dieses Tarifmodell
-ausdrücklich **nicht** verwendet und muss dafür auch nicht gesetzt sein: Ein
-dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden,
-hier wird dagegen ein täglich wiederkehrendes Preisprofil hinterlegt – beide
-Formate lassen sich nicht ineinander überführen. Für das preisoptimierte
-Laden bleibt der Sensor unabhängig vom Tarifmodell die Quelle; für die
-Wirtschaftlichkeit ist er es nur beim Tarifmodell **Dynamisch**.
-
-Der hinterlegte Tarifplan ist im Dashboard-Tab **Amortisation**
-sichtbar: eine Tabelle aus Beginn, Ende und Arbeitspreis, sortiert nach
-Beginn, mit dem Grundpreis als letzter Zeile. Die gerade geltende Zeile ist
-mit **jetzt** markiert, darunter steht der nächste Preiswechsel. Damit lässt
-sich ohne Umweg über den Konfigurationsdialog prüfen, ob die Zeitfenster so
-angekommen sind wie eingegeben. Dieselben Angaben stehen als Attribute am
-Sensor **Aktueller Netzbezugspreis** (`tariff_type`, `quote_source`,
-`active_window`, `next_price_change_at`, `base_price_eur_kwh`, `windows`) und
-sind damit auch in eigenen Automatisierungen und Vorlagen nutzbar.
-
-Der dynamische Tarif nutzt bewusst denselben Strompreis-Sensor samt dessen
-Attribut- und Einheiteneinstellung wie das preisoptimierte Laden – es gibt
-keine zweite Preisquelle. Ohne ausgewählten Sensor lässt sich dieses
-Tarifmodell nicht speichern. Liefert der Sensor keinen brauchbaren Wert
-(unbekannt, nicht verfügbar, keine Zahl, fremde Einheit, ein Preis außerhalb
-von -2 bis 5 EUR/kWh oder eine Preisvorschau, die unlesbar ist oder den
-aktuellen Zeitpunkt nicht abdeckt), gilt der Preis als unbekannt; er wird nie
-durch 0 EUR/kWh ersetzt. Der Grund steht im Diagnose-Download.
-
-Bringt der Sensor eine Preisvorschau mit, ist sie verbindlich – der
-Sensorzustand wird nur dann als aktueller Preis verwendet, wenn gar keine
-Vorschau vorliegt. Ein im Feld **Attribut mit der Preisvorschau** ausdrücklich
-angegebenes Attribut gilt dabei bereits als Vorschau, sobald es überhaupt
-einen Wert enthält.
-
-Änderungen am Tarifmodell wirken sofort und ohne Neustart der Integration –
-allerdings nur für zukünftige Messintervalle. Bereits erfasste Geldbeträge
-werden nie rückwirkend neu bewertet.
-
-Unabhängig von der gewählten Tarifart lassen sich auf derselben Seite
-optional die Felder **Investitionskosten (EUR)** und **Bereits
-erwirtschafteter Ertrag (EUR)** ausfüllen. Die Investitionskosten schalten
-die in [ROI und Amortisationsstand](#roi-und-amortisationsstand)
-beschriebenen Sensoren frei; ein Wechsel des Tarifmodells löscht keinen der
-beiden Werte.
-
-### Beispiele je Tarifart
-
-Alle drei Beispiele gehen von derselben Einspeisevergütung (0,08 EUR/kWh)
-sowie von 1 kWh Netzladung, 1 kWh PV-Ladung und 1 kWh späterer Entladung
-aus - nur der zum jeweiligen Zeitpunkt gültige Netzbezugspreis
-unterscheidet sich:
-
-- **Festpreis** (0,30 EUR/kWh ganztägig): Netzladekosten = 1 kWh × 0,30
-  EUR/kWh = 0,30 EUR. PV-Opportunitätskosten = 1 kWh × 0,08 EUR/kWh = 0,08
-  EUR. Vermiedene Netzkosten (Entladung um 0,30 EUR/kWh) = 1 kWh × 0,30
-  EUR/kWh = 0,30 EUR. Der operative Roh-Cashflow beträgt 0,30 − 0,30 −
-  0,08 = **−0,08 EUR**; die sichtbare Netto-Ersparnis bleibt bei **0 EUR**.
-- **Tageszeitabhängig** (Grundpreis 0,25 EUR/kWh, Zeitfenster 17:00–20:00
-  Uhr zu 0,40 EUR/kWh): Lädt die Netzladung innerhalb des Zeitfensters,
-  kosten die 1 kWh 0,40 EUR statt 0,25 EUR - außerhalb des Fensters gilt
-  durchgehend der Grundpreis. PV-Opportunitätskosten und die Bewertung
-  einer späteren Entladung folgen exakt derselben Formel wie beim
-  Festpreis, nur mit dem zum jeweiligen Zeitpunkt gültigen Preis.
-- **Dynamisch** (Strompreis-Sensor liefert z. B. 0,22 EUR/kWh zum
-  Ladezeitpunkt, 0,35 EUR/kWh zum späteren Entladezeitpunkt):
-  Netzladekosten = 1 kWh × 0,22 EUR/kWh = 0,22 EUR, vermiedene Netzkosten
-  = 1 kWh × 0,35 EUR/kWh = 0,35 EUR - Laden und Entladen werden bewusst
-  mit dem jeweils zu ihrem eigenen Zeitpunkt gültigen Preis bewertet, nie
-  mit einem einzigen "aktuellen" Preis für beide Vorgänge.
-
-### Formeln im Überblick
+Die Rechnung berücksichtigt gemessene Energie und den Preis zum jeweiligen
+Lade- oder Entladezeitpunkt:
 
 ```
-Netzladekosten          = geladene Netzenergie (kWh) × Netzbezugspreis zum Ladezeitpunkt
-PV-Opportunitätskosten  = geladene PV-Energie (kWh) × Einspeisevergütung
-Vermiedene Netzkosten   = monetarisierbare Entladung (kWh) × Netzbezugspreis zum Entladezeitpunkt
-Operativer Roh-Cashflow = Vermiedene Netzkosten − Netzladekosten − PV-Opportunitätskosten
-Netto-Ersparnis         = operativer Roh-Cashflow
-Amortisationsstand      = Netto-Ersparnis + Bereits erwirtschafteter Ertrag
-ROI (%)                 = Amortisationsstand ÷ Investitionskosten × 100
-Amortisationsfortschritt (%) = ROI, auf 0 bis 100 % begrenzt
-Restbetrag              = max(Investitionskosten − Amortisationsstand, 0)
+Netto-Ersparnis = vermiedene Netzbezugskosten
+                 − Kosten der Netzladung
+                 − entgangene Einspeisevergütung für PV-Ladung
 ```
 
-### Grenzen der Wirtschaftlichkeitsauswertung
+PV-Strom kostet hier die Vergütung, die du durch Einspeisen erhalten hättest.
+Ladeverluste und noch nicht verbrauchte Ladung drücken das Ergebnis.
+**Die Netto-Ersparnis kann sinken und negativ werden.**
 
-- Die Herkunftsaufteilung (Netz/PV) ist eine **Schätzung am
-  Netzanschlusspunkt** (siehe [Herkunft der Ladeenergie](#herkunft-der-ladeenergie)),
-  keine physikalische Einzelstromverfolgung.
-- Monatlicher Grundpreis, Finanzierungskosten, Wartung und
-  Batteriealterung sind **nicht Bestandteil** dieser Rechnung - der
-  operative Nettoergebnis bildet ausschließlich die reinen Arbeitspreis-
-  Zahlungsströme ab und sinkt deshalb auch durch spätere Kosten.
-- Eine Änderung des Tarifmodells oder der Investitionskosten wirkt
-  ausschließlich prospektiv - bereits verbuchte Beträge werden nie
-  rückwirkend neu berechnet.
+Die Bilanz beginnt mit der ersten Tarifaktivierung. Bereits vorhandene
+Batterieenergie wird dabei mit 0 EUR angesetzt. Monatliche Grundgebühren,
+Finanzierung, Wartung und Batteriealterung fließen nicht in die Rechnung ein.
+
+### Ersparnisübersicht
+
+![Amortisation mit Netto-Ersparnis, Tarifplan und frei wählbarem Zeitraum](docs/images/vue-ersparnis-desktop-light-de.png)
+
+Der Tab **Amortisation** zeigt die Netto-Ersparnis für den laufenden Tag,
+die Woche, den Monat und das Jahr. Unter **Freier Zeitraum** kannst du
+Start- und Enddatum wählen; **Zeitraum anzeigen** lädt Ergebnis und
+Balkendiagramm für diese vollständigen Tage.
+
+Diese Auswertungen benötigen Home Assistants Recorder-Langzeitstatistik
+der **Netto-Ersparnis**. Ohne Aufzeichnung bleiben Werte und Diagramm leer
+oder nicht verfügbar. Ein Ergebnis von 0 € ist dagegen eine berechnete Null.
+Zeiträume können gespeicherte Historie aus mehreren Bilanzabschnitten
+umfassen, auch über einen manuellen Bilanzneustart hinweg.
+
+### ROI und Amortisationsstand
+
+Hinterlege unter **Konfigurieren** die **Investitionskosten**, um Fortschritt,
+ROI und **Restbetrag bis Amortisation** zu sehen. ROI setzt die Netto-Ersparnis
+ins Verhältnis zur Investition und kann über 100 % liegen. Der
+Fortschrittsbalken bleibt zwischen 0 und 100 %.
+
+Lief die Anlage bereits vorher, kannst du **Bereits erwirtschafteter Ertrag**
+ergänzen. Dieser Betrag zählt zum Amortisationsstand, aber nicht zur
+aufgezeichneten Netto-Ersparnis oder zu den Kalenderauswertungen.
+Ein zukünftiges Amortisationsdatum wird nicht hochgerechnet.
+
+### Datenqualität, Diagnose und Bilanzneustart
+
+**Wirtschaftlichkeit Status** weist auf fehlende Preise, unbekannte
+Energieherkunft, teilweise Preisabdeckung oder einen Speicherfehler hin.
+Ohne aktivierten Tarif bleiben Geldwerte unbekannt. Nicht bewertbare
+Energiemengen werden erfasst, aber später nicht rückwirkend bepreist.
+
+Über **Entwicklertools → Aktionen → Wirtschaftlichkeitsbilanz neu starten**
+(`sax_power.restart_economics_accounting`) kannst du nach einer falschen
+Tarifeinstellung neu beginnen. Dafür ist **Bestätigen: wahr** nötig.
+**Dabei werden die bisherigen Geldsummen, Tagesbilanzen und
+Preisabdeckungszähler zurückgesetzt.** Energie- und Herkunftszähler bleiben
+erhalten; eine rückwirkende Neuberechnung findet nicht statt.
+
+Bei einem beschädigten Bilanz-Speicher bleibt die Rechnung angehalten.
+Stelle eine gültige Sicherung wieder her und lade die Integration neu.
+Ein bloßes Neuladen behebt die beschädigte Datei nicht. Länger andauernde
+Speicher- oder Preisprobleme erscheinen zusätzlich unter **Reparaturen**.
 
 ## Herkunft der Ladeenergie
 
-Zusätzlich zu **Geladene Energie (gesamt)** zeigen zwei weitere Sensoren, wie
-viel der geladenen Energie rechnerisch aus dem Netz und wie viel aus PV
-stammt:
+**Geladene Energie aus dem Netz** und **Geladene Energie aus PV** teilen die
+Ladung rechnerisch nach ihrer Herkunft auf. Grundlage sind Ladeleistung und
+Netzleistung am Hausanschluss. Das ist eine Schätzung: Gleichzeitiger
+Hausverbrauch lässt sich damit nicht eindeutig von Batterieladung trennen.
 
-- **Geladene Energie aus dem Netz**
-- **Geladene Energie aus PV**
+Fehlt die Netzleistung, zählt die betreffende Ladung im öffentlichen Zähler
+vorsorglich als Netzladung. Die Geldbilanz behandelt sie jedoch als
+unbepreist; ihre spätere Entladung erzeugt keinen angenommenen Geldvorteil.
 
-Beide zusammen ergeben immer die Gesamtladung - eine dritte Kategorie gibt
-es nicht, denn physikalisch speist entweder die PV-Anlage oder das Netz.
-
-**Geladene Energie aus dem Netz** erfasst ausschließlich den geschätzten
-Netzstromanteil der Batterieladung. Der direkte Netzverbrauch des Hauses
-gehört zum separaten Sensor **Netzbezug gesamt** (siehe
-[Energy-Dashboard](#energy-dashboard)).
-
-Diese Aufteilung funktioniert unabhängig davon, ob unter
-[Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
-eine Geldbewertung aktiviert ist, und ist eine **Schätzung anhand des
-Netzanschlusspunktes**, keine physikalisch eindeutige Zuordnung: Bei
-gleichzeitigem Hausverbrauch lässt sich aus Ladeleistung und Netzleistung
-allein nicht herleiten, welcher Anteil der PV-Erzeugung tatsächlich in den
-Speicher statt in den Hausverbrauch geflossen ist. Netzbezug, der die
-aktuelle Ladeleistung übersteigt (er deckt dann zusätzlich laufenden
-Hausverbrauch), zählt deshalb konservativ vollständig als Netzladung. Ist der
-Netzwert selbst gerade nicht bekannt, zählt die Ladeenergie dieses Zeitraums
-ebenfalls vollständig als Netzladung. Diese Zuordnung hält die beiden
-öffentlichen Herkunftszähler vollständig, ist aber ausdrücklich keine
-gemessene Herkunft: Die Wirtschaftlichkeitsbilanz bepreist das Intervall
-deshalb nicht. Stattdessen erscheint die Energiemenge als unbewerteter
-Bestand und reduziert die angezeigte Preisabdeckung.
-
-Die Herkunftszählung beginnt mit der ersten Installation dieser Funktion bei
-0 kWh - bereits vorher geladene Energie wird nicht nachträglich einer Quelle
-zugeordnet, der bestehende Gesamtzähler **Geladene Energie (gesamt)** bleibt
-davon unberührt. Beide Herkunftssensoren führen diesen Startzeitpunkt als
-Attribut `origin_accounting_started_at` mit; es lässt sich bei der jeweiligen
-Entity in Home Assistant einsehen.
-
-Dieser Zeitpunkt ist wichtig, sobald daneben eine
-[Wirtschaftlichkeitsbilanz](#wirtschaftlichkeitsbilanz) läuft: Sie beginnt
-erst mit dem ersten vollständig gespeicherten Tarif und damit in aller Regel
-später als die Herkunftszählung. **Die Zähler der beiden Abschnitte sind
-deshalb nicht gegeneinander verrechenbar** - 2,44 kWh geladene PV-Energie
-neben 0,0084 EUR PV-Opportunitätskosten ist kein Widerspruch, wenn die
-Bilanz von diesen 2,44 kWh nur die letzten 0,112 kWh erlebt hat. Vergleiche
-benötigen dieselben Zeiträume und die in diesen Zeiträumen bewerteten Mengen.
-
-## Wirtschaftlichkeitsbilanz
-
-Ist unter [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)
-ein Tarif aktiviert, bilanziert die Integration zusätzlich zur reinen
-[Herkunft der Ladeenergie](#herkunft-der-ladeenergie) einen fortlaufenden
-Geldwert. Bewertet wird ausschließlich tatsächlich gemessene Lade-/
-Entladeenergie, nie ein Sollwert:
-
-- **Netzladekosten**: geladene Netzenergie zum jeweils zum Ladezeitpunkt
-  gültigen Netzbezugspreis.
-- **PV-Opportunitätskosten**: geladene PV-Energie zur eingestellten
-  Einspeisevergütung - PV-Strom gilt nie als kostenlos, weil er statt in den
-  Speicher auch hätte eingespeist werden können.
-- **Vermiedene Netzkosten**: entladene Energie zum jeweils zum
-  Entladezeitpunkt gültigen Netzbezugspreis, also der Betrag, den der
-  Hausverbrauch dadurch nicht aus dem Netz decken musste.
-- **Operatives Nettoergebnis**: vermiedene Netzkosten abzüglich
-  Netzladekosten und PV-Opportunitätskosten. Es wird identisch als
-  **Operativer Roh-Cashflow** und **Netto-Ersparnis** veröffentlicht, kann
-  durch spätere Kosten sinken und auch negativ sein. Ladeverluste bleiben
-  dadurch unmittelbar im Ergebnis sichtbar.
-
-Die Sensoren **Aktueller Netzbezugspreis** und **Einspeisevergütung** zeigen
-den gerade angewendeten Tarif. Beim erstmaligen Aktivieren setzt die
-Integration die bereits im Speicher vorhandene Energie mit 0 EUR an. Sie wird
-nicht als unbekannte Energiemenge nachgeführt; bei maximal 7 kWh ist ihr
-einmaliger Einfluss auf die Amortisationsrechnung vernachlässigbar. Eine
-spätere Tarifänderung wirkt ausschließlich auf künftige Beträge; bereits
-verbuchte Werte bleiben unverändert.
-
-Fehlt während einer Ladung der Smartmeter-Wert, bleibt deren genaue Herkunft
-unbekannt. Obwohl der öffentliche Herkunftszähler diese Energie aus
-Kompatibilitätsgründen konservativ unter Netzladung führt, entstehen weder
-Netzladekosten noch PV-Opportunitätskosten. Die Ladung zählt stattdessen als
-unbepreist; eine spätere Entladung dieses Bestands erzeugt keinen erfundenen
-vermiedenen Geldwert. Der Status und der Diagnose-Download machen diese
-fehlende Abdeckung über die unbepreisten Energiemengen sichtbar.
-
-Monetäre Sensoren zeigen "unbekannt" statt 0, solange kein Tarif aktiviert
-ist - ein deaktivierter Tarif soll keinen falschen Nullgewinn suggerieren.
-
-Beim ersten Start nach einem Update von einem älteren Bilanzspeicher wird das
-aktuelle Nettoergebnis verlustfrei aus den drei Geldsummen rekonstruiert.
-Geldsummen und Bilanzbeginn bleiben erhalten. Gesamt- und Tages-Nettoergebnis
-besitzen jeweils eine eigene Recorder-Historie; bei einer aktualisierten
-Installation kann diese deshalb jünger sein als der weiterhin angezeigte
-Bilanzbeginn.
-Alle fünf kumulativen Geldsensoren melden denselben Bilanzbeginn als
-`last_reset`. Ein bestätigter Bilanzneustart beginnt damit für Home Assistants
-Langzeitstatistik einen neuen Abschnitt, statt den Sprung auf 0 als
-künstliche Kosten- oder Ertragsänderung zu verbuchen. Normale Rückgänge durch
-negative Preise oder spätere Kosten ändern diesen Zeitpunkt nicht.
-
-## Ersparnisübersicht
-
-Der fünfte Tab **Amortisation** fasst das **Nettoergebnis** bewusst kompakt
-zusammen. Grundlage sind vermiedene Netzbezugskosten abzüglich
-Netzladekosten und entgangener Einspeisevergütung. Spätere Kosten reduzieren
-den Wert; Mehrkosten werden negativ angezeigt. Ein echtes Ergebnis von 0
-bleibt als 0 EUR sichtbar.
-
-Die Erläuterungen zur Berechnung, zur Recorder-Datenbasis und zur freien
-Zeitraumauswahl sind nach
-den Zeitraumwerten unter **Hinweise zur Berechnung und Datenbasis**
-zusammengefasst und
-standardmäßig eingeklappt. Ein Antippen öffnet sie bei Bedarf. Aktuelle
-Warnungen bleiben davon unabhängig.
-
-Zwischen den festen Kalenderwerten und diesen Erläuterungen zeigt der Tab
-die dynamische Tarifinformation. Sie
-liest den tageszeitabhängigen Tarifplan aus der aktuellen Preis-Entity und
-reagiert deshalb ohne Dashboard-Neubau auf Tarifänderungen.
-
-Vier Karten zeigen die Änderung des Nettoergebnisses im laufenden
-Kalendertag, in der laufenden Kalenderwoche, im laufenden Kalendermonat und im
-laufenden Kalenderjahr. Die Zeitgrenzen und Werte stammen unmittelbar aus
-Home Assistants Recorder-Langzeitstatistik, nicht aus rollierenden
-24-/7-/30-/365-Stunden-Fenstern. Fehlt für einen Zeitraum noch eine Statistik
-oder ist die Entity vom Recorder ausgeschlossen, bleibt die Auswertung leer
-beziehungsweise nicht verfügbar. Die Integration ersetzt fehlende Daten nicht
-durch 0 EUR.
-
-Der aktuelle Zustand des fortlaufenden Sensors `economics_net_savings` und
-der sichtbare **Bilanzbeginn** stehen im Amortisationsblock direkt unter dem
-Vorlaufbetrag. Der Gesamtwert ist keine Recorder-Differenz. Die
-Kalenderwerte umfassen die Zuwächse seit Beginn der Recorder-Aufzeichnung und
-können deshalb bei einem Zeitraum über einen manuellen Bilanzneustart durch
-den expliziten `last_reset` signierte Änderungen des vorherigen und des aktuellen
-Bilanzabschnitts zusammenfassen. Sie dürfen dadurch vor dem sichtbaren
-Bilanzbeginn beginnen, rekonstruieren aber keine Daten vor dem Recorder-Start.
-Ein optional eingetragener, bereits vor dem Bilanzbeginn erwirtschafteter
-Ertrag bleibt zeitlich nicht zuordenbar und wird deshalb ausschließlich in der
-ROI-/Amortisationsdarstellung berücksichtigt, nicht in Tag, Woche, Monat oder
-Jahr.
-
-### Status
-
-Im gesunden Zustand `active` bleibt der Tab ruhig: Der Statushinweis am Ende
-des Tabs blendet sich vollständig aus. Nur wenn Handlungsbedarf besteht oder
-ein Wert ohne Kontext missverständlich wäre, erscheint genau ein kurzer
-Hinweis. Er erklärt einen deaktivierten Tarif, einen fehlenden Strompreis,
-unbekannte Ladeenergieherkunft,
-teilweise Preisabdeckung oder einen angehaltenen Bilanz-Store. Unbekannte oder
-noch nicht verfügbare Statusdaten werden neutral benannt. Einen separaten
-technischen Wirtschaftlichkeits-Tab oder einen Link auf einen solchen Pfad
-gibt es nicht.
-
-0 ist ein echtes berechnetes Netto-Ergebnis; ein negativer Wert weist reale
-Mehrkosten seit Bilanzbeginn aus. `unknown`/`unavailable` werden nicht als 0
-ausgegeben.
-
-### Amortisation
-
-Der erste Block zeigt bei hinterlegten Investitionskosten den blauen
-Amortisationsfortschritt und darunter in einer gemeinsamen Liste den
-**Restbetrag bis Amortisation**. Direkt danach folgt der optionale
-Vorlauf-Ertrag als **Bereits vor Bilanzbeginn berücksichtigt** mit der Einheit
-**€** und exakt zwei Nachkommastellen, anschließend **Netto-Ersparnis** und
-**Bilanzbeginn**. Alle Währungsangaben im Amortisations-Tab erscheinen mit zwei
-Nachkommastellen; intern und im Recorder bleibt die höhere Rechengenauigkeit
-erhalten. Die Karte trägt die Überschrift **Amortisation**.
-
-Ohne Investitionskosten verweist der Block auf **Geräte & Dienste → SAX Power
-Home → Konfigurieren → Wirtschaftlichkeit**. Die Anzeige reagiert direkt auf
-den Zustand von `economics_investment_configured`; ein Dashboard-Neubau ist
-nach dem Hinterlegen oder Entfernen der Kosten nicht nötig.
-
-Eine künftige Amortisation wird nicht mehr hochgerechnet. Das frühere
-voraussichtliche Datum, der 30-Tage-Durchschnitt, die Jahreshochrechnung und
-die zugehörigen Prognosehinweise entfallen.
-### Freier Zeitraum
-
-Unter **Freier Zeitraum** lässt sich ein beliebiger Datumsbereich auswählen,
-zum Beispiel die letzten drei, sechs oder zwölf Monate. Anfangs- und Enddatum
-werden mit **Zeitraum anzeigen** gemeinsam bestätigt und umfassen jeweils
-den ganzen Tag in der HA-Zeitzone. Diese Auswahl steuert Netto-Ergebnis und Balkendiagramm;
-andere Home-Assistant-Ansichten werden dadurch nicht verändert.
-
-Auch diese Auswertung verwendet ausschließlich die Recorder-Langzeitstatistik
-von `economics_net_savings`: Der Einzelwert ist dessen Änderung im
-gewählten Zeitraum, das Diagramm enthält keine zusätzlichen Kosten- oder
-Ertragsreihen. Der Recorder-Adapter wählt für die HA-lokalen Kalendertage nach
-der nativen HA-Heuristik Stunden-, Tages- oder Monatsauflösung. Der Sensor
-trennt diese Historie vom technischen Roh-Cashflow; eine zweite Berechnung im Dashboard
-gibt es nicht.
-
-Eine Auswahl vor dem sichtbaren Bilanzbeginn erfindet keine rückwirkenden
-Werte. Existiert dort Recorder-Historie aus einem früheren Bilanzabschnitt,
-kann sie jedoch angezeigt werden; schneidet die Auswahl den manuellen
-Neustart, kann das Ergebnis signierte Änderungen aus beiden Bilanzabschnitten
-enthalten. Fehlt Recorder-Historie oder ist die
-Ergebnis-Entity vom Recorder ausgeschlossen, bleiben Wert und Diagramm
-unbekannt beziehungsweise leer; ein mathematisches Ergebnis von 0 bleibt
-davon unterscheidbar.
-
-## ROI und Amortisationsstand
-
-Mit hinterlegten **Investitionskosten (EUR)** setzt die Integration das
-[Nettoergebnis](#wirtschaftlichkeitsbilanz) in Bezug zur Investition:
-
-- **ROI**: Amortisationsstand in Prozent der Investitionskosten, über 100 %
-  möglich.
-- **Amortisationsfortschritt**: derselbe Wert, auf 0 bis 100 % begrenzt.
-- **Restbetrag bis Amortisation**: Investitionskosten abzüglich
-  Amortisationsstand, nie unter 0 EUR.
-- **Netto-Ersparnis heute**: das signierte Ergebnis des laufenden
-  Kalendertags.
-
-Für Anlagen, die schon vor Einrichtung der Integration liefen, kann
-**Bereits erwirtschafteter Ertrag (EUR)** hinterlegt werden. Dieser Vorlauf
-zählt nur zu ROI, Fortschritt und Restbetrag. Netto-Ersparnis und
-Netto-Ersparnis heute bleiben reine Messwerte, damit Recorder-Auswertungen
-keinen künstlichen Tagesertrag erhalten.
-
-Ohne Investitionskosten oder ohne laufende Bilanz bleiben die vier Sensoren
-unbekannt. Eine künftige Amortisation, ein geschätztes Datum, ein
-30-Tage-Durchschnitt und eine Jahreshochrechnung werden bewusst nicht
-berechnet.
-## Datenqualität, Diagnose und Bilanzneustart
-
-Eine Geldzahl ohne Aussage zur Datenqualität ist irreführend. Der Sensor
-**Wirtschaftlichkeit Status** zeigt deshalb auf einen Blick, ob und warum
-der Wirtschaftlichkeitsbilanz gerade zu trauen ist:
-
-| Status | Bedeutung |
-| --- | --- |
-| Deaktiviert | Kein Tarif konfiguriert (siehe [Tarifmodell für die Wirtschaftlichkeit](#tarifmodell-für-die-wirtschaftlichkeit)) |
-| Speicherfehler | Der interne Bilanz-Speicher ist unlesbar - die Bilanz bleibt bis zur Wiederherstellung eingefroren; bloßes Neuladen setzt sie nicht zurück |
-| Preis nicht verfügbar | Seit über 6 Stunden kein gültiger Netzbezugspreis (bei einem Fest-/Zeitfenstertarif sofort, wenn die gespeicherte Konfiguration selbst ungültig ist) |
-| Herkunft nicht verfügbar | Die Herkunftsaufteilung aus [Herkunft der Ladeenergie](#herkunft-der-ladeenergie) läuft gerade nicht |
-| Teilweise Preisabdeckung | Mehr als 5 % der heute geladenen oder entladenen Energie konnte nicht bepreist werden |
-| Aktiv | Alles vollständig - die Bilanz ist ohne Einschränkung aussagekräftig |
-
-Bei mehreren gleichzeitig zutreffenden Problemen zeigt der Sensor immer
-das dringendste in dieser Reihenfolge. Seine Attribute liefern zusätzlich
-die aktuellen Preise, den Aktivierungszeitpunkt, kumulierte bepreiste/
-unbepreiste Energiemengen sowie die genauen Abdeckungsprozentsätze (die
-des laufenden Tages, die den Zustand bestimmen, und die kumulierten seit
-Beginn der Bilanz) - für
-Dashboards und Automationen, die feiner reagieren wollen als der reine
-Status.
-
-Bleibt der interne Bilanz-Speicher länger als 6 Stunden unlesbar oder
-liegt ebenso lange kein gültiger Netzbezugspreis vor, erscheint zusätzlich
-ein Reparaturhinweis unter **Einstellungen → System → Reparaturen**, der
-sich automatisch wieder auflöst, sobald die Ursache behoben ist.
-Hat Home Assistant eine beschädigte Datei als `.corrupt.*` gesichert, wird
-diese Sicherung niemals automatisch durch eine neue Nullbilanz ersetzt.
-Spiele einen gültigen Store aus einem Backup an den ursprünglichen Pfad
-zurück und lade die Integration danach neu. Ein bloßer Config-Entry-Reload
-gilt weder als Reparatur noch als Zustimmung zu einer neuen Nullbilanz.
-
-Bei einer fehlerhaften Konfiguration (z. B. einem versehentlich falsch
-eingegebenen Tarif) lässt sich über den Service **Wirtschaftlichkeitsbilanz
-neu starten** (`sax_power.restart_economics_accounting`) eine neue,
-prospektive Bilanz beginnen: Alle bisherigen Geldsummen, Preisabdeckungs-
-zähler und die Amortisationshistorie werden zurückgesetzt, der interne
-unbewertete Bestand wird wie bei der erstmaligen Aktivierung auf 0 gesetzt. Der
-Aufruf verlangt zur Sicherheit das Feld **Bestätigen** exakt auf „wahr“
-gesetzt und akzeptiert optional einen freien **Grund**-Text, der
-ausschließlich im Diagnose-Download erscheint. Die Energiezähler
-(**Geladene/Entladene Energie**) und die Herkunftsaufteilung aus
-[Herkunft der Ladeenergie](#herkunft-der-ladeenergie) bleiben davon
-vollständig unberührt - es gibt keine rückwirkende Neuberechnung.
-
-### Bereits beschädigte Zähler durch ungültige SunSpec-Skalierung
-
-Ab Version 2.0.3 werden SunSpec-Skalierungsfaktoren außerhalb −10 bis +10
-verworfen. Betroffene Messwerte zeigen „unbekannt“; eine Warnung im Log nennt
-das Register. Bereits gespeicherte Ausreißer aus
-[Issue #194](https://github.com/dr-dimitri/sax-ha/issues/194) korrigiert das
-Update nicht automatisch.
-
-Für betroffene Installationen:
-
-1. Home Assistant stoppen und das Konfigurationsverzeichnis sichern. Einen
-   bekannten korrekten Energie-Store aus dem Backup wiederherstellen oder
-   im `data`-Objekt von `.storage/sax_power.energy.<entry_id>` die betroffenen
-   Zähler (`charged_kwh`, `discharged_kwh`, `grid_charged_kwh`,
-   `pv_charged_kwh`, gegebenenfalls `grid_imported_kwh`/`grid_exported_kwh`)
-   auf bekannte korrekte Werte setzen. Ein bewusst gewählter Neustart bei 0
-   verwirft die jeweilige bisherige Summe. Die Datei nicht bloß löschen:
-   Sonst kann Home Assistant den beschädigten Altstand über RestoreEntity
-   erneut importieren. Dateistruktur und übrige Felder erhalten.
-2. Home Assistant starten. Die Geldbilanz bei aktiviertem Tarif und bereits
-   initialisierter Bilanz über `sax_power.restart_economics_accounting`
-   mit dem betroffenen Gerät und `confirm: true` neu beginnen. Dabei gehen
-   ihre bisherigen Summen und Tagesbilanzen verloren; Energie- und
-   Herkunftszähler werden durch diesen Service nicht zurückgesetzt.
-3. Bereits aufgezeichnete Ausreißer zusätzlich in Home Assistants
-   [Statistikwerkzeugen](https://www.home-assistant.io/docs/tools/dev-tools/#statistics-tab)
-   korrigieren. Eine Store-Korrektur bereinigt die Langzeitstatistik nicht.
+Die Herkunftszählung startet bei ihrer ersten Einrichtung bei 0 kWh.
+Gesamtenergie, Herkunftszählung und Geldbilanz können unterschiedliche
+Startzeitpunkte haben. Vergleiche deshalb nur Werte aus demselben Zeitraum.
 
 ## Energy-Dashboard
 
-Die Sensoren **Geladene Energie (gesamt)** und **Entladene Energie (gesamt)**
-lassen sich direkt als Batteriesystem verwenden:
+Unter **Einstellungen → Dashboards → Energie** ordnest du die Sensoren so zu:
 
-**Einstellungen → Dashboards → Energie → Batteriesysteme**
+| Bereich | Verwendung | SAX-Power-Sensor |
+| --- | --- | --- |
+| Batteriesysteme | In den Speicher geladen | Geladene Energie (gesamt) |
+| Batteriesysteme | Aus dem Speicher entladen | Entladene Energie (gesamt) |
+| Stromnetz | Netzverbrauch | Netzbezug gesamt |
+| Stromnetz | Rückspeisung | Netzeinspeisung gesamt |
 
-Dort den ersten Sensor für die in den Speicher geladene und den zweiten für
-die aus dem Speicher entladene Energie auswählen. Die Zählerstände bleiben
-über Neustarts hinweg erhalten.
-
-Für den Stromnetz-Abschnitt stehen außerdem **Netzbezug gesamt** und
-**Netzeinspeisung gesamt** zur Verfügung. Dort den ersten Sensor als
-Netzverbrauch und den zweiten als Rückspeisung auswählen. Sie erfassen den
-gesamten Netzanschlusspunkt einschließlich des direkten Hausverbrauchs,
-unabhängig von der Batterieladung und einer Tarifkonfiguration.
-
-Die Netzenergiezähler integrieren die gemessene Netzleistung in kWh: Der
-letzte gültige Messwert gilt bis zur nächsten gültigen Messung (linke
-Riemannsumme). Es handelt sich um eine **Schätzung aus Momentanleistungen**.
-Bei fehlenden oder ungültigen Messwerten, Verbindungsfehlern und Messlücken
-von mehr als vier Sekunden pausiert die Zählung. Diese Zeiträume werden
-nach Wiederherstellung der Verbindung nicht nachträglich berechnet.
-Ohne gültige SunSpec-Netzleistung bleibt der bisherige Zählerstand erhalten.
-Bei einem Ausfall des Basic-Modus werden die Sensoren als nicht verfügbar
-angezeigt; ihre gespeicherten Summen bleiben erhalten.
-
-Beim ersten Einrichten oder nach dem Update auf diese Funktion beginnen
-beide Netzzähler bei 0 kWh. Ihr gemeinsamer Beginn steht im Attribut
-`accounting_started_at`, das Rechenverfahren unter `integration_method`.
-Die Zählerstände und der Beginn bleiben über Neustarts erhalten; Zeiträume
-mit ausgeschaltetem Home Assistant werden nicht gezählt. Bereits vor dem
-Zählbeginn bezogene oder eingespeiste Energie wird nicht rekonstruiert.
+Die Netzzähler erfassen den gesamten Hausanschluss einschließlich direktem
+Hausverbrauch. Sie schätzen Energie aus den gemessenen Leistungen und
+pausieren bei ungültigen Werten oder Messlücken von mehr als vier Sekunden.
+Ausfälle und Zeiten mit ausgeschaltetem Home Assistant werden nicht
+nachberechnet. Die Zähler beginnen bei ihrer ersten Einrichtung bei 0 kWh
+und behalten ihre Stände über Neustarts hinweg.
 
 ## Aktionen für Automationen
 
-Alle Aktionen werden unter **Entwicklertools → Aktionen** ausgeführt und über
-das Feld `device_id` dem gewünschten SAX-Power-Gerät zugeordnet.
+Alle Aktionen findest du unter **Entwicklertools → Aktionen**. Wähle dort
+das SAX-Power-Gerät; Home Assistant erklärt die verfügbaren Eingabefelder.
 
-| Aktion | Verwendung |
+| Aktion | Zweck |
 | --- | --- |
-| `sax_power.start_grid_charge` | Manuelle Netzladung mit einem strikt negativen Leistungssollwert starten oder sofort aktualisieren |
-| `sax_power.stop_grid_charge` | Manuelle Netzladung kontrolliert beenden und die SmartMeter-Regelung wieder freigeben |
-| `sax_power.set_timed_charge_window` | Start und Ende der zeitgesteuerten Netzladung gemeinsam setzen |
-| `sax_power.set_grid_serving_window` | Start und Ende des netzdienlichen Ladens gemeinsam setzen |
-| `sax_power.refresh_price_plan` | Ladeplan nach aktualisierten Preisdaten sofort neu berechnen |
-| `sax_power.set_price_charge_enabled` | Preisoptimiertes Laden per Automation schalten |
+| `sax_power.set_timed_charge_window` | Start und Ende der Netzladung gemeinsam setzen |
+| `sax_power.set_grid_serving_window` | Start und Ende der PV-Ladepause gemeinsam setzen |
+| `sax_power.refresh_price_plan` | Ladeplan mit aktuellen Preisen neu berechnen |
+| `sax_power.set_price_charge_enabled` | Preisoptimiertes Laden schalten |
+| `sax_power.start_grid_charge` | Manuelle Netzladung starten oder deren Sollwert ändern |
+| `sax_power.stop_grid_charge` | Manuelle Netzladung beenden |
 
-Die für eine Aktion verfügbaren Felder und Beschreibungen zeigt Home Assistant
-direkt im Aktionseditor an. Für den normalen Betrieb werden die manuellen
-Aktionen zum Starten und Stoppen einer Netzladung nicht benötigt.
-
-`sax_power.start_grid_charge` akzeptiert ausschließlich ganzzahlige
-Ladesollwerte von **-32768 bis -1 W**. Null, positive Werte und damit eine
-manuelle Entladung werden abgelehnt. Der Aufruf verwendet denselben zentralen
-SunSpec-Steuerpfad wie die Ladeautomatiken und wartet, bis der erste wirksame
-Schreibvorgang vom Speicher quittiert wurde. Eine erneute Start-Aktion ändert
-den Sollwert sofort. Es gilt stets die Priorität **Max-SOC-Sperre → manuelle
-Netzladung → zeitgesteuertes Laden → netzdienliches Laden → preisoptimiertes
-Laden**. `sax_power.stop_grid_charge` wartet das Ende des gemeinsamen
-Schreib-Tasks ab, versucht aktiv zur SmartMeter-Nullregelung zurückzukehren und
-gibt danach weiterhin berechtigte Automatiken wieder frei.
-
-## Verbindung nachträglich ändern
-
-IP-Adresse, Port, Slave-IDs und Aktualisierungsintervall lassen sich jederzeit
-anpassen:
-
-**Einstellungen → Geräte & Dienste → SAX Power Home → Neu konfigurieren**
-
-Die neuen Verbindungsdaten werden vor dem Speichern geprüft. Nach erfolgreicher
-Prüfung lädt Home Assistant die Integration automatisch neu.
+Die manuelle Netzladung verlangt einen ganzzahligen Sollwert von
+**−32768 bis −1 W** und bleibt bis zum Stoppen angefordert. Sie hat Vorrang
+vor den Ladeautomatiken; **Max. SOC** gilt weiterhin. Für den normalen
+Automatikbetrieb brauchst du die manuellen Start-/Stopp-Aktionen nicht.
+Eine manuelle Entladung wird nicht unterstützt.
 
 ## Diagnose und Fehlersuche
 
-| Problem | Mögliche Ursache und Lösung |
+| Problem | Das kannst du prüfen |
 | --- | --- |
-| Verbindung kann nicht hergestellt werden | IP-Adresse und Port prüfen und sicherstellen, dass Home Assistant den Speicher im lokalen Netzwerk erreicht |
-| Modbus-Fehler bei der Einrichtung | Slave-IDs prüfen; die Standardwerte sind 64 und 100 |
-| Viele Detailwerte sind unbekannt | SunSpec-Slave-ID und Firmware prüfen; empfohlen werden Master V61/Gateway V54 oder neuer |
-| Ladefunktionen reagieren nicht | Erreichbarkeit des SunSpec-Modus sowie Statussensoren und ausgewählte Monate prüfen |
-| Netzladung startet nicht | Zeitfenster, aktive Monate, Min. SOC und Max. SOC kontrollieren |
-| Preisoptimiertes Laden zeigt „Keine Preisdaten“ | Preis-Sensor, Vorschauattribut und Preis-Einheit unter **Konfigurieren** prüfen |
-| Zeitangabe wurde geleert | Zeitfenster von Netzladung und netzdienlichem Laden überschneiden sich |
-| PV-Leistung zeigt dauerhaft 0 W | Der verwendete Smart Meter stellt diesen Wert möglicherweise nicht bereit |
+| Keine Verbindung | IP-Adresse, Port und Erreichbarkeit im lokalen Netzwerk |
+| Modbus-Fehler | Slave-IDs; Standard: Basic 64, SunSpec 100 |
+| Viele Detailwerte unbekannt | SunSpec-Verbindung und Firmwarestand |
+| Netzladung startet nicht | Schalter, Zeitfenster, Monate, Startschwelle und Netzladeziel |
+| Keine Preisdaten | Strompreis-Sensor, Vorschauattribut und Preis-Einheit unter **Konfigurieren** |
+| Zeitangabe wurde geleert | Überschneidung zwischen Netzladung und PV-Ladepause |
+| PV-Leistung dauerhaft 0 W | Unterstützung durch den verwendeten Smart Meter |
+| Dashboard nach Update unverändert | Reparaturhinweis bearbeiten, Browserseite vollständig neu laden |
 
 Unter **Einstellungen → Geräte & Dienste → SAX Power Home → Diagnose
-herunterladen** kann eine Diagnosedatei erstellt werden. Sie enthält die für
-die Fehlersuche relevanten Zustände; die IP-Adresse wird dabei unkenntlich
-gemacht. Die Datei kann einem Fehlerbericht auf GitHub beigefügt werden.
+herunterladen** erhältst du eine Datei für die Fehlersuche. Die IP-Adresse
+wird darin unkenntlich gemacht.
+
+<details>
+<summary>Alte Ausreißer in Energiezählern korrigieren</summary>
+
+Seit Version 2.0.3 werden ungültige SunSpec-Skalierungen abgefangen. Bereits
+gespeicherte Ausreißer aus
+[Issue #194](https://github.com/dr-dimitri/sax-ha/issues/194) verschwinden
+durch ein Update allerdings nicht.
+
+1. Home Assistant stoppen und das Konfigurationsverzeichnis sichern.
+   Einen korrekten Energie-Store aus dem Backup wiederherstellen oder in
+   `.storage/sax_power.energy.<entry_id>` unter `data` die betroffenen
+   Zähler auf bekannte korrekte Werte setzen: `charged_kwh`,
+   `discharged_kwh`, `grid_charged_kwh`, `pv_charged_kwh` und gegebenenfalls
+   `grid_imported_kwh` / `grid_exported_kwh`. Ein Neustart bei 0 verwirft
+   die bisherige Summe. Die Datei nicht einfach löschen, sonst können alte
+   Zustände erneut eingelesen werden. Struktur und übrige Felder erhalten.
+2. Home Assistant starten. Bei einer betroffenen laufenden Geldbilanz
+   `sax_power.restart_economics_accounting` mit dem Gerät und
+   `confirm: true` aufrufen. Das löscht ihre bisherigen Summen und
+   Tagesbilanzen, nicht die Energiezähler.
+3. Bereits aufgezeichnete Ausreißer zusätzlich in den Home-Assistant-
+   Statistikwerkzeugen korrigieren. Eine Store-Korrektur ändert die
+   Langzeitstatistik nicht.
+
+</details>
 
 ## Bekannte Einschränkungen
 
-- Eine ferngesteuerte manuelle Entladung wird vom Speicher nicht unterstützt.
-- Erweiterte Messwerte und Ladefunktionen benötigen den SunSpec-Modus. Die
-  grundlegenden Messwerte bleiben auch dann verfügbar, wenn dieser Modus nicht
-  erreichbar ist.
-- Die Strategien **Relativ** und **Smart** benötigen zukünftige Preisdaten. Mit
-  einem Sensor, der nur den aktuellen Preis liefert, steht weiterhin die
-  Strategie **Absoluter Preis** zur Verfügung.
-- Die Strategie **Smart** benötigt zusätzlich Speicherkapazität und
-  PV-Prognose. Fehlen diese Angaben, verhält sie sich wie **Relativ**.
+- Erweiterte Messwerte und Ladefunktionen benötigen **SunSpec**. Die
+  grundlegenden Messwerte bleiben bei einem SunSpec-Ausfall verfügbar.
+- **Relativ** und **Smart** brauchen zukünftige Strompreise. Ein Sensor mit
+  ausschließlich aktuellem Preis reicht für **Absoluter Preis**.
+- **Smart** benötigt für die Bedarfsrechnung gültige Speicherwerte. Fehlen
+  Kapazität, Ladezustand oder Ladeleistung, arbeitet die Strategie wie
+  **Relativ**. Eine PV-Prognose ermöglicht die Berücksichtigung des erwarteten
+  Sonnenstroms.
 
 ## Hilfe und Entwicklung
 
-Fehler und Verbesserungsvorschläge können über die
-[GitHub-Issues](https://github.com/dr-dimitri/sax-ha/issues) gemeldet werden.
-Für eine zügige Analyse bitte die Home-Assistant-Version, die Firmware des
-Speichers, eine kurze Beschreibung des beobachteten Verhaltens und nach
-Möglichkeit die Diagnosedatei angeben.
+Fehler gefunden oder eine Idee? Erstelle ein
+[GitHub-Issue](https://github.com/dr-dimitri/sax-ha/issues). Hilfreich sind
+deine Home-Assistant-Version, Speicher-Firmware, eine kurze Beschreibung
+und möglichst die Diagnosedatei.
 
-Technische Informationen für Mitwirkende befinden sich in:
+Für Mitwirkende:
 
-- [DEVELOPMENT.md](DEVELOPMENT.md) – Architektur, lokale Entwicklung und Tests
-- [anforderung.yaml](anforderung.yaml) – vollständige Verhaltensanforderungen
-- [AGENTS.md](AGENTS.md) – Arbeitsregeln für Coding-Agenten
+- [DEVELOPMENT.md](DEVELOPMENT.md): Architektur, Entwicklung und Tests
+- [anforderung.yaml](anforderung.yaml): genaue Funktionsanforderungen
+- [Dashboard-Prüfübersicht](docs/vue-dashboard-parity.md): Datenquellen,
+  Tests und bekannte Grenzen
+- [AGENTS.md](AGENTS.md): Arbeitsregeln für Coding-Agenten

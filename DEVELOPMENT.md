@@ -138,9 +138,13 @@ für beide Zeitfenster. Die gemeinsame
 kapselt Zusammenfassung und Quartalsauswahl beider Monatsgruppen.
 `hideConfirmedLabel` in Layout und Bedienkomponente entfernt nur in
 `TimedChargingView.vue` und `DynamicChargingView.vue` den Präfix
-„Bestätigter Wert:“ (EN: „Confirmed value:“). Bestätigte HA-Werte bleiben
-auch während lokaler Entwürfe sichtbar und über `aria-describedby` zugeordnet.
+„Bestätigter Wert:“ (EN: „Confirmed value:“) bei Zahlen und Auswahllisten.
+Bestätigte HA-Werte bleiben auch während lokaler Entwürfe sichtbar und über
+`aria-describedby` zugeordnet.
 Die gemeinsame Zeitfenster-Zeile „Bestätigt:“ bleibt erhalten.
+Schalter zeigen ihren bestätigten Zustand in allen Ansichten ausschließlich
+am Haken; die zusätzliche Ein-/Aus-Zeile entfällt. Ihre `aria-describedby`-
+Zuordnung verweist auf die weiterhin sichtbaren Status- und Fehlerhinweise.
 Das Layout berechnet keine Ladeberechtigungen oder
 Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
@@ -174,9 +178,10 @@ Schriftgrößen, mindestens 44 px hohe Bedienflächen und natürliche Kartenhöh
 bleiben erhalten. Die aufgeklappte Monatsauswahl zeigt auf dem Smartphone
 eine Quartalsgruppe pro Zeile, bei ausreichendem Platz zwei nebeneinander.
 Ihre Beschriftungen bleiben mindestens 14 px groß und die Bedienflächen
-mindestens 44 × 44 px. Die native Checkbox ist dabei nur 22 × 22 px groß;
-ein zugeordnetes Label stellt die größere Klickfläche bereit, ohne die
-Tastaturbedienung oder die HA-Serviceaufrufe zu verändern.
+mindestens 44 × 44 px. Alle nativen Checkboxen im Dashboard sind einheitlich
+22 × 22 px groß, einschließlich Speicher- und Ladehauptschaltern;
+ein zugeordnetes Label stellt eine mindestens 44 × 44 px große Klickfläche
+bereit, ohne die Tastaturbedienung oder die HA-Serviceaufrufe zu verändern.
 DOM- und Tastaturreihenfolge bleiben Januar bis Dezember.
 Die Gerätekarte beginnt mit `energy_charged`/`energy_discharged` und endet mit
 `storage_switch`; es gibt keine separate Energie-Karte. Nur der

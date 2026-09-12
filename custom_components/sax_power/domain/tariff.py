@@ -376,7 +376,9 @@ def _segment_bounds(
     )
 
 
-def _offset_transition(first: datetime, last: datetime, zone: tzinfo | None) -> datetime:
+def _offset_transition(
+    first: datetime, last: datetime, zone: tzinfo | None
+) -> datetime:
     """UTC-Offsetwechsel zwischen den zwei Deutungen einer lokalen Grenze."""
     first = first.replace(microsecond=0)
     last = last.replace(microsecond=0)

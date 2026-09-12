@@ -16,6 +16,14 @@ Entitäten und Lese-/Bedienberechtigungen werden dadurch berücksichtigt.
 
 ## Gemeinsame Daten- und Bedienregeln
 
+Breite Ansichten verwenden ein kompaktes Layout anhand der tatsächlich
+verfügbaren Panelbreite: zwei Kartenspalten ab 860 px Inhaltsbreite und drei
+Monatsspalten, ab 960 px vier Monatsspalten. Die Geräteübersicht ordnet Skalen
+und Leistung links neben den Gerätedaten an. Ersparnis gruppiert Amortisation
+und Kalenderwerte neben dem Tarif; die freie Auswertung nutzt die volle Breite.
+Die mobile Darstellung bleibt geräumig. Beschriftungen und Werte werden nicht
+abgeschnitten, Eingaben und Schaltflächen bleiben mindestens 44 px hoch.
+
 | Funktion | Verhalten | Automatisierte Prüfung |
 | --- | --- | --- |
 | Zugehörigkeit und Berechtigung | `sax_power/dashboard/subscribe` liefert nur aktive, lesbare SAX-Entitäten des angeforderten Eintrags mit `entity_id`, `domain`, `key`, `name`, `states` und `can_control`. | [Metadaten-API][metadata-tests] |
@@ -209,7 +217,38 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
-### Abnahme der Gerätekarte und Schaltbestätigung
+### Abnahme der kompakten Desktopansichten
+
+[Commit e6cf1672d17b](https://github.com/dr-dimitri/sax-ha/commit/e6cf1672d17b35ffd586bb85b4dec12d567cb089)
+bestand am 12.09.2026 den vollständigen
+[CI-Lauf 34684553344](https://github.com/dr-dimitri/sax-ha/actions/runs/34684553344),
+einschließlich **199 Komponententests und 28 Browserfällen ohne Wiederholung
+oder übersprungene Browserfälle**. Die lokale Python-Gesamtsuite bestand mit
+1.813 Tests und zwei erwarteten Hardware-Skips. Der zusätzliche Browserfall
+vergleicht Entitäten und Bedienflächen über mehrere Panelbreiten und prüft
+Abmessungen, Schriftgrößen, Überlagerungen und Seitenüberläufe.
+
+Bei 1366 × 768 px Browsergröße reserviert der Test 256 px für eine simulierte
+HA-Seitenleiste. Die verbleibenden 1110 px Panelbreite ergeben folgende
+gerundete Höhen, einschließlich Panelkopf und Navigation, ohne Fixture-Leiste:
+
+| Ansicht | Vorher, lokale Browserprobe | Kompakt, CI | Weniger Höhe |
+| --- | --- | --- | --- |
+| Allgemeine Informationen | 1483 px | 762 px | 49 % |
+| Ladeautomatik | 2087 px | 977 px | 53 % |
+| Netzdienliches Laden | 1879 px | 937 px | 50 % |
+| Dynamisches Laden | 1136 px | 754 px | 34 % |
+| Ersparnis | 2059 px | 1492 px | 28 % |
+
+Die Vorher-Messung verwendet denselben deutschen Fixture-Inhalt aus
+Commit `f725cbe97b0c`, ebenfalls bei 1110 px Panelbreite. Zusätzlich geprüft
+wurden 1440 × 900 px ohne reservierte Seitenleiste sowie 390 × 844 px mobil,
+jeweils Deutsch/hell und Englisch/dunkel. Alle Inhalte bleiben vorhanden;
+höhere Texte oder eigene Entity-Namen dürfen Karten natürlich verlängern.
+Die Messwerte gelten für die dokumentierte Testansicht, nicht pauschal für
+alle HA-Themes und benutzerdefinierten Beschriftungen.
+
+### Frühere Abnahme der Gerätekarte und Schaltbestätigung
 
 [Commit 639695e5e347](https://github.com/dr-dimitri/sax-ha/commit/639695e5e3479f802c568704f3ae34f3e5bd473c)
 bestand am 12.09.2026 den vollständigen
@@ -273,9 +312,8 @@ Hardware-Skips**; Ruff und Black sind erfolgreich.
 
 ### Screenshots
 
-Die Bilder der allgemeinen Informationen und der Schaltbestätigung stammen aus
-CI-Lauf 34683284222. Die übrigen Ansichten stammen aus dem früheren Lauf
-34681752310 und bleiben unverändert. Der
+Alle Bilder wurden aus CI-Lauf 34684553344 übernommen. Sie zeigen die
+kompakten Desktopansichten und die weiterhin geräumige Mobilansicht. Der
 hell abgesetzte Testbereich kennzeichnet simulierte Daten und zeigt beide
 Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
 Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,

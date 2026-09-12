@@ -1,7 +1,7 @@
 {
   "domain": "sax_power",
   "name": "SAX Power Home",
-  "after_dependencies": ["http", "lovelace"],
+  "after_dependencies": ["http", "lovelace", "websocket_api"],
   "codeowners": ["@dr-dimitri"],
   "config_flow": true,
   "dhcp": [{ "hostname": "sax*" }],

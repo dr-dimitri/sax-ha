@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import { SaxPowerVuePanel } from "../src/panel";
 import { tabPath, tabs } from "../src/tabs";
-import type { HomeAssistant } from "../src/types";
+import type { HassConnection, HomeAssistant } from "../src/types";
 
 type PanelElement = InstanceType<typeof SaxPowerVuePanel>;
 
@@ -75,6 +75,70 @@ describe("dashboard paths", () => {
 });
 
 describe("Home Assistant panel", () => {
+  it("shares one metadata subscription across navigation and HA state updates", async () => {
+    const unsubscribe = vi.fn();
+    const subscribeMessage = vi.fn().mockResolvedValue(unsubscribe);
+    const callService = vi.fn();
+    const connection: HassConnection = {
+      connected: true,
+      subscribeMessage,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    const hass = { ...germanHass, connection, callService };
+    const element = await mount({ hass });
+    expect(subscribeMessage).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Function),
+      {
+        type: "sax_power/dashboard/subscribe",
+        entry_id: "entry-1",
+        language: "de",
+      },
+      { resubscribe: false },
+    );
+    subscribeMessage.mock.calls[0][0]({ entities: [] });
+
+    for (const tab of tabs) {
+      shadow(element)
+        .querySelector<HTMLAnchorElement>(
+          `nav a[href="/sax-power-vue/${tab.path}"]`,
+        )!
+        .click();
+      element.hass = { ...hass, states: {} };
+      await flush();
+    }
+    expect(subscribeMessage).toHaveBeenCalledTimes(1);
+    expect(callService).not.toHaveBeenCalled();
+
+    element.remove();
+    await flush();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    for (const event of ["ready", "disconnected", "reconnect-error"]) {
+      expect(connection.removeEventListener).toHaveBeenCalledWith(
+        event,
+        expect.any(Function),
+      );
+    }
+  });
+
+  it("shows a localized metadata error and disposes the failed subscription", async () => {
+    const connection: HassConnection = {
+      connected: true,
+      subscribeMessage: vi.fn().mockRejectedValue(new Error("denied")),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    const element = await mount({ hass: { ...germanHass, connection } });
+    await flush();
+    expect(shadow(element).querySelector('[role="alert"]')?.textContent).toBe(
+      "Die SAX Power Entitäten konnten nicht geladen werden.",
+    );
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+    element.remove();
+    await flush();
+    expect(connection.removeEventListener).toHaveBeenCalledTimes(3);
+  });
+
   it("mounts five stable sections with isolated styles and honest placeholders", async () => {
     const element = await mount();
     const root = shadow(element);
@@ -141,7 +205,13 @@ describe("Home Assistant panel", () => {
     const element = await mount();
     element.hass = {
       language: "en-GB",
-      states: { "sensor.example": { state: "unavailable" } },
+      states: {
+        "sensor.example": {
+          entity_id: "sensor.example",
+          state: "unavailable",
+          attributes: {},
+        },
+      },
     };
     await flush();
 
@@ -152,7 +222,9 @@ describe("Home Assistant panel", () => {
       shadow(element).querySelector(".dashboard")?.getAttribute("lang"),
     ).toBe("en");
     expect(element.hass.states["sensor.example"]).toEqual({
+      entity_id: "sensor.example",
       state: "unavailable",
+      attributes: {},
     });
     expect(element.hasAttribute("hass")).toBe(false);
 

@@ -52,6 +52,7 @@
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-VUE-DASHBOARD               done       Separates optionales Vue-Panel mit Navigation und lokalem Build (Grundgerüst, #197)
+# REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SETUP-ROLLBACK              done       Fehlgeschlagene Setup-Versuche geben Client, Plattformen, Listener und Timer vollständig frei
@@ -2211,8 +2212,9 @@ requirement_vue_dashboard:
     Allgemeine Informationen (allgemein), Ladeautomatik (ladeautomatik),
     Netzdienliches Laden (netzdienliches-laden), Dynamisches Laden
     (dynamisches-laden) und Ersparnis (ersparnis). Jede Ansicht erklärt
-    den Vorschauzustand; es gibt noch keine Sensordaten, Bedienaktionen
-    oder Statistikabfragen. Diese folgen in den Issues #198 bis #202.
+    den Vorschauzustand. Die gemeinsame Datenanbindung ist separat in
+    REQ-VUE-ENTITY-BINDING beschrieben; fachliche Ansichten mit Sensordaten,
+    Bedienaktionen und Statistikabfragen folgen in den Issues #199 bis #202.
 
     vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
     standardmäßig False. Die Ersteinrichtung bietet sie neben der
@@ -2261,6 +2263,70 @@ requirement_vue_dashboard:
        Bundle; Build und Typ-/Komponententests sind in CI eingebunden."
     - "README und DEVELOPMENT beschreiben Aktivierung, Vorschauumfang,
        Parallelbetrieb, Build und Paketierung."
+
+# ==============================================================================
+# ANFORDERUNG: GEMEINSAME ENTITY-ANBINDUNG IM VUE-DASHBOARD
+# ==============================================================================
+requirement_vue_entity_binding:
+  id: REQ-VUE-ENTITY-BINDING
+  title: "Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (Issue #198)"
+  status: done
+  description: >
+    Das Vue-Panel verwendet die bestehende angemeldete HA-Sitzung. Ein
+    gemeinsamer Kontext verbindet hass.states mit dem read-only WebSocket-Abo
+    sax_power/dashboard/subscribe für den panel.config.entry_id. Es werden
+    weder Entity-IDs aus Anzeigenamen konstruiert noch zusätzliche
+    Modbus-Verbindungen, Polling oder Zugangsdaten eingeführt.
+
+    Das Metadatenabo liefert nur aktive SAX-Entitäten des angeforderten
+    SAX-Config-Entry, die der angemeldete Benutzer lesen darf. Jede Entität
+    enthält tatsächliche entity_id, Domain, stabilen Unique-ID-Suffix als
+    Schlüssel, Anzeigenamen, übersetzte Enum-Zustände und can_control gemäß
+    HA-Berechtigung. Benutzerdefinierte Namen haben Vorrang; der dynamische
+    Prognosename stammt aus dem aktuellen HA-Zustand. Änderungen der Entity
+    Registry aktualisieren Zuordnung und optionale Entitäten. Ungültige oder
+    fremde Config Entries werden abgewiesen. Abmeldung und Verbindungsende
+    räumen das Abo auf; verspätete Antworten eines alten Abos werden ignoriert.
+
+    Zustandsänderungen kommen aus hass.states und werden in allen Ansichten
+    reaktiv sichtbar. HA-Formatierung, Einheiten, Sprache und übersetzte Enum-
+    Werte bleiben erhalten. Fehlende optionale Entitäten werden ausgelassen;
+    unknown und unavailable werden verständlich angezeigt und sind nicht
+    bedienbar. Verbindungsverlust sperrt Bedienung, zeigt einen verständlichen
+    Hinweis und meldet nach Wiederverbindung Metadaten erneut an. Mount,
+    Navigation, Metadatenaktualisierung und Wiederverbindung schreiben nichts.
+
+    Wiederverwendbare Komponenten für switch, number, time und select rufen
+    ausschließlich bestehende HA-Services auf: turn_on/turn_off, set_value
+    und select_option mit der tatsächlichen Entity-ID. Schalter verwenden
+    den ausdrücklich gewählten Zielzustand. Zahlen werden auf endlichen Wert,
+    min/max und step geprüft; Zeiten auf gültige Stunden, Minuten und Sekunden;
+    Auswahlwerte müssen in den aktuellen options enthalten sein. Zahlen und
+    Zeiten bleiben lokale Eingaben bis zur ausdrücklichen Übernahme.
+    Unzulässige Werte erzeugen keine Serviceaufrufe. HA erzwingt weiterhin
+    seine Service-Berechtigungen und die bestehende Integration validiert
+    Gerätezugriffe.
+
+    Ausstehende Serviceaufrufe und Fehlermeldungen werden pro tatsächlicher
+    Entität geteilt. Während ein Aufruf läuft, wird kein zweiter für dieselbe
+    Entität gestartet. Der bestätigte Zustand wird nicht optimistisch
+    überschrieben; auch nach erfolgreicher Serviceantwort ist hass.states
+    maßgeblich. Fehler werden in Deutsch oder Englisch angezeigt, ohne
+    automatische Schreibwiederholung. Die Komponenten sind unabhängig von
+    den in #199 bis #202 folgenden fachlichen Ansichten testbar.
+  acceptance_criteria:
+    - "Registry-Umbenennungen, deaktivierte und fremde Entitäten sowie
+       Lese-/Bedienberechtigungen sind über das HA-WebSocket-Protokoll getestet."
+    - "Live-Zustände, übersetzte Namen/Enum-Werte und nicht verfügbare Werte
+       werden ohne Ersatz-Nullen und ohne zusätzliche Zustandsabfragen dargestellt."
+    - "Alle vier Bedienarten verwenden echte Entity-IDs und validierte Werte;
+       ungültige Eingaben und fehlende Berechtigungen erzeugen keine Schreibaktion."
+    - "Servicefehler, doppelte Bedienung und verzögerte Zustandsbestätigung
+       sind getestet; ausstehende Aktionen werden gemeinsam gesperrt."
+    - "Abo-Wechsel, Verbindungsabbruch, Wiederverbindung und Unmount erzeugen
+       weder doppelte Abos noch automatische Serviceaufrufe."
+    - "Die Entwicklungsvorschau erlaubt eine explizit simulierte Bedienprobe;
+       Lovelace und die bestehenden Geräte-Schreibpfade bleiben unabhängig."
 
 # ==============================================================================
 # ANFORDERUNG: MITGELIEFERTES DASHBOARD

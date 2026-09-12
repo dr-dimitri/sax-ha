@@ -167,8 +167,9 @@ Sie ist standardmäßig ausgeschaltet und kann bei der Einrichtung oder später
 unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
 geändert werden. Die Auswahl bleibt nach einem Neustart erhalten.
 
-Diese erste Vorschau enthält die Navigation zu allen fünf Bereichen.
-Messwerte, Bedienfunktionen und Ersparnis-Auswertungen folgen in den weiteren
+Diese Vorschau enthält die Navigation zu allen fünf Bereichen und die gemeinsame
+Anbindung an Home-Assistant-Entitäten. Die Darstellung der Messwerte,
+Bedienfunktionen und Ersparnis-Auswertungen in diesen Bereichen folgt in den weiteren
 Arbeitspaketen der [Vue-Umsetzung](https://github.com/dr-dimitri/sax-ha/issues/196).
 Für diese Funktionen steht weiterhin das bestehende Dashboard **SAX Power**
 zur Verfügung. Beide Oberflächen können gleichzeitig geöffnet werden.

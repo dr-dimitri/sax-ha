@@ -4,11 +4,13 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
+  provide,
   ref,
   useHost,
   watch,
 } from "vue";
 import { messages, tabPath, tabs } from "./tabs";
+import { SAX_DASHBOARD_KEY, useSaxDashboard } from "./ha";
 import type { HomeAssistant, PanelInfo, PanelRoute } from "./types";
 
 const props = defineProps<{
@@ -19,6 +21,11 @@ const props = defineProps<{
 }>();
 
 const host = useHost();
+const dashboard = useSaxDashboard(
+  () => props.hass,
+  () => props.panel?.config?.entry_id,
+);
+provide(SAX_DASHBOARD_KEY, dashboard);
 const language = computed(() =>
   props.hass?.language.toLowerCase().startsWith("de") ? "de" : "en",
 );
@@ -125,6 +132,9 @@ function openSidebar(): void {
     </nav>
 
     <main>
+      <p v-if="dashboard.error.value" class="status" role="alert">
+        {{ dashboard.error.value }}
+      </p>
       <div class="introduction">
         <p>
           {{

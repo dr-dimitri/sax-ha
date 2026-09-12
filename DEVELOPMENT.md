@@ -95,6 +95,8 @@ custom_components/sax_power/
 │                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-SAVINGS-DASHBOARD
 ├── vue_dashboard.py        Optionales Vue-Panel neben Lovelace, siehe
 │                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
+├── dashboard_api.py        Berechtigungsgefiltertes Entity-Metadatenabo für Vue,
+│                          siehe REQ-VUE-ENTITY-BINDING
 ├── frontend/              Eingechecktes Vue-Bundle für HACS und Snapshots
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
@@ -110,9 +112,31 @@ frontend/             Vue-/TypeScript-Quellen, Build und Komponententests
 Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
 in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
-ordnet die spätere Entity-Anbindung dem Config Entry zu. Das Grundgerüst
-zeigt zunächst fünf navigierbare Bereiche ohne Messwerte oder Schreibaktionen
-(Issue #197); die fachlichen Ansichten folgen in #198–#202.
+ordnet die Entity-Anbindung dem Config Entry zu. Das Grundgerüst zeigt fünf
+navigierbare Bereiche (Issue #197). Die gemeinsame Datenanbindung und
+Bedienkomponenten sind in #198 umgesetzt; die fachlichen Ansichten mit
+Messwerten und Bedienelementen folgen in #199–#202.
+
+`dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
+`sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
+die tatsächlichen Entity-IDs, Domains, stabilen Schlüssel, übersetzten Namen und
+Enum-Texte sowie die Bedienberechtigung. Registry-Änderungen aktualisieren das
+Abo, deaktivierte oder nicht lesbare Entitäten fehlen. Die bestehende
+HA-Verbindung übernimmt Anmeldung und Abmeldung; der Befehl liest keine
+Geräteregister und stellt keine eigene Schreibschnittstelle bereit.
+
+`frontend/src/ha.ts` verbindet diese Metadaten mit den reaktiven `hass.states`
+und stellt einen gemeinsamen Kontext für alle fünf Ansichten bereit. HA
+formatiert Zustände; fehlende, unbekannte und nicht verfügbare Werte erhalten
+keine erfundenen Ersatzwerte. Verbindungswechsel melden Metadaten erneut an,
+ohne Schreibaktionen zu wiederholen. `EntityValue.vue` zeigt bestätigte Werte;
+`EntityControl.vue` bedient Schalter, Zahlen, Zeiten und Auswahlfelder über
+`hass.callService`. Zahlen und Zeiten werden ausdrücklich übernommen.
+Wertebereiche, Schritte und Auswahloptionen stammen aus den aktuellen
+Entity-Attributen; HA bleibt für die Autorisierung der Services zuständig.
+Alle Darstellungen einer Entität teilen ausstehende Aktionen und Fehler.
+Ein erfolgreich beantworteter Serviceaufruf verändert den angezeigten Zustand
+erst, wenn HA ihn tatsächlich meldet.
 
 `CONF_VUE_DASHBOARD_ENABLED` ist ein dauerhaftes Opt-in mit Standard `False`.
 Die Ersteinrichtung speichert es in `entry.data`; spätere Änderungen in
@@ -151,6 +175,14 @@ Snapshot-Workflow führt weiterhin keinen Frontend-Build aus PR-Code aus.
 `tests/test_frontend_package.py` prüft Source- und Snapshot-Paketierung,
 `tests/test_vue_dashboard.py` den Panel-Lebenszyklus und
 `tests/test_config_flow.py` die unabhängigen Dashboard-Optionen.
+`tests/test_dashboard_api.py` prüft das echte WebSocket-Protokoll einschließlich
+Berechtigungen und Registry-Änderungen. Die Frontend-Tests decken Live-Zustände,
+Bedienvalidierung, ausstehende Aktionen und den Abo-Lebenszyklus ab.
+
+Für eine lokale Bedienprobe ohne Batterie `npm run dev -- --host 127.0.0.1`
+starten und `/controls-preview.html` öffnen. Die ausdrücklich als Demo markierte
+Seite verwendet simulierte HA-Zustände und Serviceantworten; sie ist kein
+zusätzlicher produktiver Dashboard-Bereich.
 
 Die Abhängigkeiten zeigen von den Home-Assistant-Entrypoints nach innen:
 `sensor.py`/`number.py`/`switch.py`/`time.py` verwenden den Coordinator, der

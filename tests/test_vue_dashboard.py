@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.components import frontend
+from homeassistant.components import frontend, websocket_api
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -27,6 +27,7 @@ from custom_components.sax_power.const import (
     DOMAIN,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.dashboard_api import SUBSCRIBE_COMMAND
 from custom_components.sax_power.vue_dashboard import (
     VUE_DASHBOARD_ASSET_URL,
     VUE_DASHBOARD_ELEMENT,
@@ -94,6 +95,7 @@ async def test_panel_uses_local_hashed_module_and_preserves_lovelace(
     assert await async_sync_vue_dashboard(hass, vue_entry)
 
     panel = _panel(hass)
+    assert SUBSCRIBE_COMMAND in hass.data[websocket_api.DOMAIN]
     assert panel.sidebar_title == VUE_DASHBOARD_TITLE
     assert panel.component_name == "custom"
     assert panel.require_admin is False

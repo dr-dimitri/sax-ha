@@ -16,6 +16,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util.hass_dict import HassKey
 
 from .const import CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+from .dashboard_api import async_register_dashboard_api
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ async def async_sync_vue_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> b
                     "Home-Assistant-Frontend ist nicht verfügbar"
                 )
                 return False
+            async_register_dashboard_api(hass)
             if not runtime.static_registered:
                 await hass.http.async_register_static_paths(
                     [

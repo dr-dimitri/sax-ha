@@ -209,7 +209,26 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
-### Historische Abnahme vom 12.09.2026
+### Abnahme der Gerätekarte und Schaltbestätigung
+
+[Commit 639695e5e347](https://github.com/dr-dimitri/sax-ha/commit/639695e5e3479f802c568704f3ae34f3e5bd473c)
+bestand am 12.09.2026 den vollständigen
+[CI-Lauf 34683284222](https://github.com/dr-dimitri/sax-ha/actions/runs/34683284222):
+Python, Ruff/Black, Release-Metadaten, HACS, hassfest, Frontend-Typen und
+Formatierung, **199 Komponententests**, Produktionsmodul-Smoke und
+reproduzierbarer Build. Lokal bestanden **1.813 Python-Tests** bei zwei
+erwarteten Hardware-Skips; es fand kein Test an einer echten Batterie statt.
+
+Alle **24 Browserfälle** bestanden ohne Wiederholung oder übersprungene Fälle.
+Die zusätzliche Prüfung bestätigt in allen vier Browserprojekten beide
+Schaltrichtungen, Abbrechen, Escape und Enter auf der vorausgewählten
+Abbruchaktion. Vor ausdrücklicher Bestätigung bleibt der HA-Zustand erhalten
+und es wird kein Service aufgerufen. Die neuen Screenshots unten stammen aus
+diesem Browserbericht und zeigen das gebaute Produktionsmodul mit simuliertem
+HA-Kontext. Die 13 zusätzlichen Komponententests prüfen außerdem ungültig
+gewordene Dialoge und doppelte Bestätigungen.
+
+### Frühere Paketabnahme vom 12.09.2026
 
 Der folgende Nachweis betrifft den Stand vor der geänderten allgemeinen
 Gerätekarte und deren Schalterbestätigung. Er ist keine Abnahme dieser
@@ -254,9 +273,9 @@ Hardware-Skips**; Ruff und Black sind erfolgreich.
 
 ### Screenshots
 
-Die Bilder stammen aus dem oben datierten Browserlauf. Die beiden Bilder der
-allgemeinen Informationen zeigen bis zu ihrer Aktualisierung noch die bisherige
-Kartenanordnung. Die übrigen Ansichten bleiben unverändert. Der
+Die Bilder der allgemeinen Informationen und der Schaltbestätigung stammen aus
+CI-Lauf 34683284222. Die übrigen Ansichten stammen aus dem früheren Lauf
+34681752310 und bleiben unverändert. Der
 hell abgesetzte Testbereich kennzeichnet simulierte Daten und zeigt beide
 Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
 Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,
@@ -265,6 +284,8 @@ während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
 | Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
 | --- | --- | --- |
 | Allgemeine Informationen | [Screenshot](images/vue-allgemein-desktop-light-de.png) | [Screenshot](images/vue-allgemein-mobile-dark-en.png) |
+| Speicher ausschalten – Bestätigung | [Screenshot](images/vue-storage-confirm-off-desktop-light-de.png) | [Screenshot](images/vue-storage-confirm-off-mobile-dark-en.png) |
+| Speicher einschalten – Bestätigung | [Screenshot](images/vue-storage-confirm-on-desktop-light-de.png) | [Screenshot](images/vue-storage-confirm-on-mobile-dark-en.png) |
 | Ladeautomatik | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
 | Netzdienliches Laden | [Screenshot](images/vue-netzdienliches-laden-desktop-light-de.png) | [Screenshot](images/vue-netzdienliches-laden-mobile-dark-en.png) |
 | Dynamisches Laden | [Screenshot](images/vue-dynamisches-laden-desktop-light-de.png) | [Screenshot](images/vue-dynamisches-laden-mobile-dark-en.png) |

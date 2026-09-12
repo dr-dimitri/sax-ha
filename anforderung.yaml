@@ -1383,6 +1383,20 @@ requirement_grid_serving_charge:
     Zeitfenster now.month in self._timed_charge_months bzw.
     self._grid_serving_months.
 
+    Eine gültige Monatsauswahl wird als lokale HA-Konfiguration unmittelbar
+    bestätigt und zum Speichern vorgemerkt. Serviceantwort und Schalterzustand
+    warten nicht auf eine laufende Geräteauswertung oder Modbus-Schreibvorgänge.
+    Der Coordinator stößt die Geräteauswertung ohne zusätzlichen Timer an;
+    sie bleibt durch den gemeinsamen Control-Lock serialisiert. Mehrere
+    Änderungen werden zusammengefasst und Änderungen während einer laufenden
+    Auswertung anschließend mit dem neuesten Stand erneut ausgewertet.
+    Aktivitäts- und Gerätezustände gelten erst nach der bestehenden quittierten
+    Steuersequenz als angewendet. Fehler bleiben diagnostizierbar; der reguläre
+    Poll versucht die Steuerung erneut. Während Bootstrap und Shutdown werden
+    keine neuen Monatsauswertungen gestartet. Beim Entladen wird eine bereits
+    laufende Auswertung vor dem abschließenden Geräte-Reset abgewartet, ohne
+    eine Registersequenz mitten im Schreiben abzubrechen.
+
     Zeitfenster-Nichtüberlappung (Tageszeit UND Monat): Das Zeitfenster des
     netzdienlichen Ladens darf sich nicht mit dem Zeitfenster der Netzladung
     überschneiden - zwei Fenster gelten dabei NUR dann als überlappend, wenn
@@ -2475,6 +2489,13 @@ requirement_vue_charging:
     behalten ihre zugänglichen Namen; Servicefehler und Nichtverfügbarkeit
     bleiben sichtbar. Der Tab Dynamischer Tarif enthält keine Monatsschalter.
 
+    Die HA-Bestätigung einer gültigen Monatsauswahl wartet nicht auf die
+    Geräteauswertung. Der Haken folgt weiterhin ausschließlich dem von HA
+    bestätigten Konfigurationszustand. Überlappende Monatsauswahlen werden vor
+    jeder Zustandsänderung abgelehnt; der ausstehende Hinweis endet mit der
+    Serviceantwort. Eine bestätigte Auswahl bedeutet nicht, dass der Speicher
+    bereits einen neuen Steuermodus quittiert hat (REQ-GRID-SERVING-CHARGE).
+
     Nur bestätigte, verfügbare Zeitfensterwerte des zeitvariablen Tarifs
     erhalten bei deutscher HA-Sprache das Suffix " Uhr", etwa 22:00 Uhr.
     Eingabefelder und Time-Service-Payloads bleiben unverändert. Englische,
@@ -2492,13 +2513,21 @@ requirement_vue_charging:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
     - "22:00 bis 06:00 wird ohne eigene Zeitplanlogik über zwei HA-Time-
-       Serviceaufrufe übertragen; Monatswechsel schreiben keine Gerätewerte."
+       Serviceaufrufe übertragen; Monatsaktionen im Frontend verwenden
+       ausschließlich HA-Schalterservices."
     - "Beide Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
        HA-bestätigter Checkboxzustand, zugängliche Namen, Fehler und
        Nichtverfügbarkeit bleiben geprüft."
     - "Die sichtbaren Monatskästchen messen 22 mal 22 Pixel innerhalb einer
        mindestens 44 mal 44 Pixel großen Klickfläche. Ein Klick auf deren
        Rand und die Leertaste lösen jeweils genau einen HA-Serviceaufruf aus."
+    - "tests/test_vue_dashboard_e2e.py prüft alle zwölf Monatsschalter beider
+       Gruppen über echte HA-WebSocket-Services: Serviceantwort und state_changed
+       werden auch bei blockierter Geräteauswertung bestätigt; die Auswertung
+       läuft nach Freigabe der Sperre weiter."
+    - "tests/test_month_switch_response.py prüft schnelle Folgeänderungen,
+       Ablehnung von Überschneidungen, Speicherung, Gerätefehler, Bootstrap
+       und Entladen ohne abgebrochene Registersequenz."
     - "Bestätigte deutsche Zeitfensterwerte im zeitvariablen Tarif zeigen Uhr;
        englische, unbekannte und nicht verfügbare Werte sowie Eingabefelder
        und Service-Payloads bleiben ohne zusätzliches Suffix."
@@ -3406,7 +3435,8 @@ requirement_control_config_bootstrap:
     öffnet dabei ein Bootstrap-Fenster, in dem Register-Reads weiterhin
     erlaubt sind, jede steuernde Entscheidung dagegen gesperrt ist - sowohl
     die aus _async_update_data als auch die setterseitigen
-    Einzelentscheidungen aus _async_apply_grid_charge_change.
+    Einzelentscheidungen aus _async_apply_grid_charge_change als auch
+    nachgelagerte Monatsauswertungen.
     SaxPowerCoordinator.async_finish_bootstrap schließt das Fenster nach dem
     Plattform-Setup, schreibt den vollständigen Snapshot fest und wendet
     unter dem vorhandenen Control-Lock (_async_enforce_grid_charge) genau
@@ -3493,8 +3523,9 @@ requirement_control_config_bootstrap:
     Basic-Mode-Ausfall verfügbar - ihre Werte stammen aus keinem Register.
 
     Nach abgeschlossenem Bootstrap merkt jede Einstellungsänderung den
-    aktuellen Snapshot über den gemeinsamen Endpunkt
-    _async_apply_grid_charge_change zum gebündelten Schreiben vor; ein
+    aktuellen Snapshot zum gebündelten Schreiben vor: Monatsänderungen
+    bereits bei Annahme der Konfiguration, andere Änderungen im gemeinsamen
+    Endpunkt _async_apply_grid_charge_change. Ein
     unveränderter Snapshot löst keinen Schreibvorgang aus. Beim Entladen des
     Config Entry wird der neueste Stand zusätzlich best-effort sofort
     geschrieben.

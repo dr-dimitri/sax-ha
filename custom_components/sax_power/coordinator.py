@@ -390,6 +390,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # kann ein älterer Aktiv-Zweig einen gerade ausgeführten Rücksprung in
         # die Nullregelung wieder überschreiben (REQ-GRID-SERVING-CHARGE).
         self._charge_control_lock = asyncio.Lock()
+        self._month_control_task: asyncio.Task[None] | None = None
+        self._month_control_revision = 0
         self._shutdown_started = False
         self._shutdown_complete = False
         self._shutdown_task: asyncio.Task[Any] | None = None
@@ -3912,6 +3914,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         restauriert werden, könnte eine Validierung während dieser
         Zwischenzustände fälschlich fehlschlagen, obwohl der jeweils
         gespeicherte Endzustand gar nicht überlappt."""
+        self._raise_if_shutdown()
         new_months = set(self._timed_charge_months)
         if enabled:
             new_months.add(month)
@@ -3934,7 +3937,51 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Schalter einzeln auf und darf eine für ein ANDERES Monat
             # gesetzte Markierung nicht versehentlich mit löschen.
             self.clear_control_field_unresolved("timed_charge_months")
-        await self._async_apply_grid_charge_change()
+        self._async_schedule_month_control_change()
+
+    def _async_schedule_month_control_change(self) -> None:
+        """Bestätige Monatskonfiguration unabhängig vom laufenden Geräteabgleich."""
+        if self._control_bootstrap_pending:
+            return
+        self._async_schedule_control_save()
+        self._month_control_revision += 1
+        if self._month_control_task is None:
+            # REQ-VUE-CHARGING: Die HA-Entity bestätigt bereits die angenommene
+            # Konfiguration; Aktivitätswerte folgen weiterhin erst Geräte-ACKs.
+            self._month_control_task = self.hass.async_create_task(
+                self._async_apply_month_control_changes(),
+                name="sax_power_month_control",
+                eager_start=False,
+            )
+
+    async def _async_apply_month_control_changes(self) -> None:
+        """Fasse Monatsänderungen zusammen und verarbeite jeden neueren Endstand."""
+        try:
+            while not self._shutdown_started:
+                async with self._charge_control_lock:
+                    if self._shutdown_started or self._control_bootstrap_pending:
+                        return
+                    revision = self._month_control_revision
+                    if self.data is not None:
+                        try:
+                            await self._async_enforce_grid_charge_locked(self.data)
+                        except HomeAssistantError as err:
+                            if not isinstance(err, _SunChargeWriteError):
+                                _LOGGER.error(
+                                    "Monatskonfiguration konnte noch nicht auf das "
+                                    "Gerät angewendet werden; erneuter Versuch im "
+                                    "nächsten Poll: %s",
+                                    err,
+                                )
+                            self._clear_sun_charge_active_flags()
+                        self._publish_charge_state(self.data)
+                        self.async_update_listeners()
+                # REQ-GRID-SERVING-CHARGE: Eine Änderung während einer laufenden
+                # Modbussequenz muss nach deren Abschluss erneut ausgewertet werden.
+                if revision == self._month_control_revision:
+                    return
+        finally:
+            self._month_control_task = None
 
     def _raise_if_shutdown(self) -> None:
         """Reject late user commands after ownership of the device ends."""
@@ -3951,9 +3998,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Einstellungsänderung, statt bis zum nächsten Poll-Intervall zu
         warten.
 
-        Gemeinsamer Endpunkt aller async_set_*-Setter: hier - und nur hier -
-        wird der Konfigurations-Snapshot zum Speichern vorgemerkt
-        (REQ-CONTROL-CONFIG-BOOTSTRAP). Während des Bootstraps passiert
+        Direkte Einstellungsänderungen merken hier ihren Konfigurations-Snapshot
+        zum Speichern vor; Monatsänderungen tun dies bereits bei der Annahme
+        und wenden denselben Geräteabgleich in einem separaten Task unter dem
+        Control-Lock an (REQ-VUE-CHARGING).
+        Während des Bootstraps passiert
         beides nicht: die Setter restaurieren dann nur noch Altzustände, und
         eine Teilkonfiguration darf weder das Gerät steuern noch den
         vollständigen gespeicherten Stand überschreiben.
@@ -5037,6 +5086,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Analog zu async_set_timed_charge_month, für das netzdienliche
         Laden."""
+        self._raise_if_shutdown()
         new_months = set(self._grid_serving_months)
         if enabled:
             new_months.add(month)
@@ -5055,7 +5105,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if validate:
             # Siehe async_set_timed_charge_month für den Hintergrund.
             self.clear_control_field_unresolved("grid_serving_months")
-        await self._async_apply_grid_charge_change()
+        self._async_schedule_month_control_change()
 
     # -- Preisoptimiertes Laden ------------------------------------------------
     # Dritte Lade-Automatik neben zeitgesteuertem und netzdienlichem Laden
@@ -5331,6 +5381,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
         await self.price_planner.async_shutdown()
         self.tariff_provider.async_shutdown()
+        # REQ-GRID-SERVING-CHARGE: Eine begonnene Modus-/Sollwertsequenz nie
+        # abbrechen; das Shutdown-Gate sperrt weitere Monatsentscheidungen.
+        if self._month_control_task is not None:
+            await self._month_control_task
         await self.price_planner.async_flush_cycle_state()
         await self._async_flush_energy_state()
         await self._async_flush_economics_state()

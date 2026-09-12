@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -20,6 +21,7 @@ from pytest_homeassistant_custom_component.typing import (
 from custom_components.sax_power.const import (
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
+    DATA_COORDINATOR,
     DOMAIN,
 )
 from custom_components.sax_power.vue_dashboard import VUE_DASHBOARD_URL_PATH
@@ -172,6 +174,88 @@ async def test_dashboard_clients_share_services_states_and_one_modbus_client(
         await first.close()
         await second.close()
         assert len(clients) == 1
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await server.shutdown()
+
+
+@pytest.mark.parametrize("prefix", ["timed_charge", "grid_serving"])
+async def test_month_services_confirm_while_device_control_is_busy(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    unused_tcp_port: int,
+    prefix: str,
+) -> None:
+    """REQ-VUE-CHARGING: alle Monate quittieren ohne Warten auf Geräte-I/O."""
+    server = _modbus_server(
+        unused_tcp_port, _build_basic_registers(), _build_extended_registers()
+    )
+    await server.serve_forever(background=True)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": unused_tcp_port,
+            "slave_id_basic": 64,
+            "slave_id_extended": 100,
+            "scan_interval": 3600,
+        },
+    )
+    entry.add_to_hass(hass)
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        registry = er.async_get(hass)
+        sender = await hass_ws_client(hass)
+        observer = await hass_ws_client(hass)
+        await observer.send_json(
+            {"id": 1, "type": "subscribe_events", "event_type": "state_changed"}
+        )
+        await _result(observer, 1)
+        applied = asyncio.Event()
+        enforce = coordinator._async_enforce_grid_charge_locked
+
+        async def record_apply(data: dict[str, Any]) -> None:
+            await enforce(data)
+            applied.set()
+
+        with (
+            patch.object(
+                coordinator.client,
+                "write_register",
+                wraps=coordinator.client.write_register,
+            ) as write,
+            patch.object(
+                coordinator, "_async_enforce_grid_charge_locked", record_apply
+            ),
+        ):
+            # A slow device operation must not postpone configuration acceptance.
+            async with coordinator._charge_control_lock:
+                for month in range(1, 13):
+                    entity_id = registry.async_get_entity_id(
+                        "switch", DOMAIN, f"{entry.entry_id}_{prefix}_month_{month}"
+                    )
+                    assert entity_id
+                    assert hass.states.get(entity_id).state == "on"
+                    await sender.send_json(
+                        {
+                            "id": month,
+                            "type": "call_service",
+                            "domain": "switch",
+                            "service": "turn_off",
+                            "target": {"entity_id": entity_id},
+                        }
+                    )
+                    await _result(sender, month)
+                    await _state_event(observer, entity_id, "off")
+                    assert hass.states.get(entity_id).state == "off"
+                    write.assert_not_called()
+                    assert not applied.is_set()
+            async with asyncio.timeout(5):
+                await applied.wait()
+        await sender.close()
+        await observer.close()
     finally:
         await hass.config_entries.async_unload(entry.entry_id)
         await server.shutdown()

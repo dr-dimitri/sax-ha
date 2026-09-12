@@ -47,6 +47,12 @@ Die Darstellung passt sich der verfügbaren Breite an. Beschriftungen und Werte
 werden nicht abgeschnitten, die Bedienflächen von Eingaben und Schaltflächen
 bleiben mindestens 44 px hoch.
 
+Gültige Monatsänderungen bestätigen Serviceantwort und HA-Schalterzustand
+ohne Warten auf die Geräteauswertung. Der Coordinator führt die notwendige
+Auswertung weiterhin über seinen gemeinsamen Control-Lock aus. Eine bestätigte
+Monatsauswahl beschreibt die angenommene Konfiguration; Aktivitäts- und
+Gerätezustände folgen weiterhin der quittierten Steuersequenz.
+
 | Funktion | Verhalten | Automatisierte Prüfung |
 | --- | --- | --- |
 | Zugehörigkeit und Berechtigung | `sax_power/dashboard/subscribe` liefert nur aktive, lesbare SAX-Entitäten des angeforderten Eintrags mit `entity_id`, `domain`, `key`, `name`, `states` und `can_control`. | [Metadaten-API][metadata-tests] |
@@ -239,7 +245,7 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
-### Aktuelle Abnahme vom 12.09.2026
+### Frontend-Abnahme vom 12.09.2026
 
 Der vollständige
 [CI-Lauf 34688788120](https://github.com/dr-dimitri/sax-ha/actions/runs/34688788120)
@@ -274,6 +280,20 @@ die Legacy-Migration nicht gelöscht. Es fand kein
 Test an einer physischen Batterie statt. Die finale isolierte Paketprüfung
 wird mit dem tatsächlichen Commit und den Prüfsummen in
 [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204) festgehalten.
+
+### Bestätigung der Monatskonfiguration
+
+Der HA-WebSocket-Test in [test_vue_dashboard_e2e.py](../tests/test_vue_dashboard_e2e.py)
+bestätigt alle zwölf Monatsschalter beider Gruppen bereits bei absichtlich
+gehaltener Geräte-Steuerungssperre. Mit der früheren Implementierung blieb
+die erste Serviceantwort aus; die korrigierte Implementierung liefert
+Serviceantwort und HA-Zustandsereignis, bevor die Sperre freigegeben wird.
+Danach läuft die reguläre Geräteauswertung weiter.
+[test_month_switch_response.py](../tests/test_month_switch_response.py)
+sichert Folgeänderungen, abgelehnte Überschneidungen, Speichervormerkung,
+Gerätefehler sowie Bootstrap und Shutdown ab. Das Frontend zeigt weiterhin
+den bestätigten HA-Zustand. Die Screenshots unten bleiben unverändert;
+der finale CI- und Paketnachweis steht in [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204).
 
 ### Historische Prüfnachweise vom 12.09.2026
 

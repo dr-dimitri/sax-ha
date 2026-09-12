@@ -162,7 +162,9 @@ verfügbare Werte bleiben als solche erkennbar.
 Die Monatsraster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
 zeigen den bestätigten Zustand direkt am Kontrollkästchen; die zusätzliche
 Zeile **Bestätigter Wert** entfällt dort. Fehler und Nichtverfügbarkeit bleiben
-sichtbar. Unter **Zeitvariabler Tarif** erhalten bestätigte Zeitfensterwerte
+sichtbar. Eine gültige Monatsauswahl wird direkt von Home Assistant bestätigt,
+auch wenn die Geräteauswertung gerade beschäftigt ist. Unter
+**Zeitvariabler Tarif** erhalten bestätigte Zeitfensterwerte
 in deutscher Sprache den Zusatz **Uhr**, etwa **22:00 Uhr**. Unbekannte oder
 nicht verfügbare Werte und die englische Anzeige erhalten diesen Zusatz nicht;
 Eingabefelder und übertragene Uhrzeiten bleiben unverändert.

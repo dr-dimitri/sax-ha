@@ -1016,6 +1016,17 @@ alle 12 Monate, parametrisiert über `is_month_active`/`async_set_month_active`
 werden. `_async_enforce_grid_charge` prüft zusätzlich `now.month in
 self._timed_charge_months` bzw. `self._grid_serving_months`.
 
+Gültige Monatsänderungen bestätigen die lokale HA-Konfiguration sofort und
+merken ihren Snapshot zum Speichern vor. Die Serviceantwort wartet dabei
+nicht auf `_charge_control_lock` oder Modbus. Ein nachverfolgter, endlicher
+Coordinator-Task stößt die Auswertung ohne zusätzlichen Timer an; die
+Geräteauswertung bleibt unter dem gemeinsamen Control-Lock. Mehrere Änderungen
+werden zusammengefasst, Änderungen während einer Auswertung lösen danach
+eine weitere Auswertung des neuesten Stands aus. Die bestehenden quittierten
+Schreibsequenzen bestimmen weiterhin die Aktivitäts- und Gerätezustände.
+Bootstrap startet keinen Monatstask. Shutdown sperrt neue Änderungen und
+wartet einen laufenden Task vor Store-Flush und abschließendem Reset ab.
+
 **Zeitfenster-Überlappung (Tageszeit UND Monat):**
 `SaxPowerCoordinator._assert_windows_dont_overlap` (aufgerufen aus den vier
 Zeit-Settern `async_set_timed_charge_start/-end`/`async_set_grid_serving_
@@ -1161,9 +1172,9 @@ Gespeicherte Netzladezielwerte werden auf den globalen Max. SOC begrenzt.
    überspringt aber `_async_enforce_grid_charge`. Reads sind im
    Bootstrap-Fenster erlaubt, steuernde Writes nicht.
 3. `async_forward_entry_setups(...)` - die Plattformen legen ihre Entities
-   an. Deren Setter laufen ebenfalls ins gesperrte
-   `_async_apply_grid_charge_change` und wenden daher keine
-   Teilkonfiguration an.
+   an. Deren Setter wenden keine Teilkonfiguration an:
+   `_async_apply_grid_charge_change` bleibt gesperrt und Monatssetter
+   starten keinen Auswertungstask.
 4. `price_planner.async_setup()`, danach `async_finish_bootstrap()` -
    schließt das Fenster, schreibt den vollständigen Snapshot fest und wendet
    unter dem vorhandenen Control-Lock **genau eine** Ladeentscheidung an.
@@ -1289,9 +1300,10 @@ nicht annehmen, der Store enthalte nur von Settern akzeptierte Zustände:
 Deshalb überspringt `_apply_control_config` die Überlappungsprüfung - sie
 ist an dieser Stelle bereits gelaufen.
 
-**Schreiben:** Nach dem Bootstrap merkt jede Einstellungsänderung über den
-gemeinsamen Endpunkt `_async_apply_grid_charge_change` den aktuellen
-Snapshot zum gebündelten Schreiben vor; ein unveränderter Snapshot löst
+**Schreiben:** Nach dem Bootstrap merkt jede Einstellungsänderung den aktuellen
+Snapshot zum gebündelten Schreiben vor: Monatsänderungen bereits bei Annahme
+der Konfiguration, andere Änderungen im gemeinsamen Endpunkt
+`_async_apply_grid_charge_change`. Ein unveränderter Snapshot löst
 keinen Schreibvorgang aus. `async_shutdown` flusht den neuesten Stand
 zusätzlich best-effort sofort.
 

@@ -3541,6 +3541,7 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
                 await coordinator.async_set_grid_serving_enabled(False)
             elif deactivation == "month":
                 await coordinator.async_set_grid_serving_month(1, False)
+                await coordinator._month_control_task
             elif deactivation == "window":
                 await coordinator.async_set_grid_serving_window(
                     dt_time(14), dt_time(16)
@@ -4453,6 +4454,7 @@ async def test_enforce_grid_charge_timed_charge_active_in_active_month(hass) -> 
     await coordinator.async_set_max_soc(90)
     for month in set(ALL_MONTHS) - {11, 12, 1}:
         await coordinator.async_set_timed_charge_month(month, False)
+    await coordinator._month_control_task
     await coordinator.async_set_timed_charge_enabled(True)
 
     try:
@@ -4514,6 +4516,7 @@ async def test_enforce_grid_charge_grid_serving_active_in_selected_month(hass) -
     await coordinator.async_set_max_soc(90)
     for month in set(ALL_MONTHS) - {5, 6, 7, 8}:
         await coordinator.async_set_grid_serving_month(month, False)
+    await coordinator._month_control_task
     coordinator._high_sample_revision += 1
     await coordinator.async_set_grid_serving_enabled(True)
 

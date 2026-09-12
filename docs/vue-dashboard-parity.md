@@ -237,6 +237,39 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
+### Aktuelle Abnahme vom 12.09.2026
+
+Der vollständige
+[CI-Lauf 34687697772](https://github.com/dr-dimitri/sax-ha/actions/runs/34687697772)
+prüfte den Code aus
+[Commit 909c2b8920cc](https://github.com/dr-dimitri/sax-ha/commit/909c2b8920ccd1b3edaceca96a2ee8dca27afcb6)
+im zugehörigen PR-Testmerge erfolgreich. Der Browserbericht zeigt:
+**28 von 28 Browserfällen bestanden,
+keine Fehler, keine erst nach Wiederholung bestandenen Fälle und keine Skips**.
+Die Prüfung umfasst das einzige Dashboard **SAX Power**, alle fünf Ansichten,
+die kompakten Monatsraster und das Entfernen des zweiten Dashboard-Einstiegs.
+Das Produktionsmodul verwendet in diesen Browserprüfungen simulierte HA-Daten.
+
+Für diesen Stand bestanden **202 Komponententests**, Typprüfung, Prettier und
+der reproduzierbare Build. Die lokale Python-Gesamtsuite bestand mit
+**1.748 Tests und zwei erwarteten Hardware-Skips**; Ruff und Black waren grün.
+
+Die lokale Browserprüfung über CUA maß für beide Monatsraster:
+
+| Verfügbarer Platz | Monatsspalten | Rasterhöhe |
+| --- | --- | --- |
+| 1110 px Panelbreite | 6 | 116 px |
+| 390 px Browserbreite | 2 | 364 px |
+| 320 px Browserbreite | 1 | Kein horizontaler Überlauf |
+
+Die Messwerte gelten für die geprüften Beispieldaten. Fehler und ausstehende
+Aktionen dürfen die Kacheln vergrößern. Alle zwölf Monatsnamen bleiben lesbar
+und die Bedienflächen mindestens 44 × 44 px groß. Gespeicherte
+HA-Dashboards werden durch die Legacy-Migration nicht gelöscht. Es fand kein
+Test an einer physischen Batterie statt. Die finale isolierte Paketprüfung
+wird mit dem tatsächlichen Commit und den Prüfsummen in
+[PR #204](https://github.com/dr-dimitri/sax-ha/pull/204) festgehalten.
+
 ### Historische Prüfnachweise vom 12.09.2026
 
 Die folgenden Ergebnisse betreffen den jeweiligen früheren Code- und
@@ -262,15 +295,14 @@ bereitgehaltene Snapshot-Veröffentlichung. Weitere Paketnachweise sind mit
 Commit und Prüfsummen in [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
 zugeordnet.
 
-### Screenshots des bisherigen Stands
+### Aktuelle Screenshots
 
-Diese Bilder stammen aus
-[CI-Lauf 34685941171](https://github.com/dr-dimitri/sax-ha/actions/runs/34685941171)
-vom 12.09.2026, **vor der Entfernung des alten Dashboards und der weiteren
-Verdichtung der Monatsraster**. Die dort sichtbaren Vue-/Vorschaukennzeichnungen
-und Links auf das alte Dashboard gehören zum damaligen Stand und sind kein
-Bestandteil der aktuellen Oberfläche. Die Bilder dokumentieren ausschließlich
-diese frühere Abnahme; aktuelle Screenshots folgen erst aus einem neuen CI-Lauf.
+Die 14 Bilder stammen aus dem Browserbericht von
+[CI-Lauf 34687697772](https://github.com/dr-dimitri/sax-ha/actions/runs/34687697772)
+vom 12.09.2026. Sie zeigen das einzige Dashboard **SAX Power** ohne
+Vue-/Vorschaukennzeichnung oder Einstieg zum alten Dashboard, die verdichteten
+Monatsraster und die Schalterbestätigung. Die Umgebung mit simulierten
+HA-Daten ist ausdrücklich als Testansicht gekennzeichnet.
 
 | Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
 | --- | --- | --- |

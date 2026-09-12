@@ -114,8 +114,11 @@ in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
 ordnet die Entity-Anbindung dem Config Entry zu. Das Grundgerüst zeigt fünf
 navigierbare Bereiche (Issue #197). Die gemeinsame Datenanbindung und
-Bedienkomponenten sind in #198 umgesetzt; die fachlichen Ansichten mit
-Messwerten und Bedienelementen folgen in #199–#202.
+Bedienkomponenten sind in #198 umgesetzt. `views/GeneralView.vue` zeigt seit
+#199 die allgemeine Geräteübersicht mit Skalen, Live-Werten, Hauptschalter und
+Max-SOC-Einstellung. Die weiteren fachlichen Ansichten folgen in #200–#202.
+`REQ-VUE-GENERAL` definiert Reihenfolge, optionale Daten und Skalenbereiche
+entsprechend dem bestehenden Lovelace-Tab.
 
 `dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
 `sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
@@ -147,6 +150,23 @@ neu auf noch löst sie eine Modbus-Aktion aus. Setup registriert das aktivierte
 Panel erneut, Unload entfernt es. Fehler der optionalen Oberfläche blockieren
 die Batterieintegration nicht. Lovelace-Einmalanlage, Neuinstallation und
 Reparaturhinweise bleiben eigenständig.
+
+`REQ-VUE-DASHBOARD-REPAIR` ergänzt einen eigenen Reparaturablauf für Vue.
+Der SHA-256-Hash des lokalen Bundles identifiziert den Stand auch zwischen
+Snapshots mit derselben Manifest-Version. `vue_dashboard_version` hält den
+bestätigten Stand; `vue_dashboard_dismissed_version` unterdrückt nur den
+konkret abgelehnten Hinweis. Neue Aktivierungen beginnen mit einer Baseline;
+bereits aktivierte ältere Vorschauen ohne Marker erhalten einen neutralen
+einmaligen Hinweis zum Neuladen. Ein Fehler bei der Registrierung kann auch
+für einen schon bestätigten Bundle-Stand eine Reparatur auslösen.
+
+Der Vue-Reparaturflow registriert ausschließlich das eigene Panel mit der
+aktuellen Hash-URL erneut. Da ein bereits definiertes Custom Element im
+Browser nicht durch erneuten Modulimport ersetzt wird, enthält der Dialog
+einen ausdrücklichen Schritt zum Neuladen der HA-Seite. Fehlgeschlagene oder
+inzwischen überholte Reparaturen quittieren keinen neueren Stand. Die Marker
+liegen in `entry.data`; Änderungen daran bleiben über den bestehenden
+Options-Listener ohne zusätzliche Ladesteuerungsaktion.
 
 Das JavaScript-Bundle liegt unter
 `custom_components/sax_power/frontend/sax-power-vue.js` im Git-Repository.
@@ -183,6 +203,11 @@ Für eine lokale Bedienprobe ohne Batterie `npm run dev -- --host 127.0.0.1`
 starten und `/controls-preview.html` öffnen. Die ausdrücklich als Demo markierte
 Seite verwendet simulierte HA-Zustände und Serviceantworten; sie ist kein
 zusätzlicher produktiver Dashboard-Bereich.
+
+`/general-preview.html` verwendet dieselbe allgemeine Ansicht mit simulierten
+HA-Entitäten für die visuelle Prüfung. Produktive Views lesen ausschließlich
+den gemeinsamen Kontext; Demowerte werden nicht in das ausgelieferte Panel
+übernommen.
 
 Die Abhängigkeiten zeigen von den Home-Assistant-Entrypoints nach innen:
 `sensor.py`/`number.py`/`switch.py`/`time.py` verwenden den Coordinator, der

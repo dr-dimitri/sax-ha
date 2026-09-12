@@ -49,7 +49,9 @@ from .const import (
     CONF_TIMED_CHARGE_ENABLED,
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
+    CONF_VUE_DASHBOARD_DISMISSED_VERSION,
     CONF_VUE_DASHBOARD_ENABLED,
+    CONF_VUE_DASHBOARD_VERSION,
     DEFAULT_CREATE_DASHBOARD,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
@@ -399,12 +401,17 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                         else f"{host}:{port}"
                     )
                     updated_data = dict(user_input)
-                    if CONF_VUE_DASHBOARD_ENABLED in reconfigure_entry.data:
+                    for dashboard_key in (
+                        CONF_VUE_DASHBOARD_ENABLED,
+                        CONF_VUE_DASHBOARD_VERSION,
+                        CONF_VUE_DASHBOARD_DISMISSED_VERSION,
+                    ):
                         # REQ-VUE-DASHBOARD: Das dauerhafte Setup-Opt-in
                         # muss einen Wechsel der Verbindungsdaten überleben.
-                        updated_data[CONF_VUE_DASHBOARD_ENABLED] = (
-                            reconfigure_entry.data[CONF_VUE_DASHBOARD_ENABLED]
-                        )
+                        if dashboard_key in reconfigure_entry.data:
+                            updated_data[dashboard_key] = reconfigure_entry.data[
+                                dashboard_key
+                            ]
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
                         data=updated_data,
@@ -488,6 +495,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     **self._connection_data,
                     **self._grid_charge_data,
                     **self._dashboard_data,
+                    CONF_VUE_DASHBOARD_VERSION: "",
                 },
             )
 
@@ -840,6 +848,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
         tarifspezifischen Altwerte.
         """
         if tariff_type is TariffType.DISABLED:
+            self._mark_vue_activation()
             return self.async_create_entry(title="", data=self._base_options)
         if tariff_type is TariffType.FIXED:
             return await self.async_step_economics_fixed()
@@ -951,6 +960,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
         """
         known = {str(marker) for marker in schema.schema}
         rounded = _round_price_fields(user_input)
+        self._mark_vue_activation()
         return self.async_create_entry(
             title="",
             data={
@@ -958,6 +968,23 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 **{key: value for key, value in rounded.items() if key in known},
             },
         )
+
+    def _mark_vue_activation(self) -> None:
+        """REQ-VUE-DASHBOARD-REPAIR: Erstaktivierung braucht keine Reload-Erinnerung."""
+        previously_enabled = self.config_entry.options.get(
+            CONF_VUE_DASHBOARD_ENABLED,
+            self.config_entry.data.get(
+                CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+            ),
+        )
+        if (
+            not previously_enabled
+            and self._base_options.get(CONF_VUE_DASHBOARD_ENABLED)
+            and CONF_VUE_DASHBOARD_VERSION not in self.config_entry.data
+        ):
+            data = {**self.config_entry.data, CONF_VUE_DASHBOARD_VERSION: ""}
+            data.pop(CONF_VUE_DASHBOARD_DISMISSED_VERSION, None)
+            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
     def _suggested(
         self, schema: vol.Schema, user_input: dict[str, Any] | None = None

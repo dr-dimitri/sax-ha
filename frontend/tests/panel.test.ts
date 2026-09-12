@@ -139,7 +139,7 @@ describe("Home Assistant panel", () => {
     expect(connection.removeEventListener).toHaveBeenCalledTimes(3);
   });
 
-  it("mounts five stable sections with isolated styles and honest placeholders", async () => {
+  it("mounts five stable sections and the general view with isolated styles", async () => {
     const element = await mount();
     const root = shadow(element);
 
@@ -153,12 +153,13 @@ describe("Home Assistant panel", () => {
     expect(selectedLink(element)?.textContent?.trim()).toBe(
       "Allgemeine Informationen",
     );
-    expect(root.querySelector("h2")?.textContent).toBe(
-      "Dieser Bereich wird vorbereitet",
-    );
-    expect(root.querySelector("style")?.textContent).toContain(
-      "--primary-background-color",
-    );
+    expect(root.querySelector(".placeholder")).toBeNull();
+    expect(root.querySelector('[role="status"]')).not.toBeNull();
+    expect(
+      [...root.querySelectorAll("style")]
+        .map((style) => style.textContent)
+        .join("\n"),
+    ).toContain("--primary-background-color");
     expect(root.querySelector(".existing-link")?.getAttribute("href")).toBe(
       "/sax-power",
     );
@@ -175,7 +176,10 @@ describe("Home Assistant panel", () => {
   });
 
   it("does not advertise an existing dashboard when none is registered", async () => {
-    const element = await mount({ hass: { language: "de", states: {} } });
+    const element = await mount({
+      pathname: "/sax-power-vue/ersparnis",
+      hass: { language: "de", states: {} },
+    });
 
     expect(shadow(element).querySelector(".existing-link")).toBeNull();
     expect(
@@ -240,7 +244,10 @@ describe("Home Assistant panel", () => {
       url_path: "sax-power-vue",
     };
     await flush();
-    expect(shadow(element).querySelector(".placeholder")).not.toBeNull();
+    expect(shadow(element).querySelector(".placeholder")).toBeNull();
+    expect(
+      shadow(element).querySelector('[role="status"]')?.textContent,
+    ).not.toContain("No SAX Power device is assigned");
   });
 
   it("shows a loading message until Home Assistant is supplied", async () => {
@@ -255,8 +262,10 @@ describe("Home Assistant panel", () => {
     element.panel = { config: { entry_id: "entry-1" } };
     await flush();
 
-    expect(shadow(element).querySelector('[role="status"]')).toBeNull();
-    expect(shadow(element).querySelector(".placeholder")).not.toBeNull();
+    expect(
+      shadow(element).querySelector('[role="status"]')?.textContent,
+    ).not.toBe("Loading Home Assistant …");
+    expect(shadow(element).querySelector(".placeholder")).toBeNull();
   });
 
   it("navigates without reloading and notifies the HA router", async () => {

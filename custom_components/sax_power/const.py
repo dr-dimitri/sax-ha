@@ -37,6 +37,11 @@ DEFAULT_CREATE_DASHBOARD = True
 # REQ-VUE-DASHBOARD: dauerhaftes Opt-in, unabhängig von der Lovelace-Einmalanlage.
 CONF_VUE_DASHBOARD_ENABLED = "vue_dashboard_enabled"
 DEFAULT_VUE_DASHBOARD_ENABLED = False
+# REQ-VUE-DASHBOARD-REPAIR: Ein leerer Stand markiert eine neue Aktivierung;
+# fehlende Metadaten kennzeichnen bereits aktivierte ältere Snapshots.
+CONF_VUE_DASHBOARD_VERSION = "vue_dashboard_version"
+CONF_VUE_DASHBOARD_DISMISSED_VERSION = "vue_dashboard_dismissed_version"
+ISSUE_VUE_DASHBOARD_UPDATE = "vue_dashboard_update"
 
 # Genau wegen dieses einmaligen Flags bekommt ein bestehendes Dashboard die
 # Tabs einer neueren Version nie zu sehen: Nach der Ersteinrichtung wird

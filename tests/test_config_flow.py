@@ -30,7 +30,9 @@ from custom_components.sax_power.const import (
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
+    CONF_VUE_DASHBOARD_DISMISSED_VERSION,
     CONF_VUE_DASHBOARD_ENABLED,
+    CONF_VUE_DASHBOARD_VERSION,
     DOMAIN,
     ECONOMICS_TOU_WINDOW_KEYS,
     PRICE_UNIT_CT_KWH,
@@ -234,6 +236,7 @@ async def test_dashboard_choices_are_independent(
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"]["create_dashboard"] is lovelace_enabled
     assert result["data"][CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
+    assert result["data"][CONF_VUE_DASHBOARD_VERSION] == ""
 
 
 @pytest.mark.parametrize(
@@ -282,6 +285,61 @@ async def test_vue_options_preserve_or_override_onboarding_choice(
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is expected
     assert entry.data["create_dashboard"] is False
+
+
+@pytest.mark.parametrize("tariff_type", [TariffType.DISABLED, TariffType.FIXED])
+@pytest.mark.parametrize("existing_version", [None, "last-confirmed-bundle"])
+async def test_vue_first_activation_marker_preserves_reactivation_history(
+    hass: HomeAssistant, tariff_type: TariffType, existing_version: str | None
+) -> None:
+    """REQ-VUE-DASHBOARD-REPAIR: Nur das erste Aktivieren setzt eine neue Baseline."""
+    data = dict(VALID_INPUT)
+    if existing_version is not None:
+        data[CONF_VUE_DASHBOARD_VERSION] = existing_version
+        data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] = "last-ignored-bundle"
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=data, options={CONF_VUE_DASHBOARD_ENABLED: False}
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_VUE_DASHBOARD_ENABLED: True,
+            CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value,
+        },
+    )
+    if tariff_type is TariffType.FIXED:
+        assert result["type"] == FlowResultType.FORM
+        assert entry.data == data
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3,
+                CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+            },
+        )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is True
+    assert entry.data[CONF_VUE_DASHBOARD_VERSION] == (existing_version or "")
+    if existing_version is not None:
+        assert entry.data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] == "last-ignored-bundle"
+
+
+async def test_vue_legacy_enabled_options_do_not_invent_confirmed_baseline(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-VUE-DASHBOARD-REPAIR: Alte Snapshots behalten ihren Reload-Hinweis."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options={CONF_VUE_DASHBOARD_ENABLED: True},
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_VUE_DASHBOARD_VERSION not in entry.data
 
 
 async def test_finish_step_shows_summary_placeholders(hass) -> None:
@@ -697,7 +755,12 @@ async def test_reconfigure_preserves_vue_onboarding_choice(
     """REQ-VUE-DASHBOARD: Neue Verbindungsdaten ändern keine Dashboard-Auswahl."""
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={**VALID_INPUT, CONF_VUE_DASHBOARD_ENABLED: vue_enabled},
+        data={
+            **VALID_INPUT,
+            CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
+            CONF_VUE_DASHBOARD_VERSION: "confirmed-hash",
+            CONF_VUE_DASHBOARD_DISMISSED_VERSION: "ignored-hash",
+        },
         unique_id="192.168.1.50:502",
     )
     entry.add_to_hass(hass)
@@ -714,6 +777,8 @@ async def test_reconfigure_preserves_vue_onboarding_choice(
     assert result["reason"] == "reconfigure_successful"
     assert entry.data["host"] == "192.168.1.99"
     assert entry.data[CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
+    assert entry.data[CONF_VUE_DASHBOARD_VERSION] == "confirmed-hash"
+    assert entry.data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] == "ignored-hash"
 
 
 async def test_reconfigure_flow_rejects_another_entries_target(hass) -> None:

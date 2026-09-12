@@ -11,6 +11,7 @@ import {
 } from "vue";
 import { messages, tabPath, tabs } from "./tabs";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "./ha";
+import GeneralView from "./views/GeneralView.vue";
 import type { HomeAssistant, PanelInfo, PanelRoute } from "./types";
 
 const props = defineProps<{
@@ -159,6 +160,7 @@ function openSidebar(): void {
         <p v-else-if="!panel?.config?.entry_id" class="status" role="status">
           {{ text.missingEntry }}
         </p>
+        <GeneralView v-else-if="activePath === 'allgemein'" />
         <div v-else-if="activeTab" class="placeholder">
           <svg class="placeholder-icon" viewBox="0 0 48 48" aria-hidden="true">
             <rect x="8" y="9" width="32" height="30" rx="4" />

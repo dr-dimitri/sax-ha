@@ -56,6 +56,94 @@ test("production module runs independently in a browser context", async () => {
       "Scheduled charging",
     );
 
+    const calls = [];
+    const unsubscribe = () => {};
+    element.hass = {
+      language: "de",
+      connection: {
+        connected: true,
+        subscribeMessage: async (callback) => {
+          callback({
+            entities: [
+              {
+                entity_id: "sensor.renamed_soc",
+                domain: "sensor",
+                key: "soc",
+                name: "Ladezustand",
+                states: {},
+                can_control: false,
+              },
+              {
+                entity_id: "number.renamed_limit",
+                domain: "number",
+                key: "max_soc",
+                name: "Maximaler Ladezustand",
+                states: {},
+                can_control: true,
+              },
+            ],
+          });
+          return unsubscribe;
+        },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      },
+      states: {
+        "sensor.renamed_soc": {
+          entity_id: "sensor.renamed_soc",
+          state: "63.5",
+          attributes: { unit_of_measurement: "%" },
+        },
+        "number.renamed_limit": {
+          entity_id: "number.renamed_limit",
+          state: "80",
+          attributes: { min: 10, max: 100, step: 1, unit_of_measurement: "%" },
+        },
+      },
+      callService: async (...args) => calls.push(args),
+    };
+    root.querySelector('nav a[href="/sax-power-vue/allgemein"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(root.querySelector(".placeholder"), null);
+    assert.match(root.textContent, /Ladezustand/);
+    assert.match(root.textContent, /63,5 %/);
+    const styles = [...root.querySelectorAll("style")]
+      .map((style) => style.textContent)
+      .join("\n");
+    for (const selector of [
+      ".entity-gauge__segment",
+      ".general-view__rows",
+      ".entity-control__input",
+    ]) {
+      assert.ok(
+        styles.includes(selector),
+        `Missing bundled style: ${selector}`,
+      );
+    }
+    assert.equal(calls.length, 0);
+    const input = root.querySelector('input[type="number"]');
+    assert.ok(
+      input,
+      "The production bundle includes the shared number control",
+    );
+    input.value = "85";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    input.form.dispatchEvent(
+      new window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], "number");
+    assert.equal(calls[0][1], "set_value");
+    assert.equal(calls[0][2].value, 85);
+    assert.equal(calls[0][3].entity_id, "number.renamed_limit");
+    assert.match(
+      root.querySelector(".entity-control__value").textContent,
+      /80 %/,
+    );
+
     element.remove();
     await Promise.resolve();
     await Promise.resolve();

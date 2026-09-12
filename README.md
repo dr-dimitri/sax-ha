@@ -167,12 +167,14 @@ Sie ist standardmäßig ausgeschaltet und kann bei der Einrichtung oder später
 unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
 geändert werden. Die Auswahl bleibt nach einem Neustart erhalten.
 
-Diese Vorschau enthält die Navigation zu allen fünf Bereichen und die gemeinsame
-Anbindung an Home-Assistant-Entitäten. Die Darstellung der Messwerte,
-Bedienfunktionen und Ersparnis-Auswertungen in diesen Bereichen folgt in den weiteren
-Arbeitspaketen der [Vue-Umsetzung](https://github.com/dr-dimitri/sax-ha/issues/196).
+Unter **Allgemeine Informationen** stehen Ladezustand, Zelltemperatur,
+Leistungs-/Energiewerte und verfügbare Gerätedaten als Live-Anzeigen bereit.
+Speicher-Hauptschalter und maximaler Ladezustand können dort bedient werden.
+Die weiteren Bereiche für Ladeautomatiken und Ersparnis folgen in den
+[weiteren Arbeitspaketen](https://github.com/dr-dimitri/sax-ha/issues/196).
 Für diese Funktionen steht weiterhin das bestehende Dashboard **SAX Power**
-zur Verfügung. Beide Oberflächen können gleichzeitig geöffnet werden.
+zur Verfügung. Beide Oberflächen können gleichzeitig geöffnet werden;
+Änderungen verwenden dieselben Home-Assistant-Entitäten.
 
 Zum Entfernen des Vue-Eintrags die Option wieder ausschalten. Das wirkt direkt,
 ohne die Batterieintegration neu zu starten. Das bisherige Lovelace-Dashboard,
@@ -180,6 +182,17 @@ eigene Kartenanpassungen und die Aktionen `sax_power.create_dashboard` und
 `sax_power.reinstall_dashboard` bleiben davon unabhängig. Die Vorschau wird
 mit der Integration lokal ausgeliefert und benötigt keine zusätzliche
 Installation auf dem Home-Assistant-Gerät.
+
+Bei einer neuen Vue-Dashboard-Version oder einem Registrierungsfehler erscheint
+ein eigener Hinweis unter **Einstellungen → System → Reparaturen**. Dort lässt
+sich **SAX Power (Vue)** mit den aktuell installierten Dateien neu registrieren.
+Anschließend die Home-Assistant-Seite im Browser vollständig neu laden, damit
+auch eine schon geöffnete Ansicht den neuen Vue-Code verwendet. Der Dialog
+erläutert diesen Schritt; bei einem Fehler bleibt die Reparatur offen.
+Bei älteren, bereits aktivierten Vorschauen erscheint dieser Hinweis einmalig
+auch zum erstmaligen Abgleich des Browserstands. Ein abgelehnter Hinweis gilt
+nur für die jeweilige Version; spätere Updates können wieder gemeldet werden.
+Die Lovelace-Neuinstallation ist weiterhin ein getrennter Vorgang.
 
 ## Wichtige Entitäten
 

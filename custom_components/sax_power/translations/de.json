@@ -582,6 +582,36 @@
           }
         }
       }
+    },
+    "vue_dashboard_update": {
+      "title": "Vue-Dashboard aktualisieren und im Browser neu laden",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Vue-Dashboard aktualisieren",
+            "description": "Für das aktivierte Vue-Dashboard steht eine andere Version bereit, eine ältere Vorschau wurde noch nicht bestätigt oder das Panel konnte nicht registriert werden.\n\nDie Reparatur registriert ausschließlich das Vue-Dashboard mit der mitgelieferten Version neu. Das Lovelace-Dashboard und die Ladeeinstellungen bleiben erhalten. Bereits geöffnete Browser benötigen anschließend ein vollständiges Neuladen, damit die neue Oberfläche verwendet wird.\n\nMit **Später** wird nur dieser Stand ausgeblendet. Ein weiterer Versionswechsel wird wieder gemeldet.",
+            "menu_options": {
+              "confirm": "Vue-Dashboard aktualisieren",
+              "cancel": "Später – diesen Stand ausblenden"
+            }
+          },
+          "confirm": {
+            "title": "Vue-Dashboard erneut aktualisieren",
+            "description": "Die Registrierung war noch nicht erfolgreich. Prüfe das Home-Assistant-Protokoll und versuche es erneut. Wurde die Integration inzwischen aktualisiert, schließe diesen Dialog und öffne den aktuellen Reparaturhinweis."
+          },
+          "reload": {
+            "title": "Vue-Dashboard ist registriert – Browser neu laden",
+            "description": "Das Vue-Dashboard wurde mit der aktuellen mitgelieferten Version registriert. Schließe diesen Schritt ab und lade anschließend **jede geöffnete Home-Assistant-Seite vollständig neu** (Browser: Seite neu laden; Companion-App: Frontend neu laden). Ein Wechsel zwischen Dashboard-Tabs reicht nicht aus.\n\nDer Browser verwendet danach die neue Vue-Oberfläche."
+          }
+        },
+        "error": {
+          "update_failed": "Das Vue-Dashboard konnte nicht aktualisiert werden. Das Problem wurde nicht als behoben markiert."
+        },
+        "abort": {
+          "no_longer_available": "Die Integration oder das aktivierte Vue-Dashboard ist nicht mehr verfügbar.",
+          "update_changed": "Der Dashboard-Stand oder seine Verfügbarkeit hat sich inzwischen geändert. Öffne den aktuellen Reparaturhinweis erneut; der neue Stand wurde nicht bestätigt."
+        }
+      }
     }
   },
   "exceptions": {

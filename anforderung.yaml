@@ -53,6 +53,8 @@
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
 # REQ-VUE-DASHBOARD               done       Separates optionales Vue-Panel mit Navigation und lokalem Build (Grundgerüst, #197)
 # REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
+# REQ-VUE-GENERAL                 done       Allgemeine Vue-Geräteübersicht mit Live-Werten und Bedienung (#199)
+# REQ-VUE-DASHBOARD-REPAIR        done       Eigenständige Vue-Aktualisierung über HA-Reparaturen (#205)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SETUP-ROLLBACK              done       Fehlgeschlagene Setup-Versuche geben Client, Plattformen, Listener und Timer vollständig frei
@@ -2212,9 +2214,9 @@ requirement_vue_dashboard:
     Allgemeine Informationen (allgemein), Ladeautomatik (ladeautomatik),
     Netzdienliches Laden (netzdienliches-laden), Dynamisches Laden
     (dynamisches-laden) und Ersparnis (ersparnis). Jede Ansicht erklärt
-    den Vorschauzustand. Die gemeinsame Datenanbindung ist separat in
-    REQ-VUE-ENTITY-BINDING beschrieben; fachliche Ansichten mit Sensordaten,
-    Bedienaktionen und Statistikabfragen folgen in den Issues #199 bis #202.
+    den jeweiligen Umsetzungsstand. Die gemeinsame Datenanbindung ist separat
+    in REQ-VUE-ENTITY-BINDING beschrieben, die allgemeine Geräteübersicht in
+    REQ-VUE-GENERAL. Weitere Ansichten folgen in den Issues #200 bis #202.
 
     vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
     standardmäßig False. Die Ersteinrichtung bietet sie neben der
@@ -2313,7 +2315,7 @@ requirement_vue_entity_binding:
     überschrieben; auch nach erfolgreicher Serviceantwort ist hass.states
     maßgeblich. Fehler werden in Deutsch oder Englisch angezeigt, ohne
     automatische Schreibwiederholung. Die Komponenten sind unabhängig von
-    den in #199 bis #202 folgenden fachlichen Ansichten testbar.
+    den fachlichen Ansichten testbar.
   acceptance_criteria:
     - "Registry-Umbenennungen, deaktivierte und fremde Entitäten sowie
        Lese-/Bedienberechtigungen sind über das HA-WebSocket-Protokoll getestet."
@@ -2327,6 +2329,115 @@ requirement_vue_entity_binding:
        weder doppelte Abos noch automatische Serviceaufrufe."
     - "Die Entwicklungsvorschau erlaubt eine explizit simulierte Bedienprobe;
        Lovelace und die bestehenden Geräte-Schreibpfade bleiben unabhängig."
+
+# ==============================================================================
+# ANFORDERUNG: ALLGEMEINE VUE-GERÄTEÜBERSICHT
+# ==============================================================================
+requirement_vue_general:
+  id: REQ-VUE-GENERAL
+  title: "Allgemeine Vue-Geräteübersicht mit Live-Werten und Bedienung (Issue #199)"
+  status: done
+  description: >
+    Der Vue-Pfad allgemein zeigt dieselben Entitäten wie der entsprechende
+    mitgelieferte Lovelace-Tab. Alle Werte und Bedienaktionen verwenden den
+    gemeinsamen Kontext aus REQ-VUE-ENTITY-BINDING. Beispielwerte sind nur
+    in der getrennten Entwicklungsvorschau erlaubt.
+
+    Zuerst erscheinen Skalen für sensor.soc (0 bis 100 Prozent) und
+    sensor.storage_max_cell_temp (0 bis 40 Grad Celsius). SOC ist unter
+    20 rot, ab 20 gelb und ab 50 grün; Zelltemperatur ist unter 5 rot,
+    ab 5 grün und ab 32 rot. Die Anzeige vermittelt den tatsächlichen Wert
+    und die Bereichsbedeutung auch als Text; Farbe ist nie der einzige
+    Informationsträger. unknown, unavailable und nichtnumerische Werte
+    erscheinen ohne vermeintliche Nullwerte oder Zeigerpositionen.
+
+    Danach folgen der Hauptschalter switch.storage_switch und die Karten
+    Leistung, Energie und Gerät in dieser Reihenfolge. Leistung enthält
+    number.max_soc als Bedienfeld sowie sensor.charge_power,
+    sensor.discharge_power und sensor.smartmeter_power (Netzleistung).
+    Energie enthält sensor.energy_charged und sensor.energy_discharged.
+    Gerät enthält sensor.sun_version_master, sensor.sun_version_gateway,
+    sensor.sun_serial_number, sensor.storage_event_text,
+    sensor.ic_control_mode_text (Steuermodus), binary_sensor.cell_calibration_active
+    und sensor.next_cell_calibration. Domains und Schlüssel bezeichnen hier
+    Registry-Metadaten, keine fest konstruierten Entity-IDs.
+
+    Fehlende optionale Entitäten werden ausgelassen; eine Karte ohne
+    verfügbare Metadaten wird nicht erzeugt. Registrierte Entitäten mit
+    fehlendem oder nicht verfügbarem Zustand bleiben mit verständlicher
+    Kennzeichnung sichtbar. Während Metadaten laden und wenn keine Entitäten
+    vorhanden sind, zeigt die Ansicht einen passenden Hinweis. Die entfernten
+    Hersteller-/Modell-/Statuskarten werden nicht wieder eingeführt.
+
+    Anordnung, Beschriftung und Bedienelemente funktionieren auf Smartphone
+    und Desktop, mit HA-Themes sowie auf Deutsch und Englisch. Die Anzeige
+    reagiert auch auf Änderungen aus Lovelace oder Automationen und führt
+    beim Öffnen, Rendern oder Tabwechsel keine Schreibaktionen aus.
+  acceptance_criteria:
+    - "Entitäten, Kartenreihenfolge und Beschriftungen entsprechen dem
+       bestehenden allgemeinen Lovelace-Tab."
+    - "Grenzen 20/50 Prozent und 5/32 Grad sowie nicht verfügbare Werte
+       sind getestet; Farbskalen besitzen eine verständliche Textalternative."
+    - "Hauptschalter und Max-SOC verwenden gemeinsame Validierung,
+       ausstehende Aktionen und bestätigte HA-Zustände."
+    - "Optionale Gerätedaten fehlen ohne leere Karten; weder Hersteller,
+       Modell noch die entfernte Statuskarte werden angezeigt."
+    - "Komponenten-/Produktionsmodultests und Browserproben decken Livewerte,
+       Navigation, beide Sprachen und eine mobile Ansicht ab."
+
+# ==============================================================================
+# ANFORDERUNG: VUE-DASHBOARD ÜBER REPARATUREN AKTUALISIEREN
+# ==============================================================================
+requirement_vue_dashboard_repair:
+  id: REQ-VUE-DASHBOARD-REPAIR
+  title: "Eigenständige Vue-Aktualisierung über HA-Reparaturen (Issue #205)"
+  status: done
+  description: >
+    Das aktivierte Vue-Dashboard erhält einen eigenen reparierbaren Hinweis
+    unter Einstellungen, System, Reparaturen, wenn sich sein lokales Bundle
+    verändert hat oder das Panel nicht registriert werden konnte. Der Stand
+    wird anhand des SHA-256-Inhalts-Hashes erkannt, unabhängig von stabilen
+    oder Snapshot-Versionen des Manifests. Die Reparatur lädt keine Software
+    aus dem Internet, sondern verwendet die aktuell installierten Assets.
+
+    Der bestätigte Stand liegt in vue_dashboard_version, ein ausdrücklich
+    abgelehnter Hinweis in vue_dashboard_dismissed_version. Eine erstmalige
+    Aktivierung bildet ohne Updateaufforderung die Baseline. Bereits aktivierte
+    ältere Vorschauen ohne Versionsmarker erhalten einen neutralen einmaligen
+    Hinweis zum Neuladen der Browseransicht; es wird kein unbekannter alter
+    Versionsstand behauptet. Reconfigure erhält die Marker. Ablehnen gilt nur
+    für den angezeigten Stand und unterdrückt keine späteren Bundle-Updates.
+    Registrierungsfehler bleiben von der Bestätigung eines zuvor korrekt
+    geladenen Bundles unterscheidbar.
+
+    Nach Bestätigung registriert der Reparaturflow ausschließlich das eigene
+    Vue-Panel neu und verwendet die aktuelle Modul-URL mit Inhalts-Hash.
+    Fremde Panels auf demselben Pfad werden nicht überschrieben. Da bereits
+    geladene Custom Elements im Browser ihre bestehende Implementierung
+    behalten, führt der Dialog ausdrücklich durch das notwendige vollständige
+    Neuladen der Home-Assistant-Seite. Erst der erfolgreiche Ablauf quittiert
+    den angezeigten Stand. Fehler liefern eine verständliche Rückmeldung und
+    bleiben erneut reparierbar; ein alter Dialog löscht keinen Hinweis für
+    einen inzwischen neueren Bundle-Stand.
+
+    Deaktivierte oder entfernte Config Entries werden nicht wieder aktiviert;
+    das Abschalten der Vue-Option entfernt den zugehörigen Hinweis. Die
+    Reparatur bleibt von Lovelace, eigenen Kartenanpassungen und dessen
+    bestehenden Installations-/Reparaturaktionen unabhängig. Weder Prüfung,
+    Quittierung noch Reparatur lösen Modbus-Schreibvorgänge, Planner-Neustarts
+    oder eine neue Tarifrevision aus. Fehler der optionalen Oberfläche dürfen
+    den Betrieb der Batterieintegration nicht blockieren.
+  acceptance_criteria:
+    - "Bundlewechsel bei gleicher Manifest-Version erzeugt einen Hinweis;
+       neue Aktivierung, Legacy-Stand und persistierte Bestätigung sind getestet."
+    - "Bestätigen registriert die aktuelle Hash-URL und erläutert Browser-
+       Neuladen; Registrierungsfehler werden nicht als Erfolg abgeschlossen."
+    - "Ablehnen gilt nur für den jeweiligen Stand; ein älterer offener
+       Reparaturdialog quittiert oder löscht keinen neueren Hinweis."
+    - "Deaktivierung, Entry-Entfernung, fremder Panelpfad und gleichzeitige
+       Änderungen während asynchroner Registrierung sind abgedeckt."
+    - "Versionsmarker überstehen Reconfigure und verändern keine
+       Geräte-Steuerung oder Lovelace-Konfiguration."
 
 # ==============================================================================
 # ANFORDERUNG: MITGELIEFERTES DASHBOARD

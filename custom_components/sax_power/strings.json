@@ -582,6 +582,36 @@
           }
         }
       }
+    },
+    "vue_dashboard_update": {
+      "title": "Update the Vue dashboard and reload it in your browser",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Update the Vue dashboard",
+            "description": "A different version is available for the enabled Vue dashboard, an earlier preview has not been acknowledged yet, or the panel could not be registered.\n\nThis repair registers only the Vue dashboard again using the bundled version. Your Lovelace dashboard and charging settings are preserved. Afterwards, every open browser needs a full reload to use the new interface.\n\n**Later** dismisses this version only. A subsequent version change will be reported again.",
+            "menu_options": {
+              "confirm": "Update Vue dashboard",
+              "cancel": "Later – dismiss this version"
+            }
+          },
+          "confirm": {
+            "title": "Retry the Vue dashboard update",
+            "description": "Registration has not succeeded yet. Check the Home Assistant log and try again. If the integration has been updated in the meantime, close this dialog and open the current repair issue."
+          },
+          "reload": {
+            "title": "Vue dashboard registered – reload your browser",
+            "description": "The Vue dashboard has been registered using the current bundled version. Complete this step, then **fully reload every open Home Assistant page** (browser: reload the page; Companion app: reload the frontend). Switching dashboard tabs is not enough.\n\nYour browser will then use the new Vue interface."
+          }
+        },
+        "error": {
+          "update_failed": "The Vue dashboard could not be updated. The issue has not been marked as fixed."
+        },
+        "abort": {
+          "no_longer_available": "The integration or enabled Vue dashboard is no longer available.",
+          "update_changed": "The dashboard version or its availability has changed in the meantime. Open the current repair issue again; the new version was not acknowledged."
+        }
+      }
     }
   },
   "exceptions": {

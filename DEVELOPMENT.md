@@ -133,15 +133,29 @@ tariff), Netzdienliches Laden, Amortisation. Die Pfade `ladeautomatik` und
 `ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
 Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
 `EntityValue`-Komponenten wie die allgemeine Ansicht sowie `TimeWindowControl`
-für beide Zeitfenster. Es berechnet keine Ladeberechtigungen oder
+für beide Zeitfenster. Die gemeinsame
+[`components/MonthSelection.vue`](frontend/src/components/MonthSelection.vue)
+kapselt Zusammenfassung und Quartalsauswahl beider Monatsgruppen.
+Das Layout berechnet keine Ladeberechtigungen oder
 Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
 [Funktionsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
 
-Die beiden Monatsraster in `TimedChargingView.vue` und `GridServingView.vue`
-lassen die zusätzliche Zeile „Bestätigter Wert“ weg. Kontrollkästchen folgen
-weiterhin dem bestätigten HA-Zustand; Fehler, Nichtverfügbarkeit und zugängliche
-Beschriftungen bleiben erhalten. Die gemeinsame bestätigte Zeitspanne in
+Die Monatsauswahl in `TimedChargingView.vue` und `GridServingView.vue` zeigt
+zunächst eine kompakte Zusammenfassung der bestätigten HA-Zustände. Nur
+zusammenhängend ausgewählte Monate bilden eine Spanne, etwa „Januar,
+März–Mai, Oktober“. Alle zwölf bestätigten Monate ergeben „Ganzjährig“
+(EN: „All year“). „Keine Monate ausgewählt · Ganzjährig inaktiv“ erscheint
+nur, wenn alle zwölf Zustände bekannt und aus sind. Fehlende, unbekannte und
+nicht verfügbare Monate werden ausdrücklich
+kenntlich gemacht. „Ändern“ öffnet vier Quartalsgruppen mit je drei unabhängig
+bedienbaren Monaten; „Schließen“ klappt sie ohne Speicheraktion wieder zu.
+Jede Änderung verwendet weiterhin einen einzelnen HA-Schalterservice.
+Kontrollkästchen und Zusammenfassung folgen ausschließlich dem bestätigten
+HA-Zustand, ohne zusätzliche Zeile „Bestätigter Wert“. Servicefehler,
+ausstehende Aktionen, fehlende Verbindung und Einschränkungen bleiben auch
+eingeklappt sichtbar. Die Bedienung und Zusammenfassung sind deutsch und
+englisch übersetzt. Die gemeinsame bestätigte Zeitspanne in
 beiden Zeitfenstern erhält in deutscher Sprache das Suffix ` Uhr`.
 Unbekannte/nicht verfügbare Zustände, englische Werte, Eingabefelder und
 Service-Payloads erhalten keinen Sprachzusatz. Der dynamische Tarif enthält
@@ -152,13 +166,13 @@ keine Monatsschalter.
 Die Ansichten wechseln ab 860 px Inhaltsbreite in ihr kompaktes Desktoplayout;
 die HA-Seitenleiste zählt deshalb nicht als nutzbarer Kartenplatz. Normale
 Schriftgrößen, mindestens 44 px hohe Bedienflächen und natürliche Kartenhöhen
-bleiben erhalten. Monatsschalter nutzen auch auf schmalen Ansichten ein
-kompaktes Raster mit knappen Innenabständen und mehr Spalten nach verfügbarem
-Platz. Ihre Beschriftungen bleiben mindestens 14 px groß und die Bedienflächen
+bleiben erhalten. Die aufgeklappte Monatsauswahl zeigt auf dem Smartphone
+eine Quartalsgruppe pro Zeile, bei ausreichendem Platz zwei nebeneinander.
+Ihre Beschriftungen bleiben mindestens 14 px groß und die Bedienflächen
 mindestens 44 × 44 px. Die native Checkbox ist dabei nur 22 × 22 px groß;
 ein zugeordnetes Label stellt die größere Klickfläche bereit, ohne die
-Tastaturbedienung oder die HA-Serviceaufrufe zu verändern. Bei sehr geringer
-Breite bleibt eine Spalte. DOM- und Tastaturreihenfolge bleiben Januar bis Dezember.
+Tastaturbedienung oder die HA-Serviceaufrufe zu verändern.
+DOM- und Tastaturreihenfolge bleiben Januar bis Dezember.
 Die Gerätekarte beginnt mit `energy_charged`/`energy_discharged` und endet mit
 `storage_switch`; es gibt keine separate Energie-Karte. Nur der
 Speicherschalter verlangt vor beiden Zielzuständen eine Dialogbestätigung.

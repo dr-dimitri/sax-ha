@@ -342,6 +342,165 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     },
   );
 
+  it.each([
+    [TimedChargingView, "timed_charge", "de"],
+    [GridServingView, "grid_serving", "de"],
+    [TimedChargingView, "timed_charge", "en-GB"],
+    [GridServingView, "grid_serving", "en-GB"],
+  ] as const)(
+    "summarises separate selected ranges and opens all four quarters without writing (%s, %s, %s)",
+    async (view, prefix, language) => {
+      const { root, update, callService } = await mount(view, { language });
+      const toggle = root.querySelector<HTMLButtonElement>(
+        ".month-selection__toggle",
+      )!;
+      const details = root.querySelector<HTMLElement>(
+        `[id="${toggle.getAttribute("aria-controls")}"]`,
+      )!;
+      const summary = () =>
+        root.querySelector(".month-selection__summary")!.textContent;
+      expect(summary()).toBe(language === "de" ? "Ganzjährig" : "All year");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(details.style.display).toBe("none");
+      toggle.click();
+      await flush();
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(details.style.display).not.toBe("none");
+      const quarters = [...details.querySelectorAll("fieldset")];
+      expect(quarters).toHaveLength(4);
+      expect(
+        quarters.map((quarter) => quarter.querySelectorAll("input").length),
+      ).toEqual([3, 3, 3, 3]);
+      expect(
+        quarters.every(
+          (quarter) => quarter.querySelector("legend")?.textContent,
+        ),
+      ).toBe(true);
+      const selected = new Set([1, 3, 4, 5, 10]);
+      for (let month = 1; month <= 12; month++)
+        await update(
+          `${prefix}_month_${month}`,
+          selected.has(month) ? "on" : "off",
+        );
+      expect(summary()).toContain(
+        language === "de"
+          ? "Januar, März–Mai, Oktober"
+          : "January, March–May, October",
+      );
+      expect(
+        root.querySelector(".month-selection__count")!.textContent,
+      ).toContain("5");
+      toggle.click();
+      await flush();
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(details.style.display).toBe("none");
+      expect(summary()).toContain(
+        language === "de"
+          ? "Januar, März–Mai, Oktober"
+          : "January, March–May, October",
+      );
+      for (let month = 1; month <= 12; month++)
+        await update(
+          `${prefix}_month_${month}`,
+          [1, 2, 11, 12].includes(month) ? "on" : "off",
+        );
+      expect(summary()).toContain(
+        language === "de"
+          ? "Januar–Februar, November–Dezember"
+          : "January–February, November–December",
+      );
+      for (const month of [1, 2, 11, 12])
+        await update(`${prefix}_month_${month}`, "off");
+      expect(summary()).toBe(
+        language === "de"
+          ? "Keine Monate ausgewählt · Ganzjährig inaktiv"
+          : "No months selected · Inactive all year",
+      );
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [TimedChargingView, "timed_charge"],
+    [GridServingView, "grid_serving"],
+  ] as const)(
+    "distinguishes no selected months from missing or unavailable month states (%s)",
+    async (view, prefix) => {
+      const { root, update, emit, metadata, callService } = await mount(view);
+      const summary = () =>
+        root.querySelector(".month-selection__summary")!.textContent;
+      for (let month = 1; month <= 12; month++)
+        await update(`${prefix}_month_${month}`, "off");
+      expect(summary()).toContain("Ganzjährig inaktiv");
+      for (const state of ["unknown", "unavailable", "invalid"]) {
+        await update(`${prefix}_month_2`, state);
+        expect(summary()).not.toContain("Ganzjährig inaktiv");
+        expect(root.querySelector(".month-selection")!.textContent).toMatch(
+          /unbekannt|nicht verfügbar|unklar/i,
+        );
+      }
+      await update(`${prefix}_month_2`, "off");
+      await emit(metadata.filter((item) => item.key !== `${prefix}_month_2`));
+      expect(summary()).not.toContain("Ganzjährig inaktiv");
+      await emit();
+      expect(summary()).toContain("Ganzjährig inaktiv");
+      await update(`${prefix}_month_3`, "on");
+      expect(summary()).toContain("März");
+      expect(summary()).not.toContain("Ganzjährig inaktiv");
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the confirmed summary during a pending write and displays rejection after collapsing", async () => {
+    const { root, update, callService } = await mount(TimedChargingView);
+    for (let month = 1; month <= 12; month++)
+      await update(`timed_charge_month_${month}`, "off");
+    let reject: (error: Error) => void = () => {};
+    callService.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, rejectPromise) => {
+          reject = rejectPromise;
+        }),
+    );
+    const toggle = root.querySelector<HTMLButtonElement>(
+      ".month-selection__toggle",
+    )!;
+    toggle.click();
+    await flush();
+    const january = form(root, "Januar").querySelector("input")!;
+    january.checked = true;
+    january.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    expect(january.checked).toBe(false);
+    expect(
+      root.querySelector(".month-selection__summary")!.textContent,
+    ).toContain("Ganzjährig inaktiv");
+    toggle.click();
+    await flush();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    reject(new Error("conflicting charge windows"));
+    await flush();
+    expect(
+      root.querySelector(".month-selection__summary")!.textContent,
+    ).toContain("Ganzjährig inaktiv");
+    const visibleError = [
+      ...root.querySelectorAll<HTMLElement>('.month-selection [role="alert"]'),
+    ].find((element) => {
+      let node: HTMLElement | null = element;
+      while (node) {
+        if (node.style.display === "none") return false;
+        node = node.parentElement;
+      }
+      return true;
+    });
+    expect(visibleError?.textContent).toContain("Änderung ist fehlgeschlagen");
+    expect(callService).toHaveBeenCalledTimes(1);
+    toggle.click();
+    await flush();
+    expect(january.checked).toBe(false);
+    expect(callService).toHaveBeenCalledTimes(1);
+  });
+
   it("renders all live discharge statuses supplied by HA without initiating actions", async () => {
     const { root, update, callService } = await mount(TimedChargingView);
     expect(root.textContent).toContain("Normalbetrieb");

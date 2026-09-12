@@ -2342,14 +2342,15 @@ requirement_vue_dashboard:
     ist die tatsächliche Panel- und Inhaltsbreite neben der HA-Seitenleiste,
     nicht allein die Browserfensterbreite. Ab 860 Pixel Inhaltsbreite stehen
     Skalen und Leistung neben den Gerätedaten, Ladeeinstellungen in Spalten
-    nebeneinander. Die Monatsraster nutzen auch auf schmalen Bildschirmen
-    mehrere Spalten und knappe Innenabstände entsprechend der verfügbaren
-    Breite. Monatsnamen bleiben mindestens 14 Pixel groß, Bedienflächen
+    nebeneinander. Die Monatsauswahl zeigt zunächst eine kompakte
+    Zusammenfassung. Aufgeklappt stehen vier Quartalsgruppen auf schmalen
+    Bildschirmen in einer Spalte, bei ausreichender Breite in zwei Spalten.
+    Monatsnamen bleiben mindestens 14 Pixel groß, Bedienflächen
     mindestens 44 mal 44 Pixel. Die sichtbaren nativen Monatskästchen sind
     22 mal 22 Pixel groß; zugeordnete Labels stellen die größere Klickfläche
     bereit. Der Speicherschalter verwendet dasselbe 22-Pixel-Kästchen in
     einer mindestens 44 mal 44 Pixel großen Klickfläche; die Sicherheitsabfrage
-    bleibt beim Ein- und Ausschalten erhalten. Bei sehr geringer Breite bleibt eine Spalte;
+    bleibt beim Ein- und Ausschalten erhalten;
     die DOM-/Tastaturreihenfolge bleibt Januar bis Dezember. In der Amortisationsansicht stehen Übersicht und Tarif nebeneinander;
     Datumsauswahl und Diagramm nutzen die volle Breite.
     Inhalte bleiben vollständig sichtbar; es gibt keine festen Kartenhöhen,
@@ -2596,10 +2597,26 @@ requirement_vue_charging:
     den dynamischen friendly_name und ihre kWh-Einheit; eine zusätzliche
     Einstellungen-Karte wird nicht erzeugt.
 
-    Beide Monatsraster zeigen keine zusätzliche Zeile Bestätigter Wert.
-    Die Kontrollkästchen zeigen weiterhin den bestätigten HA-Zustand und
-    behalten ihre zugänglichen Namen; Servicefehler und Nichtverfügbarkeit
-    bleiben sichtbar. Der Tab Dynamischer Tarif enthält keine Monatsschalter.
+    Beide Monatsauswahlen sind zunächst eingeklappt und zeigen eine kompakte
+    Zusammenfassung der bestätigten aktiven Monate samt Anzahl. Nur
+    unmittelbar aufeinanderfolgende ausgewählte Monate werden zu Spannen
+    zusammengefasst; Lücken bleiben sichtbar, etwa Januar, März–Mai, Oktober.
+    Alle zwölf bestätigten on-Zustände erscheinen als Ganzjährig (EN: All year).
+    Keine Monate ausgewählt · Ganzjährig inaktiv erscheint ausschließlich
+    bei zwölf bekannten, bestätigten off-Zuständen.
+    Fehlende, unknown- und unavailable-Zustände
+    werden ausdrücklich markiert und nicht als inaktive Monate interpretiert.
+    Ändern öffnet vier beschriftete Quartalsgruppen mit je drei unabhängig
+    bedienbaren Monatsschaltern. Schließen klappt die Auswahl ohne
+    Speicheraktion ein. Öffnen und Schließen lösen keine HA-Services aus;
+    jede Monatsänderung verwendet weiterhin einen einzelnen Schalterservice.
+    Es gibt keinen gemeinsamen Speicherschritt oder eigene Monatsregeln.
+    Kontrollkästchen und Zusammenfassung zeigen ausschließlich bestätigte
+    HA-Zustände, ohne zusätzliche Zeile Bestätigter Wert. Zugängliche Namen,
+    ausstehende Aktionen, Servicefehler, fehlende Verbindung,
+    Bedienbeschränkungen und Nichtverfügbarkeit bleiben auch eingeklappt
+    erkennbar. Zusammenfassung, Quartale und Bedienung sind deutsch und
+    englisch übersetzt. Der Tab Dynamischer Tarif enthält keine Monatsschalter.
 
     Die HA-Bestätigung einer gültigen Monatsauswahl wartet nicht auf die
     Geräteauswertung. Der Haken folgt weiterhin ausschließlich dem von HA
@@ -2679,9 +2696,25 @@ requirement_vue_charging:
        HA-Themes lesbar und bedienbar. Start- und Endmarken bleiben auch bei
        gleichen Grenzen einzeln erreichbar."
     - "Monatsaktionen im Frontend verwenden ausschließlich HA-Schalterservices."
-    - "Beide Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
-       HA-bestätigter Checkboxzustand, zugängliche Namen, Fehler und
-       Nichtverfügbarkeit bleiben geprüft."
+    - "Beide Monatsauswahlen starten eingeklappt; Ändern und Schließen
+       öffnen beziehungsweise schließen vier Quartalsgruppen mit je drei
+       Monaten ohne HA-Serviceaufruf oder zusätzlichen Speicherschritt."
+    - "Zusammenfassungen in DE/EN zeigen Einzelmonate, zusammenhängende
+       Spannen und mehrere getrennte Bereiche korrekt, etwa Januar,
+       März–Mai, Oktober. Dezember und Januar werden nicht über eine
+       Jahresgrenze verbunden. Alle zwölf aktiven Monate zeigen Ganzjährig
+       beziehungsweise All year; null aktive Monate nur bei zwölf bestätigten
+       off-Zuständen Keine Monate ausgewählt · Ganzjährig inaktiv."
+    - "Fehlende Metadaten oder Zustände sowie unknown und unavailable
+       bleiben auch in der Zusammenfassung sichtbar und werden nicht als
+       off behandelt. Ausstehende oder fehlgeschlagene Services ändern
+       weder Zusammenfassung noch Checkboxen vor HA-Bestätigung;
+       Fehler, fehlende Verbindung und Bedienbeschränkungen bleiben
+       auch nach dem Einklappen sichtbar."
+    - "Beide Monatsauswahlen zeigen keine zusätzliche Bestätigter-Wert-Zeile;
+       zugängliche Namen und die DOM-/Tastaturreihenfolge Januar bis Dezember
+       bleiben erhalten. Quartale stehen mobil in einer, bei ausreichender
+       Breite in zwei Spalten; helle und dunkle Themes bleiben lesbar."
     - "Die sichtbaren Monatskästchen messen 22 mal 22 Pixel innerhalb einer
        mindestens 44 mal 44 Pixel großen Klickfläche. Ein Klick auf deren
        Rand und die Leertaste lösen jeweils genau einen HA-Serviceaufruf aus."

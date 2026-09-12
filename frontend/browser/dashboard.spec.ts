@@ -47,6 +47,10 @@ test("compact views retain readable controls and all entities across available p
     if (tab.path === "ersparnis")
       await expect(panel.locator(".savings-chart")).toBeVisible();
     else await expect(panel.locator(".entity-control").first()).toBeVisible();
+    if (tab.path === "ladeautomatik" || tab.path === "netzdienliches-laden")
+      await panel
+        .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
+        .click();
     const expectedLabels = await contentLabels.allTextContents();
     expect(expectedLabels.length).toBeGreaterThan(0);
     const expectedControls = await panel
@@ -68,6 +72,14 @@ test("compact views retain readable controls and all entities across available p
             requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
           }),
       );
+      // Preserve the dashboard height budget while inspecting every expanded control.
+      const monthToggle = panel.locator(".month-selection__toggle");
+      const hasMonths = (await monthToggle.count()) > 0;
+      if (hasMonths) await monthToggle.click();
+      const compactPanelHeight = await panel.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      );
+      if (hasMonths) await monthToggle.click();
       await expect(contentLabels).toHaveText(expectedLabels);
       await expect(
         panel.locator(".section input, .section select"),
@@ -224,27 +236,45 @@ test("compact views retain readable controls and all entities across available p
           }
           const bounds = host.getBoundingClientRect();
           const months = section.querySelector(".charging-view__rows--months");
-          const monthColumns = months
+          const quarters = months
+            ? [...months.querySelectorAll(".month-selection__quarter")]
+            : [];
+          const quarterColumns = quarters.length
             ? new Set(
-                [...months.querySelectorAll(".entity-control")].map((tile) =>
-                  Math.round(tile.getBoundingClientRect().left),
+                quarters.map((quarter) =>
+                  Math.round(quarter.getBoundingClientRect().left),
                 ),
               ).size
             : null;
+          const quarterMonthCounts = quarters.map(
+            (quarter) => quarter.querySelectorAll(".entity-control").length,
+          );
+          const quarterMonthColumns = quarters.map(
+            (quarter) =>
+              new Set(
+                [...quarter.querySelectorAll(".entity-control")].map((tile) =>
+                  Math.round(tile.getBoundingClientRect().left),
+                ),
+              ).size,
+          );
           return {
             panelWidth: bounds.width,
             panelHeight: bounds.height,
             pageWidth: document.documentElement.scrollWidth,
             viewportWidth: window.innerWidth,
             controlCount: controls.length,
-            monthColumns,
+            quarterColumns,
+            quarterMonthCounts,
+            quarterMonthColumns,
             monthsHeight: months?.getBoundingClientRect().height ?? null,
             violations,
           };
         }, mobile);
       const description = `${tab.path}-${layout.width}x${layout.height}-sidebar${layout.sidebar}`;
       await testInfo.attach(description, {
-        body: Buffer.from(JSON.stringify(geometry, null, 2)),
+        body: Buffer.from(
+          JSON.stringify({ ...geometry, compactPanelHeight }, null, 2),
+        ),
         contentType: "application/json",
       });
       if (layout.sidebar === 256) {
@@ -266,13 +296,15 @@ test("compact views retain readable controls and all entities across available p
       expect(geometry.controlCount, description).toBeGreaterThan(0);
       expect(geometry.violations, description).toEqual([]);
       if (geometry.monthsHeight !== null) {
-        expect(geometry.monthColumns, description).toBe(mobile ? 2 : 6);
+        expect(geometry.quarterColumns, description).toBe(mobile ? 1 : 2);
+        expect(geometry.quarterMonthCounts, description).toEqual([3, 3, 3, 3]);
+        expect(geometry.quarterMonthColumns, description).toEqual([3, 3, 3, 3]);
         expect(geometry.monthsHeight, description).toBeLessThanOrEqual(
-          mobile ? 400 : 180,
+          mobile ? 700 : 400,
         );
       }
       if (!mobile)
-        expect(geometry.panelHeight, description).toBeLessThanOrEqual(
+        expect(compactPanelHeight, description).toBeLessThanOrEqual(
           heightBudgets[tab.path],
         );
     }
@@ -435,6 +467,18 @@ test("one dashboard with five complete views, local assets and responsive screen
     }
     if (tab.path === "ladeautomatik" || tab.path === "netzdienliches-laden") {
       const months = panel.locator(".charging-view__rows--months");
+      const toggle = months.getByRole("button", {
+        name: language === "de" ? "Ändern" : "Edit",
+        exact: true,
+      });
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(months.locator(".month-selection__summary")).toBeVisible();
+      await toggle.click();
+      await expect(months.locator(".month-selection__toggle")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      await expect(months.locator(".month-selection__quarter")).toHaveCount(4);
       await expect(months.getByRole("switch")).toHaveCount(12);
       await expect(months.locator(".entity-control__value")).toHaveCount(0);
       const window = panel.locator(".time-window-control");
@@ -533,6 +577,9 @@ test("overnight times, months, native strategy options and negative prices", asy
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/ladeautomatik']").click();
+  await panel
+    .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
+    .click();
   await expect(panel.getByRole("switch")).toHaveCount(13);
   const times = panel.locator("input[type=time]");
   await expect(times.nth(0)).toHaveValue("22:00");
@@ -598,6 +645,17 @@ test("overnight times, months, native strategy options and negative prices", asy
   const errorFits = await months.getByRole("alert").evaluate((message) => {
     const error = message.getBoundingClientRect();
     const form = message.closest("form")!;
+    const bounds = form.getBoundingClientRect();
+    return (
+      error.left >= bounds.left &&
+      error.right <= bounds.right &&
+      error.top >= bounds.top &&
+      error.bottom <= bounds.bottom
+    );
+  });
+  expect(errorFits).toBe(true);
+  const longNameFits = await secondMonth.evaluate((control) => {
+    const form = control.closest("form")!;
     const tile = form.getBoundingClientRect();
     const name = form
       .querySelector(".entity-control__name")!
@@ -607,17 +665,17 @@ test("overnight times, months, native strategy options and negative prices", asy
       Math.min(name.right, input.right) > Math.max(name.left, input.left) &&
       Math.min(name.bottom, input.bottom) > Math.max(name.top, input.top);
     return (
-      error.left >= tile.left &&
-      error.right <= tile.right &&
-      error.bottom <= tile.bottom &&
       name.left >= tile.left &&
       name.right <= tile.right &&
       name.bottom <= tile.bottom &&
       !overlapping
     );
   });
-  expect(errorFits).toBe(true);
+  expect(longNameFits).toBe(true);
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
+  await panel
+    .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
+    .click();
   await expect(panel.getByRole("switch")).toHaveCount(13);
   await expect(
     panel.getByText("PV-Prognose 13.9.", { exact: true }),
@@ -636,6 +694,109 @@ test("overnight times, months, native strategy options and negative prices", asy
     .click();
   await expect(page.locator("#actions")).toContainText('"value":-0.125');
   await expect(price).toHaveValue("-0.125");
+});
+
+// REQ-VUE-PARITY: quarter groups keep arbitrary confirmed month selections readable.
+test("compact month summaries retain gaps, whole-tile controls and errors when collapsed", async ({
+  page,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const english = testInfo.project.name.endsWith("en");
+  const actions = page.locator("#actions");
+  let writes = 0;
+  for (const [path, kind] of [
+    ["ladeautomatik", "timed_charge"],
+    ["netzdienliches-laden", "grid_serving"],
+  ]) {
+    await panel.locator(`nav a[href$='/${path}']`).click();
+    const months = panel.locator(".month-selection");
+    const toggle = months.locator(".month-selection__toggle");
+    const quarters = months.locator(".month-selection__quarters");
+    const summary = months.locator(".month-selection__summary");
+    const count = months.locator(".month-selection__count");
+    const switches = months.getByRole("switch");
+    const targets = months.locator(".entity-control__switch-target");
+    const before = await actions.innerText();
+    await expect(toggle).toHaveAccessibleName(english ? "Edit" : "Ändern");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(quarters).toBeHidden();
+    await expect(summary).toBeVisible();
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(quarters).toBeVisible();
+    await expect(switches).toHaveCount(12);
+    await expect(actions).toHaveText(before);
+
+    // Each click starts in tile padding, outside the visible checkbox.
+    for (const month of [2, 5, 6, 7, 9, 10, 11, 12]) {
+      await targets.nth(month - 1).click({ position: { x: 4, y: 4 } });
+      await expect(switches.nth(month - 1)).not.toBeChecked();
+      writes += 1;
+      await expect(actions).toHaveText(
+        `${writes}: switch.turn_off {"entity_id":"switch.demo_${kind}_month_${month}"}`,
+      );
+    }
+    const selected = english
+      ? "January, March–April, August"
+      : "Januar, März–April, August";
+    await expect(summary).toHaveText(selected);
+    await expect(count).toHaveText(
+      english ? "4 of 12 months selected" : "4 von 12 Monaten ausgewählt",
+    );
+    const lastWrite = await actions.innerText();
+    await toggle.click();
+    await expect(quarters).toBeHidden();
+    await expect(summary).toBeVisible();
+    await expect(summary).toHaveText(selected);
+    await expect(actions).toHaveText(lastWrite);
+    await testInfo.attach(`month-summary-${kind}-${testInfo.project.name}`, {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await toggle.click();
+    for (let index = 0; index < 12; index++)
+      await expect(switches.nth(index)).toBeChecked({
+        checked: [1, 3, 4, 8].includes(index + 1),
+      });
+    await expect(actions).toHaveText(lastWrite);
+
+    // A rejected change cannot alter the summary or disappear on collapse.
+    await page.locator("#failure").click();
+    await targets.nth(1).click({ position: { x: 4, y: 4 } });
+    writes += 1;
+    await expect(months.getByRole("alert")).toBeVisible();
+    await expect(switches.nth(1)).not.toBeChecked();
+    await expect(summary).toHaveText(selected);
+    await expect(actions).toHaveText(
+      `${writes}: switch.turn_on {"entity_id":"switch.demo_${kind}_month_2"}`,
+    );
+    const rejectedWrite = await actions.innerText();
+    await toggle.click();
+    await expect(quarters).toBeHidden();
+    await expect(months.getByRole("alert")).toBeVisible();
+    await expect(summary).toHaveText(selected);
+    await expect(actions).toHaveText(rejectedWrite);
+
+    // Retrying a gap month joins only its neighboring run after HA confirms it.
+    await toggle.click();
+    await switches.nth(1).focus();
+    await page.keyboard.press("Space");
+    await expect(switches.nth(1)).toBeChecked();
+    writes += 1;
+    await expect(actions).toHaveText(
+      `${writes}: switch.turn_on {"entity_id":"switch.demo_${kind}_month_2"}`,
+    );
+    await expect(summary).toHaveText(
+      english ? "January–April, August" : "Januar–April, August",
+    );
+    await expect(months.getByRole("alert")).toHaveCount(0);
+    await toggle.click();
+    await expect(summary).toBeVisible();
+    await expect(count).toHaveText(
+      english ? "5 of 12 months selected" : "5 von 12 Monaten ausgewählt",
+    );
+  }
 });
 
 test("both minute-only time windows support dragging, keyboard and atomic submission", async ({

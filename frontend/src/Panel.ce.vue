@@ -203,6 +203,7 @@ function openSidebar(): void {
 
 .dashboard {
   min-height: 100%;
+  container: sax-panel / inline-size;
 }
 
 .header {
@@ -331,6 +332,7 @@ main {
 }
 
 .section {
+  container: sax-content / inline-size;
   overflow-wrap: anywhere;
   padding: 28px;
   border: var(--ha-card-border-width, 1px) solid
@@ -370,6 +372,36 @@ h2 {
 
 .narrow main {
   padding: 16px 12px 32px;
+}
+
+@container sax-panel (min-width: 940px) {
+  .header {
+    min-height: 56px;
+    padding: 6px 20px;
+  }
+
+  .navigation a {
+    min-height: 48px;
+    padding: 8px 14px;
+  }
+
+  main {
+    max-width: 1360px;
+    padding: 16px 20px 20px;
+  }
+
+  .introduction {
+    gap: 4px 24px;
+    margin-bottom: 12px;
+  }
+
+  .section {
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
 }
 
 @media (max-width: 600px) {

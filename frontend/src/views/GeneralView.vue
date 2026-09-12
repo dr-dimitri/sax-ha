@@ -119,6 +119,7 @@ const hasEntities = computed(() => hasGauge.value || cards.value.length > 0);
       v-for="card in cards"
       :key="card.title"
       class="general-view__card"
+      :class="`general-view__card--${card.title}`"
       :aria-labelledby="`${id}-${card.title}`"
     >
       <h2 :id="`${id}-${card.title}`">{{ text[card.title] }}</h2>
@@ -187,6 +188,61 @@ const hasEntities = computed(() => hasGauge.value || cards.value.length > 0);
   margin: 0;
   color: var(--secondary-text-color, #666);
   line-height: 1.6;
+}
+@container sax-content (min-width: 860px) {
+  .general-view {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .general-view__gauges {
+    grid-column: 1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .general-view__gauges:has(> :only-child) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .general-view__card {
+    padding: 18px;
+  }
+  .general-view__card--power {
+    grid-column: 1;
+  }
+  .general-view__card--device {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .general-view:not(:has(.general-view__gauges)) .general-view__card--device,
+  .general-view:not(:has(.general-view__card--power))
+    .general-view__card--device {
+    grid-row: 1;
+  }
+  .general-view:has(> :only-child),
+  .general-view:not(:has(.general-view__card--device)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .general-view__card:only-child {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .general-view__card h2 {
+    margin-bottom: 12px;
+    font-size: 16px;
+  }
+  .general-view__rows {
+    gap: 10px;
+  }
+  .general-view__rows .entity-control {
+    padding: 0 0 10px;
+  }
+  .general-view__rows .entity-control:last-child {
+    padding-bottom: 0;
+  }
+  .general-view__status {
+    grid-column: 1 / -1;
+  }
 }
 @media (max-width: 600px) {
   .general-view {

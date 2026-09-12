@@ -4,6 +4,7 @@ import ChargingLayout from "./ChargingLayout.vue";
 const cards = [
   {
     key: "price",
+    layout: "columns",
     title: { de: "Preisoptimiertes Laden", en: "Price-optimised charging" },
     entities: [
       ["select", "price_charge_strategy"],

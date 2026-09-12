@@ -356,100 +356,106 @@ const chartDate = (value: string) =>
 
 <template>
   <div class="savings-view">
-    <section
-      v-if="configured?.available && configured.state?.state === 'off'"
-      class="savings-card"
-      :aria-labelledby="`${id}-investment`"
-    >
-      <h2 :id="`${id}-investment`">{{ text.payback }}</h2>
-      <p>{{ text.investment }}</p>
-    </section>
-    <section
-      v-else-if="
-        configured?.available &&
-        configured.state?.state === 'on' &&
-        (progress || remaining || roi || net || status)
-      "
-      class="savings-card"
-      :aria-labelledby="`${id}-payback`"
-    >
-      <h2 :id="`${id}-payback`">{{ text.payback }}</h2>
-      <div v-if="progress" class="savings-progress">
-        <h3 :id="`${id}-progress`">{{ progress.name }}</h3>
-        <p class="savings-large">
-          {{
-            progressValue === null
-              ? text.unavailable
-              : `${formatSavingsNumber(progressValue, hass)} %`
-          }}
-        </p>
-        <div
-          class="savings-progress__track"
-          :role="progressBounded === null ? undefined : 'meter'"
-          :aria-labelledby="`${id}-progress`"
-          :aria-valuemin="progressBounded === null ? undefined : 0"
-          :aria-valuemax="progressBounded === null ? undefined : 100"
-          :aria-valuenow="progressBounded ?? undefined"
+    <div class="savings-overview">
+      <section
+        v-if="configured?.available && configured.state?.state === 'off'"
+        class="savings-card savings-payback"
+        :aria-labelledby="`${id}-investment`"
+      >
+        <h2 :id="`${id}-investment`">{{ text.payback }}</h2>
+        <p>{{ text.investment }}</p>
+      </section>
+      <section
+        v-else-if="
+          configured?.available &&
+          configured.state?.state === 'on' &&
+          (progress || remaining || roi || net || status)
+        "
+        class="savings-card savings-payback"
+        :aria-labelledby="`${id}-payback`"
+      >
+        <h2 :id="`${id}-payback`">{{ text.payback }}</h2>
+        <div v-if="progress" class="savings-progress">
+          <h3 :id="`${id}-progress`">{{ progress.name }}</h3>
+          <p class="savings-large">
+            {{
+              progressValue === null
+                ? text.unavailable
+                : `${formatSavingsNumber(progressValue, hass)} %`
+            }}
+          </p>
+          <div
+            class="savings-progress__track"
+            :role="progressBounded === null ? undefined : 'meter'"
+            :aria-labelledby="`${id}-progress`"
+            :aria-valuemin="progressBounded === null ? undefined : 0"
+            :aria-valuemax="progressBounded === null ? undefined : 100"
+            :aria-valuenow="progressBounded ?? undefined"
+          >
+            <span
+              v-if="progressBounded !== null"
+              :style="{ width: `${progressBounded}%` }"
+            ></span>
+          </div>
+        </div>
+        <dl v-if="remaining || roi || net || status" class="savings-rows">
+          <div v-if="remaining">
+            <dt>{{ remaining.name }}</dt>
+            <dd>
+              {{ money(remaining.available ? remaining.state?.state : null) }}
+            </dd>
+          </div>
+          <div v-if="roi">
+            <dt>{{ text.prior }}</dt>
+            <dd>
+              {{
+                money(
+                  roi.available
+                    ? (roi.state?.attributes.prior_result_eur ??
+                        roi.state?.attributes.prior_result_eur_formatted)
+                    : null,
+                )
+              }}
+            </dd>
+          </div>
+          <div v-if="net">
+            <dt>{{ text.net }}</dt>
+            <dd>{{ money(net.available ? net.state?.state : null) }}</dd>
+          </div>
+          <div v-if="status">
+            <dt>{{ text.started }}</dt>
+            <dd>
+              {{
+                timestamp(
+                  status.available
+                    ? status.state?.attributes.economics_started_at
+                    : null,
+                )
+              }}
+            </dd>
+          </div>
+        </dl>
+      </section>
+      <section v-if="net" class="savings-periods" :aria-label="text.periods">
+        <article
+          v-for="period in periodKeys"
+          :key="period"
+          class="savings-card"
         >
-          <span
-            v-if="progressBounded !== null"
-            :style="{ width: `${progressBounded}%` }"
-          ></span>
-        </div>
-      </div>
-      <dl v-if="remaining || roi || net || status" class="savings-rows">
-        <div v-if="remaining">
-          <dt>{{ remaining.name }}</dt>
-          <dd>
-            {{ money(remaining.available ? remaining.state?.state : null) }}
-          </dd>
-        </div>
-        <div v-if="roi">
-          <dt>{{ text.prior }}</dt>
-          <dd>
+          <h2>{{ text[period] }}</h2>
+          <p class="savings-large">
             {{
-              money(
-                roi.available
-                  ? (roi.state?.attributes.prior_result_eur ??
-                      roi.state?.attributes.prior_result_eur_formatted)
-                  : null,
-              )
+              statistics.loading.value
+                ? "…"
+                : money(statistics.data.value?.periods[period].change)
             }}
-          </dd>
-        </div>
-        <div v-if="net">
-          <dt>{{ text.net }}</dt>
-          <dd>{{ money(net.available ? net.state?.state : null) }}</dd>
-        </div>
-        <div v-if="status">
-          <dt>{{ text.started }}</dt>
-          <dd>
-            {{
-              timestamp(
-                status.available
-                  ? status.state?.attributes.economics_started_at
-                  : null,
-              )
-            }}
-          </dd>
-        </div>
-      </dl>
-    </section>
-    <section v-if="net" class="savings-periods" :aria-label="text.periods">
-      <article v-for="period in periodKeys" :key="period" class="savings-card">
-        <h2>{{ text[period] }}</h2>
-        <p class="savings-large">
-          {{
-            statistics.loading.value
-              ? "…"
-              : money(statistics.data.value?.periods[period].change)
-          }}
-        </p>
-      </article>
-    </section>
+          </p>
+        </article>
+      </section>
+    </div>
     <section
       v-if="tariffVisible"
-      class="savings-card"
+      class="savings-card savings-tariff"
       :aria-labelledby="`${id}-tariff`"
     >
       <h2 :id="`${id}-tariff`">{{ text.tariff }}</h2>
@@ -497,7 +503,11 @@ const chartDate = (value: string) =>
         {{ timestamp(attributes.next_price_change_at) }}
       </p>
     </section>
-    <section v-if="net" class="savings-card" :aria-labelledby="`${id}-range`">
+    <section
+      v-if="net"
+      class="savings-card savings-range"
+      :aria-labelledby="`${id}-range`"
+    >
       <h2 :id="`${id}-range`">{{ text.range }}</h2>
       <form
         class="savings-dates"
@@ -651,6 +661,9 @@ const chartDate = (value: string) =>
   gap: 20px;
   margin-top: 24px;
   min-width: 0;
+}
+.savings-overview {
+  display: contents;
 }
 .savings-card {
   min-width: 0;
@@ -827,6 +840,105 @@ const chartDate = (value: string) =>
 .savings-status {
   margin: 0;
   line-height: 1.6;
+}
+@container sax-content (min-width: 860px) {
+  .savings-view {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .savings-view > * {
+    grid-column: 1 / -1;
+  }
+  .savings-overview {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+  .savings-overview:empty {
+    display: none;
+  }
+  .savings-view:has(> .savings-overview > section):has(> .savings-tariff)
+    > :is(.savings-overview, .savings-tariff) {
+    grid-column: auto;
+  }
+  .savings-card {
+    padding: 18px;
+  }
+  .savings-card h2 {
+    margin-bottom: 12px;
+    font-size: 16px;
+  }
+  .savings-card h3 {
+    margin-top: 16px;
+    font-size: 14px;
+  }
+  .savings-card p {
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+  .savings-progress h3 {
+    margin-top: 0;
+  }
+  .savings-card .savings-large {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 24px;
+  }
+  .savings-rows {
+    margin-top: 12px;
+  }
+  .savings-rows > div {
+    gap: 12px;
+    padding: 8px 0;
+  }
+  .savings-rows dt {
+    min-width: 0;
+  }
+  .savings-rows dd {
+    flex-shrink: 0;
+    max-width: 58%;
+  }
+  .savings-periods {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .savings-view:has(> .savings-tariff) .savings-periods {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .savings-periods .savings-card {
+    padding: 14px 16px;
+  }
+  .savings-periods h2 {
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+  .savings-periods .savings-large {
+    margin-bottom: 0;
+    font-size: 22px;
+  }
+  .savings-table th,
+  .savings-table td {
+    padding: 7px 8px;
+  }
+  .savings-dates {
+    gap: 12px;
+  }
+  .savings-dates label {
+    flex: 0 1 220px;
+    gap: 6px;
+  }
+  .savings-range .savings-selected-dates {
+    margin-bottom: 8px;
+  }
+  .savings-range .savings-chart-hint {
+    margin-top: 0;
+    margin-bottom: 8px;
+  }
+  .savings-chart-table {
+    margin-top: 12px;
+  }
 }
 @media (max-width: 600px) {
   .savings-view {

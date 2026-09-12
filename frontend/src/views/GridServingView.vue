@@ -4,6 +4,7 @@ import ChargingLayout from "./ChargingLayout.vue";
 const cards = [
   {
     key: "pause",
+    layout: "columns",
     title: { de: "Ladepause", en: "Charging pause" },
     entities: [
       ["time", "grid_serving_start"],
@@ -15,6 +16,7 @@ const cards = [
   },
   {
     key: "months",
+    layout: "months",
     title: { de: "Aktive Monate", en: "Active months" },
     entities: Array.from(
       { length: 12 },

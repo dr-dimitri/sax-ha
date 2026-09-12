@@ -177,6 +177,12 @@ Alle fünf Bereiche des bestehenden Dashboards sind enthalten:
 | Dynamisches Laden | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
 | Ersparnis | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
 
+Auf breiten Bildschirmen nutzen die Ansichten mehrere Spalten und kleinere
+Kartenabstände. Die Geräteübersicht stellt Skalen und Leistung neben die
+Gerätedaten; Monatsschalter erscheinen in einem Raster. Die Darstellung richtet
+sich nach dem verfügbaren Platz neben der HA-Seitenleiste. Auf schmalen
+Bildschirmen bleiben die Karten untereinander und bequem bedienbar.
+
 Beide Oberflächen können gleichzeitig geöffnet werden. Änderungen erscheinen
 über dieselben Home-Assistant-Entitäten auch in der jeweils anderen Ansicht.
 Zahlen und Uhrzeiten werden erst mit **Übernehmen** gesendet; die Anzeige des

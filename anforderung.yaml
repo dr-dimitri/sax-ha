@@ -2224,6 +2224,18 @@ requirement_vue_dashboard:
     REQ-VUE-DYNAMIC-CHARGING und REQ-VUE-SAVINGS. REQ-VUE-PARITY sichert
     ihren Parallelbetrieb und ihre Auslieferung ab.
 
+    Die Darstellung nutzt auf normalen Desktop-PCs den verfügbaren Platz
+    mit mehrspaltigen Karten und maßvoll reduzierten Abständen. Entscheidend
+    ist die tatsächliche Panel- und Inhaltsbreite neben der HA-Seitenleiste,
+    nicht allein die Browserfensterbreite. Ab 860 Pixel Inhaltsbreite stehen
+    Skalen und Leistung neben den Gerätedaten, Ladeeinstellungen in Spalten
+    und Monatsschalter in drei beziehungsweise vier Spalten. In der Ersparnis
+    stehen Übersicht und Tarif nebeneinander; Datumsauswahl und Diagramm
+    nutzen die volle Breite. Schmale Ansichten behalten ihr geräumiges Layout.
+    Inhalte bleiben vollständig sichtbar; es gibt keine festen Kartenhöhen,
+    abgeschnittenen Werte oder verkleinerten normalen Beschriftungen.
+    Eingaben und Schaltflächen bleiben mindestens 44 Pixel hoch.
+
     vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
     standardmäßig False. Die Ersteinrichtung bietet sie neben der
     unveränderten Lovelace-Einmalanlage an und speichert sie in entry.data.
@@ -2267,6 +2279,9 @@ requirement_vue_dashboard:
        Vue-Änderung erzeugt keine zusätzliche Geräteaktion."
     - "Die fünf Unterpfade funktionieren bei Navigation, direktem Einstieg
        und Browser-Zurück; Mount/Unmount räumt Frontend-Listener auf."
+    - "Browserprüfungen belegen geringeren Desktop-Platzbedarf auch mit
+       HA-Seitenleiste, vollständige Inhalte, erreichbare Bedienelemente
+       und eine weiterhin lesbare mobile Ansicht ohne Seitenüberlauf."
     - "Source-/HACS-Verzeichnis und Snapshot enthalten das geprüfte lokale
        Bundle; Build und Typ-/Komponententests sind in CI eingebunden."
     - "README und DEVELOPMENT beschreiben Aktivierung, Funktionsumfang,

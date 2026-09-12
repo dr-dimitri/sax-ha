@@ -173,4 +173,22 @@ const arcs = computed(() =>
   line-height: 1.5;
   color: var(--secondary-text-color, #666);
 }
+@container sax-content (min-width: 860px) {
+  .entity-gauge {
+    padding: 16px;
+  }
+  .entity-gauge h2 {
+    margin-bottom: 8px;
+  }
+  .entity-gauge__meter {
+    max-width: 180px;
+  }
+  .entity-gauge__value {
+    margin-top: 6px;
+    font-size: 24px;
+  }
+  .entity-gauge__range {
+    margin-top: 2px;
+  }
+}
 </style>

@@ -133,6 +133,12 @@ Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
 [Paritätsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
 
 `GeneralView.vue` ordnet nach den Skalen die Karten Leistung und Gerät an.
+`Panel.ce.vue` stellt die CSS-Container `sax-panel` und `sax-content` bereit.
+Die Ansichten wechseln ab 860 px Inhaltsbreite in ihr kompaktes Desktoplayout;
+die HA-Seitenleiste zählt deshalb nicht als nutzbarer Kartenplatz. Normale
+Schriftgrößen, mindestens 44 px hohe Eingaben und natürliche Kartenhöhen
+bleiben erhalten. Die breiten Ansichten nutzen zwei Spalten und ein Raster
+für Monatsschalter; die schmale Darstellung behält ihre bisherigen Abstände.
 Die Gerätekarte beginnt mit `energy_charged`/`energy_discharged` und endet mit
 `storage_switch`; es gibt keine separate Energie-Karte. Nur der Vue-
 Speicherschalter verlangt vor beiden Zielzuständen eine Dialogbestätigung.

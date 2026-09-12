@@ -4,6 +4,7 @@ import ChargingLayout from "./ChargingLayout.vue";
 const cards = [
   {
     key: "window",
+    group: "schedule",
     title: { de: "Zeitfenster", en: "Time window" },
     entities: [
       ["time", "timed_charge_start"],
@@ -12,6 +13,7 @@ const cards = [
   },
   {
     key: "discharge",
+    group: "schedule",
     title: { de: "Entladestatus", en: "Discharge status" },
     entities: [["sensor", "timed_charge_discharge_status"]],
   },
@@ -25,6 +27,7 @@ const cards = [
   },
   {
     key: "months",
+    layout: "months",
     title: { de: "Aktive Monate", en: "Active months" },
     entities: Array.from(
       { length: 12 },

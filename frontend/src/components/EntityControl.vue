@@ -422,4 +422,20 @@ async function changeSelect(event: Event): Promise<void> {
   justify-content: flex-end;
   gap: 12px;
 }
+@container sax-content (min-width: 860px) {
+  .entity-control {
+    gap: 8px 12px;
+    padding: 14px;
+  }
+  .entity-control__description {
+    flex-basis: 140px;
+  }
+  .entity-control__value {
+    margin-top: 2px;
+    font-size: 14px;
+  }
+  .entity-control input[type="number"] {
+    width: 104px;
+  }
+}
 </style>

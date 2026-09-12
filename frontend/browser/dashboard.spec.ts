@@ -20,6 +20,206 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
+test("compact views retain readable controls and all entities across available panel widths", async ({
+  page,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const mobile = testInfo.project.name.startsWith("mobile");
+  const layouts = mobile
+    ? [{ width: 390, height: 844, sidebar: 0 }]
+    : [
+        { width: 1366, height: 768, sidebar: 256 },
+        { width: 1440, height: 900, sidebar: 0 },
+      ];
+  const heightBudgets: Record<string, number> = {
+    allgemein: 850,
+    ladeautomatik: 1150,
+    "netzdienliches-laden": 1100,
+    "dynamisches-laden": 900,
+    ersparnis: 1600,
+  };
+  const contentLabels = panel.locator(
+    ".entity-gauge h2, .entity-control__name, .entity-value__name, .savings-rows dt, .savings-periods h2",
+  );
+
+  for (const tab of tabs) {
+    await panel.locator(`nav a[href='/sax-power-vue/${tab.path}']`).click();
+    if (tab.path === "ersparnis")
+      await expect(panel.locator(".savings-chart")).toBeVisible();
+    else await expect(panel.locator(".entity-control").first()).toBeVisible();
+    const expectedLabels = await contentLabels.allTextContents();
+    expect(expectedLabels.length).toBeGreaterThan(0);
+    const expectedControls = await panel
+      .locator(".section input, .section select")
+      .count();
+
+    for (const layout of layouts) {
+      await page.setViewportSize({
+        width: layout.width,
+        height: layout.height,
+      });
+      // Reserve actual host space, as HA's docked sidebar does, without changing the bundle.
+      await page.addStyleTag({
+        content: `sax-power-vue-panel { margin-left: ${layout.sidebar}px; width: calc(100% - ${layout.sidebar}px); }`,
+      });
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      await expect(contentLabels).toHaveText(expectedLabels);
+      await expect(
+        panel.locator(".section input, .section select"),
+      ).toHaveCount(expectedControls);
+
+      const geometry = await panel
+        .locator(".section")
+        .evaluate((section, isMobile) => {
+          const root = section.getRootNode();
+          const host =
+            root instanceof ShadowRoot
+              ? root.host
+              : section.closest("sax-power-vue-panel")!;
+          const violations: string[] = [];
+          const visible = (element: Element): boolean => {
+            const rect = element.getBoundingClientRect();
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              getComputedStyle(element).visibility !== "hidden" &&
+              !element.closest("dialog:not([open])")
+            );
+          };
+          const name = (element: Element): string =>
+            `${element.tagName.toLowerCase()} ${element.getAttribute("id") ?? element.textContent?.trim().slice(0, 65) ?? ""}`;
+          const overlaps = (first: Element, second: Element): boolean => {
+            const a = first.getBoundingClientRect();
+            const b = second.getBoundingClientRect();
+            return (
+              Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+              Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+            );
+          };
+          const controls = [
+            ...section.querySelectorAll("input, select, button"),
+          ].filter(visible);
+          for (const control of controls) {
+            const rect = control.getBoundingClientRect();
+            if (rect.height < 43.5)
+              violations.push(`${name(control)} height ${rect.height}`);
+            if (parseFloat(getComputedStyle(control).fontSize) < 13.99)
+              violations.push(
+                `${name(control)} font ${getComputedStyle(control).fontSize}`,
+              );
+            const card =
+              control.closest(
+                ".general-view__card, .charging-view__card, .savings-card",
+              ) ?? control.closest("form")!;
+            const bounds = card.getBoundingClientRect();
+            if (
+              rect.left < bounds.left - 1 ||
+              rect.right > bounds.right + 1 ||
+              rect.top < bounds.top - 1 ||
+              rect.bottom > bounds.bottom + 1
+            )
+              violations.push(`${name(control)} extends outside its card`);
+          }
+          for (let index = 0; index < controls.length; index++) {
+            for (const other of controls.slice(index + 1)) {
+              if (overlaps(controls[index], other))
+                violations.push(
+                  `${name(controls[index])} overlaps ${name(other)}`,
+                );
+            }
+          }
+          for (const row of section.querySelectorAll(
+            ".entity-control, .entity-value, .savings-rows > div",
+          )) {
+            const first = row.querySelector(
+              ".entity-control__description, .entity-value__name, dt",
+            );
+            const second = row.querySelector(
+              ".entity-control__input, .entity-value__state, dd",
+            );
+            if (
+              first &&
+              second &&
+              visible(first) &&
+              visible(second) &&
+              overlaps(first, second)
+            )
+              violations.push(`${name(first)} overlaps its value or input`);
+          }
+          for (const label of section.querySelectorAll(
+            ".entity-gauge h2, .entity-gauge__range, .entity-control__name, .entity-control__value, .entity-value__name, .entity-value__state, .savings-rows dt, .savings-rows dd, .savings-dates label, .savings-table th, .savings-table td",
+          )) {
+            // Mobile retains its existing smaller confirmation helper, like scale labels.
+            if (isMobile && label.classList.contains("entity-control__value"))
+              continue;
+            if (
+              visible(label) &&
+              parseFloat(getComputedStyle(label).fontSize) < 13.99
+            )
+              violations.push(
+                `${name(label)} font ${getComputedStyle(label).fontSize}`,
+              );
+          }
+          for (const label of section.querySelectorAll(
+            ".entity-gauge h2, .entity-control__name, .entity-value__name, .savings-rows dt, .savings-periods h2",
+          )) {
+            if (!visible(label)) violations.push(`${name(label)} is hidden`);
+            const rect = label.getBoundingClientRect();
+            const card =
+              label.closest(
+                ".entity-gauge, .general-view__card, .charging-view__card, .savings-card",
+              ) ?? section;
+            const bounds = card.getBoundingClientRect();
+            if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)
+              violations.push(`${name(label)} extends outside its card`);
+          }
+          const bounds = host.getBoundingClientRect();
+          return {
+            panelWidth: bounds.width,
+            panelHeight: bounds.height,
+            pageWidth: document.documentElement.scrollWidth,
+            viewportWidth: window.innerWidth,
+            controlCount: controls.length,
+            violations,
+          };
+        }, mobile);
+      const description = `${tab.path}-${layout.width}x${layout.height}-sidebar${layout.sidebar}`;
+      await testInfo.attach(description, {
+        body: Buffer.from(JSON.stringify(geometry, null, 2)),
+        contentType: "application/json",
+      });
+      if (layout.sidebar === 256) {
+        await testInfo.attach(
+          `compact-vue-${tab.path}-sidebar-${testInfo.project.name.endsWith("en") ? "en" : "de"}`,
+          {
+            body: await page.screenshot({ fullPage: true }),
+            contentType: "image/png",
+          },
+        );
+      }
+      expect(geometry.panelWidth, description).toBeCloseTo(
+        layout.width - layout.sidebar,
+        0,
+      );
+      expect(geometry.pageWidth, description).toBeLessThanOrEqual(
+        geometry.viewportWidth + 1,
+      );
+      expect(geometry.controlCount, description).toBeGreaterThan(0);
+      expect(geometry.violations, description).toEqual([]);
+      if (!mobile)
+        expect(geometry.panelHeight, description).toBeLessThanOrEqual(
+          heightBudgets[tab.path],
+        );
+    }
+  }
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
 test("storage requires confirmation in both directions and cancellation keeps the HA state", async ({
   page,
 }, testInfo) => {

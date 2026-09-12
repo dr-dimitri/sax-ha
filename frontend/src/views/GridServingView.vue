@@ -5,6 +5,7 @@ const cards = [
   {
     key: "pause",
     layout: "columns",
+    timeWindow: "grid_serving",
     title: { de: "Ladepause", en: "Charging pause" },
     entities: [
       ["time", "grid_serving_start"],

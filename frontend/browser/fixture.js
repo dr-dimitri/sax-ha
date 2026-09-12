@@ -79,6 +79,7 @@ function metadata() {
     domain,
     key,
     entity_id,
+    device_id: "demo-device",
     name:
       key === "grid_serving_forecast"
         ? null
@@ -232,6 +233,25 @@ async function callService(domain, service, data, target) {
   if (rejectNext) {
     rejectNext = false;
     throw new Error("Simulated service failure");
+  }
+  if (domain === "sax_power") {
+    const prefix =
+      service === "set_timed_charge_window"
+        ? "timed_charge"
+        : service === "set_grid_serving_window"
+          ? "grid_serving"
+          : null;
+    if (!prefix || data.device_id !== "demo-device")
+      throw new Error("Unknown demo window");
+    for (const boundary of ["start", "end"]) {
+      const entityId = `time.demo_${prefix}_${boundary}`;
+      states = {
+        ...states,
+        [entityId]: { ...states[entityId], state: data[boundary] },
+      };
+    }
+    update();
+    return;
   }
   const entityId = target.entity_id;
   const state =

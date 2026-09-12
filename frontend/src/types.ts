@@ -13,6 +13,7 @@ export interface HassEntity {
 export interface DashboardEntityMetadata {
   entity_id: string;
   domain: EntityDomain;
+  device_id?: string | null;
   key: string;
   name: string | null;
   states: Readonly<Record<string, string>>;

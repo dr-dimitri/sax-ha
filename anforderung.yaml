@@ -2334,8 +2334,9 @@ requirement_vue_entity_binding:
 
     Das Metadatenabo liefert nur aktive SAX-Entitäten des angeforderten
     SAX-Config-Entry, die der angemeldete Benutzer lesen darf. Jede Entität
-    enthält tatsächliche entity_id, Domain, stabilen Unique-ID-Suffix als
-    Schlüssel, Anzeigenamen, übersetzte Enum-Zustände und can_control gemäß
+    enthält tatsächliche entity_id und device_id, Domain, stabilen
+    Unique-ID-Suffix als Schlüssel, Anzeigenamen, übersetzte Enum-Zustände
+    und can_control gemäß
     HA-Berechtigung. Benutzerdefinierte Namen haben Vorrang; der dynamische
     Prognosename stammt aus dem aktuellen HA-Zustand. Änderungen der Entity
     Registry aktualisieren Zuordnung und optionale Entitäten. Ungültige oder
@@ -2350,22 +2351,31 @@ requirement_vue_entity_binding:
     Hinweis und meldet nach Wiederverbindung Metadaten erneut an. Mount,
     Navigation, Metadatenaktualisierung und Wiederverbindung schreiben nichts.
 
-    Wiederverwendbare Komponenten für switch, number, time und select rufen
+    Einzelbedienkomponenten für switch, number, time und select rufen
     ausschließlich bestehende HA-Services auf: turn_on/turn_off, set_value
     und select_option mit der tatsächlichen Entity-ID. Schalter verwenden
     den ausdrücklich gewählten Zielzustand. Zahlen werden auf endlichen Wert,
     min/max und step geprüft; Zeiten auf gültige Stunden, Minuten und Sekunden;
     Auswahlwerte müssen in den aktuellen options enthalten sein. Zahlen und
     Zeiten bleiben lokale Eingaben bis zur ausdrücklichen Übernahme.
+    Die beiden Zeitfenster aus REQ-VUE-CHARGING verwenden stattdessen die
+    bestehenden Services sax_power.set_timed_charge_window und
+    sax_power.set_grid_serving_window mit device_id, start und end. Beide
+    Grenzen werden zusammen validiert und mit genau einem Aufruf übernommen.
+    Die aufgelösten Time-Entitäten müssen bedienbar sein und dieselbe Device-ID
+    besitzen; Benutzeraufrufe werden auch serverseitig auf Bedienrechte für
+    beide Entitäten geprüft.
     Unzulässige Werte erzeugen keine Serviceaufrufe. HA erzwingt weiterhin
     seine Service-Berechtigungen und die bestehende Integration validiert
     Gerätezugriffe.
 
     Ausstehende Serviceaufrufe und Fehlermeldungen werden pro tatsächlicher
     Entität geteilt. Während ein Aufruf läuft, wird kein zweiter für dieselbe
-    Entität gestartet. Der bestätigte Zustand wird nicht optimistisch
-    überschrieben; auch nach erfolgreicher Serviceantwort ist hass.states
-    maßgeblich. Fehler werden in Deutsch oder Englisch angezeigt, ohne
+    Entität gestartet. Eine gemeinsame Zeitfensteraktion teilt ausstehende
+    Aktion und Fehler mit beiden Time-Entitäten und sperrt dadurch auch
+    konkurrierende Einzelaktionen. Der bestätigte Zustand wird nicht
+    optimistisch überschrieben; auch nach erfolgreicher Serviceantwort ist
+    hass.states maßgeblich. Fehler werden in Deutsch oder Englisch angezeigt, ohne
     automatische Schreibwiederholung. Die Komponenten sind unabhängig von
     den fachlichen Ansichten testbar.
   acceptance_criteria:
@@ -2377,6 +2387,10 @@ requirement_vue_entity_binding:
        ungültige Eingaben und fehlende Berechtigungen erzeugen keine Schreibaktion."
     - "Servicefehler, doppelte Bedienung und verzögerte Zustandsbestätigung
        sind getestet; ausstehende Aktionen werden gemeinsam gesperrt."
+    - "Eine Zeitfensterübernahme sendet genau einen vorhandenen SAX-Service
+       mit vollständigem Zielpaar und gemeinsamer Device-ID. Fehlende oder
+       fremde Gerätezuordnung und fehlende Rechte einer der beiden Entitäten
+       verhindern die Übernahme; serverseitige Rechteprüfung bleibt wirksam."
     - "Abo-Wechsel, Verbindungsabbruch, Wiederverbindung und Unmount erzeugen
        weder doppelte Abos noch automatische Serviceaufrufe."
     - "Die Entwicklungsvorschau erlaubt eine explizit simulierte Bedienprobe;
@@ -2496,25 +2510,71 @@ requirement_vue_charging:
     Serviceantwort. Eine bestätigte Auswahl bedeutet nicht, dass der Speicher
     bereits einen neuen Steuermodus quittiert hat (REQ-GRID-SERVING-CHARGE).
 
-    Nur bestätigte, verfügbare Zeitfensterwerte des zeitvariablen Tarifs
-    erhalten bei deutscher HA-Sprache das Suffix " Uhr", etwa 22:00 Uhr.
-    Eingabefelder und Time-Service-Payloads bleiben unverändert. Englische,
-    unbekannte und nicht verfügbare Werte erhalten kein Uhr-Suffix; die
-    Ladepause unter Netzdienliches Laden behält ihre bisherige Formatierung.
+    Die beiden editierbaren Zeitfenster verwenden dieselbe Komponente
+    TimeWindowControl. Eine 24-Stunden-Leiste mit getrennt verschiebbaren
+    Start- und Endmarken sowie genaue Eingabefelder mit Sekunden bearbeiten
+    ein gemeinsames lokales Entwurfspaar. Das Ziehen rastet auf Minuten ein;
+    genaue Eingaben erhalten Sekunden. Maus, Touch und Tastatur sind
+    unterstützt, mit sichtbarem Fokus, zugänglichen Start-/Endbeschriftungen
+    und mindestens 44 mal 44 Pixel großen Bedienflächen. Beide Fenster
+    bleiben auf mobilen und breiten Ansichten sowie mit hellen und dunklen
+    HA-Themes und deutscher oder englischer Sprache bedienbar.
+
+    Ein Fenster über Mitternacht wird auf der Leiste in zwei Abschnitte
+    geteilt. Gleiche Start- und Endzeit bedeuten ein leeres Fenster, niemals
+    24 Stunden. Die Leiste ist ausschließlich eine Darstellung des Entwurfs.
+    Erst die gemeinsame Schaltfläche Übernehmen sendet beide Grenzen atomar
+    über den vorhandenen set_timed_charge_window- beziehungsweise
+    set_grid_serving_window-Service (REQ-VUE-ENTITY-BINDING). Die bestehende
+    Überschneidungsprüfung bewertet nur das fertige Zielpaar und leert bei
+    echter Überschneidung beide Grenzen mit HA-Benachrichtigung.
+
+    Die bestätigte Zeitspanne stammt ausschließlich aus hass.states; die
+    Serviceantwort allein bestätigt keinen neuen Wert. Ändert HA eine
+    Zeitgrenze, wird das gesamte Entwurfspaar auf den aktuellen HA-Stand
+    gesetzt, damit kein veraltetes Grenzpaar übernommen werden kann. Andere
+    Telemetrieänderungen erhalten den lokalen Entwurf. Ungültige Eingaben,
+    fehlende Entitäten, Nichtverfügbarkeit, fehlende Rechte oder Verbindung
+    sperren die Übernahme. Fehler bleiben sichtbar; eine automatische
+    Schreibwiederholung findet nicht statt.
+
+    Beide Fenster zeigen verfügbare bestätigte Start- und Endzeit in einer
+    gemeinsamen Zeile. Bei deutscher HA-Sprache erhält diese das Suffix
+    " Uhr", etwa 22:00–06:00 Uhr. Eingabefelder und Service-Payloads erhalten
+    keinen Sprachzusatz; englische, unbekannte und nicht verfügbare Werte
+    bleiben ebenfalls ohne Uhr-Suffix.
 
     Beide Ansichten zeigen keinen zusätzlichen globalen Max-SOC-Regler.
     Netzladeziel und geräteweiter Max-SOC bleiben unterschiedliche Entitäten.
     Uhrzeiten werden auch für Zeitfenster über Mitternacht unverändert an
-    die vorhandenen Time-Services übergeben. Vue ermittelt keine
+    die vorhandenen atomaren Zeitfenster-Services übergeben. Vue ermittelt keine
     Ladeberechtigung, setzt keine Monatsregeln um und wiederholt keine
     Setpoint-Schreibvorgänge. Fehlende Entitäten und leere Karten werden
-    ausgelassen; unbekannte Zustände erhalten keine erfundenen Nullwerte.
+    ausgelassen; fehlt nur eine Zeitgrenze, bleibt die vorhandene Information
+    sichtbar und das Paar ist nicht bedienbar. Geleerte oder unbekannte Werte
+    können über die nativen HA-Time-Entitäten korrigiert werden. Unbekannte
+    Zustände erhalten keine erfundenen Nullwerte. Die nur angezeigten dynamischen Ladezeiten und
+    Tarifpläne sowie die Recorder-Datumsfilter gehören nicht zur Umstellung.
   acceptance_criteria:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
-    - "22:00 bis 06:00 wird ohne eigene Zeitplanlogik über zwei HA-Time-
-       Serviceaufrufe übertragen; Monatsaktionen im Frontend verwenden
-       ausschließlich HA-Schalterservices."
+    - "22:00 bis 06:00 wird als zwei Abschnitte über Mitternacht dargestellt
+       und ohne eigene Zeitplanlogik mit genau einem atomaren HA-Service
+       übertragen. Gleiche Grenzen zeigen ein leeres Fenster; Tagesfenster,
+       Mitternachtsgrenzen und genaue Sekunden bleiben korrekt."
+    - "Ziehen mit Maus oder Touch und Tastaturbedienung verändern nur den
+       gemeinsamen Entwurf. Die genaue Eingabe erlaubt Sekunden. Erst
+       Übernehmen schreibt; eine Serviceantwort ohne HA-Zustandsänderung
+       verändert die bestätigte Anzeige nicht."
+    - "HA-Änderungen einer Zeitgrenze ersetzen den gesamten Entwurf;
+       andere Telemetrie erhält ihn. Fehlende oder nicht verfügbare Grenzen,
+       Rechteentzug, Geräte-/Registrywechsel, Verbindungsabbruch, doppelte
+       Übernahme und Servicefehler verursachen keine veralteten Schreibaktionen."
+    - "Beide Zeitfenster bleiben mit Maus, Touch und Tastatur, auf Smartphone
+       und Desktop, auf Deutsch und Englisch sowie in hellen und dunklen
+       HA-Themes lesbar und bedienbar. Start- und Endmarken bleiben auch bei
+       gleichen Grenzen einzeln erreichbar."
+    - "Monatsaktionen im Frontend verwenden ausschließlich HA-Schalterservices."
     - "Beide Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
        HA-bestätigter Checkboxzustand, zugängliche Namen, Fehler und
        Nichtverfügbarkeit bleiben geprüft."
@@ -2528,9 +2588,9 @@ requirement_vue_charging:
     - "tests/test_month_switch_response.py prüft schnelle Folgeänderungen,
        Ablehnung von Überschneidungen, Speicherung, Gerätefehler, Bootstrap
        und Entladen ohne abgebrochene Registersequenz."
-    - "Bestätigte deutsche Zeitfensterwerte im zeitvariablen Tarif zeigen Uhr;
-       englische, unbekannte und nicht verfügbare Werte sowie Eingabefelder
-       und Service-Payloads bleiben ohne zusätzliches Suffix."
+    - "Die gemeinsame bestätigte Zeitspanne beider Fenster zeigt auf Deutsch
+       Uhr; englische, unbekannte und nicht verfügbare Werte sowie
+       Eingabefelder und Service-Payloads bleiben ohne zusätzliches Suffix."
     - "Live-Entladestatus, geänderte Ziel-SOC-Grenzen, dynamischer Prognosename
        sowie fehlende und nicht verfügbare Entitäten sind getestet."
     - "Bedienung verwendet echte Entity-IDs, gemeinsame Fehlerbehandlung

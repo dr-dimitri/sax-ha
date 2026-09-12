@@ -35,6 +35,7 @@ export function chargingSample(language = "de"): {
       const entityId = `${domain}.renamed_${key}`;
       const item: DashboardEntityMetadata = {
         entity_id: entityId,
+        device_id: "charging-preview-device",
         domain: domain as EntityDomain,
         key,
         name: key === "grid_serving_forecast" ? null : translation.name,

@@ -7,10 +7,16 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.auth.permissions.const import CAT_ENTITIES, POLICY_CONTROL
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    Unauthorized,
+    UnknownUser,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -443,6 +449,39 @@ def _coordinator_for_device(hass: HomeAssistant, device_id: str) -> SaxPowerCoor
     return hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
 
 
+async def _async_check_time_window_permissions(
+    hass: HomeAssistant, call: ServiceCall, kind: str
+) -> None:
+    """Atomare Fenster müssen dieselben Rechte wie beide Time-Entities verlangen."""
+    if not call.context.user_id:
+        return
+    user = await hass.auth.async_get_user(call.context.user_id)
+    if user is None:
+        raise UnknownUser(context=call.context, user_id=call.context.user_id)
+    if user.is_active and user.is_admin:
+        return
+    device_id = call.data[ATTR_DEVICE_ID]
+    entry_id = _entry_id_for_device(hass, device_id)
+    registry = er.async_get(hass)
+    required_ids = {f"{entry_id}_{kind}_{part}" for part in ("start", "end")}
+    allowed_ids = {
+        entity.unique_id
+        for entity in er.async_entries_for_config_entry(registry, entry_id)
+        if entity.platform == DOMAIN
+        and entity.domain == "time"
+        and entity.device_id == device_id
+        and not entity.disabled
+        and user.permissions.check_entity(entity.entity_id, POLICY_CONTROL)
+    }
+    if not user.is_active or not required_ids <= allowed_ids:
+        raise Unauthorized(
+            context=call.context,
+            user_id=call.context.user_id,
+            permission=POLICY_CONTROL,
+            perm_category=CAT_ENTITIES,
+        )
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_START_GRID_CHARGE):
         return
@@ -456,12 +495,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await coordinator.async_stop_grid_charge()
 
     async def _async_set_timed_charge_window(call: ServiceCall) -> None:
+        await _async_check_time_window_permissions(hass, call, "timed_charge")
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_set_timed_charge_window(
             call.data[ATTR_START], call.data[ATTR_END]
         )
 
     async def _async_set_grid_serving_window(call: ServiceCall) -> None:
+        await _async_check_time_window_permissions(hass, call, "grid_serving")
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_set_grid_serving_window(
             call.data[ATTR_START], call.data[ATTR_END]

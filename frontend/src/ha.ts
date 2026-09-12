@@ -66,6 +66,11 @@ export interface SaxDashboard {
   error: ComputedRef<string | null>;
   entity(domain: EntityDomain, key: string): DashboardEntity | null;
   perform(domain: EntityDomain, key: string, value: unknown): Promise<boolean>;
+  performTimeWindow(
+    kind: "timed_charge" | "grid_serving",
+    start: string,
+    end: string,
+  ): Promise<boolean>;
 }
 
 export const SAX_DASHBOARD_KEY: InjectionKey<SaxDashboard> =
@@ -74,6 +79,17 @@ export const SAX_DASHBOARD_KEY: InjectionKey<SaxDashboard> =
 interface Action {
   pending: boolean;
   error: ErrorKey | null;
+}
+
+function normalizedTime(value: unknown): string | null {
+  if (
+    typeof value !== "string" ||
+    (value.length !== 5 && value.length !== 8) ||
+    !/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)
+  ) {
+    return null;
+  }
+  return value.length === 5 ? `${value}:00` : value;
 }
 
 function displayValue(
@@ -190,16 +206,8 @@ function serviceCall(
       return { service: "set_value", data: { value: number } };
     }
     case "time": {
-      if (
-        typeof value !== "string" ||
-        !/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)
-      ) {
-        return null;
-      }
-      return {
-        service: "set_value",
-        data: { time: value.length === 5 ? `${value}:00` : value },
-      };
+      const time = normalizedTime(value);
+      return time ? { service: "set_value", data: { time } } : null;
     }
     case "select":
       return typeof value === "string" &&
@@ -435,6 +443,72 @@ export function useSaxDashboard(
     }
   }
 
+  async function performTimeWindow(
+    kind: "timed_charge" | "grid_serving",
+    start: string,
+    end: string,
+  ): Promise<boolean> {
+    const keys = [`${kind}_start`, `${kind}_end`];
+    const items = keys.map((key) => entity("time", key));
+    if (items.some((item) => item?.pending)) return false;
+    const action: Action = reactive({ pending: false, error: null });
+    for (const item of items) {
+      if (item) actions.set(item.metadata.entity_id, action);
+    }
+    const deviceId = items[0]?.metadata.device_id;
+    const hass = getHass();
+    if (
+      !ready.value ||
+      !hass?.callService ||
+      !deviceId ||
+      items.some(
+        (item) => !item?.canControl || item.metadata.device_id !== deviceId,
+      )
+    ) {
+      action.error = "forbidden";
+      return false;
+    }
+    const normalizedStart = normalizedTime(start);
+    const normalizedEnd = normalizedTime(end);
+    if (!normalizedStart || !normalizedEnd) {
+      action.error = "invalid";
+      return false;
+    }
+    const entityIds = items.map((item) => item!.metadata.entity_id);
+    const operations = keys.map((key) => operationKey("time", key));
+    action.pending = true;
+    for (const operation of operations) running.set(operation, action);
+    const current = generation;
+    const isCurrent = () =>
+      current === generation &&
+      entityIds.every((id, index) => {
+        const currentItem = entity("time", keys[index]!);
+        return (
+          actions.get(id) === action &&
+          currentItem?.metadata.entity_id === id &&
+          currentItem.metadata.device_id === deviceId
+        );
+      });
+    try {
+      await hass.callService(
+        "sax_power",
+        `set_${kind}_window`,
+        { device_id: deviceId, start: normalizedStart, end: normalizedEnd },
+        undefined,
+        false,
+      );
+      return isCurrent();
+    } catch {
+      if (isCurrent()) action.error = "failed";
+      return false;
+    } finally {
+      action.pending = false;
+      for (const operation of operations) {
+        if (running.get(operation) === action) running.delete(operation);
+      }
+    }
+  }
+
   return {
     language,
     ready: readonly(ready),
@@ -442,5 +516,6 @@ export function useSaxDashboard(
     error,
     entity,
     perform,
+    performTimeWindow,
   };
 }

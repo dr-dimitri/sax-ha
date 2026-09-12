@@ -153,8 +153,6 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     ]);
     expect(names(root)).toEqual([
       "Netzladung aktiv",
-      "Start",
-      "Ende",
       "Entladestatus",
       "Netzladen Max. SOC",
       "Netzladung Min. SOC",
@@ -182,8 +180,6 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     ).toEqual(["Ladepause", "Aktive Monate"]);
     expect(names(root)).toEqual([
       "Netzdienliches Laden aktiv",
-      "Start",
-      "Ende",
       "PV-Prognose morgen",
       "Mindest PV-Prognose",
       "Status",
@@ -212,54 +208,53 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     [TimedChargingView, "timed_charge", "en-GB"],
     [GridServingView, "grid_serving", "en-GB"],
   ] as const)(
-    "passes an overnight time range directly to both existing time entities (%s)",
+    "applies each overnight window atomically and waits for confirmed HA states (%s)",
     async (view, prefix, language) => {
       const { root, callService, update } = await mount(view, { language });
-      const start = form(root, "Start");
-      const end = form(root, language === "de" ? "Ende" : "End");
-      const suffix =
-        prefix === "timed_charge" && language === "de" ? " Uhr" : "";
-      const label = language === "de" ? "Bestätigter Wert" : "Confirmed value";
-      expect(start.querySelector(".entity-control__value")?.textContent).toBe(
-        `${label}: 22:00:00${suffix}`,
+      const control = root.querySelector<HTMLFormElement>(
+        ".time-window-control",
+      )!;
+      expect(control).not.toBeNull();
+      expect(control.querySelectorAll('input[type="time"]')).toHaveLength(2);
+      expect(control.querySelectorAll('[role="slider"]')).toHaveLength(2);
+      const confirmed = () =>
+        control.querySelector(".time-window-control__confirmed")!.textContent;
+      expect(confirmed()).toContain("22:00");
+      expect(confirmed()).toContain("06:00");
+      if (language === "de") expect(confirmed()).toContain("Uhr");
+      const start =
+        control.querySelector<HTMLInputElement>('input[type="time"]')!;
+      start.value = "23:15:27";
+      start.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+      expect(callService).not.toHaveBeenCalled();
+      control.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
       );
-      expect(end.querySelector(".entity-control__value")?.textContent).toBe(
-        `${label}: 06:00:00${suffix}`,
-      );
-      expect(start.querySelector("input")!.value).toBe("22:00:00");
-      expect(end.querySelector("input")!.value).toBe("06:00:00");
-      await submit(start, "23:15");
-      await submit(end, "06:00");
+      await flush();
       expect(callService.mock.calls).toEqual([
         [
-          "time",
-          "set_value",
-          { time: "23:15:00" },
-          { entity_id: `time.renamed_${prefix}_start` },
-          false,
-        ],
-        [
-          "time",
-          "set_value",
-          { time: "06:00:00" },
-          { entity_id: `time.renamed_${prefix}_end` },
+          "sax_power",
+          `set_${prefix}_window`,
+          {
+            device_id: "charging-preview-device",
+            start: "23:15:27",
+            end: "06:00:00",
+          },
+          undefined,
           false,
         ],
       ]);
-      expect(start.querySelector(".entity-control__value")?.textContent).toBe(
-        `${label}: 22:00:00${suffix}`,
-      );
-      await update(`${prefix}_start`, "23:15:00");
-      expect(start.querySelector("input")!.value).toBe("23:15:00");
-      expect(start.querySelector(".entity-control__value")?.textContent).toBe(
-        `${label}: 23:15:00${suffix}`,
-      );
+      expect(confirmed()).toContain("22:00");
+      await update(`${prefix}_start`, "23:15:27");
+      expect(start.value).toBe("23:15:27");
+      expect(confirmed()).toContain("23:15:27");
     },
   );
 
-  it("adds the German time unit only to valid confirmed time states", async () => {
+  it("blocks the shared window when a confirmed time is unavailable or malformed", async () => {
     const { root, update, callService } = await mount(TimedChargingView);
-    const start = form(root, "Start");
+    const control = root.querySelector(".time-window-control")!;
     for (const state of [
       "unknown",
       "unavailable",
@@ -270,14 +265,16 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     ]) {
       await update("timed_charge_start", state);
       expect(
-        start.querySelector(".entity-control__value")?.textContent,
-      ).not.toContain(" Uhr");
+        control.querySelector<HTMLInputElement>('input[type="time"]')!.disabled,
+      ).toBe(true);
     }
     await update("timed_charge_start", "09:05");
-    expect(start.querySelector(".entity-control__value")?.textContent).toBe(
-      "Bestätigter Wert: 09:05 Uhr",
-    );
-    expect(start.querySelector("input")!.value).toBe("09:05");
+    expect(
+      control.querySelector(".time-window-control__confirmed")!.textContent,
+    ).toContain("09:05");
+    expect(
+      control.querySelector<HTMLInputElement>('input[type="time"]')!.disabled,
+    ).toBe(false);
     expect(callService).not.toHaveBeenCalled();
   });
 
@@ -425,7 +422,9 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
       "Charging pause",
       "Active months",
     ]);
-    expect(names(root)).toContain("End");
+    expect(
+      root.querySelectorAll('.time-window-control input[type="time"]'),
+    ).toHaveLength(4);
     expect(names(root).filter((name) => name === "January")).toHaveLength(2);
     expect(names(root)).toContain("December");
     expect(root.textContent).toContain("PV forecast tomorrow");

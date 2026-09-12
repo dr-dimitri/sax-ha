@@ -416,18 +416,25 @@ test("one dashboard with five complete views, local assets and responsive screen
       const months = panel.locator(".charging-view__rows--months");
       await expect(months.getByRole("switch")).toHaveCount(12);
       await expect(months.locator(".entity-control__value")).toHaveCount(0);
-      const times = panel
-        .locator("form")
-        .filter({ has: page.locator("input[type=time]") });
-      const prefix = language === "de" ? "Bestätigter Wert" : "Confirmed value";
-      const suffix =
-        tab.path === "ladeautomatik" && language === "de" ? " Uhr" : "";
-      await expect(times.locator(".entity-control__value")).toHaveText([
-        `${prefix}: 22:00:00${suffix}`,
-        `${prefix}: 06:00:00${suffix}`,
-      ]);
-      await expect(times.nth(0).locator("input")).toHaveValue("22:00:00");
-      await expect(times.nth(1).locator("input")).toHaveValue("06:00:00");
+      const window = panel.locator(".time-window-control");
+      await expect(window).toHaveCount(1);
+      await expect(window.getByRole("slider")).toHaveCount(2);
+      await expect(
+        window.locator(".time-window-control__confirmed"),
+      ).toContainText("22:00");
+      await expect(
+        window.locator(".time-window-control__confirmed"),
+      ).toContainText("06:00");
+      if (language === "de")
+        await expect(
+          window.locator(".time-window-control__confirmed"),
+        ).toContainText("Uhr");
+      await expect(window.locator("input[type=time]").nth(0)).toHaveValue(
+        /22:00(?::00)?/,
+      );
+      await expect(window.locator("input[type=time]").nth(1)).toHaveValue(
+        /06:00(?::00)?/,
+      );
     }
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
@@ -507,16 +514,19 @@ test("overnight times, months, native strategy options and negative prices", asy
   await panel.locator("nav a[href$='/ladeautomatik']").click();
   await expect(panel.getByRole("switch")).toHaveCount(13);
   const times = panel.locator("input[type=time]");
-  await expect(times.nth(0)).toHaveValue("22:00:00");
-  await expect(times.nth(1)).toHaveValue("06:00:00");
+  await expect(times.nth(0)).toHaveValue(/22:00(?::00)?/);
+  await expect(times.nth(1)).toHaveValue(/06:00(?::00)?/);
   await times.nth(0).fill("23:15:00");
   await panel
     .locator("form")
     .filter({ has: page.locator("input[type=time]") })
     .first()
-    .getByRole("button")
+    .locator("button[type=submit]")
     .click();
-  await expect(page.locator("#actions")).toContainText('"time":"23:15:00"');
+  await expect(page.locator("#actions")).toContainText(
+    "sax_power.set_timed_charge_window",
+  );
+  await expect(page.locator("#actions")).toContainText('"start":"23:15:00"');
   const months = panel.locator(".charging-view__rows--months");
   const firstMonth = months.getByRole("switch").first();
   const firstTarget = months.locator(".entity-control__switch-target").first();
@@ -605,6 +615,176 @@ test("overnight times, months, native strategy options and negative prices", asy
     .click();
   await expect(page.locator("#actions")).toContainText('"value":-0.125');
   await expect(price).toHaveValue("-0.125");
+});
+
+test("both time windows support dragging, keyboard and exact atomic submission", async ({
+  page,
+  context,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const mobile = testInfo.project.name.startsWith("mobile");
+  let actions = 0;
+  for (const [path, kind] of [
+    ["ladeautomatik", "timed_charge"],
+    ["netzdienliches-laden", "grid_serving"],
+  ]) {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    await panel.locator(`nav a[href$='/${path}']`).click();
+    const window = panel.locator(".time-window-control");
+    const inputs = window.locator("input[type=time]");
+    const markers = window.getByRole("slider");
+    const apply = window.locator("button[type=submit]");
+    const confirmed = window.locator(".time-window-control__confirmed");
+    const before = await page.locator("#actions").innerText();
+    await expect(markers).toHaveCount(2);
+    await expect(window.locator(".time-window-control__segment")).toHaveCount(
+      2,
+    );
+    await inputs.nth(0).fill("22:00:17");
+    await inputs.nth(1).fill("06:00:29");
+    await markers.nth(0).click();
+    await expect(inputs.nth(0)).toHaveValue("22:00:17");
+    await markers.nth(0).press("ArrowRight");
+    await expect(inputs.nth(0)).toHaveValue("22:01:00");
+    await expect(inputs.nth(1)).toHaveValue("06:00:29");
+    await expect(confirmed).toContainText("22:00");
+    await expect(page.locator("#actions")).toHaveText(before);
+
+    await markers.nth(0).scrollIntoViewIfNeeded();
+    const rail = await window
+      .locator(".time-window-control__rail")
+      .boundingBox();
+    const marker = await markers.nth(0).boundingBox();
+    expect(rail).not.toBeNull();
+    expect(marker).not.toBeNull();
+    const from = {
+      x: marker!.x + marker!.width / 2,
+      y: marker!.y + marker!.height / 2,
+    };
+    const to = { x: rail!.x + rail!.width / 2, y: from.y };
+    if (mobile) {
+      const touch = await context.newCDPSession(page);
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ ...from, id: 0 }],
+      });
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ ...to, id: 0 }],
+      });
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+      });
+      await touch.detach();
+    } else {
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(to.x, to.y, { steps: 8 });
+      await page.mouse.up();
+    }
+    await expect(inputs.nth(0)).toHaveValue("12:00:00");
+    await expect(inputs.nth(1)).toHaveValue("06:00:29");
+    await expect(page.locator("#actions")).toHaveText(before);
+
+    await inputs.nth(1).fill("12:00:00");
+    await expect(window.locator(".time-window-control__segment")).toHaveCount(
+      0,
+    );
+    const same = await markers.evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        };
+      }),
+    );
+    expect(same[0].x).toBeCloseTo(same[1].x);
+    expect(same[0].y + same[0].height).toBeLessThanOrEqual(same[1].y);
+    await markers.nth(1).press("Home");
+    await expect(inputs.nth(1)).toHaveValue("00:00:00");
+    await markers.nth(1).press("End");
+    await expect(inputs.nth(1)).toHaveValue("23:59:59");
+    await inputs.nth(0).fill("23:15:17");
+    await inputs.nth(1).fill("06:30:29");
+    await apply.click();
+    actions += 1;
+    await expect(page.locator("#actions")).toHaveText(
+      `${actions}: sax_power.set_${kind}_window {"device_id":"demo-device","start":"23:15:17","end":"06:30:29"}`,
+    );
+    await expect(confirmed).toContainText("23:15:17");
+    await expect(confirmed).toContainText("06:30:29");
+    await expect(apply).toBeDisabled();
+    if (mobile) {
+      await page.setViewportSize({ width: 320, height: 1100 });
+      const narrow = await inputs.evaluateAll((elements) =>
+        elements.map((element) => {
+          const bounds = element.getBoundingClientRect();
+          return {
+            left: bounds.left,
+            right: bounds.right,
+            width: bounds.width,
+          };
+        }),
+      );
+      for (const field of narrow) {
+        expect(field.width).toBeGreaterThanOrEqual(136);
+        expect(field.left).toBeGreaterThanOrEqual(0);
+        expect(field.right).toBeLessThanOrEqual(320);
+      }
+      const ticks = await window
+        .locator(".time-window-control__ticks span")
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const bounds = range.getBoundingClientRect();
+            return { left: bounds.left, right: bounds.right };
+          }),
+        );
+      for (let index = 1; index < ticks.length; index++)
+        expect(ticks[index].left).toBeGreaterThan(ticks[index - 1].right);
+    }
+    await testInfo.attach(`time-window-${kind}-${testInfo.project.name}`, {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+  }
+});
+
+test("failed time-window submission preserves both confirmed values and can be retried", async ({
+  page,
+}) => {
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator("nav a[href$='/netzdienliches-laden']").click();
+  const window = panel.locator(".time-window-control");
+  const inputs = window.locator("input[type=time]");
+  const confirmed = window.locator(".time-window-control__confirmed");
+  const apply = window.locator("button[type=submit]");
+  await page.locator("#failure").click();
+  await inputs.nth(0).fill("10:00:00");
+  await inputs.nth(1).fill("15:00:00");
+  await apply.click();
+  await expect(window.getByRole("alert")).toBeVisible();
+  await expect(confirmed).toContainText("22:00");
+  await expect(confirmed).toContainText("06:00");
+  await expect(inputs.nth(0)).toHaveValue("10:00:00");
+  await expect(inputs.nth(1)).toHaveValue("15:00:00");
+  await apply.click();
+  await expect(confirmed).toContainText("10:00");
+  await expect(confirmed).toContainText("15:00");
+  await expect(window.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator("#actions")).toContainText(
+    "2: sax_power.set_grid_serving_window",
+  );
+  await page.locator("#unavailable").click();
+  await expect(inputs.nth(0)).toBeDisabled();
+  await expect(inputs.nth(1)).toBeDisabled();
+  for (const marker of await window.getByRole("slider").all())
+    await expect(marker).toBeDisabled();
 });
 
 test("one inclusive date selection drives signed chart and accessible table", async ({

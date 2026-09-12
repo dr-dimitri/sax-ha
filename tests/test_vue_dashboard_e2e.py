@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 from pytest_homeassistant_custom_component.typing import (
     MockHAClientWebSocket,
     WebSocketGenerator,
@@ -254,6 +255,170 @@ async def test_month_services_confirm_while_device_control_is_busy(
                     assert not applied.is_set()
             async with asyncio.timeout(5):
                 await applied.wait()
+        await sender.close()
+        await observer.close()
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await server.shutdown()
+
+
+@pytest.mark.parametrize(
+    "prefix, start, end",
+    [
+        ("timed_charge", "22:03:17", "06:37:23"),
+        ("grid_serving", "10:05:19", "15:47:29"),
+    ],
+)
+async def test_dashboard_window_service_confirms_both_renamed_entities_atomically(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    hass_read_only_access_token: str,
+    hass_read_only_user: MockUser,
+    unused_tcp_port: int,
+    prefix: str,
+    start: str,
+    end: str,
+) -> None:
+    """REQ-VUE-CHARGING: Registry-Gerät, WS-Rechte und exaktes Zeitpaar greifen."""
+    server = _modbus_server(
+        unused_tcp_port, _build_basic_registers(), _build_extended_registers()
+    )
+    await server.serve_forever(background=True)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": unused_tcp_port,
+            "slave_id_basic": 64,
+            "slave_id_extended": 100,
+            "scan_interval": 3600,
+            CONF_VUE_DASHBOARD_ENABLED: True,
+            CONF_VUE_DASHBOARD_VERSION: "",
+        },
+    )
+    entry.add_to_hass(hass)
+    try:
+        assert await async_setup_component(hass, "frontend", {})
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        registry = er.async_get(hass)
+        expected = {}
+        for part, value in (("start", start), ("end", end)):
+            entity_id = registry.async_get_entity_id(
+                "time", DOMAIN, f"{entry.entry_id}_{prefix}_{part}"
+            )
+            assert entity_id
+            renamed = f"time.my_battery_{part}"
+            registry.async_update_entity(entity_id, new_entity_id=renamed)
+            expected[renamed] = value
+        await hass.async_block_till_done()
+        hass_read_only_user.mock_policy(
+            {
+                "entities": {
+                    "entity_ids": {
+                        entity_id: {"read": True, "control": True}
+                        for entity_id in expected
+                    }
+                }
+            }
+        )
+        sender = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+        observer = await hass_ws_client(hass)
+        await sender.send_json(
+            {
+                "id": 1,
+                "type": "sax_power/dashboard/subscribe",
+                "entry_id": entry.entry_id,
+                "language": "de",
+            }
+        )
+        await _result(sender, 1)
+        metadata = (await sender.receive_json())["event"]["entities"]
+        assert {item["entity_id"] for item in metadata} == set(expected)
+        device_ids = {item["device_id"] for item in metadata}
+        assert len(device_ids) == 1 and None not in device_ids
+        device_id = device_ids.pop()
+        assert all(item["can_control"] for item in metadata)
+        await observer.send_json(
+            {"id": 1, "type": "subscribe_events", "event_type": "state_changed"}
+        )
+        await _result(observer, 1)
+
+        with (
+            patch.object(
+                coordinator,
+                f"async_set_{prefix}_window",
+                wraps=getattr(coordinator, f"async_set_{prefix}_window"),
+            ) as set_window,
+            patch.object(coordinator, f"async_set_{prefix}_start") as set_start,
+            patch.object(coordinator, f"async_set_{prefix}_end") as set_end,
+        ):
+            await sender.send_json(
+                {
+                    "id": 2,
+                    "type": "call_service",
+                    "domain": DOMAIN,
+                    "service": f"set_{prefix}_window",
+                    "service_data": {
+                        "device_id": device_id,
+                        "start": start,
+                        "end": end,
+                    },
+                }
+            )
+            await _result(sender, 2)
+            waiting = dict(expected)
+            async with asyncio.timeout(5):
+                while waiting:
+                    message = await observer.receive_json()
+                    if message["type"] != "event":
+                        continue
+                    event = message["event"]
+                    if event.get("event_type") != "state_changed":
+                        continue
+                    data = event["data"]
+                    if data["entity_id"] in waiting:
+                        assert data["new_state"]["state"] == waiting.pop(
+                            data["entity_id"]
+                        )
+            assert {
+                entity_id: hass.states.get(entity_id).state for entity_id in expected
+            } == expected
+            set_window.assert_awaited_once_with(
+                time.fromisoformat(start), time.fromisoformat(end)
+            )
+            set_start.assert_not_awaited()
+            set_end.assert_not_awaited()
+
+            hass_read_only_user.mock_policy(
+                {
+                    "entities": {
+                        "entity_ids": {
+                            "time.my_battery_start": {"read": True, "control": True}
+                        }
+                    }
+                }
+            )
+            await sender.send_json(
+                {
+                    "id": 3,
+                    "type": "call_service",
+                    "domain": DOMAIN,
+                    "service": f"set_{prefix}_window",
+                    "service_data": {
+                        "device_id": device_id,
+                        "start": "01:00",
+                        "end": "02:00",
+                    },
+                }
+            )
+            denied = await sender.receive_json()
+            assert denied["id"] == 3
+            assert denied["success"] is False
+            assert denied["error"]["code"] == "home_assistant_error"
+            assert denied["error"]["message"] == "Unauthorized"
+            set_window.assert_awaited_once()
         await sender.close()
         await observer.close()
     finally:

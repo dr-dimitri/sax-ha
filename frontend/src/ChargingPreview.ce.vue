@@ -42,6 +42,29 @@ const hass = shallowRef<HomeAssistant>({
       timers.push(window.setTimeout(resolve, 400)),
     );
     if (fail.value) throw new Error("Simulated failure");
+    if (domain === "sax_power") {
+      const prefix =
+        service === "set_timed_charge_window"
+          ? "timed_charge"
+          : service === "set_grid_serving_window"
+            ? "grid_serving"
+            : null;
+      if (!prefix) return;
+      timers.push(
+        window.setTimeout(() => {
+          const states = { ...hass.value.states };
+          for (const boundary of ["start", "end"]) {
+            const entityId = `time.renamed_${prefix}_${boundary}`;
+            states[entityId] = {
+              ...states[entityId],
+              state: String(data?.[boundary]),
+            };
+          }
+          hass.value = { ...hass.value, states };
+        }, 400),
+      );
+      return;
+    }
     const id = target?.entity_id;
     if (typeof id !== "string") return;
     const state =

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 from pytest_homeassistant_custom_component.typing import (
@@ -86,6 +87,7 @@ async def test_metadata_uses_stable_ids_and_requested_language(
     assert await _subscribe(client, dashboard_entry, language) == [
         {
             "entity_id": "sensor.my_store",
+            "device_id": None,
             "domain": "sensor",
             "key": "soc",
             "name": name,
@@ -93,6 +95,36 @@ async def test_metadata_uses_stable_ids_and_requested_language(
             "can_control": False,
         }
     ]
+
+
+async def test_metadata_reports_registry_device_for_renamed_time_entities(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    entity_registry: er.EntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    dashboard_entry: MockConfigEntry,
+) -> None:
+    """Atomare Fenster verwenden die Registry-Geräte-ID auch nach Entity-Umbenennung."""
+    device = device_registry.async_get_or_create(
+        config_entry_id=dashboard_entry.entry_id,
+        identifiers={(DOMAIN, "battery")},
+    )
+    item = _entity(
+        entity_registry,
+        dashboard_entry,
+        "timed_charge_start",
+        "time",
+        device_id=device.id,
+    )
+    entity_registry.async_update_entity(item.entity_id, new_entity_id="time.my_start")
+    await hass.async_block_till_done()
+    client = await hass_ws_client(hass)
+    entities = await _subscribe(client, dashboard_entry)
+    assert entities[0]["entity_id"] == "time.my_start"
+    assert entities[0]["device_id"] == device.id
+
+    entity_registry.async_update_entity("time.my_start", device_id=None)
+    assert (await client.receive_json())["event"]["entities"][0]["device_id"] is None
 
 
 async def test_metadata_matches_registry_names_and_enum_translations(

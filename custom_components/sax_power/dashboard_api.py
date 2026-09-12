@@ -22,6 +22,7 @@ _CONTROL_DOMAINS = {"switch", "number", "time", "select"}
 
 class _EntityMetadata(TypedDict):
     entity_id: str
+    device_id: str | None
     domain: str
     key: str
     name: str | None
@@ -70,6 +71,7 @@ def _metadata(
     state_prefix = f"{translation_prefix}.state."
     return {
         "entity_id": entity_id,
+        "device_id": registry_entry.device_id,
         "domain": domain,
         "key": key,
         "name": (

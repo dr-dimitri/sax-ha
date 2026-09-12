@@ -2,6 +2,7 @@
 import { computed, inject, useId } from "vue";
 import EntityControl from "../components/EntityControl.vue";
 import EntityValue from "../components/EntityValue.vue";
+import TimeWindowControl from "../components/TimeWindowControl.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import type { EntityDomain } from "../types";
 
@@ -11,7 +12,7 @@ const props = defineProps<{
     key: string;
     group?: string;
     layout?: "columns" | "months";
-    timeUnit?: boolean;
+    timeWindow?: "timed_charge" | "grid_serving";
     title: { de: string; en: string };
     entities: readonly (readonly [EntityDomain, string])[];
   }[];
@@ -21,13 +22,21 @@ const id = useId();
 const language = computed(() => dashboard?.language.value ?? "en");
 const cards = computed(() =>
   props.cards
-    .map((card) => ({
-      ...card,
-      entities: card.entities.filter(([domain, key]) =>
+    .map((card) => {
+      const entities = card.entities.filter(([domain, key]) =>
         dashboard?.entity(domain, key),
-      ),
-    }))
-    .filter((card) => card.entities.length),
+      );
+      return {
+        ...card,
+        showTimeWindow: Boolean(
+          card.timeWindow && entities.some(([domain]) => domain === "time"),
+        ),
+        entities: entities.filter(
+          ([domain]) => !card.timeWindow || domain !== "time",
+        ),
+      };
+    })
+    .filter((card) => card.entities.length || card.showTimeWindow),
 );
 const groups = computed(() => {
   const grouped: {
@@ -96,7 +105,12 @@ const text = computed(() =>
           :aria-labelledby="`${id}-${card.key}`"
         >
           <h2 :id="`${id}-${card.key}`">{{ card.title[language] }}</h2>
+          <TimeWindowControl
+            v-if="card.showTimeWindow && card.timeWindow"
+            :kind="card.timeWindow"
+          />
           <div
+            v-if="card.entities.length"
             class="charging-view__rows"
             :class="{
               'charging-view__rows--columns': card.layout === 'columns',
@@ -119,7 +133,6 @@ const text = computed(() =>
                 :hide-confirmed-value="
                   card.layout === 'months' && domain === 'switch'
                 "
-                :time-unit="card.timeUnit && domain === 'time'"
               />
               <EntityValue v-else :domain="domain" :entity-key="key" />
             </template>
@@ -163,6 +176,11 @@ const text = computed(() =>
 .charging-view__rows {
   display: grid;
   gap: 16px;
+}
+.charging-view__card > .time-window-control + .charging-view__rows {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider-color, #e0e0e0);
 }
 .charging-view__rows .entity-control {
   border: 0;

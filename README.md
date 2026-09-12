@@ -159,15 +159,26 @@ Schrittweiten und Strategieoptionen entsprechen den vorhandenen Entitäten.
 Fehlende optionale Entitäten werden ausgelassen; unbekannte oder nicht
 verfügbare Werte bleiben als solche erkennbar.
 
+Die Zeitfenster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
+zeigen jeweils eine 24-Stunden-Leiste mit verschiebbaren Marken für Start
+und Ende. Die Marken lassen sich mit Maus, Touch und Tastatur bedienen;
+die genauen Eingabefelder erlauben weiterhin Sekunden. Beide Grenzen bleiben
+ein Entwurf, bis **Übernehmen** sie gemeinsam an Home Assistant sendet.
+Die bestätigte Zeitspanne ändert sich erst mit dessen Zustandsmeldung.
+Ein Fenster von 22:00 bis 06:00 wird an Mitternacht geteilt dargestellt;
+gleiche Start- und Endzeit ergeben ein leeres Fenster. Änderungen an den
+bestätigten Grenzen, etwa durch eine Automation, ersetzen den gesamten
+Entwurf. Andere Livewerte verändern die Eingabe nicht.
+
 Die Monatsraster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
 zeigen den bestätigten Zustand direkt am Kontrollkästchen; die zusätzliche
 Zeile **Bestätigter Wert** entfällt dort. Fehler und Nichtverfügbarkeit bleiben
 sichtbar. Eine gültige Monatsauswahl wird direkt von Home Assistant bestätigt,
-auch wenn die Geräteauswertung gerade beschäftigt ist. Unter
-**Zeitvariabler Tarif** erhalten bestätigte Zeitfensterwerte
-in deutscher Sprache den Zusatz **Uhr**, etwa **22:00 Uhr**. Unbekannte oder
-nicht verfügbare Werte und die englische Anzeige erhalten diesen Zusatz nicht;
-Eingabefelder und übertragene Uhrzeiten bleiben unverändert.
+auch wenn die Geräteauswertung gerade beschäftigt ist. Beide Zeitfenster
+zeigen ihre bestätigte Zeitspanne in einer gemeinsamen Zeile; auf Deutsch
+mit dem Zusatz **Uhr**, etwa **22:00–06:00 Uhr**. Unbekannte oder nicht
+verfügbare Werte und die englische Anzeige erhalten diesen Zusatz nicht;
+Eingabefelder und übertragene Uhrzeiten bleiben ohne Sprachzusatz.
 
 Unter **Allgemeine Informationen** stehen beide Energiezähler
 am Anfang der Karte **Gerät**; eine eigene Energie-Karte entfällt. Der
@@ -422,13 +433,20 @@ dürfen sich in denselben Monaten nicht überschneiden. Die Integration prüft
 dies automatisch.
 
 - Bei einer unzulässigen Monatsauswahl wird die Änderung abgelehnt.
-- Bei einer unzulässigen Änderung von Start oder Ende wird die geänderte Zeit
-  geleert und Home Assistant zeigt eine Benachrichtigung an.
+- Bei einer unzulässigen Änderung einer einzelnen Start- oder Ende-Entität
+  wird die geänderte Zeit geleert und Home Assistant zeigt eine
+  Benachrichtigung an.
+- Das Dashboard übernimmt Start und Ende gemeinsam. Die Integration prüft
+  das fertige Ziel-Fenster; bei einer Überschneidung leert sie beide Grenzen
+  und zeigt ebenfalls eine Benachrichtigung an. Geleerte Zeitwerte werden
+  über die nativen Zeit-Entitäten in Home Assistant neu gesetzt; das
+  Dashboard sperrt die Bedienung bei unbekannten Werten.
 
 Zeitlich identische Fenster sind zulässig, wenn sie ausschließlich in
-verschiedenen Monaten aktiv sind. Für Automationen können Start und Ende mit
-den Aktionen `sax_power.set_timed_charge_window` und
-`sax_power.set_grid_serving_window` gemeinsam gesetzt werden.
+verschiedenen Monaten aktiv sind. Das Dashboard verwendet die vorhandenen
+Aktionen `sax_power.set_timed_charge_window` und
+`sax_power.set_grid_serving_window`. Auch Automationen können damit Start und
+Ende gemeinsam setzen, ohne einen Zwischenzustand aus neuer und alter Grenze.
 
 ## Tarifmodell für die Wirtschaftlichkeit
 

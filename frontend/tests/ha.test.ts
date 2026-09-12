@@ -589,3 +589,268 @@ describe("explicit HA service actions (REQ-VUE-ENTITY-BINDING)", () => {
     });
   });
 });
+
+describe("atomic HA time windows (REQ-VUE-ENTITY-BINDING)", () => {
+  function windowMetadata(
+    kind: "timed_charge" | "grid_serving" = "timed_charge",
+  ) {
+    return ["start", "end"].map((part) =>
+      metadata("time", {
+        entity_id: `time.renamed_${kind}_${part}`,
+        key: `${kind}_${part}`,
+        device_id: "registered-battery",
+      }),
+    );
+  }
+
+  it.each(["timed_charge", "grid_serving"] as const)(
+    "submits both %s values to the registry device in one call without changing HA states",
+    async (kind) => {
+      const items = windowMetadata(kind);
+      const { dashboard, hass } = setup(items);
+      const before = hass.value!.states;
+      expect(await dashboard.performTimeWindow(kind, "22:00:17", "06:30")).toBe(
+        true,
+      );
+      expect(hass.value!.callService).toHaveBeenCalledExactlyOnceWith(
+        "sax_power",
+        `set_${kind}_window`,
+        { device_id: "registered-battery", start: "22:00:17", end: "06:30:00" },
+        undefined,
+        false,
+      );
+      expect(hass.value!.states).toBe(before);
+    },
+  );
+
+  it("preserves equal endpoints as the existing empty-window setting", async () => {
+    const { dashboard, hass } = setup(windowMetadata());
+    expect(
+      await dashboard.performTimeWindow("timed_charge", "06:30", "06:30:00"),
+    ).toBe(true);
+    expect(hass.value!.callService).toHaveBeenCalledWith(
+      "sax_power",
+      "set_timed_charge_window",
+      { device_id: "registered-battery", start: "06:30:00", end: "06:30:00" },
+      undefined,
+      false,
+    );
+  });
+
+  it.each(["24:00", "6:00", "12:60", "12:00:60", "", "06:30\n"])(
+    "rejects either invalid endpoint %j for both controls",
+    async (value) => {
+      const { dashboard, hass } = setup(windowMetadata());
+      for (const [start, end] of [
+        [value, "06:00"],
+        ["22:00", value],
+      ]) {
+        expect(
+          await dashboard.performTimeWindow("timed_charge", start!, end!),
+        ).toBe(false);
+        for (const part of ["start", "end"]) {
+          expect(
+            dashboard.entity("time", `timed_charge_${part}`)?.error,
+          ).toContain("gültigen Wert");
+        }
+      }
+      expect(hass.value!.callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "missing",
+    "unavailable",
+    "unknown",
+    "permission",
+    "device",
+    "no-device",
+    "old-backend",
+  ])(
+    "rejects the complete window when one endpoint has %s metadata/state",
+    async (problem) => {
+      const items = windowMetadata();
+      if (problem === "permission") items[1]!.can_control = false;
+      if (problem === "device") items[1]!.device_id = "other-device";
+      if (problem === "no-device") items[1]!.device_id = null;
+      if (problem === "old-backend")
+        for (const item of items) delete item.device_id;
+      const { dashboard, hass, connection } = setup(items);
+      if (problem === "missing") connection.emit([items[0]!]);
+      if (problem === "unavailable" || problem === "unknown") {
+        hass.value = {
+          ...hass.value!,
+          states: {
+            ...hass.value!.states,
+            [items[1]!.entity_id]: state(items[1]!, { state: problem }),
+          },
+        };
+      }
+      expect(
+        await dashboard.performTimeWindow("timed_charge", "22:00", "06:30"),
+      ).toBe(false);
+      expect(hass.value!.callService).not.toHaveBeenCalled();
+      expect(dashboard.entity("time", "timed_charge_start")?.error).toContain(
+        "nicht bedient",
+      );
+    },
+  );
+
+  it("locks both controls against complete and individual writes and exposes one shared failure", async () => {
+    const { dashboard, hass } = setup(windowMetadata());
+    const result = deferred<unknown>();
+    const service = vi.fn(() => result.promise);
+    hass.value = { ...hass.value!, callService: service };
+    const first = dashboard.performTimeWindow("timed_charge", "22:00", "06:30");
+    for (const part of ["start", "end"]) {
+      expect(dashboard.entity("time", `timed_charge_${part}`)?.pending).toBe(
+        true,
+      );
+      expect(
+        await dashboard.perform("time", `timed_charge_${part}`, "01:00"),
+      ).toBe(false);
+    }
+    expect(
+      await dashboard.performTimeWindow("timed_charge", "21:00", "06:00"),
+    ).toBe(false);
+    expect(service).toHaveBeenCalledOnce();
+    result.reject(new Error("overlap rejected"));
+    expect(await first).toBe(false);
+    for (const part of ["start", "end"]) {
+      expect(dashboard.entity("time", `timed_charge_${part}`)?.pending).toBe(
+        false,
+      );
+      expect(dashboard.entity("time", `timed_charge_${part}`)?.error).toContain(
+        "fehlgeschlagen",
+      );
+    }
+    service.mockResolvedValueOnce({});
+    expect(
+      await dashboard.performTimeWindow("timed_charge", "21:00", "06:00"),
+    ).toBe(true);
+    expect(dashboard.entity("time", "timed_charge_end")?.error).toBeNull();
+  });
+
+  it.each(["start", "end"])(
+    "waits for an individual %s action before allowing the atomic write",
+    async (part) => {
+      const { dashboard, hass } = setup(windowMetadata());
+      const result = deferred<unknown>();
+      const service = vi.fn(() => result.promise);
+      hass.value = { ...hass.value!, callService: service };
+      const first = dashboard.perform("time", `timed_charge_${part}`, "01:00");
+      expect(
+        await dashboard.performTimeWindow("timed_charge", "21:00", "06:00"),
+      ).toBe(false);
+      expect(service).toHaveBeenCalledOnce();
+      result.resolve({});
+      expect(await first).toBe(true);
+    },
+  );
+
+  it.each(["entry", "reconnect", "rename", "device"])(
+    "ignores stale complete-window outcomes after %s changes while keeping both locks",
+    async (change) => {
+      const items = windowMetadata();
+      const { dashboard, hass, connection, entryId } = setup(items);
+      const result = deferred<unknown>();
+      const service = vi.fn(() => result.promise);
+      hass.value = { ...hass.value!, callService: service };
+      const first = dashboard.performTimeWindow(
+        "timed_charge",
+        "22:00",
+        "06:30",
+      );
+      if (change === "entry") entryId.value = "entry-2";
+      if (change === "reconnect") {
+        connection.fire("disconnected");
+        connection.fire("ready");
+      }
+      const replacement = items.map((item) => ({ ...item }));
+      if (change === "rename") replacement[1]!.entity_id = "time.new_end_name";
+      if (change === "device")
+        for (const item of replacement) item.device_id = "replacement-battery";
+      hass.value = {
+        ...hass.value!,
+        states: Object.fromEntries(
+          replacement.map((item) => [item.entity_id, state(item)]),
+        ),
+      };
+      connection.emit(replacement);
+      for (const part of ["start", "end"]) {
+        expect(dashboard.entity("time", `timed_charge_${part}`)?.pending).toBe(
+          true,
+        );
+      }
+      expect(
+        await dashboard.performTimeWindow("timed_charge", "21:00", "06:00"),
+      ).toBe(false);
+      result.reject(new Error("old call failed"));
+      expect(await first).toBe(false);
+      for (const part of ["start", "end"]) {
+        expect(dashboard.entity("time", `timed_charge_${part}`)).toMatchObject({
+          pending: false,
+          error: null,
+        });
+      }
+      expect(service).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps the two independent windows operable concurrently", async () => {
+    const { dashboard, hass } = setup([
+      ...windowMetadata(),
+      ...windowMetadata("grid_serving"),
+    ]);
+    const result = deferred<unknown>();
+    const service = vi
+      .fn()
+      .mockReturnValueOnce(result.promise)
+      .mockResolvedValueOnce({});
+    hass.value = { ...hass.value!, callService: service };
+    const first = dashboard.performTimeWindow("timed_charge", "22:00", "06:30");
+    expect(
+      await dashboard.performTimeWindow("grid_serving", "11:00", "15:00"),
+    ).toBe(true);
+    result.resolve({});
+    expect(await first).toBe(true);
+    expect(service).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not confirm a successful old request after reconnecting", async () => {
+    const items = windowMetadata();
+    const { dashboard, hass, connection } = setup(items);
+    const result = deferred<unknown>();
+    hass.value = { ...hass.value!, callService: vi.fn(() => result.promise) };
+    const first = dashboard.performTimeWindow("timed_charge", "22:00", "06:30");
+    connection.fire("disconnected");
+    connection.fire("ready");
+    connection.emit(items);
+    result.resolve({});
+    expect(await first).toBe(false);
+    expect(dashboard.entity("time", "timed_charge_start")).toMatchObject({
+      pending: false,
+      error: null,
+    });
+  });
+
+  it("preserves both locks across language changes and localizes their shared error", async () => {
+    const items = windowMetadata();
+    const { dashboard, hass, connection } = setup(items);
+    const result = deferred<unknown>();
+    hass.value = { ...hass.value!, callService: vi.fn(() => result.promise) };
+    const first = dashboard.performTimeWindow("timed_charge", "22:00", "06:30");
+    hass.value = { ...hass.value!, language: "en" };
+    connection.emit(items);
+    expect(
+      await dashboard.performTimeWindow("timed_charge", "21:00", "06:00"),
+    ).toBe(false);
+    result.reject(new Error("service rejected"));
+    expect(await first).toBe(false);
+    for (const part of ["start", "end"]) {
+      expect(dashboard.entity("time", `timed_charge_${part}`)?.error).toContain(
+        "The change failed",
+      );
+    }
+  });
+});

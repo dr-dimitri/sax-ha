@@ -5,7 +5,7 @@ const cards = [
   {
     key: "window",
     group: "schedule",
-    timeUnit: true,
+    timeWindow: "timed_charge",
     title: { de: "Zeitfenster", en: "Time window" },
     entities: [
       ["time", "timed_charge_start"],

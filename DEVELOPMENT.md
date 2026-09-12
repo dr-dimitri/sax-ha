@@ -132,18 +132,19 @@ tariff), Netzdienliches Laden, Ersparnis. Die Pfade `ladeautomatik` und
 
 `ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
 Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
-`EntityValue`-Komponenten wie die allgemeine Ansicht. Es berechnet keine
-Zeitfenster, Ladeberechtigungen oder Preisstrategien. Alle Entity-Suffixe,
+`EntityValue`-Komponenten wie die allgemeine Ansicht sowie `TimeWindowControl`
+für beide Zeitfenster. Es berechnet keine Ladeberechtigungen oder
+Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
 [Funktionsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
 
 Die beiden Monatsraster in `TimedChargingView.vue` und `GridServingView.vue`
 lassen die zusätzliche Zeile „Bestätigter Wert“ weg. Kontrollkästchen folgen
 weiterhin dem bestätigten HA-Zustand; Fehler, Nichtverfügbarkeit und zugängliche
-Beschriftungen bleiben erhalten. Nur bestätigte, verfügbare Zeitfensterwerte
-in `TimedChargingView.vue` erhalten in deutscher Sprache das Suffix ` Uhr`.
+Beschriftungen bleiben erhalten. Die gemeinsame bestätigte Zeitspanne in
+beiden Zeitfenstern erhält in deutscher Sprache das Suffix ` Uhr`.
 Unbekannte/nicht verfügbare Zustände, englische Werte, Eingabefelder und
-Time-Service-Payloads bleiben unverändert. Der dynamische Tarif enthält
+Service-Payloads erhalten keinen Sprachzusatz. Der dynamische Tarif enthält
 keine Monatsschalter.
 
 `GeneralView.vue` ordnet nach den Skalen die Karten Leistung und Gerät an.
@@ -168,9 +169,10 @@ Die übrigen Schalter benötigen diesen zusätzlichen Dialog nicht.
 
 `dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
 `sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
-die tatsächlichen Entity-IDs, Domains, stabilen Schlüssel, übersetzten Namen und
-Enum-Texte sowie die Bedienberechtigung. Registry-Änderungen aktualisieren das
-Abo, deaktivierte oder nicht lesbare Entitäten fehlen. Die bestehende
+die tatsächlichen Entity- und Device-IDs, Domains, stabilen Schlüssel,
+übersetzten Namen und Enum-Texte sowie die Bedienberechtigung.
+Registry-Änderungen aktualisieren das Abo, deaktivierte oder nicht lesbare
+Entitäten fehlen. Die bestehende
 HA-Verbindung übernimmt Anmeldung und Abmeldung; der Befehl liest keine
 Geräteregister und stellt keine eigene Schreibschnittstelle bereit.
 
@@ -186,6 +188,47 @@ Entity-Attributen; HA bleibt für die Autorisierung der Services zuständig.
 Alle Darstellungen einer Entität teilen ausstehende Aktionen und Fehler.
 Ein erfolgreich beantworteter Serviceaufruf verändert den angezeigten Zustand
 erst, wenn HA ihn tatsächlich meldet.
+
+`TimeWindowControl.vue` ersetzt in den Ansichten Zeitvariabler Tarif und
+Netzdienliches Laden die getrennten Zeit-Bedienelemente. Es gibt genau zwei
+bearbeitbare Paare: `time.timed_charge_start`/`time.timed_charge_end` und
+`time.grid_serving_start`/`time.grid_serving_end`. Eine 24-Stunden-Leiste mit
+verschiebbaren Start-/Endmarken und genaue Eingaben mit Sekunden bearbeiten
+dasselbe lokale Entwurfspaar. Das Ziehen verwendet ein Minutenraster;
+die genaue Eingabe erhält Sekunden. Ein Start nach dem Ende erzeugt zwei
+markierte Abschnitte über Mitternacht; identische Grenzen ergeben ein leeres
+Fenster. Die Darstellung berechnet keine Ladeberechtigung.
+
+Eine gemeinsame Übernahme ruft über `ha.ts` genau einmal den vorhandenen
+Service `sax_power.set_timed_charge_window` beziehungsweise
+`sax_power.set_grid_serving_window` mit `device_id`, `start` und `end` auf.
+Beide aufgelösten Time-Entitäten müssen bedienbar sein und zum selben Gerät
+gehören. Auch die Services prüfen bei Benutzeraufrufen die Rechte für beide
+Time-Entitäten. Der gemeinsame Kontext sperrt während des Aufrufs beide
+Grenzen und teilt Fehler auch mit anderen Darstellungen dieser Entitäten.
+Die bestehende Backend-Prüfung betrachtet das fertige Zielpaar atomar;
+bei Überschneidung leert sie beide Grenzen und erzeugt die vorhandene
+HA-Benachrichtigung. Es gibt keine zwei aufeinanderfolgenden `time.set_value`-
+Aufrufe und keine neue Geräte-Schreibschnittstelle.
+
+Die Bestätigungszeile zeigt ausschließlich HA-Zustände. Eine Serviceantwort
+bestätigt noch keine neue Zeitspanne. Eine echte Änderung einer HA-Zeitgrenze
+setzt das gesamte Entwurfspaar auf den aktuellen HA-Stand; andere
+Telemetrieänderungen erhalten den Entwurf. Ungültige Eingaben, fehlende
+Berechtigungen und Nichtverfügbarkeit sperren die Übernahme; Fehler führen
+zu keiner automatischen Wiederholung. Bei nur einer verfügbaren Grenze bleibt
+diese in der Bestätigungszeile sichtbar. Geleerte oder unbekannte Zeitwerte
+lassen sich weiterhin über die nativen HA-Time-Entitäten korrigieren.
+Maus-, Touch- und Tastaturbedienung
+verwenden denselben Entwurf. Beide Fenster unterstützen DE/EN, helle und
+dunkle HA-Themes sowie mobile Ansichten und zeigen auf Deutsch den
+Uhr-Zusatz nur an der bestätigten Zeitspanne.
+
+Die geplanten Zeiten im dynamischen Tarif und die Tarifplan-Attribute unter
+Ersparnis bleiben reine Anzeigen. Die Recorder-Datumsfilter bleiben
+Datumseingaben. Die bis zu acht TOU-Fenster im HA-Optionsflow sind keine
+Zeitfenster-Eingaben dieses Vue-Panels; die separate Controls-Vorschau ist
+ebenfalls keine produktive Ansicht.
 
 `dashboard_statistics.py` ergänzt den ausschließlich lesenden WebSocket-Befehl
 `sax_power/dashboard/statistics`. Die Anfrage enthält `entry_id`, optional das

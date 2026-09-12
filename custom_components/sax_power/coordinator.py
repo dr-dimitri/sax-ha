@@ -132,6 +132,7 @@ from .domain.scheduling import is_time_in_window, windows_overlap
 from .domain.sunspec import (
     DEFAULT_BATTERY_SCALE_FACTORS,
     DEFAULT_IC_POWER_SETPOINT_SF_RAW,
+    SunSpecDecodeError,
     decode_high_block,
     decode_low_blocks,
 )
@@ -2432,10 +2433,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Modbus-Fehlerantwort (Basic Mode): {basic_result}")
 
         basic_regs = basic_result.registers
+        if len(basic_regs) < READ_BLOCK_COUNT:
+            raise UpdateFailed(
+                f"Basic-Mode-Antwort unvollständig: {READ_BLOCK_COUNT} Register "
+                f"erwartet, {len(basic_regs)} erhalten"
+            )
 
         def basic_reg(address: int) -> int:
             return basic_regs[address - READ_BLOCK_START]
 
+        soc = basic_reg(REG_SOC)
+        if (
+            isinstance(soc, bool)
+            or not isinstance(soc, int)
+            or not MIN_SOC <= soc <= MAX_SOC
+        ):
+            # REQ-TIMED-SOC-CHARGE: An invalid SOC must enter the same
+            # fail-safe path as a missing read, never refresh its cache.
+            raise UpdateFailed(f"Ungültiger Basic-Mode-SOC: {soc!r}")
         switch_state = basic_reg(REG_SWITCH_STATE)
         self._basic_data = {
             "switch_state": switch_state,
@@ -2444,7 +2459,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "setpoint_power": to_signed16(basic_reg(REG_SETPOINT_POWER)),
             "setpoint_cosphi": to_signed16(basic_reg(REG_SETPOINT_COSPHI)),
-            "soc": basic_reg(REG_SOC),
+            "soc": soc,
         }
         self._basic_last_read = now
         return self._basic_data
@@ -2497,7 +2512,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise ModbusException(
                     f"Modbus-Fehlerantwort (SunSpec-Modus): {extended_result}"
                 )
-        except (TimeoutError, ModbusException) as err:
+            decoded = decode_high_block(
+                extended_result.registers, self._battery_scale_factors
+            )
+        except (TimeoutError, ModbusException, SunSpecDecodeError) as err:
             if self._extended_available:
                 _LOGGER.warning(
                     "SunSpec-Modus-Register (Slave-ID %s) nicht erreichbar - "
@@ -2532,9 +2550,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._extended_unavailable_since = None
         self._extended_available = True
 
-        decoded = decode_high_block(
-            extended_result.registers, self._battery_scale_factors
-        )
         # REQ-SUNSPEC-DATATYPES: Ein dauerhaft defektes Register darf das
         # Log nicht im Zwei-Sekunden-Takt füllen.
         for address, exponent in decoded.invalid_scale_factors.items():
@@ -2597,7 +2612,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Modbus-Fehlerantwort (LOW-Intervall-Register): "
                     f"{low1_result if low1_result.isError() else low2_result}"
                 )
-        except (TimeoutError, ModbusException) as err:
+            decoded = decode_low_blocks(low1_result.registers, low2_result.registers)
+        except (TimeoutError, ModbusException, SunSpecDecodeError) as err:
             if self._low_block_data:
                 _LOGGER.debug(
                     "LOW-Intervall-Register (Slave-ID %s) nicht lesbar - "
@@ -2615,7 +2631,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             return self._low_block_data
 
-        decoded = decode_low_blocks(low1_result.registers, low2_result.registers)
         # Die Battery-Skalierungsfaktoren stammen ausschließlich aus diesem
         # Teilblock; decode_high_block bekommt sie beim nächsten HIGH-Read
         # übergeben, statt sie selbst zu lesen (REQ-LOW-INTERVAL-REGISTERS).
@@ -3419,7 +3434,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     power, timed_discharge_hold=timed_discharge_hold, data=data
                 )
             except HomeAssistantError:
-                self._clear_sun_charge_active_flags()
+                self._clear_sun_charge_active_flags(preserve_grid_serving_hold=True)
                 raise
             if self._shutdown_started:
                 return
@@ -3445,15 +3460,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # schlafende Task den alten Sollwert nicht später erneut
                 # aktivieren. Der nächste Coordinator-Takt entscheidet neu.
                 await self._async_cancel_sun_charge_task()
-                self._clear_sun_charge_active_flags()
+                self._clear_sun_charge_active_flags(preserve_grid_serving_hold=True)
                 raise
             self._sun_charge_power = power
 
-    def _clear_sun_charge_active_flags(self) -> None:
+    def _clear_sun_charge_active_flags(
+        self, *, preserve_grid_serving_hold: bool = False
+    ) -> None:
         """Avoid publishing activity after an incomplete device sequence."""
         self._timed_charge_active = False
         self._grid_serving_active = False
-        self._grid_serving_setpoint_active = False
+        # REQ-GRID-SERVING-CHARGE: A transient write failure ends confirmed
+        # activity, but cannot discard the existing pause's recovery intent.
+        if not preserve_grid_serving_hold:
+            self._grid_serving_setpoint_active = False
         self._price_charge_active = False
         self._max_soc_clamped = False
         self._timed_charge_discharge_status = None
@@ -3574,7 +3594,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except asyncio.CancelledError:
             raise
         except HomeAssistantError:
-            self._clear_sun_charge_active_flags()
+            self._clear_sun_charge_active_flags(preserve_grid_serving_hold=True)
             _LOGGER.exception(
                 "Netzladung (SunSpec-Modus): periodischer Schreibvorgang fehlgeschlagen"
             )

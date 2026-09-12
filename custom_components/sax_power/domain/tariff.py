@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from datetime import time as dt_time
 from enum import StrEnum
 
@@ -21,8 +21,6 @@ from ..const import (
     MIN_ECONOMICS_IMPORT_PRICE,
 )
 from .scheduling import is_time_in_window, windows_overlap
-
-_SECONDS_PER_DAY = 24 * 3600
 
 
 class TariffType(StrEnum):
@@ -326,30 +324,69 @@ def evaluate_static_tariff(config: TariffConfig, moment: datetime) -> QuoteResul
 def _segment_bounds(
     moment: datetime, windows: Sequence[DailyPriceWindow]
 ) -> tuple[datetime, datetime]:
-    """Grenzen des Preisabschnitts, in dem `moment` liegt.
-
-    Gerechnet wird bewusst auf der lokalen Wanduhr (Addition auf eine
-    zeitzonenbehaftete datetime ist in Python Wanduhr-Arithmetik): Die
-    Grenzen sind Ortszeiten, keine festen UTC-Abstände.
-    """
-    boundaries = sorted(
-        {_seconds(window.start) for window in windows}
-        | {_seconds(window.end) for window in windows}
-    )
-    start_of_day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
-    if not boundaries:
+    """Echte Zeitgrenzen des lokalen Preisabschnitts, einschließlich DST."""
+    if not windows:
+        start_of_day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
         return start_of_day, start_of_day + timedelta(days=1)
 
-    now_seconds = _seconds(moment.time())
-    earlier = [value for value in boundaries if value <= now_seconds]
-    later = [value for value in boundaries if value > now_seconds]
-    previous = max(earlier) if earlier else max(boundaries) - _SECONDS_PER_DAY
-    following = min(later) if later else min(boundaries) + _SECONDS_PER_DAY
+    zone = moment.tzinfo
+    boundaries = {window.start for window in windows} | {
+        window.end for window in windows
+    }
+    candidates: set[datetime] = set()
+    # Zwei Nachbartage decken auch einen vollständig übersprungenen
+    # Kalendertag ab; feste UTC-Abstände würden lokale Tarife verschieben.
+    for day_offset in range(-2, 3):
+        day = moment.date() + timedelta(days=day_offset)
+        for boundary_time in boundaries:
+            wall = datetime.combine(day, boundary_time)
+            folds = {
+                wall.replace(tzinfo=zone, fold=fold).astimezone(UTC) for fold in (0, 1)
+            }
+            candidates.update(
+                instant
+                for instant in folds
+                if instant.astimezone(zone).replace(tzinfo=None) == wall
+            )
+            if len(folds) == 2:
+                # REQ-ECONOMICS-TARIFFS: Der Uhrsprung selbst kann das
+                # aktive Fenster wechseln, auch ohne Grenze um 02:00/03:00.
+                candidates.add(_offset_transition(min(folds), max(folds), zone))
+
+    def window_at(instant: datetime) -> int | None:
+        local_time = instant.astimezone(zone).time()
+        return next(
+            (
+                index
+                for index, window in enumerate(windows)
+                if window.contains(local_time)
+            ),
+            None,
+        )
+
+    changes = sorted(
+        instant
+        for instant in candidates
+        if window_at(instant - timedelta(microseconds=1)) != window_at(instant)
+    )
+    now = moment.astimezone(UTC)
     return (
-        start_of_day + timedelta(seconds=previous),
-        start_of_day + timedelta(seconds=following),
+        max(instant for instant in changes if instant <= now).astimezone(zone),
+        min(instant for instant in changes if instant > now).astimezone(zone),
     )
 
 
-def _seconds(value: dt_time) -> int:
-    return value.hour * 3600 + value.minute * 60 + value.second
+def _offset_transition(
+    first: datetime, last: datetime, zone: tzinfo | None
+) -> datetime:
+    """UTC-Offsetwechsel zwischen den zwei Deutungen einer lokalen Grenze."""
+    first = first.replace(microsecond=0)
+    last = last.replace(microsecond=0)
+    original_offset = first.astimezone(zone).utcoffset()
+    while (last - first).total_seconds() > 1:
+        middle = first + timedelta(seconds=int((last - first).total_seconds() // 2))
+        if middle.astimezone(zone).utcoffset() == original_offset:
+            first = middle
+        else:
+            last = middle
+    return last

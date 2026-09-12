@@ -70,11 +70,13 @@ from .const import (
     MAX_ECONOMICS_INVESTMENT_COST,
     MAX_ECONOMICS_PRIOR_RESULT,
     MAX_PV_FORECAST_FACTOR,
+    MAX_SOC,
     MIN_ECONOMICS_FEED_IN_PRICE,
     MIN_ECONOMICS_IMPORT_PRICE,
     MIN_ECONOMICS_INVESTMENT_COST,
     MIN_ECONOMICS_PRIOR_RESULT,
     MIN_PV_FORECAST_FACTOR,
+    MIN_SOC,
     PRICE_UNITS,
     READ_BLOCK_EXT_LOW1_COUNT,
     READ_BLOCK_EXT_LOW1_START,
@@ -141,13 +143,13 @@ def _is_mac_unique_id(unique_id: str | None) -> bool:
 STEP_CONNECTION_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): vol.Coerce(int),
-        vol.Required(CONF_SLAVE_ID_BASIC, default=DEFAULT_SLAVE_ID_BASIC): vol.Coerce(
-            int
+        vol.Required(CONF_PORT, default=DEFAULT_PORT): cv.port,
+        vol.Required(CONF_SLAVE_ID_BASIC, default=DEFAULT_SLAVE_ID_BASIC): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=255)
         ),
         vol.Required(
             CONF_SLAVE_ID_EXTENDED, default=DEFAULT_SLAVE_ID_EXTENDED
-        ): vol.Coerce(int),
+        ): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
         vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=5, max=3600)
         ),
@@ -190,7 +192,7 @@ class CannotConnect(Exception):
 
 
 class InvalidResponse(Exception):
-    """Speicher hat mit einer Modbus-Fehlerantwort reagiert (z. B. falsche Slave-ID)."""
+    """Modbus-Antwort enthält keinen gültigen SOC (z. B. falsche Slave-ID)."""
 
 
 async def _async_validate_connection(host: str, port: int, slave_id: int) -> None:
@@ -216,6 +218,17 @@ async def _async_validate_connection(host: str, port: int, slave_id: int) -> Non
         except (ModbusException, OSError) as err:
             raise CannotConnect from err
         if result.isError():
+            raise InvalidResponse
+        # REQ-IP-CONFIGURABLE-UI: Eine quittierte Antwort allein belegt
+        # noch keinen lesbaren SAX-Speicher (z. B. falsche Slave-ID).
+        if not result.registers:
+            raise InvalidResponse
+        soc = result.registers[0]
+        if (
+            isinstance(soc, bool)
+            or not isinstance(soc, int)
+            or not MIN_SOC <= soc <= MAX_SOC
+        ):
             raise InvalidResponse
     finally:
         client.close()

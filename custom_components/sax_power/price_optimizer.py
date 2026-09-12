@@ -216,17 +216,20 @@ def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
     dafür wird `base_day` (lokale Mitternacht des betreffenden Tages)
     benötigt.
     """
-    if isinstance(value, datetime):
-        return _local_datetime(value)
-    if isinstance(value, str):
-        parsed = dt_util.parse_datetime(value)
-        if parsed is not None:
-            return _local_datetime(parsed)
+    try:
+        if isinstance(value, datetime):
+            return _local_datetime(value)
+        if isinstance(value, str):
+            parsed = dt_util.parse_datetime(value)
+            if parsed is not None:
+                return _local_datetime(parsed)
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            if base_day is not None:
+                return base_day + timedelta(hours=float(value))
+    except ValueError, OverflowError:
+        # REQ-DYNAMIC-PRICE-CHARGE: Auch wohlgeformte, aber unmögliche
+        # ISO-Daten und nicht-endliche Stundenangaben sind Sensorfehler.
         return None
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if base_day is None:
-            return None
-        return base_day + timedelta(hours=float(value))
     return None
 
 
@@ -295,30 +298,34 @@ def _base_day(attribute: str, now: datetime) -> datetime:
 
 def _parse_entries(
     entries: Sequence[Any], base_day: datetime | None
-) -> list[tuple[datetime, datetime | None, float]]:
-    parsed: list[tuple[datetime, datetime | None, float]] = []
+) -> list[tuple[datetime, datetime | None, float | None]]:
+    parsed: list[tuple[datetime, datetime | None, float | None]] = []
     count = len(entries)
     for index, entry in enumerate(entries):
         start, end, price = _entry_values(entry, base_day, index, count)
-        if start is None or price is None:
+        if start is None:
             continue
         parsed.append((start, end, price))
     return parsed
 
 
 def _finalize_slots(
-    raw: Iterable[tuple[datetime, datetime | None, float]], factor: float
+    raw: Iterable[tuple[datetime, datetime | None, float | None]], factor: float
 ) -> list[PriceSlot]:
-    """Rohdaten zu einer lückenlos sortierten, entdoppelten Slot-Liste.
+    """Rohdaten zu einer sortierten, entdoppelten Slot-Liste.
 
     Fehlt bei einem Eintrag das Ende, wird der Beginn des nächsten Slots
     verwendet; beim letzten Eintrag die häufigste Länge der übrigen Slots
     (Fallback DEFAULT_PRICE_SLOT_MINUTES). Damit funktionieren sowohl
     stündliche als auch viertelstündliche Preisdaten ohne Sonderfall.
     """
-    by_start: dict[datetime, tuple[datetime, datetime | None, float]] = {}
+    by_start: dict[datetime, tuple[datetime, datetime | None, float | None]] = {}
     for start, end, price in raw:
-        by_start.setdefault(_instant(start), (start, end, price))
+        instant = _instant(start)
+        if instant not in by_start or (
+            by_start[instant][2] is None and price is not None
+        ):
+            by_start[instant] = (start, end, price)
     instants = sorted(by_start)
     if not instants:
         return []
@@ -337,6 +344,10 @@ def _finalize_slots(
     slots: list[PriceSlot] = []
     for index, start_instant in enumerate(instants):
         start, end, price = by_start[start_instant]
+        # REQ-DYNAMIC-PRICE-CHARGE / REQ-ECONOMICS-TARIFFS: Die bekannte
+        # Grenze eines unlesbaren Preises begrenzt weiterhin den Vorgänger.
+        if price is None:
+            continue
         if end is None or _instant(end) <= start_instant:
             if index + 1 < len(instants):
                 end = by_start[instants[index + 1]][0]
@@ -373,14 +384,16 @@ def parse_price_slots(
         ((attribute,),) if attribute else ATTRIBUTE_GROUPS
     )
     for group in groups:
-        raw: list[tuple[datetime, datetime | None, float]] = []
+        raw: list[tuple[datetime, datetime | None, float | None]] = []
         for name in group:
             entries = attributes.get(name)
             if not isinstance(entries, (list, tuple)) or not entries:
                 continue
             raw.extend(_parse_entries(entries, _base_day(name, now)))
         if raw:
-            return _finalize_slots(raw, factor)
+            slots = _finalize_slots(raw, factor)
+            if slots:
+                return slots
     return []
 
 

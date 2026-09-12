@@ -986,12 +986,19 @@ lässt:
 | `MISSING` | noch kein Store | **ja** | ja, sofort nach der Migration |
 | `FAILED` | Store da, aber unbrauchbar | nein | **nein, dauerhaft** |
 
-`FAILED` entsteht bei einem I/O-Fehler, einem Payload, der kein Objekt ist,
-oder einer Storage-Hauptversion, die diese Version nicht kennt (Home
-Assistant meldet das per `NotImplementedError`). Dann gelten sichere
-Defaults, es wird nicht migriert, und der vorhandene Store bleibt
+`FAILED` entsteht bei einem I/O-Fehler, syntaktisch defektem JSON, einem
+Payload, der kein Objekt ist, oder einer Storage-Hauptversion, die diese
+Version nicht kennt (Home Assistant meldet das per `NotImplementedError`).
+Dann gelten sichere Defaults, es wird nicht migriert, und der vorhandene Store bleibt
 unangetastet - er kann die einzige Kopie einer korrekten Konfiguration sein
 oder von einer neueren Version stammen.
+
+Home Assistant verschiebt defektes JSON in eine `.corrupt.*`-Datei und
+liefert dafür denselben Leerwert wie bei einer fehlenden Datei. Der
+Ladeguard für Steuer- und Energiezustände unterscheidet diese Fälle anhand
+der vorhandenen Store- und Quarantänedateien. Damit bleibt der Fehlerschutz
+auch nach einem weiteren Reload wirksam; eine wiederhergestellte gültige
+Store-Datei hebt ihn trotz vorhandener Quarantänekopie auf.
 
 `_control_store_write_blocked` bleibt dabei für die **gesamte
 Lebensdauer dieser Coordinator-Instanz** gesetzt - auch eine danach bewusst
@@ -1199,6 +1206,11 @@ Die Decoder nehmen ausschließlich `Sequence[int]` entgegen - keine
 Coordinator-Callbacks - und rechnen intern über Blockstart + Offset. Ist ein
 Block kürzer als das dokumentierte Layout, fällt das als
 `SunSpecDecodeError` auf statt als IndexError mitten in der Feldzuordnung.
+Der Coordinator behandelt diesen Fehler wie einen gescheiterten Read des
+jeweiligen Blocks: HIGH-Werte werden unbekannt, während ein vorhandener
+LOW-Cache erhalten bleibt. Der Basic-Read prüft zusätzlich Blocklänge und
+SOC (ganzzahlig, 0–100), bevor er seinen Cache erneuert; Fehler entziehen
+die Freigabe für weiteres Netzladen.
 
 Die Feldzuordnung des HIGH-Blocks steht als deklarative Tabelle
 `HIGH_BLOCK_FIELDS` (`ScaledField`/`EnumField`/`RawField`/`BoolField`) im

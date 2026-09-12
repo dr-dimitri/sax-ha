@@ -653,7 +653,33 @@ requirement_timed_soc_charge:
        SOC" steigt), bis der SOC "Netzladen Max. SOC" erreicht/überschreitet
        (dann zurück auf False) - Netzladung lädt also einmal gestartet bis
        zu ihrem eigenen Ziel durch, statt bei jedem erneuten Überschreiten
-       von "Netzladung Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
+       von "Netzladung Min. SOC" sofort wieder abzubrechen.
+       Die offene Hysterese wird für ein aktives Netzladefenster sofort
+       und unabhängig vom Konfigurations-Store je Config Entry gespeichert:
+       Start-/Enduhrzeit und das konkrete UTC-Fensterende identifizieren
+       genau diese Fensterinstanz, auch über Mitternacht und Zeitumstellung.
+       Nach Neustart oder Neuladen wird sie erst nach vollständigem
+       Konfigurations-Bootstrap und mit gültigem SOC übernommen, wenn
+       exakt dasselbe unveränderte Fenster noch aktiv ist, der aktuelle
+       Monat freigegeben und Netzladung weiterhin eingeschaltet ist.
+       Dadurch läuft eine bei 18 % gestartete Ladung bei Min. SOC 20 %
+       und Netzladeziel 80 % nach Neustart mit SOC 55 % bis 80 % weiter.
+       Zielerreichung, Fensterablauf oder Deaktivierung entfernen den
+       gespeicherten Zustand bei der nächsten gültigen Auswertung durch
+       einen atomaren inaktiven Datensatz (logisches Zurücksetzen);
+       ein regulärer Shutdown erhält ihn für die Wiederaufnahme.
+       Fehlende, defekte, abgelaufene oder nicht passende Zustände armen
+       niemals allein aufgrund eines SOC zwischen Startschwelle und Ziel.
+       Die Wiederherstellung erzeugt keinen Nachweis tatsächlich gemessener
+       Netzladung und damit keine Entladesperre. PV-Pausen und temporär
+       ungültige SOC-Messungen löschen eine offene Hysterese nicht.
+       Schreibvorgänge werden durch Rücklesen bestätigt; fehlgeschlagene
+       Schreib- oder Löschversuche werden protokolliert und bei der nächsten
+       gültigen Auswertung erneut versucht. Die aktuelle Ladesteuerung
+       bleibt dabei wirksam, insbesondere das Stoppen am Ziel. Bei einem
+       Neustart vor erfolgreicher Persistenz ist nur der tatsächlich
+       lesbare gespeicherte Zustand wiederherstellbar.
+       Ohne vorherige Einstellung (z.
        B. direkt nach der Ersteinrichtung) steht der Wert auf
        DEFAULT_TIMED_CHARGE_MIN_SOC (const.py, 20 %,
        SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt auf 0
@@ -3039,6 +3065,9 @@ requirement_setup_finish_summary:
        erreichbarem SunSpec-Modus-Block, sowie 'Nicht erreichbar' bzw.
        'Nicht verfügbar' bei einem auf diesem Testread fehlschlagenden
        SunSpec-Modus-Block."
+    - "Die Entity-Anzahl wird im Test gegen die tatsächlich von allen
+       Plattformen in async_setup_entry erzeugten Entities geprüft, damit
+       neue Entities nicht unbemerkt aus der Zusammenfassung fehlen."
     - "tests/test_config_flow.py deckt ab, dass der Config Entry weiterhin
        korrekt mit allen zuvor gesammelten Daten (Verbindung,
        Netzladung-Vorbelegung, Dashboard-Entscheidung) angelegt wird,
@@ -3186,12 +3215,13 @@ requirement_self_diagnosis_repairs:
        möglich (REQ-DYNAMIC-PRICE-CHARGE). Der Hinweis erscheint sofort und
        verschwindet, sobald die Preisgrenzen korrigiert sind.
        translation_placeholders: max_price, neutral_price.
-    5. ISSUE_EMPTY_CHARGE_WINDOW ("Zeitfenster ist leer"): eine der beiden
+    5. ISSUE_EMPTY_CHARGE_WINDOW ("Zeitfenster ist leer oder unvollständig"): eine der beiden
        zeitfenstergesteuerten Automatiken (zeitgesteuertes Laden ODER
        netzdienliches Laden, je eigene issue_id mit Suffix "timed_charge"/
        "grid_serving") ist aktiv, aber ihre Start- und Endzeit sind
-       identisch (siehe _window_intervals: start == end gilt als leeres
-       Fenster) - die Automatik läuft dadurch nie, ohne dass das an der
+       identisch oder mindestens eine Grenze fehlt (None, etwa nach einer
+       abgewiesenen Zeitfenster-Überschneidung). Beide Fälle gelten als
+       unwirksames Fenster - die Automatik läuft dadurch nie, ohne dass das an der
        Entity selbst erkennbar wäre. translation_placeholders: feature
        (voll ausgeschriebener Anzeigename der Automatik).
     6. ISSUE_NO_ACTIVE_MONTHS ("Kein Monat ausgewählt"): analog zu Punkt 5,
@@ -3221,6 +3251,11 @@ requirement_self_diagnosis_repairs:
     - "tests/test_repairs.py deckt zusätzlich ab, dass eine unauffällige
        Standardkonfiguration (alles deaktiviert bzw. in Ordnung) keines der
        sechs Issues erzeugt."
+    - "Fehlende Startzeit, Endzeit oder beide Grenzen erzeugen bei beiden
+       aktivierten Automatiken einen beständigen Reparaturhinweis, auch nach
+       einem Reload. Vollständige Zeitfenster oder Abschalten der Automatik
+       löschen ihn. Die durch Überschneidung geleerte Zeit einer
+       Zwei-Schritt-Bearbeitung wird ebenfalls erkannt."
     - "tests/test_coordinator.py deckt ab, dass
        self._extended_unavailable_since nur auf der Zustandsflanke gesetzt
        wird (nicht bei jedem weiteren Poll-Zyklus mit weiterhin nicht

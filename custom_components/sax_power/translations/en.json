@@ -548,8 +548,8 @@
       "description": "\"Grid charge max. SOC\" ({max_soc} %) is below \"Grid charge min. SOC\" ({min_soc} %). Timed charging stops before reaching its start threshold again, leaving no gap between the start and stop thresholds. Please raise grid charge max. SOC or lower grid charge min. SOC."
     },
     "empty_charge_window": {
-      "title": "Time window is empty",
-      "description": "The time window for \"{feature}\" is empty (start and end time are identical) - the automation therefore never runs. Please adjust the start or end time."
+      "title": "Time window is empty or incomplete",
+      "description": "The time window for \"{feature}\" is empty or incomplete (start and end time are identical or missing) - the automation therefore never runs. Please set a start and end time with different values."
     },
     "no_active_months": {
       "title": "No month selected",

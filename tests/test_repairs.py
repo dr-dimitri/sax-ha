@@ -417,6 +417,66 @@ async def test_price_neutral_below_limit_issue_clears_once_raised(hass) -> None:
 # ===========================================================================
 # 4. Leeres Zeitfenster (je Automatik: zeitgesteuertes/netzdienliches Laden)
 # ===========================================================================
+@pytest.mark.parametrize("feature", ["timed_charge", "grid_serving"])
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(None, dt_time(6)), (dt_time(22), None), (None, None)],
+)
+@pytest.mark.parametrize("resolution", ["complete", "disable"])
+async def test_incomplete_window_issue_lifecycle(
+    hass, feature: str, start: dt_time | None, end: dt_time | None, resolution: str
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Fehlende Grenzen auch nach Reload melden."""
+    coordinator = _make_coordinator(hass)
+    setattr(coordinator, f"_{feature}_start", start)
+    setattr(coordinator, f"_{feature}_end", end)
+    issue_id = f"{ISSUE_EMPTY_CHARGE_WINDOW}_{feature}"
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, issue_id) is None
+
+    setattr(coordinator, f"_{feature}_enabled", True)
+    with patch(
+        "custom_components.sax_power.infrastructure.self_diagnostics.ir."
+        "async_create_issue",
+        wraps=ir.async_create_issue,
+    ) as create_issue:
+        coordinator._async_check_self_diagnostics()
+        coordinator._async_check_self_diagnostics()
+    assert create_issue.call_count == 1
+    assert _get_issue(hass, issue_id) is not None
+
+    coordinator._self_diagnostics = SelfDiagnostics(hass, "test_entry_id")
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, issue_id) is not None
+
+    if resolution == "complete":
+        setattr(coordinator, f"_{feature}_start", dt_time(22))
+        setattr(coordinator, f"_{feature}_end", dt_time(6))
+    else:
+        setattr(coordinator, f"_{feature}_enabled", False)
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, issue_id) is None
+
+
+async def test_overlap_cleared_window_creates_repair_issue(hass) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Geleerte Zeit nach Überschneidung melden."""
+    coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = True
+    coordinator._timed_charge_start = dt_time(10)
+    coordinator._timed_charge_end = dt_time(16)
+    coordinator._grid_serving_enabled = True
+    coordinator._grid_serving_start = dt_time(2)
+    coordinator._grid_serving_end = dt_time(4)
+
+    await coordinator.async_set_timed_charge_start(dt_time(20))
+    await coordinator.async_set_timed_charge_end(dt_time(1))
+    assert coordinator.timed_charge_start is None
+    assert coordinator.timed_charge_end == dt_time(1)
+    assert coordinator.timed_charge_enabled is True
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, f"{ISSUE_EMPTY_CHARGE_WINDOW}_timed_charge") is not None
+
+
 async def test_empty_timed_charge_window_issue_triggers(hass) -> None:
     coordinator = _make_coordinator(hass)
     coordinator._timed_charge_enabled = True
@@ -521,6 +581,8 @@ async def test_no_active_months_issue_triggers_for_grid_serving(hass) -> None:
 async def test_no_active_months_issue_not_recreated_every_cycle(hass) -> None:
     coordinator = _make_coordinator(hass)
     coordinator._timed_charge_enabled = True
+    coordinator._timed_charge_start = dt_time(22)
+    coordinator._timed_charge_end = dt_time(6)
     coordinator._timed_charge_months = frozenset()
 
     with patch(

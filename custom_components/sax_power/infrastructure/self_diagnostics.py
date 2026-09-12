@@ -217,7 +217,7 @@ class SelfDiagnostics:
         end: dt_time | None,
         feature_label: str,
     ) -> None:
-        problem = enabled and start is not None and end is not None and start == end
+        problem = enabled and (start is None or end is None or start == end)
         self._sync_issue(
             f"{ISSUE_EMPTY_CHARGE_WINDOW}_{feature_key}_{self._entry_id}",
             problem,

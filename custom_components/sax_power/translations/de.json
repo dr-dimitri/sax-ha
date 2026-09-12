@@ -548,8 +548,8 @@
       "description": "\"Netzladen Max. SOC\" ({max_soc} %) liegt unter \"Netzladung Min. SOC\" ({min_soc} %). Die Netzladung endet dadurch unterhalb ihrer Startschwelle; zwischen Start und Stopp fehlt der Hystereseabstand. Bitte Netzladen Max. SOC erhöhen oder Netzladung Min. SOC senken."
     },
     "empty_charge_window": {
-      "title": "Zeitfenster ist leer",
-      "description": "Das Zeitfenster für \"{feature}\" ist leer (Start- und Endzeit sind identisch) - die Automatik läuft dadurch nie. Bitte Start- oder Endzeit anpassen."
+      "title": "Zeitfenster ist leer oder unvollständig",
+      "description": "Das Zeitfenster für \"{feature}\" ist leer oder unvollständig (Start- und Endzeit sind identisch oder fehlen) - die Automatik läuft dadurch nie. Bitte eine Start- und Endzeit mit unterschiedlichen Werten festlegen."
     },
     "no_active_months": {
       "title": "Kein Monat ausgewählt",

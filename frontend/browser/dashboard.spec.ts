@@ -104,14 +104,14 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await shared.fill("90");
   await panel
     .locator("form")
-    .filter({ has: shared })
+    .filter({ has: page.locator("input[max='100']") })
     .getByRole("button")
     .click();
   await expect(panel.getByRole("alert")).toBeVisible();
   await expect(
     panel
       .locator("form")
-      .filter({ has: shared })
+      .filter({ has: page.locator("input[max='100']") })
       .locator(".entity-control__value"),
   ).toContainText("75");
   await expect(page.locator("#actions")).toContainText("2: number.set_value");
@@ -129,7 +129,8 @@ test("overnight times, months, native strategy options and negative prices", asy
   await times.nth(0).fill("23:15:00");
   await panel
     .locator("form")
-    .filter({ has: times.nth(0) })
+    .filter({ has: page.locator("input[type=time]") })
+    .first()
     .getByRole("button")
     .click();
   await expect(page.locator("#actions")).toContainText('"time":"23:15:00"');
@@ -148,7 +149,8 @@ test("overnight times, months, native strategy options and negative prices", asy
   await price.fill("-0.125");
   await panel
     .locator("form")
-    .filter({ has: price })
+    .filter({ has: page.locator("input[min='-1']") })
+    .first()
     .getByRole("button")
     .click();
   await expect(page.locator("#actions")).toContainText('"value":-0.125');

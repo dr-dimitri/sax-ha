@@ -186,7 +186,10 @@ function openSidebar(): void {
           {{ text.missingEntry }}
         </p>
         <GeneralView v-else-if="activePath === 'allgemein'" />
-        <TimedChargingView v-else-if="activePath === 'ladeautomatik'" />
+        <TimedChargingView
+          v-else-if="activePath === 'ladeautomatik'"
+          :hass="hass"
+        />
         <GridServingView v-else-if="activePath === 'netzdienliches-laden'" />
         <DynamicChargingView v-else-if="activePath === 'dynamisches-laden'" />
         <SavingsView

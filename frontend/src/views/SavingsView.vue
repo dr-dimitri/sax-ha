@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, useId, watch } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
+import TariffPlan from "../components/TariffPlan.vue";
 import {
   finiteValue,
   formatSavingsDate,
@@ -30,16 +31,8 @@ const text = computed(() =>
         week: "Diese Woche bisher",
         month: "Dieser Monat bisher",
         year: "Dieses Jahr bisher",
-        tariff: "Tarifplan (tageszeitabhängig)",
         from: "Von",
         to: "Bis",
-        price: "Arbeitspreis",
-        now: "jetzt",
-        base: "Grundpreis",
-        feed: "Einspeisevergütung",
-        next: "Nächster Preiswechsel",
-        noPrice:
-          "Derzeit gilt kein Preis. Bitte die Tarifkonfiguration prüfen.",
         range: "Freier Zeitraum",
         apply: "Zeitraum anzeigen",
         refresh: "Aktualisieren",
@@ -90,16 +83,8 @@ const text = computed(() =>
         week: "This week so far",
         month: "This month so far",
         year: "This year so far",
-        tariff: "Tariff schedule (time of use)",
         from: "From",
         to: "To",
-        price: "Import price",
-        now: "now",
-        base: "Base price",
-        feed: "Feed-in remuneration",
-        next: "Next price change",
-        noPrice:
-          "No price currently applies. Please check the tariff configuration.",
         range: "Custom period",
         apply: "Show period",
         refresh: "Refresh",
@@ -148,9 +133,6 @@ const net = computed(() =>
   dashboard?.entity("sensor", "economics_net_savings"),
 );
 const status = computed(() => dashboard?.entity("sensor", "economics_status"));
-const price = computed(() =>
-  dashboard?.entity("sensor", "economics_current_import_price"),
-);
 const progressValue = computed(() =>
   progress.value?.available ? finiteValue(progress.value.state?.state) : null,
 );
@@ -162,10 +144,6 @@ const progressBounded = computed(() =>
 const money = (value: unknown) => {
   const formatted = formatSavingsNumber(value, props.hass);
   return formatted === null ? text.value.unavailable : `${formatted} €`;
-};
-const tariffPrice = (value: unknown) => {
-  const formatted = formatSavingsNumber(value, props.hass, 4);
-  return formatted === null ? text.value.unavailable : `${formatted} EUR/kWh`;
 };
 const timestamp = (value: unknown) =>
   formatSavingsDate(value, props.hass) ?? text.value.unavailable;
@@ -187,52 +165,6 @@ const statusMessage = computed(() => {
     return text.value[state];
   return text.value.missing;
 });
-const attributes = computed(() => price.value?.state?.attributes ?? {});
-const tariffVisible = computed(
-  () => attributes.value.tariff_type === "time_of_use",
-);
-type TariffWindow = { start: string; end: string; price_eur_kwh: unknown };
-const windows = computed<TariffWindow[]>(() =>
-  Array.isArray(attributes.value.windows)
-    ? attributes.value.windows.filter(
-        (window): window is TariffWindow =>
-          !!window &&
-          typeof window === "object" &&
-          typeof window.start === "string" &&
-          typeof window.end === "string",
-      )
-    : [],
-);
-const reason = computed(() => attributes.value.unavailable_reason);
-const hasPrice = computed(
-  () =>
-    price.value?.available &&
-    finiteValue(price.value.state?.state) !== null &&
-    reason.value == null,
-);
-const active = computed(() => {
-  const value = attributes.value.active_window;
-  return value && typeof value === "object"
-    ? (value as { start?: unknown; end?: unknown })
-    : null;
-});
-const isActive = (window: TariffWindow) =>
-  hasPrice.value &&
-  finiteValue(window.price_eur_kwh) !== null &&
-  active.value?.start === window.start &&
-  active.value?.end === window.end;
-const baseActive = computed(
-  () =>
-    hasPrice.value &&
-    active.value === null &&
-    finiteValue(attributes.value.base_price_eur_kwh) !== null,
-);
-const clock = (value: string) =>
-  formatSavingsDate(
-    `2000-01-01T${value.length === 5 ? `${value}:00` : value}Z`,
-    props.hass,
-    { timeStyle: "short", timeZone: "UTC" },
-  ) ?? value.slice(0, 5);
 const statistics = useSavingsStatistics(
   () => props.hass,
   () => props.entryId,
@@ -453,56 +385,7 @@ const chartDate = (value: string) =>
         </article>
       </section>
     </div>
-    <section
-      v-if="tariffVisible"
-      class="savings-card savings-tariff"
-      :aria-labelledby="`${id}-tariff`"
-    >
-      <h2 :id="`${id}-tariff`">{{ text.tariff }}</h2>
-      <div class="savings-table-scroll">
-        <table class="savings-table">
-          <thead>
-            <tr>
-              <th aria-label="Status"></th>
-              <th>{{ text.from }}</th>
-              <th>{{ text.to }}</th>
-              <th>{{ text.price }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(window, index) in windows"
-              :key="index"
-              :class="{ 'savings-current': isActive(window) }"
-            >
-              <td>{{ isActive(window) ? text.now : "" }}</td>
-              <td>{{ clock(window.start) }}</td>
-              <td>{{ clock(window.end) }}</td>
-              <td>{{ tariffPrice(window.price_eur_kwh) }}</td>
-            </tr>
-            <tr :class="{ 'savings-current': baseActive }">
-              <td>{{ baseActive ? text.now : "" }}</td>
-              <td colspan="2">{{ text.base }}</td>
-              <td>{{ tariffPrice(attributes.base_price_eur_kwh) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p>
-        <strong>{{ text.feed }}:</strong>
-        {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
-      </p>
-      <p v-if="!hasPrice">
-        {{ text.noPrice
-        }}<span v-if="typeof reason === 'string' && reason">
-          ({{ reason }})</span
-        >
-      </p>
-      <p v-else-if="attributes.next_price_change_at">
-        <strong>{{ text.next }}:</strong>
-        {{ timestamp(attributes.next_price_change_at) }}
-      </p>
-    </section>
+    <TariffPlan :hass="hass" class="savings-tariff" />
     <section
       v-if="net"
       class="savings-card savings-range"
@@ -756,13 +639,6 @@ const chartDate = (value: string) =>
 .savings-table th:last-child,
 .savings-table td:last-child {
   text-align: right;
-}
-.savings-current {
-  font-weight: 600;
-  background: var(
-    --secondary-background-color,
-    color-mix(in srgb, currentColor 8%, transparent)
-  );
 }
 .savings-dates {
   display: flex;

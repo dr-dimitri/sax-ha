@@ -120,10 +120,10 @@ keine Vue-/Vorschaukennzeichnung.
 | View | Anforderungen | Aufgabe |
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
-| `TimedChargingView.vue` | `REQ-VUE-CHARGING` | Zeitfenster, Entladestatus, Netzladeziel/Startschwelle und Monatsschalter. |
+| `TimedChargingView.vue` | `REQ-VUE-CHARGING` | Tarifpreisfenster, Netzladezeitfenster, Entladestatus, Netzladeziel/Startschwelle und Monatsschalter. |
 | `DynamicChargingView.vue` | `REQ-VUE-DYNAMIC-CHARGING` | Preisladeregler, Strategie und Status in der bisherigen Reihenfolge. |
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
-| `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, Tarifplan, Kalenderwerte und freie Recorder-Auswertung. |
+| `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
 Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
 Zeitvariabler Tarif (EN: Time-of-use tariff), Dynamischer Tarif (EN: Dynamic
@@ -260,11 +260,11 @@ verwenden denselben Entwurf. Beide Fenster unterstützen DE/EN, helle und
 dunkle HA-Themes sowie mobile Ansichten und zeigen auf Deutsch den
 Uhr-Zusatz nur an der bestätigten Zeitspanne.
 
-Die geplanten Zeiten im dynamischen Tarif und die Tarifplan-Attribute unter
-Amortisation bleiben reine Anzeigen. Die Recorder-Datumsfilter bleiben
-Datumseingaben. Die bis zu acht TOU-Fenster im HA-Optionsflow sind keine
-Zeitfenster-Eingaben dieses Vue-Panels; die separate Controls-Vorschau ist
-ebenfalls keine produktive Ansicht.
+Die geplanten Zeiten im dynamischen Tarif und die Tarifpreisfenster unter
+Zeitvariabler Tarif und Amortisation bleiben reine Anzeigen. Die
+Recorder-Datumsfilter bleiben Datumseingaben. Die bis zu acht TOU-Fenster im
+HA-Optionsflow sind keine Zeitfenster-Eingaben dieses Vue-Panels; die separate
+Controls-Vorschau ist ebenfalls keine produktive Ansicht.
 
 `dashboard_statistics.py` ergänzt den ausschließlich lesenden WebSocket-Befehl
 `sax_power/dashboard/statistics`. Die Anfrage enthält `entry_id`, optional das
@@ -497,6 +497,24 @@ gewählten Tarifart gehörenden Schlüssel und verwirft alle übrigen aus
 nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
 `section`-Blöcke und liegen deshalb als verschachtelte Mappings in
 `entry.options`.
+
+`TariffPlan.vue` stellt diese Preisfenster in `TimedChargingView.vue` und
+`SavingsView.vue` unter „Tarifpreisfenster“ (EN: „Tariff price windows“) dar.
+Die reaktive Datenquelle ist in beiden Ansichten ausschließlich der vorhandene
+Sensor `economics_current_import_price` mit `tariff_type`, `windows`,
+`active_window`, `base_price_eur_kwh`, `feed_in_price_eur_kwh`,
+`next_price_change_at` und `unavailable_reason`. Die Karte erscheint nur bei
+`time_of_use` und übernimmt alle bis zu acht Fenster in der vom Sensor
+gelieferten Planreihenfolge, einschließlich Mitternacht und angrenzender
+Zeitgrenzen. Der Sensor sortiert den Plan nach Startzeit; die Eingabegruppen
+in den Options bleiben dabei unverändert.
+Die gemeinsame Komponente erhält HA-Änderungen ohne Dashboard-Neubau; sie
+formatiert Preise mit vier Nachkommastellen und berechnet weder Preise noch
+aktive Fenster. Auch ohne Preisfenster bleiben vorhandene Grundpreis- und
+Tarifinformationen sichtbar. Ein fehlender Preis wird nicht als aktiver
+Grundpreis markiert. Die separate Karte „Netzladezeitfenster“ (EN: „Grid
+charging window“) bedient weiterhin genau `timed_charge_start` und
+`timed_charge_end`; Tarifpreisfenster lösen keine Lade- oder Serviceaktion aus.
 
 Der **Strompreis-Sensor** (`price_sensor`, erste Seite) hat zwei getrennte
 Aufgaben, die sich leicht verwechseln lassen:
@@ -963,9 +981,9 @@ Poll einen alten Coordinator-Stand unter der neuen Generation vormerkt.
 ### Dashboard-Tab "Amortisation" (REQ-VUE-SAVINGS)
 
 `SavingsView.vue` verwendet `economics_net_savings` für alle Kalender- und
-freien Zeitraumwerte. Amortisation, Kalenderwerte, Tarifinformation, freie
-Auswertung, eingeklappte Hinweise und Statushinweis folgen der oben
-beschriebenen Funktionsmatrix. Daten kommen aus den vorhandenen HA-Entitäten
+freien Zeitraumwerte. Amortisation, Kalenderwerte, die mit Zeitvariabler Tarif
+gemeinsame `TariffPlan.vue`-Karte, freie Auswertung, eingeklappte Hinweise und
+Statushinweis folgen der oben beschriebenen Funktionsmatrix. Daten kommen aus den vorhandenen HA-Entitäten
 und dem nativen Recorder-Adapter; Darstellung und Datumswahl sind in Vue
 implementiert. Es gibt keine generierten Lovelace-Karten oder gespeicherten
 Dashboard-Templates.
@@ -1250,9 +1268,9 @@ Leistungsreferenz/Skalierung schreibbar; der validierte SunSpec-Pfad und
 dessen Modus-Rollback bleiben erhalten. Die Regelung kann auf schnelle
 Last-/PV-Änderungen erst beim nächsten Mess-/Steuertakt reagieren.
 
-Das Dashboard zeigt im Tab „Zeitvariabler Tarif“ unmittelbar unter „Zeitfenster“
-die Karte „Entladestatus“. Der Enum-Sensor `timed_charge_discharge_status`
-zeigt „Normalbetrieb“, „Netzladen“ oder „Entladung wg. Netzladen gestoppt“.
+Das Dashboard zeigt im Tab „Zeitvariabler Tarif“ unmittelbar unter
+„Netzladezeitfenster“ die Karte „Entladestatus“. Der Enum-Sensor
+`timed_charge_discharge_status` zeigt „Normalbetrieb“, „Netzladen“ oder „Entladung wg. Netzladen gestoppt“.
 „Normalbetrieb“ beschreibt ausschließlich diesen Mechanismus. Nach einem
 Schreibfehler wird kein erfolgreich gehaltener Zustand behauptet.
 
@@ -1780,10 +1798,12 @@ tests/
 ├── test_vue_dashboard.py            Panel-Lebenszyklus und Hash-Assets
 ├── test_vue_dashboard_repairs.py    Dashboard-Update und Registrierung über HA-Reparaturen
 ├── test_vue_dashboard_e2e.py        Zwei native HA-Clients gegen lokalen Modbus-Simulator
-├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Amortisations-Tab: je ein PV-Lade-,
+├── test_economics_dashboard_e2e.py  Ende-zu-Ende bis zum Dashboard: je ein PV-Lade-,
 │                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
 │                                  Herkunftsaufteilung und die Geldsensoren bis zur
-│                                  Dashboard-Metadatenauflösung
+│                                  Dashboard-Metadatenauflösung; ein, zwei und acht Tarifpreisfenster
+│                                  vom Optionsflow über Tarifmodell und Sensorattribute bis zu den
+│                                  Dashboard-States, samt Mitternacht und angrenzenden Grenzen
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)
 └── real_device.yaml                Verbindungsdaten (IP etc.) für test_real_hardware.py

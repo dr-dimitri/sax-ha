@@ -40,7 +40,7 @@ test("compact views retain readable controls and all entities across available p
     ersparnis: 1600,
   };
   const contentLabels = panel.locator(
-    ".entity-gauge h2, .entity-control__name, .entity-value__name, .savings-rows dt, .savings-periods h2",
+    ".entity-gauge h2, .entity-control__name, .entity-value__name, .savings-rows dt, .savings-periods h2, .tariff-plan h2",
   );
 
   for (const tab of tabs) {
@@ -77,9 +77,25 @@ test("compact views retain readable controls and all entities across available p
       const monthToggle = panel.locator(".month-selection__toggle");
       const hasMonths = (await monthToggle.count()) > 0;
       if (hasMonths) await monthToggle.click();
-      const compactPanelHeight = await panel.evaluate(
-        (element) => element.getBoundingClientRect().height,
-      );
+      const compactSize = await panel.evaluate((element) => {
+        const root = element.shadowRoot ?? element;
+        const tariff = root.querySelector(".timed-charging-view__tariff");
+        const tariffStyle = tariff ? getComputedStyle(tariff) : null;
+        const tariffHeight = tariff?.getBoundingClientRect().height ?? 0;
+        const tariffSpacing = tariffStyle
+          ? parseFloat(tariffStyle.marginTop) +
+            parseFloat(tariffStyle.marginBottom)
+          : 0;
+        const compactPanelHeight = element.getBoundingClientRect().height;
+        return {
+          compactPanelHeight,
+          tariffHeight,
+          tariffSpacing,
+          // The added price schedule must not relax the existing charging-control budget.
+          compactHeightWithoutTariff:
+            compactPanelHeight - tariffHeight - tariffSpacing,
+        };
+      });
       if (hasMonths) await monthToggle.click();
       await expect(contentLabels).toHaveText(expectedLabels);
       await expect(
@@ -200,7 +216,7 @@ test("compact views retain readable controls and all entities across available p
               violations.push(`${name(first)} overlaps its value or input`);
           }
           for (const label of section.querySelectorAll(
-            ".entity-gauge h2, .entity-gauge__range, .entity-control__name, .entity-control__value, .entity-value__name, .entity-value__state, .savings-rows dt, .savings-rows dd, .savings-dates label, .savings-table th, .savings-table td",
+            ".entity-gauge h2, .entity-gauge__range, .entity-control__name, .entity-control__value, .entity-value__name, .entity-value__state, .savings-rows dt, .savings-rows dd, .savings-dates label, .savings-table th, .savings-table td, .tariff-plan th, .tariff-plan td",
           )) {
             // Mobile retains its existing smaller confirmation helper, like scale labels.
             if (isMobile && label.classList.contains("entity-control__value"))
@@ -214,13 +230,13 @@ test("compact views retain readable controls and all entities across available p
               );
           }
           for (const label of section.querySelectorAll(
-            ".entity-gauge h2, .entity-control__name, .entity-value__name, .savings-rows dt, .savings-periods h2",
+            ".entity-gauge h2, .entity-control__name, .entity-value__name, .savings-rows dt, .savings-periods h2, .tariff-plan h2",
           )) {
             if (!visible(label)) violations.push(`${name(label)} is hidden`);
             const rect = label.getBoundingClientRect();
             const card =
               label.closest(
-                ".entity-gauge, .general-view__card, .charging-view__card, .savings-card",
+                ".entity-gauge, .general-view__card, .charging-view__card, .savings-card, .tariff-plan",
               ) ?? section;
             const bounds = card.getBoundingClientRect();
             if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1)
@@ -265,7 +281,7 @@ test("compact views retain readable controls and all entities across available p
       const description = `${tab.path}-${layout.width}x${layout.height}-sidebar${layout.sidebar}`;
       await testInfo.attach(description, {
         body: Buffer.from(
-          JSON.stringify({ ...geometry, compactPanelHeight }, null, 2),
+          JSON.stringify({ ...geometry, ...compactSize }, null, 2),
         ),
         contentType: "application/json",
       });
@@ -296,9 +312,10 @@ test("compact views retain readable controls and all entities across available p
         );
       }
       if (!mobile)
-        expect(compactPanelHeight, description).toBeLessThanOrEqual(
-          heightBudgets[tab.path],
-        );
+        expect(
+          compactSize.compactHeightWithoutTariff,
+          description,
+        ).toBeLessThanOrEqual(heightBudgets[tab.path]);
     }
   }
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
@@ -543,6 +560,170 @@ test("one dashboard with five complete views, local assets and responsive screen
       .some((entry) => new URL(entry.name).origin !== location.origin),
   );
   expect(external).toBe(false);
+});
+
+// REQ-VUE-PARITY / REQ-ECONOMICS-TARIFFS: show price windows on the tariff tab.
+test("eight tariff price windows stay readable on the time-of-use tab and match amortization without service actions", async ({
+  page,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const english = testInfo.project.name.endsWith("en");
+  const mobile = testInfo.project.name.startsWith("mobile");
+  const windows = [
+    { start: "22:00", end: "02:00", price_eur_kwh: 0.18 },
+    { start: "03:00", end: "05:00", price_eur_kwh: -0.05 },
+    { start: "06:00", end: "08:00", price_eur_kwh: 0 },
+    { start: "09:00", end: "11:00", price_eur_kwh: 0.21 },
+    { start: "12:00", end: "14:00", price_eur_kwh: 0.22 },
+    { start: "15:00", end: "17:00", price_eur_kwh: 0.23 },
+    { start: "18:00", end: "20:00", price_eur_kwh: 0.2456 },
+    { start: "20:00", end: "21:00", price_eur_kwh: 0.28 },
+  ];
+  const price = (value: number) =>
+    `${new Intl.NumberFormat(english ? "en-GB" : "de-DE", {
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    }).format(value)} EUR/kWh`;
+  await page.locator("#tariff-timed").click();
+  await panel.evaluate((element, configuredWindows) => {
+    const host = element as HTMLElement & { hass: HomeAssistant };
+    const entityId = "sensor.demo_economics_current_import_price";
+    const current = host.hass.states[entityId];
+    host.hass = {
+      ...host.hass,
+      states: {
+        ...host.hass.states,
+        [entityId]: {
+          ...current,
+          attributes: {
+            ...current.attributes,
+            windows: configuredWindows,
+            active_window: { start: "18:00", end: "20:00" },
+          },
+        },
+      },
+    };
+  }, windows);
+  await panel.locator("nav a[href$='/ladeautomatik']").click();
+  await expect(panel.getByRole("heading", { level: 1 })).toHaveText(
+    english ? "Time-of-use tariff" : "Zeitvariabler Tarif",
+  );
+  await expect(
+    panel.getByRole("heading", {
+      name: english ? "Grid charging window" : "Netzladezeitfenster",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(panel.locator(".time-window-control")).toHaveCount(1);
+  await expect(
+    panel.locator(".time-window-control input[type=time]"),
+  ).toHaveCount(2);
+  const tariff = panel.locator(".tariff-plan");
+  const rows = tariff.locator(".tariff-plan__table tbody tr");
+  await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
+    english ? "Tariff price windows" : "Tarifpreisfenster",
+  );
+  await expect(rows).toHaveCount(9);
+  for (const [index, window] of windows.entries()) {
+    await expect(rows.nth(index).locator("td")).toHaveText([
+      index === 6 ? (english ? "now" : "jetzt") : "",
+      window.start,
+      window.end,
+      price(window.price_eur_kwh),
+    ]);
+  }
+  await expect(rows.last().locator("td")).toHaveText([
+    "",
+    english ? "Base price" : "Grundpreis",
+    price(0.32),
+  ]);
+  await expect(tariff.locator(".tariff-plan__current")).toHaveCount(1);
+  await expect(tariff.locator(".tariff-plan__current")).toContainText("18:00");
+  await expect(tariff).toContainText(price(0.0812));
+  await expect(tariff).toContainText(
+    english ? "Next price change" : "Nächster Preiswechsel",
+  );
+  await expect(
+    tariff.locator("input, select, button, [role=slider]"),
+  ).toHaveCount(0);
+  const expectedRows = await rows.allTextContents();
+  for (const width of mobile ? [390, 320] : [1366, 1440]) {
+    const sidebar = width === 1366 ? 256 : 0;
+    await page.setViewportSize({ width, height: mobile ? 844 : 1000 });
+    await page.addStyleTag({
+      content: `sax-power-vue-panel { margin-left: ${sidebar}px; width: calc(100% - ${sidebar}px); }`,
+    });
+    await expect(rows).toHaveText(expectedRows);
+    const geometry = await tariff.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const scroll = element.querySelector<HTMLElement>(
+        ".tariff-plan__scroll",
+      )!;
+      const scrollBounds = scroll.getBoundingClientRect();
+      const firstCell = scroll.querySelector("tbody td")!;
+      const lastCell = scroll.querySelector(
+        "tbody tr:last-child td:last-child",
+      )!;
+      scroll.scrollLeft = 0;
+      const reachesStart =
+        firstCell.getBoundingClientRect().left >= scrollBounds.left - 1;
+      scroll.scrollLeft = scroll.scrollWidth;
+      const reachesEnd =
+        lastCell.getBoundingClientRect().right <= scrollBounds.right + 1;
+      scroll.scrollLeft = 0;
+      return {
+        left: bounds.left,
+        right: bounds.right,
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        reachesStart,
+        reachesEnd,
+        unreadable: [...element.querySelectorAll("th, td, p")]
+          .filter((cell) => {
+            const style = getComputedStyle(cell);
+            const rect = cell.getBoundingClientRect();
+            const text = document.createRange();
+            text.selectNodeContents(cell);
+            const lines = new Set(
+              [...text.getClientRects()].map((line) => Math.round(line.top)),
+            );
+            return (
+              rect.width === 0 ||
+              rect.height === 0 ||
+              style.visibility === "hidden" ||
+              parseFloat(style.fontSize) < 13.99 ||
+              style.textOverflow === "ellipsis" ||
+              (cell.matches("th, td") && lines.size > 1)
+            );
+          })
+          .map((cell) => cell.textContent),
+      };
+    });
+    expect(geometry.left).toBeGreaterThanOrEqual(sidebar);
+    expect(geometry.right).toBeLessThanOrEqual(width);
+    expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+    expect(geometry.reachesStart).toBe(true);
+    expect(geometry.reachesEnd).toBe(true);
+    expect(geometry.unreadable).toEqual([]);
+    const screenshotPath = testInfo.outputPath(
+      `tariff-eight-windows-${width}.png`,
+    );
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach(
+      `tariff-eight-windows-${width}-${testInfo.project.name}`,
+      {
+        path: screenshotPath,
+        contentType: "image/png",
+      },
+    );
+  }
+  await panel.locator("nav a[href$='/ersparnis']").click();
+  await expect(panel.locator(".savings-tariff")).toBeVisible();
+  await expect(rows).toHaveText(expectedRows);
+  await expect(tariff.locator(".tariff-plan__current")).toHaveCount(1);
+  await panel.locator("nav a[href$='/ladeautomatik']").click();
+  await expect(rows).toHaveText(expectedRows);
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
 test("confirmed shared values, errors, reconnect and unavailable controls", async ({

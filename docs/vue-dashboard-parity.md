@@ -111,13 +111,19 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
 | --- | --- | --- | --- |
 | Hauptschalter | `switch.timed_charge_enabled` | Übersetzter Name „Netzladung aktiv“. | [Ladeansichten][charging-tests]: vollständige Reihenfolge |
-| Zeitfenster | `time.timed_charge_start`, `time.timed_charge_end` | Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, Minutenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
+| Netzladezeitfenster (EN: Grid charging window) | `time.timed_charge_start`, `time.timed_charge_end` | Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, Minutenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
 | Direkt danach: Entladestatus | `sensor.timed_charge_discharge_status` | `normal` → Normalbetrieb, `discharge_blocked` → Entladung wg. Netzladen gestoppt, `grid_charging` → Netzladen. | [Ladeansichten][charging-tests]: alle drei Live-Statuswechsel |
 | Einstellungen | `number.timed_charge_max_soc`, danach `number.timed_charge_min_soc` | Netzladeziel und Startschwelle. Die Obergrenze des Ziels folgt dessen HA-`max`-Attribut; kein zusätzlicher globaler Max-SOC in diesem Tab. | [Ladeansichten][charging-tests]: geänderte Grenze, ungültiger und gültiger Zielwert |
 | Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Kompakte Zusammenfassung mit einzeln ausgewählten Monaten und getrennten Spannen; „Ändern“ öffnet vier Quartalsgruppen. Nur HA-bestätigte Zustände; Fehler und fehlende Werte bleiben auch eingeklappt sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, getrennte Auswahlbereiche, HA-Bestätigung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
+| Danach über die volle Breite: Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribute `tariff_type`, `windows`, `active_window`, `base_price_eur_kwh`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Dieselbe `TariffPlan.vue`-Komponente wie unter Amortisation; nur bei `time_of_use`. Alle bis zu acht gespeicherten Preisfenster samt Mitternacht und angrenzenden Grenzen, aktive Markierung und übrige Tarifdaten kommen live aus HA; Preise mit vier Nachkommastellen. Leere Fensterlisten erhalten die übrigen verfügbaren Tarifdaten. | [Tarifpreisfenster][tariff-plan-tests], [Browser][browser-tests], `tests/test_config_flow.py`, `tests/test_economics_dashboard_e2e.py`: vollständige Options-/Modell-/Sensor-/Dashboard-Kette für ein, zwei und acht Fenster |
 
 Vue entscheidet weder über Ladeberechtigung noch über die laufende
 Sollwertwiederholung. Beides verbleibt bei `REQ-TIMED-SOC-CHARGE` im Backend.
+Die Preisfenster bleiben Anzeigen; eingegeben werden sie im HA-Optionsflow.
+Sie verändern das einzelne Netzladezeitfenster nicht. Mount, Rendern und
+Live-Tarifwechsel erzeugen keine Serviceaufrufe. Andere Tarifarten oder eine
+fehlende Preis-Entity blenden die Tarifpreisfenster-Karte aus; unbekannte oder
+nicht verfügbare Preise werden nicht als gültiger aktiver Grundpreis markiert.
 
 ## Dynamischer Tarif
 
@@ -216,7 +222,7 @@ Schreibversuch aus.
 | --- | --- |
 | Zeitvariabler Tarif: `timed_charge_start` / `timed_charge_end` | Gemeinsame Leiste und atomare Übernahme über `set_timed_charge_window`. |
 | Netzdienliche Ladepause: `grid_serving_start` / `grid_serving_end` | Dieselbe Komponente, Übernahme über `set_grid_serving_window`. |
-| Dynamischer Tarif: geplanter nächster Start; Amortisation: Tarifzeitfenster | Nur Anzeigen aus HA; keine editierbaren Zeitpaare. |
+| Dynamischer Tarif: geplanter nächster Start; Zeitvariabler Tarif und Amortisation: Tarifpreisfenster | Nur Anzeigen aus HA; keine editierbaren Zeitpaare. |
 | Amortisation: Anfangs- und Enddatum | Recorder-Datumsfilter, weiterhin Datumseingaben. |
 | Bis zu acht TOU-Fenster im HA-Optionsflow | Außerhalb des Vue-Panels; keine Umstellung. |
 | Einzelzeit in der Controls-Entwicklungsvorschau | Komponentendemonstration, kein weiteres produktives Zeitfenster. |
@@ -246,8 +252,8 @@ erst für die Anzeige. Die interne Bilanz bleibt unverändert.
 | Netto-Ergebnis | `sensor.economics_net_savings` | Bilanzierter, auch negativer Wert. Fehlt die Entity, entfallen ihre Detailzeile, Kalenderwerte, freie Auswertung und sämtliche Statistikabfragen. | [Ersparnis][savings-tests]: negative Werte und fehlende Ergebnis-Entity |
 | Bilanzbeginn | `sensor.economics_status`, Attribut `economics_started_at` | Lokalisierter Zeitpunkt; Recorder-Historie kann später beginnen. | [Ersparnis][savings-tests]: lokale Zeit und optionale Zeile |
 | 2. Kalenderwerte | Recorder von `economics_net_savings`: `change` für Tag, Woche, Monat, Jahr | Heute/Woche/Monat/Jahr bisher; HA-Kalendergrenzen und konfigurierter Wochenbeginn. Keine rollierende Bilanz und keine Differenz eigener Live-Werte. | [Recorder-Adapter][statistics-tests]: Vergleich mit denselben nativen Recorder-Abfragen |
-| 3. Tarifplan | `sensor.economics_current_import_price`, Attribut `tariff_type` | Nur bei `time_of_use`, reagiert auf Tarifwechsel ohne Dashboard-Neubau. | [Ersparnis][savings-tests]: Live-Tarifwechsel |
-| Tarifzeitfenster | `windows[].start`, `windows[].end`, `windows[].price_eur_kwh`, `active_window` | Planreihenfolge und aktive Markierung aus HA. Zeiten werden dargestellt, nicht neu bewertet. | [Ersparnis][savings-tests]: Fensterwechsel und Preisformat |
+| 3. Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribut `tariff_type` | Gemeinsame `TariffPlan.vue`-Komponente mit Zeitvariabler Tarif. Nur bei `time_of_use`, reagiert auf Tarifwechsel ohne Dashboard-Neubau. | [Tarifpreisfenster][tariff-plan-tests]: Live-Tarifwechsel |
+| Einzelne Preisfenster | `windows[].start`, `windows[].end`, `windows[].price_eur_kwh`, `active_window` | Alle bis zu acht Fenster in Planreihenfolge und aktive Markierung aus HA, auch über Mitternacht und an angrenzenden Grenzen. Zeiten werden dargestellt, nicht neu bewertet. | [Tarifpreisfenster][tariff-plan-tests]: vollständige Fenster, Live-Wechsel und Preisformat |
 | Weitere Tarifdaten | `base_price_eur_kwh`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Grundpreis, Einspeisevergütung, nächster Wechsel oder Nichtverfügbarkeitsgrund. Fehlender Preis wird nicht als gültiger aktiver Grundpreis markiert. | [Ersparnis][savings-tests]: fehlender Preis/Grundpreis, vier Nachkommastellen |
 | 4. Freier Zeitraum | Ein Paar `start_date`/`end_date`, Recorder-`change` derselben Netto-Entity | Beide Tage vollständig in HA-Zeitzone; ausdrücklich übernehmen. Ein Zeitraum steuert Kennzahl und Balkendiagramm, inklusive negativer Werte und Datenlücken. | [Ersparnis][savings-tests], [Recorder-Adapter][statistics-tests], [Browser][browser-tests] |
 | Diagramm | Native `statistics_during_period`-Buckets mit `start`, `end`, `change` | Stunden/Tage/Monate entsprechend der Auswahl; reale zeitliche Positionen auch bei DST/Lücken; beschriftetes SVG plus aufklappbare Tabelle. | [Ersparnis][savings-tests], [Recorder-Adapter][statistics-tests], [Browser][browser-tests] |
@@ -517,6 +523,7 @@ Dokumentationsbilder ausgeblendet; die README kennzeichnet die Beispieldaten.
 [control-response-tests]: ../tests/test_control_response.py
 [general-tests]: ../frontend/tests/general.test.ts
 [charging-tests]: ../frontend/tests/charging.test.ts
+[tariff-plan-tests]: ../frontend/tests/tariff-plan.test.ts
 [savings-tests]: ../frontend/tests/savings.test.ts
 [panel-tests]: ../frontend/tests/panel.test.ts
 [browser-tests]: ../frontend/browser/dashboard.spec.ts

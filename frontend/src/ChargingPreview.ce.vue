@@ -171,7 +171,7 @@ onBeforeUnmount(() => timers.forEach((timer) => window.clearTimeout(timer)));
           }}
         </button>
       </div>
-      <component :is="views[active]" />
+      <component :is="views[active]" v-bind="active === 0 ? { hass } : {}" />
       <details class="charging-preview__log">
         <summary>
           {{

@@ -4512,10 +4512,11 @@ var Qs = ["aria-labelledby"], $s = ["id"], ec = { key: 0 }, tc = { key: 1 }, nc 
 	setup(e) {
 		let t = e, n = An(Xa), r = Vn(), i = Q(() => n?.language.value ?? "en"), a = Q(() => n?.entity("sensor", "hems_status")), o = Q(() => a.value?.available ? a.value.state?.attributes ?? {} : {}), s = Q(() => o.value.mode === t.tariff), c = Q(() => a.value?.available ? s.value ? String(o.value.status ?? "unknown") : "inactive" : "unavailable"), l = Q(() => s.value && (o.value.fallback === !0 || c.value === "fallback")), u = {
 			title: ["Bedarfsgesteuerte Nachtregelung", "Demand-based night control"],
+			introduction: ["Lädt nachts gezielt Strom aus dem Netz nach, damit die gespeicherte Energie bis zur ausreichenden PV-Versorgung am Morgen reicht. Speicherstand, bisherige nächtliche Entladung und PV-Prognose bestimmen die nötige Lademenge.", "Charges from the grid at night as needed to bridge the time until sufficient solar power is available in the morning. Stored energy, past overnight battery discharge and the solar forecast determine how much to charge."],
 			unknown: ["Unbekannt", "Unknown"],
 			unavailable: ["Nicht verfügbar", "Unavailable"],
 			inactive: ["Deaktiviert", "Disabled"],
-			dynamicInactive: ["Die Strategie Bedarfsgesteuert / Nachtbrücke ist im Feld Strategie auswählbar.", "Select Demand-based / Night bridge in the Strategy field."],
+			dynamicInactive: ["Zum Einschalten wähle im Feld Strategie die Option „Bedarfsgesteuert / Nachtbrücke“. Preisgrenze und maximale Ladestunden gelten weiterhin.", "To enable this mode, select Demand-based / Night bridge in the Strategy field. The price limit and maximum charging hours still apply."],
 			planned: ["Netzladung geplant", "Grid charging planned"],
 			no_need: ["Kein Netzladen geplant", "No grid charging planned"],
 			limited: ["Bedarf nur teilweise gedeckt", "Demand only partly covered"],
@@ -4556,11 +4557,12 @@ var Qs = ["aria-labelledby"], $s = ["id"], ec = { key: 0 }, tc = { key: 1 }, nc 
 			unknownSuccess: ["Unbekannt; keine Erfolgszusage des Anbieters", "Unknown; provider does not guarantee update success"],
 			efficiencies: ["Annahmen: Lade- / Entladewirkungsgrad", "Assumptions: charge / discharge efficiency"],
 			policy: ["SAX-Annahme zum Prognosealter", "SAX assumption for forecast age"],
-			modelInfo: ["Nachtmodell aus SAX-Entladeenergie. Sieben Tage bleiben die Basis; für das neue Profil sind optional 28 Tage wählbar. Neue Verfahren benötigen ihren eigenen Gütenachweis. Eine vollständige Tagesoptimierung ist nicht enthalten.", "Night model based on SAX discharge energy. Seven days remain the baseline; 28 days are optional for the new profile. New methods require their own validation. Full-day optimisation is not included."],
-			reserveInfo: ["Min-SOC ist die Reserve der Planung; er ist keine neue Gerätesperre gegen Entladung. Max-SOC begrenzt das Ladeziel. Im Rückfall gelten dieselben gespeicherten Werte nach den klassischen Regeln.", "Min SOC is the planning reserve; it is not a new physical discharge lock. Max SOC limits the target. Fallback applies the same saved values using the classic rules."],
-			classicInfo: ["Min-SOC bleibt die Startschwelle; Max-SOC das Ladeziel der klassischen Regelung.", "Min SOC remains the start threshold; max SOC is the target of classic control."],
-			setup: ["PV-Anbieter und Anlage sowie Wirkungsgradannahmen lassen sich unter Einstellungen → Geräte & Dienste → SAX Power → Konfigurieren auswählen.", "Select the solar provider, installation and efficiency assumptions in Settings → Devices & services → SAX Power → Configure."],
-			fallbackInfo: ["Die gespeicherte Min-/Max-SOC-Regel gilt. Tarifgrenzen und Geräteschutz bleiben wirksam.", "The saved min/max SOC rule applies. Tariff limits and device protection remain in force."],
+			modelInfo: ["Alle fünf Minuten wird geprüft, wie viel Netzladung noch nötig ist. Die Schätzung beruht standardmäßig auf der Energie, die der SAX-Speicher in den letzten sieben Tagen nachts abgegeben hat. Sie erfasst nur diese Speicherentladung, nicht den gesamten Hausverbrauch. Die Regelung arbeitet nachts und bis höchstens vier Stunden nach Sonnenaufgang.", "Every five minutes, the system checks how much grid charging is still needed. By default, the estimate uses energy discharged by the SAX battery at night over the past seven days. It covers this battery discharge only, not total household consumption. Control operates at night and for up to four hours after sunrise."],
+			learningInfo: ["Optional kannst du unter Konfigurieren die Prognosen speichern, 28 Tage zur Schätzung heranziehen und die laufende Nacht berücksichtigen. Neue Schätzverfahren werden zunächst mit dem tatsächlichen Verlauf verglichen. Die Automatik nutzt sie erst nach erfolgreicher Qualitätsprüfung.", "Under Configure, you can optionally save forecasts, use 28 days of history and account for the current night. New estimation methods are first compared with actual observations. Automatic control uses them only after successful validation."],
+			reserveInfo: ["SOC ist der Ladezustand in Prozent. „Netzladung Min. SOC“ dient als Reserve in der Berechnung; diese Einstellung allein verhindert keine Entladung. „Netzladen Max. SOC“ begrenzt das berechnete Ladeziel. Die globale Grenze „Max. SOC“ hat weiterhin Vorrang.", "SOC is the battery charge level as a percentage. Grid charge min SOC sets the reserve used in the calculation; this setting alone does not prevent discharge. Grid charge max SOC caps the calculated target. The global Max SOC limit still takes priority."],
+			classicInfo: ["Die klassische Regelung startet unter „Netzladung Min. SOC“ und lädt bis „Netzladen Max. SOC“. Für die Nachtregelung wähle bei Ladesteuerung „Bedarfsgesteuert“. Zeitfenster und aktive Monate gelten für beide.", "Classic control starts charging below Grid charge min SOC and continues up to Grid charge max SOC. To use night control, select Demand-based under Charging control. Time windows and active months apply to both."],
+			setup: ["Wähle deinen PV-Anbieter (pv_forecast oder Solcast) und die Anlage unter Einstellungen → Geräte & Dienste → SAX Power → Konfigurieren. Dort kannst du auch die angenommenen Lade- und Entladewirkungsgrade anpassen; voreingestellt sind jeweils 95 %.", "Choose your solar provider (pv_forecast or Solcast) and installation in Settings → Devices & services → SAX Power → Configure. You can also adjust the assumed charge and discharge efficiencies there; both default to 95%."],
+			fallbackInfo: ["Die Daten reichen für eine bedarfsgesteuerte Planung noch nicht aus. Deshalb gilt vorübergehend die klassische Regelung: Laden unterhalb von Min-SOC, bis Max-SOC erreicht ist. Zeit- und Preisgrenzen sowie Geräteschutz gelten weiterhin.", "There is not enough reliable data for demand-based planning yet. Classic control applies temporarily: charging starts below min SOC and continues up to max SOC. Time and price limits and device protection still apply."],
 			calibrationExtra: ["Zusätzliche Netzenergie für Kalibrierung", "Additional grid energy for calibration"],
 			executionRemaining: ["Verbleibende Energie der aktuellen Ladefreigabe", "Remaining energy of the current charging permission"],
 			executionDeadline: ["Ende der aktuellen Ladefreigabe", "Current charging permission ends"],
@@ -4604,6 +4606,7 @@ var Qs = ["aria-labelledby"], $s = ["id"], ec = { key: 0 }, tc = { key: 1 }, nc 
 			"aria-labelledby": `${R(r)}-title`
 		}, [
 			J("header", null, [J("h2", { id: `${R(r)}-title` }, j(d("title")), 9, dc), J("span", fc, j(f.value), 1)]),
+			J("p", null, j(d("introduction")), 1),
 			J("div", pc, [a.value.available ? s.value ? (G(), K(W, { key: 1 }, [
 				l.value ? (G(), K("p", hc, j(d("fallbackInfo")), 1)) : Z("", !0),
 				(G(!0), K(W, null, H(p.value, (e) => (G(), K("p", { key: e }, j(R(Ys)(e, i.value)), 1))), 128)),
@@ -4631,6 +4634,7 @@ var Qs = ["aria-labelledby"], $s = ["id"], ec = { key: 0 }, tc = { key: 1 }, nc 
 				J("p", null, j(d("modelInfo")), 1),
 				J("p", null, j(d(s.value ? "reserveInfo" : e.tariff === "timed" ? "classicInfo" : "dynamicInactive")), 1),
 				J("p", null, j(d("setup")), 1),
+				J("p", null, j(d("learningInfo")), 1),
 				s.value ? (G(), K(W, { key: 0 }, [J("dl", Cc, [(G(!0), K(W, null, H(x.value, ([e, t]) => (G(), K("div", { key: e }, [J("dt", null, j(d(e)), 1), J("dd", null, j(t), 1)]))), 128))]), (G(!0), K(W, null, H(m.value, (e) => (G(), K("p", { key: e }, j(d("quality")) + ": " + j(R(Ys)(e, i.value)), 1))), 128))], 64)) : Z("", !0)
 			])) : Z("", !0)
 		], 10, uc)) : Z("", !0);
@@ -4657,7 +4661,7 @@ var Qs = ["aria-labelledby"], $s = ["id"], ec = { key: 0 }, tc = { key: 1 }, nc 
 			standard: "Min-/Max-SOC",
 			adaptive: "Bedarfsgesteuert",
 			standardDescription: "Startet unter Min-SOC und lädt bis Max-SOC.",
-			adaptiveDescription: "Plant die nötige Ladung aus SAX-Verbrauch, PV-Prognose und Speicherstand.",
+			adaptiveDescription: "Lädt nur so viel Netzstrom nach, wie bis zur PV-Versorgung am Morgen nötig ist.",
 			hint: "Es wird nur die ausgewählte Ladesteuerung verwendet. Zeitfenster und aktive Monate gelten für beide.",
 			unavailable: "Ladesteuerung nicht verfügbar",
 			disconnected: "Keine Verbindung zu Home Assistant",
@@ -4668,7 +4672,7 @@ var Qs = ["aria-labelledby"], $s = ["id"], ec = { key: 0 }, tc = { key: 1 }, nc 
 			standard: "Min/max SOC",
 			adaptive: "Demand-based",
 			standardDescription: "Starts below min SOC and charges up to max SOC.",
-			adaptiveDescription: "Plans the required charge using SAX consumption, solar forecast and stored energy.",
+			adaptiveDescription: "Charges only as much grid energy as needed until solar power is available in the morning.",
 			hint: "Only the selected charging control is used. Time windows and active months apply to both.",
 			unavailable: "Charging control unavailable",
 			disconnected: "Disconnected from Home Assistant",

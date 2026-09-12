@@ -253,55 +253,102 @@ Der Status und **Nächster Start** zeigen, worauf die Automatik gerade wartet.
 
 ### Bedarfsgesteuerte Nachtregelung (HEMS)
 
-Im zeitvariablen Tarif wechselst du direkt unter dem Hauptschalter über
-**Ladesteuerung** zwischen **Min-/Max-SOC** und **Bedarfsgesteuert**.
-Es ist immer nur die ausgewählte Steuerung wirksam; Fenster und aktive Monate
-gelten für beide. Der Hauptschalter schaltet die gewählte Steuerung ein oder aus.
-Im dynamischen Tarif
-heißt dieselbe Regelung **Bedarfsgesteuert / Nachtbrücke** und benötigt eine
-Preisvorschau. Sie schätzt den Bedarf aus der SAX-Entladeenergie der letzten
-standardmäßig sieben Tage und prüft alle fünf Minuten, wie viel Netzladung bis zur tragfähigen
-PV-Versorgung nötig ist. Die gemeinsame Karte zeigt Menge, Ziel, Ladezeitraum,
-Begründung und nächste Prüfung; ein Plan ist vom quittierten Ladebefehl getrennt.
+Die bedarfsgesteuerte Nachtregelung berechnet, wie viel Strom der Speicher
+aus dem Netz laden muss, um die Zeit bis zur ausreichenden PV-Versorgung am
+Morgen zu überbrücken. Dafür berücksichtigt sie den aktuellen Speicherstand,
+die PV-Prognose und die Energie, die der SAX-Speicher in den vergangenen
+Nächten abgegeben hat. Diese „Nachtbrücke“ wird alle fünf Minuten neu geprüft.
+Wenn die vorhandene Energie ausreicht, ist keine Netzladung nötig.
 
-Optional kannst du unter **Konfigurieren** ein lokales Prognosearchiv, eine
-28-Tage-Historie und einen Abgleich mit der aktuellen Nacht einschalten.
-Neue Profile werden zunächst nur beobachtet. Die Automatik verwendet sie erst
-nach einem späteren Vergleich mit der bisherigen Prognose. Änderungen an
-Historienlänge oder Live-Abgleich benötigen einen neuen gemeinsamen Nachweis.
-Die Prognosedetails zeigen beobachtete Fehler und Datenabdeckung; eine
-Bandbreite erscheint erst nach eigener Prüfung. Sie verändert weder die
-Lademenge noch die Min-SOC-Reserve. Auch mit diesen Erweiterungen wird nur
-beobachtbare SAX-Entladung geschätzt, kein vollständiger Hausverbrauch.
+Grundlage sind standardmäßig die letzten sieben Tage. Die Regelung schätzt
+nur den Bedarf, der sich aus der beobachteten Speicherentladung ableiten
+lässt. Sie erfasst damit nicht den gesamten Hausverbrauch und plant auch
+nicht den ganzen Tag. Nach einem Update bleibt zunächst die klassische
+Min-/Max-SOC-Regelung ausgewählt.
 
-Wähle unter **Konfigurieren** den PV-Anbieter und dessen Anlage:
-**pv_forecast** und **Solcast** werden unterstützt. Bei Solcast kann zusätzlich
-der Sensor „API Last Polled“ zugeordnet werden. pv_forecast benötigt einen
-höchstens 60 Minuten alten erfolgreichen Abruf. Für Solcast gilt eine eigene
-veränderbare Altersannahme von 1–24 Stunden, initial 24 Stunden; unbekannter
-Aktualisierungserfolg wird ausdrücklich angezeigt. Lade- und Entladewirkungsgrad
-beginnen jeweils bei 0,95 und sind veränderbare Modellannahmen.
+#### Nachtregelung einschalten
 
-**Netzladung Min. SOC** ist hier die Planungsreserve und erzeugt keine neue
-Gerätesperre gegen Entladung. **Netzladen Max. SOC** begrenzt das berechnete Ziel;
-die globale Grenze **Max. SOC** bleibt führend. Beide Netzladegrenzen lassen sich
-auch in der dynamischen Strategie direkt ändern. Zeitfenster und beliebig,
-auch nicht zusammenhängend gewählte Monate bleiben beim zeitvariablen Tarif
-verbindlich; Preisgrenze und Stundenbudget gelten im dynamischen Tarif.
-Dessen Neutralpreispause gilt im Nachtmodell bei Nichtladen auch in ungenutzten
-günstigen Abschnitten unterhalb des Neutralpreises.
+- **Zeitvariabler Tarif:** Wähle direkt unter dem Hauptschalter bei
+  **Ladesteuerung** die Option **Bedarfsgesteuert**. Der Hauptschalter schaltet
+  die ausgewählte Regelung ein oder aus. Deine Zeitfenster und aktiven Monate
+  gelten weiterhin, auch bei einzeln oder nicht zusammenhängend gewählten Monaten.
+- **Dynamischer Tarif:** Wähle im Feld **Strategie** die Option
+  **Bedarfsgesteuert / Nachtbrücke**. Dafür wird eine Preisvorschau benötigt.
+  Die eingestellte Preisgrenze und die maximale Anzahl an Ladestunden bleiben
+  verbindlich.
 
-Für das Nachtmodell werden mindestens drei abgeschlossene Nächte mit je einer
-Stunde gültiger Beobachtung und zusammen sechs Stunden benötigt. Fehlende oder
-entladegesperrte Zeit gilt nicht als Nullverbrauch. Fehlen belastbare Last- oder
-PV-Daten, greift innerhalb des Nacht-/Dämmerungsmodells der erklärte
-Min-/Max-SOC-Ersatzbetrieb unter denselben Tarifgrenzen. Ungültige Gerätedaten
-geben keine Ersatzladung frei. Außerhalb der Nacht und der höchstens vier Stunden
-nach Sonnenaufgang ist der bedarfsgesteuerte Modus inaktiv. Tragfähige PV muss
-mindestens 60 Minuten durchgehend den angesetzten Bedarf decken; auch dieser
-Nachweis muss in den Modellzeitraum passen. Das ist eine Nachtbrücke auf Basis
-der Speicherentladung, keine vollständige Hausverbrauchsprognose. Der klassische
-Modus bleibt nach dem Update Standard.
+Im Dashboard siehst du die geplante Lademenge, das berechnete Ladeziel,
+den Ladezeitraum und den Zeitpunkt der nächsten Prüfung. Eine Begründung
+zeigt, warum geladen wird oder keine Ladung vorgesehen ist. Die Anzeige
+unterscheidet zwischen dem Ladeplan und einem vom Gerät bestätigten Ladebefehl.
+
+#### PV-Prognose einrichten
+
+Wähle unter **Einstellungen → Geräte & Dienste → SAX Power → Konfigurieren**
+den PV-Anbieter und die zugehörige Anlage. Unterstützt werden **pv_forecast**
+und **Solcast**.
+
+- **pv_forecast:** Der letzte erfolgreiche Datenabruf darf höchstens
+  60 Minuten zurückliegen.
+- **Solcast:** Du kannst zusätzlich den Sensor **API Last Polled** zuordnen.
+  Das zulässige Datenalter ist zwischen 1 und 24 Stunden einstellbar;
+  voreingestellt sind 24 Stunden. Ist nicht bekannt, ob die letzte
+  Aktualisierung erfolgreich war, wird das angezeigt.
+
+Die Berechnung nimmt für Laden und Entladen zunächst jeweils einen
+Wirkungsgrad von 95 % an. Beide Werte kannst du unter **Konfigurieren** anpassen.
+
+#### Bedeutung der SOC-Grenzen
+
+SOC bezeichnet den Ladezustand des Speichers in Prozent. In der
+bedarfsgesteuerten Regelung haben die Grenzen folgende Aufgaben:
+
+| Einstellung | Bedeutung |
+| --- | --- |
+| **Netzladung Min. SOC** | Reserve, die bei der Planung berücksichtigt wird. Diese Einstellung allein verhindert keine Entladung des Geräts. |
+| **Netzladen Max. SOC** | Obergrenze für das berechnete Ladeziel. Bei geringerem Bedarf wird entsprechend weniger geladen. |
+| **Max. SOC** | Globale Ladegrenze, die weiterhin Vorrang hat. |
+
+Die beiden Netzladegrenzen kannst du auch in der dynamischen Strategie direkt
+ändern. Dort gilt außerdem die Neutralpreispause: Ist sie eingerichtet und
+wird gerade nicht geladen, pausiert die Entladung bei Preisen unterhalb des
+Neutralpreises. Das gilt während der Nachtregelung auch für günstige
+Zeitabschnitte, die nicht zum Laden genutzt werden.
+
+#### Lernphase und fehlende Daten
+
+Für eine belastbare Schätzung braucht die Regelung mindestens drei
+abgeschlossene Nächte mit jeweils mindestens einer Stunde gültiger
+Beobachtung und insgesamt mindestens sechs Stunden. Zeiten mit fehlenden
+Messwerten oder gesperrter Entladung zählen nicht als Nullverbrauch.
+
+Reichen die Daten zur Speicherentladung oder zur PV-Prognose noch nicht aus,
+nutzt die Regelung ersatzweise die klassische Min-/Max-SOC-Steuerung:
+Sie startet unterhalb der Mindestgrenze und lädt bis zur Höchstgrenze.
+Der Grund für diesen Ersatzbetrieb wird angezeigt. Die jeweiligen
+Tarifgrenzen gelten weiterhin. Ungültige Gerätedaten erlauben auch im
+Ersatzbetrieb keine Ladung.
+
+Die Nachtregelung arbeitet nur nachts und während einer Übergangszeit von
+höchstens vier Stunden nach Sonnenaufgang. Außerhalb dieses Zeitraums ist
+sie inaktiv. PV-Versorgung gilt erst dann als ausreichend, wenn die Prognose
+mindestens 60 Minuten durchgehend den geschätzten Bedarf deckt. Auch diese
+60 Minuten müssen vollständig im genannten Zeitraum liegen.
+
+#### Optionale Prognoseverbesserung
+
+Unter **Konfigurieren** kannst du ein lokales Prognosearchiv, einen Rückblick
+über 28 Tage und einen Abgleich mit der laufenden Nacht einschalten.
+Neue Schätzverfahren werden zunächst nur beobachtet. Die Automatik nutzt
+sie erst, nachdem ihre Qualität im Vergleich zur bisherigen Prognose geprüft
+wurde. Änderst du die Historienlänge oder den Live-Abgleich, ist diese Prüfung
+für die neue Kombination erneut nötig.
+
+Die Prognosedetails zeigen die beobachteten Abweichungen und die vorhandene
+Datenabdeckung. Eine geprüfte Bandbreite macht die Unsicherheit der Schätzung
+sichtbar; sie verändert weder die Lademenge noch die Min-SOC-Reserve.
+Auch diese Erweiterungen schätzen ausschließlich die beobachtbare
+SAX-Entladung.
 
 ### Zeitfenster und Überschneidungen
 

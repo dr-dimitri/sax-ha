@@ -22,7 +22,7 @@ const text = computed(() =>
         adaptive: "Bedarfsgesteuert",
         standardDescription: "Startet unter Min-SOC und lädt bis Max-SOC.",
         adaptiveDescription:
-          "Plant die nötige Ladung aus SAX-Verbrauch, PV-Prognose und Speicherstand.",
+          "Lädt nur so viel Netzstrom nach, wie bis zur PV-Versorgung am Morgen nötig ist.",
         hint: "Es wird nur die ausgewählte Ladesteuerung verwendet. Zeitfenster und aktive Monate gelten für beide.",
         unavailable: "Ladesteuerung nicht verfügbar",
         disconnected: "Keine Verbindung zu Home Assistant",
@@ -35,7 +35,7 @@ const text = computed(() =>
         adaptive: "Demand-based",
         standardDescription: "Starts below min SOC and charges up to max SOC.",
         adaptiveDescription:
-          "Plans the required charge using SAX consumption, solar forecast and stored energy.",
+          "Charges only as much grid energy as needed until solar power is available in the morning.",
         hint: "Only the selected charging control is used. Time windows and active months apply to both.",
         unavailable: "Charging control unavailable",
         disconnected: "Disconnected from Home Assistant",

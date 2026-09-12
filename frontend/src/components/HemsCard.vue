@@ -31,12 +31,16 @@ const fallback = computed(
 );
 const labels: Record<string, readonly [string, string]> = {
   title: ["Bedarfsgesteuerte Nachtregelung", "Demand-based night control"],
+  introduction: [
+    "Lädt nachts gezielt Strom aus dem Netz nach, damit die gespeicherte Energie bis zur ausreichenden PV-Versorgung am Morgen reicht. Speicherstand, bisherige nächtliche Entladung und PV-Prognose bestimmen die nötige Lademenge.",
+    "Charges from the grid at night as needed to bridge the time until sufficient solar power is available in the morning. Stored energy, past overnight battery discharge and the solar forecast determine how much to charge.",
+  ],
   unknown: ["Unbekannt", "Unknown"],
   unavailable: ["Nicht verfügbar", "Unavailable"],
   inactive: ["Deaktiviert", "Disabled"],
   dynamicInactive: [
-    "Die Strategie Bedarfsgesteuert / Nachtbrücke ist im Feld Strategie auswählbar.",
-    "Select Demand-based / Night bridge in the Strategy field.",
+    "Zum Einschalten wähle im Feld Strategie die Option „Bedarfsgesteuert / Nachtbrücke“. Preisgrenze und maximale Ladestunden gelten weiterhin.",
+    "To enable this mode, select Demand-based / Night bridge in the Strategy field. The price limit and maximum charging hours still apply.",
   ],
   planned: ["Netzladung geplant", "Grid charging planned"],
   no_need: ["Kein Netzladen geplant", "No grid charging planned"],
@@ -97,24 +101,28 @@ const labels: Record<string, readonly [string, string]> = {
   ],
   policy: ["SAX-Annahme zum Prognosealter", "SAX assumption for forecast age"],
   modelInfo: [
-    "Nachtmodell aus SAX-Entladeenergie. Sieben Tage bleiben die Basis; für das neue Profil sind optional 28 Tage wählbar. Neue Verfahren benötigen ihren eigenen Gütenachweis. Eine vollständige Tagesoptimierung ist nicht enthalten.",
-    "Night model based on SAX discharge energy. Seven days remain the baseline; 28 days are optional for the new profile. New methods require their own validation. Full-day optimisation is not included.",
+    "Alle fünf Minuten wird geprüft, wie viel Netzladung noch nötig ist. Die Schätzung beruht standardmäßig auf der Energie, die der SAX-Speicher in den letzten sieben Tagen nachts abgegeben hat. Sie erfasst nur diese Speicherentladung, nicht den gesamten Hausverbrauch. Die Regelung arbeitet nachts und bis höchstens vier Stunden nach Sonnenaufgang.",
+    "Every five minutes, the system checks how much grid charging is still needed. By default, the estimate uses energy discharged by the SAX battery at night over the past seven days. It covers this battery discharge only, not total household consumption. Control operates at night and for up to four hours after sunrise.",
+  ],
+  learningInfo: [
+    "Optional kannst du unter Konfigurieren die Prognosen speichern, 28 Tage zur Schätzung heranziehen und die laufende Nacht berücksichtigen. Neue Schätzverfahren werden zunächst mit dem tatsächlichen Verlauf verglichen. Die Automatik nutzt sie erst nach erfolgreicher Qualitätsprüfung.",
+    "Under Configure, you can optionally save forecasts, use 28 days of history and account for the current night. New estimation methods are first compared with actual observations. Automatic control uses them only after successful validation.",
   ],
   reserveInfo: [
-    "Min-SOC ist die Reserve der Planung; er ist keine neue Gerätesperre gegen Entladung. Max-SOC begrenzt das Ladeziel. Im Rückfall gelten dieselben gespeicherten Werte nach den klassischen Regeln.",
-    "Min SOC is the planning reserve; it is not a new physical discharge lock. Max SOC limits the target. Fallback applies the same saved values using the classic rules.",
+    "SOC ist der Ladezustand in Prozent. „Netzladung Min. SOC“ dient als Reserve in der Berechnung; diese Einstellung allein verhindert keine Entladung. „Netzladen Max. SOC“ begrenzt das berechnete Ladeziel. Die globale Grenze „Max. SOC“ hat weiterhin Vorrang.",
+    "SOC is the battery charge level as a percentage. Grid charge min SOC sets the reserve used in the calculation; this setting alone does not prevent discharge. Grid charge max SOC caps the calculated target. The global Max SOC limit still takes priority.",
   ],
   classicInfo: [
-    "Min-SOC bleibt die Startschwelle; Max-SOC das Ladeziel der klassischen Regelung.",
-    "Min SOC remains the start threshold; max SOC is the target of classic control.",
+    "Die klassische Regelung startet unter „Netzladung Min. SOC“ und lädt bis „Netzladen Max. SOC“. Für die Nachtregelung wähle bei Ladesteuerung „Bedarfsgesteuert“. Zeitfenster und aktive Monate gelten für beide.",
+    "Classic control starts charging below Grid charge min SOC and continues up to Grid charge max SOC. To use night control, select Demand-based under Charging control. Time windows and active months apply to both.",
   ],
   setup: [
-    "PV-Anbieter und Anlage sowie Wirkungsgradannahmen lassen sich unter Einstellungen → Geräte & Dienste → SAX Power → Konfigurieren auswählen.",
-    "Select the solar provider, installation and efficiency assumptions in Settings → Devices & services → SAX Power → Configure.",
+    "Wähle deinen PV-Anbieter (pv_forecast oder Solcast) und die Anlage unter Einstellungen → Geräte & Dienste → SAX Power → Konfigurieren. Dort kannst du auch die angenommenen Lade- und Entladewirkungsgrade anpassen; voreingestellt sind jeweils 95 %.",
+    "Choose your solar provider (pv_forecast or Solcast) and installation in Settings → Devices & services → SAX Power → Configure. You can also adjust the assumed charge and discharge efficiencies there; both default to 95%.",
   ],
   fallbackInfo: [
-    "Die gespeicherte Min-/Max-SOC-Regel gilt. Tarifgrenzen und Geräteschutz bleiben wirksam.",
-    "The saved min/max SOC rule applies. Tariff limits and device protection remain in force.",
+    "Die Daten reichen für eine bedarfsgesteuerte Planung noch nicht aus. Deshalb gilt vorübergehend die klassische Regelung: Laden unterhalb von Min-SOC, bis Max-SOC erreicht ist. Zeit- und Preisgrenzen sowie Geräteschutz gelten weiterhin.",
+    "There is not enough reliable data for demand-based planning yet. Classic control applies temporarily: charging starts below min SOC and continues up to max SOC. Time and price limits and device protection still apply.",
   ],
   calibrationExtra: [
     "Zusätzliche Netzenergie für Kalibrierung",
@@ -265,6 +273,7 @@ const data = computed(() => [
       <h2 :id="`${id}-title`">{{ text("title") }}</h2>
       <span class="hems-card__badge">{{ title }}</span>
     </header>
+    <p>{{ text("introduction") }}</p>
     <div class="hems-card__explanation" role="status" aria-live="polite">
       <p v-if="!entity.available">{{ text("disconnected") }}</p>
       <template v-else-if="active">
@@ -328,6 +337,7 @@ const data = computed(() => [
         }}
       </p>
       <p>{{ text("setup") }}</p>
+      <p>{{ text("learningInfo") }}</p>
       <template v-if="active">
         <dl class="hems-card__data">
           <div v-for="[key, value] in data" :key="key">

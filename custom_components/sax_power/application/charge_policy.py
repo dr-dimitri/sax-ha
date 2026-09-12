@@ -62,6 +62,8 @@ class ChargePolicyInput:
     price_limit: float | None
     neutral_price: float | None
     timed_window_completed: bool = False
+    timed_adaptive_charge: bool | None = None
+    price_adaptive_pause: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +93,11 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and inputs.current_soc < inputs.timed_target_soc
         and not inputs.pv_surplus_active
         and timed_window_active
-        and inputs.timed_min_soc is not None
-        and inputs.timed_armed
+        and (
+            inputs.timed_adaptive_charge
+            if inputs.timed_adaptive_charge is not None
+            else inputs.timed_min_soc is not None and inputs.timed_armed
+        )
     )
     grid_serving_window_active = (
         inputs.grid_serving_enabled
@@ -126,7 +131,11 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and inputs.price_limit is not None
         and inputs.neutral_price is not None
         and inputs.price_limit < inputs.neutral_price
-        and inputs.price_limit < inputs.current_price < inputs.neutral_price
+        and (
+            inputs.price_adaptive_pause
+            if inputs.price_adaptive_pause is not None
+            else inputs.price_limit < inputs.current_price < inputs.neutral_price
+        )
     )
     return ChargePolicyDecision(
         soc_reached=soc_reached,

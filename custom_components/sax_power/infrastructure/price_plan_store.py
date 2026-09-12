@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -22,6 +23,7 @@ from ..const import (
     DOMAIN,
     MAX_PRICE_HOURS,
     PRICE_PLAN_HORIZON_HOURS,
+    PRICE_STRATEGY_ADAPTIVE,
     PRICE_STRATEGY_RELATIVE,
     PRICE_STRATEGY_SMART,
 )
@@ -78,13 +80,20 @@ class PricePlanCycleStore:
         self._last_persisted: dict[str, Any] | None = None
         self._pending: dict[str, Any] | None = None
         self._save_scheduled = False
+        self.load_failed = False
 
     async def async_load(self) -> PricePlanCycleState | None:
         """Load a cycle, discarding the complete snapshot when inconsistent."""
-        raw = await self._store.async_load()
+        self.load_failed = False
+        try:
+            raw = await self._store.async_load()
+        except HomeAssistantError, OSError, ValueError, NotImplementedError:
+            self.load_failed = True
+            raise
         if raw is None:
             return None
         if not isinstance(raw, dict):
+            self.load_failed = True
             _LOGGER.warning(
                 "Ungültigen gespeicherten Preisplan-Zyklus verworfen: kein Objekt"
             )
@@ -96,6 +105,7 @@ class PricePlanCycleStore:
         try:
             state = _deserialize(raw)
         except (TypeError, ValueError) as err:
+            self.load_failed = True
             _LOGGER.warning(
                 "Ungültigen gespeicherten Preisplan-Zyklus verworfen: %s", err
             )
@@ -163,7 +173,11 @@ def _deserialize(raw: dict[str, Any]) -> PricePlanCycleState:
         raise ValueError("Zyklus ist nicht genau 24 Stunden lang")
 
     strategy = raw.get("strategy")
-    if strategy not in (PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART):
+    if strategy not in (
+        PRICE_STRATEGY_RELATIVE,
+        PRICE_STRATEGY_SMART,
+        PRICE_STRATEGY_ADAPTIVE,
+    ):
         raise ValueError(f"unbekannte Strategie {strategy!r}")
 
     budget_seconds = _finite_number(raw.get("budget_seconds"), "Zeitbudget")

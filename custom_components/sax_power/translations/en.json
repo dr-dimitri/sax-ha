@@ -359,6 +359,25 @@
       },
       "economics_net_savings_today": {
         "name": "Net savings today"
+      },
+      "hems_status": {
+        "name": "Night control status",
+        "state": {
+          "inactive": "Disabled",
+          "planned": "Grid charging planned",
+          "no_need": "No grid charging planned",
+          "limited": "Demand only partly covered",
+          "blocked": "Plan blocked",
+          "fallback": "Fallback to min/max SOC",
+          "awaiting_evaluation": "Preparing evaluation",
+          "evaluation_failed": "Evaluation failed",
+          "outside_model_scope": "Outside the night model",
+          "device_unavailable": "Battery unavailable",
+          "invalid_device_data": "Invalid device data"
+        }
+      },
+      "hems_next_evaluation": {
+        "name": "Night control next evaluation"
       }
     },
     "number": {
@@ -491,7 +510,15 @@
           "off": "Manual / off",
           "absolute": "Absolute price",
           "relative": "Relative / cheapest hours",
-          "smart": "Smart / PV-optimised"
+          "smart": "Smart / PV-optimised",
+          "adaptive": "Demand-based / Night bridge"
+        }
+      },
+      "timed_charge_mode": {
+        "name": "Grid charging mode",
+        "state": {
+          "standard": "Min/max SOC",
+          "adaptive": "Demand-based"
         }
       }
     }
@@ -669,7 +696,7 @@
     },
     "refresh_price_plan": {
       "name": "Recalculate charge plan",
-      "description": "Recalculates and applies the price-optimised charging plan immediately instead of waiting for the next regular check (every 60 seconds).",
+      "description": "Recalculates and applies the price-optimised charging plan immediately. Demand-based night control normally evaluates every five minutes; other strategies check every 60 seconds.",
       "fields": {
         "device_id": {
           "name": "Device",
@@ -718,7 +745,7 @@
     "step": {
       "init": {
         "title": "Dashboard, charging and economics",
-        "description": "Sources and base settings for price-optimised charging and the shared PV forecast. The integration does not fetch prices or forecasts itself; it uses existing sensor entities. Day-to-day controls are entities on the SAX device.",
+        "description": "Sources and settings for charging and economics. Existing sensors supply prices and the original solar forecast; demand-based night control reads local forecast actions from the selected installation. It learns night-time SAX discharge energy over seven days, not complete household load. Everyday controls remain entities on the SAX device.",
         "data": {
           "price_sensor": "Electricity price sensor",
           "price_attribute": "Attribute holding the price forecast (optional)",
@@ -728,10 +755,16 @@
           "economics_tariff_type": "Economics tariff model",
           "economics_investment_cost_eur": "Investment cost (EUR)",
           "economics_prior_result_eur": "Result earned before setup (EUR)",
-          "vue_dashboard_enabled": "Enable dashboard"
+          "vue_dashboard_enabled": "Enable dashboard",
+          "hems_pv_provider": "Solar provider for night control",
+          "hems_pv_entry": "Solar installation for night control",
+          "hems_solcast_timestamp": "Solcast: API Last Polled sensor (optional)",
+          "hems_solcast_max_age_hours": "Solcast: maximum forecast age (hours, assumption)",
+          "hems_charge_efficiency": "Charging efficiency (assumption)",
+          "hems_discharge_efficiency": "Discharging efficiency (assumption)"
         },
         "data_description": {
-          "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative” and “smart” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
+          "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative”, “smart” and “demand-based” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
           "price_attribute": "Only needed if auto-detection fails - e.g. “raw_today”, “data” or “forecast”.",
           "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh, EUR/MWh and ct/MWh are converted to EUR/kWh internally.",
           "pv_forecast_sensor": "Sensor with expected PV production as energy, e.g. sensor.energy_production_tomorrow (Forecast.Solar) or its Solcast equivalent. Shared by the “smart” strategy and the optional minimum for grid-serving charging.",
@@ -739,7 +772,13 @@
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
           "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress and the remaining-to-payback amount, offset against the running signed net result. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
           "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result.",
-          "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings."
+          "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings.",
+          "hems_pv_provider": "Demand-based control uses local forecast actions from pv_forecast or Solcast. Forecast.Solar supports the HA energy dashboard, but does not provide sufficient public freshness and quality metadata for this controller. The existing solar sensor selection remains in use for Smart and grid-serving charging.",
+          "hems_pv_entry": "Choose the whole installation of the selected provider. Coverage must include the night bridge up to solar supply and 60 minutes of confirmation; lookahead is limited to 48 hours. Missing intervals do not mean zero generation.",
+          "hems_solcast_timestamp": "Optionally select the actual Solcast retrieval timestamp. Otherwise its sensor is discovered through the entity registry. It must belong to the selected Solcast installation; a state change timestamp cannot replace the retrieval time.",
+          "hems_solcast_max_age_hours": "SAX assumption for Solcast: 1 to 24 hours, initially 24. A verified retrieval timestamp and sufficient coverage remain required; unknown update success is not a guarantee. pv_forecast always uses its provider limit of 60 minutes.",
+          "hems_charge_efficiency": "Model assumption greater than 0 and up to 1, initially 0.95. Fraction of AC charging energy retained in the battery.",
+          "hems_discharge_efficiency": "Model assumption greater than 0 and up to 1, initially 0.95. Fraction of stored energy available as AC output."
         }
       },
       "economics_fixed": {
@@ -896,7 +935,9 @@
       "economics_tou_window_incomplete": "A window is incomplete: start, end and energy price must all be filled in or all be empty.",
       "economics_tou_window_zero_length": "Start and end of a window must differ - an empty range is not a window and does not mean \"all day\".",
       "economics_tou_window_overlap": "Two windows overlap. Touching boundaries (end of one = start of the next) are allowed, overlapping ones are not.",
-      "economics_price_required": "Required: please enter an energy price in EUR/kWh (gross price including all levies)."
+      "economics_price_required": "Required: please enter an energy price in EUR/kWh (gross price including all levies).",
+      "hems_pv_entry_invalid": "The PV installation must belong to the selected provider. For an optional Solcast timestamp, select the enabled “API Last Polled” sensor from the same installation.",
+      "hems_invalid_number": "Enter a finite number within the displayed range."
     }
   },
   "selector": {
@@ -915,6 +956,13 @@
         "fixed": "Fixed price",
         "time_of_use": "Time of use",
         "dynamic": "Dynamic (electricity price sensor)"
+      }
+    },
+    "hems_pv_provider": {
+      "options": {
+        "none": "Not configured",
+        "pv_forecast": "pv_forecast",
+        "solcast_solar": "Solcast"
       }
     }
   }

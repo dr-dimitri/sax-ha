@@ -359,6 +359,25 @@
       },
       "economics_net_savings_today": {
         "name": "Netto-Ersparnis heute"
+      },
+      "hems_status": {
+        "name": "Nachtregelung Status",
+        "state": {
+          "inactive": "Deaktiviert",
+          "planned": "Netzladung geplant",
+          "no_need": "Kein Netzladen geplant",
+          "limited": "Bedarf nur teilweise gedeckt",
+          "blocked": "Plan gesperrt",
+          "fallback": "Rückfall auf Min-/Max-SOC",
+          "awaiting_evaluation": "Prüfung wird vorbereitet",
+          "evaluation_failed": "Prüfung fehlgeschlagen",
+          "outside_model_scope": "Außerhalb des Nachtmodells",
+          "device_unavailable": "Speicher nicht verfügbar",
+          "invalid_device_data": "Gerätedaten ungültig"
+        }
+      },
+      "hems_next_evaluation": {
+        "name": "Nachtregelung nächste Prüfung"
       }
     },
     "number": {
@@ -491,7 +510,15 @@
           "off": "Manuell / Aus",
           "absolute": "Absoluter Preis",
           "relative": "Relativ / Günstigste Stunden",
-          "smart": "Smart / PV-optimiert"
+          "smart": "Smart / PV-optimiert",
+          "adaptive": "Bedarfsgesteuert / Nachtbrücke"
+        }
+      },
+      "timed_charge_mode": {
+        "name": "Netzlademodus",
+        "state": {
+          "standard": "Min-/Max-SOC",
+          "adaptive": "Bedarfsgesteuert"
         }
       }
     }
@@ -669,7 +696,7 @@
     },
     "refresh_price_plan": {
       "name": "Ladeplan neu berechnen",
-      "description": "Berechnet den Ladeplan des preisoptimierten Ladens sofort neu und wendet ihn an, statt bis zur nächsten regulären Prüfung (alle 60 Sekunden) zu warten.",
+      "description": "Berechnet den Ladeplan des preisoptimierten Ladens sofort neu und wendet ihn an. Die bedarfsgesteuerte Nachtregelung prüft regulär alle fünf Minuten; die anderen Strategien alle 60 Sekunden.",
       "fields": {
         "device_id": {
           "name": "Gerät",
@@ -718,7 +745,7 @@
     "step": {
       "init": {
         "title": "Dashboard, Laden und Wirtschaftlichkeit",
-        "description": "Quellen und Grundeinstellungen für das preisoptimierte Laden sowie die gemeinsam genutzte PV-Prognose. Die Integration ruft selbst keine Strompreise oder Prognosen ab, sondern nutzt bereits vorhandene Sensor-Entities. Die im Alltag veränderlichen Stellgrößen sind eigene Entitäten am SAX-Gerät.",
+        "description": "Quellen und Grundeinstellungen für Laden und Wirtschaftlichkeit. Vorhandene Sensoren liefern Preise und die bisherige PV-Prognose; die bedarfsgesteuerte Nachtregelung liest lokale Prognoseaktionen der ausgewählten Anlage. Sie erlernt die nächtliche SAX-Entladeenergie aus sieben Tagen, keine vollständige Hauslast. Alltägliche Stellgrößen bleiben Entitäten am SAX-Gerät.",
         "data": {
           "price_sensor": "Strompreis-Sensor",
           "price_attribute": "Attribut mit der Preisvorschau (optional)",
@@ -728,10 +755,16 @@
           "economics_tariff_type": "Tarifmodell für die Wirtschaftlichkeit",
           "economics_investment_cost_eur": "Investitionskosten (EUR)",
           "economics_prior_result_eur": "Bereits erwirtschafteter Ertrag (EUR)",
-          "vue_dashboard_enabled": "Dashboard aktivieren"
+          "vue_dashboard_enabled": "Dashboard aktivieren",
+          "hems_pv_provider": "PV-Anbieter für die Nachtregelung",
+          "hems_pv_entry": "PV-Anlage für die Nachtregelung",
+          "hems_solcast_timestamp": "Solcast: Sensor „API Last Polled“ (optional)",
+          "hems_solcast_max_age_hours": "Solcast: maximales Prognosealter (Stunden, Annahme)",
+          "hems_charge_efficiency": "Ladewirkungsgrad (Annahme)",
+          "hems_discharge_efficiency": "Entladewirkungsgrad (Annahme)"
         },
         "data_description": {
-          "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Er hat zwei getrennte Aufgaben: Für das preisoptimierte Laden liefert er immer die Zeitfenster der Modi „Relativ“ und „Smart“ (aus seinen Preisvorschau-Attributen). Für die Wirtschaftlichkeit ist er nur beim Tarifmodell „Dynamisch“ die Preisquelle - dort ist er Pflicht. Bei „Festpreis“ und „Tageszeitabhängig“ rechnet die Wirtschaftlichkeit ausschließlich mit den Preisen, die auf der Folgeseite eingegeben werden: Ein dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, kein täglich wiederkehrendes Tagesprofil - beide Formate lassen sich nicht ineinander überführen.",
+          "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Er hat zwei getrennte Aufgaben: Für das preisoptimierte Laden liefert er immer die Zeitfenster der Modi „Relativ“, „Smart“ und „Bedarfsgesteuert“ (aus seinen Preisvorschau-Attributen). Für die Wirtschaftlichkeit ist er nur beim Tarifmodell „Dynamisch“ die Preisquelle - dort ist er Pflicht. Bei „Festpreis“ und „Tageszeitabhängig“ rechnet die Wirtschaftlichkeit ausschließlich mit den Preisen, die auf der Folgeseite eingegeben werden: Ein dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, kein täglich wiederkehrendes Tagesprofil - beide Formate lassen sich nicht ineinander überführen.",
           "price_attribute": "Nur ausfüllen, wenn die automatische Erkennung fehlschlägt - z. B. „raw_today“, „data“ oder „forecast“.",
           "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh sowie EUR/MWh und ct/MWh werden intern in EUR/kWh umgerechnet.",
           "pv_forecast_sensor": "Sensor mit der erwarteten PV-Erzeugung als Energie, z. B. sensor.energy_production_tomorrow (Forecast.Solar) oder das Solcast-Pendant. Gemeinsame Quelle für den Modus „Smart“ und den optionalen Mindestwert des netzdienlichen Ladens.",
@@ -739,7 +772,13 @@
           "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Festpreis“ rechnet mit einem ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ rechnet mit einem täglich wiederkehrenden Preisprofil: ein Grundpreis plus bis zu acht abweichende Zeitfenster, einzugeben auf der nächsten Seite. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung. Nur „Dynamisch“ verwendet den Strompreis-Sensor; das preisoptimierte Laden nutzt ihn unabhängig vom Tarifmodell weiter.",
           "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt und Restbetrag bis zur Amortisation; verrechnet wird gegen das laufende, signierte Nettoergebnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
           "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt und Restbetrag; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf.",
-          "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis."
+          "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis.",
+          "hems_pv_provider": "Bedarfsgesteuert nutzt lokale Prognoseaktionen von pv_forecast oder Solcast. Forecast.Solar ist mit dem HA-Energiedashboard kompatibel, bietet hier aber keine ausreichende öffentliche Schnittstelle für Datenalter und Qualität. Die bisherige PV-Sensorwahl bleibt für Smart und netzdienliches Laden bestehen.",
+          "hems_pv_entry": "Die vollständige Anlage des gewählten Anbieters wählen. Verwertbar sein muss die Nachtbrücke bis zur PV-Versorgung einschließlich 60 Minuten Nachweis; gesucht wird höchstens 48 Stunden voraus. Fehlende Intervalle gelten nicht als Nullerzeugung.",
+          "hems_solcast_timestamp": "Optional den tatsächlichen Solcast-Abrufzeitpunkt auswählen. Ohne Auswahl wird der zugehörige Sensor über die Entity-Registry ermittelt. Nur ein Sensor derselben Solcast-Anlage ist zulässig; ein letzter Zustandswechsel ersetzt keinen Abrufzeitpunkt.",
+          "hems_solcast_max_age_hours": "SAX-Annahme für Solcast: 1 bis 24 Stunden, initial 24. Ein nachgewiesener Abrufzeitpunkt und ausreichende Abdeckung bleiben Pflicht; unbekannter Aktualisierungserfolg ist keine Erfolgszusage. Für pv_forecast gilt fest die Anbietergrenze von 60 Minuten.",
+          "hems_charge_efficiency": "Modellannahme zwischen größer 0 und 1, initial 0,95. Beschreibt den Anteil der AC-Ladeenergie, der im Speicher verbleibt.",
+          "hems_discharge_efficiency": "Modellannahme zwischen größer 0 und 1, initial 0,95. Beschreibt den AC-nutzbaren Anteil der gespeicherten Energie."
         }
       },
       "economics_fixed": {
@@ -896,7 +935,9 @@
       "economics_tou_window_incomplete": "Ein Zeitfenster ist unvollständig: Beginn, Ende und Arbeitspreis müssen entweder alle ausgefüllt oder alle leer sein.",
       "economics_tou_window_zero_length": "Beginn und Ende eines Zeitfensters dürfen nicht gleich sein - das ergibt kein Zeitfenster und bedeutet auch nicht „ganzer Tag“.",
       "economics_tou_window_overlap": "Zwei Zeitfenster überschneiden sich. Angrenzende Grenzen (Ende des einen = Beginn des nächsten) sind erlaubt, eine Überlappung nicht.",
-      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in EUR/kWh eintragen (Bruttopreis inklusive aller Abgaben)."
+      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in EUR/kWh eintragen (Bruttopreis inklusive aller Abgaben).",
+      "hems_pv_entry_invalid": "Die PV-Anlage muss zum gewählten Anbieter gehören. Als optionalen Solcast-Zeitstempel den aktivierten Sensor „API Last Polled“ derselben Anlage wählen.",
+      "hems_invalid_number": "Bitte eine endliche Zahl im angegebenen Bereich eingeben."
     }
   },
   "selector": {
@@ -915,6 +956,13 @@
         "fixed": "Festpreis",
         "time_of_use": "Tageszeitabhängig",
         "dynamic": "Dynamisch (Strompreis-Sensor)"
+      }
+    },
+    "hems_pv_provider": {
+      "options": {
+        "none": "Nicht eingerichtet",
+        "pv_forecast": "pv_forecast",
+        "solcast_solar": "Solcast"
       }
     }
   }

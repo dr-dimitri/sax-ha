@@ -32,6 +32,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
+from .application.hems_tariffs import merge_windows
 from .const import (
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
@@ -49,11 +50,13 @@ from .const import (
     PRICE_STATUS_PV_FORECAST_COVERS,
     PRICE_STATUS_WAITING,
     PRICE_STRATEGY_ABSOLUTE,
+    PRICE_STRATEGY_ADAPTIVE,
     PRICE_STRATEGY_OFF,
     PRICE_STRATEGY_RELATIVE,
     PRICE_STRATEGY_SMART,
 )
 from .domain.forecast import normalize_energy_kwh
+from .domain.hems import ChargeInterval, TariffConstraints, TariffWindow
 from .domain.price_units import unit_factor
 from .infrastructure.price_plan_store import (
     PricePlanCycleState,
@@ -172,6 +175,38 @@ class PricePlan:
 
 
 EMPTY_PLAN = PricePlan()
+
+
+def _adaptive_valid_slots(slots: Sequence[PriceSlot]) -> list[PriceSlot]:
+    """Keep explicit valid boundaries even when their price is unusable."""
+    raw = []
+    for slot in slots:
+        if not isinstance(slot.start, datetime) or not isinstance(slot.end, datetime):
+            continue
+        price = slot.price
+        if (
+            isinstance(price, bool)
+            or not isinstance(price, int | float)
+            or not math.isfinite(price)
+        ):
+            price = None
+        raw.append((slot.start, slot.end, price))
+    return _finalize_slots(raw, 1.0, strict=True)
+
+
+def _valid_adaptive_interval(interval: ChargeInterval) -> bool:
+    """A stale or malformed suggestion cannot spend an adaptive cycle."""
+    return (
+        isinstance(interval.start, datetime)
+        and interval.start.utcoffset() is not None
+        and isinstance(interval.end, datetime)
+        and interval.end.utcoffset() is not None
+        and _instant(interval.start) < _instant(interval.end)
+        and not isinstance(interval.energy_kwh, bool)
+        and isinstance(interval.energy_kwh, int | float)
+        and math.isfinite(interval.energy_kwh)
+        and interval.energy_kwh > 0
+    )
 
 
 # --------------------------------------------------------------------------
@@ -297,7 +332,7 @@ def _base_day(attribute: str, now: datetime) -> datetime:
 
 
 def _parse_entries(
-    entries: Sequence[Any], base_day: datetime | None
+    entries: Sequence[Any], base_day: datetime | None, *, strict: bool = False
 ) -> list[tuple[datetime, datetime | None, float | None]]:
     parsed: list[tuple[datetime, datetime | None, float | None]] = []
     count = len(entries)
@@ -305,12 +340,22 @@ def _parse_entries(
         start, end, price = _entry_values(entry, base_day, index, count)
         if start is None:
             continue
+        if (
+            strict
+            and isinstance(entry, Mapping)
+            and any(key in entry for key in _END_KEYS)
+            and end is None
+        ):
+            price = None
         parsed.append((start, end, price))
     return parsed
 
 
 def _finalize_slots(
-    raw: Iterable[tuple[datetime, datetime | None, float | None]], factor: float
+    raw: Iterable[tuple[datetime, datetime | None, float | None]],
+    factor: float,
+    *,
+    strict: bool = False,
 ) -> list[PriceSlot]:
     """Rohdaten zu einer sortierten, entdoppelten Slot-Liste.
 
@@ -348,6 +393,22 @@ def _finalize_slots(
         # Grenze eines unlesbaren Preises begrenzt weiterhin den Vorgänger.
         if price is None:
             continue
+        if strict:
+            # REQ-HEMS-DYNAMIC: no extrapolated final interval or bridged gap.
+            if end is None:
+                if index + 1 >= len(instants):
+                    continue
+                next_start = instants[index + 1]
+                duration = (next_start - start_instant).total_seconds()
+                if duration not in (900, 3600) or duration != default_seconds:
+                    continue
+                end = next_start
+            if _instant(end) <= start_instant:
+                continue
+            if index + 1 < len(instants):
+                end = min(_instant(end), instants[index + 1])
+            if not math.isfinite(price * factor):
+                continue
         if end is None or _instant(end) <= start_instant:
             if index + 1 < len(instants):
                 end = by_start[instants[index + 1]][0]
@@ -365,6 +426,7 @@ def parse_price_slots(
     attribute: str | None = None,
     unit: str = DEFAULT_PRICE_UNIT,
     now: datetime | None = None,
+    strict: bool = False,
 ) -> list[PriceSlot]:
     """Preis-Slots aus dem Zustand einer beliebigen Preis-Sensor-Entity.
 
@@ -378,6 +440,14 @@ def parse_price_slots(
         return []
     attributes: Mapping[str, Any] = getattr(state, "attributes", {}) or {}
     factor = _unit_factor(unit, attributes.get("unit_of_measurement"))
+    if strict:
+        normalized = unit_factor(unit, attributes.get("unit_of_measurement"))
+        if normalized is None or getattr(state, "state", None) in (
+            "unknown",
+            "unavailable",
+        ):
+            return []
+        factor = normalized
     now = now or dt_util.now()
 
     groups: tuple[tuple[str, ...], ...] = (
@@ -389,9 +459,9 @@ def parse_price_slots(
             entries = attributes.get(name)
             if not isinstance(entries, (list, tuple)) or not entries:
                 continue
-            raw.extend(_parse_entries(entries, _base_day(name, now)))
+            raw.extend(_parse_entries(entries, _base_day(name, now), strict=strict))
         if raw:
-            slots = _finalize_slots(raw, factor)
+            slots = _finalize_slots(raw, factor, strict=strict)
             if slots:
                 return slots
     return []
@@ -673,6 +743,8 @@ class SaxPricePlanner:
         # anlegen; im regulären Setup öffnet async_load_cycle_state diese
         # Schranke vor der ersten Planauswertung.
         self._cycle_store_loaded = False
+        self._adaptive_cycle_load_failed = False
+        self._adaptive_source_slots: tuple[PriceSlot, ...] = ()
 
     # -- Konfiguration aus dem Options Flow --------------------------------
     @property
@@ -706,6 +778,7 @@ class SaxPricePlanner:
         """Persistiertes Zeitbudget vor der ersten Planauswertung laden."""
         try:
             self._cycle_state = await self._cycle_store.async_load()
+            self._adaptive_cycle_load_failed = self._cycle_store.load_failed
         except (HomeAssistantError, NotImplementedError, OSError, ValueError) as err:
             # Ein defekter Preisplan darf das Laden der gesamten Integration
             # nicht verhindern. Er enthält nur abgeleitete Zeitintervalle;
@@ -717,6 +790,7 @@ class SaxPricePlanner:
                 err,
             )
             self._cycle_state = None
+            self._adaptive_cycle_load_failed = True
         self._cycle_store_loaded = True
 
     async def async_flush_cycle_state(self) -> None:
@@ -794,6 +868,7 @@ class SaxPricePlanner:
     def _async_source_changed(self, _event: Event[EventStateChangedData]) -> None:
         if self._shutdown:
             return
+        self.coordinator.hems.source_changed()
         self.evaluate()
         task = self.hass.async_create_task(
             self.coordinator.async_apply_price_plan(),
@@ -858,6 +933,8 @@ class SaxPricePlanner:
                 attribute=self.price_attribute,
                 unit=self.price_unit,
                 now=now,
+                strict=self.coordinator.price_charge_strategy
+                == PRICE_STRATEGY_ADAPTIVE,
             )
             if not slots:
                 _LOGGER.debug(
@@ -871,6 +948,9 @@ class SaxPricePlanner:
         self, now: datetime, slots: Sequence[PriceSlot], entity_id: str | None
     ) -> PricePlan:
         ctx = self._context()
+        if ctx.strategy == PRICE_STRATEGY_ADAPTIVE and ctx.enabled:
+            return self.coordinator.hems.price_plan(now, slots)
+        self._adaptive_cycle_load_failed = False
         # Der aktuelle Preis ist eine reine Info-Anzeige (price_charge_-
         # current_price-Sensor) und wird deshalb schon vor den Enabled-/
         # Strategie-Prüfungen ermittelt - sonst zeigt der Sensor "unbekannt",
@@ -952,6 +1032,166 @@ class SaxPricePlanner:
         # reading them between evaluations must not consume more budget.
         self._remaining_budget_hours = available_hours
         return plan
+
+    def adaptive_constraints(
+        self, now: datetime, slots: Sequence[PriceSlot]
+    ) -> TariffConstraints:
+        """REQ-HEMS-DYNAMIC: preserve the existing fixed cycle and consumed time."""
+        now = _instant(now)
+        ctx = self._context()
+        self._adaptive_source_slots = tuple(slots)
+        if not ctx.enabled or ctx.strategy != PRICE_STRATEGY_ADAPTIVE:
+            return TariffConstraints(
+                max_charge_seconds=0, quality_reason="adaptive_disabled"
+            )
+        if self._adaptive_cycle_load_failed:
+            return TariffConstraints(
+                max_charge_seconds=0, quality_reason="price_cycle_unavailable"
+            )
+        if (
+            self._cycle_state is not None
+            and self._cycle_state.strategy == PRICE_STRATEGY_ADAPTIVE
+            and now < self._cycle_state.anchor
+        ):
+            return TariffConstraints(
+                max_charge_seconds=0, quality_reason="price_cycle_clock_reversed"
+            )
+        cycle = self._active_cycle(now, ctx)
+        elapsed = _merge_intervals(
+            (
+                PricePlanInterval(item.start, min(item.end, now))
+                for item in cycle.intervals
+                if item.start < now
+            ),
+            cycle.anchor,
+            cycle.end,
+        )
+        remaining = max(0.0, ctx.hours * 3600 - _interval_seconds(elapsed))
+        self._remaining_budget_hours = remaining / 3600
+        self._set_cycle_state(
+            PricePlanCycleState(
+                anchor=cycle.anchor,
+                end=cycle.end,
+                strategy=PRICE_STRATEGY_ADAPTIVE,
+                budget_seconds=ctx.hours * 3600,
+                intervals=cycle.intervals,
+            )
+        )
+        cap = ctx.max_price
+        if cap is None or not math.isfinite(cap):
+            return TariffConstraints(quality_reason="price_limit_missing")
+        valid_slots = _adaptive_valid_slots(slots)
+        candidates = tuple(
+            TariffWindow(max(now, _instant(slot.start)), _instant(slot.end), slot.price)
+            for slot in valid_slots
+            if _instant(slot.end) > now
+            and math.isfinite(slot.price)
+            and slot.price <= cap
+        )
+        executable = tuple(
+            TariffWindow(slot.start, min(slot.end, cycle.end), slot.price_eur_kwh)
+            for slot in candidates
+            if slot.start < cycle.end
+        )
+        neutral = self.coordinator.price_charge_neutral_price
+        holds = tuple(
+            TariffWindow(max(now, _instant(slot.start)), _instant(slot.end))
+            for slot in valid_slots
+            if _instant(slot.end) > now
+            and neutral is not None
+            and math.isfinite(neutral)
+            and cap < neutral
+            and slot.price < neutral
+        )
+        return TariffConstraints(
+            charge_windows=executable,
+            cheap_windows=merge_windows(candidates),
+            discharge_blocked_windows=holds,
+            max_charge_seconds=remaining,
+            quality_reason=("no_price_data" if not valid_slots else None),
+        )
+
+    def adaptive_allocate(
+        self, now: datetime, intervals: tuple[ChargeInterval, ...]
+    ) -> None:
+        """Replace future allocations only; elapsed selections are irreversible."""
+        now = _instant(now)
+        constraints = self.adaptive_constraints(now, self._adaptive_source_slots)
+        if constraints.quality_reason is not None:
+            cycle = self._cycle_state
+            if (
+                cycle is not None
+                and cycle.strategy == PRICE_STRATEGY_ADAPTIVE
+                and cycle.anchor <= now < cycle.end
+            ):
+                retained = _merge_intervals(
+                    (
+                        PricePlanInterval(item.start, min(item.end, now))
+                        for item in cycle.intervals
+                        if item.start < now
+                    ),
+                    cycle.anchor,
+                    cycle.end,
+                )
+                self._set_cycle_state(
+                    PricePlanCycleState(
+                        cycle.anchor,
+                        cycle.end,
+                        cycle.strategy,
+                        cycle.budget_seconds,
+                        retained,
+                    )
+                )
+            return
+        cycle = self._cycle_state
+        assert cycle is not None
+        elapsed = _merge_intervals(
+            (
+                PricePlanInterval(item.start, min(item.end, now))
+                for item in cycle.intervals
+                if item.start < now
+            ),
+            cycle.anchor,
+            cycle.end,
+        )
+        future: list[PricePlanInterval] = []
+        for interval in intervals:
+            if not _valid_adaptive_interval(interval):
+                continue
+            for window in constraints.charge_windows:
+                start = max(now, _instant(interval.start), window.start)
+                end = min(_instant(interval.end), window.end)
+                if start < end:
+                    future.append(PricePlanInterval(start, end))
+        remaining = constraints.max_charge_seconds or 0.0
+        bounded_future: list[PricePlanInterval] = []
+        for interval in _merge_intervals(future, now, cycle.end):
+            duration = min(remaining, (interval.end - interval.start).total_seconds())
+            if duration <= 0:
+                break
+            bounded_future.append(
+                PricePlanInterval(
+                    interval.start, interval.start + timedelta(seconds=duration)
+                )
+            )
+            remaining -= duration
+        allocated = _merge_intervals(
+            (
+                *elapsed,
+                *bounded_future,
+            ),
+            cycle.anchor,
+            cycle.end,
+        )
+        self._set_cycle_state(
+            PricePlanCycleState(
+                anchor=cycle.anchor,
+                end=cycle.end,
+                strategy=PRICE_STRATEGY_ADAPTIVE,
+                budget_seconds=self.coordinator.price_charge_hours * 3600,
+                intervals=allocated,
+            )
+        )
 
     def _active_cycle(
         self, now: datetime, ctx: PriceChargeContext

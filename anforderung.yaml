@@ -50,6 +50,15 @@
 # REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
+# REQ-HEMS-LOAD-PROFILE           done        SAX-Nachtprofil aus 168 realen Stunden mit Qualitätsnachweisen (#221)
+# REQ-HEMS-PV-INPUT               done        Austauschbare öffentliche PV-Zeitreihenadapter (#222)
+# REQ-HEMS-ENERGY-PLANNER         done        Gemeinsame minimale Nachtbrücke bis zu tragfähiger PV (#223)
+# REQ-HEMS-RUNTIME               done        Fünf-Minuten-Planung und schneller sicherer Vollzug (#224)
+# REQ-HEMS-TIMED-CHARGE          done        Opt-in-Netzladung in bestehenden Monaten und Fenstern (#224)
+# REQ-HEMS-DYNAMIC               done        Adaptive Preisstrategie mit festem Stundenbudget (#225)
+# REQ-HEMS-CONFIGURATION         done        Rückwärtskompatible HEMS-Einrichtung (#226)
+# REQ-HEMS-OBSERVABILITY         done        Gemeinsame Erklärung, Datenqualität und echte Prüftermine (#226)
+# REQ-HEMS-ACCEPTANCE             done        Tarifübergreifende Simulation und Abnahme (#227)
 # REQ-BUNDLED-DASHBOARD           superseded Abgelöst durch das einzige Dashboard SAX Power (REQ-VUE-DASHBOARD)
 # REQ-VUE-DASHBOARD               done       Dashboard SAX Power mit Navigation, Opt-in und lokalem Build (#197)
 # REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
@@ -5169,3 +5178,140 @@ requirement_economics_savings_dashboard:
     Recorder-Auswertungen, Tarifdaten und verständlichen Datenhinweisen.
     Die Ablösung verändert weder Wirtschaftlichkeitsbilanz noch Recorder-
     Historie. Gespeicherte HA-Dashboards werden nicht neu aufgebaut oder gelöscht.
+
+requirement_hems_load_profile:
+  id: REQ-HEMS-LOAD-PROFILE
+  title: "Belegtes SAX-Nachtprofil der letzten sieben Tage"
+  status: done
+  description: >
+    Ausschließlich SAX-Entladeenergie auf der AC-Seite ist Verbrauchsbasis,
+    niemals eine zusätzliche Netz- oder Hauslastmessung. Die Auswertung verwendet
+    strikt [as_of-168h,as_of), astronomische Nächte und belegte freie Entladung.
+    Drei vollständig im Rückblick liegende abgeschlossene Nächte mit je mindestens
+    einer Stunde gültiger Beobachtung und zusammen sechs Stunden sind erforderlich.
+    Leerer Speicher, physische Entladegrenze, tatsächliche Ladung/Pause/Übersteuerung
+    und fehlende Steuer-/SOC-Nachweise sind zensiert oder unbekannt, keine Nullast.
+    Die Planungsreserve ist keine historische Zensurgrenze; eine lediglich fällige
+    Kalibrierung zensiert freie Entladung ebenfalls nicht.
+  requirements:
+    - "Lokale 15-Minuten-Slotmittel benötigen drei Vergleichsnächte. Sonst gilt eine ausdrücklich gekennzeichnete gepoolte Schätzung aus gleichgewichteten qualifizierten Nachtmitteln."
+    - "Die letzten zwei Nachtstunden liefern das Dämmerungsniveau, ersatzweise das gepoolte Nachtmittel. Die Fortschreibung endet spätestens vier reale Stunden nach Sonnenaufgang."
+    - "Frische bezieht sich auf die höchstens 15 Minuten verzögerte Qualitätsauswertung, nicht auf das Alter der letzten freien Entladung. Unbekannte Zeit wird niemals nullgefüllt."
+    - "Persistente begrenzte SAX-Qualitätsintervalle ermöglichen zukünftiges Lernen. Recorder-Änderungen des Entladezählers werden nur bei vollständig belegter freier Intervallqualität verwendet; ansonsten dient zeitgewichtete positive SAX-Leistung als Adapter. Kein Doppeltzählen."
+    - "Kaltstart ohne Qualitätsnachweise, Datenlücken, Resets und ungeeignete Sonnengeometrie haben eigene Gründe. Recorder läuft mit begrenzter Abfrage im vorgesehenen Executor; parallele Reads werden zusammengeführt."
+
+requirement_hems_pv_input:
+  id: REQ-HEMS-PV-INPUT
+  title: "Anbieterunabhängige PV-Zeitreihen mit expliziter Frische"
+  status: done
+  description: >
+    Der gemeinsame Port normalisiert AC-kWh auf halb offene UTC-Intervalle.
+    pv_forecast.get_forecast und solcast_solar.query_forecast_data sind die
+    beiden öffentlichen lokalen Response-Serviceadapter. Es werden weder
+    Anbieter-Interna importiert noch Wetter-/Cloud-Aktualisierungen ausgelöst.
+    Der HA-Energy-Vertrag wh_hours bleibt kompatibel, reicht ohne Frische- und
+    Qualitätsnachweis aber allein nicht als HEMS-Datenvertrag aus.
+  requirements:
+    - "pv_forecast: Schema 1, fetched_at höchstens 60 Minuten alt, erfolgreicher letzter Update und belegte einzelne Intervalle. Gesamtanlage bereits kalibriert/begrenzt, keine Dach-Doppelzählung."
+    - "Solcast: Gesamtanlage, gedämpfte Daten, pv_estimate als mittlere kW je 30 Minuten; Energie = Leistung mal realer Dauer. API-Last-Polled-Sensor des gewählten Eintrags vor und nach dem Read vergleichen."
+    - "Solcast-Frische 1 bis 24 Stunden, initial 24 Stunden als SAX-Annahme; unbekannte Erfolgsgarantie ehrlich erhalten. Umbenannte Entity über Registry-Identität auflösen."
+    - "Fehlende, veraltete, überlappende oder ungültige notwendige Abschnitte sind unbekannt. Eine später lückenhafte Prognose macht einen vollständig belegten früheren Versorgungsnachweis nicht ungültig."
+    - "Anbieterwechsel und überholte Serviceantworten werden verworfen; ein begrenzter lokaler Serviceaufruf pro Auswertung, keine Providerinstallation erzwungen."
+
+requirement_hems_energy_planner:
+  id: REQ-HEMS-ENERGY-PLANNER
+  title: "Minimaler Batterie-Netzbezug für die Nachtbrücke"
+  status: done
+  description: >
+    Beide Tarife verwenden denselben deterministischen, frameworkfreien Planer.
+    PlanningSnapshot, LoadForecast, PvForecast, TariffConstraints und EnergyPlan
+    sind unveränderlich. Die Suche reicht höchstens 48 reale Stunden bei einem
+    15-Minuten-Grundraster mit zusätzlichen exakten Tarif-/Quellgrenzen.
+    Notwendig ist eine vollständige Strecke bis zum Ende des PV-Nachweises,
+    nicht pauschal eine volle 48-Stunden-Prognose.
+  requirements:
+    - "PV-Versorgung beginnt erst bei 60 zusammenhängenden realen Minuten positiver PV-Leistung, die in jeder Scheibe die angesetzte Last deckt. Auch das Nachweisende liegt innerhalb des Nacht-/Dämmerungsmodells."
+    - "SOC an/unter der wirksamen Reserve bedeutet für die Planung leer. Beginnt tragfähige PV streng vor Ende desselben günstigen Fensters, beträgt Batterie-Netzladung null; direkter günstiger Hausnetzbezug bis dahin ist bewusst zulässig. Der Nachweis darf nach Fensterende enden."
+    - "Andernfalls wird der Bedarf nach dem günstigen Fenster bis zur PV plus einmaliger Reserve chronologisch gedeckt. Tatsächliche Entladesperren und Entladung vor Bereitstellung fließen ein; spätere PV löst keine früheren Defizite."
+    - "E_reserve=C*ReserveSOC/100; nutzbare AC-Energie=max(C*SOC/100-E_reserve,0)*eta_d. Nötige AC-Netzladung=max(0,E_reserve+L/eta_d-E_at_delivery)/eta_c. Reserve genau einmal berücksichtigen, auch bei SOC darunter."
+    - "eta_c und eta_d sind konfigurierbare Annahmen in (0,1], initial je 0,95. Kein zusätzlicher stiller Puffer und kein Abzug einer PV-Tagessumme von bereits PV-beeinflusster SAX-Entladung."
+    - "Normales Ziel höchstens min(Netzladen-MaxSOC, globaler konfigurierter MaxSOC); höhere physische Mindestgrenze führt die Reserve. Ungültige Grenzen/Gerätedaten stoppen. Leistungs-, Kapazitäts- und Zeitlimit werden als unerfüllbarer Bedarf ausgewiesen."
+    - "Bedarfsmenge vor Preis; negative Preise erlauben keine Mehrladung. Bei gleichem Energiebedarf Kosten minimieren und reproduzierbar auswählen."
+    - "Außerhalb des Nacht-/Dämmerungsmodells inaktiv ohne Fallback; innerhalb bei unzureichenden Last-/PV-Daten begründeter MinMax-Fallback. Keine automatische Tagesoptimierung behaupten."
+
+requirement_hems_runtime:
+  id: REQ-HEMS-RUNTIME
+  title: "Ein Scheduler und begrenzte sichere Ausführung"
+  status: done
+  requirements:
+    - "Nach Bootstrap sofortige Auswertung bei aktivem adaptivem Modus; danach ein gemeinsamer 300-Sekunden-Timer auch für Nichtladen/Fallback. next_evaluation_at stammt aus dem echten Backend-Scheduler."
+    - "Eine laufende Auswertung; Quellereignisse bündeln. Konfigurations-/Quellenrevision nach jedem externen Await prüfen, veraltete Ergebnisse verwerfen. Rechenarbeit im Executor, keine blockierende Arbeit im HA-Loop."
+    - "Plan-Lease höchstens zehn Minuten und an früheren Quell-, Modell-, Tarif- oder Fenstergrenzen begrenzt. Gespeicherter Plan allein startet nach Neustart keine Ladung."
+    - "Alle Gerätewrites bleiben unter Coordinator-Kontrolle. Der vorhandene schnelle Poll-/Schreibpfad stoppt beim ersten Ziel-, Mengen-, Zeit- oder Lease-Limit, niemals erst nach fünf Minuten. Stopp und manueller Auftrag sind über denselben Control-Lock synchronisiert."
+    - "Nur der aus Speicherleistung und Netzbezug bestimmte Batterie-Netzanteil zählt als gelieferte Planenergie, PV und direkter Hausbezug nicht. Die Herkunftszuordnung ist eine konservative Schätzung; bei schlechter Messung bleiben Ziel-/Zeitgrenzen."
+    - "Ein separater Live-Fortschrittsledger korrigiert quantisierten Roh-SOC um höchstens einen Prozentpunkt innerhalb 0 bis 100 Prozent. Er bilanziert SAX-Einspeicherung und tatsächliche Entladung mit eta_c/eta_d unabhängig von Ladeabsicht, Quellenwechsel und Neuplanung. Kein Verbrauchstraining und keine zweite Zuordnung zum Netzladebudget."
+    - "Nur frische Leistungssamples bilanzieren: kleinere Einspeicherung bzw. größere Entladung zwischen zwei Endpunkten, keine Doppelzählung alter oder wiederholter Samples. Roh-SOC-Stufenwechsel verankern neu; ungültige Messungen, Lücken über 30 Sekunden oder geänderte Kapazität/Wirkungsgrade verwerfen alte Korrekturen. Der echte SOC-Messzeitstempel bleibt maßgeblich."
+    - "Persistierter SOC-Restnachweis höchstens 30 Sekunden alt, nur bei passenden Annahmen und gleichem Roh-SOC. Mögliche Entladung seit dem Nachweis anhand einer bekannten technischen Leistungsgrenze konservativ abziehen; alte Leistung nicht fortschreiben. Der erste echte Sample am Restore-Zeitpunkt bildet einmalig eine Baseline. Ohne neue Messung keine Fristverlängerung, ohne neuen Plan keine Ladefreigabe."
+    - "Eine neue normale Ladung startet oberhalb der Reserve erst ab 0,05 kWh Bedarf. Der leere Speicher und eine bereits laufende Ladung sind ausgenommen. Diese Startschwelle verhindert Takten; Ziel-, Mengen-, Fenster- und Sicherheitsstopps werden nie verzögert."
+    - "Kalibrierung benötigt regulären positiven Anlass. Normales Bedarfsziel und getrenntes Ausführungsziel bis 100 Prozent sind verschieden. Nachgewiesener Anlass darf im gültigen Kontext fortlaufen; Preis-, Stunden-, Fenster-, Modell- und Sicherheit bleiben hart. Bedarf null startet allein keine Kalibrierung."
+    - "Konfiguration und relevante Fallback-/Kalibrierungsnachweise, Mengen- und Zeitgrenzen sind versioniert gespeichert. Abschaltung entfernt Scheduler/Listener; laufende Quellenresultate verwerfen, begonnene Modbus-ACK-Sequenzen abschließen."
+    - "Gespeicherte Vollzugsnachweise vor Übernahme eines Fallback-/Kalibrierungsanlasses vollständig auf gültige Mengen, SOC-Ziel und eindeutige Deadline prüfen. Fehler erzeugen keine teilweise wiederhergestellte Freigabe. Kontinuierliche Messwerte verschieben einen vorgemerkten Speichertermin nicht unbegrenzt."
+
+requirement_hems_timed_charge:
+  id: REQ-HEMS-TIMED-CHARGE
+  title: "Zusätzlicher adaptiver Modus des zeitvariablen Tarifs"
+  status: done
+  requirements:
+    - "timed_charge_mode=standard|adaptive; Upgrade und Erststart bleiben standard. Bestehende Werte und klassische Min-/Max-SOC-Hysterese bleiben unverändert."
+    - "Im adaptiven Modus ist derselbe MinSOC die Reserve, beim begründeten Fallback wieder Startschwelle. Keine zusätzliche Reserve-Entity."
+    - "Nur bestehende Zeitfenster und aktive Monate, einschließlich getrennt gewählter Monate. Nach Mitternacht entscheidet der aktuelle lokale Monat; beide DST-Folds bleiben eindeutig."
+    - "adaptive ersetzt ausschließlich Bedarfs-/Zielfreigabe. Bestätigter PV-Überschuss, globale Sicherheit, manuelle Aufträge und netzdienliche Priorität bleiben führend."
+    - "Entladesperre nur nach real bestätigter Netzladung bis ursprünglichem Fensterende. Planung/Serviceannahme erzeugt keinen Nachweis, Fensteränderung verlängert ihn nicht. PV-Nachregelung bleibt erhalten."
+
+requirement_hems_dynamic:
+  id: REQ-HEMS-DYNAMIC
+  title: "Adaptive Preisstrategie mit unverändert hartem Zyklusbudget"
+  status: done
+  requirements:
+    - "adaptive ergänzt off/absolute/relative/smart; Altstrategien behalten ihr Verhalten. Kein Aufruf von _smart_required_hours und keine zweite PV-Bedarfskorrektur."
+    - "Günstige Kandidatenfenster sind zusammenhängende bekannte Preise bis einschließlich absoluter Preisgrenze, vor der Bedarfsauswahl bestimmt. Ein Budgetanker trennt sie für die PV-Warteentscheidung nicht; ausführbare Slots bleiben am jeweiligen Zyklus gekürzt."
+    - "Vorhandener fester 24-Stunden-Anker und verbrauchte ausgewählte Dauer bleiben persistent. Neue Prognosen ersetzen Zukunft, geben aber vergangene Dauer nicht zurück. Stundenregler bleibt absolute Obergrenze."
+    - "Unbekannte Preise und Lücken geben keine Ladung frei. Der adaptive Parser verlängert keinen unbekannten letzten Slot und überbrückt keine ungesicherte Preislücke; Legacy-Parser bleibt separat."
+    - "Fallback nutzt Min/Max-Bedarf nur innerhalb gültiger günstiger Slots und Restbudget; der zeitvariable Hauptschalter bleibt aus. Recovery erzeugt kein Doppelbudget."
+    - "Eigene Neutralpreispause ausschließlich im Nacht-/Dämmerungsmodell: bei Neutralpreis über Preisgrenze und Nichtladen pausieren gültige Preise unter Neutralpreis auch in ungenutzten günstigen Slots. Ab Neutralpreis und außerhalb des Modells endet diese Pause. Altstrategien unverändert."
+
+requirement_hems_configuration:
+  id: REQ-HEMS-CONFIGURATION
+  title: "Rückwärtskompatible HEMS-Einrichtung"
+  status: done
+  requirements:
+    - "Moduswahl und neue Preisstrategie sind HA-Select-Entities. Softwarekonfiguration wird unabhängig von Geräte-ACK bestätigt; Aktivität erst nach quittierter Ausführung."
+    - "Options Flow wählt PV-Anbieter und passenden Integrationseintrag, optional Solcast-Frischesensor, maximale Solcast-Datenalter und beide Wirkungsgradannahmen. Ungültige Quellenzuordnung wird am Feld erklärt."
+    - "Die gemeinsamen Min-/Max-SOC-Grenzen bleiben im dynamischen adaptive-Modus direkt bedienbar, auch wenn der zeitvariable Tarif-Tab ausgeblendet ist. Min-SOC ist dann Reserve, Max-SOC eine Obergrenze des berechneten Ziels."
+
+requirement_hems_observability:
+  id: REQ-HEMS-OBSERVABILITY
+  title: "Gemeinsame HEMS-Erklärung mit Datenqualität und Vollzugsstatus"
+  status: done
+  requirements:
+    - "Beide Tarif-Tabs verwenden eine gemeinsame Karte mit lesbarer regelbasierter Begründung, Bedarf/Restmenge, normalem Ziel, Planung, PV-Beginn, Quellenqualität, realem nächsten Prüfzeitpunkt und Übersteuerungsgrund. Keine eigene Bedarfs- oder Ladeberechnung im Frontend."
+    - "Kurzer Sensorzustand hems_status, begrenzte detaillierte Attribute; keine vollständigen 15-Minuten-Zeitreihen im Recorder. Unbekannte Daten bleiben unbekannt, kein optimistischer ACK."
+    - "hems_next_evaluation ist ein eigener Timestamp-Sensor. Karte und Sensor beziehen den Termin vom Backend; deaktivierter Modus, laufende Prüfung und fehlende Quelle erzeugen keinen lokalen Ersatztermin."
+    - "Nachtbeobachtung, gepoolte Schätzung und Dämmerungsfortschreibung benennen; Nächte, beobachtete Dauer und tatsächliche Abdeckung anzeigen. PV-Anbieter, echter Abruf, Altersannahme und unbekannte Erfolgsgarantie bleiben sichtbar."
+    - "Plan, bestätigter Ladebefehl, Vollzugssperre und Kalibrierungsmehrenergie getrennt erklären. Die geschätzten Wirkungsgrade sind jeweils als Annahme gekennzeichnet. Beim Reconnect keine Schreibaktion auslösen und alte Anzeige ohne Verbindung entfernen."
+    - "DE/EN, Tastatur, Mobil/Desktop und helle/dunkle Darstellung; lange Erklärungen umbrechen. Keine Wiederaufnahme der entfernten Angabe Bestätigter Wert auf beiden Tarif-Tabs."
+
+requirement_hems_acceptance:
+  id: REQ-HEMS-ACCEPTANCE
+  title: "Tarifübergreifende Simulation und geprüfter Snapshot"
+  status: done
+  description: >
+    Die übergreifende Abnahme prüft Lastprofil, PV-Vertrag, Energieplan, beide
+    Tarifadapter, Gerätevollzug und Anzeige anhand gemeinsamer Referenzfälle.
+    Die Vorabversion enthält den exakten erfolgreich geprüften Commit.
+    Referenzen, Testzuordnung und Modellgrenzen stehen in docs/hems-acceptance.md.
+  requirements:
+    - "Gemeinsame analytische Energiebeispiele, gleiche normalisierte Providerdaten und gleiche Tarifrandbedingungen führen zu derselben Bedarfsentscheidung."
+    - "Kaltstart/Recovery/Restart, Preis- und Monatsgrenzen, Nachtmodell, PV-Warten, Kalibrierung und Safety werden übergreifend getestet."
+    - "Vollständiges pytest, Ruff, Black sowie Frontend-Prüfungen, Build und Browserprüfung; kein Kontakt mit produktiver Hardware. Hardware-Skips offen berichten."
+    - "Unabhängiges Review der finalen Änderungen und Folgekorrekturen, Ergebnis und geprüfter Commit im PR. Required CI für exakt diesen Commit erfolgreich."

@@ -33,6 +33,10 @@ from .const import (
     ATTR_REASON,
     ATTR_START,
     CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_HEMS_CHARGE_EFFICIENCY,
+    CONF_HEMS_DISCHARGE_EFFICIENCY,
+    CONF_HEMS_PV_PROVIDER,
+    CONF_HEMS_SOLCAST_MAX_AGE,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_SCAN_INTERVAL,
@@ -251,6 +255,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # vor deren erster Auswertung bekannt sein. Sonst würde ein Neustart
         # bereits verbrauchte Ladedauer wieder freigeben (Issue #154).
         await coordinator.price_planner.async_load_cycle_state()
+        await coordinator.hems.async_start()
         await coordinator.async_config_entry_first_refresh()
     except BaseException:
         await _async_rollback_failed_setup(
@@ -281,6 +286,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # während des Entity-Setups eine Kette von Teilkonfigurationen
         # (REQ-CONTROL-CONFIG-BOOTSTRAP).
         await coordinator.async_finish_bootstrap()
+        coordinator.hems.configuration_changed()
         entry.async_on_unload(entry.add_update_listener(async_update_options))
 
         _async_register_services(hass)
@@ -349,6 +355,10 @@ def _control_options(options: Mapping[str, Any]) -> dict[str, Any]:
         CONF_PRICE_UNIT: DEFAULT_PRICE_UNIT,
         CONF_PV_FORECAST_FACTOR: DEFAULT_PV_FORECAST_FACTOR,
         CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
+        CONF_HEMS_PV_PROVIDER: "none",
+        CONF_HEMS_SOLCAST_MAX_AGE: 24,
+        CONF_HEMS_CHARGE_EFFICIENCY: 0.95,
+        CONF_HEMS_DISCHARGE_EFFICIENCY: 0.95,
     }
     return {
         key: value
@@ -414,6 +424,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         return
     coordinator.price_planner.async_setup()
     coordinator.tariff_provider.async_setup()
+    coordinator.hems.configuration_changed()
     # REQ-ECONOMICS-ACCOUNTING: rein diagnostischer Zeitstempel der letzten
     # Tarifrevision - beeinflusst keine bereits verbuchten Beträge.
     coordinator.notify_tariff_revision()

@@ -98,8 +98,11 @@ function example({ domain, key, entity_id }) {
   if (domain === "time")
     state = key.endsWith("start") ? "22:00:00" : "06:00:00";
   if (domain === "select") {
-    state = "absolute";
-    attributes.options = ["off", "absolute", "relative", "smart"];
+    state = key === "timed_charge_mode" ? "standard" : "absolute";
+    attributes.options =
+      key === "timed_charge_mode"
+        ? ["standard", "adaptive"]
+        : ["off", "absolute", "relative", "smart", "adaptive"];
   }
   if (key.includes("price") && domain === "number") {
     state = "-0.05";
@@ -391,6 +394,57 @@ document.querySelector("#legacy-times").onclick = () => {
       states[entityId] = { ...states[entityId], state: value };
     }
   }
+  update();
+};
+window.saxDemoHems = (mode, attributes = {}) => {
+  if (mode === "timed" || mode === "dynamic") {
+    setTariffMode(mode);
+    const selectId =
+      mode === "timed"
+        ? "select.demo_timed_charge_mode"
+        : "select.demo_price_charge_strategy";
+    states[selectId] = { ...states[selectId], state: "adaptive" };
+  }
+  const entity_id = "sensor.demo_hems_status";
+  if (!definitions.some((item) => item.key === "hems_status")) {
+    definitions.push({
+      domain: "sensor",
+      key: "hems_status",
+      translationKey: "hems_status",
+      entity_id,
+    });
+  }
+  states[entity_id] = {
+    entity_id,
+    state: "planned",
+    attributes: {
+      mode,
+      status: "planned",
+      reason_codes: ["night_bridge_required"],
+      execution_charging: false,
+      remaining_grid_kwh: 1.25,
+      target_soc: 47.5,
+      planned_start: "2026-09-13T02:00:00Z",
+      planned_end: "2026-09-13T02:30:00Z",
+      next_evaluation_at: "2026-09-12T22:05:00Z",
+      nights_count: 4,
+      observed_hours: 8.5,
+      load_coverage: 0.42,
+      load_quality_flags: [
+        "night_slot_mean",
+        "pooled_night_estimate",
+        "dawn_extrapolation",
+      ],
+      pv_provider: "solcast_solar",
+      pv_source_id: "demo-plant",
+      pv_update_success: null,
+      pv_freshness_policy: "sax_max_age_assumption",
+      pv_max_age_seconds: 86400,
+      ...attributes,
+    },
+  };
+  for (const callback of metadataSubscribers)
+    callback({ entities: metadata() });
   update();
 };
 update();

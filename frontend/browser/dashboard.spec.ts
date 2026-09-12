@@ -881,7 +881,7 @@ test("overnight times, months, native strategy options and negative prices", asy
     panel.getByText("PV-Prognose 13.9.", { exact: true }),
   ).toBeVisible();
   await panel.locator("nav a[href$='/dynamisches-laden']").click();
-  await expect(panel.locator("select option")).toHaveCount(4);
+  await expect(panel.locator("select option")).toHaveCount(5);
   await panel.getByRole("combobox").selectOption("smart");
   await expect(panel.getByRole("combobox")).toHaveValue("smart");
   const price = panel.locator("input[min='-1']").first();

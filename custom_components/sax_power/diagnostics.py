@@ -75,6 +75,7 @@ async def async_get_config_entry_diagnostics(
         # Preis-Sensor, dessen Attributformat nicht erkannt wurde (siehe
         # price_optimizer.parse_price_slots).
         "price_plan": coordinator.price_planner.plan_attributes,
+        "hems": coordinator.hems.attributes,
         # Tarifmodell der Wirtschaftlichkeitsauswertung samt aktuellem
         # Quote bzw. dem maschinenlesbaren Grund, warum keiner bestimmbar
         # ist (REQ-ECONOMICS-TARIFFS).

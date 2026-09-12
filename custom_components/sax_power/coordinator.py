@@ -35,6 +35,7 @@ from .application.economics import (
     investment_cost_eur_from_options,
     prior_result_eur_from_options,
 )
+from .application.hems_runtime import HemsRuntime
 from .application.ports import ModbusClient
 from .application.timed_charge import TimedChargeState
 from .application.timed_discharge import (
@@ -468,6 +469,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # _charge_control_lock (REQ-MANUAL-GRID-CHARGE).
         self._grid_charge_power: int | None = None
         self._timed_charge_enabled = False
+        self._timed_charge_mode = "standard"
         self._timed_charge_start: dt_time | None = None
         self._timed_charge_end: dt_time | None = None
         self._timed_charge_active = False
@@ -523,6 +525,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
+        self.hems = HemsRuntime(self)
         # Wirtschaftlichkeit: bestimmt den zu einem Zeitpunkt gültigen
         # Netzbezugspreis (REQ-ECONOMICS-TARIFFS). Ohne konfigurierten
         # Tarif liefert er ausschließlich "deaktiviert" und greift in
@@ -717,6 +720,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
         self._accumulate_grid_energy(data)
         self._accumulate_energy(data)
+        self.hems.observe(data)
 
         if not self._control_bootstrap_pending:
             # REQ-CONTROL-CONFIG-BOOTSTRAP: Lesen ist während des Bootstraps
@@ -752,6 +756,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (sensor.py/binary_sensor.py) sie wie jeden anderen Messwert lesen
         können."""
         plan = self.price_planner.plan
+        data["hems_status"] = self.hems.attributes.get("status", "inactive")
+        data["hems_attributes"] = self.hems.attributes
+        data["hems_next_evaluation"] = self.hems.next_evaluation_at
         data["timed_charge_active"] = self._timed_charge_active
         data["timed_charge_discharge_status"] = self._timed_charge_discharge_status
         data["grid_serving_active"] = self._grid_serving_active
@@ -2931,6 +2938,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return ControlConfig(
             max_soc=self._max_soc,
             timed_charge_enabled=self._timed_charge_enabled,
+            timed_charge_mode=self._timed_charge_mode,
             timed_charge_start=self._timed_charge_start,
             timed_charge_end=self._timed_charge_end,
             timed_charge_months=frozenset(self._timed_charge_months),
@@ -2950,6 +2958,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             price_charge_hours=self._price_charge_hours,
             unresolved_fields=frozenset(self._control_unresolved_fields),
         )
+
+    @property
+    def timed_charge_mode(self) -> str:
+        return self._timed_charge_mode
+
+    async def async_set_timed_charge_mode(self, mode: str) -> None:
+        """REQ-HEMS-TIMED-CHARGE: acknowledge configuration without a device wait."""
+        self._raise_if_shutdown()
+        if mode not in ("standard", "adaptive"):
+            raise ValueError("Unknown timed charge mode")
+        self._timed_charge_mode = mode
+        self._timed_charge_armed = False
+        self._timed_charge_restore_state = None
+        self._async_schedule_month_control_change()
 
     async def async_load_control_state(self) -> None:
         """Load the stored charge configuration and open the bootstrap gate.
@@ -3010,6 +3032,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         self._max_soc = config.max_soc
         self._timed_charge_enabled = bool(config.timed_charge_enabled)
+        self._timed_charge_mode = config.timed_charge_mode
         self._timed_charge_start = config.timed_charge_start
         self._timed_charge_end = config.timed_charge_end
         self._timed_charge_months = set(config.timed_charge_months or ())
@@ -3564,6 +3587,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             while True:
                 interval = self._sun_ic_write_interval()
+                if self.hems.mode is not None and (
+                    self._timed_charge_active or self._price_charge_active
+                ):
+                    interval = min(interval, READ_BLOCK_EXT_HIGH_INTERVAL)
                 if self._sun_charge_timed_discharge:
                     interval = READ_BLOCK_EXT_HIGH_INTERVAL
                     if self._timed_discharge_state is not None:
@@ -3632,6 +3659,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         self._sun_charge_power = power
                 else:
+                    if self.hems.mode is not None:
+                        async with self._charge_control_lock:
+                            if (
+                                self._shutdown_started
+                                or self._control_bootstrap_pending
+                            ):
+                                return
+                            if (
+                                self._timed_charge_active or self._price_charge_active
+                            ) and not self.hems.execution(
+                                dt_util.utcnow(), self.data or {}
+                            ).charge:
+                                # REQ-HEMS-RUNTIME: respect concurrent manual ACKs.
+                                await self._async_write_sun_charge_setpoint(0)
+                                self._sun_charge_power = 0
+                                self._timed_charge_active = False
+                                self._price_charge_active = False
+                                if self.data is not None:
+                                    self._publish_charge_state(self.data)
+                                    self.async_update_listeners()
+                                continue
                     await self._async_write_sun_charge_setpoint()
         except asyncio.CancelledError:
             raise
@@ -4086,6 +4134,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._raise_if_shutdown()
         if self._control_bootstrap_pending:
             return
+        self.hems.configuration_changed()
         self._async_schedule_control_save()
         self._month_control_revision += 1
         # REQ-VUE-CHARGING: Fenster-Services und erzwungene Tarifwechsel
@@ -4163,6 +4212,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         einer Anwenderänderung, deshalb entscheidet der Bootstrap selbst, ob
         und wie sie geschrieben wird (siehe _async_persist_bootstrap_result).
         """
+        if persist and not defer_device_update:
+            self.hems.configuration_changed()
         if defer_device_update:
             self._async_schedule_month_control_change()
             return
@@ -4648,13 +4699,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_soc < target_soc:
             self._max_soc_released_for_discharge = False
         timed_target_soc = self.effective_timed_charge_max_soc
+        hems_execution = self.hems.execution(dt_util.utcnow(), data)
+        adaptive_timed = self._timed_charge_mode == "adaptive"
+        if adaptive_timed and hems_execution.target_soc is not None:
+            timed_target_soc = hems_execution.target_soc
         if self._timed_charge_restore_state is not None:
             self._timed_charge_armed = True
             self._timed_charge_restore_state = None
         if timed_window_state is None or current_soc >= timed_target_soc:
             self._timed_charge_armed = False
         elif (
-            self._timed_charge_min_soc is not None
+            not adaptive_timed
+            and self._timed_charge_min_soc is not None
             and current_soc < self._timed_charge_min_soc
         ):
             self._timed_charge_armed = True
@@ -4699,6 +4755,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 timed_months=self._timed_charge_months,
                 timed_min_soc=self._timed_charge_min_soc,
                 timed_armed=self._timed_charge_armed,
+                timed_adaptive_charge=(
+                    hems_execution.charge if adaptive_timed else None
+                ),
+                price_adaptive_pause=(
+                    hems_execution.pause
+                    if self._price_charge_strategy == "adaptive"
+                    else None
+                ),
                 grid_serving_enabled=self._grid_serving_enabled,
                 grid_serving_start=self._grid_serving_start,
                 grid_serving_end=self._grid_serving_end,
@@ -4708,7 +4772,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 price_strategy_active=(
                     self._price_charge_strategy != PRICE_STRATEGY_OFF
                 ),
-                price_charge_now=price_plan.charge_now,
+                price_charge_now=(
+                    hems_execution.charge
+                    if self._price_charge_strategy == "adaptive"
+                    else price_plan.charge_now
+                ),
                 current_price=price_plan.current_price,
                 price_limit=self._price_charge_max_price,
                 neutral_price=self._price_charge_neutral_price,
@@ -4937,6 +5005,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             timed_should_charge
             and not max_soc_hold_active
             and not manual_charge_active_now
+        )
+        self.hems.acknowledged(
+            (timed_should_charge or price_should_charge)
+            and not max_soc_hold_active
+            and not manual_charge_active_now
+        )
+        self.hems.execution_constraint = (
+            "manual_override"
+            if manual_charge_active_now
+            else (
+                "max_soc"
+                if max_soc_hold_active
+                else (
+                    "pv_surplus"
+                    if pv_surplus_active
+                    else "grid_serving" if grid_serving_window_active else None
+                )
+            )
         )
         if self._timed_charge_active and not timed_was_active:
             self._timed_charge_start_revision = self._high_sample_revision
@@ -5628,10 +5714,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # abbrechen; das Shutdown-Gate sperrt weitere Konfigurationsentscheidungen.
         if self._month_control_task is not None:
             await self._month_control_task
-        await self.price_planner.async_flush_cycle_state()
-        await self._async_flush_energy_state()
-        await self._async_flush_economics_state()
-        await self._async_flush_control_state()
         # Kein Stop-via-Service: Dieser würde nach dem manuellen Reset eine
         # konfigurierte Automatik erneut anwenden. Beim regulären Shutdown
         # werden unter demselben Control-Lock stattdessen alle neuen
@@ -5662,6 +5744,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with self._sun_charge_write_lock, self._write_lock:
                 self._shutdown_complete = True
             self._clear_sun_charge_active_flags()
+        # REQ-HEMS-RUNTIME: stop the device before slow source/storage cleanup.
+        await self.hems.async_shutdown()
+        await self.price_planner.async_flush_cycle_state()
+        await self._async_flush_energy_state()
+        await self._async_flush_economics_state()
+        await self._async_flush_control_state()
         ir.async_delete_issue(
             self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

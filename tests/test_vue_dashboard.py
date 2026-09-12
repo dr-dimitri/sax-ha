@@ -347,6 +347,8 @@ async def test_integration_setup_and_unload_manage_optional_panel(
     coordinator = MagicMock(spec=SaxPowerCoordinator)
     coordinator.price_planner = MagicMock()
     coordinator.price_planner.async_load_cycle_state = AsyncMock()
+    coordinator.hems = MagicMock()
+    coordinator.hems.async_start = AsyncMock()
     coordinator.tariff_provider = MagicMock()
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)

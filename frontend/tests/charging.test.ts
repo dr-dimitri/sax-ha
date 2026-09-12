@@ -206,6 +206,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(names(root)).toEqual([
       "Netzladung aktiv",
       "Entladestatus",
+      "Netzlademodus",
       "Netzladen Max. SOC",
       "Netzladung Min. SOC",
       "Januar",
@@ -643,6 +644,22 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
 });
 
 describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
+  it("exposes the shared reserve for adaptive strategy when the timed tab is hidden", async () => {
+    const { root, update, callService } = await mount(DynamicChargingView);
+    expect(names(root)).not.toContain("Netzladung Min. SOC");
+    await update("price_charge_strategy", "adaptive");
+    expect(names(root)).toContain("Netzladung Min. SOC");
+    expect(names(root)).toContain("Netzladen Max. SOC");
+    expect(names(root)).not.toContain("PV-Prognose morgen");
+    await submit(form(root, "Netzladung Min. SOC"), "25");
+    expect(callService).toHaveBeenCalledExactlyOnceWith(
+      "number",
+      "set_value",
+      { value: 25 },
+      { entity_id: "number.renamed_timed_charge_min_soc" },
+      false,
+    );
+  });
   it("renders the dynamic charging controls and status values with all strategy options", async () => {
     const { root, callService } = await mount(DynamicChargingView);
     expect(names(root)).toEqual([
@@ -668,13 +685,14 @@ describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
       ["absolute", "Absoluter Preis"],
       ["relative", "Relativ / Günstigste Stunden"],
       ["smart", "Smart / PV-optimiert"],
+      ["adaptive", "Bedarfsgesteuert / Nachtbrücke"],
     ]);
     expect(root.textContent).toContain("14.09.2026, 07:00");
     expect(root.textContent).toContain("-0,04 EUR/kWh");
     expect(callService).not.toHaveBeenCalled();
   });
 
-  it.each(["off", "absolute", "relative", "smart"])(
+  it.each(["off", "absolute", "relative", "smart", "adaptive"])(
     "passes strategy %s to the existing select entity and waits for HA state",
     async (strategy) => {
       const { root, callService, update } = await mount(DynamicChargingView);

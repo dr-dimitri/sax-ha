@@ -185,7 +185,8 @@ festen günstigen Tarifzeiten, etwa einem Nachttarif.
 ![Zeitvariabler Tarif mit Zeitfenster, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
 
 Schalte **Netzladung aktiv** ein und wähle Start, Ende sowie die gewünschten
-Monate. **Netzladung Min. SOC** bestimmt, wann eine Ladung beginnen darf;
+Monate. Im Modus **Min-/Max-SOC** (Voreinstellung) bestimmt
+**Netzladung Min. SOC**, wann eine Ladung beginnen darf;
 **Netzladen Max. SOC** bestimmt das Ziel. Das Ziel kann unter der globalen
 Grenze **Max. SOC** liegen, etwa um Platz für späteren PV-Ertrag zu lassen.
 
@@ -234,6 +235,7 @@ Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion
 | Absoluter Preis | Sobald der aktuelle Preis die Preisgrenze nicht überschreitet |
 | Relativ / Günstigste Stunden | In der gewählten Anzahl der günstigsten Stunden |
 | Smart / PV-optimiert | Wie Relativ, zusätzlich abgestimmt auf Speicherfüllung und erwarteten PV-Ertrag |
+| Bedarfsgesteuert / Nachtbrücke | Nur die berechnete Nachtbrücke bis zur PV-Versorgung, innerhalb von Preisgrenze und Stundenbudget |
 
 **Relativ** und **Smart** benötigen eine Preisvorschau. Sie planen in festen
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
@@ -248,6 +250,45 @@ Netzladung läuft und kein ausreichender PV-Überschuss erkannt wird. Der
 Hausverbrauch kommt dann aus dem Netz. Ab dem Neutralpreis steht der
 Speicher wieder für den normalen Betrieb zur Verfügung.
 Der Status und **Nächster Start** zeigen, worauf die Automatik gerade wartet.
+
+### Bedarfsgesteuerte Nachtregelung (HEMS)
+
+Im zeitvariablen Tarif wählst du unter **Netzlademodus** zusätzlich zum
+bisherigen **Min-/Max-SOC** den Modus **Bedarfsgesteuert**. Im dynamischen Tarif
+heißt dieselbe Regelung **Bedarfsgesteuert / Nachtbrücke** und benötigt eine
+Preisvorschau. Sie schätzt den Bedarf aus der SAX-Entladeenergie der letzten
+sieben Tage und prüft alle fünf Minuten, wie viel Netzladung bis zur tragfähigen
+PV-Versorgung nötig ist. Die gemeinsame Karte zeigt Menge, Ziel, Ladezeitraum,
+Begründung und nächste Prüfung; ein Plan ist vom quittierten Ladebefehl getrennt.
+
+Wähle unter **Konfigurieren** den PV-Anbieter und dessen Anlage:
+**pv_forecast** und **Solcast** werden unterstützt. Bei Solcast kann zusätzlich
+der Sensor „API Last Polled“ zugeordnet werden. pv_forecast benötigt einen
+höchstens 60 Minuten alten erfolgreichen Abruf. Für Solcast gilt eine eigene
+veränderbare Altersannahme von 1–24 Stunden, initial 24 Stunden; unbekannter
+Aktualisierungserfolg wird ausdrücklich angezeigt. Lade- und Entladewirkungsgrad
+beginnen jeweils bei 0,95 und sind veränderbare Modellannahmen.
+
+**Netzladung Min. SOC** ist hier die Planungsreserve und erzeugt keine neue
+Gerätesperre gegen Entladung. **Netzladen Max. SOC** begrenzt das berechnete Ziel;
+die globale Grenze **Max. SOC** bleibt führend. Beide Netzladegrenzen lassen sich
+auch in der dynamischen Strategie direkt ändern. Zeitfenster und beliebig,
+auch nicht zusammenhängend gewählte Monate bleiben beim zeitvariablen Tarif
+verbindlich; Preisgrenze und Stundenbudget gelten im dynamischen Tarif.
+Dessen Neutralpreispause gilt im Nachtmodell bei Nichtladen auch in ungenutzten
+günstigen Abschnitten unterhalb des Neutralpreises.
+
+Für das Nachtmodell werden mindestens drei abgeschlossene Nächte mit je einer
+Stunde gültiger Beobachtung und zusammen sechs Stunden benötigt. Fehlende oder
+entladegesperrte Zeit gilt nicht als Nullverbrauch. Fehlen belastbare Last- oder
+PV-Daten, greift innerhalb des Nacht-/Dämmerungsmodells der erklärte
+Min-/Max-SOC-Ersatzbetrieb unter denselben Tarifgrenzen. Ungültige Gerätedaten
+geben keine Ersatzladung frei. Außerhalb der Nacht und der höchstens vier Stunden
+nach Sonnenaufgang ist der bedarfsgesteuerte Modus inaktiv. Tragfähige PV muss
+mindestens 60 Minuten durchgehend den angesetzten Bedarf decken; auch dieser
+Nachweis muss in den Modellzeitraum passen. Das ist eine Nachtbrücke auf Basis
+der Speicherentladung, keine vollständige Hausverbrauchsprognose. Der klassische
+Modus bleibt nach dem Update Standard.
 
 ### Zeitfenster und Überschneidungen
 

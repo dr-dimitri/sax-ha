@@ -19,6 +19,7 @@ from .const import (
     DEFAULT_PRICE_STRATEGY,
     DOMAIN,
     PRICE_STRATEGIES,
+    TIMED_CHARGE_MODES,
 )
 from .coordinator import SaxPowerCoordinator
 from .entity import SaxPowerConfigEntity, log_unmigratable_state
@@ -33,8 +34,28 @@ async def async_setup_entry(
     async_add_entities(
         [
             SaxPowerPriceStrategySelect(coordinator, entry.entry_id),
+            SaxPowerTimedChargeModeSelect(coordinator, entry.entry_id),
         ]
     )
+
+
+class SaxPowerTimedChargeModeSelect(SaxPowerConfigEntity, SelectEntity):
+    """REQ-HEMS-TIMED-CHARGE: opt-in mode, persisted before control bootstrap."""
+
+    _attr_translation_key = "timed_charge_mode"
+    _attr_options = list(TIMED_CHARGE_MODES)
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._assign_ids("select", "timed_charge_mode")
+
+    @property
+    def current_option(self) -> str:
+        return self.coordinator.timed_charge_mode
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_timed_charge_mode(option)
+        self.async_write_ha_state()
 
 
 class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerConfigEntity, SelectEntity):

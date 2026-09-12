@@ -42,6 +42,7 @@ from ..const import (
     MIN_PRICE_LIMIT,
     MIN_SOC,
     PRICE_STRATEGIES,
+    TIMED_CHARGE_MODES,
 )
 from ..domain.scheduling import windows_overlap
 from .storage_load import async_load_checked
@@ -136,6 +137,7 @@ class ControlConfig:
 
     max_soc: int | None = None
     timed_charge_enabled: bool | None = None
+    timed_charge_mode: str = "standard"
     timed_charge_start: dt_time | None = None
     timed_charge_end: dt_time | None = None
     timed_charge_months: frozenset[int] | None = None
@@ -222,6 +224,8 @@ class ControlConfig:
                 "preisoptimiertes Laden bleibt aus"
             )
             config = replace(config, price_charge_enabled=False)
+        if config.timed_charge_mode not in TIMED_CHARGE_MODES:
+            config = replace(config, timed_charge_mode="standard")
         return config._without_overlapping_windows()
 
     def _without_overlapping_windows(self) -> ControlConfig:
@@ -309,6 +313,11 @@ class ControlConfigStore:
             return ControlConfigLoadResult(ControlConfigLoadStatus.FAILED)
 
         config = ControlConfig(
+            timed_charge_mode=(
+                raw.get("timed_charge_mode")
+                if raw.get("timed_charge_mode") in TIMED_CHARGE_MODES
+                else "standard"
+            ),
             max_soc=_valid_int(raw.get("max_soc"), MIN_SOC, MAX_SOC, "Max. SOC"),
             timed_charge_enabled=_valid_bool(
                 raw.get("timed_charge_enabled"), "Netzladung aktiv"

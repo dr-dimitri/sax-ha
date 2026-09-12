@@ -48,8 +48,13 @@ export function chargingSample(language = "de"): {
       if (domain === "time")
         state = key.endsWith("start") ? "22:00:00" : "06:00:00";
       if (domain === "select") {
-        state = "absolute";
-        attributes = { options: ["off", "absolute", "relative", "smart"] };
+        state = key === "timed_charge_mode" ? "standard" : "absolute";
+        attributes = {
+          options:
+            key === "timed_charge_mode"
+              ? ["standard", "adaptive"]
+              : ["off", "absolute", "relative", "smart", "adaptive"],
+        };
       }
       if (domain === "number") {
         state = "80";

@@ -289,6 +289,20 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
     # entity_category=DIAGNOSTIC: das ist die Entity, an der der Anwender im
     # Alltag abliest, was die Automatik gerade tut.
     SaxPowerSensorEntityDescription(
+        key="hems_status",
+        translation_key="hems_status",
+        value_fn=_direct("hems_status"),
+        attributes_fn=lambda coordinator: coordinator.hems.attributes,
+        icon="mdi:battery-clock-outline",
+    ),
+    SaxPowerSensorEntityDescription(
+        key="hems_next_evaluation",
+        translation_key="hems_next_evaluation",
+        value_fn=_direct("hems_next_evaluation"),
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:clock-check-outline",
+    ),
+    SaxPowerSensorEntityDescription(
         key="price_charge_status_text",
         translation_key="price_charge_status_text",
         value_fn=_direct("price_charge_status"),

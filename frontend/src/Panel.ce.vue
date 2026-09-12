@@ -191,7 +191,10 @@ function openSidebar(): void {
           :hass="hass"
         />
         <GridServingView v-else-if="activePath === 'netzdienliches-laden'" />
-        <DynamicChargingView v-else-if="activePath === 'dynamisches-laden'" />
+        <DynamicChargingView
+          v-else-if="activePath === 'dynamisches-laden'"
+          :hass="hass"
+        />
         <SavingsView
           v-else-if="activePath === 'ersparnis'"
           :hass="hass"

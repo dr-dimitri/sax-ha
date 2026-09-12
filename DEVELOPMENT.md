@@ -2002,3 +2002,83 @@ SunSpec-Modus-Block (Slave-ID 100) gegen `modbus.pdf` – die offizielle
 sax-power.net-Dokumentation ("SAX Power Home/Home Plus Modbus-TCP
 Dokumentation (SUNSPEC-Mode)") – sowie byte-genau gegen echte Hardware
 verifiziert.
+
+## Adaptive HEMS-Nachtladung
+
+`domain/hems.py` definiert unveränderliche Ein- und Ausgaben für den gemeinsamen
+Nachtplaner. `domain/hems_planner.py` bilanziert AC-Verbrauch, gespeicherte Energie,
+Reserve, Wirkungsgradannahmen und zeitliche Ladegelegenheiten chronologisch.
+Die lexikographische Auswahl minimiert zunächst Unterdeckung, danach nötige
+Netzenergie und erst dann Kosten. Das Ergebnis enthält Gründe, Ziel, Mengen und
+Zeitintervalle; es führt keine Geräteoperation aus. Die Berechnung läuft über den
+HA-Executor, damit komplexere Intervallfolgen den Eventloop nicht aufhalten.
+
+`infrastructure/hems_history.py` sammelt begrenzte SAX-Qualitätsintervalle und
+verwendet Recorder-Änderungen nur bei belegter freier Beobachtung. Die reine
+Profilbildung in `domain/hems_load.py` lernt Nächte innerhalb der letzten 168
+realen Stunden. Planungsreserve und tatsächliche Entlademöglichkeit bleiben
+getrennt. Dämmerung wird höchstens vier Stunden nach Sonnenaufgang fortgeschrieben.
+`infrastructure/hems_pv.py` liest öffentliche lokale Response-Services von
+pv_forecast oder Solcast und normalisiert diese über `domain/hems_pv.py`.
+Es gibt keinen Cloud- oder privaten Anbieterimport im Planer. Notwendig ist
+die vollständige Abdeckung bis zum Ende des 60-minütigen PV-Nachweises;
+fehlende spätere Randstunden sperren diese belegte Nachtbrücke nicht.
+pv_forecast erfordert Schema 1, einen erfolgreichen Abruf und höchstens
+60 Minuten Datenalter. Solcast verwendet eine eigene konfigurierbare
+Altersannahme von 1–24 Stunden (initial 24) und den über die Registry dem
+gewählten Eintrag zugeordneten „API Last Polled“-Sensor. Ein unbekannter
+Aktualisierungserfolg bleibt unbekannt; der Adapter erfindet keine Garantie.
+
+`application/hems_runtime.py` verwaltet pro Config Entry einen 300-Sekunden-Timer,
+Quellenrevisionen, Plan-Leases, persistierte Vollzugsnachweise und die begrenzte
+Ausführung. Start und Historienrestore geschehen vor dem ersten Refresh;
+Planung beginnt nach dem vollständigen Control-Bootstrap. Zusatzereignisse
+werden zusammengeführt, Antworten nach einem Quellen-/Moduswechsel verworfen.
+Die nächste Prüfung stammt aus dem tatsächlich registrierten UTC-Timer.
+Beim Neustart werden Menge, Ziel und eindeutige Deadline des Vollzugsnachweises
+vollständig validiert, bevor Fallback-Arming oder Kalibrierungsanlass übernommen
+werden. Ein beschädigter Teil lässt keine teilweise wiederhergestellte
+100-%-Freigabe zurück. Ein vorgemerkter Speichertermin wird durch fortlaufende
+Energiemessungen nicht immer weiter verschoben.
+
+`domain/hems_progress.py` ergänzt den quantisierten Roh-SOC um einen begrenzten
+Live-Fortschrittsnachweis. `SocProgressLedger` bilanziert frische SAX-Speicherleistung
+mit den konfigurierten Lade-/Entladewirkungsgraden, unabhängig von aktueller
+Ladeabsicht, Quellenrevision und Planwechsel. Tatsächliche Entladung baut
+bekannte Einspeicherung wieder ab; PV-Ladung verändert ebenso den aktuellen
+Speicherzustand. Das ist weder ein Verbrauchstraining noch eine Zuordnung der
+Energieherkunft. Die getrennte Messung des Batterie-Netzanteils bleibt für die
+Erfüllung des aktuellen Netzladebudgets zuständig.
+
+Zwischen frischen Endpunkten zählt der Ledger die kleinere Einspeicherung bzw.
+größere Entladung. Seine Korrektur bleibt innerhalb eines SOC-Prozentpunkts
+und der physischen Grenzen 0–100 %. Doppelte/alte Samples zählen nicht erneut.
+Ein Roh-SOC-Stufenwechsel verankert neu; geänderte Kapazität/Wirkungsgrade,
+unbekannte Samples und Lücken über 30 Sekunden verwerfen den alten Nachweis.
+`estimate()` ersetzt niemals den echten SOC-Messzeitstempel. Ein separat
+versionierter, im Entry-Store eingebetteter Restnachweis darf höchstens
+30 Sekunden über einen Neustart reichen: Konfiguration und Roh-SOC müssen
+passen, und mögliche Entladung wird anhand einer bekannten technischen Grenze
+konservativ abgezogen. Der vorherige Leistungswert wird nicht fortgeschrieben;
+ohne neue reale Messung wird die Nachweisfrist nicht verlängert. Dieser Rest
+ist keine Ladefreigabe und ersetzt weder Bootstrap noch einen neuen Plan.
+
+Der zeitvariable Adapter (`application/hems_tariffs.py`) bewahrt Fenster und
+aktuelle lokale Monate inklusive DST. Der dynamische Adapter im bestehenden
+`SaxPricePlanner` bewahrt günstige Kandidatenfenster unabhängig vom internen
+24-Stunden-Anker; tatsächlich ausgewählte Slots bleiben am Restbudget begrenzt.
+`application/charge_policy.py` behält die Prioritäten. Ziel-, Mengen-, Zeit- und
+Lease-Stopps laufen im schnellen Coordinator-/Schreibpfad unter den vorhandenen
+Locks. Kein neuer Modbus-Writer wird eingeführt.
+
+Der ControlStore ergänzt `timed_charge_mode` mit sicherem Upgrade-Default
+`standard`; die zusätzliche Preisstrategie heißt `adaptive`. Die bisherigen
+vier Preisstrategien bleiben unverändert. Der neue HEMS-Statussensor trägt
+begrenzte Attribute, der separate Timestamp-Sensor die nächste echte Prüfung.
+Beide Dashboard-Tarifansichten verwenden `frontend/src/components/HemsCard.vue`
+und dieselben DE/EN-Grundtexte ohne eigene Energieberechnung. Erklärung und aufklappbare
+Qualitätsdetails unterscheiden berechneten Bedarf, quittierten Ladebefehl,
+Ausführungssperre und Kalibrierungsmehrenergie. Im dynamischen `adaptive`-Modus
+bleiben die gemeinsame Min-SOC-Reserve und Netzladen-Max-SOC direkt bedienbar,
+auch wenn der zeitvariable Tab ausgeblendet ist. Referenzfälle und
+Anforderungszuordnung stehen in [docs/hems-acceptance.md](docs/hems-acceptance.md).

@@ -334,6 +334,7 @@ async def test_failed_first_refresh_closes_unpublished_resources(hass) -> None:
     coordinator.async_load_timed_charge_state = AsyncMock()
     coordinator.async_load_timed_discharge_state = AsyncMock()
     coordinator.price_planner.async_load_cycle_state = AsyncMock()
+    coordinator.hems.async_start = AsyncMock()
     coordinator.async_config_entry_first_refresh = AsyncMock(
         side_effect=ConfigEntryNotReady("erster Refresh fehlgeschlagen")
     )

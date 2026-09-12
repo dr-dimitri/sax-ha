@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any
 
@@ -18,6 +19,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT, CURRENCY_EURO
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow, section
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
@@ -37,6 +39,13 @@ from .const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_HEMS_CHARGE_EFFICIENCY,
+    CONF_HEMS_DISCHARGE_EFFICIENCY,
+    CONF_HEMS_PV_ENTRY,
+    CONF_HEMS_PV_PROVIDER,
+    CONF_HEMS_SOLCAST_MAX_AGE,
+    CONF_HEMS_SOLCAST_TIMESTAMP,
+    CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -93,6 +102,7 @@ from .domain.tariff import (
     find_overlapping_window,
     validate_window_fields,
 )
+from .infrastructure.hems_pv import resolve_solcast_timestamp
 from .sensor import SENSOR_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,7 +119,7 @@ _MAC_UNIQUE_ID_PATTERN = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
 _ENTITY_COUNT_NUMBER = 7
-_ENTITY_COUNT_SELECT = 1
+_ENTITY_COUNT_SELECT = 2
 _ENTITY_COUNT_TIME = 4
 _ENTITY_COUNT_SWITCH_FIXED = 4
 # Monats-Schalter-Sätze in switch.py: zeitgesteuertes Laden, netzdienliches
@@ -557,6 +567,26 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
+        vol.Optional(CONF_HEMS_PV_PROVIDER, default="none"): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=["none", "pv_forecast", "solcast_solar"],
+                translation_key="hems_pv_provider",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Optional(CONF_HEMS_PV_ENTRY): selector.ConfigEntrySelector(),
+        vol.Optional(CONF_HEMS_SOLCAST_TIMESTAMP): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        ),
+        vol.Optional(CONF_HEMS_SOLCAST_MAX_AGE, default=24): vol.All(
+            vol.Coerce(float), vol.Range(min=1, max=24)
+        ),
+        vol.Optional(CONF_HEMS_CHARGE_EFFICIENCY, default=0.95): vol.All(
+            vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
+        ),
+        vol.Optional(CONF_HEMS_DISCHARGE_EFFICIENCY, default=0.95): vol.All(
+            vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
+        ),
         vol.Required(
             CONF_PV_FORECAST_FACTOR, default=DEFAULT_PV_FORECAST_FACTOR
         ): vol.All(
@@ -798,7 +828,37 @@ class SaxPowerOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            timestamp_registry_id: str | None = None
             tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
+            for field in (
+                CONF_HEMS_CHARGE_EFFICIENCY,
+                CONF_HEMS_DISCHARGE_EFFICIENCY,
+                CONF_HEMS_SOLCAST_MAX_AGE,
+            ):
+                if field in user_input and not math.isfinite(user_input[field]):
+                    errors[field] = "hems_invalid_number"
+            provider = user_input.get(CONF_HEMS_PV_PROVIDER, "none")
+            if provider != "none":
+                pv_entry = self.hass.config_entries.async_get_entry(
+                    user_input.get(CONF_HEMS_PV_ENTRY, "")
+                )
+                if pv_entry is None or pv_entry.domain != provider:
+                    errors[CONF_HEMS_PV_ENTRY] = "hems_pv_entry_invalid"
+                timestamp = user_input.get(CONF_HEMS_SOLCAST_TIMESTAMP)
+                if provider == "solcast_solar" and timestamp:
+                    entity = (
+                        resolve_solcast_timestamp(
+                            er.async_get(self.hass),
+                            pv_entry.entry_id,
+                            entity_id=timestamp,
+                        )
+                        if pv_entry is not None
+                        else None
+                    )
+                    if entity is None:
+                        errors[CONF_HEMS_SOLCAST_TIMESTAMP] = "hems_pv_entry_invalid"
+                    else:
+                        timestamp_registry_id = entity.id
             if tariff_type is TariffType.DYNAMIC and not user_input.get(
                 CONF_PRICE_SENSOR
             ):
@@ -807,12 +867,17 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 # denselben Preis sehen (REQ-ECONOMICS-TARIFFS). Ohne
                 # ausgewählten Sensor gäbe es also gar keine Preisquelle.
                 errors[CONF_PRICE_SENSOR] = "economics_price_sensor_required"
-            else:
+            if not errors:
                 self._base_options = {
                     key: value
                     for key, value in user_input.items()
                     if key not in ECONOMICS_OPTION_KEYS
+                    and key != CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID
                 }
+                if timestamp_registry_id is not None:
+                    self._base_options[CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID] = (
+                        timestamp_registry_id
+                    )
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
                 self._base_options.setdefault(
                     CONF_VUE_DASHBOARD_ENABLED,
@@ -998,13 +1063,26 @@ class SaxPowerOptionsFlow(OptionsFlow):
         übernommen, sonst scheiterte eine erneut abgeschickte erste Seite
         weiterhin an der Schema-Validierung (siehe _async_repeat_init).
         """
+        options = dict(self.config_entry.options)
+        if options.get(CONF_HEMS_PV_PROVIDER) == "solcast_solar" and options.get(
+            CONF_HEMS_SOLCAST_TIMESTAMP
+        ):
+            timestamp = resolve_solcast_timestamp(
+                er.async_get(self.hass),
+                options.get(CONF_HEMS_PV_ENTRY, ""),
+                entity_id=options[CONF_HEMS_SOLCAST_TIMESTAMP],
+                registry_id=options.get(CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID),
+                allow_legacy_rename=True,
+            )
+            if timestamp is not None:
+                options[CONF_HEMS_SOLCAST_TIMESTAMP] = timestamp.entity_id
         with_values = self.add_suggested_values_to_schema(
             schema,
             {
                 CONF_VUE_DASHBOARD_ENABLED: self.config_entry.data.get(
                     CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
                 ),
-                **self.config_entry.options,
+                **options,
                 **(user_input or {}),
             },
         )

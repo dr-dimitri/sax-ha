@@ -11,6 +11,7 @@ const props = defineProps<{
     key: string;
     group?: string;
     layout?: "columns" | "months";
+    timeUnit?: boolean;
     title: { de: string; en: string };
     entities: readonly (readonly [EntityDomain, string])[];
   }[];
@@ -115,6 +116,10 @@ const text = computed(() =>
                 "
                 :domain="domain"
                 :entity-key="key"
+                :hide-confirmed-value="
+                  card.layout === 'months' && domain === 'switch'
+                "
+                :time-unit="card.timeUnit && domain === 'time'"
               />
               <EntityValue v-else :domain="domain" :entity-key="key" />
             </template>

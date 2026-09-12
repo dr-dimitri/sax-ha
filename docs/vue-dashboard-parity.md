@@ -9,6 +9,18 @@ Die Zuordnung deckt die Issues [#196](https://github.com/dr-dimitri/sax-ha/issue
 bis [#203](https://github.com/dr-dimitri/sax-ha/issues/203) sowie die
 Vue-Reparatur [#205](https://github.com/dr-dimitri/sax-ha/issues/205) ab.
 
+Die aktuelle Vue-Navigation verwendet folgende Reihenfolge und Namen. Die
+Umbenennung verändert weder URL-Pfade noch Entity-Schlüssel, Tarifkonfiguration
+oder bestehende Lovelace-Bezeichnungen.
+
+| Deutsch | Englisch | Pfad unter `/sax-power-vue` |
+| --- | --- | --- |
+| Allgemeine Informationen | General information | `allgemein` |
+| Zeitvariabler Tarif | Time-of-use tariff | `ladeautomatik` |
+| Dynamischer Tarif | Dynamic tariff | `dynamisches-laden` |
+| Netzdienliches Laden | Grid-serving charging | `netzdienliches-laden` |
+| Ersparnis | Savings | `ersparnis` |
+
 Die folgenden Schlüssel sind **Entity-Domain und Registry-Suffix**, keine
 fest programmierten Entity-IDs. Die tatsächliche ID wird aus dem SAX-Config-Entry
 und der Entity Registry aufgelöst. Umbenennungen, deaktivierte optionale
@@ -53,38 +65,22 @@ Lovelace-Layout bleibt unverändert.
 | Gerät, Fortsetzung | `sensor.storage_event_text`, `sensor.ic_control_mode_text`, `binary_sensor.cell_calibration_active`, `sensor.next_cell_calibration` | HA-Zustände/Enum-Texte, Steuermodus, Kalibrierstatus und lokalisierter Zeitpunkt. Hersteller, Modell und entfernte Statuskarten werden nicht wieder eingeführt. | [Allgemein][general-tests]: vollständige Reihenfolge, Live-Werte und Zeitformat |
 | Gerät, letzte Zeile | `switch.storage_switch` | Übersetzungsschlüssel `storage`; Bestätigungsdialog vor EIN und AUS. Abbrechen/Escape sowie Änderungen von Zustand, ID, Bedienrecht oder Verbindung verwerfen die Auswahl ohne Schreiben; Bestätigung sendet genau einen vorhandenen HA-Service. | [Allgemein][general-tests], [Controls][control-tests], [Browser][browser-tests] |
 
-## Ladeautomatik
+## Zeitvariabler Tarif
 
 `TimedChargingView.vue`, Pfad `ladeautomatik`, Anforderung `REQ-VUE-CHARGING`.
 
 | Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
 | --- | --- | --- | --- |
 | Hauptschalter | `switch.timed_charge_enabled` | Übersetzter Name „Netzladung aktiv“. | [Ladeansichten][charging-tests]: vollständige Reihenfolge |
-| Zeitfenster | `time.timed_charge_start`, `time.timed_charge_end` | Start und Ende; auch 22:00 bis 06:00 wird ausschließlich an die beiden Time-Entities übergeben. | [Ladeansichten][charging-tests]: Zeitfenster über Mitternacht |
+| Zeitfenster | `time.timed_charge_start`, `time.timed_charge_end` | Bestätigte, verfügbare Werte erhalten nur auf Deutsch das Suffix „ Uhr“, etwa „22:00 Uhr“. Kein Suffix bei EN, `unknown` oder `unavailable`; Eingaben und Time-Service-Payloads bleiben unverändert, auch für 22:00 bis 06:00. | [Ladeansichten][charging-tests]: Sprache, Verfügbarkeit und Zeitfenster über Mitternacht |
 | Direkt danach: Entladestatus | `sensor.timed_charge_discharge_status` | `normal` → Normalbetrieb, `discharge_blocked` → Entladung wg. Netzladen gestoppt, `grid_charging` → Netzladen. | [Ladeansichten][charging-tests]: alle drei Live-Statuswechsel |
 | Einstellungen | `number.timed_charge_max_soc`, danach `number.timed_charge_min_soc` | Netzladeziel und Startschwelle. Die Obergrenze des Ziels folgt dessen HA-`max`-Attribut; kein zusätzlicher globaler Max-SOC in diesem Tab. | [Ladeansichten][charging-tests]: geänderte Grenze, ungültiger und gültiger Zielwert |
-| Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Januar, Februar, März, April, Mai, Juni, Juli, August, September, Oktober, November, Dezember; Namen aus Metadaten. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, HA-bestätigte Monatsänderung und Kalenderwechsel ohne Frontend-Aktion |
+| Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Januar bis Dezember mit Namen aus Metadaten. Keine zusätzliche Zeile „Bestätigter Wert“; Kontrollkästchen zeigen den bestätigten HA-Zustand, Fehler und Nichtverfügbarkeit bleiben sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, HA-bestätigte Monatsänderung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
 
 Vue entscheidet weder über Ladeberechtigung noch über die laufende
 Sollwertwiederholung. Beides verbleibt bei `REQ-TIMED-SOC-CHARGE` im Backend.
 
-## Netzdienliches Laden
-
-`GridServingView.vue`, Pfad `netzdienliches-laden`, Anforderung `REQ-VUE-CHARGING`.
-
-| Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
-| --- | --- | --- | --- |
-| Hauptschalter | `switch.grid_serving_enabled` | „Netzdienliches Laden aktiv“. | [Ladeansichten][charging-tests] |
-| Ladepause, Beginn/Ende | `time.grid_serving_start`, `time.grid_serving_end` | „Start“ und „Ende“ innerhalb der ausdrücklich als Ladepause bezeichneten Karte. | [Ladeansichten][charging-tests]: Label, Reihenfolge und Mitternacht |
-| Ladepause, Prognose | `sensor.grid_serving_forecast` | Dynamischer `friendly_name` mit Tagesbezug und Einheit kWh; keine Berechnung in Vue. | [Ladeansichten][charging-tests]: Namenswechsel und nicht verfügbare Prognose |
-| Ladepause, Schwelle | `number.grid_serving_forecast_threshold` | „Mindest PV-Prognose“ mit HA-`min`/`max`/`step` und kWh. | [Ladeansichten][charging-tests], [Controls][control-tests] |
-| Ladepause, Status | `sensor.grid_serving_pause_status` | Bestehender HA-Statustext. | [Ladeansichten][charging-tests]: Live-Status |
-| Aktive Monate | `switch.grid_serving_month_1` bis `switch.grid_serving_month_12` | Dieselben zwölf übersetzten Kalendermonate in numerischer Reihenfolge. | [Ladeansichten][charging-tests]: Namen, Bedienung, Kalenderwechsel |
-
-Es gibt weder eine zusätzliche Einstellungen-Karte noch einen globalen
-Max-SOC-Regler. Die Pausenentscheidung bleibt bei `REQ-GRID-SERVING-CHARGE`.
-
-## Dynamisches Laden
+## Dynamischer Tarif
 
 `DynamicChargingView.vue`, Pfad `dynamisches-laden`, Anforderung
 `REQ-VUE-DYNAMIC-CHARGING`. Vor der Karte steht
@@ -106,7 +102,23 @@ Max-SOC-Regler. Die Pausenentscheidung bleibt bei `REQ-GRID-SERVING-CHARGE`.
 
 Der Frontend-Test vergleicht diese zehn Schlüssel direkt mit `dashboard.py`.
 Vue ermittelt keine Strategie oder Ladezeiten; `REQ-DYNAMIC-PRICE-CHARGE`
-bleibt die fachliche Implementierung.
+bleibt die fachliche Implementierung. Diese Ansicht enthält keine Monatsschalter.
+
+## Netzdienliches Laden
+
+`GridServingView.vue`, Pfad `netzdienliches-laden`, Anforderung `REQ-VUE-CHARGING`.
+
+| Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
+| --- | --- | --- | --- |
+| Hauptschalter | `switch.grid_serving_enabled` | „Netzdienliches Laden aktiv“. | [Ladeansichten][charging-tests] |
+| Ladepause, Beginn/Ende | `time.grid_serving_start`, `time.grid_serving_end` | „Start“ und „Ende“ innerhalb der ausdrücklich als Ladepause bezeichneten Karte. | [Ladeansichten][charging-tests]: Label, Reihenfolge und Mitternacht |
+| Ladepause, Prognose | `sensor.grid_serving_forecast` | Dynamischer `friendly_name` mit Tagesbezug und Einheit kWh; keine Berechnung in Vue. | [Ladeansichten][charging-tests]: Namenswechsel und nicht verfügbare Prognose |
+| Ladepause, Schwelle | `number.grid_serving_forecast_threshold` | „Mindest PV-Prognose“ mit HA-`min`/`max`/`step` und kWh. | [Ladeansichten][charging-tests], [Controls][control-tests] |
+| Ladepause, Status | `sensor.grid_serving_pause_status` | Bestehender HA-Statustext. | [Ladeansichten][charging-tests]: Live-Status |
+| Aktive Monate | `switch.grid_serving_month_1` bis `switch.grid_serving_month_12` | Dieselben zwölf übersetzten Kalendermonate in numerischer Reihenfolge. Keine zusätzliche Zeile „Bestätigter Wert“; bestätigter Checkboxzustand, Fehler und Nichtverfügbarkeit bleiben erhalten. | [Ladeansichten][charging-tests]: Namen, Bedienung, Fehler/Verfügbarkeit, Kalenderwechsel |
+
+Es gibt weder eine zusätzliche Einstellungen-Karte noch einen globalen
+Max-SOC-Regler. Die Pausenentscheidung bleibt bei `REQ-GRID-SERVING-CHARGE`.
 
 ## Ersparnis
 
@@ -217,7 +229,11 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
-### Abnahme der kompakten Desktopansichten
+### Frühere Abnahme der kompakten Desktopansichten
+
+Dieser Nachweis vom 12.09.2026 verwendet die damaligen Tabnamen und betrifft
+den Stand vor der Umbenennung und Neusortierung sowie den anschließenden
+Änderungen an Monatsrastern und bestätigten Zeitfensterwerten.
 
 [Commit e6cf1672d17b](https://github.com/dr-dimitri/sax-ha/commit/e6cf1672d17b35ffd586bb85b4dec12d567cb089)
 bestand am 12.09.2026 den vollständigen
@@ -262,9 +278,9 @@ Alle **24 Browserfälle** bestanden ohne Wiederholung oder übersprungene Fälle
 Die zusätzliche Prüfung bestätigt in allen vier Browserprojekten beide
 Schaltrichtungen, Abbrechen, Escape und Enter auf der vorausgewählten
 Abbruchaktion. Vor ausdrücklicher Bestätigung bleibt der HA-Zustand erhalten
-und es wird kein Service aufgerufen. Die neuen Screenshots unten stammen aus
-diesem Browserbericht und zeigen das gebaute Produktionsmodul mit simuliertem
-HA-Kontext. Die 13 zusätzlichen Komponententests prüfen außerdem ungültig
+und es wird kein Service aufgerufen. Der damalige Browserbericht zeigt das
+gebaute Produktionsmodul mit simuliertem HA-Kontext. Die 13 zusätzlichen
+Komponententests prüfen außerdem ungültig
 gewordene Dialoge und doppelte Bestätigungen.
 
 ### Frühere Paketabnahme vom 12.09.2026
@@ -310,10 +326,14 @@ Config-Entry-Laden, Panel und Issue Registry sind echt. Die anschließend erneut
 ausgeführte lokale Gesamtsuite ergab **1.813 bestandene Tests und zwei erwartete
 Hardware-Skips**; Ruff und Black sind erfolgreich.
 
-### Screenshots
+### Screenshots des bisherigen Stands
 
-Alle Bilder wurden aus CI-Lauf 34684553344 übernommen. Sie zeigen die
-kompakten Desktopansichten und die weiterhin geräumige Mobilansicht. Der
+Alle Bilder wurden aus CI-Lauf 34684553344 vom 12.09.2026 übernommen. Sie
+dokumentieren den Stand vor den neuen Tabnamen, ihrer Reihenfolge und den
+Änderungen an Monatsrastern und bestätigten Zeitfensterwerten. Die Bildtitel
+verwenden deshalb die damaligen Namen; sie belegen diese neuen Änderungen
+noch nicht. Die Bilder zeigen die kompakten Desktopansichten und die weiterhin
+geräumige Mobilansicht. Der
 hell abgesetzte Testbereich kennzeichnet simulierte Daten und zeigt beide
 Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
 Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,

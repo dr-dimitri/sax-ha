@@ -172,9 +172,9 @@ Alle fünf Bereiche des bestehenden Dashboards sind enthalten:
 | Bereich | Inhalt |
 | --- | --- |
 | Allgemeine Informationen | Ladezustand, Zelltemperatur und Leistung mit globalem Max-SOC; unter Gerät zuerst geladene/entladene Energie, danach Gerätedaten und zuletzt der Speicherschalter. |
-| Ladeautomatik | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
+| Zeitvariabler Tarif | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
+| Dynamischer Tarif | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
 | Netzdienliches Laden | Hauptschalter, Ladepause, aktuelle PV-Prognose, Prognoseschwelle, Status und zwölf Monatsschalter. |
-| Dynamisches Laden | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
 | Ersparnis | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
 
 Auf breiten Bildschirmen nutzen die Ansichten mehrere Spalten und kleinere
@@ -190,6 +190,14 @@ bestätigten Werts folgt der Rückmeldung von Home Assistant. Wertebereiche,
 Schrittweiten und Strategieoptionen entsprechen den vorhandenen Entitäten.
 Fehlende optionale Entitäten werden ausgelassen; unbekannte oder nicht
 verfügbare Werte bleiben als solche erkennbar.
+
+Die Monatsraster unter **Zeitvariabler Tarif** und **Netzdienliches Laden**
+zeigen den bestätigten Zustand direkt am Kontrollkästchen; die zusätzliche
+Zeile **Bestätigter Wert** entfällt dort. Fehler und Nichtverfügbarkeit bleiben
+sichtbar. Unter **Zeitvariabler Tarif** erhalten bestätigte Zeitfensterwerte
+in deutscher Sprache den Zusatz **Uhr**, etwa **22:00 Uhr**. Unbekannte oder
+nicht verfügbare Werte und die englische Anzeige erhalten diesen Zusatz nicht;
+Eingabefelder und übertragene Uhrzeiten bleiben unverändert.
 
 In der Vue-Ansicht **Allgemeine Informationen** stehen beide Energiezähler
 am Anfang der Karte **Gerät**; eine eigene Energie-Karte entfällt. Der

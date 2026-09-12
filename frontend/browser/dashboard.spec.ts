@@ -306,6 +306,34 @@ test("five complete views, local assets, responsive screenshots and parallel ent
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   const language = testInfo.project.name.endsWith("en") ? "en" : "de";
+  await expect(panel.locator("nav a")).toHaveText(
+    language === "de"
+      ? [
+          "Allgemeine Informationen",
+          "Zeitvariabler Tarif",
+          "Dynamischer Tarif",
+          "Netzdienliches Laden",
+          "Ersparnis",
+        ]
+      : [
+          "General information",
+          "Time-of-use tariff",
+          "Dynamic tariff",
+          "Grid-serving charging",
+          "Savings",
+        ],
+  );
+  expect(
+    await panel
+      .locator("nav a")
+      .evaluateAll((links) => links.map((link) => link.getAttribute("href"))),
+  ).toEqual([
+    "/sax-power-vue/allgemein",
+    "/sax-power-vue/ladeautomatik",
+    "/sax-power-vue/dynamisches-laden",
+    "/sax-power-vue/netzdienliches-laden",
+    "/sax-power-vue/ersparnis",
+  ]);
   await expect(
     page
       .getByRole("navigation", { name: "Parallele Dashboard-Einstiege" })
@@ -326,6 +354,23 @@ test("five complete views, local assets, responsive screenshots and parallel ent
       await expect(
         panel.locator(".entity-control input, .entity-control select").first(),
       ).toBeVisible();
+    }
+    if (tab.path === "ladeautomatik" || tab.path === "netzdienliches-laden") {
+      const months = panel.locator(".charging-view__rows--months");
+      await expect(months.getByRole("switch")).toHaveCount(12);
+      await expect(months.locator(".entity-control__value")).toHaveCount(0);
+      const times = panel
+        .locator("form")
+        .filter({ has: page.locator("input[type=time]") });
+      const prefix = language === "de" ? "Bestätigter Wert" : "Confirmed value";
+      const suffix =
+        tab.path === "ladeautomatik" && language === "de" ? " Uhr" : "";
+      await expect(times.locator(".entity-control__value")).toHaveText([
+        `${prefix}: 22:00:00${suffix}`,
+        `${prefix}: 06:00:00${suffix}`,
+      ]);
+      await expect(times.nth(0).locator("input")).toHaveValue("22:00:00");
+      await expect(times.nth(1).locator("input")).toHaveValue("06:00:00");
     }
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,

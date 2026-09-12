@@ -48,14 +48,17 @@ test("production module runs independently in a browser context", async () => {
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(window.location.pathname, "/sax-power-vue/ladeautomatik");
-    assert.equal(root.querySelector("h1").textContent.trim(), "Ladeautomatik");
+    assert.equal(
+      root.querySelector("h1").textContent.trim(),
+      "Zeitvariabler Tarif",
+    );
 
     element.hass = { language: "en", states: {} };
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(
       root.querySelector("h1").textContent.trim(),
-      "Scheduled charging",
+      "Time-of-use tariff",
     );
 
     const calls = [];

@@ -54,8 +54,8 @@
 # REQ-VUE-DASHBOARD               done       Separates optionales Vue-Panel mit Navigation und lokalem Build (Grundgerüst, #197)
 # REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
 # REQ-VUE-GENERAL                 done       Allgemeine Vue-Geräteübersicht mit Live-Werten und Bedienung (#199)
-# REQ-VUE-CHARGING                done       Vue-Ladeautomatik und netzdienliche Ladepause mit Status und Monaten (#200)
-# REQ-VUE-DYNAMIC-CHARGING        done       Vue-Preisladeregler, Strategie und gemeinsamer Max-SOC (#201)
+# REQ-VUE-CHARGING                done       Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (#200)
+# REQ-VUE-DYNAMIC-CHARGING        done       Dynamischer Vue-Tarif, Strategie und gemeinsamer Max-SOC (#201)
 # REQ-VUE-SAVINGS                 done       Vue-Ersparnis, Tarifplan und native Recorder-Zeitraumauswertung (#202)
 # REQ-VUE-PARITY                  done       Paritätsmatrix, Parallelbetrieb, Browser- und isolierte Paketprüfung (#203)
 # REQ-VUE-DASHBOARD-REPAIR        done       Eigenständige Vue-Aktualisierung über HA-Reparaturen (#205)
@@ -2215,9 +2215,13 @@ requirement_vue_dashboard:
     Integration ein Vue-3-/TypeScript-Panel unter sax-power-vue mit dem
     Seitenleistennamen SAX Power (Vue). Das Panel enthält die responsive,
     in Deutsch und Englisch beschriftete Navigation zu
-    Allgemeine Informationen (allgemein), Ladeautomatik (ladeautomatik),
-    Netzdienliches Laden (netzdienliches-laden), Dynamisches Laden
-    (dynamisches-laden) und Ersparnis (ersparnis). Alle fünf Ansichten zeigen
+    Allgemeine Informationen (allgemein), Zeitvariabler Tarif (ladeautomatik),
+    Dynamischer Tarif (dynamisches-laden), Netzdienliches Laden
+    (netzdienliches-laden) und Ersparnis (ersparnis), in dieser Reihenfolge.
+    Die englischen Tarif-Tabnamen sind Time-of-use tariff und Dynamic tariff.
+    Die Umbenennung betrifft nur die Vue-Navigation; URL-Pfade, Entity-Schlüssel,
+    Tarifkonfiguration und Lovelace-Bezeichnungen bleiben unverändert.
+    Alle fünf Ansichten zeigen
     die Entitäten und Bedienfunktionen des vorhandenen Dashboards. Die
     gemeinsame Datenanbindung ist in REQ-VUE-ENTITY-BINDING beschrieben,
     die Ansichten in REQ-VUE-GENERAL, REQ-VUE-CHARGING,
@@ -2422,11 +2426,11 @@ requirement_vue_general:
        Navigation, beide Sprachen und eine mobile Ansicht ab."
 
 # ==============================================================================
-# ANFORDERUNG: VUE-LADEAUTOMATIK UND NETZDIENLICHE LADEPAUSE
+# ANFORDERUNG: ZEITVARIABLER VUE-TARIF UND NETZDIENLICHE LADEPAUSE
 # ==============================================================================
 requirement_vue_charging:
   id: REQ-VUE-CHARGING
-  title: "Vue-Ladeautomatik und netzdienliche Ladepause mit Status und Monaten (Issue #200)"
+  title: "Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (Issue #200)"
   status: done
   description: >
     Die Vue-Ansichten ladeautomatik und netzdienliches-laden übernehmen
@@ -2435,7 +2439,7 @@ requirement_vue_charging:
     REQ-VUE-ENTITY-BINDING. Namen, Monate, Start/Ende und Enum-Zustände
     stammen aus den übersetzten HA-Metadaten.
 
-    Ladeautomatik beginnt mit switch.timed_charge_enabled. Danach folgen
+    Zeitvariabler Tarif beginnt mit switch.timed_charge_enabled. Danach folgen
     Zeitfenster mit time.timed_charge_start und time.timed_charge_end,
     direkt darunter Entladestatus mit sensor.timed_charge_discharge_status,
     Einstellungen mit number.timed_charge_max_soc vor
@@ -2454,6 +2458,17 @@ requirement_vue_charging:
     den dynamischen friendly_name und ihre kWh-Einheit; eine zusätzliche
     Einstellungen-Karte wird nicht erzeugt.
 
+    Beide Monatsraster zeigen keine zusätzliche Zeile Bestätigter Wert.
+    Die Kontrollkästchen zeigen weiterhin den bestätigten HA-Zustand und
+    behalten ihre zugänglichen Namen; Servicefehler und Nichtverfügbarkeit
+    bleiben sichtbar. Der Tab Dynamischer Tarif enthält keine Monatsschalter.
+
+    Nur bestätigte, verfügbare Zeitfensterwerte des zeitvariablen Tarifs
+    erhalten bei deutscher HA-Sprache das Suffix " Uhr", etwa 22:00 Uhr.
+    Eingabefelder und Time-Service-Payloads bleiben unverändert. Englische,
+    unbekannte und nicht verfügbare Werte erhalten kein Uhr-Suffix; die
+    Ladepause unter Netzdienliches Laden behält ihre bisherige Formatierung.
+
     Beide Ansichten zeigen keinen zusätzlichen globalen Max-SOC-Regler.
     Netzladeziel und geräteweiter Max-SOC bleiben unterschiedliche Entitäten.
     Uhrzeiten werden auch für Zeitfenster über Mitternacht unverändert an
@@ -2466,6 +2481,12 @@ requirement_vue_charging:
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
     - "22:00 bis 06:00 wird ohne eigene Zeitplanlogik über zwei HA-Time-
        Serviceaufrufe übertragen; Monatswechsel schreiben keine Gerätewerte."
+    - "Beide Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
+       HA-bestätigter Checkboxzustand, zugängliche Namen, Fehler und
+       Nichtverfügbarkeit bleiben geprüft."
+    - "Bestätigte deutsche Zeitfensterwerte im zeitvariablen Tarif zeigen Uhr;
+       englische, unbekannte und nicht verfügbare Werte sowie Eingabefelder
+       und Service-Payloads bleiben ohne zusätzliches Suffix."
     - "Live-Entladestatus, geänderte Ziel-SOC-Grenzen, dynamischer Prognosename
        sowie fehlende und nicht verfügbare Entitäten sind getestet."
     - "Bedienung verwendet echte Entity-IDs, gemeinsame Fehlerbehandlung
@@ -2476,10 +2497,10 @@ requirement_vue_charging:
 # ==============================================================================
 requirement_vue_dynamic_charging:
   id: REQ-VUE-DYNAMIC-CHARGING
-  title: "Vue-Preisladeregler, Strategie und gemeinsamer Max-SOC (Issue #201)"
+  title: "Dynamischer Vue-Tarif, Strategie und gemeinsamer Max-SOC (Issue #201)"
   status: done
   description: >
-    Der Vue-Pfad dynamisches-laden zeigt den Hauptschalter
+    Der Vue-Tab Dynamischer Tarif unter dynamisches-laden zeigt den Hauptschalter
     switch.price_charge_enabled mit dem vollständigen übersetzten Namen
     Preisoptimiertes Laden aktiv. Die Karte Preisoptimiertes Laden enthält
     in dieser Reihenfolge select.price_charge_strategy,

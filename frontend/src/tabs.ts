@@ -4,16 +4,20 @@ export const tabs = [
     de: "Allgemeine Informationen",
     en: "General information",
   },
-  { path: "ladeautomatik", de: "Ladeautomatik", en: "Scheduled charging" },
+  {
+    path: "ladeautomatik",
+    de: "Zeitvariabler Tarif",
+    en: "Time-of-use tariff",
+  },
+  {
+    path: "dynamisches-laden",
+    de: "Dynamischer Tarif",
+    en: "Dynamic tariff",
+  },
   {
     path: "netzdienliches-laden",
     de: "Netzdienliches Laden",
     en: "Grid-serving charging",
-  },
-  {
-    path: "dynamisches-laden",
-    de: "Dynamisches Laden",
-    en: "Dynamic charging",
   },
   { path: "ersparnis", de: "Ersparnis", en: "Savings" },
 ] as const;

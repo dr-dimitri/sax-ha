@@ -15,6 +15,8 @@ const props = defineProps<{
   domain: "switch" | "number" | "time" | "select";
   entityKey: string;
   confirmSwitch?: boolean;
+  hideConfirmedValue?: boolean;
+  timeUnit?: boolean;
 }>();
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
@@ -41,6 +43,19 @@ const options = computed(() => {
     : [];
 });
 const language = computed(() => dashboard?.language.value ?? "en");
+const descriptionIds = computed(() =>
+  props.hideConfirmedValue ? statusId : `${valueId} ${statusId}`,
+);
+const confirmedDisplayValue = computed(() => {
+  const value = entity.value?.displayValue;
+  const showTimeUnit =
+    props.timeUnit &&
+    props.domain === "time" &&
+    language.value === "de" &&
+    entity.value?.available &&
+    /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(state.value);
+  return showTimeUnit ? `${value} Uhr` : value;
+});
 const text = computed(() =>
   language.value === "de"
     ? {
@@ -206,8 +221,8 @@ async function changeSelect(event: Event): Promise<void> {
       <label :for="inputId" class="entity-control__name">{{
         entity.name
       }}</label>
-      <p :id="valueId" class="entity-control__value">
-        <span>{{ text.confirmed }}:</span> {{ entity.displayValue }}
+      <p v-if="!hideConfirmedValue" :id="valueId" class="entity-control__value">
+        <span>{{ text.confirmed }}:</span> {{ confirmedDisplayValue }}
       </p>
     </div>
 
@@ -219,7 +234,7 @@ async function changeSelect(event: Event): Promise<void> {
         role="switch"
         :checked="state === 'on'"
         :disabled="blocked"
-        :aria-describedby="`${valueId} ${statusId}`"
+        :aria-describedby="descriptionIds"
         @change="changeSwitch"
       />
       <select
@@ -227,7 +242,7 @@ async function changeSelect(event: Event): Promise<void> {
         :id="inputId"
         :value="entity.available ? state : ''"
         :disabled="blocked"
-        :aria-describedby="`${valueId} ${statusId}`"
+        :aria-describedby="descriptionIds"
         @change="changeSelect"
       >
         <option v-if="!entity.available" value="" disabled>
@@ -246,7 +261,7 @@ async function changeSelect(event: Event): Promise<void> {
           :max="domain === 'number' ? numberAttribute('max') : undefined"
           :step="domain === 'number' ? numberAttribute('step') : 1"
           :disabled="blocked"
-          :aria-describedby="`${valueId} ${statusId}`"
+          :aria-describedby="descriptionIds"
           required
         />
         <button type="submit" :disabled="blocked || draft === ''">

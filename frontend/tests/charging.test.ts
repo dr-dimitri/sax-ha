@@ -208,19 +208,34 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   });
 
   it.each([
-    [TimedChargingView, "timed_charge"],
-    [GridServingView, "grid_serving"],
+    [TimedChargingView, "timed_charge", "de"],
+    [GridServingView, "grid_serving", "de"],
+    [TimedChargingView, "timed_charge", "en-GB"],
+    [GridServingView, "grid_serving", "en-GB"],
   ] as const)(
     "passes an overnight time range directly to both existing time entities (%s)",
-    async (view, prefix) => {
-      const { root, callService } = await mount(view);
-      await submit(form(root, "Start"), "22:00");
-      await submit(form(root, "Ende"), "06:00");
+    async (view, prefix, language) => {
+      const { root, callService, update } = await mount(view, { language });
+      const start = form(root, "Start");
+      const end = form(root, language === "de" ? "Ende" : "End");
+      const suffix =
+        prefix === "timed_charge" && language === "de" ? " Uhr" : "";
+      const label = language === "de" ? "Bestätigter Wert" : "Confirmed value";
+      expect(start.querySelector(".entity-control__value")?.textContent).toBe(
+        `${label}: 22:00:00${suffix}`,
+      );
+      expect(end.querySelector(".entity-control__value")?.textContent).toBe(
+        `${label}: 06:00:00${suffix}`,
+      );
+      expect(start.querySelector("input")!.value).toBe("22:00:00");
+      expect(end.querySelector("input")!.value).toBe("06:00:00");
+      await submit(start, "23:15");
+      await submit(end, "06:00");
       expect(callService.mock.calls).toEqual([
         [
           "time",
           "set_value",
-          { time: "22:00:00" },
+          { time: "23:15:00" },
           { entity_id: `time.renamed_${prefix}_start` },
           false,
         ],
@@ -232,8 +247,40 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
           false,
         ],
       ]);
+      expect(start.querySelector(".entity-control__value")?.textContent).toBe(
+        `${label}: 22:00:00${suffix}`,
+      );
+      await update(`${prefix}_start`, "23:15:00");
+      expect(start.querySelector("input")!.value).toBe("23:15:00");
+      expect(start.querySelector(".entity-control__value")?.textContent).toBe(
+        `${label}: 23:15:00${suffix}`,
+      );
     },
   );
+
+  it("adds the German time unit only to valid confirmed time states", async () => {
+    const { root, update, callService } = await mount(TimedChargingView);
+    const start = form(root, "Start");
+    for (const state of [
+      "unknown",
+      "unavailable",
+      "invalid",
+      "25:00:00",
+      "12:60:00",
+      "12:30:60",
+    ]) {
+      await update("timed_charge_start", state);
+      expect(
+        start.querySelector(".entity-control__value")?.textContent,
+      ).not.toContain(" Uhr");
+    }
+    await update("timed_charge_start", "09:05");
+    expect(start.querySelector(".entity-control__value")?.textContent).toBe(
+      "Bestätigter Wert: 09:05 Uhr",
+    );
+    expect(start.querySelector("input")!.value).toBe("09:05");
+    expect(callService).not.toHaveBeenCalled();
+  });
 
   it.each([
     [TimedChargingView, "timed_charge"],
@@ -242,6 +289,23 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     "updates month switches only after HA confirmation and does not infer a month schedule (%s)",
     async (view, prefix) => {
       const { root, callService, update } = await mount(view);
+      const months = root.querySelector(".charging-view__rows--months")!;
+      expect(months.querySelectorAll(".entity-control__value")).toHaveLength(0);
+      expect(months.querySelectorAll('input[role="switch"]')).toHaveLength(12);
+      for (const input of months.querySelectorAll("input")) {
+        const describedIds = input
+          .getAttribute("aria-describedby")!
+          .split(/\s+/);
+        expect(describedIds.length).toBeGreaterThan(0);
+        for (const id of describedIds)
+          expect(root.querySelector(`[id="${id}"]`)).not.toBeNull();
+        expect(root.querySelector(`[for="${input.id}"]`)).not.toBeNull();
+      }
+      expect(
+        root.querySelector(
+          ":scope .charging-view > .entity-control .entity-control__value",
+        ),
+      ).not.toBeNull();
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-09-30T21:59:59Z"));
       const september = form(root, "September").querySelector("input")!;
@@ -263,7 +327,22 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
       expect(callService).toHaveBeenCalledTimes(1);
       expect(form(root, "Oktober").querySelector("input")!.checked).toBe(true);
       await update(`${prefix}_month_10`, "off");
-      expect(form(root, "Oktober").querySelector("input")!.checked).toBe(false);
+      const october = form(root, "Oktober");
+      const octoberSwitch = october.querySelector("input")!;
+      expect(octoberSwitch.checked).toBe(false);
+      callService.mockRejectedValueOnce(new Error("server detail"));
+      octoberSwitch.checked = true;
+      octoberSwitch.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      expect(octoberSwitch.checked).toBe(false);
+      const feedback = root.querySelector(
+        `[id="${octoberSwitch.getAttribute("aria-describedby")}"]`,
+      )!;
+      expect(feedback.querySelector('[role="alert"]')?.textContent).toContain(
+        "Änderung ist fehlgeschlagen",
+      );
+      expect(october.querySelector(".entity-control__value")).toBeNull();
+      expect(callService).toHaveBeenCalledTimes(2);
     },
   );
 

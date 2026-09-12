@@ -13,10 +13,10 @@ const unavailable = ref(false);
 const fail = ref(false);
 const timers: number[] = [];
 const calls = ref<string[]>([]);
-const views = [TimedChargingView, GridServingView, DynamicChargingView];
+const views = [TimedChargingView, DynamicChargingView, GridServingView];
 const titles = {
-  de: ["Ladeautomatik", "Netzdienliches Laden", "Dynamisches Laden"],
-  en: ["Timed charging", "Grid-serving charging", "Dynamic charging"],
+  de: ["Zeitvariabler Tarif", "Dynamischer Tarif", "Netzdienliches Laden"],
+  en: ["Time-of-use tariff", "Dynamic tariff", "Grid-serving charging"],
 };
 const sample = chargingSample();
 const connection: HassConnection = {

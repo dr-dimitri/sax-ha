@@ -121,9 +121,15 @@ ordnet die Entity-Anbindung dem Config Entry zu. Die fünf Views unter
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
 | `TimedChargingView.vue` | `REQ-VUE-CHARGING` | Zeitfenster, Entladestatus, Netzladeziel/Startschwelle und Monatsschalter. |
-| `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `DynamicChargingView.vue` | `REQ-VUE-DYNAMIC-CHARGING` | Preisladeregler, Strategie und Status in der bisherigen Reihenfolge. |
+| `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, Tarifplan, Kalenderwerte und freie Recorder-Auswertung. |
+
+Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
+Zeitvariabler Tarif (EN: Time-of-use tariff), Dynamischer Tarif (EN: Dynamic
+tariff), Netzdienliches Laden, Ersparnis. Die Pfade `ladeautomatik` und
+`dynamisches-laden`, Entity-Schlüssel und Tarifkonfiguration bleiben erhalten;
+die geänderten Tabnamen gelten ausschließlich für Vue.
 
 `ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
 Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
@@ -131,6 +137,15 @@ Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
 Zeitfenster, Ladeberechtigungen oder Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
 [Paritätsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
+
+Die beiden Monatsraster in `TimedChargingView.vue` und `GridServingView.vue`
+lassen die zusätzliche Zeile „Bestätigter Wert“ weg. Kontrollkästchen folgen
+weiterhin dem bestätigten HA-Zustand; Fehler, Nichtverfügbarkeit und zugängliche
+Beschriftungen bleiben erhalten. Nur bestätigte, verfügbare Zeitfensterwerte
+in `TimedChargingView.vue` erhalten in deutscher Sprache das Suffix ` Uhr`.
+Unbekannte/nicht verfügbare Zustände, englische Werte, Eingabefelder und
+Time-Service-Payloads bleiben unverändert. Der dynamische Tarif enthält
+keine Monatsschalter.
 
 `GeneralView.vue` ordnet nach den Skalen die Karten Leistung und Gerät an.
 `Panel.ce.vue` stellt die CSS-Container `sax-panel` und `sax-content` bereit.

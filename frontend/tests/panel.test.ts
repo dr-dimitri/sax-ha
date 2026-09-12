@@ -149,7 +149,24 @@ describe("Home Assistant panel", () => {
       [...root.querySelectorAll("nav a")].map((link) =>
         link.getAttribute("href"),
       ),
-    ).toEqual(tabs.map((tab) => `/sax-power-vue/${tab.path}`));
+    ).toEqual([
+      "/sax-power-vue/allgemein",
+      "/sax-power-vue/ladeautomatik",
+      "/sax-power-vue/dynamisches-laden",
+      "/sax-power-vue/netzdienliches-laden",
+      "/sax-power-vue/ersparnis",
+    ]);
+    expect(
+      [...root.querySelectorAll("nav a")].map((link) =>
+        link.textContent?.trim(),
+      ),
+    ).toEqual([
+      "Allgemeine Informationen",
+      "Zeitvariabler Tarif",
+      "Dynamischer Tarif",
+      "Netzdienliches Laden",
+      "Ersparnis",
+    ]);
     expect(selectedLink(element)?.textContent?.trim()).toBe(
       "Allgemeine Informationen",
     );
@@ -201,7 +218,7 @@ describe("Home Assistant panel", () => {
     await flush();
 
     expect(shadow(element).querySelector("h1")?.textContent?.trim()).toBe(
-      "Dynamisches Laden",
+      "Dynamischer Tarif",
     );
   });
 
@@ -222,6 +239,17 @@ describe("Home Assistant panel", () => {
     expect(shadow(element).querySelector("h1")?.textContent?.trim()).toBe(
       "General information",
     );
+    expect(
+      [...shadow(element).querySelectorAll("nav a")].map((link) =>
+        link.textContent?.trim(),
+      ),
+    ).toEqual([
+      "General information",
+      "Time-of-use tariff",
+      "Dynamic tariff",
+      "Grid-serving charging",
+      "Savings",
+    ]);
     expect(
       shadow(element).querySelector(".dashboard")?.getAttribute("lang"),
     ).toBe("en");
@@ -340,7 +368,7 @@ describe("Home Assistant panel", () => {
     window.dispatchEvent(new CustomEvent("location-changed"));
     await flush();
     expect(shadow(element).querySelector("h1")?.textContent?.trim()).toBe(
-      "Ladeautomatik",
+      "Zeitvariabler Tarif",
     );
   });
 

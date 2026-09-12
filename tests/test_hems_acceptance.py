@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime, timedelta
 from datetime import time as dt_time
-from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,6 +25,26 @@ from .test_integration_live import (
     _build_extended_registers,
     _modbus_server,
 )
+
+
+@contextmanager
+def _simulation_clock() -> Iterator[Callable[[datetime], None]]:
+    """HA's UTC scheduler and decision clock share time; TCP keeps real monotonic."""
+    with (
+        patch("homeassistant.util.dt.utcnow", return_value=NOW) as utc_clock,
+        patch("homeassistant.util.dt.now", return_value=NOW) as local_clock,
+        patch("time.time", return_value=NOW.timestamp()) as wall_clock,
+        patch(
+            "homeassistant.helpers.event.time_tracker_timestamp",
+            return_value=NOW.timestamp(),
+        ) as tracker_clock,
+    ):
+
+        def step(instant: datetime) -> None:
+            utc_clock.return_value = local_clock.return_value = instant
+            wall_clock.return_value = tracker_clock.return_value = instant.timestamp()
+
+        yield step
 
 
 @pytest.mark.parametrize("mode", ["timed", "dynamic"])
@@ -74,10 +96,10 @@ async def test_night_decision_reaches_local_modbus_and_stops_at_limit(
     cheap_end = NOW + timedelta(hours=4.25 if wait_for_pv else 1)
     adapter = MagicMock()
     adapter.async_read = AsyncMock(return_value=pv)
+    current_time = NOW
     try:
         with (
-            patch("homeassistant.util.dt.utcnow", return_value=NOW) as utc_clock,
-            patch("homeassistant.util.dt.now", return_value=NOW) as local_clock,
+            _simulation_clock() as step_clock,
             patch.object(
                 coordinator.hems.history, "async_refresh", AsyncMock(return_value=load)
             ) as history_read,
@@ -131,16 +153,27 @@ async def test_night_decision_reaches_local_modbus_and_stops_at_limit(
             coordinator.hems._started = True
             coordinator.hems.configuration_changed()
             await hass.async_block_till_done()
+            assert history_read.await_count == 1
             plan = coordinator.hems.plan
             assert plan is not None
             assert plan.pv_supply_at == NOW + timedelta(hours=4)
             assert coordinator.hems.next_evaluation_at == NOW + timedelta(minutes=5)
             if not wait_for_pv and plan.next_start and plan.next_start > NOW:
-                utc_clock.return_value = local_clock.return_value = plan.next_start
+                current_time = plan.next_start
+                step_clock(current_time)
+                # Advance the scenario with a real fresh SOC read, then one
+                # resumed backend tick; missed ticks are never replayed in bulk.
+                coordinator._basic_data = {}
+                coordinator.data.update(await coordinator._async_read_basic())
                 history_read.return_value = replace(
-                    load, evaluated_through=plan.next_start
+                    load, evaluated_through=current_time
                 )
-                await coordinator.hems._evaluate(coordinator.hems._revision)
+                coordinator.hems._tick(current_time)
+                await hass.async_block_till_done()
+                assert history_read.await_count == 2
+                assert coordinator.hems.next_evaluation_at == (
+                    current_time + timedelta(minutes=5)
+                )
                 plan = coordinator.hems.plan
             response = await client.read_holding_registers(49, count=3, device_id=100)
             assert not response.isError()
@@ -156,9 +189,9 @@ async def test_night_decision_reaches_local_modbus_and_stops_at_limit(
                 assert plan.planned_grid_kwh > 0
                 assert plan.target_soc < 80
                 assert coordinator.hems.execution(
-                    utc_clock.return_value, coordinator.data
+                    current_time, coordinator.data
                 ).charge, (
-                    utc_clock.return_value,
+                    current_time,
                     plan.intervals,
                     plan.valid_until,
                     coordinator.hems.attributes,

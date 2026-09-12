@@ -153,6 +153,17 @@ async def test_source_event_burst_has_one_active_evaluation_and_one_followup(run
     assert maximum == 1
 
 
+async def test_synchronously_finished_evaluation_does_not_block_next_tick(runtime):
+    """HA eager tasks may finish before request_evaluation assigns their handle."""
+    with patch.object(runtime, "_evaluate", new_callable=AsyncMock) as evaluate:
+        runtime.request_evaluation()
+        await runtime.hass.async_block_till_done()
+        assert evaluate.await_count == 1
+        runtime._tick(NOW + timedelta(minutes=5))
+        await runtime.hass.async_block_till_done()
+        assert evaluate.await_count == 2
+
+
 async def test_stale_revision_after_source_await_cannot_publish_or_apply(runtime):
     entered, release = asyncio.Event(), asyncio.Event()
 

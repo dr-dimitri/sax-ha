@@ -256,8 +256,11 @@ class HemsRuntime:
         if not self._started or self._shutdown or self.mode is None:
             return
         self._dirty = True
-        if self._task is None:
-            self._task = self.hass.async_create_task(self._run(), "sax_power_hems")
+        if self._task is None or self._task.done():
+            # Register ownership before a fully synchronous evaluation can finish.
+            self._task = self.hass.async_create_task(
+                self._run(), "sax_power_hems", eager_start=False
+            )
 
     async def _run(self) -> None:
         try:

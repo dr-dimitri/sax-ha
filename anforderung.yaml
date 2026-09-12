@@ -3039,6 +3039,9 @@ requirement_setup_finish_summary:
        erreichbarem SunSpec-Modus-Block, sowie 'Nicht erreichbar' bzw.
        'Nicht verfügbar' bei einem auf diesem Testread fehlschlagenden
        SunSpec-Modus-Block."
+    - "Die Entity-Anzahl wird im Test gegen die tatsächlich von allen
+       Plattformen in async_setup_entry erzeugten Entities geprüft, damit
+       neue Entities nicht unbemerkt aus der Zusammenfassung fehlen."
     - "tests/test_config_flow.py deckt ab, dass der Config Entry weiterhin
        korrekt mit allen zuvor gesammelten Daten (Verbindung,
        Netzladung-Vorbelegung, Dashboard-Entscheidung) angelegt wird,

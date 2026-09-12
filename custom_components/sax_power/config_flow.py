@@ -108,7 +108,7 @@ _MAC_UNIQUE_ID_PATTERN = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
-_ENTITY_COUNT_NUMBER = 6
+_ENTITY_COUNT_NUMBER = 7
 _ENTITY_COUNT_SELECT = 1
 _ENTITY_COUNT_TIME = 4
 _ENTITY_COUNT_SWITCH_FIXED = 4

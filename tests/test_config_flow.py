@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,8 +15,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power import config_flow
-from custom_components.sax_power.config_flow import _expected_entity_count
+from custom_components.sax_power import PLATFORMS, config_flow
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
@@ -33,6 +33,7 @@ from custom_components.sax_power.const import (
     CONF_VUE_DASHBOARD_DISMISSED_VERSION,
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
+    DATA_COORDINATOR,
     DOMAIN,
     ECONOMICS_TOU_WINDOW_KEYS,
     PRICE_UNIT_CT_KWH,
@@ -432,7 +433,15 @@ async def test_finish_step_shows_summary_placeholders(hass) -> None:
         assert placeholders["firmware"] == "Master V61 / Gateway V54"
         assert placeholders["serial_number"] == "12345"
         assert placeholders["sunspec_status"] == "Erreichbar"
-        assert placeholders["entity_count"] == str(_expected_entity_count())
+        entry = MockConfigEntry(domain=DOMAIN, data=VALID_INPUT)
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+            DATA_COORDINATOR: MagicMock()
+        }
+        entities = []
+        for platform in PLATFORMS:
+            module = import_module(f"custom_components.sax_power.{platform}")
+            await module.async_setup_entry(hass, entry, entities.extend)
+        assert placeholders["entity_count"] == str(len(entities))
 
 
 async def test_finish_step_handles_identity_sentinels(hass) -> None:

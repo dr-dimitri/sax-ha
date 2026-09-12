@@ -61,6 +61,7 @@ async function mountTariffs(
   dynamic: string,
   pathname = "/sax-power-vue/allgemein",
   canControl = true,
+  language = "de",
 ) {
   let emit!: (message: DashboardMetadata) => void;
   const listeners = new Map<string, () => void>();
@@ -87,7 +88,7 @@ async function mountTariffs(
     }),
   );
   const hass: HomeAssistant = {
-    language: "de",
+    language,
     connection,
     states: {},
     callService,
@@ -137,6 +138,42 @@ describe("dashboard paths", () => {
 });
 
 describe("Home Assistant panel", () => {
+  it.each(["de", "en"])(
+    "opens both tariff tabs without writes or pending feedback in %s",
+    async (language) => {
+      const { element, callService } = await mountTariffs(
+        "off",
+        "off",
+        "/sax-power-vue/allgemein",
+        true,
+        language,
+      );
+      const root = shadow(element);
+      for (const path of [
+        "ladeautomatik",
+        "dynamisches-laden",
+        "ladeautomatik",
+      ]) {
+        root
+          .querySelector<HTMLAnchorElement>(`nav a[href$='/${path}']`)!
+          .click();
+        await flush();
+        expect(selectedLink(element)?.getAttribute("href")).toBe(
+          `/sax-power-vue/${path}`,
+        );
+        const control = root.querySelector<HTMLFormElement>(
+          ".charging-view > .entity-control",
+        )!;
+        expect(control.getAttribute("aria-busy")).toBe("false");
+        expect(control.querySelector("input")!.disabled).toBe(false);
+        expect(root.textContent).not.toMatch(
+          /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
+        );
+        expect(callService).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it.each([
     ["off", "off", true, true],
     ["on", "off", true, false],

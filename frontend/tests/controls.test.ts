@@ -47,6 +47,7 @@ async function mount(
     valueOnly?: boolean;
     entityKey?: string;
     confirmSwitch?: boolean;
+    hideConfirmedLabel?: boolean;
   } = {},
 ) {
   const entityId = `${domain}.renamed_by_user`;
@@ -115,6 +116,7 @@ async function mount(
                   domain: domain as "switch" | "number" | "time" | "select",
                   entityKey: options.entityKey ?? "example",
                   confirmSwitch: options.confirmSwitch,
+                  hideConfirmedLabel: options.hideConfirmedLabel,
                 }),
           ),
         );
@@ -165,6 +167,33 @@ afterEach(() => {
 });
 
 describe("shared dashboard controls", () => {
+  it.each(["de", "en-GB"])(
+    "retains the accessible confirmed value while hiding its label (%s)",
+    async (language) => {
+      const { root, callService, updateState } = await mount("number", {
+        language,
+        hideConfirmedLabel: true,
+      });
+      const value = root.querySelector(".entity-control__value")!;
+      expect(value.textContent?.trim()).toBe("50 %");
+      expect(
+        input(root).getAttribute("aria-describedby")?.split(" "),
+      ).toContain(value.id);
+      enter(root, "72.5");
+      await flush();
+      expect(value.textContent?.trim()).toBe("50 %");
+      expect(callService).not.toHaveBeenCalled();
+      submit(root);
+      await flush();
+      expect(value.textContent?.trim()).toBe("50 %");
+      await updateState("72.5");
+      expect(value.textContent?.trim()).toBe(
+        language === "de" ? "72,5 %" : "72.5 %",
+      );
+      expect(input(root).value).toBe("72.5");
+    },
+  );
+
   it("labels a number, uses HA bounds, and submits only an explicit action", async () => {
     const { root, callService, updateState } = await mount("number");
     const field = input(root);

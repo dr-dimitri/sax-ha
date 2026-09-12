@@ -2468,6 +2468,22 @@ requirement_vue_entity_binding:
     seine Service-Berechtigungen und die bestehende Integration validiert
     Gerätezugriffe.
 
+    Gültige Softwarekonfiguration wird unmittelbar zum Speichern vorgemerkt
+    und über HA-Zustandslistener bestätigt. Dies gilt für die drei
+    Ladehauptschalter, globalen Max-SOC, Netzladeziel und Min-SOC,
+    Preisgrenzen, Anzahl Stunden, Strategie, PV-Prognoseschwelle sowie
+    einzelne und atomare Zeitfenster; Monatsschalter folgen demselben Prinzip.
+    Entity- und Software-Serviceaufrufe verwenden defer_device_update=True,
+    damit Serviceantwort und Konfigurationszustand weder auf den Control-Lock
+    noch auf Modbus warten. Der gemeinsam mit den Monatsschaltern verwendete
+    Worker fasst Änderungen zusammen und wertet bei einer neueren Revision
+    den aktuellen Stand nochmals unter dem Control-Lock aus.
+    Die Annahme einer Konfiguration setzt keine geräteseitig quittierungspflichtigen
+    Aktivitätsflags. Interne Coordinator-Aufrufe, Bootstrap und manuelle
+    physische Steuerbefehle behalten ihre synchrone Gerätebestätigung.
+    Das Shutdown-Gate lehnt neue Änderungen bereits vor einer Mutation ab;
+    Bootstrap und Shutdown starten keine nachgelagerte Geräteauswertung.
+
     Ausstehende Serviceaufrufe und Fehlermeldungen werden pro tatsächlicher
     Entität geteilt. Während ein Aufruf läuft, wird kein zweiter für dieselbe
     Entität gestartet. Eine gemeinsame Zeitfensteraktion teilt ausstehende
@@ -2486,6 +2502,11 @@ requirement_vue_entity_binding:
        ungültige Eingaben und fehlende Berechtigungen erzeugen keine Schreibaktion."
     - "Servicefehler, doppelte Bedienung und verzögerte Zustandsbestätigung
        sind getestet; ausstehende Aktionen werden gemeinsam gesperrt."
+    - "tests/test_control_response.py und tests/test_vue_dashboard_e2e.py
+       prüfen Software-Entity- und Software-Serviceantworten samt HA-Zustand
+       bei blockierter Geräteauswertung. Folgeänderungen gehen nicht verloren;
+       Aktivitätsflags warten auf Gerätebestätigung, und Shutdown verhindert
+       Änderungen vor der Mutation."
     - "Eine Zeitfensterübernahme sendet genau einen vorhandenen SAX-Service
        mit vollständigem Zielpaar und gemeinsamer Device-ID. Fehlende oder
        fremde Gerätezuordnung und fehlende Rechte einer der beiden Entitäten
@@ -2588,6 +2609,12 @@ requirement_vue_charging:
     vorhandenen Texten. Die aktuelle Obergrenze des Netzladeziels wird
     aus dem max-Attribut der zugehörigen Number-Entity übernommen.
 
+    Die Bedienzeilen im Tab Zeitvariabler Tarif lassen den Präfix
+    Bestätigter Wert: beziehungsweise Confirmed value: weg. Der von HA
+    bestätigte Wert bleibt auch während eines lokalen Zahlenentwurfs und
+    einer ausstehenden Übernahme sichtbar und zugänglich. Die gemeinsame
+    Zeitfenster-Zeile Bestätigt: beziehungsweise Confirmed: bleibt erhalten.
+
     Netzdienliches Laden beginnt mit switch.grid_serving_enabled. Die Karte
     Ladepause enthält in dieser Reihenfolge time.grid_serving_start,
     time.grid_serving_end, sensor.grid_serving_forecast,
@@ -2624,6 +2651,9 @@ requirement_vue_charging:
     jeder Zustandsänderung abgelehnt; der ausstehende Hinweis endet mit der
     Serviceantwort. Eine bestätigte Auswahl bedeutet nicht, dass der Speicher
     bereits einen neuen Steuermodus quittiert hat (REQ-GRID-SERVING-CHARGE).
+    Auch Hauptschalter, Ziel-/Min-SOC, Prognoseschwelle und einzelne oder
+    atomare Zeitfenster bestätigen die Softwarekonfiguration ohne Warten auf
+    Modbus; der gemeinsame Ablauf ist in REQ-VUE-ENTITY-BINDING festgelegt.
 
     Die beiden editierbaren Zeitfenster verwenden dieselbe Komponente
     TimeWindowControl. Eine 24-Stunden-Leiste mit getrennt verschiebbaren
@@ -2679,6 +2709,9 @@ requirement_vue_charging:
   acceptance_criteria:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
+    - "Zeitvariabler Tarif zeigt auf Deutsch und Englisch bestätigte Werte
+       ohne Präfix; lokale Entwürfe ersetzen diese Werte nicht. Die gemeinsame
+       Zeitfenster-Bestätigung und Beschriftungen anderer Ansichten bleiben erhalten."
     - "22:00 bis 06:00 wird als zwei Abschnitte über Mitternacht dargestellt
        und ohne eigene Zeitplanlogik mit genau einem atomaren HA-Service
        übertragen. Gleiche Grenzen zeigen ein leeres Fenster; Tagesfenster,
@@ -2758,6 +2791,13 @@ requirement_vue_dynamic_charging:
     Wertebereichs angezeigt und angenommen. Vue führt keine zusätzlichen
     Preisgrenzen oder Strategieentscheidungen ein.
 
+    Hauptschalter, Strategie, Preisgrenzen, Anzahl Stunden und Max-SOC
+    bestätigen die Softwarekonfiguration ohne Warten auf Modbus gemäß
+    REQ-VUE-ENTITY-BINDING. In diesem Tab entfällt der Präfix Bestätigter Wert:
+    beziehungsweise Confirmed value: bei allen Bedienzeilen. Die bestätigten
+    Werte bleiben während lokaler Entwürfe und ausstehender Aktionen sichtbar
+    und zugänglich; die allgemeine Ansicht behält ihre Beschriftung.
+
     number.max_soc bezeichnet denselben globalen Wert wie in der allgemeinen
     Vue-Ansicht und in den HA-Entitäten. Bestätigte Werte, ausstehende Bedienaktionen
     und Fehler werden über den gemeinsamen Kontext geteilt. Der nächste
@@ -2772,6 +2812,9 @@ requirement_vue_dynamic_charging:
        HA-Einheiten, min/max und step werden über bestehende Services geprüft."
     - "Allgemeine und dynamische Ansicht verwenden nachweislich dieselbe
        Max-SOC-Entity samt gemeinsamer Sperre während eines ausstehenden Aufrufs."
+    - "frontend/tests/charging.test.ts und frontend/tests/controls.test.ts
+       prüfen den entfernten Präfix in DE/EN bei erhaltenen bestätigten Werten,
+       auch während einer Entwurfsänderung und bis zur HA-Bestätigung."
     - "Servicefehler, expliziter Wiederholungsversuch, unbekannte Werte,
        dynamische Prognosenamen und lokale Zeitdarstellung sind getestet."
 
@@ -3655,7 +3698,8 @@ requirement_control_config_bootstrap:
     erlaubt sind, jede steuernde Entscheidung dagegen gesperrt ist - sowohl
     die aus _async_update_data als auch die setterseitigen
     Einzelentscheidungen aus _async_apply_grid_charge_change als auch
-    nachgelagerte Monatsauswertungen.
+    nachgelagerte Software-Konfigurationsauswertungen
+    (REQ-VUE-ENTITY-BINDING).
     SaxPowerCoordinator.async_finish_bootstrap schließt das Fenster nach dem
     Plattform-Setup, schreibt den vollständigen Snapshot fest und wendet
     unter dem vorhandenen Control-Lock (_async_enforce_grid_charge) genau
@@ -3745,8 +3789,10 @@ requirement_control_config_bootstrap:
     Basic-Mode-Ausfall verfügbar - ihre Werte stammen aus keinem Register.
 
     Nach abgeschlossenem Bootstrap merkt jede Einstellungsänderung den
-    aktuellen Snapshot zum gebündelten Schreiben vor: Monatsänderungen
-    bereits bei Annahme der Konfiguration, andere Änderungen im gemeinsamen
+    aktuellen Snapshot zum gebündelten Schreiben vor: Entity- und
+    Software-Serviceänderungen bereits bei Annahme der Konfiguration,
+    unabhängig von der nachgelagerten Geräteauswertung
+    (REQ-VUE-ENTITY-BINDING); direkte interne Änderungen im gemeinsamen
     Endpunkt _async_apply_grid_charge_change. Ein
     unveränderter Snapshot löst keinen Schreibvorgang aus. Beim Entladen des
     Config Entry wird der neueste Stand zusätzlich best-effort sofort

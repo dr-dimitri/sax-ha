@@ -112,7 +112,7 @@ class SaxPowerMaxSocNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
         return self.coordinator.max_soc
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_max_soc(int(value))
+        await self.coordinator.async_set_max_soc(int(value), defer_device_update=True)
         self.async_write_ha_state()
 
 
@@ -148,7 +148,9 @@ class SaxPowerTimedChargeMaxSocNumber(SaxPowerConfigEntity, NumberEntity):
         return self.coordinator.timed_charge_max_soc
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_timed_charge_max_soc(int(value))
+        await self.coordinator.async_set_timed_charge_max_soc(
+            int(value), defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -210,7 +212,9 @@ class SaxPowerTimedChargeMinSocNumber(
         return self.coordinator.timed_charge_min_soc
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_timed_charge_min_soc(int(value))
+        await self.coordinator.async_set_timed_charge_min_soc(
+            int(value), defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -267,7 +271,9 @@ class SaxPowerGridServingForecastThresholdNumber(
         return self.coordinator.grid_serving_forecast_threshold_kwh_raw
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(value)
+        await self.coordinator.async_set_grid_serving_forecast_threshold_kwh(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -323,7 +329,9 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity
         return self.coordinator.price_charge_max_price
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_price_charge_max_price(value)
+        await self.coordinator.async_set_price_charge_max_price(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -388,7 +396,9 @@ class SaxPowerPriceNeutralPriceNumber(
         return self.coordinator.price_charge_neutral_price
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_price_charge_neutral_price(value)
+        await self.coordinator.async_set_price_charge_neutral_price(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -441,5 +451,7 @@ class SaxPowerPriceChargeHoursNumber(RestoreEntity, SaxPowerConfigEntity, Number
         return self.coordinator.price_charge_hours_raw
 
     async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_set_price_charge_hours(int(value))
+        await self.coordinator.async_set_price_charge_hours(
+            int(value), defer_device_update=True
+        )
         self.async_write_ha_state()

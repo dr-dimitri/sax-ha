@@ -88,7 +88,9 @@ async def test_window_service_requires_both_target_entities(
     await hass.services.async_call(
         DOMAIN, service, data, blocking=True, context=Context(user_id=user.id)
     )
-    action.assert_awaited_once_with(time(22, 0, 17), time(6, 30, 25))
+    action.assert_awaited_once_with(
+        time(22, 0, 17), time(6, 30, 25), defer_device_update=True
+    )
 
 
 @pytest.mark.parametrize("problem", ["inactive", "unknown", "disabled", "device"])
@@ -137,4 +139,4 @@ async def test_window_service_preserves_internal_and_admin_calls(
         blocking=True,
         context=Context(user_id=user.id if user else None),
     )
-    action.assert_awaited_once_with(time(6, 30), time(6, 30))
+    action.assert_awaited_once_with(time(6, 30), time(6, 30), defer_device_update=True)

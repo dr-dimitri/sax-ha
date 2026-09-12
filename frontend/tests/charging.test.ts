@@ -141,6 +141,30 @@ afterEach(() => {
 });
 
 describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
+  it.each(["de", "en-GB"])(
+    "omits the confirmed-value label only in both tariff views (%s)",
+    async (language) => {
+      const { root } = await mount(
+        [TimedChargingView, DynamicChargingView, GridServingView],
+        { language },
+      );
+      const [timed, dynamic, grid] = root.querySelectorAll(".charging-view");
+      const label =
+        language === "de" ? "Bestätigter Wert:" : "Confirmed value:";
+      for (const view of [timed, dynamic]) {
+        expect(view.textContent).not.toContain(label);
+        const values = view.querySelectorAll(".entity-control__value");
+        expect(values.length).toBeGreaterThan(0);
+        for (const value of values)
+          expect(value.textContent?.trim()).not.toBe("");
+      }
+      expect(
+        timed.querySelector(".time-window-control")?.textContent,
+      ).toContain(language === "de" ? "Bestätigt:" : "Confirmed:");
+      expect(grid.textContent).toContain(label);
+    },
+  );
+
   it("preserves the timed charging card and entity order including all translated months", async () => {
     const { root, callService } = await mount(TimedChargingView);
     expect(
@@ -667,9 +691,13 @@ describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
       { entity_id: "number.renamed_price_charge_max_price" },
       false,
     );
-    expect(price.textContent).toContain("Bestätigter Wert: -5 ct/kWh");
+    expect(
+      price.querySelector(".entity-control__value")?.textContent?.trim(),
+    ).toBe("-5 ct/kWh");
     await update("price_charge_max_price", "-6.25");
-    expect(price.textContent).toContain("Bestätigter Wert: -6,25 ct/kWh");
+    expect(
+      price.querySelector(".entity-control__value")?.textContent?.trim(),
+    ).toBe("-6,25 ct/kWh");
   });
 
   it("shares the authoritative max-SOC and action state with the general view", async () => {
@@ -700,13 +728,17 @@ describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
     );
     finish();
     await flush();
-    for (const control of controls)
-      expect(control.textContent).toContain("Bestätigter Wert: 80 %");
+    expect(controls[0].textContent).toContain("Bestätigter Wert: 80 %");
+    expect(
+      controls[1].querySelector(".entity-control__value")?.textContent?.trim(),
+    ).toBe("80 %");
     await update("max_soc", "70");
     for (const control of controls) {
       expect(control.querySelector("input")!.value).toBe("70");
-      expect(control.textContent).toContain("Bestätigter Wert: 70 %");
+      expect(control.textContent).toContain("70 %");
     }
+    expect(controls[0].textContent).toContain("Bestätigter Wert: 70 %");
+    expect(controls[1].textContent).not.toContain("Bestätigter Wert:");
   });
 
   it("shows disabled charging, missing price and unknown next start without deriving a schedule", async () => {
@@ -741,7 +773,9 @@ describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
       "Änderung ist fehlgeschlagen",
     );
     expect(price.textContent).not.toContain("server detail");
-    expect(price.textContent).toContain("Bestätigter Wert: 0,3 EUR/kWh");
+    expect(
+      price.querySelector(".entity-control__value")?.textContent?.trim(),
+    ).toBe("0,3 EUR/kWh");
     expect(callService).toHaveBeenCalledTimes(1);
     await submit(price, "0.25");
     expect(callService).toHaveBeenCalledTimes(2);

@@ -136,6 +136,11 @@ Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
 für beide Zeitfenster. Die gemeinsame
 [`components/MonthSelection.vue`](frontend/src/components/MonthSelection.vue)
 kapselt Zusammenfassung und Quartalsauswahl beider Monatsgruppen.
+`hideConfirmedLabel` in Layout und Bedienkomponente entfernt nur in
+`TimedChargingView.vue` und `DynamicChargingView.vue` den Präfix
+„Bestätigter Wert:“ (EN: „Confirmed value:“). Bestätigte HA-Werte bleiben
+auch während lokaler Entwürfe sichtbar und über `aria-describedby` zugeordnet.
+Die gemeinsame Zeitfenster-Zeile „Bestätigt:“ bleibt erhalten.
 Das Layout berechnet keine Ladeberechtigungen oder
 Preisstrategien. Alle Entity-Suffixe,
 Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
@@ -1094,16 +1099,26 @@ alle 12 Monate, parametrisiert über `is_month_active`/`async_set_month_active`
 werden. `_async_enforce_grid_charge` prüft zusätzlich `now.month in
 self._timed_charge_months` bzw. `self._grid_serving_months`.
 
-Gültige Monatsänderungen bestätigen die lokale HA-Konfiguration sofort und
-merken ihren Snapshot zum Speichern vor. Die Serviceantwort wartet dabei
-nicht auf `_charge_control_lock` oder Modbus. Ein nachverfolgter, endlicher
-Coordinator-Task stößt die Auswertung ohne zusätzlichen Timer an; die
-Geräteauswertung bleibt unter dem gemeinsamen Control-Lock. Mehrere Änderungen
-werden zusammengefasst, Änderungen während einer Auswertung lösen danach
-eine weitere Auswertung des neuesten Stands aus. Die bestehenden quittierten
-Schreibsequenzen bestimmen weiterhin die Aktivitäts- und Gerätezustände.
-Bootstrap startet keinen Monatstask. Shutdown sperrt neue Änderungen und
-wartet einen laufenden Task vor Store-Flush und abschließendem Reset ab.
+**Bestätigung der Softwarekonfiguration:** Monatsänderungen und die übrigen
+Software-Entity-/Serviceaufrufe bestätigen die angenommene HA-Konfiguration
+sofort über die Zustandslistener und merken ihren Snapshot zum Speichern vor.
+Die Entity- und Software-Serviceadapter verwenden `defer_device_update=True`;
+damit warten weder Serviceantwort noch Konfigurationszustand auf
+`_charge_control_lock` oder Modbus. Das betrifft die drei Ladehauptschalter,
+Max-SOC, Netzladeziel/Min-SOC, Preisgrenzen, Anzahl Stunden, Strategie,
+Prognoseschwelle sowie einzelne und atomare Zeitfenster.
+
+Alle verwenden denselben nachverfolgten, endlichen Worker wie die Monate.
+Er fasst Änderungen zusammen; eine neuere Revision während einer Auswertung
+führt danach zu einer weiteren Auswertung des aktuellen Stands unter dem
+Control-Lock. Quittierungspflichtige Aktivitätsflags bleiben an die bestehende
+Geräteschreibsequenz gebunden. Interne Coordinator-Aufrufe, Bootstrap und
+manuelle physische Steuerbefehle bleiben synchron. Bootstrap startet keinen
+Worker; Shutdown sperrt neue Änderungen vor der Mutation und wartet einen
+laufenden Task vor Store-Flush und abschließendem Reset ab. Verhalten und
+Prüfnachweise: `REQ-VUE-ENTITY-BINDING`,
+[`tests/test_control_response.py`](tests/test_control_response.py) und
+[`tests/test_vue_dashboard_e2e.py`](tests/test_vue_dashboard_e2e.py).
 
 **Zeitfenster-Überlappung (Tageszeit UND Monat):**
 `SaxPowerCoordinator._assert_windows_dont_overlap` (aufgerufen aus den vier
@@ -1419,9 +1434,11 @@ Deshalb überspringt `_apply_control_config` die Überlappungsprüfung - sie
 ist an dieser Stelle bereits gelaufen.
 
 **Schreiben:** Nach dem Bootstrap merkt jede Einstellungsänderung den aktuellen
-Snapshot zum gebündelten Schreiben vor: Monatsänderungen bereits bei Annahme
-der Konfiguration, andere Änderungen im gemeinsamen Endpunkt
-`_async_apply_grid_charge_change`. Ein unveränderter Snapshot löst
+Snapshot zum gebündelten Schreiben vor: Entity- und Software-Serviceänderungen
+bereits bei Annahme der Konfiguration, unabhängig von der nachgelagerten
+Geräteauswertung (siehe oben und `REQ-VUE-ENTITY-BINDING`); direkte interne
+Änderungen im gemeinsamen Endpunkt `_async_apply_grid_charge_change`.
+Ein unveränderter Snapshot löst
 keinen Schreibvorgang aus. `async_shutdown` flusht den neuesten Stand
 zusätzlich best-effort sofort.
 

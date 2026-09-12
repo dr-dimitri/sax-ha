@@ -94,7 +94,9 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
         return self.coordinator.timed_charge_start
 
     async def async_set_value(self, value: dt_time) -> None:
-        await self.coordinator.async_set_timed_charge_start(value)
+        await self.coordinator.async_set_timed_charge_start(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -136,7 +138,9 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
         return self.coordinator.timed_charge_end
 
     async def async_set_value(self, value: dt_time) -> None:
-        await self.coordinator.async_set_timed_charge_end(value)
+        await self.coordinator.async_set_timed_charge_end(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -186,7 +190,9 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
         return self.coordinator.grid_serving_start
 
     async def async_set_value(self, value: dt_time) -> None:
-        await self.coordinator.async_set_grid_serving_start(value)
+        await self.coordinator.async_set_grid_serving_start(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()
 
 
@@ -230,5 +236,7 @@ class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
         return self.coordinator.grid_serving_end
 
     async def async_set_value(self, value: dt_time) -> None:
-        await self.coordinator.async_set_grid_serving_end(value)
+        await self.coordinator.async_set_grid_serving_end(
+            value, defer_device_update=True
+        )
         self.async_write_ha_state()

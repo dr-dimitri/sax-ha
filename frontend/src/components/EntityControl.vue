@@ -15,6 +15,7 @@ const props = defineProps<{
   domain: "switch" | "number" | "time" | "select";
   entityKey: string;
   confirmSwitch?: boolean;
+  hideConfirmedLabel?: boolean;
   hideConfirmedValue?: boolean;
   monthTile?: boolean;
   timeUnit?: boolean;
@@ -278,7 +279,8 @@ async function changeSelect(event: Event): Promise<void> {
           :id="valueId"
           class="entity-control__value"
         >
-          <span>{{ text.confirmed }}:</span> {{ confirmedDisplayValue }}
+          <span v-if="!hideConfirmedLabel">{{ text.confirmed }}:</span>
+          {{ confirmedDisplayValue }}
         </p>
       </div>
 

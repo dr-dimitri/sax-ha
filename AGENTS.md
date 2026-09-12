@@ -109,10 +109,16 @@ apply to every PR, including documentation-only PRs.
   PRs, or release metadata. For completed changes intended for publication,
   create commits and a PR against `main`, unless the user limits the task
   to local work.
-- Creating a PR does not authorize merging it. Merge only when explicitly
-  requested. After creating the PR, return to `main` and delete the local
-  feature branch only once all changes are committed and pushed; preserve
-  the remote branch while the PR is open.
+- Review every change before merging, including documentation and follow-up
+  fixes. Review the final diff for correctness, regressions, safety, and test
+  coverage; resolve findings and review any resulting changes again. Record
+  the reviewed commit and review outcome in the PR.
+- After a successful review and all required checks passing for the current
+  PR head, the branch may be merged without asking again, unless the user
+  explicitly limits the task to local work or an unmerged PR. Existing
+  snapshot restrictions still apply. After publication, return to `main`;
+  remove local feature branches only once committed and pushed, and preserve
+  remote branches while their PRs remain open.
 - When preparing changes for publication, inspect
   `.github/workflows/release.yaml` and `.github/workflows/snapshot-release.yaml`
   before committing and creating the PR; reuse that inspection unless the

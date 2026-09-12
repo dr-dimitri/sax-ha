@@ -104,25 +104,58 @@ test("compact views retain readable controls and all entities across available p
           const controls = [
             ...section.querySelectorAll("input, select, button"),
           ].filter(visible);
+          const targets: Element[] = [];
           for (const control of controls) {
-            const rect = control.getBoundingClientRect();
+            const month =
+              control.matches("input[type='checkbox']") &&
+              control.closest(".charging-view__rows--months");
+            const target = month
+              ? control.closest(".entity-control__switch-target")
+              : control;
+            if (!target) {
+              violations.push(
+                `${name(control)} is missing its month click target`,
+              );
+              continue;
+            }
+            targets.push(target);
+            const rect = target.getBoundingClientRect();
             if (rect.height < 43.5)
-              violations.push(`${name(control)} height ${rect.height}`);
-            if (
-              control.closest(".charging-view__rows--months") &&
-              rect.width < 43.5
-            )
+              violations.push(`${name(control)} target height ${rect.height}`);
+            if (month && rect.width < 43.5)
               violations.push(
                 `${name(control)} month target width ${rect.width}`,
               );
+            if (month) {
+              const indicator = control.getBoundingClientRect();
+              if (
+                indicator.width < 20 ||
+                indicator.width > 24 ||
+                indicator.height < 20 ||
+                indicator.height > 24
+              )
+                violations.push(
+                  `${name(control)} visible checkbox ${indicator.width}×${indicator.height}`,
+                );
+              if (
+                indicator.left < rect.left ||
+                indicator.right > rect.right ||
+                indicator.top < rect.top ||
+                indicator.bottom > rect.bottom
+              )
+                violations.push(
+                  `${name(control)} extends outside its click target`,
+                );
+            }
             if (parseFloat(getComputedStyle(control).fontSize) < 13.99)
               violations.push(
                 `${name(control)} font ${getComputedStyle(control).fontSize}`,
               );
-            const card =
-              control.closest(
-                ".general-view__card, .charging-view__card, .savings-card",
-              ) ?? control.closest("form")!;
+            const card = month
+              ? control.closest("form")!
+              : (control.closest(
+                  ".general-view__card, .charging-view__card, .savings-card",
+                ) ?? control.closest("form")!);
             const bounds = card.getBoundingClientRect();
             if (
               rect.left < bounds.left - 1 ||
@@ -132,11 +165,11 @@ test("compact views retain readable controls and all entities across available p
             )
               violations.push(`${name(control)} extends outside its card`);
           }
-          for (let index = 0; index < controls.length; index++) {
-            for (const other of controls.slice(index + 1)) {
-              if (overlaps(controls[index], other))
+          for (let index = 0; index < targets.length; index++) {
+            for (const other of targets.slice(index + 1)) {
+              if (overlaps(targets[index], other))
                 violations.push(
-                  `${name(controls[index])} overlaps ${name(other)}`,
+                  `${name(targets[index])} overlaps ${name(other)}`,
                 );
             }
           }
@@ -486,15 +519,40 @@ test("overnight times, months, native strategy options and negative prices", asy
   await expect(page.locator("#actions")).toContainText('"time":"23:15:00"');
   const months = panel.locator(".charging-view__rows--months");
   const firstMonth = months.getByRole("switch").first();
+  const firstTarget = months.locator(".entity-control__switch-target").first();
+  const outsideIndicator = await firstTarget.evaluate((target) => {
+    const area = target.getBoundingClientRect();
+    const indicator = target.querySelector("input")!.getBoundingClientRect();
+    const x = area.left + 4;
+    const y = area.top + 4;
+    return (
+      x < indicator.left ||
+      x > indicator.right ||
+      y < indicator.top ||
+      y > indicator.bottom
+    );
+  });
+  expect(outsideIndicator).toBe(true);
+  await firstTarget.click({ position: { x: 4, y: 4 } });
+  await expect(firstMonth).not.toBeChecked();
+  await expect(page.locator("#actions")).toHaveText(
+    '2: switch.turn_off {"entity_id":"switch.demo_timed_charge_month_1"}',
+  );
   await firstMonth.focus();
   await expect(firstMonth).toBeFocused();
   await page.keyboard.press("Space");
-  await expect(firstMonth).not.toBeChecked();
+  await expect(firstMonth).toBeChecked();
+  await expect(page.locator("#actions")).toHaveText(
+    '3: switch.turn_on {"entity_id":"switch.demo_timed_charge_month_1"}',
+  );
   await page.locator("#failure").click();
   const secondMonth = months.getByRole("switch").nth(1);
   await secondMonth.click();
   await expect(secondMonth).toBeChecked();
   await expect(months.getByRole("alert")).toBeVisible();
+  await expect(page.locator("#actions")).toHaveText(
+    '4: switch.turn_off {"entity_id":"switch.demo_timed_charge_month_2"}',
+  );
   const longName = testInfo.project.name.endsWith("en")
     ? "February – additional custom month description"
     : "Februar – zusätzliche individuelle Monatsbeschreibung";

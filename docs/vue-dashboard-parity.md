@@ -37,13 +37,15 @@ Breite Ansichten verwenden ein kompaktes Layout anhand der tatsächlich
 verfügbaren Panelbreite: zwei Kartenspalten ab 860 px Inhaltsbreite.
 Monatsraster nutzen mehrere Spalten und knappe Innenabstände auch auf dem
 Smartphone, mit mindestens 14 px großen Namen und 44 × 44 px großen
-Bedienflächen. Bei sehr geringer Breite bleibt eine Spalte. Die Reihenfolge
+Bedienflächen. Die sichtbare native Checkbox misst nur 22 × 22 px; ihr
+zugeordnetes Label macht auch den umgebenden Bereich anklickbar. Bei sehr
+geringer Breite bleibt eine Spalte. Die Reihenfolge
 Januar bis Dezember bleibt im DOM und bei Tastaturbedienung unverändert. Die Geräteübersicht ordnet Skalen
 und Leistung links neben den Gerätedaten an. Ersparnis gruppiert Amortisation
 und Kalenderwerte neben dem Tarif; die freie Auswertung nutzt die volle Breite.
 Die Darstellung passt sich der verfügbaren Breite an. Beschriftungen und Werte
-werden nicht abgeschnitten, Eingaben und Schaltflächen bleiben mindestens
-44 px hoch.
+werden nicht abgeschnitten, die Bedienflächen von Eingaben und Schaltflächen
+bleiben mindestens 44 px hoch.
 
 | Funktion | Verhalten | Automatisierte Prüfung |
 | --- | --- | --- |

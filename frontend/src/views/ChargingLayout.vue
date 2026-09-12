@@ -263,9 +263,22 @@ const text = computed(() =>
 .charging-view__rows--months .entity-control__input {
   flex-shrink: 0;
 }
-.charging-view__rows--months .entity-control input[type="checkbox"] {
+.charging-view__rows--months .entity-control__switch-target {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 44px;
   min-height: 44px;
+  cursor: pointer;
+}
+.charging-view__rows--months .entity-control__switch-target:has(:disabled) {
+  cursor: not-allowed;
+}
+.charging-view__rows--months .entity-control input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
   margin: 0;
   padding: 0;
 }

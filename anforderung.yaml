@@ -2235,12 +2235,15 @@ requirement_vue_dashboard:
     nebeneinander. Die Monatsraster nutzen auch auf schmalen Bildschirmen
     mehrere Spalten und knappe Innenabstände entsprechend der verfügbaren
     Breite. Monatsnamen bleiben mindestens 14 Pixel groß, Bedienflächen
-    mindestens 44 mal 44 Pixel. Bei sehr geringer Breite bleibt eine Spalte;
+    mindestens 44 mal 44 Pixel. Die sichtbaren nativen Monatskästchen sind
+    22 mal 22 Pixel groß; zugeordnete Labels stellen die größere Klickfläche
+    bereit. Bei sehr geringer Breite bleibt eine Spalte;
     die DOM-/Tastaturreihenfolge bleibt Januar bis Dezember. In der Ersparnis stehen Übersicht und Tarif nebeneinander;
     Datumsauswahl und Diagramm nutzen die volle Breite.
     Inhalte bleiben vollständig sichtbar; es gibt keine festen Kartenhöhen,
     abgeschnittenen Werte oder verkleinerten normalen Beschriftungen.
-    Eingaben und Schaltflächen bleiben mindestens 44 Pixel hoch.
+    Die Bedienflächen von Eingaben und Schaltflächen bleiben mindestens
+    44 Pixel hoch.
 
     vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
     standardmäßig False. Die Ersteinrichtung bietet ausschließlich diese
@@ -2493,6 +2496,9 @@ requirement_vue_charging:
     - "Beide Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
        HA-bestätigter Checkboxzustand, zugängliche Namen, Fehler und
        Nichtverfügbarkeit bleiben geprüft."
+    - "Die sichtbaren Monatskästchen messen 22 mal 22 Pixel innerhalb einer
+       mindestens 44 mal 44 Pixel großen Klickfläche. Ein Klick auf deren
+       Rand und die Leertaste lösen jeweils genau einen HA-Serviceaufruf aus."
     - "Bestätigte deutsche Zeitfensterwerte im zeitvariablen Tarif zeigen Uhr;
        englische, unbekannte und nicht verfügbare Werte sowie Eingabefelder
        und Service-Payloads bleiben ohne zusätzliches Suffix."

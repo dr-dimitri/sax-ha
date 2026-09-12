@@ -227,16 +227,21 @@ async function changeSelect(event: Event): Promise<void> {
     </div>
 
     <div class="entity-control__input">
-      <input
+      <label
         v-if="domain === 'switch'"
-        :id="inputId"
-        type="checkbox"
-        role="switch"
-        :checked="state === 'on'"
-        :disabled="blocked"
-        :aria-describedby="descriptionIds"
-        @change="changeSwitch"
-      />
+        :for="inputId"
+        class="entity-control__switch-target"
+      >
+        <input
+          :id="inputId"
+          type="checkbox"
+          role="switch"
+          :checked="state === 'on'"
+          :disabled="blocked"
+          :aria-describedby="descriptionIds"
+          @change="changeSwitch"
+        />
+      </label>
       <select
         v-else-if="domain === 'select'"
         :id="inputId"
@@ -343,6 +348,10 @@ async function changeSelect(event: Event): Promise<void> {
   flex-wrap: wrap;
   gap: 8px;
   max-width: 100%;
+}
+
+.entity-control__switch-target {
+  display: contents;
 }
 
 .entity-control input,

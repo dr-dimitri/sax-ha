@@ -147,8 +147,9 @@ Kartenabstände. Die Geräteübersicht stellt Skalen und Leistung neben die
 Gerätedaten. Die Monatsschalter nutzen auch auf dem Smartphone mehrere
 Spalten und knappe Innenabstände; bei sehr wenig Platz wird daraus eine Spalte.
 Beschriftungen bleiben mindestens 14 px groß, Bedienflächen mindestens
-44 × 44 px. Die Darstellung richtet sich nach dem verfügbaren Platz neben
-der HA-Seitenleiste; Inhalte bleiben vollständig
+44 × 44 px. Die sichtbaren Monatskästchen sind 22 × 22 px groß; auch der
+umgebende Bereich lässt sich anklicken. Die Darstellung richtet sich nach dem
+verfügbaren Platz neben der HA-Seitenleiste; Inhalte bleiben vollständig
 sichtbar und per Tastatur bedienbar.
 
 Änderungen an den Home-Assistant-Entitäten erscheinen direkt im Dashboard.

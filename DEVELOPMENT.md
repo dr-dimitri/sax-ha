@@ -150,12 +150,14 @@ keine Monatsschalter.
 `Panel.ce.vue` stellt die CSS-Container `sax-panel` und `sax-content` bereit.
 Die Ansichten wechseln ab 860 px Inhaltsbreite in ihr kompaktes Desktoplayout;
 die HA-Seitenleiste zählt deshalb nicht als nutzbarer Kartenplatz. Normale
-Schriftgrößen, mindestens 44 px hohe Eingaben und natürliche Kartenhöhen
+Schriftgrößen, mindestens 44 px hohe Bedienflächen und natürliche Kartenhöhen
 bleiben erhalten. Monatsschalter nutzen auch auf schmalen Ansichten ein
 kompaktes Raster mit knappen Innenabständen und mehr Spalten nach verfügbarem
 Platz. Ihre Beschriftungen bleiben mindestens 14 px groß und die Bedienflächen
-mindestens 44 × 44 px. Bei sehr geringer Breite bleibt eine Spalte. DOM- und
-Tastaturreihenfolge bleiben Januar bis Dezember.
+mindestens 44 × 44 px. Die native Checkbox ist dabei nur 22 × 22 px groß;
+ein zugeordnetes Label stellt die größere Klickfläche bereit, ohne die
+Tastaturbedienung oder die HA-Serviceaufrufe zu verändern. Bei sehr geringer
+Breite bleibt eine Spalte. DOM- und Tastaturreihenfolge bleiben Januar bis Dezember.
 Die Gerätekarte beginnt mit `energy_charged`/`energy_discharged` und endet mit
 `storage_switch`; es gibt keine separate Energie-Karte. Nur der
 Speicherschalter verlangt vor beiden Zielzuständen eine Dialogbestätigung.

@@ -19,7 +19,7 @@ from custom_components.sax_power import (
     async_unload_entry,
     async_update_options,
 )
-from custom_components.sax_power.config_flow import STEP_OPTIONS_SCHEMA
+from custom_components.sax_power.config_flow import STEP_DASHBOARD_SCHEMA
 from custom_components.sax_power.const import (
     CONF_PV_FORECAST_FACTOR,
     CONF_VUE_DASHBOARD_ENABLED,
@@ -314,12 +314,12 @@ async def test_ui_option_changes_do_not_reapply_charging_policy(
 async def test_first_options_save_does_not_apply_newly_explicit_defaults(
     hass: HomeAssistant, vue_entry: MockConfigEntry, panel_environment
 ) -> None:
-    """Vom Options-Schema ergänzte Defaults sind keine Änderung der Ladesteuerung."""
+    """Das Speichern des Dashboard-Bereichs verändert keine Ladesteuerung."""
     coordinator = MagicMock()
     coordinator.options = {}
     coordinator.async_apply_price_plan = AsyncMock()
     hass.data[DOMAIN] = {vue_entry.entry_id: {DATA_COORDINATOR: coordinator}}
-    options = STEP_OPTIONS_SCHEMA({CONF_VUE_DASHBOARD_ENABLED: True})
+    options = STEP_DASHBOARD_SCHEMA({CONF_VUE_DASHBOARD_ENABLED: True})
     hass.config_entries.async_update_entry(vue_entry, options=options)
     await async_update_options(hass, vue_entry)
     assert frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)

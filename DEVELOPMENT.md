@@ -47,8 +47,8 @@ custom_components/sax_power/
 │                          Ladeeinstellungen und fensterbezogene Laufzeitzustände)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
-│                          Options Flow (preisoptimiertes Laden + gemeinsame
-│                          PV-Prognose)
+│                          Options Flow mit Bereichsmenü (Quellen, Nachtregelung,
+│                          Wirtschaftlichkeit und Dashboard)
 ├── coordinator.py       DataUpdateCoordinator: Reads (Basic+SunSpec), Writes,
 │                          Poll-Intervalle/Caches, Max-SOC-Logik, Netzladung,
 │                          zeitgesteuertes Laden, netzdienliches Laden,
@@ -470,12 +470,17 @@ Manifest nicht `single_config_entry`: Home Assistant würde sonst weitere
 Discovery-Flows bereits vor diesem Abgleich blockieren. Die eigene Prüfung
 im Config Flow verhindert dagegen nur zusätzliche Einträge.
 
-Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
-preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als
-Entity abbilden lassen (Auswahl der Quell-Sensoren und deren Interpretation);
-die im Alltag veränderlichen Stellgrößen sind echte Entities am SAX-Gerät.
-Eine Änderung wendet `async_update_options` direkt auf den laufenden
-Coordinator an (`coordinator.options` ersetzen + `price_planner.async_setup()`
+Der Options Flow (`SaxPowerOptionsFlow`) beginnt mit einem Bereichsmenü:
+Dashboard, Strompreis für Laden und Wirtschaftlichkeit, PV-Prognose für Smart
+und netzdienliches Laden, Bedarfsgesteuerte Nachtregelung, Stromtarif für die
+Wirtschaftlichkeit sowie Investition und bisheriger Ertrag. Jeder Bereich
+speichert nur seine eigenen Schlüssel und erhält die übrigen Options; mehrstufige Bereiche
+übernehmen Änderungen erst beim Abschluss. Die im Alltag veränderlichen
+Stellgrößen bleiben echte Entities am SAX-Gerät. Der Ablauf für Anwender
+steht in `README.md`, die verbindlichen Regeln in REQ-HEMS-CONFIGURATION.
+
+Eine Änderung der Preis-/PV-Prognosequelle wendet `async_update_options`
+direkt auf den laufenden Coordinator an (`coordinator.options` ersetzen + `price_planner.async_setup()`
 erneut aufrufen, idempotent + Plan sofort anwenden) - bewusst **kein**
 Config-Entry-Reload mehr: Ein
 Reload hätte über `SaxPowerCoordinator.async_shutdown`/`async_stop_sun_charge`
@@ -486,17 +491,27 @@ Ladevorgang ausgelöst, bis die neu erzeugte Instanz die
 ursprünglich gemeldeter Bug, siehe `anforderung.yaml`,
 REQ-DYNAMIC-PRICE-CHARGE.
 
-Derselbe Options Flow konfiguriert zusätzlich das Tarifmodell der
-Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS). Die Tarifart steht als
-`economics_tariff_type` auf der ersten Seite; anschließend verzweigt der Flow
+Der Bereich Stromtarif konfiguriert das Tarifmodell der
+Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS). Nach der Tarifwahl
+(`economics_tariff_type` im Schritt `economics`) verzweigt der Flow
 in genau einen tarifspezifischen Schritt (`economics_fixed`,
 `economics_time_of_use`, `economics_dynamic`) oder speichert bei
-`disabled` sofort. Beim Speichern übernimmt der Flow ausschließlich die zur
-gewählten Tarifart gehörenden Schlüssel und verwirft alle übrigen aus
-`ECONOMICS_OPTION_KEYS` - ein alter Festpreis darf nach einem Rückwechsel
-nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
+`disabled` sofort. Für `dynamic` führt ein fehlender Strompreis-Sensor erst
+zur Quellenauswahl. Beim Abschluss übernimmt der Flow nur die zur gewählten
+Tarifart gehörenden Tarifschlüssel und entfernt nicht mehr passende
+Tarifwerte; Investition und bisheriger Ertrag bleiben erhalten. Ein alter
+Festpreis darf nach einem Rückwechsel nicht unbemerkt wieder gelten.
+Die acht Zeitfenstergruppen sind eigene
 `section`-Blöcke und liegen deshalb als verschachtelte Mappings in
 `entry.options`.
+
+Die Nachtregelung führt über Anbieter (`hems`), passende Anlage
+(`hems_source`) und erweiterte Einstellungen (`hems_settings`). Nur Solcast
+zeigt Abrufsensor und zulässiges Datenalter. Prognoseverbesserung und
+Wirkungsgrade sind aufklappbare Gruppen; ihre Werte werden weiterhin unter
+den bestehenden Options-Schlüsseln gespeichert. Eine abgewählte Quelle
+entfernt beim Abschluss die alte Anlagen- und Abrufsensorzuordnung. Persönliche
+Annahmen wie Wirkungsgrade und zulässiges Solcast-Datenalter bleiben erhalten.
 
 `TariffPlan.vue` stellt diese Preisfenster in `TimedChargingView.vue` und
 `SavingsView.vue` unter „Tarifpreisfenster“ (EN: „Tariff price windows“) dar.
@@ -516,7 +531,7 @@ Grundpreis markiert. Die separate Karte „Netzladezeitfenster“ (EN: „Grid
 charging window“) bedient weiterhin genau `timed_charge_start` und
 `timed_charge_end`; Tarifpreisfenster lösen keine Lade- oder Serviceaktion aus.
 
-Der **Strompreis-Sensor** (`price_sensor`, erste Seite) hat zwei getrennte
+Der **Strompreis-Sensor** (`price_sensor`, Bereich Strompreis) hat zwei getrennte
 Aufgaben, die sich leicht verwechseln lassen:
 
 | Tarifmodell | Preisquelle der Wirtschaftlichkeit | Strompreis-Sensor |
@@ -531,9 +546,9 @@ Tarifmodell. Für die Wirtschaftlichkeit ist er es nur beim dynamischen Tarif.
 Beim tageszeitabhängigen Tarif ist er ausdrücklich unbrauchbar: Ein
 dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, das
 Tarifmodell dagegen ein täglich wiederkehrendes Profil - die beiden Formate
-lassen sich nicht ineinander überführen. Weil beide Felder auf derselben Seite
-untereinanderstehen, sagen die `data_description`-Texte in `strings.json` das
-ausdrücklich (Anwenderbericht zu #135/#137).
+lassen sich nicht ineinander überführen. Die Beschreibungen der getrennten
+Bereiche Strompreis und Stromtarif erklären diese Zuordnung ausdrücklich
+(Anwenderbericht zu #135/#137).
 
 Explizit zeitgestempelte Preis-Slots werden für Identität, Sortierung,
 Dauer, Überlappung, Horizont und Auswahl ausschließlich als UTC-Instants
@@ -566,18 +581,8 @@ erst im Schritt selbst geprüft (`_missing_prices` → Feldfehler
 `economics_price_required`): Ein `vol.Required` scheitert schon in der
 Schema-Validierung von Home Assistant, also *vor* dem Schritt, und zeigt die
 unübersetzte Rohmeldung `required key not provided`. Pflicht bleiben die
-Preise dadurch unverändert. Aus demselben Grund lassen die Folgeseiten
-fremde Schlüssel zu (`vol.ALLOW_EXTRA`) und behandeln eine erneut
-abgeschickte erste Seite als Wiederholung genau dieser Seite
-(`_async_repeat_init`) - schickt das Frontend die erste Seite zweimal ab
-(Doppelklick, oder Enter im Eingabefeld plus Klick auf „Absenden"), prüft
-Home Assistant deren Werte gegen das Schema der bereits erreichten
-Folgeseite, was sonst als Wand aus `extra keys not allowed @ data[...]` im
-Dialog landet. Die wiederholte erste Seite prüft `_async_repeat_init` dabei
-selbst gegen `STEP_OPTIONS_SCHEMA` (auf diesem Weg wendet Home Assistant es
-nicht mehr an); was nicht passt, gilt als unvollständige Eingabe der
-Folgeseite. `add_suggested_values_to_schema` baut das Schema neu auf und
-verliert dabei `extra`; `_suggested` setzt es deshalb wieder.
+Preise dadurch unverändert. Die Bereichsformulare enthalten jeweils nur
+ihre eigenen Felder; die Tarifwahl ist ein eigener Schritt vor den Preisen.
 
 Die Auswertung selbst ist dreigeteilt: `domain/tariff.py` enthält die reinen
 Typen (`TariffType`, `DailyPriceWindow`, `TariffConfig`, `PriceQuote`) samt

@@ -11,12 +11,14 @@ from homeassistant.exceptions import HomeAssistantError, Unauthorized
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 
 from custom_components.sax_power import _async_register_services, _control_options
-from custom_components.sax_power.config_flow import STEP_OPTIONS_SCHEMA
+from custom_components.sax_power.config_flow import STEP_HEMS_SETTINGS_SCHEMA
 from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
+
+from .test_hems_configuration import _settings_step
 
 
 def test_upgrade_defaults_do_not_activate_learning_or_extend_history() -> None:
-    result = STEP_OPTIONS_SCHEMA({})
+    result = STEP_HEMS_SETTINGS_SCHEMA({"forecast": {}})["forecast"]
     assert result["hems_archive_enabled"] is False
     assert result["hems_history_days"] == "7"
     assert result["hems_forecast_mode"] == "observe"
@@ -37,20 +39,22 @@ def test_upgrade_defaults_do_not_activate_learning_or_extend_history() -> None:
 )
 def test_invalid_prediction_options_are_rejected(field: str, value: object) -> None:
     with pytest.raises(vol.Invalid):
-        STEP_OPTIONS_SCHEMA({field: value})
+        STEP_HEMS_SETTINGS_SCHEMA({"forecast": {field: value}})
 
 
 async def test_options_save_explicit_observation_and_28_day_choice(hass) -> None:
     entry = MockConfigEntry(domain=DOMAIN, data={"host": "127.0.0.1"})
     entry.add_to_hass(hass)
-    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await _settings_step(hass, entry)
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"],
         {
-            "hems_archive_enabled": True,
-            "hems_history_days": "28",
-            "hems_forecast_mode": "observe",
-            "hems_live_adjustment": True,
+            "forecast": {
+                "hems_archive_enabled": True,
+                "hems_history_days": "28",
+                "hems_forecast_mode": "observe",
+                "hems_live_adjustment": True,
+            }
         },
     )
     assert result["data"]["hems_archive_enabled"] is True

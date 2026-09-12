@@ -71,11 +71,25 @@ Verbindungswerte kannst du normalerweise übernehmen:
 Die Verbindung wird vor dem Speichern geprüft. Im Anschluss kannst du die
 zeitgesteuerte Netzladung vorbelegen und das Dashboard aktivieren.
 
-Weitere Optionen findest du unter **Einstellungen → Geräte & Dienste →
-SAX Power Home → Konfigurieren**: Strompreis-Sensor, PV-Prognose,
-Wirtschaftlichkeit und Dashboard. Ladezeiten, Monate und Ladegrenzen änderst
-du direkt im Dashboard oder über die Entitäten des Geräts. Die Einstellungen
-bleiben nach einem Neustart erhalten.
+### Einstellungen gezielt ändern
+
+Unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
+wählst du zuerst den Bereich, den du bearbeiten möchtest:
+
+| Bereich | Was du dort einstellst |
+| --- | --- |
+| Dashboard | Anzeige von SAX Power in der Seitenleiste |
+| Strompreis für Laden und Wirtschaftlichkeit | Vorhandener Preis-Sensor, Preis-Einheit und Vorschauattribut |
+| PV-Prognose für Smart und netzdienliches Laden | Prognose-Sensor und nutzbarer PV-Anteil |
+| Bedarfsgesteuerte Nachtregelung | PV-Anbieter und Anlage; optional Prognoseverbesserung und Wirkungsgrade |
+| Stromtarif für die Wirtschaftlichkeit | Tarifart, Arbeitspreise und Einspeisevergütung für die Geldbilanz |
+| Investition und bisheriger Ertrag | Anschaffungskosten und bereits erwirtschafteter Ertrag für die Amortisation |
+
+Jeder Bereich lässt sich einzeln speichern; deine übrigen Einstellungen
+bleiben erhalten. Bei mehreren Schritten wird erst am Ende gespeichert.
+Ladezeiten, Monate, Strategien und Ladegrenzen änderst du direkt im Dashboard
+oder über die Entitäten des Geräts. Die Einstellungen bleiben nach einem
+Neustart erhalten.
 
 ### Verbindung nachträglich ändern
 
@@ -88,8 +102,8 @@ lädt Home Assistant die Integration neu.
 
 Mit **Dashboard aktivieren** erscheint **SAX Power** in der Seitenleiste.
 Die Option ist anfangs ausgeschaltet und lässt sich jederzeit unter
-**Konfigurieren** ändern. Das Dashboard wird mit der Integration ausgeliefert;
-eine zusätzliche Installation ist nicht nötig.
+**Konfigurieren → Dashboard** ändern. Das Dashboard wird mit der Integration
+ausgeliefert; eine zusätzliche Installation ist nicht nötig.
 
 Die Screenshots zeigen das Dashboard mit Beispieldaten.
 
@@ -210,7 +224,8 @@ PV-Mittagsspitze aufnehmen kann. Typisch wäre eine Pause von 08:00 bis
 Aktiviere **Netzdienliches Laden**, lege Start und Ende der Ladepause fest
 und wähle die Monate. Außerhalb dieser Zeiten arbeitet der Speicher normal.
 
-Optional kannst du unter **Konfigurieren** einen PV-Prognose-Sensor wählen.
+Optional kannst du unter **Konfigurieren → PV-Prognose für Smart und
+netzdienliches Laden** einen PV-Prognose-Sensor wählen.
 Die **Mindest-PV-Prognose** entscheidet dann, ob die Pause sinnvoll ist:
 Bei 8 kWh gilt sie nur, wenn mindestens 8 kWh Ertrag erwartet werden.
 Liegt die Prognose darunter oder fehlt sie, darf der Speicher früher laden.
@@ -224,9 +239,10 @@ Die Integration ruft selbst keine Preise vom Anbieter ab.
 
 ![Dynamischer Tarif mit Strategie, Preisgrenzen und Ladestatus](docs/images/vue-dynamisches-laden-desktop-light-de.png)
 
-Wähle unter **Konfigurieren** den Strompreis-Sensor. Preis-Einheit und
-Vorschauattribut werden automatisch erkannt und lassen sich bei Bedarf
-vorgeben. Unterstützt werden EUR/kWh, ct/kWh, EUR/MWh und ct/MWh.
+Wähle unter **Konfigurieren → Strompreis für Laden und Wirtschaftlichkeit**
+den Strompreis-Sensor. Preis-Einheit und Vorschauattribut werden automatisch
+erkannt und lassen sich bei Bedarf vorgeben. Unterstützt werden EUR/kWh,
+ct/kWh, EUR/MWh und ct/MWh.
 Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion.
 
 | Strategie | Wann wird geladen? |
@@ -284,9 +300,19 @@ unterscheidet zwischen dem Ladeplan und einem vom Gerät bestätigten Ladebefehl
 
 #### PV-Prognose einrichten
 
-Wähle unter **Einstellungen → Geräte & Dienste → SAX Power → Konfigurieren**
-den PV-Anbieter und die zugehörige Anlage. Unterstützt werden **pv_forecast**
-und **Solcast**.
+Öffne **Konfigurieren → Bedarfsgesteuerte Nachtregelung**. Der Dialog führt
+dich in drei Schritten durch die Einrichtung:
+
+1. Wähle den PV-Anbieter: **pv_forecast** oder **Solcast**.
+2. Ordne die zugehörige Anlage zu. Es werden nur Anlagen des gewählten
+   Anbieters angeboten. Bei Solcast kannst du außerdem den letzten
+   Datenabruf zuordnen und das zulässige Prognosealter festlegen.
+3. Prüfe die erweiterten Einstellungen und speichere. Die Gruppen für
+   Prognoseverbesserung und Wirkungsgrade kannst du bei Bedarf aufklappen;
+   für den Einstieg kannst du die Voreinstellungen übernehmen.
+
+Die neue Zuordnung gilt erst nach dem letzten Schritt. Mit **Nicht eingerichtet**
+entfernst du beim Speichern eine zuvor gewählte Prognosequelle.
 
 - **pv_forecast:** Der letzte erfolgreiche Datenabruf darf höchstens
   60 Minuten zurückliegen.
@@ -296,7 +322,8 @@ und **Solcast**.
   Aktualisierung erfolgreich war, wird das angezeigt.
 
 Die Berechnung nimmt für Laden und Entladen zunächst jeweils einen
-Wirkungsgrad von 95 % an. Beide Werte kannst du unter **Konfigurieren** anpassen.
+Wirkungsgrad von 95 % an. Beide Werte findest du in den erweiterten
+Einstellungen der Nachtregelung.
 
 #### Bedeutung der SOC-Grenzen
 
@@ -337,12 +364,14 @@ mindestens 60 Minuten durchgehend den geschätzten Bedarf deckt. Auch diese
 
 #### Optionale Prognoseverbesserung
 
-Unter **Konfigurieren** kannst du ein lokales Prognosearchiv, einen Rückblick
-über 28 Tage und einen Abgleich mit der laufenden Nacht einschalten.
-Neue Schätzverfahren werden zunächst nur beobachtet. Die Automatik nutzt
-sie erst, nachdem ihre Qualität im Vergleich zur bisherigen Prognose geprüft
-wurde. Änderst du die Historienlänge oder den Live-Abgleich, ist diese Prüfung
-für die neue Kombination erneut nötig.
+Unter **Konfigurieren → Bedarfsgesteuerte Nachtregelung** kannst du im
+letzten Schritt die Gruppe zur Prognoseverbesserung aufklappen. Dort lassen
+sich ein lokales Prognosearchiv, ein Rückblick über 28 Tage und ein Abgleich
+mit der laufenden Nacht einschalten.
+Neue Schätzverfahren werden zunächst nur beobachtet. Mit **Automatisch nach
+Qualitätsprüfung** nutzt die Regelung sie, sobald der Vergleich mit der
+bisherigen Prognose erfolgreich war. Änderst du die Historienlänge oder den
+Live-Abgleich, ist diese Prüfung für die neue Kombination erneut nötig.
 
 Die Prognosedetails zeigen die beobachteten Abweichungen und die vorhandene
 Datenabdeckung. Eine geprüfte Bandbreite macht die Unsicherheit der Schätzung
@@ -364,7 +393,8 @@ Zeit-Entitäten auf der Geräteseite neu.
 
 ## Tarifmodell für die Wirtschaftlichkeit
 
-Unter **Konfigurieren** kannst du einen Tarif für die Geldbilanz hinterlegen.
+Unter **Konfigurieren → Stromtarif für die Wirtschaftlichkeit** wählst du zuerst
+die Tarifart. Anschließend fragt der Dialog die dazu passenden Preise ab.
 Das ist optional; Messwerte und Ladesteuerung funktionieren auch ohne diese
 Auswertung.
 
@@ -384,6 +414,9 @@ hinterlegten Plan siehst du unter **Tarifpreisfenster** in den Tabs
 Geldbilanz; das **Netzladezeitfenster** stellst du separat ein.
 
 Für den dynamischen Tarif muss ein Strompreis-Sensor ausgewählt sein.
+Fehlt er noch, führt dich der Dialog zur Auswahl der Preisquelle, bevor du
+den Tarif abschließt. Einen vorhandenen Sensor kannst du im Bereich
+**Strompreis für Laden und Wirtschaftlichkeit** ändern.
 Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt
 abdecken. Fehlerhafte oder fehlende Preise werden als unbekannt behandelt.
 Tarifänderungen gelten sofort für kommende Messintervalle; frühere Beträge
@@ -425,8 +458,9 @@ umfassen, auch über einen manuellen Bilanzneustart hinweg.
 
 ### ROI und Amortisationsstand
 
-Hinterlege unter **Konfigurieren** die **Investitionskosten**, um Fortschritt,
-ROI und **Restbetrag bis Amortisation** zu sehen. ROI setzt die Netto-Ersparnis
+Hinterlege unter **Konfigurieren → Investition und bisheriger Ertrag** die
+**Investitionskosten**, um Fortschritt, ROI und **Restbetrag bis Amortisation**
+zu sehen. ROI setzt die Netto-Ersparnis
 ins Verhältnis zur Investition und kann über 100 % liegen. Der
 Fortschrittsbalken bleibt zwischen 0 und 100 %.
 
@@ -515,7 +549,7 @@ Eine manuelle Entladung wird nicht unterstützt.
 | Modbus-Fehler | Slave-IDs; Standard: Basic 64, SunSpec 100 |
 | Viele Detailwerte unbekannt | SunSpec-Verbindung und Firmwarestand |
 | Netzladung startet nicht | Schalter, Zeitfenster, Monate, Startschwelle und Netzladeziel |
-| Keine Preisdaten | Strompreis-Sensor, Vorschauattribut und Preis-Einheit unter **Konfigurieren** |
+| Keine Preisdaten | Strompreis-Sensor, Vorschauattribut und Preis-Einheit unter **Konfigurieren → Strompreis für Laden und Wirtschaftlichkeit** |
 | Zeitangabe wurde geleert | Überschneidung zwischen Netzladung und PV-Ladepause |
 | PV-Leistung dauerhaft 0 W | Unterstützung durch den verwendeten Smart Meter |
 | Dashboard nach Update unverändert | Reparaturhinweis bearbeiten, Browserseite vollständig neu laden |

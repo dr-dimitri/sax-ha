@@ -12,7 +12,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.sax_power.config_flow import STEP_OPTIONS_SCHEMA
 from custom_components.sax_power.const import DOMAIN
 from custom_components.sax_power.infrastructure.control_store import (
     ControlConfig,
@@ -20,7 +19,28 @@ from custom_components.sax_power.infrastructure.control_store import (
 )
 from custom_components.sax_power.select import SaxPowerTimedChargeModeSelect
 
+from .test_config_flow import _options_step
 from .test_month_switch_response import coordinator as coordinator
+
+
+async def _source_step(hass, entry: MockConfigEntry, provider: str) -> dict:
+    flow = await _options_step(hass, entry, "hems")
+    flow = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"hems_pv_provider": provider}
+    )
+    assert flow["step_id"] == "hems_source"
+    return flow
+
+
+async def _settings_step(hass, entry: MockConfigEntry) -> dict:
+    source = MockConfigEntry(domain="pv_forecast")
+    source.add_to_hass(hass)
+    flow = await _source_step(hass, entry, "pv_forecast")
+    flow = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"hems_pv_entry": source.entry_id}
+    )
+    assert flow["step_id"] == "hems_settings"
+    return flow
 
 
 @pytest.mark.parametrize("saved", [None, "unknown", "standard", "adaptive", 123])
@@ -82,9 +102,23 @@ async def test_select_reads_persisted_mode_without_restore_override(
         ("hems_pv_provider", "unsupported"),
     ],
 )
-def test_source_settings_reject_invalid_ranges(field, value) -> None:
-    with pytest.raises(vol.Invalid):
-        STEP_OPTIONS_SCHEMA({field: value})
+async def test_source_settings_reject_invalid_ranges(hass, field, value) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={"host": "127.0.0.1"})
+    entry.add_to_hass(hass)
+    if field == "hems_pv_provider":
+        flow = await _options_step(hass, entry, "hems")
+        data = {field: value}
+    elif field == "hems_solcast_max_age_hours":
+        source = MockConfigEntry(domain="solcast_solar")
+        source.add_to_hass(hass)
+        flow = await _source_step(hass, entry, "solcast_solar")
+        data = {"hems_pv_entry": source.entry_id, field: value}
+    else:
+        flow = await _settings_step(hass, entry)
+        data = {"efficiency": {field: value}}
+    with pytest.raises((vol.Invalid, InvalidData)):
+        await hass.config_entries.options.async_configure(flow["flow_id"], data)
+    assert entry.options == {}
 
 
 @pytest.mark.parametrize("provider", ["pv_forecast", "solcast_solar"])
@@ -95,39 +129,37 @@ async def test_options_validate_provider_entry_and_accept_matching_source(
     entry.add_to_hass(hass)
     source = MockConfigEntry(domain=provider)
     source.add_to_hass(hass)
-    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await _source_step(hass, entry, provider)
     invalid = await hass.config_entries.options.async_configure(
-        flow["flow_id"],
-        {
-            "hems_pv_provider": provider,
-            "hems_pv_entry": entry.entry_id,
-        },
+        flow["flow_id"], {"hems_pv_entry": entry.entry_id}
     )
     assert invalid["type"] == FlowResultType.FORM
     assert invalid["errors"] == {"hems_pv_entry": "hems_pv_entry_invalid"}
     valid = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"hems_pv_entry": source.entry_id}
+    )
+    assert valid["step_id"] == "hems_settings"
+    assert entry.options == {}
+    valid = await hass.config_entries.options.async_configure(
         flow["flow_id"],
-        {
-            "hems_pv_provider": provider,
-            "hems_pv_entry": source.entry_id,
-            "hems_charge_efficiency": 1,
-            "hems_discharge_efficiency": 0.9,
-        },
+        {"efficiency": {"hems_charge_efficiency": 1, "hems_discharge_efficiency": 0.9}},
     )
     assert valid["type"] == FlowResultType.CREATE_ENTRY
     assert valid["data"]["hems_charge_efficiency"] == 1
     assert valid["data"]["hems_pv_entry"] == source.entry_id
+    assert "forecast" not in valid["data"]
+    assert "efficiency" not in valid["data"]
 
 
 async def test_nan_efficiency_is_rejected_before_options_are_saved(hass) -> None:
     entry = MockConfigEntry(domain=DOMAIN, data={"host": "127.0.0.1"})
     entry.add_to_hass(hass)
-    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await _settings_step(hass, entry)
     with pytest.raises(InvalidData):
         await hass.config_entries.options.async_configure(
-            flow["flow_id"], {"hems_charge_efficiency": float("nan")}
+            flow["flow_id"], {"efficiency": {"hems_charge_efficiency": float("nan")}}
         )
-    assert "hems_charge_efficiency" not in entry.options
+    assert entry.options == {}
 
 
 @pytest.mark.parametrize("kind", ["peak_time", "foreign_platform", "disabled"])
@@ -147,11 +179,10 @@ async def test_options_reject_non_usable_solcast_timestamp_identity(hass, kind):
         registry.async_update_entity(
             timestamp.entity_id, disabled_by=er.RegistryEntryDisabler.USER
         )
-    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await _source_step(hass, entry, "solcast_solar")
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"],
         {
-            "hems_pv_provider": "solcast_solar",
             "hems_pv_entry": source.entry_id,
             "hems_solcast_timestamp": timestamp.entity_id,
         },
@@ -193,7 +224,7 @@ async def test_options_resolve_rename_and_persist_registry_identity(
             suggested_object_id=previous.split(".", 1)[1],
         )
         assert reused.entity_id == previous
-    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await _source_step(hass, entry, "solcast_solar")
     field = next(
         key for key in flow["data_schema"].schema if key == "hems_solcast_timestamp"
     )
@@ -201,11 +232,12 @@ async def test_options_resolve_rename_and_persist_registry_identity(
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"],
         {
-            "hems_pv_provider": "solcast_solar",
             "hems_pv_entry": source.entry_id,
             "hems_solcast_timestamp": "sensor.renamed_polled",
         },
     )
+    assert result["step_id"] == "hems_settings"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"]["hems_solcast_timestamp_registry_id"] == timestamp.id
     assert result["data"]["hems_solcast_timestamp"] == "sensor.renamed_polled"
@@ -224,10 +256,12 @@ async def test_clearing_explicit_solcast_timestamp_removes_saved_identity(hass):
     source = MockConfigEntry(domain="solcast_solar")
     entry.add_to_hass(hass)
     source.add_to_hass(hass)
-    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await _source_step(hass, entry, "solcast_solar")
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"],
-        {"hems_pv_provider": "solcast_solar", "hems_pv_entry": source.entry_id},
+        {"hems_pv_entry": source.entry_id},
     )
+    assert result["step_id"] == "hems_settings"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert "hems_solcast_timestamp_registry_id" not in result["data"]

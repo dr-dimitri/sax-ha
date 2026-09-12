@@ -280,6 +280,10 @@ async def test_tariff_plan_reaches_the_dashboard_session(
         }
     )
     result = await hass.config_entries.options.async_init(dashboard_entry.entry_id)
+    assert result["type"] == FlowResultType.MENU
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "economics"}
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
@@ -296,7 +300,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
     await hass.async_block_till_done()
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert {
-        key: dashboard_entry.options[key] for key in ECONOMICS_TOU_WINDOW_KEYS
+        key: dashboard_entry.options.get(key, {}) for key in ECONOMICS_TOU_WINDOW_KEYS
     } == options_windows
 
     coordinator = _make_coordinator(hass)

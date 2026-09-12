@@ -56,7 +56,7 @@
 # REQ-HEMS-RUNTIME               done        Fünf-Minuten-Planung und schneller sicherer Vollzug (#224)
 # REQ-HEMS-TIMED-CHARGE          done        Opt-in-Netzladung in bestehenden Monaten und Fenstern (#224)
 # REQ-HEMS-DYNAMIC               done        Adaptive Preisstrategie mit festem Stundenbudget (#225)
-# REQ-HEMS-CONFIGURATION         done        Rückwärtskompatible HEMS-Einrichtung (#226)
+# REQ-HEMS-CONFIGURATION         done        Bereichsmenü und geführte HEMS-Einrichtung (#226)
 # REQ-HEMS-OBSERVABILITY         done        Gemeinsame Erklärung, Datenqualität und echte Prüftermine (#226)
 # REQ-HEMS-ACCEPTANCE             done        Tarifübergreifende Simulation und Abnahme (#227)
 # REQ-HEMS-FORECAST-EVALUATION    done        Unveränderliches Prognosearchiv und späterer Gütenachweis (#231)
@@ -2193,10 +2193,12 @@ requirement_dynamic_price_charge:
     Rückfrage bewusst - eine Automation kann auf keinen Dialog antworten,
     und beim Restaurieren hat der Anwender gerade nichts angeklickt.
   requirements:
-    - "Options Flow (config_flow.SaxPowerOptionsFlow): Auswahl des
-       Strompreis-Sensors, optionales Attribut-Override, Preis-Einheit
-       (automatisch/EUR/ct), optionaler PV-Prognose-Sensor sowie dessen
-       nutzbarer Anteil in Prozent. Keine YAML-Konfiguration. Bewusst KEIN
+    - "Options Flow (config_flow.SaxPowerOptionsFlow): Bereich Strompreis
+       für Sensor, optionales Attribut-Override und Preis-Einheit
+       (automatisch/EUR/ct); eigener Bereich PV-Prognose für Smart und
+       netzdienliches Laden für Prognose-Sensor und nutzbaren Anteil in
+       Prozent. Beide Bereiche speichern unabhängig voneinander und
+       erhalten die übrigen Options. Keine YAML-Konfiguration. Bewusst KEIN
        eigenes Feld für die Strategie (bis einschließlich Version mit
        CONF_PRICE_STRATEGY vorhanden, seither entfernt): Ein dort
        hinterlegter Wert hätte ohnehin nur bis zum ersten gespeicherten
@@ -2256,9 +2258,9 @@ requirement_dynamic_price_charge:
        sichtbar als kurzer, ungewollter Ladevorgang direkt nach dem
        Speichern der Options-Flow-Seite (z. B. beim erstmaligen Hinterlegen
        des Strompreis-/PV-Prognose-Sensors), unabhängig vom preisoptimierten
-       Laden selbst. Die Options Flow betrifft ausschließlich den Preis-
-       Planner, nie Modbus-Client/Slave-IDs/Scan-Intervall (die stehen
-       unveränderlich in entry.data) - ein Reload ist für eine reine
+       Laden selbst. Der Options Flow ändert keine Verbindungseinstellungen
+       wie Modbus-Client/Slave-IDs/Scan-Intervall (die stehen in entry.data
+       und werden über Reconfigure geändert) - ein Reload ist für eine reine
        Options-Änderung deshalb nicht nötig."
   acceptance_criteria:
     - "tests/test_price_optimizer.py deckt ab: Einlesen der Attributformate
@@ -2375,8 +2377,9 @@ requirement_vue_dashboard:
     vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
     standardmäßig False. Die Ersteinrichtung bietet ausschließlich diese
     Dashboard-Auswahl an und speichert sie in entry.data.
-    Der Options Flow erlaubt nachträgliche Aktivierung und Deaktivierung
-    in entry.options; ein vorhandener Options-Wert hat Vorrang vor den
+    Der Options Flow erlaubt im eigenen Menübereich Dashboard nachträgliche
+    Aktivierung und Deaktivierung in entry.options; andere Bereiche erhalten
+    diese Auswahl. Ein vorhandener Options-Wert hat Vorrang vor den
     Setup-Daten. Eine ausgelassene Options-Eingabe und eine Änderung der
     Verbindungsdaten erhalten die bisherige Auswahl.
     Eine reine Vue-Änderung synchronisiert nur die Oberfläche, ohne
@@ -3957,14 +3960,19 @@ requirement_economics_tariffs:
     wird mit PRICE_OUT_OF_RANGE abgelehnt statt akzeptiert.
 
     Die Konfiguration liegt vollständig im Options Flow
-    (config_flow.SaxPowerOptionsFlow). Die Tarifart wird auf der ersten
-    Seite gewählt; danach verzweigt der Flow in genau einen
+    (config_flow.SaxPowerOptionsFlow), im Menübereich Stromtarif für die
+    Wirtschaftlichkeit. Nach der Tarifwahl im Schritt economics verzweigt
+    der Flow in genau einen
     tarifspezifischen Schritt (economics_fixed, economics_time_of_use,
     economics_dynamic) oder speichert bei "disabled" sofort - ein
-    deaktivierter Tarif fragt keine Einspeisevergütung ab. Beim Speichern
-    übernimmt der Flow ausschließlich die zur gewählten Tarifart passenden
-    Schlüssel und entfernt alle übrigen aus ECONOMICS_OPTION_KEYS, damit ein
-    alter Wert nach einem späteren Rückwechsel nicht unbemerkt wieder gilt.
+    deaktivierter Tarif fragt keine Einspeisevergütung ab. Für den dynamischen
+    Tarif führt ein noch fehlender Strompreis-Sensor zunächst zur Auswahl
+    der gemeinsamen Preisquelle. Erst nach gültiger Quellenauswahl und
+    Eingabe der Einspeisevergütung wird gespeichert. Beim Speichern übernimmt
+    der Flow ausschließlich die zur gewählten Tarifart passenden Tarifwerte
+    und entfernt nicht mehr passende Tarifwerte, damit ein alter Wert nach
+    einem späteren Rückwechsel nicht unbemerkt wieder gilt. Investition,
+    Vorlauf-Ertrag und Options anderer Bereiche bleiben erhalten.
     Die acht Zeitfenstergruppen (economics_tou_window_1 bis _8) werden je
     als eigene Section dargestellt und liegen deshalb als verschachtelte
     Mappings mit den Feldern start/end/price_eur_kwh in entry.options.
@@ -3990,22 +3998,6 @@ requirement_economics_tariffs:
     unmittelbar vor dem Speichern (config_flow._round_price_fields): für
     die Preise auf oberster Ebene ebenso wie für die Preise in den acht
     Zeitfenstergruppen.
-
-    Die tarifspezifischen Schemata lassen zusätzlich fremde Schlüssel zu
-    (vol.ALLOW_EXTRA) und behandeln eine erneut abgeschickte erste Seite
-    (erkennbar am dort enthaltenen Tarifmodell) als Wiederholung genau
-    dieser Seite (config_flow.SaxPowerOptionsFlow._async_repeat_init).
-    Schickt das Frontend die erste Seite ein zweites Mal ab - Doppelklick,
-    oder Enter im Eingabefeld plus Klick auf "Absenden" -, prüft Home
-    Assistant deren Werte gegen das Schema der bereits erreichten
-    Folgeseite; ohne diese Behandlung quittiert der Dialog das mit einer
-    Wand aus "extra keys not allowed @ data[...]"-Rohmeldungen
-    (Anwenderbericht zu #129). Die wiederholte erste Seite wird dabei
-    selbst gegen STEP_OPTIONS_SCHEMA geprüft - auf diesem Weg wendet Home
-    Assistant es nicht mehr an -, und was nicht darauf passt, gilt nicht
-    als Wiederholung, sondern als unvollständige Eingabe der Folgeseite.
-    Gespeichert wird trotz ALLOW_EXTRA ausschließlich, was das jeweilige
-    Schema selbst kennt.
 
     Dieselbe Unterscheidung wie im Options Flow gilt auch beim erneuten
     Einlesen für die Quote-Erzeugung
@@ -4126,8 +4118,9 @@ requirement_economics_tariffs:
        deterministisch getestet (tests/test_tariff.py)."
     - "Der dynamische Tarif nutzt denselben Sensor, dieselbe
        Attribut-Erkennung und dieselbe Einheitenlogik wie die vorhandene
-       Preisfunktion; ohne ausgewählten Sensor lehnt der Options Flow das
-       Speichern am Sensorfeld ab."
+       Preisfunktion; ohne ausgewählten Sensor führt der Options Flow zur
+       Quellenauswahl. Eine weiterhin fehlende Auswahl wird dort als
+       Feldfehler erklärt; es wird kein unvollständiger Tarif gespeichert."
     - "Fehlende, nicht numerische, nicht endliche, außerhalb des
        Wertebereichs liegende, unlesbare oder zeitlich unpassende Preiswerte
        ergeben None samt Grund - nie 0."
@@ -4144,10 +4137,10 @@ requirement_economics_tariffs:
        übersetzter Feldfehler (economics_price_required) an genau diesem
        Feld, nie als unübersetzte Schema-Rohmeldung; ohne Preis entsteht
        kein Eintrag."
-    - "Eine erneut abgeschickte erste Options-Seite (Doppelklick bzw.
-       Enter plus Klick) führt bei jeder Tarifart zurück auf dieselbe
-       Folgeseite - ohne Fehlermeldung und ohne fremde Schlüssel im
-       gespeicherten Eintrag (tests/test_config_flow.py)."
+    - "Jede Tarifart ist über das Bereichsmenü und die eigene Tarifwahl
+       erreichbar. Ein Tarifwechsel entfernt überholte Tarifwerte, erhält
+       Investition und Vorlauf-Ertrag sowie Options anderer Bereiche
+       (tests/test_config_flow.py)."
     - "Eine Optionsänderung und ein Sensor-State-Change wirken ohne Reload;
        Listener werden beim Optionswechsel und beim Entladen entfernt und
        nie doppelt registriert."
@@ -4798,7 +4791,10 @@ requirement_economics_amortization:
     0,01) schalten die vier Amortisationssensoren frei. Leer oder ungültig
     liefert für ROI, Fortschritt, Restbetrag und Netto-Ersparnis heute None,
     während die übrige Wirtschaftlichkeitsbilanz weiterläuft. Ein
-    Tarifwechsel löscht die Investitionskosten nicht.
+    Tarifwechsel löscht die Investitionskosten nicht. Investition und
+    Vorlauf-Ertrag werden im eigenen Options-Menübereich Investition und
+    bisheriger Ertrag bearbeitet; dessen Abschluss erhält
+    Tarif, Preisquelle und alle übrigen Einstellungen unverändert.
 
     Der ebenfalls optionale Vorlauf-Ertrag economics_prior_result_eur (0 bis
     1.000.000 EUR, Schrittweite 0,01) berücksichtigt einen schon vor Beginn
@@ -5289,13 +5285,19 @@ requirement_hems_dynamic:
 
 requirement_hems_configuration:
   id: REQ-HEMS-CONFIGURATION
-  title: "Rückwärtskompatible HEMS-Einrichtung"
+  title: "Bereichsmenü und geführte HEMS-Einrichtung"
   status: done
   requirements:
     - "Moduswahl und neue Preisstrategie sind HA-Select-Entities. Softwarekonfiguration wird unabhängig von Geräte-ACK bestätigt; Aktivität erst nach quittierter Ausführung."
     - "Der Zeittarif zeigt direkt unter seinem Hauptschalter einen zweistufigen Umschalter Ladesteuerung: Min-/Max-SOC oder Bedarfsgesteuert. Beide Positionen schreiben dieselbe Select-Entity standard/adaptive; nur eine Steuerung ist ausgewählt und wirksam. Kurze Erklärungen, native Tastaturbedienung und gemeinsame Zeit-/Monatsgrenzen sind sichtbar. Auswahl erst nach HA-Zustandsänderung übernehmen; Fehler behalten die bisherige Auswahl. Unbekannt/Verbindungsabbruch zeigt keine aktive Position und sperrt die Eingabe, Reconnect schreibt nichts."
-    - "Options Flow wählt PV-Anbieter und passenden Integrationseintrag, optional Solcast-Frischesensor, maximale Solcast-Datenalter und beide Wirkungsgradannahmen. Ungültige Quellenzuordnung wird am Feld erklärt."
+    - "Konfigurieren öffnet ein Bereichsmenü: Dashboard; Strompreis für Laden und Wirtschaftlichkeit; PV-Prognose für Smart und netzdienliches Laden; Bedarfsgesteuerte Nachtregelung; Stromtarif für die Wirtschaftlichkeit; Investition und bisheriger Ertrag. Jeder Bereich bearbeitet nur seine eigenen Options und erhält die übrigen Werte. Alltagseinstellungen wie Ladezeiten, Monate, Strategien und SOC-Grenzen bleiben im Dashboard und an den Entities."
+    - "Die Nachtregelung führt vom PV-Anbieter über den passenden Integrationseintrag zu erweiterten Einstellungen. Die Anlagenauswahl bietet nur Einträge des gewählten Anbieters; ungültige Quellenzuordnung wird am Feld erklärt. Nur Solcast zeigt optionalen Abrufsensor und maximales Datenalter. Anbieter none entfernt beim Abschluss eine alte Anlagen- und Abrufsensorzuordnung einschließlich Registry-ID; persönliche Annahmen wie Wirkungsgrade und zulässiges Solcast-Datenalter bleiben erhalten."
+    - "Prognoseverbesserung und Wirkungsgradannahmen liegen in aufklappbaren Gruppen der erweiterten Einstellungen. Die bestehenden Options-Schlüssel und Vorgaben bleiben kompatibel; insbesondere bleibt das Prognosearchiv standardmäßig aus. Änderungen eines mehrstufigen Bereichs werden erst beim letzten Schritt gespeichert; Abbrechen übernimmt keine Teilkonfiguration."
+    - "Die Ersteinrichtung behält ihre Folge Verbindung, optionale Netzladung-Vorbelegung, Dashboard und Abschlusszusammenfassung. Verbindungsänderungen erfolgen weiter über Neu konfigurieren. DE/EN-Texte benennen Zweck und nächsten Schritt und unterscheiden die PV-Quelle der Nachtregelung von der Prognose für Smart und netzdienliches Laden."
     - "Die gemeinsamen Min-/Max-SOC-Grenzen bleiben im dynamischen adaptive-Modus direkt bedienbar, auch wenn der zeitvariable Tarif-Tab ausgeblendet ist. Min-SOC ist dann Reserve, Max-SOC eine Obergrenze des berechneten Ziels."
+  acceptance_criteria:
+    - "tests/test_config_flow.py und tests/test_hems_configuration.py prüfen Bereichsmenü, unabhängiges Speichern und Erhalt fremder Options sowie den vollständigen Anbieter-/Anlagen-/Einstellungspfad. Solcast-Felder erscheinen nur bei Solcast; Anbieterwechsel und Abwahl entfernen überholte Anlagen- und Abrufsensorzuordnungen. Vor Abschluss werden keine Änderungen gespeichert."
+    - "Alle Bereichs- und Gruppenschemata lassen sich für das HA-Frontend serialisieren. Bestehende Werte sind vorbelegt, einschließlich False, 0 und verschachtelter Tarifpreisfenster. DE/EN führen durch die gleichen Schritte."
 
 requirement_hems_observability:
   id: REQ-HEMS-OBSERVABILITY

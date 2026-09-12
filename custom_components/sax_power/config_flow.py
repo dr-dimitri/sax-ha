@@ -547,14 +547,14 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-# Options Flow (siehe SaxPowerOptionsFlow): Konfiguration des
-# preisoptimierten Ladens. Bewusst NICHT Teil der Ersteinrichtung - die
-# Integration ist ohne Strompreis-Sensor voll funktionsfähig, und der
-# passende Sensor existiert bei einer frischen Home-Assistant-Installation
-# oft noch gar nicht. Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
-STEP_OPTIONS_SCHEMA = vol.Schema(
+# REQ-DYNAMIC-PRICE-CHARGE: Quellen und Grundeinstellungen bleiben von den
+# automatisierbaren Stellgrößen der Geräte-Entities getrennt.
+STEP_DASHBOARD_OPTIONS_SCHEMA = vol.Schema(
+    {vol.Required(CONF_VUE_DASHBOARD_ENABLED): cv.boolean}
+)
+
+STEP_PRICE_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_VUE_DASHBOARD_ENABLED): cv.boolean,
         vol.Optional(CONF_PRICE_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
@@ -568,53 +568,82 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
                 )
             )
         ),
+    }
+)
+
+STEP_PV_SCHEMA = vol.Schema(
+    {
         vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
-        vol.Optional(CONF_HEMS_PV_PROVIDER, default="none"): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=["none", "pv_forecast", "solcast_solar"],
-                translation_key="hems_pv_provider",
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Optional(CONF_HEMS_PV_ENTRY): selector.ConfigEntrySelector(),
-        vol.Optional(CONF_HEMS_SOLCAST_TIMESTAMP): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="sensor")
-        ),
-        vol.Optional(CONF_HEMS_SOLCAST_MAX_AGE, default=24): vol.All(
-            vol.Coerce(float), vol.Range(min=1, max=24)
-        ),
-        vol.Optional(CONF_HEMS_CHARGE_EFFICIENCY, default=0.95): vol.All(
-            vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
-        ),
-        vol.Optional(CONF_HEMS_DISCHARGE_EFFICIENCY, default=0.95): vol.All(
-            vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
-        ),
-        vol.Optional(CONF_HEMS_ARCHIVE_ENABLED, default=False): cv.boolean,
-        vol.Optional(CONF_HEMS_HISTORY_DAYS, default="7"): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=["7", "28"],
-                translation_key="hems_history_days",
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Optional(CONF_HEMS_FORECAST_MODE, default="observe"): (
-            selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["observe", "auto"],
-                    translation_key="hems_forecast_mode",
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            )
-        ),
-        vol.Optional(CONF_HEMS_LIVE_ADJUSTMENT, default=False): cv.boolean,
         vol.Required(
             CONF_PV_FORECAST_FACTOR, default=DEFAULT_PV_FORECAST_FACTOR
         ): vol.All(
             vol.Coerce(int),
             vol.Range(min=MIN_PV_FORECAST_FACTOR, max=MAX_PV_FORECAST_FACTOR),
         ),
+    }
+)
+
+STEP_HEMS_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_HEMS_PV_PROVIDER, default="none"): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=["none", "pv_forecast", "solcast_solar"],
+                translation_key="hems_pv_provider",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+    }
+)
+
+STEP_HEMS_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Optional("forecast"): section(
+            vol.Schema(
+                {
+                    vol.Optional(CONF_HEMS_ARCHIVE_ENABLED, default=False): cv.boolean,
+                    vol.Optional(CONF_HEMS_HISTORY_DAYS, default="7"): (
+                        selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["7", "28"],
+                                translation_key="hems_history_days",
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                            )
+                        )
+                    ),
+                    vol.Optional(CONF_HEMS_FORECAST_MODE, default="observe"): (
+                        selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["observe", "auto"],
+                                translation_key="hems_forecast_mode",
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                            )
+                        )
+                    ),
+                    vol.Optional(CONF_HEMS_LIVE_ADJUSTMENT, default=False): cv.boolean,
+                }
+            ),
+            {"collapsed": True},
+        ),
+        vol.Optional("efficiency"): section(
+            vol.Schema(
+                {
+                    vol.Optional(CONF_HEMS_CHARGE_EFFICIENCY, default=0.95): vol.All(
+                        vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
+                    ),
+                    vol.Optional(CONF_HEMS_DISCHARGE_EFFICIENCY, default=0.95): vol.All(
+                        vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
+                    ),
+                }
+            ),
+            {"collapsed": True},
+        ),
+    }
+)
+
+STEP_ECONOMICS_SCHEMA = vol.Schema(
+    {
         vol.Required(
             CONF_ECONOMICS_TARIFF_TYPE, default=TariffType.DISABLED.value
         ): selector.SelectSelector(
@@ -624,10 +653,11 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         ),
-        # REQ-ECONOMICS-AMORTIZATION: unabhängig von der Tarifart (siehe
-        # const.ECONOMICS_OPTION_KEYS) - ein Tarifwechsel darf die
-        # Investitionskosten nicht löschen. Leer lassen deaktiviert
-        # sämtliche Investitions-/Amortisationssensoren.
+    }
+)
+
+STEP_AMORTIZATION_SCHEMA = vol.Schema(
+    {
         vol.Optional(CONF_ECONOMICS_INVESTMENT_COST): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=MIN_ECONOMICS_INVESTMENT_COST,
@@ -637,9 +667,6 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
                 unit_of_measurement=CURRENCY_EURO,
             )
         ),
-        # REQ-ECONOMICS-AMORTIZATION: Ertrag aus der Zeit VOR dieser
-        # Integration. Wirkt nur auf die Amortisationssensoren, nicht auf
-        # das operative Ergebnis (siehe const.CONF_ECONOMICS_PRIOR_RESULT).
         vol.Optional(CONF_ECONOMICS_PRIOR_RESULT): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=MIN_ECONOMICS_PRIOR_RESULT,
@@ -653,14 +680,25 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
 )
 
 
-# --------------------------------------------------------------------------
-# Wirtschaftlichkeitsauswertung (siehe anforderung.yaml,
-# REQ-ECONOMICS-TARIFFS): Der Tariftyp wird bereits auf der ersten
-# Options-Seite gewählt, die tarifspezifischen Preise stehen anschließend in
-# einem eigenen Schritt - so sieht der Anwender nie Felder, die für seinen
-# Tarif keine Bedeutung haben, und ein deaktivierter Tarif fragt gar keine
-# Preise ab.
-# --------------------------------------------------------------------------
+def _hems_source_schema(provider: str) -> vol.Schema:
+    """Nur Quellen der ausgewählten Prognoseintegration anbieten."""
+    fields: dict[Any, Any] = {
+        vol.Required(CONF_HEMS_PV_ENTRY): selector.ConfigEntrySelector(
+            selector.ConfigEntrySelectorConfig(integration=provider)
+        ),
+    }
+    if provider == "solcast_solar":
+        fields.update(
+            {
+                vol.Optional(CONF_HEMS_SOLCAST_TIMESTAMP): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_HEMS_SOLCAST_MAX_AGE, default=24): vol.All(
+                    vol.Coerce(float), vol.Range(min=1, max=24)
+                ),
+            }
+        )
+    return vol.Schema(fields)
 
 
 def _round_to_price_step(value: float) -> float:
@@ -712,25 +750,16 @@ _FEED_IN_FIELD = {
     ),
 }
 
-# ALLOW_EXTRA: Schickt das Frontend die erste Seite ein zweites Mal ab
-# (Doppelklick bzw. Enter im Eingabefeld plus Klick auf "Absenden"),
-# während der Flow bereits auf dieser Folgeseite steht, prüft Home
-# Assistant diese Werte gegen DIESES Schema. Ohne ALLOW_EXTRA quittiert
-# das der Dialog mit einer Wand aus "extra keys not allowed @
-# data[...]"-Rohmeldungen; mit ALLOW_EXTRA erkennt der Schritt die
-# wiederholte erste Seite und wiederholt sie einfach (siehe
-# SaxPowerOptionsFlow._async_repeat_init).
 STEP_ECONOMICS_FIXED_SCHEMA = vol.Schema(
     {
         **_FEED_IN_FIELD,
         vol.Optional(CONF_ECONOMICS_FIXED_IMPORT_PRICE): _price_selector(
             MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
         ),
-    },
-    extra=vol.ALLOW_EXTRA,
+    }
 )
 
-STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD), extra=vol.ALLOW_EXTRA)
+STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD))
 
 # Jede der acht Zeitfenstergruppen ist eine eigene, eingeklappte Section:
 # ohne die Gruppierung stünden 24 gleich aussehende Einzelfelder
@@ -745,10 +774,6 @@ STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
             MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
         ),
         **{
-            # Optional wie die Preisfelder darüber: eine erneut
-            # abgeschickte erste Seite enthält keine Zeitfenstergruppen,
-            # und _validate_windows behandelt eine fehlende Gruppe ohnehin
-            # wie eine leere.
             vol.Optional(key): section(
                 vol.Schema(
                     {
@@ -767,8 +792,7 @@ STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
             )
             for key in ECONOMICS_TOU_WINDOW_KEYS
         },
-    },
-    extra=vol.ALLOW_EXTRA,
+    }
 )
 
 #: Preisfelder der Tarifseiten auf oberster Ebene. Die Preise der acht
@@ -787,10 +811,8 @@ def _round_price_fields(user_input: dict[str, Any]) -> dict[str, Any]:
     Der Aufrufer rundet unmittelbar vor dem Speichern, weil die Rundung
     nicht mehr im Schema stattfinden darf (siehe _price_selector).
     Nicht auswertbare Werte bleiben unverändert stehen, statt hier eine
-    Exception aus dem Schritt fliegen zu lassen: das Schema hat die im
-    Schema bekannten Preisfelder bereits als Zahl validiert, und ein aus
-    einer wiederholten ersten Seite durchgereichter Fremdwert
-    (extra=vol.ALLOW_EXTRA) wird ohnehin nicht gespeichert.
+    Exception aus dem Schritt fliegen zu lassen. Die Vollständigkeitsprüfung
+    kann dadurch für fehlende oder ungültige Preise einen Feldfehler melden.
     """
     rounded = dict(user_input)
     for key in _TOP_LEVEL_PRICE_KEYS:
@@ -826,120 +848,220 @@ _WINDOW_ERROR_KEYS = {
 
 
 class SaxPowerOptionsFlow(OptionsFlow):
-    """Konfiguration von Preisautomatik und gemeinsamer PV-Prognose.
+    """Grundeinstellungen in unabhängigen, überschaubaren Bereichen ändern."""
 
-    Hier stehen nur die Dinge, die sich nicht sinnvoll als Entity abbilden
-    lassen (Auswahl der Quell-Sensoren und deren Interpretation). Die im
-    Alltag veränderlichen Stellgrößen - Strategie, Preisgrenze, Anzahl
-    Stunden, Ziel-SOC und Mindestprognose - sind dagegen echte Entities am SAX-Gerät
-    (select.py/number.py) und damit automatisierbar und in Dashboards
-    nutzbar. Die Strategie hat deshalb bewusst KEIN eigenes Feld hier: eine
-    im Options Flow hinterlegte Vorgabe hätte ohnehin nur beim allerersten
-    Start (vor dem ersten gespeicherten Zustand der Select-Entity)
-    überhaupt eine Wirkung gehabt und würde dem Anwender fälschlich
-    suggerieren, sie ließe sich hier jederzeit ändern - siehe
-    select.SaxPowerPriceStrategySelect.
-    """
-
-    #: Auf der ersten Seite abgeschickte Werte, bis der tarifspezifische
-    #: Folgeschritt sie vervollständigt (siehe async_step_init).
-    _base_options: dict[str, Any]
+    def __init__(self) -> None:
+        """Mehrstufige Bereiche erst nach ihrem letzten Formular speichern."""
+        self._base_options: dict[str, Any] | None = None
+        self._edited_keys: set[str] = set()
+        self._price_for_economics = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        self._begin_options()
+        self._price_for_economics = False
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "dashboard",
+                "price",
+                "pv",
+                "hems",
+                "economics",
+                "amortization",
+            ],
+        )
+
+    async def async_step_dashboard(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Die Anzeige des SAX-Dashboards unabhängig von Quellen ändern."""
+        self._begin_options()
+        if user_input is not None:
+            self._replace_options(STEP_DASHBOARD_OPTIONS_SCHEMA, user_input)
+            return self._save_options()
+        return self.async_show_form(
+            step_id="dashboard",
+            data_schema=self._suggested(STEP_DASHBOARD_OPTIONS_SCHEMA),
+            last_step=True,
+        )
+
+    async def async_step_price(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Gemeinsame Preisquelle für Ladeplanung und Wirtschaftlichkeit wählen."""
+        if not self._price_for_economics:
+            self._begin_options()
+        assert self._base_options is not None
         errors: dict[str, str] = {}
         if user_input is not None:
-            timestamp_registry_id: str | None = None
-            tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
-            for field in (
-                CONF_HEMS_CHARGE_EFFICIENCY,
-                CONF_HEMS_DISCHARGE_EFFICIENCY,
-                CONF_HEMS_SOLCAST_MAX_AGE,
-            ):
-                if field in user_input and not math.isfinite(user_input[field]):
-                    errors[field] = "hems_invalid_number"
-            provider = user_input.get(CONF_HEMS_PV_PROVIDER, "none")
-            if provider != "none":
-                pv_entry = self.hass.config_entries.async_get_entry(
-                    user_input.get(CONF_HEMS_PV_ENTRY, "")
+            if self._base_options.get(
+                CONF_ECONOMICS_TARIFF_TYPE
+            ) == TariffType.DYNAMIC.value and not user_input.get(CONF_PRICE_SENSOR):
+                errors[CONF_PRICE_SENSOR] = "economics_price_sensor_required"
+            else:
+                self._replace_options(STEP_PRICE_SCHEMA, user_input)
+                if self._price_for_economics:
+                    return await self.async_step_economics_dynamic()
+                return self._save_options()
+        return self.async_show_form(
+            step_id="price",
+            data_schema=self._suggested(STEP_PRICE_SCHEMA, user_input),
+            errors=errors or None,
+            last_step=not self._price_for_economics,
+        )
+
+    async def async_step_pv(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Die Tagesprognose für netzdienliches Laden konfigurieren."""
+        self._begin_options()
+        if user_input is not None:
+            self._replace_options(STEP_PV_SCHEMA, user_input)
+            return self._save_options()
+        return self.async_show_form(
+            step_id="pv",
+            data_schema=self._suggested(STEP_PV_SCHEMA),
+            last_step=True,
+        )
+
+    async def async_step_hems(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Den Prognoseanbieter der bedarfsgesteuerten Nachtregelung wählen."""
+        self._begin_options()
+        if user_input is not None:
+            provider = user_input[CONF_HEMS_PV_PROVIDER]
+            previous_provider = self._base_options.get(CONF_HEMS_PV_PROVIDER, "none")
+            self._replace_options(STEP_HEMS_SCHEMA, user_input)
+            if provider == "none" or provider != previous_provider:
+                self._remove_options(
+                    CONF_HEMS_PV_ENTRY,
+                    CONF_HEMS_SOLCAST_TIMESTAMP,
+                    CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID,
                 )
-                if pv_entry is None or pv_entry.domain != provider:
-                    errors[CONF_HEMS_PV_ENTRY] = "hems_pv_entry_invalid"
+            if provider == "none":
+                return self._save_options()
+            return await self.async_step_hems_source()
+        return self.async_show_form(
+            step_id="hems",
+            data_schema=self._suggested(STEP_HEMS_SCHEMA),
+        )
+
+    async def async_step_hems_source(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Die konkrete Prognosequelle und optional Solcasts Zeitstempel prüfen."""
+        assert self._base_options is not None
+        provider = self._base_options[CONF_HEMS_PV_PROVIDER]
+        schema = _hems_source_schema(provider)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            pv_entry = self.hass.config_entries.async_get_entry(
+                user_input.get(CONF_HEMS_PV_ENTRY, "")
+            )
+            if pv_entry is None or pv_entry.domain != provider:
+                errors[CONF_HEMS_PV_ENTRY] = "hems_pv_entry_invalid"
+            timestamp_registry_id: str | None = None
+            source_input = dict(user_input)
+            if provider == "solcast_solar":
+                max_age = user_input.get(CONF_HEMS_SOLCAST_MAX_AGE, 24)
+                if not math.isfinite(max_age):
+                    errors[CONF_HEMS_SOLCAST_MAX_AGE] = "hems_invalid_number"
                 timestamp = user_input.get(CONF_HEMS_SOLCAST_TIMESTAMP)
-                if provider == "solcast_solar" and timestamp:
-                    entity = (
-                        resolve_solcast_timestamp(
-                            er.async_get(self.hass),
-                            pv_entry.entry_id,
-                            entity_id=timestamp,
-                        )
-                        if pv_entry is not None
-                        else None
+                if timestamp and pv_entry is not None:
+                    stored_timestamp = self._base_options.get(
+                        CONF_HEMS_SOLCAST_TIMESTAMP
+                    )
+                    same_source = self._base_options.get(CONF_HEMS_PV_ENTRY) == (
+                        pv_entry.entry_id
+                    )
+                    entity = resolve_solcast_timestamp(
+                        er.async_get(self.hass),
+                        pv_entry.entry_id,
+                        entity_id=timestamp,
+                        registry_id=(
+                            self._base_options.get(
+                                CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID
+                            )
+                            if same_source and timestamp == stored_timestamp
+                            else None
+                        ),
+                        allow_legacy_rename=same_source
+                        and timestamp == stored_timestamp,
                     )
                     if entity is None:
                         errors[CONF_HEMS_SOLCAST_TIMESTAMP] = "hems_pv_entry_invalid"
                     else:
+                        source_input[CONF_HEMS_SOLCAST_TIMESTAMP] = entity.entity_id
                         timestamp_registry_id = entity.id
-            if tariff_type is TariffType.DYNAMIC and not user_input.get(
-                CONF_PRICE_SENSOR
-            ):
-                # Der dynamische Tarif hat bewusst keine eigene
-                # Sensor-Option: Wirtschaftlichkeit und Ladeplanung müssen
-                # denselben Preis sehen (REQ-ECONOMICS-TARIFFS). Ohne
-                # ausgewählten Sensor gäbe es also gar keine Preisquelle.
-                errors[CONF_PRICE_SENSOR] = "economics_price_sensor_required"
             if not errors:
-                self._base_options = {
-                    key: value
-                    for key, value in user_input.items()
-                    if key not in ECONOMICS_OPTION_KEYS
-                    and key != CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID
-                }
+                self._replace_options(schema, source_input)
+                self._remove_options(CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID)
+                if provider != "solcast_solar":
+                    self._remove_options(CONF_HEMS_SOLCAST_TIMESTAMP)
                 if timestamp_registry_id is not None:
                     self._base_options[CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID] = (
                         timestamp_registry_id
                     )
-                self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
-                self._base_options.setdefault(
-                    CONF_VUE_DASHBOARD_ENABLED,
-                    self.config_entry.options.get(
-                        CONF_VUE_DASHBOARD_ENABLED,
-                        self.config_entry.data.get(
-                            CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
-                        ),
-                    ),
-                )
-                return await self._async_step_for_tariff(tariff_type)
-
-        # Bewusst _suggested statt add_suggested_values_to_schema auf den
-        # gespeicherten Options: Nach dem Fehler
-        # economics_price_sensor_required soll der Anwender nur den
-        # fehlenden Sensor nachtragen müssen. Gegen die reinen Options
-        # gerendert verlöre das Formular jede andere Änderung derselben
-        # Seite (Tarifart, PV-Prognose, Investitionskosten, Vorlauf) - wie
-        # bei allen Folgeschritten gewinnt deshalb die letzte Eingabe.
+                return await self.async_step_hems_settings()
         return self.async_show_form(
-            step_id="init",
-            data_schema=self._suggested(STEP_OPTIONS_SCHEMA, user_input),
+            step_id="hems_source",
+            data_schema=self._suggested(schema, user_input),
             errors=errors or None,
+            last_step=False,
         )
 
-    async def _async_step_for_tariff(self, tariff_type: TariffType) -> ConfigFlowResult:
-        """Nach der Tarifart verzweigen.
+    async def async_step_hems_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Prognoseverhalten und Speicherverluste als zusammengehörige Gruppen."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            for field in (
+                CONF_HEMS_CHARGE_EFFICIENCY,
+                CONF_HEMS_DISCHARGE_EFFICIENCY,
+            ):
+                value = user_input.get("efficiency", {}).get(field)
+                if value is not None and not math.isfinite(value):
+                    # Home Assistant kann Feldfehler keiner Section zuordnen.
+                    errors["base"] = "hems_invalid_number"
+            if not errors:
+                for marker, group in STEP_HEMS_SETTINGS_SCHEMA.schema.items():
+                    if str(marker) in user_input:
+                        self._replace_options(group.schema, user_input[str(marker)])
+                return self._save_options()
+        return self.async_show_form(
+            step_id="hems_settings",
+            data_schema=self._suggested(STEP_HEMS_SETTINGS_SCHEMA, user_input),
+            errors=errors or None,
+            last_step=True,
+        )
 
-        Ein deaktivierter Tarif braucht keine Einspeisevergütung und wird
-        deshalb sofort gespeichert - inklusive Wegräumen aller
-        tarifspezifischen Altwerte.
-        """
-        if tariff_type is TariffType.DISABLED:
-            self._mark_vue_activation()
-            return self.async_create_entry(title="", data=self._base_options)
-        if tariff_type is TariffType.FIXED:
-            return await self.async_step_economics_fixed()
-        if tariff_type is TariffType.TIME_OF_USE:
-            return await self.async_step_economics_time_of_use()
-        return await self.async_step_economics_dynamic()
+    async def async_step_economics(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Nur die zur gewählten Tarifart passenden Preisfelder abfragen."""
+        self._begin_options()
+        self._price_for_economics = False
+        if user_input is not None:
+            tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
+            self._replace_options(STEP_ECONOMICS_SCHEMA, user_input)
+            if tariff_type is TariffType.DISABLED:
+                return self._save_tariff(vol.Schema({}), {})
+            if tariff_type is TariffType.FIXED:
+                return await self.async_step_economics_fixed()
+            if tariff_type is TariffType.TIME_OF_USE:
+                return await self.async_step_economics_time_of_use()
+            if not self._base_options.get(CONF_PRICE_SENSOR):
+                self._price_for_economics = True
+                return await self.async_step_price()
+            return await self.async_step_economics_dynamic()
+        return self.async_show_form(
+            step_id="economics",
+            data_schema=self._suggested(STEP_ECONOMICS_SCHEMA),
+        )
 
     async def async_step_economics_fixed(
         self, user_input: dict[str, Any] | None = None
@@ -947,45 +1069,50 @@ class SaxPowerOptionsFlow(OptionsFlow):
         """Festpreistarif: ein ganztägig konstanter Arbeitspreis."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if (repeated := await self._async_repeat_init(user_input)) is not None:
-                return repeated
             errors = _missing_prices(
                 user_input,
                 (CONF_ECONOMICS_FEED_IN_PRICE, CONF_ECONOMICS_FIXED_IMPORT_PRICE),
             )
             if not errors:
-                return self._create_entry(STEP_ECONOMICS_FIXED_SCHEMA, user_input)
+                return self._save_tariff(STEP_ECONOMICS_FIXED_SCHEMA, user_input)
         return self.async_show_form(
             step_id="economics_fixed",
             data_schema=self._suggested(STEP_ECONOMICS_FIXED_SCHEMA, user_input),
             errors=errors or None,
+            last_step=True,
         )
 
     async def async_step_economics_dynamic(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Dynamischer Tarif: Preis aus dem bereits gewählten Preis-Sensor."""
+        """Dynamischer Tarif: Preis aus dem gemeinsam genutzten Preis-Sensor."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if (repeated := await self._async_repeat_init(user_input)) is not None:
-                return repeated
             errors = _missing_prices(user_input, (CONF_ECONOMICS_FEED_IN_PRICE,))
             if not errors:
-                return self._create_entry(STEP_ECONOMICS_DYNAMIC_SCHEMA, user_input)
+                self._base_options = self._merged_options()
+                if not self._base_options.get(CONF_PRICE_SENSOR):
+                    # Ein parallel geänderter Bereich kann die Preisquelle seit
+                    # der Tarifwahl entfernt haben (REQ-ECONOMICS-TARIFFS).
+                    self._replace_options(
+                        STEP_ECONOMICS_DYNAMIC_SCHEMA, _round_price_fields(user_input)
+                    )
+                    self._price_for_economics = True
+                    return await self.async_step_price()
+                return self._save_tariff(STEP_ECONOMICS_DYNAMIC_SCHEMA, user_input)
         return self.async_show_form(
             step_id="economics_dynamic",
             data_schema=self._suggested(STEP_ECONOMICS_DYNAMIC_SCHEMA, user_input),
             errors=errors or None,
+            last_step=True,
         )
 
     async def async_step_economics_time_of_use(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Tageszeitabhängiger Tarif: Grundpreis + bis zu acht Fenster."""
+        """Tageszeitabhängiger Tarif: Grundpreis und bis zu acht Zeitfenster."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            if (repeated := await self._async_repeat_init(user_input)) is not None:
-                return repeated
             errors = _missing_prices(
                 user_input,
                 (CONF_ECONOMICS_FEED_IN_PRICE, CONF_ECONOMICS_TOU_BASE_PRICE),
@@ -994,68 +1121,80 @@ class SaxPowerOptionsFlow(OptionsFlow):
             if issue is not None:
                 errors["base"] = _WINDOW_ERROR_KEYS[issue.error]
             if not errors:
-                return self._create_entry(STEP_ECONOMICS_TOU_SCHEMA, user_input)
-
+                return self._save_tariff(STEP_ECONOMICS_TOU_SCHEMA, user_input)
         return self.async_show_form(
             step_id="economics_time_of_use",
             data_schema=self._suggested(STEP_ECONOMICS_TOU_SCHEMA, user_input),
             errors=errors or None,
+            last_step=True,
         )
 
-    async def _async_repeat_init(
-        self, user_input: dict[str, Any]
-    ) -> ConfigFlowResult | None:
-        """Wiederholt die erste Seite, falls sie erneut abgeschickt wurde.
+    async def async_step_amortization(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Investitionskosten und bisheriges Ergebnis unabhängig vom Tarif ändern."""
+        self._begin_options()
+        if user_input is not None:
+            self._replace_options(STEP_AMORTIZATION_SCHEMA, user_input)
+            return self._save_options()
+        return self.async_show_form(
+            step_id="amortization",
+            data_schema=self._suggested(STEP_AMORTIZATION_SCHEMA),
+            last_step=True,
+        )
 
-        Schickt das Frontend die erste Seite ein zweites Mal ab
-        (Doppelklick bzw. Enter im Eingabefeld plus Klick auf "Absenden"),
-        prüft Home Assistant diese Werte gegen das Schema dieser
-        Folgeseite - erkennbar am Tarifmodell, das es hier gar nicht gibt.
-        Ohne diese Behandlung sähe der Anwender eine Wand aus "extra keys
-        not allowed @ data[...]"-Rohmeldungen. Stattdessen wird die erste
-        Seite einfach erneut ausgewertet: der Dialog landet wieder auf der
-        passenden Folgeseite, als wäre nur einmal abgeschickt worden.
-        Geprüft wird dabei gegen STEP_OPTIONS_SCHEMA, das Home Assistant
-        auf diesem Weg gar nicht mehr anwendet: Ohne diese Prüfung landete
-        eine per Websocket von Hand geschickte erste Seite ungeprüft in
-        entry.options (fremde Schlüssel, unbrauchbare Werte), und ein
-        unbekanntes Tarifmodell ließe async_step_init mit einem
-        ValueError aus dem Schritt fliegen. Passt die Eingabe nicht auf
-        dieses Schema, ist sie keine wiederholte erste Seite - dann
-        liefert die Methode None und der aufrufende Schritt behandelt sie
-        wie eine eigene (unvollständige) Eingabe. None ebenso, wenn es
-        sich um eine echte Eingabe dieser Seite handelt.
-        """
-        if CONF_ECONOMICS_TARIFF_TYPE not in user_input:
-            return None
-        try:
-            first_page = STEP_OPTIONS_SCHEMA(user_input)
-        except vol.Invalid:
-            return None
-        return await self.async_step_init(first_page)
+    def _begin_options(self) -> None:
+        """Einen Bereich auf dem aktuellen gespeicherten Zustand beginnen."""
+        self._base_options = dict(self.config_entry.options)
+        self._edited_keys = set()
 
-    def _create_entry(
+    def _remove_options(self, *keys: str) -> None:
+        """Explizite Löschungen auch beim abschließenden Zusammenführen erhalten."""
+        assert self._base_options is not None
+        for key in keys:
+            self._base_options.pop(key, None)
+            self._edited_keys.add(key)
+
+    def _replace_options(self, schema: vol.Schema, user_input: dict[str, Any]) -> None:
+        """Nur eigene Felder ersetzen; geleerte optionale Felder wirklich entfernen."""
+        assert self._base_options is not None
+        for marker in schema.schema:
+            key = str(marker)
+            self._remove_options(key)
+            value = user_input.get(key)
+            if value is not None and value != "" and value != {}:
+                self._base_options[key] = value
+
+    def _save_tariff(
         self, schema: vol.Schema, user_input: dict[str, Any]
     ) -> ConfigFlowResult:
-        """Speichert erste Seite + Folgeseite, ohne fremde Schlüssel.
-
-        Die Folgeseiten-Schemata lassen zusätzliche Schlüssel zu (siehe
-        _async_repeat_init) - gespeichert wird trotzdem ausschließlich, was
-        das jeweilige Schema selbst kennt.
-        """
-        known = {str(marker) for marker in schema.schema}
-        rounded = _round_price_fields(user_input)
-        self._mark_vue_activation()
-        return self.async_create_entry(
-            title="",
-            data={
-                **self._base_options,
-                **{key: value for key, value in rounded.items() if key in known},
-            },
+        """Alte Tarifpreise entfernen, unabhängige Amortisationswerte erhalten."""
+        assert self._base_options is not None
+        self._remove_options(
+            *(key for key in ECONOMICS_OPTION_KEYS if key != CONF_ECONOMICS_TARIFF_TYPE)
         )
+        self._replace_options(schema, _round_price_fields(user_input))
+        return self._save_options()
+
+    def _merged_options(self) -> dict[str, Any]:
+        """Parallel gespeicherte Änderungen an anderen Bereichen beibehalten."""
+        assert self._base_options is not None
+        options = dict(self.config_entry.options)
+        for key in self._edited_keys:
+            options.pop(key, None)
+            if key in self._base_options:
+                options[key] = self._base_options[key]
+        return options
+
+    def _save_options(self) -> ConfigFlowResult:
+        """Den vollständigen Bereich einschließlich aller vorigen Schritte speichern."""
+        self._base_options = self._merged_options()
+        self._mark_vue_activation()
+        return self.async_create_entry(title="", data=self._base_options)
 
     def _mark_vue_activation(self) -> None:
         """REQ-VUE-DASHBOARD-REPAIR: Erstaktivierung braucht keine Reload-Erinnerung."""
+        assert self._base_options is not None
         previously_enabled = self.config_entry.options.get(
             CONF_VUE_DASHBOARD_ENABLED,
             self.config_entry.data.get(
@@ -1074,18 +1213,18 @@ class SaxPowerOptionsFlow(OptionsFlow):
     def _suggested(
         self, schema: vol.Schema, user_input: dict[str, Any] | None = None
     ) -> vol.Schema:
-        """Formular mit den zuletzt eingegebenen bzw. gespeicherten Werten.
-
-        Nach einem Validierungsfehler gewinnt die letzte Eingabe: sonst
-        müsste der Anwender acht Zeitfenster wegen eines einzigen falschen
-        Feldes komplett neu ausfüllen.
-
-        `add_suggested_values_to_schema` baut das Schema dafür neu auf und
-        verliert dabei dessen `extra`-Einstellung - die wird hier wieder
-        übernommen, sonst scheiterte eine erneut abgeschickte erste Seite
-        weiterhin an der Schema-Validierung (siehe _async_repeat_init).
-        """
-        options = dict(self.config_entry.options)
+        """Entwurf vorfüllen und bei Fehlern auch geleerte Eingabefelder erhalten."""
+        options = dict(
+            self.config_entry.options
+            if self._base_options is None
+            else self._base_options
+        )
+        options.setdefault(
+            CONF_VUE_DASHBOARD_ENABLED,
+            self.config_entry.data.get(
+                CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+            ),
+        )
         if options.get(CONF_HEMS_PV_PROVIDER) == "solcast_solar" and options.get(
             CONF_HEMS_SOLCAST_TIMESTAMP
         ):
@@ -1098,17 +1237,23 @@ class SaxPowerOptionsFlow(OptionsFlow):
             )
             if timestamp is not None:
                 options[CONF_HEMS_SOLCAST_TIMESTAMP] = timestamp.entity_id
-        with_values = self.add_suggested_values_to_schema(
-            schema,
-            {
-                CONF_VUE_DASHBOARD_ENABLED: self.config_entry.data.get(
-                    CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
-                ),
-                **options,
-                **(user_input or {}),
-            },
-        )
-        return vol.Schema(with_values.schema, extra=schema.extra)
+        for marker, field_schema in schema.schema.items():
+            key = str(marker)
+            hems_group = isinstance(field_schema, section) and key in (
+                "forecast",
+                "efficiency",
+            )
+            if hems_group:
+                options[key] = {
+                    str(field): options[str(field)]
+                    for field in field_schema.schema.schema
+                    if str(field) in options
+                }
+            if user_input is not None and (not hems_group or key in user_input):
+                options.pop(key, None)
+        if user_input is not None:
+            options.update(user_input)
+        return self.add_suggested_values_to_schema(schema, options)
 
 
 def _missing_prices(

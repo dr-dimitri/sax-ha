@@ -40,10 +40,12 @@ export interface HassConnection {
 export interface HomeAssistant {
   language: string;
   states: Readonly<Record<string, HassEntity>>;
+  callWS?<T>(message: Readonly<Record<string, unknown>>): Promise<T>;
   connection?: HassConnection;
   connected?: boolean;
   locale?: {
     language?: string;
+    first_weekday?: string;
     number_format?: string;
     time_format?: string;
   };

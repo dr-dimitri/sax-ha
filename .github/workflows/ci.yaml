@@ -94,6 +94,22 @@ jobs:
             exit 1
           fi
 
+      - name: Chromium für die Dashboard-Abnahme installieren
+        run: npx playwright install --with-deps chromium
+
+      - name: Alle Dashboard-Ansichten im Browser prüfen
+        run: npm run test:browser
+
+      - name: Browserbericht und Dashboard-Screenshots sichern
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vue-dashboard-browser-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+
   validate-hacs:
     name: HACS validieren
     if: github.event_name == 'pull_request'

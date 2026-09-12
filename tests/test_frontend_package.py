@@ -9,7 +9,13 @@ import subprocess
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
+
 from scripts.snapshot_release import build_snapshot_archive
+from scripts.verify_dashboard_package import (
+    DashboardPackageError,
+    verify_dashboard_package,
+)
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 INTEGRATION_PATH = Path("custom_components/sax_power")
@@ -70,3 +76,47 @@ def test_stable_source_and_snapshot_include_identical_frontend_assets(
             == expected_asset
         )
         assert not any("__pycache__" in name for name in snapshot_archive.namelist())
+
+    # REQ-VUE-PARITY: each layout is installed outside the repository and served
+    # by a fresh HA process, so cached imports cannot hide missing package files.
+    stable_package = tmp_path / "stable-source.zip"
+    stable_package.write_bytes(
+        _git(source, "archive", "--format=zip", "--prefix=sax-ha-reviewed/", tree)
+    )
+    stable_report = verify_dashboard_package(stable_package)
+    snapshot_report = verify_dashboard_package(snapshot.archive)
+    assert stable_report.asset_sha256 == snapshot_report.asset_sha256
+    assert (
+        stable_report.version
+        == json.loads((clean_source / INTEGRATION_PATH / "manifest.json").read_text())[
+            "version"
+        ]
+    )
+    assert snapshot_report.version == snapshot.version
+    assert stable_report.installed_files == snapshot_report.installed_files
+    assert "2 passed" in stable_report.test_output
+    assert "2 passed" in snapshot_report.test_output
+
+
+@pytest.mark.parametrize(
+    ("files", "message"),
+    [
+        ({"../outside.txt": b"outside"}, "Unsicherer Pfad"),
+        ({"not-the-integration.txt": b"missing"}, "genau eine"),
+        (
+            {"sax_power/manifest.json": b'{"domain":"sax_power","version":"2.0.3"}'},
+            "Installationsdateien fehlen",
+        ),
+    ],
+)
+def test_package_smoke_rejects_incomplete_or_unsafe_archives(
+    tmp_path: Path, files: dict[str, bytes], message: str
+) -> None:
+    """REQ-VUE-PARITY: installation errors fail before importing any package."""
+    archive = tmp_path / "invalid.zip"
+    with ZipFile(archive, "w") as package:
+        for name, contents in files.items():
+            package.writestr(name, contents)
+    with pytest.raises(DashboardPackageError, match=message):
+        verify_dashboard_package(archive)
+    assert not (tmp_path / "outside.txt").exists()

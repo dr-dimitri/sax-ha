@@ -183,8 +183,8 @@ describe("Home Assistant panel", () => {
 
     expect(shadow(element).querySelector(".existing-link")).toBeNull();
     expect(
-      shadow(element).querySelector(".placeholder p")?.textContent,
-    ).toContain("noch in Vorbereitung");
+      shadow(element).querySelector(".savings-view")?.textContent,
+    ).toContain("Hinweise zur Berechnung und Datenbasis");
 
     element.hass = germanHass;
     await flush();

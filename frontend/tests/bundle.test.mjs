@@ -39,7 +39,9 @@ test("production module runs independently in a browser context", async () => {
     assert.equal(root.querySelector("h1").textContent.trim(), "Ersparnis");
     assert.equal(root.querySelectorAll("nav a").length, 5);
     assert.match(
-      root.querySelector("style").textContent,
+      [...root.querySelectorAll("style")]
+        .map((style) => style.textContent)
+        .join("\n"),
       /--primary-background-color/,
     );
     root.querySelector('nav a[href="/sax-power-vue/ladeautomatik"]').click();

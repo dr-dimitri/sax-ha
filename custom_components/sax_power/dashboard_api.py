@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
 from .const import DOMAIN
+from .dashboard_statistics import async_register_dashboard_statistics
 
 SUBSCRIBE_COMMAND = "sax_power/dashboard/subscribe"
 _ENTITY_DOMAINS = {"sensor", "binary_sensor", "switch", "number", "time", "select"}
@@ -33,6 +34,7 @@ def async_register_dashboard_api(hass: HomeAssistant) -> None:
     """Registriere den datenlesenden Befehl einmal pro Home-Assistant-Lauf."""
     if SUBSCRIBE_COMMAND not in hass.data.get(websocket_api.DOMAIN, {}):
         websocket_api.async_register_command(hass, websocket_subscribe_dashboard)
+    async_register_dashboard_statistics(hass)
 
 
 def _is_sax_entry(hass: HomeAssistant, entry_id: str) -> bool:

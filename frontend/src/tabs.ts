@@ -36,14 +36,10 @@ export const messages = {
     menu: "Seitenleiste öffnen",
     preview: "Vorschau",
     introduction:
-      "Das neue Dashboard entsteht parallel zu Ihrer bisherigen Ansicht.",
-    introductionStandalone: "Das neue SAX-Power-Dashboard entsteht hier.",
+      "Dieses Dashboard zeigt dieselben Gerätewerte und Einstellungen wie Ihre bisherige Ansicht.",
+    introductionStandalone:
+      "Gerätewerte, Ladeeinstellungen und Ersparnis Ihres SAX-Power-Speichers.",
     existing: "Bestehendes Dashboard öffnen",
-    preparation: "Dieser Bereich wird vorbereitet",
-    description:
-      "Die Anzeigen und Einstellungen finden Sie weiterhin im bestehenden SAX-Power-Dashboard. Sie werden Schritt für Schritt auch hier verfügbar.",
-    descriptionStandalone:
-      "Die Anzeigen und Einstellungen dieses Bereichs sind noch in Vorbereitung. Sie werden Schritt für Schritt hier verfügbar.",
     loading: "Home Assistant wird geladen …",
     missingEntry:
       "Diesem Dashboard ist noch kein SAX-Power-Gerät zugeordnet. Bitte laden Sie die Integration neu.",
@@ -57,14 +53,10 @@ export const messages = {
     menu: "Open sidebar",
     preview: "Preview",
     introduction:
-      "The new dashboard is being built alongside your existing dashboard.",
-    introductionStandalone: "The new SAX Power dashboard is taking shape here.",
+      "This dashboard shows the same device values and settings as your existing dashboard.",
+    introductionStandalone:
+      "Device values, charging settings and savings for your SAX Power battery.",
     existing: "Open existing dashboard",
-    preparation: "This section is being prepared",
-    description:
-      "Your displays and settings remain available in the existing SAX Power dashboard. They will gradually become available here too.",
-    descriptionStandalone:
-      "The displays and settings for this section are being prepared. They will gradually become available here.",
     loading: "Loading Home Assistant …",
     missingEntry:
       "No SAX Power device is assigned to this dashboard yet. Please reload the integration.",

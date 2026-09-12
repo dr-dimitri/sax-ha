@@ -97,12 +97,14 @@ custom_components/sax_power/
 │                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
 ├── dashboard_api.py        Berechtigungsgefiltertes Entity-Metadatenabo für Vue,
 │                          siehe REQ-VUE-ENTITY-BINDING
+├── dashboard_statistics.py Authentifizierter Recorder-Adapter für Kalenderwerte
+│                          und freie Zeiträume, siehe REQ-VUE-SAVINGS
 ├── frontend/              Eingechecktes Vue-Bundle für HACS und Snapshots
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
 tests/                Siehe Abschnitt "Tests"
-frontend/             Vue-/TypeScript-Quellen, Build und Komponententests
+frontend/             Vue-/TypeScript-Quellen, Build, Komponenten-/Browser-Tests
 .devcontainer/         VS Code DevContainer für lokale Entwicklung
 ```
 
@@ -112,13 +114,23 @@ frontend/             Vue-/TypeScript-Quellen, Build und Komponententests
 Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
 in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
-ordnet die Entity-Anbindung dem Config Entry zu. Das Grundgerüst zeigt fünf
-navigierbare Bereiche (Issue #197). Die gemeinsame Datenanbindung und
-Bedienkomponenten sind in #198 umgesetzt. `views/GeneralView.vue` zeigt seit
-#199 die allgemeine Geräteübersicht mit Skalen, Live-Werten, Hauptschalter und
-Max-SOC-Einstellung. Die weiteren fachlichen Ansichten folgen in #200–#202.
-`REQ-VUE-GENERAL` definiert Reihenfolge, optionale Daten und Skalenbereiche
-entsprechend dem bestehenden Lovelace-Tab.
+ordnet die Entity-Anbindung dem Config Entry zu. Die fünf Views unter
+`frontend/src/views/` bilden die fachlichen Inhalte des Lovelace-Dashboards ab:
+
+| View | Anforderungen | Aufgabe |
+| --- | --- | --- |
+| `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
+| `TimedChargingView.vue` | `REQ-VUE-CHARGING` | Zeitfenster, Entladestatus, Netzladeziel/Startschwelle und Monatsschalter. |
+| `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
+| `DynamicChargingView.vue` | `REQ-VUE-DYNAMIC-CHARGING` | Preisladeregler, Strategie und Status in der bisherigen Reihenfolge. |
+| `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, Tarifplan, Kalenderwerte und freie Recorder-Auswertung. |
+
+`ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
+Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
+`EntityValue`-Komponenten wie die allgemeine Ansicht. Es berechnet keine
+Zeitfenster, Ladeberechtigungen oder Preisstrategien. Alle Entity-Suffixe,
+Attribute, Sichtbarkeitsregeln und zugehörigen Tests stehen in der
+[Paritätsmatrix](docs/vue-dashboard-parity.md) (`REQ-VUE-PARITY`).
 
 `dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
 `sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
@@ -140,6 +152,41 @@ Entity-Attributen; HA bleibt für die Autorisierung der Services zuständig.
 Alle Darstellungen einer Entität teilen ausstehende Aktionen und Fehler.
 Ein erfolgreich beantworteter Serviceaufruf verändert den angezeigten Zustand
 erst, wenn HA ihn tatsächlich meldet.
+
+`dashboard_statistics.py` ergänzt den ausschließlich lesenden WebSocket-Befehl
+`sax_power/dashboard/statistics`. Die Anfrage enthält `entry_id`, optional das
+gemeinsame Paar `start_date`/`end_date` im Format `YYYY-MM-DD` sowie
+`first_weekday` (`mon` bis `sun`, HA-Benutzereinstellung). Der Adapter löst nur
+die `economics_net_savings`-Entität dieses Eintrags auf und prüft deren
+Leseberechtigung vor der Datenbankabfrage und erneut vor der Antwort. Fehlende
+Entität und fehlender Recorder werden ausdrücklich gemeldet. Recorder bleibt
+optional; SQL-Abhängigkeiten und Abfragen laufen erst mit einer vorhandenen
+Recorder-Instanz in deren Executor.
+
+Die Kalenderwerte verwenden die nativen HA-Funktionen `resolve_period` und
+`statistic_during_period(..., {"change"}, ...)`. Freie Zeiträume beginnen um
+Mitternacht des gewählten Anfangstags und enden exklusiv um Mitternacht nach
+dem Endtag in der HA-Zeitzone. Für den Graphen bleibt die native
+Energy-Endgrenze `23:59:59.999` erhalten. Stunden-/Tages-/Monatsauflösung verwendet
+die Heuristik von `getSuggestedPeriod` des gepinnten HA-Frontends, angewendet
+auf die gewählten Kalendertage in der konfigurierten HA-Zeitzone. Das native
+Frontend kann hierfür die Browser-Zeitzone heranziehen; bei davon abweichender
+Browser-Zeitzone wird keine identische Auflösungswahl behauptet. Der Zeitraumwert
+wird separat mit `statistic_during_period` gelesen und nicht aus
+Diagrammbalken summiert. Er kann bereits eine neuere Fünf-Minuten-Randperiode
+enthalten, während der native stündliche Graph diese noch nicht enthält.
+`tests/test_dashboard_statistics.py` vergleicht Wert und Balken direkt mit
+derselben echten Recorder-Datenbasis, einschließlich 23-/25-Stunden-Tagen,
+signierten Änderungen und einem `last_reset`-Bilanzneustart.
+
+`frontend/src/savings.ts` fragt diese Ergebnisse über `hass.callWS` ab.
+`recorder_5min_statistics_generated`, Reconnect und die explizite
+Aktualisieren-Schaltfläche lösen eine neue Abfrage aus; es gibt kein weiteres
+Polling der Batterie. Ein Generationszähler verwirft Antworten einer alten
+Auswahl, eines früheren Eintrags oder einer beendeten Verbindung. Datumseingaben
+bleiben Entwürfe bis zum Absenden. Geld wird erst zur Anzeige auf zwei,
+Tarifpreise auf vier Nachkommastellen formatiert; der Vorlaufbetrag beeinflusst
+keine Statistik. Fehlende Historie wird nicht durch Live-Sensorwerte ersetzt.
 
 `CONF_VUE_DASHBOARD_ENABLED` ist ein dauerhaftes Opt-in mit Standard `False`.
 Die Ersteinrichtung speichert es in `entry.data`; spätere Änderungen in
@@ -185,6 +232,8 @@ npm ci
 npm run check
 npm test
 npm run build
+npx playwright install chromium
+npm run test:browser
 ```
 
 Nach Quellenänderungen das neu gebaute Bundle mit einchecken. CI baut aus dem
@@ -198,6 +247,32 @@ Snapshot-Workflow führt weiterhin keinen Frontend-Build aus PR-Code aus.
 `tests/test_dashboard_api.py` prüft das echte WebSocket-Protokoll einschließlich
 Berechtigungen und Registry-Änderungen. Die Frontend-Tests decken Live-Zustände,
 Bedienvalidierung, ausstehende Aktionen und den Abo-Lebenszyklus ab.
+`tests/test_vue_dashboard_e2e.py` startet die Integration mit einem lokalen
+Modbus-TCP-Simulator und zwei echten HA-WebSocket-Clients: Änderungen über
+beide Dashboard-Zugänge sind gegenseitig sichtbar und verursachen weder einen
+zweiten Modbus-Client noch zusätzliche Geräteabfragen durch das Öffnen der
+Oberflächen. Die genaue Abgrenzung zu Browser- und Hardwareprüfungen steht in
+der Paritätsmatrix.
+
+Ein heruntergeladenes Stable-Quellarchiv oder Snapshot-ZIP kann aus dem
+Repository-Root mit der vorhandenen Python-Testumgebung geprüft werden:
+
+```sh
+.venv/bin/python -I scripts/verify_dashboard_package.py /tmp/sax-power-paket.zip
+```
+
+Der Helper installiert ausschließlich das Integrationsverzeichnis in einem
+neuen temporären Baum. Ein separater `python -I -m pytest`-Prozess ohne
+Repository-Konfiguration prüft die Herkunft aller importierten SAX-Module,
+Manifest, Lizenz und Übersetzungen sowie die echte lokale HA-HTTP-Route gegen
+den SHA-256-Hash der Paketdatei. Der native Reparaturmanager registriert dort
+auch einen simulierten Bundlewechsel; die neue URL muss die neuen Bytes
+liefern. Der Worker startet keinen Coordinator, verwendet keine Batterie und
+benötigt weder Node noch einen Build. Er setzt die Abhängigkeiten aus
+`requirements_test.txt` auf dem Testrechner voraus. Das JSON-Ergebnis benennt
+Paketversion, ZIP-Hash, Asset-Hash und Dateianzahl. Die Browserausführung des
+JavaScripts wird zusätzlich durch Komponenten-, Produktionsmodul- und
+Browsertests geprüft.
 
 Für eine lokale Bedienprobe ohne Batterie `npm run dev -- --host 127.0.0.1`
 starten und `/controls-preview.html` öffnen. Die ausdrücklich als Demo markierte
@@ -208,6 +283,14 @@ zusätzlicher produktiver Dashboard-Bereich.
 HA-Entitäten für die visuelle Prüfung. Produktive Views lesen ausschließlich
 den gemeinsamen Kontext; Demowerte werden nicht in das ausgelieferte Panel
 übernommen.
+
+`/charging-preview.html` enthält alle drei Ladeansichten samt DE/EN,
+Themewechsel, nicht verfügbarer Prognose und simuliertem Schreibfehler.
+`/savings-preview.html` stellt die Ersparnisansicht mit simulierten
+HA-/Recorder-Antworten bereit. Diese Entwicklungsvorschauen werden nicht ins
+Integrationspaket übernommen. Die unterstützte und lokal geprüfte HA-Basis ist
+**2026.8.2** mit **home-assistant-frontend 20260729.7**; CI installiert dieselben
+Pins aus `requirements_test.txt`, HACS verwendet denselben Mindeststand.
 
 Die Abhängigkeiten zeigen von den Home-Assistant-Entrypoints nach innen:
 `sensor.py`/`number.py`/`switch.py`/`time.py` verwenden den Coordinator, der

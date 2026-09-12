@@ -64,7 +64,7 @@ verwenden. Ein Cloud-Konto oder eine YAML-Konfiguration ist nicht erforderlich.
 
 ## Voraussetzungen
 
-- Home Assistant mit HACS oder Zugriff auf das Verzeichnis
+- Home Assistant ab **2026.8.2** mit HACS oder Zugriff auf das Verzeichnis
   `custom_components`
 - SAX Power Home oder SAX Power Home Plus im selben Netzwerk wie Home Assistant
 - aktivierte Modbus-TCP-Verbindung am Speicher
@@ -167,25 +167,46 @@ Sie ist standardmäßig ausgeschaltet und kann bei der Einrichtung oder später
 unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
 geändert werden. Die Auswahl bleibt nach einem Neustart erhalten.
 
-Unter **Allgemeine Informationen** stehen Ladezustand, Zelltemperatur,
-Leistungs-/Energiewerte und verfügbare Gerätedaten als Live-Anzeigen bereit.
-Speicher-Hauptschalter und maximaler Ladezustand können dort bedient werden.
-Die weiteren Bereiche für Ladeautomatiken und Ersparnis folgen in den
-[weiteren Arbeitspaketen](https://github.com/dr-dimitri/sax-ha/issues/196).
-Für diese Funktionen steht weiterhin das bestehende Dashboard **SAX Power**
-zur Verfügung. Beide Oberflächen können gleichzeitig geöffnet werden;
-Änderungen verwenden dieselben Home-Assistant-Entitäten.
+Alle fünf Bereiche des bestehenden Dashboards sind enthalten:
+
+| Bereich | Inhalt |
+| --- | --- |
+| Allgemeine Informationen | Ladezustand, Zelltemperatur, Leistung, Energie, Gerätedaten, Speicherschalter und globaler Max-SOC. |
+| Ladeautomatik | Hauptschalter, Zeitfenster, Entladestatus, Netzladeziel und Startschwelle sowie zwölf Monatsschalter. |
+| Netzdienliches Laden | Hauptschalter, Ladepause, aktuelle PV-Prognose, Prognoseschwelle, Status und zwölf Monatsschalter. |
+| Dynamisches Laden | Strategie, Preisgrenzen, Stundenanzahl, globaler Max-SOC, Status, PV-Prognose, nächster Start und aktueller Preis. |
+| Ersparnis | Amortisation, Netto-Ersparnis für Kalenderzeiträume, Tarifplan und freie Datumsauswahl mit Balkendiagramm. |
+
+Beide Oberflächen können gleichzeitig geöffnet werden. Änderungen erscheinen
+über dieselben Home-Assistant-Entitäten auch in der jeweils anderen Ansicht.
+Zahlen und Uhrzeiten werden erst mit **Übernehmen** gesendet; die Anzeige des
+bestätigten Werts folgt der Rückmeldung von Home Assistant. Wertebereiche,
+Schrittweiten und Strategieoptionen entsprechen den vorhandenen Entitäten.
+Fehlende optionale Entitäten werden ausgelassen; unbekannte oder nicht
+verfügbare Werte bleiben als solche erkennbar.
+
+Die Ersparnis-Auswertung verwendet die vorhandene Recorder-Statistik der
+Netto-Ersparnis. Anfangs- und Enddatum gelten als vollständige Tage in der
+HA-Zeitzone; Wert und Diagramm verwenden dieselbe Auswahl. Ohne aufgezeichnete
+Daten entsteht keine Ersatzberechnung aus dem aktuellen Sensorwert. Neue
+Recorder-Statistiken aktualisieren die Auswertung; **Aktualisieren** lädt sie
+auch auf Wunsch neu. Geldbeträge erscheinen mit zwei, Tarifpreise mit vier
+Nachkommastellen. Die [Paritäts- und Testübersicht](docs/vue-dashboard-parity.md)
+beschreibt Datenquellen, Prüfumfang und bekannte Grenzen.
 
 Zum Entfernen des Vue-Eintrags die Option wieder ausschalten. Das wirkt direkt,
 ohne die Batterieintegration neu zu starten. Das bisherige Lovelace-Dashboard,
 eigene Kartenanpassungen und die Aktionen `sax_power.create_dashboard` und
 `sax_power.reinstall_dashboard` bleiben davon unabhängig. Die Vorschau wird
 mit der Integration lokal ausgeliefert und benötigt keine zusätzliche
-Installation auf dem Home-Assistant-Gerät.
+Installation auf dem Home-Assistant-Gerät: weder Node, einen Entwicklungsserver
+noch ein CDN. Die dokumentierte Testbasis ist Home Assistant **2026.8.2**.
 
 Bei einer neuen Vue-Dashboard-Version oder einem Registrierungsfehler erscheint
 ein eigener Hinweis unter **Einstellungen → System → Reparaturen**. Dort lässt
 sich **SAX Power (Vue)** mit den aktuell installierten Dateien neu registrieren.
+Die Reparatur installiert kein Integrationsupdate; dieses wird zuvor wie
+gewohnt über HACS beziehungsweise das Integrationspaket eingespielt.
 Anschließend die Home-Assistant-Seite im Browser vollständig neu laden, damit
 auch eine schon geöffnete Ansicht den neuen Vue-Code verwendet. Der Dialog
 erläutert diesen Schritt; bei einem Fehler bleibt die Reparatur offen.

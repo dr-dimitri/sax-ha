@@ -12,6 +12,10 @@ import {
 import { messages, tabPath, tabs } from "./tabs";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "./ha";
 import GeneralView from "./views/GeneralView.vue";
+import TimedChargingView from "./views/TimedChargingView.vue";
+import GridServingView from "./views/GridServingView.vue";
+import DynamicChargingView from "./views/DynamicChargingView.vue";
+import SavingsView from "./views/SavingsView.vue";
 import type { HomeAssistant, PanelInfo, PanelRoute } from "./types";
 
 const props = defineProps<{
@@ -161,20 +165,14 @@ function openSidebar(): void {
           {{ text.missingEntry }}
         </p>
         <GeneralView v-else-if="activePath === 'allgemein'" />
-        <div v-else-if="activeTab" class="placeholder">
-          <svg class="placeholder-icon" viewBox="0 0 48 48" aria-hidden="true">
-            <rect x="8" y="9" width="32" height="30" rx="4" />
-            <path d="M8 18h32M19 18v21M24 26h10M24 32h7" />
-          </svg>
-          <h2>{{ text.preparation }}</h2>
-          <p>
-            {{
-              hasExistingDashboard
-                ? text.description
-                : text.descriptionStandalone
-            }}
-          </p>
-        </div>
+        <TimedChargingView v-else-if="activePath === 'ladeautomatik'" />
+        <GridServingView v-else-if="activePath === 'netzdienliches-laden'" />
+        <DynamicChargingView v-else-if="activePath === 'dynamisches-laden'" />
+        <SavingsView
+          v-else-if="activePath === 'ersparnis'"
+          :hass="hass"
+          :entry-id="panel?.config?.entry_id"
+        />
         <div v-else class="status">
           <p>{{ text.notFoundDescription }}</p>
           <a
@@ -230,7 +228,7 @@ function openSidebar(): void {
   font-weight: 400;
 }
 
-svg {
+.header svg {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;
@@ -353,33 +351,11 @@ h1:focus {
   outline: none;
 }
 
-.placeholder {
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  padding: 64px 16px;
-  text-align: center;
-}
-
-.placeholder-icon {
-  width: 52px;
-  height: 52px;
-  margin-bottom: 16px;
-  color: var(--secondary-text-color, #666);
-}
-
 h2 {
   margin: 0 0 12px;
   font-size: 18px;
   font-weight: 500;
   line-height: 1.5;
-}
-
-.placeholder p {
-  max-width: 480px;
-  margin: 0;
-  color: var(--secondary-text-color, #666);
-  line-height: 1.7;
 }
 
 .status {
@@ -430,10 +406,6 @@ h2 {
 
   h1 {
     font-size: 22px;
-  }
-
-  .placeholder {
-    padding: 40px 0;
   }
 }
 </style>

@@ -35,11 +35,11 @@ Entitäten und Lese-/Bedienberechtigungen werden dadurch berücksichtigt.
 
 Breite Ansichten verwenden ein kompaktes Layout anhand der tatsächlich
 verfügbaren Panelbreite: zwei Kartenspalten ab 860 px Inhaltsbreite.
-Monatsraster nutzen mehrere Spalten und knappe Innenabstände auch auf dem
-Smartphone, mit mindestens 14 px großen Namen und 44 × 44 px großen
+Die Monatsauswahl startet als kompakte Zusammenfassung. Aufgeklappt stehen
+vier Quartalsgruppen auf dem Smartphone in einer Spalte und bei ausreichendem
+Platz in zwei Spalten, mit mindestens 14 px großen Namen und 44 × 44 px großen
 Bedienflächen. Die sichtbare native Checkbox misst nur 22 × 22 px; ihr
-zugeordnetes Label macht auch den umgebenden Bereich anklickbar. Bei sehr
-geringer Breite bleibt eine Spalte. Die Reihenfolge
+zugeordnetes Label macht auch den umgebenden Bereich anklickbar. Die Reihenfolge
 Januar bis Dezember bleibt im DOM und bei Tastaturbedienung unverändert. Die Geräteübersicht ordnet Skalen
 und Leistung links neben den Gerätedaten an. Amortisation gruppiert Fortschritt
 und Kalenderwerte neben dem Tarif; die freie Auswertung nutzt die volle Breite.
@@ -57,7 +57,7 @@ Gerätezustände folgen weiterhin der quittierten Steuersequenz.
 | --- | --- | --- |
 | Zugehörigkeit und Berechtigung | `sax_power/dashboard/subscribe` liefert nur aktive, lesbare SAX-Entitäten des angeforderten Eintrags mit `entity_id`, `device_id`, `domain`, `key`, `name`, `states` und `can_control`. | [Metadaten-API][metadata-tests] |
 | Live-Zustände | `hass.states` ist die gemeinsame Datenquelle. HA formatiert Werte; Sprach-/Zeitzoneneinstellungen werden beim Fallback beachtet. | [HA-Kontext][ha-tests], [Allgemein][general-tests] |
-| Fehlende Werte | Fehlende Metadaten lassen Zeilen und leere Karten entfallen. Registrierte `unknown`-/`unavailable`-Zustände bleiben erkennbar; es entsteht keine Ersatz-Null. | [Controls][control-tests], alle View-Tests |
+| Fehlende Werte | Fehlende Metadaten lassen normale Entity-Zeilen und leere Karten entfallen. In der Monatsauswahl bleiben fehlende Monate ausdrücklich erkennbar. Registrierte `unknown`-/`unavailable`-Zustände bleiben erkennbar; es entsteht keine Ersatz-Null. | [Controls][control-tests], alle View-Tests |
 | Schalter | `switch.turn_on`/`turn_off` senden den ausdrücklich gewählten Zustand an die aufgelöste ID. | [HA-Kontext][ha-tests], [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Zahlen | `number.set_value`; endlicher Wert innerhalb der aktuellen Attribute `min`, `max`, `step`. Eingabe bleibt bis zur Übernahme lokal. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Uhrzeiten | Eingabe `HH:MM` mit `step=60`, explizite Übernahme als `HH:MM:00`, ohne eigene Zeitplanberechnung. Beide produktiven Zeitfenster übernehmen ihr vollständiges Paar über `sax_power.set_timed_charge_window` beziehungsweise `sax_power.set_grid_serving_window`; die allgemeine Einzelzeit-Komponente verwendet weiterhin `time.set_value`. | [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
@@ -99,7 +99,7 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Zeitfenster | `time.timed_charge_start`, `time.timed_charge_end` | Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, Minutenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
 | Direkt danach: Entladestatus | `sensor.timed_charge_discharge_status` | `normal` → Normalbetrieb, `discharge_blocked` → Entladung wg. Netzladen gestoppt, `grid_charging` → Netzladen. | [Ladeansichten][charging-tests]: alle drei Live-Statuswechsel |
 | Einstellungen | `number.timed_charge_max_soc`, danach `number.timed_charge_min_soc` | Netzladeziel und Startschwelle. Die Obergrenze des Ziels folgt dessen HA-`max`-Attribut; kein zusätzlicher globaler Max-SOC in diesem Tab. | [Ladeansichten][charging-tests]: geänderte Grenze, ungültiger und gültiger Zielwert |
-| Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Januar bis Dezember mit Namen aus Metadaten. Keine zusätzliche Zeile „Bestätigter Wert“; Kontrollkästchen zeigen den bestätigten HA-Zustand, Fehler und Nichtverfügbarkeit bleiben sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, HA-bestätigte Monatsänderung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
+| Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Kompakte Zusammenfassung mit einzeln ausgewählten Monaten und getrennten Spannen; „Ändern“ öffnet vier Quartalsgruppen. Nur HA-bestätigte Zustände; Fehler und fehlende Werte bleiben auch eingeklappt sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, getrennte Auswahlbereiche, HA-Bestätigung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
 
 Vue entscheidet weder über Ladeberechtigung noch über die laufende
 Sollwertwiederholung. Beides verbleibt bei `REQ-TIMED-SOC-CHARGE` im Backend.
@@ -139,10 +139,32 @@ bleibt die fachliche Implementierung. Diese Ansicht enthält keine Monatsschalte
 | Ladepause, Prognose | `sensor.grid_serving_forecast` | Dynamischer `friendly_name` mit Tagesbezug und Einheit kWh; keine Berechnung in Vue. | [Ladeansichten][charging-tests]: Namenswechsel und nicht verfügbare Prognose |
 | Ladepause, Schwelle | `number.grid_serving_forecast_threshold` | „Mindest PV-Prognose“ mit HA-`min`/`max`/`step` und kWh. | [Ladeansichten][charging-tests], [Controls][control-tests] |
 | Ladepause, Status | `sensor.grid_serving_pause_status` | Bestehender HA-Statustext. | [Ladeansichten][charging-tests]: Live-Status |
-| Aktive Monate | `switch.grid_serving_month_1` bis `switch.grid_serving_month_12` | Dieselben zwölf übersetzten Kalendermonate in numerischer Reihenfolge. Keine zusätzliche Zeile „Bestätigter Wert“; bestätigter Checkboxzustand, Fehler und Nichtverfügbarkeit bleiben erhalten. | [Ladeansichten][charging-tests]: Namen, Bedienung, Fehler/Verfügbarkeit, Kalenderwechsel |
+| Aktive Monate | `switch.grid_serving_month_1` bis `switch.grid_serving_month_12` | Dieselbe kompakte Zusammenfassung und aufklappbare Quartalsauswahl mit zwölf Monaten in numerischer Reihenfolge. Nur HA-bestätigte Zustände; Fehler und fehlende Werte bleiben sichtbar. | [Ladeansichten][charging-tests]: Namen, getrennte Auswahlbereiche, Bedienung, Fehler/Verfügbarkeit, Kalenderwechsel |
 
 Es gibt weder eine zusätzliche Einstellungen-Karte noch einen globalen
 Max-SOC-Regler. Die Pausenentscheidung bleibt bei `REQ-GRID-SERVING-CHARGE`.
+
+### Gemeinsame Monatsauswahl
+
+Die gemeinsame
+[`MonthSelection.vue`](../frontend/src/components/MonthSelection.vue)
+startet eingeklappt. Die Zusammenfassung zeigt bestätigte
+aktive Monate samt Anzahl und fasst ausschließlich zusammenhängende Bereiche
+zusammen, etwa „Januar, März–Mai, Oktober“. Auch Dezember und Januar bleiben
+getrennt. Alle zwölf aktiven Monate ergeben „Ganzjährig“ (EN: „All year“).
+„Keine Monate ausgewählt · Ganzjährig inaktiv“ setzt zwölf bekannte,
+bestätigte `off`-Zustände voraus. Fehlende
+Metadaten oder Zustände sowie `unknown` und `unavailable` werden ausdrücklich
+markiert und niemals als abgewählte Monate gezählt.
+
+„Ändern“ öffnet vier Quartalsgruppen mit jeweils drei frei schaltbaren Monaten.
+„Schließen“ klappt die Auswahl wieder ein. Beides sendet keinen Service;
+jeder Monat verwendet unmittelbar den vorhandenen einzelnen HA-Schalterservice.
+Es gibt keinen zusätzlichen Speicherschritt. Zusammenfassung und Checkboxen
+folgen ausschließlich bestätigten HA-Zuständen. Ausstehende Aktionen,
+Servicefehler, fehlende Verbindung und Bedienbeschränkungen bleiben auch
+eingeklappt erkennbar; eine zusätzliche Zeile „Bestätigter Wert“ entfällt.
+Zusammenfassung, Quartale und Bedienung sind deutsch und englisch übersetzt.
 
 ### Gemeinsame Zeitfenster-Bedienung
 
@@ -349,7 +371,8 @@ des veröffentlichten Commits stehen in den Checks von PR #204; die folgenden
 ### Frühere Frontend-Abnahme vom 12.09.2026
 
 Dieser Nachweis betrifft den Stand vor der gemeinsamen Zeitfenster-Leiste
-und deren atomarer Übernahme. Er ist kein Prüfnachweis für diese Erweiterung.
+und der aufklappbaren Monatsauswahl mit Quartalsgruppen. Er ist kein
+Prüfnachweis für diese Erweiterungen.
 
 Der vollständige
 [CI-Lauf 34688788120](https://github.com/dr-dimitri/sax-ha/actions/runs/34688788120)
@@ -368,14 +391,15 @@ Für diesen Stand bestanden **202 Komponententests**, Typprüfung, Prettier und
 der reproduzierbare Build. Die lokale Python-Gesamtsuite bestand mit
 **1.748 Tests und zwei erwarteten Hardware-Skips**; Ruff und Black waren grün.
 
-Die lokale Browserprüfung über CUA maß für beide Monatsraster:
+Die damalige lokale Browserprüfung über CUA maß für beide Monatsraster:
 
 | Verfügbarer Platz | Monatsspalten | Rasterhöhe |
 | --- | --- | --- |
 | 1110 px Panelbreite | 6 | 116 px |
 | 390 px Browserbreite | 2 | 364 px |
 
-Die Messwerte gelten für die geprüften Beispieldaten. Fehler und ausstehende
+Die Messwerte gelten für die damaligen Monatsraster mit den geprüften
+Beispieldaten, nicht für die aktuelle Quartalsauswahl. Fehler und ausstehende
 Aktionen dürfen die Kacheln vergrößern. Alle zwölf Monatsnamen bleiben lesbar
 und die Bedienflächen mindestens 44 × 44 px groß, während die sichtbaren
 Checkboxen nur 22 × 22 px messen. Die lokale Maus- und Tastaturprüfung zeigte
@@ -397,8 +421,8 @@ Danach läuft die reguläre Geräteauswertung weiter.
 sichert Folgeänderungen, abgelehnte Überschneidungen, Speichervormerkung,
 Gerätefehler sowie Bootstrap und Shutdown ab. Das Frontend zeigt weiterhin
 den bestätigten HA-Zustand. Diese Korrektur veränderte die Darstellung nicht;
-die spätere Zeitfenster-Umstellung ist in den Screenshots unten noch nicht
-enthalten. Der zugehörige CI- und Paketnachweis steht in
+die spätere Zeitfenster-Umstellung und aufklappbare Quartalsauswahl sind in
+den Screenshots unten noch nicht enthalten. Der zugehörige CI- und Paketnachweis steht in
 [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204).
 
 ### Historische Prüfnachweise vom 12.09.2026
@@ -426,7 +450,7 @@ bereitgehaltene Snapshot-Veröffentlichung. Weitere Paketnachweise sind mit
 Commit und Prüfsummen in [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
 zugeordnet.
 
-### Screenshots vor der Zeitfenster-Umstellung
+### Screenshots vor der Zeitfenster- und Monatsauswahl-Umstellung
 
 Die 14 Bilder stammen aus dem Browserbericht von
 [CI-Lauf 34688788120](https://github.com/dr-dimitri/sax-ha/actions/runs/34688788120)
@@ -434,8 +458,8 @@ vom 12.09.2026. Sie zeigen das einzige Dashboard **SAX Power** ohne
 Vue-/Vorschaukennzeichnung oder Einstieg zum alten Dashboard, die verdichteten
 Monatsraster mit 22-px-Kästchen und die Schalterbestätigung. Die Umgebung mit
 simulierten HA-Daten ist ausdrücklich als Testansicht gekennzeichnet.
-Die neuen gemeinsamen Zeitfenster mit verschiebbaren Marken sind darin
-noch nicht enthalten.
+Die neuen gemeinsamen Zeitfenster mit verschiebbaren Marken und die
+aufklappbare Monatsauswahl mit Quartalsgruppen sind darin noch nicht enthalten.
 
 | Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
 | --- | --- | --- |

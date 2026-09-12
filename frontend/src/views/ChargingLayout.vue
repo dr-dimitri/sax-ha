@@ -2,6 +2,7 @@
 import { computed, inject, useId } from "vue";
 import EntityControl from "../components/EntityControl.vue";
 import EntityValue from "../components/EntityValue.vue";
+import MonthSelection from "../components/MonthSelection.vue";
 import TimeWindowControl from "../components/TimeWindowControl.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import type { EntityDomain } from "../types";
@@ -23,9 +24,15 @@ const language = computed(() => dashboard?.language.value ?? "en");
 const cards = computed(() =>
   props.cards
     .map((card) => {
-      const entities = card.entities.filter(([domain, key]) =>
+      const availableEntities = card.entities.filter(([domain, key]) =>
         dashboard?.entity(domain, key),
       );
+      const entities =
+        card.layout === "months" &&
+        (availableEntities.length ||
+          dashboard?.entity("switch", props.switchKey))
+          ? card.entities
+          : availableEntities;
       return {
         ...card,
         showTimeWindow: Boolean(
@@ -117,7 +124,12 @@ const text = computed(() =>
               'charging-view__rows--months': card.layout === 'months',
             }"
           >
+            <MonthSelection
+              v-if="card.layout === 'months'"
+              :entity-keys="card.entities.map(([, key]) => key)"
+            />
             <template
+              v-else
               v-for="[domain, key] in card.entities"
               :key="`${domain}.${key}`"
             >
@@ -130,9 +142,6 @@ const text = computed(() =>
                 "
                 :domain="domain"
                 :entity-key="key"
-                :hide-confirmed-value="
-                  card.layout === 'months' && domain === 'switch'
-                "
               />
               <EntityValue v-else :domain="domain" :entity-key="key" />
             </template>
@@ -256,64 +265,6 @@ const text = computed(() =>
   .charging-view__rows--columns .entity-value {
     min-height: 44px;
     padding-block: 8px;
-  }
-}
-
-.charging-view__rows--months {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
-  gap: 8px;
-}
-.charging-view__rows--months .entity-control,
-.charging-view__rows--months .entity-control:last-child {
-  min-width: 0;
-  gap: 4px;
-  padding: 4px 6px;
-  border: 1px solid var(--divider-color, #e0e0e0);
-  border-radius: 8px;
-}
-.charging-view__rows--months .entity-control__description {
-  flex-basis: 0;
-}
-.charging-view__rows--months .entity-control__name {
-  font-size: 14px;
-  line-height: 1.3;
-}
-.charging-view__rows--months .entity-control__input {
-  flex-shrink: 0;
-}
-.charging-view__rows--months .entity-control__switch-target {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  min-height: 44px;
-  cursor: pointer;
-}
-.charging-view__rows--months .entity-control__switch-target:has(:disabled) {
-  cursor: not-allowed;
-}
-.charging-view__rows--months .entity-control input[type="checkbox"] {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  min-height: 22px;
-  margin: 0;
-  padding: 0;
-}
-.charging-view__rows--months .entity-control__feedback {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 14px;
-}
-
-@container sax-content (min-width: 600px) {
-  .charging-view__rows--months {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-@container sax-content (min-width: 960px) {
-  .charging-view__rows--months {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 </style>

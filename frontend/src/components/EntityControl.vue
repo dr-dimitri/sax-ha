@@ -16,6 +16,7 @@ const props = defineProps<{
   entityKey: string;
   confirmSwitch?: boolean;
   hideConfirmedValue?: boolean;
+  monthTile?: boolean;
   timeUnit?: boolean;
 }>();
 
@@ -100,11 +101,16 @@ const text = computed(() =>
 );
 
 const blocked = computed(
-  () => !entity.value?.canControl || entity.value.pending,
+  () =>
+    !entity.value?.canControl ||
+    entity.value.pending ||
+    (props.monthTile && state.value !== "on" && state.value !== "off"),
 );
 const status = computed(() => {
   if (!dashboard?.connected.value) return text.value.disconnected;
   if (!entity.value?.available) return text.value.unavailable;
+  if (props.monthTile && state.value !== "on" && state.value !== "off")
+    return text.value.unavailable;
   if (!entity.value.metadata.can_control) return text.value.readOnly;
   return entity.value.pending ? text.value.pending : "";
 });
@@ -235,68 +241,98 @@ async function changeSelect(event: Event): Promise<void> {
   <form
     v-if="entity"
     class="entity-control"
+    :class="{
+      'entity-control--month': monthTile,
+      'entity-control--selected':
+        monthTile && entity.available && state === 'on',
+    }"
     :aria-busy="entity.pending"
     @submit.prevent="submitDraft"
   >
-    <div class="entity-control__description">
-      <label :for="inputId" class="entity-control__name">{{
-        entity.name
-      }}</label>
-      <p v-if="!hideConfirmedValue" :id="valueId" class="entity-control__value">
-        <span>{{ text.confirmed }}:</span> {{ confirmedDisplayValue }}
-      </p>
-    </div>
-
-    <div class="entity-control__input">
-      <label
-        v-if="domain === 'switch'"
-        :for="inputId"
-        class="entity-control__switch-target"
-        :class="{ 'entity-control__switch-target--compact': compactSwitch }"
-      >
-        <input
-          :id="inputId"
-          type="checkbox"
-          role="switch"
-          :checked="state === 'on'"
-          :disabled="blocked"
-          :aria-describedby="descriptionIds"
-          @change="changeSwitch"
-        />
-      </label>
-      <select
-        v-else-if="domain === 'select'"
+    <label
+      v-if="monthTile && domain === 'switch'"
+      :for="inputId"
+      class="entity-control__switch-target entity-control__month-target"
+    >
+      <span class="entity-control__name">{{ entity.name }}</span>
+      <input
         :id="inputId"
-        :value="entity.available ? state : ''"
+        type="checkbox"
+        role="switch"
+        :checked="entity.available && state === 'on'"
+        :indeterminate="
+          !entity.available || (state !== 'on' && state !== 'off')
+        "
         :disabled="blocked"
-        :aria-describedby="descriptionIds"
-        @change="changeSelect"
-      >
-        <option v-if="!entity.available" value="" disabled>
-          {{ text.unavailable }}
-        </option>
-        <option v-for="option in options" :key="option" :value="option">
-          {{ optionLabel(option) }}
-        </option>
-      </select>
-      <template v-else>
-        <input
+        :aria-describedby="statusId"
+        @change="changeSwitch"
+      />
+    </label>
+    <template v-else>
+      <div class="entity-control__description">
+        <label :for="inputId" class="entity-control__name">{{
+          entity.name
+        }}</label>
+        <p
+          v-if="!hideConfirmedValue"
+          :id="valueId"
+          class="entity-control__value"
+        >
+          <span>{{ text.confirmed }}:</span> {{ confirmedDisplayValue }}
+        </p>
+      </div>
+
+      <div class="entity-control__input">
+        <label
+          v-if="domain === 'switch'"
+          :for="inputId"
+          class="entity-control__switch-target"
+          :class="{ 'entity-control__switch-target--compact': compactSwitch }"
+        >
+          <input
+            :id="inputId"
+            type="checkbox"
+            role="switch"
+            :checked="state === 'on'"
+            :disabled="blocked"
+            :aria-describedby="descriptionIds"
+            @change="changeSwitch"
+          />
+        </label>
+        <select
+          v-else-if="domain === 'select'"
           :id="inputId"
-          :value="draft"
-          :type="domain === 'number' ? 'number' : 'time'"
-          :min="domain === 'number' ? numberAttribute('min') : undefined"
-          :max="domain === 'number' ? numberAttribute('max') : undefined"
-          :step="domain === 'number' ? numberAttribute('step') : 60"
+          :value="entity.available ? state : ''"
           :disabled="blocked"
           :aria-describedby="descriptionIds"
-          required
-          @input="changeDraft"
-        />
-        <button type="submit" :disabled="blocked || draft === ''">
-          {{ text.apply }}
-        </button>
-      </template>
-    </div>
+          @change="changeSelect"
+        >
+          <option v-if="!entity.available" value="" disabled>
+            {{ text.unavailable }}
+          </option>
+          <option v-for="option in options" :key="option" :value="option">
+            {{ optionLabel(option) }}
+          </option>
+        </select>
+        <template v-else>
+          <input
+            :id="inputId"
+            :value="draft"
+            :type="domain === 'number' ? 'number' : 'time'"
+            :min="domain === 'number' ? numberAttribute('min') : undefined"
+            :max="domain === 'number' ? numberAttribute('max') : undefined"
+            :step="domain === 'number' ? numberAttribute('step') : 60"
+            :disabled="blocked"
+            :aria-describedby="descriptionIds"
+            required
+            @input="changeDraft"
+          />
+          <button type="submit" :disabled="blocked || draft === ''">
+            {{ text.apply }}
+          </button>
+        </template>
+      </div>
+    </template>
 
     <div :id="statusId" class="entity-control__feedback">
       <p v-if="entity.error" class="entity-control__error" role="alert">

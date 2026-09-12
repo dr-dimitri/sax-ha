@@ -1011,7 +1011,8 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    oder fallender SOC allein sperrt die Entladung weiterhin nicht; unterhalb
    des Zielwerts wird der Freigabe-Latch wie bisher zurückgesetzt.
 2. **Sonst, falls zeitgesteuertes Laden aktiviert + im Zeitfenster + im
-   aktiven Monat + unter Netzladeziel + zuvor unter Min. SOC + kein
+   aktiven Monat + unter Netzladeziel + im selben unveränderten aktiven
+   Fenster zuvor unter Min. SOC + kein
    PV-Überschuss** (`timed_should_charge`):
    Leistungsvorgabe = `MIN_SETPOINT_POWER` (sättigt in
    `_watts_to_ic_setpoint_raw` auf -100 %, maximal mögliche Ladeleistung -
@@ -1134,9 +1135,13 @@ direkt nach der Ersteinrichtung) explizit auf `MAX_SOC` (100) statt
 "unbekannt"/0 zu bleiben.
 
 **"Netzladen Max. SOC"** (`SaxPowerTimedChargeMaxSocNumber`) begrenzt nur
-die zeitgesteuerte Netzladung. Sie beginnt unterhalb von "Netzladung
-Min. SOC" und lädt dank `_timed_charge_armed` bis zum eigenen Ziel weiter.
-Am Ziel setzt die Auswertung den Latch zurück und beendet die Netzladung;
+die zeitgesteuerte Netzladung. Sie beginnt bei eingeschalteter Netzladung
+im aktiven Fenster eines freigegebenen Monats unterhalb von "Netzladung
+Min. SOC" und lädt dank `_timed_charge_armed` innerhalb desselben
+unveränderten Fensters bis zum eigenen Ziel weiter. Ein SOC unter der
+Startschwelle außerhalb eines freigegebenen Fensters erzeugt keine Freigabe
+für das nächste Fenster. Am Ziel setzt die Auswertung den Latch zurück und
+beendet die Netzladung;
 nach gemessener Netzladung bleibt die Entladung bis zum Fensterende gesperrt,
 während PV weiterhin bis zum globalen Ziel laden kann. Ohne bestätigte
 Netzladung wird unterhalb des globalen Maximums die SmartMeter-Nullregelung
@@ -1151,10 +1156,21 @@ Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
 
 `infrastructure/timed_charge_store.py` speichert die offene Hysterese
 unabhängig von Konfiguration und Entladeschutznachweis. Start-/Enduhrzeit
-und konkretes UTC-Fensterende binden sie an dieselbe unveränderte lokale
-Fensterinstanz. Der Bootstrap lädt den Zustand vor dem ersten Refresh;
-erst die erste Steuerentscheidung mit vollständiger Konfiguration und
-gültigem SOC prüft Fensteridentität, aktive Monate und Freigabe. So setzt
+und konkretes UTC-Fensterende binden sowohl RAM-Zustand als auch Persistenz
+an dieselbe unveränderte lokale Fensterinstanz. Fensterende, eine andere
+Fensterinstanz, geänderte Start-/Enduhrzeiten, Deaktivierung oder Entzug der
+Freigabe des aktuellen Monats verwerfen beide Zustände, auch bei fehlendem
+SOC. Die Prüfung erkennt einen Fensterwechsel auch ohne Poll zwischen den
+beiden Fenstern. Bei Min. SOC 20 % und Ziel 80 % startet daher eine in
+Nacht 1 von 18 % auf 60 % geladene Batterie in Nacht 2 bei 60 % nicht
+erneut und speichert keine Freigabe für Nacht 2. Erst ein aktuell unter
+20 % liegender SOC im aktiven freigegebenen Fenster erlaubt einen neuen
+Start. PV-Pausen und temporär ungültige SOC-Messungen erhalten eine offene
+Freigabe nur innerhalb desselben weiterhin freigegebenen Fensters.
+Der Bootstrap lädt den Zustand vor dem ersten Refresh. Sobald die
+Konfiguration vollständig ist, prüft die Steuerung Fensteridentität,
+aktive Monate und Freigabe. Die Wiederaufnahme benötigt zusätzlich einen
+gültigen SOC. So setzt
 eine unter Min. SOC gestartete Ladung auch nach einem Neustart oberhalb
 dieser Schwelle bis zum Ziel fort. Zustandsänderungen werden sofort
 gespeichert; Shutdown löscht die offene Hysterese nicht. Fehlende oder

@@ -567,7 +567,9 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             # anschließende periodische Schreib-Task läuft unabhängig davon.
             with patch(
                 "custom_components.sax_power.coordinator.dt_util.now",
-                return_value=datetime(2024, 1, 1, 2, 0),
+                return_value=datetime(
+                    2024, 1, 1, 2, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE
+                ),
             ):
                 await hass.services.async_call(
                     "switch", "turn_on", {"entity_id": enabled_id}, blocking=True
@@ -601,7 +603,9 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             # Sollwertmodus sofort, ohne die globale PV-Sperre auszulösen.
             with patch(
                 "custom_components.sax_power.coordinator.dt_util.now",
-                return_value=datetime(2024, 1, 1, 2, 0),
+                return_value=datetime(
+                    2024, 1, 1, 2, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE
+                ),
             ):
                 await hass.services.async_call(
                     "number",
@@ -701,7 +705,9 @@ async def test_live_grid_serving_switches_sunspec_mode_both_directions(
 
             with patch(
                 "custom_components.sax_power.coordinator.dt_util.now",
-                return_value=datetime(2024, 1, 1, 12, 0),
+                return_value=datetime(
+                    2024, 1, 1, 12, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE
+                ),
             ):
                 await hass.services.async_call(
                     "time",
@@ -812,7 +818,7 @@ async def test_live_grid_charge_seeded_from_config_entry_on_first_setup(
         # auslöst - hier geht es nur um die vorbelegten Entity-Zustände.
         with patch(
             "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 1, 12, 0),
+            return_value=datetime(2024, 1, 1, 12, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE),
         ):
             assert await hass.config_entries.async_setup(entry.entry_id)
             await hass.async_block_till_done()
@@ -1115,7 +1121,9 @@ async def test_live_restart_in_active_window_never_falls_back_to_mode_zero(
             patch.object(AsyncModbusTcpClient, "write_register", _recording_write),
             patch(
                 "custom_components.sax_power.coordinator.dt_util.now",
-                return_value=datetime(2024, 1, 1, 2, 0),
+                return_value=datetime(
+                    2024, 1, 1, 2, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE
+                ),
             ),
         ):
             assert await hass.config_entries.async_setup(entry.entry_id)

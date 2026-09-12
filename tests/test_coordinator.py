@@ -947,7 +947,9 @@ def _patched_now(hour: int, minute: int = 0, *, month: int = 1):
     """
     return patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, month, 1, hour, minute),
+        return_value=datetime(
+            2024, month, 1, hour, minute, tzinfo=dt_util.DEFAULT_TIME_ZONE
+        ),
     )
 
 

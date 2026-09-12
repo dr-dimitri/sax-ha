@@ -603,8 +603,8 @@ requirement_timed_soc_charge:
        konfigurierten Zeitfensters (time.py, "Start"/"Ende", HH:MM, darf
        über Mitternacht laufen), im aktiven Monat, "Netzladung Min. SOC"
        (number.py, siehe unten) gesetzt UND unterschritten (bzw. bereits
-       zuvor unterschritten und noch nicht bis "Netzladen Max. SOC"
-       durchgeladen -
+       im selben unveränderten aktiven Fenster zuvor unterschritten und
+       noch nicht bis "Netzladen Max. SOC" durchgeladen -
        siehe Hysterese unten) UND kein über die einheitliche
        Zyklen-Hysterese (siehe unten "PV-Überschuss-Prüfung") bestätigter
        PV-Überschuss über SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py,
@@ -647,13 +647,25 @@ requirement_timed_soc_charge:
        SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
        unterhalb dessen die Netzladung starten darf.
        SaxPowerCoordinator._timed_charge_armed hält als Hysterese fest, ob
-       der Schwellwert bereits unterschritten wurde: sobald current_soc <
-       "Netzladung Min. SOC", wird _timed_charge_armed auf True gesetzt und
-       bleibt es (auch wenn der SOC danach wieder über "Netzladung Min.
-       SOC" steigt), bis der SOC "Netzladen Max. SOC" erreicht/überschreitet
-       (dann zurück auf False) - Netzladung lädt also einmal gestartet bis
-       zu ihrem eigenen Ziel durch, statt bei jedem erneuten Überschreiten
-       von "Netzladung Min. SOC" sofort wieder abzubrechen.
+       der Schwellwert im aktuellen aktiven Fenster unterschritten wurde:
+       nur bei eingeschalteter Netzladung, freigegebenem aktuellem Monat,
+       aktiver Fensterinstanz und current_soc < "Netzladung Min. SOC" darf
+       eine neue Freigabe entstehen. Eine Unterschreitung außerhalb des
+       Fensters oder bei fehlender Freigabe wird nicht für später vorgemerkt.
+       Im selben unveränderten Fenster bleibt die Freigabe auch oberhalb
+       von "Netzladung Min. SOC" erhalten, bis der SOC "Netzladen Max. SOC"
+       erreicht/überschreitet. Die einmal gestartete Netzladung kann so
+       innerhalb dieses Fensters bis zum eigenen Ziel weiterladen.
+       Fensterende, Wechsel zur nächsten Fensterinstanz, geänderte
+       Start-/Enduhrzeiten, Deaktivierung oder Aufheben der Freigabe des
+       aktuellen Monats verwerfen die Freigabe sowohl im RAM als auch im
+       gespeicherten Zustand. Die Fensteridentität wird bei jeder Auswertung
+       geprüft; dies gilt auch dann, wenn zwischen zwei Fenstern kein Poll
+       stattgefunden hat. Jedes neue Fenster benötigt erneut einen aktuell
+       unter Min. SOC liegenden SOC. Bei Min. SOC 20 % und Netzladeziel 80 %
+       darf eine in Nacht 1 bei 18 % gestartete, bis Fensterende nur auf
+       60 % geladene Batterie in Nacht 2 bei weiterhin 60 % nicht erneut
+       netzladen und keine Freigabe für Nacht 2 speichern.
        Die offene Hysterese wird für ein aktives Netzladefenster sofort
        und unabhängig vom Konfigurations-Store je Config Entry gespeichert:
        Start-/Enduhrzeit und das konkrete UTC-Fensterende identifizieren
@@ -664,15 +676,18 @@ requirement_timed_soc_charge:
        Monat freigegeben und Netzladung weiterhin eingeschaltet ist.
        Dadurch läuft eine bei 18 % gestartete Ladung bei Min. SOC 20 %
        und Netzladeziel 80 % nach Neustart mit SOC 55 % bis 80 % weiter.
-       Zielerreichung, Fensterablauf oder Deaktivierung entfernen den
-       gespeicherten Zustand bei der nächsten gültigen Auswertung durch
-       einen atomaren inaktiven Datensatz (logisches Zurücksetzen);
+       RAM-Zustand und Persistenz verwenden dieselbe Fensterbindung.
+       Zielerreichung oder Wegfall dieser Bindung entfernen den gespeicherten
+       Zustand durch einen atomaren inaktiven Datensatz (logisches
+       Zurücksetzen);
        ein regulärer Shutdown erhält ihn für die Wiederaufnahme.
        Fehlende, defekte, abgelaufene oder nicht passende Zustände armen
        niemals allein aufgrund eines SOC zwischen Startschwelle und Ziel.
        Die Wiederherstellung erzeugt keinen Nachweis tatsächlich gemessener
        Netzladung und damit keine Entladesperre. PV-Pausen und temporär
-       ungültige SOC-Messungen löschen eine offene Hysterese nicht.
+       ungültige SOC-Messungen löschen eine offene Hysterese innerhalb
+       desselben weiterhin freigegebenen Fensters nicht; Fensterablauf oder
+       Wegfall der Freigabe verwerfen sie auch bei ungültigem SOC.
        Schreibvorgänge werden durch Rücklesen bestätigt; fehlgeschlagene
        Schreib- oder Löschversuche werden protokolliert und bei der nächsten
        gültigen Auswertung erneut versucht. Die aktuelle Ladesteuerung
@@ -936,6 +951,19 @@ requirement_timed_soc_charge:
     - "tests/test_number.py prüft Anfangswert, Sliderbereich einschließlich
        globalem Max. SOC 0 %, dynamische Absenkung und Erhöhung sowie
        unveränderte UI-Werte während der Kalibrierung."
+    - "Fenstergebundene Hysterese: Regressionstests prüfen zwei aufeinander
+       folgende Nächte mit Min. SOC 20 % und Netzladeziel 80 %. Nach Start
+       bei 18 % und Fensterende bei 60 % beginnt Nacht 2 bei 60 % ohne neue
+       Netzladung und ohne neue gespeicherte Freigabe, mit und ohne
+       Neustart sowie ohne Poll zwischen den Fenstern. Ein erneuter SOC
+       unter 20 % im aktiven Fenster erlaubt den Start. Unterschreitungen
+       außerhalb des Fensters, bei Deaktivierung oder in einem nicht
+       freigegebenen Monat erzeugen keine spätere Freigabe. Fensterwechsel,
+       geänderte Uhrzeiten und Entzug der Aktivierung/Monatsfreigabe
+       verwerfen RAM-Zustand und Persistenz auch bei fehlendem SOC.
+       Innerhalb desselben unveränderten freigegebenen Fensters bleiben
+       Weiterladen oberhalb Min. SOC, PV-Pausen, temporär ungültiger SOC und
+       Wiederaufnahme nach Neustart bis zum Ziel erhalten."
     - "tests/test_coordinator.py deckt _is_time_in_window (normales
        Fenster, über Mitternacht laufendes Fenster, nicht gesetztes
        Fenster), _async_enforce_grid_charge (Start/Stop des

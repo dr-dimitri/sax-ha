@@ -158,8 +158,9 @@ class SaxPowerTimedChargeMinSocNumber(
     """Unterer SOC-Schwellwert ("Min. SOC"), unterhalb dessen die Netzladung
     starten darf - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE und
     coordinator.SaxPowerCoordinator._async_enforce_grid_charge
-    (_timed_charge_armed) für die Hysterese-Logik: einmal unterschritten,
-    lädt die Netzladung bis "Netzladen Max. SOC" durch, statt bei jedem erneuten
+    (_timed_charge_armed) für die Hysterese-Logik: im selben Fenster einmal
+    unterschritten, lädt die Netzladung darin bis "Netzladen Max. SOC" durch,
+    statt bei jedem erneuten
     Überschreiten von "Min. SOC" sofort wieder abzubrechen.
 
     Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),

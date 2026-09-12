@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -58,7 +58,7 @@ async def test_shutdown_blocks_late_price_and_poll_decisions(
     coordinator = _coordinator(hass)
     with patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2),
+        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
     ):
         await coordinator.async_apply_price_plan()
         writer = coordinator._sun_charge_task
@@ -264,7 +264,7 @@ async def test_shutdown_finishes_inflight_sequence_before_final_reset(
     coordinator.client.write_register.side_effect = write_register
     with patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2),
+        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
     ):
         if source == "planner":
             coordinator.price_planner._async_source_changed(MagicMock())

@@ -475,6 +475,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_max_soc: int | None = None
         self._timed_charge_min_soc: int | None = None
         self._timed_charge_armed = False
+        self._timed_charge_window: TimedChargeState | None = None
         self._timed_charge_store = TimedChargeStateStore(hass, entry_id)
         self._timed_charge_restore_state: TimedChargeState | None = None
         self._timed_charge_persisted_state: TimedChargeState | None = None
@@ -699,7 +700,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_confirmation_cycles = 0
             if not self._control_bootstrap_pending:
                 async with self._charge_control_lock:
-                    await self._async_suspend_charge_for_missing_soc()
+                    await self._async_enforce_grid_charge_locked(self.data or {})
             # Die Riemann-Baseline darf einen Ausfall nicht überbrücken:
             # _energy_last_ts wird ausschließlich in _accumulate_energy
             # fortgeschrieben, das bei einem fehlgeschlagenen Basic-Read gar
@@ -3666,7 +3667,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             completed
             or not self._timed_charge_enabled
-            or self._price_charge_enabled
             or self._timed_charge_min_soc is None
             or now.month not in self._timed_charge_months
             or now.tzinfo is None
@@ -3907,8 +3907,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
         unterhalb dessen die Netzladung starten darf - siehe
         _async_enforce_grid_charge/_timed_charge_armed für die
-        Hysterese-Logik (einmal unterschritten, wird bis zum "Netzladen Max. SOC"
-        durchgeladen, statt bei jedem Überschreiten von Min. SOC sofort
+        Hysterese-Logik (im selben Fenster einmal unterschritten, wird darin
+        bis zum "Netzladen Max. SOC" durchgeladen, statt über Min. SOC sofort
         wieder abzubrechen). Klemmt auf [MIN_SOC, MAX_SOC], siehe
         async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
         NumberEntity-Validierung)."""
@@ -4396,9 +4396,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
            "Min. SOC" (self._timed_charge_min_soc, NumberEntity analog zu
            "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
-           Schwellwert unterschritten hat - _timed_charge_armed hält diesen
-           "unterschritten"-Zustand als Hysterese fest, damit einmal
-           gestartetes Laden bis zum eigenen "Netzladen Max. SOC" durchläuft,
+           Schwellwert im aktuellen Fenster unterschritten hat -
+           _timed_charge_armed hält diesen Zustand nur für dieselbe
+           Fensterinstanz fest (REQ-TIMED-SOC-CHARGE), damit einmal
+           gestartetes Laden darin bis zum eigenen "Netzladen Max. SOC" durchläuft,
            statt bei jedem erneuten Überschreiten von "Min. SOC" sofort
            wieder abzubrechen (siehe unten, vor der Berechnung von
            timed_should_charge).
@@ -4512,6 +4513,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self._shutdown_started or self._control_bootstrap_pending:
             return
+        now = dt_util.now()
+        timed_window_completed = (
+            self._timed_charge_enabled
+            and not self._price_charge_enabled
+            and completed_window_extended(
+                now,
+                self._timed_charge_start,
+                self._timed_charge_end,
+                self._timed_discharge_last_window_end,
+            )
+        )
+        timed_window_state = self._timed_charge_window_state(
+            now, completed=timed_window_completed
+        )
+        # REQ-TIMED-SOC-CHARGE: Auch ohne Poll zwischen zwei Fenstern oder
+        # bei fehlendem SOC darf keine alte Startfreigabe übernommen werden.
+        if (
+            timed_window_state is None
+            or self._timed_charge_window != timed_window_state
+        ):
+            self._timed_charge_armed = False
+        self._timed_charge_window = timed_window_state
+        if self._timed_charge_restore_state != timed_window_state:
+            self._timed_charge_restore_state = None
         current_soc = data.get("soc")
         if (
             self._basic_read_failed
@@ -4521,6 +4546,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or not MIN_SOC <= current_soc <= MAX_SOC
         ):
             await self._async_suspend_charge_for_missing_soc()
+            await self._async_persist_timed_charge_state(
+                timed_window_state
+                if self._timed_charge_armed
+                else self._timed_charge_restore_state
+            )
             return
         # REQ-PERIODIC-FULL-CALIBRATION: Timer/Services können den ersten
         # Ladezyklus des Fälligkeitstags vor dem nächsten Poll beginnen.
@@ -4528,18 +4558,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.price_planner.evaluate()
         command_revision_before = self._sun_charge_command_revision
         timed_was_active = self._timed_charge_active
-        await self._async_update_timed_discharge_proof(dt_util.now())
+        await self._async_update_timed_discharge_proof(now)
         timed_hold_active = self._timed_discharge_is_active(dt_util.utcnow())
-        timed_window_completed = (
-            self._timed_charge_enabled
-            and not self._price_charge_enabled
-            and completed_window_extended(
-                dt_util.now(),
-                self._timed_charge_start,
-                self._timed_charge_end,
-                self._timed_discharge_last_window_end,
-            )
-        )
 
         # Nach Reload/Neuinstallation kann der Speicher noch bis zum Ablauf
         # von Register 40050 im Sollwertmodus der vorherigen Instanz stehen,
@@ -4576,14 +4596,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_soc < target_soc:
             self._max_soc_released_for_discharge = False
         timed_target_soc = self.effective_timed_charge_max_soc
-        timed_window_state = self._timed_charge_window_state(
-            dt_util.now(), completed=timed_window_completed
-        )
         if self._timed_charge_restore_state is not None:
-            if self._timed_charge_restore_state == timed_window_state:
-                self._timed_charge_armed = True
+            self._timed_charge_armed = True
             self._timed_charge_restore_state = None
-        if current_soc >= timed_target_soc:
+        if timed_window_state is None or current_soc >= timed_target_soc:
             self._timed_charge_armed = False
         elif (
             self._timed_charge_min_soc is not None
@@ -4603,7 +4619,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pv_surplus_active = self._cycles_confirmed(
             "_timed_charge_pv_surplus_cycles", pv_surplus_raw
         )
-        now = dt_util.now()
         price_plan = self.price_planner.plan
         grid_serving_forecast_kwh = self.price_planner.forecast_kwh()
         grid_serving_forecast_threshold = self.grid_serving_forecast_threshold_kwh

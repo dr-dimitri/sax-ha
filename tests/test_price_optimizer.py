@@ -89,7 +89,7 @@ def _patched_now(hour: int, minute: int = 0):
     Hintergrund-Task für die Netzladung/netzdienliches Laden einfrieren)."""
     return patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, hour, minute),
+        return_value=_local(hour, minute, day=1),
     )
 
 
@@ -1602,7 +1602,7 @@ async def test_timed_charge_takes_priority_over_price_charge(hass) -> None:
     try:
         with patch(
             "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 15, 2, 0),
+            return_value=_local(2),
         ):
             await coordinator._async_enforce_grid_charge(
                 {"ic_max_power_reference": 4600, "soc": 50}

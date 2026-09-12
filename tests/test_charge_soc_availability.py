@@ -179,6 +179,71 @@ async def test_basic_cache_remains_valid_until_a_real_read_fails(
     client.read_holding_registers.assert_awaited_once()
 
 
+@pytest.mark.parametrize("invalid_soc", [101, 0xFFFF, -1, None, True])
+async def test_invalid_basic_soc_stops_charge_without_updating_calibration(
+    charge_system: tuple[SaxPowerCoordinator, MagicMock],
+    invalid_soc: object,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: invalid SOC cannot count as a full-charge edge."""
+    coordinator, client = charge_system
+    await coordinator.async_start_grid_charge(-1200)
+    previous_calibration = coordinator._cell_calibration_state
+    coordinator._basic_last_read = None
+    client.read_holding_registers.return_value.registers[REG_SOC - READ_BLOCK_START] = (
+        invalid_soc
+    )
+
+    await coordinator.async_refresh()
+
+    assert not coordinator.last_update_success
+    assert isinstance(coordinator.last_exception, UpdateFailed)
+    assert coordinator._basic_read_failed
+    assert coordinator._basic_data["soc"] == 39
+    assert coordinator._cell_calibration_state == previous_calibration
+    assert not coordinator.sun_charge_active
+    with pytest.raises(HomeAssistantError, match="ohne gültigen Basic-Mode-SOC"):
+        await coordinator._async_write_sun_charge_setpoint(-1200)
+
+
+@pytest.mark.parametrize("register_count", [0, READ_BLOCK_COUNT - 1])
+async def test_short_basic_response_stops_charge_until_complete_read_recovers(
+    charge_system: tuple[SaxPowerCoordinator, MagicMock],
+    register_count: int,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: a short successful Modbus response is a SOC outage."""
+    coordinator, client = charge_system
+    await coordinator.async_start_grid_charge(-1200)
+    complete_registers = client.read_holding_registers.return_value.registers
+    coordinator._basic_last_read = None
+    client.read_holding_registers.return_value.registers = complete_registers[
+        :register_count
+    ]
+    client.write_register.reset_mock()
+
+    await coordinator.async_refresh()
+
+    assert not coordinator.last_update_success
+    assert isinstance(coordinator.last_exception, UpdateFailed)
+    assert coordinator._basic_read_failed
+    assert not coordinator.sun_charge_active
+    assert coordinator._basic_last_read is None
+    client.write_register.assert_awaited_once_with(
+        address=REG_SUN_IC_CONTROL_MODE,
+        value=SUN_IC_CONTROL_MODE_SMARTMETER,
+        device_id=100,
+    )
+    with pytest.raises(HomeAssistantError, match="ohne gültigen Basic-Mode-SOC"):
+        await coordinator._async_write_sun_charge_setpoint(-1200)
+
+    client.read_holding_registers.return_value.registers = complete_registers
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert not coordinator._basic_read_failed
+    assert coordinator.sun_charge_active
+    assert coordinator._sun_charge_power == -1200
+
+
 async def test_writer_rejects_stale_soc_while_outage_cleanup_waits_for_lock(
     charge_system: tuple[SaxPowerCoordinator, MagicMock],
 ) -> None:

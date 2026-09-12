@@ -12,9 +12,11 @@ def normalize_energy_kwh(value: Any, unit: Any) -> float | None:
     Unknown/unavailable Home Assistant states are filtered at the boundary;
     this helper deliberately only handles numeric parsing and energy units.
     """
+    if isinstance(value, bool):
+        return None
     try:
         normalized = float(value)
-    except TypeError, ValueError:
+    except TypeError, ValueError, OverflowError:
         return None
     if not math.isfinite(normalized):
         return None
@@ -24,4 +26,6 @@ def normalize_energy_kwh(value: Any, unit: Any) -> float | None:
         normalized /= 1000
     elif normalized_unit == "mwh":
         normalized *= 1000
-    return normalized
+    elif normalized_unit not in ("", "kwh"):
+        return None
+    return normalized if math.isfinite(normalized) else None

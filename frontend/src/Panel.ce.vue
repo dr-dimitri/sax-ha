@@ -1,0 +1,427 @@
+<script setup lang="ts">
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  useHost,
+  watch,
+} from "vue";
+import { messages, tabPath, tabs } from "./tabs";
+import type { HomeAssistant, PanelInfo, PanelRoute } from "./types";
+
+const props = defineProps<{
+  hass?: HomeAssistant;
+  narrow?: boolean;
+  panel?: PanelInfo;
+  route?: PanelRoute;
+}>();
+
+const host = useHost();
+const language = computed(() =>
+  props.hass?.language.toLowerCase().startsWith("de") ? "de" : "en",
+);
+const text = computed(() => messages[language.value]);
+const hasExistingDashboard = computed(() =>
+  Boolean(props.hass?.panels?.["sax-power"]),
+);
+const showSidebarButton = computed(
+  () =>
+    !props.hass?.kioskMode &&
+    (props.narrow || props.hass?.dockedSidebar === "always_hidden"),
+);
+const basePath = computed(() => `/${props.panel?.url_path || "sax-power-vue"}`);
+const path = ref(props.route?.path ?? window.location.pathname);
+const activePath = computed(() => tabPath(path.value, basePath.value));
+const activeTab = computed(() =>
+  tabs.find((tab) => tab.path === activePath.value),
+);
+const heading = ref<HTMLElement>();
+
+watch(
+  () => props.route?.path,
+  (value) => {
+    if (value !== undefined) path.value = value;
+  },
+);
+
+function syncLocation(): void {
+  path.value = window.location.pathname;
+}
+
+onMounted(() => {
+  window.addEventListener("popstate", syncLocation);
+  window.addEventListener("location-changed", syncLocation);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("popstate", syncLocation);
+  window.removeEventListener("location-changed", syncLocation);
+});
+
+function navigate(event: MouseEvent, target: string): void {
+  if (
+    event.button !== 0 ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return;
+  }
+  event.preventDefault();
+  if (window.location.pathname !== target) {
+    window.history.pushState(null, "", target);
+    window.dispatchEvent(
+      new CustomEvent("location-changed", { detail: { replace: false } }),
+    );
+  }
+  syncLocation();
+  void nextTick(() => heading.value?.focus());
+}
+
+function openSidebar(): void {
+  host?.dispatchEvent(
+    new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }),
+  );
+}
+</script>
+
+<template>
+  <div class="dashboard" :class="{ narrow }" :lang="language">
+    <header class="header">
+      <button
+        v-if="showSidebarButton"
+        class="menu-button"
+        type="button"
+        :aria-label="text.menu"
+        @click="openSidebar"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 3h6M8 5h8a1 1 0 0 1 1 1v14H7V6a1 1 0 0 1 1-1Z" />
+          <path d="m13 8-3 5h4l-3 5" />
+        </svg>
+        <span>SAX Power <span class="variant">(Vue)</span></span>
+      </div>
+      <span class="preview">{{ text.preview }}</span>
+    </header>
+
+    <nav class="navigation" :aria-label="text.navigation">
+      <a
+        v-for="tab in tabs"
+        :key="tab.path"
+        :href="`${basePath}/${tab.path}`"
+        :aria-current="activePath === tab.path ? 'page' : undefined"
+        @click="navigate($event, `${basePath}/${tab.path}`)"
+      >
+        {{ tab[language] }}
+      </a>
+    </nav>
+
+    <main>
+      <div class="introduction">
+        <p>
+          {{
+            hasExistingDashboard
+              ? text.introduction
+              : text.introductionStandalone
+          }}
+        </p>
+        <a
+          v-if="hasExistingDashboard"
+          class="existing-link"
+          href="/sax-power"
+          >{{ text.existing }}</a
+        >
+      </div>
+
+      <section class="section" aria-labelledby="section-heading">
+        <h1 id="section-heading" ref="heading" tabindex="-1">
+          {{ activeTab?.[language] ?? text.notFound }}
+        </h1>
+        <p v-if="!hass" class="status" role="status">{{ text.loading }}</p>
+        <p v-else-if="!panel?.config?.entry_id" class="status" role="status">
+          {{ text.missingEntry }}
+        </p>
+        <div v-else-if="activeTab" class="placeholder">
+          <svg class="placeholder-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="8" y="9" width="32" height="30" rx="4" />
+            <path d="M8 18h32M19 18v21M24 26h10M24 32h7" />
+          </svg>
+          <h2>{{ text.preparation }}</h2>
+          <p>
+            {{
+              hasExistingDashboard
+                ? text.description
+                : text.descriptionStandalone
+            }}
+          </p>
+        </div>
+        <div v-else class="status">
+          <p>{{ text.notFoundDescription }}</p>
+          <a
+            :href="`${basePath}/allgemein`"
+            @click="navigate($event, `${basePath}/allgemein`)"
+          >
+            {{ text.returnToOverview }}
+          </a>
+        </div>
+      </section>
+    </main>
+  </div>
+</template>
+
+<style>
+:host {
+  display: block;
+  height: 100%;
+  color: var(--primary-text-color, #212121);
+  background: var(--primary-background-color, #fafafa);
+  font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.dashboard {
+  min-height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 8px 24px;
+  background: var(--app-header-background-color, var(--primary-color, #03a9f4));
+  color: var(--app-header-text-color, #fff);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.variant {
+  font-size: 16px;
+  font-weight: 400;
+}
+
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brand-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.preview {
+  margin-left: auto;
+  border: 1px solid currentColor;
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.menu-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-left: -10px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.menu-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.navigation {
+  display: flex;
+  overflow-x: auto;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--divider-color, #e0e0e0);
+  background: var(--card-background-color, #fff);
+}
+
+.navigation a {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  padding: 12px 16px;
+  border-bottom: 3px solid transparent;
+  color: var(--secondary-text-color, #666);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.navigation a[aria-current="page"] {
+  border-color: var(--primary-color, #03a9f4);
+  color: var(--primary-text-color, #212121);
+  font-weight: 600;
+}
+
+a {
+  color: var(--primary-text-color, #212121);
+  text-underline-offset: 3px;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -4px;
+}
+
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+}
+
+.introduction {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.introduction p {
+  margin: 0;
+  color: var(--secondary-text-color, #666);
+}
+
+.existing-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.section {
+  overflow-wrap: anywhere;
+  padding: 28px;
+  border: var(--ha-card-border-width, 1px) solid
+    var(--ha-card-border-color, var(--divider-color, #e0e0e0));
+  border-radius: var(--ha-card-border-radius, 12px);
+  background: var(--ha-card-background, var(--card-background-color, #fff));
+  box-shadow: var(--ha-card-box-shadow, none);
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+h1:focus {
+  outline: none;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  padding: 64px 16px;
+  text-align: center;
+}
+
+.placeholder-icon {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 16px;
+  color: var(--secondary-text-color, #666);
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.placeholder p {
+  max-width: 480px;
+  margin: 0;
+  color: var(--secondary-text-color, #666);
+  line-height: 1.7;
+}
+
+.status {
+  margin-top: 24px;
+  line-height: 1.7;
+}
+
+.narrow .header {
+  padding-right: 16px;
+  padding-left: 16px;
+}
+
+.narrow main {
+  padding: 16px 12px 32px;
+}
+
+@media (max-width: 600px) {
+  .header {
+    gap: 8px;
+    padding: 8px 16px;
+  }
+
+  .brand {
+    gap: 6px;
+    font-size: 18px;
+  }
+
+  .brand-icon {
+    display: none;
+  }
+
+  .navigation {
+    padding: 0 4px;
+  }
+
+  main {
+    padding: 16px 12px 32px;
+  }
+
+  .introduction {
+    gap: 0;
+    margin-bottom: 16px;
+  }
+
+  .section {
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .placeholder {
+    padding: 40px 0;
+  }
+}
+</style>

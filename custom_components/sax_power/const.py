@@ -34,6 +34,10 @@ CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
 CONF_CREATE_DASHBOARD = "create_dashboard"
 DEFAULT_CREATE_DASHBOARD = True
 
+# REQ-VUE-DASHBOARD: dauerhaftes Opt-in, unabhängig von der Lovelace-Einmalanlage.
+CONF_VUE_DASHBOARD_ENABLED = "vue_dashboard_enabled"
+DEFAULT_VUE_DASHBOARD_ENABLED = False
+
 # Genau wegen dieses einmaligen Flags bekommt ein bestehendes Dashboard die
 # Tabs einer neueren Version nie zu sehen: Nach der Ersteinrichtung wird
 # das Dashboard nie wieder gebaut, und async_create_dashboard fasst ein

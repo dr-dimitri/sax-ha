@@ -34,9 +34,13 @@
       },
       "dashboard": {
         "title": "Dashboard (optional)",
-        "description": "Creates a ready-made \"SAX Power\" dashboard with the most important sensors and settings, organized into the \"General information\", \"Automatic charging\" and \"Dynamic price charging\" tabs. Can be removed again at any time under Settings -> Dashboards.",
+        "description": "Optionally create the \"SAX Power\" dashboard with general information, charging automation, grid-serving charging, dynamic charging and savings. You can also enable the separate Vue preview.",
         "data": {
-          "create_dashboard": "Create dashboard"
+          "create_dashboard": "Create dashboard",
+          "vue_dashboard_enabled": "Enable Vue dashboard (preview)"
+        },
+        "data_description": {
+          "vue_dashboard_enabled": "Adds the separate \"SAX Power (Vue)\" sidebar entry. This preview contains navigation only; sensor values and controls will follow. The existing dashboard remains available."
         }
       },
       "finish": {
@@ -719,7 +723,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Price-optimised charging and PV forecast",
+        "title": "Dashboard, charging and economics",
         "description": "Sources and base settings for price-optimised charging and the shared PV forecast. The integration does not fetch prices or forecasts itself; it uses existing sensor entities. Day-to-day controls are entities on the SAX device.",
         "data": {
           "price_sensor": "Electricity price sensor",
@@ -729,7 +733,8 @@
           "pv_forecast_factor": "Usable share of the PV forecast (%)",
           "economics_tariff_type": "Economics tariff model",
           "economics_investment_cost_eur": "Investment cost (EUR)",
-          "economics_prior_result_eur": "Result earned before setup (EUR)"
+          "economics_prior_result_eur": "Result earned before setup (EUR)",
+          "vue_dashboard_enabled": "Enable Vue dashboard (preview)"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative” and “smart” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
@@ -739,7 +744,8 @@
           "pv_forecast_factor": "Only for the “smart” strategy: how much of the forecast is expected to reach the battery, accounting for self-consumption, uncertainty and losses. The grid-serving minimum compares the unmodified sensor value.",
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
           "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress and the remaining-to-payback amount, offset against the running signed net result. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
-          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result."
+          "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result.",
+          "vue_dashboard_enabled": "Adds the separate \"SAX Power (Vue)\" sidebar entry. This preview contains navigation only; sensor values and controls will follow. The existing dashboard remains available."
         }
       },
       "economics_fixed": {

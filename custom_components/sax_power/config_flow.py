@@ -49,6 +49,7 @@ from .const import (
     CONF_TIMED_CHARGE_ENABLED,
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
+    CONF_VUE_DASHBOARD_ENABLED,
     DEFAULT_CREATE_DASHBOARD,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
@@ -59,6 +60,7 @@ from .const import (
     DEFAULT_TIMED_CHARGE_ENABLED,
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
+    DEFAULT_VUE_DASHBOARD_ENABLED,
     DOMAIN,
     ECONOMICS_INVESTMENT_COST_STEP,
     ECONOMICS_OPTION_KEYS,
@@ -180,6 +182,9 @@ STEP_DASHBOARD_SCHEMA = vol.Schema(
     {
         vol.Optional(
             CONF_CREATE_DASHBOARD, default=DEFAULT_CREATE_DASHBOARD
+        ): cv.boolean,
+        vol.Optional(
+            CONF_VUE_DASHBOARD_ENABLED, default=DEFAULT_VUE_DASHBOARD_ENABLED
         ): cv.boolean,
     }
 )
@@ -393,9 +398,16 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                         if _is_mac_unique_id(reconfigure_entry.unique_id)
                         else f"{host}:{port}"
                     )
+                    updated_data = dict(user_input)
+                    if CONF_VUE_DASHBOARD_ENABLED in reconfigure_entry.data:
+                        # REQ-VUE-DASHBOARD: Das dauerhafte Setup-Opt-in
+                        # muss einen Wechsel der Verbindungsdaten überleben.
+                        updated_data[CONF_VUE_DASHBOARD_ENABLED] = (
+                            reconfigure_entry.data[CONF_VUE_DASHBOARD_ENABLED]
+                        )
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
-                        data=user_input,
+                        data=updated_data,
                         unique_id=unique_id,
                     )
                 # Ersteinrichtung: Verbindungsdaten merken und weiter zum
@@ -522,6 +534,7 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
 # oft noch gar nicht. Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 STEP_OPTIONS_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_VUE_DASHBOARD_ENABLED): cv.boolean,
         vol.Optional(CONF_PRICE_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
@@ -795,6 +808,15 @@ class SaxPowerOptionsFlow(OptionsFlow):
                     if key not in ECONOMICS_OPTION_KEYS
                 }
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
+                self._base_options.setdefault(
+                    CONF_VUE_DASHBOARD_ENABLED,
+                    self.config_entry.options.get(
+                        CONF_VUE_DASHBOARD_ENABLED,
+                        self.config_entry.data.get(
+                            CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+                        ),
+                    ),
+                )
                 return await self._async_step_for_tariff(tariff_type)
 
         # Bewusst _suggested statt add_suggested_values_to_schema auf den
@@ -952,7 +974,14 @@ class SaxPowerOptionsFlow(OptionsFlow):
         weiterhin an der Schema-Validierung (siehe _async_repeat_init).
         """
         with_values = self.add_suggested_values_to_schema(
-            schema, {**self.config_entry.options, **(user_input or {})}
+            schema,
+            {
+                CONF_VUE_DASHBOARD_ENABLED: self.config_entry.data.get(
+                    CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+                ),
+                **self.config_entry.options,
+                **(user_input or {}),
+            },
         )
         return vol.Schema(with_values.schema, extra=schema.extra)
 

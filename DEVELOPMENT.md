@@ -93,12 +93,64 @@ custom_components/sax_power/
 ├── dashboard.py            Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in
 │                          der Ersteinrichtung anlegbar, siehe anforderung.yaml
 │                          REQ-BUNDLED-DASHBOARD/REQ-ECONOMICS-SAVINGS-DASHBOARD
+├── vue_dashboard.py        Optionales Vue-Panel neben Lovelace, siehe
+│                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
+├── frontend/              Eingechecktes Vue-Bundle für HACS und Snapshots
 ├── services.yaml           Service-Schema für die UI
 └── translations/            DE/EN-Übersetzungen (strings.json ist die Vorlage)
 
 tests/                Siehe Abschnitt "Tests"
+frontend/             Vue-/TypeScript-Quellen, Build und Komponententests
 .devcontainer/         VS Code DevContainer für lokale Entwicklung
 ```
+
+### Paralleles Vue-Panel
+
+`vue_dashboard.py` bindet das Custom Element `sax-power-vue-panel` über
+Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
+in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
+`hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
+ordnet die spätere Entity-Anbindung dem Config Entry zu. Das Grundgerüst
+zeigt zunächst fünf navigierbare Bereiche ohne Messwerte oder Schreibaktionen
+(Issue #197); die fachlichen Ansichten folgen in #198–#202.
+
+`CONF_VUE_DASHBOARD_ENABLED` ist ein dauerhaftes Opt-in mit Standard `False`.
+Die Ersteinrichtung speichert es in `entry.data`; spätere Änderungen in
+`entry.options` haben Vorrang, auch bei explizitem `False`. Eine ausgelassene
+Option erhält die vorhandene Auswahl. Der Options-Listener synchronisiert
+das Panel direkt; eine reine Änderung dieser Option setzt weder den Planner
+neu auf noch löst sie eine Modbus-Aktion aus. Setup registriert das aktivierte
+Panel erneut, Unload entfernt es. Fehler der optionalen Oberfläche blockieren
+die Batterieintegration nicht. Lovelace-Einmalanlage, Neuinstallation und
+Reparaturhinweise bleiben eigenständig.
+
+Das JavaScript-Bundle liegt unter
+`custom_components/sax_power/frontend/sax-power-vue.js` im Git-Repository.
+Vue und die Shadow-DOM-Styles sind darin enthalten; zur Laufzeit gibt es
+keinen Node-Prozess und keine CDN-Abhängigkeit. Die statische Route wird
+pro HA-Lauf einmal registriert und bleibt beim Panel-Unload bestehen, da
+Home Assistant keine Abmeldung statischer Routen anbietet. Ein Hash der
+Asset-Datei in der Modul-URL vermeidet veraltete Browser-Caches nach Updates.
+
+Für die Frontend-Entwicklung wird zusätzlich Node.js 22 ab 22.22.2 benötigt
+(CI: Node 22); alternativ Node 24 ab 24.15 oder Node 26 und neuer, entsprechend
+`frontend/package.json`. Frontend-Prüfungen laufen aus dem Verzeichnis `frontend/`:
+
+```sh
+npm ci
+npm run check
+npm test
+npm run build
+```
+
+Nach Quellenänderungen das neu gebaute Bundle mit einchecken. CI baut aus dem
+Lockfile erneut und vergleicht die ausgelieferten Assets mit dem Git-Stand.
+HACS erhält diese Dateien aus dem getaggten Integrationsverzeichnis; das
+vorhandene Snapshot-Packprogramm übernimmt dieselben Bytes. Der privilegierte
+Snapshot-Workflow führt weiterhin keinen Frontend-Build aus PR-Code aus.
+`tests/test_frontend_package.py` prüft Source- und Snapshot-Paketierung,
+`tests/test_vue_dashboard.py` den Panel-Lebenszyklus und
+`tests/test_config_flow.py` die unabhängigen Dashboard-Optionen.
 
 Die Abhängigkeiten zeigen von den Home-Assistant-Entrypoints nach innen:
 `sensor.py`/`number.py`/`switch.py`/`time.py` verwenden den Coordinator, der

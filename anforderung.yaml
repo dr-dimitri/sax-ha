@@ -51,6 +51,7 @@
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           done       Mitgeliefertes Lovelace-Dashboard (5 Tabs), optional in der Ersteinrichtung anlegbar
+# REQ-VUE-DASHBOARD               done       Separates optionales Vue-Panel mit Navigation und lokalem Build (Grundgerüst, #197)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
 # REQ-SETUP-FINISH-SUMMARY        done       Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende
 # REQ-SETUP-ROLLBACK              done       Fehlgeschlagene Setup-Versuche geben Client, Plattformen, Listener und Timer vollständig frei
@@ -2194,6 +2195,72 @@ requirement_dynamic_price_charge:
        wieder über der Preisgrenze liegt."
     - "README.md beschreibt Einrichtung, Strategien und Zusammenspiel mit
        den übrigen Lademodi."
+
+# ==============================================================================
+# ANFORDERUNG: PARALLELES VUE-DASHBOARD (GRUNDGERÜST)
+# ==============================================================================
+requirement_vue_dashboard:
+  id: REQ-VUE-DASHBOARD
+  title: "Separates optionales Vue-Panel mit Navigation und lokalem Build (Issue #197)"
+  status: done
+  description: >
+    Ergänzend zum vorhandenen Lovelace-Dashboard sax-power registriert die
+    Integration ein Vue-3-/TypeScript-Panel unter sax-power-vue mit dem
+    Seitenleistennamen SAX Power (Vue). Dieses erste Arbeitspaket enthält
+    die responsive, in Deutsch und Englisch beschriftete Navigation zu
+    Allgemeine Informationen (allgemein), Ladeautomatik (ladeautomatik),
+    Netzdienliches Laden (netzdienliches-laden), Dynamisches Laden
+    (dynamisches-laden) und Ersparnis (ersparnis). Jede Ansicht erklärt
+    den Vorschauzustand; es gibt noch keine Sensordaten, Bedienaktionen
+    oder Statistikabfragen. Diese folgen in den Issues #198 bis #202.
+
+    vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
+    standardmäßig False. Die Ersteinrichtung bietet sie neben der
+    unveränderten Lovelace-Einmalanlage an und speichert sie in entry.data.
+    Der Options Flow erlaubt nachträgliche Aktivierung und Deaktivierung
+    in entry.options; ein vorhandener Options-Wert hat Vorrang vor den
+    Setup-Daten. Eine ausgelassene Options-Eingabe und eine Änderung der
+    Verbindungsdaten erhalten die bisherige Auswahl.
+    Eine reine Vue-Änderung synchronisiert nur die Oberfläche, ohne
+    Reload, Planner-Neustart, Tarifrevision oder zusätzliche Modbus-Aktion.
+
+    Setup und Options-Änderungen registrieren das aktivierte Panel
+    idempotent. Deaktivierung und Unload entfernen den eigenen Panel-Eintrag.
+    Fehler der optionalen Oberfläche verhindern weder Setup noch Betrieb
+    der Batterieintegration. Die gemeinsame statische Asset-Route bleibt
+    pro Home-Assistant-Lauf genau einmal bestehen, da HA keine API zum
+    Abmelden solcher Routen anbietet. Dateizugriffe laufen im Executor;
+    ein Inhalts-Hash in der Modul-URL erneuert den Browser-Cache nach Updates.
+
+    Das Custom Element sax-power-vue-panel erhält hass, narrow, panel und
+    route vom bestehenden HA-Frontend. Alle Frontend-Abhängigkeiten und
+    Shadow-DOM-Styles sind im lokalen Modul gebündelt. Das Frontend eröffnet
+    keine zusätzliche Modbus-Verbindung und benötigt weder externe Skripte
+    noch einen Node-Prozess zur Laufzeit. Die kompilierten Assets liegen
+    im Integrationsverzeichnis im Repository; Stable-/HACS- und Snapshot-
+    Pakete liefern dieselben geprüften Bytes aus. CI baut aus dem Lockfile
+    reproduzierbar neu und prüft Abweichungen vom eingecheckten Assetstand.
+    Privilegierte Release-Workflows führen keinen Frontend-Code des PR aus.
+
+    Lovelace-Konfiguration, Sidebar-Eintrag, eigene Kartenanpassungen,
+    create_dashboard/reinstall_dashboard und der Veraltet-Reparaturhinweis
+    bleiben von diesem Panel unabhängig. Das Vue-Panel ersetzt oder
+    migriert kein bestehendes Dashboard.
+  acceptance_criteria:
+    - "Alle vier Kombinationen der beiden Dashboard-Auswahlen sowie der
+       ausgeschaltete Standard sind im Config Flow getestet."
+    - "Aktivierung, Deaktivierung, Setup-Wiederholung, Reload und Unload
+       erzeugen keine doppelten Panels oder statischen Routen."
+    - "Ein Fehler bei Asset- oder Panel-Registrierung lässt die
+       Batterieintegration betriebsbereit; fremde Panels werden nicht entfernt."
+    - "Options-Werte übersteuern Setup-Werte auch bei False; eine reine
+       Vue-Änderung erzeugt keine zusätzliche Geräteaktion."
+    - "Die fünf Unterpfade funktionieren bei Navigation, direktem Einstieg
+       und Browser-Zurück; Mount/Unmount räumt Frontend-Listener auf."
+    - "Source-/HACS-Verzeichnis und Snapshot enthalten das geprüfte lokale
+       Bundle; Build und Typ-/Komponententests sind in CI eingebunden."
+    - "README und DEVELOPMENT beschreiben Aktivierung, Vorschauumfang,
+       Parallelbetrieb, Build und Paketierung."
 
 # ==============================================================================
 # ANFORDERUNG: MITGELIEFERTES DASHBOARD

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -25,10 +26,16 @@ from .const import (
     ATTR_REASON,
     ATTR_START,
     CONF_CREATE_DASHBOARD,
+    CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_PRICE_UNIT,
+    CONF_PV_FORECAST_FACTOR,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
     CONF_SLAVE_ID_EXTENDED,
+    CONF_VUE_DASHBOARD_ENABLED,
     DATA_COORDINATOR,
+    DEFAULT_PRICE_UNIT,
+    DEFAULT_PV_FORECAST_FACTOR,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID_EXTENDED,
     DOMAIN,
@@ -45,6 +52,8 @@ from .const import (
 )
 from .coordinator import SaxPowerCoordinator
 from .dashboard import async_check_dashboard_up_to_date, async_create_dashboard
+from .domain.tariff import TariffType
+from .vue_dashboard import async_sync_vue_dashboard, async_unload_vue_dashboard
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -275,6 +284,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(entry.add_update_listener(async_update_options))
 
         _async_register_services(hass)
+        await async_sync_vue_dashboard(hass, entry)
     except BaseException:
         await _async_rollback_failed_setup(
             hass, entry, client, coordinator, platforms_started=True
@@ -292,6 +302,13 @@ async def _async_rollback_failed_setup(
     platforms_started: bool,
 ) -> None:
     """Release every resource acquired by an incomplete setup attempt."""
+    try:
+        await async_unload_vue_dashboard(hass, entry)
+    except BaseException:  # noqa: BLE001
+        # Auch ein Fehler der optionalen UI darf das Geräte-Cleanup nicht abbrechen.
+        _LOGGER.exception(
+            "Vue-Dashboard konnte beim Setup-Rollback nicht entladen werden"
+        )
     if platforms_started:
         try:
             await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -326,6 +343,21 @@ async def _async_rollback_failed_setup(
         )
 
 
+def _control_options(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Vergleiche die wirksamen Optionen ohne UI-Flag und ergänzte Formulardefaults."""
+    defaults = {
+        CONF_PRICE_UNIT: DEFAULT_PRICE_UNIT,
+        CONF_PV_FORECAST_FACTOR: DEFAULT_PV_FORECAST_FACTOR,
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
+    }
+    return {
+        key: value
+        for key, value in options.items()
+        if key != CONF_VUE_DASHBOARD_ENABLED
+        and (key not in defaults or value != defaults[key])
+    }
+
+
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Wendet eine Options-Flow-Änderung (Strompreis-/PV-Prognose-Sensor)
     live auf den laufenden Coordinator an, statt den kompletten Config Entry
@@ -342,9 +374,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     (z. B. beim Hinzufügen des Strompreis-/PV-Prognose-Sensors), unabhängig
     von den eigentlichen Lade-Automatiken.
 
-    Der Options Flow betrifft ausschließlich Quell-Sensoren und deren
-    Interpretation im price_optimizer.SaxPricePlanner - nie den Modbus-
-    Client, die Slave-IDs oder das Scan-Intervall (die stehen unveränderlich
+    Der Options Flow betrifft Quell-Sensoren und deren Interpretation im
+    price_optimizer.SaxPricePlanner sowie die optionale Vue-Oberfläche - nie
+    den Modbus-Client, die Slave-IDs oder das Scan-Intervall (unveränderlich
     in entry.data, siehe config_flow.async_step_reconfigure für deren einzigen
     Änderungsweg). Die gemeinsam ausgewertete PV-Prognose kann dabei auch die
     Freigabe des netzdienlichen Ladens ändern. Ein Reload ist für eine reine
@@ -363,6 +395,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if entry_data is None:
         return
+    await async_sync_vue_dashboard(hass, entry)
     coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
     if coordinator.options == entry.options:
         # hass.config_entries.async_update_entry löst diesen Listener auch
@@ -374,7 +407,12 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         # async_apply_price_plan bis in einen Modbus-Schreibpfad, obwohl
         # sich an den Options nichts geändert hat.
         return
+    previous_options = _control_options(coordinator.options)
     coordinator.options = dict(entry.options)
+    if previous_options == _control_options(entry.options):
+        # REQ-VUE-DASHBOARD: Eine reine UI-Option darf weder die Tarifrevision
+        # noch den Modbus-Sollwert einer laufenden Ladeautomatik verändern.
+        return
     coordinator.price_planner.async_setup()
     coordinator.tariff_provider.async_setup()
     # REQ-ECONOMICS-ACCOUNTING: rein diagnostischer Zeitstempel der letzten
@@ -387,6 +425,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        await async_unload_vue_dashboard(hass, entry)
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
         coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
         await coordinator.async_shutdown()

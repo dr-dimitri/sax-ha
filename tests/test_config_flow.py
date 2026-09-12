@@ -30,6 +30,7 @@ from custom_components.sax_power.const import (
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
+    CONF_VUE_DASHBOARD_ENABLED,
     DOMAIN,
     ECONOMICS_TOU_WINDOW_KEYS,
     PRICE_UNIT_CT_KWH,
@@ -109,6 +110,7 @@ async def test_user_flow_success(hass) -> None:
         assert result5["data"]["timed_charge_start"] == "00:00:00"
         assert result5["data"]["timed_charge_end"] == "00:05:00"
         assert result5["data"]["create_dashboard"] is True
+        assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
 
 
 async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
@@ -196,6 +198,90 @@ async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
         result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
         assert result5["type"] == FlowResultType.CREATE_ENTRY
         assert result5["data"]["create_dashboard"] is False
+
+
+@pytest.mark.parametrize("lovelace_enabled", [False, True])
+@pytest.mark.parametrize("vue_enabled", [False, True])
+async def test_dashboard_choices_are_independent(
+    hass: HomeAssistant, lovelace_enabled: bool, vue_enabled: bool
+) -> None:
+    """REQ-VUE-DASHBOARD: Beide Oberflächen haben eine unabhängige Auswahl."""
+    with (
+        patch("custom_components.sax_power.config_flow._async_validate_connection"),
+        patch(
+            "custom_components.sax_power.config_flow._async_read_finish_summary",
+            return_value={"sunspec_available": False},
+        ),
+        patch("custom_components.sax_power.async_setup_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], VALID_INPUT
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "create_dashboard": lovelace_enabled,
+                CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
+            },
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["create_dashboard"] is lovelace_enabled
+    assert result["data"][CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
+
+
+@pytest.mark.parametrize(
+    ("initial_data", "initial_options", "submitted", "expected"),
+    [
+        ({}, {}, {}, False),
+        ({CONF_VUE_DASHBOARD_ENABLED: True}, {}, {}, True),
+        ({}, {CONF_VUE_DASHBOARD_ENABLED: True}, {}, True),
+        ({}, {}, {CONF_VUE_DASHBOARD_ENABLED: True}, True),
+        (
+            {CONF_VUE_DASHBOARD_ENABLED: True},
+            {},
+            {CONF_VUE_DASHBOARD_ENABLED: False},
+            False,
+        ),
+    ],
+)
+async def test_vue_options_preserve_or_override_onboarding_choice(
+    hass: HomeAssistant,
+    initial_data: dict,
+    initial_options: dict,
+    submitted: dict,
+    expected: bool,
+) -> None:
+    """REQ-VUE-DASHBOARD: Abwahl bleibt dauerhaft vor dem Setup-Opt-in wirksam."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**VALID_INPUT, "create_dashboard": False, **initial_data},
+        options=initial_options,
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    suggested = {
+        key.schema: key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if isinstance(key.description, dict) and "suggested_value" in key.description
+    }
+    assert suggested[CONF_VUE_DASHBOARD_ENABLED] is initial_options.get(
+        CONF_VUE_DASHBOARD_ENABLED, initial_data.get(CONF_VUE_DASHBOARD_ENABLED, False)
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], submitted
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is expected
+    assert entry.data["create_dashboard"] is False
 
 
 async def test_finish_step_shows_summary_placeholders(hass) -> None:
@@ -602,6 +688,32 @@ async def test_reconfigure_flow_updates_host(
         assert result2["reason"] == "reconfigure_successful"
         assert entry.data["host"] == "192.168.1.99"
         assert entry.unique_id == expected_unique_id
+
+
+@pytest.mark.parametrize("vue_enabled", [False, True])
+async def test_reconfigure_preserves_vue_onboarding_choice(
+    hass: HomeAssistant, vue_enabled: bool
+) -> None:
+    """REQ-VUE-DASHBOARD: Neue Verbindungsdaten ändern keine Dashboard-Auswahl."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**VALID_INPUT, CONF_VUE_DASHBOARD_ENABLED: vue_enabled},
+        unique_id="192.168.1.50:502",
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch("custom_components.sax_power.config_flow._async_validate_connection"),
+        patch.object(hass.config_entries, "async_reload", return_value=True),
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**VALID_INPUT, "host": "192.168.1.99"}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["host"] == "192.168.1.99"
+    assert entry.data[CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
 
 
 async def test_reconfigure_flow_rejects_another_entries_target(hass) -> None:

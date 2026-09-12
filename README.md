@@ -159,6 +159,27 @@ Dashboard deshalb. Home Assistant meldet das unter **Einstellungen → System �
 Reparaturen** und bietet dort an, das Dashboard neu aufzubauen; wer das
 ablehnt, wird nicht erneut gefragt.
 
+### Paralleles Vue-Dashboard (Vorschau)
+
+Die Option **Vue-Dashboard aktivieren (Vorschau)** ergänzt den separaten
+Seitenleisteneintrag **SAX Power (Vue)** unter `/sax-power-vue`.
+Sie ist standardmäßig ausgeschaltet und kann bei der Einrichtung oder später
+unter **Einstellungen → Geräte & Dienste → SAX Power Home → Konfigurieren**
+geändert werden. Die Auswahl bleibt nach einem Neustart erhalten.
+
+Diese erste Vorschau enthält die Navigation zu allen fünf Bereichen.
+Messwerte, Bedienfunktionen und Ersparnis-Auswertungen folgen in den weiteren
+Arbeitspaketen der [Vue-Umsetzung](https://github.com/dr-dimitri/sax-ha/issues/196).
+Für diese Funktionen steht weiterhin das bestehende Dashboard **SAX Power**
+zur Verfügung. Beide Oberflächen können gleichzeitig geöffnet werden.
+
+Zum Entfernen des Vue-Eintrags die Option wieder ausschalten. Das wirkt direkt,
+ohne die Batterieintegration neu zu starten. Das bisherige Lovelace-Dashboard,
+eigene Kartenanpassungen und die Aktionen `sax_power.create_dashboard` und
+`sax_power.reinstall_dashboard` bleiben davon unabhängig. Die Vorschau wird
+mit der Integration lokal ausgeliefert und benötigt keine zusätzliche
+Installation auf dem Home-Assistant-Gerät.
+
 ## Wichtige Entitäten
 
 Home Assistant ordnet die Entitäten automatisch dem SAX-Power-Gerät zu. Weniger

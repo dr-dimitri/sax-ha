@@ -55,6 +55,45 @@ jobs:
       - name: Tests ausführen
         run: pytest -v
 
+  frontend:
+    name: Vue-Dashboard prüfen
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v7
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend-Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Typen und Formatierung prüfen
+        run: npm run check
+
+      - name: Frontend-Tests ausführen
+        run: npm test
+
+      - name: Lokale Dashboard-Assets bauen
+        run: npm run build
+
+      - name: Eingecheckte Dashboard-Assets vergleichen
+        # REQ-VUE-DASHBOARD: Privilegierte Release-Jobs verwenden fertige Assets.
+        working-directory: .
+        run: |
+          git diff --exit-code -- custom_components/sax_power/frontend
+          if [[ -n "$(git ls-files --others --exclude-standard -- custom_components/sax_power/frontend)" ]]; then
+            echo "Neue Dashboard-Assets müssen mit dem Quellcode eingecheckt werden." >&2
+            exit 1
+          fi
+
   validate-hacs:
     name: HACS validieren
     if: github.event_name == 'pull_request'

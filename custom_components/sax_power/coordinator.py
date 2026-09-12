@@ -36,6 +36,7 @@ from .application.economics import (
     prior_result_eur_from_options,
 )
 from .application.ports import ModbusClient
+from .application.timed_charge import TimedChargeState
 from .application.timed_discharge import (
     TimedDischargeState,
     completed_window_extended,
@@ -164,6 +165,7 @@ from .infrastructure.economics_store import (
 from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
+from .infrastructure.timed_charge_store import TimedChargeStateStore
 from .infrastructure.timed_discharge_store import TimedDischargeStateStore
 from .price_optimizer import PricePlan, SaxPricePlanner
 
@@ -473,6 +475,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_max_soc: int | None = None
         self._timed_charge_min_soc: int | None = None
         self._timed_charge_armed = False
+        self._timed_charge_store = TimedChargeStateStore(hass, entry_id)
+        self._timed_charge_restore_state: TimedChargeState | None = None
+        self._timed_charge_persisted_state: TimedChargeState | None = None
         self._timed_charge_pv_surplus_cycles = 0
         self._timed_discharge_store = TimedDischargeStateStore(hass, entry_id)
         self._timed_discharge_state: TimedDischargeState | None = None
@@ -3644,6 +3649,52 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # sättigte. Das eigene Netzladeziel bleibt unter dem globalen Max-SOC;
     # die Kalibrierungsausnahme folgt REQ-PERIODIC-FULL-CALIBRATION.
 
+    async def async_load_timed_charge_state(self) -> None:
+        """Defer restoring the latch until settings and a valid SOC are known."""
+        try:
+            state = await self._timed_charge_store.async_load()
+        except HomeAssistantError, OSError, ValueError:
+            _LOGGER.exception("Gespeicherte Netzlade-Hysterese nicht lesbar")
+            return
+        self._timed_charge_restore_state = state
+        self._timed_charge_persisted_state = state
+
+    def _timed_charge_window_state(
+        self, now: datetime, *, completed: bool
+    ) -> TimedChargeState | None:
+        """REQ-TIMED-SOC-CHARGE: only this enabled window can restore a latch."""
+        if (
+            completed
+            or not self._timed_charge_enabled
+            or self._price_charge_enabled
+            or self._timed_charge_min_soc is None
+            or now.month not in self._timed_charge_months
+            or now.tzinfo is None
+            or now.utcoffset() is None
+        ):
+            return None
+        expires_at = window_end(now, self._timed_charge_start, self._timed_charge_end)
+        if expires_at is None:
+            return None
+        assert self._timed_charge_start is not None
+        assert self._timed_charge_end is not None
+        return TimedChargeState(
+            self._timed_charge_start, self._timed_charge_end, expires_at
+        )
+
+    async def _async_persist_timed_charge_state(
+        self, state: TimedChargeState | None
+    ) -> None:
+        """Save edges before device commands; shutdown must retain their proof."""
+        if state == self._timed_charge_persisted_state:
+            return
+        try:
+            await self._timed_charge_store.async_save(state)
+        except HomeAssistantError, OSError, ValueError:
+            _LOGGER.exception("Netzlade-Hysterese konnte nicht gespeichert werden")
+        else:
+            self._timed_charge_persisted_state = state
+
     async def async_load_timed_discharge_state(self) -> None:
         """Restore only a bounded, still-live proof of timed grid charging."""
         try:
@@ -4525,6 +4576,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_soc < target_soc:
             self._max_soc_released_for_discharge = False
         timed_target_soc = self.effective_timed_charge_max_soc
+        timed_window_state = self._timed_charge_window_state(
+            dt_util.now(), completed=timed_window_completed
+        )
+        if self._timed_charge_restore_state is not None:
+            if self._timed_charge_restore_state == timed_window_state:
+                self._timed_charge_armed = True
+            self._timed_charge_restore_state = None
         if current_soc >= timed_target_soc:
             self._timed_charge_armed = False
         elif (
@@ -4532,6 +4590,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and current_soc < self._timed_charge_min_soc
         ):
             self._timed_charge_armed = True
+        await self._async_persist_timed_charge_state(
+            timed_window_state if self._timed_charge_armed else None
+        )
         smartmeter_power = data.get("smartmeter_power")
         # Vorzeichenkonvention (siehe const.py, SMARTMETER_PV_SURPLUS_
         # THRESHOLD_WATT): negativ = Einspeisung/PV-Überschuss.

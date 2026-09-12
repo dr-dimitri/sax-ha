@@ -653,7 +653,33 @@ requirement_timed_soc_charge:
        SOC" steigt), bis der SOC "Netzladen Max. SOC" erreicht/überschreitet
        (dann zurück auf False) - Netzladung lädt also einmal gestartet bis
        zu ihrem eigenen Ziel durch, statt bei jedem erneuten Überschreiten
-       von "Netzladung Min. SOC" sofort wieder abzubrechen. Ohne vorherige Einstellung (z.
+       von "Netzladung Min. SOC" sofort wieder abzubrechen.
+       Die offene Hysterese wird für ein aktives Netzladefenster sofort
+       und unabhängig vom Konfigurations-Store je Config Entry gespeichert:
+       Start-/Enduhrzeit und das konkrete UTC-Fensterende identifizieren
+       genau diese Fensterinstanz, auch über Mitternacht und Zeitumstellung.
+       Nach Neustart oder Neuladen wird sie erst nach vollständigem
+       Konfigurations-Bootstrap und mit gültigem SOC übernommen, wenn
+       exakt dasselbe unveränderte Fenster noch aktiv ist, der aktuelle
+       Monat freigegeben und Netzladung weiterhin eingeschaltet ist.
+       Dadurch läuft eine bei 18 % gestartete Ladung bei Min. SOC 20 %
+       und Netzladeziel 80 % nach Neustart mit SOC 55 % bis 80 % weiter.
+       Zielerreichung, Fensterablauf oder Deaktivierung entfernen den
+       gespeicherten Zustand bei der nächsten gültigen Auswertung durch
+       einen atomaren inaktiven Datensatz (logisches Zurücksetzen);
+       ein regulärer Shutdown erhält ihn für die Wiederaufnahme.
+       Fehlende, defekte, abgelaufene oder nicht passende Zustände armen
+       niemals allein aufgrund eines SOC zwischen Startschwelle und Ziel.
+       Die Wiederherstellung erzeugt keinen Nachweis tatsächlich gemessener
+       Netzladung und damit keine Entladesperre. PV-Pausen und temporär
+       ungültige SOC-Messungen löschen eine offene Hysterese nicht.
+       Schreibvorgänge werden durch Rücklesen bestätigt; fehlgeschlagene
+       Schreib- oder Löschversuche werden protokolliert und bei der nächsten
+       gültigen Auswertung erneut versucht. Die aktuelle Ladesteuerung
+       bleibt dabei wirksam, insbesondere das Stoppen am Ziel. Bei einem
+       Neustart vor erfolgreicher Persistenz ist nur der tatsächlich
+       lesbare gespeicherte Zustand wiederherstellbar.
+       Ohne vorherige Einstellung (z.
        B. direkt nach der Ersteinrichtung) steht der Wert auf
        DEFAULT_TIMED_CHARGE_MIN_SOC (const.py, 20 %,
        SaxPowerTimedChargeMinSocNumber.async_added_to_hass) statt auf 0

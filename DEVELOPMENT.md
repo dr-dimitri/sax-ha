@@ -41,10 +41,10 @@ custom_components/sax_power/
 │                          das Domänenmodell (economics.py) sowie der
 │                          injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
-│                          Repair-Issues sowie die vier versionierten Stores
+│                          Repair-Issues sowie versionierte Stores
 │                          (Kalibrierung, Energiezähler inkl. Herkunft der
 │                          Ladeenergie, Wirtschaftlichkeitsbilanz,
-│                          Ladeeinstellungen)
+│                          Ladeeinstellungen und fensterbezogene Laufzeitzustände)
 ├── config_flow.py       GUI-Einrichtung (Verbindung + optionale
 │                          Netzladung-Vorbelegung), Verbindungsvalidierung,
 │                          Options Flow (preisoptimiertes Laden + gemeinsame
@@ -1148,6 +1148,24 @@ Erhöhung erweitert nur den Sliderbereich und verändert den gewählten
 Netzladezielwert nicht. Das Dashboard zeigt den Regler unter
 "Zeitvariabler Tarif" → "Einstellungen" direkt über "Netzladung Min. SOC".
 Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
+
+`infrastructure/timed_charge_store.py` speichert die offene Hysterese
+unabhängig von Konfiguration und Entladeschutznachweis. Start-/Enduhrzeit
+und konkretes UTC-Fensterende binden sie an dieselbe unveränderte lokale
+Fensterinstanz. Der Bootstrap lädt den Zustand vor dem ersten Refresh;
+erst die erste Steuerentscheidung mit vollständiger Konfiguration und
+gültigem SOC prüft Fensteridentität, aktive Monate und Freigabe. So setzt
+eine unter Min. SOC gestartete Ladung auch nach einem Neustart oberhalb
+dieser Schwelle bis zum Ziel fort. Zustandsänderungen werden sofort
+gespeichert; Shutdown löscht die offene Hysterese nicht. Fehlende oder
+ungültige Daten liefern keine Ladeberechtigung. Eine wiederhergestellte
+Hysterese ist kein Nachweis gemessener Netzladung. Der Store schreibt
+atomar und bestätigt Änderungen durch Rücklesen, da Home Assistant
+Schreibfehler intern abfangen kann. Ein atomarer inaktiver Datensatz
+setzt die gespeicherte Hysterese logisch zurück. Nicht bestätigte Schreibversuche
+werden protokolliert und bei der nächsten gültigen Auswertung erneut
+versucht; die laufende Steuerung bleibt wirksam. Bei einem Neustart vor
+erfolgreicher Persistenz ist nur der lesbare gespeicherte Stand verfügbar.
 
 **Entladestatus nach Netzladung:** `application/timed_discharge.py` bestimmt
 die konkrete UTC-Ablaufzeit des aktiven lokalen Fensters (auch über

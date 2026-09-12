@@ -2015,8 +2015,9 @@ HA-Executor, damit komplexere Intervallfolgen den Eventloop nicht aufhalten.
 
 `infrastructure/hems_history.py` sammelt begrenzte SAX-Qualitätsintervalle und
 verwendet Recorder-Änderungen nur bei belegter freier Beobachtung. Die reine
-Profilbildung in `domain/hems_load.py` lernt Nächte innerhalb der letzten 168
-realen Stunden. Planungsreserve und tatsächliche Entlademöglichkeit bleiben
+Profilbildung in `domain/hems_load.py` behält die Baseline der letzten 168
+realen Stunden und berechnet einen getrennten qualitätsgewichteten Kandidaten
+mit ausdrücklich wählbaren sieben oder 28 Tagen. Planungsreserve und tatsächliche Entlademöglichkeit bleiben
 getrennt. Dämmerung wird höchstens vier Stunden nach Sonnenaufgang fortgeschrieben.
 `infrastructure/hems_pv.py` liest öffentliche lokale Response-Services von
 pv_forecast oder Solcast und normalisiert diese über `domain/hems_pv.py`.
@@ -2082,3 +2083,66 @@ Ausführungssperre und Kalibrierungsmehrenergie. Im dynamischen `adaptive`-Modus
 bleiben die gemeinsame Min-SOC-Reserve und Netzladen-Max-SOC direkt bedienbar,
 auch wenn der zeitvariable Tab ausgeblendet ist. Referenzfälle und
 Anforderungszuordnung stehen in [docs/hems-acceptance.md](docs/hems-acceptance.md).
+
+### Prognosearchiv, neue Verfahren und Unsicherheit
+
+`application/hems_prediction.py` verbindet das unveränderte Nachtprofil mit
+Kandidaten, Gütenachweisen und der reinen Bandbreitenanzeige. Der Options Flow
+bietet ein standardmäßig ausgeschaltetes Prognosearchiv, sieben/28 Historientage,
+Beobachten/Automatik sowie einen optionalen Live-Abgleich. Beobachten erzeugt
+keinen Ladeeingriff. Beim Wechsel der Profil-/Live-Konfiguration werden bestehende
+Anker und die aktive Auswahl invalidiert. Bis zum gemeinsamen Nachweis der neuen
+Variante verwendet die Regelung wieder die bisherige Sieben-Tage-Baseline;
+Einzelfreigaben werden nicht zu einer ungeprüften Kombination zusammengesetzt.
+
+`domain/hems_evaluation.py` enthält eingefrorene Ausgaben, kanonische Zeitziele,
+Bewertungspaare und die Freigaberegel. `infrastructure/hems_archive.py` verwaltet
+einen eigenen versionierten HA-Store, Generationen und begrenzte lokale Daten.
+Ausgabezeit wird erst unmittelbar vor der Veröffentlichung einer angenommenen
+Planung erfasst. Ihre Datenbasis wird nach Geräte-ACK in den Archivpfad übernommen,
+ohne die sichere Geräteanwendung auf einen Archivschreibvorgang warten zu lassen.
+Zwischenzeitliche Konfigurationsrevisionen verhindern die Übernahme inkohärenter
+Ausgaben. CPU-Arbeit einschließlich Live-Abgleich läuft im HA-Executor. Nach
+solchen Warteabschnitten liest die Planung SOC und seinen Frischenachweis erneut
+aus demselben aktuellen Gerätestand.
+
+Neue Varianten benötigen mindestens 14 spätere Vergleichsnächte. Maßgeblich sind
+gleiche tatsächlich beobachtete Ziele, jeweils mindestens eine Stunde und
+insgesamt mindestens 14 Stunden. Der je Nacht normierte absolute Fehler muss
+mindestens fünf Prozent sinken; P90 der Unterschätzung darf höchstens fünf Prozent
+steigen. Dämmerung besitzt eine separate Freigabe. Die aktuellen SAX-Daten können
+nach Sonnenaufgang bereits PV-bereinigte Restlast sein und begründen daher keinen
+unabhängigen Dämmerungs-Bedarfsnachweis. Dort bleibt die bisherige Basis bestehen;
+fehlende notwendige Abdeckung erhält den sicheren Planungsfallback.
+
+`domain/hems_live.py` vergleicht 45 Minuten aktuelle Nacht mit vorab ausgegebenen
+unkorrigierten Profilen. Mindestens 30 Minuten gemeinsame frische Evidenz sind
+erforderlich. Die halbe Leistungsabweichung wirkt begrenzt und klingt mit 30
+Minuten Halbwertszeit bis spätestens 60 Minuten nach ihrem Messanker ab. Der
+Live-Port verwendet dieselbe freie Entladequalität wie die Historie. Archiv aus,
+physische Leere, Laden oder tatsächliche Sperre erzeugen keinen neuen Anker.
+Neustart benötigt frische Beobachtungen; eine laufende Berechnung kann eine nach
+Konfigurationswechsel ersetzte Live-Instanz nicht in die neue Planung zurückholen.
+
+`domain/hems_uncertainty.py` verwendet signierte Fehler ganzer vollständig
+beobachteter Ziele. Je Modell, Horizont, Phase und lokaler Ausgabe-/Zielstunde
+werden zunächst 60 verschiedene Lernnächte eingefroren. Mindestens 24 Treffer
+unter 30 späteren vorab ausgegebenen Bereichen erlauben eine empirische
+80-Prozent-Anzeige. Fehlender Nachweis, Modellwechsel, verlorene Belege oder
+Veraltung entziehen den Status. Die Karte zeigt einen ausdrücklich benannten
+künftigen UTC-Stundenzeitraum in der HA-Zeitzone; sie behauptet keine validierte
+Bandbreite für die gesamte Netzlademenge. PV-Tagesbänder werden nicht umgedeutet.
+
+`HemsForecastQuality.vue` zeigt denselben reinen Status in beiden Tarifansichten:
+Erwartung, belegter Bereich oder konkreter Leergrund, aktive/beobachtete Verfahren
+und aufklappbare Stichproben-/Abdeckungsdaten. Die Sensorattribute enthalten keine
+Roharchive. `sax_power.export_hems_archive` liefert Administratoren begrenzte
+Seiten mit `device_id`, `offset` und `limit` (höchstens 100); die Antwort enthält
+`next_offset`. `sax_power.delete_hems_archive` benötigt zusätzlich `confirm: true`
+und löscht nur dieses Archiv samt Freigaben. Beide Aktionen sind in den nativen
+Entwicklerwerkzeugen verfügbar und rufen keine Wetter- oder Gerätequelle ab.
+
+Für eine spätere unabhängige Hausverbrauchsquelle liegt ein abgegrenzter
+[Quellenvertrag](docs/hems-house-load-source.md) vor. Er beschreibt Messgrenzen,
+Beispielbilanzen, Opt-in, Neuaufbau und Ausfälle. Die Implementierung einer solchen
+Quelle ist nicht Teil der SAX-basierten Prognoseverbesserungen.

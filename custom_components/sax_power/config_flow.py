@@ -39,8 +39,12 @@ from .const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_HEMS_ARCHIVE_ENABLED,
     CONF_HEMS_CHARGE_EFFICIENCY,
     CONF_HEMS_DISCHARGE_EFFICIENCY,
+    CONF_HEMS_FORECAST_MODE,
+    CONF_HEMS_HISTORY_DAYS,
+    CONF_HEMS_LIVE_ADJUSTMENT,
     CONF_HEMS_PV_ENTRY,
     CONF_HEMS_PV_PROVIDER,
     CONF_HEMS_SOLCAST_MAX_AGE,
@@ -587,6 +591,24 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_HEMS_DISCHARGE_EFFICIENCY, default=0.95): vol.All(
             vol.Coerce(float), vol.Range(min=0, min_included=False, max=1)
         ),
+        vol.Optional(CONF_HEMS_ARCHIVE_ENABLED, default=False): cv.boolean,
+        vol.Optional(CONF_HEMS_HISTORY_DAYS, default="7"): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=["7", "28"],
+                translation_key="hems_history_days",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Optional(CONF_HEMS_FORECAST_MODE, default="observe"): (
+            selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["observe", "auto"],
+                    translation_key="hems_forecast_mode",
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+        ),
+        vol.Optional(CONF_HEMS_LIVE_ADJUSTMENT, default=False): cv.boolean,
         vol.Required(
             CONF_PV_FORECAST_FACTOR, default=DEFAULT_PV_FORECAST_FACTOR
         ): vol.All(

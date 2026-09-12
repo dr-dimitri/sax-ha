@@ -3,6 +3,7 @@ import { computed, inject, useId } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { hemsNumber, hemsReason, hemsTime } from "../hems";
 import type { HomeAssistant } from "../types";
+import HemsForecastQuality from "./HemsForecastQuality.vue";
 
 const props = defineProps<{
   tariff: "timed" | "dynamic";
@@ -96,8 +97,8 @@ const labels: Record<string, readonly [string, string]> = {
   ],
   policy: ["SAX-Annahme zum Prognosealter", "SAX assumption for forecast age"],
   modelInfo: [
-    "Nachtmodell aus SAX-Entladeenergie der letzten sieben Tage. Eine vollständige Tagesoptimierung ist nicht enthalten.",
-    "Night model based on SAX discharge energy over the last seven days. Full-day optimisation is not included.",
+    "Nachtmodell aus SAX-Entladeenergie. Sieben Tage bleiben die Basis; für das neue Profil sind optional 28 Tage wählbar. Neue Verfahren benötigen ihren eigenen Gütenachweis. Eine vollständige Tagesoptimierung ist nicht enthalten.",
+    "Night model based on SAX discharge energy. Seven days remain the baseline; 28 days are optional for the new profile. New methods require their own validation. Full-day optimisation is not included.",
   ],
   reserveInfo: [
     "Min-SOC ist die Reserve der Planung; er ist keine neue Gerätesperre gegen Entladung. Max-SOC begrenzt das Ladeziel. Im Rückfall gelten dieselben gespeicherten Werte nach den klassischen Regeln.",
@@ -306,6 +307,12 @@ const data = computed(() => [
         <dd data-testid="hems-next">{{ next }}</dd>
       </div>
     </dl>
+    <HemsForecastQuality
+      v-if="active && entity.available && attrs.forecast_quality"
+      :value="attrs.forecast_quality"
+      :language="language"
+      :hass="hass"
+    />
     <details v-if="entity.available">
       <summary>{{ text("details") }}</summary>
       <p>{{ text("modelInfo") }}</p>

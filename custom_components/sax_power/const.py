@@ -508,6 +508,10 @@ CONF_HEMS_SOLCAST_TIMESTAMP_REGISTRY_ID = "hems_solcast_timestamp_registry_id"
 CONF_HEMS_SOLCAST_MAX_AGE = "hems_solcast_max_age_hours"
 CONF_HEMS_CHARGE_EFFICIENCY = "hems_charge_efficiency"
 CONF_HEMS_DISCHARGE_EFFICIENCY = "hems_discharge_efficiency"
+CONF_HEMS_ARCHIVE_ENABLED = "hems_archive_enabled"
+CONF_HEMS_HISTORY_DAYS = "hems_history_days"
+CONF_HEMS_FORECAST_MODE = "hems_forecast_mode"
+CONF_HEMS_LIVE_ADJUSTMENT = "hems_live_adjustment"
 PRICE_STRATEGIES = (
     PRICE_STRATEGY_OFF,
     PRICE_STRATEGY_ABSOLUTE,

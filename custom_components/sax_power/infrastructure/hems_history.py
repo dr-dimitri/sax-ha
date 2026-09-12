@@ -20,20 +20,34 @@ from ..const import DOMAIN
 from ..domain.hems import EnergySlot, LoadForecast
 from ..domain.hems_load import (
     DAWN_DURATION,
-    HISTORY_WINDOW,
     DischargeObservation,
+    LoadVariants,
     NightSpan,
     ObservationQuality,
     aware,
     build_night_profile,
+    build_weighted_profile,
     finite_number,
     forecast_night_load,
+    forecast_weighted_load,
+    validate_history_days,
 )
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RECORDS = 14000
 _SAVE_DELAY = 300
 _RECORDER_TIMEOUT = 10
+
+
+class _HistoryStore(Store[dict[str, Any]]):
+    """Preserve the existing interval quality across the history extension."""
+
+    async def _async_migrate_func(
+        self, old_major_version: int, old_minor_version: int, old_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        if old_major_version != 1:
+            raise NotImplementedError
+        return {**old_data, "history_days": 7}
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +71,7 @@ class HemsHistory:
         entry_id: str,
         *,
         max_sample_gap_seconds: float = 30.0,
+        history_days: int = 7,
     ) -> None:
         if (
             not finite_number(max_sample_gap_seconds)
@@ -66,8 +81,10 @@ class HemsHistory:
         self.hass = hass
         self.entry_id = entry_id
         self.max_sample_gap_seconds = max_sample_gap_seconds
-        self._store: Store[dict[str, Any]] = Store(
-            hass, 1, f"{DOMAIN}.hems_history.{entry_id}"
+        self.history_days = validate_history_days(history_days)
+        self.variants: LoadVariants | None = None
+        self._store: Store[dict[str, Any]] = _HistoryStore(
+            hass, 2, f"{DOMAIN}.hems_history.{entry_id}"
         )
         self._records: list[DischargeObservation] = []
         self._previous: _Sample | None = None
@@ -80,6 +97,60 @@ class HemsHistory:
         self._recorder_read_through: datetime | None = None
         self._recorder_entity: str | None = None
         self._recorder_rows: dict[tuple[datetime, datetime], float] = {}
+
+    @property
+    def history_window(self) -> timedelta:
+        return timedelta(days=self.history_days)
+
+    @callback
+    def configure(self, *, history_days: int = 7) -> None:
+        """Changing the selection cannot reuse an in-flight profile or old key."""
+        validate_history_days(history_days)
+        if history_days == self.history_days:
+            return
+        self.history_days = history_days
+        self._generation += 1
+        self.variants = None
+        self._recorder_read_through = None
+        self._prune(dt_util.utcnow())
+
+    def observations(
+        self, as_of: datetime, *, lookback: timedelta | None = None
+    ) -> tuple[DischargeObservation, ...]:
+        """Expose bounded quality evidence without including measurements after now."""
+        if not aware(as_of):
+            raise ValueError("as_of must be timezone-aware")
+        span = self.history_window if lookback is None else lookback
+        if span <= timedelta():
+            raise ValueError("lookback must be positive")
+        as_of = as_of.astimezone(UTC)
+        start = as_of - min(span, self.history_window)
+        result = []
+        for item in self._effective_observations():
+            if item.end > as_of or item.end <= start:
+                continue
+            begin = max(start, item.start)
+            fraction = (item.end - begin) / (item.end - item.start)
+            result.append(
+                DischargeObservation(
+                    begin, item.end, item.energy_kwh * fraction, item.quality
+                )
+            )
+        return tuple(result)
+
+    def free_discharge(self, as_of: datetime) -> bool:
+        """Use the same live quality proof as training, with the sample gap limit."""
+        sample = self._previous
+        return bool(
+            self._started
+            and not self._stopped
+            and sample is not None
+            and sample.quality == "valid"
+            and aware(as_of)
+            and 0
+            <= (as_of.astimezone(UTC) - sample.at).total_seconds()
+            <= self.max_sample_gap_seconds
+        )
 
     async def async_start(self) -> None:
         """Restore bounded quality without integrating across a restart."""
@@ -177,7 +248,7 @@ class HemsHistory:
                 energy, interval_quality = 0.0, "unknown"
             self._append(
                 DischargeObservation(
-                    max(previous.at, at - HISTORY_WINDOW),
+                    max(previous.at, at - self.history_window),
                     at,
                     energy,
                     interval_quality,
@@ -257,9 +328,9 @@ class HemsHistory:
         self._records.append(item)
 
     def _prune(self, as_of: datetime) -> None:
-        cutoff = as_of - HISTORY_WINDOW
+        cutoff = as_of - self.history_window
         self._records = [item for item in self._records if cutoff < item.end <= as_of][
-            -_MAX_RECORDS:
+            -(_MAX_RECORDS * self.history_days // 7) :
         ]
         self._recorder_rows = {
             key: value for key, value in self._recorder_rows.items() if key[1] > cutoff
@@ -269,6 +340,7 @@ class HemsHistory:
         self._save_scheduled = False
         return {
             "entry_id": self.entry_id,
+            "history_days": self.history_days,
             "intervals": [
                 [
                     item.start.isoformat(),
@@ -284,7 +356,7 @@ class HemsHistory:
         if not isinstance(raw, dict) or raw.get("entry_id") != self.entry_id:
             return []
         rows = raw.get("intervals")
-        if not isinstance(rows, list) or len(rows) > _MAX_RECORDS:
+        if not isinstance(rows, list) or len(rows) > _MAX_RECORDS * 4:
             return []
         result: list[DischargeObservation] = []
         for row in rows:
@@ -322,12 +394,11 @@ class HemsHistory:
 
     async def _async_refresh(self, as_of: datetime) -> LoadForecast:
         generation = self._generation
-        observations = tuple(self._records)
+        history_days = self.history_days
+        observations = tuple(item for item in self._records if item.end <= as_of)
         evaluated_through = self._evaluated_through
         if self._stopped:
-            return LoadForecast(
-                generated_at=as_of, quality_reason="history_unavailable"
-            )
+            return self._unavailable(as_of, "history_unavailable")
         await self._async_read_recorder(as_of, generation)
         if self._stopped or generation != self._generation:
             return LoadForecast(
@@ -337,9 +408,7 @@ class HemsHistory:
             zone = ZoneInfo(self.hass.config.time_zone)
             nights = self._night_spans(as_of, zone)
         except ValueError, ZoneInfoNotFoundError:
-            return LoadForecast(
-                generated_at=as_of, quality_reason="unsupported_night_geometry"
-            )
+            return self._unavailable(as_of, "unsupported_night_geometry")
         current = next(
             (
                 night
@@ -349,21 +418,55 @@ class HemsHistory:
             None,
         )
         if current is None:
-            return LoadForecast(
-                generated_at=as_of,
-                quality_reason=(
-                    "outside_model_scope" if nights else "unsupported_night_geometry"
-                ),
+            return self._unavailable(
+                as_of, "outside_model_scope" if nights else "unsupported_night_geometry"
             )
-        profile = build_night_profile(
+        variants = await self.hass.async_add_executor_job(
+            self._build_variants,
             self._effective_observations(observations),
+            nights,
+            current,
+            as_of,
+            evaluated_through,
+            zone,
+            history_days,
+        )
+        if self._stopped or generation != self._generation:
+            return LoadForecast(
+                generated_at=as_of, quality_reason="history_unavailable"
+            )
+        self.variants = variants
+        return variants.baseline
+
+    def _unavailable(self, as_of: datetime, reason: str) -> LoadForecast:
+        result = LoadForecast(generated_at=as_of, quality_reason=reason)
+        self.variants = LoadVariants(
+            result,
+            result,
+            history_days=self.history_days,
+            candidate_key=f"weighted-v1:{self.history_days}d",
+        )
+        return result
+
+    @staticmethod
+    def _build_variants(
+        observations: tuple[DischargeObservation, ...],
+        nights: tuple[NightSpan, ...],
+        current: NightSpan,
+        as_of: datetime,
+        evaluated_through: datetime | None,
+        zone: ZoneInfo,
+        history_days: int,
+    ) -> LoadVariants:
+        profile = build_night_profile(
+            observations,
             nights,
             as_of=as_of,
             evaluated_through=evaluated_through,
             zone=zone,
         )
         pieces = forecast_night_load(profile, current, zone=zone)
-        return LoadForecast(
+        baseline = LoadForecast(
             intervals=tuple(
                 EnergySlot(item.start, item.end, item.energy_kwh, (item.method,))
                 for item in pieces
@@ -377,6 +480,24 @@ class HemsHistory:
             model_start=current.start,
             model_end=current.end + DAWN_DURATION,
             quality_flags=tuple(sorted({item.method for item in pieces})),
+        )
+        weighted = build_weighted_profile(
+            observations,
+            nights,
+            as_of=as_of,
+            evaluated_through=evaluated_through,
+            zone=zone,
+            history_days=history_days,
+        )
+        candidate, metadata = forecast_weighted_load(weighted, current, zone=zone)
+        return LoadVariants(
+            baseline,
+            candidate,
+            current,
+            candidate_key=weighted.model_key,
+            history_days=history_days,
+            available_history_days=weighted.available_history_days,
+            candidate_metadata=metadata,
         )
 
     def _night_spans(self, as_of: datetime, zone: ZoneInfo) -> tuple[NightSpan, ...]:
@@ -399,7 +520,7 @@ class HemsHistory:
         ):
             return ()
         nights: list[NightSpan] = []
-        for offset in range(-9, 2):
+        for offset in range(-self.history_days - 2, 2):
             day = local_day + timedelta(days=offset)
             start = event_on("sunset", day)
             end = event_on("sunrise", day + timedelta(days=1))
@@ -427,11 +548,11 @@ class HemsHistory:
         if entity is None or recorder is None or recorder.engine is None:
             return
         start = max(
-            as_of - HISTORY_WINDOW,
+            as_of - self.history_window,
             (
                 self._recorder_read_through - timedelta(minutes=15)
                 if self._recorder_read_through is not None
-                else as_of - HISTORY_WINDOW
+                else as_of - self.history_window
             ),
         )
         try:
@@ -466,7 +587,7 @@ class HemsHistory:
             except ValueError, TypeError, OverflowError, KeyError:
                 continue
         self._recorder_read_through = as_of
-        self._prune(as_of)
+        self._prune(max(as_of, self._evaluated_through or as_of))
 
     def _read_statistics(
         self, entity: str, start: datetime, end: datetime

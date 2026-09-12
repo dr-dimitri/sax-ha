@@ -19,6 +19,71 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 for (const tariff of ["timed", "dynamic"] as const) {
+  test(`REQ-HEMS-FORECAST-UNCERTAINTY: ${tariff} explains evidence and preserves unknown values`, async ({
+    page,
+  }, testInfo) => {
+    const english = testInfo.project.name.endsWith("en");
+    await page.evaluate(
+      (mode) =>
+        window.saxDemoHems(mode, {
+          forecast_quality: {
+            mode: "observe",
+            history_days: 28,
+            available_history_days: 7,
+            archive: { enabled: true, pairs_count: 75 },
+            uncertainty: {
+              status: "validated",
+              expected_kwh: 0.8,
+              lower_kwh: 0,
+              upper_kwh: 1.1,
+              training_nights: 60,
+              validation_nights: 30,
+              empirical_coverage: 0.8,
+            },
+          },
+        }),
+      tariff,
+    );
+    const panel = page.locator("sax-power-vue-panel");
+    await panel
+      .locator(
+        `nav a[href='/sax-power-vue/${tariff === "timed" ? "ladeautomatik" : "dynamisches-laden"}']`,
+      )
+      .click();
+    const quality = panel.locator(".hems-quality");
+    await expect(quality.locator('[data-testid="hems-range"]')).toContainText(
+      english ? "0–1.1 kWh" : "0–1,1 kWh",
+    );
+    await quality.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(quality.locator("details")).toHaveAttribute("open", "");
+    await expect(quality).toContainText(
+      english ? "does not guarantee" : "keine Garantie",
+    );
+    const overflow = await quality.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+    await quality.screenshot({
+      path: testInfo.outputPath("forecast-quality.png"),
+    });
+    await page.evaluate(
+      (mode) =>
+        window.saxDemoHems(mode, {
+          forecast_quality: {
+            archive: { enabled: true },
+            uncertainty: { status: "unavailable", reason: "stale" },
+          },
+        }),
+      tariff,
+    );
+    await expect(quality.locator('[data-testid="hems-range"]')).toHaveCount(0);
+    await expect(quality).toContainText(english ? "outdated" : "veraltet");
+    await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+  });
+}
+
+for (const tariff of ["timed", "dynamic"] as const) {
   test(`REQ-HEMS-OBSERVABILITY: ${tariff} is responsive, readonly and keyboard accessible`, async ({
     page,
   }, testInfo) => {

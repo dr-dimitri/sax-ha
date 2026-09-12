@@ -46,6 +46,7 @@ from ..domain.hems_planner import compute_energy_plan
 from ..domain.hems_progress import SocProgressLedger
 from ..infrastructure.hems_history import HemsHistory
 from ..infrastructure.hems_pv import HemsPvAdapter
+from .hems_prediction import HemsPrediction
 from .hems_tariffs import timed_constraints
 
 if TYPE_CHECKING:
@@ -81,6 +82,7 @@ class HemsRuntime:
         self.coordinator = coordinator
         self.hass = coordinator.hass
         self.history = HemsHistory(self.hass, coordinator.entry_id)
+        self.prediction = HemsPrediction(self.hass, coordinator.entry_id)
         self.plan: EnergyPlan | None = None
         self.load = LoadForecast()
         self.pv = PvForecast()
@@ -134,6 +136,9 @@ class HemsRuntime:
     async def async_start(self) -> None:
         if self._started or self._shutdown:
             return
+        self.prediction.configure(self.coordinator.options, dt_util.utcnow())
+        self.history.configure(history_days=self.prediction.history_days)
+        await self.prediction.async_start()
         await self.history.async_start()
         try:
             raw = await self._execution_store.async_load()
@@ -191,6 +196,7 @@ class HemsRuntime:
             return
         self._revision += 1
         self.plan = None
+        self.prediction.uncertainty = None
         if self._adapter is not None:
             self._adapter.invalidate()
         self.request_evaluation()
@@ -207,6 +213,8 @@ class HemsRuntime:
         ):
             return
         self._last_configuration = configuration
+        self.prediction.configure(self.coordinator.options, dt_util.utcnow())
+        self.history.configure(history_days=self.prediction.history_days)
         self._revision += 1
         self.plan = None
         self._execution_intervals = ()
@@ -345,6 +353,33 @@ class HemsRuntime:
         c = self.coordinator
         data = c.data or {}
         now = dt_util.utcnow()
+        try:
+            load = await self.prediction.async_prepare(
+                self.history,
+                load,
+                as_of=now,
+                max_discharge_power_w=finite(data.get("ic_max_power_reference")),
+                free_discharge=(
+                    self.history.free_discharge(now) is True
+                    and not c._basic_read_failed
+                    and c.extended_available
+                    and data.get("ic_control_mode") == 0
+                    and not (
+                        c._timed_charge_active
+                        or c._price_charge_active
+                        or c.grid_charge_active
+                    )
+                ),
+            )
+        except Exception:
+            self.prediction.restore_baseline(load)
+            _LOGGER.exception(
+                "HEMS-Prognoseprüfung fehlgeschlagen; bisheriges Profil bleibt aktiv"
+            )
+        if not self._current(revision):
+            return
+        now = dt_util.utcnow()
+        data = c.data or {}
         constraints = self._tariff(now)
         soc = finite(data.get("soc"))
         capacity = finite(data.get("battery_capacity"))
@@ -394,6 +429,7 @@ class HemsRuntime:
         plan = await self.hass.async_add_executor_job(compute_energy_plan, snapshot)
         if not self._current(revision):
             return
+        issued_at = dt_util.utcnow()
         self.load, self.pv, self.constraints = load, pv, constraints
         if self._fallback_armed and plan.status is not PlanStatus.FALLBACK:
             self._fallback_armed = False
@@ -410,6 +446,17 @@ class HemsRuntime:
         c.async_update_listeners()
         # This await can execute a Modbus ACK sequence; shutdown drains it.
         await c.async_apply_price_plan()
+        if self._current(revision):
+            try:
+                await self.prediction.async_record(snapshot, plan, issued_at=issued_at)
+            except Exception:
+                # Optionale Prognosebeobachtung darf die Gerätesicherheit nicht umgehen.
+                _LOGGER.exception(
+                    "HEMS-Prognosearchiv konnte die Ausgabe nicht übernehmen"
+                )
+        if self._current(revision):
+            c._publish_charge_state(c.data or {})
+            c.async_update_listeners()
 
     def _set_context(self, context: str) -> None:
         if context == self._context:
@@ -783,6 +830,7 @@ class HemsRuntime:
     def attributes(self) -> dict[str, Any]:
         plan = self.plan
         return {
+            "forecast_quality": self.prediction.attributes,
             "mode": self.mode,
             "status": str(plan.status) if plan else self._execution.reason,
             "reason_codes": (
@@ -899,6 +947,7 @@ class HemsRuntime:
         if self._task is not None:
             # Do not cancel a task that may have entered the coordinator ACK path.
             await asyncio.gather(self._task, return_exceptions=True)
+        await self.prediction.async_stop()
         if self._execution_store_loaded:
             try:
                 await self._execution_store.async_save(self._persisted())

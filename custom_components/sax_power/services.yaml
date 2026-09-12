@@ -1,3 +1,54 @@
+export_hems_archive:
+  name: HEMS-Prognosearchiv lesen
+  description: >-
+    Liefert höchstens 100 gespeicherte Prognosen und ihre Bewertung als lokale
+    Antwort. Nur für Administratoren; löst keine Wetterabfrage oder Geräteaktion
+    aus. Für weitere Seiten offset erhöhen.
+  fields:
+    device_id:
+      name: Gerät
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    offset:
+      name: Erster Eintrag
+      default: 0
+      selector:
+        number:
+          min: 0
+          step: 1
+          mode: box
+    limit:
+      name: Maximale Einträge
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          mode: box
+
+delete_hems_archive:
+  name: HEMS-Prognosearchiv löschen
+  description: >-
+    Löscht Prognosen, Vergleichswerte und ihre Lernfreigaben für das ausgewählte
+    Gerät. Das bisherige Nachtprofil und die Steuergrenzen bleiben erhalten.
+    Bei aktiviertem Archiv beginnen neue Nachweise erst ab jetzt.
+    Nur für Administratoren, mit ausdrücklicher Bestätigung.
+  fields:
+    device_id:
+      name: Gerät
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    confirm:
+      name: Löschen bestätigen
+      required: true
+      selector:
+        boolean:
+
 start_grid_charge:
   name: Netzladung starten
   description: >-

@@ -52,10 +52,24 @@ neuen Standardsensor und löst keine zusätzlichen Wetterabrufe aus.
 | REQ-HEMS-CONFIGURATION / #226 | OptionsFlow, Select, ControlStore | `test_hems_configuration.py`, `frontend/tests/charging.test.ts`; Upgrade, Quellenzuordnung und gemeinsame Ladegrenzen |
 | REQ-HEMS-OBSERVABILITY / #226 | Sensoren, `frontend/src/components/HemsCard.vue`, `frontend/src/hems.ts` | `frontend/tests/hems.test.ts`, `frontend/browser/hems.spec.ts`; DE/EN, unbekannte Daten, Plan vs. quittierter Ladebefehl |
 | REQ-HEMS-ACCEPTANCE / #227 | gemeinsamer Branch und Snapshot-PR | `test_hems_acceptance.py`, vollständige Prüfungen und unabhängiges Review im PR |
+| REQ-HEMS-FORECAST-EVALUATION / #231 | `domain/hems_evaluation.py`, `infrastructure/hems_archive.py` | `test_hems_evaluation.py`, `test_hems_archive.py`; kausale Zielauswahl, Messgrenzen, Persistenzfehler und begrenzter Export |
+| REQ-HEMS-WEIGHTED-PROFILE / #232 | `domain/hems_load.py`, `infrastructure/hems_history.py` | Last-/Historientests; 7/28 Tage, Qualitätsgewichtung, DST und zensierte Zeiten |
+| REQ-HEMS-LIVE-ADJUSTMENT / #233 | `domain/hems_live.py`, `application/hems_prediction.py` | `test_hems_live.py`, `test_hems_prediction_runtime.py`; vorab ausgegebene Basis, Abklingen, Konfigurationsrennen und gemeinsame Freigabe |
+| REQ-HEMS-FORECAST-UNCERTAINTY / #234 | `domain/hems_uncertainty.py`, `HemsForecastQuality.vue` | `test_hems_uncertainty.py`, Runtime-/Frontend-/Browsertests; spätere echte Bandprüfung, Null/Unbekannt, beide Tarife |
+| REQ-HEMS-HOUSE-LOAD-CONCEPT / #235 | `docs/hems-house-load-source.md` | unabhängige Prüfung gegen Register-/Sensorbilanz; nur Konzept, keine neue aktive Lastquelle |
 
 Modulpfade ohne Präfix beziehen sich auf `custom_components/sax_power/`,
 Python-Testnamen auf `tests/`. Die tatsächlich ausgeführten Testzahlen und
 das Review des endgültigen Commits stehen im PR-Prüfprotokoll.
+
+Die neuen Verfahren bleiben standardmäßig beobachtend, das Archiv ist zunächst
+ausgeschaltet. Synthetische Zeitreihen prüfen die Freigabemechanik; sie ersetzen
+keinen Feldnachweis. Ein Profil benötigt mindestens 14 spätere Vergleichsnächte.
+Die angezeigte Bandbreite benötigt 60 Lernnächte und danach 30 passende
+Prüfnächte mit vorab ausgegebenen Bereichen. Zensierte SAX-Zeit und die Dämmerung
+liefern dabei keinen unabhängigen Hauslastnachweis. Der separate PV-Morgenabgleich
+in pv-forecast-ha #172 nutzt ausschließlich dessen echte AC-PV-Messung; SAX
+korrigiert den PV-Ertrag nicht nochmals.
 
 ## Bewusste Grenzen
 

@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant.auth.permissions.const import CAT_ENTITIES, POLICY_CONTROL
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
@@ -21,6 +21,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.service import async_register_admin_service
 from pymodbus.client import AsyncModbusTcpClient
 
 from .const import (
@@ -33,8 +34,12 @@ from .const import (
     ATTR_REASON,
     ATTR_START,
     CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_HEMS_ARCHIVE_ENABLED,
     CONF_HEMS_CHARGE_EFFICIENCY,
     CONF_HEMS_DISCHARGE_EFFICIENCY,
+    CONF_HEMS_FORECAST_MODE,
+    CONF_HEMS_HISTORY_DAYS,
+    CONF_HEMS_LIVE_ADJUSTMENT,
     CONF_HEMS_PV_PROVIDER,
     CONF_HEMS_SOLCAST_MAX_AGE,
     CONF_PRICE_UNIT,
@@ -359,6 +364,10 @@ def _control_options(options: Mapping[str, Any]) -> dict[str, Any]:
         CONF_HEMS_SOLCAST_MAX_AGE: 24,
         CONF_HEMS_CHARGE_EFFICIENCY: 0.95,
         CONF_HEMS_DISCHARGE_EFFICIENCY: 0.95,
+        CONF_HEMS_ARCHIVE_ENABLED: False,
+        CONF_HEMS_HISTORY_DAYS: "7",
+        CONF_HEMS_FORECAST_MODE: "observe",
+        CONF_HEMS_LIVE_ADJUSTMENT: False,
     }
     return {
         key: value
@@ -545,6 +554,46 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await coordinator.async_restart_economics_accounting(
             reason=call.data.get(ATTR_REASON)
         )
+
+    async def _async_export_hems_archive(call: ServiceCall) -> dict[str, Any]:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        return await coordinator.hems.prediction.archive.async_export(
+            offset=call.data["offset"], limit=call.data["limit"]
+        )
+
+    async def _async_delete_hems_archive(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.hems.prediction.async_delete()
+        coordinator.hems.source_changed()
+
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        "export_hems_archive",
+        _async_export_hems_archive,
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_DEVICE_ID): cv.string,
+                vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
+                vol.Optional("limit", default=100): vol.All(
+                    int, vol.Range(min=1, max=100)
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        "delete_hems_archive",
+        _async_delete_hems_archive,
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_DEVICE_ID): cv.string,
+                vol.Required(ATTR_CONFIRM): _require_confirm_true,
+            }
+        ),
+    )
 
     hass.services.async_register(
         DOMAIN,

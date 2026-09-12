@@ -257,9 +257,19 @@ Im zeitvariablen Tarif wählst du unter **Netzlademodus** zusätzlich zum
 bisherigen **Min-/Max-SOC** den Modus **Bedarfsgesteuert**. Im dynamischen Tarif
 heißt dieselbe Regelung **Bedarfsgesteuert / Nachtbrücke** und benötigt eine
 Preisvorschau. Sie schätzt den Bedarf aus der SAX-Entladeenergie der letzten
-sieben Tage und prüft alle fünf Minuten, wie viel Netzladung bis zur tragfähigen
+standardmäßig sieben Tage und prüft alle fünf Minuten, wie viel Netzladung bis zur tragfähigen
 PV-Versorgung nötig ist. Die gemeinsame Karte zeigt Menge, Ziel, Ladezeitraum,
 Begründung und nächste Prüfung; ein Plan ist vom quittierten Ladebefehl getrennt.
+
+Optional kannst du unter **Konfigurieren** ein lokales Prognosearchiv, eine
+28-Tage-Historie und einen Abgleich mit der aktuellen Nacht einschalten.
+Neue Profile werden zunächst nur beobachtet. Die Automatik verwendet sie erst
+nach einem späteren Vergleich mit der bisherigen Prognose. Änderungen an
+Historienlänge oder Live-Abgleich benötigen einen neuen gemeinsamen Nachweis.
+Die Prognosedetails zeigen beobachtete Fehler und Datenabdeckung; eine
+Bandbreite erscheint erst nach eigener Prüfung. Sie verändert weder die
+Lademenge noch die Min-SOC-Reserve. Auch mit diesen Erweiterungen wird nur
+beobachtbare SAX-Entladung geschätzt, kein vollständiger Hausverbrauch.
 
 Wähle unter **Konfigurieren** den PV-Anbieter und dessen Anlage:
 **pv_forecast** und **Solcast** werden unterstützt. Bei Solcast kann zusätzlich

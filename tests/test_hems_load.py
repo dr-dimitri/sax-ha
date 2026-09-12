@@ -1,5 +1,6 @@
 """Analytical night-profile tests for REQ-HEMS-LOAD-PROFILE."""
 
+import math
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -10,7 +11,9 @@ from custom_components.sax_power.domain.hems_load import (
     DischargeObservation,
     NightSpan,
     build_night_profile,
+    build_weighted_profile,
     forecast_night_load,
+    forecast_weighted_load,
 )
 
 NOW = datetime(2026, 9, 12, 22, tzinfo=UTC)
@@ -205,3 +208,213 @@ def test_overlap_is_rejected_and_missing_geometry_explained():
 def test_outside_model_scope_produces_no_forecast():
     learned = replace(profile(), as_of=NIGHTS[-1].end + timedelta(hours=4))
     assert forecast_night_load(learned, NIGHTS[-1], zone=UTC) == ()
+
+
+def weighted(values=None, **kwargs):
+    return build_weighted_profile(
+        observations() if values is None else values,
+        kwargs.pop("nights", NIGHTS),
+        as_of=kwargs.pop("as_of", NOW),
+        evaluated_through=kwargs.pop("evaluated_through", NOW),
+        zone=kwargs.pop("zone", UTC),
+        **kwargs,
+    )
+
+
+def test_weighted_candidate_keeps_legacy_result_separate():
+    records = observations(hours=(1, 1, 4), powers=(0.1, 1, 0.4))
+    legacy = profile(records)
+    candidate = weighted(records)
+    weights = [
+        math.exp(-(NOW - n.end).total_seconds() / (7 * 86400)) * hours / 12
+        for n, hours in zip(NIGHTS, (1, 1, 4), strict=False)
+    ]
+    expected = sum(w * p for w, p in zip(weights, (0.1, 1, 0.4), strict=True)) / sum(
+        weights
+    )
+    forecast, meta = forecast_weighted_load(candidate, NIGHTS[-1], zone=UTC)
+    assert legacy.pooled_kw == pytest.approx(0.5)
+    assert forecast.intervals[0].energy_kwh == pytest.approx(expected / 4)
+    assert candidate.model_key == "weighted-v1:7d"
+    assert meta[0].weight_sum == pytest.approx(sum(weights))
+    assert meta[0].group == "pooled"
+
+
+@pytest.mark.parametrize(
+    "minutes,direct", [(1 / 60, False), (9.999, False), (10, True), (15, True)]
+)
+def test_weighted_slot_requires_ten_minutes_per_independent_night(minutes, direct):
+    records = []
+    for n in NIGHTS[:3]:
+        records.extend(
+            (
+                DischargeObservation(n.start, n.start + timedelta(hours=2), 1, "valid"),
+                DischargeObservation(
+                    n.start + timedelta(hours=4),
+                    n.start + timedelta(hours=4, minutes=minutes),
+                    minutes / 60,
+                    "valid",
+                ),
+            )
+        )
+    candidate = weighted(tuple(records))
+    forecast, meta = forecast_weighted_load(candidate, NIGHTS[-1], zone=UTC)
+    assert (meta[0].method == "weighted_slot") is direct
+    if direct:
+        assert forecast.intervals[0].energy_kwh == pytest.approx(0.25)
+        assert meta[0].observed_minutes == pytest.approx(3 * minutes)
+
+
+@pytest.mark.parametrize(
+    "minutes,direct", [(1 / 60, False), (59.99, False), (60, True), (120, True)]
+)
+def test_weighted_dawn_requires_one_hour_per_night(minutes, direct):
+    records = []
+    for n in NIGHTS[:3]:
+        records.extend(
+            (
+                DischargeObservation(n.start, n.start + timedelta(hours=2), 1, "valid"),
+                DischargeObservation(
+                    n.end - timedelta(minutes=minutes), n.end, minutes / 60, "valid"
+                ),
+            )
+        )
+    candidate = weighted(tuple(records))
+    forecast, meta = forecast_weighted_load(candidate, NIGHTS[-1], zone=UTC)
+    assert (meta[-1].method == "weighted_dawn") is direct
+    if direct:
+        assert forecast.intervals[-1].energy_kwh == pytest.approx(0.25)
+
+
+@pytest.mark.parametrize(
+    "days,allowed", [(7, True), (28, True), (14, False), (True, False), (7.0, False)]
+)
+def test_history_selection_is_explicit(days, allowed):
+    if allowed:
+        assert weighted(history_days=days).history_days == days
+    else:
+        with pytest.raises(ValueError):
+            weighted(history_days=days)
+
+
+def test_twenty_eight_days_do_not_manufacture_missing_history():
+    candidate = weighted(history_days=28)
+    assert candidate.nights == 3
+    assert candidate.available_history_days == pytest.approx(3 + 4 / 24)
+    assert candidate.model_key == "weighted-v1:28d"
+
+
+def _weekly_cases(days):
+    nights = tuple(
+        NightSpan(
+            NIGHTS[-1].start - timedelta(days=days_ago),
+            NIGHTS[-1].end - timedelta(days=days_ago),
+        )
+        for days_ago in sorted(days, reverse=True)
+    )
+    records = tuple(
+        DischargeObservation(n.start, n.end, 12 * (index + 1), "valid")
+        for index, n in enumerate(nights)
+    )
+    return nights, records
+
+
+@pytest.mark.parametrize(
+    "days,group",
+    [
+        ((7, 14, 21), "same_weekday"),
+        ((6, 7, 13), "weekend"),
+        ((1, 2, 3), "all_nights"),
+    ],
+)
+def test_weekday_group_fallback_uses_three_distinct_nights(days, group):
+    nights, records = _weekly_cases(days)
+    candidate = weighted(records, nights=nights, history_days=28)
+    _, meta = forecast_weighted_load(candidate, NIGHTS[-1], zone=UTC)
+    assert meta[0].group == group
+    assert meta[0].sample_nights >= 3
+
+
+def test_older_than_selected_window_cannot_supply_baseline_or_candidate():
+    nights, records = _weekly_cases((8, 9, 10))
+    assert weighted(records, nights=nights).reason == "insufficient_history"
+    assert weighted(records, nights=nights, history_days=28).reason == "ok"
+    assert profile(records, nights=nights).reason == "insufficient_history"
+
+
+def test_dst_repeated_slot_counts_once_and_caps_duration_weight():
+    zone = ZoneInfo("Europe/Berlin")
+    start = datetime(2026, 10, 24, 18, tzinfo=UTC)
+    nights = tuple(
+        NightSpan(
+            start - timedelta(days=d), start - timedelta(days=d) + timedelta(hours=12)
+        )
+        for d in (2, 1, 0)
+    )
+    as_of = datetime(2026, 10, 25, 22, tzinfo=UTC)
+    records = tuple(DischargeObservation(n.start, n.end, 6, "valid") for n in nights)
+    candidate = weighted(
+        records, nights=nights, as_of=as_of, evaluated_through=as_of, zone=zone
+    )
+    samples = dict(candidate.slots)[8]
+    assert len(samples) == 3
+    repeated = samples[-1]
+    assert repeated.observed_seconds == 1800
+    assert repeated.power_kw == pytest.approx(0.5)
+    assert repeated.weight == pytest.approx(
+        math.exp(-(as_of - nights[-1].end).total_seconds() / (7 * 86400))
+    )
+
+
+def test_dst_partial_repeated_slot_weights_the_real_available_duration():
+    zone = ZoneInfo("Europe/Berlin")
+    night = NightSpan(
+        datetime(2026, 10, 24, 18, tzinfo=UTC), datetime(2026, 10, 25, 6, tzinfo=UTC)
+    )
+    as_of = night.end + timedelta(hours=16)
+    records = (
+        DischargeObservation(night.start, night.start + timedelta(hours=2), 1, "valid"),
+        DischargeObservation(
+            datetime(2026, 10, 25, 0, tzinfo=UTC),
+            datetime(2026, 10, 25, 0, 5, tzinfo=UTC),
+            0.05,
+            "valid",
+        ),
+        DischargeObservation(
+            datetime(2026, 10, 25, 1, tzinfo=UTC),
+            datetime(2026, 10, 25, 1, 5, tzinfo=UTC),
+            0.05,
+            "valid",
+        ),
+    )
+    candidate = weighted(
+        records, nights=(night,), as_of=as_of, evaluated_through=as_of, zone=zone
+    )
+    sample = dict(candidate.slots)[8][0]
+    recency = math.exp(-(as_of - night.end).total_seconds() / (7 * 86400))
+    assert sample.observed_seconds == 600
+    assert sample.weight == pytest.approx(recency / 3)
+
+
+@pytest.mark.parametrize(
+    "quality,power,reason",
+    [
+        ("valid", 0, "ok"),
+        ("censored", 0, "insufficient_history"),
+        ("unknown", 1, "insufficient_history"),
+        ("valid", 4.6, "ok"),
+    ],
+)
+def test_weighted_quality_and_physical_high_load_are_preserved(quality, power, reason):
+    candidate = weighted(observations(powers=(power,) * 3, quality=quality))
+    assert candidate.reason == reason
+    if reason == "ok":
+        forecast, _ = forecast_weighted_load(candidate, NIGHTS[-1], zone=UTC)
+        assert forecast.intervals[0].energy_kwh == pytest.approx(power / 4)
+
+
+@pytest.mark.parametrize(
+    "lag,reason", [(900, "ok"), (901, "history_stale"), (-1, "history_stale")]
+)
+def test_weighted_profile_preserves_freshness_boundary(lag, reason):
+    assert weighted(evaluated_through=NOW - timedelta(seconds=lag)).reason == reason

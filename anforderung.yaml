@@ -59,6 +59,11 @@
 # REQ-HEMS-CONFIGURATION         done        Rückwärtskompatible HEMS-Einrichtung (#226)
 # REQ-HEMS-OBSERVABILITY         done        Gemeinsame Erklärung, Datenqualität und echte Prüftermine (#226)
 # REQ-HEMS-ACCEPTANCE             done        Tarifübergreifende Simulation und Abnahme (#227)
+# REQ-HEMS-FORECAST-EVALUATION    done        Unveränderliches Prognosearchiv und späterer Gütenachweis (#231)
+# REQ-HEMS-WEIGHTED-PROFILE       done        Qualitätsgewichtetes Nachtprofil mit optional 28 Tagen (#232)
+# REQ-HEMS-LIVE-ADJUSTMENT        done        Gedämpfter kausaler Abgleich der aktuellen Nacht (#233)
+# REQ-HEMS-FORECAST-UNCERTAINTY   done        Prospektiv geprüfte Lastbandbreite ohne Ladeeingriff (#234)
+# REQ-HEMS-HOUSE-LOAD-CONCEPT     done        Quellenvertrag für optionalen späteren Hausverbrauch (#235)
 # REQ-BUNDLED-DASHBOARD           superseded Abgelöst durch das einzige Dashboard SAX Power (REQ-VUE-DASHBOARD)
 # REQ-VUE-DASHBOARD               done       Dashboard SAX Power mit Navigation, Opt-in und lokalem Build (#197)
 # REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
@@ -5185,8 +5190,10 @@ requirement_hems_load_profile:
   status: done
   description: >
     Ausschließlich SAX-Entladeenergie auf der AC-Seite ist Verbrauchsbasis,
-    niemals eine zusätzliche Netz- oder Hauslastmessung. Die Auswertung verwendet
-    strikt [as_of-168h,as_of), astronomische Nächte und belegte freie Entladung.
+    niemals eine zusätzliche Netz- oder Hauslastmessung. Die unveränderte Baseline
+    verwendet strikt [as_of-168h,as_of), astronomische Nächte und belegte freie
+    Entladung. Das separat geprüfte gewichtete Profil ist in
+    REQ-HEMS-WEIGHTED-PROFILE beschrieben.
     Drei vollständig im Rückblick liegende abgeschlossene Nächte mit je mindestens
     einer Stunde gültiger Beobachtung und zusammen sechs Stunden sind erforderlich.
     Leerer Speicher, physische Entladegrenze, tatsächliche Ladung/Pause/Übersteuerung
@@ -5315,3 +5322,88 @@ requirement_hems_acceptance:
     - "Kaltstart/Recovery/Restart, Preis- und Monatsgrenzen, Nachtmodell, PV-Warten, Kalibrierung und Safety werden übergreifend getestet."
     - "Vollständiges pytest, Ruff, Black sowie Frontend-Prüfungen, Build und Browserprüfung; kein Kontakt mit produktiver Hardware. Hardware-Skips offen berichten."
     - "Unabhängiges Review der finalen Änderungen und Folgekorrekturen, Ergebnis und geprüfter Commit im PR. Required CI für exakt diesen Commit erfolgreich."
+
+requirement_hems_forecast_evaluation:
+  id: REQ-HEMS-FORECAST-EVALUATION
+  title: "Unveränderliche Prognosen und kausaler Gütenachweis"
+  status: done
+  description: >
+    Das standardmäßig ausgeschaltete lokale Archiv hält vorab ausgegebene
+    SAX-Lastprognosen, ihre unberichtigten Profile, Kandidaten, wirksame Auswahl,
+    PV-Zeitreihe und Planungsparameter getrennt fest. Neue Prognosen erhalten neue
+    Identitäten; spätere Istwerte ändern die Ausgabe nicht. Beobachten ist die
+    Standardeinstellung für neue Verfahren, Automatik benötigt einen späteren
+    gemeinsamen Nachweis der tatsächlich verwendeten Profil-/Live-Kombination.
+  requirements:
+    - "Nur qualitätsbelegte freie SAX-Entladung ist Istwert. Fehlende, gesperrte, leere oder ladende Zeit ist unbekannt, niemals null. Die beobachtete SAX-Energie ist kein vollständiger unabhängiger Hausverbrauch."
+    - "15-/60-Minuten-Ziele liegen auf festem UTC-Raster; jeweils letzte rechtzeitige Ausgabe. Vollständige Restnacht höchstens einmal je Nacht. Vergleichsdauer zählt reale Minuten nur einmal; Kandidaten verwenden dieselben belegten Abschnitte."
+    - "Versionierte Freigabe: mindestens 14 spätere unterschiedliche Nächte, je mindestens eine gemeinsame Beobachtungsstunde und zusammen mindestens 14 Stunden. Mittlerer absoluter kWh-Fehler je belegter Stunde sinkt mindestens 5 Prozent; P90 der Unterschätzung steigt höchstens 5 Prozent. Fehlerfreie Baseline, fehlender oder negativer Nachweis aktivieren keinen Kandidaten."
+    - "Modell-/Parameter-/Historien-/Live-Versionen sind ein gemeinsamer Freigabeschlüssel. Nacht und Dämmerung sind getrennt; SAX-Dämmerungsrestlast liefert keinen unabhängigen Bedarfsnachweis."
+    - "Änderungen an Historienlänge oder Live-Abgleich bilden eine neue Kombination. Bis zu deren eigenem späterem Nachweis gilt wieder die unveränderte Sieben-Tage-Basis. Eine unvollständige Modellzuordnung bei Auswertungsfehlern wird nicht archiviert."
+    - "Detailprognosen maximal 90 Tage/64 MiB, kompakte Paare maximal 365 Tage/50.000 Einträge. Kompakte Paare bewahren signierte Fehler, tatsächliche Zeitabdeckung, Qualitäts-/Nacht-/Modellkennung und vorab ausgegebene Bandgrenzen. Grenzen und fehlende Evidenz bleiben sichtbar."
+    - "Persistenz und Auswertung laufen asynchron bzw. im HA-Executor. Unbekannte/beschädigte Stores werden bis zu bewusster Löschung nicht überschrieben. Generationen verhindern Übernahme veralteter Arbeit nach Änderung, Löschung oder Entladen."
+    - "Archiv aus erzeugt keine neuen Nachweise oder Erstfreigaben. Ein geprüftes unverändertes Profil darf mit Kennzeichnung bleiben; Live-Anker werden nicht erneuert. Wiederanschalten rekonstruiert keine vergangenen Ausgaben."
+    - "MAE, Bias, Unter-/Überschätzung, Vergleichsnächte und Abdeckung sind in Diagnose/Status verfügbar. Administrative Aktionen export_hems_archive und delete_hems_archive lesen begrenzte Seiten bzw. löschen nur nach ausdrücklicher Bestätigung. Kein neuer Wetterabruf oder Modbus-Pfad."
+
+requirement_hems_weighted_profile:
+  id: REQ-HEMS-WEIGHTED-PROFILE
+  title: "Qualitätsgewichtetes Nachtprofil mit optionaler 28-Tage-Historie"
+  status: done
+  description: >
+    Sieben Tage bleiben Standard und unveränderte Vergleichsbasis. Die ausdrücklich
+    wählbare 28-Tage-Historie erweitert ausschließlich den neuen Profilkandidaten.
+    Historienhaltung, Recorder-Abfrage und astronomische Nachtberechnung beachten
+    die gewählte reale Dauer. Bestehende Qualitätsdaten migrieren ohne erfundene
+    rückwirkende Beobachtung.
+  requirements:
+    - "Drei abgeschlossene Vergleichsnächte mit je einer gültigen Stunde und insgesamt sechs Stunden bleiben Mindestqualität; frei beobachtete Nullleistung ist gültig."
+    - "Ein lokaler Viertelstundenslot benötigt mindestens zehn gültige Minuten je Nacht; die letzten zwei Nachtstunden mindestens 60 gültige Minuten. Wiederholte DST-Slots bewahren reale Dauer und zählen je Nacht nur einmal."
+    - "Gewicht je Nacht: exp(-Alter_in_Tagen/7) mal beobachtetem Anteil. Gruppenfolge gleicher Wochentag, Werktag/Wochenende, alle passenden Nächte, qualitätsgewichtetes Gesamtnachtmittel; jede lokale Gruppe benötigt drei verschiedene qualifizierte Nächte."
+    - "Ausgabe enthält gewählte/vorhandene Historie und je Slot Methode, Gruppe, Vergleichsnächte, belegte Minuten und Gewichtssumme. Parameterversion und spätere Freigabe bleiben getrennt von der Historienauswahl."
+    - "Automatische Dämmerungsfortschreibung des Kandidaten benötigt einen eigenen Bedarfsnachweis. Ohne diesen bleibt die bisherige Dämmerungsschätzung; fehlende Abdeckung bewahrt den bestehenden Planungsfallback."
+
+requirement_hems_live_adjustment:
+  id: REQ-HEMS-LIVE-ADJUSTMENT
+  title: "Kausale Anpassung an die aktuelle Nacht"
+  status: done
+  description: >
+    Der optionale Abgleich vergleicht vorab archivierte unkorrigierte Basiswerte
+    mit genau denselben belegten SAX-Entladeabschnitten der laufenden Nacht.
+    Ohne passenden Nachweis bleibt das gültige Basisprofil bestehen. Live-Daten
+    reparieren keine ungültige verwendete Profilbasis.
+  requirements:
+    - "Versionierter Kandidat: 45 Minuten Rückblick, mindestens 30 gültige Vergleichsminuten und letzter gültiger Messpunkt höchstens fünf Minuten alt. Nach Neustart werden mindestens 30 Minuten neue Evidenz benötigt."
+    - "50 Prozent der mittleren Leistungsabweichung, begrenzt auf max(0,1 kW, 50 Prozent Basisleistung) und technische SAX-Leistung. Exponentieller Abfall mit 30 Minuten Halbwertszeit, vollständig beendet nach 60 Minuten. Zeitgewichtete Integration mit nichtnegativer Energie."
+    - "Nur neue passende Messdaten erneuern den Anker. Wiederholung, fehlende Live-Evidenz, Laden, tatsächliche Sperre oder Archiv aus verlängern ihn nicht. Historienqualität und frischer letzter Gerätesample müssen freie Entladung bestätigen."
+    - "Nacht-/Modellwechsel verwerfen inkompatible Anker. Nach Sonnenaufgang kein neues Lernen aus PV-bereinigter Restentladung; Auswirkung in Dämmerung nur nach separater Freigabe."
+    - "Beide Tarife verwenden dieselbe Berechnung. Keine neue Reserve, Wirkungsgrade, PV-Korrektur oder Geräteaktion; bestehende Mengen-/Zeitbudgets und Sicherheitsregeln bleiben maßgeblich."
+
+requirement_hems_forecast_uncertainty:
+  id: REQ-HEMS-FORECAST-UNCERTAINTY
+  title: "Belegte Lastbandbreite als reine Anzeige"
+  status: done
+  description: >
+    Beide Tarifansichten zeigen erwartete SAX-Entladung für einen expliziten
+    zukünftigen Stundenzeitraum und einen empirischen Bereich ausschließlich
+    bei passendem späterem Nachweis. Fehlende Evidenz ist kein pauschaler
+    Prozentpuffer. Die Anzeige verändert die Ladeenergie und Min-SOC nicht.
+  requirements:
+    - "Gesamtfehler vollständig beobachteter Ziele verwenden; keine Addition vermeintlich unabhängiger Viertelstundenquantile. Modell, Datenbasis, Nacht/Dämmerung sowie lokale Ausgabe- und Zielstunde bilden feste getrennte Klassen."
+    - "Zentraler nomineller 80-Prozent-Bereich aus 60 verschiedenen Lernnächten; danach 30 zeitlich spätere vorab ausgegebene Bereiche mit mindestens 24 Treffern. Pro Klasse/Nacht zählt nur ein vorbestimmtes Ziel. Quantilmethode und Trainingsstand werden eingefroren."
+    - "Die letzten 30 qualifizierten Prüfnächte kontrollieren die Freigabe; weniger als 24 Treffer, verlorener Nachweis, Quellen-/Modellwechsel oder 30 Tage ohne neuen Beleg entziehen sie. Stichprobe, Trefferrate, Breite und Datenalter bleiben sichtbar."
+    - "Null, unbekannt, unzureichend und veraltet bleiben unterscheidbar. Reconnect entfernt alte Live-Anzeigen bis zur neuen HA-Datenbasis."
+    - "Die Auswahl beobachtbarer SAX-Entladung begrenzt den Nachweis. Keine Garantie für Hauslast, leere/gesperrte Batterie, PV oder Netzlademenge; Tages-PV-Bänder werden nicht auf beliebige Nachtbrücken übertragen."
+
+requirement_hems_house_load_concept:
+  id: REQ-HEMS-HOUSE-LOAD-CONCEPT
+  title: "Quellenvertrag für optionalen unabhängigen Hausverbrauch"
+  status: done
+  description: >
+    docs/hems-house-load-source.md beschreibt Messgröße, Quellenmatrix,
+    bestätigte AC-Energiebilanz, normalisierte Intervalle, Opt-in, Neuaufbau,
+    Ausfallzustände und Abnahme. Es ist ein geprüftes Konzept, keine neue
+    aktive Quelle. Erst bestätigte Entity, Messgrenze und separater Auftrag
+    erlauben eine Implementierung. Die SAX-basierte Prognose bleibt unabhängig.
+  requirements:
+    - "Quellenmatrix, bestätigte Messgrenze und Vorzeichen, unbekannte Intervalle, Opt-in und getrennte Modellmigration sind im Konzept prüfbar beschrieben."
+    - "Die synthetischen Energiebilanzen belegen Vorzeichen und verhindern die doppelte Anrechnung von PV, SAX oder Netzmessung. Kein neuer Laufzeitpfad."

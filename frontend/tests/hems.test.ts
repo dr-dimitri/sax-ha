@@ -303,3 +303,137 @@ describe("REQ-HEMS-OBSERVABILITY", () => {
     );
   });
 });
+
+describe("REQ-HEMS-FORECAST-UNCERTAINTY", () => {
+  const quality = {
+    mode: "auto",
+    candidate_active: true,
+    history_days: 28,
+    available_history_days: 22.5,
+    archive: { enabled: true, pairs_count: 150, truncated: false },
+    uncertainty: {
+      status: "validated",
+      expected_kwh: 0.8,
+      lower_kwh: 0.6,
+      upper_kwh: 1.1,
+      start: "2026-09-12T22:00:00Z",
+      end: "2026-09-12T23:00:00Z",
+      training_nights: 60,
+      validation_nights: 30,
+      empirical_coverage: 0.8,
+      mean_width_kwh: 0.5,
+    },
+  };
+  it.each(["timed", "dynamic"] as const)(
+    "shows validated ranges in %s without changing targets or sending writes",
+    async (tariff) => {
+      const { root, update, callService, disconnect, reconnect } = await mount(
+        "de",
+        tariff,
+        true,
+      );
+      await update({ forecast_quality: quality });
+      const range = () => root.querySelector('[data-testid="hems-range"]');
+      expect(range()?.textContent).toContain("0,6–1,1 kWh");
+      expect(root.querySelector(".hems-quality")?.textContent).toContain(
+        "28 / 22,5 Tage",
+      );
+      expect(root.querySelector(".hems-card__metrics")?.textContent).toContain(
+        "47,5 %",
+      );
+      expect(root.querySelector(".hems-quality")?.textContent).toContain(
+        "keine Garantie",
+      );
+      await disconnect();
+      expect(range()).toBeNull();
+      await reconnect();
+      expect(range()?.textContent).toContain("0,6–1,1 kWh");
+      expect(callService).not.toHaveBeenCalled();
+    },
+  );
+  it("distinguishes a validated zero from absent and stale evidence", async () => {
+    const { root, update } = await mount();
+    await update({
+      forecast_quality: {
+        ...quality,
+        uncertainty: {
+          ...quality.uncertainty,
+          expected_kwh: 0,
+          lower_kwh: 0,
+          upper_kwh: 0,
+        },
+      },
+    });
+    expect(
+      root.querySelector('[data-testid="hems-range"]')?.textContent,
+    ).toContain("0–0 kWh");
+    for (const reason of ["insufficient_training", "stale", "rejected"]) {
+      await update({
+        forecast_quality: {
+          ...quality,
+          uncertainty: {
+            status: "unavailable",
+            reason,
+            expected_kwh: null,
+            lower_kwh: null,
+            upper_kwh: null,
+          },
+        },
+      });
+      expect(root.querySelector('[data-testid="hems-range"]')).toBeNull();
+      expect(
+        root.querySelector('[data-testid="hems-range-unavailable"]')
+          ?.textContent,
+      ).toContain("Bandbreite noch nicht belastbar");
+      expect(root.querySelector(".hems-quality")?.textContent).not.toContain(
+        "0 kWh",
+      );
+    }
+  });
+  it("does not display malformed bounds as validated evidence", async () => {
+    const { root, update } = await mount("en");
+    for (const bounds of [
+      [null, 1],
+      [NaN, 1],
+      [2, 1],
+      [-1, 1],
+    ]) {
+      await update({
+        forecast_quality: {
+          ...quality,
+          uncertainty: {
+            ...quality.uncertainty,
+            lower_kwh: bounds[0],
+            upper_kwh: bounds[1],
+          },
+        },
+      });
+      expect(root.querySelector('[data-testid="hems-range"]')).toBeNull();
+      expect(root.textContent).toContain("Range not yet validated");
+    }
+  });
+  it("explains archive failures and shows measured errors with their sign", async () => {
+    const { root, update, callService } = await mount("de");
+    await update({
+      forecast_quality: {
+        ...quality,
+        archive: { ...quality.archive, status: "save_failed" },
+        summary: {
+          nights: 14,
+          observed_hours: 28.5,
+          mae_kwh: 0.15,
+          bias_kwh: -0.12,
+          under_kwh: 1.8,
+          over_kwh: 0.1,
+        },
+      },
+    });
+    const detail = root.querySelector(".hems-quality")?.textContent;
+    expect(detail).toContain("erfolgreich gespeicherten Nachweis");
+    expect(detail).toContain("28,5 h");
+    expect(detail).toContain("0,15 kWh");
+    expect(detail).toContain("-0,12 kWh");
+    expect(detail).toContain("1,8 kWh");
+    expect(callService).not.toHaveBeenCalled();
+  });
+});

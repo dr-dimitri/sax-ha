@@ -761,7 +761,11 @@
           "hems_solcast_timestamp": "Solcast: API Last Polled sensor (optional)",
           "hems_solcast_max_age_hours": "Solcast: maximum forecast age (hours, assumption)",
           "hems_charge_efficiency": "Charging efficiency (assumption)",
-          "hems_discharge_efficiency": "Discharging efficiency (assumption)"
+          "hems_discharge_efficiency": "Discharging efficiency (assumption)",
+          "hems_archive_enabled": "Enable HEMS forecast archive",
+          "hems_history_days": "History for the new night profile",
+          "hems_forecast_mode": "Improved night forecast",
+          "hems_live_adjustment": "Evaluate adjustment to the current night"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative”, “smart” and “demand-based” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
@@ -778,7 +782,11 @@
           "hems_solcast_timestamp": "Optionally select the actual Solcast retrieval timestamp. Otherwise its sensor is discovered through the entity registry. It must belong to the selected Solcast installation; a state change timestamp cannot replace the retrieval time.",
           "hems_solcast_max_age_hours": "SAX assumption for Solcast: 1 to 24 hours, initially 24. A verified retrieval timestamp and sufficient coverage remain required; unknown update success is not a guarantee. pv_forecast always uses its provider limit of 60 minutes.",
           "hems_charge_efficiency": "Model assumption greater than 0 and up to 1, initially 0.95. Fraction of AC charging energy retained in the battery.",
-          "hems_discharge_efficiency": "Model assumption greater than 0 and up to 1, initially 0.95. Fraction of stored energy available as AC output."
+          "hems_discharge_efficiency": "Model assumption greater than 0 and up to 1, initially 0.95. Fraction of stored energy available as AC output.",
+          "hems_archive_enabled": "Stores forecasts locally before their outcomes and compares them with observed SAX discharge. No new quality evidence is collected without the archive. Details: at most 90 days/64 MiB; compact comparisons: at most 365 days/50,000 entries.",
+          "hems_history_days": "Seven days remain the default. 28 days collect additional quality-proven history; selecting this does not activate an unvalidated method. The existing seven-day forecast remains the reference.",
+          "hems_forecast_mode": "Observe compares new methods without affecting control. Automatic applies them only after separate later validation. Night and dawn are approved separately; min SOC remains the reserve.",
+          "hems_live_adjustment": "Evaluates a damped adjustment using observed SAX discharge over the last 45 minutes. Empty, charging and discharge-blocked periods are not zero demand. The combination with the selected profile requires joint validation. Changing the profile/live configuration returns to the existing seven-day forecast until the new combination is validated."
         }
       },
       "economics_fixed": {
@@ -963,6 +971,18 @@
         "none": "Not configured",
         "pv_forecast": "pv_forecast",
         "solcast_solar": "Solcast"
+      }
+    },
+    "hems_history_days": {
+      "options": {
+        "7": "7 days (default)",
+        "28": "28 days (optional)"
+      }
+    },
+    "hems_forecast_mode": {
+      "options": {
+        "observe": "Observe",
+        "auto": "Apply automatically after validation"
       }
     }
   }

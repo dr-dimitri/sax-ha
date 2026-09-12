@@ -3189,12 +3189,13 @@ requirement_self_diagnosis_repairs:
        möglich (REQ-DYNAMIC-PRICE-CHARGE). Der Hinweis erscheint sofort und
        verschwindet, sobald die Preisgrenzen korrigiert sind.
        translation_placeholders: max_price, neutral_price.
-    5. ISSUE_EMPTY_CHARGE_WINDOW ("Zeitfenster ist leer"): eine der beiden
+    5. ISSUE_EMPTY_CHARGE_WINDOW ("Zeitfenster ist leer oder unvollständig"): eine der beiden
        zeitfenstergesteuerten Automatiken (zeitgesteuertes Laden ODER
        netzdienliches Laden, je eigene issue_id mit Suffix "timed_charge"/
        "grid_serving") ist aktiv, aber ihre Start- und Endzeit sind
-       identisch (siehe _window_intervals: start == end gilt als leeres
-       Fenster) - die Automatik läuft dadurch nie, ohne dass das an der
+       identisch oder mindestens eine Grenze fehlt (None, etwa nach einer
+       abgewiesenen Zeitfenster-Überschneidung). Beide Fälle gelten als
+       unwirksames Fenster - die Automatik läuft dadurch nie, ohne dass das an der
        Entity selbst erkennbar wäre. translation_placeholders: feature
        (voll ausgeschriebener Anzeigename der Automatik).
     6. ISSUE_NO_ACTIVE_MONTHS ("Kein Monat ausgewählt"): analog zu Punkt 5,
@@ -3224,6 +3225,11 @@ requirement_self_diagnosis_repairs:
     - "tests/test_repairs.py deckt zusätzlich ab, dass eine unauffällige
        Standardkonfiguration (alles deaktiviert bzw. in Ordnung) keines der
        sechs Issues erzeugt."
+    - "Fehlende Startzeit, Endzeit oder beide Grenzen erzeugen bei beiden
+       aktivierten Automatiken einen beständigen Reparaturhinweis, auch nach
+       einem Reload. Vollständige Zeitfenster oder Abschalten der Automatik
+       löschen ihn. Die durch Überschneidung geleerte Zeit einer
+       Zwei-Schritt-Bearbeitung wird ebenfalls erkannt."
     - "tests/test_coordinator.py deckt ab, dass
        self._extended_unavailable_since nur auf der Zustandsflanke gesetzt
        wird (nicht bei jedem weiteren Poll-Zyklus mit weiterhin nicht

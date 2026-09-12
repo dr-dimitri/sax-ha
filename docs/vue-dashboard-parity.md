@@ -229,6 +229,35 @@ nicht benötigt. Das JSON-Ergebnis enthält Manifestversion, ZIP-SHA-256,
 Asset-SHA-256, Dateianzahl und Ergebnis. Die JS-Ausführung selbst wird separat
 im Produktionsmodul- und Browserlauf geprüft.
 
+### Abnahme der Tarif-Tabnamen und Anzeigeänderungen vom 12.09.2026
+
+Der Code aus
+[Commit 936eaeae6c97](https://github.com/dr-dimitri/sax-ha/commit/936eaeae6c972fe99e53f2f6d40af58ded6a80ab)
+bestand den vollständigen
+[CI-Lauf 34685941171](https://github.com/dr-dimitri/sax-ha/actions/runs/34685941171).
+Der Browserbericht gehört zum zugehörigen PR-Testmerge `8f37e3d8cad` und weist
+**28 bestandene Browserfälle, keine Fehler, keine erst nach Wiederholung
+bestandenen Fälle und keine übersprungenen Fälle** aus. Die vier Browserprojekte
+prüfen Deutsch/hell und Englisch/dunkel auf Desktop und Smartphone.
+
+Geprüft sind die neuen Tabnamen **Zeitvariabler Tarif / Time-of-use tariff**
+und **Dynamischer Tarif / Dynamic tariff**, die Reihenfolge mit dem dynamischen
+Tarif vor netzdienlichem Laden und die weiterhin unveränderten URL-Pfade.
+Die beiden Monatsraster zeigen keine zusätzliche Bestätigter-Wert-Zeile;
+Kontrollkästchen, Bedienung und HA-Rückmeldungen bleiben erhalten. Nur bestätigte
+deutsche Zeitfensterwerte des zeitvariablen Tarifs erhalten „ Uhr“.
+Komponententests prüfen außerdem unbekannte/nicht verfügbare Werte sowie
+unveränderte Eingaben und Service-Payloads.
+
+Für diesen Stand bestanden **202 Komponententests** sowie die lokale
+Python-Gesamtsuite mit **1.813 Tests und zwei erwarteten Hardware-Skips**.
+Typprüfung, Formatierung, Ruff/Black, Produktionsmodul-Smoke und reproduzierbarer
+Build waren erfolgreich. Die Browser verwenden das gebaute Produktionsmodul
+mit simuliertem HA-Kontext; an einer physischen Batterie wurde nicht getestet.
+Die isolierte Prüfung des abschließenden Snapshot-Pakets wird mit dessen
+Commit und Prüfsummen im [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
+festgehalten.
+
 ### Frühere Abnahme der kompakten Desktopansichten
 
 Dieser Nachweis vom 12.09.2026 verwendet die damaligen Tabnamen und betrifft
@@ -326,15 +355,15 @@ Config-Entry-Laden, Panel und Issue Registry sind echt. Die anschließend erneut
 ausgeführte lokale Gesamtsuite ergab **1.813 bestandene Tests und zwei erwartete
 Hardware-Skips**; Ruff und Black sind erfolgreich.
 
-### Screenshots des bisherigen Stands
+### Aktuelle Screenshots
 
-Alle Bilder wurden aus CI-Lauf 34684553344 vom 12.09.2026 übernommen. Sie
-dokumentieren den Stand vor den neuen Tabnamen, ihrer Reihenfolge und den
-Änderungen an Monatsrastern und bestätigten Zeitfensterwerten. Die Bildtitel
-verwenden deshalb die damaligen Namen; sie belegen diese neuen Änderungen
-noch nicht. Die Bilder zeigen die kompakten Desktopansichten und die weiterhin
-geräumige Mobilansicht. Der
-hell abgesetzte Testbereich kennzeichnet simulierte Daten und zeigt beide
+Alle Bilder stammen aus dem Browserbericht von
+[CI-Lauf 34685941171](https://github.com/dr-dimitri/sax-ha/actions/runs/34685941171)
+vom 12.09.2026. Sie zeigen die neuen Tabnamen und ihre Reihenfolge, die
+Monatsraster ohne zusätzliche Bestätigter-Wert-Zeile und das deutsche
+Uhr-Suffix im Zeitfenster. Die kompakten Desktopansichten und die geräumige
+Mobilansicht bleiben erhalten. Der hell abgesetzte Testbereich kennzeichnet
+simulierte Daten und zeigt beide
 Dashboard-Einstiege; der Link innerhalb des Vue-Panels führt ebenfalls zu
 Lovelace. Die native Darstellung von Zeit- und Datumsfeldern folgt dem Browser,
 während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
@@ -344,9 +373,9 @@ während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
 | Allgemeine Informationen | [Screenshot](images/vue-allgemein-desktop-light-de.png) | [Screenshot](images/vue-allgemein-mobile-dark-en.png) |
 | Speicher ausschalten – Bestätigung | [Screenshot](images/vue-storage-confirm-off-desktop-light-de.png) | [Screenshot](images/vue-storage-confirm-off-mobile-dark-en.png) |
 | Speicher einschalten – Bestätigung | [Screenshot](images/vue-storage-confirm-on-desktop-light-de.png) | [Screenshot](images/vue-storage-confirm-on-mobile-dark-en.png) |
-| Ladeautomatik | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
+| Zeitvariabler Tarif | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
+| Dynamischer Tarif | [Screenshot](images/vue-dynamisches-laden-desktop-light-de.png) | [Screenshot](images/vue-dynamisches-laden-mobile-dark-en.png) |
 | Netzdienliches Laden | [Screenshot](images/vue-netzdienliches-laden-desktop-light-de.png) | [Screenshot](images/vue-netzdienliches-laden-mobile-dark-en.png) |
-| Dynamisches Laden | [Screenshot](images/vue-dynamisches-laden-desktop-light-de.png) | [Screenshot](images/vue-dynamisches-laden-mobile-dark-en.png) |
 | Ersparnis | [Screenshot](images/vue-ersparnis-desktop-light-de.png) | [Screenshot](images/vue-ersparnis-mobile-dark-en.png) |
 
 <details>
@@ -354,11 +383,11 @@ während Beschriftungen und bestätigte Werte die HA-Sprache verwenden.
 
 ![Allgemeine Informationen mit simulierten HA-Daten](images/vue-allgemein-desktop-light-de.png)
 
-![Ladeautomatik mit simulierten HA-Daten](images/vue-ladeautomatik-desktop-light-de.png)
+![Zeitvariabler Tarif mit simulierten HA-Daten](images/vue-ladeautomatik-desktop-light-de.png)
+
+![Dynamischer Tarif mit simulierten HA-Daten](images/vue-dynamisches-laden-desktop-light-de.png)
 
 ![Netzdienliches Laden mit simulierten HA-Daten](images/vue-netzdienliches-laden-desktop-light-de.png)
-
-![Dynamisches Laden mit simulierten HA-Daten](images/vue-dynamisches-laden-desktop-light-de.png)
 
 ![Ersparnis mit simulierten HA-Daten](images/vue-ersparnis-desktop-light-de.png)
 

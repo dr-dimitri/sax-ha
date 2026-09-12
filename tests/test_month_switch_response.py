@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from datetime import time as dt_time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -160,7 +160,7 @@ async def test_month_acceptance_does_not_wait_for_transport_lock(
     _prepare_timed_charge(coordinator)
     with patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2),
+        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
     ):
         await coordinator._write_lock.acquire()
         try:
@@ -194,7 +194,7 @@ async def test_change_during_device_write_rechecks_latest_month_selection(
     coordinator.client.write_register.side_effect = write
     with patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2),
+        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
     ):
         await coordinator.async_set_timed_charge_month(1, True)
         task = coordinator._month_control_task
@@ -279,7 +279,7 @@ async def test_shutdown_drains_inflight_month_write_without_cancelling_sequence(
     coordinator.client.write_register.side_effect = write
     with patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2),
+        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
     ):
         await coordinator.async_set_timed_charge_month(1, True)
         task = coordinator._month_control_task
@@ -347,7 +347,7 @@ async def test_month_write_failure_keeps_config_and_allows_poll_retry(
     coordinator.client.write_register.side_effect = write
     with patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2),
+        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
     ):
         await coordinator.async_set_timed_charge_month(1, True)
         await coordinator._month_control_task

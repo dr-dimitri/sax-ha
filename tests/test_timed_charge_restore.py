@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util.file import WriteError
 
 from custom_components.sax_power.application.timed_charge import TimedChargeState
@@ -143,6 +144,212 @@ async def test_restart_resumes_same_overnight_window_and_stops_at_own_target(
     finally:
         await original.async_shutdown()
         await restored.async_shutdown()
+
+
+@pytest.mark.parametrize("between_windows", ["valid", "missing_soc", "no_poll"])
+async def test_live_latch_expires_before_next_overnight_window(
+    hass: HomeAssistant, between_windows: str
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: night two needs its own SOC below Min. SOC."""
+    await _save_config(hass)
+    coordinator = _coordinator(hass, soc=18)
+    try:
+        with _at(NOW):
+            await _load(coordinator)
+            await coordinator.async_finish_bootstrap()
+            assert coordinator._timed_charge_active
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() == STATE
+
+        if between_windows != "no_poll":
+            with _at(NOW.replace(hour=6)):
+                coordinator.data["soc"] = (
+                    None if between_windows == "missing_soc" else 60
+                )
+                await coordinator._async_enforce_grid_charge(coordinator.data)
+                assert not coordinator._timed_charge_active
+                assert not coordinator._timed_charge_armed
+                assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() is None
+
+        with _at(NOW + timedelta(days=1)):
+            coordinator.data["soc"] = 60
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert not coordinator._timed_charge_active
+            assert not coordinator._timed_charge_armed
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() is None
+
+            coordinator.data["soc"] = 20
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert not coordinator._timed_charge_active
+
+            coordinator.data["soc"] = 19
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() == (
+                TimedChargeState(
+                    STATE.start, STATE.end, STATE.expires_at + timedelta(days=1)
+                )
+            )
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize("inactive_reason", ["outside_window", "disabled", "month"])
+async def test_low_soc_outside_active_window_never_prearms_later_charge(
+    hass: HomeAssistant, inactive_reason: str
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: only an active window may observe the start SOC."""
+    overrides: dict[str, object] = {}
+    if inactive_reason == "disabled":
+        overrides["timed_charge_enabled"] = False
+    elif inactive_reason == "month":
+        overrides["timed_charge_months"] = frozenset({1})
+    await _save_config(hass, **overrides)
+    coordinator = _coordinator(hass, soc=18)
+    initial_time = (
+        NOW - timedelta(hours=4) if inactive_reason == "outside_window" else NOW
+    )
+    try:
+        with _at(initial_time):
+            await _load(coordinator)
+            await coordinator.async_finish_bootstrap()
+            assert not coordinator._timed_charge_active
+            assert not coordinator._timed_charge_armed
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() is None
+
+        with _at(NOW):
+            coordinator.data["soc"] = 60
+            if inactive_reason == "disabled":
+                await coordinator.async_set_timed_charge_enabled(True)
+            elif inactive_reason == "month":
+                await coordinator.async_set_timed_charge_month(NOW.month, True)
+                await coordinator._month_control_task
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert not coordinator._timed_charge_active
+            assert not coordinator._timed_charge_armed
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() is None
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize("interruption", ["pv", "missing_soc", "basic_failure"])
+async def test_live_latch_resumes_after_temporary_pause_in_same_window(
+    hass: HomeAssistant, interruption: str
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: a pause preserves this occurrence's threshold crossing."""
+    await _save_config(hass)
+    coordinator = _coordinator(hass, soc=18)
+    try:
+        with _at(NOW):
+            await _load(coordinator)
+            await coordinator.async_finish_bootstrap()
+            assert coordinator._timed_charge_active
+            coordinator.data["soc"] = 60
+            if interruption == "pv":
+                coordinator.data["smartmeter_power"] = -1000
+                coordinator._timed_charge_pv_surplus_cycles = 100
+            elif interruption == "missing_soc":
+                coordinator.data["soc"] = None
+            else:
+                coordinator._basic_read_failed = True
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert not coordinator._timed_charge_active
+            assert coordinator._timed_charge_armed
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() == STATE
+
+        with _at(NOW + timedelta(minutes=10)):
+            coordinator.data["soc"] = 60
+            coordinator.data["smartmeter_power"] = 0
+            coordinator._basic_read_failed = False
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert coordinator._timed_charge_active
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() == STATE
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize(
+    ("moment", "expected_state"),
+    [
+        (NOW + timedelta(hours=1), STATE),
+        (NOW.replace(hour=6), None),
+    ],
+)
+async def test_basic_read_failure_keeps_latch_only_until_window_end(
+    hass: HomeAssistant, moment: datetime, expected_state: TimedChargeState | None
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: the failed-read path also observes latch expiry."""
+    await _save_config(hass)
+    coordinator = _coordinator(hass, soc=18)
+    try:
+        with _at(NOW):
+            await _load(coordinator)
+            await coordinator.async_finish_bootstrap()
+            assert coordinator._timed_charge_active
+            coordinator.data["soc"] = 60
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() == STATE
+
+        with (
+            _at(moment),
+            patch.object(
+                coordinator,
+                "_async_read_basic",
+                AsyncMock(side_effect=UpdateFailed("Basic read unavailable")),
+            ),
+        ):
+            with pytest.raises(UpdateFailed, match="Basic read unavailable"):
+                await coordinator._async_update_data()
+            assert not coordinator._timed_charge_active
+            assert coordinator._timed_charge_armed is (expected_state is not None)
+            assert (
+                await TimedChargeStateStore(hass, ENTRY_ID).async_load()
+                == expected_state
+            )
+    finally:
+        await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize("change", ["start", "end", "window", "disabled", "month"])
+@pytest.mark.parametrize("valid_soc", [True, False])
+async def test_configuration_change_invalidates_live_latch(
+    hass: HomeAssistant, change: str, valid_soc: bool
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: editing or disabling the occurrence loses its latch."""
+    await _save_config(hass)
+    coordinator = _coordinator(hass, soc=18)
+    try:
+        with _at(NOW):
+            await _load(coordinator)
+            await coordinator.async_finish_bootstrap()
+            assert coordinator._timed_charge_active
+            coordinator.data["soc"] = 60 if valid_soc else None
+            if change == "start":
+                await coordinator.async_set_timed_charge_start(dt_time(22))
+            elif change == "end":
+                await coordinator.async_set_timed_charge_end(dt_time(7))
+            elif change == "window":
+                await coordinator.async_set_timed_charge_window(dt_time(22), dt_time(7))
+            elif change == "disabled":
+                await coordinator.async_set_timed_charge_enabled(False)
+            else:
+                await coordinator.async_set_timed_charge_month(NOW.month, False)
+                await coordinator._month_control_task
+            assert not coordinator._timed_charge_active
+            assert not coordinator._timed_charge_armed
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() is None
+
+            coordinator.data["soc"] = 60
+            if change == "disabled":
+                await coordinator.async_set_timed_charge_enabled(True)
+            elif change == "month":
+                await coordinator.async_set_timed_charge_month(NOW.month, True)
+                await coordinator._month_control_task
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            assert not coordinator._timed_charge_active
+            assert not coordinator._timed_charge_armed
+            assert await TimedChargeStateStore(hass, ENTRY_ID).async_load() is None
+    finally:
+        await coordinator.async_shutdown()
 
 
 @pytest.mark.parametrize(

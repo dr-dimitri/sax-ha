@@ -7,7 +7,7 @@ gesperrt) und der einmalige RestoreEntity-Migrationspfad der Plattformen.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -139,7 +139,7 @@ def _setpoint_mode_writes(client: MagicMock) -> list[int]:
 def _patched_now(hour: int, month: int = 2):
     return patch(
         "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, month, 1, hour, 0),
+        return_value=datetime(2024, month, 1, hour, 0, tzinfo=UTC),
     )
 
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -231,6 +232,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
 
 
 @pytest.mark.parametrize("window_count", [1, 2, 8])
+@pytest.mark.parametrize("base_price", [0.30, 0.20], ids=["low-window", "low-base"])
 @pytest.mark.parametrize(
     "moment",
     [
@@ -246,14 +248,18 @@ async def test_tariff_plan_reaches_the_dashboard_session(
     hass_ws_client: WebSocketGenerator,
     dashboard_entry: MockConfigEntry,
     window_count: int,
+    base_price: float,
     moment: datetime,
 ) -> None:
     """REQ-VUE-CHARGING/-SAVINGS: Optionsflow -> Modell -> Sensor -> Dashboard.
 
     Beide Ansichten erhalten alle gespeicherten Fenster in Planreihenfolge,
     auch über Mitternacht und an direkt angrenzenden Fenstergrenzen.
+    REQ-TIME-OF-USE-CHARGE-SOURCE: Niedertarif-Markierungen und verbindliches
+    Ende kommen sowohl für Nachtfenster als auch für Basispreislücken an.
     """
     await hass.config.async_set_time_zone("Europe/Berlin")
+    moment = moment.replace(tzinfo=ZoneInfo("Europe/Berlin"))
     profile = (
         ("22:00:00", "06:00:00", 0.2101),
         ("06:00:00", "08:00:00", 0.2202),
@@ -289,7 +295,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
         result["flow_id"],
         {
             CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.30,
+            CONF_ECONOMICS_TOU_BASE_PRICE: base_price,
             **options_windows,
         },
     )
@@ -321,16 +327,36 @@ async def test_tariff_plan_reaches_the_dashboard_session(
     else:
         active_window = None
         next_change = "2026-06-02T22:00:00+02:00"
-    expected_price = active_window["price_eur_kwh"] if active_window else 0.30
+    expected_price = active_window["price_eur_kwh"] if active_window else base_price
+    base_is_low = base_price == 0.20
+    low_tariff_active = active_window is None if base_is_low else moment.hour in (23, 0)
     expected_attributes = {
         "tariff_type": "time_of_use",
         "quote_source": "time_of_use_window" if active_window else "time_of_use_base",
         "unavailable_reason": None,
         "active_window": active_window,
         "next_price_change_at": next_change,
-        "base_price_eur_kwh": 0.30,
+        "base_price_eur_kwh": base_price,
         "feed_in_price_eur_kwh": 0.08,
-        "windows": sorted(windows, key=lambda window: window["start"]),
+        "low_tariff_price_eur_kwh": 0.20 if base_is_low else 0.2101,
+        "base_price_is_low_tariff": base_is_low,
+        "low_tariff_active": low_tariff_active,
+        "low_tariff_valid_until": (
+            (
+                "2026-06-02T22:00:00+02:00"
+                if base_is_low
+                else "2026-06-02T06:00:00+02:00"
+            )
+            if low_tariff_active
+            else None
+        ),
+        "windows": sorted(
+            [
+                {**window, "low_tariff": not base_is_low and index == 0}
+                for index, window in enumerate(windows)
+            ],
+            key=lambda window: window["start"],
+        ),
     }
     coordinator._energy_charged_kwh = 0.0
     coordinator._energy_discharged_kwh = 0.0

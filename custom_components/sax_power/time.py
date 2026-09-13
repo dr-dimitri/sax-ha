@@ -90,6 +90,10 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
             await self.coordinator.async_set_timed_charge_start(value)
 
     @property
+    def available(self) -> bool:
+        return super().available and not self.coordinator.timed_charge_uses_tariff
+
+    @property
     def native_value(self) -> dt_time | None:
         return self.coordinator.timed_charge_start
 
@@ -132,6 +136,10 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
         value = dt_util.parse_time(initial or DEFAULT_TIMED_CHARGE_END)
         if value is not None:
             await self.coordinator.async_set_timed_charge_end(value)
+
+    @property
+    def available(self) -> bool:
+        return super().available and not self.coordinator.timed_charge_uses_tariff
 
     @property
     def native_value(self) -> dt_time | None:

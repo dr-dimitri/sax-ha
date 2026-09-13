@@ -21,6 +21,14 @@ const text = computed(() =>
         status: "Status",
         now: "jetzt",
         base: "Grundpreis",
+        low: "Niedertarif",
+        lowUntil: "Niedertarif aktiv bis",
+        notLow: "Aktuell kein Niedertarif.",
+        rule: "Die Tarifpreisfenster bestimmen die verbindlichen Ladezeiten. Niedertarif ist die niedrigste täglich tatsächlich vorkommende Preisstufe, einschließlich des Grundpreises in Fensterlücken. Die SOC-Ladung darf nur im Niedertarif laden; SOC-Grenzen und aktive Monate gelten weiterhin.",
+        configure:
+          "Zeiten sind nur unter Konfigurieren → Tarifpreisfenster änderbar. Bisherige separate Netzladezeiten sind bei diesem Tarif unwirksam.",
+        noLowTariff:
+          "Tarifdaten fehlen oder sind ungültig. Die SOC-Ladung bleibt gesperrt, bis gültige Tarifdaten vorliegen.",
         feed: "Einspeisevergütung",
         next: "Nächster Preiswechsel",
         unavailable: "Nicht verfügbar",
@@ -35,6 +43,14 @@ const text = computed(() =>
         status: "Status",
         now: "now",
         base: "Base price",
+        low: "Low tariff",
+        lowUntil: "Low tariff active until",
+        notLow: "The low tariff is not currently active.",
+        rule: "The tariff price windows define the binding charging times. The low tariff is the lowest price level that actually occurs each day, including the base price in gaps between windows. SOC charging is only allowed during the low tariff; SOC limits and active months still apply.",
+        configure:
+          "Times can only be changed under Configure → Tariff price windows. Previously configured separate grid charging times have no effect for this tariff.",
+        noLowTariff:
+          "Tariff data is missing or invalid. SOC charging remains blocked until valid tariff data is available.",
         feed: "Feed-in remuneration",
         next: "Next price change",
         unavailable: "Unavailable",
@@ -55,7 +71,12 @@ const attributes = computed(() => price.value?.state?.attributes ?? {});
 const tariffVisible = computed(
   () => attributes.value.tariff_type === "time_of_use",
 );
-type TariffWindow = { start: string; end: string; price_eur_kwh: unknown };
+type TariffWindow = {
+  start: string;
+  end: string;
+  price_eur_kwh: unknown;
+  low_tariff?: unknown;
+};
 const windows = computed<TariffWindow[]>(() =>
   Array.isArray(attributes.value.windows)
     ? attributes.value.windows.filter(
@@ -70,10 +91,46 @@ const windows = computed<TariffWindow[]>(() =>
 const reason = computed(() => attributes.value.unavailable_reason);
 const hasPrice = computed(
   () =>
-    price.value?.available &&
+    price.value?.available === true &&
     finiteValue(price.value.state?.state) !== null &&
     reason.value == null,
 );
+const lowTariffAvailable = computed(
+  () =>
+    hasPrice.value &&
+    finiteValue(attributes.value.low_tariff_price_eur_kwh) !== null &&
+    typeof attributes.value.low_tariff_active === "boolean" &&
+    (attributes.value.low_tariff_active === false ||
+      lowTariffUntil.value !== null) &&
+    typeof attributes.value.base_price_is_low_tariff === "boolean" &&
+    Array.isArray(attributes.value.windows) &&
+    windows.value.length === attributes.value.windows.length &&
+    windows.value.every(
+      (window) =>
+        typeof window.low_tariff === "boolean" &&
+        finiteValue(window.price_eur_kwh) !== null,
+    ),
+);
+const lowTariffUntil = computed(() =>
+  formatSavingsDate(attributes.value.low_tariff_valid_until, props.hass),
+);
+const lowTariffActive = computed(
+  () =>
+    lowTariffAvailable.value &&
+    attributes.value.low_tariff_active === true &&
+    lowTariffUntil.value !== null,
+);
+const isLow = (window: TariffWindow) =>
+  lowTariffAvailable.value && window.low_tariff === true;
+const baseLow = computed(
+  () =>
+    lowTariffAvailable.value &&
+    attributes.value.base_price_is_low_tariff === true,
+);
+const status = (current: boolean, low: boolean) =>
+  [current ? text.value.now : "", low ? text.value.low : ""]
+    .filter(Boolean)
+    .join(" · ");
 const active = computed(() => {
   const value = attributes.value.active_window;
   return value && typeof value === "object"
@@ -106,6 +163,8 @@ const clock = (value: string) =>
     :aria-labelledby="`${id}-tariff`"
   >
     <h2 :id="`${id}-tariff`">{{ text.tariff }}</h2>
+    <p>{{ text.rule }}</p>
+    <p>{{ text.configure }}</p>
     <div class="tariff-plan__scroll">
       <table class="tariff-plan__table">
         <thead>
@@ -120,21 +179,38 @@ const clock = (value: string) =>
           <tr
             v-for="(window, index) in windows"
             :key="index"
-            :class="{ 'tariff-plan__current': isActive(window) }"
+            :class="{
+              'tariff-plan__current': isActive(window),
+              'tariff-plan__low': isLow(window),
+            }"
           >
-            <td>{{ isActive(window) ? text.now : "" }}</td>
+            <td>{{ status(isActive(window), isLow(window)) }}</td>
             <td>{{ clock(window.start) }}</td>
             <td>{{ clock(window.end) }}</td>
             <td>{{ tariffPrice(window.price_eur_kwh) }}</td>
           </tr>
-          <tr :class="{ 'tariff-plan__current': baseActive }">
-            <td>{{ baseActive ? text.now : "" }}</td>
+          <tr
+            :class="{
+              'tariff-plan__current': baseActive,
+              'tariff-plan__low': baseLow,
+            }"
+          >
+            <td>{{ status(baseActive, baseLow) }}</td>
             <td colspan="2">{{ text.base }}</td>
             <td>{{ tariffPrice(attributes.base_price_eur_kwh) }}</td>
           </tr>
         </tbody>
       </table>
     </div>
+    <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
+      <strong>{{ text.low }}:</strong>
+      {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
+      <template v-if="lowTariffActive">
+        {{ text.lowUntil }} {{ lowTariffUntil }}.
+      </template>
+      <template v-else>{{ text.notLow }}</template>
+    </p>
+    <p v-else class="tariff-plan__low-unavailable">{{ text.noLowTariff }}</p>
     <p>
       <strong>{{ text.feed }}:</strong>
       {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}

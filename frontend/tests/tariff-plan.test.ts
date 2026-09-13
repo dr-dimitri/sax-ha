@@ -17,6 +17,7 @@ type TariffWindow = {
   start: string;
   end: string;
   price_eur_kwh: number | null;
+  low_tariff?: boolean;
 };
 const twoWindows: TariffWindow[] = [
   { start: "06:00:00", end: "12:00:00", price_eur_kwh: 0.25678 },
@@ -30,12 +31,19 @@ const eightWindows: TariffWindow[] = Array.from({ length: 8 }, (_, index) => ({
 function tariffAttributes(windows = twoWindows): Record<string, unknown> {
   return {
     tariff_type: "time_of_use",
-    windows,
+    windows: windows.map((window, index) => ({
+      ...window,
+      low_tariff: window.low_tariff ?? index === 1,
+    })),
     active_window: { start: windows[1].start, end: windows[1].end },
     base_price_eur_kwh: 0.35,
     feed_in_price_eur_kwh: 0.08,
     next_price_change_at: "2026-03-29T16:00:00Z",
     unavailable_reason: null,
+    low_tariff_price_eur_kwh: -0.015,
+    base_price_is_low_tariff: false,
+    low_tariff_active: true,
+    low_tariff_valid_until: "2026-03-29T16:00:00Z",
   };
 }
 async function flush() {
@@ -210,7 +218,10 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
           plan.querySelectorAll("input, select, button, form"),
         ).toHaveLength(0);
       }
-      expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+      expect(chargingTimes(fixture.root)).toEqual([]);
+      expect(fixture.root.textContent).toContain("Netzladung Min. SOC");
+      expect(fixture.root.textContent).toContain("Netzladen Max. SOC");
+      expect(fixture.root.textContent).toContain("Aktive Monate");
       expect(fixture.callService).not.toHaveBeenCalled();
       expect(fixture.callWS).not.toHaveBeenCalled();
     },
@@ -226,20 +237,117 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     },
   );
 
-  it("updates windows, tariff type and entity registration live without changing the grid charging window", async () => {
+  it("renders the backend's lowest occurring price level, including base-price gaps and adjacent equal windows", async () => {
+    const fixture = await mount({ windows: eightWindows });
+    await fixture.update("0.21", {
+      ...tariffAttributes(eightWindows),
+      base_price_eur_kwh: -0.1,
+    });
+    for (const plan of fixture.plans()) {
+      const low = plan.querySelectorAll(".tariff-plan__low");
+      expect(low).toHaveLength(1);
+      expect(low[0].textContent).toContain("03:00");
+      expect(rows(plan).at(-1)?.[0]).toBe("");
+    }
+    await fixture.update("0.35", {
+      ...tariffAttributes(),
+      windows: [
+        { start: "22:00", end: "02:00", price_eur_kwh: 0.4, low_tariff: false },
+        { start: "02:00", end: "06:00", price_eur_kwh: 0.35, low_tariff: true },
+        { start: "06:00", end: "08:00", price_eur_kwh: 0.35, low_tariff: true },
+      ],
+      active_window: null,
+      base_price_eur_kwh: 0.35,
+      low_tariff_price_eur_kwh: 0.35,
+      base_price_is_low_tariff: true,
+      low_tariff_valid_until: "2026-03-29T20:00:00Z",
+    });
+    for (const plan of fixture.plans()) {
+      expect(plan.querySelectorAll(".tariff-plan__low")).toHaveLength(3);
+      expect(rows(plan).at(-1)?.[0]).toBe("jetzt · Niedertarif");
+      expect(
+        plan.querySelector(".tariff-plan__low-status")?.textContent,
+      ).toContain("29.03.2026, 22:00");
+    }
+    expect(fixture.callService).not.toHaveBeenCalled();
+    expect(fixture.callWS).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { low_tariff_price_eur_kwh: undefined },
+    { low_tariff_price_eur_kwh: null },
+    { low_tariff_price_eur_kwh: "NaN" },
+    { low_tariff_active: undefined },
+    { base_price_is_low_tariff: undefined },
+    { windows: twoWindows },
+    { windows: undefined },
+    { windows: [null] },
+    {
+      windows: [
+        { start: "22:00", end: "06:00", price_eur_kwh: null, low_tariff: true },
+      ],
+    },
+    { low_tariff_valid_until: null },
+    { low_tariff_valid_until: "invalid" },
+    { unavailable_reason: "invalid_tariff" },
+  ])(
+    "never infers low tariff or charging permission from incomplete attributes: %j",
+    async (attributes) => {
+      const fixture = await mount();
+      await fixture.update("-0.015", { ...tariffAttributes(), ...attributes });
+      for (const plan of fixture.plans()) {
+        expect(plan.querySelector(".tariff-plan__low")).toBeNull();
+        expect(plan.querySelector(".tariff-plan__low-status")).toBeNull();
+        expect(
+          plan.querySelector(".tariff-plan__low-unavailable")?.textContent,
+        ).toContain("SOC-Ladung bleibt gesperrt");
+      }
+      expect(chargingTimes(fixture.root)).toEqual([]);
+      expect(fixture.root.textContent).toContain("Netzladung Min. SOC");
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it("follows backend low-tariff status without calculating local time boundaries", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-29T21:00:00Z"));
+    const fixture = await mount();
+    await fixture.update("0.35", {
+      ...tariffAttributes(),
+      active_window: null,
+      low_tariff_active: false,
+      low_tariff_valid_until: null,
+    });
+    for (const plan of fixture.plans()) {
+      expect(plan.querySelectorAll(".tariff-plan__low")).toHaveLength(1);
+      expect(
+        plan.querySelector(".tariff-plan__low-status")?.textContent,
+      ).toContain("Aktuell kein Niedertarif");
+      expect(
+        plan.querySelector(".tariff-plan__low-status")?.textContent,
+      ).not.toContain("aktiv bis");
+    }
+    expect(fixture.callService).not.toHaveBeenCalled();
+  });
+
+  it("updates windows and hides legacy charging times only for the registered time-of-use tariff", async () => {
     const fixture = await mount({ tariffType: "fixed" });
     expect(fixture.plans()).toHaveLength(0);
+    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
     await fixture.update("-0.015", tariffAttributes());
     expect(fixture.plans()).toHaveLength(2);
+    expect(chargingTimes(fixture.root)).toEqual([]);
     await fixture.update("-0.015", tariffAttributes(eightWindows));
     for (const plan of fixture.plans()) expect(rows(plan)).toHaveLength(9);
     await fixture.metadata(false);
     expect(fixture.plans()).toHaveLength(0);
+    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
     await fixture.metadata(true);
     expect(fixture.plans()).toHaveLength(2);
     for (const tariffType of ["dynamic", "fixed", "disabled"]) {
       await fixture.update(".35", { tariff_type: tariffType });
       expect(fixture.plans()).toHaveLength(0);
+      expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
     }
     await fixture.update(".35", {
       ...tariffAttributes(),
@@ -251,9 +359,9 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       expect(active).toHaveLength(1);
       expect(active[0].textContent).toContain("Grundpreis");
     }
-    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+    expect(chargingTimes(fixture.root)).toEqual([]);
     expect(fixture.root.querySelectorAll(".time-window-control")).toHaveLength(
-      1,
+      0,
     );
     expect(fixture.callService).not.toHaveBeenCalled();
   });
@@ -272,7 +380,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       expect(plan.textContent).toContain("0,0800 EUR/kWh");
       expect(plan.textContent).toContain("29.03.2026, 18:00");
     }
-    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+    expect(chargingTimes(fixture.root)).toEqual([]);
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 
@@ -320,7 +428,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 
-  it("separates translated price windows from the editable grid charging window", async () => {
+  it("explains the binding translated low-tariff schedule and where to configure it", async () => {
     const fixture = await mount({ language: "en-GB" });
     expect(fixture.plans()).toHaveLength(2);
     for (const plan of fixture.plans()) {
@@ -328,11 +436,21 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
         "Tariff price windows",
       );
       expect(plan.textContent).toContain("-0.0150 EUR/kWh");
+      expect(plan.textContent).toContain(
+        "lowest price level that actually occurs each day",
+      );
+      expect(plan.textContent).toContain("Configure → Tariff price windows");
+      expect(plan.textContent).toContain(
+        "separate grid charging times have no effect",
+      );
+      expect(
+        plan.querySelector(".tariff-plan__low-status")?.textContent,
+      ).toContain("Low tariff active until 29 Mar 2026, 18:00");
     }
-    expect(fixture.root.querySelector(".timed-fixture")?.textContent).toContain(
-      "Grid charging window",
-    );
-    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+    expect(
+      fixture.root.querySelector(".timed-fixture")?.textContent,
+    ).not.toContain("Grid charging window");
+    expect(chargingTimes(fixture.root)).toEqual([]);
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 });

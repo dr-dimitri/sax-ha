@@ -175,14 +175,23 @@ function example({ domain, key, entity_id }) {
       unit_of_measurement: "EUR/kWh",
       tariff_type: "time_of_use",
       windows: [
-        { start: "00:00", end: "06:00", price_eur_kwh: 0.18 },
-        { start: "18:00", end: "22:00", price_eur_kwh: 0.2456 },
+        { start: "00:00", end: "06:00", price_eur_kwh: 0.18, low_tariff: true },
+        {
+          start: "18:00",
+          end: "22:00",
+          price_eur_kwh: 0.2456,
+          low_tariff: false,
+        },
       ],
       active_window: { start: "18:00", end: "22:00" },
       base_price_eur_kwh: 0.32,
       feed_in_price_eur_kwh: 0.0812,
       next_price_change_at: "2026-09-12T20:00:00Z",
       unavailable_reason: null,
+      low_tariff_price_eur_kwh: 0.18,
+      base_price_is_low_tariff: false,
+      low_tariff_active: false,
+      low_tariff_valid_until: null,
     };
   if (key === "bridge_charge_plan")
     attributes = {
@@ -407,6 +416,14 @@ document.querySelector("#legacy-times").onclick = () => {
       states[entityId] = { ...states[entityId], state: value };
     }
   }
+  update();
+};
+document.querySelector("#legacy-tariff").onclick = () => {
+  const id = "sensor.demo_economics_current_import_price";
+  states[id] = {
+    ...states[id],
+    attributes: { ...states[id].attributes, tariff_type: "fixed" },
+  };
   update();
 };
 update();

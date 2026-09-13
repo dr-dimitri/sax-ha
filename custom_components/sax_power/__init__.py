@@ -414,6 +414,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         # REQ-VUE-DASHBOARD: Eine reine UI-Option darf weder die Tarifrevision
         # noch den Modbus-Sollwert einer laufenden Ladeautomatik verändern.
         return
+    coordinator.reconcile_charge_time_source()
     coordinator.price_planner.async_setup()
     coordinator.tariff_provider.async_setup()
     # REQ-ECONOMICS-ACCOUNTING: rein diagnostischer Zeitstempel der letzten

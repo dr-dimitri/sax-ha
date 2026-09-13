@@ -14,6 +14,7 @@ from custom_components.sax_power.domain.tariff import (
     DailyPriceWindow,
     TariffConfig,
     TariffType,
+    low_tariff_window,
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -91,9 +92,7 @@ def test_cheapest_tariff_segments_include_the_base_price() -> None:
     )
     assert windows == (
         _window("2026-09-14T00:00:00", "2026-09-14T01:00:00", 0.1),
-        _window("2026-09-14T02:00:00", "2026-09-14T03:00:00", 0.1),
-        _window("2026-09-14T03:00:00", "2026-09-14T04:00:00", 0.1),
-        _window("2026-09-14T04:00:00", "2026-09-14T07:00:00", 0.1),
+        _window("2026-09-14T02:00:00", "2026-09-14T07:00:00", 0.1),
     )
 
 
@@ -253,3 +252,45 @@ def test_negative_low_tariff_remains_the_selected_price() -> None:
         active_months=MONTHS,
         tariff=_tariff(DailyPriceWindow(dt_time(21), dt_time(23), -0.1), base=0),
     ) == (_window("2026-09-13T22:00:00", "2026-09-13T23:00:00", -0.1),)
+
+
+def test_bridge_windows_share_the_current_low_tariff_phase() -> None:
+    """REQ-TIME-OF-USE-CHARGE-SOURCE: Alle Lader verwenden dieselbe Freigabe."""
+    tariff = _tariff(
+        DailyPriceWindow(dt_time(0), dt_time(2), 0.1),
+        DailyPriceWindow(dt_time(2), dt_time(4), 0.1),
+        DailyPriceWindow(dt_time(8), dt_time(10), 0.2),
+        DailyPriceWindow(dt_time(12), dt_time(14), 0.1),
+    )
+    windows = charge_windows(
+        now=_moment("2026-09-14T00:00:00"),
+        pv_start=_moment("2026-09-14T15:00:00"),
+        active_months=MONTHS,
+        tariff=tariff,
+    )
+
+    assert windows == (
+        _window("2026-09-14T00:00:00", "2026-09-14T04:00:00"),
+        _window("2026-09-14T12:00:00", "2026-09-14T14:00:00"),
+    )
+    for window in windows:
+        quote = low_tariff_window(tariff, window.start.astimezone(BERLIN))
+        assert quote is not None
+        assert quote.valid_from.astimezone(UTC) == window.start
+        assert quote.valid_until.astimezone(UTC) == window.end
+        assert quote.price_eur_kwh == window.price
+
+
+def test_merged_low_tariff_phase_still_respects_month_activation() -> None:
+    tariff = _tariff(
+        DailyPriceWindow(dt_time(22), dt_time(0), 0.1),
+        DailyPriceWindow(dt_time(0), dt_time(3), 0.1),
+        DailyPriceWindow(dt_time(3), dt_time(6), 0.1),
+    )
+
+    assert charge_windows(
+        now=_moment("2026-09-30T22:00:00"),
+        pv_start=_moment("2026-10-01T08:00:00"),
+        active_months={10},
+        tariff=tariff,
+    ) == (_window("2026-10-01T00:00:00", "2026-10-01T06:00:00"),)

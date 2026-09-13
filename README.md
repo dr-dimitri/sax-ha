@@ -201,19 +201,36 @@ und hat während seiner wirksamen Ladepause Vorrang vor der Preisoptimierung.
 Im Dashboard heißt dieser Bereich **Zeitvariabler Tarif**. Er passt zu
 festen günstigen Tarifzeiten, etwa einem Nachttarif.
 
-![Zeitvariabler Tarif mit Zeitfenster, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
+![Zeitvariabler Tarif mit verbindlichen Tarifpreisfenstern, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
 
-Schalte **Netzladung aktiv** ein und wähle Start, Ende sowie die gewünschten
-Monate. Ohne verbrauchsbasierte Planung bestimmt **Netzladung Min. SOC**,
+Schalte **Netzladung aktiv** ein und wähle die gewünschten Monate. Beim
+Tarifmodell **Tageszeitabhängig** bestimmen die gespeicherten
+**Tarifpreisfenster** die erlaubten Ladezeiten: freigegeben sind alle Abschnitte
+mit dem niedrigsten tatsächlich täglich vorkommenden Preis. Auch Lücken mit
+Standardpreis zählen dazu, wenn dieser am günstigsten ist. Ohne
+verbrauchsbasierte Planung bestimmt **Netzladung Min. SOC**,
 wann eine Ladung beginnen darf;
 **Netzladen Max. SOC** bestimmt das Ziel. Das Ziel kann unter der globalen
 Grenze **Max. SOC** liegen, etwa um Platz für späteren PV-Ertrag zu lassen.
 
-**Beispiel:** Von 01:00 bis 05:00 Uhr, Startschwelle 40 %, Netzladeziel 70 %
+**Beispiel:** Günstigster Tarifabschnitt von 01:00 bis 05:00 Uhr,
+Startschwelle 40 %, Netzladeziel 70 %
 und globale Grenze 90 %. Liegt der Speicher im Zeitfenster unter 40 %, lädt
 er bis 70 % oder bis 05:00 Uhr. PV-Strom darf anschließend weiter bis 90 %
 laden. Nach tatsächlich erfolgter Netzladung bleibt die Entladung bis zum
 Fensterende gesperrt; den Zustand zeigt **Entladestatus**.
+
+Der gespeicherte Tarif gilt sofort nach einem Update oder Tarifwechsel.
+Bisherige Start-/Endzeiten werden weder übertragen noch mit dem Tarif
+kombiniert: Sie bleiben für andere Tarifarten gespeichert, sind im
+tageszeitabhängigen Modus aber unwirksam und nicht bearbeitbar. Beim Rückwechsel
+auf eine andere Tarifart werden sie erneut auf Überschneidungen mit der
+PV-Ladepause geprüft; ein widersprüchliches altes Netzladefenster wird geleert.
+Bei ungültigen
+Tarifdaten startet keine automatische Tarifladung. Für andere Tarifarten ohne
+verbrauchsbasierte Planung bleibt das **Netzladezeitfenster** mit Start und
+Ende verfügbar. Diese Vereinheitlichung setzt
+[Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) um.
 
 Erkennt die Integration ausreichend PV-Überschuss, beendet sie die
 Netzladung und der Speicher kann Sonnenstrom nutzen.
@@ -233,11 +250,9 @@ Die erlaubten Ladezeiten stammen ausschließlich aus den **Tarifpreisfenstern**
 deines gespeicherten tageszeitabhängigen Tarifs. Verwendet werden dessen
 günstigste Abschnitte, einschließlich Zeiten mit Standardpreis, wenn dieser am
 günstigsten ist. Gibt es vor dem PV-Start keinen solchen Abschnitt, wird keine
-teurere Ersatzzeit gewählt. Das separate **Netzladezeitfenster** hat in dieser
-Betriebsart keinen Einfluss. Es wird im Dashboard zusammen mit der nicht
-verwendeten Startschwelle ausgeblendet.
-Die Angleichung der bisherigen festen Netzladung an dieses Tarifmodell wird
-in [Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) verfolgt.
+teurere Ersatzzeit gewählt. Die gemeinsame Tarifquelle gilt auch für feste
+SOC-Ladung; bei Verbrauchsplanung wird zusätzlich die nicht verwendete
+Min.-SOC-Startschwelle im Dashboard ausgeblendet.
 
 Wähle in den Integrationsoptionen als **PV-Prognose-Sensor** einen Sensor deiner
 Integration `pv_forecast`. Die Ladeplanung liest darüber die 15-Minuten-Prognose
@@ -360,8 +375,9 @@ Zeit-Entitäten auf der Geräteseite neu.
 ## Tarifmodell für die Wirtschaftlichkeit
 
 Unter **Konfigurieren** kannst du einen Tarif für die Geldbilanz hinterlegen.
-Das ist optional; Messwerte und Ladesteuerung funktionieren auch ohne diese
-Auswertung.
+Das ist optional; Messwerte und die bisherigen Ladefunktionen sind auch ohne
+diese Auswertung verfügbar. Ein gespeicherter tageszeitabhängiger Tarif
+bestimmt zugleich die erlaubten Ladezeiten der zeitgesteuerten Netzladung.
 
 | Tarifmodell | Eingaben |
 | --- | --- |
@@ -376,9 +392,13 @@ Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
 hinterlegten Plan siehst du unter **Tarifpreisfenster** in den Tabs
 **Zeitvariabler Tarif** und **Amortisation**. Diese Preisfenster dienen der
-Geldbilanz und bestimmen bei aktivierter verbrauchsbasierter Ladeplanung
-ausschließlich den erlaubten Niedertarifbereich. Das separate
-**Netzladezeitfenster** gilt für die bisherige feste Netzladung.
+Geldbilanz und bestimmen den erlaubten Niedertarifbereich für feste SOC-Ladung
+und verbrauchsbasierte Ladeplanung. Beide verwenden dieselben günstigsten
+täglich vorkommenden Tarifabschnitte einschließlich Lücken zum günstigen
+Standardpreis. Bei einem vollständig durch Preisfenster abgedeckten Tag zählt ein
+nirgends wirksamer Standardpreis nicht mit. Ohne abweichende Preisstufen ist
+der gesamte Tag Niedertarif; SOC-Grenzen und Monatsauswahl gelten weiterhin.
+Es gibt keine zusätzliche Ladezeitenquelle oder Freigabeoption.
 
 Für den dynamischen Tarif muss ein Strompreis-Sensor ausgewählt sein.
 Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt

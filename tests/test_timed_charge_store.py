@@ -128,3 +128,86 @@ async def test_save_validates_before_mutating_storage(
     with pytest.raises(ValueError):
         await store.async_save(state)
     store._store.async_save.assert_not_called()
+
+
+@pytest.mark.parametrize("full_day", [False, True])
+async def test_tariff_source_survives_round_trip_including_full_day_windows(
+    hass: HomeAssistant, full_day: bool
+) -> None:
+    """REQ-TIME-OF-USE-CHARGE-SOURCE: Quelle und absolutes Ende bleiben erhalten."""
+    source = "0123456789abcdef" * 4
+    start = dt_time(0) if full_day else dt_time(22)
+    end = dt_time(0) if full_day else dt_time(6)
+    expiry = datetime(2026, 10, 25, 6, tzinfo=ZoneInfo("Europe/Berlin"))
+    store = TimedChargeStateStore(hass, "tariff")
+
+    await store.async_save(TimedChargeState(start, end, expiry, source))
+
+    restored = await TimedChargeStateStore(hass, "tariff").async_load()
+    assert restored == TimedChargeState(start, end, expiry.astimezone(UTC), source)
+    assert (await store._store.async_load())["source"] == source
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+async def test_legacy_state_without_tariff_source_remains_restorable(
+    hass: HomeAssistant, explicit_null: bool
+) -> None:
+    raw = {
+        "armed": True,
+        "start": "22:00:00",
+        "end": "06:00:00",
+        "expires_at": "2026-09-15T06:00:00+02:00",
+    }
+    if explicit_null:
+        raw["source"] = None
+    store = TimedChargeStateStore(hass, "legacy")
+    store._store.async_load = AsyncMock(return_value=raw)
+
+    assert await store.async_load() == TimedChargeState(
+        dt_time(22), dt_time(6), datetime(2026, 9, 15, 4, tzinfo=UTC), None
+    )
+
+
+@pytest.mark.parametrize(
+    "source", ["", "a" * 63, "a" * 65, "A" * 64, "g" * 64, True, 1, []]
+)
+async def test_invalid_tariff_source_neither_loads_nor_mutates_storage(
+    hass: HomeAssistant, source: object
+) -> None:
+    store = TimedChargeStateStore(hass, "invalid_source")
+    store._store.async_load = AsyncMock(
+        return_value={
+            "armed": True,
+            "start": "22:00:00",
+            "end": "06:00:00",
+            "expires_at": "2026-09-15T06:00:00+02:00",
+            "source": source,
+        }
+    )
+    store._store.async_save = AsyncMock()
+    store._store.async_remove = AsyncMock()
+
+    assert await store.async_load() is None
+    with pytest.raises(ValueError, match="Tarifidentität"):
+        await store.async_save(
+            TimedChargeState(
+                dt_time(22), dt_time(6), datetime(2026, 9, 15, 4, tzinfo=UTC), source
+            )
+        )
+    store._store.async_save.assert_not_called()
+    store._store.async_remove.assert_not_called()
+
+
+async def test_full_day_without_tariff_source_cannot_be_saved(
+    hass: HomeAssistant,
+) -> None:
+    store = TimedChargeStateStore(hass, "legacy_full_day")
+    store._store.async_save = AsyncMock()
+
+    with pytest.raises(ValueError, match="Fenstergrenzen"):
+        await store.async_save(
+            TimedChargeState(
+                dt_time(0), dt_time(0), datetime(2026, 9, 15, 22, tzinfo=UTC)
+            )
+        )
+    store._store.async_save.assert_not_called()

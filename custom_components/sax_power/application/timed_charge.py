@@ -14,3 +14,13 @@ class TimedChargeState:
     start: dt_time
     end: dt_time
     expires_at: datetime
+    source: str | None = None
+
+
+def is_tariff_source(value: object) -> bool:
+    """A persisted tariff identity is a SHA-256 digest, never inferred data."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )

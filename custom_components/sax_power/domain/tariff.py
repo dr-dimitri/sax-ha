@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from datetime import time as dt_time
 from enum import StrEnum
 
@@ -241,11 +241,95 @@ def validate_tariff(config: TariffConfig) -> QuoteUnavailable | None:
         config.windows_valid
         and is_valid_import_price(config.tou_base_price_eur_kwh)
         and all(
-            is_valid_import_price(window.price_eur_kwh) for window in config.windows
+            isinstance(window, DailyPriceWindow)
+            and isinstance(window.start, dt_time)
+            and isinstance(window.end, dt_time)
+            and window.start.tzinfo is None
+            and window.end.tzinfo is None
+            and window.start != window.end
+            and is_valid_import_price(window.price_eur_kwh)
+            for window in config.windows
         )
+        and find_overlapping_window(tuple(enumerate(config.windows))) is None
     ):
         return QuoteUnavailable.TARIFF_INCOMPLETE
     return None
+
+
+def daily_base_price_applies(config: TariffConfig | None) -> bool:
+    """Ob ein gültiges Tagesprofil eine Lücke mit Basispreis enthält."""
+    if (
+        config is None
+        or config.tariff_type is not TariffType.TIME_OF_USE
+        or validate_tariff(config) is not None
+    ):
+        return False
+    coverage = sum(
+        (
+            datetime.combine(date.min, window.end)
+            - datetime.combine(date.min, window.start)
+        ).total_seconds()
+        % 86400
+        for window in config.windows
+    )
+    return coverage < 86400
+
+
+def lowest_daily_price(config: TariffConfig | None) -> float | None:
+    """Niedrigster tatsächlich vorkommender Preis, REQ-TIME-OF-USE-CHARGE-SOURCE."""
+    if (
+        config is None
+        or config.tariff_type is not TariffType.TIME_OF_USE
+        or validate_tariff(config) is not None
+    ):
+        return None
+    prices = [window.price_eur_kwh for window in config.windows]
+    if daily_base_price_applies(config):
+        assert config.tou_base_price_eur_kwh is not None
+        prices.append(config.tou_base_price_eur_kwh)
+    return min(prices)
+
+
+def low_tariff_window(
+    config: TariffConfig | None, moment: datetime
+) -> PriceQuote | None:
+    """Die zusammenhängende aktuelle Niedertarifphase mit echten Zeitgrenzen.
+
+    Gleich billige Fenster und Basispreis-Lücken gehören zur selben Phase,
+    auch über Mitternacht hinweg. Nur ein ganztägig konstanter Tarif erhält
+    lokale Tagesgrenzen; Monatsfreigaben wendet die Ladepolicy darauf an.
+    Siehe REQ-TIME-OF-USE-CHARGE-SOURCE.
+    """
+    cheapest = lowest_daily_price(config)
+    if cheapest is None:
+        return None
+    assert config is not None
+    try:
+        quote = evaluate_static_tariff(config, moment).quote
+        if quote is None or quote.price_eur_kwh != cheapest:
+            return None
+
+        def is_low(instant: datetime) -> bool:
+            window = active_window(config, instant.astimezone(moment.tzinfo))
+            price = (
+                config.tou_base_price_eur_kwh
+                if window is None
+                else window.price_eur_kwh
+            )
+            return price == cheapest
+
+        changes = sorted(
+            instant
+            for instant in _boundary_instants(moment, config.windows)
+            if is_low(instant - timedelta(microseconds=1)) != is_low(instant)
+        )
+        if changes:
+            start, end = _bounds_around(moment, changes)
+        else:
+            start, end = _day_bounds(moment)
+        return PriceQuote(cheapest, quote.source, start, end)
+    except OverflowError, ValueError:
+        return None
 
 
 def active_window(config: TariffConfig, moment: datetime) -> DailyPriceWindow | None:
@@ -309,6 +393,12 @@ def evaluate_static_tariff(config: TariffConfig, moment: datetime) -> QuoteResul
     if config.tariff_type is not TariffType.TIME_OF_USE:
         return QuoteResult(reason=QuoteUnavailable.TARIFF_DISABLED)
 
+    if moment.utcoffset() is None or (
+        moment.astimezone(UTC).astimezone(moment.tzinfo).replace(tzinfo=None)
+        != moment.replace(tzinfo=None)
+    ):
+        return QuoteResult(reason=QuoteUnavailable.TARIFF_INCOMPLETE)
+
     window = active_window(config, moment)
     if window is None:
         price = float(config.tou_base_price_eur_kwh)
@@ -326,8 +416,36 @@ def _segment_bounds(
 ) -> tuple[datetime, datetime]:
     """Echte Zeitgrenzen des lokalen Preisabschnitts, einschließlich DST."""
     if not windows:
-        start_of_day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
-        return start_of_day, start_of_day + timedelta(days=1)
+        return _day_bounds(moment)
+
+    def window_at(instant: datetime) -> int | None:
+        local_time = instant.astimezone(moment.tzinfo).time()
+        return next(
+            (
+                index
+                for index, window in enumerate(windows)
+                if window.contains(local_time)
+            ),
+            None,
+        )
+
+    changes = sorted(
+        instant
+        for instant in _boundary_instants(moment, windows)
+        if window_at(instant - timedelta(microseconds=1)) != window_at(instant)
+    )
+    return _bounds_around(moment, changes)
+
+
+def _day_bounds(moment: datetime) -> tuple[datetime, datetime]:
+    start = datetime.combine(moment.date(), dt_time(), moment.tzinfo)
+    return start, start + timedelta(days=1)
+
+
+def _boundary_instants(
+    moment: datetime, windows: Sequence[DailyPriceWindow]
+) -> set[datetime]:
+    """Mögliche reale Tarifwechsel aus Wandzeitgrenzen und Uhrumstellungen."""
 
     zone = moment.tzinfo
     boundaries = {window.start for window in windows} | {
@@ -353,26 +471,16 @@ def _segment_bounds(
                 # aktive Fenster wechseln, auch ohne Grenze um 02:00/03:00.
                 candidates.add(_offset_transition(min(folds), max(folds), zone))
 
-    def window_at(instant: datetime) -> int | None:
-        local_time = instant.astimezone(zone).time()
-        return next(
-            (
-                index
-                for index, window in enumerate(windows)
-                if window.contains(local_time)
-            ),
-            None,
-        )
+    return candidates
 
-    changes = sorted(
-        instant
-        for instant in candidates
-        if window_at(instant - timedelta(microseconds=1)) != window_at(instant)
-    )
+
+def _bounds_around(
+    moment: datetime, changes: Sequence[datetime]
+) -> tuple[datetime, datetime]:
     now = moment.astimezone(UTC)
     return (
-        max(instant for instant in changes if instant <= now).astimezone(zone),
-        min(instant for instant in changes if instant > now).astimezone(zone),
+        max(instant for instant in changes if instant <= now).astimezone(moment.tzinfo),
+        min(instant for instant in changes if instant > now).astimezone(moment.tzinfo),
     )
 
 

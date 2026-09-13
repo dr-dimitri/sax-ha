@@ -41,6 +41,7 @@
 # REQ-SUNSPEC-MODE-CORRECTION     done       SunSpec-Modus-Registerkarte (Slave-ID 100) als alleinige Quelle für Speicher-/Netz-/Akkudetails
 # REQ-SUNSPEC-DATATYPES           done       SunSpec-Datentypen (int16/uint16/enum16/bitfield16/sunssf) und ihre Not-Implemented-Sentinels korrekt decodieren
 # REQ-TIMED-SOC-CHARGE            done       Zeitgesteuertes Laden auf Ziel-SOC + geräteunabhängige Max-SOC-Sperre + PV-Überschuss-Hysterese
+# REQ-TIME-OF-USE-CHARGE-SOURCE   done       Tarifpreisfenster als einzige Ladezeitenquelle im zeitvariablen Tarif (#237)
 # REQ-MANUAL-GRID-CHARGE          done       Manueller Netzladeservice als sicherer Adapter auf die zentrale SunSpec-Steuerung
 # REQ-GRID-SERVING-CHARGE         done       Netzdienliches Laden: PV-Ladevorgang im eigenen Zeitfenster aktiv unterbrechen
 # REQ-MANUAL-DISCHARGE            verworfen  Manuelle Entladung mit fester Leistung - vom Hersteller nicht vorgesehen
@@ -141,7 +142,8 @@ requirement_bridge_charge:
     die verbleibende Energiemenge wird ausdrücklich als Fehlbetrag angegeben.
 
     Die erlaubten Intervalle stammen ausschließlich aus den Tarifpreisfenstern
-    des gespeicherten TIME_OF_USE-Tarifs. Es gelten nur dessen billigste
+    des gespeicherten TIME_OF_USE-Tarifs nach REQ-TIME-OF-USE-CHARGE-SOURCE.
+    Es gelten nur dessen billigste
     tatsächlich vorkommende Preisstufen einschließlich des Basispreises.
     Ein teureres verbleibendes Fenster ersetzt keinen verpassten Niedertarif.
     Das separate Netzladezeitfenster beeinflusst diese Planung nicht.
@@ -599,6 +601,49 @@ requirement_sunspec_datatypes:
        noch eine PV-Überschuss-Hysterese fälschlich bestätigt."
 
 # ==============================================================================
+# ANFORDERUNG: GEMEINSAME LADEZEITENQUELLE IM ZEITVARIABLEN TARIF
+# ==============================================================================
+requirement_time_of_use_charge_source:
+  id: REQ-TIME-OF-USE-CHARGE-SOURCE
+  title: "Tarifpreisfenster als einzige Ladezeitenquelle im zeitvariablen Tarif (Issue #237)"
+  status: done
+  description: >
+    Bei gespeichertem TIME_OF_USE-Tarif verwenden feste SOC-Ladung nach
+    REQ-TIMED-SOC-CHARGE und Verbrauchsplanung nach REQ-BRIDGE-CHARGE
+    dieselben erlaubten Tarifabschnitte. Niedertarif ist die niedrigste
+    tatsächlich täglich vorkommende Preisstufe. Alle gleich günstigen
+    Abschnitte sind freigegeben, einschließlich Basispreis in echten Lücken;
+    ein durch Preisfenster vollständig verdrängter Basispreis zählt nicht.
+    Halboffene Grenzen, Mitternacht und lokale Zeitzone folgen
+    REQ-ECONOMICS-TARIFFS. Min.-SOC-Startschwelle, Netzlade-Max-SOC,
+    globales Max-SOC und aktive Monate gelten weiter für feste SOC-Ladung;
+    Bridge ersetzt ausschließlich die Startschwelle durch den Bedarf.
+
+    Der Tarif gilt unmittelbar nach Update, Neustart und Optionsänderung.
+    Gespeicherte timed_charge_start/end bleiben für andere Tarifarten
+    erhalten, werden nicht zu Tarifpreisfenstern umgedeutet und sind im
+    TIME_OF_USE-Modus unwirksam und nicht bearbeitbar. Alte fenstergebundene
+    Laufzeitzustände ohne Tarifbindung werden auch bei gleichen Uhrzeiten
+    verworfen; eine erneute Min.-SOC-Auswertung ist erforderlich. Gebundene
+    Zustände gelten nur für den identischen Tarif und absoluten Abschnitt.
+    Beim Rückwechsel auf andere Tarifarten werden die getrennten Zeiten
+    erneut gegen die Ladepause geprüft; überlappende alte Netzladezeiten
+    werden wie beim Neustart geleert. Der Writer beendet die Tarifladung
+    auch ohne abgeschlossenen Poll an der absoluten Abschnittsgrenze und
+    prüft Tarifänderungen nach verzögerten Modusantworten erneut. Ein
+    bestätigter 0-W-Entladeschutz bei SOC-Ausfall behält seine eigene Frist.
+    Ungültige Tarifdaten erlauben keine Tarifladung und keinen Rückfall auf
+    alte Zeiten. Dashboard und Konfigurations-Hilfetext erklären die einzige
+    Tarifquelle; es gibt keine weitere Checkbox oder Quellenwahl.
+  acceptance_criteria:
+    - "Feste SOC-Ladung und Bridge nutzen dieselben billigsten Tarifabschnitte; mehrere gleich niedrige Fenster und tatsächlich wirksame Basispreislücken sind abgedeckt."
+    - "Ein vollständig abgedeckter Tag ignoriert den nirgendwo geltenden Basispreis. Ein teurerer Restabschnitt ersetzt keinen verpassten Niedertarif."
+    - "Tests prüfen Mitternacht, lokale Zeit, angrenzende Grenzen und Monatswechsel sowie ungültige oder fehlende Tarifdaten ohne Legacy-Fallback."
+    - "Update, Neustart und Tarifwechsel geben alte Lade- oder Haltezustände nicht für abweichende Tarifabschnitte frei; alte Start-/Endwerte werden weder erfunden noch als zweite Ladequelle verwendet."
+    - "Das Dashboard zeigt im TIME_OF_USE-Modus keine bearbeitbaren alten Ladezeiten. Min.-SOC-Startschwelle bleibt bei fester SOC-Ladung sichtbar und entfällt bei Bridge; Max-SOC und Monate bleiben bedienbar."
+    - "Der deutsch-/englischsprachige Hilfetext auf economics_time_of_use erklärt Tarifquelle, niedrigste Preisstufe und Umgang mit bestehenden Ladezeiten."
+
+# ==============================================================================
 # ANFORDERUNG: ZEITGESTEUERTES LADEN AUF ZIEL-SOC
 # ==============================================================================
 requirement_timed_soc_charge:
@@ -606,6 +651,11 @@ requirement_timed_soc_charge:
   title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden, plus geräteunabhängige Max-SOC-Sperre"
   status: done
   description: >
+    Im TIME_OF_USE-Modus stammen die hier beschriebenen Ladefenster
+    ausschließlich aus dem gespeicherten Tarif nach
+    REQ-TIME-OF-USE-CHARGE-SOURCE; bei anderen Tarifarten gilt weiterhin
+    das separate Netzladezeitfenster.
+
     Zeitgesteuertes Laden und die Max-SOC-Sperre sind Software-Logik (kein
     natives Geräteregister für die Aktivierung selbst) und teilen sich mit
     der manuellen Netzladung (REQ-MANUAL-GRID-CHARGE), netzdienlichem und
@@ -888,8 +938,12 @@ requirement_timed_soc_charge:
 
     Die konkrete Ablaufzeit wird separat je Config Entry im Store
     sax_power.timed_discharge gespeichert und vor dem ersten Steuerlauf
-    restauriert. Abgelaufene, ungültige oder über 25 Stunden entfernte
-    Ablaufzeiten erzeugen keine Sperre. Eine höchstens 25 Stunden alte
+    restauriert. Abgelaufene oder ungültige Ablaufzeiten erzeugen keine
+    Sperre. Bei Legacy-Fenstern gilt zusätzlich eine Entfernung von maximal
+    25 Stunden. Tarifgebundene Zustände werden gegen ihre exakte Identität
+    geprüft; durch eine übersprungene teure Phase bei Sommerzeitwechsel
+    kann ein gültiger zusammenhängender Niedertarif länger als 25 Stunden sein.
+    Eine höchstens 25 Stunden alte
     Ablaufzeit dient nur noch als Endmarker: Ein nachträglich verlängertes
     Fenster darf denselben abgeschlossenen Ladezyklus auch nach Neustart
     weder neu bestätigen noch erneut an die globale Max-SOC-Sperre binden.
@@ -2794,6 +2848,9 @@ requirement_vue_charging:
     Netzladezeitfenster und die Startschwelle timed_charge_min_soc, auch wenn
     der Plan auf Daten wartet oder pausiert. Netzlade-Max-SOC und Monate
     bleiben bedienbar; diese Grenzen gelten weiterhin für REQ-BRIDGE-CHARGE.
+    Im TIME_OF_USE-Modus entfällt das Netzladezeitfenster außerdem auch bei
+    fester SOC-Ladung nach REQ-TIME-OF-USE-CHARGE-SOURCE; die Startschwelle
+    bleibt in dieser Betriebsart sichtbar.
 
     Nach diesen Ladekarten zeigt der Tab die wiederverwendbare Karte
     Ladeplanung (EN: Charging plan) aus ChargePlan.vue mit
@@ -2819,9 +2876,9 @@ requirement_vue_charging:
     Einspeisevergütung, nächster Preiswechsel und Nichtverfügbarkeit werden
     live aus den Sensorattributen übernommen. Preise haben vier
     Nachkommastellen; der Browser berechnet weder aktive Fenster noch Preise.
-    Die Preisfenster bleiben im Browser reine Anzeigen und verändern das
-    einzelne Netzladezeitfenster nicht. Ihre Verwendung für
-    REQ-BRIDGE-CHARGE entscheidet das Backend anhand der Konfiguration.
+    Die Preisfenster bleiben im Browser reine Anzeigen. Ihre Verwendung für
+    feste SOC-Ladung und REQ-BRIDGE-CHARGE bestimmt das Backend nach
+    REQ-TIME-OF-USE-CHARGE-SOURCE anhand der Konfiguration.
     Ein Tarifwechsel, Mount oder erneutes Rendern löst im Browser keinen
     HA-Service und keinen Registerzugriff aus.
 
@@ -4164,6 +4221,8 @@ requirement_economics_tariffs:
     Die acht Zeitfenstergruppen (economics_tou_window_1 bis _8) werden je
     als eigene Section dargestellt und liegen deshalb als verschachtelte
     Mappings mit den Feldern start/end/price_eur_kwh in entry.options.
+    Die TIME_OF_USE-Folgeseite erläutert die gemeinsame Ladezeitenquelle
+    und bestehende Ladezeiten nach REQ-TIME-OF-USE-CHARGE-SOURCE.
 
     Die Preisfelder der tarifspezifischen Schritte sind im Schema bewusst
     vol.Optional und werden erst im Schritt selbst geprüft

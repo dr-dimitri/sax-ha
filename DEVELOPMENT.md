@@ -124,7 +124,7 @@ keine Vue-/Vorschaukennzeichnung.
 | View | Anforderungen | Aufgabe |
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
-| `TimedChargingView.vue` | `REQ-VUE-CHARGING`, `REQ-BRIDGE-CHARGE` | Tarifpreisfenster, Netzladezeitfenster, Entladestatus, Netzladeziel/Startschwelle, Monatsschalter und begründete Verbrauchsplanung bis zum PV-Start. |
+| `TimedChargingView.vue` | `REQ-VUE-CHARGING`, `REQ-TIME-OF-USE-CHARGE-SOURCE`, `REQ-BRIDGE-CHARGE` | Tarifpreisfenster, bei anderen Tarifarten Netzladezeitfenster, Entladestatus, Netzladeziel/Startschwelle, Monatsschalter und begründete Verbrauchsplanung bis zum PV-Start. |
 | `DynamicChargingView.vue` | `REQ-VUE-DYNAMIC-CHARGING` | Preisladeregler, Strategie und Status in der bisherigen Reihenfolge. |
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
@@ -228,8 +228,11 @@ Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
 
 `TimeWindowControl.vue` ersetzt in den Ansichten Zeitvariabler Tarif und
 Netzdienliches Laden die getrennten Zeit-Bedienelemente. Es gibt genau zwei
-bearbeitbare Paare: `time.timed_charge_start`/`time.timed_charge_end` und
-`time.grid_serving_start`/`time.grid_serving_end`. Eine 24-Stunden-Leiste mit
+Paare: `time.timed_charge_start`/`time.timed_charge_end` und
+`time.grid_serving_start`/`time.grid_serving_end`. Das erste ist nur ohne
+`TIME_OF_USE`-Tarif und ohne Verbrauchsplanung bearbeitbar; im Tarifmodus
+gelten die Tarifpreisfenster nach `REQ-TIME-OF-USE-CHARGE-SOURCE`.
+Eine 24-Stunden-Leiste mit
 verschiebbaren Start-/Endmarken und Eingaben im Format HH:MM bearbeiten
 dasselbe lokale Entwurfspaar. Eingaben verwenden `step=60`, Ziehen und
 Tastatur ein Minutenraster bis 23:59. Vorhandene Sekunden lösen beim Laden
@@ -495,7 +498,12 @@ Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS). Die Tarifart steht als
 `economics_tariff_type` auf der ersten Seite; anschließend verzweigt der Flow
 in genau einen tarifspezifischen Schritt (`economics_fixed`,
 `economics_time_of_use`, `economics_dynamic`) oder speichert bei
-`disabled` sofort. Beim Speichern übernimmt der Flow ausschließlich die zur
+`disabled` sofort. Die `economics_time_of_use`-Folgeseite erklärt ausdrücklich,
+dass das Profil die einzige Ladezeitenquelle für feste SOC-Ladung und
+Verbrauchsplanung ist, einschließlich günstiger Basispreislücken. Sie erklärt
+auch den sofortigen Wechsel nach Update/Optionsänderung und die gespeicherten,
+in diesem Modus unwirksamen alten Start-/Endzeiten; eine weitere Quellenoption
+gibt es nicht. Beim Speichern übernimmt der Flow ausschließlich die zur
 gewählten Tarifart gehörenden Schlüssel und verwirft alle übrigen aus
 `ECONOMICS_OPTION_KEYS` - ein alter Festpreis darf nach einem Rückwechsel
 nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
@@ -516,11 +524,13 @@ Die gemeinsame Komponente erhält HA-Änderungen ohne Dashboard-Neubau; sie
 formatiert Preise mit vier Nachkommastellen und berechnet weder Preise noch
 aktive Fenster. Auch ohne Preisfenster bleiben vorhandene Grundpreis- und
 Tarifinformationen sichtbar. Ein fehlender Preis wird nicht als aktiver
-Grundpreis markiert. Ohne aktivierte Verbrauchsplanung bedient die separate
-Karte „Netzladezeitfenster“ (EN: „Grid charging window“) weiterhin genau
-`timed_charge_start` und `timed_charge_end`. Die Tarifpreisfenster-Karte löst
-selbst keine Lade- oder Serviceaktion aus; für `REQ-BRIDGE-CHARGE` verwendet
-das Backend den gespeicherten Tarif als alleinige Quelle erlaubter Ladezeiten.
+Grundpreis markiert. Bei `TIME_OF_USE` entfällt die separate Karte
+„Netzladezeitfenster“ (EN: „Grid charging window“); nur bei anderen Tarifarten
+ohne Verbrauchsplanung bedient sie `timed_charge_start` und `timed_charge_end`.
+Die Tarifpreisfenster-Karte löst selbst keine Lade- oder Serviceaktion aus.
+Das Backend verwendet den gespeicherten Tarif sowohl für feste SOC-Ladung
+als auch für `REQ-BRIDGE-CHARGE` als alleinige Quelle erlaubter Ladezeiten
+(siehe `REQ-TIME-OF-USE-CHARGE-SOURCE`).
 
 Der **Strompreis-Sensor** (`price_sensor`, erste Seite) hat zwei getrennte
 Aufgaben, die sich leicht verwechseln lassen:
@@ -653,8 +663,31 @@ UTC-Intervalle, einschließlich des Basispreises. Ein teureres verbleibendes
 Fenster ersetzt keinen bereits verpassten Niedertarif. Aktive Monate werden an
 lokalen Tagesgrenzen geprüft. Das separate Netzladezeitfenster ist kein Eingang
 der Verbrauchsplanung und begrenzt oder erweitert deren Tarifintervalle nicht.
-Die weitergehende Migration der bisherigen festen Netzladung ist separat in
-[Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) erfasst.
+Dieselbe Tarifauflösung versorgt die feste SOC-Ladung nach
+`REQ-TIME-OF-USE-CHARGE-SOURCE`; damit ist
+[Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) umgesetzt.
+Die niedrigste Preisstufe wird über den vollständigen täglich vorkommenden
+Plan bestimmt. Basispreisabschnitte zählen nur in tatsächlichen Lücken,
+alle gleich günstigen Abschnitte sind erlaubt. Ungültige Tarifdaten ergeben
+keine Freigabe und keinen Rückfall auf `timed_charge_start`/`timed_charge_end`.
+`application/tariff_charge.py::tariff_charge_state` adaptiert
+`domain/tariff.py::low_tariff_window` zu einem `TimedChargeState` für die
+feste SOC-Ladung. Ist der Folgemonat deaktiviert, begrenzt der Adapter den
+Abschnitt am lokalen Monatswechsel. Die persistierte `source` bindet
+Ladehysterese und Entladesperre über eine SHA256-Identität des vollständigen
+Tarifs und des absoluten Abschnitts an genau diesen Tarifstand und Zeitraum.
+Laufzeitzustände ohne `source` werden beim Wechsel zu `TIME_OF_USE` verworfen,
+auch bei zufällig gleichen Uhrzeiten; eine erneute Min.-SOC-Auswertung ist
+erforderlich. Neue Zustände dürfen nur bei exakt passender Identität gelten.
+
+Die alten Konfigurationswerte bleiben für andere Tarifarten unverändert
+gespeichert. Im `TIME_OF_USE`-Modus sind sie unwirksam und nicht bearbeitbar;
+Start/Ende werden beim Update nicht zu Preisfenstern migriert. Der Tarif gilt
+bereits vor der ersten steuernden Auswertung nach Neustart und nach einer
+Optionsänderung. Beim Rückwechsel auf andere Tarifarten prüft
+`reconcile_charge_time_source` vor jeder neuen Ladeentscheidung die bisherigen
+Überschneidungsregeln erneut; ein inzwischen mit der Ladepause überlappendes
+Legacy-Netzladefenster wird wie beim Start geleert.
 
 Die PV-Quelle ist der bereits konfigurierte `CONF_PV_FORECAST_SENSOR`. Über die
 Entity Registry wird dessen `config_entry_id` der Integration `pv_forecast`
@@ -1361,9 +1394,12 @@ unveränderte Modusrückmeldung verhindern Nachweise durch wiederverwendete
 Setter-Daten oder optimistische Register-Updates. Ein reiner Ladeauftrag,
 PV-Laden oder preisoptimiertes/manuelles Laden setzt keinen Nachweis.
 
-`infrastructure/timed_discharge_store.py` speichert ausschließlich die
-bestätigte Ablaufzeit je Config Entry. Sie wird vor dem ersten Steuerlauf
-restauriert; ungültige oder über 25 Stunden entfernte Werte werden verworfen.
+`infrastructure/timed_discharge_store.py` speichert die bestätigte Ablaufzeit
+je Config Entry, bei Tarifladung zusätzlich die `source`-Identität. Vor dem
+ersten Steuerlauf werden ungültige Zustände verworfen. Die 25-Stunden-Grenze
+gilt für Legacy-Fenster; Tarifzustände werden gegen die exakte Quelle und
+Ablaufzeit geprüft. Eine durch übersprungene teure Abschnitte bei der
+Sommerzeitumstellung verlängerte Niedertarifphase darf länger gültig sein.
 Eine abgelaufene Frist aktiviert keine Sperre; bis zu 25 Stunden alte
 Fristen bleiben lediglich als Endmarker bekannt, damit ein nachträglich
 verlängertes Fenster denselben Ladezyklus auch nach Neustart nicht neu

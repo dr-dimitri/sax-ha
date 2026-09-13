@@ -161,7 +161,7 @@ class ControlConfig:
     # sich dabei nicht um einen bestätigten Anwenderwert handelt.
     unresolved_fields: frozenset[str] = frozenset()
 
-    def sanitized(self) -> ControlConfig:
+    def sanitized(self, *, validate_legacy_windows: bool = True) -> ControlConfig:
         """Füllt fehlende Felder auf und erzwingt die fachlichen Invarianten.
 
         Die Feldvalidierung beim Laden prüft jeden Wert nur für sich. Ein
@@ -222,7 +222,9 @@ class ControlConfig:
                 "preisoptimiertes Laden bleibt aus"
             )
             config = replace(config, price_charge_enabled=False)
-        return config._without_overlapping_windows()
+        return (
+            config._without_overlapping_windows() if validate_legacy_windows else config
+        )
 
     def _without_overlapping_windows(self) -> ControlConfig:
         """Erzwingt die Nicht-Überschneidung der beiden Zeitfenster.

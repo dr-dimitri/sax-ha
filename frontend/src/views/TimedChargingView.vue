@@ -14,6 +14,11 @@ const bridgeEnabled = computed(
     dashboard?.entity("sensor", "bridge_charge_plan")?.state?.attributes
       .enabled === true,
 );
+const timeOfUseTariff = computed(
+  () =>
+    dashboard?.entity("sensor", "economics_current_import_price")?.state
+      ?.attributes.tariff_type === "time_of_use",
+);
 const baseCards = [
   {
     key: "window",
@@ -51,7 +56,11 @@ const baseCards = [
 ] as const;
 const cards = computed(() =>
   baseCards
-    .filter((card) => !bridgeEnabled.value || card.key !== "window")
+    .filter(
+      (card) =>
+        card.key !== "window" ||
+        (!bridgeEnabled.value && !timeOfUseTariff.value),
+    )
     .map((card) => ({
       ...card,
       entities: card.entities.filter(

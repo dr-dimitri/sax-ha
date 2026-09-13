@@ -511,6 +511,12 @@ test("one dashboard with five complete views, local assets and responsive screen
       await expect(months.locator(".month-selection__quarter")).toHaveCount(4);
       await expect(months.getByRole("switch")).toHaveCount(12);
       await expect(months.locator(".entity-control__value")).toHaveCount(0);
+    }
+    if (tab.path === "ladeautomatik") {
+      await expect(panel.locator(".time-window-control")).toHaveCount(0);
+      await expect(panel.locator(".tariff-plan")).toBeVisible();
+    }
+    if (tab.path === "netzdienliches-laden") {
       const window = panel.locator(".time-window-control");
       await expect(window).toHaveCount(1);
       await expect(window.getByRole("slider")).toHaveCount(2);
@@ -597,8 +603,12 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
           ...current,
           attributes: {
             ...current.attributes,
-            windows: configuredWindows,
+            windows: configuredWindows.map((window, index) => ({
+              ...window,
+              low_tariff: index === 1,
+            })),
             active_window: { start: "18:00", end: "20:00" },
+            low_tariff_price_eur_kwh: -0.05,
           },
         },
       },
@@ -613,11 +623,16 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
       name: english ? "Grid charging window" : "Netzladezeitfenster",
       exact: true,
     }),
-  ).toBeVisible();
-  await expect(panel.locator(".time-window-control")).toHaveCount(1);
+  ).toHaveCount(0);
+  await expect(panel.locator(".time-window-control")).toHaveCount(0);
   await expect(
     panel.locator(".time-window-control input[type=time]"),
-  ).toHaveCount(2);
+  ).toHaveCount(0);
+  await expect(
+    panel.getByText(english ? "Grid charge min. SOC" : "Netzladung Min. SOC", {
+      exact: true,
+    }),
+  ).toBeVisible();
   const tariff = panel.locator(".tariff-plan");
   const rows = tariff.locator(".tariff-plan__table tbody tr");
   await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
@@ -626,7 +641,15 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   await expect(rows).toHaveCount(9);
   for (const [index, window] of windows.entries()) {
     await expect(rows.nth(index).locator("td")).toHaveText([
-      index === 6 ? (english ? "now" : "jetzt") : "",
+      index === 6
+        ? english
+          ? "now"
+          : "jetzt"
+        : index === 1
+          ? english
+            ? "Low tariff"
+            : "Niedertarif"
+          : "",
       window.start,
       window.end,
       price(window.price_eur_kwh),
@@ -638,6 +661,13 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
     price(0.32),
   ]);
   await expect(tariff.locator(".tariff-plan__current")).toHaveCount(1);
+  await expect(tariff.locator(".tariff-plan__low")).toHaveCount(1);
+  await expect(tariff.locator(".tariff-plan__low")).toContainText("03:00");
+  await expect(tariff).toContainText(
+    english
+      ? "Configure → Tariff price windows"
+      : "Konfigurieren → Tarifpreisfenster",
+  );
   await expect(tariff.locator(".tariff-plan__current")).toContainText("18:00");
   await expect(tariff).toContainText(price(0.0812));
   await expect(tariff).toContainText(
@@ -723,6 +753,34 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   await expect(tariff.locator(".tariff-plan__current")).toHaveCount(1);
   await panel.locator("nav a[href$='/ladeautomatik']").click();
   await expect(rows).toHaveText(expectedRows);
+  await panel.evaluate((element) => {
+    const host = element as HTMLElement & { hass: HomeAssistant };
+    const id = "sensor.demo_economics_current_import_price";
+    const current = host.hass.states[id];
+    host.hass = {
+      ...host.hass,
+      states: {
+        ...host.hass.states,
+        [id]: {
+          ...current,
+          attributes: {
+            ...current.attributes,
+            low_tariff_price_eur_kwh: null,
+          },
+        },
+      },
+    };
+  });
+  await expect(tariff.locator(".tariff-plan__low")).toHaveCount(0);
+  await expect(tariff.locator(".tariff-plan__low-unavailable")).toContainText(
+    english ? "SOC charging remains blocked" : "SOC-Ladung bleibt gesperrt",
+  );
+  await expect(panel.locator(".time-window-control")).toHaveCount(0);
+  await page.locator("#legacy-tariff").click();
+  await expect(tariff).toHaveCount(0);
+  await expect(panel.locator(".time-window-control")).toHaveCount(1);
+  await expect(panel.locator("input[type=time]").nth(0)).toHaveValue("22:00");
+  await expect(panel.locator("input[type=time]").nth(1)).toHaveValue("06:00");
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
@@ -776,6 +834,7 @@ test("overnight times, months, native strategy options and negative prices", asy
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
+  await page.locator("#legacy-tariff").click();
   await panel.locator("nav a[href$='/ladeautomatik']").click();
   await panel
     .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
@@ -1004,6 +1063,7 @@ test("both minute-only time windows support dragging, keyboard and atomic submis
   context,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
+  await page.locator("#legacy-tariff").click();
   const mobile = testInfo.project.name.startsWith("mobile");
   let actions = 0;
   await page.locator("#legacy-times").click();
@@ -1334,7 +1394,8 @@ test("hidden tariff deep links, reload and history resolve to the active tariff 
   );
   await page.reload();
   await expect(page).toHaveURL(/ladeautomatik$/);
-  await expect(panel.locator(".time-window-control")).toBeVisible();
+  await expect(panel.locator(".tariff-plan")).toBeVisible();
+  await expect(panel.locator(".time-window-control")).toHaveCount(0);
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
   await page.locator("#tariff-dynamic").click();
   await expect(page).toHaveURL(/netzdienliches-laden$/);

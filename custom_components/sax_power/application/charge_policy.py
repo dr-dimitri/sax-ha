@@ -69,6 +69,7 @@ class ChargePolicyInput:
     neutral_price: float | None
     timed_window_completed: bool = False
     timed_plan_charge_now: bool | None = None
+    timed_tariff_window_active: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,8 +95,12 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
             inputs.timed_plan_charge_now
             if inputs.timed_plan_charge_now is not None
             else not inputs.timed_window_completed
-            and is_time_in_window(
-                inputs.now.time(), inputs.timed_start, inputs.timed_end
+            and (
+                inputs.timed_tariff_window_active
+                if inputs.timed_tariff_window_active is not None
+                else is_time_in_window(
+                    inputs.now.time(), inputs.timed_start, inputs.timed_end
+                )
             )
         )
     )

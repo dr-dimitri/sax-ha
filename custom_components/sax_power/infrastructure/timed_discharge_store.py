@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
+from ..application.timed_charge import is_tariff_source
 from ..application.timed_discharge import TimedDischargeState
 from ..const import DOMAIN
 
@@ -43,7 +44,10 @@ class TimedDischargeStateStore:
             timestamp = datetime.fromisoformat(timestamp_raw)
             if timestamp.tzinfo is None or timestamp.utcoffset() is None:
                 raise ValueError("Ablaufzeit hat keine Zeitzone")
-            return TimedDischargeState(expires_at=timestamp.astimezone(UTC))
+            source = raw.get("source")
+            if source is not None and not is_tariff_source(source):
+                raise ValueError("Ungültige Tarifidentität")
+            return TimedDischargeState(timestamp.astimezone(UTC), source)
         except (
             HomeAssistantError,
             KeyError,
@@ -70,6 +74,9 @@ class TimedDischargeStateStore:
             raise ValueError("Ablaufzeit ist kein Zeitpunkt")
         if timestamp.tzinfo is None or timestamp.utcoffset() is None:
             raise ValueError("Ablaufzeit ohne Zeitzone")
-        await self._store.async_save(
-            {"expires_at": timestamp.astimezone(UTC).isoformat()}
-        )
+        result = {"expires_at": timestamp.astimezone(UTC).isoformat()}
+        if state.source is not None:
+            if not is_tariff_source(state.source):
+                raise ValueError("Ungültige Tarifidentität")
+            result["source"] = state.source
+        await self._store.async_save(result)

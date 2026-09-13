@@ -3127,14 +3127,19 @@ requirement_vue_tariff_editor:
     der gemeinsame Options-Lifecycle bilden weiterhin die einzige aktive Tarifquelle
     und übernehmen Änderungen ohne Config-Entry-Reload in den Coordinator.
 
-    Beim Speichern liest der Editor die sichtbaren nativen Zeitfelder; auch
-    separat bestätigte Pickerwerte werden übernommen. Unvollständige Zeiten
-    und gleiche Grenzen benennen das betroffene Fenster und Feld, markieren
-    es zugänglich und setzen den Fokus dorthin. Der Entwurf bleibt erhalten.
-    Die getrennten Niedertarife 00:00 bis 04:59 und 12:30 bis 14:30 sind gültig.
-    Browserprüfungen verwenden Tastatureingabe in Chromium und WebKit sowie
-    getrennte change- und Submit-Übernahmen. Die native WebKit-Prüfung läuft
-    auf macOS mit den dort verfügbaren editierbaren Zeitsegmenten.
+    Tarifzeiten werden als Text mit sichtbarem 24-Stunden-Formathinweis eingegeben
+    (12:30 oder 1230), ohne missverständliche segmentierte Browser-Platzhalter.
+    Eine unvollständige Eingabe wie 12 bleibt sichtbar unvollständig und wird
+    nicht automatisch ergänzt. Vollständige vierstellige Zeiten werden bei change
+    und beim Speichern in HH:MM normalisiert; vorhandene Sekunden bleiben erhalten.
+    Beim Speichern liest der Editor die sichtbaren Zeitfelder; auch separat
+    bestätigte change-Werte werden übernommen. Unvollständige Zeiten und gleiche
+    Grenzen benennen das betroffene Fenster und Feld, markieren es zugänglich und
+    setzen den Fokus dorthin. Der Entwurf bleibt erhalten, auch bei Serverfehlern.
+    Die getrennten Niedertarife 00:00 bis 04:59 und 12:30 bis 15:30 sind gültig.
+    Browserprüfungen verwenden Tastatureingabe in Chromium und WebKit auf macOS
+    während HA-Zustandsupdates sowie getrennte change- und Submit-Übernahmen,
+    unvollständige Stunden und die vierstellige Eingabe mit Korrektur und Retry.
 
     TOU-Standardpreis, Einspeisevergütung und Zeitfenster entfallen vollständig im
     Options Flow. Tarifauswahl und Preiseingaben für Festpreis und dynamische

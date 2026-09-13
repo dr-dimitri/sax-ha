@@ -172,9 +172,9 @@ apply to every PR, including documentation-only PRs.
   application of the latest state; reuse the response suites linked in DEVELOPMENT.md.
 - Cover real tariff/source changes during both device acknowledgement phases
   and periodic writes; unchanged saves alone do not prove responsiveness.
-  Test native time inputs in Chromium and WebKit with keyboard entry and commit
-  events, including midnight and multiple windows; run Safari's native control
-  regression on macOS because headless Linux WebKit uses different controls.
+  Test tariff time inputs in Chromium and WebKit with keyboard entry and commit
+  events, including incomplete hours, midnight and multiple windows; run the
+  Safari regression on macOS because headless Linux WebKit uses different controls.
   Validate the visible values
   on submission and identify the exact invalid field without discarding drafts.
 

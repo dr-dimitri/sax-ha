@@ -136,10 +136,10 @@ jobs:
       - name: Frontend-Abhängigkeiten installieren
         run: npm ci
 
-      - name: WebKit für die native Tarifeditor-Abnahme installieren
+      - name: WebKit für die Tarifeditor-Abnahme installieren
         run: npx playwright install webkit
 
-      - name: Tarifeditor mit nativen Zeitfeldern prüfen
+      - name: Tarifeditor-Eingaben in WebKit prüfen
         run: npm run test:browser -- --project=webkit-light-de
 
       - name: WebKit-Browserbericht und Screenshots sichern

@@ -589,7 +589,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
     expect(plan.querySelectorAll(".tariff-plan__window")).toHaveLength(2);
     await fill(plan, '[name="base_price"]', "32,75");
     await fill(plan, '[name="feed_in_price"]', "8.12");
-    await fill(plan, '.tariff-plan__window input[type="text"]', "-2,50");
+    await fill(plan, ".tariff-plan__price", "-2,50");
     expect(saves(fixture)).toHaveLength(0);
     await click(plan, "Speichern");
     expect(saves(fixture)[0]?.[0]).toEqual({
@@ -643,17 +643,17 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
     });
     const plan = fixture.plans()[0]!;
     await click(plan, "Bearbeiten");
-    await fill(plan, '.tariff-plan__window input[type="time"]', "06:00:15");
+    await fill(plan, ".tariff-plan__time", "06:00:15");
     await click(plan, "Speichern");
     expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
       "verschieden",
     );
-    await fill(plan, '.tariff-plan__window input[type="time"]', "07:00:00");
+    await fill(plan, ".tariff-plan__time", "07:00:00");
     await click(plan, "Speichern");
     expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
       "überschneiden",
     );
-    await fill(plan, '.tariff-plan__window input[type="time"]', "22:00:15");
+    await fill(plan, ".tariff-plan__time", "22:00:15");
     await click(plan, "Speichern");
     expect(saves(fixture)).toHaveLength(1);
     expect(saves(fixture)[0]?.[0].windows).toEqual([
@@ -661,8 +661,49 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       { start: "06:00:15", end: "08:00:00", price_ct_kwh: 22 },
     ]);
   });
+  it.each([
+    ["1230", "12:30:00"],
+    [" 12:30 ", "12:30:00"],
+    ["12:30:15", "12:30:15"],
+    ["0000", "00:00:00"],
+    ["2359", "23:59:00"],
+  ])(
+    "normalizes complete time %s without changing its meaning",
+    async (input, expected) => {
+      const fixture = await mount({
+        profile: {
+          windows: [{ start: "12:00:00", end: "15:30:00", price_ct_kwh: 16 }],
+        },
+      });
+      const plan = fixture.plans()[0]!;
+      await click(plan, "Bearbeiten");
+      await fill(plan, ".tariff-plan__time", input);
+      await click(plan, "Speichern");
+      expect(saves(fixture)[0]?.[0].windows).toEqual([
+        { start: expected, end: "15:30:00", price_ct_kwh: 16 },
+      ]);
+    },
+  );
+  it.each(["12", "123", "12:", "12:3", "24:00", "2360", "12:30:60", "noon"])(
+    "preserves invalid time %s without inventing missing parts or saving",
+    async (value) => {
+      const fixture = await mount();
+      const plan = fixture.plans()[0]!;
+      await click(plan, "Bearbeiten");
+      await fill(plan, ".tariff-plan__time", value);
+      const input = plan.querySelector<HTMLInputElement>(".tariff-plan__time")!;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      expect(input.value).toBe(value);
+      await click(plan, "Speichern");
+      expect(input.value).toBe(value);
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(input);
+      expect(saves(fixture)).toHaveLength(0);
+    },
+  );
   it.each(["change", "submit"])(
-    "saves the visible midnight and midday windows after native %s commits",
+    "saves the visible midnight and midday windows after %s commits",
     async (commit) => {
       const fixture = await mount({ profile: { windows: [] } });
       const plan = fixture.plans()[0]!;
@@ -672,10 +713,10 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
         const row = [
           ...plan.querySelectorAll<HTMLElement>(".tariff-plan__window"),
         ].at(-1)!;
-        await fill(row, 'input[type="text"]', "18,50");
+        await fill(row, ".tariff-plan__price", "18,50");
       }
       const inputs =
-        plan.querySelectorAll<HTMLInputElement>('input[type="time"]');
+        plan.querySelectorAll<HTMLInputElement>(".tariff-plan__time");
       for (const [index, value] of [
         "00:00",
         "04:59",
@@ -724,7 +765,9 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       expect(alert.textContent).toContain(windowLabel);
       expect(alert.textContent).toContain(fieldLabel);
       expect(input.getAttribute("aria-invalid")).toBe("true");
-      expect(input.getAttribute("aria-describedby")).toBe(alert.id);
+      expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(
+        alert.id,
+      );
       expect(document.activeElement).toBe(input);
       expect(plan.querySelectorAll(".tariff-plan__window")).toHaveLength(2);
       expect(saves(fixture)).toHaveLength(0);

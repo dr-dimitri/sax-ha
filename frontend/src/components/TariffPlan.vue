@@ -74,6 +74,7 @@ const text = computed(() =>
           "Trage zuerst deinen normalen Strompreis ein. Ergänze danach abweichende Preiszeiten und die Einspeisevergütung.",
         priceError:
           "Bitte Preise mit höchstens zwei Nachkommastellen eingeben: Standardpreis und Zeitfenster von −200 bis 500 ct/kWh, Einspeisevergütung von 0 bis 200 ct/kWh.",
+        timeHint: "Uhrzeiten im 24-Stunden-Format eingeben: 12:30 oder 1230.",
         startError: "Bitte eine vollständige Startzeit eingeben (z. B. 12:30).",
         endError: "Bitte eine vollständige Endzeit eingeben (z. B. 14:30).",
         equalTimeError: "Start und Ende müssen verschieden sein.",
@@ -164,6 +165,7 @@ const text = computed(() =>
           "Start with your regular electricity price. Then add any different price periods and your feed-in payment.",
         priceError:
           "Enter prices with up to two decimal places: standard price and windows from −200 to 500 ct/kWh, feed-in remuneration from 0 to 200 ct/kWh.",
+        timeHint: "Enter times in 24-hour format: 12:30 or 1230.",
         startError: "Enter a complete start time (e.g. 12:30).",
         endError: "Enter a complete end time (e.g. 14:30).",
         equalTimeError: "Start and end must differ.",
@@ -479,7 +481,8 @@ function timeInput(key: number, field: "start" | "end") {
 }
 function changeTime(key: number, field: "start" | "end", event: Event) {
   const window = draftWindows.value.find((window) => window.key === key);
-  if (window) window[field] = (event.target as HTMLInputElement).value;
+  const input = event.target as HTMLInputElement;
+  if (window) input.value = window[field] = normalizeTime(input.value);
   clearTimeError(key);
 }
 function clearTimeError(key?: number) {
@@ -530,8 +533,8 @@ async function openEditor() {
     pvSensor.value = result.profiles?.time_of_use.pv_sensor ?? null;
     draftWindows.value = result.windows.map((window) => ({
       key: windowKey++,
-      start: window.start,
-      end: window.end,
+      start: inputTime(window.start),
+      end: inputTime(window.end),
       price: inputPrice(window.price_ct_kwh),
     }));
     conflict.value = false;
@@ -580,6 +583,18 @@ function parsePrice(input: string, min: number, max: number): number | null {
   const value = Number(input.trim().replace(",", "."));
   return Number.isFinite(value) && value >= min && value <= max ? value : null;
 }
+function inputTime(value: string): string {
+  return value.length === 8 && value.endsWith(":00")
+    ? value.slice(0, 5)
+    : value;
+}
+function normalizeTime(value: string): string {
+  const trimmed = value.trim();
+  const candidate = /^\d{4}$/.test(trimmed)
+    ? `${trimmed.slice(0, 2)}:${trimmed.slice(2)}`
+    : trimmed;
+  return timeSeconds(candidate) === null ? value : candidate;
+}
 function timeSeconds(value: string): number | null {
   if (!/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) return null;
   const [hours, minutes, seconds = 0] = value.split(":").map(Number);
@@ -589,11 +604,11 @@ async function save() {
   if (!dashboard || !profile.value || pending.value || conflict.value) return;
   error.value = null;
   clearTimeError();
-  // REQ-VUE-TARIFF-EDITOR: native pickers can commit independently of Vue's input event.
+  // REQ-VUE-TARIFF-EDITOR: include visible edits even without an input event.
   for (const window of draftWindows.value) {
     for (const field of ["start", "end"] as const) {
       const input = timeInput(window.key, field);
-      if (input) window[field] = input.value;
+      if (input) window[field] = normalizeTime(input.value);
     }
   }
   const base = parsePrice(baseInput.value, -200, 500);
@@ -806,6 +821,9 @@ watch(tariffVisible, (visible) => {
         <div class="tariff-plan__step">
           <h3>{{ text.windowsSection }}</h3>
           <p class="tariff-plan__hint">{{ text.windowsHint }}</p>
+          <p :id="`${id}-time-hint`" class="tariff-plan__hint">
+            {{ text.timeHint }}
+          </p>
           <p v-if="!draftWindows.length" class="tariff-plan__empty">
             {{ text.noWindows }}
           </p>
@@ -822,24 +840,21 @@ watch(tariffVisible, (visible) => {
               }}<input
                 v-model="window.start"
                 :name="`window_${window.key}_start`"
-                type="time"
+                type="text"
+                class="tariff-plan__time"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="HH:MM"
                 :aria-invalid="
                   timeError?.key === window.key && timeError.field === 'start'
                 "
                 :aria-describedby="
                   timeError?.key === window.key && timeError.field === 'start'
-                    ? `${id}-error`
-                    : undefined
+                    ? `${id}-time-hint ${id}-error`
+                    : `${id}-time-hint`
                 "
                 @input="clearTimeError(window.key)"
                 @change="changeTime(window.key, 'start', $event)"
-                :step="
-                  (window.start.slice(-2) !== '00' &&
-                    window.start.length === 8) ||
-                  (window.end.slice(-2) !== '00' && window.end.length === 8)
-                    ? 1
-                    : 60
-                "
                 :aria-label="`${text.window} ${index + 1}: ${text.from}`"
             /></label>
             <label
@@ -847,29 +862,27 @@ watch(tariffVisible, (visible) => {
               }}<input
                 v-model="window.end"
                 :name="`window_${window.key}_end`"
-                type="time"
+                type="text"
+                class="tariff-plan__time"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="HH:MM"
                 :aria-invalid="
                   timeError?.key === window.key && timeError.field === 'end'
                 "
                 :aria-describedby="
                   timeError?.key === window.key && timeError.field === 'end'
-                    ? `${id}-error`
-                    : undefined
+                    ? `${id}-time-hint ${id}-error`
+                    : `${id}-time-hint`
                 "
                 @input="clearTimeError(window.key)"
                 @change="changeTime(window.key, 'end', $event)"
-                :step="
-                  (window.start.slice(-2) !== '00' &&
-                    window.start.length === 8) ||
-                  (window.end.slice(-2) !== '00' && window.end.length === 8)
-                    ? 1
-                    : 60
-                "
                 :aria-label="`${text.window} ${index + 1}: ${text.to}`"
             /></label>
             <label
               >{{ text.price }} (ct/kWh)<input
                 v-model="window.price"
+                class="tariff-plan__price"
                 type="text"
                 inputmode="decimal"
                 autocomplete="off"

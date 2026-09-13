@@ -177,7 +177,11 @@ function openSidebar(): void {
       </p>
       <p class="introduction">{{ text.introduction }}</p>
 
-      <section class="section" aria-labelledby="section-heading">
+      <section
+        :key="panel?.config?.entry_id"
+        class="section"
+        aria-labelledby="section-heading"
+      >
         <h1 id="section-heading" ref="heading" tabindex="-1">
           {{ activeTab?.[language] ?? text.notFound }}
         </h1>

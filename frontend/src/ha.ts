@@ -16,6 +16,8 @@ import type {
   EntityDomain,
   HassEntity,
   HomeAssistant,
+  TariffDraft,
+  TariffProfile,
   Unsubscribe,
 } from "./types";
 
@@ -66,6 +68,9 @@ export interface SaxDashboard {
   error: ComputedRef<string | null>;
   entity(domain: EntityDomain, key: string): DashboardEntity | null;
   perform(domain: EntityDomain, key: string, value: unknown): Promise<boolean>;
+  tariff: Readonly<Ref<TariffProfile | null>>;
+  loadTariff(): Promise<TariffProfile>;
+  saveTariff(draft: TariffDraft): Promise<TariffProfile>;
   performTimeWindow(
     kind: "timed_charge" | "grid_serving",
     start: string,
@@ -245,6 +250,7 @@ export function useSaxDashboard(
   const language = computed(() =>
     getHass()?.language.toLowerCase().startsWith("de") ? "de" : "en",
   );
+  const tariff = shallowRef<TariffProfile | null>(null);
   const ready = ref(false);
   const connected = ref(false);
   const errorKey = ref<ErrorKey | null>(null);
@@ -261,6 +267,7 @@ export function useSaxDashboard(
   function reset(invalidateActions = true): void {
     if (invalidateActions) generation += 1;
     ready.value = false;
+    tariff.value = null;
     metadata.value = [];
     for (const [id, action] of actions) {
       if (!action.pending) actions.delete(id);
@@ -527,6 +534,25 @@ export function useSaxDashboard(
     }
   }
 
+  async function tariffRequest(draft?: TariffDraft): Promise<TariffProfile> {
+    const hass = getHass();
+    const entryId = getEntryId();
+    if (!connected.value) throw { code: "disconnected" };
+    if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const current = generation;
+    const profile = await hass.callWS<TariffProfile>({
+      type: `sax_power/dashboard/tariff/${draft ? "save" : "get"}`,
+      entry_id: entryId,
+      ...draft,
+    });
+    if (current !== generation || !connected.value)
+      throw { code: "disconnected" };
+    if (!profile || typeof profile.revision !== "string")
+      throw { code: "failed" };
+    tariff.value = profile;
+    return profile;
+  }
+
   return {
     language,
     ready: readonly(ready),
@@ -535,5 +561,8 @@ export function useSaxDashboard(
     entity,
     perform,
     performTimeWindow,
+    tariff: computed(() => tariff.value),
+    loadTariff: () => tariffRequest(),
+    saveTariff: (draft) => tariffRequest(draft),
   };
 }

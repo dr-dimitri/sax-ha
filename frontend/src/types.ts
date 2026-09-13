@@ -24,6 +24,28 @@ export interface DashboardMetadata {
   entities: readonly DashboardEntityMetadata[];
 }
 
+export interface TariffPriceWindow {
+  start: string;
+  end: string;
+  price_ct_kwh: number;
+}
+
+export interface TariffProfile {
+  tariff_type: string;
+  base_price_ct_kwh: number | null;
+  feed_in_price_ct_kwh: number | null;
+  windows: TariffPriceWindow[];
+  revision: string;
+  can_edit: boolean;
+}
+
+export interface TariffDraft {
+  revision: string;
+  base_price_ct_kwh: number;
+  feed_in_price_ct_kwh: number;
+  windows: TariffPriceWindow[];
+}
+
 export type ConnectionEvent = "ready" | "disconnected" | "reconnect-error";
 export type Unsubscribe = () => Promise<void> | void;
 

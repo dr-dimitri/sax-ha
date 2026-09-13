@@ -6,6 +6,7 @@ import type {
   DashboardMetadata,
   HassConnection,
   HomeAssistant,
+  TariffProfile,
 } from "../src/types";
 
 type PanelElement = InstanceType<typeof SaxPowerVuePanel>;
@@ -638,4 +639,125 @@ describe("Home Assistant panel", () => {
       "/sax-power-vue/ersparnis",
     );
   });
+});
+
+it("REQ-VUE-TARIFF-EDITOR repairs missing price sensors and discards drafts when the entry changes even with an identical revision", async () => {
+  const initial: TariffProfile = {
+    tariff_type: "time_of_use",
+    base_price_ct_kwh: null,
+    feed_in_price_ct_kwh: null,
+    windows: [],
+    revision: "same-profile",
+    can_edit: true,
+  };
+  const callWS = vi.fn(async (message: Readonly<Record<string, unknown>>) => ({
+    ...initial,
+    ...(message.type === "sax_power/dashboard/tariff/save" ? message : {}),
+  }));
+  const hass: HomeAssistant = {
+    language: "de",
+    states: {},
+    connection: {
+      connected: true,
+      async subscribeMessage<T>(callback: (message: T) => void) {
+        callback({ entities: [] } as T);
+        return () => {};
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    callWS: <T>(message: Readonly<Record<string, unknown>>) =>
+      callWS(message) as Promise<T>,
+  };
+  const element = await mount({
+    hass,
+    pathname: "/sax-power-vue/ladeautomatik",
+  });
+  for (let index = 0; index < 5; index++) await flush();
+  expect(shadow(element).querySelector(".tariff-plan")).not.toBeNull();
+  expect(shadow(element).querySelector(".time-window-control")).toBeNull();
+  const edit = () =>
+    shadow(element).querySelector<HTMLButtonElement>(
+      ".tariff-plan__header button",
+    )!;
+  edit().click();
+  for (let index = 0; index < 5; index++) await flush();
+  const base = shadow(element).querySelector<HTMLInputElement>(
+    '[name="base_price"]',
+  )!;
+  base.value = "42";
+  base.dispatchEvent(new Event("input", { bubbles: true }));
+  await flush();
+  element.panel = {
+    config: { entry_id: "entry-2" },
+    url_path: "sax-power-vue",
+  };
+  for (let index = 0; index < 5; index++) await flush();
+  expect(shadow(element).querySelector(".tariff-plan form")).toBeNull();
+  edit().click();
+  for (let index = 0; index < 5; index++) await flush();
+  expect(
+    shadow(element).querySelector<HTMLInputElement>('[name="base_price"]')
+      ?.value,
+  ).toBe("");
+  expect(
+    callWS.mock.calls.filter(
+      ([message]) => message.type === "sax_power/dashboard/tariff/save",
+    ),
+  ).toHaveLength(0);
+  expect(callWS).toHaveBeenLastCalledWith({
+    type: "sax_power/dashboard/tariff/get",
+    entry_id: "entry-2",
+  });
+});
+it("REQ-VUE-TARIFF-EDITOR ignores a late tariff response from a previous entry", async () => {
+  const initial: TariffProfile = {
+    tariff_type: "time_of_use",
+    base_price_ct_kwh: 30,
+    feed_in_price_ct_kwh: 8,
+    windows: [],
+    revision: "same",
+    can_edit: true,
+  };
+  let resolveOld: (result: TariffProfile) => void = () => {};
+  const callWS = vi.fn(async (message: Readonly<Record<string, unknown>>) =>
+    message.entry_id === "entry-1"
+      ? new Promise<TariffProfile>((resolve) => {
+          resolveOld = resolve;
+        })
+      : initial,
+  );
+  const hass: HomeAssistant = {
+    language: "de",
+    states: {},
+    connection: {
+      connected: true,
+      async subscribeMessage<T>(callback: (message: T) => void) {
+        callback({ entities: [] } as T);
+        return () => {};
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    },
+    callWS: <T>(message: Readonly<Record<string, unknown>>) =>
+      callWS(message) as Promise<T>,
+  };
+  const element = await mount({
+    hass,
+    pathname: "/sax-power-vue/ladeautomatik",
+  });
+  await flush();
+  element.panel = {
+    config: { entry_id: "entry-2" },
+    url_path: "sax-power-vue",
+  };
+  for (let index = 0; index < 5; index++) await flush();
+  resolveOld({ ...initial, base_price_ct_kwh: 99 });
+  for (let index = 0; index < 5; index++) await flush();
+  expect(shadow(element).querySelector(".tariff-plan")?.textContent).toContain(
+    "30,00 ct/kWh",
+  );
+  expect(
+    shadow(element).querySelector(".tariff-plan")?.textContent,
+  ).not.toContain("99,00");
 });

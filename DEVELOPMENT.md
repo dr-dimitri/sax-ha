@@ -267,11 +267,11 @@ verwenden denselben Entwurf. Beide Fenster unterstützen DE/EN, helle und
 dunkle HA-Themes sowie mobile Ansichten und zeigen auf Deutsch den
 Uhr-Zusatz nur an der bestätigten Zeitspanne.
 
-Die geplanten Zeiten im dynamischen Tarif und die Tarifpreisfenster unter
-Zeitvariabler Tarif und Amortisation bleiben reine Anzeigen. Die
-Recorder-Datumsfilter bleiben Datumseingaben. Die bis zu acht TOU-Fenster im
-HA-Optionsflow sind keine Zeitfenster-Eingaben dieses Vue-Panels; die separate
-Controls-Vorschau ist ebenfalls keine produktive Ansicht.
+Die geplanten Zeiten im dynamischen Tarif bleiben reine Anzeigen. Die
+Tarifpreisfenster unter Zeitvariabler Tarif und Amortisation besitzen den
+gemeinsamen ausklappbaren Editor nach REQ-VUE-TARIFF-EDITOR. Die
+Recorder-Datumsfilter bleiben Datumseingaben; die separate Controls-Vorschau
+ist keine produktive Ansicht.
 
 `dashboard_statistics.py` ergänzt den ausschließlich lesenden WebSocket-Befehl
 `sax_power/dashboard/statistics`. Die Anfrage enthält `entry_id`, optional das
@@ -305,7 +305,7 @@ Aktualisieren-Schaltfläche lösen eine neue Abfrage aus; es gibt kein weiteres
 Polling der Batterie. Ein Generationszähler verwirft Antworten einer alten
 Auswahl, eines früheren Eintrags oder einer beendeten Verbindung. Datumseingaben
 bleiben Entwürfe bis zum Absenden. Geld wird erst zur Anzeige auf zwei,
-Tarifpreise auf vier Nachkommastellen formatiert; der Vorlaufbetrag beeinflusst
+Tarifpreise in ct/kWh auf zwei Nachkommastellen formatiert; der Vorlaufbetrag beeinflusst
 keine Statistik. Fehlende Historie wird nicht durch Live-Sensorwerte ersetzt.
 
 `CONF_VUE_DASHBOARD_ENABLED` ist ein dauerhaftes Opt-in mit Standard `False`.
@@ -493,26 +493,23 @@ Ladevorgang ausgelöst, bis die neu erzeugte Instanz die
 ursprünglich gemeldeter Bug, siehe `anforderung.yaml`,
 REQ-DYNAMIC-PRICE-CHARGE.
 
-Derselbe Options Flow konfiguriert zusätzlich das Tarifmodell der
-Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS). Die Tarifart steht als
-`economics_tariff_type` auf der ersten Seite; anschließend verzweigt der Flow
-in genau einen tarifspezifischen Schritt (`economics_fixed`,
-`economics_time_of_use`, `economics_dynamic`) oder speichert bei
-`disabled` sofort. Die `economics_time_of_use`-Folgeseite erklärt ausdrücklich,
-dass das Profil die einzige Ladezeitenquelle für feste SOC-Ladung und
-Verbrauchsplanung ist, einschließlich günstiger Basispreislücken. Sie erklärt
-auch den sofortigen Wechsel nach Update/Optionsänderung und die gespeicherten,
-in diesem Modus unwirksamen alten Start-/Endzeiten; eine weitere Quellenoption
-gibt es nicht. Beim Speichern übernimmt der Flow ausschließlich die zur
-gewählten Tarifart gehörenden Schlüssel und verwirft alle übrigen aus
-`ECONOMICS_OPTION_KEYS` - ein alter Festpreis darf nach einem Rückwechsel
-nicht unbemerkt wieder gelten. Die acht Zeitfenstergruppen sind eigene
-`section`-Blöcke und liegen deshalb als verschachtelte Mappings in
-`entry.options`.
+Derselbe Options Flow wählt das Tarifmodell der Wirtschaftlichkeitsauswertung
+(REQ-ECONOMICS-TARIFFS). Die Tarifart steht als `economics_tariff_type` auf der
+ersten Seite; Festpreis und dynamischer Tarif haben die Folgeschritte
+`economics_fixed` und `economics_dynamic` mit Preiseingaben in ct/kWh.
+`disabled` und `time_of_use` speichern sofort. Standardpreis, Einspeisevergütung
+und Zeitfenster des tageszeitabhängigen Tarifs werden ausschließlich im
+Dashboard bearbeitet (REQ-VUE-TARIFF-EDITOR). Bleibt die Tarifart gleich,
+übernimmt der Flow das aktuell gespeicherte TOU-Profil; bei erstmaliger
+Auswahl bleiben fehlende Pflichtpreise unbekannt, bis der Anwender das Profil
+im Dashboard vervollständigt. Beim Tarifwechsel werden fremde Tarifschlüssel
+aus `ECONOMICS_OPTION_KEYS` entfernt. Die persistierten Schlüssel und die
+acht verschachtelten Fenster-Mappings in `entry.options` bleiben in EUR/kWh,
+damit bestehende Konfigurationen und die interne Bilanz unverändert weiterlaufen.
 
 `TariffPlan.vue` stellt diese Preisfenster in `TimedChargingView.vue` und
 `SavingsView.vue` unter „Tarifpreisfenster“ (EN: „Tariff price windows“) dar.
-Die reaktive Datenquelle ist in beiden Ansichten ausschließlich der vorhandene
+Die reaktive Quelle für Tarifstatus und Preisbewertung ist in beiden Ansichten der vorhandene
 Sensor `economics_current_import_price` mit `tariff_type`, `windows`,
 `active_window`, `base_price_eur_kwh`, `feed_in_price_eur_kwh`,
 `next_price_change_at` und `unavailable_reason`. Die Karte erscheint nur bei
@@ -521,13 +518,44 @@ gelieferten Planreihenfolge, einschließlich Mitternacht und angrenzender
 Zeitgrenzen. Der Sensor sortiert den Plan nach Startzeit; die Eingabegruppen
 in den Options bleiben dabei unverändert.
 Die gemeinsame Komponente erhält HA-Änderungen ohne Dashboard-Neubau; sie
-formatiert Preise mit vier Nachkommastellen und berechnet weder Preise noch
-aktive Fenster. Auch ohne Preisfenster bleiben vorhandene Grundpreis- und
+formatiert Preise in ct/kWh mit zwei Nachkommastellen und berechnet weder
+Tarifpreise noch aktive Fenster. Auch ohne Preisfenster bleiben vorhandene Standardpreis- und
 Tarifinformationen sichtbar. Ein fehlender Preis wird nicht als aktiver
-Grundpreis markiert. Bei `TIME_OF_USE` entfällt die separate Karte
+Standardpreis markiert. Bei `TIME_OF_USE` entfällt die separate Karte
 „Netzladezeitfenster“ (EN: „Grid charging window“); nur bei anderen Tarifarten
 ohne Verbrauchsplanung bedient sie `timed_charge_start` und `timed_charge_end`.
-Die Tarifpreisfenster-Karte löst selbst keine Lade- oder Serviceaktion aus.
+„Bearbeiten“ öffnet Standardpreis, Einspeisevergütung und vorhandene Fenster
+in derselben Karte. Nur „Speichern“ schreibt das vollständige Profil;
+„Abbrechen“ verwirft den lokalen Entwurf. Die kompakte Übersicht und
+einklappbare Erläuterungen halten den Platzbedarf nach dem Speichern gering.
+`dashboard_tariff.py` stellt dafür die authentifizierten WebSocket-Befehle
+`sax_power/dashboard/tariff/get` und `sax_power/dashboard/tariff/save` bereit.
+Fehlen Preis-Entity oder Tarifattribute, lädt die Karte das Profil einmalig
+über die API. Ein bestätigter TOU-Tarif bleibt damit auch ohne gültigen
+Preissensor bearbeitbar; der gemeinsame Kontext unterdrückt zugleich die
+hier unwirksamen separaten Netzladezeiten. Ein Anlagenwechsel remountet die
+Ansicht und verwirft Entwürfe der vorherigen Anlage; verspätete Antworten
+werden über die Generation der Verbindung und des Eintrags verworfen.
+Die Schreibseite verlangt einen aktiven Administrator, einen SAX-Eintrag
+mit TOU-Tarif und die beim Laden erhaltene Revision. Eine veraltete Revision
+wird als Konflikt abgelehnt. Die Validierung prüft das vollständige Profil
+einschließlich Wertebereichen, endlichen Preisen und zyklischen Überlappungen;
+die Options werden atomar aktualisiert und über `async_update_options` live
+angewendet. Die API verwendet ausdrücklich `*_ct_kwh`, während gespeicherte
+Options und bestehende Sensorattribute `*_eur_kwh` in Euro bleiben.
+
+Die drei aktuellen Preis-Sensoren veröffentlichen ihre Zustände in ct/kWh.
+Preisgrenze und Neutralpreis wandeln native Centwerte beim Lesen und Schreiben
+an der Entity-Grenze um; der Steuerungs-Store bleibt in EUR/kWh. Der einmalige
+Restore-Pfad unterscheidet alte Euro- und neue Centzustände anhand der Einheit.
+`infrastructure/price_statistics.py` migriert bestehende Kurz- und
+Langzeitstatistiken dieser drei Sensoren auf ct/kWh. Ein `RecorderTask` skaliert
+Werte mit Faktor 100 und ändert die Metadaten in derselben Transaktion;
+die alte Einheit ist zugleich der Schutz vor doppelter Migration. Die
+Registry-Auflösung berücksichtigt umbenannte Entities und deren Config Entry.
+Diese gezielte Migration ist nötig, weil HA keinen Tarifpreis-UnitConverter
+für EUR/kWh und ct/kWh besitzt. Rohzustände behalten ihre historische Einheit;
+ein gemischtes Übergangsintervall kann bei der Statistikbildung entfallen.
 Das Backend verwendet den gespeicherten Tarif sowohl für feste SOC-Ladung
 als auch für `REQ-BRIDGE-CHARGE` als alleinige Quelle erlaubter Ladezeiten
 (siehe `REQ-TIME-OF-USE-CHARGE-SOURCE`).
@@ -539,7 +567,7 @@ Aufgaben, die sich leicht verwechseln lassen:
 |---|---|---|
 | `disabled` | keine | nur preisoptimiertes Laden |
 | `fixed` | ein fester Arbeitspreis aus dem Options Flow | nur preisoptimiertes Laden |
-| `time_of_use` | Grundpreis + bis zu acht Zeitfenster aus dem Options Flow | nur preisoptimiertes Laden |
+| `time_of_use` | Standardpreis + bis zu acht Zeitfenster aus dem Dashboard | nur preisoptimiertes Laden |
 | `dynamic` | der Strompreis-Sensor | Pflichtfeld |
 
 Für das preisoptimierte Laden ist der Sensor immer die Quelle, unabhängig vom
@@ -571,7 +599,8 @@ gewöhnliche Python-Funktion in einem `vol.All` gehört dazu. Der Fehler fliegt
 erst *nach* dem Flow-Schritt in der Websocket-Schicht, der Dialog zeigt
 deshalb nur „Unknown error occurred", und der Schritt ist überhaupt nicht
 erreichbar (#135). Die Preisfelder sind deshalb nackte `NumberSelector` (die
-prüfen den Wertebereich selbst), und die Rundung auf 0,0001 EUR/kWh erfolgt
+prüfen den Wertebereich selbst). Eingaben in ct/kWh werden beim Speichern
+in EUR/kWh umgerechnet; die Rundung auf 0,0001 EUR/kWh erfolgt
 im Schritt (`_round_price_fields`). `tests/test_config_flow.py` führt die
 Serialisierung für jeden Schritt beider Flows und für jedes Modulschema aus;
 die übrigen Tests rufen den Flow über die Python-API auf und überspringen
@@ -1961,7 +1990,7 @@ tests/
 │                                  Netzlade- und Entladeabschnitt von der Tarifauflösung über die
 │                                  Herkunftsaufteilung und die Geldsensoren bis zur
 │                                  Dashboard-Metadatenauflösung; ein, zwei und acht Tarifpreisfenster
-│                                  vom Optionsflow über Tarifmodell und Sensorattribute bis zu den
+│                                  vom Dashboard-Editor über Tarifmodell und Sensorattribute bis zu den
 │                                  Dashboard-States, samt Mitternacht und angrenzenden Grenzen
 ├── test_real_hardware.py           Optionaler Live-Hardware-Test gegen einen *echten* SAX
 │                                  Speicher (siehe Abschnitt "Test gegen echte Hardware" unten)

@@ -106,12 +106,12 @@ function example({ domain, key, entity_id }) {
     attributes.options = ["off", "absolute", "relative", "smart"];
   }
   if (key.includes("price") && domain === "number") {
-    state = "-0.05";
+    state = "-5";
     attributes = {
-      min: -1,
-      max: 2,
-      step: 0.001,
-      unit_of_measurement: "EUR/kWh",
+      min: -100,
+      max: 200,
+      step: 0.1,
+      unit_of_measurement: "ct/kWh",
     };
   }
   if (key === "price_charge_hours") {
@@ -144,14 +144,14 @@ function example({ domain, key, entity_id }) {
     price_charge_active_text: "Inaktiv",
     price_charge_status_text: "Warte auf Preisfenster",
     price_charge_next_start: "2026-09-13T20:00:00Z",
-    price_charge_current_price: "-0.04",
+    price_charge_current_price: "-4",
     economics_investment_configured: "on",
     economics_amortization_progress: "28.5",
     economics_remaining_to_payback: "7150",
     economics_roi: "28.5",
     economics_net_savings: "1350.25",
     economics_status: "active",
-    economics_current_import_price: "0.2456",
+    economics_current_import_price: "24.56",
     bridge_charge_plan: "planned",
   };
   state = values[key] ?? state;
@@ -167,7 +167,7 @@ function example({ domain, key, entity_id }) {
   if (key === "next_cell_calibration") attributes.device_class = "date";
   if (key === "price_charge_next_start") attributes.device_class = "timestamp";
   if (key === "price_charge_current_price")
-    attributes.unit_of_measurement = "EUR/kWh";
+    attributes.unit_of_measurement = "ct/kWh";
   if (key === "grid_serving_forecast")
     attributes.friendly_name = "PV-Prognose 13.9.";
   if (key === "economics_roi") attributes.prior_result_eur = 1499.75;
@@ -175,7 +175,7 @@ function example({ domain, key, entity_id }) {
     attributes.economics_started_at = "2026-01-01T00:00:00Z";
   if (key === "economics_current_import_price")
     attributes = {
-      unit_of_measurement: "EUR/kWh",
+      unit_of_measurement: "ct/kWh",
       tariff_type: "time_of_use",
       windows: [
         { start: "00:00", end: "06:00", price_eur_kwh: 0.18, low_tariff: true },
@@ -325,7 +325,65 @@ function berlinMidnight(day) {
     .value.replace("GMT", "");
   return `${day}T00:00:00${offset}`;
 }
+let tariffRevision = 1;
 async function callWS(request) {
+  if (request.type.startsWith("sax_power/dashboard/tariff/")) {
+    const id = "sensor.demo_economics_current_import_price";
+    const attrs = states[id].attributes;
+    if (request.type.endsWith("/save")) {
+      if (rejectNext) {
+        rejectNext = false;
+        throw { code: "invalid_tariff" };
+      }
+      if (request.revision !== String(tariffRevision))
+        throw { code: "conflict" };
+      tariffRevision += 1;
+      writes += 1;
+      actions.textContent = `${writes}: sax_power.save_tariff ${JSON.stringify(request)}`;
+      const lowPrice = Math.min(
+        request.base_price_ct_kwh,
+        ...request.windows.map((window) => window.price_ct_kwh),
+      );
+      states = {
+        ...states,
+        [id]: {
+          ...states[id],
+          attributes: {
+            ...attrs,
+            base_price_eur_kwh: request.base_price_ct_kwh / 100,
+            feed_in_price_eur_kwh: request.feed_in_price_ct_kwh / 100,
+            low_tariff_price_eur_kwh: lowPrice / 100,
+            base_price_is_low_tariff: request.base_price_ct_kwh === lowPrice,
+            windows: request.windows.map((window) => ({
+              ...window,
+              price_eur_kwh: window.price_ct_kwh / 100,
+              low_tariff: window.price_ct_kwh === lowPrice,
+            })),
+          },
+        },
+      };
+      update();
+    }
+    const current = states[id].attributes;
+    return {
+      tariff_type: current.tariff_type,
+      base_price_ct_kwh:
+        current.base_price_eur_kwh === null
+          ? null
+          : current.base_price_eur_kwh * 100,
+      feed_in_price_ct_kwh:
+        current.feed_in_price_eur_kwh === null
+          ? null
+          : current.feed_in_price_eur_kwh * 100,
+      windows: current.windows.map((window) => ({
+        start: window.start,
+        end: window.end,
+        price_ct_kwh: window.price_eur_kwh * 100,
+      })),
+      revision: String(tariffRevision),
+      can_edit: true,
+    };
+  }
   if (request.type !== "sax_power/dashboard/statistics")
     throw new Error("Unknown demo request");
   const start = request.start_date ?? "2026-09-12";

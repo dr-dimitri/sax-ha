@@ -16,7 +16,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_PORT, CURRENCY_EURO
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import AbortFlow, section
+from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 from homeassistant.helpers.device_registry import format_mac
@@ -24,7 +24,7 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
-from .application.economics import parse_price, parse_time
+from .application.economics import parse_price
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
@@ -35,9 +35,6 @@ from .const import (
     CONF_ECONOMICS_PRIOR_RESULT,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
-    CONF_ECONOMICS_WINDOW_END,
-    CONF_ECONOMICS_WINDOW_PRICE,
-    CONF_ECONOMICS_WINDOW_START,
     CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
@@ -87,14 +84,7 @@ from .const import (
     REG_SOC,
 )
 from .domain.sunspec import SunSpecDecodeError, decode_identity
-from .domain.tariff import (
-    DailyPriceWindow,
-    TariffType,
-    TariffWindowError,
-    TariffWindowIssue,
-    find_overlapping_window,
-    validate_window_fields,
-)
+from .domain.tariff import TariffType
 from .sensor import SENSOR_DESCRIPTIONS
 
 _LOGGER = logging.getLogger(__name__)
@@ -610,10 +600,8 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
 # --------------------------------------------------------------------------
 # Wirtschaftlichkeitsauswertung (siehe anforderung.yaml,
 # REQ-ECONOMICS-TARIFFS): Der Tariftyp wird bereits auf der ersten
-# Options-Seite gewählt, die tarifspezifischen Preise stehen anschließend in
-# einem eigenen Schritt - so sieht der Anwender nie Felder, die für seinen
-# Tarif keine Bedeutung haben, und ein deaktivierter Tarif fragt gar keine
-# Preise ab.
+# Options-Seite gewählt. Festpreis/dynamisch fragen anschließend ihre Preise
+# ab; das Tagesprofil wird ausschließlich im Dashboard bearbeitet.
 # --------------------------------------------------------------------------
 
 
@@ -628,7 +616,7 @@ def _round_to_price_step(value: float) -> float:
 
 
 def _price_selector(minimum: float, maximum: float) -> selector.NumberSelector:
-    """Eingabefeld für einen Brutto-Arbeitspreis in EUR/kWh.
+    """Eingabefeld für einen Brutto-Arbeitspreis in ct/kWh.
 
     Bewusst ein nackter NumberSelector ohne umschließendes vol.All: Home
     Assistant übersetzt jedes Formularschema für das Frontend mit
@@ -644,11 +632,11 @@ def _price_selector(minimum: float, maximum: float) -> selector.NumberSelector:
     """
     return selector.NumberSelector(
         selector.NumberSelectorConfig(
-            min=minimum,
-            max=maximum,
+            min=minimum * 100,
+            max=maximum * 100,
             step="any",
             mode=selector.NumberSelectorMode.BOX,
-            unit_of_measurement="EUR/kWh",
+            unit_of_measurement="ct/kWh",
         )
     )
 
@@ -686,97 +674,23 @@ STEP_ECONOMICS_FIXED_SCHEMA = vol.Schema(
 
 STEP_ECONOMICS_DYNAMIC_SCHEMA = vol.Schema(dict(_FEED_IN_FIELD), extra=vol.ALLOW_EXTRA)
 
-# Jede der acht Zeitfenstergruppen ist eine eigene, eingeklappte Section:
-# ohne die Gruppierung stünden 24 gleich aussehende Einzelfelder
-# untereinander, und die Zuordnung Start/Ende/Preis wäre nicht mehr
-# erkennbar. Alle Felder einer Gruppe sind optional - eine Gruppe ist
-# entweder vollständig leer oder vollständig befüllt, geprüft in
-# _validate_windows.
-STEP_ECONOMICS_TOU_SCHEMA = vol.Schema(
-    {
-        **_FEED_IN_FIELD,
-        vol.Optional(CONF_ECONOMICS_TOU_BASE_PRICE): _price_selector(
-            MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
-        ),
-        **{
-            # Optional wie die Preisfelder darüber: eine erneut
-            # abgeschickte erste Seite enthält keine Zeitfenstergruppen,
-            # und _validate_windows behandelt eine fehlende Gruppe ohnehin
-            # wie eine leere.
-            vol.Optional(key): section(
-                vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_ECONOMICS_WINDOW_START
-                        ): selector.TimeSelector(),
-                        vol.Optional(
-                            CONF_ECONOMICS_WINDOW_END
-                        ): selector.TimeSelector(),
-                        vol.Optional(CONF_ECONOMICS_WINDOW_PRICE): _price_selector(
-                            MIN_ECONOMICS_IMPORT_PRICE, MAX_ECONOMICS_IMPORT_PRICE
-                        ),
-                    }
-                ),
-                {"collapsed": True},
-            )
-            for key in ECONOMICS_TOU_WINDOW_KEYS
-        },
-    },
-    extra=vol.ALLOW_EXTRA,
-)
-
-#: Preisfelder der Tarifseiten auf oberster Ebene. Die Preise der acht
-#: Zeitfenstergruppen stecken je eine Ebene tiefer in ihrer Section und
-#: werden in _round_price_fields getrennt behandelt.
 _TOP_LEVEL_PRICE_KEYS = (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
-    CONF_ECONOMICS_TOU_BASE_PRICE,
 )
 
 
 def _round_price_fields(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Kopie der Eingabe mit allen Preisen auf ECONOMICS_PRICE_DECIMALS.
-
-    Der Aufrufer rundet unmittelbar vor dem Speichern, weil die Rundung
-    nicht mehr im Schema stattfinden darf (siehe _price_selector).
-    Nicht auswertbare Werte bleiben unverändert stehen, statt hier eine
-    Exception aus dem Schritt fliegen zu lassen: das Schema hat die im
-    Schema bekannten Preisfelder bereits als Zahl validiert, und ein aus
-    einer wiederholten ersten Seite durchgereichter Fremdwert
-    (extra=vol.ALLOW_EXTRA) wird ohnehin nicht gespeichert.
-    """
+    """REQ-ECONOMICS-TARIFFS: Cent-Eingaben einmalig in gespeicherte Euro wandeln."""
     rounded = dict(user_input)
     for key in _TOP_LEVEL_PRICE_KEYS:
         if (price := parse_price(rounded.get(key))) is not None:
-            rounded[key] = _round_to_price_step(price)
-    for key in ECONOMICS_TOU_WINDOW_KEYS:
-        group = rounded.get(key)
-        if not isinstance(group, dict):
-            continue
-        price = parse_price(group.get(CONF_ECONOMICS_WINDOW_PRICE))
-        if price is None:
-            continue
-        rounded[key] = {
-            **group,
-            CONF_ECONOMICS_WINDOW_PRICE: _round_to_price_step(price),
-        }
+            rounded[key] = _round_to_price_step(price / 100)
     return rounded
 
 
-#: Übersetzungsschlüssel des fehlenden Pflichtpreises (options.error.* in
-#: strings.json) - anders als die Zeitfensterfehler darunter wird er an
-#: seinem eigenen Feld gemeldet.
+#: Fehlende Pflichtpreise werden direkt am betroffenen Feld gemeldet.
 _PRICE_REQUIRED_ERROR = "economics_price_required"
-
-# Übersetzungsschlüssel der Zeitfensterfehler (options.error.* in
-# strings.json). Der Fehler wird an "base" gemeldet: Home Assistant kann
-# einen Feldfehler keiner Section zuordnen.
-_WINDOW_ERROR_KEYS = {
-    TariffWindowError.INCOMPLETE: "economics_tou_window_incomplete",
-    TariffWindowError.ZERO_LENGTH: "economics_tou_window_zero_length",
-    TariffWindowError.OVERLAP: "economics_tou_window_overlap",
-}
 
 
 class SaxPowerOptionsFlow(OptionsFlow):
@@ -866,7 +780,18 @@ class SaxPowerOptionsFlow(OptionsFlow):
         if tariff_type is TariffType.FIXED:
             return await self.async_step_economics_fixed()
         if tariff_type is TariffType.TIME_OF_USE:
-            return await self.async_step_economics_time_of_use()
+            # REQ-VUE-CHARGING: Der Dashboard-Editor besitzt das Tagesprofil.
+            # Andere Optionsänderungen übernehmen dessen aktuellste Fassung.
+            if self.config_entry.options.get(CONF_ECONOMICS_TARIFF_TYPE) == tariff_type:
+                for key in (
+                    CONF_ECONOMICS_FEED_IN_PRICE,
+                    CONF_ECONOMICS_TOU_BASE_PRICE,
+                    *ECONOMICS_TOU_WINDOW_KEYS,
+                ):
+                    if key in self.config_entry.options:
+                        self._base_options[key] = self.config_entry.options[key]
+            self._mark_vue_activation()
+            return self.async_create_entry(title="", data=self._base_options)
         return await self.async_step_economics_dynamic()
 
     async def async_step_economics_fixed(
@@ -903,30 +828,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="economics_dynamic",
             data_schema=self._suggested(STEP_ECONOMICS_DYNAMIC_SCHEMA, user_input),
-            errors=errors or None,
-        )
-
-    async def async_step_economics_time_of_use(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Tageszeitabhängiger Tarif: Grundpreis + bis zu acht Fenster."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            if (repeated := await self._async_repeat_init(user_input)) is not None:
-                return repeated
-            errors = _missing_prices(
-                user_input,
-                (CONF_ECONOMICS_FEED_IN_PRICE, CONF_ECONOMICS_TOU_BASE_PRICE),
-            )
-            issue = _validate_windows(user_input)
-            if issue is not None:
-                errors["base"] = _WINDOW_ERROR_KEYS[issue.error]
-            if not errors:
-                return self._create_entry(STEP_ECONOMICS_TOU_SCHEMA, user_input)
-
-        return self.async_show_form(
-            step_id="economics_time_of_use",
-            data_schema=self._suggested(STEP_ECONOMICS_TOU_SCHEMA, user_input),
             errors=errors or None,
         )
 
@@ -1004,22 +905,25 @@ class SaxPowerOptionsFlow(OptionsFlow):
     ) -> vol.Schema:
         """Formular mit den zuletzt eingegebenen bzw. gespeicherten Werten.
 
-        Nach einem Validierungsfehler gewinnt die letzte Eingabe: sonst
-        müsste der Anwender acht Zeitfenster wegen eines einzigen falschen
-        Feldes komplett neu ausfüllen.
+        Nach einem Validierungsfehler gewinnt die letzte Cent-Eingabe über
+        die aus internen Euro-Preisen umgerechneten gespeicherten Werte.
 
         `add_suggested_values_to_schema` baut das Schema dafür neu auf und
         verliert dabei dessen `extra`-Einstellung - die wird hier wieder
         übernommen, sonst scheiterte eine erneut abgeschickte erste Seite
         weiterhin an der Schema-Validierung (siehe _async_repeat_init).
         """
+        stored = dict(self.config_entry.options)
+        for key in _TOP_LEVEL_PRICE_KEYS:
+            if (price := parse_price(stored.get(key))) is not None:
+                stored[key] = round(price * 100, ECONOMICS_PRICE_DECIMALS - 2)
         with_values = self.add_suggested_values_to_schema(
             schema,
             {
                 CONF_VUE_DASHBOARD_ENABLED: self.config_entry.data.get(
                     CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
                 ),
-                **self.config_entry.options,
+                **stored,
                 **(user_input or {}),
             },
         )
@@ -1036,33 +940,11 @@ def _missing_prices(
     unübersetzte Schema-Rohmeldung erscheint - Pflicht sind sie trotzdem.
     """
     return {
-        key: _PRICE_REQUIRED_ERROR
-        for key in required_keys
-        if user_input.get(key) is None
-    }
-
-
-def _validate_windows(user_input: dict[str, Any]) -> TariffWindowIssue | None:
-    """Erste Regelverletzung der acht Zeitfenstergruppen, oder None.
-
-    Geprüft werden die Regeln aus REQ-ECONOMICS-TARIFFS: vollständig leer
-    oder vollständig befüllt, `start == end` ist ungültig (und bedeutet
-    ausdrücklich nicht "ganzer Tag"), und zwei Fenster dürfen sich auf der
-    zyklischen 24-Stunden-Zeitleiste nicht überschneiden - angrenzende
-    Grenzen dagegen schon, weil die Intervalle halboffen sind.
-    """
-    windows: list[tuple[int, DailyPriceWindow]] = []
-    for index, key in enumerate(ECONOMICS_TOU_WINDOW_KEYS, start=1):
-        group = user_input.get(key) or {}
-        start = parse_time(group.get(CONF_ECONOMICS_WINDOW_START))
-        end = parse_time(group.get(CONF_ECONOMICS_WINDOW_END))
-        price = parse_price(group.get(CONF_ECONOMICS_WINDOW_PRICE))
-        issue = validate_window_fields(index, start, end, price)
-        if issue is not None:
-            return issue
-        if start is None or end is None or price is None:
-            continue
-        windows.append(
-            (index, DailyPriceWindow(start=start, end=end, price_eur_kwh=price))
+        key: (
+            _PRICE_REQUIRED_ERROR
+            if user_input.get(key) is None
+            else "economics_price_invalid"
         )
-    return find_overlapping_window(windows)
+        for key in required_keys
+        if parse_price(user_input.get(key)) is None
+    }

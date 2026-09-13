@@ -44,6 +44,29 @@ def test_sensor_keys_are_unique() -> None:
     assert len(keys) == len(set(keys))
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "price_charge_current_price",
+        "economics_current_import_price",
+        "economics_feed_in_price",
+    ],
+)
+@pytest.mark.parametrize("price_eur_kwh", [None, -0.05, 0, 0.3421])
+def test_tariff_sensor_values_are_cents(key: str, price_eur_kwh: float | None) -> None:
+    """REQ-VUE-TARIFF-EDITOR: Einheit und Preiswert wechseln gemeinsam auf ct/kWh."""
+    description = next(item for item in SENSOR_DESCRIPTIONS if item.key == key)
+    data = {key: price_eur_kwh}
+
+    assert description.native_unit_of_measurement == "ct/kWh"
+    assert description.suggested_display_precision == 2
+    if price_eur_kwh is None:
+        assert description.value_fn(data) is None
+    else:
+        assert description.value_fn(data) == pytest.approx(price_eur_kwh * 100)
+    assert data[key] == price_eur_kwh
+
+
 def test_daily_net_savings_uses_a_fresh_recorder_entity() -> None:
     """Der tägliche Roh-Cashflow darf nicht als Netto-Historie umgedeutet werden."""
     keys = {description.key for description in SENSOR_DESCRIPTIONS}

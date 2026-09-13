@@ -9,6 +9,7 @@ import type {
   DashboardMetadata,
   HassConnection,
   HomeAssistant,
+  TariffProfile,
 } from "../src/types";
 
 const apps: App[] = [];
@@ -57,6 +58,7 @@ async function mount(
     investment?: "off" | "missing";
     language?: string;
     tariffType?: string;
+    profile?: Partial<TariffProfile>;
   } = {},
 ) {
   const sample = chargingSample(options.language);
@@ -88,13 +90,14 @@ async function mount(
   }
   sample.states[priceId] = {
     entity_id: priceId,
-    state: "-0.015",
+    state: "-1.5",
     attributes: {
       ...tariffAttributes(options.windows),
       tariff_type: options.tariffType ?? "time_of_use",
     },
   };
   let emitMetadata: (data: DashboardMetadata) => void = () => {};
+  const listeners = new Map<string, Set<() => void>>();
   const connection: HassConnection = {
     connected: true,
     async subscribeMessage<T>(callback: (message: T) => void) {
@@ -102,17 +105,43 @@ async function mount(
       emitMetadata({ entities: metadata });
       return () => {};
     },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(event, callback) {
+      const handlers = listeners.get(event) ?? new Set();
+      handlers.add(callback);
+      listeners.set(event, handlers);
+    },
+    removeEventListener(event, callback) {
+      listeners.get(event)?.delete(callback);
+    },
   };
   const callService = vi.fn().mockResolvedValue(undefined);
-  const callWS = vi.fn().mockResolvedValue(undefined);
+  const initialProfile: TariffProfile = {
+    tariff_type: options.tariffType ?? "time_of_use",
+    base_price_ct_kwh: 35,
+    feed_in_price_ct_kwh: 8,
+    windows: (options.windows ?? twoWindows).map((window) => ({
+      start: window.start,
+      end: window.end,
+      price_ct_kwh: window.price_eur_kwh! * 100,
+    })),
+    revision: "revision-1",
+    can_edit: true,
+    ...options.profile,
+  };
+  const callWS = vi.fn(async (request: Readonly<Record<string, unknown>>) => {
+    if (request.type === "sax_power/dashboard/tariff/get")
+      return initialProfile;
+    if (request.type === "sax_power/dashboard/tariff/save")
+      return { ...initialProfile, ...request, revision: "revision-2" };
+    return undefined;
+  });
   const hass = shallowRef<HomeAssistant>({
     language: options.language ?? "de",
     states: sample.states,
     connection,
     callService,
-    callWS,
+    callWS: <T>(request: Readonly<Record<string, unknown>>) =>
+      callWS(request) as Promise<T>,
     config: { time_zone: "Europe/Berlin" },
     locale: { time_format: "twenty_four" },
   });
@@ -145,6 +174,14 @@ async function mount(
     root,
     callService,
     callWS,
+    hass,
+    async disconnect(value = true) {
+      Object.assign(connection, { connected: !value });
+      listeners
+        .get(value ? "disconnected" : "ready")
+        ?.forEach((callback) => callback());
+      await flush();
+    },
     plans: () => [...root.querySelectorAll(".tariff-plan")],
     async update(state: string, attributes: Record<string, unknown>) {
       hass.value = {
@@ -206,17 +243,15 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
           expect(displayed[index]).toContain(window.start.slice(0, 5));
           expect(displayed[index]).toContain(window.end.slice(0, 5));
         });
-        expect(displayed.at(-1)).toContain("Grundpreis");
-        expect(plan.textContent).toContain("0,3500 EUR/kWh");
-        expect(plan.textContent).toContain("0,0800 EUR/kWh");
+        expect(displayed.at(-1)).toContain("Standardpreis");
+        expect(plan.textContent).toContain("35,00 ct/kWh");
+        expect(plan.textContent).toContain("8,00 ct/kWh");
         expect(plan.textContent).toContain("29.03.2026, 18:00");
         const active = plan.querySelectorAll(".tariff-plan__current");
         expect(active).toHaveLength(1);
         expect(active[0].textContent).toContain(windows[1].start.slice(0, 5));
-        expect(active[0].textContent).toContain("-0,0150 EUR/kWh");
-        expect(
-          plan.querySelectorAll("input, select, button, form"),
-        ).toHaveLength(0);
+        expect(active[0].textContent).toContain("-1,50 ct/kWh");
+        expect(plan.querySelectorAll("input, select, form")).toHaveLength(0);
       }
       expect(chargingTimes(fixture.root)).toEqual([]);
       expect(fixture.root.textContent).toContain("Netzladung Min. SOC");
@@ -357,7 +392,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       expect(rows(plan)).toHaveLength(3);
       const active = plan.querySelectorAll(".tariff-plan__current");
       expect(active).toHaveLength(1);
-      expect(active[0].textContent).toContain("Grundpreis");
+      expect(active[0].textContent).toContain("Standardpreis");
     }
     expect(chargingTimes(fixture.root)).toEqual([]);
     expect(fixture.root.querySelectorAll(".time-window-control")).toHaveLength(
@@ -375,9 +410,9 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     });
     expect(fixture.plans()).toHaveLength(2);
     for (const plan of fixture.plans()) {
-      expect(rows(plan)).toEqual([["jetzt", "Grundpreis", "0,3500 EUR/kWh"]]);
+      expect(rows(plan)).toEqual([["jetzt", "Standardpreis", "35,00 ct/kWh"]]);
       expect(plan.querySelectorAll(".tariff-plan__current")).toHaveLength(1);
-      expect(plan.textContent).toContain("0,0800 EUR/kWh");
+      expect(plan.textContent).toContain("8,00 ct/kWh");
       expect(plan.textContent).toContain("29.03.2026, 18:00");
     }
     expect(chargingTimes(fixture.root)).toEqual([]);
@@ -407,7 +442,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
         expect(plan.querySelector(".tariff-plan__current")).toBeNull();
         expect(plan.textContent).toContain("Derzeit gilt kein Preis");
         expect(plan.textContent).toContain("missing_base_price");
-        expect(plan.textContent).not.toContain("0,0000 EUR/kWh");
+        expect(plan.textContent).not.toContain("0,00 ct/kWh");
       }
       expect(fixture.callService).not.toHaveBeenCalled();
     },
@@ -421,7 +456,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     }));
     await fixture.update("0", tariffAttributes(windows));
     for (const plan of fixture.plans()) {
-      expect(rows(plan)[0]).toContain("0,0000 EUR/kWh");
+      expect(rows(plan)[0]).toContain("0,00 ct/kWh");
       expect(rows(plan)[1]).toContain("Nicht verfügbar");
       expect(plan.querySelector(".tariff-plan__current")).toBeNull();
     }
@@ -435,11 +470,11 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       expect(plan.querySelector("h2")?.textContent).toBe(
         "Tariff price windows",
       );
-      expect(plan.textContent).toContain("-0.0150 EUR/kWh");
+      expect(plan.textContent).toContain("-1.50 ct/kWh");
       expect(plan.textContent).toContain(
         "lowest price level that actually occurs each day",
       );
-      expect(plan.textContent).toContain("Configure → Tariff price windows");
+      expect(plan.textContent).toContain("How charging times apply");
       expect(plan.textContent).toContain(
         "separate grid charging times have no effect",
       );
@@ -453,4 +488,284 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     expect(chargingTimes(fixture.root)).toEqual([]);
     expect(fixture.callService).not.toHaveBeenCalled();
   });
+});
+
+function button(root: Element, text: string): HTMLButtonElement {
+  return [...root.querySelectorAll("button")].find(
+    (button) => button.textContent?.trim() === text,
+  )!;
+}
+async function click(root: Element, text: string) {
+  button(root, text).click();
+  await flush();
+}
+async function fill(root: Element, selector: string, value: string) {
+  const input = root.querySelector<HTMLInputElement>(selector)!;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await flush();
+}
+function saves(fixture: Awaited<ReturnType<typeof mount>>) {
+  return fixture.callWS.mock.calls.filter(
+    ([request]) => request.type === "sax_power/dashboard/tariff/save",
+  );
+}
+describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
+  it("loads existing prices in cents, saves the complete tariff atomically, then collapses", async () => {
+    const fixture = await mount();
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    expect(fixture.callWS).toHaveBeenLastCalledWith({
+      type: "sax_power/dashboard/tariff/get",
+      entry_id: "entry-1",
+    });
+    expect(
+      plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+    ).toBe("35,00");
+    expect(plan.querySelectorAll(".tariff-plan__window")).toHaveLength(2);
+    await fill(plan, '[name="base_price"]', "32,75");
+    await fill(plan, '[name="feed_in_price"]', "8.12");
+    await fill(plan, '.tariff-plan__window input[type="text"]', "-2,50");
+    expect(saves(fixture)).toHaveLength(0);
+    await click(plan, "Speichern");
+    expect(saves(fixture)[0]?.[0]).toEqual({
+      type: "sax_power/dashboard/tariff/save",
+      entry_id: "entry-1",
+      revision: "revision-1",
+      base_price_ct_kwh: 32.75,
+      feed_in_price_ct_kwh: 8.12,
+      windows: [
+        { start: "06:00:00", end: "12:00:00", price_ct_kwh: -2.5 },
+        { start: "12:00:00", end: "18:00:00", price_ct_kwh: -1.5 },
+      ],
+    });
+    expect(plan.querySelector("form")).toBeNull();
+    expect(plan.textContent).toContain("32,75 ct/kWh");
+    expect(plan.textContent).toContain("Tarif gespeichert");
+    expect(fixture.callService).not.toHaveBeenCalled();
+  });
+  it("discards cancelled edits without saving, and reloads the persisted revision on reopening", async () => {
+    const fixture = await mount();
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    await fill(plan, '[name="base_price"]', "99");
+    await click(plan, "Abbrechen");
+    expect(saves(fixture)).toHaveLength(0);
+    await click(plan, "Bearbeiten");
+    expect(
+      plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+    ).toBe("35,00");
+  });
+  it.each(["", "NaN", "32,123", "501", "-201"])(
+    "rejects invalid base price %s without saving",
+    async (value) => {
+      const fixture = await mount();
+      const plan = fixture.plans()[0]!;
+      await click(plan, "Bearbeiten");
+      await fill(plan, '[name="base_price"]', value);
+      await click(plan, "Speichern");
+      expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
+        "zwei Nachkommastellen",
+      );
+      expect(saves(fixture)).toHaveLength(0);
+    },
+  );
+  it("rejects equal and overlapping times, including overnight, and supports adjacent overnight windows", async () => {
+    const fixture = await mount({
+      windows: [
+        { start: "22:00:15", end: "06:00:15", price_eur_kwh: 0.18 },
+        { start: "06:00:15", end: "08:00:00", price_eur_kwh: 0.22 },
+      ],
+    });
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    await fill(plan, '.tariff-plan__window input[type="time"]', "06:00:15");
+    await click(plan, "Speichern");
+    expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
+      "verschieden",
+    );
+    await fill(plan, '.tariff-plan__window input[type="time"]', "07:00:00");
+    await click(plan, "Speichern");
+    expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
+      "überschneiden",
+    );
+    await fill(plan, '.tariff-plan__window input[type="time"]', "22:00:15");
+    await click(plan, "Speichern");
+    expect(saves(fixture)).toHaveLength(1);
+    expect(saves(fixture)[0]?.[0].windows).toEqual([
+      { start: "22:00:15", end: "06:00:15", price_ct_kwh: 18 },
+      { start: "06:00:15", end: "08:00:00", price_ct_kwh: 22 },
+    ]);
+  });
+  it("supports an empty initial profile, optional new windows and removal up to the eight-window limit", async () => {
+    const fixture = await mount({
+      profile: {
+        base_price_ct_kwh: null,
+        feed_in_price_ct_kwh: null,
+        windows: [],
+      },
+    });
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    expect(plan.textContent).toContain("Trage zuerst");
+    expect(plan.querySelectorAll(".tariff-plan__window")).toHaveLength(0);
+    for (let index = 0; index < 8; index++)
+      await click(plan, "+ Zeitfenster hinzufügen");
+    expect(button(plan, "+ Zeitfenster hinzufügen")).toBeUndefined();
+    for (let index = 0; index < 8; index++) await click(plan, "Entfernen");
+    await fill(plan, '[name="base_price"]', "30");
+    await fill(plan, '[name="feed_in_price"]', "0");
+    await click(plan, "Speichern");
+    expect(saves(fixture)[0]?.[0].windows).toEqual([]);
+  });
+  it("keeps read-only accounts out of the editor and disables actions while disconnected", async () => {
+    const fixture = await mount({ profile: { can_edit: false } });
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    expect(plan.querySelector("form")).toBeNull();
+    expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
+      "Administratorkonto",
+    );
+    await fixture.disconnect();
+    expect(button(plan, "Bearbeiten").disabled).toBe(true);
+    expect(saves(fixture)).toHaveLength(0);
+  });
+  it.each(["conflict", "invalid_tariff", "forbidden", "not_found"])(
+    "preserves the draft on server error %s",
+    async (code) => {
+      const fixture = await mount();
+      const plan = fixture.plans()[0]!;
+      await click(plan, "Bearbeiten");
+      await fill(plan, '[name="base_price"]', "32");
+      fixture.callWS.mockRejectedValueOnce({ code });
+      await click(plan, "Speichern");
+      expect(
+        plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+      ).toBe("32");
+      expect(plan.querySelector('[role="alert"]')).not.toBeNull();
+      if (code === "conflict") {
+        expect(button(plan, "Speichern").disabled).toBe(true);
+        await click(plan, "Gespeicherten Tarif laden (Entwurf verwerfen)");
+        expect(
+          plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+        ).toBe("35,00");
+      }
+    },
+  );
+  it("preserves a pending draft when disconnected and allows retry only after reconnect", async () => {
+    const fixture = await mount();
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    await fill(plan, '[name="base_price"]', "33");
+    let resolve: (value: TariffProfile) => void = () => {};
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((done) => {
+          resolve = done;
+        }),
+    );
+    await click(plan, "Speichern");
+    expect(button(plan, "Wird gespeichert …").disabled).toBe(true);
+    await fixture.disconnect();
+    resolve({
+      tariff_type: "time_of_use",
+      base_price_ct_kwh: 33,
+      feed_in_price_ct_kwh: 8,
+      windows: [],
+      revision: "later",
+      can_edit: true,
+    });
+    await flush();
+    expect(
+      plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+    ).toBe("33");
+    expect(button(plan, "Speichern").disabled).toBe(true);
+    await fixture.disconnect(false);
+    expect(button(plan, "Speichern").disabled).toBe(false);
+  });
+});
+
+it.each(
+  [
+    [
+      { start: "00:00:00", end: "06:00:00", price_eur_kwh: 0.18 },
+      { start: "18:00:00", end: "00:00:00", price_eur_kwh: 0.2 },
+    ],
+    eightWindows,
+  ].map((windows) => ({ windows })),
+)(
+  "REQ-VUE-TARIFF-EDITOR accepts adjacent windows ending at midnight",
+  async ({ windows }) => {
+    const fixture = await mount({ windows });
+    const plan = fixture.plans()[0]!;
+    await click(plan, "Bearbeiten");
+    await click(plan, "Speichern");
+    expect(plan.querySelector('[role="alert"]')).toBeNull();
+    expect(saves(fixture)).toHaveLength(1);
+  },
+);
+it("REQ-VUE-TARIFF-EDITOR retains a saved tariff until matching sensor attributes arrive", async () => {
+  const fixture = await mount();
+  const plan = fixture.plans()[0]!;
+  await click(plan, "Bearbeiten");
+  await fill(plan, '[name="base_price"]', "42");
+  await click(plan, "Speichern");
+  await fixture.update("-1.5", {
+    ...tariffAttributes(),
+    next_price_change_at: "2026-03-30T16:00:00Z",
+  });
+  expect(plan.textContent).toContain("42,00 ct/kWh");
+  expect(plan.textContent).not.toContain("35,00 ct/kWh");
+  expect(plan.querySelector(".tariff-plan__low-unavailable")).toBeNull();
+  await fixture.update("-1.5", {
+    ...tariffAttributes(),
+    base_price_eur_kwh: 0.42,
+    windows: [
+      {
+        start: "06:00:00",
+        end: "12:00:00",
+        price_eur_kwh: 0.2568,
+        low_tariff: false,
+      },
+      {
+        start: "12:00:00",
+        end: "18:00:00",
+        price_eur_kwh: -0.015,
+        low_tariff: true,
+      },
+    ],
+  });
+  expect(plan.textContent).toContain("42,00 ct/kWh");
+  expect(plan.querySelector(".tariff-plan__low-status")).not.toBeNull();
+});
+
+it("REQ-VUE-TARIFF-EDITOR accepts the sensor's sorted windows and later external tariff changes", async () => {
+  const unordered = [
+    { start: "18:00:00", end: "22:00:00", price_eur_kwh: 0.18 },
+    { start: "00:00:00", end: "06:00:00", price_eur_kwh: 0.1 },
+  ];
+  const fixture = await mount({ windows: unordered });
+  const plan = fixture.plans()[0]!;
+  await click(plan, "Bearbeiten");
+  await fill(plan, '[name="base_price"]', "42");
+  await click(plan, "Speichern");
+  await fixture.update("10", {
+    ...tariffAttributes(unordered.slice().reverse()),
+    base_price_eur_kwh: 0.42,
+  });
+  expect(plan.querySelector(".tariff-plan__low-status")).not.toBeNull();
+  await click(plan, "Bearbeiten");
+  await fill(plan, '[name="base_price"]', "43");
+  await click(plan, "Speichern");
+  await fixture.update("10", {
+    ...tariffAttributes(unordered),
+    base_price_eur_kwh: 0.5,
+  });
+  expect(plan.textContent).toContain("50,00 ct/kWh");
+  expect(plan.textContent).not.toContain("43,00 ct/kWh");
+  await click(plan, "Bearbeiten");
+  await fill(plan, '[name="base_price"]', "44");
+  await click(plan, "Speichern");
+  await fixture.update("10", { tariff_type: "dynamic" });
+  expect(fixture.plans()).toHaveLength(0);
 });

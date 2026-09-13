@@ -187,7 +187,9 @@ async function mount(
     states,
     connection,
     callWS: <T>(message: Readonly<Record<string, unknown>>) =>
-      callWS(message) as Promise<T>,
+      message.type === "sax_power/dashboard/tariff/get"
+        ? Promise.reject({ code: "not_found" })
+        : (callWS(message) as Promise<T>),
     callService,
     config: { time_zone: "Europe/Berlin" },
     locale: { time_format: "twenty_four", first_weekday: "monday" },
@@ -353,8 +355,8 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
   });
   it("updates TOU attributes live and never marks a missing price as an active base tariff", async () => {
     const { root, update } = await mount();
-    expect(root.textContent).toContain("0,2568 EUR/kWh");
-    expect(root.textContent).toContain("0,0800 EUR/kWh");
+    expect(root.textContent).toContain("25,68 ct/kWh");
+    expect(root.textContent).toContain("8,00 ct/kWh");
     expect(root.textContent).toContain("29.03.2026, 12:00");
     expect(root.querySelectorAll(".tariff-plan__current")).toHaveLength(1);
     await update("economics_current_import_price", "unavailable", {
@@ -366,13 +368,13 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
     });
     expect(root.querySelectorAll(".tariff-plan__current")).toHaveLength(0);
     expect(root.textContent).toContain("missing_base_price");
-    expect(root.textContent).not.toContain("0,0000 EUR/kWh");
+    expect(root.textContent).not.toContain("0,00 ct/kWh");
     await update("economics_current_import_price", ".35", {
       ...attrs.economics_current_import_price,
       active_window: null,
     });
     expect(root.querySelector(".tariff-plan__current")?.textContent).toContain(
-      "Grundpreis",
+      "Standardpreis",
     );
     await update("economics_current_import_price", ".35", {
       tariff_type: "fixed",
@@ -604,14 +606,14 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
   it("formats English copy and respects HA timezone and decimal preferences", async () => {
     const { root, hass } = await mount({ language: "en-GB" });
     expect(root.textContent).toContain("Today so far");
-    expect(root.textContent).toContain("0.2568 EUR/kWh");
+    expect(root.textContent).toContain("25.68 ct/kWh");
     expect(root.textContent).toContain("29 Mar 2026, 12:00");
     hass.value = {
       ...hass.value,
       locale: { ...hass.value.locale, number_format: "decimal_comma" },
     };
     await flush();
-    expect(root.textContent).toContain("0,2568 EUR/kWh");
+    expect(root.textContent).toContain("25,68 ct/kWh");
   });
 });
 

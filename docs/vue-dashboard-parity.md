@@ -116,7 +116,7 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Einstellungen | `number.timed_charge_max_soc`, danach `number.timed_charge_min_soc` | Netzladeziel und Startschwelle; die Startschwelle entfällt bei aktivierter Verbrauchsplanung. Die Obergrenze des Ziels folgt dessen HA-`max`-Attribut; kein zusätzlicher globaler Max-SOC in diesem Tab. | [Ladeansichten][charging-tests]: geänderte Grenze, ungültiger und gültiger Zielwert |
 | Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Kompakte Zusammenfassung mit einzeln ausgewählten Monaten und getrennten Spannen; „Ändern“ öffnet vier Quartalsgruppen. Nur HA-bestätigte Zustände; Fehler und fehlende Werte bleiben auch eingeklappt sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, getrennte Auswahlbereiche, HA-Bestätigung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
 | Danach über die volle Breite: Ladeplanung (EN: Charging plan) | `sensor.bridge_charge_plan`, Attribute `observation_minutes`, `average_discharge_w`, `discharge_at`, `charge_start`, `charge_end`, `pv_start`, `target_soc`, `shortfall_kwh`, `reason` | Wiederverwendbare `ChargePlan.vue`-Komponente nach `REQ-BRIDGE-CHARGE`. Begründet erwartete Entladung und nötige Niedertarifladung bis PV-Start oder erklärt, dass keine Netzladung benötigt wird. Fehlbetrag und Teilaufladung bleiben auch bei laufender Ladung sichtbar. Bekannte Fehlergründe erhalten verständliche DE-/EN-Texte; Datum und Zahlen folgen HA-Zeitzone und Locale. Bei fehlender Entity entfällt die Karte. | [Ladeplanung][charge-plan-tests]: Status, Fehlbetrag, Datenlücken, DE/EN, Zeitzone, Tageswechsel und Live-Entity-Bindung |
-| Anschließend: Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribute `tariff_type`, `windows` mit `low_tariff`, `active_window`, `base_price_eur_kwh`, `base_price_is_low_tariff`, `low_tariff_price_eur_kwh`, `low_tariff_active`, `low_tariff_valid_until`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Dieselbe `TariffPlan.vue`-Komponente wie unter Amortisation; nur bei `time_of_use`. Alle bis zu acht gespeicherten Preisfenster samt Mitternacht und angrenzenden Grenzen, aktive Markierung und übrige Tarifdaten kommen live aus HA; Preise mit vier Nachkommastellen. Die niedrigste täglich tatsächlich vorkommende Preisstufe wird ausschließlich anhand der Backend-Attribute als Niedertarif markiert, einschließlich gültiger Basispreislücken. Fehlende oder ungültige Attribute ergeben keine Niedertarifmarkierung. Leere Fensterlisten erhalten die übrigen verfügbaren Tarifdaten. | [Tarifpreisfenster][tariff-plan-tests], [Browser][browser-tests], `tests/test_config_flow.py`, `tests/test_economics_dashboard_e2e.py`: vollständige Options-/Modell-/Sensor-/Dashboard-Kette für ein, zwei und acht Fenster |
+| Anschließend: Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribute `tariff_type`, `windows` mit `low_tariff`, `active_window`, `base_price_eur_kwh`, `base_price_is_low_tariff`, `low_tariff_price_eur_kwh`, `low_tariff_active`, `low_tariff_valid_until`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Dieselbe `TariffPlan.vue`-Komponente wie unter Amortisation; nur bei `time_of_use`. Alle bis zu acht gespeicherten Preisfenster samt Mitternacht und angrenzenden Grenzen, aktive Markierung und übrige Tarifdaten kommen live aus HA; Preise in ct/kWh mit zwei Nachkommastellen. Die niedrigste täglich tatsächlich vorkommende Preisstufe wird ausschließlich anhand der Backend-Attribute als Niedertarif markiert, einschließlich gültiger Basispreislücken. Fehlende oder ungültige Attribute ergeben keine Niedertarifmarkierung. Leere Fensterlisten erhalten die übrigen verfügbaren Tarifdaten. | [Tarifpreisfenster][tariff-plan-tests], [Browser][browser-tests], `tests/test_config_flow.py`, `tests/test_economics_dashboard_e2e.py`: vollständige Options-/Modell-/Sensor-/Dashboard-Kette für ein, zwei und acht Fenster |
 
 Vue entscheidet weder über Ladeberechtigung noch über die laufende
 Sollwertwiederholung. Beides verbleibt bei `REQ-TIMED-SOC-CHARGE` beziehungsweise
@@ -127,20 +127,27 @@ fehlender PV-Quelle, Messwerten und Pausen stammen aus bekannten Status-/Grundco
 Unbekannte oder unvollständige Daten erhalten keine erfundenen Zeitangaben.
 `economics_current_import_price.attributes.tariff_type=time_of_use` blendet das
 separate Netzladezeitfenster aus: Die gespeicherten Tarifpreisfenster einschließlich
-des außerhalb geltenden Grundpreises sind die verbindliche Zeitquelle. Bei fester
+des außerhalb geltenden Standardpreises sind die verbindliche Zeitquelle. Bei fester
 SOC-Steuerung bleiben Min-SOC, Max-SOC und Monatsfreigaben bedienbar. Nur
 `bridge_charge_plan.attributes.enabled=true` blendet zusätzlich die
 Min-SOC-Startschwelle aus. Diese Sichtbarkeit bleibt auch bei `waiting_for_data`
 oder `paused` konsistent.
 Die gemeinsame Tarifkarte erläutert die niedrigste tatsächlich vorkommende
 Preisstufe, die Sperre bei fehlenden oder ungültigen Tarifdaten und die unwirksamen
-alten Netzladezeiten. Änderungen erfolgen ausschließlich im HA-Optionsflow unter
-„Konfigurieren → Tarifpreisfenster“. Vue berechnet weder Niedertarifpreise noch
+alten Netzladezeiten. „Bearbeiten“ öffnet den ausklappbaren Editor direkt in
+der Tarifkarte (REQ-VUE-TARIFF-EDITOR). Er liest das gespeicherte Profil über
+`sax_power/dashboard/tariff/get` und übernimmt mit `tariff/save` Standardpreis,
+Einspeisevergütung und bis zu acht Zeitfenster gemeinsam. Preise werden in ct/kWh
+eingegeben und angezeigt. Administratorrechte und eine aktuelle Revision sind
+für das Speichern erforderlich; Fehler erhalten den Entwurf. Im Options Flow
+entfallen die TOU-Preisfelder. Vue berechnet weder Niedertarifpreise noch
 Zeitgrenzen; aktive Niedertarifgrenzen werden mit HA-Zeitzone und Locale angezeigt.
 Mount, Rendern und
-Live-Tarifwechsel erzeugen keine Serviceaufrufe. Andere Tarifarten oder eine
-fehlende Preis-Entity blenden die Tarifpreisfenster-Karte aus; unbekannte oder
-nicht verfügbare Preise werden nicht als gültiger aktiver Grundpreis markiert.
+Live-Tarifwechsel erzeugen keine Schreibaufrufe. Andere Tarifarten blenden
+die Tarifpreisfenster-Karte aus. Bei fehlender Preis-Entity oder fehlenden
+Tarifattributen bestätigt eine einmalige API-Abfrage den Tarif und ermöglicht
+berechtigten Administratoren die Eingabe; unbekannte oder
+nicht verfügbare Preise werden nicht als gültiger aktiver Standardpreis markiert.
 
 ## Dynamischer Tarif
 
@@ -239,9 +246,10 @@ Schreibversuch aus.
 | --- | --- |
 | Zeitvariabler Tarif: `timed_charge_start` / `timed_charge_end` | Gemeinsame Leiste und atomare Übernahme über `set_timed_charge_window`. |
 | Netzdienliche Ladepause: `grid_serving_start` / `grid_serving_end` | Dieselbe Komponente, Übernahme über `set_grid_serving_window`. |
-| Dynamischer Tarif: geplanter nächster Start; Zeitvariabler Tarif und Amortisation: Tarifpreisfenster | Nur Anzeigen aus HA; keine editierbaren Zeitpaare. |
+| Dynamischer Tarif: geplanter nächster Start | Nur Anzeige aus HA. |
+| Zeitvariabler Tarif und Amortisation: Tarifpreisfenster | Ausklappbarer Editor für Standardpreis, Einspeisevergütung und bis zu acht tägliche Zeitfenster; atomare Übernahme mit Revisionsprüfung. |
 | Amortisation: Anfangs- und Enddatum | Recorder-Datumsfilter, weiterhin Datumseingaben. |
-| Bis zu acht TOU-Fenster im HA-Optionsflow | Außerhalb des Vue-Panels; keine Umstellung. |
+| TOU-Preisfelder im HA-Optionsflow | Entfallen; Eingabe ausschließlich im Dashboard. |
 | Einzelzeit in der Controls-Entwicklungsvorschau | Komponentendemonstration, kein weiteres produktives Zeitfenster. |
 
 Zur Abnahme gehören Tages-, Mitternachts- und leere Fenster, vorhandene Altsekunden ohne Schreibaktion,
@@ -271,7 +279,7 @@ erst für die Anzeige. Die interne Bilanz bleibt unverändert.
 | 2. Kalenderwerte | Recorder von `economics_net_savings`: `change` für Tag, Woche, Monat, Jahr | Heute/Woche/Monat/Jahr bisher; HA-Kalendergrenzen und konfigurierter Wochenbeginn. Keine rollierende Bilanz und keine Differenz eigener Live-Werte. | [Recorder-Adapter][statistics-tests]: Vergleich mit denselben nativen Recorder-Abfragen |
 | 3. Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribut `tariff_type` | Gemeinsame `TariffPlan.vue`-Komponente mit Zeitvariabler Tarif. Nur bei `time_of_use`, reagiert auf Tarifwechsel ohne Dashboard-Neubau. | [Tarifpreisfenster][tariff-plan-tests]: Live-Tarifwechsel |
 | Einzelne Preisfenster | `windows[].start`, `windows[].end`, `windows[].price_eur_kwh`, `active_window` | Alle bis zu acht Fenster in Planreihenfolge und aktive Markierung aus HA, auch über Mitternacht und an angrenzenden Grenzen. Zeiten werden dargestellt, nicht neu bewertet. | [Tarifpreisfenster][tariff-plan-tests]: vollständige Fenster, Live-Wechsel und Preisformat |
-| Weitere Tarifdaten | `base_price_eur_kwh`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Grundpreis, Einspeisevergütung, nächster Wechsel oder Nichtverfügbarkeitsgrund. Fehlender Preis wird nicht als gültiger aktiver Grundpreis markiert. | [Ersparnis][savings-tests]: fehlender Preis/Grundpreis, vier Nachkommastellen |
+| Weitere Tarifdaten | `base_price_eur_kwh`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Standardpreis, Einspeisevergütung, nächster Wechsel oder Nichtverfügbarkeitsgrund. Fehlender Preis wird nicht als gültiger aktiver Standardpreis markiert. | [Ersparnis][savings-tests]: fehlender Preis/Standardpreis, ct/kWh mit zwei Nachkommastellen |
 | 4. Freier Zeitraum | Ein Paar `start_date`/`end_date`, Recorder-`change` derselben Netto-Entity | Beide Tage vollständig in HA-Zeitzone; ausdrücklich übernehmen. Ein Zeitraum steuert Kennzahl und Balkendiagramm, inklusive negativer Werte und Datenlücken. | [Ersparnis][savings-tests], [Recorder-Adapter][statistics-tests], [Browser][browser-tests] |
 | Diagramm | Native `statistics_during_period`-Buckets mit `start`, `end`, `change` | Stunden/Tage/Monate entsprechend der Auswahl; reale zeitliche Positionen auch bei DST/Lücken; beschriftetes SVG plus aufklappbare Tabelle. | [Ersparnis][savings-tests], [Recorder-Adapter][statistics-tests], [Browser][browser-tests] |
 | 5. Erklärung | „Hinweise zur Berechnung und Datenbasis“ | Anfangs eingeklappt; erklärt Netto-Bilanz, Aufzeichnungsbeginn, negative Werte, fehlende Historie und Bilanzneustart. | [Ersparnis][savings-tests] |

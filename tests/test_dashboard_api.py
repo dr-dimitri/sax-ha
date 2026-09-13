@@ -410,8 +410,8 @@ async def test_registration_is_idempotent(hass: HomeAssistant) -> None:
     ) as register:
         async_register_dashboard_api(hass)
         async_register_dashboard_api(hass)
-    assert register.call_count == 2
-    assert len({call.args[1] for call in register.call_args_list}) == 2
+    assert register.call_count == 4
+    assert len({call.args[1] for call in register.call_args_list}) == 4
 
 
 async def test_initial_metadata_includes_changes_during_translation_loading(

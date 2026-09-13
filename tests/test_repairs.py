@@ -421,8 +421,8 @@ async def test_price_neutral_below_limit_issue_triggers_immediately(hass) -> Non
     issue = _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT)
     assert issue is not None
     assert issue.translation_placeholders == {
-        "max_price": "0.3",
-        "neutral_price": "0.2",
+        "max_price": "30.00",
+        "neutral_price": "20.00",
     }
 
 

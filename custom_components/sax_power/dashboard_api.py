@@ -14,6 +14,7 @@ from homeassistant.helpers import translation
 
 from .const import DOMAIN
 from .dashboard_statistics import async_register_dashboard_statistics
+from .dashboard_tariff import async_register_dashboard_tariff
 
 SUBSCRIBE_COMMAND = "sax_power/dashboard/subscribe"
 _ENTITY_DOMAINS = {"sensor", "binary_sensor", "switch", "number", "time", "select"}
@@ -36,6 +37,7 @@ def async_register_dashboard_api(hass: HomeAssistant) -> None:
     if SUBSCRIBE_COMMAND not in hass.data.get(websocket_api.DOMAIN, {}):
         websocket_api.async_register_command(hass, websocket_subscribe_dashboard)
     async_register_dashboard_statistics(hass)
+    async_register_dashboard_tariff(hass)
 
 
 def _is_sax_entry(hass: HomeAssistant, entry_id: str) -> bool:

@@ -726,7 +726,7 @@ describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
       ["smart", "Smart / PV-optimiert"],
     ]);
     expect(root.textContent).toContain("14.09.2026, 07:00");
-    expect(root.textContent).toContain("-0,04 EUR/kWh");
+    expect(root.textContent).toContain("-4 ct/kWh");
     expect(callService).not.toHaveBeenCalled();
   });
 
@@ -852,16 +852,16 @@ describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
     const { root, callService } = await mount(DynamicChargingView);
     const price = form(root, "Netzbezug ohne Laden bis");
     callService.mockRejectedValueOnce(new Error("server detail"));
-    await submit(price, "0.25");
+    await submit(price, "25");
     expect(price.querySelector('[role="alert"]')?.textContent).toContain(
       "Änderung ist fehlgeschlagen",
     );
     expect(price.textContent).not.toContain("server detail");
     expect(
       price.querySelector(".entity-control__value")?.textContent?.trim(),
-    ).toBe("0,3 EUR/kWh");
+    ).toBe("30 ct/kWh");
     expect(callService).toHaveBeenCalledTimes(1);
-    await submit(price, "0.25");
+    await submit(price, "25");
     expect(callService).toHaveBeenCalledTimes(2);
     expect(price.querySelector('[role="alert"]')).toBeNull();
   });

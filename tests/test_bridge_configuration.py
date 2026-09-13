@@ -100,12 +100,9 @@ async def test_enabling_requires_explicit_pv_start_and_preserves_edits_after_err
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {**submitted, CONF_PV_FORECAST_SENSOR: "sensor.pv_forecast"}
     )
-    assert result["step_id"] == "economics_time_of_use"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_FEED_IN_PRICE: 0.08, CONF_ECONOMICS_TOU_BASE_PRICE: 0.3},
-    )
     assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_ECONOMICS_FEED_IN_PRICE not in entry.options
+    assert CONF_ECONOMICS_TOU_BASE_PRICE not in entry.options
     assert entry.options[CONF_BRIDGE_CHARGE_ENABLED] is True
     assert entry.options[CONF_PV_FORECAST_SENSOR] == "sensor.pv_forecast"
     assert entry.options[CONF_PV_FORECAST_FACTOR] == 70
@@ -146,7 +143,12 @@ async def test_explicit_sources_survive_save_and_reopening(
     hass: HomeAssistant, pv_sensor: str
 ) -> None:
     """REQ-BRIDGE-CHARGE: Die separate Ladepausenquelle bleibt unabhängig."""
-    entry = _entry(hass)
+    tariff_options = {
+        CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.3,
+    }
+    entry = _entry(hass, tariff_options)
     bridge_options = {
         CONF_BRIDGE_CHARGE_ENABLED: True,
         CONF_PV_FORECAST_SENSOR: pv_sensor,
@@ -160,20 +162,9 @@ async def test_explicit_sources_survive_save_and_reopening(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], first_page
     )
-    assert result["step_id"] == "economics_time_of_use"
-    # The existing duplicate-submit route must preserve the new fields too.
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], first_page
-    )
-    assert not result.get("errors")
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.3,
-        },
-    )
     assert result["type"] == FlowResultType.CREATE_ENTRY
+    for key, value in tariff_options.items():
+        assert entry.options[key] == value
     for key, value in bridge_options.items():
         assert entry.options[key] == value
 

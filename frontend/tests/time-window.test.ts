@@ -85,6 +85,9 @@ async function mount(
     .fn<(kind: Kind, start: string, end: string) => Promise<boolean>>()
     .mockResolvedValue(true);
   const dashboard: SaxDashboard = {
+    tariff: ref(null),
+    loadTariff: vi.fn(),
+    saveTariff: vi.fn(),
     language: computed(() => options.language ?? "de"),
     ready: ref(true),
     connected,

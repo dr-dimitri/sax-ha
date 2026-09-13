@@ -198,8 +198,16 @@ class SelfDiagnostics:
             problem,
             ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
             {
-                "max_price": str(snapshot.price_limit),
-                "neutral_price": str(snapshot.neutral_price),
+                "max_price": (
+                    f"{snapshot.price_limit * 100:.2f}"
+                    if snapshot.price_limit is not None
+                    else ""
+                ),
+                "neutral_price": (
+                    f"{snapshot.neutral_price * 100:.2f}"
+                    if snapshot.neutral_price is not None
+                    else ""
+                ),
             },
         )
 

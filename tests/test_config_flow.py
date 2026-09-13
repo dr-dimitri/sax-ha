@@ -36,7 +36,6 @@ from custom_components.sax_power.const import (
     CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
     DOMAIN,
-    ECONOMICS_TOU_WINDOW_KEYS,
     PRICE_UNIT_CT_KWH,
     REG_SOC,
     REG_SUN_SERIAL_HI,
@@ -369,8 +368,8 @@ async def test_vue_first_activation_marker_preserves_reactivation_history(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             {
-                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3,
-                CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 30.0,
+                CONF_ECONOMICS_FEED_IN_PRICE: 8.0,
             },
         )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -990,10 +989,6 @@ def _economics_entry(hass, options: dict | None = None) -> MockConfigEntry:
     return entry
 
 
-def _empty_windows() -> dict:
-    return {key: {} for key in ECONOMICS_TOU_WINDOW_KEYS}
-
-
 async def test_options_flow_defaults_to_a_disabled_tariff(hass) -> None:
     """Ohne Angabe bleibt die Wirtschaftlichkeitsauswertung aus und der
     Flow endet wie bisher nach einem einzigen Schritt."""
@@ -1023,8 +1018,8 @@ async def test_options_flow_stores_a_fixed_tariff(hass) -> None:
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3421,
+            CONF_ECONOMICS_FEED_IN_PRICE: 7.86,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 34.21,
         },
     )
     await hass.async_block_till_done()
@@ -1041,16 +1036,10 @@ async def test_options_flow_stores_a_fixed_tariff(hass) -> None:
         pytest.param(
             TariffType.FIXED,
             "economics_fixed",
-            {CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3421},
+            {CONF_ECONOMICS_FIXED_IMPORT_PRICE: 34.21},
             id="fixed",
         ),
         pytest.param(TariffType.DYNAMIC, "economics_dynamic", {}, id="dynamic"),
-        pytest.param(
-            TariffType.TIME_OF_USE,
-            "economics_time_of_use",
-            {CONF_ECONOMICS_TOU_BASE_PRICE: 0.34, **_empty_windows()},
-            id="time_of_use",
-        ),
     ],
 )
 async def test_repeated_first_page_does_not_show_raw_schema_errors(
@@ -1088,7 +1077,7 @@ async def test_repeated_first_page_does_not_show_raw_schema_errors(
 
     # Danach lässt sich der Flow normal zu Ende führen.
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {**second_page, CONF_ECONOMICS_FEED_IN_PRICE: 0.0786}
+        result["flow_id"], {**second_page, CONF_ECONOMICS_FEED_IN_PRICE: 7.86}
     )
     await hass.async_block_till_done()
 
@@ -1155,13 +1144,6 @@ async def test_repeated_first_page_is_validated_against_its_own_schema(hass) -> 
             },
             id="fixed_without_any_price",
         ),
-        pytest.param(
-            TariffType.TIME_OF_USE,
-            "economics_time_of_use",
-            {CONF_ECONOMICS_FEED_IN_PRICE: 0.0786, **_empty_windows()},
-            {CONF_ECONOMICS_TOU_BASE_PRICE: "economics_price_required"},
-            id="time_of_use_without_base_price",
-        ),
     ],
 )
 async def test_missing_tariff_price_is_reported_on_its_field(
@@ -1190,152 +1172,69 @@ async def test_missing_tariff_price_is_reported_on_its_field(
     assert CONF_ECONOMICS_TARIFF_TYPE not in entry.options
 
 
-@pytest.mark.parametrize("window_count", [1, 2, 8])
-async def test_options_flow_stores_time_of_use_windows(
-    hass: HomeAssistant, window_count: int
-) -> None:
-    """REQ-VUE-CHARGING/-SAVINGS: Alle Tarifpreisfenster bleiben gespeichert."""
-    entry = _economics_entry(hass)
-
+@pytest.mark.parametrize("existing", [False, True])
+async def test_time_of_use_finishes_without_a_price_step(hass, existing: bool) -> None:
+    """REQ-ECONOMICS-TARIFFS: Das Dashboard besitzt Preise und Fenster vollständig."""
+    profile = {
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
+        economics_tou_window_key(1): {
+            CONF_ECONOMICS_WINDOW_START: "22:00:00",
+            CONF_ECONOMICS_WINDOW_END: "06:00:00",
+            CONF_ECONOMICS_WINDOW_PRICE: 0.21,
+        },
+    }
+    entry = _economics_entry(
+        hass,
+        (
+            {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value, **profile}
+            if existing
+            else {}
+        ),
+    )
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
-    )
-    assert result["step_id"] == "economics_time_of_use"
-
-    windows = _empty_windows()
-    profile = (
-        ("22:00:00", "06:00:00", 0.2101),
-        ("06:00:00", "08:00:00", 0.2202),
-        ("08:00:00", "10:00:00", 0.2303),
-        ("10:00:00", "12:00:00", 0.2404),
-        ("12:00:00", "14:00:00", 0.2505),
-        ("14:00:00", "16:00:00", 0.2606),
-        ("16:00:00", "18:00:00", 0.2707),
-        ("18:00:00", "20:00:00", 0.2808),
-    )
-    for index, (start, end, price) in enumerate(profile[:window_count], start=1):
-        windows[economics_tou_window_key(index)] = {
-            CONF_ECONOMICS_WINDOW_START: start,
-            CONF_ECONOMICS_WINDOW_END: end,
-            CONF_ECONOMICS_WINDOW_PRICE: price,
-        }
+    if existing:
+        # Ein offener Options-Dialog darf neuere Dashboard-Preise nicht ersetzen.
+        profile[CONF_ECONOMICS_TOU_BASE_PRICE] = 0.3456
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, **profile}
+        )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
-            **windows,
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+            CONF_PV_FORECAST_FACTOR: 70,
         },
     )
-    await hass.async_block_till_done()
-
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_ECONOMICS_TOU_BASE_PRICE] == 0.32
-    assert {key: entry.options[key] for key in ECONOMICS_TOU_WINDOW_KEYS} == windows
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
+    assert entry.options[CONF_PV_FORECAST_FACTOR] == 70
+    assert not hasattr(
+        config_flow.SaxPowerOptionsFlow, "async_step_economics_time_of_use"
     )
-    assert result["step_id"] == "economics_time_of_use"
-    suggested = {
-        key.schema: {
-            field.schema: field.description["suggested_value"]
-            for field in section.schema.schema
-            if isinstance(field.description, dict)
-            and "suggested_value" in field.description
-        }
-        for key, section in result["data_schema"].schema.items()
-        if key.schema in ECONOMICS_TOU_WINDOW_KEYS
-    }
-    assert suggested == windows
+    if existing:
+        assert all(entry.options[key] == value for key, value in profile.items())
+    else:
+        assert all(key not in entry.options for key in profile)
 
 
-async def test_options_flow_rejects_an_incomplete_window(hass) -> None:
-    """Eine Gruppe ist entweder ganz leer oder vollständig befüllt."""
-    entry = _economics_entry(hass)
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
-    )
-    windows = _empty_windows()
-    windows[economics_tou_window_key(2)] = {CONF_ECONOMICS_WINDOW_START: "22:00:00"}
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
+async def test_switch_to_time_of_use_does_not_reuse_other_tariff_prices(hass) -> None:
+    """REQ-ECONOMICS-TARIFFS: Neuauswahl wartet auf explizite Dashboard-Eingaben."""
+    entry = _economics_entry(
+        hass,
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
-            **windows,
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
+            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3,
         },
     )
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {"base": "economics_tou_window_incomplete"}
-    assert entry.options == {}
-
-
-async def test_options_flow_rejects_overlapping_windows(hass) -> None:
-    entry = _economics_entry(hass)
-
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
+        result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value}
     )
-    windows = _empty_windows()
-    windows[economics_tou_window_key(1)] = {
-        CONF_ECONOMICS_WINDOW_START: "06:00:00",
-        CONF_ECONOMICS_WINDOW_END: "10:00:00",
-        CONF_ECONOMICS_WINDOW_PRICE: 0.4,
-    }
-    windows[economics_tou_window_key(2)] = {
-        CONF_ECONOMICS_WINDOW_START: "09:00:00",
-        CONF_ECONOMICS_WINDOW_END: "12:00:00",
-        CONF_ECONOMICS_WINDOW_PRICE: 0.5,
-    }
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
-            **windows,
-        },
-    )
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {"base": "economics_tou_window_overlap"}
-
-
-async def test_options_flow_rejects_a_zero_length_window(hass) -> None:
-    """`start == end` ist ungültig und bedeutet nicht "ganzer Tag"."""
-    entry = _economics_entry(hass)
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
-    )
-    windows = _empty_windows()
-    windows[economics_tou_window_key(1)] = {
-        CONF_ECONOMICS_WINDOW_START: "06:00:00",
-        CONF_ECONOMICS_WINDOW_END: "06:00:00",
-        CONF_ECONOMICS_WINDOW_PRICE: 0.4,
-    }
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
-            **windows,
-        },
-    )
-
-    assert result["errors"] == {"base": "economics_tou_window_zero_length"}
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_ECONOMICS_FEED_IN_PRICE not in entry.options
+    assert CONF_ECONOMICS_FIXED_IMPORT_PRICE not in entry.options
+    assert CONF_ECONOMICS_TOU_BASE_PRICE not in entry.options
 
 
 async def test_dynamic_tariff_requires_the_price_sensor(hass) -> None:
@@ -1370,7 +1269,7 @@ async def test_dynamic_tariff_reuses_the_configured_price_sensor(hass) -> None:
     assert result["step_id"] == "economics_dynamic"
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_ECONOMICS_FEED_IN_PRICE: 0.0786}
+        result["flow_id"], {CONF_ECONOMICS_FEED_IN_PRICE: 7.86}
     )
     await hass.async_block_till_done()
 
@@ -1406,8 +1305,8 @@ async def test_switching_the_tariff_type_drops_stale_values(hass) -> None:
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.09,
-            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+            CONF_ECONOMICS_FEED_IN_PRICE: 9.0,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 34.0,
         },
     )
     await hass.async_block_till_done()
@@ -1596,8 +1495,8 @@ async def test_investment_cost_can_be_removed_without_touching_the_tariff(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.34,
+            CONF_ECONOMICS_FEED_IN_PRICE: 7.86,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 34.0,
         },
     )
     await hass.async_block_till_done()
@@ -1677,7 +1576,7 @@ async def test_every_setup_step_renders_for_the_frontend(hass) -> None:
 
 @pytest.mark.parametrize(
     "tariff_type",
-    [TariffType.FIXED, TariffType.TIME_OF_USE, TariffType.DYNAMIC],
+    [TariffType.FIXED, TariffType.DYNAMIC],
 )
 async def test_every_tariff_step_renders_for_the_frontend(
     hass, tariff_type: TariffType
@@ -1708,41 +1607,22 @@ async def test_every_tariff_step_renders_for_the_frontend(
 
 
 async def test_prices_are_rounded_to_the_configured_step(hass) -> None:
-    """Die Rundung auf ECONOMICS_PRICE_DECIMALS sitzt seit #135 nicht mehr
-    im Schema (dort war sie nicht serialisierbar), sondern im Schritt - sie
-    muss weiterhin für alle Preisfelder greifen, auch für die Preise in den
-    Zeitfenstergruppen."""
+    """REQ-ECONOMICS-TARIFFS: Cent-Eingaben einmalig gerundet als EUR speichern."""
     entry = _economics_entry(hass)
-
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
+        result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value}
     )
-    windows = _empty_windows()
-    windows[economics_tou_window_key(1)] = {
-        CONF_ECONOMICS_WINDOW_START: "22:00:00",
-        CONF_ECONOMICS_WINDOW_END: "06:00:00",
-        CONF_ECONOMICS_WINDOW_PRICE: 0.2100000000000002,
-    }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.078649999,
-            CONF_ECONOMICS_TOU_BASE_PRICE: 0.3200000000000003,
-            **windows,
+            CONF_ECONOMICS_FEED_IN_PRICE: 7.8649999,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: 32.00000000000003,
         },
     )
-    await hass.async_block_till_done()
-
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_ECONOMICS_FEED_IN_PRICE] == 0.0786
-    assert entry.options[CONF_ECONOMICS_TOU_BASE_PRICE] == 0.32
-    stored = entry.options[economics_tou_window_key(1)]
-    assert stored[CONF_ECONOMICS_WINDOW_PRICE] == 0.21
-    # Die übrigen Felder der Gruppe bleiben unangetastet.
-    assert stored[CONF_ECONOMICS_WINDOW_START] == "22:00:00"
-    assert stored[CONF_ECONOMICS_WINDOW_END] == "06:00:00"
+    assert entry.options[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 0.32
 
 
 async def test_out_of_range_price_is_still_rejected(hass) -> None:
@@ -1761,8 +1641,81 @@ async def test_out_of_range_price_is_still_rejected(hass) -> None:
         await hass.config_entries.options.async_configure(
             result["flow_id"],
             {
-                CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
-                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 99.0,
+                CONF_ECONOMICS_FEED_IN_PRICE: 7.86,
+                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 9900.0,
             },
         )
+    assert entry.options == {}
+
+
+@pytest.mark.parametrize("tariff_type", [TariffType.FIXED, TariffType.DYNAMIC])
+async def test_stored_prices_are_suggested_in_cents_without_roundtrip_drift(
+    hass: HomeAssistant, tariff_type: TariffType
+) -> None:
+    """REQ-ECONOMICS-TARIFFS: EUR-Altbestand erscheint als Cent ohne Wertänderung."""
+    options = {
+        CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
+        CONF_PRICE_SENSOR: "sensor.strompreis",
+    }
+    if tariff_type is TariffType.FIXED:
+        options[CONF_ECONOMICS_FIXED_IMPORT_PRICE] = 0.3421
+    entry = _economics_entry(hass, options)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value,
+            CONF_PRICE_SENSOR: "sensor.strompreis",
+        },
+    )
+    suggested = {
+        key.schema: key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if isinstance(key.description, dict) and "suggested_value" in key.description
+    }
+    assert suggested[CONF_ECONOMICS_FEED_IN_PRICE] == 7.86
+    for price_selector in result["data_schema"].schema.values():
+        assert price_selector.config["unit_of_measurement"] == "ct/kWh"
+    if tariff_type is TariffType.FIXED:
+        assert suggested[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 34.21
+        # Ein Feldfehler erhält die letzte Cent-Eingabe statt EUR oder Defaults.
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_ECONOMICS_FEED_IN_PRICE: 9.25}
+        )
+        retry = {
+            key.schema: key.description["suggested_value"]
+            for key in result["data_schema"].schema
+            if isinstance(key.description, dict)
+            and "suggested_value" in key.description
+        }
+        assert retry[CONF_ECONOMICS_FEED_IN_PRICE] == 9.25
+        assert retry[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 34.21
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], suggested
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_FEED_IN_PRICE] == 0.0786
+    if tariff_type is TariffType.FIXED:
+        assert entry.options[CONF_ECONOMICS_FIXED_IMPORT_PRICE] == 0.3421
+
+
+async def test_non_finite_price_is_not_stored(hass: HomeAssistant) -> None:
+    """REQ-ECONOMICS-TARIFFS: Nicht endliche Preise werden abgewiesen."""
+    entry = _economics_entry(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_FEED_IN_PRICE: 8.0,
+            CONF_ECONOMICS_FIXED_IMPORT_PRICE: float("nan"),
+        },
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: "economics_price_invalid"
+    }
     assert entry.options == {}

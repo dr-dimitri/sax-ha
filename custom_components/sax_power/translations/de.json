@@ -576,7 +576,7 @@
     },
     "price_neutral_below_limit": {
       "title": "Neutralpreis liegt nicht über der Preisgrenze",
-      "description": "In der Strategie „Absoluter Preis“ muss „Neutralpreis“ ({neutral_price} EUR/kWh) über „Preisgrenze“ ({max_price} EUR/kWh) liegen, damit eine Pausezone entsteht. Erhöhe den Neutralpreis oder senke die Preisgrenze. Relativ und Smart pausieren in nicht zum Laden ausgewählten Slots unterhalb des Neutralpreises, unabhängig von der absoluten Preisgrenze."
+      "description": "In der Strategie „Absoluter Preis“ muss „Neutralpreis“ ({neutral_price} ct/kWh) über „Preisgrenze“ ({max_price} ct/kWh) liegen, damit eine Pausezone entsteht. Erhöhe den Neutralpreis oder senke die Preisgrenze. Relativ und Smart pausieren in nicht zum Laden ausgewählten Slots unterhalb des Neutralpreises, unabhängig von der absoluten Preisgrenze."
     },
     "control_config_unreadable": {
       "title": "Ladeeinstellungen konnten nicht gelesen werden",
@@ -758,12 +758,12 @@
           "grid_serving_pv_forecast_sensor": "PV-Prognose-Sensor für die Ladepause (heute verbleibend)"
         },
         "data_description": {
-          "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Er hat zwei getrennte Aufgaben: Für das preisoptimierte Laden liefert er immer die Zeitfenster der Modi „Relativ“ und „Smart“ (aus seinen Preisvorschau-Attributen). Für die Wirtschaftlichkeit ist er nur beim Tarifmodell „Dynamisch“ die Preisquelle - dort ist er Pflicht. Bei „Festpreis“ und „Tageszeitabhängig“ rechnet die Wirtschaftlichkeit ausschließlich mit den Preisen, die auf der Folgeseite eingegeben werden: Ein dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, kein täglich wiederkehrendes Tagesprofil - beide Formate lassen sich nicht ineinander überführen.",
+          "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Das preisoptimierte Laden nutzt dessen Preisvorschau für „Relativ“ und „Smart“. Für die Wirtschaftlichkeit ist dieser Sensor nur bei „Dynamisch“ erforderlich. „Festpreis“ verwendet den auf der Folgeseite eingegebenen Preis; „Tageszeitabhängig“ das im Dashboard bearbeitete tägliche Tarifprofil. Eine dynamische Preisvorschau und ein täglich wiederkehrendes Profil sind getrennte Preisquellen.",
           "price_attribute": "Nur ausfüllen, wenn die automatische Erkennung fehlschlägt - z. B. „raw_today“, „data“ oder „forecast“.",
-          "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh sowie EUR/MWh und ct/MWh werden intern in EUR/kWh umgerechnet.",
+          "price_unit": "Einheit des Quell-Sensors. „Automatisch“ erkennt sie anhand des Sensors. Das SAX-Dashboard zeigt Arbeitspreise in ct/kWh an.",
           "pv_forecast_sensor": "Für Smart einen Energiesensor mit dem gesamten erwarteten PV-Ertrag morgen wählen. Die verbrauchsbasierte Ladeplanung ordnet über dieselbe Auswahl eine PV-Forecast-Anlage zu und ruft deren Prognosezeitreihe ab. Bisherige Auswahlen bleiben nach Updates erhalten. Die Ladepause verwendet einen eigenen Sensor für den heute verbleibenden Ertrag.",
           "pv_forecast_factor": "Nur für Smart: nutzbarer Anteil der Morgen-Prognose nach Eigenverbrauch, Wetterunsicherheit und Verlusten. Der Mindestwert des netzdienlichen Ladens vergleicht den unveränderten heutigen Rest-Ertrag seiner getrennten Quelle.",
-          "economics_tariff_type": "Optional. Bestimmt den Netzbezugspreis für die Wirtschaftlichkeit. „Deaktiviert“ lässt die Ladeeinstellungen unverändert. „Festpreis“ verwendet einen ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ verwendet einen täglich wiederkehrenden Basispreis und bis zu acht Zeitfenster, einzugeben auf der nächsten Seite. Die täglich günstigsten Tarifabschnitte bestimmen zugleich die erlaubten Zeiten für feste SOC-Ladung und verbrauchsbasierte Netzladung. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt Attribut- und Einheiteneinstellung. Das preisoptimierte Laden nutzt diesen Sensor unabhängig vom Tarifmodell weiter.",
+          "economics_tariff_type": "Optional. Bestimmt den Netzbezugspreis für die Wirtschaftlichkeit. „Festpreis“ verwendet einen ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ verwendet einen Standardpreis und bis zu acht tägliche Zeitfenster. Diese Preise und die Einspeisevergütung bearbeitest du im Dashboard unter Tarifpreisfenster → Bearbeiten. Die günstigsten täglichen Abschnitte bestimmen zugleich die erlaubten Zeiten für feste SOC-Ladung und verbrauchsbasierte Netzladung. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt Attribut- und Einheiteneinstellung.",
           "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt und Restbetrag bis zur Amortisation; verrechnet wird gegen das laufende, signierte Nettoergebnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
           "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt und Restbetrag; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf.",
           "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis.",
@@ -773,10 +773,10 @@
       },
       "economics_fixed": {
         "title": "Wirtschaftlichkeit: Festpreis",
-        "description": "Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh. Monatlicher Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten gehören ausdrücklich nicht dazu.",
+        "description": "Alle Preise sind variable Brutto-Arbeitspreise in ct/kWh. Monatlicher Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten gehören ausdrücklich nicht dazu.",
         "data": {
-          "economics_feed_in_price_eur_kwh": "Einspeisevergütung (EUR/kWh)",
-          "economics_fixed_import_price_eur_kwh": "Arbeitspreis Netzbezug (EUR/kWh)"
+          "economics_feed_in_price_eur_kwh": "Einspeisevergütung (ct/kWh)",
+          "economics_fixed_import_price_eur_kwh": "Arbeitspreis Netzbezug (ct/kWh)"
         },
         "data_description": {
           "economics_feed_in_price_eur_kwh": "Erforderlich. Entgangener Erlös und damit Beschaffungspreis jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt - PV-Energie wird nie als kostenlos bewertet.",
@@ -785,149 +785,21 @@
       },
       "economics_dynamic": {
         "title": "Wirtschaftlichkeit: Dynamischer Tarif",
-        "description": "Der Netzbezugspreis kommt aus dem bereits ausgewählten Strompreis-Sensor - es wird bewusst keine zweite Preisquelle konfiguriert. Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh. Monatlicher Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten gehören ausdrücklich nicht dazu.",
+        "description": "Der Netzbezugspreis kommt aus dem bereits ausgewählten Strompreis-Sensor - es wird bewusst keine zweite Preisquelle konfiguriert. Alle Preise sind variable Brutto-Arbeitspreise in ct/kWh. Monatlicher Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten gehören ausdrücklich nicht dazu.",
         "data": {
-          "economics_feed_in_price_eur_kwh": "Einspeisevergütung (EUR/kWh)"
+          "economics_feed_in_price_eur_kwh": "Einspeisevergütung (ct/kWh)"
         },
         "data_description": {
           "economics_feed_in_price_eur_kwh": "Erforderlich. Entgangener Erlös und damit Beschaffungspreis jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt - PV-Energie wird nie als kostenlos bewertet."
-        }
-      },
-      "economics_time_of_use": {
-        "title": "Tageszeitabhängiger Tarif: Preise und Ladezeiten",
-        "description": "Dieses tägliche Preisprofil bestimmt die Wirtschaftlichkeit und die erlaubten Zeiten für feste SOC-Ladung und verbrauchsbasierte Netzladung. Diese beiden Betriebsarten nutzen ausschließlich Abschnitte mit dem niedrigsten tatsächlich täglich vorkommenden Preis; dazu gehören auch Lücken mit Basispreis, wenn dieser am günstigsten ist. Alle gleich günstigen Abschnitte sind freigegeben. Bei fester SOC-Ladung gelten weiterhin Min. SOC als Startschwelle, Max. SOC und aktive Monate. Bei verbrauchsbasierter Planung ersetzt der berechnete Bedarf die Min.-SOC-Startschwelle.\n\nNach dem Speichern oder einem Integrationsupdate ist dieser Tarif im tageszeitabhängigen Modus die einzige Ladezeitenquelle. Bisher gespeicherte Start-/Endzeiten der Netzladung bleiben für andere Tarifarten erhalten, sind hier aber unwirksam und nicht bearbeitbar. Ungültige Tarifdaten führen niemals zu einem Rückfall auf diese alten Zeiten.\n\nJeden Kalendertag gilt derselbe Basispreis, den bis zu acht Zeitfenster überschreiben. Zeitfenster sind halboffen (Beginn einschließlich, Ende ausschließlich), dürfen über Mitternacht gehen und sich nicht überschneiden; angrenzende Grenzen sind erlaubt. Maßgeblich ist die lokale Zeitzone von Home Assistant. Jede Gruppe bleibt entweder ganz leer oder wird vollständig ausgefüllt. Alle Preise sind variable Brutto-Arbeitspreise in EUR/kWh. Monatlicher Grundpreis, Boni, außerhalb des Arbeitspreises ausgewiesene Steuern und sonstige Fixkosten gehören nicht dazu. Dies ist ein täglich wiederkehrendes Profil, kein Zeitreihen-Forecast: Der auf der vorigen Seite ausgewählte Strompreis-Sensor wird hier nicht verwendet und ist nicht erforderlich.",
-        "data": {
-          "economics_feed_in_price_eur_kwh": "Einspeisevergütung (EUR/kWh)",
-          "economics_tou_base_price_eur_kwh": "Grundpreis Netzbezug (EUR/kWh)"
-        },
-        "data_description": {
-          "economics_feed_in_price_eur_kwh": "Erforderlich. Entgangener Erlös und damit Beschaffungspreis jeder PV-Kilowattstunde, die in den Speicher statt ins Netz fließt - PV-Energie wird nie als kostenlos bewertet.",
-          "economics_tou_base_price_eur_kwh": "Erforderlich. Gilt zu allen Zeiten außerhalb der unten definierten Zeitfenster."
-        },
-        "sections": {
-          "economics_tou_window_1": {
-            "name": "Zeitfenster 1 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_2": {
-            "name": "Zeitfenster 2 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_3": {
-            "name": "Zeitfenster 3 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_4": {
-            "name": "Zeitfenster 4 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_5": {
-            "name": "Zeitfenster 5 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_6": {
-            "name": "Zeitfenster 6 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_7": {
-            "name": "Zeitfenster 7 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          },
-          "economics_tou_window_8": {
-            "name": "Zeitfenster 8 (optional)",
-            "description": "Entweder alle drei Felder ausfüllen oder alle drei leer lassen.",
-            "data": {
-              "start": "Beginn",
-              "end": "Ende",
-              "price_eur_kwh": "Arbeitspreis (EUR/kWh)"
-            },
-            "data_description": {
-              "start": "Beginn des Zeitfensters (einschließlich).",
-              "end": "Ende des Zeitfensters (ausschließlich). Ein Fenster darf über Mitternacht gehen; Beginn und Ende dürfen nicht gleich sein.",
-              "price_eur_kwh": "Brutto-Arbeitspreis, der in diesem Zeitfenster statt des Grundpreises gilt."
-            }
-          }
         }
       }
     },
     "error": {
       "economics_price_sensor_required": "Der dynamische Tarif braucht den oben ausgewählten Strompreis-Sensor. Bitte einen Sensor auswählen oder ein anderes Tarifmodell wählen.",
-      "economics_tou_window_incomplete": "Ein Zeitfenster ist unvollständig: Beginn, Ende und Arbeitspreis müssen entweder alle ausgefüllt oder alle leer sein.",
-      "economics_tou_window_zero_length": "Beginn und Ende eines Zeitfensters dürfen nicht gleich sein - das ergibt kein Zeitfenster und bedeutet auch nicht „ganzer Tag“.",
-      "economics_tou_window_overlap": "Zwei Zeitfenster überschneiden sich. Angrenzende Grenzen (Ende des einen = Beginn des nächsten) sind erlaubt, eine Überlappung nicht.",
-      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in EUR/kWh eintragen (Bruttopreis inklusive aller Abgaben).",
+      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in ct/kWh eintragen (Bruttopreis inklusive aller Abgaben).",
       "bridge_pv_start_required": "Einen PV-Forecast-Energiesensor als gemeinsame PV-Prognosequelle auswählen.",
-      "bridge_tariff_required": "Die verbrauchsbasierte Planung benötigt einen gespeicherten zeitvariablen Tarif."
+      "bridge_tariff_required": "Die verbrauchsbasierte Planung benötigt einen gespeicherten zeitvariablen Tarif.",
+      "economics_price_invalid": "Bitte einen endlichen Arbeitspreis im erlaubten Bereich in ct/kWh eingeben."
     }
   },
   "selector": {

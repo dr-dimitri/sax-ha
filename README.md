@@ -379,7 +379,7 @@ Zeit-Entitäten auf der Geräteseite neu.
 
 ## Tarifmodell für die Wirtschaftlichkeit
 
-Unter **Konfigurieren** kannst du einen Tarif für die Geldbilanz hinterlegen.
+Unter **Konfigurieren** wählst du das Tarifmodell für die Geldbilanz.
 Das ist optional; Messwerte und die bisherigen Ladefunktionen sind auch ohne
 diese Auswertung verfügbar. Ein gespeicherter tageszeitabhängiger Tarif
 bestimmt zugleich die erlaubten Ladezeiten der zeitgesteuerten Netzladung.
@@ -392,11 +392,30 @@ bestimmt zugleich die erlaubten Ladezeiten der zeitgesteuerten Netzladung.
 | Dynamisch | Derselbe Strompreis-Sensor wie beim preisoptimierten Laden |
 
 Bei einem aktiven Tarif gehört die **Einspeisevergütung** dazu. Alle Preise
-werden als Brutto-Arbeitspreise in EUR/kWh erfasst. Beim tageszeitabhängigen
+werden als Brutto-Arbeitspreise in **ct/kWh** erfasst und angezeigt; etwa
+32,00 ct/kWh für einen Arbeitspreis von 0,32 Euro pro kWh. Geldbilanzen und
+Investitionskosten bleiben Eurobeträge. Beim tageszeitabhängigen
 Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
-hinterlegten Plan siehst du unter **Tarifpreisfenster** in den Tabs
-**Zeitvariabler Tarif** und **Amortisation**. Diese Preisfenster dienen der
+hinterlegten Plan bearbeitest du als Administrator unter **Tarifpreisfenster →
+Bearbeiten** in den Tabs **Zeitvariabler Tarif** und **Amortisation**.
+Der Editor klappt direkt in der Karte auf: Standardpreis, Einspeisevergütung
+und vorhandene Zeitfenster mit **Von**, **Bis** und **Preis**. Über
+**Zeitfenster hinzufügen** lassen sich bis zu acht Fenster anlegen; Fenster
+über Mitternacht sind möglich. **Speichern** übernimmt das vollständige Profil
+und klappt den Editor zu, **Abbrechen** verwirft den Entwurf. Fehler oder
+zwischenzeitliche Tarifänderungen werden angezeigt und überschreiben keine
+gespeicherten Werte. Der Standardpreis gilt außerhalb der Fenster und ist
+ein Arbeitspreis pro kWh; monatliche Grundgebühren gehören nicht dazu.
+
+Für diesen Tarif entfallen die Preiseingaben im Konfigurationsdialog.
+Bestehende Tarifwerte bleiben beim Update und bei Änderungen anderer
+Einstellungen erhalten. Nach der erstmaligen Auswahl von **Tageszeitabhängig**
+vervollständigst du das Profil im Dashboard. Bis dahin gibt es keinen gültigen
+Tarif und keine automatische Tarifladung. Festpreis und dynamische
+Einspeisevergütung werden weiterhin unter **Konfigurieren** eingegeben.
+
+Diese Preisfenster dienen der
 Geldbilanz und bestimmen den erlaubten Niedertarifbereich für feste SOC-Ladung
 und verbrauchsbasierte Ladeplanung. Beide verwenden dieselben günstigsten
 täglich vorkommenden Tarifabschnitte einschließlich Lücken zum günstigen
@@ -410,6 +429,12 @@ Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt
 abdecken. Fehlerhafte oder fehlende Preise werden als unbekannt behandelt.
 Tarifänderungen gelten sofort für kommende Messintervalle; frühere Beträge
 werden nicht neu berechnet.
+
+Auch die HA-Entitäten für aktuelle Bezugspreise, Einspeisevergütung,
+Preisgrenze und Neutralpreis verwenden ct/kWh. Gespeicherte Preisgrenzen und
+vorhandene Preisstatistiken werden beim Update automatisch umgerechnet.
+Eigene Automationen, die Preisgrenze oder Neutralpreis mit `number.set_value`
+setzen, müssen Centwerte übergeben, beispielsweise `32` für 32 ct/kWh.
 
 ### Wirtschaftlichkeitsbilanz
 

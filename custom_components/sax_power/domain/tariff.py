@@ -65,7 +65,7 @@ class QuoteUnavailable(StrEnum):
 
 
 class TariffWindowError(StrEnum):
-    """Regelverstoß einer Zeitfenstergruppe im Options Flow."""
+    """Regelverstoß einer täglichen Tarif-Zeitfenstergruppe."""
 
     INCOMPLETE = "incomplete"
     ZERO_LENGTH = "zero_length"
@@ -162,7 +162,7 @@ def validate_window_fields(
     end: dt_time | None,
     price_eur_kwh: float | None,
 ) -> TariffWindowIssue | None:
-    """Prüft eine einzelne Zeitfenstergruppe des Options Flow.
+    """Prüft eine einzelne gespeicherte Tarif-Zeitfenstergruppe.
 
     Eine Gruppe ist entweder vollständig leer (dann existiert das Fenster
     schlicht nicht) oder vollständig befüllt. Alles dazwischen ist ein
@@ -219,11 +219,10 @@ def is_valid_feed_in_price(price: float | None) -> bool:
 def validate_tariff(config: TariffConfig) -> QuoteUnavailable | None:
     """Grund, warum aus `config` überhaupt kein Quote entstehen darf.
 
-    Läuft vor jeder Quote-Erzeugung - auch beim dynamischen Tarif. Der
-    Options Flow lässt eine unvollständige Konfiguration zwar nicht
-    speichern, ein von Hand bearbeiteter oder aus einer früheren Version
-    stammender Options-Eintrag kann aber trotzdem einen fehlenden oder
-    unsinnigen Wert enthalten.
+    Läuft vor jeder Quote-Erzeugung - auch beim dynamischen Tarif.
+    Nach der erstmaligen TOU-Auswahl können Pflichtpreise bis zur Eingabe
+    im Dashboard fehlen (REQ-VUE-TARIFF-EDITOR); auch importierte oder
+    ältere Options müssen vor ihrer Verwendung vollständig gültig sein.
 
     Die Einspeisevergütung ist dabei genauso Pflicht wie der Arbeitspreis:
     ohne sie wäre die PV-Kilowattstunde im Speicher unbewertet, und

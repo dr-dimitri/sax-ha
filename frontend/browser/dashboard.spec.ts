@@ -49,9 +49,7 @@ test("compact views retain readable controls and all entities across available p
       await expect(panel.locator(".savings-chart")).toBeVisible();
     else await expect(panel.locator(".entity-control").first()).toBeVisible();
     if (tab.path === "ladeautomatik" || tab.path === "netzdienliches-laden")
-      await panel
-        .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
-        .click();
+      await panel.locator(".month-selection__toggle").click();
     const expectedLabels = await contentLabels.allTextContents();
     expect(expectedLabels.length).toBeGreaterThan(0);
     const expectedControls = await panel
@@ -178,7 +176,7 @@ test("compact views retain readable controls and all entities across available p
             const card = month
               ? control.closest("form")!
               : (control.closest(
-                  ".general-view__card, .charging-view__card, .savings-card",
+                  ".general-view__card, .charging-view__card, .savings-card, .tariff-plan",
                 ) ?? control.closest("form")!);
             const bounds = card.getBoundingClientRect();
             if (
@@ -483,8 +481,8 @@ test("one dashboard with five complete views, local assets and responsive screen
             tab.path === "ladeautomatik"
               ? "20 %"
               : language === "de"
-                ? "-0,05 EUR/kWh"
-                : "-0.05 EUR/kWh",
+                ? "-5 ct/kWh"
+                : "-5 ct/kWh",
         }),
       ).toHaveCount(tab.path === "ladeautomatik" ? 1 : 2);
     }
@@ -587,9 +585,9 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   ];
   const price = (value: number) =>
     `${new Intl.NumberFormat(english ? "en-GB" : "de-DE", {
-      minimumFractionDigits: 4,
-      maximumFractionDigits: 4,
-    }).format(value)} EUR/kWh`;
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value * 100)} ct/kWh`;
   await page.locator("#tariff-timed").click();
   await panel.evaluate((element, configuredWindows) => {
     const host = element as HTMLElement & { hass: HomeAssistant };
@@ -657,25 +655,21 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   }
   await expect(rows.last().locator("td")).toHaveText([
     "",
-    english ? "Base price" : "Grundpreis",
+    english ? "Standard price" : "Standardpreis",
     price(0.32),
   ]);
   await expect(tariff.locator(".tariff-plan__current")).toHaveCount(1);
   await expect(tariff.locator(".tariff-plan__low")).toHaveCount(1);
   await expect(tariff.locator(".tariff-plan__low")).toContainText("03:00");
   await expect(tariff).toContainText(
-    english
-      ? "Configure → Tariff price windows"
-      : "Konfigurieren → Tarifpreisfenster",
+    english ? "How charging times apply" : "So gelten die Ladezeiten",
   );
   await expect(tariff.locator(".tariff-plan__current")).toContainText("18:00");
   await expect(tariff).toContainText(price(0.0812));
   await expect(tariff).toContainText(
     english ? "Next price change" : "Nächster Preiswechsel",
   );
-  await expect(
-    tariff.locator("input, select, button, [role=slider]"),
-  ).toHaveCount(0);
+  await expect(tariff.locator("input, select, [role=slider]")).toHaveCount(0);
   const expectedRows = await rows.allTextContents();
   for (const width of mobile ? [390, 320] : [1366, 1440]) {
     const sidebar = width === 1366 ? 256 : 0;
@@ -709,6 +703,7 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
         reachesStart,
         reachesEnd,
         unreadable: [...element.querySelectorAll("th, td, p")]
+          .filter((cell) => !cell.closest("details:not([open])"))
           .filter((cell) => {
             const style = getComputedStyle(cell);
             const rect = cell.getBoundingClientRect();
@@ -836,9 +831,7 @@ test("overnight times, months, native strategy options and negative prices", asy
   const panel = page.locator("sax-power-vue-panel");
   await page.locator("#legacy-tariff").click();
   await panel.locator("nav a[href$='/ladeautomatik']").click();
-  await panel
-    .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
-    .click();
+  await panel.locator(".month-selection__toggle").click();
   await expect(panel.locator(".charging-view").getByRole("switch")).toHaveCount(
     13,
   );
@@ -934,9 +927,7 @@ test("overnight times, months, native strategy options and negative prices", asy
   });
   expect(longNameFits).toBe(true);
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
-  await panel
-    .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
-    .click();
+  await panel.locator(".month-selection__toggle").click();
   await expect(panel.locator(".charging-view").getByRole("switch")).toHaveCount(
     13,
   );
@@ -947,16 +938,16 @@ test("overnight times, months, native strategy options and negative prices", asy
   await expect(panel.locator("select option")).toHaveCount(4);
   await panel.getByRole("combobox").selectOption("smart");
   await expect(panel.getByRole("combobox")).toHaveValue("smart");
-  const price = panel.locator("input[min='-1']").first();
-  await price.fill("-0.125");
+  const price = panel.locator("input[min='-100']").first();
+  await price.fill("-12.5");
   await panel
     .locator("form")
-    .filter({ has: page.locator("input[min='-1']") })
+    .filter({ has: page.locator("input[min='-100']") })
     .first()
     .getByRole("button")
     .click();
-  await expect(page.locator("#actions")).toContainText('"value":-0.125');
-  await expect(price).toHaveValue("-0.125");
+  await expect(page.locator("#actions")).toContainText('"value":-12.5');
+  await expect(price).toHaveValue("-12.5");
 });
 
 // REQ-VUE-PARITY: quarter groups keep arbitrary confirmed month selections readable.

@@ -79,7 +79,10 @@ async function mount(language = "de", withControl = false) {
     config: { time_zone: "Europe/Berlin" },
     locale: { time_format: "twenty_four" },
     callService,
-    callWS,
+    callWS: <T>(message: Readonly<Record<string, unknown>>) =>
+      message.type === "sax_power/dashboard/tariff/get"
+        ? Promise.reject({ code: "not_found" })
+        : (callWS(message) as Promise<T>),
   });
   const root = document.createElement("div");
   document.body.append(root);

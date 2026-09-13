@@ -60,6 +60,7 @@
 # REQ-VUE-CHARGING                done       Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (#200)
 # REQ-VUE-DYNAMIC-CHARGING        done       Dynamischer Vue-Tarif, Strategie und gemeinsamer Max-SOC (#201)
 # REQ-VUE-SAVINGS                 done       Vue-Amortisation, Tarifplan und native Recorder-Zeitraumauswertung (#202)
+# REQ-VUE-TARIFF-EDITOR           done       Ausklappbarer Tarifeditor im Dashboard und Preise in Cent
 # REQ-VUE-PARITY                  done       Funktionsmatrix, HA-Anbindung, Browser- und isolierte Paketprüfung (#203)
 # REQ-VUE-DASHBOARD-REPAIR        done       Eigenständige Vue-Aktualisierung über HA-Reparaturen (#205)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
@@ -650,7 +651,7 @@ requirement_time_of_use_charge_source:
     - "Tests prüfen Mitternacht, lokale Zeit, angrenzende Grenzen und Monatswechsel sowie ungültige oder fehlende Tarifdaten ohne Legacy-Fallback."
     - "Update, Neustart und Tarifwechsel geben alte Lade- oder Haltezustände nicht für abweichende Tarifabschnitte frei; alte Start-/Endwerte werden weder erfunden noch als zweite Ladequelle verwendet."
     - "Das Dashboard zeigt im TIME_OF_USE-Modus keine bearbeitbaren alten Ladezeiten. Min.-SOC-Startschwelle bleibt bei fester SOC-Ladung sichtbar und entfällt bei Bridge; Max-SOC und Monate bleiben bedienbar."
-    - "Der deutsch-/englischsprachige Hilfetext auf economics_time_of_use erklärt Tarifquelle, niedrigste Preisstufe und Umgang mit bestehenden Ladezeiten."
+    - "Der deutsch-/englischsprachige Hilfetext in der Dashboard-Tarifkarte erklärt Tarifquelle, niedrigste Preisstufe und Umgang mit bestehenden Ladezeiten."
 
 # ==============================================================================
 # ANFORDERUNG: ZEITGESTEUERTES LADEN AUF ZIEL-SOC
@@ -2407,8 +2408,8 @@ requirement_dynamic_price_charge:
        Dashboard folgenlos blieb."
     - "Entities am bestehenden SAX-Gerät: switch 'Preisoptimiertes Laden
        aktiv' (Hauptschalter), select 'Preisoptimiertes Laden Strategie',
-       number 'Preisoptimiertes Laden Preisgrenze' (EUR/kWh), number
-       'Preisoptimiertes Laden Neutralpreis' (EUR/kWh, bei Absoluter Preis
+       number 'Preisoptimiertes Laden Preisgrenze' (ct/kWh), number
+       'Preisoptimiertes Laden Neutralpreis' (ct/kWh, bei Absoluter Preis
        oberhalb der Preisgrenze), number 'Preisoptimiertes Laden Anzahl Stunden'
        (1-24), sensor 'Preisoptimiertes Laden nächster Start' (device_class
        timestamp), sensor 'Preisoptimiertes Laden Status' (Klartext),
@@ -2876,16 +2877,19 @@ requirement_vue_charging:
     Danach zeigt der Tab über die volle Breite dieselbe gemeinsame
     Tarifpreisfenster-Karte (EN: Tariff price windows) wie
     Amortisation nach REQ-VUE-SAVINGS (Issue #219).
-    Sichtbarkeit und Inhalt folgen ausschließlich dem aktuellen Zustand von
+    Sichtbarkeit und laufende Tarifbewertung folgen dem aktuellen Zustand von
     sensor.economics_current_import_price: bei tariff_type=time_of_use
     erscheinen alle konfigurierten windows in der vom Sensor gelieferten
-    Reihenfolge, bei anderen Tarifarten oder fehlender Entität entfällt die Karte.
+    Reihenfolge; bei anderen Tarifarten entfällt die Karte. Fehlen Entität oder
+    Tarifattribute, kann die gesicherte Dashboard-API ein TIME_OF_USE-Profil für
+    die Bearbeitung bestätigen. Das erzeugt keine erfundene Preisbewertung.
     Auch zwei oder acht Fenster, Mitternachtsfenster und angrenzende Grenzen
     werden vollständig dargestellt. active_window, Grundpreis,
     Einspeisevergütung, nächster Preiswechsel und Nichtverfügbarkeit werden
-    live aus den Sensorattributen übernommen. Preise haben vier
-    Nachkommastellen; der Browser berechnet weder aktive Fenster noch Preise.
-    Die Preisfenster bleiben im Browser reine Anzeigen. Ihre Verwendung für
+    live aus den Sensorattributen übernommen. Preise erscheinen in ct/kWh mit
+    zwei Nachkommastellen; der Browser berechnet weder aktive Fenster noch Preise.
+    Die Preiseingabe erfolgt im ausklappbaren Editor nach REQ-VUE-TARIFF-EDITOR.
+    Ihre Verwendung für
     feste SOC-Ladung und REQ-BRIDGE-CHARGE bestimmt das Backend nach
     REQ-TIME-OF-USE-CHARGE-SOURCE anhand der Konfiguration.
     Ein Tarifwechsel, Mount oder erneutes Rendern löst im Browser keinen
@@ -2999,7 +3003,7 @@ requirement_vue_charging:
        Mitternacht, Live-Fenster-/Tarifwechsel, Grundpreis, leere Fensterliste
        und Nichtverfügbarkeit sind ohne Serviceaufruf abgesichert."
     - "tests/test_config_flow.py und tests/test_economics_dashboard_e2e.py
-       prüfen ein, zwei und acht Fenster vom Optionsflow über gespeicherte
+       prüfen ein, zwei und acht Fenster vom Dashboard-Editor über gespeicherte
        Options und Tarifmodell bis zu Sensorattributen und authentifizierten
        Dashboard-States, einschließlich Mitternacht und angrenzender Grenzen."
     - "Zeitvariabler Tarif zeigt auf Deutsch und Englisch bestätigte Werte
@@ -3058,6 +3062,81 @@ requirement_vue_charging:
        sowie fehlende und nicht verfügbare Entitäten sind getestet."
     - "Bedienung verwendet echte Entity-IDs, gemeinsame Fehlerbehandlung
        und erst durch HA bestätigte Zustände; Mount und Rendern schreiben nichts."
+
+# ==============================================================================
+# ANFORDERUNG: TARIFEDITOR IM DASHBOARD
+# ==============================================================================
+requirement_vue_tariff_editor:
+  id: REQ-VUE-TARIFF-EDITOR
+  title: "Tarifpreisfenster direkt im Dashboard bearbeiten und Preise in Cent anzeigen"
+  status: done
+  description: >
+    Die gemeinsame Tarifpreisfenster-Karte in Zeitvariabler Tarif und Amortisation
+    zeigt zunächst eine kompakte Übersicht. Bearbeiten klappt Standardpreis,
+    Einspeisevergütung und die vorhandenen täglichen Zeitfenster mit Von/Bis/Preis
+    direkt in der Karte auf. Zeitfenster hinzufügen ergänzt bis zu acht Fenster;
+    einzelne Fenster lassen sich entfernen. Standardpreis bedeutet den variablen
+    Arbeitspreis außerhalb der Fenster, keine monatliche Grundgebühr. Erklärungen
+    bleiben bei Bedarf zugänglich, ohne dauerhaft die Karte aufzublähen.
+
+    Der Editor arbeitet mit einem lokalen Entwurf. Speichern übernimmt das gesamte
+    gültige Profil atomar und klappt den Editor nach Bestätigung zu; Abbrechen
+    verwirft den Entwurf. Speichern ist eine bewusste Tarifänderung und kann sofort
+    die erlaubten Ladezeiten ändern. Mount, Rendern und reine Eingaben schreiben
+    nichts. Fehler, fehlende Rechte, Verbindungsverlust und konkurrierende
+    Tarifänderungen werden angezeigt; gescheiterte Speicherungen behalten den
+    Entwurf. Eine alte Revision darf einen inzwischen geänderten Tarif nicht
+    überschreiben. Fehlende Pflichtpreise lassen sich im Dashboard ergänzen.
+
+    Die WebSocket-Befehle sax_power/dashboard/tariff/get und
+    sax_power/dashboard/tariff/save beziehen sich auf genau einen SAX-Config-Entry.
+    Lesen prüft Benutzer- und Leserechte; ein aktiver Administrator kann auch einen
+    unvollständigen Tarif reparieren. Speichern verlangt einen aktiven Administrator,
+    TIME_OF_USE als aktuelle Tarifart und die aktuelle Revision. Der Server prüft
+    endliche Preise, Wertebereiche, höchstens acht vollständige Fenster, verschiedene
+    Start-/Endzeiten und Überschneidungen auf dem zyklischen Tag. Fenster über
+    Mitternacht und angrenzende Grenzen sind zulässig. Die bestehenden Options und
+    async_update_options bilden weiterhin die einzige persistierte Tarifquelle
+    und übernehmen Änderungen ohne Config-Entry-Reload in den Coordinator.
+
+    TOU-Standardpreis, Einspeisevergütung und Zeitfenster entfallen vollständig im
+    Options Flow. Tarifauswahl und Preiseingaben für Festpreis und dynamische
+    Einspeisevergütung bleiben dort. Andere Optionsänderungen bei gleicher Tarifart
+    bewahren den aktuell gespeicherten TOU-Tarif. Die erste Auswahl von TIME_OF_USE
+    darf ein unvollständiges Profil anlegen, bis es im Dashboard vervollständigt ist.
+    Es werden weder Nullpreise noch Ersatzladezeiten erfunden.
+
+    Sämtliche sichtbaren Tarifpreise, die Einspeisevergütung und die Preisgrenzen
+    verwenden ct/kWh. TOU-Eingaben haben eine Schrittweite von 0,01 ct/kWh;
+    NumberEntity-Grenzen und Schrittweiten werden entsprechend ihrer bisherigen
+    Euro-Werte umgerechnet. Die API benennt Centwerte ausdrücklich mit *_ct_kwh.
+    Interne Tarifberechnung, Options, Steuerungs-Store und bestehende Attribute
+    *_eur_kwh bleiben EUR/kWh. So entspricht 32,00 ct/kWh weiterhin intern 0,32
+    EUR/kWh. Geldbilanzen und Investitionskosten bleiben EUR. Die explizite Auswahl
+    der Einheit eines externen Preissensors beschreibt weiterhin dessen tatsächliche
+    Einheit (EUR/kWh, ct/kWh, EUR/MWh oder ct/MWh).
+
+    Alte Restore-Werte der Preis-NumberEntities werden anhand ihrer gespeicherten
+    Einheit übernommen. Vorhandene Preisstatistiken der drei umgestellten Sensoren
+    werden einmalig in der Recorder-Warteschlange mit Faktor 100 skaliert und
+    zusammen mit ihren Metadaten atomar auf ct/kWh umgestellt. Andere Statistiken
+    und rohe historische Zustände bleiben unberührt. Der gemischte Übergangsabschnitt
+    kann von HA bei der Statistikbildung übersprungen werden; folgende Abschnitte
+    und die konvertierte Historie verwenden dieselbe Einheit.
+  acceptance_criteria:
+    - "Frontend-Tests prüfen Speichern, Abbrechen, Hinzufügen/Entfernen, Null und
+       negative Preise, Dezimalkomma, fehlende Felder, Mitternacht, Überlappungen,
+       acht Fenster, Leserechte, Verbindungsverlust und Speicherfehler."
+    - "Backend-Tests prüfen aktive Benutzer, Administratorrechte, Entry-Zuordnung,
+       Tariftyp, Revision, endliche Preise, Wertebereiche, Fensterregeln und atomare
+       Speicherung ohne Änderung fremder Options."
+    - "Config-Flow-Tests prüfen das Entfallen der TOU-Folgeseite, Erhalt bestehender
+       Profile und Cent/Euro-Roundtrips der verbleibenden Preisfelder."
+    - "Number-/Sensor-Tests prüfen Wert und Einheit gemeinsam sowie die Migration
+       alter Euro- und neuer Cent-Restore-Werte ohne Faktor-100-Fehler."
+    - "Recorder-Tests prüfen Kurz-/Langzeitstatistik, Idempotenz, unbeteiligte
+       Sensoren und nachfolgende neue Cent-Statistiken."
+    - "Browserprüfungen decken schmale Darstellung, Tastaturbedienung und DE/EN ab."
 
 # ==============================================================================
 # ANFORDERUNG: VUE-PREISOPTIMIERTES LADEN
@@ -3134,21 +3213,24 @@ requirement_vue_savings:
     der Vorlaufbetrag aus prior_result_eur von sensor.economics_roi,
     sensor.economics_net_savings und economics_started_at von
     sensor.economics_status. Fehlende optionale Entitäten erzeugen keine
-    leeren Zeilen. Geldbeträge erhalten zwei, Tarifpreise und Einspeisevergütung
-    vier Nachkommastellen; die interne Genauigkeit bleibt unverändert.
+    leeren Zeilen. Geldbeträge erhalten zwei Nachkommastellen in EUR;
+    Tarifpreise und Einspeisevergütung zwei Nachkommastellen in ct/kWh.
+    Die interne Genauigkeit bleibt unverändert.
 
     Die mit Zeitvariabler Tarif gemeinsam verwendete Tarifpreisfenster-Karte
-    (EN: Tariff price windows) ist ausschließlich sichtbar, wenn die Attribute von
-    sensor.economics_current_import_price tariff_type=time_of_use melden.
+    (EN: Tariff price windows) ist sichtbar, wenn die Attribute von
+    sensor.economics_current_import_price tariff_type=time_of_use melden oder
+    bei fehlenden Sensorattributen die gesicherte API diesen Tarif bestätigt.
     windows, active_window, base_price_eur_kwh, feed_in_price_eur_kwh,
-    next_price_change_at und unavailable_reason sind die einzige
-    Datenquelle. Alle bis zu acht konfigurierten Fenster bleiben in der
+    next_price_change_at und unavailable_reason sind die
+    Datenquelle für die laufende Tarifbewertung. Alle bis zu acht konfigurierten Fenster bleiben in der
     vom Sensor gelieferten Reihenfolge sichtbar, auch über Mitternacht und bei
     angrenzenden Grenzen. Tarifwechsel werden live übernommen; ein fehlender
     Preis wird weder zu Null noch zum gültigen aktiven Grundpreis umgedeutet.
     Eine leere Fensterliste zeigt weiterhin die verfügbaren übrigen Tarifdaten.
-    Die gemeinsame Komponente führt keine Tarifberechnung und keinen
-    Serviceaufruf aus; die HA-Options bleiben der Ort zur Preiseingabe.
+    Die gemeinsame Komponente führt keine Tarifberechnung aus.
+    Der ausklappbare Editor nach REQ-VUE-TARIFF-EDITOR schreibt das vollständige
+    Profil über eine gesicherte WebSocket-API in die HA-Options.
 
     sax_power/dashboard/statistics ist eine authentifizierte, nur lesende
     HA-WebSocket-Abfrage für die registrierte economics_net_savings-Entity
@@ -4218,20 +4300,17 @@ requirement_economics_tariffs:
     falscher Sensorwert (typisch ein als EUR/kWh gelesener ct/kWh-Wert) und
     wird mit PRICE_OUT_OF_RANGE abgelehnt statt akzeptiert.
 
-    Die Konfiguration liegt vollständig im Options Flow
-    (config_flow.SaxPowerOptionsFlow). Die Tarifart wird auf der ersten
-    Seite gewählt; danach verzweigt der Flow in genau einen
-    tarifspezifischen Schritt (economics_fixed, economics_time_of_use,
-    economics_dynamic) oder speichert bei "disabled" sofort - ein
-    deaktivierter Tarif fragt keine Einspeisevergütung ab. Beim Speichern
-    übernimmt der Flow ausschließlich die zur gewählten Tarifart passenden
-    Schlüssel und entfernt alle übrigen aus ECONOMICS_OPTION_KEYS, damit ein
-    alter Wert nach einem späteren Rückwechsel nicht unbemerkt wieder gilt.
-    Die acht Zeitfenstergruppen (economics_tou_window_1 bis _8) werden je
-    als eigene Section dargestellt und liegen deshalb als verschachtelte
-    Mappings mit den Feldern start/end/price_eur_kwh in entry.options.
-    Die TIME_OF_USE-Folgeseite erläutert die gemeinsame Ladezeitenquelle
-    und bestehende Ladezeiten nach REQ-TIME-OF-USE-CHARGE-SOURCE.
+    Die Tarifart wird auf der ersten Seite des Options Flow gewählt.
+    Festpreis und dynamischer Tarif verwenden die Folgeschritte economics_fixed
+    und economics_dynamic mit Preiseingaben in ct/kWh. Disabled und
+    time_of_use speichern direkt. Der tageszeitabhängige Tarif wird ausschließlich
+    im Dashboard eingegeben (REQ-VUE-TARIFF-EDITOR). Bleibt diese Tarifart beim
+    Speichern anderer Options gleich, wird das aktuell gespeicherte Profil
+    bewahrt. Eine erstmalige Auswahl darf ohne erfundene Pflichtpreise gespeichert
+    werden; der Tarif bleibt bis zur Vervollständigung ungültig und erlaubt keine
+    Tarifladung. Ein Tarifwechsel entfernt unpassende ECONOMICS_OPTION_KEYS.
+    Das Speicherformat bleibt unverändert in EUR/kWh, einschließlich der acht
+    optionalen Mappings economics_tou_window_1 bis _8 mit start/end/price_eur_kwh.
 
     Die Preisfelder der tarifspezifischen Schritte sind im Schema bewusst
     vol.Optional und werden erst im Schritt selbst geprüft
@@ -4250,10 +4329,9 @@ requirement_economics_tariffs:
     occurred", und die betroffene Seite ist überhaupt nicht erreichbar
     (Anwenderbericht zu #135). Die Preisfelder sind deshalb nackte
     NumberSelector - die Prüfung des Wertebereichs übernehmen sie selbst -,
-    und die Rundung auf die Schrittweite 0,0001 erfolgt im Schritt
-    unmittelbar vor dem Speichern (config_flow._round_price_fields): für
-    die Preise auf oberster Ebene ebenso wie für die Preise in den acht
-    Zeitfenstergruppen.
+    und die Umrechnung aus ct/kWh mit anschließender Rundung auf 0,0001
+    EUR/kWh erfolgt unmittelbar vor dem Speichern. Die Dashboard-API validiert
+    das vollständige TOU-Profil einschließlich aller Fensterpreise separat.
 
     Die tarifspezifischen Schemata lassen zusätzlich fremde Schlüssel zu
     (vol.ALLOW_EXTRA) und behandeln eine erneut abgeschickte erste Seite
@@ -4377,8 +4455,9 @@ requirement_economics_tariffs:
     (diagnostics.py, Schlüssel "tariff").
 
     Nicht Bestandteil dieser Anforderung: Energieherkunft,
-    Kostenakkumulation, ROI-Sensoren und Dashboardkarten. Das Tarifmodell
-    greift in keine Ladeentscheidung ein und löst keinen Modbus-Write aus.
+    Kostenakkumulation und ROI-Sensoren. Die reinen Tariftypen lösen keinen
+    Modbus-Write aus. Ihre Verwendung für erlaubte Ladezeiten beschreibt
+    REQ-TIME-OF-USE-CHARGE-SOURCE, die Eingabe REQ-VUE-TARIFF-EDITOR.
   acceptance_criteria:
     - "Ohne Wirtschaftlichkeitskonfiguration ('disabled') verändern sich
        weder Verhalten noch vorhandene Options; es wird kein
@@ -4409,8 +4488,8 @@ requirement_economics_tariffs:
        Feld, nie als unübersetzte Schema-Rohmeldung; ohne Preis entsteht
        kein Eintrag."
     - "Eine erneut abgeschickte erste Options-Seite (Doppelklick bzw.
-       Enter plus Klick) führt bei jeder Tarifart zurück auf dieselbe
-       Folgeseite - ohne Fehlermeldung und ohne fremde Schlüssel im
+       Enter plus Klick) führt bei Festpreis und dynamischem Tarif zurück auf
+       dieselbe Folgeseite - ohne Fehlermeldung und ohne fremde Schlüssel im
        gespeicherten Eintrag (tests/test_config_flow.py)."
     - "Eine Optionsänderung und ein Sensor-State-Change wirken ohne Reload;
        Listener werden beim Optionswechsel und beim Entladen entfernt und
@@ -4884,7 +4963,7 @@ requirement_economics_accounting:
     economics_net_savings (EUR, device_class monetary, state_class total
     mit economics_started_at als last_reset: signiertes aktuelles
     Nettoergebnis mit eigener Recorder-Historie), sowie
-    economics_current_import_price/economics_feed_in_price (EUR/kWh,
+    economics_current_import_price/economics_feed_in_price (ct/kWh,
     state_class measurement).
 
     Alle fünf kumulativen monetären TOTAL-Sensoren (drei Kosten-/Nutzen-

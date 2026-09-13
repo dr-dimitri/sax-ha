@@ -18,8 +18,9 @@ const bridgeEnabled = computed(() => {
 });
 const timeOfUseTariff = computed(
   () =>
-    dashboard?.entity("sensor", "economics_current_import_price")?.state
-      ?.attributes.tariff_type === "time_of_use",
+    (dashboard?.entity("sensor", "economics_current_import_price")?.state
+      ?.attributes.tariff_type ?? dashboard?.tariff.value?.tariff_type) ===
+    "time_of_use",
 );
 const baseCards = [
   {

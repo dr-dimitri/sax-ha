@@ -593,16 +593,16 @@ ATTR_FORCE = "force"
 # Selbstdiagnose / erweiterte Repairs (siehe anforderung.yaml,
 # REQ-SELF-DIAGNOSIS-REPAIRS)
 # ==========================================================================
-# Weitere reparierbare Issues über den Ladekonflikt
+# Weitere informative Issues über den Ladekonflikt
 # (ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT oben) und die
 # sofortige SunSpec-Nichterreichbarkeits-Warnung (ISSUE_EXTENDED_MODE_
 # UNAVAILABLE) hinaus: erkennen still fehlschlagende Konfigurationen, die
 # sonst nur an unerwartet ausbleibendem Ladeverhalten auffallen würden.
-# Alle fünf sind rein informativ (is_fixable=False) und heilen sich selbst
-# (SaxPowerCoordinator._async_check_self_diagnostics, hinter einer
-# Zustandsflanke je Prüfung, damit weder Log noch Issue Registry bei jedem
-# Poll-Zyklus neu befüllt werden), sobald ihre jeweilige Ursache behoben
-# ist - analog zum Muster von ISSUE_EXTENDED_MODE_UNAVAILABLE.
+# Die sechs Basisregeln sind rein informativ (is_fixable=False).
+# SelfDiagnostics wertet zusätzlich REQ-ECONOMICS-OBSERVABILITY aus; Fenster
+# und Monate werden je Automatik geprüft (insgesamt bis zu neun Issue-IDs).
+# Zustandsflanken vermeiden wiederholte Meldungen; behobene Ursachen löschen
+# die zugehörigen Hinweise (REQ-SELF-DIAGNOSIS-REPAIRS).
 ISSUE_PRICE_SENSOR_MISSING = "price_sensor_missing"
 ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE = "sunspec_persistently_unavailable"
 ISSUE_MAX_SOC_BELOW_MIN_SOC = "max_soc_below_min_soc"
@@ -611,7 +611,7 @@ ISSUE_NO_ACTIVE_MONTHS = "no_active_months"
 ISSUE_PRICE_NEUTRAL_BELOW_LIMIT = "price_neutral_below_limit"
 
 # Zwei weitere, ebenfalls rein informative (is_fixable=False) Issues rund um
-# REQ-CONTROL-CONFIG-BOOTSTRAP - anders als die fünf oben aber nicht aus
+# REQ-CONTROL-CONFIG-BOOTSTRAP - anders als die Basisregeln oben aber nicht aus
 # einer periodischen Prüfung, sondern direkt aus dem Bootstrap heraus
 # gesetzt/gelöscht (siehe SaxPowerCoordinator.async_load_control_state /
 # .async_finish_bootstrap / .clear_control_field_unresolved):

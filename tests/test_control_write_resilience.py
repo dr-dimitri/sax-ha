@@ -78,6 +78,7 @@ async def test_poll_write_failure_publishes_measurements_and_retries(
         return success
 
     coordinator.client.write_register.side_effect = write
+    coordinator._timed_charge_enabled = True
     coordinator._timed_charge_min_soc = 90
     caplog.set_level(logging.WARNING)
 

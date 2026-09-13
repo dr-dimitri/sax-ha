@@ -1293,8 +1293,11 @@ requirement_grid_serving_charge:
     ohne bekannten Messwert keine aktive Entscheidung.
 
     Optionale PV-Prognose-Freigabe (Issues #78/#81): number.py stellt die
-    über RestoreEntity persistierte Einstellung "Mindest PV-Prognose" in
-    kWh bereit (0-999 kWh, Schritt 1 kWh, Default 0). Der Coordinator rundet
+    im versionierten Konfigurations-Store persistierte Einstellung
+    "Mindest PV-Prognose" in kWh bereit (0-999 kWh, Schritt 1 kWh, Default 0;
+    REQ-CONTROL-CONFIG-BOOTSTRAP). RestoreEntity dient nur als einmaliger
+    Migrationspfad für Einträge ohne Store, solange
+    control_config_migration_pending gilt. Der Coordinator rundet
     jeden Schreibwert auf volle kWh; bei genau 0,5 wird kaufmännisch
     aufgerundet (8,5 -> 9), anschließend wird auf 0-999 begrenzt. Dadurch
     werden auch aus älteren Versionen restaurierte Dezimalwerte migriert.
@@ -2184,10 +2187,11 @@ requirement_dynamic_price_charge:
     Einführung des Neutralpreises, statt einer stillen Annahme.
 
     Reparaturhinweis ISSUE_PRICE_NEUTRAL_BELOW_LIMIT
-    (coordinator._check_price_neutral_below_limit, aufgerufen aus
-    _async_check_self_diagnostics wie die fünf Prüfungen aus
-    REQ-SELF-DIAGNOSIS-REPAIRS): liegt der Neutralpreis nicht über der
-    Preisgrenze (<=), legt der Coordinator ein rein informatives
+    (infrastructure/self_diagnostics.SelfDiagnostics._check_price_neutral_below_limit,
+    eine der sechs Basisregeln aus REQ-SELF-DIAGNOSIS-REPAIRS): Der
+    Coordinator übergibt in _async_check_self_diagnostics einen
+    DiagnosticSnapshot an SelfDiagnostics.check. Liegt der Neutralpreis
+    nicht über der Preisgrenze (<=), legt SelfDiagnostics ein rein informatives
     (is_fixable=False), sich selbst heilendes Issue an - statische
     Einstellungskombination wie ISSUE_MAX_SOC_BELOW_MIN_SOC, kein
     Zustandsflanken-Timer nötig, schlägt sofort an.
@@ -3323,13 +3327,13 @@ requirement_setup_rollback:
 # ==============================================================================
 requirement_self_diagnosis_repairs:
   id: REQ-SELF-DIAGNOSIS-REPAIRS
-  title: "Sechs zusätzliche, selbstheilende Repair-Issues für still fehlschlagende Konfigurationen"
+  title: "Sechs selbstheilende Diagnose-Basisregeln für still fehlschlagende Konfigurationen"
   status: done
   description: >
     repairs.py behandelt den Ladekonflikt zwischen Netzladung und
     preisoptimiertem Laden (ChargeConflictRepairFlow,
-    ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT). Sechs weitere,
-    rein informative (is_fixable=False) Issues über
+    ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT). Sechs weitere
+    Basisregeln für rein informative (is_fixable=False) Hinweise über
     SaxPowerCoordinator._async_check_self_diagnostics erkennen zusätzlich
     Konfigurationen, die still fehlschlagen - eine Automatik, die
     eingeschaltet ist, aber nie greift, fällt sonst nur am unerwartet
@@ -3340,6 +3344,13 @@ requirement_self_diagnosis_repairs:
     heilen sich stattdessen automatisch (ir.async_delete_issue), sobald ihre
     jeweilige Ursache behoben ist, analog zum bestehenden Muster von
     ISSUE_EXTENDED_MODE_UNAVAILABLE (_async_read_high_block).
+
+    SelfDiagnostics.check wertet insgesamt sieben Regeln aus: die sechs
+    hier beschriebenen Basisregeln sowie _check_economics_price_unavailable
+    aus REQ-ECONOMICS-OBSERVABILITY. Zeitfenster und Monatsauswahl erzeugen
+    jeweils eine eigene Issue-ID pro Automatik; damit entstehen bis zu
+    acht Hinweise aus den Basisregeln und ein weiterer Wirtschaftshinweis,
+    insgesamt bis zu neun Issues pro Config Entry.
 
     _async_check_self_diagnostics wird am Ende jedes _async_update_data-
     Zyklus aufgerufen (nach _publish_charge_state) und läuft damit bei jedem
@@ -3384,13 +3395,17 @@ requirement_self_diagnosis_repairs:
        derselben Zustandsflanke gesetzt/zurückgesetzt wie das bestehende
        Issue. translation_placeholders: slave_id.
     3. ISSUE_MAX_SOC_BELOW_MIN_SOC ("Netzladen Max. SOC liegt unter
-       Min. SOC"): timed_charge_max_soc < timed_charge_min_soc - das
-       Netzladeziel liegt unterhalb der Startschwelle. Die Netzladung endet
+       Min. SOC"): Nur bei eingeschalteter Netzladung
+       (timed_charge_enabled) und timed_charge_max_soc < timed_charge_min_soc
+       liegt das Netzladeziel unterhalb der Startschwelle. Die Netzladung endet
        damit unterhalb der Startschwelle, ohne Hystereseabstand zwischen
        Start und Stopp. Der Hinweis empfiehlt, Netzladen Max. SOC zu erhöhen
        oder Netzladung Min. SOC zu senken.
        Kein Zustandsflanken-Timer nötig (statische Einstellungskombination,
-       kein transienter Messwert) - schlägt sofort an.
+       kein transienter Messwert) - schlägt sofort an. Abschalten der
+       Netzladung entfernt auch einen vor dem Neuladen angelegten Hinweis,
+       ohne die SOC-Grenzen zu ändern. Erneutes Einschalten mit weiterhin
+       widersprüchlichen Grenzen erzeugt den Hinweis erneut.
        translation_placeholders: max_soc, min_soc.
     4. ISSUE_PRICE_NEUTRAL_BELOW_LIMIT ("Neutralpreis liegt nicht über der
        Preisgrenze"): Sind beide Preise gesetzt und ist der Neutralpreis
@@ -3432,8 +3447,13 @@ requirement_self_diagnosis_repairs:
        Reload zunächst noch, bleibt sein Issue sichtbar und verschwindet
        erst bei behobener Ursache."
     - "tests/test_repairs.py deckt zusätzlich ab, dass eine unauffällige
-       Standardkonfiguration (alles deaktiviert bzw. in Ordnung) keines der
-       sechs Issues erzeugt."
+       Standardkonfiguration (alles deaktiviert bzw. in Ordnung) keine der
+       Basisregeln auslöst."
+    - "Eine ausgeschaltete Netzladung erzeugt auch mit widersprüchlichen
+       SOC-Grenzen keinen Hinweis. Abschalten, Neuladen und erneutes
+       Einschalten sind in tests/test_repairs.py abgesichert; auch ein
+       abgesenktes globales Max. SOC erzeugt bei ausgeschalteter Netzladung
+       keine Warnung."
     - "Fehlende Startzeit, Endzeit oder beide Grenzen erzeugen bei beiden
        aktivierten Automatiken einen beständigen Reparaturhinweis, auch nach
        einem Reload. Vollständige Zeitfenster oder Abschalten der Automatik

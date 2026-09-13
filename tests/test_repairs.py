@@ -299,6 +299,7 @@ async def test_max_soc_below_min_soc_issue_triggers_immediately(hass) -> None:
     Einstellungskombination, kein transienter Zustand - kein
     Karenzzeit-Timer nötig."""
     coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = True
     coordinator._max_soc = 50
     coordinator._timed_charge_min_soc = 60
 
@@ -311,6 +312,9 @@ async def test_max_soc_below_min_soc_issue_triggers_immediately(hass) -> None:
 
 async def test_max_soc_below_min_soc_issue_not_recreated_every_cycle(hass) -> None:
     coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = True
+    coordinator._timed_charge_start = dt_time(1)
+    coordinator._timed_charge_end = dt_time(5)
     coordinator._max_soc = 50
     coordinator._timed_charge_min_soc = 60
 
@@ -325,6 +329,7 @@ async def test_max_soc_below_min_soc_issue_not_recreated_every_cycle(hass) -> No
 
 async def test_max_soc_below_min_soc_issue_clears_once_raised(hass) -> None:
     coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = True
     coordinator._max_soc = 50
     coordinator._timed_charge_min_soc = 60
     coordinator._async_check_self_diagnostics()
@@ -339,6 +344,7 @@ async def test_max_soc_below_min_soc_issue_clears_once_raised(hass) -> None:
 async def test_timed_max_soc_below_min_soc_uses_own_target(hass) -> None:
     """REQ-TIMED-SOC-CHARGE: Ein hohes globales Limit verdeckt keinen Konflikt."""
     coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = True
     coordinator._max_soc = 90
     coordinator._timed_charge_max_soc = 30
     coordinator._timed_charge_min_soc = 40
@@ -353,6 +359,45 @@ async def test_timed_max_soc_below_min_soc_uses_own_target(hass) -> None:
     coordinator._async_check_self_diagnostics()
 
     assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is None
+
+
+@pytest.mark.parametrize("global_max_soc", [15, 90])
+async def test_disabled_timed_charge_has_no_soc_conflict_issue(
+    hass, global_max_soc: int
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Ungenutzte SOC-Grenzen warnen nicht (#215)."""
+    coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = False
+    coordinator._max_soc = global_max_soc
+    coordinator._timed_charge_max_soc = 50
+    coordinator._timed_charge_min_soc = 60
+
+    coordinator._async_check_self_diagnostics()
+
+    assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is None
+
+
+@pytest.mark.parametrize("reload_diagnostics", [False, True])
+async def test_soc_conflict_issue_follows_timed_charge_enabled(
+    hass, reload_diagnostics: bool
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Abschalten heilt auch bestehende Issues."""
+    coordinator = _make_coordinator(hass)
+    coordinator._timed_charge_enabled = True
+    coordinator._timed_charge_max_soc = 50
+    coordinator._timed_charge_min_soc = 60
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is not None
+
+    if reload_diagnostics:
+        coordinator._self_diagnostics = SelfDiagnostics(hass, "test_entry_id")
+    coordinator._timed_charge_enabled = False
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is None
+
+    coordinator._timed_charge_enabled = True
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_MAX_SOC_BELOW_MIN_SOC) is not None
 
 
 # ===========================================================================

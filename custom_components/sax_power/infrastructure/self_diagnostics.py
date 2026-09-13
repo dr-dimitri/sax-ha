@@ -168,7 +168,8 @@ class SelfDiagnostics:
 
     def _check_max_soc_below_min_soc(self, snapshot: DiagnosticSnapshot) -> None:
         problem = (
-            snapshot.timed_max_soc is not None
+            snapshot.timed_enabled
+            and snapshot.timed_max_soc is not None
             and snapshot.timed_min_soc is not None
             and snapshot.timed_max_soc < snapshot.timed_min_soc
         )

@@ -469,7 +469,16 @@ async def websocket_configure_tariff(
             if "profile" in msg
             else None
         )
-        options = options_for_tariff(entry.options, msg["tariff_type"], profile)
+        if (
+            enabled is not None
+            and profile is None
+            and msg["tariff_type"] == entry.options.get(CONF_ECONOMICS_TARIFF_TYPE)
+        ):
+            # REQ-VUE-ELECTRICITY-TARIFF: Der Hauptschalter verändert keine
+            # Tarifquelle und braucht weder Profilmigration noch Geräte-Lock.
+            options = expected_options
+        else:
+            options = options_for_tariff(entry.options, msg["tariff_type"], profile)
         if error := bridge_configuration_error(options):
             connection.send_error(msg["id"], error, "Keep the required PV start source")
             return

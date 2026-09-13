@@ -3993,10 +3993,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         previous_tariff_type = self.tariff_provider.config.tariff_type
         previous_enabled = self._timed_charge_enabled, self._price_charge_enabled
-        ignored = {CONF_DASHBOARD_TARIFF_PROFILES, CONF_VUE_DASHBOARD_ENABLED}
-        source_changed = {
-            k: v for k, v in self.options.items() if k not in ignored
-        } != {k: v for k, v in options.items() if k not in ignored}
+        source_changed = self._tariff_sources_changed(options)
         self.options = dict(options)
         self._reconcile_tariff_automation(
             previous_tariff_type=previous_tariff_type, enabled=enabled
@@ -4024,6 +4021,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             self.price_planner.evaluate()
 
+    def _tariff_sources_changed(self, options: dict[str, Any]) -> bool:
+        ignored = {CONF_DASHBOARD_TARIFF_PROFILES, CONF_VUE_DASHBOARD_ENABLED}
+        return {k: v for k, v in self.options.items() if k not in ignored} != {
+            k: v for k, v in options.items() if k not in ignored
+        }
+
     async def async_apply_dashboard_tariff(
         self,
         options: dict[str, Any],
@@ -4032,43 +4035,63 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         expected_options: dict[str, Any],
     ) -> None:
         """Commit tariff and automation ownership together, before publishing either."""
-        async with self._charge_control_lock:
-            self._raise_if_shutdown()
-            if self._control_bootstrap_pending:
-                raise ServiceValidationError("Ladeeinstellungen werden noch geladen")
-            entry = self.hass.config_entries.async_get_entry(self.entry_id)
-            if entry is None or dict(entry.options) != expected_options:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="dashboard_tariff_conflict",
-                )
-            if error := bridge_configuration_error(options):
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN, translation_key=error
-                )
-            target = tariff_config_from_options(options)
-            controls = tariff_automation_controls(
-                target.tariff_type,
-                self._timed_charge_enabled,
-                self._price_charge_enabled,
-                previous_tariff_type=self.tariff_provider.config.tariff_type,
-                enabled=enabled,
+        if not self._tariff_sources_changed(options):
+            # REQ-VUE-ELECTRICITY-TARIFF: Ohne geänderte Gerätequelle dürfen
+            # Schalter, Profilmigration und erneutes Speichern sofort antworten.
+            self._apply_dashboard_tariff_configuration(
+                options, enabled=enabled, expected_options=expected_options
             )
-            # A native switch can change while this request waits for the lock;
-            # validate the actual inherited state, including legacy tariffs.
-            if any(controls) and (
-                validate_tariff(target) is not None
-                or target.tariff_type is TariffType.DYNAMIC
-                and not options.get(CONF_PRICE_SENSOR)
-            ):
-                raise ServiceValidationError(
-                    "Bitte den Stromtarif vor dem Aktivieren vollständig einrichten."
-                )
-            self._apply_tariff_options(options, enabled=enabled)
-            # The options listener sees this already-applied snapshot and does not
-            # restart the provider or create a second control decision.
+            return
+        async with self._charge_control_lock:
+            self._apply_dashboard_tariff_configuration(
+                options, enabled=enabled, expected_options=expected_options
+            )
+
+    def _apply_dashboard_tariff_configuration(
+        self,
+        options: dict[str, Any],
+        *,
+        enabled: bool | None,
+        expected_options: dict[str, Any],
+    ) -> None:
+        """Validate and accept one snapshot without yielding between its mutations."""
+        self._raise_if_shutdown()
+        if self._control_bootstrap_pending:
+            raise ServiceValidationError("Ladeeinstellungen werden noch geladen")
+        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        if entry is None or dict(entry.options) != expected_options:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="dashboard_tariff_conflict",
+            )
+        if error := bridge_configuration_error(options):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key=error
+            )
+        target = tariff_config_from_options(options)
+        controls = tariff_automation_controls(
+            target.tariff_type,
+            self._timed_charge_enabled,
+            self._price_charge_enabled,
+            previous_tariff_type=self.tariff_provider.config.tariff_type,
+            enabled=enabled,
+        )
+        # A native switch can change while a profile update waits for the lock;
+        # validate the actual inherited state, including legacy tariffs.
+        if any(controls) and (
+            validate_tariff(target) is not None
+            or target.tariff_type is TariffType.DYNAMIC
+            and not options.get(CONF_PRICE_SENSOR)
+        ):
+            raise ServiceValidationError(
+                "Bitte den Stromtarif vor dem Aktivieren vollständig einrichten."
+            )
+        self._apply_tariff_options(options, enabled=enabled)
+        if dict(entry.options) != options:
+            # The listener sees this already-applied snapshot and cannot create
+            # a second control decision. Toggles do not notify options listeners.
             self.hass.config_entries.async_update_entry(entry, options=options)
-            self._async_schedule_month_control_change()
+        self._async_schedule_month_control_change()
 
     def reconcile_charge_time_source(self) -> None:
         """Apply legacy overlap rules before an options change can resume charging."""
@@ -6049,6 +6072,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_apply_grid_charge_change(
             defer_device_update=defer_device_update
         )
+
+    async def async_refresh_price_plan(self) -> None:
+        """Bestätige die angeforderte Planung unabhängig vom Geräteabgleich."""
+        self._raise_if_shutdown()
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change(defer_device_update=True)
 
     async def async_apply_price_plan(self, *, background: bool = True) -> None:
         """Vom Planner nach jeder periodischen Neuberechnung aufgerufen -

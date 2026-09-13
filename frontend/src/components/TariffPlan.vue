@@ -358,6 +358,7 @@ const clock = (value: string) =>
 const editing = ref(false);
 watch(editing, (value) => emit("editing", value));
 const pending = ref(false);
+const pendingAction = ref<"loading" | "saving">("loading");
 const editor = ref<HTMLElement>();
 const editButton = ref<HTMLButtonElement>();
 const profile = ref<TariffProfile | null>(null);
@@ -406,6 +407,7 @@ function inputPrice(value: number | null) {
 }
 async function openEditor() {
   if (!dashboard || pending.value) return;
+  pendingAction.value = "loading";
   pending.value = true;
   error.value = null;
   saved.value = false;
@@ -519,6 +521,7 @@ async function save() {
     error.value = "overlap";
     return;
   }
+  pendingAction.value = "saving";
   pending.value = true;
   const sourceFingerprint = tariffFingerprint(sourceAttributes.value);
   try {
@@ -586,6 +589,9 @@ watch(tariffVisible, (visible) => {
         {{ pending ? text.loading : text.edit }}
       </button>
     </header>
+    <p v-if="pending" role="status">
+      {{ text[pendingAction] }}
+    </p>
     <p v-if="compact && !editing" class="tariff-plan__compact-summary">
       {{ text.base }} {{ tariffPrice(attributes.base_price_eur_kwh) }} ·
       {{ windows.length }} {{ text.windows }} · {{ text.feed }}
@@ -702,7 +708,7 @@ watch(tariffVisible, (visible) => {
           class="tariff-plan__save"
           :disabled="pending || !connectionAvailable || conflict"
         >
-          {{ pending ? text.saving : text.save }}
+          {{ pending ? text[pendingAction] : text.save }}
         </button>
         <button type="button" :disabled="pending" @click="cancel">
           {{ text.cancel }}

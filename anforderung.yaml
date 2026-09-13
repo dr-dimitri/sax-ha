@@ -2450,9 +2450,12 @@ requirement_dynamic_price_charge:
        bleibt live verfügbar, wird aber nicht als Recorder-Attribut
        gespeichert. tests/test_price_plan_attributes.py prüft unveränderte
        Snapshots und die Budgetaktualisierung bei erneuter Planung."
-    - "Services: sax_power.refresh_price_plan (sofortige Neuberechnung) und
-       sax_power.set_price_charge_enabled (nicht-interaktives Schalten mit
-       optionalem force)."
+    - "Services: sax_power.refresh_price_plan bestätigt die sofortige Neuberechnung
+       ohne Warten auf Geräte-Control-Lock oder Modbus und übergibt die
+       Geräteauswertung an den gemeinsamen Worker. Shutdown wird vor der
+       Neuberechnung abgelehnt. sax_power.set_price_charge_enabled dient zum
+       nicht-interaktiven Schalten mit
+       optionalem force."
     - "Die Prüfung der Ladebedingungen läuft mindestens alle 60 Sekunden."
     - "__init__.async_update_options wendet eine Options-Flow-Änderung
        (Strompreis-/PV-Prognose-Sensor) live auf den laufenden Coordinator
@@ -3208,17 +3211,48 @@ requirement_vue_electricity_tariff:
     Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
     übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services; Fertig
     schließt den Bereich. Zeitvariabel erhält Ladeziel, Mindest-SOC als
-    Startschwelle, aktive Monate und Planung bis zum PV-Start. Dynamisch erhält
-    Strategie, Preisgrenze bei Absolut, Stundenbudget bei Relativ/Smart und
-    Neutralpreis. Globale SOC-Obergrenze und eigenes TOU-Ladeziel bleiben
+    Startschwelle, aktive Monate und Planung bis zum PV-Start. Dynamisch führt
+    die Bedienung mit alltagssprachlichen Ladeweisen durch die Einrichtung:
+    bedarfsgerechtes Laden (Smart), günstigste Stunden (Relativ), feste
+    Preisgrenze (Absolut) oder ausgeschaltete Preisautomatik (Off). Die Ansicht
+    erklärt die Wirkung der bestätigten Auswahl und zeigt nur die passenden
+    Eingaben: Preisgrenze bei Absolut, maximale Ladedauer bei Relativ/Smart.
+    Das Ladeziel bezeichnet den maximalen Speicherfüllstand in Prozent und
+    erklärt ausdrücklich seine Gültigkeit für alle Ladearten. Smart berücksichtigt
+    den Energiebedarf und die optionale PV-Prognose; fehlen Gerätedaten,
+    gilt weiterhin der bestehende Rückfall auf die günstigsten Stunden.
+    Die Preisgrenze wirkt bei Relativ/Smart nicht als zusätzliche Obergrenze.
+    Bestehende Strategien und Werte werden weder beim Öffnen noch durch
+    Empfehlungen eigenmächtig geändert. Eine verständliche Zusammenfassung
+    beschreibt die gespeicherte Wirkung auch außerhalb des Editors.
+
+    Der Neutralpreis bleibt in erweiterten Ladeeinstellungen erreichbar.
+    Die Erklärung macht den Netzbezug des Hauses während der Speicherpause
+    sowie das unterschiedliche Preisband bei Absolut verständlich. Auch
+    außerhalb der erweiterten Einstellungen bleibt eine vorhandene Pausegrenze
+    erkennbar. Die einfache Preisquellen-Einrichtung zeigt Strompreis-Sensor
+    und Einspeisevergütung. Preisattribut, Einheit und PV-Anteil sind weiterhin
+    erreichbar, aber nachgeordnet; vorhandene Sonderwerte bleiben erhalten.
+    Hinweise erklären Preisvorschau, optionale PV-Quelle und die Wirkung des
+    anrechenbaren PV-Anteils. Globale SOC-Obergrenze und eigenes TOU-Ladeziel bleiben
     getrennte Größen. Prognose-, Status-, Entlade- und Planungsinformationen
     bleiben zugänglich. Der Stundenzyklus ist unabhängig vom angezeigten Kalendertag.
 
     sax_power/dashboard/tariff/configure speichert Profil und aktive Tarifwahl
     mit Revisionsprüfung. Ein optionaler automation_enabled-Wert stellt den
     Hauptschalter; fehlt er, bleibt dessen Gesamtzustand beim Tarifwechsel
-    erhalten. Der Coordinator synchronisiert passende, sich ausschließende
-    Steuerflags unter dem gemeinsamen Control-Lock und verwendet weiterhin die
+    erhalten. Reines Ein-/Ausschalten des unveränderten aktiven Tarifs nimmt
+    der Coordinator nach vollständiger Validierung ohne Warten auf den
+    Control-Lock oder Modbus an. Es verändert weder Tarif-Options noch deren
+    Revision und startet keine Preis-/Prognoseanbieter neu. Der gespeicherte
+    Softwarezustand wird unmittelbar zur Persistenz vorgemerkt und bestätigt;
+    der bestehende gemeinsame Worker übernimmt die Geräteauswertung unter
+    dem Control-Lock. Tatsächliche Geräteaktivität bleibt an quittierte
+    Gerätebefehle gebunden. Erneutes Speichern ohne Änderung aktiver Tarifquellen
+    und reine Archivpflege benötigen ebenfalls keinen Geräte-Lock. Echte
+    Tarif- und Quellenänderungen synchronisieren
+    passende, sich ausschließende Steuerflags weiterhin unter dem gemeinsamen
+    Control-Lock. Alle Wege verwenden weiterhin die
     zentrale ChargePolicy und denselben SunSpec-Schreibpfad. Native Aufrufe können
     die zum aktiven dynamischen beziehungsweise zeitvariablen Tarif unpassende
     Automatik nicht aktivieren. Beim Bootstrap werden unpassende gespeicherte
@@ -3258,6 +3292,11 @@ requirement_vue_electricity_tariff:
     erhalten den lokalen Entwurf. Reines Anzeigen oder Wechseln des Diagrammtags
     verändert keine Gerätesteuerung.
 
+    Beim Hauptschalter erscheint unmittelbar nach dem Klick eine zugängliche
+    Fortschrittsmeldung. Bis zur Serverbestätigung bleibt der letzte bestätigte
+    Hakenwert sichtbar und weiteres Schalten gesperrt. Fehler erhalten den
+    bestätigten Zustand und erlauben einen ausdrücklichen neuen Versuch.
+
     Vor dem Speichern oder Wiederherstellen prüft bridge_configuration_error
     die vollständigen aktiven Ziel-Options; der Dashboard-Coordinator prüft sie
     erneut unter dem Control-Lock. Eine aktive verbrauchsbasierte Ladeplanung
@@ -3276,6 +3315,14 @@ requirement_vue_electricity_tariff:
     - "Frontend-/Browsertests prüfen die dauerhafte Navigation, Redirects, Tarifwahl,
        Hauptschalter, kontextabhängige Einstellungen, Speichern/Abbrechen sowie
        heutige/morgige Preiskurven in DE/EN, hell/dunkel und auf schmalen Displays."
+    - "Tests prüfen die verständlichen Ladeweisen, nur wirksame Einstellfelder,
+       erweiterte Einstellungen und den Erhalt vorhandener Werte ohne implizite
+       Schreibvorgänge. Verzögerte oder fehlerhafte Hauptschalterantworten zeigen
+       sofort den Fortschritt, blockieren Doppelklicks und bestätigen keinen
+       erfundenen Zustand."
+    - "Backendtests halten den Geräte-Control-Lock belegt und weisen die sofortige
+       Antwort auf reine Hauptschalteränderungen nach. Options, Revision und
+       Anbieter bleiben unverändert; nach Freigabe greift der neueste Steuerstand."
     - "Ladeentscheidung, aktuelle Preisanzeige und Amortisation verwenden denselben
        gültigen Bezugspreis; die zeitliche Buchung folgt REQ-ECONOMICS-ACCOUNTING."
     - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver

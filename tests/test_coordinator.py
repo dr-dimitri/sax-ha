@@ -7308,7 +7308,8 @@ async def test_restart_economics_accounting_needs_no_current_battery_data(
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
     coordinator.data = {}
 
-    await coordinator.async_restart_economics_accounting()
+    async with coordinator._charge_control_lock, coordinator._write_lock:
+        await asyncio.wait_for(coordinator.async_restart_economics_accounting(), 0.2)
 
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
 

@@ -7,6 +7,7 @@ import ChargePlan from "../components/ChargePlan.vue";
 import TariffPlan from "../components/TariffPlan.vue";
 import TariffPriceChart from "../components/TariffPriceChart.vue";
 import SensorPicker from "../components/SensorPicker.vue";
+import DynamicChargingSettings from "../components/DynamicChargingSettings.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { formatSavingsDate, formatSavingsNumber } from "../savings";
 import type {
@@ -32,7 +33,12 @@ const text = computed(() =>
         done: "Fertig",
         edit: "Bearbeiten",
         loading: "Wird geladen …",
+        saving: "Wird gespeichert …",
+        applying: "Tarif wird übernommen …",
+        entityPending: "Änderung wird an Home Assistant gesendet …",
         automatic: "Automatische Netzladung",
+        turningOn: "Einschalten wird übernommen …",
+        turningOff: "Ausschalten wird übernommen …",
         off: "Automatische Netzladung aus",
         on: "Automatische Netzladung ein",
         offHint: "Der aktive Tarif bleibt für Preise und Auswertung erhalten.",
@@ -48,12 +54,25 @@ const text = computed(() =>
         tomorrow: "Morgen",
         prices: "Tarif & Preise",
         feed: "Einspeisevergütung",
-        source: "Strompreis-Sensor",
+        source: "Strompreis-Sensor (erforderlich)",
         attribute: "Preisattribut (optional)",
         unit: "Einheit der Preisquelle",
         autoUnit: "Automatisch erkennen",
         pv: "PV-Prognose-Sensor (optional)",
         pvFactor: "Anrechenbarer PV-Anteil (%)",
+        advanced: "Weitere Einstellungen",
+        sourceSettings: "Preisquelle genauer einstellen",
+        attributeHint:
+          "Meist werden die Preislisten automatisch erkannt. Trage nur dann ein Attribut ein, wenn deine Preisquelle es erfordert.",
+        unitHint:
+          "Nur ändern, wenn die Einheit des Sensors fehlt oder nicht korrekt erkannt wird. Eine falsche Einheit verändert alle angezeigten und für die Ladung verwendeten Preise.",
+        pvHint:
+          "Wähle den erwarteten PV-Gesamtertrag für morgen als Energie in kWh oder Wh, keine aktuelle Leistung und keinen heutigen Restertrag. Bedarfsgerechtes Laden kann diese Energie berücksichtigen und dadurch weniger Netzstrom einkaufen. Ohne Quelle wird kein PV-Ertrag abgezogen.",
+        pvFactorHint:
+          "100 % rechnet die gesamte Prognose an. Ein kleinerer Anteil plant vorsichtiger mit PV und kann mehr Netzladung erlauben. 0 % berücksichtigt keinen PV-Ertrag.",
+        customSettings: "Gespeicherte Zusatzwerte",
+        feedHint:
+          "Vergütung für eingespeisten Strom laut deinem Vertrag. Sie wird für die Ersparnisberechnung verwendet, nicht als Ladepreisgrenze.",
         invalidPvFactor:
           "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
         charging: "Ladeverhalten",
@@ -66,9 +85,6 @@ const text = computed(() =>
         minimumHint: "Ladung beginnt nur unter diesem SOC.",
         bridge: "Verbrauchsbasiert bis zum PV-Start laden",
         months: "Aktive Monate",
-        budget:
-          "Smart nutzt das Stundenbudget als Obergrenze. Der 24-h-Planungszyklus ist unabhängig von der Tagesansicht.",
-        neutral: "Der Neutralpreis steuert den Netzbezug ohne Laden.",
         priceHint:
           "Alle Preise brutto in ct/kWh. Die Quelleneinheit wird nur zur Umrechnung verwendet.",
         readonly: "Keine Berechtigung zum Ändern des Tarifs.",
@@ -110,7 +126,12 @@ const text = computed(() =>
         done: "Done",
         edit: "Edit",
         loading: "Loading …",
+        saving: "Saving …",
+        applying: "Applying tariff …",
+        entityPending: "Sending change to Home Assistant …",
         automatic: "Automatic grid charging",
+        turningOn: "Turning on …",
+        turningOff: "Turning off …",
         off: "Automatic grid charging off",
         on: "Automatic grid charging on",
         offHint:
@@ -127,12 +148,25 @@ const text = computed(() =>
         tomorrow: "Tomorrow",
         prices: "Tariff & prices",
         feed: "Feed-in remuneration",
-        source: "Electricity price sensor",
+        source: "Electricity price sensor (required)",
         attribute: "Price attribute (optional)",
         unit: "Price source unit",
         autoUnit: "Detect automatically",
         pv: "PV forecast sensor (optional)",
         pvFactor: "PV share to account for (%)",
+        advanced: "More settings",
+        sourceSettings: "Adjust price source details",
+        attributeHint:
+          "Price lists are usually detected automatically. Only enter an attribute if your price source requires it.",
+        unitHint:
+          "Only change this if the sensor unit is missing or detected incorrectly. A wrong unit changes every price displayed and used for charging.",
+        pvHint:
+          "Choose the total solar energy forecast for tomorrow in kWh or Wh, not current power or today's remaining production. Charging what is needed can account for this energy and buy less grid energy. Without a source, no solar production is deducted.",
+        pvFactorHint:
+          "100% accounts for the entire forecast. A smaller share plans more cautiously for solar production and may allow more grid charging. 0% ignores solar production.",
+        customSettings: "Saved additional values",
+        feedHint:
+          "The remuneration for exported electricity in your contract. It is used to calculate savings, not as a charging price cap.",
         invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
         charging: "Charging settings",
         details: "Charging plan & forecast",
@@ -144,9 +178,6 @@ const text = computed(() =>
         minimumHint: "Charging starts only below this SOC.",
         bridge: "Charge based on consumption until PV starts",
         months: "Active months",
-        budget:
-          "Smart uses the hours budget as an upper limit. The 24-hour planning cycle is independent of the selected day.",
-        neutral: "The neutral price controls grid import without charging.",
         priceHint:
           "All prices include tax and use ct/kWh. The source unit is used for conversion only.",
         readonly: "You do not have permission to change the tariff.",
@@ -222,15 +253,14 @@ const bridge = computed(
   () =>
     dashboard?.entity("switch", "bridge_charge_enabled")?.state?.state === "on",
 );
-const strategy = computed(() =>
-  dashboard?.entity("select", "price_charge_strategy"),
-);
 const series = ref<TariffPriceSeries | null>(null);
 const seriesLoading = ref(false);
 const day = ref<"today" | "tomorrow">("today");
 const error = ref<string | null>(null);
 const conflict = ref(false);
 const pending = ref(false);
+const togglePending = ref<boolean | null>(null);
+const pendingOperation = ref<"loading" | "saving" | "applying" | null>(null);
 const changed = ref(false);
 const externalTariffChange = ref(false);
 const changing = ref(false);
@@ -296,11 +326,47 @@ const monthCount = computed(
       (key) => dashboard?.entity("switch", key)?.state?.state === "on",
     ).length,
 );
-const chargingSummary = computed(() =>
-  active.value === "dynamic"
-    ? `${strategy.value?.displayValue ?? text.value.unavailable} · ${text.value.global} ${dashboard?.entity("number", "max_soc")?.displayValue ?? "—"}`
-    : `${bridge.value ? text.value.pvMode : `${text.value.target} ${dashboard?.entity("number", "timed_charge_max_soc")?.displayValue ?? "—"}`} · ${monthCount.value} ${text.value.months.toLowerCase()}`,
+const chargingFeedback = computed(() => {
+  const fields: ["number" | "switch", string][] =
+    active.value === "dynamic"
+      ? [
+          ["number", "max_soc"],
+          ["number", "price_charge_max_price"],
+          ["number", "price_charge_hours"],
+          ["number", "price_charge_neutral_price"],
+        ]
+      : [
+          ["number", "max_soc"],
+          ["number", "timed_charge_max_soc"],
+          ["number", "timed_charge_min_soc"],
+          ["switch", "bridge_charge_enabled"],
+          ...months.map((key): ["switch", string] => ["switch", key]),
+        ];
+  return fields
+    .map(([domain, key]) => dashboard?.entity(domain, key))
+    .filter((entity) => entity && (entity.pending || entity.error));
+});
+const chargingSummary = computed(
+  () =>
+    `${bridge.value ? text.value.pvMode : `${text.value.target} ${dashboard?.entity("number", "timed_charge_max_soc")?.displayValue ?? "—"}`} · ${monthCount.value} ${text.value.months.toLowerCase()}`,
 );
+const additionalSettings = computed(() => {
+  const settings = profile.value?.profiles?.dynamic;
+  if (!settings) return "";
+  return [
+    settings.price_attribute
+      ? `${text.value.attribute}: ${settings.price_attribute}`
+      : "",
+    settings.price_unit !== "auto"
+      ? `${text.value.unit}: ${text.value.units[settings.price_unit]}`
+      : "",
+    settings.pv_factor !== 100
+      ? `${text.value.pvFactor}: ${settings.pv_factor}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+});
 const dynamicSummary = computed(() => {
   const source = profile.value?.profiles?.dynamic.price_sensor;
   const name = source
@@ -410,6 +476,7 @@ function beginChoice() {
 async function applyChoice() {
   if (!dashboard || !canConfigure.value || pending.value) return;
   pending.value = true;
+  pendingOperation.value = "applying";
   error.value = null;
   try {
     await dashboard.configureTariff({
@@ -424,6 +491,7 @@ async function applyChoice() {
   } catch (cause) {
     showError(cause);
   } finally {
+    pendingOperation.value = null;
     pending.value = false;
   }
 }
@@ -434,7 +502,9 @@ async function toggle(event: Event) {
   if (!dashboard || !canConfigure.value || !known.value || pending.value)
     return;
   pending.value = true;
+  togglePending.value = enabled;
   error.value = null;
+  changed.value = false;
   try {
     await dashboard.configureTariff({
       revision: profile.value!.revision,
@@ -444,6 +514,7 @@ async function toggle(event: Event) {
   } catch (cause) {
     showError(cause);
   } finally {
+    togglePending.value = null;
     pending.value = false;
   }
 }
@@ -451,6 +522,7 @@ async function openPrices() {
   externalTariffChange.value = false;
   if (!dashboard || pending.value) return;
   pending.value = true;
+  pendingOperation.value = "loading";
   error.value = null;
   changed.value = false;
   try {
@@ -477,6 +549,7 @@ async function openPrices() {
   } catch (cause) {
     showError(cause);
   } finally {
+    pendingOperation.value = null;
     pending.value = false;
     await nextTick();
     pricesEditor.value?.querySelector<HTMLElement>("select,input")?.focus();
@@ -513,6 +586,7 @@ async function savePrices() {
     return;
   }
   pending.value = true;
+  pendingOperation.value = "saving";
   error.value = null;
   try {
     await dashboard.configureTariff({
@@ -532,12 +606,14 @@ async function savePrices() {
   } catch (cause) {
     showError(cause);
   } finally {
+    pendingOperation.value = null;
     pending.value = false;
   }
 }
 async function reload() {
   if (!dashboard || pending.value) return;
   pending.value = true;
+  pendingOperation.value = "loading";
   try {
     await dashboard.loadTariff();
     if (!disposed) {
@@ -549,6 +625,7 @@ async function reload() {
   } catch (cause) {
     showError(cause);
   } finally {
+    pendingOperation.value = null;
     pending.value = false;
   }
 }
@@ -573,11 +650,15 @@ function closeCharging() {
             {{ text.change }}
           </button>
         </div>
-        <label v-if="known" class="electricity-master"
+        <label
+          v-if="known"
+          class="electricity-master"
+          :aria-busy="togglePending !== null"
           ><input
             type="checkbox"
             role="switch"
             :checked="automatic === true"
+            aria-describedby="electricity-master-status"
             :disabled="
               !canConfigure ||
               pending ||
@@ -589,9 +670,24 @@ function closeCharging() {
           />{{ text.automatic }}</label
         >
       </div>
+      <p
+        id="electricity-master-status"
+        class="electricity-master-status"
+        role="status"
+        aria-live="polite"
+      >
+        {{
+          togglePending === null
+            ? ""
+            : togglePending
+              ? text.turningOn
+              : text.turningOff
+        }}
+      </p>
       <form
         v-if="changing"
         class="electricity-choice"
+        :aria-busy="pendingOperation === 'applying'"
         @submit.prevent="applyChoice"
       >
         <fieldset :disabled="pending || !connected">
@@ -616,7 +712,9 @@ function closeCharging() {
         <p v-if="incompleteSelection" role="status">{{ text.incomplete }}</p>
         <div class="electricity-actions">
           <button type="submit" :disabled="pending || !connected || conflict">
-            {{ text.apply }}</button
+            {{
+              pendingOperation === "applying" ? text.applying : text.apply
+            }}</button
           ><button
             type="button"
             :disabled="pending"
@@ -629,6 +727,14 @@ function closeCharging() {
           </button>
         </div>
       </form>
+      <p
+        v-if="pendingOperation"
+        class="electricity-operation-status"
+        role="status"
+        aria-live="polite"
+      >
+        {{ text[pendingOperation] }}
+      </p>
       <p v-if="error" role="alert" class="electricity-error">{{ error }}</p>
       <button
         v-if="conflict"
@@ -703,6 +809,9 @@ function closeCharging() {
     <section
       v-else-if="active === 'dynamic'"
       class="electricity-card electricity-prices"
+      :aria-busy="
+        pendingOperation === 'loading' || pendingOperation === 'saving'
+      "
     >
       <header>
         <div>
@@ -717,13 +826,14 @@ function closeCharging() {
           :aria-expanded="priceEditing"
           @click="openPrices"
         >
-          {{ text.edit }}
+          {{ pendingOperation === "loading" ? text.loading : text.edit }}
         </button>
       </header>
       <form
         v-if="priceEditing"
         ref="pricesEditor"
         class="electricity-price-editor"
+        :aria-busy="pendingOperation === 'saving'"
         novalidate
         @submit.prevent="savePrices"
       >
@@ -734,50 +844,78 @@ function closeCharging() {
               v-model="draft.price_sensor"
               :hass="hass"
               :label="text.source"
-            /><label
-              >{{ text.attribute
-              }}<input
-                v-model="draft.price_attribute"
-                type="text"
-                autocomplete="off" /></label
-            ><label
-              >{{ text.unit
-              }}<select v-model="draft.price_unit">
-                <option
-                  v-for="(label, value) in text.units"
-                  :key="value"
-                  :value="value"
-                >
-                  {{ label }}
-                </option>
-              </select></label
-            ><label
+            />
+            <label
               >{{ text.feed }} (ct/kWh)<input
                 v-model="feed"
                 type="text"
                 inputmode="decimal"
                 name="dynamic_feed"
-                autocomplete="off" /></label
-            ><SensorPicker
-              v-model="draft.pv_sensor"
-              :hass="hass"
-              :label="text.pv"
-            /><label
-              >{{ text.pvFactor
-              }}<input
-                v-model="pvFactor"
-                name="dynamic_pv_factor"
-                type="number"
-                min="0"
-                max="100"
-                step="1"
+                autocomplete="off"
             /></label>
           </div>
           <p class="electricity-muted">{{ text.sourceHint }}</p>
+          <p class="electricity-muted">{{ text.feedHint }}</p>
+          <div class="electricity-fields">
+            <SensorPicker
+              v-model="draft.pv_sensor"
+              :hass="hass"
+              :label="text.pv"
+            />
+          </div>
+          <p class="electricity-muted">{{ text.pvHint }}</p>
+          <p
+            v-if="additionalSettings"
+            class="electricity-muted electricity-additional-settings"
+          >
+            {{ text.customSettings }}: {{ additionalSettings }}
+          </p>
+          <details class="electricity-price-advanced">
+            <summary>{{ text.advanced }}</summary>
+            <h3>{{ text.sourceSettings }}</h3>
+            <div class="electricity-fields">
+              <label
+                >{{ text.attribute
+                }}<input
+                  v-model="draft.price_attribute"
+                  type="text"
+                  autocomplete="off"
+              /></label>
+              <label
+                >{{ text.unit
+                }}<select v-model="draft.price_unit">
+                  <option
+                    v-for="(label, value) in text.units"
+                    :key="value"
+                    :value="value"
+                  >
+                    {{ label }}
+                  </option>
+                </select></label
+              >
+            </div>
+            <p class="electricity-muted">{{ text.attributeHint }}</p>
+            <p class="electricity-muted">{{ text.unitHint }}</p>
+            <div class="electricity-fields">
+              <label
+                >{{ text.pvFactor
+                }}<input
+                  v-model="pvFactor"
+                  name="dynamic_pv_factor"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+              /></label>
+            </div>
+            <p class="electricity-muted">{{ text.pvFactorHint }}</p>
+          </details>
         </fieldset>
         <div class="electricity-actions">
           <button type="submit" :disabled="pending || !connected || conflict">
-            {{ text.save }}</button
+            {{
+              pendingOperation === "saving" ? text.saving : text.save
+            }}</button
           ><button type="button" :disabled="pending" @click="closePrices">
             {{ text.cancel }}
           </button>
@@ -788,7 +926,9 @@ function closeCharging() {
       <header>
         <div>
           <h2>{{ text.charging }}</h2>
-          <p class="electricity-muted">{{ chargingSummary }}</p>
+          <p v-if="active === 'time_of_use'" class="electricity-muted">
+            {{ chargingSummary }}
+          </p>
         </div>
         <button
           v-if="!chargingOpen"
@@ -801,62 +941,53 @@ function closeCharging() {
           {{ text.edit }}
         </button>
       </header>
+      <DynamicChargingSettings
+        v-if="active === 'dynamic'"
+        :editing="chargingOpen"
+      />
+      <div v-if="!chargingOpen" class="electricity-charging-feedback">
+        <template
+          v-for="entity in chargingFeedback"
+          :key="entity?.metadata.entity_id"
+        >
+          <p v-if="entity?.error" class="electricity-error" role="alert">
+            {{ entity.name }}: {{ entity.error }}
+          </p>
+          <p v-else-if="entity?.pending" role="status" aria-live="polite">
+            {{ entity.name }}: {{ text.entityPending }}
+          </p>
+        </template>
+      </div>
       <div v-if="chargingOpen" class="electricity-charging-editor">
-        <h3>{{ text.global }}</h3>
-        <EntityControl
-          domain="number"
-          entity-key="max_soc"
-          :label="text.global"
-          hide-confirmed-label
-        />
-        <p class="electricity-muted">{{ text.globalHint }}</p>
-        <template v-if="active === 'time_of_use'"
-          ><EntityControl
+        <template v-if="active === 'time_of_use'">
+          <h3>{{ text.global }}</h3>
+          <EntityControl
+            domain="number"
+            entity-key="max_soc"
+            :label="text.global"
+            hide-confirmed-label
+          />
+          <p class="electricity-muted">{{ text.globalHint }}</p>
+          <EntityControl
             domain="switch"
             entity-key="bridge_charge_enabled"
-            :label="text.bridge" /><EntityControl
+            :label="text.bridge"
+          /><EntityControl
             domain="number"
             entity-key="timed_charge_max_soc"
             :label="text.target"
-            hide-confirmed-label /><EntityControl
+            hide-confirmed-label
+          /><EntityControl
             v-if="!bridge"
             domain="number"
             entity-key="timed_charge_min_soc"
             :label="text.minimum"
-            hide-confirmed-label />
+            hide-confirmed-label
+          />
           <p v-if="!bridge" class="electricity-muted">{{ text.minimumHint }}</p>
           <h3>{{ text.months }}</h3>
-          <MonthSelection :entity-keys="months"
-        /></template>
-        <template v-else
-          ><EntityControl
-            domain="select"
-            entity-key="price_charge_strategy"
-            hide-confirmed-label
-          /><EntityControl
-            v-if="strategy?.state?.state === 'absolute'"
-            domain="number"
-            entity-key="price_charge_max_price"
-            hide-confirmed-label
-          /><EntityControl
-            domain="number"
-            entity-key="price_charge_neutral_price"
-            hide-confirmed-label
-          />
-          <p class="electricity-muted">{{ text.neutral }}</p>
-          <EntityControl
-            v-if="['relative', 'smart'].includes(strategy?.state?.state ?? '')"
-            domain="number"
-            entity-key="price_charge_hours"
-            hide-confirmed-label
-          />
-          <p
-            v-if="strategy?.state?.state === 'smart'"
-            class="electricity-muted"
-          >
-            {{ text.budget }}
-          </p></template
-        >
+          <MonthSelection :entity-keys="months" />
+        </template>
         <div class="electricity-actions">
           <button type="button" @click="closeCharging">{{ text.done }}</button>
         </div>
@@ -957,6 +1088,18 @@ function closeCharging() {
   gap: 10px;
   min-height: 44px;
   cursor: pointer;
+}
+.electricity-master-status:empty {
+  display: none;
+}
+.electricity-master-status {
+  padding: 10px 14px;
+  border-left: 3px solid var(--primary-color, #03a9f4);
+  background: var(--secondary-background-color, #f5f5f5);
+  font-weight: 500;
+}
+.electricity-master[aria-busy="true"] {
+  cursor: progress;
 }
 .electricity-master input {
   width: 22px;
@@ -1069,6 +1212,17 @@ function closeCharging() {
   border: 0;
   min-width: 0;
 }
+.electricity-price-advanced {
+  border-top: 1px solid var(--divider-color, #ddd);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.electricity-price-advanced > summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+}
+.dynamic-charging-settings .entity-control,
 .electricity-charging-editor .entity-control {
   margin-top: 12px;
 }

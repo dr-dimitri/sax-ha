@@ -232,6 +232,43 @@ Die Navigation bleibt unverändert sichtbar; nur die alte Route
 `dynamisches-laden` wird per `replaceState` nach `stromtarif` umgeleitet.
 Der Tab Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
 
+Im dynamischen Tarif erklärt die Ladebedienung die Wirkung jeder Ladeweise
+und zeigt nur deren relevante Eingaben. Die einfachen Bezeichnungen bilden
+weiterhin `smart`, `relative`, `absolute` und `off` ab; Planung, Grenzwerte
+und Services bleiben im Backend. Die Zusammenfassung verwendet bestätigte
+Werte. Preisquellen-Sonderoptionen und die Speicherpause durch den Neutralpreis
+bleiben in erweiterten Einstellungen erreichbar, ohne vorhandene Werte zu
+überschreiben. Ladeziel und Preis-/Stundenregler verwenden weiterhin die
+gemeinsamen HA-Entitäten.
+
+Reines Umschalten von „Automatische Netzladung“ wird als validierte
+Softwareänderung unmittelbar bestätigt und zur Persistenz vorgemerkt.
+Dieser Weg wartet nicht auf `_charge_control_lock`, verändert keine
+Tarif-Options und startet keine Preisquelle neu. Der bestehende gemeinsame
+Worker setzt den jeweils aktuellen Steuerstand unter dem Lock um;
+Geräteaktivität wird weiterhin erst nach Gerätebestätigung gemeldet.
+Tatsächliche Tarif-/Quellenwechsel behalten den atomaren Abgleich unter
+dem Lock. Die Oberfläche markiert die ausstehende Schalterantwort sofort
+und sperrt doppelte Aufrufe, ohne den bestätigten Zustand vorwegzunehmen.
+
+Die Reaktionsprüfung umfasst alle Aktionswege, nicht nur sichtbare Schalter:
+
+| Aktion | Rückmeldung und notwendige Wartezeit | Regressionstests |
+| --- | --- | --- |
+| Ladefreigaben, SOC-/Preis-/Stundenwerte, Strategie, Monate, Zeitfenster | Sofortige Softwarebestätigung; gemeinsamer Geräte-Worker | `tests/test_control_response.py`, `tests/test_month_switch_response.py`, `tests/test_vue_dashboard_e2e.py` |
+| Automatische Netzladung im Tarifdashboard | Sofortige WebSocket-Antwort auch bei belegtem Geräte-Lock | `tests/test_dashboard_tariff_response.py` |
+| Verbrauchsplanung und Preisplan aktualisieren | Sofortige Bestätigung; Geräteauswertung nachgelagert | `tests/test_bridge_switch.py`, `tests/test_control_response.py`, `tests/test_vue_dashboard_e2e.py` |
+| Tarif-/Quellenwechsel und vollständige Profilübernahme | Sofortige Fortschrittsanzeige; atomarer Wechsel wartet auf den sicheren Übergang des periodischen Schreibers | `tests/test_electricity_tariff_control.py`, `frontend/browser/dynamic-tariff.spec.ts` |
+| Speicher Ein/Aus, manuelles Laden Start/Stop | Sofortiger ausstehender Zustand; Erfolg erst nach Gerätequittierung | `frontend/tests/controls.test.ts`, `tests/test_coordinator.py` |
+| Bilanzneustart und Statistikabruf | Asynchrone lokale Speicherung bzw. Recorder-Lesen, kein Warten auf Geräte-Lock | `tests/test_economics_persistence.py`, `frontend/tests/savings.test.ts` |
+| Navigation, Details, Abbrechen, Diagrammtag und Monatsübersicht | Lokale UI-Aktion; nachgeladene Preise zeigen Fortschritt, ältere Antworten werden verworfen | `frontend/tests/panel.test.ts`, `frontend/tests/electricity-tariff.test.ts` |
+
+Die gemeinsamen Controls und Tarifeditoren testen verzögerte und fehlgeschlagene
+Antworten, sofortige zugängliche Fortschrittsmeldungen, erhaltene Entwürfe und
+gesperrte doppelte Schreibaufträge. Ein neuer Statistikzeitraum darf einen
+laufenden Leseauftrag ersetzen; dessen verspätetes Ergebnis wird ignoriert.
+Diese Prüfung ist für neue oder geänderte Aktionswege in `AGENTS.md` verbindlich.
+
 `TimeWindowControl.vue` ersetzt in den Ansichten Zeitvariabler Tarif und
 Netzdienliches Laden die getrennten Zeit-Bedienelemente. Es gibt genau zwei
 Paare: `time.timed_charge_start`/`time.timed_charge_end` und

@@ -80,6 +80,14 @@ apply to every PR, including documentation-only PRs.
   unchecked writes to the device).
 - Catch `ModbusException`/`asyncio.TimeoutError` and map to
   `UpdateFailed`/`ConfigEntryNotReady` - don't let them propagate raw.
+- Keep every UI action responsive: acknowledge validated software settings
+  without waiting for Modbus or the device-control lock; apply device changes
+  through the existing coalescing worker. Atomic tariff/source handovers may
+  retain their safety lock; physical commands require device acknowledgement.
+  See `REQ-VUE-ENTITY-BINDING` / `REQ-VUE-ELECTRICITY-TARIFF`.
+- Show accessible pending feedback immediately for every asynchronous button,
+  switch, or save action, prevent duplicate writes, and preserve confirmed
+  values and drafts on failure. Never display device success optimistically.
 - Comments explain *why* (non-obvious constraints, device quirks, prior
   incidents), never *what* - the code already says what. Point to the
   relevant `REQ-*` id in `anforderung.yaml` instead of re-explaining
@@ -157,6 +165,10 @@ apply to every PR, including documentation-only PRs.
   `tests/test_sensor_descriptions.py` cover their respective platforms.
 - New behavior needs a test AND, if it changes what's described there, an
   `anforderung.yaml` update in the same change - they must not drift apart.
+- For new or changed UI write paths, test a held device-control lock and delayed
+  or failed responses (including the real service/WebSocket boundary). Check
+  prompt software acknowledgement, pending feedback, duplicate prevention and
+  application of the latest state; reuse the response suites linked in DEVELOPMENT.md.
 
 ## Security considerations
 

@@ -111,6 +111,10 @@ async function mount(
     state: "-2.5",
     attributes: { friendly_name: "Marktpreis", unit_of_measurement: "ct/kWh" },
   };
+  if (options.readonly)
+    sample.metadata.forEach((item) => {
+      item.can_control = false;
+    });
   let stored = {
     ...initialProfile(),
     tariff_type: options.type ?? "time_of_use",
@@ -597,17 +601,323 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     await click(section, "Fertig");
     expect(section.querySelector(".electricity-charging-editor")).toBeNull();
   });
-  it("keeps neutral price available and shows the hours budget for relative and smart strategies", async () => {
+  it.each(["de", "en"])(
+    "guides charging choices with relevant fields and accurate effects in %s",
+    async (language) => {
+      const fixture = await mount({ type: "dynamic", language });
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      await click(section, language === "de" ? "Bearbeiten" : "Edit");
+      const english = language === "en";
+      expect(section.querySelectorAll("[data-strategy]")).toHaveLength(4);
+      expect(section.textContent).toContain(
+        english ? "Maximum price for charging" : "Höchster Preis zum Laden",
+      );
+      expect(section.textContent).not.toContain(
+        english ? "Maximum charging time" : "Maximale Ladezeit",
+      );
+      expect(
+        section.querySelector<HTMLDetailsElement>(".dynamic-charging-advanced")
+          ?.open,
+      ).toBe(false);
+      expect(
+        section.querySelector(".dynamic-charging-neutral-summary")?.textContent,
+      ).toContain("30 ct/kWh");
+      await fixture.update("price_charge_strategy", "smart");
+      expect(section.textContent).toContain(
+        english
+          ? "Maximum charging time per 24 hours"
+          : "Maximale Ladezeit je 24 Stunden",
+      );
+      expect(section.textContent).toContain(
+        english
+          ? "battery level, capacity or charging power is missing"
+          : "Fehlen Ladestand, Kapazität oder Ladeleistung",
+      );
+      expect(section.textContent).toContain(
+        english
+          ? "a single current price is not enough"
+          : "ein einzelner aktueller Preis reicht nicht",
+      );
+      expect(section.textContent).toContain(
+        english ? "Without a solar forecast" : "Ohne PV-Prognose",
+      );
+      expect(section.textContent).not.toContain(
+        english ? "Maximum price for charging" : "Höchster Preis zum Laden",
+      );
+      expect(
+        section.querySelector(".dynamic-charging-summary")?.textContent,
+      ).toContain("4 h");
+      expect(
+        section.querySelector(".dynamic-charging-summary")?.textContent,
+      ).toContain("80 %");
+      await fixture.update("price_charge_strategy", "relative");
+      expect(section.textContent).toContain(
+        english
+          ? "even the cheapest available hours may be expensive"
+          : "Auch die günstigsten verfügbaren Stunden können teuer sein",
+      );
+      expect(section.textContent).not.toContain(
+        english ? "Without a solar forecast" : "Ohne PV-Prognose",
+      );
+      await fixture.update("price_charge_strategy", "off");
+      expect(section.querySelector(".entity-control")).toBeNull();
+      expect(section.textContent).toContain(
+        english
+          ? "even when the main switch is on"
+          : "auch wenn der Hauptschalter eingeschaltet ist",
+      );
+      expect(fixture.callService).not.toHaveBeenCalled();
+      expect(writes(fixture)).toHaveLength(0);
+    },
+  );
+  it("shows an ineffective neutral threshold and preserves its value across methods", async () => {
     const fixture = await mount({ type: "dynamic" });
+    await fixture.update("price_charge_neutral_price", "-10");
+    const section = fixture.root.querySelector(".electricity-charging")!;
+    expect(
+      section.querySelector(".dynamic-charging-neutral-summary")?.textContent,
+    ).toContain("ohne Wirkung");
+    await fixture.update("price_charge_strategy", "relative");
+    expect(
+      section.querySelector(".dynamic-charging-neutral-summary")?.textContent,
+    ).toContain("-10 ct/kWh");
+    expect(fixture.callService).not.toHaveBeenCalled();
+  });
+  it.each(["", " ", "unavailable", "invalid"])(
+    "does not infer a neutral threshold from %s",
+    async (state) => {
+      const fixture = await mount({ type: "dynamic" });
+      await fixture.update("price_charge_neutral_price", state);
+      const summary = fixture.root.querySelector(
+        ".dynamic-charging-neutral-summary",
+      )!;
+      expect(summary.textContent).toContain("nicht verfügbar");
+      expect(summary.textContent).not.toContain("ohne Wirkung");
+      expect(summary.textContent).not.toContain("0 ct/kWh");
+    },
+  );
+  it.each(["smart", "relative", "off"])(
+    "sends %s through the existing select service without an optimistic selection",
+    async (method) => {
+      const fixture = await mount({ type: "dynamic" });
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      await click(section, "Bearbeiten");
+      let resolve!: () => void;
+      fixture.callService.mockImplementationOnce(
+        () =>
+          new Promise<void>((done) => {
+            resolve = done;
+          }),
+      );
+      const choice = section.querySelector<HTMLButtonElement>(
+        `[data-strategy="${method}"]`,
+      )!;
+      choice.click();
+      await flush();
+      expect(
+        section
+          .querySelector('[data-strategy="absolute"]')
+          ?.getAttribute("aria-pressed"),
+      ).toBe("true");
+      expect(choice.getAttribute("aria-pressed")).toBe("false");
+      expect(choice.disabled).toBe(true);
+      expect(section.querySelector('[aria-busy="true"]')).not.toBeNull();
+      expect(section.textContent).toContain("Ladeweise wird übernommen …");
+      choice.click();
+      expect(fixture.callService).toHaveBeenCalledTimes(1);
+      expect(fixture.callService).toHaveBeenCalledWith(
+        "select",
+        "select_option",
+        { option: method },
+        { entity_id: "select.renamed_price_charge_strategy" },
+        false,
+      );
+      resolve();
+      await flush();
+      expect(choice.getAttribute("aria-pressed")).toBe("false");
+      await fixture.update("price_charge_strategy", method);
+      expect(choice.getAttribute("aria-pressed")).toBe("true");
+      expect(writes(fixture)).toHaveLength(0);
+    },
+  );
+  it("keeps charge target, hours and neutral values on their existing number services", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    await fixture.update("price_charge_strategy", "smart");
     const section = fixture.root.querySelector(".electricity-charging")!;
     await click(section, "Bearbeiten");
-    expect(section.textContent).toContain("Netzbezug und Laden bis");
-    expect(section.textContent).not.toContain("Anzahl Stunden");
-    await fixture.update("price_charge_strategy", "smart");
-    expect(section.textContent).toContain("Anzahl Stunden");
-    expect(section.textContent).toContain("Smart nutzt das Stundenbudget");
-    expect(section.textContent).toContain("Netzbezug ohne Laden bis");
-    expect(section.textContent).not.toContain("Netzbezug und Laden bis");
+    for (const [label, key, value] of [
+      ["Ladeziel (%)", "max_soc", "85"],
+      ["Maximale Ladezeit je 24 Stunden", "price_charge_hours", "3"],
+      [
+        "Speicher bei günstigem Strom schonen bis (ct/kWh)",
+        "price_charge_neutral_price",
+        "12.5",
+      ],
+    ]) {
+      const form = [...section.querySelectorAll(".entity-control")].find(
+        (form) => form.querySelector("label")?.textContent === label,
+      )!;
+      await fill(form, "input", value!);
+      await click(form, "Übernehmen");
+      expect(fixture.callService).toHaveBeenLastCalledWith(
+        "number",
+        "set_value",
+        { value: Number(value) },
+        { entity_id: `number.renamed_${key}` },
+        false,
+      );
+    }
+    expect(writes(fixture)).toHaveLength(0);
+  });
+  it.each([
+    ["dynamic", "strategy"],
+    ["dynamic", "number"],
+    ["time_of_use", "number"],
+  ])(
+    "keeps pending changes and late failures visible after closing %s %s settings",
+    async (type, control) => {
+      const fixture = await mount({ type });
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      await click(section, "Bearbeiten");
+      let reject!: (cause: unknown) => void;
+      fixture.callService.mockImplementationOnce(
+        () =>
+          new Promise<void>((_, fail) => {
+            reject = fail;
+          }),
+      );
+      if (control === "strategy") {
+        section
+          .querySelector<HTMLButtonElement>('[data-strategy="relative"]')!
+          .click();
+        await flush();
+      } else {
+        const form = section.querySelector(".entity-control")!;
+        await fill(form, "input", "85");
+        await click(form, "Übernehmen");
+      }
+      await click(section, "Fertig");
+      expect(section.querySelector(".electricity-charging-editor")).toBeNull();
+      expect(section.querySelector('[role="status"]')?.textContent).toContain(
+        control === "strategy"
+          ? "Ladeweise wird übernommen"
+          : "Änderung wird an Home Assistant gesendet",
+      );
+      reject(new Error("Service failed"));
+      await flush();
+      expect(section.querySelector('[role="status"]')).toBeNull();
+      expect(section.querySelector('[role="alert"]')?.textContent).toContain(
+        "fehlgeschlagen",
+      );
+      if (control === "strategy")
+        expect(
+          section.querySelector(".dynamic-charging-summary")?.textContent,
+        ).toContain("Bis zu einem festen Preis laden");
+      expect(fixture.callService).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(["de", "en"])(
+    "explains the required solar forecast quantity and date in %s",
+    async (language) => {
+      const fixture = await mount({ type: "dynamic", language });
+      const section = fixture.root.querySelector(".electricity-prices")!;
+      await click(section, language === "de" ? "Bearbeiten" : "Edit");
+      expect(section.textContent).toContain(
+        language === "de"
+          ? "PV-Gesamtertrag für morgen als Energie in kWh oder Wh"
+          : "total solar energy forecast for tomorrow in kWh or Wh",
+      );
+      expect(section.textContent).toContain(
+        language === "de"
+          ? "keine aktuelle Leistung und keinen heutigen Restertrag"
+          : "not current power or today's remaining production",
+      );
+    },
+  );
+  it("keeps custom price settings visible as a summary and preserves them when saving basic fields", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    fixture.stored.profiles!.dynamic.price_attribute = "raw_today";
+    const section = fixture.root.querySelector(".electricity-prices")!;
+    await click(section, "Bearbeiten");
+    expect(
+      section.querySelector<HTMLDetailsElement>(".electricity-price-advanced")
+        ?.open,
+    ).toBe(false);
+    expect(
+      section.querySelector(".electricity-additional-settings")?.textContent,
+    ).toContain("raw_today");
+    expect(
+      section.querySelector(".electricity-additional-settings")?.textContent,
+    ).toContain("70");
+    await fill(section, '[name="dynamic_feed"]', "8.5");
+    await click(section, "Speichern");
+    expect(writes(fixture)[0]?.[0].profile).toMatchObject({
+      price_attribute: "raw_today",
+      price_unit: "ct_kwh",
+      pv_factor: 70,
+      feed_in_price_ct_kwh: 8.5,
+    });
+  });
+  it.each(["readonly", "unavailable", "disconnected"])(
+    "prevents changing the charging method when %s",
+    async (state) => {
+      const fixture = await mount({
+        type: "dynamic",
+        readonly: state === "readonly",
+      });
+      if (state === "unavailable")
+        await fixture.update("price_charge_strategy", "unavailable");
+      if (state === "disconnected") await fixture.disconnect();
+      await click(
+        fixture.root.querySelector(".electricity-charging")!,
+        "Bearbeiten",
+      );
+      expect(
+        [
+          ...fixture.root.querySelectorAll<HTMLButtonElement>(
+            "[data-strategy]",
+          ),
+        ].every((choice) => choice.disabled),
+      ).toBe(true);
+      if (state !== "readonly")
+        expect(
+          fixture.root.querySelector('[data-strategy][aria-pressed="true"]'),
+        ).toBeNull();
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+  it("reports delayed automation changes immediately and preserves the confirmed switch on failure", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    let reject!: (cause: unknown) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((_, fail) => {
+          reject = fail;
+        }),
+    );
+    const master = fixture.root.querySelector<HTMLInputElement>(
+      ".electricity-master input",
+    )!;
+    master.click();
+    await flush();
+    expect(master.checked).toBe(false);
+    expect(master.disabled).toBe(true);
+    expect(master.closest("label")?.getAttribute("aria-busy")).toBe("true");
+    expect(
+      fixture.root.querySelector(".electricity-master-status")?.textContent,
+    ).toContain("Einschalten wird übernommen …");
+    master.click();
+    expect(writes(fixture)).toHaveLength(1);
+    reject({ code: "failed" });
+    await flush();
+    expect(master.checked).toBe(false);
+    expect(master.disabled).toBe(false);
+    expect(
+      fixture.root.querySelector(".electricity-master-status")?.textContent,
+    ).toBe("");
+    expect(fixture.root.querySelector('[role="alert"]')?.textContent).toContain(
+      "fehlgeschlagen",
+    );
   });
 });
 describe("REQ-VUE-ELECTRICITY-TARIFF: exact price steps and gaps", () => {

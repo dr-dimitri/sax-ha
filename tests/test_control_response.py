@@ -182,6 +182,32 @@ async def test_deferred_bootstrap_changes_create_neither_worker_nor_save(
     coordinator.client.write_register.assert_not_awaited()
 
 
+async def test_price_plan_refresh_confirms_before_device_evaluation(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """Eine ausdrückliche Neuberechnung wartet wie Einstellungen nicht auf Modbus."""
+    with patch.object(coordinator.price_planner, "evaluate") as evaluate:
+        async with coordinator._charge_control_lock:
+            await asyncio.wait_for(coordinator.async_refresh_price_plan(), 0.2)
+            evaluate.assert_called_once()
+            task = coordinator._month_control_task
+            assert task is not None and not task.done()
+            coordinator.client.write_register.assert_not_awaited()
+        await task
+
+
+async def test_shutdown_rejects_price_plan_refresh_before_recalculation(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """Ein Planungsklick nach Shutdown darf das gespeicherte Budget nicht ändern."""
+    await coordinator.async_shutdown(reset_device=False)
+    with patch.object(coordinator.price_planner, "evaluate") as evaluate:
+        with pytest.raises(HomeAssistantError, match="entladen"):
+            await coordinator.async_refresh_price_plan()
+        evaluate.assert_not_called()
+    assert coordinator._month_control_task is None
+
+
 def _prepare_charging(coordinator: SaxPowerCoordinator) -> None:
     coordinator._timed_charge_start = dt_time(0)
     coordinator._timed_charge_end = dt_time(6)

@@ -511,6 +511,60 @@ function saves(fixture: Awaited<ReturnType<typeof mount>>) {
   );
 }
 describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
+  it.each([
+    ["de", "Bearbeiten", "Wird geladen …", "Speichern", "Wird gespeichert …"],
+    ["en", "Edit", "Loading …", "Save", "Saving …"],
+  ])(
+    "announces delayed reads and writes immediately in %s",
+    async (language, edit, loading, save, saving) => {
+      const fixture = await mount({ language });
+      const plan = fixture.plans()[0]!;
+      const profile = await fixture.callWS({
+        type: "sax_power/dashboard/tariff/get",
+      });
+      let resolve!: (value: TariffProfile) => void;
+      fixture.callWS.mockImplementationOnce(
+        () =>
+          new Promise<TariffProfile>((done) => {
+            resolve = done;
+          }),
+      );
+      await click(plan, edit);
+      expect(plan.querySelector('[role="status"]')?.textContent).toContain(
+        loading,
+      );
+      const requests = fixture.callWS.mock.calls.length;
+      button(plan, loading).click();
+      await flush();
+      expect(fixture.callWS).toHaveBeenCalledTimes(requests);
+      resolve(profile as TariffProfile);
+      await flush();
+      let reject!: (cause: unknown) => void;
+      fixture.callWS.mockImplementationOnce(
+        () =>
+          new Promise<TariffProfile>((_done, fail) => {
+            reject = fail;
+          }),
+      );
+      await click(plan, save);
+      expect(plan.querySelector('[role="status"]')?.textContent).toContain(
+        saving,
+      );
+      expect(plan.querySelector("form")?.getAttribute("aria-busy")).toBe(
+        "true",
+      );
+      button(plan, saving).click();
+      await flush();
+      expect(saves(fixture)).toHaveLength(1);
+      reject({ code: "failed" });
+      await flush();
+      expect(plan.querySelector('[role="alert"]')).not.toBeNull();
+      expect(button(plan, save).disabled).toBe(false);
+      expect(
+        plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+      ).toBe(language === "de" ? "35,00" : "35.00");
+    },
+  );
   it("loads existing prices in cents, saves the complete tariff atomically, then collapses", async () => {
     const fixture = await mount();
     const plan = fixture.plans()[0]!;

@@ -348,9 +348,23 @@ Die Integration ruft selbst keine Preise vom Anbieter ab.
 
 ![Dynamischer Stromtarif mit Tagespreisen und Ladesteuerung](docs/images/vue-stromtarif-dynamisch-desktop-light-de.png)
 
-Wähle unter **Tarif & Preise → Bearbeiten** den Strompreis-Sensor. Preis-Einheit und
-Vorschauattribut werden automatisch erkannt und lassen sich bei Bedarf
-vorgeben. Unterstützt werden EUR/kWh, ct/kWh, EUR/MWh und ct/MWh.
+Die Einrichtung besteht aus drei Schritten:
+
+1. Wähle unter **Tarif & Preise → Bearbeiten** deinen Strompreis-Sensor
+   und trage die Einspeisevergütung in ct/kWh ein. Bestätige mit **Speichern**.
+2. Öffne **Ladeverhalten → Bearbeiten**. Wähle, wie der Speicher laden soll,
+   und stelle den gewünschten maximalen Speicherfüllstand ein. Die Erklärung
+   zur Ladeweise zeigt, welche Einstellungen dafür benötigt werden. Bestätige
+   geänderte Zahlen jeweils mit **Übernehmen**.
+3. Schließe die Bearbeitung und schalte **Automatische Netzladung** ein.
+   Der Status erklärt, ob die Ladung läuft oder worauf sie wartet.
+
+Preis-Einheit und Vorschauattribut werden automatisch erkannt. Die erweiterten
+Einstellungen erlauben weiterhin eigene Vorgaben; vorhandene Werte bleiben
+beim Öffnen und Schließen erhalten. Unterstützt werden EUR/kWh, ct/kWh,
+EUR/MWh und ct/MWh. Ein Klick auf den Hauptschalter zeigt sofort den Fortschritt;
+der Haken folgt der Bestätigung aus Home Assistant, ohne auf die
+Gerätekommunikation zu warten.
 
 **Hinweis beim Update:** Fremde Währungen wie SEK werden nicht mehr als
 Europreise interpretiert. Eine solche Quelle setzt die preisbasierte Ladeplanung
@@ -360,30 +374,46 @@ eine Währungsumrechnung übernimmt die Integration nicht. Die Einheit manuell
 zu überschreiben ist nur für falsche Metadaten bei bereits korrekten Euro- oder
 Centwerten gedacht.
 
-Den anrechenbaren PV-Anteil gibst du als ganze Prozentzahl von 0 bis 100 ein.
+Eine PV-Prognose ist optional. Den Anteil des vorhergesagten Solarertrags,
+der für die Speicherladung nutzbar ist, kannst du in den erweiterten
+Einstellungen als ganze Prozentzahl von 0 bis 100 angeben. Bei 70 % werden
+beispielsweise von 10 kWh Vorhersage 7 kWh angerechnet.
 
-Anschließend wählst du unter **Ladeverhalten** eine Strategie und schaltest
-**Automatische Netzladung** ein.
-
-| Strategie | Wann wird geladen? |
+| Ladeweise | Wann wird geladen? |
 | --- | --- |
-| Manuell / Aus | Preisautomatik aus; Einstellungen bleiben erhalten |
-| Absoluter Preis | Sobald der aktuelle Preis die Preisgrenze nicht überschreitet |
-| Relativ / Günstigste Stunden | In der gewählten Anzahl der günstigsten Stunden |
-| Smart / PV-optimiert | Wie Relativ, zusätzlich abgestimmt auf Speicherfüllung und erwarteten PV-Ertrag |
+| Bedarfsgerecht laden (Smart) | In günstigen Stunden, abgestimmt auf Speicherfüllung und optionalen PV-Ertrag |
+| Günstigste Stunden nutzen (Relativ) | In der eingestellten Anzahl der günstigsten Stunden des 24-Stunden-Zyklus |
+| Bis zu einem festen Preis laden (Absolut) | Solange der aktuelle Preis höchstens der eingestellten Grenze entspricht |
+| Keine automatische Ladung (Aus) | Preisautomatik aus; Einstellungen bleiben erhalten |
+
+Die Ansicht zeigt nur die Felder, die zur gewählten Ladeweise passen.
+Bei einer festen Preisgrenze stellst du den höchsten erlaubten Preis ein;
+bei den beiden anderen aktiven Ladeweisen die maximale Ladedauer. Dort ist
+die absolute Preisgrenze unwirksam: Auch die günstigsten verfügbaren Stunden
+können teuer sein. Das **Ladeziel (%)** ist dieselbe globale Obergrenze wie
+**Max. SOC** und gilt auch für PV-Ladung. Zeitbudget, Preise und PV-Prognose
+können dazu führen, dass weniger Netzstrom geladen wird.
 
 **Relativ** und **Smart** benötigen eine Preisvorschau. Sie planen in festen
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
 verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
-**Smart** verwendet den **PV-Prognose-Sensor für Smart und Ladeplanung** aus
+**Smart** verwendet den **PV-Prognose-Sensor (optional)** aus
 **Tarif & Preise**, getrennt vom heutigen Rest-Ertrag der Ladepause.
 Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
 der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
 **Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
 Prognose den Bedarf vollständig, entfällt die Netzladung. **Anzahl Stunden**
 bleibt die Obergrenze; das Ladeziel ist **Max. SOC**.
+Fehlen Messwerte für Speicherfüllung, Kapazität oder Ladeleistung, nutzt
+Smart die eingestellte Anzahl der günstigsten Stunden. Die Übersicht zeigt
+die bestätigten Einstellungen; allein das Öffnen des Einstellbereichs
+verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick;
+**Fertig** schließt den Bereich und speichert keine offenen Zahleneingaben.
 
-Der **Neutralpreis** bestimmt, unter welchem Strompreis der Speicher
+![Geführte Ladeeinstellungen mit erklärten Auswirkungen](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
+
+Unter **Weitere Einstellungen · Speicher schonen** bestimmt die Grenze
+**Speicher bei günstigem Strom schonen bis (ct/kWh)** (Neutralpreis), unter welchem Strompreis der Speicher
 pausiert, wenn gerade keine Netzladung läuft. Bei **Relativ** und **Smart**
 gilt das für alle nicht zum Laden ausgewählten Stunden unter diesem Wert,
 auch unterhalb der absoluten Preisgrenze oder bei erschöpfter Ladedauer.

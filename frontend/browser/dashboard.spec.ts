@@ -816,7 +816,15 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await page.locator("#connection").click();
   await expect(shared).toBeEnabled();
   await page.locator("#unavailable").click();
-  await expect(shared).toBeDisabled();
+  await expect(shared).toHaveCount(0);
+  await expect(
+    panel.locator("[data-strategy][aria-pressed='true']"),
+  ).toHaveCount(0);
+  for (const method of await panel.locator("[data-strategy]").all())
+    await expect(method).toBeDisabled();
+  await expect(panel.locator(".dynamic-charging-summary")).toContainText(
+    /Ladeweise nicht verfügbar|Charging method unavailable/,
+  );
   await page.locator("#unavailable").click();
   await expect(shared).toHaveValue("75");
   await page.locator("#failure").click();
@@ -836,7 +844,7 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await expect(page.locator("#actions")).toContainText("2: number.set_value");
 });
 
-test("overnight times, months, native strategy options and negative prices", async ({
+test("overnight times, months, guided strategy options and negative prices", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
@@ -948,9 +956,13 @@ test("overnight times, months, native strategy options and negative prices", asy
   await page.locator("#tariff-dynamic").click();
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header button").click();
-  await expect(panel.locator("select option")).toHaveCount(4);
-  await panel.getByRole("combobox").selectOption("smart");
-  await expect(panel.getByRole("combobox")).toHaveValue("smart");
+  await expect(panel.locator("[data-strategy]")).toHaveCount(4);
+  await panel.locator('[data-strategy="smart"]').click();
+  await expect(panel.locator('[data-strategy="smart"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await panel.locator(".dynamic-charging-advanced summary").click();
   const price = panel.locator("input[min='-100']").first();
   await price.fill("-12.5");
   await panel

@@ -366,6 +366,24 @@ async def test_configuration_services_confirm_without_waiting_for_device_control
                 )
                 write.assert_not_called()
                 assert coordinator._month_control_task is worker
+                with patch.object(
+                    coordinator.price_planner,
+                    "evaluate",
+                    wraps=coordinator.price_planner.evaluate,
+                ) as evaluate:
+                    await sender.send_json(
+                        {
+                            "id": 42,
+                            "type": "call_service",
+                            "domain": DOMAIN,
+                            "service": "refresh_price_plan",
+                            "service_data": {"device_id": device_id},
+                        }
+                    )
+                    await _result(sender, 42)
+                    evaluate.assert_called_once()
+                write.assert_not_called()
+                assert coordinator._month_control_task is worker
             await worker
         await sender.close()
         await observer.close()

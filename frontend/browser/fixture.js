@@ -15,6 +15,9 @@ let language = "de";
 let connected = true;
 let unavailable = false;
 let rejectNext = false;
+let holdNextAction = false;
+let releaseAction = null;
+let tariffConfigureRequests = 0;
 let writes = 0;
 let activeTariff = "time_of_use";
 let tariffRevision = 1;
@@ -315,9 +318,21 @@ function update() {
     callWS,
   };
 }
+async function waitForActionRelease() {
+  if (!holdNextAction) return;
+  holdNextAction = false;
+  const button = document.querySelector("#release-action");
+  button.disabled = false;
+  await new Promise((resolve) => {
+    releaseAction = resolve;
+  });
+  releaseAction = null;
+  button.disabled = true;
+}
 async function callService(domain, service, data, target) {
   writes += 1;
   actions.textContent = `${writes}: ${domain}.${service} ${JSON.stringify({ ...data, ...target })}`;
+  await waitForActionRelease();
   await new Promise((resolve) => setTimeout(resolve, 150));
   if (rejectNext) {
     rejectNext = false;
@@ -450,6 +465,8 @@ async function callWS(request) {
     return tariffSeries(request.day);
   if (request.type === "sax_power/dashboard/tariff/get") return tariffResult();
   if (request.type === "sax_power/dashboard/tariff/configure") {
+    panel.dataset.tariffConfigureRequests = String(++tariffConfigureRequests);
+    await waitForActionRelease();
     if (rejectNext) {
       rejectNext = false;
       throw { code: "invalid_tariff" };
@@ -613,6 +630,12 @@ document.querySelector("#unavailable").onclick = () => {
 };
 document.querySelector("#failure").onclick = () => {
   rejectNext = true;
+};
+document.querySelector("#hold-action").onclick = () => {
+  holdNextAction = true;
+};
+document.querySelector("#release-action").onclick = () => {
+  releaseAction?.();
 };
 for (const mode of Object.keys(tariffModes)) {
   document.querySelector(`#tariff-${mode}`).onclick = () => {

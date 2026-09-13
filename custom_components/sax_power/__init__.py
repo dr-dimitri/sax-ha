@@ -33,6 +33,7 @@ from .const import (
     ATTR_REASON,
     ATTR_START,
     CONF_BRIDGE_CHARGE_ENABLED,
+    CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
@@ -355,7 +356,7 @@ def _control_options(options: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in options.items()
-        if key != CONF_VUE_DASHBOARD_ENABLED
+        if key not in (CONF_VUE_DASHBOARD_ENABLED, CONF_DASHBOARD_TARIFF_PROFILES)
         and (key not in defaults or value != defaults[key])
     }
 
@@ -387,8 +388,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     und das Ergebnis sofort angewendet -
     SaxPricePlanner.async_setup ist bewusst idempotent (räumt seine alten
     Zustandsbeobachter ab und registriert sie mit den aktuellen Optionen
-    neu), ohne Entities, Modbus-Verbindung oder eine laufende
-    Lade-Automatik anzutasten. Für die Tarifkonfiguration der
+    neu), ohne Entities oder Modbus-Verbindung neu anzulegen. Ein Tarifwechsel
+    übernimmt zugleich die passende Automatik unter dem zentralen Control-Lock
+    (REQ-VUE-ELECTRICITY-TARIFF). Für die Tarifkonfiguration der
     Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS) gilt dasselbe:
     SaxTariffProvider.async_setup registriert den Zustandsbeobachter des
     dynamischen Preis-Sensors nach demselben idempotenten Muster neu, sodass
@@ -409,18 +411,12 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         # sich an den Options nichts geändert hat.
         return
     previous_options = _control_options(coordinator.options)
-    coordinator.options = dict(entry.options)
     if previous_options == _control_options(entry.options):
         # REQ-VUE-DASHBOARD: Eine reine UI-Option darf weder die Tarifrevision
         # noch den Modbus-Sollwert einer laufenden Ladeautomatik verändern.
+        coordinator.options = dict(entry.options)
         return
-    coordinator.reconcile_charge_time_source()
-    coordinator.price_planner.async_setup()
-    coordinator.tariff_provider.async_setup()
-    # REQ-ECONOMICS-ACCOUNTING: rein diagnostischer Zeitstempel der letzten
-    # Tarifrevision - beeinflusst keine bereits verbuchten Beträge.
-    coordinator.notify_tariff_revision()
-    await coordinator.async_apply_price_plan()
+    await coordinator.async_apply_tariff_options(dict(entry.options))
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

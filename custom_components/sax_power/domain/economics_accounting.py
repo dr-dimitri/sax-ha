@@ -15,9 +15,11 @@ den zu diesem Zeitpunkt vermiedenen Netzbezug wert.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .energy_accounting import EnergyDelta
+from .tariff import is_valid_feed_in_price, is_valid_import_price
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,77 @@ class EconomicsDelta:
 
 
 NO_DELTA = EconomicsDelta()
+
+
+@dataclass(frozen=True, slots=True)
+class EconomicsPriceSegment:
+    """Observed part of one measurement interval, with its contemporaneous prices."""
+
+    seconds: float
+    import_price_eur_kwh: float | None
+    feed_in_price_eur_kwh: float | None
+
+
+def compute_economics_interval(
+    charge_delta: EnergyDelta,
+    discharged_kwh: float,
+    unvalued_inventory_kwh: float,
+    segments: Sequence[EconomicsPriceSegment],
+) -> EconomicsDelta:
+    """REQ-ECONOMICS-ACCOUNTING: Split measured energy at actual tariff boundaries.
+
+    Energy retains the coordinator's constant-power integration; only prices
+    vary within the interval. Previously booked costs are never recalculated.
+    Unknown intervals remain unpriced, including when later forecasts recover.
+    """
+    duration = sum(segment.seconds for segment in segments)
+    if (
+        not segments
+        or not math.isfinite(duration)
+        or duration <= 0
+        or any(segment.seconds <= 0 for segment in segments)
+    ):
+        return compute_economics_delta(
+            charge_delta, discharged_kwh, unvalued_inventory_kwh, None, None
+        )
+    deltas: list[EconomicsDelta] = []
+    inventory = unvalued_inventory_kwh
+    for segment in segments:
+        fraction = segment.seconds / duration
+        delta = compute_economics_delta(
+            EnergyDelta(
+                charged_kwh=charge_delta.charged_kwh * fraction,
+                grid_kwh=charge_delta.grid_kwh * fraction,
+                pv_kwh=charge_delta.pv_kwh * fraction,
+                origin_known=charge_delta.origin_known,
+            ),
+            discharged_kwh * fraction,
+            inventory,
+            segment.import_price_eur_kwh,
+            segment.feed_in_price_eur_kwh,
+        )
+        deltas.append(delta)
+        inventory += delta.unvalued_inventory_delta_kwh
+    return EconomicsDelta(
+        grid_charge_cost_delta=sum(item.grid_charge_cost_delta for item in deltas),
+        pv_opportunity_cost_delta=sum(
+            item.pv_opportunity_cost_delta for item in deltas
+        ),
+        avoided_grid_cost_delta=sum(item.avoided_grid_cost_delta for item in deltas),
+        unvalued_inventory_delta_kwh=sum(
+            item.unvalued_inventory_delta_kwh for item in deltas
+        ),
+        unpriced_charge_delta_kwh=sum(
+            item.unpriced_charge_delta_kwh for item in deltas
+        ),
+        unpriced_discharge_delta_kwh=sum(
+            item.unpriced_discharge_delta_kwh for item in deltas
+        ),
+        priced_charge_kwh_delta=sum(item.priced_charge_kwh_delta for item in deltas),
+        priced_discharge_kwh_delta=sum(
+            item.priced_discharge_kwh_delta for item in deltas
+        ),
+    )
 
 
 def compute_operating_result_high_water(
@@ -88,6 +161,10 @@ def compute_economics_delta(
     `unvalued_inventory_kwh` ist der VOR diesem Intervall gültige Bestand -
     der Aufrufer trägt `unvalued_inventory_delta_kwh` nach.
     """
+    if not is_valid_import_price(import_price_eur_kwh):
+        import_price_eur_kwh = None
+    if not is_valid_feed_in_price(feed_in_price_eur_kwh):
+        feed_in_price_eur_kwh = None
     grid_cost = 0.0
     pv_cost = 0.0
     unpriced_charge = 0.0

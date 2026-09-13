@@ -30,12 +30,14 @@ from .application.calibration import (
 from .application.charge_policy import (
     ChargePolicyInput,
     evaluate_charge_policy,
+    tariff_automation_controls,
     timed_discharge_hold_active,
     timed_discharge_pv_power,
 )
 from .application.economics import (
     investment_cost_eur_from_options,
     prior_result_eur_from_options,
+    tariff_config_from_options,
 )
 from .application.ports import ModbusClient
 from .application.tariff_charge import tariff_charge_state
@@ -50,6 +52,9 @@ from .const import (
     CELL_CALIBRATION_INTERVAL,
     CHARGE_CONFLICT_ISSUES,
     CONF_BRIDGE_CHARGE_ENABLED,
+    CONF_DASHBOARD_TARIFF_PROFILES,
+    CONF_PRICE_SENSOR,
+    CONF_VUE_DASHBOARD_ENABLED,
     CONTROL_MODE_LABELS,
     DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
@@ -114,7 +119,7 @@ from .domain.discharge_forecast import DischargeForecast
 from .domain.economics_accounting import (
     EconomicsDelta,
     capacity_inventory_correction,
-    compute_economics_delta,
+    compute_economics_interval,
     compute_operating_result_high_water,
     min_soc_inventory_correction,
 )
@@ -156,6 +161,7 @@ from .domain.tariff import (
     low_tariff_window,
     lowest_daily_price,
     sorted_windows,
+    validate_tariff,
     window_as_mapping,
 )
 from .domain.validation import clamp_float as _clamp_float
@@ -1181,6 +1187,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Aufrufen ein Fenster ausweisen, das zum gemeldeten Preis gar
         # nicht gehört (REQ-VUE-SAVINGS).
         moment = dt_util.now()
+        price_segments = self.tariff_provider.accounting_segments(
+            moment, observed_seconds
+        )
         quote_result = self.tariff_provider.quote(moment)
         current_price = quote_result.price_eur_kwh
         feed_in_price = self.tariff_provider.feed_in_price_eur_kwh
@@ -1229,12 +1238,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not frozen:
             delta: EconomicsDelta | None = None
             if charge_delta is not None:
-                delta = compute_economics_delta(
+                delta = compute_economics_interval(
                     charge_delta,
                     discharged_kwh,
                     self._economics_unvalued_inventory_kwh,
-                    current_price,
-                    feed_in_price,
+                    price_segments,
                 )
 
             # Tageswechsel-Erkennung VOR der Anwendung des aktuellen Deltas,
@@ -3244,6 +3252,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # vollständig bekannt, unabhängig von der Entity-Startreihenfolge.
         if self._timed_charge_max_soc is None:
             self._timed_charge_max_soc = self.timed_charge_max_soc
+        self._reconcile_tariff_automation()
         self._control_bootstrap_pending = False
         self._async_sync_unresolved_fields_issue()
         await self._async_persist_bootstrap_result()
@@ -3947,6 +3956,115 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def timed_charge_uses_tariff(self) -> bool:
         return self.tariff_provider.config.tariff_type is TariffType.TIME_OF_USE
 
+    def _reconcile_tariff_automation(
+        self,
+        *,
+        previous_tariff_type: TariffType | None = None,
+        enabled: bool | None = None,
+    ) -> None:
+        """Use the selected tariff even when both legacy switches are off."""
+        self._timed_charge_enabled, self._price_charge_enabled = (
+            tariff_automation_controls(
+                self.tariff_provider.config.tariff_type,
+                self._timed_charge_enabled,
+                self._price_charge_enabled,
+                previous_tariff_type=previous_tariff_type,
+                enabled=enabled,
+            )
+        )
+
+    async def async_apply_tariff_options(self, options: dict[str, Any]) -> None:
+        """Apply a Config Flow change through the same owner as the dashboard."""
+        async with self._charge_control_lock:
+            self._raise_if_shutdown()
+            entry = self.hass.config_entries.async_get_entry(self.entry_id)
+            if entry is not None:
+                # A queued listener must not restore a snapshot superseded by
+                # another options save while the device lock was occupied.
+                options = dict(entry.options)
+            if self.options == options:
+                return
+            self._apply_tariff_options(options)
+            self._async_schedule_month_control_change()
+
+    def _apply_tariff_options(
+        self, options: dict[str, Any], *, enabled: bool | None = None
+    ) -> None:
+        previous_tariff_type = self.tariff_provider.config.tariff_type
+        previous_enabled = self._timed_charge_enabled, self._price_charge_enabled
+        ignored = {CONF_DASHBOARD_TARIFF_PROFILES, CONF_VUE_DASHBOARD_ENABLED}
+        source_changed = {
+            k: v for k, v in self.options.items() if k not in ignored
+        } != {k: v for k, v in options.items() if k not in ignored}
+        self.options = dict(options)
+        self._reconcile_tariff_automation(
+            previous_tariff_type=previous_tariff_type, enabled=enabled
+        )
+        if (
+            enabled is not None
+            or previous_tariff_type != self.tariff_provider.config.tariff_type
+        ):
+            self.clear_control_field_unresolved("timed_charge_enabled")
+            self.clear_control_field_unresolved("price_charge_enabled")
+            self.async_dismiss_charge_conflict()
+        if source_changed:
+            # No sleeping writer may repeat the previous tariff's setpoint.
+            # The common control task applies the new decision without releasing
+            # an unrelated global SOC hold through an intermediate mode reset.
+            if self._sun_charge_task is not None:
+                self._sun_charge_task.cancel()
+            self.reconcile_charge_time_source()
+            self.price_planner.async_setup()
+            self.tariff_provider.async_setup()
+            self.notify_tariff_revision()
+        elif previous_enabled != (
+            self._timed_charge_enabled,
+            self._price_charge_enabled,
+        ):
+            self.price_planner.evaluate()
+
+    async def async_apply_dashboard_tariff(
+        self,
+        options: dict[str, Any],
+        *,
+        enabled: bool | None,
+        expected_options: dict[str, Any],
+    ) -> None:
+        """Commit tariff and automation ownership together, before publishing either."""
+        async with self._charge_control_lock:
+            self._raise_if_shutdown()
+            if self._control_bootstrap_pending:
+                raise ServiceValidationError("Ladeeinstellungen werden noch geladen")
+            entry = self.hass.config_entries.async_get_entry(self.entry_id)
+            if entry is None or dict(entry.options) != expected_options:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="dashboard_tariff_conflict",
+                )
+            target = tariff_config_from_options(options)
+            controls = tariff_automation_controls(
+                target.tariff_type,
+                self._timed_charge_enabled,
+                self._price_charge_enabled,
+                previous_tariff_type=self.tariff_provider.config.tariff_type,
+                enabled=enabled,
+            )
+            # A native switch can change while this request waits for the lock;
+            # validate the actual inherited state, including legacy tariffs.
+            if any(controls) and (
+                validate_tariff(target) is not None
+                or target.tariff_type is TariffType.DYNAMIC
+                and not options.get(CONF_PRICE_SENSOR)
+            ):
+                raise ServiceValidationError(
+                    "Bitte den Stromtarif vor dem Aktivieren vollständig einrichten."
+                )
+            self._apply_tariff_options(options, enabled=enabled)
+            # The options listener sees this already-applied snapshot and does not
+            # restart the provider or create a second control decision.
+            self.hass.config_entries.async_update_entry(entry, options=options)
+            self._async_schedule_month_control_change()
+
     def reconcile_charge_time_source(self) -> None:
         """Apply legacy overlap rules before an options change can resume charging."""
         if (
@@ -4255,6 +4373,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         gleichzeitig aktiv gespeichert sein können.
         """
         self._raise_if_shutdown()
+        if enabled and self.tariff_provider.config.tariff_type is TariffType.DYNAMIC:
+            if self._control_bootstrap_pending:
+                enabled = False
+            else:
+                raise ServiceValidationError(
+                    "Der dynamische Stromtarif ist aktiv. "
+                    "Bitte die Tarifart unter Stromtarif wechseln."
+                )
         if enabled and self._price_charge_enabled:
             if not force:
                 self._async_create_charge_conflict_issue(ISSUE_TIMED_CHARGE_CONFLICT)
@@ -5832,6 +5958,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Änderung übernommen wurde - siehe async_set_timed_charge_enabled für
         die gemeinsame Konfliktbehandlung mit der Netzladung."""
         self._raise_if_shutdown()
+        if enabled and self.timed_charge_uses_tariff:
+            if self._control_bootstrap_pending:
+                enabled = False
+            else:
+                raise ServiceValidationError(
+                    "Der zeitvariable Stromtarif ist aktiv. "
+                    "Bitte die Tarifart unter Stromtarif wechseln."
+                )
         if enabled and self._timed_charge_enabled:
             if not force:
                 self._async_create_charge_conflict_issue(ISSUE_PRICE_CHARGE_CONFLICT)

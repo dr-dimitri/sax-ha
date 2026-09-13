@@ -44,7 +44,7 @@ def parse_price(value: Any) -> float | None:
         return None
     try:
         price = float(value)
-    except TypeError, ValueError:
+    except TypeError, ValueError, OverflowError:
         return None
     return price if math.isfinite(price) else None
 

@@ -40,7 +40,8 @@ custom_components/sax_power/
 │                          (bridge_charge.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung, die Abbildung der Tarif-Options auf
-│                          das Domänenmodell (economics.py), explizite PV-/
+│                          das Domänenmodell (economics.py), getrennte
+│                          Tarifprofile (tariff_profiles.py), explizite PV-/
 │                          Zeitfenstereingaben und begrenzte Ladeaufträge
 │                          (bridge_inputs.py, bridge_session.py) sowie der
 │                          injizierbare Modbus-Client-Port
@@ -64,7 +65,8 @@ custom_components/sax_power/
 │                          60-Sekunden-Takt - ohne Modbus-Zugriff
 ├── economics.py          Home-Assistant-Adapter des Tarifmodells
 │                          (SaxTariffProvider): liest Options und Preis-Sensor
-│                          und liefert den geltenden Netzbezugspreis als Quote,
+│                          und liefert den geltenden Netzbezugspreis als Quote
+│                          sowie beobachtete Preisintervalle für die Geldbilanz,
 │                          siehe anforderung.yaml REQ-ECONOMICS-TARIFFS. Die
 │                          Geldbilanz selbst (REQ-ECONOMICS-ACCOUNTING) hat
 │                          keinen eigenen Adapter - sie läuft im Coordinator
@@ -98,6 +100,8 @@ custom_components/sax_power/
 │                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
 ├── dashboard_api.py        Berechtigungsgefiltertes Entity-Metadatenabo für Vue,
 │                          siehe REQ-VUE-ENTITY-BINDING
+├── dashboard_tariff.py     Tarifprofile, Tarifwechsel und Netzladefreigabe
+├── dashboard_price_series.py Vollständige Tagespreise mit Zeitzone und Lücken
 ├── dashboard_statistics.py Authentifizierter Recorder-Adapter für Kalenderwerte
 │                          und freie Zeiträume, siehe REQ-VUE-SAVINGS
 ├── frontend/              Eingechecktes Vue-Bundle für HACS und Snapshots
@@ -115,8 +119,8 @@ frontend/             Vue-/TypeScript-Quellen, Build, Komponenten-/Browser-Tests
 Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
 in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
-ordnet die Entity-Anbindung dem Config Entry zu. Die fünf Views unter
-`frontend/src/views/` bilden das einzige mitgelieferte Dashboard **SAX Power**.
+ordnet die Entity-Anbindung dem Config Entry zu. Die fünf navigierbaren Views
+unter `frontend/src/views/` bilden das einzige mitgelieferte Dashboard **SAX Power**.
 Der technische Pfad `/sax-power-vue`, das Custom Element und die bestehenden
 Config-Schlüssel bleiben kompatibel; UI-Name und Aktivierungsoption tragen
 keine Vue-/Vorschaukennzeichnung.
@@ -124,24 +128,27 @@ keine Vue-/Vorschaukennzeichnung.
 | View | Anforderungen | Aufgabe |
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
+| `ElectricityTariffView.vue` | `REQ-VUE-ELECTRICITY-TARIFF` | Gemeinsame Tarifwahl, Tagespreiskurve und kompakt bearbeitbare Tarif-/Ladeeinstellungen für zeitvariablen und dynamischen Tarif. |
 | `TimedChargingView.vue` | `REQ-VUE-CHARGING`, `REQ-TIME-OF-USE-CHARGE-SOURCE`, `REQ-BRIDGE-CHARGE` | Tarifpreisfenster, bei anderen Tarifarten Netzladezeitfenster, Entladestatus, Netzladeziel/Startschwelle, Monatsschalter und begründete Verbrauchsplanung bis zum PV-Start. |
-| `DynamicChargingView.vue` | `REQ-VUE-DYNAMIC-CHARGING` | Preisladeregler, Strategie und Status in der bisherigen Reihenfolge. |
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
 Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
-Zeitvariabler Tarif (EN: Time-of-use tariff), Dynamischer Tarif (EN: Dynamic
-tariff), Netzdienliches Laden, Amortisation. Die Pfade `ladeautomatik` und
-`dynamisches-laden`, Entity-Schlüssel und Tarifkonfiguration bleiben erhalten.
+Stromtarif (EN: Electricity tariff), Zeitvariabler Tarif (EN: Time-of-use tariff),
+Netzdienliches Laden, Amortisation. `stromtarif` ersetzt den dynamischen Einstieg;
+`dynamisches-laden` wird ohne Schreibaktion dorthin weitergeleitet. Der alte
+Tab unter `ladeautomatik` bleibt als Fallback immer sichtbar. Entity-Schlüssel
+und bestehende Steuerparameter bleiben erhalten.
 
-`ChargingLayout.vue` hält die Kartenstruktur der drei Ladeansichten gemeinsam.
+`ChargingLayout.vue` hält die Kartenstruktur der bisherigen Ladeansichten
+gemeinsam.
 Es filtert leere Karten und verwendet die gleichen `EntityControl`- und
 `EntityValue`-Komponenten wie die allgemeine Ansicht sowie `TimeWindowControl`
 für beide Zeitfenster. Die gemeinsame
 [`components/MonthSelection.vue`](frontend/src/components/MonthSelection.vue)
 kapselt Zusammenfassung und Quartalsauswahl beider Monatsgruppen.
-`hideConfirmedLabel` in Layout und Bedienkomponente entfernt nur in
-`TimedChargingView.vue` und `DynamicChargingView.vue` den Präfix
+`hideConfirmedLabel` in Layout und Bedienkomponente entfernt in
+Stromtarif und Zeitvariabler Tarif den Präfix
 „Bestätigter Wert:“ (EN: „Confirmed value:“) bei Zahlen und Auswahllisten.
 Bestätigte HA-Werte bleiben auch während lokaler Entwürfe sichtbar und über
 `aria-describedby` zugeordnet.
@@ -217,14 +224,13 @@ Alle Darstellungen einer Entität teilen ausstehende Aktionen und Fehler.
 Ein erfolgreich beantworteter Serviceaufruf verändert den angezeigten Zustand
 erst, wenn HA ihn tatsächlich meldet.
 
-Die Navigation blendet den jeweils anderen Tarif nur aus, wenn
-`timed_charge_enabled`/`price_charge_enabled` bestätigt `on`/`off` oder
-`off`/`on` melden. Bei beiden `off`, beiden `on`, fehlenden, unbekannten
-oder nicht verfügbaren Zuständen bleiben beide Tabs sichtbar. Leserechte
-genügen; Pending-Aktionen ändern die Navigation nicht optimistisch.
-Verborgene Deep Links, HA-Routen und History-Einträge werden per
-`replaceState` zum aktiven Tarif korrigiert, ohne Serviceaktion. Der Tab
-Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
+Der aktive Stromtarif folgt `economics_tariff_type`, unabhängig von den
+Ladeschaltern. „Automatische Netzladung“ schaltet nur die passende Automatik;
+Preiskurve und Wirtschaftlichkeit verwenden den ausgewählten Tarif auch bei
+`off`. „Tarif wechseln“ bleibt bis „Tarif übernehmen“ ein lokaler Entwurf.
+Die Navigation bleibt unverändert sichtbar; nur die alte Route
+`dynamisches-laden` wird per `replaceState` nach `stromtarif` umgeleitet.
+Der Tab Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
 
 `TimeWindowControl.vue` ersetzt in den Ansichten Zeitvariabler Tarif und
 Netzdienliches Laden die getrennten Zeit-Bedienelemente. Es gibt genau zwei
@@ -481,11 +487,11 @@ Zusätzlich gibt es einen Options Flow (`SaxPowerOptionsFlow`) für das
 preisoptimierte Laden. Dort stehen nur die Dinge, die sich nicht sinnvoll als
 Entity abbilden lassen (Auswahl der Quell-Sensoren und deren Interpretation);
 die im Alltag veränderlichen Stellgrößen sind echte Entities am SAX-Gerät.
-Eine Änderung wendet `async_update_options` direkt auf den laufenden
-Coordinator an (`coordinator.options` ersetzen + `price_planner.async_setup()`
-erneut aufrufen, idempotent + Plan sofort anwenden) - bewusst **kein**
-Config-Entry-Reload mehr: Ein
-Reload hätte über `SaxPowerCoordinator.async_shutdown`/`async_stop_sun_charge`
+Eine Änderung wendet `async_update_options` über
+`coordinator.async_apply_tariff_options` auf den laufenden Coordinator an.
+Tarifquelle und exklusive Automatik wechseln unter `_charge_control_lock`;
+Planner und Tarifprovider werden idempotent aktualisiert, der gemeinsame
+Control-Worker übernimmt den Geräteabgleich. Ein Config-Entry-Reload hätte über `SaxPowerCoordinator.async_shutdown`/`async_stop_sun_charge`
 ein gerade aktiv gehaltenes netzdienliches Laden (Register 40051 zurück auf
 SmartMeter-Nullregelung) unterbrochen und einen kurzen, ungewollten
 Ladevorgang ausgelöst, bis die neu erzeugte Instanz die
@@ -502,9 +508,11 @@ und Zeitfenster des tageszeitabhängigen Tarifs werden ausschließlich im
 Dashboard bearbeitet (REQ-VUE-TARIFF-EDITOR). Bleibt die Tarifart gleich,
 übernimmt der Flow das aktuell gespeicherte TOU-Profil; bei erstmaliger
 Auswahl bleiben fehlende Pflichtpreise unbekannt, bis der Anwender das Profil
-im Dashboard vervollständigt. Beim Tarifwechsel werden fremde Tarifschlüssel
-aus `ECONOMICS_OPTION_KEYS` entfernt. Die persistierten Schlüssel und die
-acht verschachtelten Fenster-Mappings in `entry.options` bleiben in EUR/kWh,
+im Dashboard vervollständigt. Inaktive Profile bleiben unter
+`dashboard_tariff_profiles` erhalten; die flachen aktiven Options bleiben
+verbindlich. Auch ein späterer Optionsflow erhält die Profile und kann ein
+bereits gespeichertes TOU-Profil wiederherstellen. Die persistierten Schlüssel
+und die acht verschachtelten Fenster-Mappings in `entry.options` bleiben in EUR/kWh,
 damit bestehende Konfigurationen und die interne Bilanz unverändert weiterlaufen.
 
 `TariffPlan.vue` stellt diese Preisfenster in `TimedChargingView.vue` und
@@ -544,6 +552,55 @@ die Options werden atomar aktualisiert und über `async_update_options` live
 angewendet. Die API verwendet ausdrücklich `*_ct_kwh`, während gespeicherte
 Options und bestehende Sensorattribute `*_eur_kwh` in Euro bleiben.
 
+Der gemeinsame Tab `ElectricityTariffView.vue` ergänzt diese Fallback-Karte
+um die kompakte Ansicht „Tarif & Preise“. Zeitvariabler und dynamischer Tarif
+verwenden dieselbe `TariffPriceChart.vue`: vollständiger heutiger Preistag,
+beim dynamischen Tarif zusätzlich morgen, aktuelle Preisangabe und Ladezustand.
+UTC-Intervallgrenzen erhalten 23-/25-Stunden-Tage; negative Preise liegen unter
+der Nulllinie, fehlende oder widersprüchliche Preise bleiben Lücken. Antippen,
+Pfeiltasten und eine aufklappbare Tabelle erschließen die einzelnen Werte.
+Die Kurve zeigt die Preisquelle, nicht nur ausgewählte Ladezeiten. Eine Quelle
+mit ausschließlich aktuellem Sensorzustand liefert keine erfundene Tageskurve.
+
+`tariff/get` liefert neben den bisherigen TOU-Feldern beide Profile,
+`can_configure` und `automation_enabled`. `tariff/configure` übernimmt
+`entry_id`, `revision`, die Ziel-`tariff_type`, optional ein vollständiges
+`profile` und optional `automation_enabled`. Ohne Profil wird das gespeicherte
+Zielprofil aktiviert; fehlende Pflichtdaten verhindern eine Netzladefreigabe.
+`async_apply_dashboard_tariff` prüft die Options nochmals unter dem Control-Lock,
+übernimmt Options und passende Freigabe gemeinsam und beendet alte periodische
+Writer bei einem Quellenwechsel. Der ausgeschaltete Hauptschalter erhält den
+Tarif; beim Start wird eine widersprüchliche alte Automatik ausgeschaltet.
+Reine Profilarchive lösen keine Quellenrevision aus. Schreibzugriff erfordert
+einen aktiven Administrator; Revisionskonflikte erhalten den lokalen Entwurf.
+Die API-Bestätigung beschreibt angenommene Konfiguration, Geräteaktivität folgt
+weiterhin erst auf die quittierte Steuersequenz.
+
+`tariff/series` nimmt `entry_id` und `day` (`today`/`tomorrow`) an. Die Antwort
+enthält `date`, `time_zone`, `start`, `end`, `now`, `current_price_ct_kwh`,
+`slots` mit Start/Ende/Preis, `gaps`, `status`, `reason` und `revision`.
+Lesende Benutzer benötigen auch Zugriff auf die dynamische Preisquelle.
+`ha.ts` teilt Profilabfragen und verwirft Antworten alter Einträge/Verbindungen;
+der Tab aktualisiert bei Quellen-/Tarifänderung und alle 60 Sekunden nur die
+Dashboard-Daten, ohne zusätzliche Modbus-Abfrage.
+
+„Tarif & Preise“ bearbeitet beim zeitvariablen Tarif Standardpreis,
+Einspeisevergütung, bis zu acht Fenster und die PV-Start-Prognosequelle. Beim
+dynamischen Tarif bleiben Preisquelle, optionales Attribut, Quelleneinheit
+(`auto`, `eur_kwh`, `ct_kwh`, `eur_mwh`, `ct_mwh`), Einspeisevergütung sowie
+Smart-PV-Sensor und anrechenbarer PV-Anteil erhalten. Beide Profile speichern
+getrennte PV-Quellen. Preiseingaben erfolgen in ct/kWh; die Quelleneinheit dient
+nur der Umrechnung und ergänzt keine Steuern oder Zuschläge.
+„Ladeverhalten“ verwendet die bestehenden HA-Entities mit ihren einzelnen
+Übernahmen; „Fertig“ klappt nur zu. Globaler Max-SOC und zeitvariables Ladeziel
+bleiben unterschiedliche Grenzen. Die TOU-Startschwelle entfällt bei
+verbrauchsbasierter Planung, die aktiven Monate bleiben bedienbar.
+Dynamisch erscheint die absolute Preisgrenze nur bei `absolute`, das
+Stundenbudget bei `relative`/`smart`; der Neutralpreis bleibt verfügbar und
+wirkt in diesen aktiven Strategien. Smart verwendet das Stundenbudget als
+Obergrenze seines festen 24-Stunden-Planungszyklus. „Ladeplan & Prognose“ zeigt
+weiterhin ausschließlich Backend-Ergebnisse.
+
 Die drei aktuellen Preis-Sensoren veröffentlichen ihre Zustände in ct/kWh.
 Preisgrenze und Neutralpreis wandeln native Centwerte beim Lesen und Schreiben
 an der Entity-Grenze um; der Steuerungs-Store bleibt in EUR/kWh. Der einmalige
@@ -567,11 +624,12 @@ Aufgaben, die sich leicht verwechseln lassen:
 |---|---|---|
 | `disabled` | keine | nur preisoptimiertes Laden |
 | `fixed` | ein fester Arbeitspreis aus dem Options Flow | nur preisoptimiertes Laden |
-| `time_of_use` | Standardpreis + bis zu acht Zeitfenster aus dem Dashboard | nur preisoptimiertes Laden |
+| `time_of_use` | Standardpreis + bis zu acht Zeitfenster aus dem Dashboard | inaktives dynamisches Profil; keine parallele Preisautomatik |
 | `dynamic` | der Strompreis-Sensor | Pflichtfeld |
 
-Für das preisoptimierte Laden ist der Sensor immer die Quelle, unabhängig vom
-Tarifmodell. Für die Wirtschaftlichkeit ist er es nur beim dynamischen Tarif.
+Für das preisoptimierte Laden ist der Sensor immer die Quelle. Bei
+`time_of_use` kann dieser Ladepfad nicht parallel aktiviert werden. Für die
+Wirtschaftlichkeit ist er es nur beim dynamischen Tarif.
 Beim tageszeitabhängigen Tarif ist er ausdrücklich unbrauchbar: Ein
 dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, das
 Tarifmodell dagegen ein täglich wiederkehrendes Profil - die beiden Formate
@@ -591,7 +649,12 @@ Mitternachten über die reale UTC-Tagesdauer verteilt. Dadurch behalten auch
 23/25-Stunden- und 92/100-Viertelstundenlisten an Zeitumstellungstagen ihre
 Tarifintervalle. Jede Slotgrenze wird direkt aus Tagesdauer und Index
 berechnet; bei anderen Arraylängen verschiebt kumulierte Rundung deshalb
-nicht die letzte Grenze über Mitternacht hinaus (Issue #105).
+nicht die letzte Grenze über Mitternacht hinaus (Issue #105). Relative Listen
+werden am lokalen `state.last_updated` verankert: alte heutige Preise wandern
+nach Mitternacht nicht auf den Folgetag. Unverfügbare Quellen, fremde Einheiten
+und nicht endliche Preise erzeugen keine gültigen Slots. Widersprüchliche
+Überlappungen bleiben in der Preisquelle erkennbar und werden für die
+Ladeauswahl ausgespart; identische Wiederholungen werden entdoppelt.
 
 Kein Formularschema darf einen Validator enthalten, den
 `voluptuous_serialize` nicht für das Frontend übersetzen kann - eine
@@ -827,8 +890,14 @@ rohen, ungerundeten Entladezuwachs dieses Intervalls - keine zweite Uhr,
 keine zweite Riemann-Summe. Die reine Rechnung liegt in
 `domain/economics_accounting.py`:
 
-- `compute_economics_delta` bewertet ein Intervall: Netzladung kostet den
-  Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
+- `compute_economics_interval` teilt die gemessene Energie proportional zur
+  Dauer entlang der tatsächlich beobachteten Preis-/Tarifgrenzen.
+  `SaxTariffProvider.accounting_segments` hält dazu begrenzte Snapshots von
+  Tarif und dynamischer Quelle bis zur nächsten Messung vor. Verspätete
+  Prognosen füllen frühere Lücken nicht nachträglich; Zeit vor der ersten
+  Beobachtung und verworfene Historie bleiben unbewertet.
+  `compute_economics_delta` bewertet jeweils ein solches Teilintervall:
+  Netzladung kostet den Netzbezugspreis, PV-Ladung die Einspeisevergütung. Fehlt der jeweilige
   Preis, wird nichts erfunden - die Energie erhöht stattdessen
   `unvalued_inventory_kwh` (unbewerteter Bestand) und einen
   `unpriced_charge`-Zähler. Dasselbe gilt bei fehlendem Smartmeter:
@@ -954,11 +1023,11 @@ unverändert übernommen werden (Issue #147).
 Minor-Version 8 startet nur `day_results` und den laufenden Tages-Bucket neu,
 weil ältere Snapshot-Stände dort Peak-Zuwächse statt signierter Ergebnisse
 gespeichert haben. Das Gesamtergebnis bleibt aus den drei Geldsummen erhalten.
-`notify_tariff_revision()` (aufgerufen aus
-`__init__.async_update_options`) merkt sich nur einen rein diagnostischen
-Zeitpunkt der letzten Options-Änderung - eine Tarifänderung wirkt ohnehin
-ausschließlich prospektiv, weil jedes künftige Delta einfach den dann
-aktuellen Preis verwendet; nichts wird rückwirkend neu berechnet.
+`notify_tariff_revision()` wird beim zentralen Anwenden geänderter Quellen
+aufgerufen und hält einen diagnostischen Revisionszeitpunkt fest. Die
+Geldbewertung verwendet die beobachteten Preisintervalle; ein Tarifwechsel
+ändert weder vorherige Intervalle noch bereits gebuchte Beträge. Die
+Amortisation und Recorder-Kalenderwerte übernehmen diese fortlaufende Bilanz.
 
 Scheitert `EconomicsStateStore.async_load()` selbst (I/O-Fehler, unbekannte
 künftige Storage-Hauptversion), setzt `async_load_economics_state`

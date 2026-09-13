@@ -642,6 +642,7 @@ SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD = 3600  # Sekunden
 # stehen als TariffType in domain/tariff.py; hier liegen nur die
 # Options-Flow-Schlüssel und die Wertebereiche der Eingabefelder.
 CONF_ECONOMICS_TARIFF_TYPE = "economics_tariff_type"
+CONF_DASHBOARD_TARIFF_PROFILES = "dashboard_tariff_profiles"
 CONF_ECONOMICS_FEED_IN_PRICE = "economics_feed_in_price_eur_kwh"
 CONF_ECONOMICS_FIXED_IMPORT_PRICE = "economics_fixed_import_price_eur_kwh"
 CONF_ECONOMICS_TOU_BASE_PRICE = "economics_tou_base_price_eur_kwh"

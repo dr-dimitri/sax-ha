@@ -97,8 +97,8 @@ Die Screenshots zeigen das Dashboard mit Beispieldaten.
 | Bereich | Das findest du dort |
 | --- | --- |
 | Allgemeine Informationen | Ladezustand, Leistung, Temperatur, Energiezähler und Speicherschalter |
-| Zeitvariabler Tarif | Ladezeiten, Monate, Ladegrenzen, Tarifpreisfenster und optionale Verbrauchsplanung bis zum PV-Start |
-| Dynamischer Tarif | Preisstrategie, Preisgrenzen und nächster Ladestart |
+| Stromtarif | Aktiven Tarif wählen, Tagespreise vergleichen, Tarifpreise und automatische Netzladung einstellen |
+| Zeitvariabler Tarif | Bisherige Ansicht als Fallback für Tarifpreisfenster, Ladegrenzen, Monate und Verbrauchsplanung bis zum PV-Start |
 | Netzdienliches Laden | PV-Ladepause, Monate und Prognoseschwelle |
 | Amortisation | Netto-Ersparnis, Tarifplan und Auswertung eigener Zeiträume |
 
@@ -108,16 +108,27 @@ und Uhrzeiten sendest du mit **Übernehmen**. Die Zeitfenster lassen sich
 Ende werden gemeinsam übernommen. Vor dem Ein- oder Ausschalten des
 Speichers erscheint eine Bestätigung.
 
-Zeitvariabler und dynamischer Tarif können nicht gleichzeitig aktiv sein.
-Das Dashboard zeigt den eingeschalteten Tarif und blendet den anderen aus.
-Sind beide ausgeschaltet, stehen beide zur Auswahl.
+Im Tab **Stromtarif** wählst du zwischen **Zeitvariabel** und **Dynamisch**.
+Es wird immer nur der aktive Tarif angezeigt; die Einstellungen des anderen
+bleiben für einen späteren Wechsel gespeichert. **Automatische Netzladung**
+schaltet die zum Tarif passende Ladefunktion. Auch bei ausgeschalteter
+Netzladung bleiben die Preise für Anzeige und Amortisation gültig.
+
+Das Diagramm zeigt die Strompreise des heutigen Tages in **ct/kWh**, bei
+dynamischen Tarifen auch die bereits verfügbaren Preise für morgen.
+**Tarif & Preise** und **Ladeverhalten** lassen sich zum Bearbeiten aufklappen
+und zeigen anschließend wieder eine kurze Zusammenfassung. Der bisherige
+Tab **Zeitvariabler Tarif** bleibt als Fallback erreichbar und verwendet
+dieselben Einstellungen.
+
+![Stromtarif mit Tagespreisen und kompakten Einstellungen](docs/images/vue-stromtarif-desktop-light-de.png)
 
 <details>
 <summary>So sieht das Dashboard auf dem Smartphone aus</summary>
 
 <p>
   <img src="docs/images/vue-allgemein-mobile-dark-en.png" alt="Geräteübersicht auf dem Smartphone im dunklen Design, englische Sprache" width="320">
-  <img src="docs/images/vue-ladeautomatik-mobile-dark-en.png" alt="Zeitfenster und Monatsauswahl auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+  <img src="docs/images/vue-stromtarif-mobile-dark-en.png" alt="Stromtarif mit Tagespreisen und kompakten Einstellungen auf dem Smartphone im dunklen Design, englische Sprache" width="320">
 </p>
 
 </details>
@@ -192,14 +203,17 @@ bedeutet also: nächste Fälligkeit am 15. September.
 ## Ladefunktionen
 
 Die zeitgesteuerte und die preisoptimierte Netzladung sind Alternativen.
-Beim Umschalten fragt Home Assistant nach, bevor es die bisher aktive
-Funktion ausschaltet. Netzdienliches Laden lässt sich zusätzlich nutzen
+Die Auswahl im Tab **Stromtarif** bestimmt die passende Ladefunktion; ein
+Tarifwechsel übernimmt den Zustand der automatischen Netzladung. Bei einem
+noch unvollständigen Zielprofil bleibt sie bis zur Einrichtung ausgeschaltet.
+Netzdienliches Laden lässt sich zusätzlich nutzen
 und hat während seiner wirksamen Ladepause Vorrang vor der Preisoptimierung.
 
 ### Zeitgesteuerte Netzladung
 
-Im Dashboard heißt dieser Bereich **Zeitvariabler Tarif**. Er passt zu
-festen günstigen Tarifzeiten, etwa einem Nachttarif.
+Wähle im Tab **Stromtarif** den Tarif **Zeitvariabel**. Er passt zu festen
+günstigen Tarifzeiten, etwa einem Nachttarif. Die bisherige Ansicht
+**Zeitvariabler Tarif** bleibt als Fallback verfügbar.
 
 ![Zeitvariabler Tarif mit verbindlichen Tarifpreisfenstern, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
 
@@ -321,16 +335,17 @@ Ertrag dieser Heute-Quelle.
 
 ### Preisoptimiertes Laden
 
-Der Bereich **Dynamischer Tarif** nutzt einen vorhandenen Strompreis-Sensor,
+Der Tarif **Dynamisch** im Tab **Stromtarif** nutzt einen vorhandenen Strompreis-Sensor,
 zum Beispiel von Tibber, Nordpool, EPEX Spot, ENTSO-E oder aWATTar.
 Die Integration ruft selbst keine Preise vom Anbieter ab.
 
-![Dynamischer Tarif mit Strategie, Preisgrenzen und Ladestatus](docs/images/vue-dynamisches-laden-desktop-light-de.png)
+![Dynamischer Stromtarif mit Tagespreisen und Ladesteuerung](docs/images/vue-stromtarif-dynamisch-desktop-light-de.png)
 
-Wähle unter **Konfigurieren** den Strompreis-Sensor. Preis-Einheit und
+Wähle unter **Tarif & Preise → Bearbeiten** den Strompreis-Sensor. Preis-Einheit und
 Vorschauattribut werden automatisch erkannt und lassen sich bei Bedarf
 vorgeben. Unterstützt werden EUR/kWh, ct/kWh, EUR/MWh und ct/MWh.
-Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion.
+Anschließend wählst du unter **Ladeverhalten** eine Strategie und schaltest
+**Automatische Netzladung** ein.
 
 | Strategie | Wann wird geladen? |
 | --- | --- |
@@ -343,7 +358,7 @@ Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
 verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
 **Smart** verwendet den **PV-Prognose-Sensor für Smart und Ladeplanung** aus
-**Konfigurieren**, getrennt vom heutigen Rest-Ertrag der Ladepause.
+**Tarif & Preise**, getrennt vom heutigen Rest-Ertrag der Ladepause.
 Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
 der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
 **Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
@@ -397,8 +412,9 @@ werden als Brutto-Arbeitspreise in **ct/kWh** erfasst und angezeigt; etwa
 Investitionskosten bleiben Eurobeträge. Beim tageszeitabhängigen
 Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
-hinterlegten Plan bearbeitest du als Administrator unter **Tarifpreisfenster →
-Bearbeiten** in den Tabs **Zeitvariabler Tarif** und **Amortisation**.
+hinterlegten Plan bearbeitest du als Administrator im Tab **Stromtarif** unter
+**Tarif & Preise → Bearbeiten**. Derselbe Editor ist unter **Tarifpreisfenster →
+Bearbeiten** in den Tabs **Zeitvariabler Tarif** und **Amortisation** verfügbar.
 Der Editor klappt direkt in der Karte auf: Standardpreis, Einspeisevergütung
 und vorhandene Zeitfenster mit **Von**, **Bis** und **Preis**. Über
 **Zeitfenster hinzufügen** lassen sich bis zu acht Fenster anlegen; Fenster
@@ -412,8 +428,9 @@ Für diesen Tarif entfallen die Preiseingaben im Konfigurationsdialog.
 Bestehende Tarifwerte bleiben beim Update und bei Änderungen anderer
 Einstellungen erhalten. Nach der erstmaligen Auswahl von **Tageszeitabhängig**
 vervollständigst du das Profil im Dashboard. Bis dahin gibt es keinen gültigen
-Tarif und keine automatische Tarifladung. Festpreis und dynamische
-Einspeisevergütung werden weiterhin unter **Konfigurieren** eingegeben.
+Tarif und keine automatische Tarifladung. Den Festpreis bearbeitest du
+weiterhin unter **Konfigurieren**, die dynamische Einspeisevergütung auch
+direkt unter **Stromtarif → Tarif & Preise**.
 
 Diese Preisfenster dienen der
 Geldbilanz und bestimmen den erlaubten Niedertarifbereich für feste SOC-Ladung
@@ -427,8 +444,12 @@ Es gibt keine zusätzliche Ladezeitenquelle oder Freigabeoption.
 Für den dynamischen Tarif muss ein Strompreis-Sensor ausgewählt sein.
 Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt
 abdecken. Fehlerhafte oder fehlende Preise werden als unbekannt behandelt.
-Tarifänderungen gelten sofort für kommende Messintervalle; frühere Beträge
-werden nicht neu berechnet.
+Beim Laden und Entladen gilt der Preis des zu diesem Zeitpunkt aktiven
+Tarifs. Ein Messintervall über einen Preis- oder Tarifwechsel wird zeitanteilig
+aufgeteilt: Netzladung kostet den Bezugspreis, PV-Ladung die entgangene
+Einspeisevergütung und Entladung spart den jeweiligen Bezugspreis. Die
+Energie wird innerhalb des kurzen Messintervalls gleichmäßig verteilt;
+bereits verbuchte Beträge werden nicht neu berechnet.
 
 Auch die HA-Entitäten für aktuelle Bezugspreise, Einspeisevergütung,
 Preisgrenze und Neutralpreis verwenden ct/kWh. Gespeicherte Preisgrenzen und

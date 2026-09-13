@@ -14,7 +14,7 @@ import { SAX_DASHBOARD_KEY, useSaxDashboard } from "./ha";
 import GeneralView from "./views/GeneralView.vue";
 import TimedChargingView from "./views/TimedChargingView.vue";
 import GridServingView from "./views/GridServingView.vue";
-import DynamicChargingView from "./views/DynamicChargingView.vue";
+import ElectricityTariffView from "./views/ElectricityTariffView.vue";
 import SavingsView from "./views/SavingsView.vue";
 import type { HomeAssistant, PanelInfo, PanelRoute } from "./types";
 
@@ -42,30 +42,35 @@ const showSidebarButton = computed(
 );
 const basePath = computed(() => `/${props.panel?.url_path || "sax-power-vue"}`);
 const path = ref(props.route?.path ?? window.location.pathname);
-const exclusiveTariff = computed(() => {
-  const timed = dashboard.entity("switch", "timed_charge_enabled");
-  const dynamic = dashboard.entity("switch", "price_charge_enabled");
-  if (!timed?.available || !dynamic?.available) return undefined;
-  if (timed.state?.state === "on" && dynamic.state?.state === "off")
-    return "ladeautomatik";
-  if (dynamic.state?.state === "on" && timed.state?.state === "off")
-    return "dynamisches-laden";
-  return undefined;
-});
-const visibleTabs = computed(() =>
-  tabs.filter(
-    (tab) =>
-      !exclusiveTariff.value ||
-      !["ladeautomatik", "dynamisches-laden"].includes(tab.path) ||
-      tab.path === exclusiveTariff.value,
-  ),
-);
+const visibleTabs = tabs;
 const requestedPath = computed(() => tabPath(path.value, basePath.value));
 const activePath = computed(() =>
-  exclusiveTariff.value &&
-  ["ladeautomatik", "dynamisches-laden"].includes(requestedPath.value)
-    ? exclusiveTariff.value
+  requestedPath.value === "dynamisches-laden"
+    ? "stromtarif"
     : requestedPath.value,
+);
+watch(
+  [
+    () => dashboard.ready.value,
+    () => {
+      const attrs =
+        dashboard.entity("sensor", "economics_current_import_price")?.state
+          ?.attributes ?? {};
+      return JSON.stringify([
+        attrs.tariff_type,
+        attrs.base_price_eur_kwh,
+        attrs.feed_in_price_eur_kwh,
+        attrs.windows,
+        attrs.price_sensor_entity_id,
+      ]);
+    },
+    () => dashboard.entity("switch", "timed_charge_enabled")?.state?.state,
+    () => dashboard.entity("switch", "price_charge_enabled")?.state?.state,
+  ],
+  ([ready]) => {
+    if (ready) void dashboard.loadTariff().catch(() => {});
+  },
+  { immediate: true },
 );
 const activeTab = computed(() =>
   tabs.find((tab) => tab.path === activePath.value),
@@ -193,9 +198,14 @@ function openSidebar(): void {
         <TimedChargingView
           v-else-if="activePath === 'ladeautomatik'"
           :hass="hass"
+          :tariff-url="`${basePath}/stromtarif`"
+          @navigate="navigate($event, `${basePath}/stromtarif`)"
         />
         <GridServingView v-else-if="activePath === 'netzdienliches-laden'" />
-        <DynamicChargingView v-else-if="activePath === 'dynamisches-laden'" />
+        <ElectricityTariffView
+          v-else-if="activePath === 'stromtarif'"
+          :hass="hass"
+        />
         <SavingsView
           v-else-if="activePath === 'ersparnis'"
           :hass="hass"

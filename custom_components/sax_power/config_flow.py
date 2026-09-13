@@ -25,10 +25,12 @@ from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from .application.economics import parse_price
+from .application.tariff_profiles import tariff_profiles_from_options
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
     CONF_BRIDGE_CHARGE_ENABLED,
+    CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
@@ -742,6 +744,9 @@ class SaxPowerOptionsFlow(OptionsFlow):
                     for key, value in user_input.items()
                     if key not in ECONOMICS_OPTION_KEYS
                 }
+                history = tariff_profiles_from_options(self.config_entry.options)
+                if any(history.values()):
+                    self._base_options[CONF_DASHBOARD_TARIFF_PROFILES] = history
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
                 self._base_options.setdefault(
                     CONF_VUE_DASHBOARD_ENABLED,
@@ -782,14 +787,16 @@ class SaxPowerOptionsFlow(OptionsFlow):
         if tariff_type is TariffType.TIME_OF_USE:
             # REQ-VUE-CHARGING: Der Dashboard-Editor besitzt das Tagesprofil.
             # Andere Optionsänderungen übernehmen dessen aktuellste Fassung.
-            if self.config_entry.options.get(CONF_ECONOMICS_TARIFF_TYPE) == tariff_type:
-                for key in (
-                    CONF_ECONOMICS_FEED_IN_PRICE,
-                    CONF_ECONOMICS_TOU_BASE_PRICE,
-                    *ECONOMICS_TOU_WINDOW_KEYS,
-                ):
-                    if key in self.config_entry.options:
-                        self._base_options[key] = self.config_entry.options[key]
+            profile = tariff_profiles_from_options(self.config_entry.options)[
+                tariff_type
+            ]
+            for key in (
+                CONF_ECONOMICS_FEED_IN_PRICE,
+                CONF_ECONOMICS_TOU_BASE_PRICE,
+                *ECONOMICS_TOU_WINDOW_KEYS,
+            ):
+                if key in profile:
+                    self._base_options[key] = profile[key]
             self._mark_vue_activation()
             return self.async_create_entry(title="", data=self._base_options)
         return await self.async_step_economics_dynamic()
@@ -873,6 +880,10 @@ class SaxPowerOptionsFlow(OptionsFlow):
         das jeweilige Schema selbst kennt.
         """
         known = {str(marker) for marker in schema.schema}
+        # Dashboard edits made while this page was open must survive in history.
+        history = tariff_profiles_from_options(self.config_entry.options)
+        if any(history.values()):
+            self._base_options[CONF_DASHBOARD_TARIFF_PROFILES] = history
         rounded = _round_price_fields(user_input)
         self._mark_vue_activation()
         return self.async_create_entry(
@@ -914,6 +925,14 @@ class SaxPowerOptionsFlow(OptionsFlow):
         weiterhin an der Schema-Validierung (siehe _async_repeat_init).
         """
         stored = dict(self.config_entry.options)
+        if schema is STEP_ECONOMICS_DYNAMIC_SCHEMA:
+            profile = tariff_profiles_from_options(self.config_entry.options)[
+                TariffType.DYNAMIC
+            ]
+            if CONF_ECONOMICS_FEED_IN_PRICE in profile:
+                stored[CONF_ECONOMICS_FEED_IN_PRICE] = profile[
+                    CONF_ECONOMICS_FEED_IN_PRICE
+                ]
         for key in _TOP_LEVEL_PRICE_KEYS:
             if (price := parse_price(stored.get(key))) is not None:
                 stored[key] = round(price * 100, ECONOMICS_PRICE_DECIMALS - 2)

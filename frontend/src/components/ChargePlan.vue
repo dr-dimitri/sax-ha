@@ -9,7 +9,7 @@ import {
 } from "../savings";
 import type { HomeAssistant } from "../types";
 
-const props = defineProps<{ hass?: HomeAssistant }>();
+const props = defineProps<{ hass?: HomeAssistant; hideControl?: boolean }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
 const german = computed(() => dashboard?.language.value === "de");
@@ -218,7 +218,11 @@ const target = computed(() => {
     :aria-labelledby="`${id}-charge-plan`"
   >
     <h2 :id="`${id}-charge-plan`">{{ text.title }}</h2>
-    <EntityControl domain="switch" entity-key="bridge_charge_enabled" />
+    <EntityControl
+      v-if="!hideControl"
+      domain="switch"
+      entity-key="bridge_charge_enabled"
+    />
     <p v-if="control">{{ text.setup }}</p>
     <p v-if="configurationHint">{{ configurationHint }}</p>
     <template v-for="(paragraph, index) in paragraphs" :key="index">

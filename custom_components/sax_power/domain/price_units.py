@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..const import (
+    PRICE_UNIT_AUTO,
     PRICE_UNIT_CT_KWH,
     PRICE_UNIT_CT_MWH,
     PRICE_UNIT_EUR_KWH,
@@ -47,6 +48,8 @@ def unit_factor(configured_unit: str, sensor_unit: Any) -> float | None:
     """
     if configured_unit in _EXPLICIT_FACTORS:
         return _EXPLICIT_FACTORS[configured_unit]
+    if configured_unit != PRICE_UNIT_AUTO:
+        return None
     unit = "".join(str(sensor_unit or "").lower().split())
     if not unit:
         return 1.0

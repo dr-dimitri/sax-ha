@@ -17,6 +17,8 @@ import type {
   HassEntity,
   HomeAssistant,
   TariffDraft,
+  TariffConfiguration,
+  TariffPriceSeries,
   TariffProfile,
   Unsubscribe,
 } from "./types";
@@ -71,6 +73,8 @@ export interface SaxDashboard {
   tariff: Readonly<Ref<TariffProfile | null>>;
   loadTariff(): Promise<TariffProfile>;
   saveTariff(draft: TariffDraft): Promise<TariffProfile>;
+  configureTariff(configuration: TariffConfiguration): Promise<TariffProfile>;
+  loadTariffSeries(day: "today" | "tomorrow"): Promise<TariffPriceSeries>;
   performTimeWindow(
     kind: "timed_charge" | "grid_serving",
     start: string,
@@ -534,23 +538,92 @@ export function useSaxDashboard(
     }
   }
 
-  async function tariffRequest(draft?: TariffDraft): Promise<TariffProfile> {
+  let tariffReadSequence = 0;
+  let tariffWrite: {
+    generation: number;
+    promise: Promise<TariffProfile>;
+  } | null = null;
+
+  let tariffRead: {
+    generation: number;
+    sequence: number;
+    promise: Promise<TariffProfile>;
+  } | null = null;
+
+  async function tariffRequest(
+    draft?: TariffDraft | TariffConfiguration,
+  ): Promise<TariffProfile> {
     const hass = getHass();
     const entryId = getEntryId();
     if (!connected.value) throw { code: "disconnected" };
     if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
     const current = generation;
-    const profile = await hass.callWS<TariffProfile>({
-      type: `sax_power/dashboard/tariff/${draft ? "save" : "get"}`,
+    if (!draft && tariffWrite?.generation === current)
+      return tariffWrite.promise;
+    const request = ++tariffReadSequence;
+    const response = hass.callWS<TariffProfile>({
+      type: `sax_power/dashboard/tariff/${draft ? ("tariff_type" in draft ? "configure" : "save") : "get"}`,
       entry_id: entryId,
       ...draft,
     });
+    const operation: Promise<TariffProfile> =
+      (async (): Promise<TariffProfile> => {
+        const profile = await response;
+        if (current !== generation || !connected.value)
+          throw { code: "disconnected" };
+        if (!profile || typeof profile.revision !== "string")
+          throw { code: "failed" };
+        // REQ-VUE-ELECTRICITY-TARIFF: a delayed read must never undo a confirmed write.
+        if (!draft && request !== tariffReadSequence) {
+          if (tariffWrite?.generation === current) return tariffWrite.promise;
+          if (
+            tariffRead?.generation === current &&
+            tariffRead.sequence !== request
+          )
+            return tariffRead.promise;
+          return tariff.value ?? profile;
+        }
+        if (draft) tariffReadSequence++;
+        tariff.value = profile;
+        return profile;
+      })();
+    if (draft) tariffWrite = { generation: current, promise: operation };
+    else
+      tariffRead = {
+        generation: current,
+        sequence: request,
+        promise: operation,
+      };
+    try {
+      return await operation;
+    } finally {
+      if (tariffWrite?.promise === operation) tariffWrite = null;
+      if (tariffRead?.promise === operation) tariffRead = null;
+    }
+  }
+
+  async function loadTariffSeries(
+    day: "today" | "tomorrow",
+  ): Promise<TariffPriceSeries> {
+    const hass = getHass();
+    const entryId = getEntryId();
+    if (!connected.value) throw { code: "disconnected" };
+    if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const current = generation;
+    const result = await hass.callWS<TariffPriceSeries>({
+      type: "sax_power/dashboard/tariff/series",
+      entry_id: entryId,
+      day,
+    });
     if (current !== generation || !connected.value)
       throw { code: "disconnected" };
-    if (!profile || typeof profile.revision !== "string")
+    if (
+      !result ||
+      !Array.isArray(result.slots) ||
+      typeof result.start !== "string"
+    )
       throw { code: "failed" };
-    tariff.value = profile;
-    return profile;
+    return result;
   }
 
   return {
@@ -564,5 +637,7 @@ export function useSaxDashboard(
     tariff: computed(() => tariff.value),
     loadTariff: () => tariffRequest(),
     saveTariff: (draft) => tariffRequest(draft),
+    configureTariff: (configuration) => tariffRequest(configuration),
+    loadTariffSeries,
   };
 }

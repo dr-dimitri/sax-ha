@@ -36,7 +36,7 @@ test("compact views retain readable controls and all entities across available p
     allgemein: 850,
     ladeautomatik: 1150,
     "netzdienliches-laden": 1100,
-    "dynamisches-laden": 900,
+    stromtarif: 900,
     ersparnis: 1600,
   };
   const contentLabels = panel.locator(
@@ -44,6 +44,7 @@ test("compact views retain readable controls and all entities across available p
   );
 
   for (const tab of tabs) {
+    if (tab.path === "stromtarif") continue;
     await panel.locator(`nav a[href='/sax-power-vue/${tab.path}']`).click();
     if (tab.path === "ersparnis")
       await expect(panel.locator(".savings-chart")).toBeVisible();
@@ -426,15 +427,15 @@ test("one dashboard with five complete views, local assets and responsive screen
     language === "de"
       ? [
           "Allgemeine Informationen",
+          "Stromtarif",
           "Zeitvariabler Tarif",
-          "Dynamischer Tarif",
           "Netzdienliches Laden",
           "Amortisation",
         ]
       : [
           "General information",
+          "Electricity tariff",
           "Time-of-use tariff",
-          "Dynamic tariff",
           "Grid-serving charging",
           "Amortization",
         ],
@@ -445,8 +446,8 @@ test("one dashboard with five complete views, local assets and responsive screen
       .evaluateAll((links) => links.map((link) => link.getAttribute("href"))),
   ).toEqual([
     "/sax-power-vue/allgemein",
+    "/sax-power-vue/stromtarif",
     "/sax-power-vue/ladeautomatik",
-    "/sax-power-vue/dynamisches-laden",
     "/sax-power-vue/netzdienliches-laden",
     "/sax-power-vue/ersparnis",
   ]);
@@ -465,10 +466,18 @@ test("one dashboard with five complete views, local assets and responsive screen
       tab[language],
     );
     await expect(panel.locator(".placeholder")).toHaveCount(0);
+    if (tab.path === "stromtarif") {
+      await expect(panel.locator(".electricity-price-card svg")).toBeVisible();
+      await testInfo.attach(`vue-${tab.path}-${testInfo.project.name}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      continue;
+    }
     await expect(panel).not.toContainText(
       /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
     );
-    if (tab.path === "ladeautomatik" || tab.path === "dynamisches-laden") {
+    if (tab.path === "ladeautomatik") {
       await expect(panel).not.toContainText(
         /Bestätigter Wert:|Confirmed value:/,
       );
@@ -794,7 +803,9 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await expect(page.locator("#actions")).toContainText("1: number.set_value");
   await page.locator("#external").click();
   await expect(input).toHaveValue("75");
-  await panel.locator("nav a[href$='/dynamisches-laden']").click();
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await page.locator("#tariff-dynamic").click();
+  await panel.locator(".electricity-charging header button").click();
   const shared = panel.locator("input[max='100']");
   await expect(shared).toHaveValue("75");
   await page.locator("#connection").click();
@@ -934,7 +945,9 @@ test("overnight times, months, native strategy options and negative prices", asy
   await expect(
     panel.getByText("PV-Prognose 13.9.", { exact: true }),
   ).toBeVisible();
-  await panel.locator("nav a[href$='/dynamisches-laden']").click();
+  await page.locator("#tariff-dynamic").click();
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await panel.locator(".electricity-charging header button").click();
   await expect(panel.locator("select option")).toHaveCount(4);
   await panel.getByRole("combobox").selectOption("smart");
   await expect(panel.getByRole("combobox")).toHaveValue("smart");
@@ -1273,14 +1286,14 @@ test("one inclusive date selection drives signed chart and accessible table", as
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
-test("both tariff switches clear pending feedback after the simulated HA service completes", async ({
+test("the legacy TOU switch clears pending feedback after the simulated HA service completes", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   const pending = testInfo.project.name.endsWith("en")
     ? "Sending change to Home Assistant …"
     : "Änderung wird an Home Assistant gesendet …";
-  for (const path of ["ladeautomatik", "dynamisches-laden"]) {
+  for (const path of ["ladeautomatik"]) {
     await panel.locator(`nav a[href$='/${path}']`).click();
     const control = panel.locator(".charging-view > .entity-control");
     const input = control.getByRole("switch");
@@ -1328,82 +1341,49 @@ test("both tariff switches clear pending feedback after the simulated HA service
   }
 });
 
-test("tariff tabs follow confirmed HA states and keep both choices available when no exclusive tariff is known", async ({
+test("tariff navigation remains stable while the saved tariff controls the legacy fallback", async ({
   page,
 }) => {
   const panel = page.locator("sax-power-vue-panel");
   const timed = panel.locator("nav a[href$='/ladeautomatik']");
-  const dynamic = panel.locator("nav a[href$='/dynamisches-laden']");
-  await expect(panel.locator("nav a")).toHaveCount(5);
+  const electricity = panel.locator("nav a[href$='/stromtarif']");
   await page.locator("#tariff-timed").click();
-  await expect(panel.locator("nav a")).toHaveCount(4);
-  await expect(timed).toBeVisible();
-  await expect(dynamic).toHaveCount(0);
-  await expect(page).toHaveURL(/allgemein$/);
   await timed.click();
-  await expect(panel).not.toContainText(
-    /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
-  );
+  await expect(panel.locator("nav a")).toHaveCount(5);
+  await expect(panel.locator(".timed-charging-view__fallback")).toHaveCount(0);
   await page.locator("#tariff-dynamic").click();
-  await expect(page).toHaveURL(/dynamisches-laden$/);
-  await expect(dynamic).toHaveAttribute("aria-current", "page");
-  await expect(panel).not.toContainText(
-    /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
-  );
-  await expect(timed).toHaveCount(0);
-  await expect(panel.getByRole("heading", { level: 1 })).toBeFocused();
+  await expect(page).toHaveURL(/ladeautomatik$/);
+  await expect(panel.locator(".timed-charging-view__fallback")).toBeVisible();
+  await expect(
+    panel.locator(".timed-charging-view__fallback input"),
+  ).toHaveCount(0);
   await page.locator("#tariff-off").click();
   await expect(panel.locator("nav a")).toHaveCount(5);
-  await expect(timed).toBeVisible();
-  await expect(dynamic).toBeVisible();
-  await page.locator("#tariff-both").click();
-  await expect(panel.locator("nav a")).toHaveCount(5);
-  await page.locator("#tariff-timed").click();
-  await expect(page).toHaveURL(/ladeautomatik$/);
-  await page.locator("#unavailable").click();
-  await expect(panel.locator("nav a")).toHaveCount(5);
-  await page.locator("#unavailable").click();
-  await expect(panel.locator("nav a")).toHaveCount(4);
-  await expect(dynamic).toHaveCount(0);
+  await expect(electricity).toBeVisible();
+  await expect(panel.locator(".timed-charging-view__fallback")).toBeVisible();
   await page.locator("#connection").click();
   await expect(panel.locator("nav a")).toHaveCount(5);
   await page.locator("#connection").click();
-  await expect(panel.locator("nav a")).toHaveCount(4);
-  await expect(timed).toBeVisible();
+  await expect(panel.locator("nav a")).toHaveCount(5);
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
-
-test("hidden tariff deep links, reload and history resolve to the active tariff without service actions", async ({
+test("old dynamic deep links redirect to electricity tariff and preserve history without activation", async ({
   page,
 }) => {
   const panel = page.locator("sax-power-vue-panel");
-  await page.locator("#tariff-timed").click();
   await page.goto("/sax-power-vue/dynamisches-laden");
-  await expect(page).toHaveURL(/ladeautomatik$/);
+  await expect(page).toHaveURL(/stromtarif$/);
   await expect(panel.locator("nav [aria-current='page']")).toHaveAttribute(
     "href",
-    "/sax-power-vue/ladeautomatik",
-  );
-  await expect(panel.locator("nav a[href$='/dynamisches-laden']")).toHaveCount(
-    0,
+    "/sax-power-vue/stromtarif",
   );
   await page.reload();
-  await expect(page).toHaveURL(/ladeautomatik$/);
-  await expect(panel.locator(".tariff-plan")).toBeVisible();
-  await expect(panel.locator(".time-window-control")).toHaveCount(0);
+  await expect(panel.locator(".electricity-tariff-view")).toBeVisible();
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
-  await page.locator("#tariff-dynamic").click();
-  await expect(page).toHaveURL(/netzdienliches-laden$/);
   await page.goBack();
-  await expect(page).toHaveURL(/dynamisches-laden$/);
-  await expect(panel.locator("nav [aria-current='page']")).toHaveAttribute(
-    "href",
-    "/sax-power-vue/dynamisches-laden",
-  );
-  await expect(panel.locator("nav a[href$='/ladeautomatik']")).toHaveCount(0);
+  await expect(page).toHaveURL(/stromtarif$/);
   await page.goForward();
   await expect(page).toHaveURL(/netzdienliches-laden$/);
-  await expect(panel.locator(".time-window-control")).toBeVisible();
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
@@ -1449,4 +1429,170 @@ test("keyboard navigation, deep links, reload and browser history", async ({
     "/sax-power-vue/ersparnis",
   );
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+// REQ-VUE-ELECTRICITY-TARIFF: compact chart and explicit persisted settings.
+test("electricity tariff saves compact prices and keeps all editor fields usable down to 320px", async ({
+  page,
+}, testInfo) => {
+  const en = testInfo.project.name.endsWith("en");
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator("nav a[href='/sax-power-vue/stromtarif']").click();
+  await expect(panel.locator(".tariff-price-chart svg")).toBeVisible();
+  await expect(panel.locator(".electricity-master input")).toHaveCount(1);
+  await page.setViewportSize({ width: 320, height: 844 });
+  const editButton = panel.locator(".electricity-charging header > button");
+  expect((await editButton.boundingBox())?.height).toBeLessThanOrEqual(48);
+  const price = panel.locator(".tariff-plan");
+  await expect(price.locator("form")).toHaveCount(0);
+  await price
+    .getByRole("button", { name: en ? "Edit" : "Bearbeiten", exact: true })
+    .click();
+  await page.setViewportSize({ width: 320, height: 844 });
+  const fields = price.locator("input,select");
+  for (const input of await fields.all()) {
+    const box = await input.boundingBox();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+    expect(box?.width).toBeGreaterThanOrEqual(150);
+  }
+  await price.locator('input[name="base_price"]').fill(en ? "34.25" : "34,25");
+  await price
+    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .click();
+  await expect(price.locator("form")).toHaveCount(0);
+  await expect(price).toContainText(en ? "34.25" : "34,25");
+  await expect(page.locator("#actions")).toContainText(
+    '"base_price_ct_kwh":34.25',
+  );
+  await price
+    .getByRole("button", { name: en ? "Edit" : "Bearbeiten", exact: true })
+    .click();
+  await price.locator('input[name="base_price"]').fill("99");
+  await price
+    .getByRole("button", { name: en ? "Cancel" : "Abbrechen", exact: true })
+    .click();
+  await expect(price).toContainText(en ? "34.25" : "34,25");
+  expect(
+    await panel.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth + 1,
+    ),
+  ).toBe(true);
+});
+test("electricity tariff explicitly selects dynamic and uses one central automation switch", async ({
+  page,
+}, testInfo) => {
+  const en = testInfo.project.name.endsWith("en");
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator("nav a[href='/sax-power-vue/stromtarif']").click();
+  await panel
+    .getByRole("button", {
+      name: en ? "Change tariff" : "Tarif wechseln",
+      exact: true,
+    })
+    .click();
+  await panel.locator('input[value="dynamic"]').check();
+  await expect(page.locator("#actions")).not.toContainText("configure_tariff");
+  await panel
+    .getByRole("button", {
+      name: en ? "Apply tariff" : "Tarif übernehmen",
+      exact: true,
+    })
+    .click();
+  await expect(panel.locator(".electricity-active strong")).toHaveText(
+    en ? "Dynamic" : "Dynamisch",
+  );
+  const master = panel.locator(".electricity-master input");
+  const checked = await master.isChecked();
+  await master.setChecked(!checked);
+  await expect(page.locator("#actions")).toContainText(
+    `"automation_enabled":${!checked}`,
+  );
+  await expect(page.locator("#actions")).toContainText(
+    '"tariff_type":"dynamic"',
+  );
+  await panel.locator("nav a[href='/sax-power-vue/ladeautomatik']").click();
+  await expect(panel.locator(".timed-charging-view input")).toHaveCount(0);
+  await expect(panel.locator(".timed-charging-view a")).toHaveAttribute(
+    "href",
+    "/sax-power-vue/stromtarif",
+  );
+  await panel.locator(".timed-charging-view a").click();
+  const prices = panel.locator(".electricity-prices");
+  await prices
+    .getByRole("button", { name: en ? "Edit" : "Bearbeiten", exact: true })
+    .click();
+  await prices.locator('[name="dynamic_feed"]').fill(en ? "9.25" : "9,25");
+  await page.locator("#failure").click();
+  await prices
+    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .click();
+  await expect(panel.locator('[role="alert"]')).toBeVisible();
+  await expect(prices.locator('[name="dynamic_feed"]')).toHaveValue(
+    en ? "9.25" : "9,25",
+  );
+  await prices
+    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .click();
+  await expect(prices.locator("form")).toHaveCount(0);
+  await expect(prices).toContainText(en ? "9.25" : "9,25");
+});
+test("electricity chart preserves negative values and gaps and marks missing tomorrow honestly", async ({
+  page,
+}, testInfo) => {
+  const en = testInfo.project.name.endsWith("en");
+  await page.locator("#tariff-dynamic").click();
+  await page.evaluate(() => {
+    const panel = document.querySelector(
+      "sax-power-vue-panel",
+    ) as HTMLElement & { hass: HomeAssistant };
+    const original = panel.hass.callWS!;
+    panel.hass = {
+      ...panel.hass,
+      callWS: async <T>(
+        request: Readonly<Record<string, unknown>>,
+      ): Promise<T> => {
+        const result = await original<any>(request);
+        if (request.type === "sax_power/dashboard/tariff/series") {
+          if (request.day === "tomorrow")
+            return {
+              ...result,
+              status: "unavailable",
+              slots: [],
+              gaps: [{ start: result.start, end: result.end }],
+              reason: "price_forecast_missing",
+            };
+          const removed = result.slots.splice(8, 1)[0];
+          return {
+            ...result,
+            status: "partial",
+            gaps: [{ start: removed.start, end: removed.end }],
+          };
+        }
+        return result;
+      },
+    };
+  });
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator("nav a[href='/sax-power-vue/stromtarif']").click();
+  const chart = panel.locator(".tariff-price-chart");
+  await expect(chart).toContainText(
+    en ? "Gaps remain empty" : "Lücken werden nicht aufgefüllt",
+  );
+  const curve = chart.locator(".tariff-price-chart__line");
+  expect((await curve.getAttribute("d"))?.match(/M/g)?.length).toBe(2);
+  await chart.locator("svg").focus();
+  await page.keyboard.press("End");
+  await expect(chart.locator(".tariff-price-chart__detail")).toContainText(
+    "ct/kWh",
+  );
+  await chart.locator("summary").click();
+  await expect(chart.locator("table")).toContainText(en ? "-4.00" : "-4,00");
+  await panel
+    .getByRole("button", { name: en ? "Tomorrow" : "Morgen", exact: true })
+    .click();
+  await expect(chart.locator("svg")).toHaveCount(0);
+  await expect(chart).toContainText(
+    en ? "Prices are not available" : "noch keine Preise verfügbar",
+  );
 });

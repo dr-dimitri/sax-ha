@@ -14,6 +14,7 @@ import { SAX_DASHBOARD_KEY } from "../ha";
 const props = defineProps<{
   domain: "switch" | "number" | "time" | "select";
   entityKey: string;
+  label?: string;
   confirmSwitch?: boolean;
   hideConfirmedLabel?: boolean;
   monthTile?: boolean;
@@ -249,7 +250,7 @@ async function changeSelect(event: Event): Promise<void> {
       :for="inputId"
       class="entity-control__switch-target entity-control__month-target"
     >
-      <span class="entity-control__name">{{ entity.name }}</span>
+      <span class="entity-control__name">{{ label ?? entity.name }}</span>
       <input
         :id="inputId"
         type="checkbox"
@@ -266,7 +267,7 @@ async function changeSelect(event: Event): Promise<void> {
     <template v-else>
       <div class="entity-control__description">
         <label :for="inputId" class="entity-control__name">{{
-          entity.name
+          label ?? entity.name
         }}</label>
         <p
           v-if="domain !== 'switch'"

@@ -19,6 +19,33 @@ from ..const import (
     PRICE_STRATEGY_SMART,
 )
 from ..domain.scheduling import is_time_in_window
+from ..domain.tariff import TariffType
+
+
+def tariff_automation_controls(
+    tariff_type: TariffType,
+    timed_enabled: bool,
+    price_enabled: bool,
+    *,
+    previous_tariff_type: TariffType | None = None,
+    enabled: bool | None = None,
+) -> tuple[bool, bool]:
+    """REQ-VUE-ELECTRICITY-TARIFF: one selected source owns automatic charging."""
+    if tariff_type not in (TariffType.TIME_OF_USE, TariffType.DYNAMIC):
+        return timed_enabled, price_enabled
+    if enabled is None:
+        if previous_tariff_type is not None and previous_tariff_type != tariff_type:
+            enabled = timed_enabled or price_enabled
+        else:
+            enabled = (
+                timed_enabled
+                if tariff_type is TariffType.TIME_OF_USE
+                else price_enabled
+            )
+    return (
+        bool(enabled and tariff_type is TariffType.TIME_OF_USE),
+        bool(enabled and tariff_type is TariffType.DYNAMIC),
+    )
 
 
 def timed_discharge_hold_active(

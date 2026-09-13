@@ -17,6 +17,7 @@ from pytest_homeassistant_custom_component.typing import (
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
+    CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_PV_FORECAST_FACTOR,
@@ -85,7 +86,14 @@ async def test_admin_roundtrip_preserves_euro_options_and_precision(
     original = deepcopy(dict(tariff_entry.options))
     client = await hass_ws_client(hass)
     tariff = await _get(client, tariff_entry)
-    assert tariff == {
+    assert tariff["can_configure"] is True
+    assert tariff["automation_enabled"] is None
+    assert tariff["profiles"]["time_of_use"]["base_price_ct_kwh"] == 32.12
+    assert {
+        key: value
+        for key, value in tariff.items()
+        if key not in {"can_configure", "automation_enabled", "profiles"}
+    } == {
         "tariff_type": "time_of_use",
         "base_price_ct_kwh": 32.12,
         "feed_in_price_ct_kwh": 7.86,
@@ -160,7 +168,7 @@ async def test_revision_prevents_overwriting_a_newer_tariff(
             }
         },
         "type": {CONF_ECONOMICS_TARIFF_TYPE: "fixed"},
-        "unrelated": {CONF_PV_FORECAST_FACTOR: 90},
+        "unrelated": {CONF_ECONOMICS_INVESTMENT_COST: 9000},
     }
     hass.config_entries.async_update_entry(
         tariff_entry, options={**tariff_entry.options, **changes[change]}
@@ -170,7 +178,7 @@ async def test_revision_prevents_overwriting_a_newer_tariff(
     response = await client.receive_json()
     if change == "unrelated":
         assert response["success"] is True
-        assert tariff_entry.options[CONF_PV_FORECAST_FACTOR] == 90
+        assert tariff_entry.options[CONF_ECONOMICS_INVESTMENT_COST] == 9000
     else:
         assert response["error"]["code"] == "conflict"
     assert tariff_entry.options == current

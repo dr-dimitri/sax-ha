@@ -11,7 +11,7 @@ Registerzugriffe.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -147,7 +147,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     #    die gesamte Ladeleistung, siehe REQ-ENERGY-ORIGIN).
     pv_tick = _tick(
         1000.0 + 3600,
-        base,
+        base + timedelta(hours=1),
         storage_power_active=-1000,
         smartmeter_power=-500,
         soc=10,
@@ -156,7 +156,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     # 3) Eine Stunde Netzladung (Netzbezug deckt die Ladeleistung).
     grid_tick = _tick(
         1000.0 + 2 * 3600,
-        base,
+        base + timedelta(hours=2),
         storage_power_active=-1000,
         smartmeter_power=1000,
         soc=20,
@@ -165,7 +165,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     # 4) Eine Stunde Entladung.
     discharge_tick = _tick(
         1000.0 + 3 * 3600,
-        base,
+        base + timedelta(hours=3),
         storage_power_active=1000,
         smartmeter_power=0,
         soc=10,

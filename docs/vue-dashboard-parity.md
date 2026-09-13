@@ -21,8 +21,8 @@ Die Navigation verwendet folgende Reihenfolge und Namen:
 | Deutsch | Englisch | Pfad unter `/sax-power-vue` |
 | --- | --- | --- |
 | Allgemeine Informationen | General information | `allgemein` |
+| Stromtarif | Electricity tariff | `stromtarif` |
 | Zeitvariabler Tarif | Time-of-use tariff | `ladeautomatik` |
-| Dynamischer Tarif | Dynamic tariff | `dynamisches-laden` |
 | Netzdienliches Laden | Grid-serving charging | `netzdienliches-laden` |
 | Amortisation | Amortization | `ersparnis` |
 
@@ -47,7 +47,7 @@ Die Darstellung passt sich der verfügbaren Breite an. Beschriftungen und Werte
 werden nicht abgeschnitten, die Bedienflächen von Eingaben und Schaltflächen
 bleiben mindestens 44 px hoch.
 
-Gültige Softwarekonfiguration bestätigt Serviceantwort und HA-Zustand ohne
+Native Entity-Services bestätigen gültige Softwarekonfiguration und HA-Zustand ohne
 Warten auf die Geräteauswertung. Das gilt für die drei Ladehauptschalter,
 Monate, Max-SOC, Netzladeziel/Min-SOC, Preisgrenzen, Anzahl Stunden, Strategie,
 Prognoseschwelle sowie einzelne und atomare Zeitfenster. Der Coordinator
@@ -58,8 +58,8 @@ Gerätezustände folgen weiterhin der quittierten Steuersequenz.
 Implementierungsgrenzen und Ablauf stehen in `REQ-VUE-ENTITY-BINDING` und
 [DEVELOPMENT.md](../DEVELOPMENT.md).
 
-In den beiden Tarif-Tabs entfällt „Bestätigter Wert:“ (EN: „Confirmed value:“)
-vor den bestätigten Zahlen- und Auswahlwerten. Die Werte bleiben auch beim Bearbeiten und
+In Stromtarif und Zeitvariabler Tarif entfällt „Bestätigter Wert:“
+(EN: „Confirmed value:“) vor den bestätigten Zahlen- und Auswahlwerten. Die Werte bleiben auch beim Bearbeiten und
 bis zur HA-Bestätigung sichtbar und zugänglich. Die gemeinsame Zeitfenster-Zeile
 „Bestätigt:“ sowie Zahlen- und Auswahlbeschriftungen anderer Ansichten bleiben
 erhalten. Alle Schalter zeigen ausschließlich ihre 22 × 22 px großen Haken
@@ -71,22 +71,21 @@ Klickfläche. Status und Fehler bleiben sichtbar und zugänglich.
 | Zugehörigkeit und Berechtigung | `sax_power/dashboard/subscribe` liefert nur aktive, lesbare SAX-Entitäten des angeforderten Eintrags mit `entity_id`, `device_id`, `domain`, `key`, `name`, `states` und `can_control`. | [Metadaten-API][metadata-tests] |
 | Live-Zustände | `hass.states` ist die gemeinsame Datenquelle. HA formatiert Werte; Sprach-/Zeitzoneneinstellungen werden beim Fallback beachtet. | [HA-Kontext][ha-tests], [Allgemein][general-tests] |
 | Fehlende Werte | Fehlende Metadaten lassen normale Entity-Zeilen und leere Karten entfallen. In der Monatsauswahl bleiben fehlende Monate ausdrücklich erkennbar. Registrierte `unknown`-/`unavailable`-Zustände bleiben erkennbar; es entsteht keine Ersatz-Null. | [Controls][control-tests], alle View-Tests |
-| Schalter | `switch.turn_on`/`turn_off` senden den ausdrücklich gewählten Zustand an die aufgelöste ID. | [HA-Kontext][ha-tests], [Controls][control-tests], [Ladeansichten][charging-tests] |
+| Native Entity-Schalter | `switch.turn_on`/`turn_off` senden den ausdrücklich gewählten Zustand an die aufgelöste ID. | [HA-Kontext][ha-tests], [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Zahlen | `number.set_value`; endlicher Wert innerhalb der aktuellen Attribute `min`, `max`, `step`. Eingabe bleibt bis zur Übernahme lokal. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Uhrzeiten | Eingabe `HH:MM` mit `step=60`, explizite Übernahme als `HH:MM:00`, ohne eigene Zeitplanberechnung. Beide produktiven Zeitfenster übernehmen ihr vollständiges Paar über `sax_power.set_timed_charge_window` beziehungsweise `sax_power.set_grid_serving_window`; die allgemeine Einzelzeit-Komponente verwendet weiterhin `time.set_value`. | [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
 | Auswahlfelder | `select.select_option`; erlaubte Werte aus `options`, Beschriftung aus den übersetzten Enum-Metadaten. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Bestätigung und Fehler | Ein laufender Aufruf sperrt alle Bedienelemente derselben Entität; eine gemeinsame Zeitfensteraktion sperrt beide Grenzen. Serviceantworten ersetzen keinen HA-Zustand. Fehler werden angezeigt; es gibt keinen automatischen erneuten Schreibversuch. | [Controls][control-tests], [HA-Kontext][ha-tests], [Ladeansichten][charging-tests] |
-| Softwarekonfiguration | HA bestätigt angenommene Einstellungen unabhängig von Control-Lock und Modbus; Geräteaktivität erfordert weiterhin die quittierte Steuersequenz. | [Konfigurationsantworten][control-response-tests], [HA-E2E][ha-e2e-tests] |
-| Beschriftung der Tarifwerte | Beide Tarif-Tabs zeigen bestätigte Zahlen- und Auswahlwerte ohne „Bestätigter Wert:“/„Confirmed value:“; lokale Entwürfe ersetzen diese nicht. Gemeinsame Zeitfenster-Bestätigung und Zahlen-/Auswahlbeschriftungen anderer Ansichten bleiben erhalten. Schalter verwenden in allen Ansichten Haken ohne Wertzeile. | [Controls][control-tests], [Ladeansichten][charging-tests] |
+| Native Entity-Konfiguration | HA bestätigt angenommene Einstellungen unabhängig von Control-Lock und Modbus; Geräteaktivität erfordert weiterhin die quittierte Steuersequenz. | [Konfigurationsantworten][control-response-tests], [HA-E2E][ha-e2e-tests] |
+| Beschriftung der Tarifwerte | Stromtarif und Zeitvariabler Tarif zeigen bestätigte Zahlen- und Auswahlwerte ohne „Bestätigter Wert:“/„Confirmed value:“; lokale Entwürfe ersetzen diese nicht. Gemeinsame Zeitfenster-Bestätigung und Zahlen-/Auswahlbeschriftungen anderer Ansichten bleiben erhalten. Schalter verwenden in allen Ansichten Haken ohne Wertzeile. | [Controls][control-tests], [Ladeansichten][charging-tests] |
 | Verbindung und Navigation | Ein gemeinsames Metadatenabo, Aufräumen bei Unmount, erneutes Abonnieren nach Reconnect, kein Schreiben bei Mount, Tabwechsel oder Reconnect. | [Panel][panel-tests], [HA-Kontext][ha-tests], [Browser][browser-tests] |
 
-Die bestätigten Hauptschalter `timed_charge_enabled` und
-`price_charge_enabled` steuern die Tarifnavigation: `on/off` zeigt nur
-Zeitvariabler Tarif, `off/on` nur Dynamischer Tarif und `off/off` beide.
-Fehlende, unbekannte, nicht verfügbare oder widersprüchlich beide aktive
-Schalter erhalten beide Zugänge. Verborgene Routen werden ohne Serviceaufruf
-zum sichtbaren Tarif ersetzt; dies gilt auch für Benutzer mit reinen
-Leserechten. [Paneltests](../frontend/tests/panel.test.ts) prüfen die Zustände und Navigation.
+Der aktive Tarif folgt `economics_tariff_type`; die Hauptschalter steuern
+keine Tab-Sichtbarkeit mehr. Stromtarif und der bisherige Zeitvariabler-Tarif-Tab
+bleiben immer erreichbar. Die alte Route `dynamisches-laden` wird ohne
+Schreibaufruf nach `stromtarif` umgeleitet. Ein ausgeschalteter Hauptschalter
+ändert weder den ausgewählten Tarif noch dessen Preis-/Bilanzgrundlage.
+[Paneltests][panel-tests] prüfen Navigation und Redirect.
 
 ## Allgemeine Informationen
 
@@ -104,9 +103,50 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Gerät, Fortsetzung | `sensor.storage_event_text`, `sensor.ic_control_mode_text`, `binary_sensor.cell_calibration_active`, `sensor.next_cell_calibration` | HA-Zustände/Enum-Texte, Steuermodus, Kalibrierstatus und lokalisiertes Datum ohne Uhrzeit. Hersteller, Modell und entfernte Statuskarten werden nicht wieder eingeführt. | [Allgemein][general-tests]: vollständige Reihenfolge, Live-Werte und Zeitformat |
 | Gerät, letzte Zeile | `switch.storage_switch` | Übersetzungsschlüssel `storage`; Bestätigungsdialog vor EIN und AUS. Abbrechen/Escape sowie Änderungen von Zustand, ID, Bedienrecht oder Verbindung verwerfen die Auswahl ohne Schreiben; Bestätigung sendet genau einen vorhandenen HA-Service. | [Allgemein][general-tests], [Controls][control-tests], [Browser][browser-tests] |
 
+## Stromtarif
+
+`ElectricityTariffView.vue`, Pfad `stromtarif`, Anforderung
+`REQ-VUE-ELECTRICITY-TARIFF`. Dieser gemeinsame Einstieg ersetzt den bisherigen
+Tab Dynamischer Tarif. Zeitvariabler Tarif bleibt daneben als
+Fallback-Zugang mit seinen bestehenden Bedienelementen erhalten.
+
+| Bereich | Datenquelle und Bedienung | Prüfung |
+| --- | --- | --- |
+| Aktiver Tarif | `tariff/get` bestätigt `tariff_type`. „Tarif wechseln“ öffnet einen Entwurf; erst „Tarif übernehmen“ aktiviert `time_of_use` oder `dynamic` über `tariff/configure`. Gespeicherte inaktive Profile bleiben erhalten. Ein unvollständiges Zielprofil wird mit ausgeschalteter Netzladung übernommen und anschließend eingerichtet. | [Stromtarif][electricity-tests], [Tarifkonfiguration][tariff-configuration-tests] |
+| Automatische Netzladung | Ein gemeinsamer Hauptschalter sendet `tariff/configure` mit `automation_enabled`. Nur die zum aktiven Tarif passende Automatik wird freigegeben. Abschalten erhält Preise und Auswertung; ein unbekannter bestätigter Zustand sperrt den Schalter. | [Stromtarif][electricity-tests], [Ladesteuerung][tariff-control-tests] |
+| Strompreis | Gleiche Tageskurve für beide Tarifarten aus `tariff/series`; dynamisch mit Heute/Morgen-Auswahl. Alle vorhandenen Tagespreise einschließlich Vergangenheit und negativer Preise, aktuelle Preisangabe, Jetzt-Markierung und Ladezustand. Fehlende Preise bleiben Lücken; fehlende Morgenpreise erhalten einen Hinweis. | [Preisreihen][price-series-tests], [Stromtarif][electricity-tests] |
+| Diagrammbedienung | `TariffPriceChart.vue` nutzt reale Zeitgrenzen und HA-Zeitzone, auch für 23-/25-Stunden-Tage. Antippen, Pfeiltasten und eine aufklappbare Tabelle zeigen Preisdetails. Kein Zusammenziehen auf ausgewählte Ladestunden und keine künstliche Kurve aus einem einzelnen Sensorzustand. | [Stromtarif][electricity-tests], [Browser][browser-tests] |
+| Tarif & Preise: zeitvariabel | Kompakte `TariffPlan.vue` mit Standardpreis, Einspeisevergütung, bis zu acht täglichen Preisfenstern und PV-Start-Prognosequelle. „Speichern“ übernimmt das vollständige Profil über `tariff/configure`; „Abbrechen“ verwirft den Entwurf. | [Tarifpreisfenster][tariff-plan-tests], [Tarifkonfiguration][tariff-configuration-tests] |
+| Tarif & Preise: dynamisch | Strompreis-Sensor, optionales Preisattribut, Einheit `auto`/`eur_kwh`/`ct_kwh`/`eur_mwh`/`ct_mwh`, Einspeisevergütung, Smart-PV-Prognose-Sensor und anrechenbarer PV-Anteil 0–100 %. Profile halten getrennte PV-Quellen. Der Sensor muss gewünschte Steuern/Zuschläge selbst enthalten. | [Stromtarif][electricity-tests], [Tarifkonfiguration][tariff-configuration-tests] |
+| Ladeverhalten: gemeinsam | `number.max_soc` als globale Obergrenze. Die bestehenden Entity-Controls behalten ihre eigenen Übernahmen und HA-Bestätigungen; „Fertig“ klappt den Abschnitt zu. | [Stromtarif][electricity-tests], [Controls][control-tests] |
+| Ladeverhalten: zeitvariabel | `switch.bridge_charge_enabled`, `number.timed_charge_max_soc`, bei fester SOC-Steuerung `number.timed_charge_min_soc`, außerdem die zwölf `timed_charge_month_*`-Schalter. Die Startschwelle und das eigene Ladeziel ersetzen nicht den globalen Max-SOC. | [Stromtarif][electricity-tests], [Ladeansichten][charging-tests] |
+| Ladeverhalten: dynamisch | `select.price_charge_strategy` mit `off`, `absolute`, `relative`, `smart`. Absolute Preisgrenze nur bei `absolute`; Stundenbudget nur bei `relative`/`smart`. Der Neutralpreis bleibt verfügbar und steuert die Pause in den aktiven Strategien. Smart begrenzt seine Bedarfsrechnung durch das Stundenbudget; der 24-Stunden-Zyklus ist unabhängig von Heute/Morgen. | [Stromtarif][electricity-tests], [Preisplanung][tariff-price-tests] |
+| Ladeplan & Prognose | Anfangs eingeklappt. TOU nutzt `ChargePlan.vue`; dynamisch bleiben `price_charge_active_text`, `price_charge_status_text`, `price_charge_next_start` und `grid_serving_forecast` sichtbar. Zeiten, Bedarf und Ladeberechtigung kommen aus dem Backend. | [Stromtarif][electricity-tests], [Ladeplanung][charge-plan-tests] |
+
+Alle Tarifbefehle liegen unter `sax_power/dashboard/tariff/`.
+`tariff/get` ergänzt die bisherige TOU-Antwort um `profiles`, `can_configure`
+und `automation_enabled`; `tariff/save` bleibt für die alte Tarifkarte verfügbar.
+`tariff/configure` nimmt `entry_id`, `revision`, `tariff_type`, optional das
+vollständige Zielprofil und optional `automation_enabled` an. Ohne Profil
+wird der gespeicherte Stand aktiviert. Aktive Administratorrechte, gültige
+Einheiten, endliche Werte, vollständige Felder und aktuelle Revision werden
+serverseitig geprüft. Ein Konflikt oder Verbindungsfehler erhält den Entwurf;
+Speichern wird nicht automatisch wiederholt. Die Annahme der Konfiguration
+bestätigt noch keine Geräteaktivität.
+
+`tariff/series` erhält `entry_id` und `day` und liefert Tagesgrenzen, Zeitzone,
+`now`, `current_price_ct_kwh`, `slots`, `gaps`, Status/Grund und Revision.
+Dynamische Quellendaten erfordern zusätzlich deren Leseberechtigung. Der Tab
+aktualisiert bei Tarif-/Quellenänderungen und alle 60 Sekunden ohne zusätzliche
+Modbus-Abfragen; verspätete Antworten alter Einträge oder Verbindungen werden
+verworfen. Preiseingaben und Anzeigen verwenden ct/kWh; bestehende Options und
+Sensorattribute mit `*_eur_kwh` bleiben intern Euro.
+
 ## Zeitvariabler Tarif
 
 `TimedChargingView.vue`, Pfad `ladeautomatik`, Anforderung `REQ-VUE-CHARGING`.
+Der Tab bleibt als Fallback immer sichtbar; bei dynamisch aktivem Tarif führt
+ein Hinweis zum Wechsel im gemeinsamen Tab Stromtarif.
 
 | Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
 | --- | --- | --- | --- |
@@ -148,30 +188,6 @@ die Tarifpreisfenster-Karte aus. Bei fehlender Preis-Entity oder fehlenden
 Tarifattributen bestätigt eine einmalige API-Abfrage den Tarif und ermöglicht
 berechtigten Administratoren die Eingabe; unbekannte oder
 nicht verfügbare Preise werden nicht als gültiger aktiver Standardpreis markiert.
-
-## Dynamischer Tarif
-
-`DynamicChargingView.vue`, Pfad `dynamisches-laden`, Anforderung
-`REQ-VUE-DYNAMIC-CHARGING`. Vor der Karte steht
-`switch.price_charge_enabled` mit dem vollständigen Namen
-„Preisoptimiertes Laden aktiv“. Die Karte „Preisoptimiertes Laden“ enthält:
-
-| Nr. | Domain und Schlüssel | Label und Datenquelle | Prüfung |
-| --- | --- | --- | --- |
-| 1 | `select.price_charge_strategy` | Strategie; `options` und übersetzte Werte für `off`, `absolute`, `relative`, `smart`. | [Ladeansichten][charging-tests]: alle Strategien und tatsächliches Serviceziel |
-| 2 | `number.price_charge_max_price` | Netzbezug und Laden bis; negative Preise innerhalb der HA-Grenzen, aktuelle Einheit. | [Ladeansichten][charging-tests]: negative Eingabe, geänderte Einheit, Grenzen/Schrittweite |
-| 3 | `number.price_charge_neutral_price` | Netzbezug ohne Laden bis; gleiche gemeinsame Validierung. | [Ladeansichten][charging-tests]: Fehler, expliziter Wiederholungsversuch, bestätigter Altwert |
-| 4 | `number.price_charge_hours` | Anzahl Stunden; aktuelle HA-Grenzen und Einheit. | [Ladeansichten][charging-tests], [Controls][control-tests] |
-| 5 | `number.max_soc` | Derselbe globale Max-SOC wie unter Allgemein und in den HA-Entitäten. | [Ladeansichten][charging-tests]: gemeinsamer Zustand und laufender Aufruf in beiden Vue-Views; [HA-E2E][ha-e2e-tests] |
-| 6 | `sensor.price_charge_active_text` | Aktiv; bestehender HA-Text. | [Ladeansichten][charging-tests]: Reihenfolge und Zustände |
-| 7 | `sensor.price_charge_status_text` | Status, einschließlich deaktivierter Automatik. | [Ladeansichten][charging-tests]: deaktivierter Zustand |
-| 8 | `sensor.grid_serving_forecast` | Dynamischer Tagesname und kWh. | [Ladeansichten][charging-tests]: Live-Name und HA-Formatierung |
-| 9 | `sensor.price_charge_next_start` | Nächster Start; HA-Zeitzone, Sprache und Zeitformat. `unknown` bleibt unbekannt. | [Ladeansichten][charging-tests]: lokaler Zeitstempel und unbekannter Start |
-| 10 | `sensor.price_charge_current_price` | Aktueller Strompreis mit tatsächlicher Einheit; fehlender Preis bleibt nicht verfügbar. | [Ladeansichten][charging-tests]: negativer und fehlender Preis |
-
-Der Frontend-Test prüft diese zehn Schlüssel und ihre Reihenfolge ausdrücklich.
-Vue ermittelt keine Strategie oder Ladezeiten; `REQ-DYNAMIC-PRICE-CHARGE`
-bleibt die fachliche Implementierung. Diese Ansicht enthält keine Monatsschalter.
 
 ## Netzdienliches Laden
 
@@ -246,8 +262,8 @@ Schreibversuch aus.
 | --- | --- |
 | Zeitvariabler Tarif: `timed_charge_start` / `timed_charge_end` | Gemeinsame Leiste und atomare Übernahme über `set_timed_charge_window`. |
 | Netzdienliche Ladepause: `grid_serving_start` / `grid_serving_end` | Dieselbe Komponente, Übernahme über `set_grid_serving_window`. |
-| Dynamischer Tarif: geplanter nächster Start | Nur Anzeige aus HA. |
-| Zeitvariabler Tarif und Amortisation: Tarifpreisfenster | Ausklappbarer Editor für Standardpreis, Einspeisevergütung und bis zu acht tägliche Zeitfenster; atomare Übernahme mit Revisionsprüfung. |
+| Stromtarif, dynamisch: geplanter nächster Start | Nur Anzeige aus HA. |
+| Stromtarif, Zeitvariabler Tarif und Amortisation: Tarifpreisfenster | Ausklappbarer Editor für Standardpreis, Einspeisevergütung und bis zu acht tägliche Zeitfenster; atomare Übernahme mit Revisionsprüfung. |
 | Amortisation: Anfangs- und Enddatum | Recorder-Datumsfilter, weiterhin Datumseingaben. |
 | TOU-Preisfelder im HA-Optionsflow | Entfallen; Eingabe ausschließlich im Dashboard. |
 | Einzelzeit in der Controls-Entwicklungsvorschau | Komponentendemonstration, kein weiteres produktives Zeitfenster. |
@@ -265,8 +281,12 @@ Abschlussnachweis wird erst nach dem zugehörigen Testlauf ergänzt.
 ## Amortisation
 
 `SavingsView.vue`, Pfad `ersparnis`, Anforderung `REQ-VUE-SAVINGS`.
-Alle Geldbeträge haben zwei Nachkommastellen, Tarifpreise vier; gerundet wird
-erst für die Anzeige. Die interne Bilanz bleibt unverändert.
+Geldbeträge und Tarifpreise in ct/kWh haben zwei Nachkommastellen; gerundet
+wird erst für die Anzeige. Die Geldbilanz teilt gemessene Energieintervalle an
+beobachteten Tarif-/Preisgrenzen. Verspätete Prognosen bewerten frühere Lücken
+nicht nachträglich; bereits gebuchte Beträge bleiben erhalten. Die
+Amortisation und Recorder-Auswertung bauen auf dieser Bilanz auf.
+[Intervalltests][price-interval-tests] prüfen Grenzen, Tarifwechsel und Preislücken.
 
 | Block, Reihenfolge | Domain/Schlüssel bzw. Attribute | Sichtbarkeit und Bedeutung | Prüfung |
 | --- | --- | --- | --- |
@@ -507,38 +527,31 @@ bereitgehaltene Snapshot-Veröffentlichung. Weitere Paketnachweise sind mit
 Commit und Prüfsummen in [PR #204](https://github.com/dr-dimitri/sax-ha/pull/204)
 zugeordnet.
 
-### Aktuelle Dashboard-Screenshots
+### Dashboard-Screenshots
 
-Die 14 Bilder wurden am 12.09.2026 mit Chromium aus dem lokal gebauten
-Produktionsbundle und der Browser-Fixture mit simulierten HA-Daten aufgenommen.
-Sie zeigen die gemeinsamen Zeitfenster mit verschiebbaren Marken,
-die aufgeklappte Monatsauswahl in Quartalsgruppen und die Speicherbestätigung.
-Alle Haken messen einheitlich 22 × 22 px und kommen ohne zusätzliche
-Ein-/Aus-Wertzeile aus. Die Hilfsleiste der Testumgebung ist für die
-Dokumentationsbilder ausgeblendet; die README kennzeichnet die Beispieldaten.
+Die beiden neuen Stromtarif-Ansichten zeigen das Produktionsbundle mit
+simulierten HA-Daten vom 13.09.2026. Sie verwenden dasselbe Preisdiagramm für
+zeitvariablen und dynamischen Tarif. Die übrigen Bilder stammen vom 12.09.2026;
+sie dokumentieren die erhaltenen Ansichten und Bedienelemente, ihre Navigation
+zeigt noch den damaligen Stand. Die Hilfsleiste der Testumgebung ist ausgeblendet.
 
 | Ansicht | Desktop, Deutsch, hell | Smartphone, Englisch, dunkel |
 | --- | --- | --- |
+| Stromtarif: zeitvariabel | [Screenshot](images/vue-stromtarif-desktop-light-de.png) | [Screenshot](images/vue-stromtarif-mobile-dark-en.png) |
+| Stromtarif: dynamisch | [Screenshot](images/vue-stromtarif-dynamisch-desktop-light-de.png) | [Screenshot](images/vue-stromtarif-dynamisch-mobile-dark-en.png) |
 | Allgemeine Informationen | [Screenshot](images/vue-allgemein-desktop-light-de.png) | [Screenshot](images/vue-allgemein-mobile-dark-en.png) |
 | Speicher ausschalten – Bestätigung | [Screenshot](images/vue-storage-confirm-off-desktop-light-de.png) | [Screenshot](images/vue-storage-confirm-off-mobile-dark-en.png) |
 | Speicher einschalten – Bestätigung | [Screenshot](images/vue-storage-confirm-on-desktop-light-de.png) | [Screenshot](images/vue-storage-confirm-on-mobile-dark-en.png) |
-| Zeitvariabler Tarif | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
-| Dynamischer Tarif | [Screenshot](images/vue-dynamisches-laden-desktop-light-de.png) | [Screenshot](images/vue-dynamisches-laden-mobile-dark-en.png) |
+| Zeitvariabler Tarif: Fallback | [Screenshot](images/vue-ladeautomatik-desktop-light-de.png) | [Screenshot](images/vue-ladeautomatik-mobile-dark-en.png) |
 | Netzdienliches Laden | [Screenshot](images/vue-netzdienliches-laden-desktop-light-de.png) | [Screenshot](images/vue-netzdienliches-laden-mobile-dark-en.png) |
 | Amortisation | [Screenshot](images/vue-ersparnis-desktop-light-de.png) | [Screenshot](images/vue-ersparnis-mobile-dark-en.png) |
 
 <details>
-<summary>Alle fünf Desktopansichten anzeigen</summary>
+<summary>Gemeinsamen Stromtarif mit beiden Tarifarten anzeigen</summary>
 
-![Allgemeine Informationen mit simulierten HA-Daten](images/vue-allgemein-desktop-light-de.png)
+![Stromtarif mit zeitvariablem Tarif und simulierten HA-Daten](images/vue-stromtarif-desktop-light-de.png)
 
-![Zeitvariabler Tarif mit simulierten HA-Daten](images/vue-ladeautomatik-desktop-light-de.png)
-
-![Dynamischer Tarif mit simulierten HA-Daten](images/vue-dynamisches-laden-desktop-light-de.png)
-
-![Netzdienliches Laden mit simulierten HA-Daten](images/vue-netzdienliches-laden-desktop-light-de.png)
-
-![Ersparnis mit simulierten HA-Daten](images/vue-ersparnis-desktop-light-de.png)
+![Stromtarif mit dynamischem Tarif und simulierten HA-Daten](images/vue-stromtarif-dynamisch-desktop-light-de.png)
 
 </details>
 
@@ -560,3 +573,10 @@ Dokumentationsbilder ausgeblendet; die README kennzeichnet die Beispieldaten.
 [package-tests]: ../tests/test_frontend_package.py
 [package-worker]: ../scripts/dashboard_package_smoke.py
 [restart-tests]: ../tests/test_vue_dashboard_restart.py
+
+[electricity-tests]: ../frontend/tests/electricity-tariff.test.ts
+[tariff-configuration-tests]: ../tests/test_dashboard_tariff_configuration.py
+[price-series-tests]: ../tests/test_dashboard_price_series.py
+[tariff-control-tests]: ../tests/test_electricity_tariff_control.py
+[tariff-price-tests]: ../tests/test_electricity_tariff_prices.py
+[price-interval-tests]: ../tests/test_economics_price_intervals.py

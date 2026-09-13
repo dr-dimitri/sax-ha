@@ -6,9 +6,17 @@ import ChargePlan from "../components/ChargePlan.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import type { HomeAssistant } from "../types";
 
-defineProps<{ hass?: HomeAssistant }>();
+defineProps<{ hass?: HomeAssistant; tariffUrl?: string }>();
+const emit = defineEmits<{ navigate: [event: MouseEvent] }>();
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
+const dynamicTariff = computed(
+  () =>
+    (dashboard?.tariff.value?.tariff_type ??
+      dashboard?.entity("sensor", "economics_current_import_price")?.state
+        ?.attributes.tariff_type) === "dynamic",
+);
+const german = computed(() => dashboard?.language.value === "de");
 const bridgeEnabled = computed(() => {
   const control = dashboard?.entity("switch", "bridge_charge_enabled");
   return control
@@ -74,7 +82,27 @@ const cards = computed(() =>
 </script>
 
 <template>
-  <div class="timed-charging-view">
+  <div
+    v-if="dynamicTariff"
+    class="timed-charging-view timed-charging-view__fallback"
+  >
+    <h2>
+      {{ german ? "Aktiver Tarif: Dynamisch" : "Active tariff: Dynamic" }}
+    </h2>
+    <p>
+      {{
+        german
+          ? "Die zeitvariable Ladeautomatik ist inaktiv. Den aktiven Tarif und seine Einstellungen findest du unter „Stromtarif“."
+          : "Time-of-use charging is inactive. Open Electricity tariff to manage the active tariff and its settings."
+      }}
+    </p>
+    <a
+      :href="tariffUrl ?? '/sax-power-vue/stromtarif'"
+      @click="emit('navigate', $event)"
+      >{{ german ? "Stromtarif öffnen" : "Open electricity tariff" }}</a
+    >
+  </div>
+  <div v-else class="timed-charging-view">
     <ChargingLayout
       switch-key="timed_charge_enabled"
       :cards="cards"
@@ -86,6 +114,13 @@ const cards = computed(() =>
 </template>
 
 <style>
+.timed-charging-view__fallback {
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--divider-color, #ddd);
+  border-radius: 12px;
+  line-height: 1.6;
+}
 .timed-charging-view {
   min-width: 0;
 }

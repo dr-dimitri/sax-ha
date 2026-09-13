@@ -317,14 +317,14 @@ async def test_first_options_save_does_not_apply_newly_explicit_defaults(
     """Vom Options-Schema ergänzte Defaults sind keine Änderung der Ladesteuerung."""
     coordinator = MagicMock()
     coordinator.options = {}
-    coordinator.async_apply_price_plan = AsyncMock()
+    coordinator.async_apply_tariff_options = AsyncMock()
     hass.data[DOMAIN] = {vue_entry.entry_id: {DATA_COORDINATOR: coordinator}}
     options = STEP_OPTIONS_SCHEMA({CONF_VUE_DASHBOARD_ENABLED: True})
     hass.config_entries.async_update_entry(vue_entry, options=options)
     await async_update_options(hass, vue_entry)
     assert frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
     assert coordinator.options == options
-    coordinator.async_apply_price_plan.assert_not_awaited()
+    coordinator.async_apply_tariff_options.assert_not_awaited()
     coordinator.notify_tariff_revision.assert_not_called()
 
     # Ein abweichender Prognosefaktor bleibt eine echte Steuerungsänderung.
@@ -332,8 +332,9 @@ async def test_first_options_save_does_not_apply_newly_explicit_defaults(
         vue_entry, options={**options, CONF_PV_FORECAST_FACTOR: 50}
     )
     await async_update_options(hass, vue_entry)
-    coordinator.async_apply_price_plan.assert_awaited_once()
-    coordinator.notify_tariff_revision.assert_called_once()
+    coordinator.async_apply_tariff_options.assert_awaited_once_with(
+        {**options, CONF_PV_FORECAST_FACTOR: 50}
+    )
 
 
 @pytest.mark.parametrize("missing_asset", [False, True])

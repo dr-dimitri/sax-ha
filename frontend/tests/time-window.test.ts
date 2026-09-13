@@ -88,6 +88,8 @@ async function mount(
     tariff: ref(null),
     loadTariff: vi.fn(),
     saveTariff: vi.fn(),
+    configureTariff: vi.fn(),
+    loadTariffSeries: vi.fn(),
     language: computed(() => options.language ?? "de"),
     ready: ref(true),
     connected,

@@ -58,9 +58,10 @@
 # REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
 # REQ-VUE-GENERAL                 done       Allgemeine Vue-Geräteübersicht mit Live-Werten und Bedienung (#199)
 # REQ-VUE-CHARGING                done       Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (#200)
-# REQ-VUE-DYNAMIC-CHARGING        done       Dynamischer Vue-Tarif, Strategie und gemeinsamer Max-SOC (#201)
+# REQ-VUE-DYNAMIC-CHARGING        superseded Dynamische Bedienung jetzt im gemeinsamen Stromtarif
 # REQ-VUE-SAVINGS                 done       Vue-Amortisation, Tarifplan und native Recorder-Zeitraumauswertung (#202)
 # REQ-VUE-TARIFF-EDITOR           done       Ausklappbarer Tarifeditor im Dashboard und Preise in Cent
+# REQ-VUE-ELECTRICITY-TARIFF      done       Gemeinsamer Stromtarif mit eindeutiger Auswahl, Tagespreisen und kompakter Bearbeitung
 # REQ-VUE-PARITY                  done       Funktionsmatrix, HA-Anbindung, Browser- und isolierte Paketprüfung (#203)
 # REQ-VUE-DASHBOARD-REPAIR        done       Eigenständige Vue-Aktualisierung über HA-Reparaturen (#205)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
@@ -2380,7 +2381,12 @@ requirement_dynamic_price_charge:
 
     Gegenseitiger Ausschluss mit der Netzladung: Beide laden aktiv aus dem
     Netz über denselben Schreibpfad und dürfen nicht gleichzeitig aktiv
-    sein. Wird eines eingeschaltet, während das andere läuft, wird die
+    sein. Bei explizit gewähltem time_of_use oder dynamic bestimmt seit
+    REQ-VUE-ELECTRICITY-TARIFF die Tarifart die passende Automatik; native
+    Aktivierungen der anderen werden auch mit force abgelehnt. Bootstrap
+    deaktiviert unpassende Restore-Flags, ohne die andere Automatik einzuschalten.
+    Für die kompatiblen Tarifwerte fixed und disabled gilt weiterhin der
+    bisherige Konfliktdialog: Wird eines eingeschaltet, während das andere läuft, wird die
     Änderung NICHT stillschweigend ausgeführt: Der Coordinator lehnt sie
     zunächst ab (Setter geben False zurück, der Schalter springt zurück)
     und legt ein reparierbares Issue mit Bestätigen/Abbrechen-Dialog an
@@ -2545,25 +2551,22 @@ requirement_vue_dashboard:
     Vorschauzusatz; der bestehende Pfad sax-power-vue bleibt kompatibel.
     Das Panel enthält die responsive,
     in Deutsch und Englisch beschriftete Navigation zu
-    Allgemeine Informationen (allgemein), Zeitvariabler Tarif (ladeautomatik),
-    Dynamischer Tarif (dynamisches-laden), Netzdienliches Laden
+    Allgemeine Informationen (allgemein), Stromtarif (stromtarif),
+    Zeitvariabler Tarif (ladeautomatik), Netzdienliches Laden
     (netzdienliches-laden) und Amortisation (ersparnis), in dieser Reihenfolge.
-    Die englischen Tarif-Tabnamen sind Time-of-use tariff und Dynamic tariff;
+    Die englischen Tarif-Tabnamen sind Electricity tariff und Time-of-use tariff;
     Amortisation heißt auf Englisch Amortization.
-    Die Tarifnavigation folgt ausschließlich den bestätigten Hauptschaltern
-    timed_charge_enabled und price_charge_enabled: on/off blendet den
-    dynamischen Tarif aus, off/on den zeitvariablen Tarif; bei off/off sind
-    beide sichtbar. Fehlende, unbekannte oder nicht verfügbare Zustände und
-    ein vorübergehendes on/on erhalten beide Zugänge. Leseberechtigte sehen
-    dieselbe Navigation; ausstehende oder fehlgeschlagene Services blenden
-    keinen Tab vor der Zustandsbestätigung aus. Verborgene Deep Links,
-    HA-Routen sowie Zurück/Vorwärts-Ziele werden ohne Serviceaufruf und
-    ohne zusätzlichen History-Eintrag zum aktiven Tarif ersetzt.
-    URL-Pfade, Entity-Schlüssel und Tarifkonfiguration bleiben unverändert.
+    Beide Tarifzugänge bleiben unabhängig vom Zustand der Ladeautomatik sichtbar.
+    Der gespeicherte Tariftyp bestimmt den Inhalt von Stromtarif, auch bei
+    ausgeschalteter Netzladung. Die bisherige Route dynamisches-laden wird ohne
+    Serviceaufruf und ohne zusätzlichen History-Eintrag nach stromtarif umgeleitet.
+    Zeitvariabler Tarif bleibt als Fallback bestehen; bei aktivem dynamischem
+    Tarif zeigt er den Verweis auf Stromtarif statt einer zweiten Ladeautomatik.
+    Entity-Schlüssel bleiben unverändert.
     Alle fünf Ansichten zeigen die vorhandenen Entitäten und Bedienfunktionen. Die
     gemeinsame Datenanbindung ist in REQ-VUE-ENTITY-BINDING beschrieben,
     die Ansichten in REQ-VUE-GENERAL, REQ-VUE-CHARGING,
-    REQ-VUE-DYNAMIC-CHARGING und REQ-VUE-SAVINGS. REQ-VUE-PARITY sichert
+    REQ-VUE-ELECTRICITY-TARIFF und REQ-VUE-SAVINGS. REQ-VUE-PARITY sichert
     ihre HA-Anbindung und Auslieferung ab.
 
     Die Darstellung nutzt auf normalen Desktop-PCs den verfügbaren Platz
@@ -2658,7 +2661,10 @@ requirement_vue_entity_binding:
     gemeinsamer Kontext verbindet hass.states mit dem read-only WebSocket-Abo
     sax_power/dashboard/subscribe für den panel.config.entry_id. Es werden
     weder Entity-IDs aus Anzeigenamen konstruiert noch zusätzliche
-    Modbus-Verbindungen, Polling oder Zugangsdaten eingeführt.
+    Modbus-Verbindungen oder Zugangsdaten eingeführt. Entitätszustände kommen
+    weiterhin aus der HA-Sitzung; die offene Stromtarifansicht erneuert ihre
+    Tagespreisserie und Tarifkonfiguration zusätzlich nach
+    REQ-VUE-ELECTRICITY-TARIFF.
 
     Das Metadatenabo liefert nur aktive SAX-Entitäten des angeforderten
     SAX-Config-Entry, die der angemeldete Benutzer lesen darf. Jede Entität
@@ -2861,6 +2867,10 @@ requirement_vue_charging:
     Im TIME_OF_USE-Modus entfällt das Netzladezeitfenster außerdem auch bei
     fester SOC-Ladung nach REQ-TIME-OF-USE-CHARGE-SOURCE; die Startschwelle
     bleibt in dieser Betriebsart sichtbar.
+
+    Bei aktivem dynamischem Tarif ersetzt ein Hinweis auf Stromtarif die
+    Bedienung dieser Fallback-Ansicht. Die Tarifwahl folgt den bestätigten
+    Tarifdaten, nicht den Zuständen der beiden alten Hauptschalter.
 
     Nach diesen Ladekarten zeigt der Tab die wiederverwendbare Karte
     Ladeplanung (EN: Charging plan) aus ChargePlan.vue mit
@@ -3071,7 +3081,7 @@ requirement_vue_tariff_editor:
   title: "Tarifpreisfenster direkt im Dashboard bearbeiten und Preise in Cent anzeigen"
   status: done
   description: >
-    Die gemeinsame Tarifpreisfenster-Karte in Zeitvariabler Tarif und Amortisation
+    Die gemeinsame Tarifpreisfenster-Karte in Stromtarif, Zeitvariabler Tarif und Amortisation
     zeigt zunächst eine kompakte Übersicht. Bearbeiten klappt Standardpreis,
     Einspeisevergütung und die vorhandenen täglichen Zeitfenster mit Von/Bis/Preis
     direkt in der Karte auf. Zeitfenster hinzufügen ergänzt bis zu acht Fenster;
@@ -3095,8 +3105,8 @@ requirement_vue_tariff_editor:
     TIME_OF_USE als aktuelle Tarifart und die aktuelle Revision. Der Server prüft
     endliche Preise, Wertebereiche, höchstens acht vollständige Fenster, verschiedene
     Start-/Endzeiten und Überschneidungen auf dem zyklischen Tag. Fenster über
-    Mitternacht und angrenzende Grenzen sind zulässig. Die bestehenden Options und
-    async_update_options bilden weiterhin die einzige persistierte Tarifquelle
+    Mitternacht und angrenzende Grenzen sind zulässig. Die aktiven Options und
+    der gemeinsame Options-Lifecycle bilden weiterhin die einzige aktive Tarifquelle
     und übernehmen Änderungen ohne Config-Entry-Reload in den Coordinator.
 
     TOU-Standardpreis, Einspeisevergütung und Zeitfenster entfallen vollständig im
@@ -3143,53 +3153,106 @@ requirement_vue_tariff_editor:
 # ==============================================================================
 requirement_vue_dynamic_charging:
   id: REQ-VUE-DYNAMIC-CHARGING
-  title: "Dynamischer Vue-Tarif, Strategie und gemeinsamer Max-SOC (Issue #201)"
+  title: "Dynamische Tarifbedienung im gemeinsamen Stromtarif"
+  status: superseded
+  description: >
+    Die dynamische Tarifbedienung ist in REQ-VUE-ELECTRICITY-TARIFF enthalten.
+    Die Route dynamisches-laden leitet nach stromtarif um. Bestehende Entities,
+    Preisstrategien und globale SOC-Obergrenze bleiben erhalten.
+
+requirement_vue_electricity_tariff:
+  id: REQ-VUE-ELECTRICITY-TARIFF
+  title: "Gemeinsamer Stromtarif mit Tagespreisen und kompakter Bearbeitung"
   status: done
   description: >
-    Der Vue-Tab Dynamischer Tarif unter dynamisches-laden zeigt den Hauptschalter
-    switch.price_charge_enabled mit dem vollständigen übersetzten Namen
-    Preisoptimiertes Laden aktiv. Die Karte Preisoptimiertes Laden enthält
-    in dieser Reihenfolge select.price_charge_strategy,
-    number.price_charge_max_price, number.price_charge_neutral_price,
-    number.price_charge_hours, number.max_soc, sensor.price_charge_active_text,
-    sensor.price_charge_status_text, sensor.grid_serving_forecast,
-    sensor.price_charge_next_start und sensor.price_charge_current_price.
+    Der Tab Stromtarif unter stromtarif zeigt ausschließlich den gespeicherten
+    aktiven Tariftyp. Tarif wechseln bietet Zeitvariabel und Dynamisch; erst
+    Übernehmen speichert die Auswahl. Der Hauptschalter Automatische Netzladung
+    ist von der Tarifauswahl unabhängig. Bei ausgeschalteter Automatik bleiben
+    Tarif, aktuelle Preise und Amortisationsbewertung aktiv. Beide Tarifarten
+    verwenden denselben Aufbau: Auswahl, breite Tagespreiskurve mit aktuellem
+    Preis, kompakte Tarifübersicht, aufklappbares Ladeverhalten und Ladeplan.
 
-    Die vorhandenen Namen Netzbezug und Laden bis, Netzbezug ohne Laden bis,
-    Anzahl Stunden, Aktiv, Status und Nächster Start bleiben erhalten.
-    Strategien und deren Übersetzungen stammen aus options und den
-    Entity-Metadaten; Preisgrenzen, Schrittweiten und Einheiten aus den
-    aktuellen HA-Attributen. Negative Preise werden innerhalb dieses
-    Wertebereichs angezeigt und angenommen. Vue führt keine zusätzlichen
-    Preisgrenzen oder Strategieentscheidungen ein.
+    Die bestehende Route ladeautomatik bleibt als Fallback erhalten und verwendet
+    dieselben aktiven Tarifdaten und Steuerwerte. Bei dynamischem Tarif zeigt
+    sie einen Verweis auf Stromtarif. Der Tab Dynamischer Tarif entfällt; seine
+    alten Links werden ohne zusätzliche History-Einträge nach stromtarif geleitet.
+    Festpreis und deaktivierte Tarife bleiben als bestehende Optionswerte gültig;
+    die neue Auswahl erfindet dafür weder einen zeitvariablen noch dynamischen Preis.
 
-    Hauptschalter, Strategie, Preisgrenzen, Anzahl Stunden und Max-SOC
-    bestätigen die Softwarekonfiguration ohne Warten auf Modbus gemäß
-    REQ-VUE-ENTITY-BINDING. In diesem Tab entfällt der Präfix Bestätigter Wert:
-    beziehungsweise Confirmed value: bei Zahlen und Auswahllisten.
-    Die bestätigten Werte bleiben während lokaler Entwürfe und ausstehender Aktionen sichtbar
-    und zugänglich; die allgemeine Ansicht behält ihre Zahlenbeschriftung.
-    Schalter zeigen ihren Zustand gemäß REQ-VUE-ENTITY-BINDING am Haken.
+    Tarif & Preise verwendet lokale Entwürfe mit Speichern und Abbrechen. Bei
+    Zeitvariabel enthält es Standardpreis, Einspeisevergütung und bis zu acht
+    tägliche Zeitfenster nach REQ-VUE-TARIFF-EDITOR. Dynamisch erlaubt Preis-Sensor,
+    optionales Attribut, tatsächliche Quelleneinheit, Einspeisevergütung sowie
+    PV-Quelle und PV-Anteil. Gespeicherte inaktive Profile bleiben in
+    dashboard_tariff_profiles erhalten; die flachen aktiven Options bleiben die
+    gemeinsame Quelle für Tarifbewertung und Ladeplanung. Ein Wechsel verwirft
+    weder Investitionsdaten noch native SOC-, Monats- oder Strategieeinstellungen.
 
-    number.max_soc bezeichnet denselben globalen Wert wie in der allgemeinen
-    Vue-Ansicht und in den HA-Entitäten. Bestätigte Werte, ausstehende Bedienaktionen
-    und Fehler werden über den gemeinsamen Kontext geteilt. Der nächste
-    Start wird nach HA-Sprache, Zeitformat und Zeitzone formatiert; die
-    PV-Prognose übernimmt ihren dynamischen Tagesnamen. Deaktivierte
-    Automatik, fehlender Strompreis und unbekannter nächster Start bleiben
-    verständlich und ohne Frontend-Ersatzplanung sichtbar.
+    Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
+    übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services; Fertig
+    schließt den Bereich. Zeitvariabel erhält Ladeziel, Mindest-SOC als
+    Startschwelle, aktive Monate und Planung bis zum PV-Start. Dynamisch erhält
+    Strategie, Preisgrenze bei Absolut, Stundenbudget bei Relativ/Smart und
+    Neutralpreis. Globale SOC-Obergrenze und eigenes TOU-Ladeziel bleiben
+    getrennte Größen. Prognose-, Status-, Entlade- und Planungsinformationen
+    bleiben zugänglich. Der Stundenzyklus ist unabhängig vom angezeigten Kalendertag.
+
+    sax_power/dashboard/tariff/configure speichert Profil und aktive Tarifwahl
+    mit Revisionsprüfung. Ein optionaler automation_enabled-Wert stellt den
+    Hauptschalter; fehlt er, bleibt dessen Gesamtzustand beim Tarifwechsel
+    erhalten. Der Coordinator synchronisiert passende, sich ausschließende
+    Steuerflags unter dem gemeinsamen Control-Lock und verwendet weiterhin die
+    zentrale ChargePolicy und denselben SunSpec-Schreibpfad. Native Aufrufe können
+    die zum aktiven dynamischen beziehungsweise zeitvariablen Tarif unpassende
+    Automatik nicht aktivieren. Beim Bootstrap werden unpassende gespeicherte
+    Schalter deaktiviert, ohne eigenmächtig eine andere Automatik einzuschalten.
+    Options Flow und Dashboard verwenden denselben Laufzeitabgleich; ein
+    verspäteter Optionslistener darf keinen älteren Stand wiederherstellen.
+
+    Beim Wechsel auf ein noch unvollständiges Profil erklärt die Auswahl,
+    dass die automatische Netzladung ausgeschaltet wird, und übergibt dafür
+    automation_enabled=false. Das Profil ist danach erreichbar und kann
+    vervollständigt werden. Live-Änderungen anderer Clients und nativer Schalter
+    werden übernommen; ältere Leseantworten überschreiben keine bestätigten
+    Schreibvorgänge. Die offene Ansicht aktualisiert Zeitmarkierung, Tagesgrenzen
+    und Tarifzustand zusätzlich minütlich und räumt den Timer beim Verlassen ab.
+    Ein extern geänderter Tariftyp schließt offene Editoren mit sichtbarem Hinweis,
+    ohne unsichtbare Bediensperren zurückzulassen. Preisantworten müssen weiterhin
+    zum angefragten Tarif, seiner Revision und dem angezeigten Tag passen. Das
+    vom Server gelieferte lokale Tagesdatum bleibt auch bei abweichender
+    Browserzeitzone unverändert; wiederholte Stunden zeigen ihre UTC-Offsets.
+
+    sax_power/dashboard/tariff/series liefert die vollständige Preisabdeckung
+    für heute, bei dynamischen Tarifen auch morgen, unabhängig von ausgewählten
+    Ladefenstern. ISO-Intervallgrenzen, HA-Zeitzone und tatsächliche Tageslänge
+    erhalten 23-/25-Stunden-Tage und wiederholte Stunden eindeutig. Die Kurve
+    verwendet ct/kWh, eine Stufendarstellung, sichtbare Lücken und negative Preise.
+    Fehlende Morgenpreise bleiben ausdrücklich nicht verfügbar. Ein reiner
+    aktueller Sensorwert liefert keine erfundene Tageskurve. Relative Heute- und
+    Morgenlisten werden am Aktualisierungsdatum des Quellsensors verankert.
+    Unverfügbare Quellen, fremde Einheiten und widersprüchliche Überlappungen
+    autorisieren keine Ladung und erhalten keinen Ersatzpreis.
+
+    Lesen und Schreiben prüfen aktive Benutzer, Entry-Zuordnung und die
+    erforderlichen Rechte. Preisserien prüfen zusätzlich die Leserechte der
+    externen Quelle. Aktive Administratoren können unvollständige Profile
+    reparieren; ungültige, veraltete oder unberechtigte Schreibanforderungen
+    verändern weder Options noch Steuerflags. Fehler und Verbindungsabbrüche
+    erhalten den lokalen Entwurf. Reines Anzeigen oder Wechseln des Diagrammtags
+    verändert keine Gerätesteuerung.
   acceptance_criteria:
-    - "frontend/tests/charging.test.ts prüft die zehn aufgeführten Schlüssel,
-       Labels, Strategieoptionen und Reihenfolge ohne separaten Dashboard-Builder."
-    - "Alle vorhandenen Strategien, negative Preise sowie geänderte
-       HA-Einheiten, min/max und step werden über bestehende Services geprüft."
-    - "Allgemeine und dynamische Ansicht verwenden nachweislich dieselbe
-       Max-SOC-Entity samt gemeinsamer Sperre während eines ausstehenden Aufrufs."
-    - "frontend/tests/charging.test.ts und frontend/tests/controls.test.ts
-       prüfen den entfernten Präfix in DE/EN bei erhaltenen bestätigten Werten,
-       auch während einer Entwurfsänderung und bis zur HA-Bestätigung."
-    - "Servicefehler, expliziter Wiederholungsversuch, unbekannte Werte,
-       dynamische Prognosenamen und lokale Zeitdarstellung sind getestet."
+    - "Backendtests decken Profilwechsel, aktive/inaktive Werte, Revisionskonflikte,
+       Berechtigungen und vollständige Preisserien mit negativen Preisen, Lücken,
+       überlappenden Quellen und Sommer-/Winterzeit ab."
+    - "Coordinator-Tests prüfen genau eine passende Automatik, ausgeschalteten
+       Hauptschalter, globale SOC-Werte, Bootstrap, alte native Schalter, verspätete
+       Optionslistener und das Ende des bisherigen periodischen Tarif-Schreibers."
+    - "Frontend-/Browsertests prüfen die dauerhafte Navigation, Redirects, Tarifwahl,
+       Hauptschalter, kontextabhängige Einstellungen, Speichern/Abbrechen sowie
+       heutige/morgige Preiskurven in DE/EN, hell/dunkel und auf schmalen Displays."
+    - "Ladeentscheidung, aktuelle Preisanzeige und Amortisation verwenden denselben
+       gültigen Bezugspreis; die zeitliche Buchung folgt REQ-ECONOMICS-ACCOUNTING."
 
 # ==============================================================================
 # ANFORDERUNG: VUE-ERSPARNIS UND RECORDER-AUSWERTUNG
@@ -3417,7 +3480,7 @@ requirement_bundled_dashboard:
     Die Implementierung und Anforderungen an das generierte Lovelace-
     Storage-Dashboard sind abgelöst. Das einzige mitgelieferte Dashboard
     ist in REQ-VUE-DASHBOARD beschrieben; seine Ansichten stehen in
-    REQ-VUE-GENERAL, REQ-VUE-CHARGING, REQ-VUE-DYNAMIC-CHARGING und
+    REQ-VUE-GENERAL, REQ-VUE-CHARGING, REQ-VUE-ELECTRICITY-TARIFF und
     REQ-VUE-SAVINGS. Lovelace-Builder, Erstellungsoption, Anlage- und
     Neuinstallationsservices sowie Veraltet-Reparatur werden nicht mehr
     ausgeliefert. Die Migration bereinigt zugehörige alte Integrationsdaten
@@ -4300,7 +4363,8 @@ requirement_economics_tariffs:
     falscher Sensorwert (typisch ein als EUR/kWh gelesener ct/kWh-Wert) und
     wird mit PRICE_OUT_OF_RANGE abgelehnt statt akzeptiert.
 
-    Die Tarifart wird auf der ersten Seite des Options Flow gewählt.
+    Die Tarifart wird im Stromtarif-Tab (REQ-VUE-ELECTRICITY-TARIFF) oder
+    weiterhin auf der ersten Seite des Options Flow gewählt.
     Festpreis und dynamischer Tarif verwenden die Folgeschritte economics_fixed
     und economics_dynamic mit Preiseingaben in ct/kWh. Disabled und
     time_of_use speichern direkt. Der tageszeitabhängige Tarif wird ausschließlich
@@ -4308,7 +4372,9 @@ requirement_economics_tariffs:
     Speichern anderer Options gleich, wird das aktuell gespeicherte Profil
     bewahrt. Eine erstmalige Auswahl darf ohne erfundene Pflichtpreise gespeichert
     werden; der Tarif bleibt bis zur Vervollständigung ungültig und erlaubt keine
-    Tarifladung. Ein Tarifwechsel entfernt unpassende ECONOMICS_OPTION_KEYS.
+    Tarifladung. Ein Tarifwechsel entfernt unpassende ECONOMICS_OPTION_KEYS aus
+    den aktiven Options und bewahrt die inaktiven zeitvariablen und dynamischen
+    Profile unter dashboard_tariff_profiles für eine spätere Wiederherstellung.
     Das Speicherformat bleibt unverändert in EUR/kWh, einschließlich der acht
     optionalen Mappings economics_tou_window_1 bis _8 mit start/end/price_eur_kwh.
 
@@ -4813,6 +4879,18 @@ requirement_economics_accounting:
     primäre RestoreEntity-Persistenz für Geldzustände) werden nicht
     übernommen.
 
+    Jedes gemessene Intervall wird an Tarif-, Preisfenster- und beobachteten
+    Sensoränderungen aufgeteilt. Die bereits nach Herkunft bestimmte Energie
+    wird proportional zu realen UTC-Sekunden auf diese Teilintervalle verteilt;
+    die zugrunde liegende Leistungsintegration bleibt unverändert. Der
+    SaxTariffProvider hält dafür unveränderliche Options-/Quellsnapshots bis zur
+    nächsten Messung, begrenzt auf 256 Änderungen. Frühere oder nicht mehr
+    bekannte Abschnitte bleiben unbepreist; nachträglich gelieferte Vorschauen
+    füllen keine alte Preislücke. Sommer-/Winterzeit und Rückwärtszeit werden
+    anhand realer Zeitpunkte behandelt. compute_economics_interval verwendet
+    compute_economics_delta chronologisch pro Abschnitt und führt den
+    unbewerteten Bestand fort. Bereits gebuchte Summen werden nie neu bewertet.
+
     Verbindliche Geldbilanz je EnergyDelta (02/06,
     domain.economics_accounting.compute_economics_delta), alle Beträge
     intern ungerundet in EUR:
@@ -5071,6 +5149,12 @@ requirement_economics_accounting:
     - "Fest-, Zeitfenster- und dynamischer Preis werden am jeweiligen
        Lade-/Entladezeitpunkt korrekt angewendet - über SaxTariffProvider.quote(),
        nicht über eine eigene Preislogik."
+    - "Messintervalle über Preisfenster-, Sensor- und Optionswechsel werden
+       zeitanteilig bewertet. Verspätete Preisvorschauen füllen keine bereits
+       beobachteten Lücken. Reale Sekunden an Zeitumstellungstagen,
+       Rückwärtszeit und begrenzte Historie sind in
+       tests/test_economics_price_intervals.py geprüft; echte Coordinator-
+       Messungen und Optionslistener in tests/test_economics_tariff_coordinator.py."
     - "PV-Ladung wird mit der Einspeisevergütung bewertet; reine
        Netz-/PV-/Mischladung stimmen mit der Herkunftsaufteilung aus
        02/06 überein (tests/test_economics_accounting.py)."

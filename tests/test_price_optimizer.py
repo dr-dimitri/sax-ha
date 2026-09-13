@@ -453,12 +453,17 @@ def test_invalid_price_keeps_its_slot_boundary(invalid_price: object) -> None:
 
 @pytest.mark.parametrize(
     ("prices", "expected"),
-    [([None, 0.10], 0.10), ([0.10, None], 0.10), ([0.10, 0.20], 0.10)],
+    [
+        ([None, 0.10], 0.10),
+        ([0.10, None], 0.10),
+        ([0.10, 0.10], 0.10),
+        ([0.10, 0.20], None),
+    ],
 )
-def test_duplicate_forecast_starts_keep_the_first_readable_price(
-    prices: list[float | None], expected: float
+def test_duplicate_forecast_starts_require_an_unambiguous_readable_price(
+    prices: list[float | None], expected: float | None
 ) -> None:
-    """REQ-DYNAMIC-PRICE-CHARGE: Eine bloße Grenze verdrängt keinen Preis."""
+    """REQ-VUE-ELECTRICITY-TARIFF: Grenzen sind keine widersprüchlichen Preise."""
     state = _FakeState(
         forecast=[
             *({"start": _local(12).isoformat(), "price": price} for price in prices),
@@ -468,8 +473,12 @@ def test_duplicate_forecast_starts_keep_the_first_readable_price(
 
     slots = parse_price_slots(state, now=_now())
 
-    assert len(slots) == 2
-    assert current_price(slots, _now()) == pytest.approx(expected)
+    assert len(slots) == (3 if expected is None else 2)
+    if expected is None:
+        assert current_price(slots, _now()) is None
+        assert not compute_plan(_now(), slots, _ctx()).charge_now
+    else:
+        assert current_price(slots, _now()) == pytest.approx(expected)
     assert slots[0].end == _local(13)
 
 

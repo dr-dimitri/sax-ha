@@ -37,6 +37,51 @@ export interface TariffProfile {
   windows: TariffPriceWindow[];
   revision: string;
   can_edit: boolean;
+  can_configure?: boolean;
+  automation_enabled?: boolean | null;
+  profiles?: {
+    time_of_use: TimeOfUseProfile;
+    dynamic: DynamicTariffProfile;
+  };
+}
+
+export interface TimeOfUseProfile {
+  base_price_ct_kwh: number | null;
+  feed_in_price_ct_kwh: number | null;
+  windows: TariffPriceWindow[];
+  pv_sensor: string | null;
+}
+
+export interface DynamicTariffProfile {
+  feed_in_price_ct_kwh: number | null;
+  price_sensor: string | null;
+  price_attribute: string | null;
+  price_unit: "auto" | "eur_kwh" | "ct_kwh" | "eur_mwh" | "ct_mwh";
+  pv_sensor: string | null;
+  pv_factor: number;
+}
+
+export interface TariffConfiguration {
+  revision: string;
+  tariff_type: "time_of_use" | "dynamic";
+  profile?: TimeOfUseProfile | DynamicTariffProfile;
+  automation_enabled?: boolean;
+}
+
+export interface TariffPriceSeries {
+  tariff_type: string;
+  day: "today" | "tomorrow";
+  date: string;
+  time_zone: string;
+  start: string;
+  end: string;
+  now: string;
+  current_price_ct_kwh: number | null;
+  status: "available" | "partial" | "unavailable";
+  reason: string | null;
+  slots: { start: string; end: string; price_ct_kwh: number }[];
+  gaps: { start: string; end: string }[];
+  revision: string;
 }
 
 export interface TariffDraft {

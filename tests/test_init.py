@@ -192,9 +192,7 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
 
     coordinator = MagicMock()
     coordinator.options = {}
-    coordinator.price_planner.async_setup = MagicMock()
-    coordinator.tariff_provider.async_setup = MagicMock()
-    coordinator.async_apply_price_plan = AsyncMock()
+    coordinator.async_apply_tariff_options = AsyncMock()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {DATA_COORDINATOR: coordinator}
 
@@ -210,13 +208,9 @@ async def test_async_update_options_applies_live_without_reload(hass) -> None:
     await async_update_options(hass, entry)
 
     hass.config_entries.async_reload.assert_not_called()
-    assert coordinator.options == {CONF_PRICE_SENSOR: "sensor.strompreis"}
-    coordinator.price_planner.async_setup.assert_called_once()
-    # Auch die Tarifkonfiguration der Wirtschaftlichkeitsauswertung wird
-    # live übernommen (REQ-ECONOMICS-TARIFFS): async_setup registriert die
-    # Zustandsbeobachter des dynamischen Preis-Sensors idempotent neu.
-    coordinator.tariff_provider.async_setup.assert_called_once()
-    coordinator.async_apply_price_plan.assert_awaited_once()
+    coordinator.async_apply_tariff_options.assert_awaited_once_with(
+        {CONF_PRICE_SENSOR: "sensor.strompreis"}
+    )
 
 
 async def test_async_update_options_noop_without_loaded_entry(hass) -> None:
@@ -575,14 +569,12 @@ async def test_update_options_is_a_noop_when_only_entry_data_changed(hass) -> No
     entry.add_to_hass(hass)
     coordinator = MagicMock()
     coordinator.options = dict(entry.options)
-    coordinator.async_apply_price_plan = AsyncMock()
+    coordinator.async_apply_tariff_options = AsyncMock()
     hass.data[DOMAIN] = {entry.entry_id: {DATA_COORDINATOR: coordinator}}
 
     await async_update_options(hass, entry)
 
-    coordinator.notify_tariff_revision.assert_not_called()
-    coordinator.async_apply_price_plan.assert_not_called()
-    coordinator.price_planner.async_setup.assert_not_called()
+    coordinator.async_apply_tariff_options.assert_not_called()
 
     # Gegenprobe: Eine echte Options-Änderung wird weiterhin angewendet.
     hass.config_entries.async_update_entry(
@@ -590,5 +582,6 @@ async def test_update_options_is_a_noop_when_only_entry_data_changed(hass) -> No
     )
     await async_update_options(hass, entry)
 
-    coordinator.notify_tariff_revision.assert_called_once()
-    coordinator.async_apply_price_plan.assert_awaited_once()
+    coordinator.async_apply_tariff_options.assert_awaited_once_with(
+        {CONF_PRICE_SENSOR: "sensor.anderer_preis"}
+    )

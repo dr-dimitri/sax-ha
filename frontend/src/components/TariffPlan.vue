@@ -9,6 +9,7 @@ import {
   watch,
 } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
+import SensorPicker from "./SensorPicker.vue";
 import {
   finiteValue,
   formatSavingsDate,
@@ -16,13 +17,16 @@ import {
 } from "../savings";
 import type { HomeAssistant, TariffProfile } from "../types";
 
-const props = defineProps<{ hass?: HomeAssistant }>();
+const props = defineProps<{ hass?: HomeAssistant; compact?: boolean }>();
+const emit = defineEmits<{ saved: []; editing: [value: boolean] }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
 const text = computed(() =>
   dashboard?.language.value === "de"
     ? {
-        tariff: "Tarifpreisfenster",
+        tariff: props.compact ? "Tarif & Preise" : "Tarifpreisfenster",
+        pv: "PV-Start-Sensor (optional)",
+        windows: "Zeitfenster",
         gross:
           "Alle Preise brutto. Speichern aktualisiert auch die erlaubten Ladezeiten.",
         edit: "Bearbeiten",
@@ -77,7 +81,9 @@ const text = computed(() =>
           "Derzeit gilt kein Preis. Bitte die Tarifkonfiguration prüfen.",
       }
     : {
-        tariff: "Tariff price windows",
+        tariff: props.compact ? "Tariff & prices" : "Tariff price windows",
+        pv: "PV start sensor (optional)",
+        windows: "time windows",
         gross:
           "All prices include tax. Saving also updates the permitted charging times.",
         edit: "Edit",
@@ -232,7 +238,9 @@ watch(
 const attributes = computed(() => {
   const profile =
     savedProfile.value ??
-    (!sourceAttributes.value.tariff_type ? dashboard?.tariff.value : null);
+    (props.compact || !sourceAttributes.value.tariff_type
+      ? dashboard?.tariff.value
+      : null);
   if (!profile) return sourceAttributes.value;
   return {
     ...sourceAttributes.value,
@@ -342,12 +350,14 @@ const clock = (value: string) =>
   ) ?? value.slice(0, 5);
 
 const editing = ref(false);
+watch(editing, (value) => emit("editing", value));
 const pending = ref(false);
 const editor = ref<HTMLElement>();
 const editButton = ref<HTMLButtonElement>();
 const profile = ref<TariffProfile | null>(null);
 const baseInput = ref("");
 const feedInput = ref("");
+const pvSensor = ref<string | null>(null);
 const draftWindows = ref<
   { key: number; start: string; end: string; price: string }[]
 >([]);
@@ -395,6 +405,7 @@ async function openEditor() {
     profile.value = result;
     baseInput.value = inputPrice(result.base_price_ct_kwh);
     feedInput.value = inputPrice(result.feed_in_price_ct_kwh);
+    pvSensor.value = result.profiles?.time_of_use.pv_sensor ?? null;
     draftWindows.value = result.windows.map((window) => ({
       key: windowKey++,
       start: window.start,
@@ -499,7 +510,7 @@ async function save() {
   pending.value = true;
   const sourceFingerprint = tariffFingerprint(sourceAttributes.value);
   try {
-    const result = await dashboard.saveTariff({
+    const draft = {
       revision: profile.value.revision,
       base_price_ct_kwh: base,
       feed_in_price_ct_kwh: feed,
@@ -508,13 +519,26 @@ async function save() {
         end: window.end.length === 5 ? `${window.end}:00` : window.end,
         price_ct_kwh: window.value!,
       })),
-    });
+    };
+    const result = props.compact
+      ? await dashboard.configureTariff({
+          revision: draft.revision,
+          tariff_type: "time_of_use",
+          profile: {
+            base_price_ct_kwh: draft.base_price_ct_kwh,
+            feed_in_price_ct_kwh: draft.feed_in_price_ct_kwh,
+            windows: draft.windows,
+            pv_sensor: pvSensor.value,
+          },
+        })
+      : await dashboard.saveTariff(draft);
     if (disposed) return;
     savedProfile.value = result;
     savedSourceFingerprint.value = sourceFingerprint;
     clearConfirmedProfile();
     cancel();
     saved.value = true;
+    emit("saved");
   } catch (cause) {
     reportError(cause);
   } finally {
@@ -550,6 +574,11 @@ watch(tariffVisible, (visible) => {
         {{ pending ? text.loading : text.edit }}
       </button>
     </header>
+    <p v-if="compact && !editing" class="tariff-plan__compact-summary">
+      {{ text.base }} {{ tariffPrice(attributes.base_price_eur_kwh) }} ·
+      {{ windows.length }} {{ text.windows }} · {{ text.feed }}
+      {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
+    </p>
     <p v-if="saved" role="status">{{ text.saved }}</p>
     <p v-if="errorMessage" role="alert" class="tariff-plan__error">
       {{ errorMessage }}
@@ -586,6 +615,12 @@ watch(tariffVisible, (visible) => {
               autocomplete="off"
           /></label>
         </div>
+        <SensorPicker
+          v-if="compact"
+          v-model="pvSensor"
+          :hass="hass"
+          :label="text.pv"
+        />
         <div
           v-for="(window, index) in draftWindows"
           :key="window.key"
@@ -670,7 +705,7 @@ watch(tariffVisible, (visible) => {
         </button>
       </div>
     </form>
-    <div v-if="!editing" class="tariff-plan__scroll">
+    <div v-if="!editing && !compact" class="tariff-plan__scroll">
       <table class="tariff-plan__table">
         <thead>
           <tr>
@@ -707,7 +742,10 @@ watch(tariffVisible, (visible) => {
         </tbody>
       </table>
     </div>
-    <p v-if="!editing && lowTariffAvailable" class="tariff-plan__low-status">
+    <p
+      v-if="!editing && !compact && lowTariffAvailable"
+      class="tariff-plan__low-status"
+    >
       <strong>{{ text.low }}:</strong>
       {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
       <template v-if="lowTariffActive">
@@ -716,24 +754,28 @@ watch(tariffVisible, (visible) => {
       <template v-else>{{ text.notLow }}</template>
     </p>
     <p
-      v-else-if="!editing && !savedProfile"
+      v-else-if="!editing && !compact && !savedProfile"
       class="tariff-plan__low-unavailable"
     >
       {{ text.noLowTariff }}
     </p>
-    <p v-if="!editing">
+    <p v-if="!editing && !compact">
       <strong>{{ text.feed }}:</strong>
       {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
     </p>
-    <p v-if="!editing && !hasPrice && !savedProfile">
+    <p v-if="!editing && !compact && !hasPrice && !savedProfile">
       {{ text.noPrice
       }}<span v-if="typeof reason === 'string' && reason"> ({{ reason }})</span>
     </p>
-    <p v-else-if="!editing && attributes.next_price_change_at && !savedProfile">
+    <p
+      v-else-if="
+        !editing && !compact && attributes.next_price_change_at && !savedProfile
+      "
+    >
       <strong>{{ text.next }}:</strong>
       {{ timestamp(attributes.next_price_change_at) }}
     </p>
-    <details class="tariff-plan__details">
+    <details v-if="!compact" class="tariff-plan__details">
       <summary>{{ text.details }}</summary>
       <p>{{ text.rule }}</p>
       <p>{{ text.configure }}</p>
@@ -757,6 +799,13 @@ watch(tariffVisible, (visible) => {
   font-size: 18px;
   font-weight: 500;
   line-height: 1.5;
+}
+.tariff-plan__compact-summary {
+  color: var(--secondary-text-color, #666);
+  margin: 0;
+}
+.tariff-plan__editor > fieldset > .sensor-picker {
+  margin-top: 16px;
 }
 .tariff-plan p {
   line-height: 1.6;

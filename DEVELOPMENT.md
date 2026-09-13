@@ -96,7 +96,7 @@ custom_components/sax_power/
 ├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
 │                          + coordinator.data + Ladeplan + Roh-/Startwerte der
 │                          Energie- und Geldzähler, IP-Adresse redigiert
-├── vue_dashboard.py        Dashboard SAX Power als optionales Vue-Panel, siehe
+├── vue_dashboard.py        Dashboard SAX Power als integriertes Vue-Panel, siehe
 │                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
 ├── dashboard_api.py        Berechtigungsgefiltertes Entity-Metadatenabo für Vue,
 │                          siehe REQ-VUE-ENTITY-BINDING
@@ -202,7 +202,7 @@ Bedienberechtigung oder Verbindung verwerfen die offene Auswahl ohne Service.
 Eine gültige Bestätigung verwendet einmal den bestehenden HA-Schalterservice.
 Die übrigen Schalter benötigen diesen zusätzlichen Dialog nicht.
 
-`dashboard_api.py` registriert mit dem optionalen Panel den WebSocket-Befehl
+`dashboard_api.py` registriert mit dem integrierten Panel den WebSocket-Befehl
 `sax_power/dashboard/subscribe`. Er liefert für den angeforderten SAX-Config-Entry
 die tatsächlichen Entity- und Device-IDs, Domains, stabilen Schlüssel,
 übersetzten Namen und Enum-Texte sowie die Bedienberechtigung.
@@ -314,23 +314,21 @@ bleiben Entwürfe bis zum Absenden. Geld wird erst zur Anzeige auf zwei,
 Tarifpreise in ct/kWh auf zwei Nachkommastellen formatiert; der Vorlaufbetrag beeinflusst
 keine Statistik. Fehlende Historie wird nicht durch Live-Sensorwerte ersetzt.
 
-`CONF_VUE_DASHBOARD_ENABLED` ist ein dauerhaftes Opt-in mit Standard `False`.
-Die Ersteinrichtung speichert es in `entry.data`; spätere Änderungen in
-`entry.options` haben Vorrang, auch bei explizitem `False`. Eine ausgelassene
-Option erhält die vorhandene Auswahl. Der Options-Listener synchronisiert
-das Panel direkt; eine reine Änderung dieser Option setzt weder den Planner
-neu auf noch löst sie eine Modbus-Aktion aus. Setup registriert das aktivierte
-Panel erneut, Unload entfernt es. Fehler der optionalen Oberfläche blockieren
-die Batterieintegration nicht.
+Das Dashboard ist integraler Bestandteil der Integration. Setup und
+Options-Listener registrieren das Panel idempotent, ohne Auswahl im Config-
+oder Options Flow. Alte Werte von `vue_dashboard_enabled` beeinflussen die
+Verfügbarkeit nicht mehr. Deaktivierung der Integration und Unload entfernen
+das eigene Panel. Frontendfehler blockieren die Batterieintegration nicht.
 
 Der Lovelace-Builder, dessen Anlageoption, Create-/Reinstall-Services,
 Veraltet-Reparatur und Lovelace-Abhängigkeit sind entfernt. Die Migration
-bereinigt `create_dashboard` und `dashboard_update_dismissed` in `entry.data`
+bereinigt `create_dashboard`, `dashboard_update_dismissed` und
+`vue_dashboard_enabled` in `entry.data`
 und `entry.options` sowie `dashboard_outdated_<entry_id>` in der Issue Registry.
 Sie schreibt weder in den Lovelace-Storage noch löscht sie gespeicherte
-Dashboards oder Karten. Das bestehende Dashboard-Opt-in einschließlich
-explizitem `False` bleibt erhalten. Die aktive Implementierung benötigt
-keine Lovelace-Konfiguration oder parallelen Dashboard-Einstieg.
+Dashboards oder Karten. Frühere Dashboard-Abwahlen entfallen. Die aktive
+Implementierung benötigt keine Lovelace-Konfiguration oder parallelen
+Dashboard-Einstieg.
 
 `REQ-VUE-DASHBOARD-REPAIR` ergänzt einen eigenen Reparaturablauf für Vue.
 Der SHA-256-Hash des lokalen Bundles identifiziert den Stand auch zwischen
@@ -377,7 +375,7 @@ vorhandene Snapshot-Packprogramm übernimmt dieselben Bytes. Der privilegierte
 Snapshot-Workflow führt weiterhin keinen Frontend-Build aus PR-Code aus.
 `tests/test_frontend_package.py` prüft Source- und Snapshot-Paketierung,
 `tests/test_vue_dashboard.py` den Panel-Lebenszyklus und
-`tests/test_config_flow.py` die Dashboard-Aktivierung; `tests/test_init.py`
+`tests/test_config_flow.py` das Entfallen der Dashboard-Auswahl; `tests/test_init.py`
 prüft die Bereinigung alter Metadaten ohne Änderung gespeicherter Dashboards.
 `tests/test_dashboard_api.py` prüft das echte WebSocket-Protokoll einschließlich
 Berechtigungen und Registry-Änderungen. Die Frontend-Tests decken Live-Zustände,
@@ -448,12 +446,11 @@ Naht für weitere schrittweise Extraktionen.
 auch `async_step_reconfigure` (spätere Änderung, z. B. der IP-Adresse) über
 eine gemeinsame Methode (`_async_step_connection`). Beide validieren die
 Verbindung mit demselben Testread, bevor die Daten gespeichert werden. Nur
-`async_step_user` verzweigt bei Erfolg zusätzlich in drei weitere, optionale
+`async_step_user` verzweigt bei Erfolg zusätzlich in zwei weitere
 Schritte, bevor der Eintrag angelegt wird - `async_step_reconfigure`
 überspringt sie alle: `async_step_grid_charge` (Vorbelegung für das
-zeitgesteuerte Laden, siehe `STEP_GRID_CHARGE_SCHEMA`), `async_step_dashboard`
-(Dashboard aktivieren ja/nein, Standard `False`, siehe `STEP_DASHBOARD_SCHEMA`
-und REQ-VUE-DASHBOARD) und zuletzt `async_step_finish` - eine reine
+zeitgesteuerte Laden, siehe `STEP_GRID_CHARGE_SCHEMA`) und
+`async_step_finish` – eine reine
 Zusammenfassungsseite ohne eigene Eingabefelder (Firmware, Seriennummer,
 SunSpec-Erreichbarkeit, Anzahl angelegter Entities als
 `description_placeholders`, per Testread über `_async_read_finish_summary`
@@ -505,18 +502,25 @@ ersten Seite; Festpreis und dynamischer Tarif haben die Folgeschritte
 `economics_fixed` und `economics_dynamic` mit Preiseingaben in ct/kWh.
 `disabled` und `time_of_use` speichern sofort. Standardpreis, Einspeisevergütung
 und Zeitfenster des tageszeitabhängigen Tarifs werden ausschließlich im
-Dashboard bearbeitet (REQ-VUE-TARIFF-EDITOR). Bei `time_of_use` setzt das Speichern
-deshalb ein aktiviertes Dashboard voraus (Issue #243). Die aktuelle Eingabe
-hat Vorrang vor `entry.options`, danach `entry.data` und dem ausgeschalteten
-Standard. Ohne Opt-in bleibt der Flow mit `economics_dashboard_required` am
-Dashboard-Feld offen und erklärt den Editorpfad; er ändert weder bestehende
-Preise noch die Dashboardwahl automatisch. Bleibt die Tarifart gleich,
+Dashboard bearbeitet (REQ-VUE-TARIFF-EDITOR). Das Dashboard steht ohne
+zusätzliche Aktivierung bereit (REQ-VUE-DASHBOARD); eine frühere Abwahl
+blockiert die Tarifauswahl nicht. Bleibt die Tarifart gleich,
 übernimmt der Flow das aktuell gespeicherte TOU-Profil; bei erstmaliger
 Auswahl bleiben fehlende Pflichtpreise unbekannt, bis der Anwender das Profil
 im Dashboard vervollständigt. Inaktive Profile bleiben unter
 `dashboard_tariff_profiles` erhalten; die flachen aktiven Options bleiben
 verbindlich. Auch ein späterer Optionsflow erhält die Profile und kann ein
-bereits gespeichertes TOU-Profil wiederherstellen. Die persistierten Schlüssel
+bereits gespeichertes TOU-Profil wiederherstellen.
+
+Der dynamische Dashboard-Editor prüft den PV-Anteil vor dem WebSocket-Aufruf
+auf ganze Prozentwerte zwischen 0 und 100 und erhält ungültige Entwürfe mit
+einer konkreten Fehlermeldung. `price_planner.has_unsupported_price_unit`
+meldet fremde Preiseinheiten an die Selbstdiagnose. Bei aktiver Planung ohne
+Preisdaten entsteht sofort `price_unit_unsupported`; der allgemeine Hinweis
+nach sechs Stunden wird für diesen Fehler unterdrückt. Die Einheitenkorrektur
+ersetzt keine Währungsumrechnung.
+
+Die persistierten Schlüssel
 und die acht verschachtelten Fenster-Mappings in `entry.options` bleiben in EUR/kWh,
 damit bestehende Konfigurationen und die interne Bilanz unverändert weiterlaufen.
 

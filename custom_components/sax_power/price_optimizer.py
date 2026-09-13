@@ -725,6 +725,19 @@ class SaxPricePlanner:
         return self.coordinator.options.get(CONF_PRICE_UNIT) or DEFAULT_PRICE_UNIT
 
     @property
+    def has_unsupported_price_unit(self) -> bool:
+        """REQ-SELF-DIAGNOSIS-REPAIRS: Fremde Einheiten sind kein Datenaussetzer."""
+        entity_id = self.price_entity_id
+        state = self.hass.states.get(entity_id) if entity_id else None
+        return (
+            state is not None
+            and _unit_factor(
+                self.price_unit, state.attributes.get("unit_of_measurement")
+            )
+            is None
+        )
+
+    @property
     def pv_factor(self) -> float:
         percent = self.coordinator.options.get(
             CONF_PV_FORECAST_FACTOR, DEFAULT_PV_FORECAST_FACTOR

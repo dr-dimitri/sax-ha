@@ -28,7 +28,6 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
-    CONF_VUE_DASHBOARD_ENABLED,
     DOMAIN,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -277,7 +276,6 @@ async def test_tariff_plan_reaches_the_dashboard_session(
         result["flow_id"],
         {
             CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
-            CONF_VUE_DASHBOARD_ENABLED: True,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY

@@ -23,7 +23,6 @@ from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
-    CONF_VUE_DASHBOARD_ENABLED,
     DOMAIN,
 )
 from custom_components.sax_power.domain.tariff import TariffType
@@ -85,7 +84,6 @@ async def test_enabling_requires_explicit_pv_start_and_preserves_edits_after_err
         CONF_BRIDGE_CHARGE_ENABLED: True,
         CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
         CONF_PV_FORECAST_FACTOR: 70,
-        CONF_VUE_DASHBOARD_ENABLED: True,
     }
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -160,7 +158,6 @@ async def test_explicit_sources_survive_save_and_reopening(
     first_page = {
         **bridge_options,
         CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
-        CONF_VUE_DASHBOARD_ENABLED: True,
     }
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], first_page

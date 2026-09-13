@@ -40,7 +40,9 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID_BASIC,
     CONF_SLAVE_ID_EXTENDED,
+    CONF_VUE_DASHBOARD_DISMISSED_VERSION,
     CONF_VUE_DASHBOARD_ENABLED,
+    CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
@@ -191,11 +193,25 @@ def _async_remove_legacy_dashboard_metadata(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
     """Entferne überholte Metadaten, ohne gespeicherte Nutzer-Dashboards anzufassen."""
-    legacy_keys = {"create_dashboard", "dashboard_update_dismissed"}
+    legacy_keys = {
+        "create_dashboard",
+        "dashboard_update_dismissed",
+        CONF_VUE_DASHBOARD_ENABLED,
+    }
     data = {key: value for key, value in entry.data.items() if key not in legacy_keys}
     options = {
         key: value for key, value in entry.options.items() if key not in legacy_keys
     }
+    # REQ-VUE-DASHBOARD-REPAIR: Automatische Erstaktivierung kennt kein altes Bundle.
+    if (
+        CONF_VUE_DASHBOARD_VERSION not in data
+        and entry.options.get(
+            CONF_VUE_DASHBOARD_ENABLED, entry.data.get(CONF_VUE_DASHBOARD_ENABLED)
+        )
+        is False
+    ):
+        data[CONF_VUE_DASHBOARD_VERSION] = ""
+        data.pop(CONF_VUE_DASHBOARD_DISMISSED_VERSION, None)
     if data != entry.data or options != entry.options:
         hass.config_entries.async_update_entry(entry, data=data, options=options)
     ir.async_delete_issue(hass, DOMAIN, f"dashboard_outdated_{entry.entry_id}")

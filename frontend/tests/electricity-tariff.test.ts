@@ -465,6 +465,34 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     await click(section, "Abbrechen");
     expect(writes(fixture)).toHaveLength(1);
   });
+  it.each(["de", "en"])(
+    "rejects fractional PV shares locally and keeps the draft in %s",
+    async (language) => {
+      const fixture = await mount({ type: "dynamic", language });
+      const section = fixture.root.querySelector(".electricity-prices")!;
+      await click(section, language === "de" ? "Bearbeiten" : "Edit");
+      await fill(section, '[name="dynamic_feed"]', "9,25");
+      await fill(section, '[name="dynamic_pv_factor"]', "50.5");
+      await click(section, language === "de" ? "Speichern" : "Save");
+      expect(writes(fixture)).toHaveLength(0);
+      expect(section.querySelector("form")).not.toBeNull();
+      expect(fixture.root.textContent).toContain(
+        language === "de"
+          ? "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben."
+          : "Enter a whole PV percentage from 0 to 100%.",
+      );
+      expect(
+        section.querySelector<HTMLInputElement>('[name="dynamic_feed"]')?.value,
+      ).toBe("9,25");
+      await fill(section, '[name="dynamic_pv_factor"]', "50");
+      await click(section, language === "de" ? "Speichern" : "Save");
+      expect(writes(fixture)).toHaveLength(1);
+      expect(writes(fixture)[0]?.[0].profile).toMatchObject({
+        pv_factor: 50,
+        feed_in_price_ct_kwh: 9.25,
+      });
+    },
+  );
   it.each(["conflict", "invalid_tariff", "forbidden"])(
     "keeps a dynamic draft on %s",
     async (code) => {

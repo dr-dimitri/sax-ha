@@ -54,6 +54,8 @@ const text = computed(() =>
         autoUnit: "Automatisch erkennen",
         pv: "PV-Prognose-Sensor (optional)",
         pvFactor: "Anrechenbarer PV-Anteil (%)",
+        invalidPvFactor:
+          "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
         charging: "Ladeverhalten",
         details: "Ladeplan & Prognose",
         global: "Globale SOC-Obergrenze",
@@ -131,6 +133,7 @@ const text = computed(() =>
         autoUnit: "Detect automatically",
         pv: "PV forecast sensor (optional)",
         pvFactor: "PV share to account for (%)",
+        invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
         charging: "Charging settings",
         details: "Charging plan & forecast",
         global: "Global SOC limit",
@@ -245,7 +248,7 @@ const draft = ref<DynamicTariffProfile>({
   pv_factor: 100,
 });
 const feed = ref("");
-const pvFactor = ref("");
+const pvFactor = ref<string | number>("");
 const editRevision = ref("");
 const pricesEditor = ref<HTMLElement>();
 const priceButton = ref<HTMLButtonElement>();
@@ -492,14 +495,19 @@ async function savePrices() {
     : NaN;
   const factor = Number(pvFactor.value);
   if (
+    String(pvFactor.value).trim() === "" ||
+    !Number.isInteger(factor) ||
+    factor < 0 ||
+    factor > 100
+  ) {
+    error.value = text.value.invalidPvFactor;
+    return;
+  }
+  if (
     !draft.value.price_sensor ||
     !Number.isFinite(price) ||
     price < 0 ||
-    price > 200 ||
-    pvFactor.value.trim() === "" ||
-    !Number.isFinite(factor) ||
-    factor < 0 ||
-    factor > 100
+    price > 200
   ) {
     error.value = text.value.invalid;
     return;
@@ -758,6 +766,7 @@ function closeCharging() {
               >{{ text.pvFactor
               }}<input
                 v-model="pvFactor"
+                name="dynamic_pv_factor"
                 type="number"
                 min="0"
                 max="100"

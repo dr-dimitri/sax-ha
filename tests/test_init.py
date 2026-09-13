@@ -29,6 +29,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
     CONF_VUE_DASHBOARD_ENABLED,
+    CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
     DOMAIN,
     MAX_SETPOINT_POWER,
@@ -49,7 +50,7 @@ VALID_INPUT = {
 
 
 @pytest.mark.parametrize("vue_enabled", [False, True])
-async def test_legacy_dashboard_cleanup_preserves_saved_dashboards_and_opt_in(
+async def test_legacy_dashboard_cleanup_removes_choice_and_preserves_saved_dashboards(
     hass, hass_storage, vue_enabled: bool
 ) -> None:
     """REQ-VUE-DASHBOARD: Nur entfallene Metadaten werden beim Upgrade entfernt."""
@@ -110,9 +111,11 @@ async def test_legacy_dashboard_cleanup_preserves_saved_dashboards_and_opt_in(
     update.assert_called_once()
     service_call.assert_not_called()
     assert not coordinator.mock_calls
-    assert entry.data == {**VALID_INPUT, CONF_VUE_DASHBOARD_ENABLED: True}
+    assert entry.data == {
+        **VALID_INPUT,
+        **({CONF_VUE_DASHBOARD_VERSION: ""} if not vue_enabled else {}),
+    }
     assert entry.options == {
-        CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
         CONF_PRICE_SENSOR: "sensor.preis",
     }
     assert registry.async_get_issue(DOMAIN, issue_id) is None

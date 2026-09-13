@@ -115,9 +115,8 @@ async def test_user_flow_success(hass) -> None:
     zweite, optionale Schritt "grid_charge" - wird er unverändert (leer)
     abgeschickt, gelten die Hard-Defaults aus const.py (deaktiviert,
     Zeitfenster 00:00-00:05), siehe anforderung.yaml REQ-TIMED-SOC-CHARGE.
-    Danach folgt der dritte, optionale Schritt "dashboard" (siehe
-    anforderung.yaml REQ-VUE-DASHBOARD) - unverändert abgeschickt bleibt
-    das Dashboard deaktiviert."""
+    Danach folgt direkt die Abschlussseite ohne Dashboard-Auswahl
+    (REQ-VUE-DASHBOARD)."""
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
     client.connected = True
@@ -154,21 +153,19 @@ async def test_user_flow_success(hass) -> None:
 
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
         assert result3["type"] == FlowResultType.FORM
-        assert result3["step_id"] == "dashboard"
+        assert result3["step_id"] == "finish"
+        assert not hass.config_entries.async_entries(DOMAIN)
 
         result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
-        assert result4["type"] == FlowResultType.FORM
-        assert result4["step_id"] == "finish"
-
-        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
-        assert result5["type"] == FlowResultType.CREATE_ENTRY
-        assert result5["title"] == "SAX Power Home"
-        assert result5["data"]["host"] == "192.168.1.50"
-        assert result5["data"]["timed_charge_enabled"] is False
-        assert result5["data"]["timed_charge_start"] == "00:00:00"
-        assert result5["data"]["timed_charge_end"] == "00:05:00"
-        assert "create_dashboard" not in result5["data"]
-        assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
+        assert result4["type"] == FlowResultType.CREATE_ENTRY
+        assert result4["title"] == "SAX Power Home"
+        assert result4["data"]["host"] == "192.168.1.50"
+        assert result4["data"]["timed_charge_enabled"] is False
+        assert result4["data"]["timed_charge_start"] == "00:00:00"
+        assert result4["data"]["timed_charge_end"] == "00:05:00"
+        assert "create_dashboard" not in result4["data"]
+        assert CONF_VUE_DASHBOARD_ENABLED not in result4["data"]
+        assert CONF_VUE_DASHBOARD_VERSION in result4["data"]
 
 
 async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
@@ -206,177 +203,35 @@ async def test_user_flow_grid_charge_step_accepts_explicit_values(hass) -> None:
             },
         )
         assert result3["type"] == FlowResultType.FORM
-        assert result3["step_id"] == "dashboard"
+        assert result3["step_id"] == "finish"
+        assert not hass.config_entries.async_entries(DOMAIN)
 
         result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
-        assert result4["type"] == FlowResultType.FORM
-        assert result4["step_id"] == "finish"
-
-        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
-        assert result5["type"] == FlowResultType.CREATE_ENTRY
-        assert result5["data"]["timed_charge_enabled"] is True
-        assert result5["data"]["timed_charge_start"] == "22:00:00"
-        assert result5["data"]["timed_charge_end"] == "06:00:00"
+        assert result4["type"] == FlowResultType.CREATE_ENTRY
+        assert result4["data"]["timed_charge_enabled"] is True
+        assert result4["data"]["timed_charge_start"] == "22:00:00"
+        assert result4["data"]["timed_charge_end"] == "06:00:00"
 
 
-async def test_user_flow_dashboard_step_can_be_declined(hass) -> None:
-    """Der dritte Schritt ("dashboard") lässt sich abwählen - der Wert landet
-    dann als False im Config Entry, siehe anforderung.yaml
-    REQ-VUE-DASHBOARD."""
-    client = MagicMock()
-    client.connect = AsyncMock(return_value=True)
-    client.connected = True
-    read_result = MagicMock()
-    read_result.isError.return_value = False
-    read_result.registers = [50] * 115
-    client.read_holding_registers = AsyncMock(return_value=read_result)
-    client.write_register = AsyncMock(return_value=read_result)
-    client.close = MagicMock()
-
-    with (
-        patch(
-            "custom_components.sax_power.config_flow.AsyncModbusTcpClient",
-            return_value=client,
-        ),
-        patch("custom_components.sax_power.AsyncModbusTcpClient", return_value=client),
-    ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], VALID_INPUT
-        )
-        result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
-        result4 = await hass.config_entries.flow.async_configure(
-            result3["flow_id"], {CONF_VUE_DASHBOARD_ENABLED: False}
-        )
-        assert result4["type"] == FlowResultType.FORM
-        assert result4["step_id"] == "finish"
-
-        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
-        assert result5["type"] == FlowResultType.CREATE_ENTRY
-        assert result5["data"][CONF_VUE_DASHBOARD_ENABLED] is False
-
-
-@pytest.mark.parametrize("vue_enabled", [False, True])
-async def test_dashboard_choice_is_persisted(
-    hass: HomeAssistant, vue_enabled: bool
+@pytest.mark.parametrize("legacy_enabled", [None, False, True])
+async def test_options_offer_no_dashboard_choice(
+    hass: HomeAssistant, legacy_enabled: bool | None
 ) -> None:
-    """REQ-VUE-DASHBOARD: Die einzige Dashboard-Auswahl wird dauerhaft gespeichert."""
-    with (
-        patch("custom_components.sax_power.config_flow._async_validate_connection"),
-        patch(
-            "custom_components.sax_power.config_flow._async_read_finish_summary",
-            return_value={"sunspec_available": False},
-        ),
-        patch("custom_components.sax_power.async_setup_entry", return_value=True),
-    ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], VALID_INPUT
-        )
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_VUE_DASHBOARD_ENABLED: vue_enabled,
-            },
-        )
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
-        await hass.async_block_till_done()
-
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert "create_dashboard" not in result["data"]
-    assert result["data"][CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
-    assert result["data"][CONF_VUE_DASHBOARD_VERSION] == ""
-
-
-@pytest.mark.parametrize(
-    ("initial_data", "initial_options", "submitted", "expected"),
-    [
-        ({}, {}, {}, False),
-        ({CONF_VUE_DASHBOARD_ENABLED: True}, {}, {}, True),
-        ({}, {CONF_VUE_DASHBOARD_ENABLED: True}, {}, True),
-        ({}, {}, {CONF_VUE_DASHBOARD_ENABLED: True}, True),
-        (
-            {CONF_VUE_DASHBOARD_ENABLED: True},
-            {},
-            {CONF_VUE_DASHBOARD_ENABLED: False},
-            False,
-        ),
-    ],
-)
-async def test_vue_options_preserve_or_override_onboarding_choice(
-    hass: HomeAssistant,
-    initial_data: dict,
-    initial_options: dict,
-    submitted: dict,
-    expected: bool,
-) -> None:
-    """REQ-VUE-DASHBOARD: Abwahl bleibt dauerhaft vor dem Setup-Opt-in wirksam."""
+    """REQ-VUE-DASHBOARD: Alte Abwahlen erzeugen kein neues Auswahlfeld."""
+    legacy = (
+        {} if legacy_enabled is None else {CONF_VUE_DASHBOARD_ENABLED: legacy_enabled}
+    )
     entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={**VALID_INPUT, **initial_data},
-        options=initial_options,
+        domain=DOMAIN, data={**VALID_INPUT, **legacy}, options=legacy
     )
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    suggested = {
-        key.schema: key.description["suggested_value"]
-        for key in result["data_schema"].schema
-        if isinstance(key.description, dict) and "suggested_value" in key.description
+    assert CONF_VUE_DASHBOARD_ENABLED not in {
+        key.schema for key in result["data_schema"].schema
     }
-    assert suggested[CONF_VUE_DASHBOARD_ENABLED] is initial_options.get(
-        CONF_VUE_DASHBOARD_ENABLED, initial_data.get(CONF_VUE_DASHBOARD_ENABLED, False)
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], submitted
-    )
-    await hass.async_block_till_done()
-
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is expected
-
-
-@pytest.mark.parametrize("tariff_type", [TariffType.DISABLED, TariffType.FIXED])
-@pytest.mark.parametrize("existing_version", [None, "last-confirmed-bundle"])
-async def test_vue_first_activation_marker_preserves_reactivation_history(
-    hass: HomeAssistant, tariff_type: TariffType, existing_version: str | None
-) -> None:
-    """REQ-VUE-DASHBOARD-REPAIR: Nur das erste Aktivieren setzt eine neue Baseline."""
-    data = dict(VALID_INPUT)
-    if existing_version is not None:
-        data[CONF_VUE_DASHBOARD_VERSION] = existing_version
-        data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] = "last-ignored-bundle"
-    entry = MockConfigEntry(
-        domain=DOMAIN, data=data, options={CONF_VUE_DASHBOARD_ENABLED: False}
-    )
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_VUE_DASHBOARD_ENABLED: True,
-            CONF_ECONOMICS_TARIFF_TYPE: tariff_type.value,
-        },
-    )
-    if tariff_type is TariffType.FIXED:
-        assert result["type"] == FlowResultType.FORM
-        assert entry.data == data
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"],
-            {
-                CONF_ECONOMICS_FIXED_IMPORT_PRICE: 30.0,
-                CONF_ECONOMICS_FEED_IN_PRICE: 8.0,
-            },
-        )
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is True
-    assert entry.data[CONF_VUE_DASHBOARD_VERSION] == (existing_version or "")
-    if existing_version is not None:
-        assert entry.data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] == "last-ignored-bundle"
+    assert CONF_VUE_DASHBOARD_ENABLED not in entry.options
 
 
 async def test_vue_legacy_enabled_options_do_not_invent_confirmed_baseline(
@@ -396,7 +251,7 @@ async def test_vue_legacy_enabled_options_do_not_invent_confirmed_baseline(
 
 
 async def test_finish_step_shows_summary_placeholders(hass) -> None:
-    """Vierter, abschließender Schritt der Ersteinrichtung ("finish", siehe
+    """Dritter, abschließender Schritt der Ersteinrichtung ("finish", siehe
     anforderung.yaml REQ-SETUP-FINISH-SUMMARY): fasst Firmware, Seriennummer,
     SunSpec-Erreichbarkeit und Entity-Anzahl als description_placeholders
     zusammen, bevor der Config Entry angelegt wird."""
@@ -425,11 +280,10 @@ async def test_finish_step_shows_summary_placeholders(hass) -> None:
             result["flow_id"], VALID_INPUT
         )
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
-        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
 
-        assert result4["type"] == FlowResultType.FORM
-        assert result4["step_id"] == "finish"
-        placeholders = result4["description_placeholders"]
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "finish"
+        placeholders = result3["description_placeholders"]
         assert placeholders["firmware"] == "Master V61 / Gateway V54"
         assert placeholders["serial_number"] == "12345"
         assert placeholders["sunspec_status"] == "Erreichbar"
@@ -474,9 +328,8 @@ async def test_finish_step_handles_identity_sentinels(hass) -> None:
             result["flow_id"], VALID_INPUT
         )
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
-        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
 
-        placeholders = result4["description_placeholders"]
+        placeholders = result3["description_placeholders"]
         assert placeholders["sunspec_status"] == "Erreichbar"
         assert placeholders["firmware"] == "Master unbekannt / Gateway unbekannt"
         assert placeholders["serial_number"] == "unbekannt"
@@ -518,11 +371,10 @@ async def test_finish_step_marks_sunspec_unavailable(hass) -> None:
             result["flow_id"], VALID_INPUT
         )
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
-        result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
 
-        assert result4["type"] == FlowResultType.FORM
-        assert result4["step_id"] == "finish"
-        placeholders = result4["description_placeholders"]
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "finish"
+        placeholders = result3["description_placeholders"]
         assert placeholders["sunspec_status"] == "Nicht erreichbar"
         assert "Nicht verfügbar" in placeholders["firmware"]
         assert "Nicht verfügbar" in placeholders["serial_number"]
@@ -625,7 +477,7 @@ async def test_dhcp_discovery_prefills_host(hass) -> None:
     """DHCP-Discovery (siehe anforderung.yaml REQ-DHCP-DISCOVERY) leitet in
     den normalen "user"-Schritt weiter und belegt dessen Host-Feld mit der
     entdeckten IP vor; die restliche Ersteinrichtung (Verbindungsprüfung,
-    grid_charge/dashboard/finish) läuft danach unverändert weiter."""
+    grid_charge/finish) läuft danach unverändert weiter."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_DHCP},
@@ -667,11 +519,10 @@ async def test_dhcp_discovery_prefills_host(hass) -> None:
 
         result3 = await hass.config_entries.flow.async_configure(result2["flow_id"], {})
         result4 = await hass.config_entries.flow.async_configure(result3["flow_id"], {})
-        result5 = await hass.config_entries.flow.async_configure(result4["flow_id"], {})
 
-        assert result5["type"] == FlowResultType.CREATE_ENTRY
-        assert result5["result"].unique_id == "aa:bb:cc:dd:ee:ff"
-        assert result5["result"].data["host"] == "192.168.1.77"
+        assert result4["type"] == FlowResultType.CREATE_ENTRY
+        assert result4["result"].unique_id == "aa:bb:cc:dd:ee:ff"
+        assert result4["result"].data["host"] == "192.168.1.77"
 
 
 async def test_dhcp_discovery_aborts_if_host_already_configured(hass) -> None:
@@ -810,10 +661,10 @@ async def test_reconfigure_flow_updates_host(
 
 
 @pytest.mark.parametrize("vue_enabled", [False, True])
-async def test_reconfigure_preserves_vue_onboarding_choice(
+async def test_reconfigure_removes_choice_and_preserves_bundle_history(
     hass: HomeAssistant, vue_enabled: bool
 ) -> None:
-    """REQ-VUE-DASHBOARD: Neue Verbindungsdaten ändern keine Dashboard-Auswahl."""
+    """REQ-VUE-DASHBOARD: Reconfigure erhält Bundle-Marker ohne Dashboard-Auswahl."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -837,7 +688,7 @@ async def test_reconfigure_preserves_vue_onboarding_choice(
 
     assert result["reason"] == "reconfigure_successful"
     assert entry.data["host"] == "192.168.1.99"
-    assert entry.data[CONF_VUE_DASHBOARD_ENABLED] is vue_enabled
+    assert CONF_VUE_DASHBOARD_ENABLED not in entry.data
     assert entry.data[CONF_VUE_DASHBOARD_VERSION] == "confirmed-hash"
     assert entry.data[CONF_VUE_DASHBOARD_DISMISSED_VERSION] == "ignored-hash"
 
@@ -1204,7 +1055,6 @@ async def test_time_of_use_finishes_without_a_price_step(hass, existing: bool) -
         {
             CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
             CONF_PV_FORECAST_FACTOR: 70,
-            CONF_VUE_DASHBOARD_ENABLED: True,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -1233,7 +1083,6 @@ async def test_switch_to_time_of_use_does_not_reuse_other_tariff_prices(hass) ->
         result["flow_id"],
         {
             CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
-            CONF_VUE_DASHBOARD_ENABLED: True,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -1570,7 +1419,7 @@ async def test_every_setup_step_renders_for_the_frontend(hass) -> None:
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
-        for user_input in (VALID_INPUT, {}, {}, {}):
+        for user_input in (VALID_INPUT, {}, {}):
             assert result["type"] == FlowResultType.FORM
             _assert_frontend_can_render(result["data_schema"])
             result = await hass.config_entries.flow.async_configure(

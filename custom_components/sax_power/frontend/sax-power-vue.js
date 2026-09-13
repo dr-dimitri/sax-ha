@@ -5345,6 +5345,7 @@ var Hc = ["aria-busy"], Uc = {
 			autoUnit: "Automatisch erkennen",
 			pv: "PV-Prognose-Sensor (optional)",
 			pvFactor: "Anrechenbarer PV-Anteil (%)",
+			invalidPvFactor: "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
 			charging: "Ladeverhalten",
 			details: "Ladeplan & Prognose",
 			global: "Globale SOC-Obergrenze",
@@ -5409,6 +5410,7 @@ var Hc = ["aria-busy"], Uc = {
 			autoUnit: "Detect automatically",
 			pv: "PV forecast sensor (optional)",
 			pvFactor: "PV share to account for (%)",
+			invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
 			charging: "Charging settings",
 			details: "Charging plan & forecast",
 			global: "Global SOC limit",
@@ -5564,7 +5566,11 @@ var Hc = ["aria-busy"], Uc = {
 		async function L() {
 			if (!n || x.value || b.value) return;
 			let e = /^\d+(?:[.,]\d{1,2})?$/.test(te.value.trim()) ? Number(te.value.trim().replace(",", ".")) : NaN, t = Number(A.value);
-			if (!k.value.price_sensor || !Number.isFinite(e) || e < 0 || e > 200 || A.value.trim() === "" || !Number.isFinite(t) || t < 0 || t > 100) {
+			if (String(A.value).trim() === "" || !Number.isInteger(t) || t < 0 || t > 100) {
+				y.value = i.value.invalidPvFactor;
+				return;
+			}
+			if (!k.value.price_sensor || !Number.isFinite(e) || e < 0 || e > 200) {
 				y.value = i.value.invalid;
 				return;
 			}
@@ -5755,6 +5761,7 @@ var Hc = ["aria-busy"], Uc = {
 					]),
 					Y("label", null, [Z(I(i.value.pvFactor), 1), Dn(Y("input", {
 						"onUpdate:modelValue": n[8] ||= (e) => A.value = e,
+						name: "dynamic_pv_factor",
 						type: "number",
 						min: "0",
 						max: "100",

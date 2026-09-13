@@ -21,7 +21,6 @@ from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
-    CONF_VUE_DASHBOARD_ENABLED,
     DATA_COORDINATOR,
     DOMAIN,
     ECONOMICS_TOU_WINDOW_KEYS,
@@ -263,7 +262,6 @@ async def test_options_flow_keeps_profiles_and_restores_saved_time_of_use(
         {
             CONF_ECONOMICS_TARIFF_TYPE: "time_of_use",
             CONF_PV_FORECAST_FACTOR: 60,
-            CONF_VUE_DASHBOARD_ENABLED: True,
         },
     )
     assert result["type"] == "create_entry"

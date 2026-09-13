@@ -54,7 +54,7 @@
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           superseded Abgelöst durch das einzige Dashboard SAX Power (REQ-VUE-DASHBOARD)
-# REQ-VUE-DASHBOARD               done       Dashboard SAX Power mit Navigation, Opt-in und lokalem Build (#197)
+# REQ-VUE-DASHBOARD               done       Dashboard SAX Power mit Navigation, automatischer Einrichtung und lokalem Build (#197)
 # REQ-VUE-ENTITY-BINDING          done       Gemeinsame HA-Entitäten, Live-Zustände und Bedienkomponenten für Vue (#198)
 # REQ-VUE-GENERAL                 done       Allgemeine Vue-Geräteübersicht mit Live-Werten und Bedienung (#199)
 # REQ-VUE-CHARGING                done       Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (#200)
@@ -306,7 +306,7 @@ requirement_ip_configurable_ui:
        Formular begrenzt. Der Testread muss einen ganzzahligen SOC von
        0 bis 100 liefern; leere oder fachlich ungültige Antworten melden
        invalid_response und ändern keine gespeicherte Verbindung."
-    - "user, grid_charge, dashboard und finish verhindern zusätzliche
+    - "user, grid_charge und finish verhindern zusätzliche
        Config Entries auch bei parallel begonnenen Einrichtungs-Flows;
        vor dem Anlegen des Eintrags wird die Begrenzung erneut geprüft."
     - "Der Abbruch single_instance_allowed enthält in allen angebotenen
@@ -2550,7 +2550,7 @@ requirement_dynamic_price_charge:
 # ==============================================================================
 requirement_vue_dashboard:
   id: REQ-VUE-DASHBOARD
-  title: "Dashboard SAX Power mit Navigation, Opt-in und lokalem Build (Issue #197)"
+  title: "Dashboard SAX Power mit Navigation, automatischer Einrichtung und lokalem Build (Issue #197)"
   status: done
   description: >
     Die Integration liefert ausschließlich das Vue-3-/TypeScript-Dashboard
@@ -2597,23 +2597,19 @@ requirement_vue_dashboard:
     Die Bedienflächen von Eingaben und Schaltflächen bleiben mindestens
     44 Pixel hoch.
 
-    vue_dashboard_enabled ist eine eigenständige persistierte Auswahl,
-    standardmäßig False. Die Ersteinrichtung bietet ausschließlich diese
-    Dashboard-Auswahl an und speichert sie in entry.data.
-    Der Options Flow erlaubt nachträgliche Aktivierung und Deaktivierung
-    in entry.options; ein vorhandener Options-Wert hat Vorrang vor den
-    Setup-Daten. Eine ausgelassene Options-Eingabe und eine Änderung der
-    Verbindungsdaten erhalten die bisherige Auswahl.
-    Eine reine Vue-Änderung synchronisiert nur die Oberfläche, ohne
-    Reload, Planner-Neustart, Tarifrevision oder zusätzliche Modbus-Aktion.
+    Das Dashboard ist integraler Bestandteil der Integration und wird bei jeder
+    Einrichtung und jedem Start automatisch angelegt. Config Flow und Options
+    Flow enthalten weder Dashboard-Schritt noch Aktivierungsfeld. Frühere Werte
+    von vue_dashboard_enabled, auch explizites False, werden beim Setup entfernt
+    und beeinflussen die Verfügbarkeit nicht mehr.
 
-    Setup und Options-Änderungen registrieren das aktivierte Panel
-    idempotent. Deaktivierung und Unload entfernen den eigenen Panel-Eintrag.
-    Fehler der optionalen Oberfläche verhindern weder Setup noch Betrieb
-    der Batterieintegration. Die gemeinsame statische Asset-Route bleibt
-    pro Home-Assistant-Lauf genau einmal bestehen, da HA keine API zum
-    Abmelden solcher Routen anbietet. Dateizugriffe laufen im Executor;
-    ein Inhalts-Hash in der Modul-URL erneuert den Browser-Cache nach Updates.
+    Setup und Options-Änderungen registrieren das Panel idempotent.
+    Deaktivierung der Integration und Unload entfernen den eigenen Panel-Eintrag.
+    Frontendfehler verhindern weder Setup noch Betrieb der Batterieintegration.
+    Die gemeinsame statische Asset-Route bleibt pro Home-Assistant-Lauf genau
+    einmal bestehen, da HA keine API zum Abmelden solcher Routen anbietet.
+    Dateizugriffe laufen im Executor; ein Inhalts-Hash in der Modul-URL erneuert
+    den Browser-Cache nach Updates.
 
     Das Custom Element sax-power-vue-panel erhält hass, narrow, panel und
     route vom bestehenden HA-Frontend. Alle Frontend-Abhängigkeiten und
@@ -2627,25 +2623,24 @@ requirement_vue_dashboard:
 
     Der Lovelace-Builder, dessen Erstellungsoption und Abhängigkeit sowie
     create_dashboard/reinstall_dashboard und die Veraltet-Reparatur sind
-    entfernt. Beim Entry-Setup bereinigt die Migration create_dashboard und
-    dashboard_update_dismissed aus entry.data und entry.options sowie
-    dashboard_outdated_<entry_id> aus der Issue Registry; sie erhält das
-    Dashboard-Opt-in samt explizitem
-    False. Bereits gespeicherte HA-/Lovelace-Dashboards, Panels und Karten
+    entfernt. Beim Entry-Setup bereinigt die Migration create_dashboard,
+    dashboard_update_dismissed und vue_dashboard_enabled aus entry.data und
+    entry.options sowie dashboard_outdated_<entry_id> aus der Issue Registry.
+    Bereits gespeicherte HA-/Lovelace-Dashboards, Panels und Karten
     werden weder gelöscht noch überschrieben. Es gibt keinen Link auf einen
     zweiten mitgelieferten Dashboard-Einstieg.
   acceptance_criteria:
-    - "Der Config Flow bietet genau eine Dashboard-Auswahl mit ausgeschaltetem
-       Standard; Aktivierung und explizite Deaktivierung sind getestet."
+    - "Config Flow und Options Flow bieten keine Dashboard-Auswahl; automatische
+       Einrichtung ohne Auswahl und mit früherer Abwahl sind getestet."
     - "Die Migration entfernt alte Anlage-/Ablehnungsschlüssel und den
-       Legacy-Repair-Issue, erhält das Dashboard-Opt-in und verändert keine
+       Legacy-Repair-Issue sowie die frühere Dashboard-Auswahl und verändert keine
        gespeicherten HA-Dashboards oder Karten. Legacy-Services sind nicht registriert."
-    - "Aktivierung, Deaktivierung, Setup-Wiederholung, Reload und Unload
+    - "Integrationseinrichtung, Deaktivierung, Setup-Wiederholung, Reload und Unload
        erzeugen keine doppelten Panels oder statischen Routen."
     - "Ein Fehler bei Asset- oder Panel-Registrierung lässt die
        Batterieintegration betriebsbereit; fremde Panels werden nicht entfernt."
-    - "Options-Werte übersteuern Setup-Werte auch bei False; eine reine
-       Vue-Änderung erzeugt keine zusätzliche Geräteaktion."
+    - "Alte Dashboard-Options-Werte deaktivieren das Panel nicht und erzeugen
+       keine zusätzliche Geräteaktion."
     - "Die fünf Unterpfade funktionieren bei Navigation, direktem Einstieg
        und Browser-Zurück; Mount/Unmount räumt Frontend-Listener auf."
     - "Browserprüfungen belegen geringeren Desktop-Platzbedarf auch mit
@@ -2653,7 +2648,7 @@ requirement_vue_dashboard:
        und eine weiterhin lesbare mobile Ansicht ohne Seitenüberlauf."
     - "Source-/HACS-Verzeichnis und Snapshot enthalten das geprüfte lokale
        Bundle; Build und Typ-/Komponententests sind in CI eingebunden."
-    - "README und DEVELOPMENT beschreiben Aktivierung, Funktionsumfang,
+    - "README und DEVELOPMENT beschreiben automatische Einrichtung, Funktionsumfang,
        HA-Anbindung, Build und Paketierung."
 
 # ==============================================================================
@@ -3123,15 +3118,11 @@ requirement_vue_tariff_editor:
     darf ein unvollständiges Profil anlegen, bis es im Dashboard vervollständigt ist.
     Es werden weder Nullpreise noch Ersatzladezeiten erfunden.
 
-    TIME_OF_USE darf im Options Flow nur bei effektiv eingeschaltetem Dashboard
-    gespeichert werden (Issue #243). Aktuelle Eingabe hat Vorrang vor Options,
-    danach Entry-Daten und dem ausgeschalteten Standard. Ohne Zustimmung bleibt
-    die erste Seite mit economics_dashboard_required am Dashboard-Feld offen;
-    der Text erklärt die Aktivierung und Stromtarif → Tarif & Preise in ct/kWh.
-    Dashboardwahl, aktive und inaktive Tarifprofile werden nicht ungefragt
-    geändert. Das gilt auch für bestehende vollständige Tarife und wiederholte
-    erste Seiten. Nach expliziter Aktivierung bleibt die direkte Speicherung
-    ohne zusätzliche TOU-Preisseite erhalten.
+    TIME_OF_USE wird im Options Flow ohne zusätzliche Dashboard-Zustimmung
+    gespeichert, da das Dashboard immer bereitgestellt wird (REQ-VUE-DASHBOARD).
+    Frühere Abwahlen blockieren weder neue noch bestehende Tarifprofile oder
+    wiederholte erste Seiten. Aktive und inaktive Profile bleiben erhalten;
+    die direkte Speicherung erfolgt ohne zusätzliche TOU-Preisseite.
 
     Sämtliche sichtbaren Tarifpreise, die Einspeisevergütung und die Preisgrenzen
     verwenden ct/kWh. TOU-Eingaben haben eine Schrittweite von 0,01 ct/kWh;
@@ -3159,9 +3150,9 @@ requirement_vue_tariff_editor:
        Speicherung ohne Änderung fremder Options."
     - "Config-Flow-Tests prüfen das Entfallen der TOU-Folgeseite, Erhalt bestehender
        Profile und Cent/Euro-Roundtrips der verbleibenden Preisfelder."
-    - "tests/test_tou_dashboard_options.py prüft Dashboard-Opt-in, Priorität von
-       Eingabe/Options/Entry-Daten, unveränderte neue/aktive/inaktive Tarifprofile,
-       Feldfehler und erfolgreichen Wiederholungsversuch nach Aktivierung."
+    - "tests/test_tou_dashboard_options.py prüft direkte Tarifauswahl trotz alter
+       Abwahlen in Options/Entry-Daten, neue/aktive/inaktive Tarifprofile und
+       wiederholte erste Seiten ohne Dashboard-Abfrage."
     - "Number-/Sensor-Tests prüfen Wert und Einheit gemeinsam sowie die Migration
        alter Euro- und neuer Cent-Restore-Werte ohne Faktor-100-Fehler."
     - "Recorder-Tests prüfen Kurz-/Langzeitstatistik, Idempotenz, unbeteiligte
@@ -3206,7 +3197,12 @@ requirement_vue_electricity_tariff:
     optionales Attribut, tatsächliche Quelleneinheit, Einspeisevergütung sowie
     PV-Quelle und PV-Anteil. Gespeicherte inaktive Profile bleiben in
     dashboard_tariff_profiles erhalten; die flachen aktiven Options bleiben die
-    gemeinsame Quelle für Tarifbewertung und Ladeplanung. Ein Wechsel verwirft
+    gemeinsame Quelle für Tarifbewertung und Ladeplanung. Der PV-Anteil ist
+    eine ganze Prozentzahl von 0 bis 100. Frontend und Backend prüfen diese
+    Grenze einschließlich Ganzzahligkeit; eine ungültige Eingabe wie 50,5 wird
+    vor dem Speichern mit einer konkreten DE-/EN-Meldung abgelehnt und der
+    Entwurf bleibt erhalten (frontend/tests/electricity-tariff.test.ts).
+    Ein Wechsel verwirft
     weder Investitionsdaten noch native SOC-, Monats- oder Strategieeinstellungen.
 
     Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
@@ -3441,8 +3437,8 @@ requirement_vue_parity:
        und erzeugen Bilder aller fünf Tabs ohne zweiten Dashboard-Einstieg."
     - "tests/test_vue_dashboard_e2e.py prüft bidirektionale HA-Änderungen
        gegen simuliertes Modbus-TCP ohne zweite Verbindung oder doppelte Aktionen."
-    - "tests/test_vue_dashboard_restart.py prüft gespeicherte Aktivierung,
-       deaktivierte Optionen und ein im Stillstand aktualisiertes Bundle nach HA-Neustart."
+    - "tests/test_vue_dashboard_restart.py prüft automatische Einrichtung,
+       ignorierte alte Abwahlen und ein im Stillstand aktualisiertes Bundle nach HA-Neustart."
     - "tests/test_frontend_package.py prüft Stable-Quellarchiv- und Snapshot-
        Layout in getrennten HA-Prozessen ohne Rückgriff auf Repository-Module."
     - "Die Abnahme benennt ausgeführte Prüfungen, getesteten Commit/Paket-Hash,
@@ -3465,7 +3461,9 @@ requirement_vue_dashboard_repair:
 
     Der bestätigte Stand liegt in vue_dashboard_version, ein ausdrücklich
     abgelehnter Hinweis in vue_dashboard_dismissed_version. Eine erstmalige
-    Aktivierung bildet ohne Updateaufforderung die Baseline. Bereits aktivierte
+    Aktivierung bildet ohne Updateaufforderung die Baseline. Auch die Migration
+    einer expliziten alten Abwahl ohne Versionsmarker setzt diese Baseline;
+    vorhandene Versionsmarker bleiben erhalten. Bereits aktivierte
     ältere Dashboardstände ohne Versionsmarker erhalten einen neutralen einmaligen
     Hinweis zum Neuladen der Browseransicht; es wird kein unbekannter alter
     Versionsstand behauptet. Reconfigure erhält die Marker. Ablehnen gilt nur
@@ -3484,10 +3482,10 @@ requirement_vue_dashboard_repair:
     einen inzwischen neueren Bundle-Stand.
 
     Deaktivierte oder entfernte Config Entries werden nicht wieder aktiviert;
-    das Abschalten der Vue-Option entfernt den zugehörigen Hinweis. Die
+    die Deaktivierung der Integration entfernt den zugehörigen Hinweis. Die
     Reparatur verändert keine gespeicherten HA-Dashboards oder Karten.
     Weder Prüfung, Quittierung noch Reparatur lösen Modbus-Schreibvorgänge, Planner-Neustarts
-    oder eine neue Tarifrevision aus. Fehler der optionalen Oberfläche dürfen
+    oder eine neue Tarifrevision aus. Fehler der Oberfläche dürfen
     den Betrieb der Batterieintegration nicht blockieren.
   acceptance_criteria:
     - "Bundlewechsel bei gleicher Manifest-Version erzeugt einen Hinweis;
@@ -3588,21 +3586,17 @@ requirement_setup_finish_summary:
   title: "Abschlussseite der Ersteinrichtung: Zusammenfassung statt wortlosem Ende"
   status: done
   description: >
-    Der Config Flow endete bislang nach dem dritten, optionalen Schritt
-    ("dashboard", siehe REQ-VUE-DASHBOARD) direkt mit async_create_entry
-    - ohne jede Rückmeldung, was die Ersteinrichtung tatsächlich ergeben hat.
-    config_flow.async_step_finish ergänzt einen vierten, abschließenden
-    Schritt ohne eigene Eingabefelder (leeres vol.Schema({}), reiner
-    "Weiter"-Button): eine Zusammenfassung über description_placeholders
-    (strings.json/translations, Übersetzungsschlüssel "finish").
+    Nach Verbindung und optionaler Vorbelegung der Netzladung folgt direkt
+    config_flow.async_step_finish als dritter, abschließender Schritt ohne
+    eigene Eingabefelder (leeres vol.Schema({}), reiner Weiter-Button).
+    Die Zusammenfassung verwendet description_placeholders
+    (strings.json/translations, Übersetzungsschlüssel finish).
+    Eine Dashboard-Auswahl entfällt, da das Dashboard automatisch angelegt wird
+    (REQ-VUE-DASHBOARD).
 
-    Der Config Entry selbst wird jetzt erst hier angelegt (vorher in
-    async_step_dashboard) - async_step_dashboard merkt die
-    Dashboard-Entscheidung nur noch in self._dashboard_data vor und
-    verzweigt weiter zu async_step_finish, analog zu
-    self._connection_data/self._grid_charge_data aus den vorherigen
-    Schritten. Ein Abbruch des Flows auf der Abschlussseite legt dadurch
-    keinen unvollständigen Eintrag an.
+    Der Config Entry wird erst nach Bestätigung der Abschlussseite aus
+    self._connection_data und self._grid_charge_data angelegt. Ein Abbruch
+    auf der Abschlussseite legt keinen unvollständigen Eintrag an.
 
     Angezeigte Werte, per _async_read_finish_summary ermittelt (eigener,
     einmaliger Testread analog zu _async_validate_connection - Verbindung
@@ -3640,7 +3634,7 @@ requirement_setup_finish_summary:
     kein neues Register wird geschrieben, kein bestehender Schreibpfad
     verändert.
   acceptance_criteria:
-    - "tests/test_config_flow.py deckt den vierten Ersteinrichtungsschritt
+    - "tests/test_config_flow.py deckt den dritten Ersteinrichtungsschritt
        ('finish') ab: description_placeholders enthalten korrekte
        Firmware-/Seriennummer-/SunSpec-Status-/Entity-Anzahl-Werte bei
        erreichbarem SunSpec-Modus-Block, sowie 'Nicht erreichbar' bzw.
@@ -3651,7 +3645,7 @@ requirement_setup_finish_summary:
        neue Entities nicht unbemerkt aus der Zusammenfassung fehlen."
     - "tests/test_config_flow.py deckt ab, dass der Config Entry weiterhin
        korrekt mit allen zuvor gesammelten Daten (Verbindung,
-       Netzladung-Vorbelegung, Dashboard-Entscheidung) angelegt wird,
+       Netzladung-Vorbelegung) angelegt wird,
        jetzt aber erst nach Bestätigung der Abschlussseite."
 
 # ==============================================================================
@@ -3739,12 +3733,23 @@ requirement_self_diagnosis_repairs:
     jeweilige Ursache behoben ist, analog zum bestehenden Muster von
     ISSUE_EXTENDED_MODE_UNAVAILABLE (_async_read_high_block).
 
-    SelfDiagnostics.check wertet insgesamt sieben Regeln aus: die sechs
-    hier beschriebenen Basisregeln sowie _check_economics_price_unavailable
-    aus REQ-ECONOMICS-OBSERVABILITY. Zeitfenster und Monatsauswahl erzeugen
+    SelfDiagnostics.check wertet zusätzlich zu den sechs Basisregeln
+    _check_economics_price_unavailable aus REQ-ECONOMICS-OBSERVABILITY und
+    ISSUE_PRICE_UNIT_UNSUPPORTED aus. Zeitfenster und Monatsauswahl erzeugen
     jeweils eine eigene Issue-ID pro Automatik; damit entstehen bis zu
     acht Hinweise aus den Basisregeln und ein weiterer Wirtschaftshinweis,
-    insgesamt bis zu neun Issues pro Config Entry.
+    plus einen Hinweis für nicht unterstützte Preiseinheiten. Der Einheitenhinweis
+    ersetzt dabei den allgemeinen Hinweis auf fehlende Preisdaten.
+
+    ISSUE_PRICE_UNIT_UNSUPPORTED meldet eine nicht unterstützte Einheit oder
+    Währung der ausgewählten Preisquelle sofort, wenn die aktive Ladeplanung
+    deshalb Keine Preisdaten meldet. Der Hinweis nennt den Sensor, die vier
+    unterstützten Euro-/Cent-Einheiten und erklärt, dass keine Währungsumrechnung
+    erfolgt. Explizite Einheiten korrigieren nur falsche Metadaten. Nach Korrektur
+    der Quelle oder Abschalten der Preisplanung verschwindet der Hinweis;
+    ISSUE_PRICE_SENSOR_MISSING wird während dieses Fehlers nicht zusätzlich
+    angelegt. tests/test_repairs.py prüft Sofortmeldung, Idempotenz, Korrektur,
+    explizite Einheit, Abschalten und Bereinigung nach Reload.
 
     _async_check_self_diagnostics wird am Ende jedes _async_update_data-
     Zyklus aufgerufen (nach _publish_charge_state) und läuft damit bei jedem
@@ -3975,7 +3980,7 @@ requirement_dhcp_discovery:
     vor. Die Formular-Vorbelegung in _async_step_connection nutzt sie als
     suggested_value für das Host-Feld, sofern kein Reconfigure-Kontext
     vorliegt. Die restliche Ersteinrichtung (Verbindungsprüfung,
-    grid_charge/dashboard/finish-Schritte, siehe REQ-IP-CONFIGURABLE-UI,
+    grid_charge/finish-Schritte, siehe REQ-IP-CONFIGURABLE-UI,
     REQ-TIMED-SOC-CHARGE, REQ-VUE-DASHBOARD, REQ-SETUP-FINISH-SUMMARY)
     läuft unverändert weiter - Port, Slave-IDs und Aktualisierungsintervall
     müssen weiterhin bestätigt bzw. bei Bedarf angepasst werden, DHCP

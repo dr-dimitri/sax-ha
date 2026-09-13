@@ -32,19 +32,9 @@
           "timed_charge_end": "Ende"
         }
       },
-      "dashboard": {
-        "title": "Dashboard (optional)",
-        "description": "Optional das Dashboard „SAX Power“ mit allgemeinen Informationen, zeitvariablem Tarif, dynamischem Tarif, netzdienlichem Laden und Ersparnis aktivieren.",
-        "data": {
-          "vue_dashboard_enabled": "Dashboard aktivieren"
-        },
-        "data_description": {
-          "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis."
-        }
-      },
       "finish": {
         "title": "Einrichtung abgeschlossen",
-        "description": "Firmware: {firmware}\nSeriennummer: {serial_number}\nSunSpec-Modus: {sunspec_status}\n\n{entity_count} Entities wurden angelegt.\n\nDas Dashboard wird entsprechend der vorherigen Auswahl aktiviert. Du kannst die Auswahl jederzeit über „Konfigurieren“ bei dieser Integration ändern.\n\nPreisoptimiertes Laden ist bewusst nicht Teil der Ersteinrichtung und lässt sich jederzeit über \"Konfigurieren\" bei dieser Integration einrichten."
+        "description": "Firmware: {firmware}\nSeriennummer: {serial_number}\nSunSpec-Modus: {sunspec_status}\n\n{entity_count} Entities wurden angelegt.\n\nDas Dashboard SAX Power wird als integraler Bestandteil der Integration automatisch in der Seitenleiste angelegt.\n\nPreisoptimiertes Laden ist bewusst nicht Teil der Ersteinrichtung und lässt sich jederzeit über \"Konfigurieren\" bei dieser Integration einrichten."
       }
     },
     "flow_title": "SAX Power Home ({host})",
@@ -556,7 +546,7 @@
     },
     "economics_price_unavailable": {
       "title": "Wirtschaftlichkeit: Netzbezugspreis nicht verfügbar",
-      "description": "Für die Wirtschaftlichkeitsauswertung liegt seit über 6 Stunden kein gültiger Netzbezugspreis vor - bei einem Fest- oder Zeitfenstertarif kann das auch sofort ein Konfigurationsfehler sein (fehlender Pflichtpreis, kaputte Zeitfenstergruppe). Neue Ladeenergie wird währenddessen als unbepreist verbucht, nie rückwirkend bewertet. Prüfe zeitvariable Preise und Zeitfenster im SAX-Power-Dashboard unter Stromtarif → Tarif & Preise. Falls das Dashboard fehlt, aktiviere es unter \"Konfigurieren\" bei dieser Integration. Festpreise und den dynamischen Strompreis-Sensor kannst du weiterhin unter \"Konfigurieren\" prüfen."
+      "description": "Für die Wirtschaftlichkeitsauswertung liegt seit über 6 Stunden kein gültiger Netzbezugspreis vor - bei einem Fest- oder Zeitfenstertarif kann das auch sofort ein Konfigurationsfehler sein (fehlender Pflichtpreis, kaputte Zeitfenstergruppe). Neue Ladeenergie wird währenddessen als unbepreist verbucht, nie rückwirkend bewertet. Prüfe zeitvariable Preise und Zeitfenster im SAX-Power-Dashboard unter Stromtarif → Tarif & Preise. Festpreise und den dynamischen Strompreis-Sensor kannst du weiterhin unter \"Konfigurieren\" prüfen."
     },
     "sunspec_persistently_unavailable": {
       "title": "SAX SunSpec-Modus dauerhaft nicht erreichbar",
@@ -592,7 +582,7 @@
         "step": {
           "init": {
             "title": "Dashboard aktualisieren",
-            "description": "Für das aktivierte Dashboard steht eine andere Version bereit, ein früherer Stand wurde noch nicht bestätigt oder das Panel konnte nicht registriert werden.\n\nDie Reparatur registriert das Dashboard mit der mitgelieferten Version neu. Die Ladeeinstellungen bleiben erhalten. Bereits geöffnete Browser benötigen anschließend ein vollständiges Neuladen, damit die neue Oberfläche verwendet wird.\n\nMit **Später** wird nur dieser Stand ausgeblendet. Ein weiterer Versionswechsel wird wieder gemeldet.",
+            "description": "Für das Dashboard steht eine andere Version bereit, ein früherer Stand wurde noch nicht bestätigt oder das Panel konnte nicht registriert werden.\n\nDie Reparatur registriert das Dashboard mit der mitgelieferten Version neu. Die Ladeeinstellungen bleiben erhalten. Bereits geöffnete Browser benötigen anschließend ein vollständiges Neuladen, damit die neue Oberfläche verwendet wird.\n\nMit **Später** wird nur dieser Stand ausgeblendet. Ein weiterer Versionswechsel wird wieder gemeldet.",
             "menu_options": {
               "confirm": "Dashboard aktualisieren",
               "cancel": "Später – diesen Stand ausblenden"
@@ -611,10 +601,14 @@
           "update_failed": "Das Dashboard konnte nicht aktualisiert werden. Das Problem wurde nicht als behoben markiert."
         },
         "abort": {
-          "no_longer_available": "Die Integration oder das aktivierte Dashboard ist nicht mehr verfügbar.",
+          "no_longer_available": "Die Integration oder das Dashboard ist nicht mehr verfügbar.",
           "update_changed": "Der Dashboard-Stand oder seine Verfügbarkeit hat sich inzwischen geändert. Öffne den aktuellen Reparaturhinweis erneut; der neue Stand wurde nicht bestätigt."
         }
       }
+    },
+    "price_unit_unsupported": {
+      "title": "Preisoptimiertes Laden: Preiseinheit nicht unterstützt",
+      "description": "Der Preis-Sensor {price_sensor} verwendet eine nicht unterstützte Einheit oder Währung. Die automatische preisbasierte Ladung ist ausgesetzt, weil diese Werte nicht als Europreise ausgewertet werden können. Unterstützt werden EUR/kWh, ct/kWh, EUR/MWh und ct/MWh. Beispielsweise benötigen Nordpool-Preise in SEK eine in Euro umgerechnete Quelle einschließlich der Preisvorschau. Es erfolgt keine Währungsumrechnung. Überschreibe die Einheit unter Konfigurieren oder Stromtarif → Tarif & Preise nur, wenn der Sensor bereits Euro- oder Centwerte liefert und lediglich seine Einheitenangabe falsch ist. Nach Korrektur der Quelle oder Abschalten der preisoptimierten Ladung verschwindet der Hinweis automatisch."
     }
   },
   "exceptions": {
@@ -742,7 +736,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Dashboard, Laden und Wirtschaftlichkeit",
+        "title": "Laden und Wirtschaftlichkeit",
         "description": "Quellen für das preisoptimierte Laden und getrennte PV-Prognosen: morgen für Smart, heute verbleibend für die netzdienliche Ladepause. Die Integration verwendet vorhandene Sensor-Entities. Die im Alltag veränderlichen Stellgrößen sind eigene Entitäten am SAX-Gerät.",
         "data": {
           "price_sensor": "Strompreis-Sensor",
@@ -753,7 +747,6 @@
           "economics_tariff_type": "Tarifmodell für die Wirtschaftlichkeit",
           "economics_investment_cost_eur": "Investitionskosten (EUR)",
           "economics_prior_result_eur": "Bereits erwirtschafteter Ertrag (EUR)",
-          "vue_dashboard_enabled": "Dashboard aktivieren",
           "bridge_charge_enabled": "Verbrauchsbasierte Ladeplanung aktivieren",
           "grid_serving_pv_forecast_sensor": "PV-Prognose-Sensor für die Ladepause (heute verbleibend)"
         },
@@ -763,10 +756,9 @@
           "price_unit": "Einheit des Quell-Sensors. „Automatisch“ erkennt sie anhand des Sensors. Das SAX-Dashboard zeigt Arbeitspreise in ct/kWh an.",
           "pv_forecast_sensor": "Für Smart einen Energiesensor mit dem gesamten erwarteten PV-Ertrag morgen wählen. Die verbrauchsbasierte Ladeplanung ordnet über dieselbe Auswahl eine PV-Forecast-Anlage zu und ruft deren Prognosezeitreihe ab. Bisherige Auswahlen bleiben nach Updates erhalten. Die Ladepause verwendet einen eigenen Sensor für den heute verbleibenden Ertrag.",
           "pv_forecast_factor": "Nur für Smart: nutzbarer Anteil der Morgen-Prognose nach Eigenverbrauch, Wetterunsicherheit und Verlusten. Der Mindestwert des netzdienlichen Ladens vergleicht den unveränderten heutigen Rest-Ertrag seiner getrennten Quelle.",
-          "economics_tariff_type": "Optional. Bestimmt den Netzbezugspreis für die Wirtschaftlichkeit. „Festpreis“ verwendet einen ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ verwendet einen Standardpreis und bis zu acht tägliche Zeitfenster. Aktiviere dafür das Dashboard. Diese Preise und die Einspeisevergütung bearbeitest du dort unter Stromtarif → Tarif & Preise in ct/kWh. Die günstigsten täglichen Abschnitte bestimmen zugleich die erlaubten Zeiten für feste SOC-Ladung und verbrauchsbasierte Netzladung. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt Attribut- und Einheiteneinstellung.",
+          "economics_tariff_type": "Optional. Bestimmt den Netzbezugspreis für die Wirtschaftlichkeit. „Festpreis“ verwendet einen ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ verwendet einen Standardpreis und bis zu acht tägliche Zeitfenster. Diese Preise und die Einspeisevergütung bearbeitest du im Dashboard unter Stromtarif → Tarif & Preise in ct/kWh. Die günstigsten täglichen Abschnitte bestimmen zugleich die erlaubten Zeiten für feste SOC-Ladung und verbrauchsbasierte Netzladung. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt Attribut- und Einheiteneinstellung.",
           "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt und Restbetrag bis zur Amortisation; verrechnet wird gegen das laufende, signierte Nettoergebnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
           "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt und Restbetrag; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf.",
-          "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis. Für zeitvariable Preise und Zeitfenster unter Stromtarif → Tarif & Preise erforderlich.",
           "bridge_charge_enabled": "Verwendet ausschließlich die günstigsten gespeicherten Tarifpreisfenster. Als gemeinsame PV-Quelle einen Energiesensor von PV Forecast wählen; dessen Stundenprognose liefert den PV-Start, sobald sie den gemessenen Verbrauch mindestens 30 Minuten deckt. Netzladung und aktive Monate müssen eingeschaltet sein. Der Bedarf ersetzt Min. SOC; Max. SOC bleibt Obergrenze. Nach dem Laden wird die Entladung freigegeben.",
           "grid_serving_pv_forecast_sensor": "Energiesensor mit dem heute noch erwarteten PV-Ertrag, ohne bereits erzeugte Energie. Erforderlich für eine netzdienliche Ladepause mit Mindest-PV-Prognose über 0 kWh. Ohne Auswahl greift diese Pause nicht; 0 kWh deaktiviert die Prognosebedingung. Diese Quelle nach einem Update ausdrücklich auswählen."
         }
@@ -799,8 +791,7 @@
       "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in ct/kWh eintragen (Bruttopreis inklusive aller Abgaben).",
       "bridge_pv_start_required": "Einen PV-Forecast-Energiesensor als gemeinsame PV-Prognosequelle auswählen.",
       "bridge_tariff_required": "Die verbrauchsbasierte Planung benötigt einen gespeicherten zeitvariablen Tarif.",
-      "economics_price_invalid": "Bitte einen endlichen Arbeitspreis im erlaubten Bereich in ct/kWh eingeben.",
-      "economics_dashboard_required": "Für einen zeitvariablen Tarif bitte das Dashboard aktivieren. Standardpreis, Einspeisevergütung und Zeitfenster werden dort unter Stromtarif → Tarif & Preise in ct/kWh bearbeitet."
+      "economics_price_invalid": "Bitte einen endlichen Arbeitspreis im erlaubten Bereich in ct/kWh eingeben."
     }
   },
   "selector": {

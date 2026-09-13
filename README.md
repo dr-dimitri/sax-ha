@@ -69,11 +69,12 @@ Verbindungswerte kannst du normalerweise übernehmen:
 | Aktualisierungsintervall der grundlegenden Messwerte | 10 Sekunden |
 
 Die Verbindung wird vor dem Speichern geprüft. Im Anschluss kannst du die
-zeitgesteuerte Netzladung vorbelegen und das Dashboard aktivieren.
+zeitgesteuerte Netzladung vorbelegen und die Einrichtung abschließen.
+Das Dashboard wird automatisch angelegt.
 
 Weitere Optionen findest du unter **Einstellungen → Geräte & Dienste →
 SAX Power Home → Konfigurieren**: Strompreis-Sensor, PV-Prognose,
-verbrauchsbasierte Ladeplanung mit PV-Start, Wirtschaftlichkeit und Dashboard.
+verbrauchsbasierte Ladeplanung mit PV-Start und Wirtschaftlichkeit.
 Ladezeiten, Monate und Ladegrenzen änderst
 du direkt im Dashboard oder über die Entitäten des Geräts. Die Einstellungen
 bleiben nach einem Neustart erhalten.
@@ -87,13 +88,12 @@ lädt Home Assistant die Integration neu.
 
 ## Dashboard
 
-Mit **Dashboard aktivieren** erscheint **SAX Power** in der Seitenleiste.
-Die Option ist anfangs ausgeschaltet und lässt sich jederzeit unter
-**Konfigurieren** ändern. Das Dashboard wird mit der Integration ausgeliefert;
-eine zusätzliche Installation ist nicht nötig.
-Für einen zeitvariablen Tarif muss es aktiviert bleiben, damit du Preise und
-Zeitfenster bearbeiten kannst. Der Konfigurationsdialog weist darauf hin,
-wenn diese Tarifart bei ausgeschaltetem Dashboard gespeichert werden soll.
+Das Dashboard ist integraler Bestandteil der Integration und erscheint nach
+Einrichtung oder Update automatisch als **SAX Power** in der Seitenleiste.
+Es gibt dafür keine Auswahl im Einrichtungs- oder Konfigurationsdialog und
+keine zusätzliche Installation. Auch eine früher gespeicherte Abwahl entfällt.
+Preise und Zeitfenster eines zeitvariablen Tarifs bearbeitest du direkt unter
+**Stromtarif → Tarif & Preise**.
 
 Die Screenshots zeigen das Dashboard mit Beispieldaten.
 
@@ -351,6 +351,17 @@ Die Integration ruft selbst keine Preise vom Anbieter ab.
 Wähle unter **Tarif & Preise → Bearbeiten** den Strompreis-Sensor. Preis-Einheit und
 Vorschauattribut werden automatisch erkannt und lassen sich bei Bedarf
 vorgeben. Unterstützt werden EUR/kWh, ct/kWh, EUR/MWh und ct/MWh.
+
+**Hinweis beim Update:** Fremde Währungen wie SEK werden nicht mehr als
+Europreise interpretiert. Eine solche Quelle setzt die preisbasierte Ladeplanung
+aus und erzeugt sofort einen Hinweis unter **Einstellungen → System → Reparaturen**.
+Verwende eine Quelle mit Europreisen einschließlich ihrer Preisvorschau;
+eine Währungsumrechnung übernimmt die Integration nicht. Die Einheit manuell
+zu überschreiben ist nur für falsche Metadaten bei bereits korrekten Euro- oder
+Centwerten gedacht.
+
+Den anrechenbaren PV-Anteil gibst du als ganze Prozentzahl von 0 bis 100 ein.
+
 Anschließend wählst du unter **Ladeverhalten** eine Strategie und schaltest
 **Automatische Netzladung** ein.
 
@@ -432,8 +443,8 @@ gespeicherten Werte. Der Standardpreis gilt außerhalb der Fenster und ist
 ein Arbeitspreis pro kWh; monatliche Grundgebühren gehören nicht dazu.
 
 Für diesen Tarif entfallen die Preiseingaben im Konfigurationsdialog.
-Aktiviere dort **Dashboard aktivieren**, um Standardpreis, Einspeisevergütung
-und Zeitfenster unter **Stromtarif → Tarif & Preise** zu bearbeiten.
+Standardpreis, Einspeisevergütung und Zeitfenster bearbeitest du im Dashboard
+unter **Stromtarif → Tarif & Preise**.
 Bestehende Tarifwerte bleiben beim Update und bei Änderungen anderer
 Einstellungen erhalten. Nach der erstmaligen Auswahl von **Tageszeitabhängig**
 vervollständigst du das Profil im Dashboard. Bis dahin gibt es keinen gültigen

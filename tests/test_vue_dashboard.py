@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant import config_entries
 from homeassistant.components import frontend, websocket_api
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -70,13 +71,21 @@ def _panel(hass: HomeAssistant) -> frontend.Panel:
     return hass.data[frontend.DATA_PANELS][VUE_DASHBOARD_URL_PATH]
 
 
-async def test_panel_is_opt_in(hass: HomeAssistant) -> None:
-    """Bestandsinstallationen legen weder Panel noch HTTP-Route an."""
-    entry = MockConfigEntry(domain=DOMAIN, data={})
-    with patch(f"{_MODULE}.async_setup_component") as setup:
-        assert await async_sync_vue_dashboard(hass, entry)
-    setup.assert_not_called()
-    assert not frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
+@pytest.mark.parametrize("legacy_enabled", [None, False, True])
+async def test_panel_is_always_created(
+    hass: HomeAssistant,
+    panel_environment: tuple[AsyncMock, Path],
+    legacy_enabled: bool | None,
+) -> None:
+    """REQ-VUE-DASHBOARD: Auch ohne Auswahl und mit alter Abwahl wird es angelegt."""
+    legacy = (
+        {} if legacy_enabled is None else {CONF_VUE_DASHBOARD_ENABLED: legacy_enabled}
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data=legacy, options=legacy)
+    entry.add_to_hass(hass)
+    assert await async_sync_vue_dashboard(hass, entry)
+    assert frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
+    panel_environment[0].assert_awaited_once()
 
 
 async def test_panel_uses_local_hashed_module_and_preserves_existing_user_panel(
@@ -139,10 +148,10 @@ async def test_panel_lifecycle_does_not_duplicate_static_routes(
     register_static.assert_awaited_once()
 
 
-async def test_options_override_persisted_onboarding_setting(
+async def test_legacy_options_do_not_disable_dashboard(
     hass: HomeAssistant, panel_environment
 ) -> None:
-    """Das Onboarding-Flag bleibt dauerhaft; spätere Optionen haben Vorrang."""
+    """REQ-VUE-DASHBOARD: Alte Options-Updates schalten das Panel nicht ab."""
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_VUE_DASHBOARD_ENABLED: True})
     entry.add_to_hass(hass)
     assert await async_sync_vue_dashboard(hass, entry)
@@ -153,7 +162,7 @@ async def test_options_override_persisted_onboarding_setting(
         entry, options={CONF_VUE_DASHBOARD_ENABLED: False}
     )
     assert await async_sync_vue_dashboard(hass, entry)
-    assert not frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
+    assert frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
     hass.config_entries.async_update_entry(
         entry, options={CONF_VUE_DASHBOARD_ENABLED: True}
     )
@@ -162,10 +171,10 @@ async def test_options_override_persisted_onboarding_setting(
     panel_environment[0].assert_awaited_once()
 
 
-async def test_queued_option_updates_use_last_saved_value(
+async def test_queued_legacy_option_updates_keep_dashboard(
     hass: HomeAssistant, vue_entry: MockConfigEntry, panel_environment
 ) -> None:
-    """Schnelles Aus-/Einschalten beim Setup hinterlässt das gewünschte Panel."""
+    """Alte Options-Updates während des Setups hinterlassen genau ein Panel."""
     setup_started = asyncio.Event()
     finish_setup = asyncio.Event()
 
@@ -196,8 +205,8 @@ async def test_panel_removal_failure_can_be_retried_without_breaking_unload(
 ) -> None:
     """REQ-VUE-DASHBOARD: UI-Abmeldung darf Geräte-Cleanup nicht unterbrechen."""
     assert await async_sync_vue_dashboard(hass, vue_entry)
-    hass.config_entries.async_update_entry(
-        vue_entry, options={CONF_VUE_DASHBOARD_ENABLED: False}
+    await hass.config_entries.async_set_disabled_by(
+        vue_entry.entry_id, config_entries.ConfigEntryDisabler.USER
     )
     with patch(
         f"{_MODULE}.frontend.async_remove_panel", side_effect=RuntimeError("frontend")
@@ -288,7 +297,7 @@ async def test_optional_failure_can_be_retried(
     assert register_static.await_count == (2 if failure == "static" else 1)
 
 
-async def test_ui_option_changes_do_not_reapply_charging_policy(
+async def test_legacy_ui_option_changes_do_not_reapply_charging_policy(
     hass: HomeAssistant, vue_entry: MockConfigEntry, panel_environment
 ) -> None:
     """Reine UI-Änderungen verändern keine Tarifrevision oder Ladesteuerung."""
@@ -303,7 +312,7 @@ async def test_ui_option_changes_do_not_reapply_charging_policy(
         vue_entry, options={CONF_VUE_DASHBOARD_ENABLED: False}
     )
     await async_update_options(hass, vue_entry)
-    assert not frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
+    assert frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
     assert coordinator.options == {CONF_VUE_DASHBOARD_ENABLED: False}
     coordinator.async_apply_price_plan.assert_not_awaited()
     coordinator.notify_tariff_revision.assert_not_called()
@@ -319,7 +328,7 @@ async def test_first_options_save_does_not_apply_newly_explicit_defaults(
     coordinator.options = {}
     coordinator.async_apply_tariff_options = AsyncMock()
     hass.data[DOMAIN] = {vue_entry.entry_id: {DATA_COORDINATOR: coordinator}}
-    options = STEP_OPTIONS_SCHEMA({CONF_VUE_DASHBOARD_ENABLED: True})
+    options = STEP_OPTIONS_SCHEMA({})
     hass.config_entries.async_update_entry(vue_entry, options=options)
     await async_update_options(hass, vue_entry)
     assert frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)

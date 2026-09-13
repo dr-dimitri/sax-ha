@@ -74,13 +74,13 @@ def _setup_boundaries(
 
 
 @pytest.mark.parametrize(
-    ("enabled_after_restart", "bundle_changed"),
+    ("legacy_enabled", "bundle_changed"),
     [(True, False), (False, False), (True, True)],
 )
 async def test_restart_restores_saved_option_and_bundle_confirmation(
     hass_storage: dict[str, Any],
     tmp_path: Path,
-    enabled_after_restart: bool,
+    legacy_enabled: bool,
     bundle_changed: bool,
 ) -> None:
     """REQ-VUE-DASHBOARD-REPAIR: Neustart lädt Optionen/Hash aus HA-Storage neu."""
@@ -108,7 +108,7 @@ async def test_restart_restores_saved_option_and_bundle_confirmation(
                 assert original.data[CONF_VUE_DASHBOARD_VERSION] == original_version
                 first.config_entries.async_update_entry(
                     original,
-                    options={CONF_VUE_DASHBOARD_ENABLED: enabled_after_restart},
+                    options={CONF_VUE_DASHBOARD_ENABLED: legacy_enabled},
                 )
                 await first.async_block_till_done()
                 assert await async_unload_entry(first, original)
@@ -136,20 +136,15 @@ async def test_restart_restores_saved_option_and_bundle_confirmation(
             with _setup_boundaries(restarted, restored, asset) as restarted_static:
                 assert await async_setup_entry(restarted, restored)
                 await restarted.async_block_till_done()
-                assert (
-                    frontend.async_panel_exists(restarted, VUE_DASHBOARD_URL_PATH)
-                    is enabled_after_restart
+                assert frontend.async_panel_exists(restarted, VUE_DASHBOARD_URL_PATH)
+                assert CONF_VUE_DASHBOARD_ENABLED not in restored.options
+                restarted_static.assert_awaited_once()
+                panel = restarted.data[frontend.DATA_PANELS][VUE_DASHBOARD_URL_PATH]
+                assert panel is not first_panel
+                assert panel.config["entry_id"] == original.entry_id
+                assert panel.config["_panel_custom"]["module_url"] == (
+                    f"{VUE_DASHBOARD_ASSET_URL}?v={installed_version}"
                 )
-                if enabled_after_restart:
-                    restarted_static.assert_awaited_once()
-                    panel = restarted.data[frontend.DATA_PANELS][VUE_DASHBOARD_URL_PATH]
-                    assert panel is not first_panel
-                    assert panel.config["entry_id"] == original.entry_id
-                    assert panel.config["_panel_custom"]["module_url"] == (
-                        f"{VUE_DASHBOARD_ASSET_URL}?v={installed_version}"
-                    )
-                else:
-                    restarted_static.assert_not_awaited()
                 issue = ir.async_get(restarted).async_get_issue(
                     DOMAIN, f"{ISSUE_VUE_DASHBOARD_UPDATE}_{original.entry_id}"
                 )

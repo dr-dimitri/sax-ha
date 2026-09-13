@@ -397,6 +397,13 @@ def test_parse_awattar_marketprice_converts_eur_per_mwh(
     assert slots[0].price == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("unit", ["SEK/kWh", "USD/MWh", "kWh", "%"])
+def test_parse_price_slots_rejects_foreign_units(unit: str) -> None:
+    """REQ-ECONOMICS-TARIFFS: Fremde Werte sind keine Euro-Preisvorschau."""
+    state = _FakeState(unit_of_measurement=unit, today=[1.25] * 24)
+    assert parse_price_slots(state, now=_now(), unit=PRICE_UNIT_AUTO) == []
+
+
 def test_parse_price_slots_explicit_unit_overrides_sensor_unit() -> None:
     """Fehlt am Sensor eine (brauchbare) Einheit, lässt sie sich erzwingen."""
     state = _FakeState(today=[25.0] * 24)

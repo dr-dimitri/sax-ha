@@ -6161,6 +6161,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             DiagnosticSnapshot(
                 price_status=self.price_planner.plan.status,
                 price_entity_id=self.price_planner.price_entity_id,
+                unsupported_price_unit=self.price_planner.has_unsupported_price_unit,
                 extended_available=self._extended_available,
                 extended_unavailable_since=self._extended_unavailable_since,
                 slave_id_extended=self.slave_id_extended,

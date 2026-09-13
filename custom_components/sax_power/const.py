@@ -20,9 +20,8 @@ CONF_TIMED_CHARGE_START = "timed_charge_start"
 CONF_TIMED_CHARGE_END = "timed_charge_end"
 CONF_TIMED_CHARGE_ENABLED = "timed_charge_enabled"
 
-# REQ-VUE-DASHBOARD: dauerhaftes, optionales Dashboard.
+# Nur zur Bereinigung alter Installationen (REQ-VUE-DASHBOARD).
 CONF_VUE_DASHBOARD_ENABLED = "vue_dashboard_enabled"
-DEFAULT_VUE_DASHBOARD_ENABLED = False
 # REQ-VUE-DASHBOARD-REPAIR: Ein leerer Stand markiert eine neue Aktivierung;
 # fehlende Metadaten kennzeichnen bereits aktivierte ältere Snapshots.
 CONF_VUE_DASHBOARD_VERSION = "vue_dashboard_version"
@@ -595,11 +594,12 @@ ATTR_FORCE = "force"
 # UNAVAILABLE) hinaus: erkennen still fehlschlagende Konfigurationen, die
 # sonst nur an unerwartet ausbleibendem Ladeverhalten auffallen würden.
 # Die sechs Basisregeln sind rein informativ (is_fixable=False).
-# SelfDiagnostics wertet zusätzlich REQ-ECONOMICS-OBSERVABILITY aus; Fenster
-# und Monate werden je Automatik geprüft (insgesamt bis zu neun Issue-IDs).
+# SelfDiagnostics prüft zusätzlich Preiseinheiten und REQ-ECONOMICS-OBSERVABILITY;
+# Fenster und Monate werden je Automatik geprüft.
 # Zustandsflanken vermeiden wiederholte Meldungen; behobene Ursachen löschen
 # die zugehörigen Hinweise (REQ-SELF-DIAGNOSIS-REPAIRS).
 ISSUE_PRICE_SENSOR_MISSING = "price_sensor_missing"
+ISSUE_PRICE_UNIT_UNSUPPORTED = "price_unit_unsupported"
 ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE = "sunspec_persistently_unavailable"
 ISSUE_MAX_SOC_BELOW_MIN_SOC = "max_soc_below_min_soc"
 ISSUE_EMPTY_CHARGE_WINDOW = "empty_charge_window"

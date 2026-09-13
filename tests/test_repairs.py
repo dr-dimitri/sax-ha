@@ -17,11 +17,13 @@ from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_SENSOR,
+    CONF_PRICE_UNIT,
     DATA_COORDINATOR,
     DOMAIN,
     ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
@@ -31,11 +33,13 @@ from custom_components.sax_power.const import (
     ISSUE_PRICE_CHARGE_CONFLICT,
     ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
     ISSUE_PRICE_SENSOR_MISSING,
+    ISSUE_PRICE_UNIT_UNSUPPORTED,
     ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
     ISSUE_VUE_DASHBOARD_UPDATE,
     MAX_SOC,
     PRICE_SENSOR_MISSING_GRACE_PERIOD,
     PRICE_STATUS_NO_PRICE_DATA,
+    PRICE_STATUS_OFF,
     PRICE_STATUS_WAITING,
     PRICE_STRATEGY_ABSOLUTE,
     PRICE_STRATEGY_OFF,
@@ -86,6 +90,13 @@ def _get_issue(hass, key: str):
         (
             ISSUE_PRICE_SENSOR_MISSING,
             {"price_status": PRICE_STATUS_NO_PRICE_DATA},
+        ),
+        (
+            ISSUE_PRICE_UNIT_UNSUPPORTED,
+            {
+                "price_status": PRICE_STATUS_NO_PRICE_DATA,
+                "unsupported_price_unit": True,
+            },
         ),
         (
             ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
@@ -167,6 +178,38 @@ async def test_self_diagnostic_issue_clears_after_reload(
 # ===========================================================================
 # 1. Preis-Sensor liefert keine Daten
 # ===========================================================================
+@pytest.mark.parametrize("recovery", ["unit", "override", "off"])
+async def test_foreign_price_unit_is_reported_immediately_and_clears(
+    hass: HomeAssistant, recovery: str
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Fremdwährung wartet nicht sechs Stunden."""
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {CONF_PRICE_SENSOR: "sensor.nordpool"}
+    coordinator.price_planner.plan = PricePlan(status=PRICE_STATUS_NO_PRICE_DATA)
+    hass.states.async_set("sensor.nordpool", "1.25", {"unit_of_measurement": "SEK/kWh"})
+    with patch(
+        "custom_components.sax_power.coordinator.ir.async_create_issue",
+        wraps=ir.async_create_issue,
+    ) as create:
+        coordinator._async_check_self_diagnostics()
+        coordinator._async_check_self_diagnostics()
+    assert create.call_count == 1
+    issue = _get_issue(hass, ISSUE_PRICE_UNIT_UNSUPPORTED)
+    assert issue is not None
+    assert issue.translation_placeholders == {"price_sensor": "sensor.nordpool"}
+    assert _get_issue(hass, ISSUE_PRICE_SENSOR_MISSING) is None
+    if recovery == "unit":
+        hass.states.async_set(
+            "sensor.nordpool", "0.11", {"unit_of_measurement": "EUR/kWh"}
+        )
+    elif recovery == "override":
+        coordinator.options = {**coordinator.options, CONF_PRICE_UNIT: "eur_kwh"}
+    else:
+        coordinator.price_planner.plan = PricePlan(status=PRICE_STATUS_OFF)
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_PRICE_UNIT_UNSUPPORTED) is None
+
+
 async def test_price_sensor_missing_issue_after_grace_period(hass) -> None:
     coordinator = _make_coordinator(hass)
     coordinator.options = {CONF_PRICE_SENSOR: "sensor.strompreis"}

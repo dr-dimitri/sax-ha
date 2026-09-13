@@ -33,28 +33,15 @@ PROFILE = {
 
 
 @pytest.mark.parametrize("profile_kind", ["new", "active", "inactive"])
-@pytest.mark.parametrize(
-    ("data_enabled", "options_enabled", "submitted_enabled", "expected"),
-    [
-        (None, None, None, False),
-        (True, None, None, True),
-        (True, False, None, False),
-        (False, True, None, True),
-        (True, True, False, False),
-        (False, False, True, True),
-        (None, None, False, False),
-        (None, None, True, True),
-    ],
-)
-async def test_time_of_use_requires_the_effective_dashboard_opt_in(
+@pytest.mark.parametrize("data_enabled", [None, False, True])
+@pytest.mark.parametrize("options_enabled", [None, False, True])
+async def test_time_of_use_needs_no_dashboard_opt_in(
     hass: HomeAssistant,
     profile_kind: str,
     data_enabled: bool | None,
     options_enabled: bool | None,
-    submitted_enabled: bool | None,
-    expected: bool,
 ) -> None:
-    """REQ-VUE-TARIFF-EDITOR: preserve opt-in precedence and stored EUR profiles."""
+    """REQ-VUE-TARIFF-EDITOR: Alte Abwahlen erhalten Tarifauswahl und EUR-Profile."""
     data = {} if data_enabled is None else {CONF_VUE_DASHBOARD_ENABLED: data_enabled}
     options = (
         {} if options_enabled is None else {CONF_VUE_DASHBOARD_ENABLED: options_enabled}
@@ -70,44 +57,18 @@ async def test_time_of_use_requires_the_effective_dashboard_opt_in(
         )
     entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
     entry.add_to_hass(hass)
-    before_options, before_data = deepcopy(dict(entry.options)), dict(entry.data)
     submitted = {
         CONF_ECONOMICS_TARIFF_TYPE: "time_of_use",
         CONF_PV_FORECAST_FACTOR: 63,
         CONF_ECONOMICS_INVESTMENT_COST: 12345.67,
     }
-    if submitted_enabled is not None:
-        submitted[CONF_VUE_DASHBOARD_ENABLED] = submitted_enabled
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], submitted
     )
-    if not expected:
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "init"
-        assert result["errors"] == {
-            CONF_VUE_DASHBOARD_ENABLED: "economics_dashboard_required"
-        }
-        assert dict(entry.options) == before_options
-        assert dict(entry.data) == before_data
-        suggested = {
-            key.schema: key.description["suggested_value"]
-            for key in result["data_schema"].schema
-            if isinstance(key.description, dict)
-            and "suggested_value" in key.description
-        }
-        assert suggested[CONF_VUE_DASHBOARD_ENABLED] is False
-        assert suggested[CONF_PV_FORECAST_FACTOR] == 63
-        assert suggested[CONF_ECONOMICS_INVESTMENT_COST] == 12345.67
-        assert not {CONF_ECONOMICS_TOU_BASE_PRICE, *ECONOMICS_TOU_WINDOW_KEYS} & {
-            key.schema for key in result["data_schema"].schema
-        }
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"], {**submitted, CONF_VUE_DASHBOARD_ENABLED: True}
-        )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_ECONOMICS_TARIFF_TYPE] == "time_of_use"
-    assert entry.options[CONF_VUE_DASHBOARD_ENABLED] is True
+    assert CONF_VUE_DASHBOARD_ENABLED not in entry.options
     assert entry.options[CONF_PV_FORECAST_FACTOR] == 63
     assert entry.options[CONF_ECONOMICS_INVESTMENT_COST] == 12345.67
     if profile_kind == "new":
@@ -116,10 +77,10 @@ async def test_time_of_use_requires_the_effective_dashboard_opt_in(
         assert all(entry.options[key] == value for key, value in PROFILE.items())
 
 
-async def test_repeated_first_page_cannot_bypass_dashboard_requirement(
+async def test_repeated_first_page_can_select_time_of_use_directly(
     hass: HomeAssistant,
 ) -> None:
-    """REQ-VUE-TARIFF-EDITOR: resubmitted first pages receive the same field error."""
+    """REQ-VUE-TARIFF-EDITOR: Wiederholte Seiten brauchen keine Dashboard-Abfrage."""
     entry = MockConfigEntry(domain=DOMAIN, data={})
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -130,8 +91,6 @@ async def test_repeated_first_page_cannot_bypass_dashboard_requirement(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: "time_of_use"}
     )
-    assert result["step_id"] == "init"
-    assert result["errors"] == {
-        CONF_VUE_DASHBOARD_ENABLED: "economics_dashboard_required"
-    }
-    assert entry.options == {}
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_ECONOMICS_TARIFF_TYPE] == "time_of_use"
+    assert CONF_VUE_DASHBOARD_ENABLED not in entry.options

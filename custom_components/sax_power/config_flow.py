@@ -50,7 +50,6 @@ from .const import (
     CONF_TIMED_CHARGE_END,
     CONF_TIMED_CHARGE_START,
     CONF_VUE_DASHBOARD_DISMISSED_VERSION,
-    CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
@@ -61,7 +60,6 @@ from .const import (
     DEFAULT_TIMED_CHARGE_ENABLED,
     DEFAULT_TIMED_CHARGE_END,
     DEFAULT_TIMED_CHARGE_START,
-    DEFAULT_VUE_DASHBOARD_ENABLED,
     DOMAIN,
     ECONOMICS_INVESTMENT_COST_STEP,
     ECONOMICS_OPTION_KEYS,
@@ -169,16 +167,6 @@ STEP_GRID_CHARGE_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_TIMED_CHARGE_END, default=DEFAULT_TIMED_CHARGE_END
         ): selector.TimeSelector(),
-    }
-)
-
-# Dritter, optionaler Schritt der Ersteinrichtung (siehe async_step_dashboard):
-# bietet an, das Dashboard in der Seitenleiste zu aktivieren.
-STEP_DASHBOARD_SCHEMA = vol.Schema(
-    {
-        vol.Optional(
-            CONF_VUE_DASHBOARD_ENABLED, default=DEFAULT_VUE_DASHBOARD_ENABLED
-        ): cv.boolean,
     }
 )
 
@@ -303,7 +291,6 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
 
     _connection_data: dict[str, Any]
     _grid_charge_data: dict[str, Any]
-    _dashboard_data: dict[str, Any]
     _discovered_ip: str | None = None
 
     @staticmethod
@@ -404,12 +391,11 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                     updated_data = dict(user_input)
                     for dashboard_key in (
-                        CONF_VUE_DASHBOARD_ENABLED,
                         CONF_VUE_DASHBOARD_VERSION,
                         CONF_VUE_DASHBOARD_DISMISSED_VERSION,
                     ):
-                        # REQ-VUE-DASHBOARD: Das dauerhafte Setup-Opt-in
-                        # muss einen Wechsel der Verbindungsdaten überleben.
+                        # REQ-VUE-DASHBOARD-REPAIR: Bestätigte Bundle-Stände
+                        # überleben einen Wechsel der Verbindungsdaten.
                         if dashboard_key in reconfigure_entry.data:
                             updated_data[dashboard_key] = reconfigure_entry.data[
                                 dashboard_key
@@ -452,30 +438,18 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._async_abort_if_configured()
         if user_input is not None:
             self._grid_charge_data = user_input
-            return await self.async_step_dashboard()
-        return self.async_show_form(
-            step_id="grid_charge", data_schema=STEP_GRID_CHARGE_SCHEMA
-        )
-
-    async def async_step_dashboard(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Merke die dauerhafte Dashboard-Auswahl für das spätere Panel-Setup vor."""
-        self._async_abort_if_configured()
-        if user_input is not None:
-            self._dashboard_data = user_input
             return await self.async_step_finish()
         return self.async_show_form(
-            step_id="dashboard", data_schema=STEP_DASHBOARD_SCHEMA
+            step_id="grid_charge", data_schema=STEP_GRID_CHARGE_SCHEMA
         )
 
     async def async_step_finish(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Vierter, abschließender Schritt der Ersteinrichtung: reine
+        """Dritter, abschließender Schritt der Ersteinrichtung: reine
         Zusammenfassung ohne eigene Eingabefelder (siehe anforderung.yaml,
         REQ-SETUP-FINISH-SUMMARY). Der Config Entry wird erst hier angelegt,
-        nachdem die Zusammenfassung feststeht - vorher (async_step_dashboard)
+        nachdem die Zusammenfassung feststeht - vorher (async_step_grid_charge)
         existiert er noch nicht, ein zwischenzeitlicher Abbruch des Flows
         legt also keinen unvollständigen Eintrag an.
         """
@@ -486,7 +460,6 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 data={
                     **self._connection_data,
                     **self._grid_charge_data,
-                    **self._dashboard_data,
                     CONF_VUE_DASHBOARD_VERSION: "",
                 },
             )
@@ -534,7 +507,6 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
 # oft noch gar nicht. Siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 STEP_OPTIONS_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_VUE_DASHBOARD_ENABLED): cv.boolean,
         vol.Optional(CONF_PRICE_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
@@ -721,20 +693,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
-            dashboard_enabled = user_input.get(
-                CONF_VUE_DASHBOARD_ENABLED,
-                self.config_entry.options.get(
-                    CONF_VUE_DASHBOARD_ENABLED,
-                    self.config_entry.data.get(
-                        CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
-                    ),
-                ),
-            )
-            if tariff_type is TariffType.TIME_OF_USE and not dashboard_enabled:
-                # REQ-VUE-TARIFF-EDITOR: Tarifpflege muss erreichbar bleiben,
-                # ohne die ausdrückliche Dashboard-Zustimmung zu ersetzen.
-                errors[CONF_VUE_DASHBOARD_ENABLED] = "economics_dashboard_required"
-            elif user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
+            if user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
                 CONF_PV_FORECAST_SENSOR
             ):
                 errors[CONF_PV_FORECAST_SENSOR] = "bridge_pv_start_required"
@@ -761,9 +720,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 if any(history.values()):
                     self._base_options[CONF_DASHBOARD_TARIFF_PROFILES] = history
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
-                self._base_options.setdefault(
-                    CONF_VUE_DASHBOARD_ENABLED, dashboard_enabled
-                )
                 return await self._async_step_for_tariff(tariff_type)
 
         # Bewusst _suggested statt add_suggested_values_to_schema auf den
@@ -787,7 +743,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
         tarifspezifischen Altwerte.
         """
         if tariff_type is TariffType.DISABLED:
-            self._mark_vue_activation()
             return self.async_create_entry(title="", data=self._base_options)
         if tariff_type is TariffType.FIXED:
             return await self.async_step_economics_fixed()
@@ -804,7 +759,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
             ):
                 if key in profile:
                     self._base_options[key] = profile[key]
-            self._mark_vue_activation()
             return self.async_create_entry(title="", data=self._base_options)
         return await self.async_step_economics_dynamic()
 
@@ -892,7 +846,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
         if any(history.values()):
             self._base_options[CONF_DASHBOARD_TARIFF_PROFILES] = history
         rounded = _round_price_fields(user_input)
-        self._mark_vue_activation()
         return self.async_create_entry(
             title="",
             data={
@@ -900,23 +853,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 **{key: value for key, value in rounded.items() if key in known},
             },
         )
-
-    def _mark_vue_activation(self) -> None:
-        """REQ-VUE-DASHBOARD-REPAIR: Erstaktivierung braucht keine Reload-Erinnerung."""
-        previously_enabled = self.config_entry.options.get(
-            CONF_VUE_DASHBOARD_ENABLED,
-            self.config_entry.data.get(
-                CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
-            ),
-        )
-        if (
-            not previously_enabled
-            and self._base_options.get(CONF_VUE_DASHBOARD_ENABLED)
-            and CONF_VUE_DASHBOARD_VERSION not in self.config_entry.data
-        ):
-            data = {**self.config_entry.data, CONF_VUE_DASHBOARD_VERSION: ""}
-            data.pop(CONF_VUE_DASHBOARD_DISMISSED_VERSION, None)
-            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
 
     def _suggested(
         self, schema: vol.Schema, user_input: dict[str, Any] | None = None
@@ -946,9 +882,6 @@ class SaxPowerOptionsFlow(OptionsFlow):
         with_values = self.add_suggested_values_to_schema(
             schema,
             {
-                CONF_VUE_DASHBOARD_ENABLED: self.config_entry.data.get(
-                    CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
-                ),
                 **stored,
                 **(user_input or {}),
             },

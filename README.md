@@ -119,8 +119,10 @@ Netzladung bleiben die Preise für Anzeige und Amortisation gültig.
 
 Das Diagramm zeigt die Strompreise des heutigen Tages in **ct/kWh**, bei
 dynamischen Tarifen auch die bereits verfügbaren Preise für morgen.
-**Tarif & Preise** und **Ladeverhalten** lassen sich zum Bearbeiten aufklappen
-und zeigen anschließend wieder eine kurze Zusammenfassung. Der bisherige
+Beim zeitvariablen Tarif führen drei Schritte durch Preise, Ladeziel und
+Aktivierung. Der Preisverlauf ist bei Bedarf aufklappbar. Beim dynamischen
+Tarif bleiben **Tarif & Preise** und **Ladeverhalten** die Einstiege zum
+Bearbeiten. Geschlossene Einstellungen zeigen ihre gespeicherten Werte. Der bisherige
 Tab **Zeitvariabler Tarif** bleibt als Fallback erreichbar und verwendet
 dieselben Einstellungen.
 
@@ -215,8 +217,31 @@ und hat während seiner wirksamen Ladepause Vorrang vor der Preisoptimierung.
 ### Zeitgesteuerte Netzladung
 
 Wähle im Tab **Stromtarif** den Tarif **Zeitvariabel**. Er passt zu festen
-günstigen Tarifzeiten, etwa einem Nachttarif. Die bisherige Ansicht
-**Zeitvariabler Tarif** bleibt als Fallback verfügbar.
+günstigen Tarifzeiten, etwa einem Nachttarif. Die Einrichtung hat drei Schritte:
+
+1. **Wann ist dein Strom günstig?** Öffne **Bearbeiten** und übertrage die
+   Preise aus deinem Vertrag in **ct/kWh**. Der Standardpreis gilt außerhalb
+   deiner abweichenden Preiszeiten. Speichere den Tarif.
+2. **Wie viel möchtest du laden?** Wähle **Festes Ladeziel**, wenn der Speicher
+   in den günstigsten Zeiten bis zu deinem eingestellten Prozentwert laden
+   soll. **Nur Bedarf bis Solarstrom** plant stattdessen die noch fehlende
+   Energie bis zum erwarteten Solarstrom; dafür ist eine passende PV-Prognose
+   erforderlich. Das Ladeziel ist dann eine Obergrenze.
+3. **Automatik einschalten.** Aktiviere **Automatische Netzladung**, sobald
+   die Einstellungen passen. Einschalten erlaubt die Ladung unter den
+   angezeigten Bedingungen; es bedeutet nicht, dass der Speicher sofort lädt.
+
+Unter **Weitere Einstellungen** findest du Startschwelle, globale Ladegrenze
+und aktive Monate. Die Zusammenfassung zeigt, was aktuell gilt. Bei festem
+Ladeziel startet die Ladung nur unter der Startschwelle; **0 % verhindert einen
+neuen Start**. Die globale Ladegrenze gilt auch für Solarstrom. Eine fällige
+Zellkalibrierung darf die eingestellten Grenzen vorübergehend bis 100 % erweitern;
+die Bedarfsladung plant deshalb keine zusätzliche Vollladung ein.
+Zahlen werden jeweils mit **Übernehmen** gespeichert; **Fertig** schließt nur
+die Bearbeitung. Bereits gespeicherte Werte ändern sich beim Öffnen nicht.
+
+Die bisherige Ansicht **Zeitvariabler Tarif** bleibt als Fallback verfügbar.
+Die folgenden Namen beziehen sich auf deren native Home-Assistant-Entitäten.
 
 ![Zeitvariabler Tarif mit verbindlichen Tarifpreisfenstern, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
 

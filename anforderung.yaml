@@ -2890,12 +2890,13 @@ requirement_vue_charging:
     Karte. Die Karte liest ausschließlich Backend-Zustände und Attribute.
 
     Danach zeigt der Tab über die volle Breite dieselbe gemeinsame
-    Tarifpreisfenster-Karte (EN: Tariff price windows) wie
+    Karte „Dein Stromtarif“ (EN: Your electricity tariff) wie
     Amortisation nach REQ-VUE-SAVINGS (Issue #219).
     Sichtbarkeit und laufende Tarifbewertung folgen dem aktuellen Zustand von
     sensor.economics_current_import_price: bei tariff_type=time_of_use
-    erscheinen alle konfigurierten windows in der vom Sensor gelieferten
-    Reihenfolge; bei anderen Tarifarten entfällt die Karte. Fehlen Entität oder
+    erscheinen aktueller Preis und günstigste Ladezeiten; „Alle Preise ansehen“
+    öffnet die konfigurierten windows in der vom Sensor gelieferten Reihenfolge.
+    Bei anderen Tarifarten entfällt die Karte. Fehlen Entität oder
     Tarifattribute, kann die gesicherte Dashboard-API ein TIME_OF_USE-Profil für
     die Bearbeitung bestätigen. Das erzeugt keine erfundene Preisbewertung.
     Auch zwei oder acht Fenster, Mitternachtsfenster und angrenzende Grenzen
@@ -3087,9 +3088,21 @@ requirement_vue_tariff_editor:
   status: done
   description: >
     Die gemeinsame Tarifpreisfenster-Karte in Stromtarif, Zeitvariabler Tarif und Amortisation
-    zeigt zunächst eine kompakte Übersicht. Bearbeiten klappt Standardpreis,
-    Einspeisevergütung und die vorhandenen täglichen Zeitfenster mit Von/Bis/Preis
-    direkt in der Karte auf. Zeitfenster hinzufügen ergänzt bis zu acht Fenster;
+    zeigt zunächst eine kompakte Übersicht. Im Stromtarif heißt sie
+    „1. Wann ist dein Strom günstig?“, ansonsten „Dein Stromtarif“.
+    Gespeicherte tägliche Preiszeiten und Standardpreis sind direkt lesbar;
+    günstigste Zeiten werden nur bei exakt zum Profil passenden Sensorattributen
+    anhand der Backend-Markierung hervorgehoben. Nach einer Tarifänderung bis
+    zur passenden Telemetrie erscheint ein Aktualisierungshinweis statt alter
+    Ladezeiten. Außerhalb der kompakten Variante bleibt der aktuelle Preis
+    sichtbar, vollständige Preistabelle und Auswahlregeln sind einklappbar.
+    Bearbeiten öffnet in dieser Reihenfolge normalen Strompreis, Zeiten mit
+    anderem Preis und Vergütung für Solarstrom. Kurze Beispiele erklären ct/kWh,
+    den Standardpreis außerhalb der Fenster und 0 bei fehlender Vergütung.
+    Solarprognose ist ein optional aufklappbarer Zusatzbereich, bei aktiver
+    Bedarfsplanung oder einem Quellfehler offen. Der Hinweis vor Speichern
+    erklärt die Wirkung auf Ladezeiten ohne Einschalten der Netzladung.
+    Zeitfenster hinzufügen ergänzt bis zu acht Fenster;
     einzelne Fenster lassen sich entfernen. Standardpreis bedeutet den variablen
     Arbeitspreis außerhalb der Fenster, keine monatliche Grundgebühr. Erklärungen
     bleiben bei Bedarf zugänglich, ohne dauerhaft die Karte aufzublähen.
@@ -3192,9 +3205,15 @@ requirement_vue_electricity_tariff:
     aktiven Tariftyp. Tarif wechseln bietet Zeitvariabel und Dynamisch; erst
     Übernehmen speichert die Auswahl. Der Hauptschalter Automatische Netzladung
     ist von der Tarifauswahl unabhängig. Bei ausgeschalteter Automatik bleiben
-    Tarif, aktuelle Preise und Amortisationsbewertung aktiv. Beide Tarifarten
-    verwenden denselben Aufbau: Auswahl, breite Tagespreiskurve mit aktuellem
-    Preis, kompakte Tarifübersicht, aufklappbares Ladeverhalten und Ladeplan.
+    Tarif, aktuelle Preise und Amortisationsbewertung aktiv. Der zeitvariable
+    Tarif führt in drei Schritten durch die Einrichtung: „1. Wann ist dein Strom
+    günstig?“, „2. Wie viel möchtest du laden?“ und „3. Automatik einschalten“.
+    Die Reihenfolge im DOM entspricht der sichtbaren Reihenfolge. Tarif- und
+    Ladeeinstellungen beginnen mit einer Zusammenfassung und einer ausdrücklichen
+    Bearbeiten-Aktion; Öffnen und Schließen ändern keine Werte. Aktueller Preis
+    und Entladestatus bleiben sichtbar, der vollständige Tagespreisverlauf ist
+    unter „Preisverlauf anzeigen“ einklappbar. Dynamisch bleiben Tarifauswahl,
+    breite Tagespreiskurve, kompakte Einstellungen und Ladeplan erhalten.
 
     Die bestehende Route ladeautomatik bleibt als Fallback erhalten und verwendet
     dieselben aktiven Tarifdaten und Steuerwerte. Bei dynamischem Tarif zeigt
@@ -3219,8 +3238,29 @@ requirement_vue_electricity_tariff:
 
     Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
     übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services; Fertig
-    schließt den Bereich. Zeitvariabel erhält Ladeziel, Mindest-SOC als
-    Startschwelle, aktive Monate und Planung bis zum PV-Start. Dynamisch führt
+    schließt den Bereich. Zeitvariabel bietet zwei beschriebene Ladeweisen:
+    „Festes Ladeziel“ schaltet ausschließlich bridge_charge_enabled aus,
+    „Nur Bedarf bis Solarstrom“ schaltet ausschließlich diesen Schalter ein.
+    Nur bestätigte, verfügbare on/off-Zustände markieren die Auswahl; fehlende,
+    unbekannte und nicht verfügbare Werte erhalten keine erfundene Ladeweise.
+    Die Auswahl aktiviert weder den Hauptschalter noch setzt sie Zielwerte.
+    Das sichtbare Netzladeziel heißt bei Verbrauchsplanung „Höchstens laden bis“
+    und wird als Obergrenze erklärt. Startschwelle (nur bei festem Ladeziel),
+    globale Ladegrenze und Monate bleiben unter „Weitere Einstellungen“
+    erreichbar. Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen
+    sichtbar; 0 % wird als verhinderter Neustart erklärt. Fehlende Monatswerte
+    dürfen nicht als ganzjährig inaktiv erscheinen. Die globale Grenze erklärt
+    ihre Wirkung auch auf Solarstrom und ein höheres Netzladeziel. Ein sichtbarer
+    Hinweis beim Ladeziel und in der geschlossenen Zusammenfassung erklärt
+    die vorübergehende 100-%-Ausnahme bei fälliger Zellkalibrierung; bei
+    Verbrauchsplanung autorisiert sie keine ungeplante Vollladung. Die feste
+    Ladeweise erklärt ihre Entladesperre nach erfolgter Netzladung bis zum
+    Fensterende, die Bedarfsladung die anschließende normale Entladefreigabe.
+    PV-Voraussetzungen werden neben der Ladeweise verständlich erklärt;
+    bridge_pv_start_required und bridge_tariff_required aus dem HA-Service
+    erhalten konkrete DE-/EN-Hinweise. Ausstehende Änderungen sperren weitere
+    Modusaufrufe. Bestätigte Zustände, Fehlermeldungen und Zahlentwürfe bleiben
+    beim Schließen und erneuten Öffnen erhalten. Dynamisch führt
     die Bedienung mit alltagssprachlichen Ladeweisen durch die Einrichtung:
     bedarfsgerechtes Laden (Smart), günstigste Stunden (Relativ), feste
     Preisgrenze (Absolut) oder ausgeschaltete Preisautomatik (Off). Die Ansicht
@@ -3342,6 +3382,12 @@ requirement_vue_electricity_tariff:
     - "Frontend-/Browsertests prüfen die dauerhafte Navigation, Redirects, Tarifwahl,
        Hauptschalter, kontextabhängige Einstellungen, Speichern/Abbrechen sowie
        heutige/morgige Preiskurven in DE/EN, hell/dunkel und auf schmalen Displays."
+    - "Zeitvariable Komponenten-/Browsertests prüfen die drei Schritte, nur ein
+       Hauptschalter, Tastaturbedienung, initial geschlossene Zusatzfelder,
+       bestätigte Modusauswahl und Zusammenfassung, fehlende PV-/Monatsdaten,
+       verzögerte und abgelehnte Dienste ohne Doppelaufrufe oder implizite
+       Aktivierung sowie den Erhalt fehlgeschlagener Zahlentwürfe. Desktop und
+       Mobil bis 320 px, DE/EN und beide Themes bleiben ohne Seitenüberlauf."
     - "Tests prüfen die verständlichen Ladeweisen, nur wirksame Einstellfelder,
        erweiterte Einstellungen und den Erhalt vorhandener Werte ohne implizite
        Schreibvorgänge. Verzögerte oder fehlerhafte Hauptschalterantworten zeigen
@@ -3378,7 +3424,7 @@ requirement_vue_savings:
     und deren Recorder-Netto-Ersparnis. Er ersetzt die abgelöste
     Lovelace-spezifische REQ-ECONOMICS-SAVINGS-DASHBOARD.
     Die Blöcke erscheinen in der Reihenfolge Amortisation, Kalenderwerte,
-    Tarifpreisfenster, freie Datumsauswahl mit Zeitraumwert und Balkendiagramm,
+    Dein Stromtarif, freie Datumsauswahl mit Zeitraumwert und Balkendiagramm,
     eingeklappte Berechnungshinweise und höchstens ein Wirtschaftsstatushinweis.
 
     binary_sensor.economics_investment_configured entscheidet über den
@@ -3392,15 +3438,17 @@ requirement_vue_savings:
     Tarifpreise und Einspeisevergütung zwei Nachkommastellen in ct/kWh.
     Die interne Genauigkeit bleibt unverändert.
 
-    Die mit Zeitvariabler Tarif gemeinsam verwendete Tarifpreisfenster-Karte
-    (EN: Tariff price windows) ist sichtbar, wenn die Attribute von
+    Die mit Zeitvariabler Tarif gemeinsam verwendete Karte „Dein Stromtarif“
+    (EN: Your electricity tariff) ist sichtbar, wenn die Attribute von
     sensor.economics_current_import_price tariff_type=time_of_use melden oder
     bei fehlenden Sensorattributen die gesicherte API diesen Tarif bestätigt.
     windows, active_window, base_price_eur_kwh, feed_in_price_eur_kwh,
     next_price_change_at und unavailable_reason sind die
-    Datenquelle für die laufende Tarifbewertung. Alle bis zu acht konfigurierten Fenster bleiben in der
-    vom Sensor gelieferten Reihenfolge sichtbar, auch über Mitternacht und bei
-    angrenzenden Grenzen. Tarifwechsel werden live übernommen; ein fehlender
+    Datenquelle für die laufende Tarifbewertung. Aktueller Preis und günstigste
+    Ladezeiten sind sichtbar; „Alle Preise ansehen“ öffnet alle bis zu acht
+    konfigurierten Fenster in der vom Sensor gelieferten Reihenfolge, auch über
+    Mitternacht und bei angrenzenden Grenzen. Die Preisregeln sind separat
+    einklappbar. Tarifwechsel werden live übernommen; ein fehlender
     Preis wird weder zu Null noch zum gültigen aktiven Grundpreis umgedeutet.
     Eine leere Fensterliste zeigt weiterhin die verfügbaren übrigen Tarifdaten.
     Die gemeinsame Komponente führt keine Tarifberechnung aus.

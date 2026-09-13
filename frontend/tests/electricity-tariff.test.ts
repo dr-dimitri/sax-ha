@@ -258,7 +258,9 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       fixture.root.querySelectorAll(".electricity-master input"),
     ).toHaveLength(1);
     expect(fixture.root.textContent).toContain("Zeitvariabel");
-    expect(fixture.root.textContent).toContain("Automatische Netzladung aus");
+    expect(fixture.root.textContent).toContain(
+      "Ausgeschaltet: Diese Automatik",
+    );
     expect(fixture.root.textContent).toContain("-2,50");
     expect(
       fixture.root.querySelectorAll(".electricity-charging-editor"),
@@ -790,9 +792,9 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     const fixture = await mount();
     const section = fixture.root.querySelector(".electricity-charging")!;
     await click(section, "Bearbeiten");
-    expect(section.textContent).toContain("Globale SOC-Obergrenze");
-    expect(section.textContent).toContain("Zeitvariables Ladeziel");
-    expect(section.textContent).toContain("Startschwelle der Netzladung");
+    expect(section.textContent).toContain("Ladegrenze für alle Lademethoden");
+    expect(section.textContent).toContain("Ladeziel (%)");
+    expect(section.textContent).toContain("Nur starten unter einem Ladestand");
     expect(section.textContent).toContain("Aktive Monate");
     await click(section, "Fertig");
     expect(section.querySelector(".electricity-charging-editor")).toBeNull();
@@ -1115,6 +1117,70 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       "fehlgeschlagen",
     );
   });
+});
+describe("REQ-VUE-ELECTRICITY-TARIFF: activation feedback beside step 3", () => {
+  it.each(["failed", "conflict"])(
+    "keeps delayed %s feedback and recovery beside the confirmed time-of-use switch",
+    async (code) => {
+      const fixture = await mount();
+      let reject!: (cause: unknown) => void;
+      fixture.callWS.mockImplementationOnce(
+        () =>
+          new Promise<TariffProfile>((_, fail) => {
+            reject = fail;
+          }),
+      );
+      const section = fixture.root.querySelector(".electricity-activation")!;
+      const master = section.querySelector<HTMLInputElement>("input")!;
+      master.click();
+      await flush();
+      expect(master.checked).toBe(false);
+      expect(master.disabled).toBe(true);
+      expect(section.querySelector("[role=status]")?.textContent).toContain(
+        "Einschalten wird übernommen",
+      );
+      master.click();
+      expect(writes(fixture)).toHaveLength(1);
+      reject({ code });
+      await flush();
+      expect(master.checked).toBe(false);
+      expect(master.disabled).toBe(false);
+      const alert = section.querySelector<HTMLElement>("[role=alert]")!;
+      expect(alert.textContent).toContain(
+        code === "conflict" ? "inzwischen geändert" : "fehlgeschlagen",
+      );
+      expect(master.getAttribute("aria-describedby")).toContain(alert.id);
+      expect(
+        fixture.root.querySelector(".electricity-tariff-bar [role=alert]"),
+      ).toBeNull();
+      if (code === "conflict") {
+        const reload = button(
+          section,
+          "Gespeicherte Einstellungen laden (Entwurf verwerfen)",
+        );
+        expect(reload).toBeTruthy();
+        reload.click();
+        await flush();
+        expect(section.querySelector("[role=alert]")).toBeNull();
+      }
+    },
+  );
+
+  it.each(["readonly", "disconnected"])(
+    "explains %s beside the unavailable activation switch",
+    async (reason) => {
+      const fixture = await mount({ readonly: reason === "readonly" });
+      if (reason === "disconnected") await fixture.disconnect();
+      const section = fixture.root.querySelector(".electricity-activation")!;
+      expect(section.querySelector<HTMLInputElement>("input")?.disabled).toBe(
+        true,
+      );
+      expect(section.textContent).toContain(
+        reason === "readonly" ? "Keine Berechtigung" : "Keine Verbindung",
+      );
+      expect(writes(fixture)).toHaveLength(0);
+    },
+  );
 });
 describe("REQ-VUE-ELECTRICITY-TARIFF: exact price steps and gaps", () => {
   it("draws separate paths across gaps and keeps negative prices below zero", () => {

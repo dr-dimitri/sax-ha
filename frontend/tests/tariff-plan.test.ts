@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, h, nextTick, provide, shallowRef, type App } from "vue";
 import { chargingSample } from "../src/charging-preview-data";
+import TariffPlan from "../src/components/TariffPlan.vue";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "../src/ha";
 import SavingsView from "../src/views/SavingsView.vue";
 import TimedChargingView from "../src/views/TimedChargingView.vue";
@@ -59,6 +60,7 @@ async function mount(
     language?: string;
     tariffType?: string;
     profile?: Partial<TariffProfile>;
+    compact?: boolean;
   } = {},
 ) {
   const sample = chargingSample(options.language);
@@ -157,14 +159,16 @@ async function mount(
         ),
       );
       return () =>
-        h("div", [
-          h("div", { class: "timed-fixture" }, [
-            h(TimedChargingView, { hass: hass.value }),
-          ]),
-          h("div", { class: "savings-fixture" }, [
-            h(SavingsView, { hass: hass.value, entryId: "entry-1" }),
-          ]),
-        ]);
+        options.compact
+          ? h(TariffPlan, { hass: hass.value, compact: true })
+          : h("div", [
+              h("div", { class: "timed-fixture" }, [
+                h(TimedChargingView, { hass: hass.value }),
+              ]),
+              h("div", { class: "savings-fixture" }, [
+                h(SavingsView, { hass: hass.value, entryId: "entry-1" }),
+              ]),
+            ]);
     },
   });
   apps.push(app);
@@ -236,7 +240,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       expect(plans).toHaveLength(2);
       expect(rows(plans[0])).toEqual(rows(plans[1]));
       for (const plan of plans) {
-        expect(plan.querySelector("h2")?.textContent).toBe("Tarifpreisfenster");
+        expect(plan.querySelector("h2")?.textContent).toBe("Dein Stromtarif");
         const displayed = rows(plan);
         expect(displayed).toHaveLength(windows.length + 1);
         windows.forEach((window, index) => {
@@ -299,7 +303,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     });
     for (const plan of fixture.plans()) {
       expect(plan.querySelectorAll(".tariff-plan__low")).toHaveLength(3);
-      expect(rows(plan).at(-1)?.[0]).toBe("jetzt · Niedertarif");
+      expect(rows(plan).at(-1)?.[0]).toBe("jetzt · günstig");
       expect(
         plan.querySelector(".tariff-plan__low-status")?.textContent,
       ).toContain("29.03.2026, 22:00");
@@ -357,7 +361,7 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       expect(plan.querySelectorAll(".tariff-plan__low")).toHaveLength(1);
       expect(
         plan.querySelector(".tariff-plan__low-status")?.textContent,
-      ).toContain("Aktuell kein Niedertarif");
+      ).toContain("Aktuell außerhalb der günstigsten Zeiten");
       expect(
         plan.querySelector(".tariff-plan__low-status")?.textContent,
       ).not.toContain("aktiv bis");
@@ -428,7 +432,9 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       for (const plan of fixture.plans()) {
         expect(rows(plan)).toHaveLength(3);
         expect(plan.querySelector(".tariff-plan__current")).toBeNull();
-        expect(plan.textContent).toContain("Derzeit gilt kein Preis");
+        expect(plan.textContent).toContain(
+          "Derzeit ist kein aktueller Strompreis verfügbar",
+        );
       }
       await fixture.update(state, {
         ...tariffAttributes(),
@@ -440,7 +446,9 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
       for (const plan of fixture.plans()) {
         expect(rows(plan)).toHaveLength(3);
         expect(plan.querySelector(".tariff-plan__current")).toBeNull();
-        expect(plan.textContent).toContain("Derzeit gilt kein Preis");
+        expect(plan.textContent).toContain(
+          "Derzeit ist kein aktueller Strompreis verfügbar",
+        );
         expect(plan.textContent).toContain("missing_base_price");
         expect(plan.textContent).not.toContain("0,00 ct/kWh");
       }
@@ -468,19 +476,21 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     expect(fixture.plans()).toHaveLength(2);
     for (const plan of fixture.plans()) {
       expect(plan.querySelector("h2")?.textContent).toBe(
-        "Tariff price windows",
+        "Your electricity tariff",
       );
       expect(plan.textContent).toContain("-1.50 ct/kWh");
       expect(plan.textContent).toContain(
         "lowest price level that actually occurs each day",
       );
-      expect(plan.textContent).toContain("How charging times apply");
+      expect(plan.textContent).toContain(
+        "How are the cheapest charging times selected?",
+      );
       expect(plan.textContent).toContain(
         "separate grid charging times have no effect",
       );
       expect(
         plan.querySelector(".tariff-plan__low-status")?.textContent,
-      ).toContain("Low tariff active until 29 Mar 2026, 18:00");
+      ).toContain("Cheapest period until 29 Mar 2026, 18:00");
     }
     expect(
       fixture.root.querySelector(".timed-fixture")?.textContent,
@@ -917,4 +927,193 @@ it("REQ-VUE-TARIFF-EDITOR accepts the sensor's sorted windows and later external
   await click(plan, "Speichern");
   await fixture.update("10", { tariff_type: "dynamic" });
   expect(fixture.plans()).toHaveLength(0);
+});
+
+describe("REQ-VUE-TARIFF-EDITOR: guided everyday tariff setup", () => {
+  it.each(["de", "en"])(
+    "keeps the current price visible and full detail optional in %s",
+    async (language) => {
+      const fixture = await mount({ language });
+      for (const plan of fixture.plans()) {
+        expect(
+          plan.querySelector(".tariff-plan__current-price")?.textContent,
+        ).toContain(language === "de" ? "-1,50 ct/kWh" : "-1.50 ct/kWh");
+        const details = plan.querySelector<HTMLDetailsElement>(
+          ".tariff-plan__all-prices",
+        )!;
+        expect(details.open).toBe(false);
+        expect(details.querySelector("summary")?.textContent).toBe(
+          language === "de" ? "Alle Preise ansehen" : "View all prices",
+        );
+        const scroll = details.querySelector<HTMLElement>(
+          ".tariff-plan__scroll",
+        )!;
+        expect(scroll.tabIndex).toBe(0);
+        expect(scroll.getAttribute("aria-label")).toBeTruthy();
+        expect(details.querySelector("table th")?.getAttribute("scope")).toBe(
+          "col",
+        );
+      }
+      expect(saves(fixture)).toHaveLength(0);
+    },
+  );
+
+  it.each(["de", "en"])(
+    "explains daily prices and overnight periods in the compact %s overview",
+    async (language) => {
+      const fixture = await mount({
+        compact: true,
+        language,
+        windows: [
+          { start: "22:00:00", end: "06:00:00", price_eur_kwh: 0.18 },
+          { start: "06:00:00", end: "08:00:00", price_eur_kwh: 0.22 },
+        ],
+      });
+      const plan = fixture.plans()[0]!;
+      expect(plan.querySelector("h2")?.textContent).toBe(
+        language === "de"
+          ? "1. Wann ist dein Strom günstig?"
+          : "1. When is your electricity cheaper?",
+      );
+      const summary = plan.querySelector(".tariff-plan__compact-summary")!;
+      expect(summary.textContent).toContain(
+        language === "de" ? "35,00 ct/kWh" : "35.00 ct/kWh",
+      );
+      expect(summary.textContent).toContain("22:00 – 06:00");
+      expect(summary.textContent).toContain(
+        language === "de" ? "über Nacht" : "overnight",
+      );
+      expect(summary.textContent).toContain(
+        language === "de" ? "aktive Monate" : "active months",
+      );
+      expect(plan.querySelector("form")).toBeNull();
+      expect(saves(fixture)).toHaveLength(0);
+    },
+  );
+
+  it.each(["de", "en"])(
+    "places prices, different times and feed-in payment in order and explains saving in %s",
+    async (language) => {
+      const fixture = await mount({ compact: true, language });
+      const plan = fixture.plans()[0]!;
+      await click(plan, language === "de" ? "Bearbeiten" : "Edit");
+      const steps = [...plan.querySelectorAll(".tariff-plan__step")];
+      expect(steps).toHaveLength(3);
+      expect(steps[0].querySelector('[name="base_price"]')).not.toBeNull();
+      expect(steps[1].querySelectorAll(".tariff-plan__window")).toHaveLength(2);
+      expect(steps[2].querySelector('[name="feed_in_price"]')).not.toBeNull();
+      const feed = plan.querySelector('[name="feed_in_price"]')!;
+      expect(
+        document.getElementById(feed.getAttribute("aria-describedby")!)
+          ?.textContent,
+      ).toContain(language === "de" ? "Ohne Vergütung 0" : "Enter 0");
+      expect(
+        plan.querySelector(".tariff-plan__editor .tariff-plan__impact")
+          ?.textContent,
+      ).toContain(
+        language === "de"
+          ? "Es schaltet die Netzladung nicht ein"
+          : "It does not turn on grid charging",
+      );
+      expect(
+        plan.querySelector<HTMLDetailsElement>(".tariff-plan__pv-details")
+          ?.open,
+      ).toBe(false);
+      expect(saves(fixture)).toHaveLength(0);
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+});
+
+it("REQ-VUE-TARIFF-EDITOR marks only backend-selected cheap periods in the compact overview, including gaps and all-day prices", async () => {
+  const fixture = await mount({ compact: true });
+  const plan = fixture.plans()[0]!;
+  expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(1);
+  expect(
+    plan.querySelector(".tariff-plan__badge")?.closest("li")?.textContent,
+  ).toContain("12:00 – 18:00");
+  await fixture.update("35", {
+    ...tariffAttributes(),
+    windows: twoWindows.map((window) => ({
+      ...window,
+      price_eur_kwh: 0.35,
+      low_tariff: true,
+    })),
+    active_window: null,
+    base_price_is_low_tariff: true,
+    low_tariff_price_eur_kwh: 0.35,
+  });
+  expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(3);
+  expect(
+    plan.querySelector(".tariff-plan__compact-summary > p")?.textContent,
+  ).toContain("günstig");
+  await fixture.update("35", {
+    ...tariffAttributes(),
+    windows: [],
+    active_window: null,
+    base_price_is_low_tariff: true,
+    low_tariff_price_eur_kwh: 0.35,
+  });
+  expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(1);
+  expect(
+    plan.querySelector(".tariff-plan__compact-summary")?.textContent,
+  ).toContain("Standardpreis gilt den ganzen Tag");
+});
+
+it("REQ-VUE-TARIFF-EDITOR waits for matching telemetry before marking cheap periods after a compact save", async () => {
+  const windows = [
+    { start: "06:00:00", end: "12:00:00", price_eur_kwh: 0.18 },
+    { start: "12:00:00", end: "18:00:00", price_eur_kwh: 0.22 },
+  ];
+  const fixture = await mount({ compact: true, windows });
+  const plan = fixture.plans()[0]!;
+  await click(plan, "Bearbeiten");
+  await fill(plan, '[name="base_price"]', "42");
+  fixture.callWS.mockResolvedValueOnce({
+    tariff_type: "time_of_use",
+    base_price_ct_kwh: 42,
+    feed_in_price_ct_kwh: 8,
+    windows: windows.map((window) => ({
+      start: window.start,
+      end: window.end,
+      price_ct_kwh: window.price_eur_kwh * 100,
+    })),
+    can_edit: true,
+    revision: "2",
+  });
+  await click(plan, "Speichern");
+  expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(0);
+  expect(plan.querySelector(".tariff-plan__low-status")).toBeNull();
+  expect(
+    plan.querySelector(".tariff-plan__pending-status")?.textContent,
+  ).toContain("werden aktualisiert");
+  await fixture.update("22", {
+    ...tariffAttributes(windows),
+    base_price_eur_kwh: 0.42,
+  });
+  expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(1);
+  expect(
+    plan.querySelector(".tariff-plan__badge")?.closest("li")?.textContent,
+  ).toContain("12:00 – 18:00");
+  expect(plan.querySelector(".tariff-plan__low-status")).not.toBeNull();
+  expect(plan.querySelector(".tariff-plan__pending-status")).toBeNull();
+});
+
+it("REQ-VUE-TARIFF-EDITOR opens additional PV setup when the server requires it and keeps the price draft", async () => {
+  const fixture = await mount({ compact: true });
+  const plan = fixture.plans()[0]!;
+  await click(plan, "Bearbeiten");
+  await fill(plan, '[name="base_price"]', "32");
+  fixture.callWS.mockRejectedValueOnce({ code: "bridge_pv_start_required" });
+  await click(plan, "Speichern");
+  expect(
+    plan.querySelector<HTMLDetailsElement>(".tariff-plan__pv-details")?.open,
+  ).toBe(true);
+  expect(
+    plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+  ).toBe("32");
+  expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
+    "PV-Start-Quelle",
+  );
+  expect(fixture.callService).not.toHaveBeenCalled();
 });

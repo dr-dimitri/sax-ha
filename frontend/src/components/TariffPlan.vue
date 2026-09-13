@@ -24,12 +24,39 @@ const id = useId();
 const text = computed(() =>
   dashboard?.language.value === "de"
     ? {
-        tariff: props.compact ? "Tarif & Preise" : "Tarifpreisfenster",
+        tariff: props.compact
+          ? "1. Wann ist dein Strom günstig?"
+          : "Dein Stromtarif",
+        introduction:
+          "Trage die Preise aus deinem Stromvertrag ein. Sie gelten jeden Tag zu denselben Zeiten.",
+        currentPrice: "Strompreis jetzt",
+        baseSection: "Normaler Strompreis",
+        windowsSection: "Zeiten mit anderem Preis",
+        windowsHint:
+          "Zum Beispiel ein günstiger Nachtpreis von 22:00 bis 06:00 Uhr. Nur die Zeiten eintragen, in denen ein anderer Preis als der Standardpreis gilt.",
+        noWindows:
+          "Noch keine anderen Preiszeiten: Der Standardpreis gilt den ganzen Tag.",
+        feedSection: "Vergütung für Solarstrom",
+        feedHint:
+          "Wie viel erhältst du für eine eingespeiste kWh? Dieser Wert wird für die Ersparnisberechnung verwendet. Ohne Vergütung 0 eintragen.",
+        impact: "Das bewirkt dein Tarif",
+        impactHint:
+          "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Ladeziel und aktive Monate gelten zusätzlich.",
+        saveHint:
+          "Speichern übernimmt Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
+        pvDetails: "Zusätzlich: Solarprognose für die Ladeplanung",
+        pvHint:
+          "Nur für verbrauchsbasierte Ladeplanung erforderlich. Wähle die eingerichtete PV-Prognosequelle, damit die Planung den Bedarf bis zum Solarstart berechnen kann.",
+        allPrices: "Alle Preise ansehen",
+        everyDay: "Täglich",
+        remaining: "zu allen übrigen Zeiten",
+        overnightLabel: "über Nacht",
+        technicalReason: "Technischer Hinweis",
+        awaitingTariff: "Die aktuellen Ladezeiten werden aktualisiert.",
         pv: "PV-Start-Sensor (optional)",
         pvRequired: "PV-Start-Sensor (erforderlich)",
-        windows: "Zeitfenster",
         gross:
-          "Alle Preise brutto. Speichern aktualisiert auch die erlaubten Ladezeiten.",
+          "Alle Preise in ct/kWh inklusive Steuern, ohne monatliche Grundgebühr. Beispiel: 30 eingeben für 30 ct/kWh.",
         edit: "Bearbeiten",
         save: "Speichern",
         cancel: "Abbrechen",
@@ -38,12 +65,13 @@ const text = computed(() =>
         add: "+ Zeitfenster hinzufügen",
         remove: "Entfernen",
         window: "Zeitfenster",
-        baseHint: "Gilt außerhalb der Zeitfenster.",
+        baseHint:
+          "Gilt den ganzen Tag, außer zu den unten eingetragenen Zeiten.",
         overnight:
           "Endet ein Fenster vor seiner Startzeit, gilt es über Mitternacht. Fenster dürfen sich nicht überschneiden.",
-        details: "So gelten die Ladezeiten",
+        details: "Wie werden günstige Ladezeiten ausgewählt?",
         first:
-          "Trage zuerst Standardpreis und Einspeisevergütung ein. Nebentarife kannst du bei Bedarf als Zeitfenster ergänzen.",
+          "Trage zuerst deinen normalen Strompreis ein. Ergänze danach abweichende Preiszeiten und die Einspeisevergütung.",
         priceError:
           "Bitte Preise mit höchstens zwei Nachkommastellen eingeben: Standardpreis und Zeitfenster von −200 bis 500 ct/kWh, Einspeisevergütung von 0 bis 200 ct/kWh.",
         startError: "Bitte eine vollständige Startzeit eingeben (z. B. 12:30).",
@@ -72,27 +100,54 @@ const text = computed(() =>
         status: "Status",
         now: "jetzt",
         base: "Standardpreis",
-        low: "Niedertarif",
-        lowUntil: "Niedertarif aktiv bis",
-        notLow: "Aktuell kein Niedertarif.",
-        rule: "Die Tarifpreisfenster bestimmen die verbindlichen Ladezeiten. Niedertarif ist die niedrigste täglich tatsächlich vorkommende Preisstufe, einschließlich des Standardpreises in Fensterlücken. Die SOC-Ladung darf nur im Niedertarif laden; SOC-Grenzen und aktive Monate gelten weiterhin.",
+        low: "günstig",
+        lowTariffPrice: "Günstigster Tagespreis",
+        lowUntil: "Günstige Zeit bis",
+        notLow: "Aktuell außerhalb der günstigsten Zeiten.",
+        rule: "Der niedrigste täglich vorkommende Strompreis heißt Niedertarif. Alle Zeiten mit diesem Preis sind mögliche Ladezeiten. Auch der Standardpreis zählt, wenn er in Lücken zwischen den Zeitfenstern gilt. Die feste und verbrauchsbasierte Netzladung verwenden ausschließlich diese günstigsten Zeiten.",
         configure:
           "Bisherige separate Netzladezeiten sind bei diesem Tarif unwirksam.",
         noLowTariff:
-          "Tarifdaten fehlen oder sind ungültig. Die SOC-Ladung bleibt gesperrt, bis gültige Tarifdaten vorliegen.",
+          "Günstige Ladezeiten sind derzeit nicht verfügbar. Die SOC-Ladung bleibt gesperrt, bis gültige Tarifdaten vorliegen. Prüfe die Preise über Bearbeiten, wenn dieser Hinweis bestehen bleibt.",
         feed: "Einspeisevergütung",
         next: "Nächster Preiswechsel",
         unavailable: "Nicht verfügbar",
-        noPrice:
-          "Derzeit gilt kein Preis. Bitte die Tarifkonfiguration prüfen.",
+        noPrice: "Derzeit ist kein aktueller Strompreis verfügbar.",
       }
     : {
-        tariff: props.compact ? "Tariff & prices" : "Tariff price windows",
+        tariff: props.compact
+          ? "1. When is your electricity cheaper?"
+          : "Your electricity tariff",
+        introduction:
+          "Enter the prices from your electricity contract. They apply at the same times every day.",
+        currentPrice: "Electricity price now",
+        baseSection: "Regular electricity price",
+        windowsSection: "Times with a different price",
+        windowsHint:
+          "For example, a cheaper night rate from 22:00 to 06:00. Only add times when a different price applies instead of the standard price.",
+        noWindows:
+          "No other price periods yet: the standard price applies all day.",
+        feedSection: "Payment for solar electricity",
+        feedHint:
+          "How much do you receive for each exported kWh? This value is used to calculate savings. Enter 0 if you receive no payment.",
+        impact: "What your tariff does",
+        impactHint:
+          "Automation uses the cheapest times for fixed-target and consumption-based grid charging. Battery level, charging target and active months also apply.",
+        saveHint:
+          "Saving applies the prices and possible charging times. It does not turn on grid charging.",
+        pvDetails: "Additional setup: solar forecast for charging planning",
+        pvHint:
+          "Only required for consumption-based charging planning. Select your configured PV forecast source so planning can calculate the energy needed until solar production starts.",
+        allPrices: "View all prices",
+        everyDay: "Every day",
+        remaining: "at all remaining times",
+        overnightLabel: "overnight",
+        technicalReason: "Technical details",
+        awaitingTariff: "Current charging times are being updated.",
         pv: "PV start sensor (optional)",
         pvRequired: "PV start sensor (required)",
-        windows: "time windows",
         gross:
-          "All prices include tax. Saving also updates the permitted charging times.",
+          "All prices in ct/kWh including tax, excluding the monthly standing charge. Example: enter 30 for 30 ct/kWh.",
         edit: "Edit",
         save: "Save",
         cancel: "Cancel",
@@ -101,12 +156,12 @@ const text = computed(() =>
         add: "+ Add time window",
         remove: "Remove",
         window: "Time window",
-        baseHint: "Applies outside the time windows.",
+        baseHint: "Applies all day, except during the times entered below.",
         overnight:
           "A window ending before its start continues past midnight. Windows must not overlap.",
-        details: "How charging times apply",
+        details: "How are the cheapest charging times selected?",
         first:
-          "Start with the standard price and feed-in remuneration. Add time windows for other rates as needed.",
+          "Start with your regular electricity price. Then add any different price periods and your feed-in payment.",
         priceError:
           "Enter prices with up to two decimal places: standard price and windows from −200 to 500 ct/kWh, feed-in remuneration from 0 to 200 ct/kWh.",
         startError: "Enter a complete start time (e.g. 12:30).",
@@ -134,19 +189,19 @@ const text = computed(() =>
         status: "Status",
         now: "now",
         base: "Standard price",
-        low: "Low tariff",
-        lowUntil: "Low tariff active until",
-        notLow: "The low tariff is not currently active.",
-        rule: "The tariff price windows define the binding charging times. The low tariff is the lowest price level that actually occurs each day, including the standard price in gaps between windows. SOC charging is only allowed during the low tariff; SOC limits and active months still apply.",
+        low: "cheapest",
+        lowTariffPrice: "Cheapest daily price",
+        lowUntil: "Cheapest period until",
+        notLow: "Currently outside the cheapest times.",
+        rule: "The lowest price level that actually occurs each day is called the low tariff. Every period at this price is a possible charging time. The standard price also counts when it applies in gaps between windows. Fixed-target and consumption-based grid charging only use these cheapest times.",
         configure:
           "Previously configured separate grid charging times have no effect for this tariff.",
         noLowTariff:
-          "Tariff data is missing or invalid. SOC charging remains blocked until valid tariff data is available.",
+          "The cheapest charging times are currently unavailable. SOC charging remains blocked until valid tariff data is available. Check the prices using Edit if this message persists.",
         feed: "Feed-in remuneration",
         next: "Next price change",
         unavailable: "Unavailable",
-        noPrice:
-          "No price currently applies. Please check the tariff configuration.",
+        noPrice: "The current electricity price is unavailable.",
       },
 );
 const price = computed(() =>
@@ -161,6 +216,14 @@ const tariffPrice = (value: unknown) => {
   );
   return formatted === null ? text.value.unavailable : `${formatted} ct/kWh`;
 };
+const currentPrice = computed(() => {
+  const formatted = formatSavingsNumber(
+    price.value?.state?.state,
+    props.hass,
+    2,
+  );
+  return formatted === null ? text.value.unavailable : `${formatted} ct/kWh`;
+});
 const timestamp = (value: unknown) =>
   formatSavingsDate(value, props.hass) ?? text.value.unavailable;
 const savedProfile = ref<TariffProfile | null>(null);
@@ -247,14 +310,14 @@ watch(
   },
   { immediate: true },
 );
-const attributes = computed(() => {
+const attributes = computed<Readonly<Record<string, unknown>>>(() => {
   const profile =
     savedProfile.value ??
     (props.compact || !sourceAttributes.value.tariff_type
       ? dashboard?.tariff.value
       : null);
   if (!profile) return sourceAttributes.value;
-  return {
+  const configured = {
     ...sourceAttributes.value,
     tariff_type: profile.tariff_type,
     base_price_eur_kwh:
@@ -272,7 +335,17 @@ const attributes = computed(() => {
     active_window: null,
     low_tariff_price_eur_kwh: null,
   };
+  // REQ-VUE-TARIFF-EDITOR: only matching telemetry can identify cheap periods.
+  return tariffFingerprint(configured) ===
+    tariffFingerprint(sourceAttributes.value)
+    ? sourceAttributes.value
+    : configured;
 });
+const tariffMetadataMatches = computed(
+  () =>
+    tariffFingerprint(attributes.value) ===
+    tariffFingerprint(sourceAttributes.value),
+);
 const tariffVisible = computed(
   () => attributes.value.tariff_type === "time_of_use",
 );
@@ -650,11 +723,52 @@ watch(tariffVisible, (visible) => {
     <p v-if="pending" role="status">
       {{ text[pendingAction] }}
     </p>
-    <p v-if="compact && !editing" class="tariff-plan__compact-summary">
-      {{ text.base }} {{ tariffPrice(attributes.base_price_eur_kwh) }} ·
-      {{ windows.length }} {{ text.windows }} · {{ text.feed }}
-      {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
+    <p v-if="!editing" class="tariff-plan__introduction">
+      {{ text.introduction }}
     </p>
+    <div v-if="compact && !editing" class="tariff-plan__compact-summary">
+      <p>
+        <strong
+          >{{ text.base }}:
+          {{ tariffPrice(attributes.base_price_eur_kwh) }}</strong
+        ><span v-if="baseLow" class="tariff-plan__badge">{{ text.low }}</span
+        ><br />{{ text.remaining }}
+      </p>
+      <ul v-if="windows.length" class="tariff-plan__periods">
+        <li v-for="(window, index) in windows" :key="index">
+          <span
+            >{{ text.everyDay }} {{ clock(window.start) }} –
+            {{ clock(window.end)
+            }}<span v-if="window.end < window.start">
+              ({{ text.overnightLabel }})</span
+            ></span
+          >
+          <span class="tariff-plan__period-price"
+            ><span v-if="isLow(window)" class="tariff-plan__badge">{{
+              text.low
+            }}</span
+            ><strong>{{ tariffPrice(window.price_eur_kwh) }}</strong></span
+          >
+        </li>
+      </ul>
+      <p v-else>{{ text.noWindows }}</p>
+      <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
+        <strong>{{ text.lowTariffPrice }}:</strong>
+        {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
+        <template v-if="lowTariffActive"
+          >{{ text.lowUntil }} {{ lowTariffUntil }}.</template
+        >
+        <template v-else>{{ text.notLow }}</template>
+      </p>
+      <p
+        v-else-if="savedProfile || !tariffMetadataMatches"
+        class="tariff-plan__pending-status"
+      >
+        {{ text.awaitingTariff }}
+      </p>
+      <p v-else class="tariff-plan__low-unavailable">{{ text.noLowTariff }}</p>
+      <p class="tariff-plan__impact">{{ text.impactHint }}</p>
+    </div>
     <p v-if="saved" role="status">{{ text.saved }}</p>
     <p
       v-if="errorMessage"
@@ -676,7 +790,8 @@ watch(tariffVisible, (visible) => {
       <p v-if="profile?.base_price_ct_kwh === null">{{ text.first }}</p>
       <fieldset :disabled="pending || !connectionAvailable">
         <p class="tariff-plan__hint">{{ text.gross }}</p>
-        <div class="tariff-plan__prices">
+        <div class="tariff-plan__step">
+          <h3>{{ text.baseSection }}</h3>
           <label
             >{{ text.base }} (ct/kWh)<input
               v-model="baseInput"
@@ -687,6 +802,102 @@ watch(tariffVisible, (visible) => {
               :aria-describedby="`${id}-base-hint`"
             /><small :id="`${id}-base-hint`">{{ text.baseHint }}</small></label
           >
+        </div>
+        <div class="tariff-plan__step">
+          <h3>{{ text.windowsSection }}</h3>
+          <p class="tariff-plan__hint">{{ text.windowsHint }}</p>
+          <p v-if="!draftWindows.length" class="tariff-plan__empty">
+            {{ text.noWindows }}
+          </p>
+          <div
+            v-for="(window, index) in draftWindows"
+            :key="window.key"
+            class="tariff-plan__window"
+          >
+            <span class="tariff-plan__window-name"
+              >{{ text.window }} {{ index + 1 }}</span
+            >
+            <label
+              >{{ text.from
+              }}<input
+                v-model="window.start"
+                :name="`window_${window.key}_start`"
+                type="time"
+                :aria-invalid="
+                  timeError?.key === window.key && timeError.field === 'start'
+                "
+                :aria-describedby="
+                  timeError?.key === window.key && timeError.field === 'start'
+                    ? `${id}-error`
+                    : undefined
+                "
+                @input="clearTimeError(window.key)"
+                @change="changeTime(window.key, 'start', $event)"
+                :step="
+                  (window.start.slice(-2) !== '00' &&
+                    window.start.length === 8) ||
+                  (window.end.slice(-2) !== '00' && window.end.length === 8)
+                    ? 1
+                    : 60
+                "
+                :aria-label="`${text.window} ${index + 1}: ${text.from}`"
+            /></label>
+            <label
+              >{{ text.to
+              }}<input
+                v-model="window.end"
+                :name="`window_${window.key}_end`"
+                type="time"
+                :aria-invalid="
+                  timeError?.key === window.key && timeError.field === 'end'
+                "
+                :aria-describedby="
+                  timeError?.key === window.key && timeError.field === 'end'
+                    ? `${id}-error`
+                    : undefined
+                "
+                @input="clearTimeError(window.key)"
+                @change="changeTime(window.key, 'end', $event)"
+                :step="
+                  (window.start.slice(-2) !== '00' &&
+                    window.start.length === 8) ||
+                  (window.end.slice(-2) !== '00' && window.end.length === 8)
+                    ? 1
+                    : 60
+                "
+                :aria-label="`${text.window} ${index + 1}: ${text.to}`"
+            /></label>
+            <label
+              >{{ text.price }} (ct/kWh)<input
+                v-model="window.price"
+                type="text"
+                inputmode="decimal"
+                autocomplete="off"
+                :aria-label="`${text.window} ${index + 1}: ${text.price} (ct/kWh)`"
+            /></label>
+            <button
+              type="button"
+              class="tariff-plan__remove"
+              :aria-label="`${text.window} ${index + 1}: ${text.remove}`"
+              @click="removeWindow(index)"
+            >
+              {{ text.remove }}
+            </button>
+          </div>
+          <button
+            v-if="draftWindows.length < 8"
+            type="button"
+            class="tariff-plan__add"
+            @click="addWindow"
+          >
+            {{ text.add }}
+          </button>
+          <p v-if="draftWindows.length" class="tariff-plan__hint">
+            {{ text.overnight }}
+          </p>
+        </div>
+        <div class="tariff-plan__step">
+          <h3>{{ text.feedSection }}</h3>
           <label
             >{{ text.feed }} (ct/kWh)<input
               v-model="feedInput"
@@ -694,98 +905,32 @@ watch(tariffVisible, (visible) => {
               type="text"
               inputmode="decimal"
               autocomplete="off"
-          /></label>
+              :aria-describedby="`${id}-feed-hint`"
+            /><small :id="`${id}-feed-hint`">{{ text.feedHint }}</small></label
+          >
         </div>
-        <SensorPicker
+        <details
           v-if="compact"
-          v-model="pvSensor"
-          :hass="hass"
-          :label="bridgeEnabled ? text.pvRequired : text.pv"
-        />
-        <div
-          v-for="(window, index) in draftWindows"
-          :key="window.key"
-          class="tariff-plan__window"
+          class="tariff-plan__details tariff-plan__pv-details"
+          :open="
+            bridgeEnabled ||
+            error === 'bridgePvRequired' ||
+            error === 'pvMissing'
+          "
         >
-          <span class="tariff-plan__window-name"
-            >{{ text.window }} {{ index + 1 }}</span
-          >
-          <label
-            >{{ text.from
-            }}<input
-              v-model="window.start"
-              :name="`window_${window.key}_start`"
-              type="time"
-              :aria-invalid="
-                timeError?.key === window.key && timeError.field === 'start'
-              "
-              :aria-describedby="
-                timeError?.key === window.key && timeError.field === 'start'
-                  ? `${id}-error`
-                  : undefined
-              "
-              @input="clearTimeError(window.key)"
-              @change="changeTime(window.key, 'start', $event)"
-              :step="
-                (window.start.slice(-2) !== '00' &&
-                  window.start.length === 8) ||
-                (window.end.slice(-2) !== '00' && window.end.length === 8)
-                  ? 1
-                  : 60
-              "
-              :aria-label="`${text.window} ${index + 1}: ${text.from}`"
-          /></label>
-          <label
-            >{{ text.to
-            }}<input
-              v-model="window.end"
-              :name="`window_${window.key}_end`"
-              type="time"
-              :aria-invalid="
-                timeError?.key === window.key && timeError.field === 'end'
-              "
-              :aria-describedby="
-                timeError?.key === window.key && timeError.field === 'end'
-                  ? `${id}-error`
-                  : undefined
-              "
-              @input="clearTimeError(window.key)"
-              @change="changeTime(window.key, 'end', $event)"
-              :step="
-                (window.start.slice(-2) !== '00' &&
-                  window.start.length === 8) ||
-                (window.end.slice(-2) !== '00' && window.end.length === 8)
-                  ? 1
-                  : 60
-              "
-              :aria-label="`${text.window} ${index + 1}: ${text.to}`"
-          /></label>
-          <label
-            >{{ text.price }} (ct/kWh)<input
-              v-model="window.price"
-              type="text"
-              inputmode="decimal"
-              autocomplete="off"
-              :aria-label="`${text.window} ${index + 1}: ${text.price} (ct/kWh)`"
-          /></label>
-          <button
-            type="button"
-            class="tariff-plan__remove"
-            :aria-label="`${text.window} ${index + 1}: ${text.remove}`"
-            @click="removeWindow(index)"
-          >
-            {{ text.remove }}
-          </button>
+          <summary>{{ text.pvDetails }}</summary>
+          <p class="tariff-plan__hint">{{ text.pvHint }}</p>
+          <SensorPicker
+            v-model="pvSensor"
+            :hass="hass"
+            :label="bridgeEnabled ? text.pvRequired : text.pv"
+          />
+        </details>
+        <div class="tariff-plan__impact">
+          <strong>{{ text.impact }}</strong>
+          <p>{{ text.impactHint }}</p>
+          <p>{{ text.saveHint }}</p>
         </div>
-        <button
-          v-if="draftWindows.length < 8"
-          type="button"
-          class="tariff-plan__add"
-          @click="addWindow"
-        >
-          {{ text.add }}
-        </button>
-        <p class="tariff-plan__hint">{{ text.overnight }}</p>
       </fieldset>
       <div class="tariff-plan__actions">
         <button
@@ -808,77 +953,97 @@ watch(tariffVisible, (visible) => {
         </button>
       </div>
     </form>
-    <div v-if="!editing && !compact" class="tariff-plan__scroll">
-      <table class="tariff-plan__table">
-        <thead>
-          <tr>
-            <th :aria-label="text.status"></th>
-            <th>{{ text.from }}</th>
-            <th>{{ text.to }}</th>
-            <th>{{ text.price }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="(window, index) in windows"
-            :key="index"
-            :class="{
-              'tariff-plan__current': isActive(window),
-              'tariff-plan__low': isLow(window),
-            }"
-          >
-            <td>{{ status(isActive(window), isLow(window)) }}</td>
-            <td>{{ clock(window.start) }}</td>
-            <td>{{ clock(window.end) }}</td>
-            <td>{{ tariffPrice(window.price_eur_kwh) }}</td>
-          </tr>
-          <tr
-            :class="{
-              'tariff-plan__current': baseActive,
-              'tariff-plan__low': baseLow,
-            }"
-          >
-            <td>{{ status(baseActive, baseLow) }}</td>
-            <td colspan="2">{{ text.base }}</td>
-            <td>{{ tariffPrice(attributes.base_price_eur_kwh) }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div
+      v-if="!editing && !compact && !savedProfile"
+      class="tariff-plan__overview"
+    >
+      <p class="tariff-plan__current-price">
+        <span>{{ text.currentPrice }}</span
+        ><strong>{{ hasPrice ? currentPrice : text.unavailable }}</strong>
+      </p>
+      <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
+        <strong>{{ text.lowTariffPrice }}:</strong>
+        {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
+        <template v-if="lowTariffActive">
+          {{ text.lowUntil }} {{ lowTariffUntil }}.
+        </template>
+        <template v-else>{{ text.notLow }}</template>
+      </p>
+      <p v-else class="tariff-plan__low-unavailable">
+        {{ text.noLowTariff }}
+      </p>
     </div>
     <p
-      v-if="!editing && !compact && lowTariffAvailable"
-      class="tariff-plan__low-status"
-    >
-      <strong>{{ text.low }}:</strong>
-      {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
-      <template v-if="lowTariffActive">
-        {{ text.lowUntil }} {{ lowTariffUntil }}.
-      </template>
-      <template v-else>{{ text.notLow }}</template>
-    </p>
-    <p
-      v-else-if="!editing && !compact && !savedProfile"
-      class="tariff-plan__low-unavailable"
-    >
-      {{ text.noLowTariff }}
-    </p>
-    <p v-if="!editing && !compact">
-      <strong>{{ text.feed }}:</strong>
-      {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
-    </p>
-    <p v-if="!editing && !compact && !hasPrice && !savedProfile">
-      {{ text.noPrice
-      }}<span v-if="typeof reason === 'string' && reason"> ({{ reason }})</span>
-    </p>
-    <p
-      v-else-if="
-        !editing && !compact && attributes.next_price_change_at && !savedProfile
+      v-if="
+        !editing &&
+        !compact &&
+        hasPrice &&
+        attributes.next_price_change_at &&
+        !savedProfile
       "
     >
       <strong>{{ text.next }}:</strong>
       {{ timestamp(attributes.next_price_change_at) }}
     </p>
-    <details v-if="!compact" class="tariff-plan__details">
+    <details
+      v-if="!editing && !compact"
+      class="tariff-plan__details tariff-plan__all-prices"
+    >
+      <summary>{{ text.allPrices }}</summary>
+      <div
+        class="tariff-plan__scroll"
+        tabindex="0"
+        role="region"
+        :aria-label="text.allPrices"
+      >
+        <table class="tariff-plan__table">
+          <thead>
+            <tr>
+              <th scope="col">{{ text.status }}</th>
+              <th scope="col">{{ text.from }}</th>
+              <th scope="col">{{ text.to }}</th>
+              <th scope="col">{{ text.price }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(window, index) in windows"
+              :key="index"
+              :class="{
+                'tariff-plan__current': isActive(window),
+                'tariff-plan__low': isLow(window),
+              }"
+            >
+              <td>{{ status(isActive(window), isLow(window)) }}</td>
+              <td>{{ clock(window.start) }}</td>
+              <td>{{ clock(window.end) }}</td>
+              <td>{{ tariffPrice(window.price_eur_kwh) }}</td>
+            </tr>
+            <tr
+              :class="{
+                'tariff-plan__current': baseActive,
+                'tariff-plan__low': baseLow,
+              }"
+            >
+              <td>{{ status(baseActive, baseLow) }}</td>
+              <td colspan="2">{{ text.base }}</td>
+              <td>{{ tariffPrice(attributes.base_price_eur_kwh) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <strong>{{ text.feed }}:</strong>
+        {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
+      </p>
+      <p v-if="!hasPrice && !savedProfile">
+        {{ text.noPrice
+        }}<span v-if="typeof reason === 'string' && reason">
+          {{ text.technicalReason }}: {{ reason }}</span
+        >
+      </p>
+    </details>
+    <details class="tariff-plan__details">
       <summary>{{ text.details }}</summary>
       <p>{{ text.rule }}</p>
       <p>{{ text.configure }}</p>
@@ -903,12 +1068,110 @@ watch(tariffVisible, (visible) => {
   font-weight: 500;
   line-height: 1.5;
 }
-.tariff-plan__compact-summary {
+.tariff-plan__introduction {
   color: var(--secondary-text-color, #666);
+  margin: 0 0 16px;
+}
+.tariff-plan__compact-summary {
   margin: 0;
 }
-.tariff-plan__editor > fieldset > .sensor-picker {
-  margin-top: 16px;
+.tariff-plan__periods {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.tariff-plan__periods li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  border-top: 1px solid var(--divider-color, #e0e0e0);
+  padding: 10px 0;
+  line-height: 1.5;
+}
+.tariff-plan__period-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.tariff-plan__badge {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 2px 7px;
+  border: 1px solid var(--success-color, #43a047);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.tariff-plan__periods strong {
+  white-space: nowrap;
+}
+.tariff-plan__step {
+  margin: 20px 0;
+}
+.tariff-plan__step h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.tariff-plan__step > label {
+  max-width: 460px;
+}
+.tariff-plan__step > label input {
+  max-width: 240px;
+}
+.tariff-plan__step .tariff-plan__hint {
+  margin-top: 0;
+}
+.tariff-plan__impact {
+  margin: 16px 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--secondary-background-color, #f5f5f5);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.tariff-plan__impact p {
+  margin: 6px 0;
+}
+.tariff-plan__empty {
+  color: var(--secondary-text-color, #666);
+  font-size: 14px;
+}
+.tariff-plan__overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.tariff-plan__overview > p {
+  margin: 0;
+}
+.tariff-plan__current-price {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--secondary-background-color, #f5f5f5);
+  border-radius: 8px;
+}
+.tariff-plan__current-price > span {
+  font-size: 14px;
+  color: var(--secondary-text-color, #666);
+}
+.tariff-plan__current-price > strong {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+}
+.tariff-plan__low-status {
+  font-size: 14px;
+  padding: 12px 0;
+}
+.tariff-plan__low-unavailable {
+  font-size: 14px;
+  border-inline-start: 3px solid var(--warning-color, #ff9800);
+  padding-inline-start: 12px;
 }
 .tariff-plan p {
   line-height: 1.6;
@@ -947,6 +1210,7 @@ watch(tariffVisible, (visible) => {
 .tariff-plan__header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
@@ -970,7 +1234,8 @@ watch(tariffVisible, (visible) => {
 }
 .tariff-plan button:focus-visible,
 .tariff-plan input:focus-visible,
-.tariff-plan summary:focus-visible {
+.tariff-plan summary:focus-visible,
+.tariff-plan__scroll:focus-visible {
   outline: 2px solid var(--primary-color, #03a9f4);
   outline-offset: 2px;
 }
@@ -982,11 +1247,6 @@ watch(tariffVisible, (visible) => {
   border: 0;
   padding: 0;
   margin: 0;
-}
-.tariff-plan__prices {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
 }
 .tariff-plan__editor label {
   min-width: 0;
@@ -1058,10 +1318,12 @@ watch(tariffVisible, (visible) => {
 .tariff-plan__details summary {
   cursor: pointer;
   color: var(--secondary-text-color, #666);
-  padding: 8px 0;
+  padding: 12px 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  line-height: 1.5;
 }
 @media (max-width: 400px) {
-  .tariff-plan__prices,
   .tariff-plan__window {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -277,7 +277,7 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
       "Diese Woche bisher",
       "Dieser Monat bisher",
       "Dieses Jahr bisher",
-      "Tarifpreisfenster",
+      "Dein Stromtarif",
       "Freier Zeitraum",
     ]);
     expect(root.textContent).toContain("750,01 €");
@@ -379,7 +379,7 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
     await update("economics_current_import_price", ".35", {
       tariff_type: "fixed",
     });
-    expect(root.textContent).not.toContain("Tarifpreisfenster");
+    expect(root.textContent).not.toContain("Dein Stromtarif");
   });
   it("shows an honest empty Recorder result and keeps zero distinct from missing", async () => {
     const { root } = await mount({ response: result(null) });
@@ -472,7 +472,9 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
         active_window: null,
       });
       expect(root.querySelector(".tariff-plan__current")).toBeNull();
-      expect(root.textContent).toContain("Derzeit gilt kein Preis");
+      expect(root.textContent).toContain(
+        "Derzeit ist kein aktueller Strompreis verfügbar",
+      );
     },
   );
   it("keeps date drafts from changing values and ignores late results for an old selection", async () => {

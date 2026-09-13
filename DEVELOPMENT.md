@@ -593,7 +593,14 @@ und die acht verschachtelten Fenster-Mappings in `entry.options` bleiben in EUR/
 damit bestehende Konfigurationen und die interne Bilanz unverändert weiterlaufen.
 
 `TariffPlan.vue` stellt diese Preisfenster in `TimedChargingView.vue` und
-`SavingsView.vue` unter „Tarifpreisfenster“ (EN: „Tariff price windows“) dar.
+`SavingsView.vue` unter „Dein Stromtarif“ (EN: „Your electricity tariff“) dar.
+Im gemeinsamen Stromtarif ist sie Schritt 1 „Wann ist dein Strom günstig?“.
+Die kompakte Ansicht zeigt gespeicherte tägliche Preiszeiten; günstige Fenster
+und gültige Standardpreislücken werden nur aus übereinstimmenden Backenddaten
+markiert. Ein Profil-/Telemetrievergleich über den bestehenden Fingerprint
+verhindert alte Niedertarifmarkierungen direkt nach dem Speichern. Sonst bleiben
+aktueller Preis und günstigste Zeit sichtbar; die ganze Tabelle und die
+Preisregeln stehen in nativen Details-Elementen.
 Die reaktive Quelle für Tarifstatus und Preisbewertung ist in beiden Ansichten der vorhandene
 Sensor `economics_current_import_price` mit `tariff_type`, `windows`,
 `active_window`, `base_price_eur_kwh`, `feed_in_price_eur_kwh`,
@@ -609,7 +616,7 @@ Tarifinformationen sichtbar. Ein fehlender Preis wird nicht als aktiver
 Standardpreis markiert. Bei `TIME_OF_USE` entfällt die separate Karte
 „Netzladezeitfenster“ (EN: „Grid charging window“); nur bei anderen Tarifarten
 ohne Verbrauchsplanung bedient sie `timed_charge_start` und `timed_charge_end`.
-„Bearbeiten“ öffnet Standardpreis, Einspeisevergütung und vorhandene Fenster
+„Bearbeiten“ öffnet Standardpreis, vorhandene Fenster und Einspeisevergütung
 in derselben Karte. Nur „Speichern“ schreibt das vollständige Profil;
 „Abbrechen“ verwirft den lokalen Entwurf. Die kompakte Übersicht und
 einklappbare Erläuterungen halten den Platzbedarf nach dem Speichern gering.
@@ -683,10 +690,26 @@ dynamischen Tarif bleiben Preisquelle, optionales Attribut, Quelleneinheit
 Smart-PV-Sensor und anrechenbarer PV-Anteil erhalten. Beide Profile speichern
 getrennte PV-Quellen. Preiseingaben erfolgen in ct/kWh; die Quelleneinheit dient
 nur der Umrechnung und ergänzt keine Steuern oder Zuschläge.
-„Ladeverhalten“ verwendet die bestehenden HA-Entities mit ihren einzelnen
-Übernahmen; „Fertig“ klappt nur zu. Globaler Max-SOC und zeitvariables Ladeziel
-bleiben unterschiedliche Grenzen. Die TOU-Startschwelle entfällt bei
-verbrauchsbasierter Planung, die aktiven Monate bleiben bedienbar.
+Im zeitvariablen Tarif ordnet `ElectricityTariffView.vue` die Bedienung als
+„1. Wann ist dein Strom günstig?“, „2. Wie viel möchtest du laden?“ und
+„3. Automatik einschalten“. Der Hauptschalter verwendet weiterhin denselben
+`tariff/configure`-Aufruf. Aktueller Preis und Entladestatus bleiben sichtbar;
+die Tageskurve ist nachgeordnet unter „Preisverlauf anzeigen“ erreichbar.
+`TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise, Ladeziel,
+Startschwelle und Monatsauswahl. Die zwei beschriebenen Auswahlflächen bilden
+nur `switch.bridge_charge_enabled` auf festes Ziel beziehungsweise Bedarf bis
+Solarstrom ab. Sie setzen keine Standardwerte und aktivieren keine Netzladung.
+Unbekannte Zustände markieren keine Auswahl. Globale Ladegrenze, Startschwelle
+(nur bei fester Ladeweise) und MonthSelection stehen unter „Weitere Einstellungen“.
+Zahlen verwenden weiterhin `EntityControl`; dessen Entwürfe bleiben durch
+`v-show` beim Einklappen erhalten. „Fertig“ klappt nur zu. Fehler und Pending
+bleiben auch bei geschlossenem Editor sichtbar. Die spezielle HA-Service-
+Fehlerübersetzung in `ha.ts` berücksichtigt nur passende SAX-Fehlerschlüssel
+für den Verbrauchsplanungsschalter. Komponenten- und Browsertests stehen in
+`time-of-use-charging.test.ts` und `time-of-use-usability.spec.ts`.
+Globaler Max-SOC und zeitvariables Ladeziel bleiben unterschiedliche Grenzen.
+Ein sichtbarer Hinweis erklärt die bestehende Kalibrierungsausnahme bis 100 %;
+die feste Ladeweise erläutert zusätzlich ihre Entladesperre bis Fensterende.
 Dynamisch erscheint die absolute Preisgrenze nur bei `absolute`, das
 Stundenbudget bei `relative`/`smart`; der Neutralpreis bleibt verfügbar und
 wirkt in diesen aktiven Strategien. Smart verwendet das Stundenbudget als

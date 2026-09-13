@@ -467,6 +467,7 @@ test("one dashboard with five complete views, local assets and responsive screen
     );
     await expect(panel.locator(".placeholder")).toHaveCount(0);
     if (tab.path === "stromtarif") {
+      await panel.locator(".electricity-price-details > summary").click();
       await expect(panel.locator(".electricity-price-card svg")).toBeVisible();
       await testInfo.attach(`vue-${tab.path}-${testInfo.project.name}`, {
         body: await page.screenshot({ fullPage: true }),
@@ -643,8 +644,9 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   const tariff = panel.locator(".tariff-plan");
   const rows = tariff.locator(".tariff-plan__table tbody tr");
   await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
-    english ? "Tariff price windows" : "Tarifpreisfenster",
+    english ? "Your electricity tariff" : "Dein Stromtarif",
   );
+  await tariff.locator(".tariff-plan__all-prices > summary").click();
   await expect(rows).toHaveCount(9);
   for (const [index, window] of windows.entries()) {
     await expect(rows.nth(index).locator("td")).toHaveText([
@@ -654,8 +656,8 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
           : "jetzt"
         : index === 1
           ? english
-            ? "Low tariff"
-            : "Niedertarif"
+            ? "cheapest"
+            : "günstig"
           : "",
       window.start,
       window.end,
@@ -671,7 +673,9 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   await expect(tariff.locator(".tariff-plan__low")).toHaveCount(1);
   await expect(tariff.locator(".tariff-plan__low")).toContainText("03:00");
   await expect(tariff).toContainText(
-    english ? "How charging times apply" : "So gelten die Ladezeiten",
+    english
+      ? "How are the cheapest charging times selected?"
+      : "Wie werden günstige Ladezeiten ausgewählt?",
   );
   await expect(tariff.locator(".tariff-plan__current")).toContainText("18:00");
   await expect(tariff).toContainText(price(0.0812));
@@ -1450,6 +1454,7 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   const en = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href='/sax-power-vue/stromtarif']").click();
+  await panel.locator(".electricity-price-details > summary").click();
   await expect(panel.locator(".tariff-price-chart svg")).toBeVisible();
   await expect(panel.locator(".electricity-master input")).toHaveCount(1);
   await page.setViewportSize({ width: 320, height: 844 });
@@ -1461,7 +1466,7 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
     .getByRole("button", { name: en ? "Edit" : "Bearbeiten", exact: true })
     .click();
   await page.setViewportSize({ width: 320, height: 844 });
-  const fields = price.locator("input,select");
+  const fields = price.locator("input:visible,select:visible");
   for (const input of await fields.all()) {
     const box = await input.boundingBox();
     expect(box?.x).toBeGreaterThanOrEqual(0);

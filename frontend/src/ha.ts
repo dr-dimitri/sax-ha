@@ -33,6 +33,10 @@ const messages = {
     invalid: "Bitte einen gültigen Wert im erlaubten Bereich eingeben.",
     failed:
       "Die Änderung ist fehlgeschlagen. Bitte den aktuellen Zustand prüfen und erneut versuchen.",
+    bridgePvRequired:
+      "Öffne in Schritt 1 „Bearbeiten“ und ergänze die Solarprognose. Die bisherige Ladeweise bleibt erhalten.",
+    bridgeTariffRequired:
+      "Richte zuerst einen zeitvariablen Tarif mit gültigen Preisen ein. Die bisherige Ladeweise bleibt erhalten.",
     on: "Ein",
     off: "Aus",
   },
@@ -44,13 +48,23 @@ const messages = {
     forbidden: "This entity cannot be controlled at the moment.",
     invalid: "Please enter a valid value within the allowed range.",
     failed: "The change failed. Please check the current state and try again.",
+    bridgePvRequired:
+      "Open Edit in step 1 and add the solar forecast. The previous charging method is preserved.",
+    bridgeTariffRequired:
+      "First set up a time-of-use tariff with valid prices. The previous charging method is preserved.",
     on: "On",
     off: "Off",
   },
 } as const;
 
 type ErrorKey =
-  "disconnected" | "loadFailed" | "forbidden" | "invalid" | "failed";
+  | "disconnected"
+  | "loadFailed"
+  | "forbidden"
+  | "invalid"
+  | "failed"
+  | "bridgePvRequired"
+  | "bridgeTariffRequired";
 
 export interface DashboardEntity {
   metadata: DashboardEntityMetadata;
@@ -463,8 +477,24 @@ export function useSaxDashboard(
         false,
       );
       return isCurrent();
-    } catch {
-      if (isCurrent()) action.error = "failed";
+    } catch (cause) {
+      if (isCurrent()) {
+        action.error = "failed";
+        if (
+          domain === "switch" &&
+          key === "bridge_charge_enabled" &&
+          cause &&
+          typeof cause === "object" &&
+          "translation_domain" in cause &&
+          cause.translation_domain === "sax_power" &&
+          "translation_key" in cause
+        ) {
+          if (cause.translation_key === "bridge_pv_start_required")
+            action.error = "bridgePvRequired";
+          else if (cause.translation_key === "bridge_tariff_required")
+            action.error = "bridgeTariffRequired";
+        }
+      }
       return false;
     } finally {
       action.pending = false;

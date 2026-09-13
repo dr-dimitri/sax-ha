@@ -111,12 +111,12 @@ Energiezähler und Speicherschalter mit den Gerätedaten zusammen.
 | Reihenfolge | Domain und Schlüssel | Darstellung und Verhalten | Prüfung |
 | --- | --- | --- | --- |
 | Hauptschalter | `switch.timed_charge_enabled` | Übersetzter Name „Netzladung aktiv“. | [Ladeansichten][charging-tests]: vollständige Reihenfolge |
-| Netzladezeitfenster (EN: Grid charging window) | `time.timed_charge_start`, `time.timed_charge_end` | Nur ohne aktivierte Verbrauchsplanung sichtbar. Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, Minutenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests] |
+| Netzladezeitfenster (EN: Grid charging window) | `time.timed_charge_start`, `time.timed_charge_end` | Nur außerhalb eines tatsächlich konfigurierten `time_of_use`-Tarifs und ohne aktivierte Verbrauchsplanung sichtbar. Gemeinsame 24-Stunden-Leiste mit Start-/Endmarken, Minutenfelder und eine atomare Übernahme. Die bestätigte Zeitspanne zeigt nur auf Deutsch „ Uhr“, etwa „22:00–06:00 Uhr“; kein Suffix bei EN, `unknown` oder `unavailable`. | [Zeitfenster-Bedienung](#gemeinsame-zeitfenster-bedienung), [Ladeansichten][charging-tests], [Tarifpreisfenster][tariff-plan-tests]: Live-Tarifwechsel und unveränderte Min-SOC-Sichtbarkeit |
 | Direkt danach: Entladestatus | `sensor.timed_charge_discharge_status` | `normal` → Normalbetrieb, `discharge_blocked` → Entladung wg. Netzladen gestoppt, `grid_charging` → Netzladen. | [Ladeansichten][charging-tests]: alle drei Live-Statuswechsel |
 | Einstellungen | `number.timed_charge_max_soc`, danach `number.timed_charge_min_soc` | Netzladeziel und Startschwelle; die Startschwelle entfällt bei aktivierter Verbrauchsplanung. Die Obergrenze des Ziels folgt dessen HA-`max`-Attribut; kein zusätzlicher globaler Max-SOC in diesem Tab. | [Ladeansichten][charging-tests]: geänderte Grenze, ungültiger und gültiger Zielwert |
 | Aktive Monate | `switch.timed_charge_month_1` bis `switch.timed_charge_month_12` | Kompakte Zusammenfassung mit einzeln ausgewählten Monaten und getrennten Spannen; „Ändern“ öffnet vier Quartalsgruppen. Nur HA-bestätigte Zustände; Fehler und fehlende Werte bleiben auch eingeklappt sichtbar. | [Ladeansichten][charging-tests]: zwölf Namen DE/EN, getrennte Auswahlbereiche, HA-Bestätigung, Fehler/Verfügbarkeit und Kalenderwechsel ohne Frontend-Aktion |
 | Danach über die volle Breite: Ladeplanung (EN: Charging plan) | `sensor.bridge_charge_plan`, Attribute `observation_minutes`, `average_discharge_w`, `discharge_at`, `charge_start`, `charge_end`, `pv_start`, `target_soc`, `shortfall_kwh`, `reason` | Wiederverwendbare `ChargePlan.vue`-Komponente nach `REQ-BRIDGE-CHARGE`. Begründet erwartete Entladung und nötige Niedertarifladung bis PV-Start oder erklärt, dass keine Netzladung benötigt wird. Fehlbetrag und Teilaufladung bleiben auch bei laufender Ladung sichtbar. Bekannte Fehlergründe erhalten verständliche DE-/EN-Texte; Datum und Zahlen folgen HA-Zeitzone und Locale. Bei fehlender Entity entfällt die Karte. | [Ladeplanung][charge-plan-tests]: Status, Fehlbetrag, Datenlücken, DE/EN, Zeitzone, Tageswechsel und Live-Entity-Bindung |
-| Anschließend: Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribute `tariff_type`, `windows`, `active_window`, `base_price_eur_kwh`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Dieselbe `TariffPlan.vue`-Komponente wie unter Amortisation; nur bei `time_of_use`. Alle bis zu acht gespeicherten Preisfenster samt Mitternacht und angrenzenden Grenzen, aktive Markierung und übrige Tarifdaten kommen live aus HA; Preise mit vier Nachkommastellen. Leere Fensterlisten erhalten die übrigen verfügbaren Tarifdaten. | [Tarifpreisfenster][tariff-plan-tests], [Browser][browser-tests], `tests/test_config_flow.py`, `tests/test_economics_dashboard_e2e.py`: vollständige Options-/Modell-/Sensor-/Dashboard-Kette für ein, zwei und acht Fenster |
+| Anschließend: Tarifpreisfenster (EN: Tariff price windows) | `sensor.economics_current_import_price`, Attribute `tariff_type`, `windows` mit `low_tariff`, `active_window`, `base_price_eur_kwh`, `base_price_is_low_tariff`, `low_tariff_price_eur_kwh`, `low_tariff_active`, `low_tariff_valid_until`, `feed_in_price_eur_kwh`, `next_price_change_at`, `unavailable_reason` | Dieselbe `TariffPlan.vue`-Komponente wie unter Amortisation; nur bei `time_of_use`. Alle bis zu acht gespeicherten Preisfenster samt Mitternacht und angrenzenden Grenzen, aktive Markierung und übrige Tarifdaten kommen live aus HA; Preise mit vier Nachkommastellen. Die niedrigste täglich tatsächlich vorkommende Preisstufe wird ausschließlich anhand der Backend-Attribute als Niedertarif markiert, einschließlich gültiger Basispreislücken. Fehlende oder ungültige Attribute ergeben keine Niedertarifmarkierung. Leere Fensterlisten erhalten die übrigen verfügbaren Tarifdaten. | [Tarifpreisfenster][tariff-plan-tests], [Browser][browser-tests], `tests/test_config_flow.py`, `tests/test_economics_dashboard_e2e.py`: vollständige Options-/Modell-/Sensor-/Dashboard-Kette für ein, zwei und acht Fenster |
 
 Vue entscheidet weder über Ladeberechtigung noch über die laufende
 Sollwertwiederholung. Beides verbleibt bei `REQ-TIMED-SOC-CHARGE` beziehungsweise
@@ -125,14 +125,19 @@ verwendet einen kurzen Enum-Zustand und strukturierte Attribute; Vue berechnet
 weder Verbrauch noch Ziel-SOC oder Ladezeiten selbst. Hinweise zur Aktivierung,
 fehlender PV-Quelle, Messwerten und Pausen stammen aus bekannten Status-/Grundcodes.
 Unbekannte oder unvollständige Daten erhalten keine erfundenen Zeitangaben.
-`bridge_charge_plan.attributes.enabled=true` blendet das separate
-Netzladezeitfenster und die Min-SOC-Startschwelle aus. Nur die Tarifpreisfenster
-bestimmen dann die erlaubten Ladezeiten; Max-SOC und Monatsfreigaben bleiben
-bedienbar. Die Sichtbarkeit folgt dem bestätigten Optionsattribut und bleibt
-auch bei `waiting_for_data` oder `paused` konsistent.
-Die Preisfenster bleiben Anzeigen; eingegeben werden sie im HA-Optionsflow.
-Sie verändern das einzelne Netzladezeitfenster nicht; ihre Verwendung als
-Ladeerlaubnis folgt der Backend-Konfiguration. Mount, Rendern und
+`economics_current_import_price.attributes.tariff_type=time_of_use` blendet das
+separate Netzladezeitfenster aus: Die gespeicherten Tarifpreisfenster einschließlich
+des außerhalb geltenden Grundpreises sind die verbindliche Zeitquelle. Bei fester
+SOC-Steuerung bleiben Min-SOC, Max-SOC und Monatsfreigaben bedienbar. Nur
+`bridge_charge_plan.attributes.enabled=true` blendet zusätzlich die
+Min-SOC-Startschwelle aus. Diese Sichtbarkeit bleibt auch bei `waiting_for_data`
+oder `paused` konsistent.
+Die gemeinsame Tarifkarte erläutert die niedrigste tatsächlich vorkommende
+Preisstufe, die Sperre bei fehlenden oder ungültigen Tarifdaten und die unwirksamen
+alten Netzladezeiten. Änderungen erfolgen ausschließlich im HA-Optionsflow unter
+„Konfigurieren → Tarifpreisfenster“. Vue berechnet weder Niedertarifpreise noch
+Zeitgrenzen; aktive Niedertarifgrenzen werden mit HA-Zeitzone und Locale angezeigt.
+Mount, Rendern und
 Live-Tarifwechsel erzeugen keine Serviceaufrufe. Andere Tarifarten oder eine
 fehlende Preis-Entity blenden die Tarifpreisfenster-Karte aus; unbekannte oder
 nicht verfügbare Preise werden nicht als gültiger aktiver Grundpreis markiert.

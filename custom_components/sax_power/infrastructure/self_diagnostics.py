@@ -51,6 +51,7 @@ class DiagnosticSnapshot:
     # Konfigurationsfehler bei Fest-/Zeitfenstertarif, siehe
     # SaxPowerCoordinator._update_economics_price_availability) - hier nur
     # noch die Zustandsflanke für Issue-Erzeugung/-Löschung.
+    timed_uses_tariff: bool = False
     economics_tariff_enabled: bool = False
     economics_price_unavailable: bool = False
 
@@ -73,7 +74,7 @@ class SelfDiagnostics:
         self._check_economics_price_unavailable(snapshot)
         self._check_empty_charge_window(
             "timed_charge",
-            snapshot.timed_enabled,
+            snapshot.timed_enabled and not snapshot.timed_uses_tariff,
             snapshot.timed_start,
             snapshot.timed_end,
             "Netzladung (zeitgesteuertes Laden)",

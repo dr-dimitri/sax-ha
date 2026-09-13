@@ -14,6 +14,7 @@ class TimedDischargeState:
     """The fixed end of a window with confirmed charging from the grid."""
 
     expires_at: datetime
+    source: str | None = None
 
 
 def completed_window_extended(

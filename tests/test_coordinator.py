@@ -7523,8 +7523,7 @@ def test_tariff_plan_attributes_show_the_active_window(hass) -> None:
 
 
 def test_tariff_plan_attributes_list_windows_sorted_by_start(hass) -> None:
-    """Die Fensterliste ist die Grundlage der Dashboard-Karte und deshalb
-    nach Beginn sortiert, nicht in der Reihenfolge der Eingabegruppen."""
+    """REQ-TIME-OF-USE-CHARGE-SOURCE: Sortierter Plan markiert den Niedertarif."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _TOU_TARIFF_OPTIONS
 
@@ -7536,12 +7535,26 @@ def test_tariff_plan_attributes_list_windows_sorted_by_start(hass) -> None:
     assert attributes["base_price_eur_kwh"] == pytest.approx(0.30)
     assert attributes["feed_in_price_eur_kwh"] == pytest.approx(0.08)
     assert attributes["windows"] == [
-        {"start": "06:00:00", "end": "08:00:00", "price_eur_kwh": 0.41},
-        {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21},
+        {
+            "start": "06:00:00",
+            "end": "08:00:00",
+            "price_eur_kwh": 0.41,
+            "low_tariff": False,
+        },
+        {
+            "start": "22:00:00",
+            "end": "06:00:00",
+            "price_eur_kwh": 0.21,
+            "low_tariff": True,
+        },
     ]
     # Mittags gilt der Grundpreis - kein Fenster darf als aktiv gelten.
     assert attributes["active_window"] is None
     assert attributes["quote_source"] == "time_of_use_base"
+    assert attributes["low_tariff_price_eur_kwh"] == pytest.approx(0.21)
+    assert attributes["base_price_is_low_tariff"] is False
+    assert attributes["low_tariff_active"] is False
+    assert attributes["low_tariff_valid_until"] is None
 
 
 def test_tariff_plan_attributes_are_empty_for_a_fixed_tariff(hass) -> None:
@@ -7631,8 +7644,17 @@ def test_tariff_plan_marks_no_active_window_without_a_price(hass) -> None:
     assert attributes["unavailable_reason"] == "tariff_incomplete"
     assert attributes["active_window"] is None
     assert attributes["next_price_change_at"] is None
+    assert attributes["low_tariff_price_eur_kwh"] is None
+    assert attributes["base_price_is_low_tariff"] is False
+    assert attributes["low_tariff_active"] is False
+    assert attributes["low_tariff_valid_until"] is None
     assert attributes["windows"] == [
-        {"start": "22:00:00", "end": "06:00:00", "price_eur_kwh": 0.21}
+        {
+            "start": "22:00:00",
+            "end": "06:00:00",
+            "price_eur_kwh": 0.21,
+            "low_tariff": False,
+        }
     ]
 
 

@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
-from ..application.timed_charge import TimedChargeState
+from ..application.timed_charge import TimedChargeState, is_tariff_source
 from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,10 +47,11 @@ class TimedChargeStateStore:
                 start=dt_time.fromisoformat(raw["start"]),
                 end=dt_time.fromisoformat(raw["end"]),
                 expires_at=datetime.fromisoformat(raw["expires_at"]),
+                source=raw.get("source"),
             )
             _serialize(state)
             return TimedChargeState(
-                state.start, state.end, state.expires_at.astimezone(UTC)
+                state.start, state.end, state.expires_at.astimezone(UTC), state.source
             )
         except (
             HomeAssistantError,
@@ -92,13 +93,10 @@ class TimedChargeStateStore:
 def _serialize(state: TimedChargeState) -> dict[str, str | bool]:
     if not isinstance(state, TimedChargeState):
         raise ValueError("Ungültige Netzlade-Hysterese")
-    if (
-        any(
-            not isinstance(value, dt_time) or value.tzinfo is not None
-            for value in (state.start, state.end)
-        )
-        or state.start == state.end
-    ):
+    if any(
+        not isinstance(value, dt_time) or value.tzinfo is not None
+        for value in (state.start, state.end)
+    ) or (state.start == state.end and state.source is None):
         raise ValueError("Ungültige lokale Fenstergrenzen")
     timestamp = state.expires_at
     if (
@@ -107,9 +105,14 @@ def _serialize(state: TimedChargeState) -> dict[str, str | bool]:
         or timestamp.utcoffset() is None
     ):
         raise ValueError("Fensterende ist kein Zeitpunkt mit Zeitzone")
-    return {
+    if state.source is not None and not is_tariff_source(state.source):
+        raise ValueError("Ungültige Tarifidentität")
+    result = {
         "armed": True,
         "start": state.start.isoformat(),
         "end": state.end.isoformat(),
         "expires_at": timestamp.astimezone(UTC).isoformat(),
     }
+    if state.source is not None:
+        result["source"] = state.source
+    return result

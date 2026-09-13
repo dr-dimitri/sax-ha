@@ -111,3 +111,59 @@ async def test_loading_keeps_absolute_expiry_for_coordinator_validation(
     await store.async_save(expired)
 
     assert await TimedDischargeStateStore(hass, "expired").async_load() == expired
+
+
+async def test_tariff_source_survives_round_trip_without_extending_expiry(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-TIME-OF-USE-CHARGE-SOURCE: Schutz bleibt an die bestätigte Phase gebunden."""
+    source = "0123456789abcdef" * 4
+    expiry = datetime(2026, 10, 25, 6, tzinfo=ZoneInfo("Europe/Berlin"))
+    store = TimedDischargeStateStore(hass, "tariff")
+
+    await store.async_save(TimedDischargeState(expiry, source))
+
+    assert await TimedDischargeStateStore(hass, "tariff").async_load() == (
+        TimedDischargeState(expiry.astimezone(UTC), source)
+    )
+    assert (await store._store.async_load())["source"] == source
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+async def test_legacy_protection_without_source_remains_restorable(
+    hass: HomeAssistant, explicit_null: bool
+) -> None:
+    raw = {"expires_at": "2026-09-15T06:00:00+02:00"}
+    if explicit_null:
+        raw["source"] = None
+    store = TimedDischargeStateStore(hass, "legacy")
+    store._store.async_load = AsyncMock(return_value=raw)
+
+    assert await store.async_load() == TimedDischargeState(
+        datetime(2026, 9, 15, 4, tzinfo=UTC), None
+    )
+
+
+@pytest.mark.parametrize(
+    "source", ["", "a" * 63, "a" * 65, "A" * 64, "g" * 64, True, 1, []]
+)
+async def test_invalid_tariff_source_neither_restores_nor_writes_protection(
+    hass: HomeAssistant, source: object
+) -> None:
+    store = TimedDischargeStateStore(hass, "invalid_source")
+    store._store.async_load = AsyncMock(
+        return_value={
+            "expires_at": "2026-09-15T06:00:00+02:00",
+            "source": source,
+        }
+    )
+    store._store.async_save = AsyncMock()
+    store._store.async_remove = AsyncMock()
+
+    assert await store.async_load() is None
+    with pytest.raises(ValueError, match="Tarifidentität"):
+        await store.async_save(
+            TimedDischargeState(datetime(2026, 9, 15, 4, tzinfo=UTC), source)
+        )
+    store._store.async_save.assert_not_called()
+    store._store.async_remove.assert_not_called()

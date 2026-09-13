@@ -1028,7 +1028,7 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
 
 
 class SaxPowerForecastSensor(SaxPowerSensor):
-    """PV-Prognose mit täglich aktualisiertem Datum im Anzeigenamen."""
+    """Verbleibender PV-Ertrag für heute aus der Quelle der Ladepause."""
 
     # Der dynamische Text ist bereits der vollständige Anzeigename und kein
     # gerätebezogener Namensbestandteil (siehe REQ-VUE-CHARGING).

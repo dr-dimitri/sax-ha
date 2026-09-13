@@ -81,7 +81,7 @@ DEFAULT_TIMED_CHARGE_MIN_SOC = 20
 DEFAULT_GRID_SERVING_START = "00:00:00"
 DEFAULT_GRID_SERVING_END = "00:00:00"
 DEFAULT_GRID_SERVING_ENABLED = False
-# Optionaler Mindestwert der gemeinsam genutzten PV-Prognose. 0 kWh
+# Optionaler Mindestwert der heute noch erwarteten PV-Erzeugung. 0 kWh
 # deaktiviert die zusätzliche Freigabebedingung, damit Bestandsinstallationen
 # nach dem Update unverändert rein statisch über Monate/Zeitfenster arbeiten.
 MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
@@ -455,7 +455,7 @@ SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50
 PV_SURPLUS_HYSTERESIS_CYCLES = 2
 
 # ==========================================================================
-# Preisoptimiertes Laden + gemeinsame PV-Prognose (siehe anforderung.yaml,
+# Preisoptimiertes Laden + getrennte PV-Prognosequellen (siehe anforderung.yaml,
 # REQ-DYNAMIC-PRICE-CHARGE/REQ-GRID-SERVING-CHARGE)
 # ==========================================================================
 # Reine Software-Logik oberhalb des vorhandenen SunSpec-Schreibpfads
@@ -470,6 +470,7 @@ CONF_PRICE_SENSOR = "price_sensor"
 CONF_PRICE_ATTRIBUTE = "price_attribute"
 CONF_PRICE_UNIT = "price_unit"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
+CONF_GRID_SERVING_PV_FORECAST_SENSOR = "grid_serving_pv_forecast_sensor"
 CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
 CONF_BRIDGE_CHARGE_ENABLED = "bridge_charge_enabled"
 
@@ -518,15 +519,9 @@ MAX_PRICE_LIMIT = 2.0
 PRICE_LIMIT_STEP = 0.001
 DEFAULT_PRICE_LIMIT = 0.20
 
-# Neutralpreis: zweiter, oberhalb der Preisgrenze liegender Schwellwert
-# (gleiche Einheit/Bereich/Schrittweite wie die Preisgrenze). Liegt der
-# aktuelle Preis zwischen Preisgrenze und Neutralpreis, wird der Speicher in
-# den manuellen Sollwertmodus mit Sollwert 0 geschaltet (Laden UND Entladen
-# gestoppt) statt der geräteeigenen SmartMeter-Nullregelung überlassen zu
-# werden - verhindert, dass gespeicherte, günstig eingekaufte Energie durch
-# die Speicherverluste teurer entladen wird, als der direkte Netzbezug in
-# diesem Preisband kosten würde. Erst ab dem Neutralpreis lohnt sich die
-# Entladung wieder, der Speicher geht dann zurück in die Nullregelung.
+# REQ-DYNAMIC-PRICE-CHARGE: Günstiger Netzbezug soll gespeicherte Energie
+# für teurere Stunden erhalten. Relativ/Smart benötigen dafür keine absolute
+# Preisgrenze; nur Absoluter Preis verwendet das offene Band beider Grenzen.
 DEFAULT_PRICE_NEUTRAL = 0.30
 
 # Anzahl der günstigsten Stunden (Modi "Relativ" und "Smart"). Im
@@ -594,16 +589,16 @@ ATTR_FORCE = "force"
 # Selbstdiagnose / erweiterte Repairs (siehe anforderung.yaml,
 # REQ-SELF-DIAGNOSIS-REPAIRS)
 # ==========================================================================
-# Weitere reparierbare Issues über den Ladekonflikt
+# Weitere informative Issues über den Ladekonflikt
 # (ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT oben) und die
 # sofortige SunSpec-Nichterreichbarkeits-Warnung (ISSUE_EXTENDED_MODE_
 # UNAVAILABLE) hinaus: erkennen still fehlschlagende Konfigurationen, die
 # sonst nur an unerwartet ausbleibendem Ladeverhalten auffallen würden.
-# Alle fünf sind rein informativ (is_fixable=False) und heilen sich selbst
-# (SaxPowerCoordinator._async_check_self_diagnostics, hinter einer
-# Zustandsflanke je Prüfung, damit weder Log noch Issue Registry bei jedem
-# Poll-Zyklus neu befüllt werden), sobald ihre jeweilige Ursache behoben
-# ist - analog zum Muster von ISSUE_EXTENDED_MODE_UNAVAILABLE.
+# Die sechs Basisregeln sind rein informativ (is_fixable=False).
+# SelfDiagnostics wertet zusätzlich REQ-ECONOMICS-OBSERVABILITY aus; Fenster
+# und Monate werden je Automatik geprüft (insgesamt bis zu neun Issue-IDs).
+# Zustandsflanken vermeiden wiederholte Meldungen; behobene Ursachen löschen
+# die zugehörigen Hinweise (REQ-SELF-DIAGNOSIS-REPAIRS).
 ISSUE_PRICE_SENSOR_MISSING = "price_sensor_missing"
 ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE = "sunspec_persistently_unavailable"
 ISSUE_MAX_SOC_BELOW_MIN_SOC = "max_soc_below_min_soc"
@@ -612,7 +607,7 @@ ISSUE_NO_ACTIVE_MONTHS = "no_active_months"
 ISSUE_PRICE_NEUTRAL_BELOW_LIMIT = "price_neutral_below_limit"
 
 # Zwei weitere, ebenfalls rein informative (is_fixable=False) Issues rund um
-# REQ-CONTROL-CONFIG-BOOTSTRAP - anders als die fünf oben aber nicht aus
+# REQ-CONTROL-CONFIG-BOOTSTRAP - anders als die Basisregeln oben aber nicht aus
 # einer periodischen Prüfung, sondern direkt aus dem Bootstrap heraus
 # gesetzt/gelöscht (siehe SaxPowerCoordinator.async_load_control_state /
 # .async_finish_bootstrap / .clear_control_field_unresolved):

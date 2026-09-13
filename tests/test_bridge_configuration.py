@@ -19,6 +19,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
+    CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_FACTOR,
     CONF_PV_FORECAST_SENSOR,
@@ -144,10 +145,12 @@ async def test_tariff_source_requires_time_of_use_before_saving(
 async def test_explicit_sources_survive_save_and_reopening(
     hass: HomeAssistant, pv_sensor: str
 ) -> None:
+    """REQ-BRIDGE-CHARGE: Die separate Ladepausenquelle bleibt unabhängig."""
     entry = _entry(hass)
     bridge_options = {
         CONF_BRIDGE_CHARGE_ENABLED: True,
         CONF_PV_FORECAST_SENSOR: pv_sensor,
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_pause_remaining_today",
     }
     result = await hass.config_entries.options.async_init(entry.entry_id)
     first_page = {

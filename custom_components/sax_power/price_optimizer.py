@@ -33,6 +33,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -315,9 +316,10 @@ def _finalize_slots(
     """Rohdaten zu einer sortierten, entdoppelten Slot-Liste.
 
     Fehlt bei einem Eintrag das Ende, wird der Beginn des nächsten Slots
-    verwendet; beim letzten Eintrag die häufigste Länge der übrigen Slots
-    (Fallback DEFAULT_PRICE_SLOT_MINUTES). Damit funktionieren sowohl
-    stündliche als auch viertelstündliche Preisdaten ohne Sonderfall.
+    verwendet; beim letzten Eintrag der kleinste positive Abstand zwischen
+    den bekannten Startzeitpunkten (Fallback DEFAULT_PRICE_SLOT_MINUTES).
+    REQ-DYNAMIC-PRICE-CHARGE: Bei unregelmäßigen Daten begrenzt diese
+    vorsichtige Annahme die unbestätigte Gültigkeit des letzten Preises.
     """
     by_start: dict[datetime, tuple[datetime, datetime | None, float | None]] = {}
     for start, end, price in raw:
@@ -684,6 +686,12 @@ class SaxPricePlanner:
         return self.coordinator.options.get(CONF_PV_FORECAST_SENSOR) or None
 
     @property
+    def grid_serving_pv_forecast_entity_id(self) -> str | None:
+        return (
+            self.coordinator.options.get(CONF_GRID_SERVING_PV_FORECAST_SENSOR) or None
+        )
+
+    @property
     def price_attribute(self) -> str | None:
         return self.coordinator.options.get(CONF_PRICE_ATTRIBUTE) or None
 
@@ -747,7 +755,13 @@ class SaxPricePlanner:
         )
         tracked = [
             entity_id
-            for entity_id in (self.price_entity_id, self.pv_forecast_entity_id)
+            for entity_id in dict.fromkeys(
+                (
+                    self.price_entity_id,
+                    self.pv_forecast_entity_id,
+                    self.grid_serving_pv_forecast_entity_id,
+                )
+            )
             if entity_id
         ]
         if tracked:
@@ -804,14 +818,20 @@ class SaxPricePlanner:
 
     # -- Auswertung ---------------------------------------------------------
     def forecast_kwh(self) -> float | None:
-        """Erwarteter PV-Ertrag laut Prognose-Sensor, in kWh.
+        """Erwarteter PV-Ertrag für morgen für die Smart-Bedarfsrechnung.
 
         Erwartet wird ein Sensor, dessen Zustand die noch zu erwartende
         Erzeugung als Energie liefert - typischerweise
         `sensor.energy_production_tomorrow` (Forecast.Solar) oder das
         Solcast-Pendant. Wh werden anhand der Einheit auf kWh umgerechnet.
         """
-        entity_id = self.pv_forecast_entity_id
+        return self._forecast_kwh(self.pv_forecast_entity_id)
+
+    def grid_serving_forecast_kwh(self) -> float | None:
+        """REQ-GRID-SERVING-CHARGE: Nur die ausdrücklich gewählte Heute-Quelle."""
+        return self._forecast_kwh(self.grid_serving_pv_forecast_entity_id)
+
+    def _forecast_kwh(self, entity_id: str | None) -> float | None:
         if not entity_id:
             return None
         state = self.hass.states.get(entity_id)

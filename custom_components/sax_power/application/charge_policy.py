@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from datetime import time as dt_time
 
-from ..const import MIN_SETPOINT_POWER
+from ..const import (
+    MIN_SETPOINT_POWER,
+    PRICE_STRATEGY_ABSOLUTE,
+    PRICE_STRATEGY_OFF,
+    PRICE_STRATEGY_RELATIVE,
+    PRICE_STRATEGY_SMART,
+)
 from ..domain.scheduling import is_time_in_window
 
 
@@ -56,7 +62,7 @@ class ChargePolicyInput:
     grid_serving_months: set[int]
     grid_serving_forecast_allowed: bool
     price_enabled: bool
-    price_strategy_active: bool
+    price_strategy: str
     price_charge_now: bool
     current_price: float | None
     price_limit: float | None
@@ -121,7 +127,7 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and not timed_should_charge
         and not grid_serving_window_active
         and inputs.price_enabled
-        and inputs.price_strategy_active
+        and inputs.price_strategy != PRICE_STRATEGY_OFF
         and inputs.price_charge_now
     )
     price_should_pause = (
@@ -131,12 +137,17 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and not grid_serving_window_active
         and not price_should_charge
         and inputs.price_enabled
-        and inputs.price_strategy_active
         and inputs.current_price is not None
-        and inputs.price_limit is not None
         and inputs.neutral_price is not None
-        and inputs.price_limit < inputs.neutral_price
-        and inputs.price_limit < inputs.current_price < inputs.neutral_price
+        and inputs.current_price < inputs.neutral_price
+        and (
+            inputs.price_strategy in (PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART)
+            or (
+                inputs.price_strategy == PRICE_STRATEGY_ABSOLUTE
+                and inputs.price_limit is not None
+                and inputs.price_limit < inputs.current_price
+            )
+        )
     )
     return ChargePolicyDecision(
         soc_reached=soc_reached,

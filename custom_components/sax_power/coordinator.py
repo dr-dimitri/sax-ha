@@ -319,15 +319,18 @@ def _grid_serving_pause_status(
         return f"Inaktiv im Monat {month_name}"
     if not is_time_in_window(now.time(), start, end):
         return "Außerhalb des Zeitfensters"
-    if threshold_kwh > 0 and forecast_sensor_configured and forecast_kwh is None:
-        return "PV-Prognose nicht verfügbar"
+    if threshold_kwh > 0:
+        if not forecast_sensor_configured:
+            return "PV-Prognose für heute auswählen"
+        if forecast_kwh is None:
+            return "PV-Prognose nicht verfügbar"
 
     assert start is not None and end is not None
     active = (
         f"Ladepause ist zwischen {start.strftime('%H:%M')} Uhr und "
         f"{end.strftime('%H:%M')} Uhr im {month_name} aktiv."
     )
-    if threshold_kwh <= 0 or not forecast_sensor_configured:
+    if threshold_kwh <= 0:
         return active
 
     assert forecast_kwh is not None
@@ -4469,12 +4472,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         ):
             threshold = self.grid_serving_forecast_threshold_kwh
-            forecast = self.price_planner.forecast_kwh()
-            if (
-                self.price_planner.pv_forecast_entity_id is None
-                or threshold <= 0
-                or (forecast is not None and forecast >= threshold)
-            ):
+            forecast = self.price_planner.grid_serving_forecast_kwh()
+            if threshold <= 0 or (forecast is not None and forecast >= threshold):
                 return True
         return in_price_slot
 
@@ -4742,26 +4741,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
            SOC" (keine eigene Einstellung) - ist er erreicht, greift
            dieselbe Max-SOC-Sperre wie bei den anderen Lademodi.
 
-           Neutralpreis-Pausezone: lädt preisoptimiertes Laden gerade NICHT
-           (price_should_charge False, z. B. weil der aktuelle Preis über
-           der Preisgrenze liegt), aber der aktuelle Preis liegt noch
-           unterhalb des Neutralpreises (number "Preisoptimiertes Laden
-           Neutralpreis"), wird der Speicher statt der normalen
-           SmartMeter-Nullregelung aktiv in den manuellen Sollwertmodus mit
-           Sollwert 0 geschaltet (price_should_pause,
-           async_start_sun_charge(0)) - Laden UND Entladen bleiben
-           gestoppt, der komplette Hausverbrauch läuft über das Netz. Erst
-           ab dem Neutralpreis lohnt sich die Entladung wieder (die
-           Speicherverluste würden sie sonst teurer machen als der direkte
-           Netzbezug), der Speicher geht dann zurück in die Nullregelung.
-           Dieselben Ausschlussgründe wie bei price_should_charge (Max-SOC-
-           Sperre, PV-Überschuss, zeitgesteuertes UND netzdienliches Laden
-           haben Vorrang) gelten auch hier. Fehlt eine der beiden
-           Preis-Einstellungen, oder liegt der Neutralpreis nicht über der
-           Preisgrenze, bleibt price_should_pause False (siehe
-           _check_price_neutral_below_limit für den zugehörigen
-           Reparaturhinweis) - Verhalten unverändert wie vor Einführung des
-           Neutralpreises.
+           Neutralpreis-Pausezone (REQ-DYNAMIC-PRICE-CHARGE): Bei Relativ
+           und Smart pausieren nicht ausgewählte Slots unterhalb des
+           Neutralpreises, unabhängig von der absoluten Preisgrenze. Bei
+           Absoluter Preis gilt das offene Band zwischen Preisgrenze und
+           Neutralpreis. Die Pause hält Sollwert 0; ab dem Neutralpreis
+           folgt die SmartMeter-Nullregelung. Die oben genannten Vorränge
+           bleiben erhalten. SelfDiagnostics meldet widersprüchliche
+           Preisgrenzen ausschließlich für die Strategie Absoluter Preis.
         6. Andernfalls (alle Features deaktiviert, außerhalb Zeitfenster/
            Monat oder SOC erreicht) wird Register 40051 zurück auf 0
            (SmartMeter-Nullregelung) gesetzt und der Zustand der
@@ -4887,18 +4874,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "_timed_charge_pv_surplus_cycles", pv_surplus_raw
         )
         price_plan = self.price_planner.plan
-        grid_serving_forecast_kwh = self.price_planner.forecast_kwh()
+        grid_serving_forecast_kwh = self.price_planner.grid_serving_forecast_kwh()
         grid_serving_forecast_threshold = self.grid_serving_forecast_threshold_kwh
         grid_serving_forecast_sensor_configured = (
-            self.price_planner.pv_forecast_entity_id is not None
+            self.price_planner.grid_serving_pv_forecast_entity_id is not None
         )
-        grid_serving_forecast_allowed = (
-            not grid_serving_forecast_sensor_configured
-            or grid_serving_forecast_threshold <= 0
-            or (
-                grid_serving_forecast_kwh is not None
-                and grid_serving_forecast_kwh >= grid_serving_forecast_threshold
-            )
+        grid_serving_forecast_allowed = grid_serving_forecast_threshold <= 0 or (
+            grid_serving_forecast_kwh is not None
+            and grid_serving_forecast_kwh >= grid_serving_forecast_threshold
         )
         bridge_charge_now = self._prepare_bridge_charge(data, now)
         bridge_plan = self._bridge_session.plan
@@ -4923,9 +4906,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 grid_serving_months=self._grid_serving_months,
                 grid_serving_forecast_allowed=grid_serving_forecast_allowed,
                 price_enabled=self._price_charge_enabled,
-                price_strategy_active=(
-                    self._price_charge_strategy != PRICE_STRATEGY_OFF
-                ),
+                price_strategy=self._price_charge_strategy,
                 price_charge_now=price_plan.charge_now,
                 current_price=price_plan.current_price,
                 price_limit=self._price_charge_max_price,
@@ -5692,17 +5673,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_set_price_charge_neutral_price(
         self, value: float | None, *, defer_device_update: bool = False
     ) -> None:
-        """Neutralpreis (EUR/kWh) - oberhalb der Preisgrenze liegender
-        Schwellwert, ab dem sich die Entladung aus dem Speicher wieder
-        lohnt (siehe const.py, DEFAULT_PRICE_NEUTRAL, sowie
-        _async_enforce_grid_charge zur Pause-Zone dazwischen).
+        """Neutralpreis (EUR/kWh) für die Pause nach REQ-DYNAMIC-PRICE-CHARGE.
 
         Klemmt auf denselben Bereich wie die Preisgrenze, siehe
         async_set_price_charge_max_price. Erzwingt keine Reihenfolge
-        gegenüber der Preisgrenze - eine falsch herum liegende Kombination
-        wird stattdessen von _check_price_neutral_below_limit als
-        Reparaturhinweis gemeldet, statt den Wert stillschweigend zu
-        verwerfen."""
+        gegenüber der Preisgrenze: Nur bei Absoluter Preis benötigt die
+        Pause ein offenes Preisband. SelfDiagnostics meldet dort eine
+        ungültige Kombination, statt den Wert stillschweigend zu verwerfen.
+        """
         self._raise_if_shutdown()
         self._price_charge_neutral_price = _clamp_float(
             value, MIN_PRICE_LIMIT, MAX_PRICE_LIMIT
@@ -5842,6 +5820,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 price_limit=self._price_charge_max_price,
                 neutral_price=self._price_charge_neutral_price,
                 timed_enabled=self._timed_charge_enabled,
+                price_strategy=self._price_charge_strategy,
                 timed_start=self._timed_charge_start,
                 timed_end=self._timed_charge_end,
                 timed_months=frozenset(self._timed_charge_months),

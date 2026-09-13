@@ -12,6 +12,12 @@ from custom_components.sax_power.application.charge_policy import (
     ChargePolicyInput,
     evaluate_charge_policy,
 )
+from custom_components.sax_power.const import (
+    PRICE_STRATEGY_ABSOLUTE,
+    PRICE_STRATEGY_OFF,
+    PRICE_STRATEGY_RELATIVE,
+    PRICE_STRATEGY_SMART,
+)
 
 
 def _inputs(**values: Any) -> ChargePolicyInput:
@@ -34,7 +40,7 @@ def _inputs(**values: Any) -> ChargePolicyInput:
             grid_serving_months={9},
             grid_serving_forecast_allowed=True,
             price_enabled=False,
-            price_strategy_active=False,
+            price_strategy=PRICE_STRATEGY_OFF,
             price_charge_now=False,
             current_price=None,
             price_limit=None,
@@ -94,7 +100,7 @@ def test_global_soc_limit_blocks_all_competing_modes() -> None:
             current_soc=90,
             grid_serving_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -109,7 +115,7 @@ def test_due_bridge_retains_timed_priority_over_grid_serving_and_price() -> None
         _inputs(
             grid_serving_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -124,7 +130,7 @@ def test_not_due_bridge_leaves_existing_price_policy_available() -> None:
         _inputs(
             timed_plan_charge_now=False,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -132,11 +138,15 @@ def test_not_due_bridge_leaves_existing_price_policy_available() -> None:
     assert decision.price_should_charge
 
 
-def test_due_bridge_is_not_replaced_by_neutral_price_pause() -> None:
+@pytest.mark.parametrize(
+    "strategy",
+    [PRICE_STRATEGY_ABSOLUTE, PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART],
+)
+def test_due_bridge_is_not_replaced_by_neutral_price_pause(strategy: str) -> None:
     decision = evaluate_charge_policy(
         _inputs(
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=strategy,
             current_price=0.25,
             price_limit=0.2,
             neutral_price=0.3,
@@ -151,7 +161,7 @@ def test_pv_surplus_blocks_bridge_and_competing_price_charge() -> None:
         _inputs(
             pv_surplus_active=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )

@@ -38,6 +38,7 @@ from .const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -559,6 +560,9 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
             selector.EntitySelectorConfig(domain="sensor")
         ),
         vol.Optional(CONF_BRIDGE_CHARGE_ENABLED, default=False): cv.boolean,
+        vol.Optional(CONF_GRID_SERVING_PV_FORECAST_SENSOR): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        ),
         vol.Required(
             CONF_PV_FORECAST_FACTOR, default=DEFAULT_PV_FORECAST_FACTOR
         ): vol.All(
@@ -776,7 +780,7 @@ _WINDOW_ERROR_KEYS = {
 
 
 class SaxPowerOptionsFlow(OptionsFlow):
-    """Konfiguration von Preisautomatik und gemeinsamer PV-Prognose.
+    """Konfiguration von Preisautomatik und getrennten PV-Prognosequellen.
 
     Hier stehen nur die Dinge, die sich nicht sinnvoll als Entity abbilden
     lassen (Auswahl der Quell-Sensoren und deren Interpretation). Die im

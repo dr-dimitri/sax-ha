@@ -285,11 +285,19 @@ PV-Mittagsspitze aufnehmen kann. Typisch wäre eine Pause von 08:00 bis
 Aktiviere **Netzdienliches Laden**, lege Start und Ende der Ladepause fest
 und wähle die Monate. Außerhalb dieser Zeiten arbeitet der Speicher normal.
 
-Optional kannst du unter **Konfigurieren** einen PV-Prognose-Sensor wählen.
-Die **Mindest-PV-Prognose** entscheidet dann, ob die Pause sinnvoll ist:
+Wähle unter **Konfigurieren** den **PV-Prognose-Sensor für die Ladepause
+(heute verbleibend)**. Sein Wert muss den heute noch erwarteten PV-Ertrag
+angeben. Die **Mindest-PV-Prognose** entscheidet, ob die Pause sinnvoll ist:
 Bei 8 kWh gilt sie nur, wenn mindestens 8 kWh Ertrag erwartet werden.
 Liegt die Prognose darunter oder fehlt sie, darf der Speicher früher laden.
 Mit **0 kWh** schaltest du die Prognoseprüfung aus.
+
+Nach einem Update bleibt die bisherige Sensorauswahl bei Smart erhalten.
+Für die Ladepause musst du die Heute-Quelle einmal ausdrücklich auswählen.
+Bis dahin greift bei einem Mindestwert über 0 kWh keine prognoseabhängige
+Ladepause; der Status fordert im wirksamen Zeitfenster zur Auswahl auf.
+Die Prognosekarte mit heutigem Datum zeigt ausschließlich den verbleibenden
+Ertrag dieser Heute-Quelle.
 
 ### Preisoptimiertes Laden
 
@@ -314,15 +322,27 @@ Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion
 **Relativ** und **Smart** benötigen eine Preisvorschau. Sie planen in festen
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
 verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
+**Smart** verwendet den **PV-Prognose-Sensor für Smart und Ladeplanung** aus
+**Konfigurieren**, getrennt vom heutigen Rest-Ertrag der Ladepause.
+Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
+der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
 **Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
 Prognose den Bedarf vollständig, entfällt die Netzladung. **Anzahl Stunden**
 bleibt die Obergrenze; das Ladeziel ist **Max. SOC**.
 
-Der **Neutralpreis** muss über der Preisgrenze liegen. Liegt der aktuelle
-Preis zwischen beiden Grenzen, pausiert der Speicher, sofern gerade keine
-Netzladung läuft und kein ausreichender PV-Überschuss erkannt wird. Der
-Hausverbrauch kommt dann aus dem Netz. Ab dem Neutralpreis steht der
-Speicher wieder für den normalen Betrieb zur Verfügung.
+Der **Neutralpreis** bestimmt, unter welchem Strompreis der Speicher
+pausiert, wenn gerade keine Netzladung läuft. Bei **Relativ** und **Smart**
+gilt das für alle nicht zum Laden ausgewählten Stunden unter diesem Wert,
+auch unterhalb der absoluten Preisgrenze oder bei erschöpfter Ladedauer.
+Die Preisgrenze hat dabei keine Wirkung. Bei **Absoluter Preis** bleibt die
+Pause auf das Band zwischen Preisgrenze und Neutralpreis begrenzt; nur hier
+muss der Neutralpreis oberhalb der Preisgrenze liegen.
+
+Während der Pause kommt der Hausverbrauch aus dem Netz. Ausreichender
+PV-Überschuss und die bestehenden Vorränge anderer Ladefunktionen bleiben
+wirksam. Ab einschließlich Neutralpreis steht der Speicher wieder für den
+normalen Betrieb zur Verfügung. Ohne gültigen Neutralpreis gibt es keine
+Preis-Pause.
 Der Status und **Nächster Start** zeigen, worauf die Automatik gerade wartet.
 
 ### Zeitfenster und Überschneidungen

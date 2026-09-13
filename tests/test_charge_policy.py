@@ -13,7 +13,13 @@ from custom_components.sax_power.application.charge_policy import (
     timed_discharge_hold_active,
     timed_discharge_pv_power,
 )
-from custom_components.sax_power.const import MIN_SETPOINT_POWER
+from custom_components.sax_power.const import (
+    MIN_SETPOINT_POWER,
+    PRICE_STRATEGY_ABSOLUTE,
+    PRICE_STRATEGY_OFF,
+    PRICE_STRATEGY_RELATIVE,
+    PRICE_STRATEGY_SMART,
+)
 
 
 @pytest.mark.parametrize(
@@ -85,7 +91,7 @@ def _inputs() -> ChargePolicyInput:
         grid_serving_months={1},
         grid_serving_forecast_allowed=True,
         price_enabled=False,
-        price_strategy_active=False,
+        price_strategy=PRICE_STRATEGY_OFF,
         price_charge_now=False,
         current_price=None,
         price_limit=None,
@@ -101,7 +107,7 @@ def test_max_soc_takes_priority_over_all_charging_modes() -> None:
             timed_enabled=True,
             grid_serving_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -118,7 +124,7 @@ def test_timed_charge_takes_priority_over_price_charge() -> None:
             _inputs(),
             timed_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -180,7 +186,7 @@ def test_timed_target_does_not_limit_price_charge() -> None:
             target_soc=90,
             timed_target_soc=60,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -198,7 +204,7 @@ def test_timed_target_does_not_block_neutral_price_pause() -> None:
             target_soc=90,
             timed_target_soc=60,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             current_price=0.25,
             price_limit=0.20,
             neutral_price=0.30,
@@ -221,7 +227,7 @@ def test_global_max_soc_overrides_an_excessive_timed_target() -> None:
             timed_enabled=True,
             grid_serving_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -239,7 +245,7 @@ def test_grid_serving_window_reserves_control_from_price_charge() -> None:
             _inputs(),
             grid_serving_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -256,7 +262,7 @@ def test_low_forecast_releases_grid_serving_priority_for_price_charge() -> None:
             grid_serving_enabled=True,
             grid_serving_forecast_allowed=False,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -273,7 +279,7 @@ def test_pv_surplus_blocks_timed_and_price_charge() -> None:
             pv_surplus_active=True,
             timed_enabled=True,
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             price_charge_now=True,
         )
     )
@@ -287,7 +293,7 @@ def test_neutral_price_band_pauses_storage() -> None:
         replace(
             _inputs(),
             price_enabled=True,
-            price_strategy_active=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
             current_price=0.25,
             price_limit=0.20,
             neutral_price=0.30,
@@ -296,3 +302,76 @@ def test_neutral_price_band_pauses_storage() -> None:
 
     assert decision.price_should_charge is False
     assert decision.price_should_pause is True
+
+
+@pytest.mark.parametrize("strategy", [PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART])
+@pytest.mark.parametrize("price_limit", [None, 0.20, 0.30, 0.50])
+@pytest.mark.parametrize(
+    ("price", "paused"), [(-0.10, True), (0.10, True), (0.20, True), (0.30, False)]
+)
+def test_unselected_relative_and_smart_slots_pause_below_neutral_price(
+    strategy: str, price_limit: float | None, price: float, paused: bool
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Die absolute Preisgrenze beschränkt keine Slots."""
+    decision = evaluate_charge_policy(
+        replace(
+            _inputs(),
+            price_enabled=True,
+            price_strategy=strategy,
+            current_price=price,
+            price_limit=price_limit,
+            neutral_price=0.30,
+        )
+    )
+    assert decision.price_should_charge is False
+    assert decision.price_should_pause is paused
+
+
+@pytest.mark.parametrize("strategy", [PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART])
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"price_charge_now": True},
+        {"pv_surplus_active": True},
+        {"current_soc": 80},
+        {"timed_enabled": True},
+        {"grid_serving_enabled": True},
+        {"price_enabled": False},
+        {"price_strategy": PRICE_STRATEGY_OFF},
+        {"neutral_price": None},
+        {"current_price": None},
+    ],
+)
+def test_cheap_slot_pause_preserves_priority_and_required_inputs(
+    strategy: str, override: dict[str, object]
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Die erweiterte Pause übergeht keinen Vorrang."""
+    inputs = replace(
+        _inputs(),
+        price_enabled=True,
+        price_strategy=strategy,
+        current_price=0.10,
+        price_limit=0.20,
+        neutral_price=0.30,
+    )
+    assert not evaluate_charge_policy(replace(inputs, **override)).price_should_pause
+
+
+@pytest.mark.parametrize(
+    ("price", "paused"), [(0.10, False), (0.20, False), (0.25, True), (0.30, False)]
+)
+def test_absolute_strategy_keeps_its_existing_pause_band(
+    price: float, paused: bool
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Absoluter Preis nutzt weiter das offene Band."""
+    decision = evaluate_charge_policy(
+        replace(
+            _inputs(),
+            price_enabled=True,
+            price_strategy=PRICE_STRATEGY_ABSOLUTE,
+            current_price=price,
+            price_limit=0.20,
+            neutral_price=0.30,
+        )
+    )
+    assert decision.price_should_pause is paused

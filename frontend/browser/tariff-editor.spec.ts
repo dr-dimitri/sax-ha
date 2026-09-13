@@ -30,7 +30,8 @@ async function enterNativeTime(
     };
   });
   for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowLeft");
-  await page.keyboard.press(browserName === "webkit" ? "Tab" : "ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(field).toBeFocused();
   await page.keyboard.type(minute);
   if (browserName === "chromium") {
     await page.keyboard.press("ArrowRight");

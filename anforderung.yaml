@@ -3120,7 +3120,8 @@ requirement_vue_tariff_editor:
     es zugänglich und setzen den Fokus dorthin. Der Entwurf bleibt erhalten.
     Die getrennten Niedertarife 00:00 bis 04:59 und 12:30 bis 14:30 sind gültig.
     Browserprüfungen verwenden Tastatureingabe in Chromium und WebKit sowie
-    getrennte change- und Submit-Übernahmen.
+    getrennte change- und Submit-Übernahmen. Die native WebKit-Prüfung läuft
+    auf macOS mit den dort verfügbaren editierbaren Zeitsegmenten.
 
     TOU-Standardpreis, Einspeisevergütung und Zeitfenster entfallen vollständig im
     Options Flow. Tarifauswahl und Preiseingaben für Festpreis und dynamische

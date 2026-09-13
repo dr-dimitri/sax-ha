@@ -258,8 +258,12 @@ Speichern die sichtbaren Zeitwerte, bevor er vollständige Zeiten und
 markiert es mit `aria-invalid` und setzt den Fokus dorthin. Die Browserabnahme
 prüft 00:00–04:59 und 12:30–14:30 per Tastatur, auch während HA-Zustandsupdates,
 sowie getrennte Picker-/Submit-Übernahmen. Der Tarifeditor läuft in CI zusätzlich
-in WebKit; dessen erfolgreiche native Tastaturprüfung ist kein Nachweis für
-eine bestimmte Safari-Version auf einem anderen Gerät.
+in WebKit auf macOS. Das [Playwright-Startskript](https://github.com/microsoft/playwright/blob/v1.63.0/browser_patches/webkit/pw_run.sh)
+verwendet unter Linux ohne Fenster den WPE-Port; die editierbaren Zeitsegmente
+sind laut [WebKit-Voreinstellung](https://github.com/WebKit/WebKit/blob/main/Source/WTF/Scripts/Preferences/UnifiedWebPreferences.yaml)
+dort nicht aktiviert. Deshalb findet die native Tastaturprüfung auf macOS statt,
+während Chromium weiterhin auf Linux läuft. Auch diese Prüfung ist kein Nachweis
+für eine bestimmte Safari-Version auf einem anderen Gerät.
 
 Reines Umschalten von „Automatische Netzladung“ wird als validierte
 Softwareänderung unmittelbar bestätigt und zur Persistenz vorgemerkt.

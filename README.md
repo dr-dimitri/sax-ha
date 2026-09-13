@@ -73,7 +73,8 @@ zeitgesteuerte Netzladung vorbelegen und das Dashboard aktivieren.
 
 Weitere Optionen findest du unter **Einstellungen → Geräte & Dienste →
 SAX Power Home → Konfigurieren**: Strompreis-Sensor, PV-Prognose,
-Wirtschaftlichkeit und Dashboard. Ladezeiten, Monate und Ladegrenzen änderst
+verbrauchsbasierte Ladeplanung mit PV-Start, Wirtschaftlichkeit und Dashboard.
+Ladezeiten, Monate und Ladegrenzen änderst
 du direkt im Dashboard oder über die Entitäten des Geräts. Die Einstellungen
 bleiben nach einem Neustart erhalten.
 
@@ -96,7 +97,7 @@ Die Screenshots zeigen das Dashboard mit Beispieldaten.
 | Bereich | Das findest du dort |
 | --- | --- |
 | Allgemeine Informationen | Ladezustand, Leistung, Temperatur, Energiezähler und Speicherschalter |
-| Zeitvariabler Tarif | Feste Ladezeiten, Monate, Startschwelle, Netzladeziel und Tarifpreisfenster |
+| Zeitvariabler Tarif | Ladezeiten, Monate, Ladegrenzen, Tarifpreisfenster und optionale Verbrauchsplanung bis zum PV-Start |
 | Dynamischer Tarif | Preisstrategie, Preisgrenzen und nächster Ladestart |
 | Netzdienliches Laden | PV-Ladepause, Monate und Prognoseschwelle |
 | Amortisation | Netto-Ersparnis, Tarifplan und Auswertung eigener Zeiträume |
@@ -138,6 +139,7 @@ findest du dort unter **Diagnose**.
 | Netzleistung | Positiv: Netzbezug; negativ: Einspeisung |
 | Lade-/Entladeleistung | Positiv: Entladung; negativ: Ladung |
 | Voraussichtlich entladen um | Geschätzter Zeitpunkt, an dem die SOC-Untergrenze des Geräts erreicht wird |
+| Ladeplanung bis PV-Start | Status der verbrauchsabhängigen Netzladung; Attribute mit Verbrauchsbasis, Ladezeiten, PV-Start und möglichem Fehlbetrag |
 | Max. SOC | Globale Ladegrenze für den Speicher |
 | Netzladen Max. SOC | Eigenes Ziel der zeitgesteuerten Netzladung, höchstens Max. SOC |
 | Netzladung Min. SOC | Startschwelle der zeitgesteuerten Netzladung |
@@ -157,6 +159,9 @@ lädt, wird die Prognose zurückgesetzt. Nach Neustart, Messausfall oder ungült
 Batteriewerten beginnt der Messverlauf ebenfalls neu; bis genügend Daten vorliegen
 oder bei einem Durchschnitt von 0 W bleibt der Sensor unbekannt. Die Hochrechnung
 setzt voraus, dass sich der bisherige Verbrauch fortsetzt.
+Die Sensorattribute enthalten die Beobachtungsdauer in Minuten, die mittlere
+Entladeleistung in Watt und den Messzeitpunkt. Damit lässt sich die Grundlage
+der Hochrechnung auch in eigenen Automationen verwenden.
 
 ## Max-SOC-Sperre
 
@@ -176,6 +181,9 @@ Ladung zur Zellkalibrierung: Am dritten Kalendertag nach der letzten
 Volladung wird das Ladeziel vorübergehend auf 100 % gesetzt. Die Funktion
 wartet auf die nächste reguläre Lademöglichkeit und startet dafür keine
 zusätzliche Netzladung. Deine eingestellten Grenzen bleiben erhalten.
+Bei verbrauchsbasierter Ladeplanung steigen dafür nur die wirksamen SOC-Grenzen
+auf 100 %. Bedarf, Tarifpreisfenster und Überbrückung bis zum PV-Start bestimmen
+weiterhin den Auftrag; eine zusätzliche Vollladung aus dem Netz wird nicht geplant.
 
 Die Diagnose-Entitäten **Zellkalibrierung aktiv** und **Nächste
 Zellkalibrierung** zeigen Status und Datum. Eine Volladung am 12. September
@@ -196,7 +204,8 @@ festen günstigen Tarifzeiten, etwa einem Nachttarif.
 ![Zeitvariabler Tarif mit Zeitfenster, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
 
 Schalte **Netzladung aktiv** ein und wähle Start, Ende sowie die gewünschten
-Monate. **Netzladung Min. SOC** bestimmt, wann eine Ladung beginnen darf;
+Monate. Ohne verbrauchsbasierte Planung bestimmt **Netzladung Min. SOC**,
+wann eine Ladung beginnen darf;
 **Netzladen Max. SOC** bestimmt das Ziel. Das Ziel kann unter der globalen
 Grenze **Max. SOC** liegen, etwa um Platz für späteren PV-Ertrag zu lassen.
 
@@ -208,6 +217,62 @@ Fensterende gesperrt; den Zustand zeigt **Entladestatus**.
 
 Erkennt die Integration ausreichend PV-Überschuss, beendet sie die
 Netzladung und der Speicher kann Sonnenstrom nutzen.
+
+#### Verbrauchsabhängig bis zum PV-Start laden
+
+Aktiviere unter **Konfigurieren** die Option **Verbrauchsbasierte Ladeplanung
+aktivieren**. **Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
+ausgewählten Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch
+der letzten 1 bis 60 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht.
+Nur den fehlenden Bedarf lädt sie aus dem Netz nach. **Netzladen Max. SOC** und
+die globale Grenze **Max. SOC** begrenzen das Ziel; die Startschwelle
+**Netzladung Min. SOC** wird in dieser Betriebsart durch den berechneten Bedarf
+ersetzt.
+
+Die erlaubten Ladezeiten stammen ausschließlich aus den **Tarifpreisfenstern**
+deines gespeicherten tageszeitabhängigen Tarifs. Verwendet werden dessen
+günstigste Abschnitte, einschließlich Zeiten mit Standardpreis, wenn dieser am
+günstigsten ist. Gibt es vor dem PV-Start keinen solchen Abschnitt, wird keine
+teurere Ersatzzeit gewählt. Das separate **Netzladezeitfenster** hat in dieser
+Betriebsart keinen Einfluss. Es wird im Dashboard zusammen mit der nicht
+verwendeten Startschwelle ausgeblendet.
+Die Angleichung der bisherigen festen Netzladung an dieses Tarifmodell wird
+in [Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) verfolgt.
+
+Wähle in den Integrationsoptionen als **PV-Prognose-Sensor** einen Sensor deiner
+Integration `pv_forecast`. Die Ladeplanung liest darüber die 15-Minuten-Prognose
+der gesamten PV-Anlage. Als PV-Start gilt der Beginn von mindestens zwei
+aufeinanderfolgenden Prognoseintervallen, deren mittlere PV-Leistung den
+beobachteten Verbrauch deckt, also mindestens 30 Minuten. Die PV-Vorschau wird
+zwischengespeichert und frühestens nach 60 Sekunden neu abgerufen. Sonnenaufgang
+oder die prognostizierte Tagesenergiemenge allein bestimmen den Start nicht.
+Ohne passende PV-Prognose, ausreichenden vorhergesagten Ertrag oder gültige
+Batteriemesswerte startet keine geplante Netzladung.
+
+Die Karte **Ladeplanung** im Tab **Zeitvariabler Tarif** nennt die beobachteten
+Minuten, den erwarteten Entladezeitpunkt, Ladebeginn und Ladeende sowie den
+PV-Start. Reicht die vorhandene Energie aus, meldet sie ausdrücklich, dass keine
+Netzladung nötig ist. Reichen Ladefenster oder Speicherkapazität nicht aus, zeigt
+sie den erwarteten Fehlbetrag und gegebenenfalls eine teilweise Aufladung.
+
+Geplant wird jeweils eine zusammenhängende Ladung. Während sie läuft, bleibt
+ihre Verbrauchsbasis erhalten, auch wenn der Entladeprognose-Sensor durch die
+Ladung zurückgesetzt wird. Die Ladung endet spätestens zum geplanten Ende oder
+beim Erreichen des berechneten SOC-Ziels. Danach darf der Speicher wieder normal
+entladen; die Entladesperre bis zum Ende des bisherigen Netzladezeitfensters
+gilt in dieser Betriebsart nicht. Neue Planung benötigt mindestens eine Minute
+nach dem Ladeende und wieder gültige Verbrauchsmessungen. Ein Neustart verwirft
+den Auftrag und benötigt neue Messungen.
+
+PV-Überschuss, manuelle Ladung und die bestehenden Ladegrenzen werden weiterhin
+berücksichtigt. Bei fälliger Zellkalibrierung steigen die wirksame globale
+SOC-Grenze und die Netzlade-SOC-Grenze auf 100 %. Die Planung lädt weiterhin nur
+den Bedarf bis zum PV-Start innerhalb der Tarifpreisfenster. Das verborgene
+Netzladezeitfenster und Min. SOC werden auch dann nicht verwendet; eine
+zusätzliche Vollladung aus dem Netz wird nicht gestartet. PV oder ein entsprechend
+hoher Überbrückungsbedarf können den Speicher bis 100 % bringen.
+Die Berechnung ist für eine spätere Verwendung beim dynamischen Tarif gekapselt;
+dessen bestehende Ladesteuerung wird dadurch nicht umgestellt.
 
 ### Netzdienliches Laden
 
@@ -257,7 +322,7 @@ Anschließend wählst du im Dashboard eine Strategie und aktivierst die Funktion
 **Relativ** und **Smart** benötigen eine Preisvorschau. Sie planen in festen
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
 verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
-**Smart** verwendet den **PV-Prognose-Sensor für Smart (morgen)** aus
+**Smart** verwendet den **PV-Prognose-Sensor für Smart und Ladeplanung** aus
 **Konfigurieren**, getrennt vom heutigen Rest-Ertrag der Ladepause.
 Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
 der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
@@ -311,7 +376,9 @@ Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
 hinterlegten Plan siehst du unter **Tarifpreisfenster** in den Tabs
 **Zeitvariabler Tarif** und **Amortisation**. Diese Preisfenster dienen der
-Geldbilanz; das **Netzladezeitfenster** stellst du separat ein.
+Geldbilanz und bestimmen bei aktivierter verbrauchsbasierter Ladeplanung
+ausschließlich den erlaubten Niedertarifbereich. Das separate
+**Netzladezeitfenster** gilt für die bisherige feste Netzladung.
 
 Für den dynamischen Tarif muss ein Strompreis-Sensor ausgewählt sein.
 Enthält er eine Preisvorschau, muss diese auch den aktuellen Zeitpunkt

@@ -1,11 +1,20 @@
 <script setup lang="ts">
+import { computed, inject } from "vue";
 import ChargingLayout from "./ChargingLayout.vue";
 import TariffPlan from "../components/TariffPlan.vue";
+import ChargePlan from "../components/ChargePlan.vue";
+import { SAX_DASHBOARD_KEY } from "../ha";
 import type { HomeAssistant } from "../types";
 
 defineProps<{ hass?: HomeAssistant }>();
 
-const cards = [
+const dashboard = inject(SAX_DASHBOARD_KEY);
+const bridgeEnabled = computed(
+  () =>
+    dashboard?.entity("sensor", "bridge_charge_plan")?.state?.attributes
+      .enabled === true,
+);
+const baseCards = [
   {
     key: "window",
     group: "schedule",
@@ -40,6 +49,16 @@ const cards = [
     ),
   },
 ] as const;
+const cards = computed(() =>
+  baseCards
+    .filter((card) => !bridgeEnabled.value || card.key !== "window")
+    .map((card) => ({
+      ...card,
+      entities: card.entities.filter(
+        ([, key]) => !bridgeEnabled.value || key !== "timed_charge_min_soc",
+      ),
+    })),
+);
 </script>
 
 <template>
@@ -49,6 +68,7 @@ const cards = [
       :cards="cards"
       hide-confirmed-label
     />
+    <ChargePlan :hass="hass" class="timed-charging-view__tariff" />
     <TariffPlan :hass="hass" class="timed-charging-view__tariff" />
   </div>
 </template>

@@ -362,6 +362,19 @@
       },
       "economics_net_savings_today": {
         "name": "Netto-Ersparnis heute"
+      },
+      "bridge_charge_plan": {
+        "name": "Ladeplanung bis PV-Start",
+        "state": {
+          "off": "Ausgeschaltet",
+          "waiting_for_data": "Warten auf Daten",
+          "planned": "Ladung geplant",
+          "charging": "Ladung läuft",
+          "not_needed": "Keine Ladung nötig",
+          "insufficient": "Überbrückung unvollständig",
+          "paused": "Pausiert",
+          "complete": "Abgeschlossen"
+        }
       }
     },
     "number": {
@@ -726,24 +739,26 @@
           "price_sensor": "Strompreis-Sensor",
           "price_attribute": "Attribut mit der Preisvorschau (optional)",
           "price_unit": "Preis-Einheit",
-          "pv_forecast_sensor": "PV-Prognose-Sensor für Smart (morgen)",
+          "pv_forecast_sensor": "PV-Prognose-Sensor für Smart und Ladeplanung",
           "pv_forecast_factor": "Nutzbarer Anteil der PV-Prognose (%)",
           "economics_tariff_type": "Tarifmodell für die Wirtschaftlichkeit",
           "economics_investment_cost_eur": "Investitionskosten (EUR)",
           "economics_prior_result_eur": "Bereits erwirtschafteter Ertrag (EUR)",
           "vue_dashboard_enabled": "Dashboard aktivieren",
+          "bridge_charge_enabled": "Verbrauchsbasierte Ladeplanung aktivieren",
           "grid_serving_pv_forecast_sensor": "PV-Prognose-Sensor für die Ladepause (heute verbleibend)"
         },
         "data_description": {
           "price_sensor": "Sensor mit dem aktuellen Arbeitspreis. Er hat zwei getrennte Aufgaben: Für das preisoptimierte Laden liefert er immer die Zeitfenster der Modi „Relativ“ und „Smart“ (aus seinen Preisvorschau-Attributen). Für die Wirtschaftlichkeit ist er nur beim Tarifmodell „Dynamisch“ die Preisquelle - dort ist er Pflicht. Bei „Festpreis“ und „Tageszeitabhängig“ rechnet die Wirtschaftlichkeit ausschließlich mit den Preisen, die auf der Folgeseite eingegeben werden: Ein dynamischer Preis-Sensor liefert eine Zeitreihe für die nächsten Stunden, kein täglich wiederkehrendes Tagesprofil - beide Formate lassen sich nicht ineinander überführen.",
           "price_attribute": "Nur ausfüllen, wenn die automatische Erkennung fehlschlägt - z. B. „raw_today“, „data“ oder „forecast“.",
           "price_unit": "„Automatisch“ leitet die Einheit aus dem Sensor ab; ct/kWh sowie EUR/MWh und ct/MWh werden intern in EUR/kWh umgerechnet.",
-          "pv_forecast_sensor": "Energiesensor mit dem gesamten erwarteten PV-Ertrag morgen, ausschließlich für Smart. Bisherige Auswahlen bleiben nach Updates hier erhalten. Diese Quelle ist unabhängig vom heutigen Rest-Ertrag für die Ladepause.",
+          "pv_forecast_sensor": "Für Smart einen Energiesensor mit dem gesamten erwarteten PV-Ertrag morgen wählen. Die verbrauchsbasierte Ladeplanung ordnet über dieselbe Auswahl eine PV-Forecast-Anlage zu und ruft deren Prognosezeitreihe ab. Bisherige Auswahlen bleiben nach Updates erhalten. Die Ladepause verwendet einen eigenen Sensor für den heute verbleibenden Ertrag.",
           "pv_forecast_factor": "Nur für Smart: nutzbarer Anteil der Morgen-Prognose nach Eigenverbrauch, Wetterunsicherheit und Verlusten. Der Mindestwert des netzdienlichen Ladens vergleicht den unveränderten heutigen Rest-Ertrag seiner getrennten Quelle.",
           "economics_tariff_type": "Optional. Bestimmt, mit welchem Netzbezugspreis die Wirtschaftlichkeit rechnet. „Deaktiviert“ lässt die Integration wie bisher arbeiten. „Festpreis“ rechnet mit einem ganztägig konstanten Arbeitspreis. „Tageszeitabhängig“ rechnet mit einem täglich wiederkehrenden Preisprofil: ein Grundpreis plus bis zu acht abweichende Zeitfenster, einzugeben auf der nächsten Seite. „Dynamisch“ verwendet den oben ausgewählten Strompreis-Sensor samt dessen Attribut- und Einheiteneinstellung. Nur „Dynamisch“ verwendet den Strompreis-Sensor; das preisoptimierte Laden nutzt ihn unabhängig vom Tarifmodell weiter.",
           "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt und Restbetrag bis zur Amortisation; verrechnet wird gegen das laufende, signierte Nettoergebnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
           "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt und Restbetrag; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf.",
           "vue_dashboard_enabled": "Zeigt „SAX Power“ in der Seitenleiste mit Messwerten, Ladesteuerung und Ersparnis.",
+          "bridge_charge_enabled": "Verwendet ausschließlich die günstigsten gespeicherten Tarifpreisfenster. Als gemeinsame PV-Quelle einen Energiesensor von PV Forecast wählen; dessen Stundenprognose liefert den PV-Start, sobald sie den gemessenen Verbrauch mindestens 30 Minuten deckt. Netzladung und aktive Monate müssen eingeschaltet sein. Der Bedarf ersetzt Min. SOC; Max. SOC bleibt Obergrenze. Nach dem Laden wird die Entladung freigegeben.",
           "grid_serving_pv_forecast_sensor": "Energiesensor mit dem heute noch erwarteten PV-Ertrag, ohne bereits erzeugte Energie. Erforderlich für eine netzdienliche Ladepause mit Mindest-PV-Prognose über 0 kWh. Ohne Auswahl greift diese Pause nicht; 0 kWh deaktiviert die Prognosebedingung. Diese Quelle nach einem Update ausdrücklich auswählen."
         }
       },
@@ -901,7 +916,9 @@
       "economics_tou_window_incomplete": "Ein Zeitfenster ist unvollständig: Beginn, Ende und Arbeitspreis müssen entweder alle ausgefüllt oder alle leer sein.",
       "economics_tou_window_zero_length": "Beginn und Ende eines Zeitfensters dürfen nicht gleich sein - das ergibt kein Zeitfenster und bedeutet auch nicht „ganzer Tag“.",
       "economics_tou_window_overlap": "Zwei Zeitfenster überschneiden sich. Angrenzende Grenzen (Ende des einen = Beginn des nächsten) sind erlaubt, eine Überlappung nicht.",
-      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in EUR/kWh eintragen (Bruttopreis inklusive aller Abgaben)."
+      "economics_price_required": "Pflichtangabe: Bitte einen Arbeitspreis in EUR/kWh eintragen (Bruttopreis inklusive aller Abgaben).",
+      "bridge_pv_start_required": "Einen PV-Forecast-Energiesensor als gemeinsame PV-Prognosequelle auswählen.",
+      "bridge_tariff_required": "Die verbrauchsbasierte Planung benötigt einen gespeicherten zeitvariablen Tarif."
     }
   },
   "selector": {

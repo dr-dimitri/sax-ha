@@ -362,6 +362,19 @@
       },
       "economics_net_savings_today": {
         "name": "Net savings today"
+      },
+      "bridge_charge_plan": {
+        "name": "Charging plan until PV starts",
+        "state": {
+          "off": "Off",
+          "waiting_for_data": "Waiting for data",
+          "planned": "Charging planned",
+          "charging": "Charging",
+          "not_needed": "No charging needed",
+          "insufficient": "Insufficient coverage",
+          "paused": "Paused",
+          "complete": "Complete"
+        }
       }
     },
     "number": {
@@ -726,24 +739,26 @@
           "price_sensor": "Electricity price sensor",
           "price_attribute": "Attribute holding the price forecast (optional)",
           "price_unit": "Price unit",
-          "pv_forecast_sensor": "PV forecast sensor for Smart (tomorrow)",
+          "pv_forecast_sensor": "PV forecast sensor for Smart and charging planning",
           "pv_forecast_factor": "Usable share of the PV forecast (%)",
           "economics_tariff_type": "Economics tariff model",
           "economics_investment_cost_eur": "Investment cost (EUR)",
           "economics_prior_result_eur": "Result earned before setup (EUR)",
           "vue_dashboard_enabled": "Enable dashboard",
+          "bridge_charge_enabled": "Enable consumption-based charging plan",
           "grid_serving_pv_forecast_sensor": "PV forecast sensor for the charging pause (remaining today)"
         },
         "data_description": {
           "price_sensor": "Sensor holding the current energy price. It serves two separate purposes: for price-optimized charging it always provides the windows of the “relative” and “smart” strategies (from its price forecast attributes). For the economics evaluation it is the price source only for the “dynamic” tariff, where it is mandatory. With “fixed” and “time of use” the economics evaluation uses exclusively the prices entered on the following page: a dynamic price sensor provides a time series for the coming hours, not a daily recurring profile - the two formats cannot be converted into one another.",
           "price_attribute": "Only needed if auto-detection fails - e.g. “raw_today”, “data” or “forecast”.",
           "price_unit": "“Automatic” derives the unit from the sensor; ct/kWh, EUR/MWh and ct/MWh are converted to EUR/kWh internally.",
-          "pv_forecast_sensor": "Energy sensor with the total PV yield expected tomorrow, used only by Smart. Existing selections are retained here after updates. This source is independent of the remaining yield today used by the charging pause.",
+          "pv_forecast_sensor": "For Smart, select an energy sensor with the total PV yield expected tomorrow. Consumption-based charging planning uses the same selection to identify a PV Forecast installation and retrieve its forecast time series. Existing selections are retained after updates. The charging pause uses its own sensor for the remaining yield today.",
           "pv_forecast_factor": "Only for Smart: the usable share of tomorrow’s forecast, accounting for household consumption, weather uncertainty and losses. The grid-serving minimum compares the unmodified remaining yield today from its separate source.",
           "economics_tariff_type": "Optional. Selects the import price the economics evaluation uses. \"Disabled\" keeps the integration behaving exactly as before. \"Fixed\" uses a single energy price that is constant all day. \"Time of use\" uses a daily recurring price profile: a base price plus up to eight deviating windows, entered on the next page. \"Dynamic\" reuses the electricity price sensor selected above, including its attribute and unit settings. Only \"dynamic\" uses the electricity price sensor; price-optimized charging keeps using it regardless of the tariff model.",
           "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress and the remaining-to-payback amount, offset against the running signed net result. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
           "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result.",
           "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings.",
+          "bridge_charge_enabled": "Uses only the cheapest saved tariff periods. Select a PV Forecast energy sensor as the shared PV source; its forecast determines when PV covers measured consumption for at least 30 minutes. Grid charging and the active month must be enabled. Demand replaces the minimum SOC trigger; maximum SOC remains a limit. Discharging resumes after charging.",
           "grid_serving_pv_forecast_sensor": "Energy sensor with the PV yield still expected today, excluding energy already generated. Required for a grid-serving pause with a minimum forecast above 0 kWh. Without a selected source, that pause does not apply; 0 kWh disables the forecast condition. Choose this source explicitly after an update."
         }
       },
@@ -901,7 +916,9 @@
       "economics_tou_window_incomplete": "A window is incomplete: start, end and energy price must all be filled in or all be empty.",
       "economics_tou_window_zero_length": "Start and end of a window must differ - an empty range is not a window and does not mean \"all day\".",
       "economics_tou_window_overlap": "Two windows overlap. Touching boundaries (end of one = start of the next) are allowed, overlapping ones are not.",
-      "economics_price_required": "Required: please enter an energy price in EUR/kWh (gross price including all levies)."
+      "economics_price_required": "Required: please enter an energy price in EUR/kWh (gross price including all levies).",
+      "bridge_pv_start_required": "Select a PV Forecast energy sensor as the shared PV forecast source.",
+      "bridge_tariff_required": "Consumption-based planning requires a saved time-of-use tariff."
     }
   },
   "selector": {

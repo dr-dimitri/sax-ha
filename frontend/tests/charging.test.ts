@@ -225,6 +225,62 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(callService).not.toHaveBeenCalled();
   });
 
+  it("hides the separate grid charging window and start threshold only when consumption planning is enabled", async () => {
+    const { root, hass, metadata, emit, callService } =
+      await mount(TimedChargingView);
+    const entityId = "sensor.renamed_bridge_plan";
+    const planMetadata: DashboardEntityMetadata = {
+      domain: "sensor",
+      key: "bridge_charge_plan",
+      entity_id: entityId,
+      name: "Ladeplanung bis PV-Start",
+      states: {},
+      can_control: false,
+    };
+    await emit([...metadata, planMetadata]);
+    for (const state of ["planned", "waiting_for_data", "paused", "off"]) {
+      hass.value = {
+        ...hass.value,
+        states: {
+          ...hass.value.states,
+          [entityId]: {
+            entity_id: entityId,
+            state,
+            attributes: { enabled: true },
+          },
+        },
+      };
+      await flush();
+      expect(root.querySelector(".time-window-control")).toBeNull();
+      expect(root.textContent).not.toContain("Netzladezeitfenster");
+      expect(names(root)).not.toContain("Netzladung Min. SOC");
+      expect(names(root)).toContain("Netzladen Max. SOC");
+      expect(root.querySelectorAll('input[type="number"]')).toHaveLength(1);
+      expect(root.textContent).toContain("Aktive Monate");
+    }
+    for (const enabled of [false, undefined, "true"]) {
+      hass.value = {
+        ...hass.value,
+        states: {
+          ...hass.value.states,
+          [entityId]: {
+            entity_id: entityId,
+            state: "off",
+            attributes: { enabled },
+          },
+        },
+      };
+      await flush();
+      expect(root.querySelector(".time-window-control")).not.toBeNull();
+      expect(names(root)).toContain("Netzladung Min. SOC");
+      expect(root.querySelectorAll('input[type="number"]')).toHaveLength(2);
+    }
+    await emit(metadata);
+    expect(root.querySelector(".time-window-control")).not.toBeNull();
+    expect(names(root)).toContain("Netzladung Min. SOC");
+    expect(callService).not.toHaveBeenCalled();
+  });
+
   it("preserves the grid-serving pause order, forecast and all month names without an extra settings card", async () => {
     const { root, callService } = await mount(GridServingView);
     expect(

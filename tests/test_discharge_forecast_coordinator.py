@@ -56,11 +56,18 @@ async def test_timestamp_entity_and_cached_refresh(
         data = _sample(coordinator, time)
     expected = _NOW + timedelta(seconds=60, hours=5)
     assert data["discharge_forecast"] == expected
+    expected_attributes = {
+        "average_discharge_w": 1000,
+        "observation_minutes": 1.0,
+        "observed_at": (_NOW + timedelta(seconds=60)).isoformat(),
+    }
+    assert data["discharge_forecast_attributes"] == expected_attributes
     cached = {}
     with patch(_CLOCK, return_value=61):
         coordinator._update_discharge_forecast(cached)
         coordinator._update_discharge_forecast(cached)
     assert cached["discharge_forecast"] == expected
+    assert cached["discharge_forecast_attributes"] == expected_attributes
     coordinator.data = cached
     description = next(
         item for item in SENSOR_DESCRIPTIONS if item.key == "discharge_forecast"
@@ -70,6 +77,7 @@ async def test_timestamp_entity_and_cached_refresh(
     assert description.state_class is None
     assert description.native_unit_of_measurement is None
     assert entity.native_value == expected
+    assert entity.extra_state_attributes == expected_attributes
 
 
 @pytest.mark.parametrize("failure", ["basic", "sunspec", "stale"])
@@ -88,8 +96,11 @@ async def test_poll_failures_clear_forecast_and_history(
         with patch(_CLOCK, return_value=65 if failure == "stale" else 62):
             coordinator._update_discharge_forecast(data)
         assert data["discharge_forecast"] is None
+        assert data["discharge_forecast_attributes"] == {}
     coordinator._extended_available = True
-    assert _sample(coordinator, 66)["discharge_forecast"] is None
+    restarted = _sample(coordinator, 66)
+    assert restarted["discharge_forecast"] is None
+    assert restarted["discharge_forecast_attributes"] == {}
 
 
 async def test_regular_poll_publishes_forecast_without_additional_io(
@@ -112,6 +123,7 @@ async def test_regular_poll_publishes_forecast_without_additional_io(
         with patch(_CLOCK, return_value=time):
             data = await coordinator._async_update_data()
     assert isinstance(data["discharge_forecast"], datetime)
+    assert data["discharge_forecast_attributes"]["observation_minutes"] == 1.0
     assert coordinator._async_read_basic.await_count == 31
     assert coordinator._async_read_extended.await_count == 31
     coordinator.client.read_holding_registers.assert_not_called()
@@ -124,3 +136,25 @@ async def test_unrepresentable_timestamp_is_unknown(
     for time in range(0, 61, 2):
         data = _sample(coordinator, time, 1e-10)
     assert data["discharge_forecast"] is None
+    assert data["discharge_forecast_attributes"] == {}
+
+
+async def test_charging_reset_clears_published_observation(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-DISCHARGE-FORECAST: no old plan basis survives sustained charging."""
+    for time in range(0, 61, 2):
+        _sample(coordinator, time)
+    for time in range(62, 123, 2):
+        data = _sample(coordinator, time, -1000)
+    assert data["discharge_forecast"] is None
+    assert data["discharge_forecast_attributes"] == {}
+
+
+async def test_observation_minutes_preserve_fractional_window(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-DISCHARGE-FORECAST: displayed minutes retain actual elapsed time."""
+    for time in range(0, 63, 2):
+        data = _sample(coordinator, time)
+    assert data["discharge_forecast_attributes"]["observation_minutes"] == 62 / 60

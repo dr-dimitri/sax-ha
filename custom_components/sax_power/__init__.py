@@ -32,6 +32,7 @@ from .const import (
     ATTR_POWER,
     ATTR_REASON,
     ATTR_START,
+    CONF_BRIDGE_CHARGE_ENABLED,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
@@ -346,6 +347,7 @@ async def _async_rollback_failed_setup(
 def _control_options(options: Mapping[str, Any]) -> dict[str, Any]:
     """Vergleiche die wirksamen Optionen ohne UI-Flag und ergänzte Formulardefaults."""
     defaults = {
+        CONF_BRIDGE_CHARGE_ENABLED: False,
         CONF_PRICE_UNIT: DEFAULT_PRICE_UNIT,
         CONF_PV_FORECAST_FACTOR: DEFAULT_PV_FORECAST_FACTOR,
         CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,

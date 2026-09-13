@@ -104,6 +104,18 @@ def _negative_part(key: str) -> Callable[[dict[str, Any]], StateType]:
     return value_fn
 
 
+def _discharge_forecast_attributes(
+    coordinator: SaxPowerCoordinator,
+) -> dict[str, Any]:
+    """Expose the observation behind the published forecast."""
+    return dict((coordinator.data or {}).get("discharge_forecast_attributes", {}))
+
+
+def _bridge_charge_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
+    """Structured explanation of the bounded PV bridge (REQ-BRIDGE-CHARGE)."""
+    return dict((coordinator.data or {}).get("bridge_charge_plan_attributes", {}))
+
+
 def _economics_roi_attributes(coordinator: SaxPowerCoordinator) -> dict[str, Any]:
     """Vorlauf-Ertrag und das rein gemessene Ergebnis dahinter
     (REQ-ECONOMICS-AMORTIZATION).
@@ -203,11 +215,30 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_direct("soc"),
     ),
     SaxPowerSensorEntityDescription(
+        key="bridge_charge_plan",
+        translation_key="bridge_charge_plan",
+        device_class=SensorDeviceClass.ENUM,
+        options=[
+            "off",
+            "waiting_for_data",
+            "planned",
+            "charging",
+            "not_needed",
+            "insufficient",
+            "paused",
+            "complete",
+        ],
+        icon="mdi:battery-clock-outline",
+        value_fn=_direct("bridge_charge_plan"),
+        attributes_fn=_bridge_charge_attributes,
+    ),
+    SaxPowerSensorEntityDescription(
         key="discharge_forecast",
         translation_key="discharge_forecast",
         device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:battery-clock-outline",
         value_fn=lambda data: data.get("discharge_forecast"),
+        attributes_fn=_discharge_forecast_attributes,
     ),
     SaxPowerSensorEntityDescription(
         key="discharge_power",

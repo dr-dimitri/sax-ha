@@ -49,6 +49,7 @@
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
 # REQ-DISCHARGE-FORECAST          done       Entladezeitpunkt aus 1 bis 60 Minuten gemessener Entladeleistung schätzen
+# REQ-BRIDGE-CHARGE              done       Verbrauchsabhängige Niedertarifladung zur Überbrückung bis zum PV-Start
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           superseded Abgelöst durch das einzige Dashboard SAX Power (REQ-VUE-DASHBOARD)
@@ -95,15 +96,121 @@ requirement_discharge_forecast:
     Speicherleistung wird zeitgewichtet mit dem vorherigen Messwert integriert;
     ein angeschnittenes Intervall an der Fenstergrenze wird anteilig gewertet.
     Leerlauf und kurze Ladungen zählen mit 0 W Entladeleistung zur Fensterdauer.
+    Die Attribute observation_minutes, average_discharge_w und observed_at
+    liefern die tatsächlich verwendete Beobachtungsdauer, mittlere
+    Entladeleistung und den Zeitpunkt der letzten ausgewerteten Messung.
+    REQ-BRIDGE-CHARGE verwendet dieselbe Messgrundlage für die Ladeplanung.
   acceptance_criteria:
     - "Vor 60 Sekunden Messverlauf und bei mittlerer Entladeleistung 0 W ist der Sensor unbekannt."
     - "60 Sekunden durchgehend negative Speicherleistung löschen Verlauf und Prognose; kürzere Ladeimpulse nicht."
     - "Nach bestätigtem Laden beginnt erst eine neue positive Speicherleistung einen neuen Verlauf."
     - "Nur neue, gültige HIGH-Messungen zählen; Cache-Refreshs verschieben den Zeitpunkt nicht."
+    - "Die Attribute gehören zur veröffentlichten Prognose; Cache-Refreshs erneuern observed_at nicht. Bei verworfener Prognose werden auch ihre Metadaten verworfen."
     - "Neustarts, Basic-/SunSpec-Ausfälle, veraltete Messwerte, Messlücken über zwei HIGH-Intervalle und ungültige Eingaben verwerfen den Verlauf."
     - "Kapazität muss positiv und endlich sein, beide SOC-Werte müssen endlich und zwischen 0 und 100 liegen; fehlende Werte werden nicht geschätzt."
     - "Bei gültiger Prognose und erreichtem Minimal-SOC ist der Entladezeitpunkt jetzt. Nicht darstellbare Zeitpunkte bleiben unbekannt."
     - "Die Berechnung verwendet vorhandene Messwerte und löst keine zusätzlichen Modbus-Abfragen oder Schreibzugriffe aus."
+
+# ==============================================================================
+# ANFORDERUNG: VERBRAUCHSABHÄNGIGE NETZLADUNG BIS PV-START
+# ==============================================================================
+requirement_bridge_charge:
+  id: REQ-BRIDGE-CHARGE
+  title: "Niedertarifladung anhand des Verbrauchs bis zum erwarteten PV-Start planen"
+  status: done
+  description: >
+    Die optionale Betriebsart bridge_charge_enabled plant im zeitvariablen
+    Tarif den fehlenden Speicherbedarf bis zum erwarteten PV-Start aus der
+    Entladeprognose nach REQ-DISCHARGE-FORECAST. Der vorhandene Hauptschalter
+    timed_charge_enabled und die aktiven Monate bleiben erforderlich.
+    Die Einstellung timed_charge_min_soc wird durch den berechneten Bedarf
+    ersetzt. Netzladen Max. SOC und die globale Max-SOC-Grenze begrenzen
+    weiterhin das Ziel. Ohne Bedarf findet keine geplante Netzladung statt.
+
+    domain/bridge_charge.py erhält ausschließlich Daten und ausdrücklich
+    erlaubte Ladeintervalle. Die Berechnung kennt weder Home Assistant noch
+    eine konkrete Tarifquelle. Sie berücksichtigt nutzbare Energie oberhalb
+    der Geräte-SOC-Untergrenze, den zeitgewichteten Entladedurchschnitt aus
+    mindestens einer und maximal 60 Minuten, die Geräte-Ladeleistung und den
+    Verbrauch bis PV-Start. Während Netzladung wird der Hausverbrauch direkt
+    vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
+    Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
+    Intervalls spätestens zum PV-Start. Ausreichende Kandidaten werden nach
+    Preis und anschließend spätestem Start ausgewählt. Reicht kein Kandidat,
+    ist ein begrenzter Teilauftrag mit größtmöglicher Bedarfsdeckung zulässig;
+    die verbleibende Energiemenge wird ausdrücklich als Fehlbetrag angegeben.
+
+    Die erlaubten Intervalle stammen ausschließlich aus den Tarifpreisfenstern
+    des gespeicherten TIME_OF_USE-Tarifs. Es gelten nur dessen billigste
+    tatsächlich vorkommende Preisstufen einschließlich des Basispreises.
+    Ein teureres verbleibendes Fenster ersetzt keinen verpassten Niedertarif.
+    Das separate Netzladezeitfenster beeinflusst diese Planung nicht.
+    application/bridge_inputs.py adaptiert die lokalen Tarifabschnitte unter
+    Beachtung der aktiven Monate auf UTC-Intervalle.
+
+    PV-Quelle ist der bereits ausgewählte CONF_PV_FORECAST_SENSOR aus der
+    Integration pv_forecast. Die separate Heute-Quelle der netzdienlichen
+    Ladepause bleibt davon unabhängig; beide Auswahlen werden beim Speichern
+    und erneuten Öffnen der Optionen erhalten. Der Konfigurationseintrag der
+    PV-Anlage wird über die Entity Registry zugeordnet.
+    Der Service pv_forecast.get_forecast liefert
+    die validierte Gesamtanlagen-Zeitreihe in 15-Minuten-Intervallen mit
+    mean_ac_power_kw. Als PV-Start gilt der Beginn von mindestens zwei
+    aufeinanderfolgenden Intervallen, deren mittlere PV-Leistung den
+    Entladedurchschnitt erreicht oder überschreitet. Damit wird für
+    mindestens 30 Minuten Verbrauchsdeckung erwartet. Serviceergebnisse
+    werden 60 Sekunden zwischengespeichert. Manuelle PV-Uhrzeiten,
+    zusätzliche Startsensoren und die Tagesenergiemenge ersetzen diese
+    Zeitreihe nicht.
+
+    application/bridge_session.py hält die begrenzte Ausführung. Nach einem
+    bestätigten Start bleibt deren Verbrauchsbasis erhalten, obwohl der
+    Entladeprognose-Sensor nach einer Minute Ladung zurückgesetzt wird.
+    Der Auftrag endet bei erreichtem SOC-Ziel oder festem Endzeitpunkt.
+    Anschließend darf der Speicher wieder normal entladen. Die klassische
+    fenstergebundene Entladesperre nach zeitgesteuerter Netzladung wird in
+    dieser Betriebsart nicht aufgebaut. Eine Neuplanung erfordert mindestens
+    eine Minute nach Ladeende und erneut gültige Verbrauchsmesswerte. Ein
+    Auftrag wird nicht persistiert; nach einem Neustart werden neue
+    Messungen benötigt. Konfigurationsänderungen verwerfen den gebundenen
+    Auftrag. Manuelle Ladung, PV-Überschuss und globale Schutzgrenzen bleiben
+    wirksam. Bei fälliger Zellkalibrierung steigen effective_max_soc und
+    effective_timed_charge_max_soc auf 100 %. Dies erweitert nur die
+    wirksamen Obergrenzen; Bedarf und erlaubte Tarifpreisfenster bestimmen
+    weiterhin den Auftrag bis PV-Start. Es erfolgt kein Rückfall auf
+    separates Netzladezeitfenster oder Min-SOC und keine zusätzliche
+    ungeplante Netzladung bis 100 %. PV oder ein ausreichend hoher
+    Überbrückungsbedarf können 100 % erreichen. Außerhalb dieser Betriebsart
+    bleibt die Kalibrierungssteuerung nach REQ-PERIODIC-FULL-CALIBRATION
+    unverändert.
+
+    Der Sensor bridge_charge_plan (Ladeplanung bis PV-Start) trägt einen
+    kurzen Enum-Zustand und stellt die Meldungsbestandteile als Attribute
+    bereit: observation_minutes, average_discharge_w, discharge_at,
+    charge_start, charge_end, pv_start, target_soc, shortfall_kwh und reason.
+    Seine Zustände sind off, waiting_for_data, planned, charging, not_needed,
+    insufficient, paused und complete. ChargePlan.vue stellt im
+    zeitvariablen Tab daraus eine verständliche Meldung mit Verbrauchsbasis,
+    erwartetem Entladezeitpunkt, Niedertarif-Ladestart, Ladeende und PV-Start
+    zusammen. Kein Ladebedarf, fehlende Eingangsdaten, Pause und ein
+    verbleibender Fehlbetrag werden ausdrücklich benannt. Die bestehenden
+    Strategien und Schreibpfade des dynamischen Tarifs werden nicht durch
+    diese Betriebsart ersetzt; die reine Planung ist für deren spätere
+    Verwendung wiederverwendbar.
+  acceptance_criteria:
+    - "Ohne aktivierte Option oder eingeschaltete zeitvariable Netzladung erfolgt keine verbrauchsbasierte Netzladung. Aktive Monate begrenzen die erlaubten Intervalle."
+    - "Ohne gültigen zukünftigen PV-Start, frische Batteriewerte oder mindestens eine Minute gültige Entladebeobachtung wird kein neuer Auftrag freigegeben. Fehlende Werte werden nicht geschätzt."
+    - "Niedertarifintervalle stammen nur aus einem gültigen TIME_OF_USE-Tarif. Änderungen am separaten Netzladezeitfenster verändern keinen verbrauchsabhängigen Plan."
+    - "PV-Start erfordert zwei lückenlos folgende 15-Minuten-Intervalle der Gesamtanlagen-Prognose mit ausreichender mittlerer Leistung. Tagesenergiesummen und fremde Sensorquellen sind kein Ersatz."
+    - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
+    - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
+    - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."
+    - "Während des gestarteten Auftrags beendet der normale Entladeprognose-Reset allein nicht die Ladung. Der feste Endzeitpunkt und das SOC-Ziel bleiben verbindlich."
+    - "Nach Auftragsende wird keine fenstergebundene Entladesperre aus dem klassischen zeitgesteuerten Laden aufgebaut."
+    - "Bei Kalibrierungsfälligkeit gelten wirksame SOC-Obergrenzen von 100 %, aber weiterhin ausschließlich der Bedarf bis PV-Start und die Tarifpreisfenster. Separates Netzladezeitfenster und Min-SOC werden nicht verwendet; eine zusätzliche ungeplante Vollladung ist ausgeschlossen."
+    - "Manuelle Ladung, PV-Überschuss und ungültige Messwerte dürfen keinen konkurrierenden Auftrag erzeugen."
+    - "Neustart oder geänderte auftragsrelevante Konfiguration übernimmt keinen alten Auftrag ungeprüft."
+    - "Die Anzeige verwendet HA-Metadaten und Sensorattribute, berücksichtigt Sprache und HA-Zeitzone und löst keine Serviceaufrufe aus."
 
 # ==============================================================================
 # ANFORDERUNG: ALLE MODBUS-REGISTER LESBAR
@@ -1618,7 +1725,8 @@ requirement_grid_serving_charge:
     Entitäten nach der Ersteinrichtung konfiguriert.
   acceptance_criteria:
     - "Getrennte Heute-/Morgen-Auswahlen werden gespeichert und vorbelegt.
-       Alte Auswahlen bleiben nur bei Smart; eine fehlende Heute-Auswahl
+       Alte Auswahlen bleiben bei Smart und der optionalen Ladeplanung;
+       eine fehlende Heute-Auswahl
        verhindert die prognoseabhängige Pause und wird verständlich angezeigt.
        Unterschiedliche Sensorwerte und Ausfälle beeinflussen jeweils nur
        ihren Zeithorizont. Eine fallende Heute-Prognose beendet einen aktiven
@@ -2682,9 +2790,25 @@ requirement_vue_charging:
     HA-Zustände normal, discharge_blocked und grid_charging mit ihren
     vorhandenen Texten. Die aktuelle Obergrenze des Netzladeziels wird
     aus dem max-Attribut der zugehörigen Number-Entity übernommen.
+    Bei bridge_charge_plan.attributes.enabled=true entfallen das
+    Netzladezeitfenster und die Startschwelle timed_charge_min_soc, auch wenn
+    der Plan auf Daten wartet oder pausiert. Netzlade-Max-SOC und Monate
+    bleiben bedienbar; diese Grenzen gelten weiterhin für REQ-BRIDGE-CHARGE.
 
-    Nach diesen Ladekarten zeigt der Tab über die volle Breite dieselbe
-    gemeinsame Tarifpreisfenster-Karte (EN: Tariff price windows) wie
+    Nach diesen Ladekarten zeigt der Tab die wiederverwendbare Karte
+    Ladeplanung (EN: Charging plan) aus ChargePlan.vue mit
+    sensor.bridge_charge_plan nach REQ-BRIDGE-CHARGE. Die Karte erläutert den
+    Verbrauchszeitraum, erwartete Entladung, geplante oder laufende
+    Niedertarifladung und den PV-Start. Sie meldet auch keinen Ladebedarf,
+    unzureichende Bedarfsdeckung sowie fehlende Eingaben und Pausen. Ein
+    Fehlbetrag bleibt bei laufender Teilaufladung sichtbar. Bekannte Gründe
+    erhalten DE-/EN-Texte, unbekannte Gründe eine allgemeine Meldung. Datum,
+    Uhrzeit und Zahlen folgen HA-Sprache und HA-Zeitzone; fehlende Daten
+    erzeugen keine erfundenen Zeiten. Fehlt die Sensor-Entity, entfällt die
+    Karte. Die Karte liest ausschließlich Backend-Zustände und Attribute.
+
+    Danach zeigt der Tab über die volle Breite dieselbe gemeinsame
+    Tarifpreisfenster-Karte (EN: Tariff price windows) wie
     Amortisation nach REQ-VUE-SAVINGS (Issue #219).
     Sichtbarkeit und Inhalt folgen ausschließlich dem aktuellen Zustand von
     sensor.economics_current_import_price: bei tariff_type=time_of_use
@@ -2695,9 +2819,11 @@ requirement_vue_charging:
     Einspeisevergütung, nächster Preiswechsel und Nichtverfügbarkeit werden
     live aus den Sensorattributen übernommen. Preise haben vier
     Nachkommastellen; der Browser berechnet weder aktive Fenster noch Preise.
-    Die Preisfenster bleiben reine Anzeigen und verändern weder das einzelne
-    Netzladezeitfenster noch die Ladeberechtigung. Ein Tarifwechsel, Mount
-    oder erneutes Rendern löst keinen HA-Service und keinen Registerzugriff aus.
+    Die Preisfenster bleiben im Browser reine Anzeigen und verändern das
+    einzelne Netzladezeitfenster nicht. Ihre Verwendung für
+    REQ-BRIDGE-CHARGE entscheidet das Backend anhand der Konfiguration.
+    Ein Tarifwechsel, Mount oder erneutes Rendern löst im Browser keinen
+    HA-Service und keinen Registerzugriff aus.
 
     Die Zahlen-Bedienzeilen im Tab Zeitvariabler Tarif lassen den Präfix
     Bestätigter Wert: beziehungsweise Confirmed value: weg. Der von HA
@@ -2799,6 +2925,7 @@ requirement_vue_charging:
   acceptance_criteria:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
+    - "Die Ladeplanung erklärt geplante und laufende Aufträge, keinen Bedarf, Teilaufladung und fehlende Daten in DE/EN. Alle Zeiten und Zahlen stammen aus Sensorattributen; die Anzeige erzeugt keine eigenen Ladeaufträge."
     - "frontend/tests/tariff-plan.test.ts prüft die gemeinsame Tarifpreisfenster-Karte:
        Sie erscheint bei time_of_use in
        Zeitvariabler Tarif und Amortisation; fixed, dynamic, disabled und eine
@@ -3762,6 +3889,14 @@ requirement_periodic_full_calibration:
     konfigurierte globale Max. SOC) bleiben sichtbar und persistent
     unverändert. Nach der realen Volladung wirkt auch das eigene
     Netzladeziel wieder unmittelbar (REQ-TIMED-SOC-CHARGE).
+
+    Bei der optionalen Verbrauchsplanung REQ-BRIDGE-CHARGE ist das effektive
+    Netzladeziel von 100 % ausschließlich eine Obergrenze. Der berechnete
+    Bedarf bis zum prognostizierten PV-Start bestimmt weiterhin den Auftrag
+    innerhalb der Tarifpreisfenster. Es gibt keinen Rückfall auf das
+    separate Netzladezeitfenster oder die Min-SOC-Startschwelle und keine
+    zusätzliche ungeplante Vollladung aus dem Netz. Ein ausreichend hoher
+    Überbrückungsbedarf oder PV-Ladung kann 100 % erreichen.
 
     Zwei leise Diagnose-Entities informieren ohne Benachrichtigungs-Pop-up:
     binary_sensor cell_calibration_active zeigt die fällige/laufende Phase,

@@ -1,0 +1,363 @@
+"""Read-only PV plant lookup and safe public time-series use (REQ-BRIDGE-CHARGE)."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.sax_power.infrastructure.pv_bridge_forecast import (
+    PvBridgeForecast,
+)
+
+NOW = datetime(2026, 9, 13, 20, 7, tzinfo=UTC)
+PV_START = datetime(2026, 9, 14, 5, tzinfo=UTC)
+
+
+@dataclass
+class _Source:
+    entry: MockConfigEntry
+    entity_id: str
+    selected: str | None
+    now: datetime = NOW
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    power_w: Callable[[datetime], float] = lambda moment: (
+        1500 if moment >= PV_START else 0
+    )
+    mutation: tuple[tuple[str | int, ...], Any] | None = None
+    error: Exception | None = None
+    block: asyncio.Event | None = None
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def response(self, request: dict[str, Any]) -> dict[str, Any]:
+        start = datetime.fromisoformat(request["window"]["start"])
+        end = datetime.fromisoformat(request["window"]["end"])
+        intervals = []
+        cursor = start
+        while cursor < end:
+            power_kw = self.power_w(cursor) / 1000
+            intervals.append(
+                {
+                    "start": cursor.isoformat(),
+                    "end": (cursor + timedelta(minutes=15)).isoformat(),
+                    "energy_kwh": power_kw / 4,
+                    "mean_ac_power_kw": power_kw,
+                }
+            )
+            cursor += timedelta(minutes=15)
+        energy = sum(item["energy_kwh"] for item in intervals)
+        fetched_at = (self.now - timedelta(minutes=5)).isoformat()
+        result = {
+            "schema_version": 1,
+            "timezone": "Europe/Berlin",
+            "fetched_at": fetched_at,
+            "last_update_success": True,
+            "origin": "live",
+            "window": {
+                "schema_version": 1,
+                "scope": "total",
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "as_of": self.now.isoformat(),
+                "fetched_at": fetched_at,
+                "timezone": "Europe/Berlin",
+                "status": "available",
+                "reason": None,
+                "coverage": {
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "complete": True,
+                },
+                "quality_flags": [],
+                "step_minutes": 15,
+                "energy_kwh": energy,
+                "mean_ac_power_kw": energy / ((end - start).total_seconds() / 3600),
+                "assumption": "constant_interval_mean_power",
+                "intervals": intervals,
+            },
+        }
+        if self.mutation is not None:
+            path, value = self.mutation
+            target = result
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+        return result
+
+
+@pytest.fixture
+async def pv_source(
+    hass: HomeAssistant,
+) -> tuple[_Source, PvBridgeForecast]:
+    entry = MockConfigEntry(domain="pv_forecast", data={"time_zone": "Europe/Berlin"})
+    entry.add_to_hass(hass)
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+    registered = er.async_get(hass).async_get_or_create(
+        "sensor", "pv_forecast", "total-today", config_entry=entry
+    )
+    source = _Source(entry, registered.entity_id, registered.entity_id)
+
+    async def forecast(call: ServiceCall) -> dict[str, Any]:
+        source.calls.append(dict(call.data))
+        source.entered.set()
+        if source.block is not None:
+            await source.block.wait()
+        if source.error is not None:
+            raise source.error
+        return source.response(dict(call.data))
+
+    hass.services.async_register(
+        "pv_forecast",
+        "get_forecast",
+        forecast,
+        supports_response=SupportsResponse.ONLY,
+    )
+    return source, PvBridgeForecast(hass, lambda: source.selected)
+
+
+async def test_total_plant_service_yields_consumption_based_pv_start(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+
+    assert adapter.pv_start(NOW, 1000) == PV_START
+    assert adapter.pv_start(NOW, 1500) == PV_START
+    assert adapter.pv_start(NOW, 1501) is None
+    assert source.calls == [
+        {
+            "config_entry_id": source.entry.entry_id,
+            "window": {
+                "start": "2026-09-13T20:15:00+00:00",
+                "end": "2026-09-14T22:00:00+00:00",
+                "step_minutes": 15,
+            },
+        }
+    ]
+
+
+async def test_single_bright_quarter_does_not_claim_sustained_pv_start(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    source.power_w = lambda moment: 2000 if moment == PV_START else 0
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) is None
+
+
+async def test_service_cache_is_limited_to_one_call_per_minute(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    for seconds in (0, 1, 30, 59):
+        await adapter.async_refresh(NOW + timedelta(seconds=seconds))
+    assert len(source.calls) == 1
+    assert adapter.pv_start(NOW + timedelta(seconds=59), 1000) == PV_START
+    assert adapter.pv_start(NOW + timedelta(seconds=61), 1000) is None
+    source.now = NOW + timedelta(seconds=60)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 2
+    assert adapter.pv_start(source.now, 1000) == PV_START
+
+
+async def test_concurrent_refreshes_share_one_read(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    source.block = asyncio.Event()
+    first = asyncio.create_task(adapter.async_refresh(NOW))
+    await source.entered.wait()
+    second = asyncio.create_task(adapter.async_refresh(NOW))
+    source.block.set()
+    await asyncio.gather(first, second)
+    assert len(source.calls) == 1
+
+
+async def test_failed_refresh_drops_previous_permission_and_throttles_retries(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) == PV_START
+    source.error = HomeAssistantError("PV source offline")
+    source.now = NOW + timedelta(seconds=60)
+    await adapter.async_refresh(source.now)
+    assert adapter.pv_start(source.now, 1000) is None
+    await adapter.async_refresh(source.now + timedelta(seconds=30))
+    assert len(source.calls) == 2
+
+
+async def test_timeout_discards_permission_and_cancels_the_slow_read(
+    pv_source: tuple[_Source, PvBridgeForecast], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, adapter = pv_source
+    monkeypatch.setattr(
+        "custom_components.sax_power.infrastructure.pv_bridge_forecast._SERVICE_TIMEOUT",
+        0.01,
+    )
+    source.block = asyncio.Event()
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) is None
+    assert len(source.calls) == 1
+    source.block.set()
+
+
+@pytest.mark.parametrize("selected", [None, "sensor.missing", "switch.pv"])
+async def test_source_change_immediately_invalidates_cached_data(
+    pv_source: tuple[_Source, PvBridgeForecast], selected: str | None
+) -> None:
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    source.selected = selected
+    assert adapter.pv_start(NOW, 1000) is None
+    await adapter.async_refresh(NOW)
+    assert len(source.calls) == 1
+
+
+async def test_source_change_during_read_cannot_publish_old_plant_data(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    source.block = asyncio.Event()
+    task = asyncio.create_task(adapter.async_refresh(NOW))
+    await source.entered.wait()
+    source.selected = None
+    source.block.set()
+    await task
+    assert adapter.pv_start(NOW, 1000) is None
+
+
+async def test_unloaded_plant_immediately_invalidates_cached_data(
+    hass: HomeAssistant, pv_source: tuple[_Source, PvBridgeForecast]
+) -> None:
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    source.entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
+    assert adapter.pv_start(NOW, 1000) is None
+
+
+@pytest.mark.parametrize(
+    ("domain", "platform"), [("template", "pv_forecast"), ("pv_forecast", "template")]
+)
+async def test_foreign_registry_sources_do_not_call_pv_forecast(
+    hass: HomeAssistant,
+    pv_source: tuple[_Source, PvBridgeForecast],
+    domain: str,
+    platform: str,
+) -> None:
+    source, adapter = pv_source
+    entry = MockConfigEntry(domain=domain, data={"time_zone": "Europe/Berlin"})
+    entry.add_to_hass(hass)
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+    registered = er.async_get(hass).async_get_or_create(
+        "sensor", platform, "foreign", config_entry=entry
+    )
+    source.selected = registered.entity_id
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) is None
+    assert source.calls == []
+
+
+async def test_missing_service_never_uses_the_energy_sensor_as_a_pv_start(
+    hass: HomeAssistant, pv_source: tuple[_Source, PvBridgeForecast]
+) -> None:
+    source, adapter = pv_source
+    hass.states.async_set(source.entity_id, "999", {"unit_of_measurement": "kWh"})
+    hass.services.async_remove("pv_forecast", "get_forecast")
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) is None
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("schema_version",), 2),
+        (("schema_version",), True),
+        (("last_update_success",), False),
+        (("origin",), "restored"),
+        (("window", "schema_version"), 2),
+        (("window", "schema_version"), True),
+        (("window", "scope"), "roof"),
+        (("window", "status"), "unavailable"),
+        (("window", "reason"), "stale_forecast"),
+        (("window", "quality_flags"), ["temperature_fallback"]),
+        (("window", "coverage", "complete"), False),
+        (("window", "coverage", "start"), NOW.isoformat()),
+        (("window", "timezone"), "UTC"),
+        (("window", "step_minutes"), 30),
+        (("window", "assumption"), "instantaneous_power"),
+        (("window", "as_of"), (NOW + timedelta(seconds=1)).isoformat()),
+        (("window", "fetched_at"), (NOW + timedelta(seconds=1)).isoformat()),
+        (("window", "fetched_at"), (NOW - timedelta(minutes=61)).isoformat()),
+        (("window", "fetched_at"), "2026-09-13T20:00:00"),
+        (("window", "fetched_at"), None),
+        (("window", "intervals"), []),
+        (("window", "intervals", 1, "start"), "2026-09-13T21:00:00+00:00"),
+        (("window", "intervals", 0, "mean_ac_power_kw"), -1),
+        (("window", "intervals", 0, "mean_ac_power_kw"), float("nan")),
+        (("window", "intervals", 0, "mean_ac_power_kw"), float("inf")),
+        (("window", "intervals", 0, "mean_ac_power_kw"), True),
+        (("window", "intervals", 0, "energy_kwh"), 10),
+        (("window", "energy_kwh"), 9000),
+        (("window", "mean_ac_power_kw"), 9000),
+    ],
+)
+async def test_invalid_or_unsafe_contract_never_authorizes_a_pv_deadline(
+    pv_source: tuple[_Source, PvBridgeForecast],
+    path: tuple[str | int, ...],
+    value: Any,
+) -> None:
+    source, adapter = pv_source
+    source.mutation = (path, value)
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) is None
+
+
+async def test_weather_data_age_is_checked_between_service_reads(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    source.mutation = (
+        ("window", "fetched_at"),
+        (NOW - timedelta(minutes=59, seconds=30)).isoformat(),
+    )
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) == PV_START
+    assert adapter.pv_start(NOW + timedelta(seconds=31), 1000) is None
+
+
+@pytest.mark.parametrize("consumption", [None, True, -1, 0, float("nan"), float("inf")])
+async def test_invalid_consumption_has_no_comparison_threshold(
+    pv_source: tuple[_Source, PvBridgeForecast], consumption: Any
+) -> None:
+    _source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, consumption) is None
+
+
+async def test_forecast_does_not_survive_a_backwards_clock_jump(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    _source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW - timedelta(seconds=1), 1000) is None
+
+
+async def test_spring_dst_request_stays_inside_the_two_local_forecast_days(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    source, adapter = pv_source
+    source.now = datetime(2026, 3, 28, 22, 50, tzinfo=UTC)
+    await adapter.async_refresh(source.now)
+    window = source.calls[0]["window"]
+    assert window["start"] == "2026-03-28T23:00:00+00:00"
+    assert window["end"] == "2026-03-29T22:00:00+00:00"

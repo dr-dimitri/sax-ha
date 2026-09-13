@@ -23,12 +23,26 @@ class DischargeForecast:
         self._samples: deque[tuple[float, float]] = deque()
         self._charging_since: float | None = None
         self._last_time: float | None = None
+        self._average_discharge_w: float | None = None
+        self._observation_seconds: float | None = None
+
+    @property
+    def average_discharge_w(self) -> float | None:
+        """Return the measured average only while the latest estimate is valid."""
+        return self._average_discharge_w
+
+    @property
+    def observation_seconds(self) -> float | None:
+        """Return the actual observation window behind the latest estimate."""
+        return self._observation_seconds
 
     def reset(self) -> None:
         """Discard unobservable history on restart or a measurement outage."""
         self._samples.clear()
         self._charging_since = None
         self._last_time = None
+        self._average_discharge_w = None
+        self._observation_seconds = None
 
     def update(
         self,
@@ -40,6 +54,8 @@ class DischargeForecast:
         min_soc: float | None,
     ) -> float | None:
         """Return seconds until the device SOC floor, or no usable estimate."""
+        self._average_discharge_w = None
+        self._observation_seconds = None
         if not all(
             _finite(value) for value in (time, power, capacity_wh, soc, min_soc)
         ):
@@ -87,4 +103,8 @@ class DischargeForecast:
         if average_power <= 0:
             return None
         remaining_wh = capacity_wh * max(soc - min_soc, 0.0) / 100
-        return remaining_wh / average_power * 3600
+        seconds = remaining_wh / average_power * 3600
+        if math.isfinite(average_power) and math.isfinite(seconds):
+            self._average_discharge_w = average_power
+            self._observation_seconds = duration
+        return seconds

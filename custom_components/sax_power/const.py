@@ -472,6 +472,7 @@ CONF_PRICE_UNIT = "price_unit"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
 CONF_GRID_SERVING_PV_FORECAST_SENSOR = "grid_serving_pv_forecast_sensor"
 CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
+CONF_BRIDGE_CHARGE_ENABLED = "bridge_charge_enabled"
 
 # Preis-Einheit des ausgewählten Sensors. "auto" leitet sie aus dessen
 # unit_of_measurement ab (alles mit "ct"/"cent" wird durch 100 geteilt),

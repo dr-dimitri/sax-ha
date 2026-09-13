@@ -28,6 +28,7 @@ from .application.economics import parse_price, parse_time
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
+    CONF_BRIDGE_CHARGE_ENABLED,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
@@ -557,6 +558,7 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
         vol.Optional(CONF_PV_FORECAST_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
         ),
+        vol.Optional(CONF_BRIDGE_CHARGE_ENABLED, default=False): cv.boolean,
         vol.Required(
             CONF_PV_FORECAST_FACTOR, default=DEFAULT_PV_FORECAST_FACTOR
         ): vol.All(
@@ -799,7 +801,16 @@ class SaxPowerOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
-            if tariff_type is TariffType.DYNAMIC and not user_input.get(
+            if user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
+                CONF_PV_FORECAST_SENSOR
+            ):
+                errors[CONF_PV_FORECAST_SENSOR] = "bridge_pv_start_required"
+            elif (
+                user_input.get(CONF_BRIDGE_CHARGE_ENABLED)
+                and tariff_type is not TariffType.TIME_OF_USE
+            ):
+                errors[CONF_ECONOMICS_TARIFF_TYPE] = "bridge_tariff_required"
+            elif tariff_type is TariffType.DYNAMIC and not user_input.get(
                 CONF_PRICE_SENSOR
             ):
                 # Der dynamische Tarif hat bewusst keine eigene

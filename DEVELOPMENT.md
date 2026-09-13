@@ -35,10 +35,14 @@ custom_components/sax_power/
 │                          (energy_accounting.py), die Geldbilanz darauf
 │                          (economics_accounting.py) sowie den ROI-/
 │                          Amortisationsstand darüber
-│                          (economics_amortization.py)
+│                          (economics_amortization.py), Entladeprognose
+│                          (discharge_forecast.py) und PV-Überbrückungsplanung
+│                          (bridge_charge.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung, die Abbildung der Tarif-Options auf
-│                          das Domänenmodell (economics.py) sowie der
+│                          das Domänenmodell (economics.py), explizite PV-/
+│                          Zeitfenstereingaben und begrenzte Ladeaufträge
+│                          (bridge_inputs.py, bridge_session.py) sowie der
 │                          injizierbare Modbus-Client-Port
 ├── infrastructure/      Home-Assistant-Adapter für zustandsbasierte
 │                          Repair-Issues sowie versionierte Stores
@@ -120,7 +124,7 @@ keine Vue-/Vorschaukennzeichnung.
 | View | Anforderungen | Aufgabe |
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
-| `TimedChargingView.vue` | `REQ-VUE-CHARGING` | Tarifpreisfenster, Netzladezeitfenster, Entladestatus, Netzladeziel/Startschwelle und Monatsschalter. |
+| `TimedChargingView.vue` | `REQ-VUE-CHARGING`, `REQ-BRIDGE-CHARGE` | Tarifpreisfenster, Netzladezeitfenster, Entladestatus, Netzladeziel/Startschwelle, Monatsschalter und begründete Verbrauchsplanung bis zum PV-Start. |
 | `DynamicChargingView.vue` | `REQ-VUE-DYNAMIC-CHARGING` | Preisladeregler, Strategie und Status in der bisherigen Reihenfolge. |
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
@@ -512,9 +516,11 @@ Die gemeinsame Komponente erhält HA-Änderungen ohne Dashboard-Neubau; sie
 formatiert Preise mit vier Nachkommastellen und berechnet weder Preise noch
 aktive Fenster. Auch ohne Preisfenster bleiben vorhandene Grundpreis- und
 Tarifinformationen sichtbar. Ein fehlender Preis wird nicht als aktiver
-Grundpreis markiert. Die separate Karte „Netzladezeitfenster“ (EN: „Grid
-charging window“) bedient weiterhin genau `timed_charge_start` und
-`timed_charge_end`; Tarifpreisfenster lösen keine Lade- oder Serviceaktion aus.
+Grundpreis markiert. Ohne aktivierte Verbrauchsplanung bedient die separate
+Karte „Netzladezeitfenster“ (EN: „Grid charging window“) weiterhin genau
+`timed_charge_start` und `timed_charge_end`. Die Tarifpreisfenster-Karte löst
+selbst keine Lade- oder Serviceaktion aus; für `REQ-BRIDGE-CHARGE` verwendet
+das Backend den gespeicherten Tarif als alleinige Quelle erlaubter Ladezeiten.
 
 Der **Strompreis-Sensor** (`price_sensor`, erste Seite) hat zwei getrennte
 Aufgaben, die sich leicht verwechseln lassen:
@@ -616,6 +622,91 @@ HIGH-Intervalle sowie ungültige Eingaben verwerfen die Historie. Es gibt keine
 Persistenz. Der Coordinator wandelt die Restzeit in einen UTC-Zeitpunkt um und
 veröffentlicht ihn als `discharge_forecast` für den gleichnamigen Timestamp-Sensor.
 Cache-Refreshs übernehmen den zuletzt berechneten Zeitpunkt unverändert.
+Die Attribute `observation_minutes`, `average_discharge_w` und `observed_at`
+veröffentlichen die zugehörige Beobachtungsdauer, mittlere Leistung und den
+Zeitpunkt der letzten ausgewerteten Messung. Sie werden zusammen mit einer
+ungültigen oder zurückgesetzten Prognose verworfen; ein Cache-Refresh erzeugt
+keinen neuen Messzeitpunkt.
+
+### Verbrauchsabhängige Netzladung bis PV-Start (REQ-BRIDGE-CHARGE)
+
+`domain/bridge_charge.py` berechnet ausschließlich aus Zeitpunkt, PV-Start,
+mittlerer Entladeleistung, Kapazität, SOC-Grenzen, Ladeleistung und ausdrücklich
+erlaubten `ChargeWindow`-Intervallen einen `BridgeChargePlan`. Die Domain kennt
+weder Home Assistant noch den zeitvariablen Tarif und schreibt keine Register.
+Damit kann eine spätere Tarifquelle dieselbe Berechnung mit eigenen Intervallen
+verwenden. Die bestehende dynamische Preissteuerung ist nicht daran angebunden.
+
+Der Bedarf ergibt sich aus dem Verbrauch bis PV-Start abzüglich der nutzbaren
+Batterieenergie oberhalb der Geräte-SOC-Untergrenze. Während Netzladung wird
+Hausverbrauch aus dem Netz gedeckt; deshalb berücksichtigt die Berechnung sowohl
+den Energiezuwachs im Speicher als auch die in dieser Zeit vermiedene Entladung.
+Das Ladeziel bleibt unter dem effektiven Netzlade-Max-SOC. Geplant wird jeweils
+ein zusammenhängender Auftrag: unter ausreichenden Kandidaten zuerst der
+günstigste, bei gleichem Preis der späteste mögliche Start. Reicht keiner aus,
+wählt die Domain die größte mögliche Bedarfsdeckung und weist den verbleibenden
+Fehlbetrag aus. Ein solcher Teilplan verspricht keine vollständige Überbrückung.
+
+`application/bridge_inputs.py` adaptiert ausschließlich die tatsächlich
+vorkommenden billigsten Preisstufen des gespeicherten `TIME_OF_USE`-Tarifs auf
+UTC-Intervalle, einschließlich des Basispreises. Ein teureres verbleibendes
+Fenster ersetzt keinen bereits verpassten Niedertarif. Aktive Monate werden an
+lokalen Tagesgrenzen geprüft. Das separate Netzladezeitfenster ist kein Eingang
+der Verbrauchsplanung und begrenzt oder erweitert deren Tarifintervalle nicht.
+Die weitergehende Migration der bisherigen festen Netzladung ist separat in
+[Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) erfasst.
+
+Die PV-Quelle ist der bereits konfigurierte `CONF_PV_FORECAST_SENSOR`. Über die
+Entity Registry wird dessen `config_entry_id` der Integration `pv_forecast`
+zugeordnet. Der geprüfte Service `pv_forecast.get_forecast` liefert die
+15-Minuten-Prognose der Gesamtanlage mit `mean_ac_power_kw`. Der Adapter
+validiert diese Zeitreihe und bestimmt den ersten ausreichend langen Zeitraum:
+Die prognostizierte mittlere PV-Leistung muss in mindestens zwei
+aufeinanderfolgenden Intervallen den gemessenen Entladedurchschnitt erreichen,
+also den Verbrauch mindestens 30 Minuten lang decken. Serviceergebnisse werden
+60 Sekunden zwischengespeichert. Es gibt keine zusätzliche Startzeit-Entity,
+manuelle PV-Uhrzeit oder Ableitung aus der Tagesenergiesumme. Fehlende oder
+ungültige Prognosedaten geben keine geplante Netzladung frei.
+
+Die Option `bridge_charge_enabled` schaltet die Betriebsart ein. Der vorhandene
+Hauptschalter `timed_charge_enabled` und die Monatsfreigabe bleiben erforderlich;
+`timed_charge_min_soc` wird durch die Bedarfsentscheidung ersetzt. Fehlende oder
+veraltete Messwerte und fehlender PV-Start geben keinen Ladeauftrag frei.
+`application/bridge_session.py` bindet den Auftrag an seine Konfiguration und
+hält nach dem bestätigten Start die Verbrauchsbasis fest. So kann die normale
+Entladeprognose nach einer Minute Ladung zurückgesetzt werden, ohne den aktiven
+Auftrag zu verlieren. Festes Ende oder erreichtes Ziel beenden den Auftrag;
+eine Neuplanung benötigt mindestens eine Minute nach Abschluss und wieder
+gültige Beobachtungen. Es gibt keine Auftragspersistenz und keine Wiederaufnahme
+ohne neue Messungen nach einem Neustart.
+
+Der Coordinator bleibt alleiniger Besitzer des vorhandenen SunSpec-Schreibpfads.
+Die bisherige fenstergebundene Entladesperre aus `timed_discharge` wird in dieser
+Betriebsart nicht aufgebaut: Nach dem begrenzten Laden wird normale Entladung
+wieder möglich. Die bestehenden Schutz- und Prioritätsregeln für manuelle
+Ladung, PV-Überschuss und Max-SOC gelten weiterhin. Bei fälliger Zellkalibrierung
+steigen `effective_max_soc` und `effective_timed_charge_max_soc` auf 100 %;
+dies erweitert lediglich die Obergrenzen der Verbrauchsplanung. Bedarf,
+PV-Zeitpunkt und erlaubte Tarifintervalle bestimmen weiterhin den begrenzten
+Auftrag. Es gibt weder einen Rückfall auf das ausgeblendete Netzladezeitfenster
+oder Min-SOC noch eine zusätzliche ungeplante Netzladung bis 100 %. PV oder ein
+entsprechend hoher Überbrückungsbedarf können 100 % erreichen. Außerhalb dieser
+Betriebsart bleibt die bestehende Kalibrierungssteuerung unverändert.
+
+Der Enum-Sensor `bridge_charge_plan` veröffentlicht `off`, `waiting_for_data`,
+`planned`, `charging`, `not_needed`, `insufficient`, `paused` oder `complete`.
+Strukturierte Attribute liefern `observation_minutes`, `average_discharge_w`,
+`discharge_at`, `charge_start`, `charge_end`, `pv_start`, `target_soc`,
+`shortfall_kwh` und gegebenenfalls `reason`. `ChargePlan.vue` verwendet diese
+Daten für die deutsch-/englischsprachige Meldung im zeitvariablen Tab. Die
+Komponente formatiert Datum und Uhrzeit in der HA-Zeitzone, erklärt bekannte
+Fehlergründe und behält einen Fehlbetrag auch während einer laufenden Teilladung
+sichtbar. Sie plant nicht selbst und ruft keine Services auf.
+Bei `bridge_charge_plan.attributes.enabled=true` blendet der zeitvariable Tab
+das separate Netzladezeitfenster und `timed_charge_min_soc` aus, da beide die
+Verbrauchsplanung nicht steuern. Netzlade-Max-SOC und Monatsfreigaben bleiben
+bedienbar. Die bestätigte Backend-Option bestimmt die Sichtbarkeit auch bei
+einem wartenden oder pausierten Plan.
 
 ### Gesamte Netzenergie (REQ-GRID-ENERGY)
 
@@ -1045,6 +1136,9 @@ Auch das eigene Netzladeziel erhält während der Kalibrierung einen
 effektiven Wert von 100 %, bei unverändertem Benutzerwert und unveränderter
 Slidergrenze. Die Kalibrierung startet dabei weiterhin keine eigene
 Netzladung; die regulären Startbedingungen bleiben erforderlich.
+Bei `REQ-BRIDGE-CHARGE` ist 100 % ausschließlich die wirksame Obergrenze;
+der berechnete Bedarf bis PV-Start bestimmt weiterhin das Ziel. Die
+Tarifpreisfenster bleiben verbindlich, auch während Kalibrierungsfälligkeit.
 Reihenfolge/Priorität in `_async_enforce_grid_charge`:
 
 1. **SOC ≥ "Max. SOC"** (`soc_reached`): Leistungsvorgabe wird auf 0 %
@@ -1081,6 +1175,11 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    `min(0, storage_power_active + smartmeter_power)` weiterhin PV-Laden.
    Dieser Haltezustand greift vor der netzdienlichen Regelung; er ist bei
    aktiviertem preisoptimiertem Laden immer inaktiv und wird verworfen.
+   Bei aktivierter Verbrauchsplanung (`REQ-BRIDGE-CHARGE`) ersetzt deren
+   begrenzter Auftrag die feste Startschwellenentscheidung. Nach diesem Auftrag
+   wird keine fenstergebundene Entladesperre gehalten. Bei Kalibrierungsfälligkeit
+   steigt nur die wirksame SOC-Obergrenze auf 100 %; die Bedarfsentscheidung
+   erhält keinen Rückfall auf Startschwelle oder separates Netzladezeitfenster.
 3. **Sonst, falls netzdienliches Laden aktiviert + im eigenen Zeitfenster +
    im eigenen aktiven Monat + optionale Mindest-PV-Prognose erfüllt + nicht
    bereits durch zeitgesteuertes Laden
@@ -1201,7 +1300,9 @@ direkt nach der Ersteinrichtung) explizit auf `MAX_SOC` (100) statt
 "unbekannt"/0 zu bleiben.
 
 **"Netzladen Max. SOC"** (`SaxPowerTimedChargeMaxSocNumber`) begrenzt nur
-die zeitgesteuerte Netzladung. Sie beginnt bei eingeschalteter Netzladung
+die zeitgesteuerte Netzladung, einschließlich des berechneten Ziels der optionalen
+Verbrauchsplanung nach `REQ-BRIDGE-CHARGE`. Ohne diese Betriebsart beginnt sie
+bei eingeschalteter Netzladung
 im aktiven Fenster eines freigegebenen Monats unterhalb von "Netzladung
 Min. SOC" und lädt dank `_timed_charge_armed` innerhalb desselben
 unveränderten Fensters bis zum eigenen Ziel weiter. Ein SOC unter der

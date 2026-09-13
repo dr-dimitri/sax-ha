@@ -16,6 +16,7 @@ let connected = true;
 let unavailable = false;
 let rejectNext = false;
 let writes = 0;
+const bridgePlan = new URLSearchParams(location.search).has("bridge-plan");
 
 const general = [
   "soc",
@@ -54,6 +55,7 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
     if (
       !general.includes(key) &&
       !economics.includes(key) &&
+      !(bridgePlan && key === "bridge_charge_plan") &&
       !["timed_charge_", "grid_serving_", "price_charge_"].some((prefix) =>
         key.startsWith(prefix),
       )
@@ -147,6 +149,7 @@ function example({ domain, key, entity_id }) {
     economics_net_savings: "1350.25",
     economics_status: "active",
     economics_current_import_price: "0.2456",
+    bridge_charge_plan: "planned",
   };
   state = values[key] ?? state;
   if (["soc", "economics_amortization_progress", "economics_roi"].includes(key))
@@ -181,6 +184,18 @@ function example({ domain, key, entity_id }) {
       next_price_change_at: "2026-09-12T20:00:00Z",
       unavailable_reason: null,
     };
+  if (key === "bridge_charge_plan")
+    attributes = {
+      enabled: true,
+      observation_minutes: 30,
+      average_discharge_w: 1000,
+      discharge_at: "2026-09-14T00:00:00Z",
+      charge_start: "2026-09-13T23:00:00Z",
+      charge_end: "2026-09-14T00:00:00Z",
+      pv_start: "2026-09-14T05:00:00Z",
+      target_soc: 60,
+      shortfall_kwh: 0,
+    };
   return { entity_id, state, attributes };
 }
 let states = Object.fromEntries(
@@ -208,6 +223,7 @@ function setTariffMode(mode) {
 const savedTariff = sessionStorage.getItem("sax-demo-tariff");
 if (savedTariff && Object.hasOwn(tariffModes, savedTariff))
   setTariffMode(savedTariff);
+if (bridgePlan) setTariffMode("timed");
 const connection = {
   get connected() {
     return connected;

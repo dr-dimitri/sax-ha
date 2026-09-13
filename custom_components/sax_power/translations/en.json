@@ -92,6 +92,9 @@
       "soc": {
         "name": "State of charge"
       },
+      "discharge_forecast": {
+        "name": "Estimated discharge time"
+      },
       "discharge_power": {
         "name": "Discharge power"
       },

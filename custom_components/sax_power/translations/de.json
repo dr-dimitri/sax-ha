@@ -92,6 +92,9 @@
       "soc": {
         "name": "Ladezustand"
       },
+      "discharge_forecast": {
+        "name": "Voraussichtlich entladen um"
+      },
       "discharge_power": {
         "name": "Entladeleistung"
       },

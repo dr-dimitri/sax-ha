@@ -505,7 +505,12 @@ ersten Seite; Festpreis und dynamischer Tarif haben die Folgeschritte
 `economics_fixed` und `economics_dynamic` mit Preiseingaben in ct/kWh.
 `disabled` und `time_of_use` speichern sofort. Standardpreis, Einspeisevergütung
 und Zeitfenster des tageszeitabhängigen Tarifs werden ausschließlich im
-Dashboard bearbeitet (REQ-VUE-TARIFF-EDITOR). Bleibt die Tarifart gleich,
+Dashboard bearbeitet (REQ-VUE-TARIFF-EDITOR). Bei `time_of_use` setzt das Speichern
+deshalb ein aktiviertes Dashboard voraus (Issue #243). Die aktuelle Eingabe
+hat Vorrang vor `entry.options`, danach `entry.data` und dem ausgeschalteten
+Standard. Ohne Opt-in bleibt der Flow mit `economics_dashboard_required` am
+Dashboard-Feld offen und erklärt den Editorpfad; er ändert weder bestehende
+Preise noch die Dashboardwahl automatisch. Bleibt die Tarifart gleich,
 übernimmt der Flow das aktuell gespeicherte TOU-Profil; bei erstmaliger
 Auswahl bleiben fehlende Pflichtpreise unbekannt, bis der Anwender das Profil
 im Dashboard vervollständigt. Inaktive Profile bleiben unter
@@ -575,6 +580,17 @@ Reine Profilarchive lösen keine Quellenrevision aus. Schreibzugriff erfordert
 einen aktiven Administrator; Revisionskonflikte erhalten den lokalen Entwurf.
 Die API-Bestätigung beschreibt angenommene Konfiguration, Geräteaktivität folgt
 weiterhin erst auf die quittierte Steuersequenz.
+
+`bridge_configuration_error` prüft die fertig projizierten aktiven Options:
+Eine eingeschaltete verbrauchsbasierte Ladeplanung erfordert weiterhin ihre
+PV-Quelle und `time_of_use` (Issue #244). `tariff/configure` prüft das auch beim
+Wiederherstellen eines archivierten Profils ohne explizites `profile`; der
+Coordinator wiederholt die Prüfung vor jeder Mutation unter dem Control-Lock.
+Eine fehlende Quelle liefert `bridge_pv_start_required`, auch wenn die
+automatische Netzladung aus ist. Der Dashboardeditor erklärt die Voraussetzung
+und erhält den Entwurf. Erst nach bewusstem Abschalten der Ladeplanung darf
+ihre Quelle entfernt werden. Ein konfigurierter, vorübergehend unverfügbarer
+Sensor bleibt zulässig; beim dynamischen Tarif bleibt die PV-Quelle optional.
 
 `tariff/series` nimmt `entry_id` und `day` (`today`/`tomorrow`) an. Die Antwort
 enthält `date`, `time_zone`, `start`, `end`, `now`, `current_price_ct_kwh`,

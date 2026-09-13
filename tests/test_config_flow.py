@@ -1204,6 +1204,7 @@ async def test_time_of_use_finishes_without_a_price_step(hass, existing: bool) -
         {
             CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
             CONF_PV_FORECAST_FACTOR: 70,
+            CONF_VUE_DASHBOARD_ENABLED: True,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -1229,7 +1230,11 @@ async def test_switch_to_time_of_use_does_not_reuse_other_tariff_prices(hass) ->
     )
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value}
+        result["flow_id"],
+        {
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
+            CONF_VUE_DASHBOARD_ENABLED: True,
+        },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert CONF_ECONOMICS_FEED_IN_PRICE not in entry.options

@@ -41,6 +41,7 @@ from .application.economics import (
 )
 from .application.ports import ModbusClient
 from .application.tariff_charge import tariff_charge_state
+from .application.tariff_profiles import bridge_configuration_error
 from .application.timed_charge import TimedChargeState
 from .application.timed_discharge import (
     TimedDischargeState,
@@ -4040,6 +4041,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key="dashboard_tariff_conflict",
+                )
+            if error := bridge_configuration_error(options):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key=error
                 )
             target = tariff_config_from_options(options)
             controls = tariff_automation_controls(

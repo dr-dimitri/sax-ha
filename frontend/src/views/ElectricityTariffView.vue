@@ -72,6 +72,8 @@ const text = computed(() =>
         readonly: "Keine Berechtigung zum Ändern des Tarifs.",
         disconnected:
           "Keine Verbindung zu Home Assistant. Dein Entwurf bleibt erhalten.",
+        bridgePvRequired:
+          "Die PV-Start-Quelle wird für die aktive verbrauchsbasierte Ladung benötigt. Wähle eine Quelle oder schalte diese Ladeplanung zuerst aus.",
         failed: "Die Änderung ist fehlgeschlagen. Bitte erneut versuchen.",
         conflict:
           "Der Tarif wurde inzwischen geändert. Dein Entwurf bleibt erhalten. Lade die gespeicherten Einstellungen erneut.",
@@ -147,6 +149,8 @@ const text = computed(() =>
         readonly: "You do not have permission to change the tariff.",
         disconnected:
           "Disconnected from Home Assistant. Your draft is preserved.",
+        bridgePvRequired:
+          "The active consumption-based charging plan requires a PV start source. Choose a source or turn off this charging plan first.",
         failed: "The change failed. Please try again.",
         conflict:
           "The tariff has changed elsewhere. Your draft is preserved. Reload the saved settings.",
@@ -309,15 +313,17 @@ function showError(cause: unknown) {
       : "failed";
   conflict.value = code === "conflict";
   error.value =
-    code === "conflict"
-      ? text.value.conflict
-      : code === "forbidden"
-        ? text.value.readonly
-        : code === "disconnected"
-          ? text.value.disconnected
-          : code === "invalid_tariff" || code === "invalid_format"
-            ? text.value.invalid
-            : text.value.failed;
+    code === "bridge_pv_start_required"
+      ? text.value.bridgePvRequired
+      : code === "conflict"
+        ? text.value.conflict
+        : code === "forbidden"
+          ? text.value.readonly
+          : code === "disconnected"
+            ? text.value.disconnected
+            : code === "invalid_tariff" || code === "invalid_format"
+              ? text.value.invalid
+              : text.value.failed;
 }
 async function loadSeries() {
   const request = ++seriesRequest;

@@ -19,6 +19,7 @@ from homeassistant.helpers import entity_registry as er
 from .application.economics import parse_price, parse_time, tariff_config_from_options
 from .application.tariff_profiles import (
     TARIFF_PROFILE_KEYS,
+    bridge_configuration_error,
     options_for_tariff,
     tariff_profiles_from_options,
 )
@@ -469,6 +470,9 @@ async def websocket_configure_tariff(
             else None
         )
         options = options_for_tariff(entry.options, msg["tariff_type"], profile)
+        if error := bridge_configuration_error(options):
+            connection.send_error(msg["id"], error, "Keep the required PV start source")
+            return
         if enabled is True or enabled is None and _automation_enabled(hass, entry):
             if validate_tariff(tariff_config_from_options(options)) is not None:
                 raise ValueError("Configure the tariff before enabling charging")
@@ -498,7 +502,12 @@ async def websocket_configure_tariff(
             code = (
                 "conflict"
                 if err.translation_key == "dashboard_tariff_conflict"
-                else "invalid_tariff"
+                else (
+                    err.translation_key
+                    if err.translation_key
+                    in ("bridge_pv_start_required", "bridge_tariff_required")
+                    else "invalid_tariff"
+                )
             )
             connection.send_error(msg["id"], code, str(err))
             return

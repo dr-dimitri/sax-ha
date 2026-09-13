@@ -556,7 +556,7 @@
     },
     "economics_price_unavailable": {
       "title": "Economics: import price unavailable",
-      "description": "No valid import price has been available for the economics evaluation for over 6 hours - for a fixed or time-of-use tariff this can also be an immediate configuration error (a missing required price, a broken time-window group). New charge energy is booked as unpriced in the meantime and never re-evaluated retroactively. Please check the import price tariff, or for a dynamic tariff the selected electricity price sensor, under \"Configure\" on this integration."
+      "description": "No valid import price has been available for the economics evaluation for over 6 hours - for a fixed or time-of-use tariff this can also be an immediate configuration error (a missing required price, a broken time-window group). New charge energy is booked as unpriced in the meantime and never re-evaluated retroactively. Check time-of-use prices and time windows in the SAX Power dashboard under Electricity tariff → Tariff & prices. If the dashboard is hidden, enable it under \"Configure\" on this integration. Fixed prices and the dynamic electricity price sensor can also be checked under \"Configure\"."
     },
     "sunspec_persistently_unavailable": {
       "title": "SAX SunSpec mode persistently unreachable",
@@ -763,10 +763,10 @@
           "price_unit": "Unit supplied by the source sensor. Automatic detects it from the sensor. The SAX dashboard displays energy prices in ct/kWh.",
           "pv_forecast_sensor": "For Smart, select an energy sensor with the total PV yield expected tomorrow. Consumption-based charging planning uses the same selection to identify a PV Forecast installation and retrieve its forecast time series. Existing selections are retained after updates. The charging pause uses its own sensor for the remaining yield today.",
           "pv_forecast_factor": "Only for Smart: the usable share of tomorrow’s forecast, accounting for household consumption, weather uncertainty and losses. The grid-serving minimum compares the unmodified remaining yield today from its separate source.",
-          "economics_tariff_type": "Optional. Selects the import price for the economics evaluation. Fixed price uses one energy price for the entire day. Time of use uses a standard price and up to eight daily price windows. Edit these prices and the feed-in tariff in the dashboard under Tariff price windows → Edit. Its cheapest daily periods also determine the allowed times for fixed-SOC and consumption-based grid charging. Dynamic uses the electricity price sensor selected above, including its attribute and unit settings.",
+          "economics_tariff_type": "Optional. Selects the import price for the economics evaluation. Fixed price uses one energy price for the entire day. Time of use uses a standard price and up to eight daily price windows. Enable the dashboard to edit these prices and the feed-in tariff in ct/kWh under Electricity tariff → Tariff & prices. Its cheapest daily periods also determine the allowed times for fixed-SOC and consumption-based grid charging. Dynamic uses the electricity price sensor selected above, including its attribute and unit settings.",
           "economics_investment_cost_eur": "One-off purchase cost of the storage system in euros - battery, installation and accessories as invoiced. It is the basis for ROI, amortization progress and the remaining-to-payback amount, offset against the running signed net result. Optional and independent of the tariff model: switching tariffs does not clear this value. Leave empty to disable all amortization sensors; the rest of the economics balance keeps running.",
           "economics_prior_result_eur": "Optional. Amount the system already earned before this integration was set up - for storage systems that have been running for a while. Without it the amortization progress would sit at 0 % even though part of the investment has long been paid back. The amount only affects ROI, amortization progress and the remaining amount; net savings keep showing only what the integration measured itself, so the history chart does not report an artificial daily gain. Leave empty or 0 for no prior result.",
-          "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings.",
+          "vue_dashboard_enabled": "Adds “SAX Power” to the sidebar with sensor values, charging controls and savings. Required to edit time-of-use prices and windows under Electricity tariff → Tariff & prices.",
           "bridge_charge_enabled": "Uses only the cheapest saved tariff periods. Select a PV Forecast energy sensor as the shared PV source; its forecast determines when PV covers measured consumption for at least 30 minutes. Grid charging and the active month must be enabled. Demand replaces the minimum SOC trigger; maximum SOC remains a limit. Discharging resumes after charging.",
           "grid_serving_pv_forecast_sensor": "Energy sensor with the PV yield still expected today, excluding energy already generated. Required for a grid-serving pause with a minimum forecast above 0 kWh. Without a selected source, that pause does not apply; 0 kWh disables the forecast condition. Choose this source explicitly after an update."
         }
@@ -799,7 +799,8 @@
       "economics_price_required": "Required: please enter an energy price in ct/kWh (gross price including all levies).",
       "bridge_pv_start_required": "Select a PV Forecast energy sensor as the shared PV forecast source.",
       "bridge_tariff_required": "Consumption-based planning requires a saved time-of-use tariff.",
-      "economics_price_invalid": "Please enter a finite energy price within the permitted range in ct/kWh."
+      "economics_price_invalid": "Please enter a finite energy price within the permitted range in ct/kWh.",
+      "economics_dashboard_required": "Enable the dashboard to use a time-of-use tariff. Edit the standard price, feed-in tariff and time windows there under Electricity tariff → Tariff & prices in ct/kWh."
     }
   },
   "selector": {

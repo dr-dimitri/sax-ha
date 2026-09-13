@@ -91,6 +91,9 @@ Mit **Dashboard aktivieren** erscheint **SAX Power** in der Seitenleiste.
 Die Option ist anfangs ausgeschaltet und lässt sich jederzeit unter
 **Konfigurieren** ändern. Das Dashboard wird mit der Integration ausgeliefert;
 eine zusätzliche Installation ist nicht nötig.
+Für einen zeitvariablen Tarif muss es aktiviert bleiben, damit du Preise und
+Zeitfenster bearbeiten kannst. Der Konfigurationsdialog weist darauf hin,
+wenn diese Tarifart bei ausgeschaltetem Dashboard gespeichert werden soll.
 
 Die Screenshots zeigen das Dashboard mit Beispieldaten.
 
@@ -257,6 +260,10 @@ wie die Option unter **Konfigurieren**; Änderungen sind in beiden Oberflächen
 sichtbar und bleiben nach einem Neustart erhalten. Zum Einschalten müssen ein
 zeitvariabler Tarif und eine PV-Prognosequelle konfiguriert sein. Ausschalten
 ist jederzeit möglich und wechselt zurück zur festen SOC-Steuerung.
+Solange diese Ladeplanung eingeschaltet ist, bleibt ihre PV-Start-Quelle
+erforderlich. Du kannst sie unter **Stromtarif → Tarif & Preise** ersetzen;
+zum Entfernen schaltest du zuerst die verbrauchsbasierte Ladeplanung aus.
+Ein abgelehnter Speicherversuch erhält deine Eingaben und die bisherigen Werte.
 **Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
 ausgewählten Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch
 der letzten 1 bis 60 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht.
@@ -425,6 +432,8 @@ gespeicherten Werte. Der Standardpreis gilt außerhalb der Fenster und ist
 ein Arbeitspreis pro kWh; monatliche Grundgebühren gehören nicht dazu.
 
 Für diesen Tarif entfallen die Preiseingaben im Konfigurationsdialog.
+Aktiviere dort **Dashboard aktivieren**, um Standardpreis, Einspeisevergütung
+und Zeitfenster unter **Stromtarif → Tarif & Preise** zu bearbeiten.
 Bestehende Tarifwerte bleiben beim Update und bei Änderungen anderer
 Einstellungen erhalten. Nach der erstmaligen Auswahl von **Tageszeitabhängig**
 vervollständigst du das Profil im Dashboard. Bis dahin gibt es keinen gültigen

@@ -93,6 +93,19 @@ async function mount(
   } = {},
 ) {
   const sample = chargingSample(options.language ?? "de");
+  sample.metadata.push({
+    domain: "switch",
+    key: "bridge_charge_enabled",
+    entity_id: "switch.renamed_bridge_charge_enabled",
+    name: "Bridge charging",
+    states: {},
+    can_control: true,
+  });
+  sample.states["switch.renamed_bridge_charge_enabled"] = {
+    entity_id: "switch.renamed_bridge_charge_enabled",
+    state: "off",
+    attributes: {},
+  };
   sample.states["sensor.market_price"] = {
     entity_id: "sensor.market_price",
     state: "-2.5",
@@ -465,6 +478,72 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         section.querySelector<HTMLInputElement>('[name="dynamic_feed"]')?.value,
       ).toBe("9,25");
       expect(fixture.root.querySelector('[role="alert"]')).not.toBeNull();
+    },
+  );
+  // REQ-VUE-ELECTRICITY-TARIFF / #244: a server guard never discards the price draft.
+  it.each([
+    ["time_of_use", "de"],
+    ["time_of_use", "en"],
+    ["dynamic", "de"],
+    ["dynamic", "en"],
+  ])(
+    "explains the required PV start source and preserves the %s draft in %s",
+    async (type, language) => {
+      const fixture = await mount({ type, language });
+      const english = language === "en";
+      const profile =
+        type === "dynamic"
+          ? fixture.stored.profiles!.dynamic
+          : fixture.stored.profiles!.time_of_use;
+      profile.pv_sensor = "sensor.market_price";
+      await fixture.update("bridge_charge_enabled", "on");
+      const section = fixture.root.querySelector(
+        type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
+      )!;
+      await click(section, english ? "Edit" : "Bearbeiten");
+      const field =
+        type === "dynamic" ? '[name="dynamic_feed"]' : '[name="base_price"]';
+      await fill(section, field, english ? "9.25" : "9,25");
+      const source = section.querySelectorAll<HTMLSelectElement>(
+        ".sensor-picker select",
+      )[type === "dynamic" ? 1 : 0]!;
+      expect(source.value).toBe("sensor.market_price");
+      if (type === "time_of_use")
+        expect(source.closest("label")?.textContent).toContain(
+          english ? "(required)" : "(erforderlich)",
+        );
+      source.value = "";
+      source.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      fixture.callWS.mockRejectedValueOnce({
+        code: "bridge_pv_start_required",
+      });
+      await click(section, english ? "Save" : "Speichern");
+      expect(
+        fixture.root.querySelector('[role="alert"]')?.textContent,
+      ).toContain(
+        english
+          ? "Choose a source or turn off this charging plan first."
+          : "Wähle eine Quelle oder schalte diese Ladeplanung zuerst aus.",
+      );
+      expect(section.querySelector<HTMLInputElement>(field)?.value).toBe(
+        english ? "9.25" : "9,25",
+      );
+      expect(source.value).toBe("");
+      expect(writes(fixture)).toHaveLength(1);
+      expect(writes(fixture)[0]?.[0].profile).toMatchObject({
+        pv_sensor: null,
+      });
+      expect(profile.pv_sensor).toBe("sensor.market_price");
+      expect(fixture.callService).not.toHaveBeenCalled();
+      source.value = "sensor.market_price";
+      source.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await click(section, english ? "Save" : "Speichern");
+      expect(section.querySelector("form")).toBeNull();
+      expect(writes(fixture)[1]?.[0].profile).toMatchObject({
+        pv_sensor: "sensor.market_price",
+      });
     },
   );
   it("blocks tariff writes for readers and while disconnected", async () => {

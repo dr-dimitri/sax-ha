@@ -26,6 +26,7 @@ const text = computed(() =>
     ? {
         tariff: props.compact ? "Tarif & Preise" : "Tarifpreisfenster",
         pv: "PV-Start-Sensor (optional)",
+        pvRequired: "PV-Start-Sensor (erforderlich)",
         windows: "Zeitfenster",
         gross:
           "Alle Preise brutto. Speichern aktualisiert auch die erlaubten Ladezeiten.",
@@ -55,6 +56,8 @@ const text = computed(() =>
         conflict:
           "Der Tarif wurde inzwischen geändert. Dein Entwurf bleibt erhalten. Lade den gespeicherten Tarif, bevor du erneut bearbeitest.",
         reload: "Gespeicherten Tarif laden (Entwurf verwerfen)",
+        bridgePvRequired:
+          "Die PV-Start-Quelle wird für die aktive verbrauchsbasierte Ladung benötigt. Wähle eine Quelle oder schalte diese Ladeplanung zuerst aus.",
         failed:
           "Der Tarif konnte nicht geladen oder gespeichert werden. Bitte erneut versuchen.",
         invalid:
@@ -83,6 +86,7 @@ const text = computed(() =>
     : {
         tariff: props.compact ? "Tariff & prices" : "Tariff price windows",
         pv: "PV start sensor (optional)",
+        pvRequired: "PV start sensor (required)",
         windows: "time windows",
         gross:
           "All prices include tax. Saving also updates the permitted charging times.",
@@ -112,6 +116,8 @@ const text = computed(() =>
         conflict:
           "The tariff has changed elsewhere. Your draft is preserved. Load the saved tariff before editing again.",
         reload: "Load saved tariff (discard draft)",
+        bridgePvRequired:
+          "The active consumption-based charging plan requires a PV start source. Choose a source or turn off this charging plan first.",
         failed: "The tariff could not be loaded or saved. Please try again.",
         invalid:
           "The tariff was not saved. Please check prices and time windows.",
@@ -358,6 +364,10 @@ const profile = ref<TariffProfile | null>(null);
 const baseInput = ref("");
 const feedInput = ref("");
 const pvSensor = ref<string | null>(null);
+const bridgeEnabled = computed(
+  () =>
+    dashboard?.entity("switch", "bridge_charge_enabled")?.state?.state === "on",
+);
 const draftWindows = ref<
   { key: number; start: string; end: string; price: string }[]
 >([]);
@@ -379,11 +389,13 @@ function reportError(cause: unknown) {
       : "failed";
   conflict.value = code === "conflict";
   error.value =
-    code === "invalid_tariff" || code === "invalid_format"
-      ? "invalid"
-      : ["conflict", "disconnected", "forbidden"].includes(String(code))
-        ? String(code)
-        : "failed";
+    code === "bridge_pv_start_required"
+      ? "bridgePvRequired"
+      : code === "invalid_tariff" || code === "invalid_format"
+        ? "invalid"
+        : ["conflict", "disconnected", "forbidden"].includes(String(code))
+          ? String(code)
+          : "failed";
 }
 function inputPrice(value: number | null) {
   return value === null
@@ -619,7 +631,7 @@ watch(tariffVisible, (visible) => {
           v-if="compact"
           v-model="pvSensor"
           :hass="hass"
-          :label="text.pv"
+          :label="bridgeEnabled ? text.pvRequired : text.pv"
         />
         <div
           v-for="(window, index) in draftWindows"

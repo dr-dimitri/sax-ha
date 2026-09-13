@@ -134,6 +134,13 @@ requirement_bridge_charge:
     bleibt auch bei fehlenden Quellen oder Geräteausfall möglich und wechselt
     zur festen SOC-Steuerung. Der Hauptschalter wird dadurch nicht verändert.
     Änderungen aus dem Optionsdialog aktualisieren auch den Dashboard-Schalter.
+    Auch Tarifänderungen im Dashboard erhalten diese Voraussetzung (Issue #244):
+    Eine eingeschaltete verbrauchsbasierte Ladeplanung darf ihre PV-Start-Quelle
+    nicht verlieren. Das gilt unabhängig vom Netzladehauptschalter sowie beim
+    Wiederherstellen eines inaktiven Profils. Quellenwechsel bleibt zulässig;
+    zum Entfernen muss die Ladeplanung ausdrücklich ausgeschaltet sein. Ein
+    vorübergehend unverfügbarer, weiterhin ausgewählter Sensor ist keine
+    fehlende Konfiguration.
     Die Einstellung timed_charge_min_soc wird durch den berechneten Bedarf
     ersetzt. Netzladen Max. SOC und die globale Max-SOC-Grenze begrenzen
     weiterhin das Ziel. Ohne Bedarf findet keine geplante Netzladung statt.
@@ -3116,6 +3123,16 @@ requirement_vue_tariff_editor:
     darf ein unvollständiges Profil anlegen, bis es im Dashboard vervollständigt ist.
     Es werden weder Nullpreise noch Ersatzladezeiten erfunden.
 
+    TIME_OF_USE darf im Options Flow nur bei effektiv eingeschaltetem Dashboard
+    gespeichert werden (Issue #243). Aktuelle Eingabe hat Vorrang vor Options,
+    danach Entry-Daten und dem ausgeschalteten Standard. Ohne Zustimmung bleibt
+    die erste Seite mit economics_dashboard_required am Dashboard-Feld offen;
+    der Text erklärt die Aktivierung und Stromtarif → Tarif & Preise in ct/kWh.
+    Dashboardwahl, aktive und inaktive Tarifprofile werden nicht ungefragt
+    geändert. Das gilt auch für bestehende vollständige Tarife und wiederholte
+    erste Seiten. Nach expliziter Aktivierung bleibt die direkte Speicherung
+    ohne zusätzliche TOU-Preisseite erhalten.
+
     Sämtliche sichtbaren Tarifpreise, die Einspeisevergütung und die Preisgrenzen
     verwenden ct/kWh. TOU-Eingaben haben eine Schrittweite von 0,01 ct/kWh;
     NumberEntity-Grenzen und Schrittweiten werden entsprechend ihrer bisherigen
@@ -3142,6 +3159,9 @@ requirement_vue_tariff_editor:
        Speicherung ohne Änderung fremder Options."
     - "Config-Flow-Tests prüfen das Entfallen der TOU-Folgeseite, Erhalt bestehender
        Profile und Cent/Euro-Roundtrips der verbleibenden Preisfelder."
+    - "tests/test_tou_dashboard_options.py prüft Dashboard-Opt-in, Priorität von
+       Eingabe/Options/Entry-Daten, unveränderte neue/aktive/inaktive Tarifprofile,
+       Feldfehler und erfolgreichen Wiederholungsversuch nach Aktivierung."
     - "Number-/Sensor-Tests prüfen Wert und Einheit gemeinsam sowie die Migration
        alter Euro- und neuer Cent-Restore-Werte ohne Faktor-100-Fehler."
     - "Recorder-Tests prüfen Kurz-/Langzeitstatistik, Idempotenz, unbeteiligte
@@ -3241,6 +3261,15 @@ requirement_vue_electricity_tariff:
     verändern weder Options noch Steuerflags. Fehler und Verbindungsabbrüche
     erhalten den lokalen Entwurf. Reines Anzeigen oder Wechseln des Diagrammtags
     verändert keine Gerätesteuerung.
+
+    Vor dem Speichern oder Wiederherstellen prüft bridge_configuration_error
+    die vollständigen aktiven Ziel-Options; der Dashboard-Coordinator prüft sie
+    erneut unter dem Control-Lock. Eine aktive verbrauchsbasierte Ladeplanung
+    ohne konfigurierte PV-Quelle wird mit bridge_pv_start_required abgelehnt,
+    ohne Profile, Preise oder Steuerflags zu ändern. Der TOU-Editor kennzeichnet
+    die Quelle als erforderlich und erklärt den Fehler in DE/EN bei erhaltenem
+    Entwurf. Die optionale dynamische PV-Quelle und archivierte TOU-Einstellungen
+    bleiben beim Wechsel zu Dynamisch unabhängig (Issue #244).
   acceptance_criteria:
     - "Backendtests decken Profilwechsel, aktive/inaktive Werte, Revisionskonflikte,
        Berechtigungen und vollständige Preisserien mit negativen Preisen, Lücken,
@@ -3253,6 +3282,9 @@ requirement_vue_electricity_tariff:
        heutige/morgige Preiskurven in DE/EN, hell/dunkel und auf schmalen Displays."
     - "Ladeentscheidung, aktuelle Preisanzeige und Amortisation verwenden denselben
        gültigen Bezugspreis; die zeitliche Buchung folgt REQ-ECONOMICS-ACCOUNTING."
+    - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver
+       Ladeplanung, vorhandene/fehlende Laufzeit, ausgeschalteten Hauptschalter,
+       Archiv-Restore, zulässigen Quellenwechsel und konkurrierende Optionsänderungen."
 
 # ==============================================================================
 # ANFORDERUNG: VUE-ERSPARNIS UND RECORDER-AUSWERTUNG

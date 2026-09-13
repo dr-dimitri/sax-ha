@@ -41,6 +41,17 @@ TARIFF_PROFILE_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
+def bridge_configuration_error(options: Mapping[str, Any]) -> str | None:
+    """REQ-BRIDGE-CHARGE: an enabled bridge must retain its configured source."""
+    if options.get(CONF_BRIDGE_CHARGE_ENABLED) is not True:
+        return None
+    if not options.get(CONF_PV_FORECAST_SENSOR):
+        return "bridge_pv_start_required"
+    if options.get(CONF_ECONOMICS_TARIFF_TYPE) != TariffType.TIME_OF_USE:
+        return "bridge_tariff_required"
+    return None
+
+
 def tariff_profiles_from_options(
     options: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:

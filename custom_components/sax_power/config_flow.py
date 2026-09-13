@@ -721,7 +721,20 @@ class SaxPowerOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
-            if user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
+            dashboard_enabled = user_input.get(
+                CONF_VUE_DASHBOARD_ENABLED,
+                self.config_entry.options.get(
+                    CONF_VUE_DASHBOARD_ENABLED,
+                    self.config_entry.data.get(
+                        CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
+                    ),
+                ),
+            )
+            if tariff_type is TariffType.TIME_OF_USE and not dashboard_enabled:
+                # REQ-VUE-TARIFF-EDITOR: Tarifpflege muss erreichbar bleiben,
+                # ohne die ausdrückliche Dashboard-Zustimmung zu ersetzen.
+                errors[CONF_VUE_DASHBOARD_ENABLED] = "economics_dashboard_required"
+            elif user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
                 CONF_PV_FORECAST_SENSOR
             ):
                 errors[CONF_PV_FORECAST_SENSOR] = "bridge_pv_start_required"
@@ -749,13 +762,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
                     self._base_options[CONF_DASHBOARD_TARIFF_PROFILES] = history
                 self._base_options[CONF_ECONOMICS_TARIFF_TYPE] = tariff_type.value
                 self._base_options.setdefault(
-                    CONF_VUE_DASHBOARD_ENABLED,
-                    self.config_entry.options.get(
-                        CONF_VUE_DASHBOARD_ENABLED,
-                        self.config_entry.data.get(
-                            CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED
-                        ),
-                    ),
+                    CONF_VUE_DASHBOARD_ENABLED, dashboard_enabled
                 )
                 return await self._async_step_for_tariff(tariff_type)
 

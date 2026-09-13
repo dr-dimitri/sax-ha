@@ -94,8 +94,8 @@ jobs:
             exit 1
           fi
 
-      - name: Chromium für die Dashboard-Abnahme installieren
-        run: npx playwright install --with-deps chromium
+      - name: Chromium und WebKit für die Dashboard-Abnahme installieren
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Alle Dashboard-Ansichten im Browser prüfen
         run: npm run test:browser

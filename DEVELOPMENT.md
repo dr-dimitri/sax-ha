@@ -241,14 +241,36 @@ bleiben in erweiterten Einstellungen erreichbar, ohne vorhandene Werte zu
 überschreiben. Ladeziel und Preis-/Stundenregler verwenden weiterhin die
 gemeinsamen HA-Entitäten.
 
+Die Preisprüfung benennt das tatsächlich betroffene Feld: fehlender/gelöschter
+Preissensor, nicht unterstützte Einheit, Einspeisevergütung, PV-Quelle,
+PV-Anteil oder Preisattribut. Sie markiert und fokussiert das Feld, öffnet
+bei Bedarf die erweiterten Einstellungen und erhält sämtliche Eingaben.
+Eine fehlende Einspeisevergütung wird nicht durch einen erfundenen Wert ersetzt;
+der Hinweis erklärt die bewusste Eingabe von 0 bei fehlender Vergütung.
+`tests/test_epex_price_source.py` sichert EPEX `€/kWh` mit
+`data[{start_time,end_time,price_per_kwh}]` sowie das ältere Cent-Format durch
+WebSocket-Speicherung, Preisplan, Tageskurve und gemeinsamen Bewertungspreis ab,
+auch bei negativen Preisen. Die bereits unterstützte Einheit wird nicht neu interpretiert.
+
+Der Zeitfenstereditor übernimmt native `change`-Ereignisse und liest beim
+Speichern die sichtbaren Zeitwerte, bevor er vollständige Zeiten und
+Überschneidungen prüft. Ein Zeitfehler benennt Fenster und Start-/Endfeld,
+markiert es mit `aria-invalid` und setzt den Fokus dorthin. Die Browserabnahme
+prüft 00:00–04:59 und 12:30–14:30 per Tastatur, auch während HA-Zustandsupdates,
+sowie getrennte Picker-/Submit-Übernahmen. Der Tarifeditor läuft in CI zusätzlich
+in WebKit; dessen erfolgreiche native Tastaturprüfung ist kein Nachweis für
+eine bestimmte Safari-Version auf einem anderen Gerät.
+
 Reines Umschalten von „Automatische Netzladung“ wird als validierte
 Softwareänderung unmittelbar bestätigt und zur Persistenz vorgemerkt.
 Dieser Weg wartet nicht auf `_charge_control_lock`, verändert keine
 Tarif-Options und startet keine Preisquelle neu. Der bestehende gemeinsame
 Worker setzt den jeweils aktuellen Steuerstand unter dem Lock um;
 Geräteaktivität wird weiterhin erst nach Gerätebestätigung gemeldet.
-Tatsächliche Tarif-/Quellenwechsel behalten den atomaren Abgleich unter
-dem Lock. Die Oberfläche markiert die ausstehende Schalterantwort sofort
+Auch tatsächliche Tarif-/Quellenwechsel werden ohne Geräte-Lock atomar angenommen.
+Eine Quellenrevision sperrt alte Ladesollwerte; der gemeinsame Worker übernimmt
+den sicheren Geräteübergang nach laufenden Quittierungssequenzen unter den
+Geräte-Locks. Die Oberfläche markiert die ausstehende Schalterantwort sofort
 und sperrt doppelte Aufrufe, ohne den bestätigten Zustand vorwegzunehmen.
 
 Die Reaktionsprüfung umfasst alle Aktionswege, nicht nur sichtbare Schalter:
@@ -258,7 +280,7 @@ Die Reaktionsprüfung umfasst alle Aktionswege, nicht nur sichtbare Schalter:
 | Ladefreigaben, SOC-/Preis-/Stundenwerte, Strategie, Monate, Zeitfenster | Sofortige Softwarebestätigung; gemeinsamer Geräte-Worker | `tests/test_control_response.py`, `tests/test_month_switch_response.py`, `tests/test_vue_dashboard_e2e.py` |
 | Automatische Netzladung im Tarifdashboard | Sofortige WebSocket-Antwort auch bei belegtem Geräte-Lock | `tests/test_dashboard_tariff_response.py` |
 | Verbrauchsplanung und Preisplan aktualisieren | Sofortige Bestätigung; Geräteauswertung nachgelagert | `tests/test_bridge_switch.py`, `tests/test_control_response.py`, `tests/test_vue_dashboard_e2e.py` |
-| Tarif-/Quellenwechsel und vollständige Profilübernahme | Sofortige Fortschrittsanzeige; atomarer Wechsel wartet auf den sicheren Übergang des periodischen Schreibers | `tests/test_electricity_tariff_control.py`, `frontend/browser/dynamic-tariff.spec.ts` |
+| Tarif-/Quellenwechsel und vollständige Profilübernahme | Sofortige Softwarebestätigung; Quellenrevision sperrt alte Ladesollwerte, Worker übernimmt den sicheren Geräteübergang | `tests/test_dashboard_tariff_transition_response.py`, `frontend/browser/dynamic-tariff.spec.ts` |
 | Speicher Ein/Aus, manuelles Laden Start/Stop | Sofortiger ausstehender Zustand; Erfolg erst nach Gerätequittierung | `frontend/tests/controls.test.ts`, `tests/test_coordinator.py` |
 | Bilanzneustart und Statistikabruf | Asynchrone lokale Speicherung bzw. Recorder-Lesen, kein Warten auf Geräte-Lock | `tests/test_economics_persistence.py`, `frontend/tests/savings.test.ts` |
 | Navigation, Details, Abbrechen, Diagrammtag und Monatsübersicht | Lokale UI-Aktion; nachgeladene Preise zeigen Fortschritt, ältere Antworten werden verworfen | `frontend/tests/panel.test.ts`, `frontend/tests/electricity-tariff.test.ts` |
@@ -268,6 +290,11 @@ Antworten, sofortige zugängliche Fortschrittsmeldungen, erhaltene Entwürfe und
 gesperrte doppelte Schreibaufträge. Ein neuer Statistikzeitraum darf einen
 laufenden Leseauftrag ersetzen; dessen verspätetes Ergebnis wird ignoriert.
 Diese Prüfung ist für neue oder geänderte Aktionswege in `AGENTS.md` verbindlich.
+Die Übergangstests halten zusätzlich beide Quittierungsphasen von Startsequenz
+und periodischem Writer an. Sie prüfen echte Profil-/Sensoränderungen,
+Rücksetzfehler mit erneutem Versuch und den Erhalt globaler SOC-Sperren.
+Ein manueller Ladebefehl bewertet bei einem gleichzeitigen Quellenwechsel den
+aktuellen Stand erneut, bevor er Erfolg nach Gerätebestätigung meldet.
 
 `TimeWindowControl.vue` ersetzt in den Ansichten Zeitvariabler Tarif und
 Netzdienliches Laden die getrennten Zeit-Bedienelemente. Es gibt genau zwei
@@ -613,10 +640,14 @@ mit ausschließlich aktuellem Sensorzustand liefert keine erfundene Tageskurve.
 `entry_id`, `revision`, die Ziel-`tariff_type`, optional ein vollständiges
 `profile` und optional `automation_enabled`. Ohne Profil wird das gespeicherte
 Zielprofil aktiviert; fehlende Pflichtdaten verhindern eine Netzladefreigabe.
-`async_apply_dashboard_tariff` prüft die Options nochmals unter dem Control-Lock,
-übernimmt Options und passende Freigabe gemeinsam und beendet alte periodische
-Writer bei einem Quellenwechsel. Der ausgeschaltete Hauptschalter erhält den
-Tarif; beim Start wird eine widersprüchliche alte Automatik ausgeschaltet.
+`async_apply_dashboard_tariff` prüft die aktuellen Options und übernimmt Options
+und passende Freigabe gemeinsam ohne asynchrone Unterbrechung oder Geräte-Lock.
+Bei einem Quellenwechsel verhindert eine Revision alte negative Sollwerte.
+Der gemeinsame Worker wartet eine laufende Modbussequenz unter dem Schreib-Lock
+ab und beendet danach alte periodische Writer. Eine inzwischen veraltete
+Start-/Schreibsequenz setzt kontrolliert zurück; Rücksetzfehler bleiben bis zum
+erfolgreichen erneuten Versuch vorgemerkt. Der ausgeschaltete Hauptschalter erhält
+den Tarif; beim Start wird eine widersprüchliche alte Automatik ausgeschaltet.
 Reine Profilarchive lösen keine Quellenrevision aus. Schreibzugriff erfordert
 einen aktiven Administrator; Revisionskonflikte erhalten den lokalen Entwurf.
 Die API-Bestätigung beschreibt angenommene Konfiguration, Geräteaktivität folgt
@@ -626,7 +657,7 @@ weiterhin erst auf die quittierte Steuersequenz.
 Eine eingeschaltete verbrauchsbasierte Ladeplanung erfordert weiterhin ihre
 PV-Quelle und `time_of_use` (Issue #244). `tariff/configure` prüft das auch beim
 Wiederherstellen eines archivierten Profils ohne explizites `profile`; der
-Coordinator wiederholt die Prüfung vor jeder Mutation unter dem Control-Lock.
+Coordinator wiederholt die Prüfung unmittelbar vor jeder atomaren Softwareänderung.
 Eine fehlende Quelle liefert `bridge_pv_start_required`, auch wenn die
 automatische Netzladung aus ist. Der Dashboardeditor erklärt die Voraussetzung
 und erhält den Entwurf. Erst nach bewusstem Abschalten der Ladeplanung darf

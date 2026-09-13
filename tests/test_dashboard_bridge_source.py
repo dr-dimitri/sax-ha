@@ -229,12 +229,13 @@ async def test_queued_request_cannot_undo_a_native_bridge_activation(
             expected_options=before,
         )
     )
-    await asyncio.sleep(0)
     latest = {**before, CONF_BRIDGE_CHARGE_ENABLED: True}
     hass.config_entries.async_update_entry(entry, options=latest)
-    coordinator._charge_control_lock.release()
-    with pytest.raises(ServiceValidationError) as error:
-        await request
+    try:
+        with pytest.raises(ServiceValidationError) as error:
+            await asyncio.wait_for(request, 0.2)
+    finally:
+        coordinator._charge_control_lock.release()
     assert error.value.translation_key == "dashboard_tariff_conflict"
     assert entry.options == latest
     assert entry.options[CONF_PV_FORECAST_SENSOR] == "sensor.pv"

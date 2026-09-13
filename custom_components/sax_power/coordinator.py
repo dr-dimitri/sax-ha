@@ -424,6 +424,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._charge_control_lock = asyncio.Lock()
         self._month_control_task: asyncio.Task[None] | None = None
         self._month_control_revision = 0
+        self._tariff_source_revision = 0
+        self._tariff_control_revision = 0
         self._shutdown_started = False
         self._shutdown_complete = False
         self._shutdown_task: asyncio.Task[Any] | None = None
@@ -3412,7 +3414,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Der Aufruf kehrt erst zurück, wenn die wirksame zentrale
                 # Entscheidung (manueller Sollwert oder höherrangige Max-SOC-
                 # Sperre) vom Gerät quittiert wurde.
-                await self._async_enforce_grid_charge_locked(self.data)
+                while True:
+                    self._raise_if_shutdown()
+                    if self._control_bootstrap_pending:
+                        raise HomeAssistantError(
+                            "Ladeeinstellungen werden noch geladen"
+                        )
+                    await self._async_enforce_grid_charge_locked(self.data)
+                    if self._tariff_control_revision == self._tariff_source_revision:
+                        break
+                    # REQ-MANUAL-GRID-CHARGE: Ein Tarifwechsel während der
+                    # Persistenz verwirft die alte Entscheidung. Der physische
+                    # Service muss ihren aktuellen Nachfolger selbst quittieren.
             except HomeAssistantError:
                 self._grid_charge_power = previous_power
                 raise
@@ -3573,6 +3586,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _check_timed_charge_write(self, power: int) -> None:
         """Late ACKs cannot authorize an expired plan or changed tariff window."""
+        if power < 0 and self._tariff_control_revision != self._tariff_source_revision:
+            raise HomeAssistantError("Tarifquelle während der Netzladung geändert")
         if (
             power < 0
             and self._timed_charge_source_config is not None
@@ -3639,6 +3654,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_write_extended_register(
                 REG_SUN_IC_POWER_SETPOINT_PCT, setpoint_raw
             )
+            # REQ-VUE-ELECTRICITY-TARIFF: Ein Quellenwechsel kann auch während
+            # des Sollwert-ACKs bestätigt werden. Der alte Auftrag endet dann
+            # mit demselben quittierten Rollback wie ein fehlgeschlagener Write.
+            self._check_timed_charge_write(requested_power)
         except HomeAssistantError as setpoint_error:
             try:
                 await self.async_write_extended_register(
@@ -3833,7 +3852,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             ),
                         )
                 await asyncio.sleep(interval)
-                if self._shutdown_started:
+                if (
+                    self._shutdown_started
+                    or self._tariff_control_revision != self._tariff_source_revision
+                ):
                     return
                 if self._active_charge_deadline() is not None:
                     async with self._charge_control_lock:
@@ -3976,17 +3998,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_apply_tariff_options(self, options: dict[str, Any]) -> None:
         """Apply a Config Flow change through the same owner as the dashboard."""
-        async with self._charge_control_lock:
-            self._raise_if_shutdown()
-            entry = self.hass.config_entries.async_get_entry(self.entry_id)
-            if entry is not None:
-                # A queued listener must not restore a snapshot superseded by
-                # another options save while the device lock was occupied.
-                options = dict(entry.options)
-            if self.options == options:
-                return
-            self._apply_tariff_options(options)
-            self._async_schedule_month_control_change()
+        self._raise_if_shutdown()
+        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        if entry is not None:
+            # An options listener may carry a snapshot superseded by a later save.
+            options = dict(entry.options)
+        if self.options == options:
+            return
+        self._apply_tariff_options(options)
+        self._async_schedule_month_control_change()
 
     def _apply_tariff_options(
         self, options: dict[str, Any], *, enabled: bool | None = None
@@ -4006,11 +4026,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.clear_control_field_unresolved("price_charge_enabled")
             self.async_dismiss_charge_conflict()
         if source_changed:
-            # No sleeping writer may repeat the previous tariff's setpoint.
-            # The common control task applies the new decision without releasing
-            # an unrelated global SOC hold through an intermediate mode reset.
-            if self._sun_charge_task is not None:
-                self._sun_charge_task.cancel()
+            # REQ-VUE-ELECTRICITY-TARIFF: Softwareannahme wartet nie auf Modbus.
+            # Die Revision sperrt alte Wiederholungen; erst der Geräteabgleich
+            # darf einen Writer nach Abschluss seiner ACK-Sequenz beenden.
+            self._tariff_source_revision += 1
             self.reconcile_charge_time_source()
             self.price_planner.async_setup()
             self.tariff_provider.async_setup()
@@ -4035,17 +4054,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         expected_options: dict[str, Any],
     ) -> None:
         """Commit tariff and automation ownership together, before publishing either."""
-        if not self._tariff_sources_changed(options):
-            # REQ-VUE-ELECTRICITY-TARIFF: Ohne geänderte Gerätequelle dürfen
-            # Schalter, Profilmigration und erneutes Speichern sofort antworten.
-            self._apply_dashboard_tariff_configuration(
-                options, enabled=enabled, expected_options=expected_options
-            )
-            return
-        async with self._charge_control_lock:
-            self._apply_dashboard_tariff_configuration(
-                options, enabled=enabled, expected_options=expected_options
-            )
+        self._apply_dashboard_tariff_configuration(
+            options, enabled=enabled, expected_options=expected_options
+        )
 
     def _apply_dashboard_tariff_configuration(
         self,
@@ -4076,8 +4087,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             previous_tariff_type=self.tariff_provider.config.tariff_type,
             enabled=enabled,
         )
-        # A native switch can change while a profile update waits for the lock;
-        # validate the actual inherited state, including legacy tariffs.
+        # Validate the actual inherited state, including legacy tariffs, in
+        # the same non-yielding acceptance step as the options revision.
         if any(controls) and (
             validate_tariff(target) is not None
             or target.tariff_type is TariffType.DYNAMIC
@@ -4092,6 +4103,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # a second control decision. Toggles do not notify options listeners.
             self.hass.config_entries.async_update_entry(entry, options=options)
         self._async_schedule_month_control_change()
+
+    async def _async_reconcile_tariff_writer(self) -> None:
+        """Drain a superseded writer under the control lock before a new decision."""
+        if self._tariff_control_revision == self._tariff_source_revision:
+            return
+        # REQ-VUE-ELECTRICITY-TARIFF: Cancel only outside an ACK sequence. Keep
+        # the write lock until the old task is gone so it cannot start another
+        # sequence between draining and cancellation. Re-evaluation preserves
+        # an unrelated SOC hold without an intermediate SmartMeter reset.
+        async with self._sun_charge_write_lock:
+            await self._async_cancel_sun_charge_task()
+            self._tariff_control_revision = self._tariff_source_revision
 
     def reconcile_charge_time_source(self) -> None:
         """Apply legacy overlap rules before an options change can resume charging."""
@@ -5088,6 +5111,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self._shutdown_started or self._control_bootstrap_pending:
             return
+        await self._async_reconcile_tariff_writer()
         now = dt_util.now()
         decision_tariff = self.tariff_provider.config
         timed_window_completed = (
@@ -5185,6 +5209,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_persist_timed_charge_state(
             timed_window_state if self._timed_charge_armed else None
         )
+        if self._tariff_control_revision != self._tariff_source_revision:
+            # REQ-VUE-ELECTRICITY-TARIFF: Die angenommene Änderung besitzt
+            # bereits einen Folgeabgleich. Diese alte Entscheidung darf weder
+            # einen neuen Sollwert schreiben noch eine globale SOC-Sperre
+            # durch einen zwischenzeitlichen Modus-0-Reset freigeben.
+            return
         if decision_tariff != self.tariff_provider.config:
             # Options may change while persistence awaits the filesystem.
             # A previous window's latch cannot authorize the new source.

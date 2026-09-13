@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import {
+  computed,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  useId,
+  watch,
+} from "vue";
 import EntityControl from "../components/EntityControl.vue";
 import EntityValue from "../components/EntityValue.vue";
 import MonthSelection from "../components/MonthSelection.vue";
@@ -72,7 +80,20 @@ const text = computed(() =>
           "100 % rechnet die gesamte Prognose an. Ein kleinerer Anteil plant vorsichtiger mit PV und kann mehr Netzladung erlauben. 0 % berücksichtigt keinen PV-Ertrag.",
         customSettings: "Gespeicherte Zusatzwerte",
         feedHint:
-          "Vergütung für eingespeisten Strom laut deinem Vertrag. Sie wird für die Ersparnisberechnung verwendet, nicht als Ladepreisgrenze.",
+          "Vergütung für eingespeisten Strom laut deinem Vertrag. Wenn du keine Vergütung erhältst, trage 0 ein. Sie wird für die Ersparnisberechnung verwendet, nicht als Ladepreisgrenze.",
+        missingPriceSensor: "Bitte einen Strompreis-Sensor auswählen.",
+        missingFeed:
+          "Bitte die Einspeisevergütung in ct/kWh eintragen. Wenn du keine Vergütung erhältst, trage 0 ein.",
+        invalidFeed:
+          "Bitte die Einspeisevergütung als Zahl von 0 bis 200 ct/kWh mit höchstens zwei Nachkommastellen eingeben.",
+        priceSensorMissing:
+          "Der gewählte Strompreis-Sensor wurde nicht gefunden. Bitte einen vorhandenen Sensor auswählen.",
+        unsupportedPriceUnit:
+          "Die Einheit der Preisquelle wird nicht unterstützt. Prüfe die Einheit am Sensor und wähle hier nur die dazu passende Einheit. Preise in anderen Währungen müssen zuerst in Euro umgerechnet werden.",
+        pvSensorMissing:
+          "Der gewählte PV-Prognose-Sensor wurde nicht gefunden. Bitte einen vorhandenen Sensor auswählen oder die optionale Auswahl löschen.",
+        invalidAttribute:
+          "Bitte einen Attributnamen mit höchstens 128 Zeichen eingeben oder das Feld für die automatische Erkennung leer lassen.",
         invalidPvFactor:
           "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
         charging: "Ladeverhalten",
@@ -97,7 +118,7 @@ const text = computed(() =>
           "Der Tarif wurde inzwischen geändert. Dein Entwurf bleibt erhalten. Lade die gespeicherten Einstellungen erneut.",
         reload: "Gespeicherte Einstellungen laden (Entwurf verwerfen)",
         invalid:
-          "Bitte Preisquelle und Preise prüfen: Einspeisung 0 bis 200 ct/kWh, PV-Anteil 0 bis 100 %.",
+          "Die Tarifeinstellungen sind ungültig. Bitte die Angaben im geöffneten Formular prüfen.",
         saved: "Einstellungen gespeichert.",
         tariffChanged:
           "Der aktive Tarif wurde an anderer Stelle gewechselt. Der bisherige Preisentwurf wurde geschlossen.",
@@ -166,7 +187,20 @@ const text = computed(() =>
           "100% accounts for the entire forecast. A smaller share plans more cautiously for solar production and may allow more grid charging. 0% ignores solar production.",
         customSettings: "Saved additional values",
         feedHint:
-          "The remuneration for exported electricity in your contract. It is used to calculate savings, not as a charging price cap.",
+          "The remuneration for exported electricity in your contract. Enter 0 if you receive no remuneration. It is used to calculate savings, not as a charging price cap.",
+        missingPriceSensor: "Please select an electricity price sensor.",
+        missingFeed:
+          "Please enter the feed-in remuneration in ct/kWh. Enter 0 if you receive no remuneration.",
+        invalidFeed:
+          "Enter a feed-in remuneration from 0 to 200 ct/kWh with at most two decimal places.",
+        priceSensorMissing:
+          "The selected electricity price sensor was not found. Please select an existing sensor.",
+        unsupportedPriceUnit:
+          "The price source unit is not supported. Check the sensor unit and select only the matching unit here. Prices in other currencies must be converted to euros first.",
+        pvSensorMissing:
+          "The selected PV forecast sensor was not found. Select an existing sensor or clear this optional selection.",
+        invalidAttribute:
+          "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
         invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
         charging: "Charging settings",
         details: "Charging plan & forecast",
@@ -190,7 +224,7 @@ const text = computed(() =>
           "The tariff has changed elsewhere. Your draft is preserved. Reload the saved settings.",
         reload: "Load saved settings (discard draft)",
         invalid:
-          "Check the price source and values: feed-in price 0 to 200 ct/kWh, PV share 0 to 100%.",
+          "The tariff settings are invalid. Please check the values in the open form.",
         saved: "Settings saved.",
         tariffChanged:
           "The active tariff was changed elsewhere. The previous price draft was closed.",
@@ -257,6 +291,15 @@ const series = ref<TariffPriceSeries | null>(null);
 const seriesLoading = ref(false);
 const day = ref<"today" | "tomorrow">("today");
 const error = ref<string | null>(null);
+type PriceErrorField =
+  | "price_sensor"
+  | "feed"
+  | "pv_sensor"
+  | "price_attribute"
+  | "price_unit"
+  | "pv_factor";
+const priceErrorField = ref<PriceErrorField | null>(null);
+const priceErrorId = useId();
 const conflict = ref(false);
 const pending = ref(false);
 const togglePending = ref<boolean | null>(null);
@@ -374,6 +417,20 @@ const dynamicSummary = computed(() => {
     : text.value.unset;
   return `${name} · ${text.value.feed} ${formatSavingsNumber(profile.value?.profiles?.dynamic.feed_in_price_ct_kwh, props.hass, 2) ?? "—"} ct/kWh`;
 });
+function showPriceError(field: PriceErrorField, message: string) {
+  error.value = message;
+  if (!priceEditing.value) return;
+  priceErrorField.value = field;
+  void nextTick(() => {
+    if (disposed) return;
+    const input = pricesEditor.value?.querySelector<HTMLElement>(
+      `[name="dynamic_${field}"]`,
+    );
+    const details = input?.closest("details");
+    if (details) details.open = true;
+    input?.focus();
+  });
+}
 function showError(cause: unknown) {
   if (disposed) return;
   const code =
@@ -381,6 +438,27 @@ function showError(cause: unknown) {
       ? String(cause.code)
       : "failed";
   conflict.value = code === "conflict";
+  priceErrorField.value = null;
+  const fieldErrors: Record<string, [PriceErrorField, string]> = {
+    price_sensor_not_configured: [
+      "price_sensor",
+      text.value.missingPriceSensor,
+    ],
+    price_sensor_missing: ["price_sensor", text.value.priceSensorMissing],
+    price_unit_unsupported: ["price_unit", text.value.unsupportedPriceUnit],
+    pv_sensor_missing: ["pv_sensor", text.value.pvSensorMissing],
+    invalid_price_attribute: ["price_attribute", text.value.invalidAttribute],
+    invalid_feed_in_price: [
+      "feed",
+      feed.value.trim() ? text.value.invalidFeed : text.value.missingFeed,
+    ],
+    invalid_pv_factor: ["pv_factor", text.value.invalidPvFactor],
+  };
+  const fieldError = fieldErrors[code];
+  if (fieldError) {
+    showPriceError(...fieldError);
+    return;
+  }
   error.value =
     code === "bridge_pv_start_required"
       ? text.value.bridgePvRequired
@@ -439,6 +517,7 @@ watch(active, (value, previous) => {
     touEditing.value = false;
     chargingOpen.value = false;
     error.value = null;
+    priceErrorField.value = null;
     conflict.value = false;
     externalTariffChange.value = true;
   }
@@ -524,6 +603,7 @@ async function openPrices() {
   pending.value = true;
   pendingOperation.value = "loading";
   error.value = null;
+  priceErrorField.value = null;
   changed.value = false;
   try {
     const latest = await dashboard.loadTariff();
@@ -558,14 +638,28 @@ async function openPrices() {
 function closePrices() {
   priceEditing.value = false;
   error.value = null;
+  priceErrorField.value = null;
   conflict.value = false;
   void nextTick(() => priceButton.value?.focus());
 }
 async function savePrices() {
   if (!dashboard || pending.value || conflict.value) return;
+  priceErrorField.value = null;
+  if (!draft.value.price_sensor) {
+    showPriceError("price_sensor", text.value.missingPriceSensor);
+    return;
+  }
+  if (!feed.value.trim()) {
+    showPriceError("feed", text.value.missingFeed);
+    return;
+  }
   const price = /^\d+(?:[.,]\d{1,2})?$/.test(feed.value.trim())
     ? Number(feed.value.trim().replace(",", "."))
     : NaN;
+  if (!Number.isFinite(price) || price < 0 || price > 200) {
+    showPriceError("feed", text.value.invalidFeed);
+    return;
+  }
   const factor = Number(pvFactor.value);
   if (
     String(pvFactor.value).trim() === "" ||
@@ -573,16 +667,7 @@ async function savePrices() {
     factor < 0 ||
     factor > 100
   ) {
-    error.value = text.value.invalidPvFactor;
-    return;
-  }
-  if (
-    !draft.value.price_sensor ||
-    !Number.isFinite(price) ||
-    price < 0 ||
-    price > 200
-  ) {
-    error.value = text.value.invalid;
+    showPriceError("pv_factor", text.value.invalidPvFactor);
     return;
   }
   pending.value = true;
@@ -620,6 +705,7 @@ async function reload() {
       priceEditing.value = false;
       changing.value = false;
       error.value = null;
+      priceErrorField.value = null;
       conflict.value = false;
     }
   } catch (cause) {
@@ -735,7 +821,13 @@ function closeCharging() {
       >
         {{ text[pendingOperation] }}
       </p>
-      <p v-if="error" role="alert" class="electricity-error">{{ error }}</p>
+      <p
+        v-if="error && !priceErrorField"
+        role="alert"
+        class="electricity-error"
+      >
+        {{ error }}
+      </p>
       <button
         v-if="conflict"
         type="button"
@@ -837,6 +929,14 @@ function closeCharging() {
         novalidate
         @submit.prevent="savePrices"
       >
+        <p
+          v-if="error && priceErrorField"
+          :id="priceErrorId"
+          role="alert"
+          class="electricity-error"
+        >
+          {{ error }}
+        </p>
         <fieldset :disabled="pending || !connected">
           <p class="electricity-muted">{{ text.priceHint }}</p>
           <div class="electricity-fields">
@@ -844,6 +944,11 @@ function closeCharging() {
               v-model="draft.price_sensor"
               :hass="hass"
               :label="text.source"
+              name="dynamic_price_sensor"
+              :invalid="priceErrorField === 'price_sensor'"
+              :described-by="
+                priceErrorField === 'price_sensor' ? priceErrorId : undefined
+              "
             />
             <label
               >{{ text.feed }} (ct/kWh)<input
@@ -852,6 +957,11 @@ function closeCharging() {
                 inputmode="decimal"
                 name="dynamic_feed"
                 autocomplete="off"
+                required
+                :aria-invalid="priceErrorField === 'feed' || undefined"
+                :aria-describedby="
+                  priceErrorField === 'feed' ? priceErrorId : undefined
+                "
             /></label>
           </div>
           <p class="electricity-muted">{{ text.sourceHint }}</p>
@@ -861,6 +971,11 @@ function closeCharging() {
               v-model="draft.pv_sensor"
               :hass="hass"
               :label="text.pv"
+              name="dynamic_pv_sensor"
+              :invalid="priceErrorField === 'pv_sensor'"
+              :described-by="
+                priceErrorField === 'pv_sensor' ? priceErrorId : undefined
+              "
             />
           </div>
           <p class="electricity-muted">{{ text.pvHint }}</p>
@@ -878,12 +993,28 @@ function closeCharging() {
                 >{{ text.attribute
                 }}<input
                   v-model="draft.price_attribute"
+                  name="dynamic_price_attribute"
                   type="text"
                   autocomplete="off"
+                  :aria-invalid="
+                    priceErrorField === 'price_attribute' || undefined
+                  "
+                  :aria-describedby="
+                    priceErrorField === 'price_attribute'
+                      ? priceErrorId
+                      : undefined
+                  "
               /></label>
               <label
                 >{{ text.unit
-                }}<select v-model="draft.price_unit">
+                }}<select
+                  v-model="draft.price_unit"
+                  name="dynamic_price_unit"
+                  :aria-invalid="priceErrorField === 'price_unit' || undefined"
+                  :aria-describedby="
+                    priceErrorField === 'price_unit' ? priceErrorId : undefined
+                  "
+                >
                   <option
                     v-for="(label, value) in text.units"
                     :key="value"
@@ -906,6 +1037,10 @@ function closeCharging() {
                   min="0"
                   max="100"
                   step="1"
+                  :aria-invalid="priceErrorField === 'pv_factor' || undefined"
+                  :aria-describedby="
+                    priceErrorField === 'pv_factor' ? priceErrorId : undefined
+                  "
               /></label>
             </div>
             <p class="electricity-muted">{{ text.pvFactorHint }}</p>
@@ -1180,6 +1315,10 @@ function closeCharging() {
 }
 .electricity-error {
   color: var(--error-color, #db4437);
+}
+.electricity-price-editor [aria-invalid="true"] {
+  border-color: var(--error-color, #db4437);
+  outline: 1px solid var(--error-color, #db4437);
 }
 .electricity-fields {
   display: grid;

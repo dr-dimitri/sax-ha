@@ -1,5 +1,114 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { HomeAssistant, TariffProfile } from "../src/types";
+
+async function enterNativeTime(
+  page: Page,
+  field: Locator,
+  time: string,
+  browserName: string,
+) {
+  const [hour, minute] = time.split(":");
+  await field.click({ position: { x: 12, y: 20 } });
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type(
+    browserName === "chromium" ? String(Number(hour) % 12 || 12) : hour,
+  );
+  // A live HA update must preserve a partly entered native time segment.
+  await page.evaluate(() => {
+    const panel = document.querySelector(
+      "sax-power-vue-panel",
+    ) as HTMLElement & {
+      hass: HomeAssistant;
+    };
+    const id = "sensor.demo_soc";
+    panel.hass = {
+      ...panel.hass,
+      states: {
+        ...panel.hass.states,
+        [id]: { ...panel.hass.states[id], state: "64" },
+      },
+    };
+  });
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press(browserName === "webkit" ? "Tab" : "ArrowRight");
+  await page.keyboard.type(minute);
+  if (browserName === "chromium") {
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press(Number(hour) < 12 ? "a" : "p");
+  }
+  await expect(field).toHaveValue(time);
+}
+
+test("two separate low tariffs accept native keyboard entry while HA states update", async ({
+  page,
+  browserName,
+}) => {
+  await page.goto("/sax-power-vue/stromtarif");
+  const tariff = page.locator("sax-power-vue-panel .tariff-plan");
+  await tariff.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+  while (await tariff.locator(".tariff-plan__window").count())
+    await tariff.locator(".tariff-plan__remove").last().click();
+  for (const [start, end] of [
+    ["00:00", "04:59"],
+    ["12:30", "14:30"],
+  ]) {
+    await tariff
+      .getByRole("button", { name: "+ Zeitfenster hinzufügen", exact: true })
+      .click();
+    const row = tariff.locator(".tariff-plan__window").last();
+    const fields = row.locator('input[type="time"]');
+    await enterNativeTime(page, fields.nth(0), start, browserName);
+    await enterNativeTime(page, fields.nth(1), end, browserName);
+    await row.locator('input[type="text"]').fill("18");
+  }
+  await tariff.getByRole("button", { name: "Speichern", exact: true }).click();
+  await expect(tariff.locator("form")).toHaveCount(0);
+  await expect(tariff.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator("#actions")).toContainText(
+    '"start":"00:00:00","end":"04:59:00"',
+  );
+  await expect(page.locator("#actions")).toContainText(
+    '"start":"12:30:00","end":"14:30:00"',
+  );
+});
+
+for (const notification of ["change", "submit"] as const) {
+  // Explicitly simulate a picker that commits its DOM value without an input event.
+  // Native WebKit keyboard input is independently covered above.
+  test(`time values committed through ${notification} are saved from the visible fields`, async ({
+    page,
+  }) => {
+    await page.goto("/sax-power-vue/stromtarif");
+    const tariff = page.locator("sax-power-vue-panel .tariff-plan");
+    await tariff
+      .getByRole("button", { name: "Bearbeiten", exact: true })
+      .click();
+    await tariff.locator(".tariff-plan__remove").last().click();
+    await tariff.locator('input[type="time"]').nth(1).fill("04:59");
+    await tariff
+      .getByRole("button", { name: "+ Zeitfenster hinzufügen", exact: true })
+      .click();
+    const row = tariff.locator(".tariff-plan__window").last();
+    await row.locator('input[type="text"]').fill("18");
+    await row.locator('input[type="time"]').evaluateAll((fields, event) => {
+      for (const [index, field] of fields.entries()) {
+        (field as HTMLInputElement).value = ["12:30", "14:30"][index];
+        if (event === "change")
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }, notification);
+    await expect(row.locator('input[type="time"]').nth(0)).toHaveValue("12:30");
+    await expect(row.locator('input[type="time"]').nth(1)).toHaveValue("14:30");
+    await tariff
+      .getByRole("button", { name: "Speichern", exact: true })
+      .click();
+    await expect(tariff.locator("form")).toHaveCount(0);
+    await expect(tariff.getByRole("alert")).toHaveCount(0);
+    await expect(page.locator("#actions")).toContainText(
+      '"start":"12:30:00","end":"14:30:00"',
+    );
+  });
+}
 
 // REQ-VUE-TARIFF-EDITOR: exercise the bundled UI against the simulated HA API.
 test("tariff editor saves cents explicitly and remains compact after editing on desktop and mobile", async ({

@@ -46,8 +46,9 @@ const text = computed(() =>
           "Trage zuerst Standardpreis und Einspeisevergütung ein. Nebentarife kannst du bei Bedarf als Zeitfenster ergänzen.",
         priceError:
           "Bitte Preise mit höchstens zwei Nachkommastellen eingeben: Standardpreis und Zeitfenster von −200 bis 500 ct/kWh, Einspeisevergütung von 0 bis 200 ct/kWh.",
-        timeError:
-          "Bitte gültige Start- und Endzeiten eingeben. Start und Ende müssen verschieden sein.",
+        startError: "Bitte eine vollständige Startzeit eingeben (z. B. 12:30).",
+        endError: "Bitte eine vollständige Endzeit eingeben (z. B. 14:30).",
+        equalTimeError: "Start und Ende müssen verschieden sein.",
         overlap: "Die Zeitfenster überschneiden sich. Bitte die Zeiten prüfen.",
         disconnected:
           "Keine Verbindung zu Home Assistant. Dein Entwurf bleibt erhalten.",
@@ -58,6 +59,8 @@ const text = computed(() =>
         reload: "Gespeicherten Tarif laden (Entwurf verwerfen)",
         bridgePvRequired:
           "Die PV-Start-Quelle wird für die aktive verbrauchsbasierte Ladung benötigt. Wähle eine Quelle oder schalte diese Ladeplanung zuerst aus.",
+        pvMissing:
+          "Der gewählte PV-Start-Sensor wurde nicht gefunden. Wähle einen vorhandenen Sensor oder entferne die Auswahl, wenn die Quelle optional ist.",
         failed:
           "Der Tarif konnte nicht geladen oder gespeichert werden. Bitte erneut versuchen.",
         invalid:
@@ -106,8 +109,9 @@ const text = computed(() =>
           "Start with the standard price and feed-in remuneration. Add time windows for other rates as needed.",
         priceError:
           "Enter prices with up to two decimal places: standard price and windows from −200 to 500 ct/kWh, feed-in remuneration from 0 to 200 ct/kWh.",
-        timeError:
-          "Enter valid start and end times. Start and end must differ.",
+        startError: "Enter a complete start time (e.g. 12:30).",
+        endError: "Enter a complete end time (e.g. 14:30).",
+        equalTimeError: "Start and end must differ.",
         overlap: "The time windows overlap. Please check the times.",
         disconnected:
           "Disconnected from Home Assistant. Your draft is preserved.",
@@ -118,6 +122,8 @@ const text = computed(() =>
         reload: "Load saved tariff (discard draft)",
         bridgePvRequired:
           "The active consumption-based charging plan requires a PV start source. Choose a source or turn off this charging plan first.",
+        pvMissing:
+          "The selected PV start sensor was not found. Choose an existing sensor or clear the selection if this source is optional.",
         failed: "The tariff could not be loaded or saved. Please try again.",
         invalid:
           "The tariff was not saved. Please check prices and time windows.",
@@ -374,14 +380,40 @@ const draftWindows = ref<
 >([]);
 let windowKey = 0;
 const error = ref<string | null>(null);
+const timeError = ref<{
+  key: number;
+  field: "start" | "end";
+  reason: "startError" | "endError" | "equalTimeError";
+} | null>(null);
 const conflict = ref(false);
 const saved = ref(false);
 const connectionAvailable = computed(
   () => dashboard?.connected.value === true && dashboard.ready.value,
 );
-const errorMessage = computed(() =>
-  error.value ? text.value[error.value as "failed"] : null,
-);
+const errorMessage = computed(() => {
+  if (error.value === "timeError" && timeError.value) {
+    const index = draftWindows.value.findIndex(
+      (window) => window.key === timeError.value!.key,
+    );
+    return `${text.value.window} ${index + 1}: ${text.value[timeError.value.reason]}`;
+  }
+  return error.value ? text.value[error.value as "failed"] : null;
+});
+function timeInput(key: number, field: "start" | "end") {
+  return editor.value?.querySelector<HTMLInputElement>(
+    `[name="window_${key}_${field}"]`,
+  );
+}
+function changeTime(key: number, field: "start" | "end", event: Event) {
+  const window = draftWindows.value.find((window) => window.key === key);
+  if (window) window[field] = (event.target as HTMLInputElement).value;
+  clearTimeError(key);
+}
+function clearTimeError(key?: number) {
+  if (key !== undefined && timeError.value?.key !== key) return;
+  timeError.value = null;
+  if (error.value === "timeError") error.value = null;
+}
 function reportError(cause: unknown) {
   if (disposed) return;
   const code =
@@ -392,11 +424,13 @@ function reportError(cause: unknown) {
   error.value =
     code === "bridge_pv_start_required"
       ? "bridgePvRequired"
-      : code === "invalid_tariff" || code === "invalid_format"
-        ? "invalid"
-        : ["conflict", "disconnected", "forbidden"].includes(String(code))
-          ? String(code)
-          : "failed";
+      : code === "pv_sensor_missing"
+        ? "pvMissing"
+        : code === "invalid_tariff" || code === "invalid_format"
+          ? "invalid"
+          : ["conflict", "disconnected", "forbidden"].includes(String(code))
+            ? String(code)
+            : "failed";
 }
 function inputPrice(value: number | null) {
   return value === null
@@ -410,6 +444,7 @@ async function openEditor() {
   pendingAction.value = "loading";
   pending.value = true;
   error.value = null;
+  clearTimeError();
   saved.value = false;
   try {
     const result = await dashboard.loadTariff();
@@ -440,6 +475,7 @@ async function openEditor() {
 function cancel() {
   editing.value = false;
   error.value = null;
+  clearTimeError();
   conflict.value = false;
   draftWindows.value = [];
   void nextTick(() => editButton.value?.focus());
@@ -452,6 +488,7 @@ async function addWindow() {
     ?.focus();
 }
 async function removeWindow(index: number) {
+  clearTimeError(draftWindows.value[index]?.key);
   draftWindows.value.splice(index, 1);
   await nextTick();
   const windows = editor.value?.querySelectorAll<HTMLElement>(
@@ -478,6 +515,14 @@ function timeSeconds(value: string): number | null {
 async function save() {
   if (!dashboard || !profile.value || pending.value || conflict.value) return;
   error.value = null;
+  clearTimeError();
+  // REQ-VUE-TARIFF-EDITOR: native pickers can commit independently of Vue's input event.
+  for (const window of draftWindows.value) {
+    for (const field of ["start", "end"] as const) {
+      const input = timeInput(window.key, field);
+      if (input) window[field] = input.value;
+    }
+  }
   const base = parsePrice(baseInput.value, -200, 500);
   const feed = parsePrice(feedInput.value, 0, 200);
   const windows = draftWindows.value.map((window) => ({
@@ -497,7 +542,20 @@ async function save() {
     const start = timeSeconds(window.start);
     const end = timeSeconds(window.end);
     if (start === null || end === null || start === end) {
+      const field = start === null ? "start" : "end";
+      timeError.value = {
+        key: window.key,
+        field,
+        reason:
+          start === null
+            ? "startError"
+            : end === null
+              ? "endError"
+              : "equalTimeError",
+      };
       error.value = "timeError";
+      await nextTick();
+      timeInput(window.key, field)?.focus();
       return;
     }
     segments.push(
@@ -598,7 +656,12 @@ watch(tariffVisible, (visible) => {
       {{ tariffPrice(attributes.feed_in_price_eur_kwh) }}
     </p>
     <p v-if="saved" role="status">{{ text.saved }}</p>
-    <p v-if="errorMessage" role="alert" class="tariff-plan__error">
+    <p
+      v-if="errorMessage"
+      :id="`${id}-error`"
+      role="alert"
+      class="tariff-plan__error"
+    >
       {{ errorMessage }}
     </p>
     <form
@@ -651,7 +714,18 @@ watch(tariffVisible, (visible) => {
             >{{ text.from
             }}<input
               v-model="window.start"
+              :name="`window_${window.key}_start`"
               type="time"
+              :aria-invalid="
+                timeError?.key === window.key && timeError.field === 'start'
+              "
+              :aria-describedby="
+                timeError?.key === window.key && timeError.field === 'start'
+                  ? `${id}-error`
+                  : undefined
+              "
+              @input="clearTimeError(window.key)"
+              @change="changeTime(window.key, 'start', $event)"
               :step="
                 (window.start.slice(-2) !== '00' &&
                   window.start.length === 8) ||
@@ -665,7 +739,18 @@ watch(tariffVisible, (visible) => {
             >{{ text.to
             }}<input
               v-model="window.end"
+              :name="`window_${window.key}_end`"
               type="time"
+              :aria-invalid="
+                timeError?.key === window.key && timeError.field === 'end'
+              "
+              :aria-describedby="
+                timeError?.key === window.key && timeError.field === 'end'
+                  ? `${id}-error`
+                  : undefined
+              "
+              @input="clearTimeError(window.key)"
+              @change="changeTime(window.key, 'end', $event)"
               :step="
                 (window.start.slice(-2) !== '00' &&
                   window.start.length === 8) ||
@@ -962,6 +1047,9 @@ watch(tariffVisible, (visible) => {
 }
 .tariff-plan__error {
   color: var(--error-color, #db4437);
+}
+.tariff-plan input[aria-invalid="true"] {
+  border-color: var(--error-color, #db4437);
 }
 .tariff-plan__details {
   margin-top: 14px;

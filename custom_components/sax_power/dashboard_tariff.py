@@ -67,6 +67,14 @@ _ENTRY_ID_SCHEMA = vol.All(str, vol.Length(min=1, max=128))
 _TIME_PATTERN = re.compile(r"\A\d{2}:\d{2}(?::\d{2})?\Z")
 
 
+class _TariffFieldError(ValueError):
+    """REQ-VUE-ELECTRICITY-TARIFF: identify the input that needs correction."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class _Window(TypedDict):
     start: str
     end: str
@@ -356,10 +364,13 @@ def websocket_save_tariff(
 def _sensor(hass: HomeAssistant, value: Any, *, optional: bool = False) -> str | None:
     if optional and value in (None, ""):
         return None
+    if not optional and value in (None, ""):
+        raise _TariffFieldError("price_sensor_not_configured", "Select a price sensor")
+    code = "pv_sensor_missing" if optional else "price_sensor_missing"
     if not isinstance(value, str) or not re.fullmatch(r"sensor\.[a-z0-9_]+", value):
-        raise ValueError("Select a sensor entity")
+        raise _TariffFieldError(code, "Select a sensor entity")
     if hass.states.get(value) is None and er.async_get(hass).async_get(value) is None:
-        raise ValueError("The sensor entity does not exist")
+        raise _TariffFieldError(code, "The sensor entity does not exist")
     return value
 
 
@@ -397,19 +408,22 @@ def _configuration_profile(
     sensor = _sensor(hass, submitted["price_sensor"])
     unit = submitted["price_unit"]
     if not isinstance(unit, str) or unit not in PRICE_UNITS:
-        raise ValueError("Unsupported price unit")
+        raise _TariffFieldError("price_unit_unsupported", "Unsupported price unit")
     sensor_state = hass.states.get(sensor)
     if (
         sensor_state is not None
         and unit_factor(unit, sensor_state.attributes.get("unit_of_measurement"))
         is None
     ):
-        raise ValueError("The sensor does not report a supported price unit")
+        raise _TariffFieldError(
+            "price_unit_unsupported",
+            "The sensor does not report a supported price unit",
+        )
     attribute = submitted["price_attribute"]
     if attribute is not None and (
         not isinstance(attribute, str) or len(attribute) > 128
     ):
-        raise ValueError("Invalid forecast attribute")
+        raise _TariffFieldError("invalid_price_attribute", "Invalid forecast attribute")
     factor = submitted["pv_factor"]
     if (
         isinstance(factor, bool)
@@ -417,13 +431,19 @@ def _configuration_profile(
         or not 0 <= factor <= 100
         or not float(factor).is_integer()
     ):
-        raise ValueError("PV factor must be a whole percentage from 0 to 100")
-    return {
-        CONF_ECONOMICS_FEED_IN_PRICE: _price(
+        raise _TariffFieldError(
+            "invalid_pv_factor", "PV factor must be a whole percentage from 0 to 100"
+        )
+    try:
+        feed_in_price = _price(
             submitted["feed_in_price_ct_kwh"],
             MIN_ECONOMICS_FEED_IN_PRICE,
             MAX_ECONOMICS_FEED_IN_PRICE,
-        ),
+        )
+    except ValueError as err:
+        raise _TariffFieldError("invalid_feed_in_price", str(err)) from err
+    return {
+        CONF_ECONOMICS_FEED_IN_PRICE: feed_in_price,
         CONF_PRICE_SENSOR: sensor,
         CONF_PRICE_UNIT: unit,
         CONF_PRICE_ATTRIBUTE: (
@@ -489,6 +509,9 @@ async def websocket_configure_tariff(
                 CONF_PRICE_SENSOR
             ):
                 raise ValueError("Select a price sensor before enabling charging")
+    except _TariffFieldError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
     except (ValueError, OverflowError) as err:
         connection.send_error(msg["id"], "invalid_tariff", str(err))
         return

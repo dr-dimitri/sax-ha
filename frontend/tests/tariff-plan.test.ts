@@ -651,6 +651,81 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       { start: "06:00:15", end: "08:00:00", price_ct_kwh: 22 },
     ]);
   });
+  it.each(["change", "submit"])(
+    "saves the visible midnight and midday windows after native %s commits",
+    async (commit) => {
+      const fixture = await mount({ profile: { windows: [] } });
+      const plan = fixture.plans()[0]!;
+      await click(plan, "Bearbeiten");
+      for (let index = 0; index < 2; index++) {
+        await click(plan, "+ Zeitfenster hinzufügen");
+        const row = [
+          ...plan.querySelectorAll<HTMLElement>(".tariff-plan__window"),
+        ].at(-1)!;
+        await fill(row, 'input[type="text"]', "18,50");
+      }
+      const inputs =
+        plan.querySelectorAll<HTMLInputElement>('input[type="time"]');
+      for (const [index, value] of [
+        "00:00",
+        "04:59",
+        "12:30",
+        "14:30",
+      ].entries()) {
+        inputs[index]!.value = value;
+        if (commit === "change")
+          inputs[index]!.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await click(plan, "Speichern");
+      expect(plan.querySelector('[role="alert"]')).toBeNull();
+      expect(saves(fixture)[0]?.[0].windows).toEqual([
+        { start: "00:00:00", end: "04:59:00", price_ct_kwh: 18.5 },
+        { start: "12:30:00", end: "14:30:00", price_ct_kwh: 18.5 },
+      ]);
+    },
+  );
+  it.each([
+    ["de", "start", "Zeitfenster 2", "Startzeit"],
+    ["de", "end", "Zeitfenster 2", "Endzeit"],
+    ["en", "start", "Time window 2", "start time"],
+    ["en", "end", "Time window 2", "end time"],
+  ])(
+    "identifies and focuses the incomplete %s %s field, preserving both drafts",
+    async (language, field, windowLabel, fieldLabel) => {
+      const fixture = await mount({
+        language,
+        windows: [
+          { start: "00:00:00", end: "04:59:00", price_eur_kwh: 0.18 },
+          { start: "12:30:00", end: "14:30:00", price_eur_kwh: 0.18 },
+        ],
+      });
+      const plan = fixture.plans()[0]!;
+      await click(plan, language === "de" ? "Bearbeiten" : "Edit");
+      const row = plan.querySelectorAll<HTMLElement>(
+        ".tariff-plan__window",
+      )[1]!;
+      const input = row.querySelector<HTMLInputElement>(
+        `input[name$="_${field}"]`,
+      )!;
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await click(plan, language === "de" ? "Speichern" : "Save");
+      const alert = plan.querySelector('[role="alert"]')!;
+      expect(alert.textContent).toContain(windowLabel);
+      expect(alert.textContent).toContain(fieldLabel);
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      expect(input.getAttribute("aria-describedby")).toBe(alert.id);
+      expect(document.activeElement).toBe(input);
+      expect(plan.querySelectorAll(".tariff-plan__window")).toHaveLength(2);
+      expect(saves(fixture)).toHaveLength(0);
+      input.value = field === "start" ? "12:30" : "14:30";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      expect(plan.querySelector('[role="alert"]')).toBeNull();
+      await click(plan, language === "de" ? "Speichern" : "Save");
+      expect(saves(fixture)).toHaveLength(1);
+    },
+  );
   it("supports an empty initial profile, optional new windows and removal up to the eight-window limit", async () => {
     const fixture = await mount({
       profile: {
@@ -704,6 +779,26 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
           plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
         ).toBe("35,00");
       }
+    },
+  );
+  it.each(["de", "en"])(
+    "explains a missing PV source in %s and retains the tariff draft",
+    async (language) => {
+      const fixture = await mount({ language });
+      const plan = fixture.plans()[0]!;
+      await click(plan, language === "de" ? "Bearbeiten" : "Edit");
+      await fill(plan, '[name="base_price"]', "32");
+      fixture.callWS.mockRejectedValueOnce({ code: "pv_sensor_missing" });
+      await click(plan, language === "de" ? "Speichern" : "Save");
+      expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
+        language === "de"
+          ? "PV-Start-Sensor wurde nicht gefunden"
+          : "PV start sensor was not found",
+      );
+      expect(
+        plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
+      ).toBe("32");
+      expect(plan.querySelectorAll(".tariff-plan__window")).toHaveLength(2);
     },
   );
   it("preserves a pending draft when disconnected and allows retry only after reconnect", async () => {

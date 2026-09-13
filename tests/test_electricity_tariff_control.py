@@ -141,7 +141,8 @@ async def test_queued_options_listener_uses_latest_entry(
     stale = _options("dynamic")
     newest = {**_options("time_of_use"), "economics_tou_base_price_eur_kwh": 0.45}
     hass.config_entries.async_update_entry(entry, options=newest)
-    await coordinator.async_apply_tariff_options(stale)
+    async with coordinator._charge_control_lock:
+        await asyncio.wait_for(coordinator.async_apply_tariff_options(stale), 0.2)
     assert coordinator.options == newest
     assert coordinator.tariff_provider.quote().price_eur_kwh == pytest.approx(0.45)
 
@@ -172,7 +173,7 @@ async def test_incomplete_target_cannot_inherit_an_enabled_legacy_control(
     assert not coordinator.price_charge_enabled
 
 
-async def test_native_master_change_while_waiting_revalidates_incomplete_target(
+async def test_native_master_change_before_acceptance_revalidates_incomplete_target(
     tariff_coordinator,
 ) -> None:
     coordinator, entry = tariff_coordinator
@@ -184,11 +185,12 @@ async def test_native_master_change_while_waiting_revalidates_incomplete_target(
             expected_options=dict(entry.options),
         )
     )
-    await asyncio.sleep(0)
     coordinator._timed_charge_enabled = True
-    coordinator._charge_control_lock.release()
-    with pytest.raises(ServiceValidationError, match="vollständig"):
-        await request
+    try:
+        with pytest.raises(ServiceValidationError, match="vollständig"):
+            await asyncio.wait_for(request, 0.2)
+    finally:
+        coordinator._charge_control_lock.release()
     assert entry.options["economics_tariff_type"] == "time_of_use"
     assert coordinator.timed_charge_enabled
     assert not coordinator.price_charge_enabled
@@ -225,15 +227,23 @@ async def test_bootstrap_drops_mismatched_legacy_switch_without_starting_another
     assert not coordinator.price_charge_enabled
 
 
-async def test_tariff_change_cancels_old_periodic_writer(tariff_coordinator) -> None:
+async def test_tariff_change_cancels_old_writer_only_during_device_reconciliation(
+    tariff_coordinator,
+) -> None:
     coordinator, entry = tariff_coordinator
+    coordinator._async_enforce_grid_charge_locked = (
+        SaxPowerCoordinator._async_enforce_grid_charge_locked.__get__(coordinator)
+    )
     writer = asyncio.create_task(asyncio.sleep(3600))
     coordinator._sun_charge_task = writer
-    await coordinator.async_apply_dashboard_tariff(
-        _options("dynamic"), enabled=False, expected_options=dict(entry.options)
-    )
-    with pytest.raises(asyncio.CancelledError):
-        await writer
+    async with coordinator._charge_control_lock:
+        await coordinator.async_apply_dashboard_tariff(
+            _options("dynamic"), enabled=False, expected_options=dict(entry.options)
+        )
+        assert not writer.cancelling()
+        task = coordinator._month_control_task
+    await asyncio.wait_for(task, 1)
+    assert writer.cancelled()
 
 
 async def test_bootstrap_cannot_accept_a_partial_dashboard_configuration(

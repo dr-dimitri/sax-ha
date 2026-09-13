@@ -116,20 +116,21 @@ async def test_switch_restores_inactive_tariff_and_its_distinct_pv_source(
 
 
 @pytest.mark.parametrize(
-    "changes",
+    ("changes", "error"),
     [
-        {"price_sensor": "switch.bad"},
-        {"price_sensor": "sensor.missing"},
-        {"price_unit": "bogus"},
-        {"price_unit": False},
-        {"pv_factor": "NaN"},
-        {"pv_factor": 70.5},
-        {"pv_factor": True},
-        {"pv_factor": 101},
-        {"pv_sensor": "sensor.missing"},
-        {"price_attribute": []},
-        {"price_attribute": "x" * 129},
-        {"feed_in_price_ct_kwh": -1},
+        ({"price_sensor": None}, "price_sensor_not_configured"),
+        ({"price_sensor": "switch.bad"}, "price_sensor_missing"),
+        ({"price_sensor": "sensor.missing"}, "price_sensor_missing"),
+        ({"price_unit": "bogus"}, "price_unit_unsupported"),
+        ({"price_unit": False}, "price_unit_unsupported"),
+        ({"pv_factor": "NaN"}, "invalid_pv_factor"),
+        ({"pv_factor": 70.5}, "invalid_pv_factor"),
+        ({"pv_factor": True}, "invalid_pv_factor"),
+        ({"pv_factor": 101}, "invalid_pv_factor"),
+        ({"pv_sensor": "sensor.missing"}, "pv_sensor_missing"),
+        ({"price_attribute": []}, "invalid_price_attribute"),
+        ({"price_attribute": "x" * 129}, "invalid_price_attribute"),
+        ({"feed_in_price_ct_kwh": -1}, "invalid_feed_in_price"),
     ],
 )
 async def test_invalid_configuration_leaves_all_profiles_unchanged(
@@ -137,6 +138,7 @@ async def test_invalid_configuration_leaves_all_profiles_unchanged(
     hass_ws_client: WebSocketGenerator,
     entry: MockConfigEntry,
     changes: dict[str, Any],
+    error: str,
 ) -> None:
     client = await hass_ws_client(hass)
     current = await _get(client, entry)
@@ -150,7 +152,7 @@ async def test_invalid_configuration_leaves_all_profiles_unchanged(
             "profile": dynamic_profile(**changes),
         }
     )
-    assert (await client.receive_json())["error"]["code"] == "invalid_tariff"
+    assert (await client.receive_json())["error"]["code"] == error
     assert entry.options == before
 
 

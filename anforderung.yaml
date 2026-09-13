@@ -3114,6 +3114,14 @@ requirement_vue_tariff_editor:
     der gemeinsame Options-Lifecycle bilden weiterhin die einzige aktive Tarifquelle
     und übernehmen Änderungen ohne Config-Entry-Reload in den Coordinator.
 
+    Beim Speichern liest der Editor die sichtbaren nativen Zeitfelder; auch
+    separat bestätigte Pickerwerte werden übernommen. Unvollständige Zeiten
+    und gleiche Grenzen benennen das betroffene Fenster und Feld, markieren
+    es zugänglich und setzen den Fokus dorthin. Der Entwurf bleibt erhalten.
+    Die getrennten Niedertarife 00:00 bis 04:59 und 12:30 bis 14:30 sind gültig.
+    Browserprüfungen verwenden Tastatureingabe in Chromium und WebKit sowie
+    getrennte change- und Submit-Übernahmen.
+
     TOU-Standardpreis, Einspeisevergütung und Zeitfenster entfallen vollständig im
     Options Flow. Tarifauswahl und Preiseingaben für Festpreis und dynamische
     Einspeisevergütung bleiben dort. Andere Optionsänderungen bei gleicher Tarifart
@@ -3238,6 +3246,16 @@ requirement_vue_electricity_tariff:
     getrennte Größen. Prognose-, Status-, Entlade- und Planungsinformationen
     bleiben zugänglich. Der Stundenzyklus ist unabhängig vom angezeigten Kalendertag.
 
+    Preisfehler benennen das konkrete Feld: fehlender oder gelöschter Strompreis-
+    Sensor, Einheit, Einspeisevergütung, PV-Quelle, Preisattribut oder PV-Anteil.
+    Das betroffene Feld wird zugänglich markiert und fokussiert, gegebenenfalls
+    werden die erweiterten Einstellungen geöffnet. Gewählte Quellen und Preise
+    bleiben im Entwurf. Eine fehlende Einspeisevergütung wird nicht eigenmächtig
+    auf 0 gesetzt; der Hinweis erklärt die Eingabe von 0 ohne Vergütung.
+    EPEX-Daten in €/kWh mit data-Intervallen aus start_time, end_time und
+    price_per_kwh bleiben ebenso zulässig wie das bestehende Cent-Format.
+    Unbekannte Einheiten oder Fremdwährungen werden nicht als Euro angenommen.
+
     sax_power/dashboard/tariff/configure speichert Profil und aktive Tarifwahl
     mit Revisionsprüfung. Ein optionaler automation_enabled-Wert stellt den
     Hauptschalter; fehlt er, bleibt dessen Gesamtzustand beim Tarifwechsel
@@ -3249,10 +3267,17 @@ requirement_vue_electricity_tariff:
     der bestehende gemeinsame Worker übernimmt die Geräteauswertung unter
     dem Control-Lock. Tatsächliche Geräteaktivität bleibt an quittierte
     Gerätebefehle gebunden. Erneutes Speichern ohne Änderung aktiver Tarifquellen
-    und reine Archivpflege benötigen ebenfalls keinen Geräte-Lock. Echte
-    Tarif- und Quellenänderungen synchronisieren
-    passende, sich ausschließende Steuerflags weiterhin unter dem gemeinsamen
-    Control-Lock. Alle Wege verwenden weiterhin die
+    und reine Archivpflege benötigen ebenfalls keinen Geräte-Lock. Auch echte
+    Tarif- und Quellenänderungen übernehmen Options und passende, sich
+    ausschließende Steuerflags atomar ohne Warten auf den Geräte-Lock.
+    Eine Quellenrevision sperrt veraltete negative Sollwerte. Der gemeinsame
+    Worker wartet laufende Quittierungssequenzen unter dem Schreib-Lock ab,
+    beendet alte periodische Writer sicher und wendet den neuesten Stand an.
+    Während einer Quittierung veraltete Schreibentscheidungen werden kontrolliert
+    zurückgesetzt; fehlgeschlagene Rücksetzungen werden erneut versucht.
+    Globale SOC-Sperren bleiben beim Tarifwechsel erhalten. Ein gleichzeitiger
+    manueller Ladebefehl bewertet den neuesten Stand erneut und bestätigt seinen
+    Erfolg weiterhin erst nach Gerätequittierung. Alle Wege verwenden weiterhin die
     zentrale ChargePolicy und denselben SunSpec-Schreibpfad. Native Aufrufe können
     die zum aktiven dynamischen beziehungsweise zeitvariablen Tarif unpassende
     Automatik nicht aktivieren. Beim Bootstrap werden unpassende gespeicherte
@@ -3299,8 +3324,9 @@ requirement_vue_electricity_tariff:
 
     Vor dem Speichern oder Wiederherstellen prüft bridge_configuration_error
     die vollständigen aktiven Ziel-Options; der Dashboard-Coordinator prüft sie
-    erneut unter dem Control-Lock. Eine aktive verbrauchsbasierte Ladeplanung
-    ohne konfigurierte PV-Quelle wird mit bridge_pv_start_required abgelehnt,
+    erneut unmittelbar vor der atomaren Softwareübernahme. Eine aktive
+    verbrauchsbasierte Ladeplanung ohne konfigurierte PV-Quelle wird mit
+    bridge_pv_start_required abgelehnt,
     ohne Profile, Preise oder Steuerflags zu ändern. Der TOU-Editor kennzeichnet
     die Quelle als erforderlich und erklärt den Fehler in DE/EN bei erhaltenem
     Entwurf. Die optionale dynamische PV-Quelle und archivierte TOU-Einstellungen
@@ -3323,6 +3349,16 @@ requirement_vue_electricity_tariff:
     - "Backendtests halten den Geräte-Control-Lock belegt und weisen die sofortige
        Antwort auf reine Hauptschalteränderungen nach. Options, Revision und
        Anbieter bleiben unverändert; nach Freigabe greift der neueste Steuerstand."
+    - "tests/test_dashboard_tariff_transition_response.py prüft echte Tarif- und
+       Quellenwechsel über WebSocket bei belegtem Geräte-Lock, beide ACK-Phasen
+       von Start und periodischem Writer, Rücksetzfehler mit erneutem Versuch
+       sowie globale SOC-Sperren einschließlich Änderungen während Persistenz.
+       Ein gleichzeitiger manueller Lade-Service wartet auf die Gerätequittierung
+       und gibt fehlgeschlagene Quittierungen als Fehler zurück."
+    - "tests/test_epex_price_source.py prüft EPEX €/kWh und ct/kWh durch Speicherung,
+       Preisplan, Tageskurve und gemeinsamen Bewertungspreis inklusive negativer
+       Preise und vorübergehend nicht verfügbarer Quellen. Frontendtests prüfen die genauen
+       Feldfehler in DE/EN, Fokus, erhaltene Quellen und bewusste Preiseingabe."
     - "Ladeentscheidung, aktuelle Preisanzeige und Amortisation verwenden denselben
        gültigen Bezugspreis; die zeitliche Buchung folgt REQ-ECONOMICS-ACCOUNTING."
     - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver

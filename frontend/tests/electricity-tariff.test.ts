@@ -488,6 +488,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       expect(
         section.querySelector<HTMLInputElement>('[name="dynamic_feed"]')?.value,
       ).toBe("9,25");
+      expect(section.querySelector<HTMLDetailsElement>("details")?.open).toBe(
+        true,
+      );
+      const factorInput = section.querySelector('[name="dynamic_pv_factor"]');
+      expect(factorInput?.getAttribute("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(factorInput);
       await fill(section, '[name="dynamic_pv_factor"]', "50");
       await click(section, language === "de" ? "Speichern" : "Save");
       expect(writes(fixture)).toHaveLength(1);
@@ -495,6 +501,196 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         pv_factor: 50,
         feed_in_price_ct_kwh: 9.25,
       });
+    },
+  );
+  it.each([
+    ["de", "0", 0],
+    ["en", "0", 0],
+    ["de", "7,86", 7.86],
+    ["en", "7.86", 7.86],
+  ])(
+    "keeps the EPEX euro source and identifies its missing feed-in price in %s, then accepts %s",
+    async (language, input, expected) => {
+      const fixture = await mount({
+        type: "dynamic",
+        language: String(language),
+      });
+      const epex = "sensor.epex_spot_data_market_price";
+      fixture.stored.profiles!.dynamic = {
+        ...fixture.stored.profiles!.dynamic,
+        price_sensor: null,
+        price_unit: "auto",
+        feed_in_price_ct_kwh: null,
+      };
+      fixture.hass.value = {
+        ...fixture.hass.value,
+        states: {
+          ...fixture.hass.value.states,
+          [epex]: {
+            entity_id: epex,
+            state: "0.179",
+            attributes: {
+              friendly_name: "EPEX Spot Data Market Price",
+              unit_of_measurement: "€/kWh",
+              data: [
+                {
+                  start_time: "2026-09-13T12:30:00+02:00",
+                  end_time: "2026-09-13T12:45:00+02:00",
+                  price_per_kwh: 0.179,
+                },
+              ],
+            },
+          },
+        },
+      };
+      const section = fixture.root.querySelector(".electricity-prices")!;
+      await click(section, language === "de" ? "Bearbeiten" : "Edit");
+      const source = section.querySelector<HTMLSelectElement>(
+        '[name="dynamic_price_sensor"]',
+      )!;
+      source.value = epex;
+      source.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await click(section, language === "de" ? "Speichern" : "Save");
+      expect(writes(fixture)).toHaveLength(0);
+      expect(source.value).toBe(epex);
+      expect(source.getAttribute("aria-invalid")).toBeNull();
+      const feed = section.querySelector<HTMLInputElement>(
+        '[name="dynamic_feed"]',
+      )!;
+      const alert = section.querySelector('[role="alert"]')!;
+      expect(feed.value).toBe("");
+      expect(feed.getAttribute("aria-invalid")).toBe("true");
+      expect(feed.getAttribute("aria-describedby")).toBe(alert.id);
+      expect(document.activeElement).toBe(feed);
+      expect(alert.textContent).toContain(
+        language === "de"
+          ? "Bitte die Einspeisevergütung in ct/kWh eintragen."
+          : "Please enter the feed-in remuneration in ct/kWh.",
+      );
+      expect(alert.textContent).toContain(
+        language === "de"
+          ? "Wenn du keine Vergütung erhältst, trage 0 ein."
+          : "Enter 0 if you receive no remuneration.",
+      );
+      expect(alert.textContent).not.toContain("Preisquelle");
+      expect(alert.textContent).not.toContain("price source");
+      await fill(section, '[name="dynamic_feed"]', String(input));
+      await click(section, language === "de" ? "Speichern" : "Save");
+      expect(writes(fixture)).toHaveLength(1);
+      expect(writes(fixture)[0]?.[0].profile).toMatchObject({
+        price_sensor: epex,
+        price_unit: "auto",
+        feed_in_price_ct_kwh: expected,
+      });
+      expect(section.querySelector("form")).toBeNull();
+    },
+  );
+  it.each(["de", "en"])(
+    "marks the source only when no source was selected in %s",
+    async (language) => {
+      const fixture = await mount({ type: "dynamic", language });
+      fixture.stored.profiles!.dynamic.price_sensor = null;
+      const section = fixture.root.querySelector(".electricity-prices")!;
+      await click(section, language === "de" ? "Bearbeiten" : "Edit");
+      await click(section, language === "de" ? "Speichern" : "Save");
+      expect(writes(fixture)).toHaveLength(0);
+      const source = section.querySelector('[name="dynamic_price_sensor"]');
+      expect(source?.getAttribute("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(source);
+      expect(section.querySelector('[role="alert"]')?.textContent).toBe(
+        language === "de"
+          ? "Bitte einen Strompreis-Sensor auswählen."
+          : "Please select an electricity price sensor.",
+      );
+    },
+  );
+  it.each(["-1", "201", "7.861", "NaN"])(
+    "identifies invalid feed-in price %s without discarding or blaming the sensor",
+    async (value) => {
+      const fixture = await mount({ type: "dynamic" });
+      const section = fixture.root.querySelector(".electricity-prices")!;
+      await click(section, "Bearbeiten");
+      await fill(section, '[name="dynamic_feed"]', value);
+      await click(section, "Speichern");
+      expect(writes(fixture)).toHaveLength(0);
+      expect(section.querySelector('[role="alert"]')?.textContent).toContain(
+        "Bitte die Einspeisevergütung als Zahl von 0 bis 200 ct/kWh",
+      );
+      const feed = section.querySelector<HTMLInputElement>(
+        '[name="dynamic_feed"]',
+      )!;
+      expect(feed.value).toBe(value);
+      expect(document.activeElement).toBe(feed);
+      expect(
+        section.querySelector<HTMLSelectElement>(
+          '[name="dynamic_price_sensor"]',
+        )?.value,
+      ).toBe("sensor.market_price");
+    },
+  );
+  it.each(
+    ["de", "en"].flatMap((language) =>
+      [
+        [
+          "price_sensor_not_configured",
+          "price_sensor",
+          "Strompreis-Sensor",
+          "electricity price sensor",
+        ],
+        ["price_sensor_missing", "price_sensor", "nicht gefunden", "not found"],
+        ["price_unit_unsupported", "price_unit", "Einheit", "unit"],
+        [
+          "pv_sensor_missing",
+          "pv_sensor",
+          "PV-Prognose-Sensor",
+          "PV forecast sensor",
+        ],
+        [
+          "invalid_price_attribute",
+          "price_attribute",
+          "Attributnamen",
+          "attribute name",
+        ],
+        [
+          "invalid_feed_in_price",
+          "feed",
+          "Einspeisevergütung",
+          "feed-in remuneration",
+        ],
+        ["invalid_pv_factor", "pv_factor", "PV-Anteil", "PV percentage"],
+      ].map(([code, field, german, english]) => [
+        language,
+        code,
+        field,
+        language === "de" ? german : english,
+      ]),
+    ),
+  )(
+    "focuses the field behind %s error %s and preserves the draft",
+    async (language, code, field, expected) => {
+      const fixture = await mount({ type: "dynamic", language });
+      const section = fixture.root.querySelector(".electricity-prices")!;
+      await click(section, language === "de" ? "Bearbeiten" : "Edit");
+      await fill(section, '[name="dynamic_feed"]', "9,25");
+      fixture.callWS.mockRejectedValueOnce({ code });
+      await click(section, language === "de" ? "Speichern" : "Save");
+      const input = section.querySelector(`[name="dynamic_${field}"]`)!;
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      expect(document.activeElement).toBe(input);
+      const alert = section.querySelector('[role="alert"]')!;
+      expect(alert.textContent).toContain(expected);
+      expect(input.getAttribute("aria-describedby")).toBe(alert.id);
+      if (input.closest("details"))
+        expect(input.closest("details")?.open).toBe(true);
+      expect(
+        section.querySelector<HTMLInputElement>('[name="dynamic_feed"]')?.value,
+      ).toBe("9,25");
+      expect(
+        section.querySelector<HTMLSelectElement>(
+          '[name="dynamic_price_sensor"]',
+        )?.value,
+      ).toBe("sensor.market_price");
     },
   );
   it.each(["conflict", "invalid_tariff", "forbidden"])(

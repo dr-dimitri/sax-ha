@@ -6,6 +6,9 @@ const props = defineProps<{
   modelValue: string | null;
   label: string;
   disabled?: boolean;
+  name?: string;
+  invalid?: boolean;
+  describedBy?: string;
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: string | null] }>();
 const choices = computed(() => {
@@ -32,6 +35,9 @@ const choices = computed(() => {
     }}<select
       :value="modelValue ?? ''"
       :disabled="disabled"
+      :name="name"
+      :aria-invalid="invalid || undefined"
+      :aria-describedby="describedBy"
       @change="
         emit(
           'update:modelValue',

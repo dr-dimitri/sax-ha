@@ -82,8 +82,9 @@ apply to every PR, including documentation-only PRs.
   `UpdateFailed`/`ConfigEntryNotReady` - don't let them propagate raw.
 - Keep every UI action responsive: acknowledge validated software settings
   without waiting for Modbus or the device-control lock; apply device changes
-  through the existing coalescing worker. Atomic tariff/source handovers may
-  retain their safety lock; physical commands require device acknowledgement.
+  through the existing coalescing worker. This includes real tariff/source
+  changes: validate and accept them atomically, then reconcile obsolete writers
+  safely under the device locks. Physical commands require device acknowledgement.
   See `REQ-VUE-ENTITY-BINDING` / `REQ-VUE-ELECTRICITY-TARIFF`.
 - Show accessible pending feedback immediately for every asynchronous button,
   switch, or save action, prevent duplicate writes, and preserve confirmed
@@ -169,6 +170,11 @@ apply to every PR, including documentation-only PRs.
   or failed responses (including the real service/WebSocket boundary). Check
   prompt software acknowledgement, pending feedback, duplicate prevention and
   application of the latest state; reuse the response suites linked in DEVELOPMENT.md.
+- Cover real tariff/source changes during both device acknowledgement phases
+  and periodic writes; unchanged saves alone do not prove responsiveness.
+  Test native time inputs in Chromium and WebKit with keyboard entry and commit
+  events, including midnight and multiple windows. Validate the visible values
+  on submission and identify the exact invalid field without discarding drafts.
 
 ## Security considerations
 

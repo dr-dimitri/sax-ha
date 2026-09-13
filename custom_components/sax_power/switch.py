@@ -9,11 +9,15 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     ALL_MONTHS,
+    CONF_BRIDGE_CHARGE_ENABLED,
+    CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_PV_FORECAST_SENSOR,
     CONF_TIMED_CHARGE_ENABLED,
     DATA_COORDINATOR,
     DEFAULT_GRID_SERVING_ENABLED,
@@ -26,6 +30,7 @@ from .const import (
     SWITCH_STATE_ON,
 )
 from .coordinator import SaxPowerCoordinator
+from .domain.tariff import TariffType
 from .entity import (
     SaxPowerConfigEntity,
     SaxPowerEntity,
@@ -44,6 +49,7 @@ async def async_setup_entry(
     entities: list[SwitchEntity] = [
         SaxPowerStorageSwitch(coordinator, entry.entry_id),
         SaxPowerTimedChargeSwitch(coordinator, entry.entry_id),
+        SaxPowerBridgeChargeSwitch(coordinator, entry),
         SaxPowerGridServingSwitch(coordinator, entry.entry_id),
         SaxPowerPriceChargeSwitch(coordinator, entry.entry_id),
     ]
@@ -165,6 +171,66 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_timed_charge_enabled(
             False, defer_device_update=True
+        )
+        self.async_write_ha_state()
+
+
+class SaxPowerBridgeChargeSwitch(SaxPowerConfigEntity, SwitchEntity):
+    """Dashboard und Optionsdialog teilen eine Einstellung (REQ-BRIDGE-CHARGE)."""
+
+    _attr_translation_key = "bridge_charge_enabled"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry.entry_id)
+        self._entry = entry
+        self._assign_ids("switch", "bridge_charge_enabled")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._entry.add_update_listener(self._async_options_updated)
+        )
+
+    async def _async_options_updated(
+        self, hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool:
+        return self._entry.options.get(CONF_BRIDGE_CHARGE_ENABLED) is True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        return {"configuration_error": self._configuration_error}
+
+    @property
+    def _configuration_error(self) -> str | None:
+        options = self._entry.options
+        if not options.get(CONF_PV_FORECAST_SENSOR):
+            return "bridge_pv_start_required"
+        if options.get(CONF_ECONOMICS_TARIFF_TYPE) != TariffType.TIME_OF_USE.value:
+            return "bridge_tariff_required"
+        return None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        if error := self._configuration_error:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=error,
+            )
+        self._set_enabled(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._set_enabled(False)
+
+    def _set_enabled(self, enabled: bool) -> None:
+        # Der bestehende Options-Listener wendet die Änderung live an; kein
+        # zweiter Restore-Wert und kein direkter Gerätezugriff aus der Entity.
+        self.hass.config_entries.async_update_entry(
+            self._entry,
+            options={**self._entry.options, CONF_BRIDGE_CHARGE_ENABLED: enabled},
         )
         self.async_write_ha_state()
 

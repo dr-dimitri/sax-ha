@@ -237,8 +237,13 @@ Netzladung und der Speicher kann Sonnenstrom nutzen.
 
 #### Verbrauchsabhängig bis zum PV-Start laden
 
-Aktiviere unter **Konfigurieren** die Option **Verbrauchsbasierte Ladeplanung
-aktivieren**. **Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
+Aktiviere im Dashboard **Zeitvariabler Tarif → Ladeplanung** den Schalter
+**Verbrauchsbasierte Ladeplanung**. Er verwendet dieselbe gespeicherte Einstellung
+wie die Option unter **Konfigurieren**; Änderungen sind in beiden Oberflächen
+sichtbar und bleiben nach einem Neustart erhalten. Zum Einschalten müssen ein
+zeitvariabler Tarif und eine PV-Prognosequelle konfiguriert sein. Ausschalten
+ist jederzeit möglich und wechselt zurück zur festen SOC-Steuerung.
+**Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
 ausgewählten Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch
 der letzten 1 bis 60 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht.
 Nur den fehlenden Bedarf lädt sie aus dem Netz nach. **Netzladen Max. SOC** und

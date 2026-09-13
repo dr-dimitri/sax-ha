@@ -9,11 +9,13 @@ import type { HomeAssistant } from "../types";
 defineProps<{ hass?: HomeAssistant }>();
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
-const bridgeEnabled = computed(
-  () =>
-    dashboard?.entity("sensor", "bridge_charge_plan")?.state?.attributes
-      .enabled === true,
-);
+const bridgeEnabled = computed(() => {
+  const control = dashboard?.entity("switch", "bridge_charge_enabled");
+  return control
+    ? control.state?.state === "on"
+    : dashboard?.entity("sensor", "bridge_charge_plan")?.state?.attributes
+        .enabled === true;
+});
 const timeOfUseTariff = computed(
   () =>
     dashboard?.entity("sensor", "economics_current_import_price")?.state

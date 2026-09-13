@@ -25,7 +25,16 @@ async function flush() {
   await nextTick();
   await nextTick();
 }
-async function mount(language = "de") {
+async function mount(language = "de", withControl = false) {
+  const switchId = "switch.renamed_planning";
+  const switchMetadata = {
+    domain: "switch" as const,
+    key: "bridge_charge_enabled",
+    entity_id: switchId,
+    name: "Verbrauchsbasierte Ladeplanung",
+    states: {},
+    can_control: true,
+  };
   let emitMetadata: (data: DashboardMetadata) => void = () => {};
   const metadata = {
     domain: "sensor" as const,
@@ -40,7 +49,9 @@ async function mount(language = "de") {
     connected: true,
     async subscribeMessage<T>(callback: (message: T) => void) {
       emitMetadata = (data) => callback(data as T);
-      emitMetadata({ entities: [metadata] });
+      emitMetadata({
+        entities: withControl ? [metadata, switchMetadata] : [metadata],
+      });
       return () => {};
     },
     addEventListener(event, callback) {
@@ -56,6 +67,9 @@ async function mount(language = "de") {
     language,
     connection,
     states: {
+      ...(withControl
+        ? { [switchId]: { entity_id: switchId, state: "off", attributes: {} } }
+        : {}),
       [entityId]: {
         entity_id: entityId,
         state: "planned",
@@ -89,6 +103,27 @@ async function mount(language = "de") {
     hass,
     callService,
     callWS,
+    async control(
+      state: string,
+      canControl = true,
+      configurationError: string | null = null,
+    ) {
+      emitMetadata({
+        entities: [metadata, { ...switchMetadata, can_control: canControl }],
+      });
+      hass.value = {
+        ...hass.value,
+        states: {
+          ...hass.value.states,
+          [switchId]: {
+            entity_id: switchId,
+            state,
+            attributes: { configuration_error: configurationError },
+          },
+        },
+      };
+      await flush();
+    },
     async update(state: string, attributes: Record<string, unknown> = planned) {
       hass.value = {
         ...hass.value,
@@ -183,7 +218,12 @@ describe("consumption-based charging plan", () => {
     ["paused", "calibration", "Batteriekalibrierung", "Battery calibration"],
     ["paused", "pv_surplus", "PV-Überschuss", "PV surplus"],
     ["paused", "manual_charge", "manuelle Ladung", "Manual charging"],
-    ["off", "disabled", "Integrationsoptionen", "integration options"],
+    [
+      "off",
+      "disabled",
+      "Verbrauchsbasierte Ladeplanung",
+      "Consumption-based charging planning",
+    ],
   ])(
     "explains the reason %s/%s in both languages without exposing internal codes",
     async (state, reason, german, english) => {
@@ -204,7 +244,7 @@ describe("consumption-based charging plan", () => {
   it("gives an activation hint without a reason and keeps unknown reasons generic", async () => {
     const { root, update } = await mount();
     await update("off", {});
-    expect(root.textContent).toContain("Integrationsoptionen aktivieren");
+    expect(root.textContent).toContain("Verbrauchsbasierte Ladeplanung");
     expect(root.textContent).toContain("Netzladung aktiv");
     await update("waiting_for_data", { reason: "private_new_reason" });
     expect(root.textContent).toContain(
@@ -307,3 +347,79 @@ describe("consumption-based charging plan", () => {
     expect(fixture.callWS).not.toHaveBeenCalled();
   });
 });
+
+describe("charging planning activation", () => {
+  it("uses the discovered switch and waits for confirmed HA state", async () => {
+    const { root, callService, control } = await mount("de", true);
+    const input = root.querySelector<HTMLInputElement>('[role="switch"]')!;
+    expect(input.checked).toBe(false);
+    expect(callService).not.toHaveBeenCalled();
+    input.click();
+    await flush();
+    expect(callService).toHaveBeenCalledWith(
+      "switch",
+      "turn_on",
+      {},
+      { entity_id: "switch.renamed_planning" },
+      false,
+    );
+    expect(input.checked).toBe(false);
+    await control("on");
+    expect(input.checked).toBe(true);
+    input.click();
+    await flush();
+    expect(callService).toHaveBeenLastCalledWith(
+      "switch",
+      "turn_off",
+      {},
+      { entity_id: "switch.renamed_planning" },
+      false,
+    );
+    await control("off");
+    expect(input.checked).toBe(false);
+  });
+
+  it("shows configuration errors without claiming activation", async () => {
+    const { root, callService } = await mount("de", true);
+    callService.mockRejectedValueOnce(
+      new Error("Wähle eine PV-Prognosequelle aus."),
+    );
+    const input = root.querySelector<HTMLInputElement>('[role="switch"]')!;
+    input.click();
+    await flush();
+    expect(input.checked).toBe(false);
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+      "Änderung ist fehlgeschlagen",
+    );
+  });
+
+  it("blocks writes for read-only, unavailable and disconnected sessions", async () => {
+    const { root, callService, control, disconnect } = await mount("de", true);
+    const input = root.querySelector<HTMLInputElement>('[role="switch"]')!;
+    await control("off", false);
+    expect(input.disabled).toBe(true);
+    await control("unavailable");
+    expect(input.disabled).toBe(true);
+    await control("off");
+    expect(input.disabled).toBe(false);
+    await disconnect();
+    expect(root.querySelector('[role="switch"]:not(:disabled)')).toBeNull();
+    expect(callService).not.toHaveBeenCalled();
+  });
+});
+
+it.each([
+  ["de", "bridge_pv_start_required", "PV-Prognosequelle auswählen"],
+  ["de", "bridge_tariff_required", "zeitvariablen Tarif einrichten"],
+  ["en", "bridge_pv_start_required", "select a PV forecast source"],
+  ["en", "bridge_tariff_required", "configure a time-of-use tariff"],
+])(
+  "explains missing planning configuration (%s, %s)",
+  async (language, error, hint) => {
+    const { root, control } = await mount(language, true);
+    await control("off", true, error);
+    expect(root.textContent).toContain(hint);
+    await control("off");
+    expect(root.textContent).not.toContain(hint);
+  },
+);

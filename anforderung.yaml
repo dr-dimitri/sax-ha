@@ -124,6 +124,14 @@ requirement_bridge_charge:
     Tarif den fehlenden Speicherbedarf bis zum erwarteten PV-Start aus der
     Entladeprognose nach REQ-DISCHARGE-FORECAST. Der vorhandene Hauptschalter
     timed_charge_enabled und die aktiven Monate bleiben erforderlich.
+    Im Dashboard ist bridge_charge_enabled direkt in der Karte Ladeplanung
+    ein- und ausschaltbar. Switch-Entity und Optionsdialog verwenden dieselbe
+    persistierte Config-Entry-Option ohne separaten Restore-Zustand. Einschalten
+    erfordert TIME_OF_USE und eine ausgewählte PV-Prognosequelle; andernfalls
+    meldet die Oberfläche die fehlende Konfiguration ohne Änderung. Ausschalten
+    bleibt auch bei fehlenden Quellen oder Geräteausfall möglich und wechselt
+    zur festen SOC-Steuerung. Der Hauptschalter wird dadurch nicht verändert.
+    Änderungen aus dem Optionsdialog aktualisieren auch den Dashboard-Schalter.
     Die Einstellung timed_charge_min_soc wird durch den berechneten Bedarf
     ersetzt. Netzladen Max. SOC und die globale Max-SOC-Grenze begrenzen
     weiterhin das Ziel. Ohne Bedarf findet keine geplante Netzladung statt.
@@ -200,6 +208,7 @@ requirement_bridge_charge:
     diese Betriebsart ersetzt; die reine Planung ist für deren spätere
     Verwendung wiederverwendbar.
   acceptance_criteria:
+    - "Dashboard-Schalter und Optionsdialog teilen bridge_charge_enabled; Aktivierung benötigt Tarif und PV-Quelle, Ausschalten bleibt möglich. Bestätigte Zustände, Fehler und fehlende Schreibrechte werden im Dashboard angezeigt."
     - "Ohne aktivierte Option oder eingeschaltete zeitvariable Netzladung erfolgt keine verbrauchsbasierte Netzladung. Aktive Monate begrenzen die erlaubten Intervalle."
     - "Ohne gültigen zukünftigen PV-Start, frische Batteriewerte oder mindestens eine Minute gültige Entladebeobachtung wird kein neuer Auftrag freigegeben. Fehlende Werte werden nicht geschätzt."
     - "Niedertarifintervalle stammen nur aus einem gültigen TIME_OF_USE-Tarif. Änderungen am separaten Netzladezeitfenster verändern keinen verbrauchsabhängigen Plan."

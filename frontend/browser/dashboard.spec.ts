@@ -839,7 +839,9 @@ test("overnight times, months, native strategy options and negative prices", asy
   await panel
     .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
     .click();
-  await expect(panel.getByRole("switch")).toHaveCount(13);
+  await expect(panel.locator(".charging-view").getByRole("switch")).toHaveCount(
+    13,
+  );
   const times = panel.locator("input[type=time]");
   await expect(times.nth(0)).toHaveValue("22:00");
   await expect(times.nth(1)).toHaveValue("06:00");
@@ -935,7 +937,9 @@ test("overnight times, months, native strategy options and negative prices", asy
   await panel
     .getByRole("button", { name: /^(Ändern|Edit)$/, exact: true })
     .click();
-  await expect(panel.getByRole("switch")).toHaveCount(13);
+  await expect(panel.locator(".charging-view").getByRole("switch")).toHaveCount(
+    13,
+  );
   await expect(
     panel.getByText("PV-Prognose 13.9.", { exact: true }),
   ).toBeVisible();

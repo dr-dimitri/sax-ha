@@ -119,7 +119,7 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
     }),
   ).toBeVisible();
   await expect(panel.locator(".tariff-plan")).toBeVisible();
-  await expect(plan.locator("input, select, button")).toHaveCount(0);
+  await expect(plan.getByRole("switch")).toBeChecked();
 
   for (const width of mobile ? [390, 320] : [1440, 1100]) {
     await page.setViewportSize({ width, height: mobile ? 844 : 1000 });
@@ -168,5 +168,17 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
     await attachScreenshot(plan, testInfo, "not-needed", width);
   }
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+  const planning = plan.getByRole("switch");
+  await planning.click();
+  await expect(planning).not.toBeChecked();
+  await expect(panel.locator("input[type=number]")).toHaveCount(2);
+  await expect(page.locator("#actions")).toContainText("switch.turn_off");
+  await expect(page.locator("#actions")).toContainText(
+    "switch.demo_bridge_charge_enabled",
+  );
+  await planning.click();
+  await expect(planning).toBeChecked();
+  await expect(panel.locator("input[type=number]")).toHaveCount(1);
+  await expect(page.locator("#actions")).toContainText("switch.turn_on");
   expect(errors).toEqual([]);
 });

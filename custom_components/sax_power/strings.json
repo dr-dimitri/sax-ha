@@ -484,6 +484,9 @@
       },
       "price_charge_enabled": {
         "name": "Preisoptimiertes Laden aktiv"
+      },
+      "bridge_charge_enabled": {
+        "name": "Verbrauchsbasierte Ladeplanung"
       }
     },
     "time": {
@@ -620,6 +623,12 @@
     },
     "economics_restart_not_ready": {
       "message": "Ein Bilanzneustart ist nur möglich, solange die Wirtschaftlichkeit aktiviert und bereits initialisiert ist."
+    },
+    "bridge_pv_start_required": {
+      "message": "Wähle unter Konfigurieren eine PV-Prognosequelle aus, bevor du die Ladeplanung einschaltest."
+    },
+    "bridge_tariff_required": {
+      "message": "Richte unter Konfigurieren einen zeitvariablen Tarif ein, bevor du die Ladeplanung einschaltest."
     }
   },
   "services": {

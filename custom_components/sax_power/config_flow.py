@@ -106,14 +106,14 @@ _MAC_UNIQUE_ID_PATTERN = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
 # binary_sensor.py und die zwölf Monats-Schalter je Mechanismus in switch.py
 # wachsen am ehesten künftig weiter und werden deshalb dynamisch über die
 # jeweiligen Beschreibungslisten/ALL_MONTHS gezählt; number.py, select.py,
-# time.py sowie die vier nicht-monatsbezogenen Schalter in switch.py legen
+# time.py sowie die fünf nicht-monatsbezogenen Schalter in switch.py legen
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
 _ENTITY_COUNT_NUMBER = 7
 _ENTITY_COUNT_SELECT = 1
 _ENTITY_COUNT_TIME = 4
-_ENTITY_COUNT_SWITCH_FIXED = 4
+_ENTITY_COUNT_SWITCH_FIXED = 5
 # Monats-Schalter-Sätze in switch.py: zeitgesteuertes Laden, netzdienliches
 # Laden (siehe REQ-GRID-SERVING-CHARGE).
 _ENTITY_COUNT_MONTH_SWITCH_SETS = 2

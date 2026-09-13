@@ -701,7 +701,14 @@ also den Verbrauch mindestens 30 Minuten lang decken. Serviceergebnisse werden
 manuelle PV-Uhrzeit oder Ableitung aus der Tagesenergiesumme. Fehlende oder
 ungültige Prognosedaten geben keine geplante Netzladung frei.
 
-Die Option `bridge_charge_enabled` schaltet die Betriebsart ein. Der vorhandene
+Die Option `bridge_charge_enabled` schaltet die Betriebsart ein.
+`SaxPowerBridgeChargeSwitch` stellt dieselbe Config-Entry-Option als Schalter
+in der Dashboard-Karte `ChargePlan.vue` bereit. Einschalten prüft wie der
+Optionsdialog den zeitvariablen Tarif und die ausgewählte PV-Quelle; Ausschalten
+bleibt ohne diese Voraussetzungen möglich. Der bestehende Options-Listener
+wendet Änderungen live auf die Planung an. Ein eigener Entity-Listener meldet
+Optionsänderungen auch bei Geräteausfall zurück, ohne Geräte-I/O abzuwarten.
+Es gibt keinen zweiten Restore-State für diese Einstellung. Der vorhandene
 Hauptschalter `timed_charge_enabled` und die Monatsfreigabe bleiben erforderlich;
 `timed_charge_min_soc` wird durch die Bedarfsentscheidung ersetzt. Fehlende oder
 veraltete Messwerte und fehlender PV-Start geben keinen Ladeauftrag frei.

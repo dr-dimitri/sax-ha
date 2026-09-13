@@ -53,6 +53,7 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
         ? "storage_switch"
         : translationKey;
     if (
+      key !== "bridge_charge_enabled" &&
       !general.includes(key) &&
       !economics.includes(key) &&
       !(bridgePlan && key === "bridge_charge_plan") &&
@@ -63,6 +64,7 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
       continue;
     if (
       domain === "binary_sensor" &&
+      key !== "bridge_charge_enabled" &&
       !general.includes(key) &&
       !economics.includes(key)
     )
@@ -132,6 +134,7 @@ function example({ domain, key, entity_id }) {
     cell_calibration_active: "off",
     next_cell_calibration: "2026-09-14",
     timed_charge_enabled: "off",
+    bridge_charge_enabled: bridgePlan ? "on" : "off",
     price_charge_enabled: "off",
     timed_charge_min_soc: "20",
     timed_charge_discharge_status: "normal",

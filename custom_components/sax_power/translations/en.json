@@ -484,6 +484,9 @@
       },
       "price_charge_enabled": {
         "name": "Price-optimised charging active"
+      },
+      "bridge_charge_enabled": {
+        "name": "Consumption-based charging planning"
       }
     },
     "time": {
@@ -620,6 +623,12 @@
     },
     "economics_restart_not_ready": {
       "message": "A balance restart is only possible while economics is enabled and already initialized."
+    },
+    "bridge_pv_start_required": {
+      "message": "Select a PV forecast source in the integration options before enabling charging planning."
+    },
+    "bridge_tariff_required": {
+      "message": "Configure a time-of-use tariff in the integration options before enabling charging planning."
     }
   },
   "services": {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, useId } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
+import EntityControl from "./EntityControl.vue";
 import {
   finiteValue,
   formatSavingsDate,
@@ -13,11 +14,30 @@ const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
 const german = computed(() => dashboard?.language.value === "de");
 const plan = computed(() => dashboard?.entity("sensor", "bridge_charge_plan"));
+const control = computed(() =>
+  dashboard?.entity("switch", "bridge_charge_enabled"),
+);
 const attributes = computed(() => plan.value?.state?.attributes ?? {});
+const configurationHint = computed(() => {
+  switch (control.value?.state?.attributes.configuration_error) {
+    case "bridge_pv_start_required":
+      return german.value
+        ? "Zum Einschalten unter Konfigurieren eine PV-Prognosequelle auswählen."
+        : "To enable planning, select a PV forecast source in the integration options.";
+    case "bridge_tariff_required":
+      return german.value
+        ? "Zum Einschalten unter Konfigurieren einen zeitvariablen Tarif einrichten."
+        : "To enable planning, configure a time-of-use tariff in the integration options.";
+    default:
+      return null;
+  }
+});
 const text = computed(() =>
   german.value
     ? {
         title: "Ladeplanung",
+        setup:
+          "Die Planung lädt nur den benötigten Bedarf bis zum PV-Start. „Netzladung aktiv“ muss ebenfalls eingeschaltet sein. Tarif und PV-Prognosequelle werden unter Konfigurieren ausgewählt.",
         unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
         incomplete:
           "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
@@ -33,6 +53,8 @@ const text = computed(() =>
       }
     : {
         title: "Charging plan",
+        setup:
+          "Planning charges only the energy needed until PV starts. The main grid charging switch must also be on. Select the tariff and PV forecast source in the integration options.",
         unavailable: "The charging plan is currently unavailable.",
         incomplete:
           "The charging plan is still incomplete. Charging times cannot currently be displayed.",
@@ -62,7 +84,7 @@ const reasons = computed<Record<string, string>>(() =>
         pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
         manual_charge: "Die manuelle Ladung hat Vorrang.",
         disabled:
-          "Die verbrauchsabhängige Ladeplanung in den Integrationsoptionen aktivieren und den Hauptschalter „Netzladung aktiv“ einschalten.",
+          "Den Schalter „Verbrauchsbasierte Ladeplanung“ hier und den Hauptschalter „Netzladung aktiv“ einschalten.",
       }
     : {
         pv_start_missing:
@@ -74,7 +96,7 @@ const reasons = computed<Record<string, string>>(() =>
         pv_surplus: "PV surplus pauses planned grid charging.",
         manual_charge: "Manual charging takes priority.",
         disabled:
-          "Enable consumption-based charging planning in the integration options and turn on the main grid charging switch.",
+          "Turn on “Consumption-based charging planning” here and the main grid charging switch.",
       },
 );
 const reason = computed(() =>
@@ -191,11 +213,14 @@ const target = computed(() => {
 
 <template>
   <section
-    v-if="plan"
+    v-if="plan || control"
     class="charge-plan"
     :aria-labelledby="`${id}-charge-plan`"
   >
     <h2 :id="`${id}-charge-plan`">{{ text.title }}</h2>
+    <EntityControl domain="switch" entity-key="bridge_charge_enabled" />
+    <p v-if="control">{{ text.setup }}</p>
+    <p v-if="configurationHint">{{ configurationHint }}</p>
     <template v-for="(paragraph, index) in paragraphs" :key="index">
       <p v-if="paragraph">{{ paragraph }}</p>
     </template>

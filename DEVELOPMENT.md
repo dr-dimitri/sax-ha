@@ -603,6 +603,20 @@ Listenform der bekannten Attributnamen. Die Zuordnung eines Zeitfensters erfolgt
 über die lokale Wanduhrzeit; damit braucht die Sommerzeitumstellung keinen
 Sonderfall.
 
+### Entladeprognose (REQ-DISCHARGE-FORECAST)
+
+Die unabhängige Entladeprognose (`REQ-DISCHARGE-FORECAST`) liegt in
+`domain/discharge_forecast.py`. Der Coordinator übergibt pro neuer, frischer
+HIGH-Messung Speicherleistung, Kapazität, SunSpec-SOC und Geräte-Minimal-SOC.
+Die Domain hält höchstens 60 Minuten Verlauf, integriert die positive Leistung
+zeitgewichtet mit dem jeweils vorherigen Messwert und liefert nach mindestens
+60 Sekunden die verbleibende Zeit. Kurzes Laden und Leerlauf zählen mit 0 W;
+60 Sekunden ununterbrochenes Laden löschen den Verlauf. Messlücken über zwei
+HIGH-Intervalle sowie ungültige Eingaben verwerfen die Historie. Es gibt keine
+Persistenz. Der Coordinator wandelt die Restzeit in einen UTC-Zeitpunkt um und
+veröffentlicht ihn als `discharge_forecast` für den gleichnamigen Timestamp-Sensor.
+Cache-Refreshs übernehmen den zuletzt berechneten Zeitpunkt unverändert.
+
 ### Gesamte Netzenergie (REQ-GRID-ENERGY)
 
 `energy_imported_from_grid` und `energy_exported_to_grid` integrieren die

@@ -137,6 +137,7 @@ findest du dort unter **Diagnose**.
 | Ladezustand | Aktuelle Speicherfüllung in Prozent, auch SOC genannt |
 | Netzleistung | Positiv: Netzbezug; negativ: Einspeisung |
 | Lade-/Entladeleistung | Positiv: Entladung; negativ: Ladung |
+| Voraussichtlich entladen um | Geschätzter Zeitpunkt, an dem die SOC-Untergrenze des Geräts erreicht wird |
 | Max. SOC | Globale Ladegrenze für den Speicher |
 | Netzladen Max. SOC | Eigenes Ziel der zeitgesteuerten Netzladung, höchstens Max. SOC |
 | Netzladung Min. SOC | Startschwelle der zeitgesteuerten Netzladung |
@@ -146,6 +147,16 @@ Dazu kommen getrennte Lade- und Entladeleistung, PV-Leistung, Zelltemperatur,
 Energiezähler sowie Geräte-, Firmware- und Akkustatus. Die PV-Leistung ist
 laut Hersteller nur mit dem Smart Meter **ADW200** vollständig verfügbar.
 Andere Modelle können hier dauerhaft 0 W melden.
+
+Die Entladeprognose verwendet die durchschnittliche Entladeleistung der letzten
+maximal 60 Minuten, die Batteriekapazität und den verbleibenden SOC oberhalb der
+Geräte-Untergrenze. Nach mindestens einer Minute Messverlauf ab Entladebeginn
+erscheint ein Zeitpunkt. Leerlauf und Ladeimpulse unter einer Minute fließen mit
+0 W Entladeleistung ein. Sobald der Speicher mindestens eine Minute durchgehend
+lädt, wird die Prognose zurückgesetzt. Nach Neustart, Messausfall oder ungültigen
+Batteriewerten beginnt der Messverlauf ebenfalls neu; bis genügend Daten vorliegen
+oder bei einem Durchschnitt von 0 W bleibt der Sensor unbekannt. Die Hochrechnung
+setzt voraus, dass sich der bisherige Verbrauch fortsetzt.
 
 ## Max-SOC-Sperre
 

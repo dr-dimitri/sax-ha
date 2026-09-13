@@ -48,6 +48,7 @@
 # REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
+# REQ-DISCHARGE-FORECAST          done       Entladezeitpunkt aus 1 bis 60 Minuten gemessener Entladeleistung schätzen
 # REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           superseded Abgelöst durch das einzige Dashboard SAX Power (REQ-VUE-DASHBOARD)
@@ -75,6 +76,34 @@
 # REQ-ECONOMICS-OBSERVABILITY     done       Datenqualitäts-Statussensor, Diagnose, Preisausfall-Repair und kontrollierter Bilanzneustart
 # REQ-ECONOMICS-SAVINGS-DASHBOARD superseded Abgelöst durch die Vue-Ersparnis in REQ-VUE-SAVINGS
 # ==============================================================================
+
+# ==============================================================================
+# ANFORDERUNG: ENTLADEPROGNOSE
+# ==============================================================================
+requirement_discharge_forecast:
+  id: REQ-DISCHARGE-FORECAST
+  title: "Voraussichtlichen Entladezeitpunkt aus gleitender Entladeleistung schätzen"
+  status: done
+  description: >
+    Der Sensor discharge_forecast (Voraussichtlich entladen um) zeigt als
+    zeitzonenbehafteten Timestamp den geschätzten Zeitpunkt des Erreichens der
+    Geräte-SOC-Untergrenze. Die Restzeit ist battery_capacity in Wh mal
+    max(battery_soc - battery_soc_min, 0) / 100, geteilt durch die mittlere
+    Entladeleistung in W. Sie wird in Stunden zum aktuellen Zeitpunkt addiert.
+    Der Verlauf beginnt mit einer positiven Speicherleistung und umfasst
+    mindestens 60 Sekunden und höchstens die letzten 3600 Sekunden. Die positive
+    Speicherleistung wird zeitgewichtet mit dem vorherigen Messwert integriert;
+    ein angeschnittenes Intervall an der Fenstergrenze wird anteilig gewertet.
+    Leerlauf und kurze Ladungen zählen mit 0 W Entladeleistung zur Fensterdauer.
+  acceptance_criteria:
+    - "Vor 60 Sekunden Messverlauf und bei mittlerer Entladeleistung 0 W ist der Sensor unbekannt."
+    - "60 Sekunden durchgehend negative Speicherleistung löschen Verlauf und Prognose; kürzere Ladeimpulse nicht."
+    - "Nach bestätigtem Laden beginnt erst eine neue positive Speicherleistung einen neuen Verlauf."
+    - "Nur neue, gültige HIGH-Messungen zählen; Cache-Refreshs verschieben den Zeitpunkt nicht."
+    - "Neustarts, Basic-/SunSpec-Ausfälle, veraltete Messwerte, Messlücken über zwei HIGH-Intervalle und ungültige Eingaben verwerfen den Verlauf."
+    - "Kapazität muss positiv und endlich sein, beide SOC-Werte müssen endlich und zwischen 0 und 100 liegen; fehlende Werte werden nicht geschätzt."
+    - "Bei gültiger Prognose und erreichtem Minimal-SOC ist der Entladezeitpunkt jetzt. Nicht darstellbare Zeitpunkte bleiben unbekannt."
+    - "Die Berechnung verwendet vorhandene Messwerte und löst keine zusätzlichen Modbus-Abfragen oder Schreibzugriffe aus."
 
 # ==============================================================================
 # ANFORDERUNG: ALLE MODBUS-REGISTER LESBAR

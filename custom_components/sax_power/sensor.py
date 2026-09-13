@@ -203,6 +203,13 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_direct("soc"),
     ),
     SaxPowerSensorEntityDescription(
+        key="discharge_forecast",
+        translation_key="discharge_forecast",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:battery-clock-outline",
+        value_fn=lambda data: data.get("discharge_forecast"),
+    ),
+    SaxPowerSensorEntityDescription(
         key="discharge_power",
         translation_key="discharge_power",
         device_class=SensorDeviceClass.POWER,

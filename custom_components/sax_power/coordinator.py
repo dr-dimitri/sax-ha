@@ -106,6 +106,7 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
+from .domain.discharge_forecast import DischargeForecast
 from .domain.economics_accounting import (
     EconomicsDelta,
     capacity_inventory_correction,
@@ -590,6 +591,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # battery availability and cached coordinator refreshes are irrelevant.
         self._grid_energy_last_sample: tuple[float, float] | None = None
         self._grid_energy_last_revision: int | None = None
+        self._discharge_forecast = DischargeForecast(
+            max_sample_gap=2 * READ_BLOCK_EXT_HIGH_INTERVAL
+        )
+        self._discharge_forecast_revision: int | None = None
+        self._discharge_forecast_at: datetime | None = None
         # Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING): dieselbe
         # None-bis-Bootstrap-Logik, zusätzlich gebunden an
         # SaxTariffProvider.config.enabled - solange der Tarif deaktiviert
@@ -714,9 +720,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Zeitabdeckung ausschließen.
             self._energy_last_ts = None
             self._invalidate_grid_energy_sample()
+            self._discharge_forecast.reset()
+            self._discharge_forecast_at = None
             raise
         self._accumulate_grid_energy(data)
         self._accumulate_energy(data)
+        self._update_discharge_forecast(data)
 
         if not self._control_bootstrap_pending:
             # REQ-CONTROL-CONFIG-BOOTSTRAP: Lesen ist während des Bootstraps
@@ -764,6 +773,37 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_next_start"] = plan.next_start
         data["price_charge_current_price"] = plan.current_price
         data["next_cell_calibration"] = self.next_cell_calibration_date
+
+    def _update_discharge_forecast(self, data: dict[str, Any]) -> None:
+        """Publish a timestamp only from fresh samples (REQ-DISCHARGE-FORECAST)."""
+        sample_time = self._high_sample_time
+        if (
+            not self._extended_available
+            or sample_time is None
+            or not 0 <= monotonic() - sample_time <= 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+        ):
+            self._discharge_forecast.reset()
+            self._discharge_forecast_at = None
+            self._discharge_forecast_revision = self._high_sample_revision
+        elif self._discharge_forecast_revision != self._high_sample_revision:
+            self._discharge_forecast_revision = self._high_sample_revision
+            seconds = self._discharge_forecast.update(
+                time=sample_time,
+                power=data.get("storage_power_active"),
+                capacity_wh=data.get("battery_capacity"),
+                soc=data.get("battery_soc"),
+                min_soc=data.get("battery_soc_min"),
+            )
+            self._discharge_forecast_at = None
+            if seconds is not None and math.isfinite(seconds):
+                try:
+                    self._discharge_forecast_at = dt_util.utcnow() + timedelta(
+                        seconds=seconds
+                    )
+                except OverflowError:
+                    # Very small discharge rates can exceed datetime's range.
+                    pass
+        data["discharge_forecast"] = self._discharge_forecast_at
 
     def _accumulate_grid_energy(self, data: dict[str, Any]) -> None:
         """Publish persistent grid totals from measured intervals (REQ-GRID-ENERGY)."""

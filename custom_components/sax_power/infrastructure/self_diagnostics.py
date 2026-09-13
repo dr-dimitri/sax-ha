@@ -19,6 +19,7 @@ from ..const import (
     ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
     PRICE_SENSOR_MISSING_GRACE_PERIOD,
     PRICE_STATUS_NO_PRICE_DATA,
+    PRICE_STRATEGY_ABSOLUTE,
     SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
 )
 
@@ -36,6 +37,7 @@ class DiagnosticSnapshot:
     timed_min_soc: int | None
     price_limit: float | None
     neutral_price: float | None
+    price_strategy: str
     timed_enabled: bool
     timed_start: dt_time | None
     timed_end: dt_time | None
@@ -185,7 +187,8 @@ class SelfDiagnostics:
 
     def _check_price_neutral_below_limit(self, snapshot: DiagnosticSnapshot) -> None:
         problem = (
-            snapshot.price_limit is not None
+            snapshot.price_strategy == PRICE_STRATEGY_ABSOLUTE
+            and snapshot.price_limit is not None
             and snapshot.neutral_price is not None
             and snapshot.neutral_price <= snapshot.price_limit
         )

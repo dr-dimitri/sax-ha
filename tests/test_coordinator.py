@@ -29,9 +29,9 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
-    CONF_PV_FORECAST_SENSOR,
     ECONOMICS_PRICE_UNAVAILABLE_GRACE_PERIOD,
     GRID_CHARGE_WRITE_INTERVAL,
     MAX_MANUAL_CHARGE_POWER,
@@ -116,7 +116,7 @@ from custom_components.sax_power.price_optimizer import PricePlan
             False,
             None,
             10,
-            "Ladepause ist zwischen 11:00 Uhr und 14:00 Uhr im August aktiv.",
+            "PV-Prognose für heute auswählen",
         ),
         (True, {8}, 12, True, None, 10, "PV-Prognose nicht verfügbar"),
         (
@@ -2420,7 +2420,9 @@ async def _make_max_soc_discharge_release(
     assert coordinator.max_soc_clamped is True
 
     if trigger == "forecast_missing":
-        coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.missing_pv"}
+        coordinator.options = {
+            CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.missing_pv"
+        }
         coordinator._grid_serving_forecast_threshold_kwh = 8
     elif trigger == "grid_import":
         coordinator.data["smartmeter_power"] = 100
@@ -3611,12 +3613,12 @@ async def test_grid_serving_deactivation_restores_smartmeter_after_task_stopped(
                 )
             else:
                 hass.states.async_set(
-                    "sensor.pv_prognose_morgen",
+                    "sensor.pv_prognose_heute",
                     "4",
                     {"unit_of_measurement": "kWh"},
                 )
                 coordinator.options = {
-                    CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"
+                    CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_prognose_heute"
                 }
                 await coordinator.async_set_grid_serving_forecast_threshold_kwh(8)
 

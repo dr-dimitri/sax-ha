@@ -37,6 +37,10 @@ from custom_components.sax_power.const import (
     PRICE_SENSOR_MISSING_GRACE_PERIOD,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_WAITING,
+    PRICE_STRATEGY_ABSOLUTE,
+    PRICE_STRATEGY_OFF,
+    PRICE_STRATEGY_RELATIVE,
+    PRICE_STRATEGY_SMART,
     SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -129,6 +133,7 @@ async def test_self_diagnostic_issue_clears_after_reload(
         timed_min_soc=20,
         price_limit=0.2,
         neutral_price=0.3,
+        price_strategy=PRICE_STRATEGY_ABSOLUTE,
         timed_enabled=True,
         timed_start=dt_time(1),
         timed_end=dt_time(5),
@@ -407,6 +412,7 @@ async def test_price_neutral_below_limit_issue_triggers_immediately(hass) -> Non
     """Statische Einstellungskombination wie Prüfung 3 - kein
     Karenzzeit-Timer nötig."""
     coordinator = _make_coordinator(hass)
+    coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
     coordinator._price_charge_max_price = 0.30
     coordinator._price_charge_neutral_price = 0.20
 
@@ -424,6 +430,7 @@ async def test_price_neutral_below_limit_issue_triggers_on_equal_values(hass) ->
     """Gleichheit zählt ebenfalls als Problem - die Pause-Zone braucht ein
     echtes Preisband zwischen den beiden Werten."""
     coordinator = _make_coordinator(hass)
+    coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
     coordinator._price_charge_max_price = 0.30
     coordinator._price_charge_neutral_price = 0.30
 
@@ -434,6 +441,7 @@ async def test_price_neutral_below_limit_issue_triggers_on_equal_values(hass) ->
 
 async def test_price_neutral_below_limit_issue_not_recreated_every_cycle(hass) -> None:
     coordinator = _make_coordinator(hass)
+    coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
     coordinator._price_charge_max_price = 0.30
     coordinator._price_charge_neutral_price = 0.20
 
@@ -448,6 +456,7 @@ async def test_price_neutral_below_limit_issue_not_recreated_every_cycle(hass) -
 
 async def test_price_neutral_below_limit_issue_clears_once_raised(hass) -> None:
     coordinator = _make_coordinator(hass)
+    coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
     coordinator._price_charge_max_price = 0.30
     coordinator._price_charge_neutral_price = 0.20
     coordinator._async_check_self_diagnostics()
@@ -456,6 +465,26 @@ async def test_price_neutral_below_limit_issue_clears_once_raised(hass) -> None:
     coordinator._price_charge_neutral_price = 0.40
     coordinator._async_check_self_diagnostics()
 
+    assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is None
+
+
+@pytest.mark.parametrize(
+    "strategy", [PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART, PRICE_STRATEGY_OFF]
+)
+async def test_neutral_price_issue_clears_when_leaving_absolute_strategy(
+    hass, strategy: str
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Die Preisgrenze begrenzt nur Absoluter Preis."""
+    coordinator = _make_coordinator(hass)
+    coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
+    coordinator._price_charge_max_price = 0.30
+    coordinator._price_charge_neutral_price = 0.20
+    coordinator._async_check_self_diagnostics()
+    assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is not None
+
+    coordinator._self_diagnostics = SelfDiagnostics(hass, "test_entry_id")
+    coordinator._price_charge_strategy = strategy
+    coordinator._async_check_self_diagnostics()
     assert _get_issue(hass, ISSUE_PRICE_NEUTRAL_BELOW_LIMIT) is None
 
 

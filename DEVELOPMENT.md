@@ -56,7 +56,7 @@ custom_components/sax_power/
 │                          Zeitfenster-Überlappungsprüfung
 ├── price_optimizer.py    Preisoptimiertes Laden: Einlesen der Preisdaten aus
 │                          einer beliebigen Preis-Sensor-Entity, Ladeplanung je
-│                          Strategie, gemeinsame Prognosequelle,
+│                          Strategie, getrennte PV-Prognosequellen,
 │                          60-Sekunden-Takt - ohne Modbus-Zugriff
 ├── economics.py          Home-Assistant-Adapter des Tarifmodells
 │                          (SaxTariffProvider): liest Options und Preis-Sensor
@@ -1124,7 +1124,8 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    gegenseitig ein- und ausschalten konnten, sobald ihre Bedingungen
    gleichzeitig erfüllt waren). Dieselbe Ausschlussregel gilt für die
    Neutralpreis-Pausezone (`price_should_pause`, Sollwert 0 statt
-   Nullregelung zwischen Preisgrenze und Neutralpreis).
+   Nullregelung unterhalb des Neutralpreises; nur Absoluter Preis begrenzt
+   das Band zusätzlich durch die Preisgrenze).
 5. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
    (SmartMeter-Nullregelung), Zustandsmaschine zurückgesetzt.
 

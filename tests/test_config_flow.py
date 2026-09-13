@@ -26,6 +26,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
@@ -915,6 +916,7 @@ async def test_options_flow_stores_price_configuration(hass) -> None:
             CONF_PRICE_SENSOR: "sensor.strompreis",
             CONF_PRICE_UNIT: PRICE_UNIT_CT_KWH,
             CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen",
+            CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_rest_heute",
             CONF_PV_FORECAST_FACTOR: 70,
         },
     )
@@ -924,6 +926,32 @@ async def test_options_flow_stores_price_configuration(hass) -> None:
     assert entry.options[CONF_PRICE_SENSOR] == "sensor.strompreis"
     assert entry.options[CONF_PRICE_UNIT] == PRICE_UNIT_CT_KWH
     assert entry.options[CONF_PV_FORECAST_FACTOR] == 70
+    assert entry.options[CONF_PV_FORECAST_SENSOR] == "sensor.pv_prognose_morgen"
+    assert entry.options[CONF_GRID_SERVING_PV_FORECAST_SENSOR] == "sensor.pv_rest_heute"
+
+
+async def test_options_preserve_legacy_forecast_only_for_smart(hass) -> None:
+    """REQ-GRID-SERVING-CHARGE: Die Migration erfindet keine Heute-Auswahl."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=VALID_INPUT,
+        options={CONF_PV_FORECAST_SENSOR: "sensor.pv_morgen"},
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    suggested = {
+        key.schema: key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if isinstance(key.description, dict) and "suggested_value" in key.description
+    }
+    assert suggested[CONF_PV_FORECAST_SENSOR] == "sensor.pv_morgen"
+    assert not suggested.get(CONF_GRID_SERVING_PV_FORECAST_SENSOR)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_PV_FORECAST_SENSOR: "sensor.pv_morgen"}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_PV_FORECAST_SENSOR] == "sensor.pv_morgen"
+    assert not entry.options.get(CONF_GRID_SERVING_PV_FORECAST_SENSOR)
 
 
 async def test_options_flow_is_prefilled_with_current_options(hass) -> None:

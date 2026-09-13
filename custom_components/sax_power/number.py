@@ -341,14 +341,10 @@ class SaxPowerPriceNeutralPriceNumber(
     """Neutralpreis für das preisoptimierte Laden, in EUR/kWh - siehe
     anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 
-    Muss über der Preisgrenze liegen (sonst reparierbares Issue
-    ISSUE_PRICE_NEUTRAL_BELOW_LIMIT, siehe
-    coordinator._check_price_neutral_below_limit). Liegt der aktuelle Preis
-    zwischen Preisgrenze und Neutralpreis, schaltet der Coordinator den
-    Speicher in den manuellen Sollwertmodus mit Sollwert 0 (Laden UND
-    Entladen gestoppt) statt ihn der SmartMeter-Nullregelung zu überlassen -
-    ab dem Neutralpreis lohnt sich die Entladung wieder trotz
-    Speicherverlusten, siehe coordinator._async_enforce_grid_charge.
+    Bei Relativ/Smart pausieren nicht zum Laden ausgewählte Slots unterhalb
+    dieses Preises. Nur Absoluter Preis benötigt ein offenes Band oberhalb
+    der Preisgrenze; widersprüchliche Grenzen meldet SelfDiagnostics.
+    REQ-DYNAMIC-PRICE-CHARGE beschreibt Vorränge und Freigabe der Entladung.
 
     Persistiert im Konfigurations-Store (REQ-CONTROL-CONFIG-BOOTSTRAP),
     RestoreEntity nur noch als einmaliger Migrationspfad; ohne beides gilt

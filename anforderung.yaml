@@ -1303,24 +1303,31 @@ requirement_grid_serving_charge:
     werden auch aus älteren Versionen restaurierte Dezimalwerte migriert.
     0 kWh deaktiviert die Zusatzbedingung vollständig und erhält damit das
     bisherige statische Verhalten für Bestandsinstallationen. Bei einem
-    Wert > 0 wird der bereits im Options Flow für REQ-DYNAMIC-PRICE-CHARGE
-    auswählbare CONF_PV_FORECAST_SENSOR als gemeinsame Quelle verwendet.
-    price_optimizer.SaxPricePlanner.forecast_kwh liest dessen Zustand;
+    Wert > 0 verwendet die Ladepause ausschließlich den im Options Flow
+    gewählten CONF_GRID_SERVING_PV_FORECAST_SENSOR: den heute noch erwarteten
+    PV-Ertrag. SaxPricePlanner.grid_serving_forecast_kwh liest dessen Zustand;
     domain.forecast.normalize_energy_kwh normalisiert endliche Zahlen aus
     Wh/kWh/MWh auf kWh. Eine fehlende Einheit bleibt aus Kompatibilität
     als kWh interpretierbar; Wahrheitswerte, fremde Einheiten (z. B. W)
     sowie ein Überlauf bei der Umrechnung ergeben keine gültige Prognose.
-    Der Vergleich nutzt bewusst den rohen normalisierten
-    Prognosewert und NICHT CONF_PV_FORECAST_FACTOR, weil dieser Faktor nur
-    den nutzbaren Anteil für die Bedarfsrechnung der Smart-Preisstrategie
-    beschreibt. Ist kein CONF_PV_FORECAST_SENSOR ausgewählt, entfällt die
-    Zusatzbedingung vollständig und die Ladepause bleibt unabhängig vom
-    eingestellten Mindestwert freigegeben. Nur bei ausgewähltem Sensor gilt:
-    forecast >= Mindestwert gibt die Ladepause frei; eine nicht vorhandene
-    Entity sowie unknown/unavailable/leerer/nichtnumerischer oder nicht
-    endlicher Zustand gelten als nicht freigegeben (Fail-open für die
-    Ladung). Die Zustandsmaschine greift dann nicht ein und der Speicher darf
-    früh über die SmartMeter-Nullregelung laden.
+    Der Vergleich nutzt den rohen normalisierten Wert ohne
+    CONF_PV_FORECAST_FACTOR; dieser Faktor gehört nur zur Smart-Bedarfsrechnung
+    mit der separaten Morgen-Quelle CONF_PV_FORECAST_SENSOR.
+    Nur forecast >= Mindestwert gibt die prognoseabhängige Ladepause frei.
+    Eine fehlende Auswahl, eine nicht vorhandene Entity sowie
+    unknown/unavailable/leere/nichtnumerische oder nicht endliche Zustände
+    geben sie nicht frei. Die Zustandsmaschine greift dann nicht ein und
+    der Speicher darf früh über die SmartMeter-Nullregelung laden.
+
+    Migration (Issue #216): Die bisher gespeicherte Auswahl
+    CONF_PV_FORECAST_SENSOR bleibt unverändert als Morgen-Quelle für Smart
+    erhalten. Sie wird nicht als Heute-Quelle übernommen. Bei Mindestwert
+    > 0 benötigt die Ladepause eine ausdrückliche Auswahl im neuen Feld;
+    im aktiven Zeitfenster meldet sie bis dahin
+    "PV-Prognose für heute auswählen". 0 kWh lässt das statische Verhalten
+    unverändert. Beide Auswahlen bleiben unabhängig, auch nach Neustarts.
+    Der Prognosesensor im Dashboard zeigt nur die Heute-Quelle; sein Datum
+    bezeichnet den heutigen Rest-Ertrag, nicht die Smart-Prognose für morgen.
 
     ChargePolicyInput.grid_serving_forecast_allowed fließt zentral in
     grid_serving_window_active ein. Dieser Wert ist damit das EINE effektive
@@ -1331,8 +1338,8 @@ requirement_grid_serving_charge:
     und _async_enforce_grid_charge ruft async_stop_sun_charge auf. Dasselbe
     effektive False gibt den Schreibpfad für price_should_charge bzw.
     price_should_pause frei. Änderungen am Number-Wert werden über dessen
-    Coordinator-Setter sofort angewendet; Zustandswechsel am gemeinsamen
-    Sensor werden vom Planner beobachtet und über async_apply_price_plan
+    Coordinator-Setter sofort angewendet; Zustandswechsel an beiden getrennten
+    Prognosesensoren werden vom Planner beobachtet und über async_apply_price_plan
     ohne Neustart sofort auf den Coordinator übertragen.
 
     Jeder Übergang eines zuvor aktiven 0-%-Eingriffs auf inaktiv setzt
@@ -1427,14 +1434,14 @@ requirement_grid_serving_charge:
     dadurch verwendet Home Assistant ihren dynamischen Namen unverändert und
     stellt nicht "SAX Power Home" voran.
     Der Status beschreibt grundsätzlich das effektive Ladepausen-Fenster,
-    nicht erst den späteren Eingriff nach erkannter PV-Ladung. Ist kein
-    Prognosesensor konfiguriert, bleibt der reine zeitliche Aktivsatz sichtbar,
-    die Mindestprognose wird nicht geprüft und auch das effektive
-    Ladepausen-Fenster bleibt freigegeben. Die
+    nicht erst den späteren Eingriff nach erkannter PV-Ladung. Bei Mindestwert
+    > 0 benötigt dieses Fenster eine ausgewählte, gültige Heute-Prognose. Die
     erste passende Bedingung gewinnt: Hauptschalter aus -> "Inaktiv";
     aktueller Monat aus
     -> "Inaktiv im Monat <Monat>"; Uhrzeit außerhalb -> "Außerhalb des
-    Zeitfensters"; konfigurierter, aber ungültiger Sensor -> "PV-Prognose
+    Zeitfensters"; Mindestwert > 0 ohne Heute-Auswahl -> "PV-Prognose für
+    heute auswählen"; konfigurierter, aber ungültiger Sensor bei Mindestwert
+    > 0 -> "PV-Prognose
     nicht verfügbar"; Prognose unter Mindestwert -> Satz mit
     beiden kWh-Werten und inaktiver Ladepause; Prognose > Mindestwert ->
     aktiver Satz mit "größer als"; Prognose == Mindestwert -> derselbe aktive
@@ -1610,6 +1617,12 @@ requirement_grid_serving_charge:
     REQ-TIMED-SOC-CHARGE) - das Feature wird ausschließlich über die
     Entitäten nach der Ersteinrichtung konfiguriert.
   acceptance_criteria:
+    - "Getrennte Heute-/Morgen-Auswahlen werden gespeichert und vorbelegt.
+       Alte Auswahlen bleiben nur bei Smart; eine fehlende Heute-Auswahl
+       verhindert die prognoseabhängige Pause und wird verständlich angezeigt.
+       Unterschiedliche Sensorwerte und Ausfälle beeinflussen jeweils nur
+       ihren Zeithorizont. Eine fallende Heute-Prognose beendet einen aktiven
+       Eingriff unmittelbar; Mindestwert 0 erhält die statische Pause."
     - "tests/test_price_optimizer.py/test_charge_policy.py/test_forecast.py
        decken die optionale Prognosefreigabe ab: 0 kWh deaktiviert sie;
        unterhalb/exakt auf/oberhalb der Schwelle gilt False/True/True;
@@ -2153,49 +2166,45 @@ requirement_dynamic_price_charge:
     (PRICE_STATUS_PAUSED_GRID_SERVING).
 
     Neutralpreis-Pausezone: number "Preisoptimiertes Laden Neutralpreis"
-    (EUR/kWh, muss über der Preisgrenze liegen, siehe Reparaturhinweis
-    unten) erweitert das preisoptimierte Laden um einen dritten Preisbereich
-    - unabhängig von der aktiven Strategie (absolute/relativ/smart), aber
-    nur wenn preisoptimiertes Laden aktiv ist. Lädt die Automatik gerade
-    NICHT aus dem Netz (price_should_charge in
-    SaxPowerCoordinator._async_enforce_grid_charge ist False, z. B. weil der
-    aktuelle Preis über der Preisgrenze liegt), aber der aktuelle Preis
-    (price_planner.plan.current_price) liegt noch unterhalb des
-    Neutralpreises, wird der Speicher NICHT der geräteeigenen
-    SmartMeter-Nullregelung überlassen, sondern aktiv in den manuellen
-    Sollwertmodus mit Sollwert 0 geschaltet (price_should_pause,
-    async_start_sun_charge(0), Status "Pausiert (Preisband)") - Laden UND
-    Entladen bleiben gestoppt, der komplette Hausverbrauch läuft über das
-    Netz. Zweck: verhindert, dass die im Speicher gespeicherte, günstig
-    eingekaufte Energie durch die Speicherverluste beim Entladen teurer wird
-    als der direkte Netzbezug in diesem mittleren Preisband. Erst ab dem
-    Neutralpreis lohnt sich die Entladung wieder trotz Speicherverlusten -
-    der Speicher geht dann zurück in die normale SmartMeter-Nullregelung,
-    die die Entladung wieder übernimmt (identisch zum bisherigen
-    Rückfallverhalten, wenn kein gültiges Preisgrenze/Neutralpreis-Paar
-    vorliegt). Die Pausezone teilt sich dieselben Ausschlussgründe wie
-    price_should_charge (Max-SOC-Sperre, PV-Überschuss, Vorrang des
-    zeitgesteuerten UND des netzdienlichen Ladens - insbesondere weicht sie
-    sofort einem bestätigten PV-Überschuss, damit freie PV-Energie weiterhin
-    ungehindert in den Speicher fließen kann) und hat dieselbe Priorität wie
-    aktives preisoptimiertes Laden selbst: sie wird umgekehrt von
-    netzdienlichem Laden blockiert, sobald dessen Zeitfenster aktiv ist
-    (price_should_pause schließt grid_serving_window_active mit aus), NICHT
-    mehr andersherum. Fehlt eine der beiden Preis-Einstellungen (noch nicht
-    restauriert), oder liegt der Neutralpreis nicht über der Preisgrenze,
-    bleibt price_should_pause bewusst False - unverändertes Verhalten wie vor
-    Einführung des Neutralpreises, statt einer stillen Annahme.
+    (EUR/kWh) hält den Speicher bei günstigem Netzstrom an, solange die
+    Preisautomatik eingeschaltet ist und nicht gerade aus dem Netz lädt
+    (price_should_charge False). Für die Strategie "Absoluter Preis" gilt
+    weiterhin das offene Band Preisgrenze < aktueller Preis < Neutralpreis.
+    Hier müssen beide Grenzen gesetzt sein und der Neutralpreis oberhalb
+    der Preisgrenze liegen. Für "Relativ" und "Smart" gilt dagegen nur
+    aktueller Preis < Neutralpreis: Nicht ausgewählte Slots, ein erschöpftes
+    Zyklusbudget oder durch PV gedeckter Bedarf erlauben unterhalb dieses
+    Werts keine Entladung, auch bei negativen Preisen. Die absolute
+    Preisgrenze ist in diesen Strategien weder Untergrenze noch Voraussetzung
+    der Pause; sie darf fehlen oder oberhalb des Neutralpreises liegen.
+
+    Die Pause schaltet den Speicher aktiv in den manuellen Sollwertmodus
+    mit Sollwert 0 (async_start_sun_charge(0), Status "Pausiert (Preisband)").
+    Laden und Entladen bleiben gestoppt; der Hausverbrauch kommt aus dem
+    Netz. Das verhindert, dass gespeicherte Energie in günstigen Stunden
+    verbraucht wird, obwohl direkter Netzbezug nach Speicherverlusten
+    günstiger wäre. Ab einschließlich Neutralpreis wird die normale
+    SmartMeter-Nullregelung wieder freigegeben. Fehlt ein gültiger aktueller
+    Preis oder Neutralpreis, entsteht keine Pausefreigabe.
+
+    Die bisherigen Prioritäten bleiben wirksam: Max-SOC-Sperre, manuelle
+    Netzladung, zeitgesteuerte Netzladung, das wirksame Fenster des
+    netzdienlichen Ladens und bestätigter PV-Überschuss haben Vorrang.
+    Ein zum Laden ausgewählter Slot wird weiter geladen; die Pause erzeugt
+    keinen zusätzlichen Ladeslot und verändert kein Zyklusbudget.
 
     Reparaturhinweis ISSUE_PRICE_NEUTRAL_BELOW_LIMIT
     (infrastructure/self_diagnostics.SelfDiagnostics._check_price_neutral_below_limit,
     eine der sechs Basisregeln aus REQ-SELF-DIAGNOSIS-REPAIRS): Der
     Coordinator übergibt in _async_check_self_diagnostics einen
     DiagnosticSnapshot an SelfDiagnostics.check. Liegt der Neutralpreis
-    nicht über der Preisgrenze (<=), legt SelfDiagnostics ein rein informatives
+    in der Strategie "Absoluter Preis" nicht über der Preisgrenze (<=),
+    legt SelfDiagnostics ein rein informatives
     (is_fixable=False), sich selbst heilendes Issue an - statische
     Einstellungskombination wie ISSUE_MAX_SOC_BELOW_MIN_SOC, kein
     Zustandsflanken-Timer nötig, schlägt sofort an.
-    translation_placeholders: max_price, neutral_price.
+    Beim Wechsel zu Relativ, Smart oder Aus verschwindet dieser Hinweis,
+    auch nach einem Reload. translation_placeholders: max_price, neutral_price.
 
     Gegenseitiger Ausschluss mit der Netzladung: Beide laden aktiv aus dem
     Netz über denselben Schreibpfad und dürfen nicht gleichzeitig aktiv
@@ -2214,8 +2223,9 @@ requirement_dynamic_price_charge:
   requirements:
     - "Options Flow (config_flow.SaxPowerOptionsFlow): Auswahl des
        Strompreis-Sensors, optionales Attribut-Override, Preis-Einheit
-       (automatisch/EUR/ct), optionaler PV-Prognose-Sensor sowie dessen
-       nutzbarer Anteil in Prozent. Keine YAML-Konfiguration. Bewusst KEIN
+       (automatisch/EUR/ct), optionaler PV-Prognose-Sensor für morgen und
+       dessen nutzbarer Anteil in Prozent. Die Heute-Quelle der Ladepause
+       ist ein separates Feld. Keine YAML-Konfiguration. Bewusst KEIN
        eigenes Feld für die Strategie (bis einschließlich Version mit
        CONF_PRICE_STRATEGY vorhanden, seither entfernt): Ein dort
        hinterlegter Wert hätte ohnehin nur bis zum ersten gespeicherten
@@ -2227,8 +2237,8 @@ requirement_dynamic_price_charge:
     - "Entities am bestehenden SAX-Gerät: switch 'Preisoptimiertes Laden
        aktiv' (Hauptschalter), select 'Preisoptimiertes Laden Strategie',
        number 'Preisoptimiertes Laden Preisgrenze' (EUR/kWh), number
-       'Preisoptimiertes Laden Neutralpreis' (EUR/kWh, muss über der
-       Preisgrenze liegen), number 'Preisoptimiertes Laden Anzahl Stunden'
+       'Preisoptimiertes Laden Neutralpreis' (EUR/kWh, bei Absoluter Preis
+       oberhalb der Preisgrenze), number 'Preisoptimiertes Laden Anzahl Stunden'
        (1-24), sensor 'Preisoptimiertes Laden nächster Start' (device_class
        timestamp), sensor 'Preisoptimiertes Laden Status' (Klartext),
        sensor 'Preisoptimiertes Laden aktiv' (Diagnose) sowie sensor
@@ -2280,6 +2290,19 @@ requirement_dynamic_price_charge:
        unveränderlich in entry.data) - ein Reload ist für eine reine
        Options-Änderung deshalb nicht nötig."
   acceptance_criteria:
+    - "Fehlt eine explizite gültige Endzeit, endet ein Preisabschnitt am
+       nächsten bekannten Beginn; der letzte endet nach dem kleinsten
+       positiven Abstand zwischen den bekannten Startzeitpunkten, ohne
+       Nachbarabstand nach DEFAULT_PRICE_SLOT_MINUTES. Abstände werden als
+       reale UTC-Dauer gemessen. Gültige explizite Endzeiten bleiben maßgeblich.
+       Unregelmäßige Vorschauen mit überwiegend längeren Abständen und einem
+       einzelnen kurzen Abstand sind in tests/test_price_optimizer.py
+       abgesichert (Issue #217); nach dem abgeleiteten Ende fehlt der Preis."
+    - "tests/test_charge_policy.py und tests/test_price_optimizer.py sichern
+       die Pause nicht ausgewählter Relativ-/Smart-Slots unterhalb der
+       absoluten Preisgrenze, negative Preise, Gleichheit am Neutralpreis,
+       fehlende Preise, die unveränderten Vorränge und den aktiven Wechsel
+       von Sollwert 0 zur SmartMeter-Nullregelung ab (Issue #214)."
     - "tests/test_price_optimizer.py deckt ab: Einlesen der Attributformate
        (raw_today/raw_tomorrow, Zahlenlisten, data/start_time,
        Viertelstunden, ct-Umrechnung, Attribut-Override, unbrauchbare
@@ -2297,10 +2320,11 @@ requirement_dynamic_price_charge:
        Konfliktdialog (Anlegen, Bestätigen, Abbrechen, force), das
        Restore-Verhalten der Select-/Switch-Entities sowie die
        Neutralpreis-Pausezone: manueller Sollwertmodus mit Sollwert 0
-       zwischen Preisgrenze und Neutralpreis, Rückkehr in die Nullregelung
+       bei Absoluter Preis zwischen Preisgrenze und Neutralpreis, bei
+       Relativ/Smart auch unterhalb der Preisgrenze, Rückkehr in die Nullregelung
        ab dem Neutralpreis, Vorrang von PV-Überschuss vor der Pausezone,
-       unverändertes Verhalten ohne gültige Preisgrenze/Neutralpreis-
-       Kombination sowie Vorrang von netzdienlichem Laden vor
+       keine Pause ohne Neutralpreis; bei Absoluter Preis zusätzlich keine
+       Pause ohne gültiges Preisband sowie Vorrang von netzdienlichem Laden vor
        preisoptimiertem Laden (test_grid_serving_takes_priority_over_
        price_charge_neutral_band, test_grid_serving_takes_priority_over_
        price_charge_active_charging) - ein aktives Zeitfenster des
@@ -2331,8 +2355,8 @@ requirement_dynamic_price_charge:
        während der Coordinator (noch) nicht in hass.data registriert ist."
     - "tests/test_repairs.py deckt ISSUE_PRICE_NEUTRAL_BELOW_LIMIT ab:
        sofortiges Auslösen bei Neutralpreis <= Preisgrenze (auch bei
-       Gleichheit), Idempotenz und Selbstheilung, sobald der Neutralpreis
-       wieder über der Preisgrenze liegt."
+       Gleichheit) in der Strategie Absoluter Preis, Idempotenz und
+       Selbstheilung bei korrigierten Grenzen oder einem Strategiewechsel."
     - "README.md beschreibt Einrichtung, Strategien und Zusammenspiel mit
        den übrigen Lademodi."
 
@@ -3408,10 +3432,12 @@ requirement_self_diagnosis_repairs:
        widersprüchlichen Grenzen erzeugt den Hinweis erneut.
        translation_placeholders: max_soc, min_soc.
     4. ISSUE_PRICE_NEUTRAL_BELOW_LIMIT ("Neutralpreis liegt nicht über der
-       Preisgrenze"): Sind beide Preise gesetzt und ist der Neutralpreis
-       kleiner oder gleich der Preisgrenze, ist keine Neutralpreis-Pausezone
+       Preisgrenze"): Nur in der Strategie Absoluter Preis gilt: Sind beide
+       Preise gesetzt und ist der Neutralpreis kleiner oder gleich der
+       Preisgrenze, ist keine Neutralpreis-Pausezone
        möglich (REQ-DYNAMIC-PRICE-CHARGE). Der Hinweis erscheint sofort und
-       verschwindet, sobald die Preisgrenzen korrigiert sind.
+       verschwindet, sobald die Preisgrenzen korrigiert sind oder Relativ,
+       Smart oder Aus gewählt wird.
        translation_placeholders: max_price, neutral_price.
     5. ISSUE_EMPTY_CHARGE_WINDOW ("Zeitfenster ist leer oder unvollständig"): eine der beiden
        zeitfenstergesteuerten Automatiken (zeitgesteuertes Laden ODER

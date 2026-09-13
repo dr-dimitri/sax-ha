@@ -378,8 +378,8 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     price_optimizer.SaxPricePlanner sowie die optionale Vue-Oberfläche - nie
     den Modbus-Client, die Slave-IDs oder das Scan-Intervall (unveränderlich
     in entry.data, siehe config_flow.async_step_reconfigure für deren einzigen
-    Änderungsweg). Die gemeinsam ausgewertete PV-Prognose kann dabei auch die
-    Freigabe des netzdienlichen Ladens ändern. Ein Reload ist für eine reine
+    Änderungsweg). Die separate Heute-Prognose kann dabei die Freigabe des
+    netzdienlichen Ladens ändern. Ein Reload ist für eine reine
     Options-Änderung trotzdem nicht nötig: Die neuen Werte werden direkt in
     den laufenden Coordinator übernommen, der Planner wird erneut aufgesetzt
     und das Ergebnis sofort angewendet -

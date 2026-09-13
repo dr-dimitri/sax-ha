@@ -81,7 +81,7 @@ DEFAULT_TIMED_CHARGE_MIN_SOC = 20
 DEFAULT_GRID_SERVING_START = "00:00:00"
 DEFAULT_GRID_SERVING_END = "00:00:00"
 DEFAULT_GRID_SERVING_ENABLED = False
-# Optionaler Mindestwert der gemeinsam genutzten PV-Prognose. 0 kWh
+# Optionaler Mindestwert der heute noch erwarteten PV-Erzeugung. 0 kWh
 # deaktiviert die zusätzliche Freigabebedingung, damit Bestandsinstallationen
 # nach dem Update unverändert rein statisch über Monate/Zeitfenster arbeiten.
 MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH = 0.0
@@ -455,7 +455,7 @@ SMARTMETER_PV_SURPLUS_THRESHOLD_WATT = 50
 PV_SURPLUS_HYSTERESIS_CYCLES = 2
 
 # ==========================================================================
-# Preisoptimiertes Laden + gemeinsame PV-Prognose (siehe anforderung.yaml,
+# Preisoptimiertes Laden + getrennte PV-Prognosequellen (siehe anforderung.yaml,
 # REQ-DYNAMIC-PRICE-CHARGE/REQ-GRID-SERVING-CHARGE)
 # ==========================================================================
 # Reine Software-Logik oberhalb des vorhandenen SunSpec-Schreibpfads
@@ -470,6 +470,7 @@ CONF_PRICE_SENSOR = "price_sensor"
 CONF_PRICE_ATTRIBUTE = "price_attribute"
 CONF_PRICE_UNIT = "price_unit"
 CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
+CONF_GRID_SERVING_PV_FORECAST_SENSOR = "grid_serving_pv_forecast_sensor"
 CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
 
 # Preis-Einheit des ausgewählten Sensors. "auto" leitet sie aus dessen
@@ -517,15 +518,9 @@ MAX_PRICE_LIMIT = 2.0
 PRICE_LIMIT_STEP = 0.001
 DEFAULT_PRICE_LIMIT = 0.20
 
-# Neutralpreis: zweiter, oberhalb der Preisgrenze liegender Schwellwert
-# (gleiche Einheit/Bereich/Schrittweite wie die Preisgrenze). Liegt der
-# aktuelle Preis zwischen Preisgrenze und Neutralpreis, wird der Speicher in
-# den manuellen Sollwertmodus mit Sollwert 0 geschaltet (Laden UND Entladen
-# gestoppt) statt der geräteeigenen SmartMeter-Nullregelung überlassen zu
-# werden - verhindert, dass gespeicherte, günstig eingekaufte Energie durch
-# die Speicherverluste teurer entladen wird, als der direkte Netzbezug in
-# diesem Preisband kosten würde. Erst ab dem Neutralpreis lohnt sich die
-# Entladung wieder, der Speicher geht dann zurück in die Nullregelung.
+# REQ-DYNAMIC-PRICE-CHARGE: Günstiger Netzbezug soll gespeicherte Energie
+# für teurere Stunden erhalten. Relativ/Smart benötigen dafür keine absolute
+# Preisgrenze; nur Absoluter Preis verwendet das offene Band beider Grenzen.
 DEFAULT_PRICE_NEUTRAL = 0.30
 
 # Anzahl der günstigsten Stunden (Modi "Relativ" und "Smart"). Im

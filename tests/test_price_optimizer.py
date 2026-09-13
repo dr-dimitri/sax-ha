@@ -28,6 +28,7 @@ from homeassistant.util import dt as dt_util
 from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     CELL_CALIBRATION_INTERVAL,
+    CONF_GRID_SERVING_PV_FORECAST_SENSOR,
     CONF_PRICE_SENSOR,
     CONF_PV_FORECAST_SENSOR,
     DATA_COORDINATOR,
@@ -288,6 +289,23 @@ def test_parse_price_slots_data_attribute_with_start_time() -> None:
     assert slots[0].end == _local(13)
     # Letzter Slot ohne Nachfolger: Länge aus dem kleinsten bekannten Abstand.
     assert slots[1].end == _local(14)
+
+
+@pytest.mark.parametrize("explicit_end", [False, True])
+def test_last_irregular_slot_uses_shortest_gap_unless_end_is_known(
+    explicit_end: bool,
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Unbestätigte Preisgültigkeit kurz halten (#217)."""
+    starts = [_local(8), _local(9), _local(9, 15), _local(10, 15), _local(11, 15)]
+    entries = [{"start_time": start.isoformat(), "price": 0.20} for start in starts]
+    if explicit_end:
+        entries[-1]["end_time"] = _local(12, 15).isoformat()
+    slots = parse_price_slots(_FakeState(data=entries), now=_local(8))
+
+    assert [slot.end for slot in slots[:-1]] == starts[1:]
+    assert slots[-1].end == (_local(12, 15) if explicit_end else _local(11, 30))
+    if not explicit_end:
+        assert current_price(slots, _local(11, 30)) is None
 
 
 def test_explicit_slots_keep_both_autumn_folds() -> None:
@@ -1166,6 +1184,50 @@ async def test_price_charge_pauses_in_neutral_band(hass) -> None:
         await coordinator.async_stop_sun_charge()
 
 
+@pytest.mark.parametrize("strategy", [PRICE_STRATEGY_RELATIVE, PRICE_STRATEGY_SMART])
+async def test_unselected_cheap_slot_pauses_then_releases_at_neutral_price(
+    hass, strategy: str
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Nicht gewählte billige Slots entladen nicht."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    coordinator.data = {
+        "soc": 50,
+        "ic_max_power_reference": 4600,
+        "ic_timeout": 300,
+        "smartmeter_power": 0,
+    }
+    await _enable_price_charge(coordinator)
+    await coordinator.async_set_price_charge_strategy(strategy)
+    await coordinator.async_set_price_charge_max_price(0.40)
+    await coordinator.async_set_price_charge_neutral_price(0.30)
+    coordinator.price_planner.plan = PricePlan(
+        status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.10
+    )
+    try:
+        await coordinator._async_enforce_grid_charge(coordinator.data)
+        assert coordinator.sun_charge_active
+        assert not coordinator.price_charge_active
+        assert coordinator.price_charge_status == PRICE_STATUS_PAUSED_NEUTRAL_BAND
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100
+        )
+
+        coordinator.price_planner.plan = PricePlan(
+            status=PRICE_STATUS_WAITING, charge_now=False, current_price=0.30
+        )
+        await coordinator._async_enforce_grid_charge(coordinator.data)
+        assert not coordinator.sun_charge_active
+        assert coordinator.price_charge_status == PRICE_STATUS_WAITING
+        client.write_register.assert_awaited_with(
+            address=REG_SUN_IC_CONTROL_MODE,
+            value=SUN_IC_CONTROL_MODE_SMARTMETER,
+            device_id=100,
+        )
+    finally:
+        await coordinator.async_shutdown(reset_device=False)
+
+
 async def test_price_charge_returns_to_nullregelung_above_neutral_price(hass) -> None:
     """Ab dem Neutralpreis lohnt sich die Entladung wieder - der Speicher
     geht zurück in die geräteeigene SmartMeter-Nullregelung, das Smart
@@ -1351,10 +1413,12 @@ async def test_grid_serving_forecast_controls_effective_window(
     """
     if state is not None:
         hass.states.async_set(
-            "sensor.pv_prognose_morgen", state, {"unit_of_measurement": unit}
+            "sensor.pv_prognose_heute", state, {"unit_of_measurement": unit}
         )
     coordinator = _make_coordinator(hass)
-    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.options = {
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_prognose_heute"
+    }
     coordinator.data = {"soc": 50, "smartmeter_power": 0}
     await coordinator.async_set_max_soc(90)
     await coordinator.async_set_grid_serving_start(dt_time(10))
@@ -1369,11 +1433,14 @@ async def test_grid_serving_forecast_controls_effective_window(
     assert coordinator.grid_serving_window_active is expected_allowed
 
 
-async def test_missing_forecast_sensor_keeps_grid_serving_pause_active(hass) -> None:
-    """Ohne ausgewählten Prognosesensor ist der Mindestwert wirkungslos;
-    die Ladepause erkennt reale SAX-Ladung weiterhin und stoppt sie."""
+async def test_legacy_forecast_needs_explicit_today_source_for_grid_serving(
+    hass,
+) -> None:
+    """REQ-GRID-SERVING-CHARGE: Ein Altsensor bleibt ausschließlich bei Smart."""
     client = _make_client()
     coordinator = _make_coordinator(hass, client)
+    hass.states.async_set("sensor.pv_morgen", "20", {"unit_of_measurement": "kWh"})
+    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_morgen"}
     coordinator.data = {
         "soc": 50,
         "ic_max_power_reference": 4600,
@@ -1394,33 +1461,47 @@ async def test_missing_forecast_sensor_keeps_grid_serving_pause_active(hass) -> 
             await coordinator._async_enforce_grid_charge(coordinator.data)
             await asyncio.sleep(0.1)
 
-        assert coordinator.grid_serving_forecast_allowed is True
-        assert coordinator.grid_serving_window_active is True
-        assert coordinator.grid_serving_active is True
+        assert coordinator.price_planner.forecast_kwh() == 20
+        assert coordinator.price_planner.grid_serving_forecast_kwh() is None
+        assert coordinator.grid_serving_forecast_allowed is False
+        assert coordinator.grid_serving_window_active is False
+        assert coordinator.grid_serving_active is False
         assert coordinator.data["grid_serving_pause_status"] == (
-            "Ladepause ist zwischen 10:00 Uhr und 14:00 Uhr im Januar aktiv."
-        )
-        client.write_register.assert_any_await(
-            address=REG_SUN_IC_CONTROL_MODE,
-            value=SUN_IC_CONTROL_MODE_SETPOINT,
-            device_id=100,
-        )
-        client.write_register.assert_awaited_with(
-            address=REG_SUN_IC_POWER_SETPOINT_PCT,
-            value=0,
-            device_id=100,
+            "PV-Prognose für heute auswählen"
         )
     finally:
         await coordinator.async_stop_sun_charge()
 
 
+async def test_forecast_sources_keep_today_and_tomorrow_separate(hass) -> None:
+    """REQ-GRID-SERVING-CHARGE/REQ-DYNAMIC-PRICE-CHARGE: Zwei Zeithorizonte."""
+    hass.states.async_set("sensor.pv_heute", "8000", {"unit_of_measurement": "Wh"})
+    hass.states.async_set("sensor.pv_morgen", "20", {"unit_of_measurement": "kWh"})
+    coordinator = _make_coordinator(hass)
+    coordinator.options = {
+        CONF_PV_FORECAST_SENSOR: "sensor.pv_morgen",
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_heute",
+    }
+    assert coordinator.price_planner._context().pv_forecast_kwh == 20
+    assert coordinator.price_planner.grid_serving_forecast_kwh() == 8
+
+    hass.states.async_set("sensor.pv_morgen", "unavailable")
+    assert coordinator.price_planner._context().pv_forecast_kwh is None
+    assert coordinator.price_planner.grid_serving_forecast_kwh() == 8
+
+    hass.states.async_set("sensor.pv_heute", "unknown")
+    assert coordinator.price_planner.grid_serving_forecast_kwh() is None
+
+
 async def test_equal_forecast_keeps_grid_serving_pause_active(hass) -> None:
     """Gleichheit erfüllt die Mindestprognose und wird als aktiv veröffentlicht."""
     hass.states.async_set(
-        "sensor.pv_prognose_morgen", "8", {"unit_of_measurement": "kWh"}
+        "sensor.pv_prognose_heute", "8", {"unit_of_measurement": "kWh"}
     )
     coordinator = _make_coordinator(hass)
-    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.options = {
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_prognose_heute"
+    }
     coordinator.data = {"soc": 50, "smartmeter_power": 0}
     await coordinator.async_set_max_soc(90)
     await coordinator.async_set_grid_serving_start(dt_time(10))
@@ -1443,11 +1524,13 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
     """Ein Sensorwechsel unter die Schwelle beendet einen aktiven 0-%-
     Sollwert über den sicheren Rückweg in die SmartMeter-Nullregelung."""
     hass.states.async_set(
-        "sensor.pv_prognose_morgen", "10", {"unit_of_measurement": "kWh"}
+        "sensor.pv_prognose_heute", "10", {"unit_of_measurement": "kWh"}
     )
     client = _make_client()
     coordinator = _make_coordinator(hass, client)
-    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.options = {
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_prognose_heute"
+    }
     coordinator.data = {
         "soc": 50,
         "ic_max_power_reference": 4600,
@@ -1485,7 +1568,7 @@ async def test_low_forecast_stops_running_grid_serving_pause_immediately(hass) -
 
             coordinator.price_planner.async_setup()
             hass.states.async_set(
-                "sensor.pv_prognose_morgen",
+                "sensor.pv_prognose_heute",
                 "4",
                 {"unit_of_measurement": "kWh"},
             )
@@ -1514,10 +1597,12 @@ async def test_raised_forecast_threshold_stops_running_pause_immediately(hass) -
     """Auch eine Änderung der Number-Entity wird ohne Poll-Verzögerung auf
     eine laufende Zustandsmaschine angewendet."""
     hass.states.async_set(
-        "sensor.pv_prognose_morgen", "10", {"unit_of_measurement": "kWh"}
+        "sensor.pv_prognose_heute", "10", {"unit_of_measurement": "kWh"}
     )
     coordinator = _make_coordinator(hass)
-    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.options = {
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_prognose_heute"
+    }
     coordinator.data = {
         "soc": 50,
         "ic_max_power_reference": 4600,
@@ -1553,10 +1638,12 @@ async def test_low_forecast_does_not_block_active_price_charge(hass) -> None:
     """Die statische Ladepause reserviert bei zu wenig Prognose nicht den
     gemeinsamen Schreibpfad vor dem preisoptimierten Laden."""
     hass.states.async_set(
-        "sensor.pv_prognose_morgen", "4", {"unit_of_measurement": "kWh"}
+        "sensor.pv_prognose_heute", "4", {"unit_of_measurement": "kWh"}
     )
     coordinator = _make_coordinator(hass)
-    coordinator.options = {CONF_PV_FORECAST_SENSOR: "sensor.pv_prognose_morgen"}
+    coordinator.options = {
+        CONF_GRID_SERVING_PV_FORECAST_SENSOR: "sensor.pv_prognose_heute"
+    }
     coordinator.data = {
         "soc": 50,
         "ic_max_power_reference": 4600,

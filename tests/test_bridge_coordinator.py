@@ -155,7 +155,10 @@ async def test_transient_data_gap_pauses_and_resumes_frozen_bridge_plan(
     assert coordinator._bridge_session.started
     assert coordinator.data["bridge_charge_plan"] == "paused"
     assert coordinator._bridge_session.attributes == attributes | {
-        "reason": "pv_start_missing" if gap == "pv" else "measurements_missing"
+        "reason": "pv_start_missing" if gap == "pv" else "measurements_missing",
+        "data_gap_reason": (
+            "pv_start_missing" if gap == "pv" else "measurements_missing"
+        ),
     }
 
     recovered = interrupted + timedelta(seconds=2)
@@ -624,3 +627,173 @@ async def test_replanning_uses_same_new_consumption_for_pv_and_energy(
     await _evaluate(coordinator, next_time, data)
     coordinator._pv_bridge_forecast.pv_start.assert_called_with(next_time, 2000)
     assert coordinator._bridge_session.attributes["average_discharge_w"] == 2000
+
+
+@pytest.mark.parametrize(
+    "soc,status,shortfall", [(11, "insufficient", 0.4), (15, "complete", 0)]
+)
+async def test_deadline_with_missing_pv_reports_measured_completion(
+    coordinator: SaxPowerCoordinator, soc: float, status: str, shortfall: float
+) -> None:
+    """REQ-BRIDGE-CHARGE: Forecast gaps cannot hide a charge shortfall (#252)."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    plan = coordinator._bridge_session.plan
+    assert plan is not None and plan.end is not None
+    coordinator._pv_bridge_forecast.pv_start.return_value = None
+    await _evaluate(coordinator, plan.end, _data(plan.end, soc=soc, observation=False))
+    attributes = coordinator.data["bridge_charge_plan_attributes"]
+    assert coordinator.data["bridge_charge_plan"] == status
+    assert attributes["shortfall_kwh"] == pytest.approx(shortfall)
+    assert attributes["reason"] == ("charge_shortfall" if shortfall else None)
+    assert attributes["data_gap_reason"] == "pv_start_missing"
+    assert attributes["completion_evaluated_at"] == plan.end.isoformat()
+    assert not coordinator._bridge_session.started
+    coordinator.async_start_sun_charge.reset_mock()
+    recovered = plan.end + timedelta(minutes=2)
+    coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(hours=3)
+    await _evaluate(
+        coordinator, recovered, _data(recovered, soc=soc, observation=False)
+    )
+    assert coordinator.data["bridge_charge_plan"] == status
+    assert coordinator.data["bridge_charge_plan_attributes"] == attributes
+    coordinator.async_start_sun_charge.assert_not_awaited()
+
+
+@pytest.mark.parametrize("gap", ["missing", "stale", "pv_and_stale"])
+@pytest.mark.parametrize("recovery_soc", [11, 15])
+async def test_expired_plan_defers_completion_until_measurements_recover(
+    coordinator: SaxPowerCoordinator, gap: str, recovery_soc: float
+) -> None:
+    """REQ-BRIDGE-CHARGE: Unknown energy is never replaced by cached plan zero."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    plan = coordinator._bridge_session.plan
+    assert plan is not None and plan.end is not None
+    data = _data(plan.end, soc=50, observation=False)
+    if gap == "missing":
+        data["battery_capacity"] = None
+    if gap == "pv_and_stale":
+        coordinator._pv_bridge_forecast.pv_start.return_value = None
+    with patch.object(
+        coordinator,
+        "_timed_discharge_measurements_fresh",
+        return_value=gap == "missing",
+    ):
+        await _evaluate(coordinator, plan.end, data)
+    attributes = coordinator.data["bridge_charge_plan_attributes"]
+    assert coordinator.data["bridge_charge_plan"] == "waiting_for_data"
+    assert attributes["shortfall_kwh"] is None
+    assert attributes["completion_evaluated_at"] is None
+    assert attributes["reason"] == "measurements_missing"
+    assert attributes["data_gap_reason"] == (
+        "pv_start_missing" if gap == "pv_and_stale" else "measurements_missing"
+    )
+    recovered = plan.end + timedelta(minutes=2)
+    coordinator.async_start_sun_charge.reset_mock()
+    await _evaluate(
+        coordinator, recovered, _data(recovered, soc=recovery_soc, observation=False)
+    )
+    shortfall = max(0, 28 / 60 - (recovery_soc - 10) / 10)
+    assert coordinator.data["bridge_charge_plan"] == (
+        "insufficient" if shortfall else "complete"
+    )
+    attributes = coordinator.data["bridge_charge_plan_attributes"]
+    assert attributes["shortfall_kwh"] == pytest.approx(shortfall)
+    assert attributes["completion_evaluated_at"] == recovered.isoformat()
+    assert attributes["reason"] == ("charge_shortfall" if shortfall else None)
+    assert coordinator._bridge_session.plan is plan
+    assert coordinator._bridge_session.completed_at == plan.end
+    assert not coordinator._timed_charge_active
+    coordinator.async_start_sun_charge.assert_not_awaited()
+
+
+async def test_target_soc_with_missing_pv_finishes_frozen_plan_before_deadline(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: Fresh target feedback also ends a paused charge."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    coordinator._pv_bridge_forecast.pv_start.return_value = None
+    finished = NOW + timedelta(minutes=20)
+    await _evaluate(coordinator, finished, _data(finished, soc=15, observation=False))
+    assert not coordinator._bridge_session.started
+    assert coordinator._bridge_session.completed_at == finished
+    assert coordinator.data["bridge_charge_plan"] == "insufficient"
+    assert coordinator.data["bridge_charge_plan_attributes"][
+        "shortfall_kwh"
+    ] == pytest.approx(1 / 6)
+
+
+@pytest.mark.parametrize("pv_available", [True, False])
+async def test_completion_needs_no_charge_power_reference(
+    coordinator: SaxPowerCoordinator, pv_available: bool
+) -> None:
+    """REQ-BRIDGE-CHARGE: Actual remaining energy does not need a charging rate."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    plan = coordinator._bridge_session.plan
+    assert plan is not None and plan.end is not None
+    if not pv_available:
+        coordinator._pv_bridge_forecast.pv_start.return_value = None
+    data = _data(plan.end, soc=11, observation=False)
+    data["ic_max_power_reference"] = None
+    await _evaluate(coordinator, plan.end, data)
+    assert coordinator.data["bridge_charge_plan"] == "insufficient"
+    assert coordinator.data["bridge_charge_plan_attributes"][
+        "shortfall_kwh"
+    ] == pytest.approx(0.4)
+
+
+@pytest.mark.parametrize("measurements_fresh", [True, False])
+async def test_writer_expiry_uses_only_fresh_measurements_for_completion(
+    coordinator: SaxPowerCoordinator, measurements_fresh: bool
+) -> None:
+    """REQ-BRIDGE-CHARGE: Deadline enforcement and polls share the same verdict."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    deadline = coordinator._bridge_charge_deadline
+    assert deadline is not None
+    coordinator.data = _data(deadline, soc=50, observation=False)
+    coordinator._high_data = _data(deadline, soc=11, observation=False)
+    with (
+        patch("custom_components.sax_power.coordinator.asyncio.sleep", new=AsyncMock()),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=deadline,
+        ),
+        patch.object(
+            coordinator,
+            "_timed_discharge_measurements_fresh",
+            return_value=measurements_fresh,
+        ),
+    ):
+        await coordinator._async_sun_charge_loop()
+    attributes = coordinator.data["bridge_charge_plan_attributes"]
+    assert attributes["completed_at"] == deadline.isoformat()
+    if measurements_fresh:
+        assert coordinator.data["bridge_charge_plan"] == "insufficient"
+        assert attributes["shortfall_kwh"] == pytest.approx(0.4)
+        assert "data_gap_reason" not in attributes
+    else:
+        assert coordinator.data["bridge_charge_plan"] == "waiting_for_data"
+        assert attributes["shortfall_kwh"] is None
+        assert attributes["data_gap_reason"] == "measurements_missing"
+    assert not coordinator._timed_charge_active
+    coordinator.async_write_extended_register.assert_awaited_once_with(
+        REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
+    )
+
+
+async def test_invalid_new_consumption_cannot_erase_completed_plan(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: Invalid new demand leaves the prior verdict reviewable."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    deadline = coordinator._bridge_charge_deadline
+    assert deadline is not None
+    await _evaluate(coordinator, deadline, _data(deadline, soc=11, observation=False))
+    later = deadline + timedelta(minutes=2)
+    data = _data(later)
+    data["discharge_forecast_attributes"]["average_discharge_w"] = None
+    await _evaluate(coordinator, later, data)
+    assert coordinator.data["bridge_charge_plan"] == "insufficient"
+    assert coordinator.data["bridge_charge_plan_attributes"][
+        "shortfall_kwh"
+    ] == pytest.approx(0.4)
+    assert coordinator._bridge_session.completed_at == deadline

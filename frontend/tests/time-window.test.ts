@@ -165,7 +165,11 @@ async function mount(
 }
 
 function inputs(root: HTMLElement): HTMLInputElement[] {
-  return [...root.querySelectorAll<HTMLInputElement>('input[type="time"]')];
+  return [
+    ...root.querySelectorAll<HTMLInputElement>(
+      ".time-window-control__field input",
+    ),
+  ];
 }
 function markers(root: HTMLElement): HTMLButtonElement[] {
   return [...root.querySelectorAll<HTMLButtonElement>('[role="slider"]')];
@@ -222,11 +226,114 @@ afterEach(() => {
 });
 
 describe("paired time window control", () => {
+  // REQ-VUE-CHARGING / #251: native macOS time segments must not erase drafts.
+  it.each<Kind>(["timed_charge", "grid_serving"])(
+    "preserves partial and invalid %s keyboard drafts through unrelated HA updates",
+    async (kind) => {
+      const { root, source, service } = await mount({ kind });
+      const field = inputs(root)[0];
+      expect(field.type).toBe("text");
+      expect(field.inputMode).toBe("numeric");
+      expect(field.placeholder).toBe("HH:MM");
+      enter(root, "start", "12");
+      source.value = {
+        ...source.value,
+        start: { ...source.value.start!, name: "Ladebeginn" },
+      };
+      await flush();
+      expect(field.value).toBe("12");
+      expect(apply(root).disabled).toBe(false);
+      submit(root);
+      await flush();
+      expect(field.value).toBe("12");
+      expect(field.getAttribute("aria-invalid")).toBe("true");
+      expect(root.querySelector('[role="alert"]')!.textContent).toContain(
+        "Ladebeginn",
+      );
+      expect(document.activeElement).toBe(field);
+      expect(service).not.toHaveBeenCalled();
+      enter(root, "start", "1230");
+      await flush();
+      expect(field.value).toBe("1230");
+      field.dispatchEvent(new Event("blur"));
+      await flush();
+      expect(field.value).toBe("12:30");
+      expect(root.querySelector('[role="alert"]')).toBeNull();
+      enter(root, "end", "24:99");
+      submit(root);
+      await flush();
+      expect(inputs(root)[1].value).toBe("24:99");
+      expect(inputs(root)[1].getAttribute("aria-invalid")).toBe("true");
+      expect(field.getAttribute("aria-invalid")).toBe("false");
+      expect(document.activeElement).toBe(inputs(root)[1]);
+      expect(confirmed(root)).toContain("22:00 – 06:00 Uhr");
+      expect(service).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["change", "blur", "submit"])(
+    "reads both visible fields on %s even when input events are missing",
+    async (notification) => {
+      const { root, service } = await mount();
+      const [start, end] = inputs(root);
+      start.value = "0000";
+      end.value = "04:59";
+      if (notification !== "submit") {
+        start.dispatchEvent(new Event(notification, { bubbles: true }));
+        end.dispatchEvent(new Event(notification, { bubbles: true }));
+        await flush();
+      }
+      expect(apply(root).disabled).toBe(false);
+      apply(root).click();
+      await flush();
+      expect(service).toHaveBeenCalledExactlyOnceWith(
+        "timed_charge",
+        "00:00:00",
+        "04:59:00",
+      );
+      expect(inputs(root).map((field) => field.value)).toEqual([
+        "00:00",
+        "04:59",
+      ]);
+    },
+  );
+
+  it("keeps the other visible DOM-only draft when one field commits", async () => {
+    const { root, service } = await mount();
+    const [start, end] = inputs(root);
+    start.value = "1230";
+    end.value = "1530";
+    start.dispatchEvent(new Event("blur"));
+    await flush();
+    expect(start.value).toBe("12:30");
+    expect(end.value).toBe("1530");
+    submit(root);
+    await flush();
+    expect(service).toHaveBeenCalledExactlyOnceWith(
+      "timed_charge",
+      "12:30:00",
+      "15:30:00",
+    );
+  });
+
+  it("rejects a visible invalid DOM-only field and preserves both drafts", async () => {
+    const { root, service } = await mount();
+    inputs(root)[0].value = "12:30";
+    inputs(root)[1].value = "1";
+    submit(root);
+    await flush();
+    expect(inputs(root).map((field) => field.value)).toEqual(["12:30", "1"]);
+    expect(root.querySelector('[role="alert"]')!.textContent).toContain("end");
+    expect(service).not.toHaveBeenCalled();
+  });
+
   it("shows the confirmed pair, minute-only fields and an overnight draft on two rail segments", async () => {
     const { root, service } = await mount();
-    expect(inputs(root).map((input) => [input.value, input.step])).toEqual([
-      ["22:00", "60"],
-      ["06:00", "60"],
+    expect(
+      inputs(root).map((input) => [input.value, input.placeholder]),
+    ).toEqual([
+      ["22:00", "HH:MM"],
+      ["06:00", "HH:MM"],
     ]);
     expect(
       [...root.querySelectorAll("label")].map((label) => label.htmlFor),
@@ -240,7 +347,7 @@ describe("paired time window control", () => {
       markers(root).map((marker) => marker.getAttribute("aria-label")),
     ).toEqual(["Startmarke", "Endmarke"]);
     expect(markers(root)[0].getAttribute("aria-valuetext")).toBe("22:00 Uhr");
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
     expect(service).not.toHaveBeenCalled();
   });
 
@@ -256,7 +363,7 @@ describe("paired time window control", () => {
         "01:00",
         "05:30",
       ]);
-      expect(apply(root).disabled).toBe(true);
+      expect(apply(root).disabled).toBe(false);
       submit(root);
       await flush();
       expect(service).not.toHaveBeenCalled();
@@ -278,7 +385,7 @@ describe("paired time window control", () => {
       );
       await update("02:15:00", "05:30:00");
       expect(confirmed(root)).toContain("02:15 – 05:30 Uhr");
-      expect(apply(root).disabled).toBe(true);
+      expect(apply(root).disabled).toBe(false);
       expect(root.textContent).not.toContain("ausstehend");
     },
   );
@@ -383,7 +490,7 @@ describe("paired time window control", () => {
     );
   });
 
-  it("does not normalize confirmed seconds or enable Apply when a marker is only clicked", async () => {
+  it("does not normalize confirmed seconds or write when a marker is only clicked", async () => {
     const { root, service } = await mount({ start: "10:00:19" });
     const rail = root.querySelector<HTMLElement>(".time-window-control__rail")!;
     vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({
@@ -394,7 +501,7 @@ describe("paired time window control", () => {
     pointer(markers(root)[0], "pointerup", 710);
     await flush();
     expect(inputs(root)[0].value).toBe("10:00");
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
     expect(service).not.toHaveBeenCalled();
   });
 
@@ -407,7 +514,7 @@ describe("paired time window control", () => {
       "10:00",
       "12:00",
     ]);
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
     expect(root.textContent).not.toContain("Entwurf:");
     enter(root, "start", "10:00");
     await flush();
@@ -434,7 +541,7 @@ describe("paired time window control", () => {
     ]);
     expect(root.textContent).toContain("Dauer: 40 Sek.");
     expect(segments(root)).toHaveLength(1);
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
     enter(root, "start", "10:00");
     await flush();
     expect(root.textContent).toContain("Entwurf: Leeres Zeitfenster");
@@ -446,6 +553,9 @@ describe("paired time window control", () => {
   it("removes seconds from supplied input text even when the visible minute is unchanged", async () => {
     const { root, service } = await mount({ start: "10:00:19" });
     enter(root, "start", "10:00:45");
+    await flush();
+    expect(inputs(root)[0].value).toBe("10:00:45");
+    inputs(root)[0].dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
     expect(inputs(root)[0].value).toBe("10:00");
     submit(root);
@@ -581,7 +691,7 @@ describe("paired time window control", () => {
     const { root, service } = await mount();
     enter(root, "start", "");
     await flush();
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
     expect(markers(root).every((marker) => marker.disabled)).toBe(true);
     expect(segments(root)).toHaveLength(0);
     submit(root);
@@ -629,7 +739,7 @@ describe("paired time window control", () => {
       expect(segments(root)).toHaveLength(0);
       await update("22:00:00", "06:00:00");
       expect(inputs(root)[0].value).toBe("22:00");
-      expect(apply(root).disabled).toBe(true);
+      expect(apply(root).disabled).toBe(false);
       expect(service).not.toHaveBeenCalled();
     },
   );
@@ -658,7 +768,7 @@ describe("paired time window control", () => {
     action.resolve(true);
     await flush();
     expect(root.textContent).not.toContain("ausstehend");
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
   });
 
   it("discards the draft and releases a captured pointer when both entities move to another device", async () => {
@@ -697,7 +807,7 @@ describe("paired time window control", () => {
     pointer(marker, "pointerup", 1400);
     await flush();
     expect(inputs(root)[0].value).toBe("22:00");
-    expect(apply(root).disabled).toBe(true);
+    expect(apply(root).disabled).toBe(false);
     submit(root);
     await flush();
     expect(service).not.toHaveBeenCalled();

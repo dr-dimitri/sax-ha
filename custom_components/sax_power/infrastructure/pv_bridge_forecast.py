@@ -19,6 +19,12 @@ from homeassistant.util import dt as dt_util
 
 _STEP = timedelta(minutes=15)
 _REFRESH_INTERVAL = timedelta(seconds=60)
+_RETRY_INTERVAL = timedelta(seconds=10)
+_MAX_RESPONSE_AGE = timedelta(seconds=60)
+# REQ-BRIDGE-CHARGE: an accepted result must span the next refresh, its
+# service timeout and polling jitter even if as_of was already 60 seconds old.
+_CACHE_LIFETIME = timedelta(seconds=75)
+_MAX_CACHED_RESPONSE_AGE = _MAX_RESPONSE_AGE + _CACHE_LIFETIME
 _MAX_FORECAST_AGE = timedelta(minutes=60)
 _SERVICE_TIMEOUT = 2
 
@@ -51,6 +57,7 @@ def _quarter(value: datetime) -> datetime:
 class _Snapshot:
     as_of: datetime
     fetched_at: datetime
+    accepted_at: datetime
     intervals: tuple[tuple[datetime, datetime, float], ...]
 
 
@@ -99,8 +106,8 @@ def _parse_snapshot(
     if (
         as_of is None
         or fetched_at is None
-        or not timedelta(0) <= now - as_of <= _REFRESH_INTERVAL
-        or not timedelta(0) <= now - fetched_at <= _MAX_FORECAST_AGE
+        or not timedelta(0) <= now - as_of <= _MAX_RESPONSE_AGE
+        or not timedelta(0) <= now - fetched_at <= _MAX_FORECAST_AGE - _CACHE_LIFETIME
         or fetched_at > as_of
     ):
         return None
@@ -143,7 +150,7 @@ def _parse_snapshot(
         )
     ):
         return None
-    return _Snapshot(as_of, fetched_at, tuple(intervals))
+    return _Snapshot(as_of, fetched_at, now, tuple(intervals))
 
 
 class PvBridgeForecast:
@@ -156,6 +163,7 @@ class PvBridgeForecast:
         self._source_entity_id = source_entity_id
         self._source: tuple[str, str, str] | None = None
         self._last_attempt: datetime | None = None
+        self._retry_pending = False
         self._snapshot: _Snapshot | None = None
         self._lock = asyncio.Lock()
 
@@ -192,29 +200,34 @@ class PvBridgeForecast:
         if source != self._source:
             self._source = source
             self._last_attempt = None
+            self._retry_pending = False
             self._snapshot = None
         return source
 
     async def async_refresh(self, now: datetime | None = None) -> None:
-        """Read at most once a minute; source changes immediately discard old data."""
-        instant = _timestamp(now if now is not None else dt_util.utcnow())
-        if instant is None:
-            self._snapshot = None
-            return
+        """Refresh once a minute, retry failures sooner, and expire cached results."""
         async with self._lock:
+            instant = _timestamp(now if now is not None else dt_util.utcnow())
+            if instant is None:
+                self._snapshot = None
+                return
             source = self._sync_source()
             if source is None or not self._hass.services.has_service(
                 "pv_forecast", "get_forecast"
             ):
                 self._snapshot = None
+                self._last_attempt = None
                 return
+            refresh_interval = (
+                _RETRY_INTERVAL if self._retry_pending else _REFRESH_INTERVAL
+            )
             if (
                 self._last_attempt is not None
-                and timedelta(0) <= instant - self._last_attempt < _REFRESH_INTERVAL
+                and timedelta(0) <= instant - self._last_attempt < refresh_interval
             ):
                 return
             self._last_attempt = instant
-            self._snapshot = None
+            self._retry_pending = True
             # #130 anchors its raster to the supplied start. Whole future
             # quarters avoid presenting an already elapsed interval as PV start.
             start = _quarter(instant)
@@ -229,6 +242,7 @@ class PvBridgeForecast:
                 ).astimezone(UTC)
                 end = _quarter(min(instant + timedelta(hours=26), available_end))
                 if end - start < 2 * _STEP:
+                    self._snapshot = None
                     return
                 async with asyncio.timeout(_SERVICE_TIMEOUT):
                     response = await self._hass.services.async_call(
@@ -253,13 +267,14 @@ class PvBridgeForecast:
                         end=end,
                         timezone=source[2],
                     )
-            except (
-                HomeAssistantError,
-                TimeoutError,
-                OverflowError,
-                TypeError,
-                ValueError,
-            ):
+                    if self._snapshot is not None:
+                        self._last_attempt = self._snapshot.accepted_at
+                        self._retry_pending = False
+            except HomeAssistantError, TimeoutError:
+                # REQ-BRIDGE-CHARGE: a transient read failure cannot extend the
+                # accepted snapshot's deadline or hide a source change.
+                self._sync_source()
+            except OverflowError, TypeError, ValueError:
                 self._snapshot = None
 
     def pv_start(
@@ -275,7 +290,8 @@ class PvBridgeForecast:
             or not self._hass.services.has_service("pv_forecast", "get_forecast")
             or not _number(average_discharge_w)
             or average_discharge_w <= 0
-            or not timedelta(0) <= instant - snapshot.as_of <= _REFRESH_INTERVAL
+            or not timedelta(0) <= instant - snapshot.accepted_at <= _CACHE_LIFETIME
+            or not timedelta(0) <= instant - snapshot.as_of <= _MAX_CACHED_RESPONSE_AGE
             or not timedelta(0) <= instant - snapshot.fetched_at <= _MAX_FORECAST_AGE
         ):
             return None

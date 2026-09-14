@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normalizeTime, timeSeconds } from "../time";
 import {
   computed,
   inject,
@@ -587,18 +588,6 @@ function inputTime(value: string): string {
   return value.length === 8 && value.endsWith(":00")
     ? value.slice(0, 5)
     : value;
-}
-function normalizeTime(value: string): string {
-  const trimmed = value.trim();
-  const candidate = /^\d{4}$/.test(trimmed)
-    ? `${trimmed.slice(0, 2)}:${trimmed.slice(2)}`
-    : trimmed;
-  return timeSeconds(candidate) === null ? value : candidate;
-}
-function timeSeconds(value: string): number | null {
-  if (!/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) return null;
-  const [hours, minutes, seconds = 0] = value.split(":").map(Number);
-  return hours! * 3600 + minutes! * 60 + seconds;
 }
 async function save() {
   if (!dashboard || !profile.value || pending.value || conflict.value) return;

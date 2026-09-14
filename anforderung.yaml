@@ -177,8 +177,20 @@ requirement_bridge_charge:
     mean_ac_power_kw. Als PV-Start gilt der Beginn von mindestens zwei
     aufeinanderfolgenden Intervallen, deren mittlere PV-Leistung den
     Entladedurchschnitt erreicht oder überschreitet. Damit wird für
-    mindestens 30 Minuten Verbrauchsdeckung erwartet. Serviceergebnisse
-    werden 60 Sekunden zwischengespeichert. Manuelle PV-Uhrzeiten,
+    mindestens 30 Minuten Verbrauchsdeckung erwartet. Erfolgreiche
+    Serviceergebnisse werden nach 60 Sekunden erneut abgefragt, bleiben
+    aber bis 75 Sekunden nach ihrer Annahme nutzbar. Bei Annahme darf as_of
+    höchstens 60 Sekunden und fetched_at höchstens 58 Minuten 45 Sekunden
+    zurückliegen; damit reicht die Reserve auch bei verzögerten Anbieterdaten
+    bis über die nächste reguläre Abfrage. Zusätzlich gelten absolute
+    Nutzungsgrenzen von 135 Sekunden für as_of und 60 Minuten für fetched_at.
+    Ein laufender Refresh oder ein vorübergehender Servicefehler verwirft
+    einen noch innerhalb dieser festen Grenzen gültigen Snapshot nicht.
+    Nach Fehlern wird ab 10 Sekunden erneut versucht, ohne die Nutzungsfrist
+    zu verlängern. Das Service-Timeout bleibt für einen reaktionsfähigen
+    Poll bei 2 Sekunden. Vertragsfehler und Quellenwechsel verwerfen den
+    Snapshot sofort; parallele Aufrufe werden gemeinsam gedrosselt.
+    Manuelle PV-Uhrzeiten,
     zusätzliche Startsensoren und die Tagesenergiemenge ersetzen diese
     Zeitreihe nicht.
 
@@ -198,6 +210,19 @@ requirement_bridge_charge:
     an den relevanten Ladeeinstellungen entwerten den Auftrag auch während
     einer Datenlücke.
     Der Auftrag endet bei erreichtem SOC-Ziel oder festem Endzeitpunkt.
+    Auch bei einer Datenlücke durchläuft er dieselbe Abschlussbewertung:
+    Der Restbedarf bis zum im Plan gebundenen PV-Start wird aus dessen
+    eingefrorenem Entladedurchschnitt und der aktuell gemessenen nutzbaren
+    Batterieenergie berechnet. Bei mehr als 1 Wh Restbedarf lautet das
+    Ergebnis insufficient mit reason=charge_shortfall, andernfalls complete.
+    Fehlender PV-Start aus der aktuellen Prognose verhindert diese Bewertung
+    nicht. Fehlen frische, gültige Batterie-SOC-, Mindest-SOC- oder
+    Kapazitätswerte, bleibt nur die Bewertung offen: shortfall_kwh ist None
+    statt des alten Planwerts 0, der Status waiting_for_data mit
+    reason=measurements_missing. Bei Datenrückkehr wird mit den dann aktuellen
+    Messwerten und dem Bewertungszeitpunkt nachbewertet; eine historische
+    Fehlmenge wird nicht erfunden. Ein bewertetes Ergebnis bleibt bis zur
+    zulässigen Neuplanung oder Konfigurationsänderung erhalten.
     Anschließend darf der Speicher wieder normal entladen. Die klassische
     fenstergebundene Entladesperre nach zeitgesteuerter Netzladung wird in
     dieser Betriebsart nicht aufgebaut. Eine Neuplanung erfordert mindestens
@@ -220,6 +245,14 @@ requirement_bridge_charge:
     kurzen Enum-Zustand und stellt die Meldungsbestandteile als Attribute
     bereit: observation_minutes, average_discharge_w, discharge_at,
     charge_start, charge_end, pv_start, target_soc, shortfall_kwh und reason.
+    Nach erkanntem Auftragsende benennt completed_at den Abschlusszeitpunkt;
+    completion_evaluated_at ist bis zur Bewertung None und danach deren
+    Zeitpunkt. data_gap_reason hält den Unterbrechungsgrund getrennt vom
+    Abschlussergebnis fest. Eine echte Wiederaufnahme vor Planende entfernt
+    diesen Grund; der Abschluss erhält ihn. Die Oberfläche unterscheidet
+    beendete Aufträge von erst geplanten Teilladungen, zeigt eine ausstehende
+    Bewertung ausdrücklich als unbekannte Fehlmenge und nennt Datenlücke
+    und Bewertungszeitpunkt zusätzlich zum Ergebnis.
     Seine Zustände sind off, waiting_for_data, planned, charging, not_needed,
     insufficient, paused und complete. ChargePlan.vue stellt im
     zeitvariablen Tab daraus eine verständliche Meldung mit Verbrauchsbasis,
@@ -235,12 +268,14 @@ requirement_bridge_charge:
     - "Ohne gültigen zukünftigen PV-Start, frische Batteriewerte oder mindestens eine Minute gültige Entladebeobachtung wird kein neuer Auftrag freigegeben. Fehlende Werte werden nicht geschätzt."
     - "Niedertarifintervalle stammen nur aus einem gültigen TIME_OF_USE-Tarif. Änderungen am separaten Netzladezeitfenster verändern keinen verbrauchsabhängigen Plan."
     - "PV-Start erfordert zwei lückenlos folgende 15-Minuten-Intervalle der Gesamtanlagen-Prognose mit ausreichender mittlerer Leistung. Tagesenergiesummen und fremde Sensorquellen sind kein Ersatz."
+    - "Bei 0, 45 und 60 Sekunden altem as_of bleiben angenommene Snapshots bis zur nächsten regulären Abfrage nutzbar. Refresh, Timeout und frühere Wiederholungen verlängern keine alte Nutzungsfrist; Vertragsfehler, Quellenwechsel und absolute Altersgrenzen bleiben wirksam."
     - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."
     - "Während des gestarteten Auftrags beendet der normale Entladeprognose-Reset allein nicht die Ladung. Der feste Endzeitpunkt und das SOC-Ziel bleiben verbindlich."
     - "Kurze PV-/Messdatenlücken erhalten den gestarteten Plan und dessen Verbrauchsbasis als Pause. Nach Rückkehr gültiger Daten wird ohne neue Entlademinute weitergeladen, sofern Ziel, Ende und Konfiguration weiterhin gelten. Fehlende Daten vor dem Start geben keinen Auftrag frei."
     - "Fehlende PV-Prognosen stoppen Ladesollwerte auch ohne abgeschlossenen Poll sowie vor und nach beiden Gerätequittierungsphasen. Abgelaufene oder während der Pause entwertete Pläne werden nicht wieder aufgenommen."
+    - "Ein während einer Datenlücke beendeter Auftrag meldet complete oder insufficient mit neu berechneter Fehlmenge, sobald frische SOC-/Kapazitätsdaten vorliegen. Bis dahin sind Fehlmenge und Bewertungszeitpunkt unbekannt. Abschluss, Unterbrechungsgrund und nachträgliche Bewertung bleiben getrennt erkennbar; der alte Plan startet nicht erneut."
     - "Nach Auftragsende wird keine fenstergebundene Entladesperre aus dem klassischen zeitgesteuerten Laden aufgebaut."
     - "Bei Kalibrierungsfälligkeit gelten wirksame SOC-Obergrenzen von 100 %, aber weiterhin ausschließlich der Bedarf bis PV-Start und die Tarifpreisfenster. Separates Netzladezeitfenster und Min-SOC werden nicht verwendet; eine zusätzliche ungeplante Vollladung ist ausgeschlossen."
     - "Manuelle Ladung, PV-Überschuss und ungültige Messwerte dürfen keinen konkurrierenden Auftrag erzeugen."
@@ -2954,9 +2989,12 @@ requirement_vue_charging:
 
     Das Zeitfenster der netzdienlichen Ladepause verwendet die Komponente
     TimeWindowControl. Eine 24-Stunden-Leiste mit getrennt verschiebbaren
-    Start- und Endmarken sowie Eingabefelder im Format HH:MM bearbeiten
-    ein gemeinsames lokales Entwurfspaar. Eingaben mit step=60, Ziehen und
-    Tastatur verwenden Minuten bis 23:59, ohne Sekunden-Eingabemöglichkeit.
+    Start- und Endmarken sowie Textfelder mit sichtbarem 24-Stunden-Hinweis
+    (12:30 oder 1230) bearbeiten ein gemeinsames lokales Entwurfspaar.
+    Unvollständige oder ungültige Eingaben bleiben sichtbar. Vollständige
+    Zeiten werden bei change, blur und Übernehmen zu HH:MM normalisiert;
+    beide sichtbaren DOM-Feldwerte werden vor der Validierung erneut gelesen.
+    Ziehen und Tastatur verwenden Minuten bis 23:59, ohne Sekunden-Eingabemöglichkeit.
     Vorhandene HA-Sekunden lösen beim Laden keine Schreibaktion und keinen
     geänderten Entwurf aus; bestätigte Spanne, Dauer und Fläche erhalten diese
     Präzision bis zur ersten Bearbeitung. Erst nach einer bewussten Änderung
@@ -2982,7 +3020,12 @@ requirement_vue_charging:
     gesetzt, damit kein veraltetes Grenzpaar übernommen werden kann. Andere
     Telemetrieänderungen erhalten den lokalen Entwurf. Ungültige Eingaben,
     fehlende Entitäten, Nichtverfügbarkeit, fehlende Rechte oder Verbindung
-    sperren die Übernahme. Fehler bleiben sichtbar; eine automatische
+    verhindern Schreibaufrufe. Übernehmen bleibt bei beschreibbaren Feldern
+    auch ohne input-Ereignis erreichbar; ein unverändertes Wertepaar erzeugt
+    keinen Serviceaufruf. Ungültige Eingaben benennen und fokussieren das
+    betroffene Start-/Endfeld mit aria-invalid, ohne Entwürfe zu löschen.
+    Während ausstehender Übernahme bleibt die Doppelaufrufsperre aktiv.
+    Fehler bleiben sichtbar; eine automatische
     Schreibwiederholung findet nicht statt.
 
     Das Fenster zeigt verfügbare bestätigte Start- und Endzeit in einer
@@ -3024,7 +3067,7 @@ requirement_vue_charging:
        übertragen. Gleiche Grenzen zeigen ein leeres Fenster; Tagesfenster,
        Mitternachtsgrenzen und unbearbeitete Altsekunden bleiben korrekt."
     - "Ziehen mit Maus oder Touch und Tastaturbedienung verändern nur den
-       gemeinsamen Entwurf. Die Eingabe erlaubt ausschließlich HH:MM. Erst
+       gemeinsamen Entwurf. Die Texteingabe erlaubt HH:MM oder HHMM. Erst
        Übernehmen schreibt; eine Serviceantwort ohne HA-Zustandsänderung
        verändert die bestätigte Anzeige nicht."
     - "HA-Änderungen einer Zeitgrenze ersetzen den gesamten Entwurf;
@@ -3035,6 +3078,7 @@ requirement_vue_charging:
        und Desktop, auf Deutsch und Englisch sowie in hellen und dunklen
        HA-Themes lesbar und bedienbar. Start- und Endmarken bleiben auch bei
        gleichen Grenzen einzeln erreichbar."
+    - "frontend/browser/time-window.spec.ts prüft Tastatureingaben, unvollständige Stunden, Mitternacht, change-/blur-Commits und sichtbare DOM-Werte beim Absenden in Chromium und WebKit auf macOS. Fehler und verzögerte Bestätigungen erhalten Entwürfe und verhindern doppelte Writes."
     - "Monatsaktionen im Frontend verwenden ausschließlich HA-Schalterservices."
     - "Beide Monatsauswahlen starten eingeklappt; Ändern und Schließen
        öffnen beziehungsweise schließen vier Quartalsgruppen mit je drei

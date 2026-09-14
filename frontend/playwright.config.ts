@@ -14,7 +14,7 @@ export default defineConfig({
   projects: [
     {
       name: "webkit-light-de",
-      testMatch: "tariff-editor.spec.ts",
+      testMatch: ["tariff-editor.spec.ts", "time-window.spec.ts"],
       use: {
         ...devices["Desktop Safari"],
         locale: "de-DE",

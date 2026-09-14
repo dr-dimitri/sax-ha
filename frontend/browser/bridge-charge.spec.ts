@@ -1,6 +1,85 @@
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import type { HomeAssistant } from "../src/types";
 
+test("completion and missing assessment remain distinct after a forecast gap", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const mobile = testInfo.project.name.startsWith("mobile");
+  await page.goto("/sax-power-vue/stromtarif?bridge-plan");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator(".electricity-plan > summary").click();
+  const card = panel.locator(".charge-plan");
+  await page.setViewportSize({ width: mobile ? 320 : 1440, height: 1000 });
+
+  for (const state of ["waiting_for_data", "insufficient", "complete"]) {
+    await panel.evaluate((element, state) => {
+      const host = element as HTMLElement & { hass: HomeAssistant };
+      const entityId = "sensor.demo_bridge_charge_plan";
+      const previous = host.hass.states[entityId];
+      host.hass = {
+        ...host.hass,
+        states: {
+          ...host.hass.states,
+          [entityId]: {
+            ...previous,
+            state,
+            attributes: {
+              ...previous.attributes,
+              completed_at: "2026-09-14T00:00:00Z",
+              completion_evaluated_at:
+                state === "waiting_for_data" ? null : "2026-09-14T00:02:00Z",
+              shortfall_kwh:
+                state === "waiting_for_data"
+                  ? null
+                  : state === "insufficient"
+                    ? 0.56
+                    : 0,
+              reason:
+                state === "insufficient"
+                  ? "charge_shortfall"
+                  : "measurements_missing",
+              data_gap_reason: "pv_start_missing",
+            },
+          },
+        },
+      };
+    }, state);
+    await expect(card).toContainText(
+      english ? "PV forecast was temporarily" : "PV-Prognose zeitweise",
+    );
+    if (state === "waiting_for_data") {
+      await expect(card).toContainText(
+        english ? "shortfall is still unknown" : "Fehlmenge ist noch unbekannt",
+      );
+      await expect(card).not.toContainText("0,00 kWh");
+      await expect(card).not.toContainText("0.00 kWh");
+    } else if (state === "insufficient") {
+      await expect(card).toContainText(
+        english ? "shortfall: 0.56 kWh" : "Fehlbetrag: 0,56 kWh",
+      );
+      await expect(card).not.toContainText(
+        english ? "charging is planned" : "Aufladung im Niedertarif ist",
+      );
+    } else {
+      await expect(card).toContainText(
+        english ? "grid charging is complete" : "Netzladung ist abgeschlossen",
+      );
+    }
+    await verifyCardGeometry(card);
+    await attachScreenshot(
+      card,
+      testInfo,
+      `completion-${state}`,
+      mobile ? 320 : 1440,
+    );
+  }
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
 async function verifyCardGeometry(card: Locator) {
   const geometry = await card.evaluate((element) => {
     const bounds = element.getBoundingClientRect();

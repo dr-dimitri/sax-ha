@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, useId, watch } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
+import { normalizeTime, timeSeconds as seconds } from "../time";
 
 const props = defineProps<{ kind: "timed_charge" | "grid_serving" }>();
 type Boundary = "start" | "end";
@@ -38,7 +39,9 @@ const text = computed(() =>
         disconnected: "Keine Verbindung zu Home Assistant",
         changed:
           "Zeitfenster durch Home Assistant aktualisiert. Der Entwurf wurde verworfen.",
-        invalid: "Bitte gültige Start- und Endzeiten eingeben.",
+        invalid:
+          "Bitte eine vollständige, gültige Uhrzeit eingeben (z. B. 12:30).",
+        timeHint: "Uhrzeiten im 24-Stunden-Format eingeben: 12:30 oder 1230.",
         help: "Marken ziehen oder Uhrzeit eingeben. Pfeiltasten ändern um eine Minute, Bild auf und Bild ab um 15 Minuten. Pos1 und Ende wählen Tagesanfang und Tagesende.",
         startMarker: "Startmarke",
         endMarker: "Endmarke",
@@ -66,7 +69,8 @@ const text = computed(() =>
         disconnected: "Disconnected from Home Assistant",
         changed:
           "Time window updated by Home Assistant. The draft was discarded.",
-        invalid: "Please enter valid start and end times.",
+        invalid: "Enter a complete, valid time (e.g. 12:30).",
+        timeHint: "Enter times in 24-hour format: 12:30 or 1230.",
         help: "Drag the markers or enter a time. Arrow keys change by one minute; Page Up and Page Down by 15 minutes. Home and End select the beginning and end of the day.",
         startMarker: "Start marker",
         endMarker: "End marker",
@@ -77,6 +81,8 @@ const start = ref("");
 const end = ref("");
 const edited = ref(false);
 const rail = ref<HTMLElement>();
+const form = ref<HTMLFormElement>();
+const invalidBoundary = ref<Boundary | null>(null);
 const localPending = ref(false);
 const awaiting = ref(false);
 const discarded = ref(false);
@@ -89,12 +95,6 @@ let drag: {
   originX: number;
   originSeconds: number;
 } | null = null;
-
-function seconds(value: string): number | null {
-  if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) return null;
-  const [hours, minutes, seconds = 0] = value.split(":").map(Number);
-  return hours * 3600 + minutes * 60 + seconds;
-}
 
 function clock(value: number): string {
   const pad = (part: number) => String(part).padStart(2, "0");
@@ -163,9 +163,15 @@ const blocked = computed(
     !endEntity.value?.canControl ||
     pending.value,
 );
-const error = computed(
-  () => startEntity.value?.error || endEntity.value?.error,
-);
+const error = computed(() => {
+  if (invalidBoundary.value) {
+    const boundary = boundaries.value.find(
+      (item) => item.key === invalidBoundary.value,
+    )!;
+    return `${boundary.name}: ${text.value.invalid}`;
+  }
+  return startEntity.value?.error || endEntity.value?.error;
+});
 const status = computed(() => {
   if (!dashboard?.connected.value) return text.value.disconnected;
   if (!available.value) return text.value.unavailable;
@@ -175,7 +181,6 @@ const status = computed(() => {
   if (pending.value) return text.value.pending;
   if (awaiting.value) return text.value.awaiting;
   if (discarded.value) return text.value.changed;
-  if (!valid.value) return text.value.invalid;
   return "";
 });
 const visibleStart = computed(() =>
@@ -270,6 +275,7 @@ watch(
     localPending.value = false;
     awaiting.value = false;
     edited.value = false;
+    invalidBoundary.value = null;
     discarded.value =
       !!previous?.length && wasDraft && !ownConfirmation && available.value;
     start.value = available.value ? minute(confirmedStart.value) : "";
@@ -288,8 +294,9 @@ onBeforeUnmount(stopDrag);
 
 function edit(boundary: Boundary, value: string): void {
   if (blocked.value) return;
-  if (boundary === "start") start.value = minute(value);
-  else end.value = minute(value);
+  if (boundary === "start") start.value = value;
+  else end.value = value;
+  if (invalidBoundary.value === boundary) invalidBoundary.value = null;
   edited.value = true;
   awaiting.value = false;
   discarded.value = false;
@@ -298,7 +305,32 @@ function edit(boundary: Boundary, value: string): void {
 function typeTime(boundary: Boundary, event: Event): void {
   const input = event.target as HTMLInputElement;
   edit(boundary, input.value);
-  input.value = boundary === "start" ? start.value : end.value;
+}
+
+function committedTime(value: string): string {
+  const normalized = normalizeTime(value);
+  return seconds(normalized) === null ? value : minute(normalized);
+}
+
+function readVisibleTimes(committed?: Boundary): void {
+  const visible = (["start", "end"] as const).map((boundary) => ({
+    boundary,
+    input: form.value?.querySelector<HTMLInputElement>(`[name="${boundary}"]`),
+  }));
+  for (const { boundary, input } of visible) {
+    if (!input) continue;
+    const current = boundary === "start" ? start.value : end.value;
+    const value =
+      !committed || boundary === committed
+        ? committedTime(input.value)
+        : input.value;
+    if (input.value !== current || value !== current) edit(boundary, value);
+    input.value = value;
+  }
+}
+
+function commitTime(boundary: Boundary): void {
+  if (!blocked.value) readVisibleTimes(boundary);
 }
 
 function keyboard(boundary: Boundary, event: KeyboardEvent): void {
@@ -325,7 +357,7 @@ function keyboard(boundary: Boundary, event: KeyboardEvent): void {
             0,
             Math.min(86340, Math.floor(value / 60) * 60 + delta[event.key]),
           );
-  edit(boundary, clock(next));
+  edit(boundary, minute(clock(next)));
 }
 
 function movePointer(event: PointerEvent): void {
@@ -350,7 +382,7 @@ function movePointer(event: PointerEvent): void {
     ),
   );
   drag.moved = true;
-  edit(drag.boundary, clock(minute * 60));
+  edit(drag.boundary, clock(minute * 60).slice(0, 5));
 }
 
 function startDrag(boundary: Boundary, event: PointerEvent): void {
@@ -382,7 +414,22 @@ function finishDrag(event: PointerEvent): void {
 }
 
 async function submit(): Promise<void> {
-  if (!dashboard || blocked.value || !valid.value || !dirty.value) return;
+  if (!dashboard || blocked.value) return;
+  // REQ-VUE-CHARGING: browsers may commit visible values without input events.
+  readVisibleTimes();
+  invalidBoundary.value =
+    seconds(start.value) === null
+      ? "start"
+      : seconds(end.value) === null
+        ? "end"
+        : null;
+  if (invalidBoundary.value) {
+    form.value
+      ?.querySelector<HTMLInputElement>(`[name="${invalidBoundary.value}"]`)
+      ?.focus();
+    return;
+  }
+  if (!dirty.value) return;
   const current = revision;
   localPending.value = true;
   discarded.value = false;
@@ -401,6 +448,7 @@ async function submit(): Promise<void> {
 <template>
   <form
     v-if="startEntity || endEntity"
+    ref="form"
     class="time-window-control"
     :aria-busy="pending"
     @submit.prevent="submit"
@@ -418,23 +466,31 @@ async function submit(): Promise<void> {
         >
         <input
           :id="`${id}-${boundary.key}`"
-          type="time"
-          step="60"
-          required
+          :name="boundary.key"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          placeholder="HH:MM"
           :value="boundary.value"
           :disabled="blocked"
-          :aria-describedby="`${id}-confirmed ${id}-status`"
+          :aria-invalid="invalidBoundary === boundary.key"
+          :aria-describedby="`${id}-time-hint ${id}-confirmed ${id}-status`"
           @input="typeTime(boundary.key, $event)"
+          @change="commitTime(boundary.key)"
+          @blur="commitTime(boundary.key)"
         />
       </label>
       <button
         class="time-window-control__apply"
         type="submit"
-        :disabled="blocked || !valid || !dirty"
+        :disabled="blocked"
       >
         {{ text.apply }}
       </button>
     </div>
+    <p :id="`${id}-time-hint`" class="time-window-control__hint">
+      {{ text.timeHint }}
+    </p>
     <p :id="`${id}-confirmed`" class="time-window-control__confirmed">
       {{ text.confirmed }}: {{ confirmedLabel }}
     </p>
@@ -538,11 +594,15 @@ async function submit(): Promise<void> {
 .time-window-control__field input {
   width: 100%;
 }
+.time-window-control__field input[aria-invalid="true"] {
+  border-color: var(--error-color, #db4437);
+}
 .time-window-control__apply {
   flex: 0 0 auto;
   border-color: var(--primary-color, #03a9f4);
   cursor: pointer;
 }
+.time-window-control__hint,
 .time-window-control__confirmed,
 .time-window-control__duration {
   margin: 9px 0 0;

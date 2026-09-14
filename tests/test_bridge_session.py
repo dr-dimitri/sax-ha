@@ -369,3 +369,109 @@ def test_reset_clears_execution_and_explanation() -> None:
     assert session.plan is None and not session.started
     assert session.completed_at is None
     assert session.attributes == {"reason": "disabled"}
+
+
+@pytest.mark.parametrize("path", ["regular", "data_gap"])
+@pytest.mark.parametrize("soc,shortfall", [(30, 1.2), (42, 0)])
+def test_completion_uses_frozen_pv_horizon_and_measured_energy(
+    path: str, soc: float, shortfall: float
+) -> None:
+    """REQ-BRIDGE-CHARGE: Both completion paths assess the same frozen plan."""
+    session = _started()
+    assert session.plan is not None and session.plan.end is not None
+    deadline = session.plan.end
+    if path == "regular":
+        assert not _prepare(
+            session,
+            now=deadline,
+            pv_start=PV_START + timedelta(hours=5),
+            observation={},
+            data={"battery_soc": soc},
+        )
+    else:
+        session.wait_for_data(
+            deadline, "pv_start_missing", data=BATTERY | {"battery_soc": soc}
+        )
+        assert session.attributes["data_gap_reason"] == "pv_start_missing"
+    assert session.status == ("insufficient" if shortfall else "complete")
+    assert session.attributes["shortfall_kwh"] == pytest.approx(shortfall)
+    assert session.attributes["completed_at"] == deadline.isoformat()
+    assert session.attributes["completion_evaluated_at"] == deadline.isoformat()
+    assert session.attributes["pv_start"] == PV_START.isoformat()
+    assert not session.started
+
+
+@pytest.mark.parametrize("key", ["battery_soc", "battery_soc_min", "battery_capacity"])
+@pytest.mark.parametrize("invalid", [None, True, "10", float("inf"), float("nan")])
+def test_completion_waits_for_valid_measurements_then_assesses_once(
+    key: str, invalid: Any
+) -> None:
+    """REQ-BRIDGE-CHARGE: Deferred energy is unknown, with a dated recovery verdict."""
+    session = _started()
+    assert session.plan is not None and session.plan.end is not None
+    deadline = session.plan.end
+    session.wait_for_data(
+        deadline, "measurements_missing", data=BATTERY | {key: invalid}
+    )
+    assert session.status == "waiting_for_data"
+    assert session.attributes["reason"] == "measurements_missing"
+    assert session.attributes["shortfall_kwh"] is None
+    assert session.attributes["completed_at"] == deadline.isoformat()
+    assert session.attributes["completion_evaluated_at"] is None
+    recovered = deadline + timedelta(minutes=2)
+    assert not _prepare(
+        session, now=recovered, observation={}, data={"battery_soc": 30}
+    )
+    assert session.status == "insufficient"
+    assert session.attributes["shortfall_kwh"] == pytest.approx(1.2 - 1 / 60)
+    assert session.attributes["completion_evaluated_at"] == recovered.isoformat()
+    assert session.completed_at == deadline
+    attributes = dict(session.attributes)
+    session.wait_for_data(recovered + timedelta(minutes=1), "pv_start_missing")
+    assert session.attributes == attributes
+
+
+def test_deferred_completion_keeps_cooldown_when_pv_recovers() -> None:
+    """REQ-BRIDGE-CHARGE: Completing a gap must not reuse precharge history."""
+    session = BridgeChargeSession()
+    assert _prepare(session, pv_start=NOW + timedelta(minutes=2))
+    session.mark_started()
+    assert session.plan is not None and session.plan.end is not None
+    plan = session.plan
+    deadline = plan.end
+    session.wait_for_data(deadline, "measurements_missing")
+    assert session.attributes["shortfall_kwh"] is None
+    assert not _prepare(session, now=deadline + timedelta(seconds=59))
+    assert session.plan is plan
+    assert session.attributes["shortfall_kwh"] is not None
+    assert session.completed_at == deadline
+    assert _prepare(session, now=deadline + timedelta(seconds=60))
+    assert session.plan is not plan
+    assert session.completed_at is None
+    assert "data_gap_reason" not in session.attributes
+    assert "completed_at" not in session.attributes
+
+
+def test_configuration_change_discards_deferred_completion() -> None:
+    """REQ-BRIDGE-CHARGE: Revocation invalidates both execution and later verdicts."""
+    session = _started()
+    assert session.plan is not None and session.plan.end is not None
+    deadline = session.plan.end
+    session.wait_for_data(deadline, "measurements_missing")
+    session.sync_configuration("changed_configuration")
+    assert not _prepare(session, now=deadline + timedelta(seconds=1), observation={})
+    assert session.plan is None and session.completed_at is None
+    assert session.attributes == {"reason": "consumption_missing"}
+
+
+def test_finished_verdict_does_not_acquire_later_unrelated_data_gap() -> None:
+    """REQ-BRIDGE-CHARGE: A later outage cannot rewrite the finished charge."""
+    session = _started()
+    assert session.plan is not None and session.plan.end is not None
+    deadline = session.plan.end
+    assert not _prepare(session, now=deadline, observation={}, data={"battery_soc": 42})
+    attributes = dict(session.attributes)
+    assert "data_gap_reason" not in attributes
+    session.wait_for_data(deadline + timedelta(seconds=1), "pv_start_missing")
+    assert session.status == "complete"
+    assert session.attributes == attributes

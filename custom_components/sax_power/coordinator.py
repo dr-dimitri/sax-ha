@@ -849,6 +849,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         tariff = self.tariff_provider.config
         max_soc = self.effective_timed_charge_max_soc
+        measurements_fresh = self._timed_discharge_measurements_fresh()
+        completion_data = data if measurements_fresh else None
         observation = data.get("discharge_forecast_attributes") or {}
         retain_observation = session.started or (
             session.completed_at is not None
@@ -865,16 +867,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or not math.isfinite(average_power)
             or average_power <= 0
         ):
-            session.reset("waiting_for_data", "consumption_missing")
+            session.wait_for_data(now, "consumption_missing", data=completion_data)
             return False
         pv_start = self._pv_bridge_forecast.pv_start(
             now,
             average_power,
         )
         if pv_start is None:
-            session.wait_for_data(now, "pv_start_missing")
+            session.wait_for_data(now, "pv_start_missing", data=completion_data)
             return False
-        if not self._timed_discharge_measurements_fresh() or any(
+        if not measurements_fresh or any(
             isinstance(data.get(key), bool)
             or not isinstance(data.get(key), int | float)
             or not math.isfinite(data[key])
@@ -885,14 +887,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "ic_max_power_reference",
             )
         ):
-            session.wait_for_data(now, "measurements_missing")
+            session.wait_for_data(now, "measurements_missing", data=completion_data)
             return False
         if (
             data["battery_capacity"] <= 0
             or data["ic_max_power_reference"] <= 0
             or not 0 <= data["battery_soc_min"] <= data["battery_soc"] <= 100
         ):
-            session.wait_for_data(now, "measurements_missing")
+            session.wait_for_data(now, "measurements_missing", data=completion_data)
             return False
         windows = charge_windows(
             now=now,
@@ -3912,12 +3914,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                     SUN_IC_CONTROL_MODE_SMARTMETER
                                 )
                             if self._bridge_charge_deadline is not None:
+                                bridge_measurements_fresh = (
+                                    not self._basic_read_failed
+                                    and self._timed_discharge_measurements_fresh()
+                                )
                                 self._bridge_session.wait_for_data(
                                     dt_util.utcnow(),
                                     (
                                         "pv_start_missing"
                                         if bridge_forecast_missing
-                                        else "awaiting_confirmation"
+                                        else (
+                                            "measurements_missing"
+                                            if not bridge_measurements_fresh
+                                            else None
+                                        )
+                                    ),
+                                    data=(
+                                        self._high_data
+                                        if bridge_measurements_fresh
+                                        else None
                                     ),
                                 )
                             self._bridge_charge_deadline = None
@@ -5191,6 +5206,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or not math.isfinite(current_soc)
             or not MIN_SOC <= current_soc <= MAX_SOC
         ):
+            if self.bridge_charge_enabled:
+                self._bridge_session.wait_for_data(now, "measurements_missing")
             await self._async_suspend_charge_for_missing_soc()
             await self._async_persist_timed_charge_state(
                 timed_window_state

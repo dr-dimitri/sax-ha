@@ -302,9 +302,13 @@ aktuellen Stand erneut, bevor er Erfolg nach Gerätebestätigung meldet.
 bleiben native HA-Entitäten; im zeitvariablen Tarif gelten ausschließlich
 Tarifpreisfenster nach `REQ-TIME-OF-USE-CHARGE-SOURCE`.
 Eine 24-Stunden-Leiste mit
-verschiebbaren Start-/Endmarken und Eingaben im Format HH:MM bearbeiten
-dasselbe lokale Entwurfspaar. Eingaben verwenden `step=60`, Ziehen und
-Tastatur ein Minutenraster bis 23:59. Vorhandene Sekunden lösen beim Laden
+verschiebbaren Start-/Endmarken und Textfeldern für HH:MM oder HHMM bearbeiten
+dasselbe lokale Entwurfspaar. Ein sichtbarer Hinweis erklärt das 24-Stunden-Format;
+unvollständige und ungültige Texte bleiben erhalten. `frontend/src/time.ts`
+teilt die Normalisierung mit dem Tarifeditor. `change`, `blur` und Übernehmen
+normalisieren vollständige Zeiten; beim Übernehmen werden beide sichtbaren
+DOM-Felder erneut gelesen. Ziehen und Tastatur verwenden ein Minutenraster
+bis 23:59. Vorhandene Sekunden lösen beim Laden
 keine Änderung aus; bestätigte Spanne, Dauer und Fläche erhalten diese
 Präzision bis zur ersten Bearbeitung. Nach ausdrücklicher Übernahme werden
 beide Grenzen als HH:MM:00 gesendet. Ein Start nach dem Ende erzeugt zwei
@@ -325,8 +329,12 @@ Aufrufe und keine neue Geräte-Schreibschnittstelle.
 Die Bestätigungszeile zeigt ausschließlich HA-Zustände. Eine Serviceantwort
 bestätigt noch keine neue Zeitspanne. Eine echte Änderung einer HA-Zeitgrenze
 setzt das gesamte Entwurfspaar auf den aktuellen HA-Stand; andere
-Telemetrieänderungen erhalten den Entwurf. Ungültige Eingaben, fehlende
-Berechtigungen und Nichtverfügbarkeit sperren die Übernahme; Fehler führen
+Telemetrieänderungen erhalten den Entwurf. Übernehmen bleibt bei beschreibbaren
+Feldern erreichbar, damit sichtbare Änderungen ohne `input`-Ereignis gelesen
+werden können. Unveränderte Werte lösen keinen Serviceaufruf aus. Ungültige
+Werte markieren und fokussieren das benannte Feld mit `aria-invalid` und
+erhalten den Entwurf. Fehlende Berechtigungen, Nichtverfügbarkeit und laufende
+Übernahmen sperren den Aufruf; Fehler führen
 zu keiner automatischen Wiederholung. Bei nur einer verfügbaren Grenze bleibt
 diese in der Bestätigungszeile sichtbar. Geleerte oder unbekannte Zeitwerte
 lassen sich weiterhin über die nativen HA-Time-Entitäten korrigieren.
@@ -930,8 +938,18 @@ zugeordnet. Der geprüfte Service `pv_forecast.get_forecast` liefert die
 validiert diese Zeitreihe und bestimmt den ersten ausreichend langen Zeitraum:
 Die prognostizierte mittlere PV-Leistung muss in mindestens zwei
 aufeinanderfolgenden Intervallen den gemessenen Entladedurchschnitt erreichen,
-also den Verbrauch mindestens 30 Minuten lang decken. Serviceergebnisse werden
-60 Sekunden zwischengespeichert. Es gibt keine zusätzliche Startzeit-Entity,
+also den Verbrauch mindestens 30 Minuten lang decken. Erfolgreiche Ergebnisse
+werden nach 60 Sekunden erneut abgefragt und sind bis 75 Sekunden nach
+Annahme nutzbar. Die Annahme verlangt höchstens 60 Sekunden alte `as_of`-
+Bewertungen und höchstens 58:45 Minuten alte Wetterdaten (`fetched_at`).
+Damit enthält jeder angenommene Snapshot Reserve für die nächste Abfrage,
+das 2-Sekunden-Service-Timeout und Poll-Schwankungen. Die absoluten Grenzen
+bleiben 135 Sekunden für `as_of` und 60 Minuten für Wetterdaten. Während
+Refresh oder vorübergehendem Servicefehler bleibt ein noch gültiger Snapshot
+nutzbar; ein Fehler führt nach 10 Sekunden zum nächsten Versuch, ohne seine
+Frist zu verlängern. Vertragsfehler und Quellenwechsel verwerfen ihn sofort.
+Der Adapter serialisiert und drosselt auch parallele Aufrufe.
+Es gibt keine zusätzliche Startzeit-Entity,
 manuelle PV-Uhrzeit oder Ableitung aus der Tagesenergiesumme. Fehlende oder
 ungültige Prognosedaten geben keine geplante Netzladung frei.
 
@@ -965,6 +983,15 @@ nach den beiden Gerätequittierungen geprüft.
 Festes Ende oder erreichtes Ziel beenden den Auftrag;
 eine Neuplanung benötigt mindestens eine Minute nach Abschluss und wieder
 gültige Beobachtungen, auch beim Ablauf während einer Datenlücke.
+Eine gemeinsame Abschlussbewertung berechnet den verbleibenden Bedarf bis
+zum gebundenen PV-Start mit dem festgehaltenen Verbrauch und frischem
+Batterie-SOC, Geräte-Minimal-SOC und Kapazität. Eine fehlende aktuelle
+PV-Prognose oder Ladeleistungsreferenz verhindert die Bewertung nicht.
+Ein Restbedarf über 1 Wh ergibt `insufficient`/`charge_shortfall`, sonst
+`complete`. Fehlen frische Batteriewerte, wird `shortfall_kwh` unbekannt;
+`waiting_for_data`/`measurements_missing` bleibt nur bis zur Nachbewertung
+mit dann aktuellen Messwerten und Zeitpunkt. Das Ergebnis bleibt danach
+bis zur zulässigen Neuplanung oder Konfigurationsänderung erhalten.
 Es gibt keine Auftragspersistenz und keine Wiederaufnahme
 ohne neue Messungen nach einem Neustart.
 
@@ -985,7 +1012,13 @@ Der Enum-Sensor `bridge_charge_plan` veröffentlicht `off`, `waiting_for_data`,
 `planned`, `charging`, `not_needed`, `insufficient`, `paused` oder `complete`.
 Strukturierte Attribute liefern `observation_minutes`, `average_discharge_w`,
 `discharge_at`, `charge_start`, `charge_end`, `pv_start`, `target_soc`,
-`shortfall_kwh` und gegebenenfalls `reason`. `ChargePlan.vue` verwendet diese
+`shortfall_kwh` und gegebenenfalls `reason`. Nach Auftragsende liefert
+`completed_at` dessen Zeitpunkt und `completion_evaluated_at` den Zeitpunkt
+der Bewertung (zunächst `None`, falls Messwerte fehlen). `data_gap_reason`
+erhält den Unterbrechungsgrund neben dem Ergebnis; eine Wiederaufnahme vor
+Planende entfernt ihn. `ChargePlan.vue` trennt beendete Aufträge von noch
+geplanten Teilladungen und zeigt die unbekannte Fehlmenge bei ausstehender
+Bewertung sowie Datenlücke und Bewertungszeitpunkt. Die Komponente verwendet diese
 Daten für die deutsch-/englischsprachige Meldung im zeitvariablen Tab. Die
 Komponente formatiert Datum und Uhrzeit in der HA-Zeitzone, erklärt bekannte
 Fehlergründe und behält einen Fehlbetrag auch während einer laufenden Teilladung

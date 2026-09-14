@@ -214,7 +214,7 @@ function rows(plan: Element): (string | null)[][] {
 function chargingTimes(root: Element) {
   return [
     ...root.querySelectorAll<HTMLInputElement>(
-      '.time-window-control input[type="time"]',
+      '.time-window-control input[type="text"]',
     ),
   ].map((input) => input.value);
 }

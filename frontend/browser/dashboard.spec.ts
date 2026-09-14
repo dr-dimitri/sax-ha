@@ -525,10 +525,10 @@ test("one dashboard with four complete views, local assets and responsive screen
         await expect(
           window.locator(".time-window-control__confirmed"),
         ).toContainText("Uhr");
-      await expect(window.locator("input[type=time]").nth(0)).toHaveValue(
+      await expect(window.locator("input[type=text]").nth(0)).toHaveValue(
         "22:00",
       );
-      await expect(window.locator("input[type=time]").nth(1)).toHaveValue(
+      await expect(window.locator("input[type=text]").nth(1)).toHaveValue(
         "06:00",
       );
     }
@@ -643,7 +643,7 @@ test("eight tariff windows match the compact electricity summary and detailed am
   ).toHaveCount(0);
   await expect(panel.locator(".time-window-control")).toHaveCount(0);
   await expect(
-    panel.locator(".time-window-control input[type=time]"),
+    panel.locator(".time-window-control input[type=text]"),
   ).toHaveCount(0);
   const tariff = panel.locator(".tariff-plan");
   await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
@@ -979,7 +979,7 @@ test("tariff months, grid-serving overnight window and guided negative price set
     panel.getByText("PV-Prognose 13.9.", { exact: true }),
   ).toBeVisible();
   const timeWindow = panel.locator(".time-window-control");
-  const times = timeWindow.locator("input[type=time]");
+  const times = timeWindow.locator("input[type=text]");
   await expect(times.nth(0)).toHaveValue("22:00");
   await expect(times.nth(1)).toHaveValue("06:00");
   await times.nth(0).fill("23:15");
@@ -1125,21 +1125,21 @@ test("grid-serving time window supports dragging, keyboard and atomic submission
   if (mobile) await page.setViewportSize({ width: 390, height: 844 });
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
   const window = panel.locator(".time-window-control");
-  const inputs = window.locator("input[type=time]");
+  const inputs = window.locator("input[type=text]");
   const markers = window.getByRole("slider");
   const apply = window.locator("button[type=submit]");
   const confirmed = window.locator(".time-window-control__confirmed");
   const before = await page.locator("#actions").innerText();
   await expect(markers).toHaveCount(2);
   await expect(window.locator(".time-window-control__segment")).toHaveCount(2);
-  await expect(inputs.nth(0)).toHaveAttribute("step", "60");
-  await expect(inputs.nth(1)).toHaveAttribute("step", "60");
+  await expect(inputs.nth(0)).toHaveAttribute("placeholder", "HH:MM");
+  await expect(inputs.nth(1)).toHaveAttribute("placeholder", "HH:MM");
   await expect(confirmed).toContainText("22:00:17");
   await expect(confirmed).toContainText("06:00:29");
-  await expect(apply).toBeDisabled();
+  await expect(apply).toBeEnabled();
   await markers.nth(0).click();
   await expect(inputs.nth(0)).toHaveValue("22:00");
-  await expect(apply).toBeDisabled();
+  await expect(apply).toBeEnabled();
   await markers.nth(0).press("ArrowRight");
   await expect(inputs.nth(0)).toHaveValue("22:01");
   await expect(inputs.nth(1)).toHaveValue("06:00");
@@ -1212,7 +1212,7 @@ test("grid-serving time window supports dragging, keyboard and atomic submission
   await expect(confirmed).toContainText("06:30");
   await expect(confirmed).not.toContainText(":17");
   await expect(confirmed).not.toContainText(":29");
-  await expect(apply).toBeDisabled();
+  await expect(apply).toBeEnabled();
   if (mobile) {
     await page.setViewportSize({ width: 320, height: 1100 });
     const narrow = await inputs.evaluateAll((elements) =>
@@ -1255,7 +1255,7 @@ test("failed time-window submission preserves both confirmed values and can be r
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/netzdienliches-laden']").click();
   const window = panel.locator(".time-window-control");
-  const inputs = window.locator("input[type=time]");
+  const inputs = window.locator("input[type=text]");
   const confirmed = window.locator(".time-window-control__confirmed");
   const apply = window.locator("button[type=submit]");
   await page.locator("#failure").click();

@@ -197,7 +197,7 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
         ".time-window-control",
       )!;
       expect(control).not.toBeNull();
-      expect(control.querySelectorAll('input[type="time"]')).toHaveLength(2);
+      expect(control.querySelectorAll('input[type="text"]')).toHaveLength(2);
       expect(control.querySelectorAll('[role="slider"]')).toHaveLength(2);
       const confirmed = () =>
         control.querySelector(".time-window-control__confirmed")!.textContent;
@@ -205,7 +205,7 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
       expect(confirmed()).toContain("06:00");
       if (language === "de") expect(confirmed()).toContain("Uhr");
       const start =
-        control.querySelector<HTMLInputElement>('input[type="time"]')!;
+        control.querySelector<HTMLInputElement>('input[type="text"]')!;
       start.value = "23:15";
       start.dispatchEvent(new Event("input", { bubbles: true }));
       await flush();
@@ -247,7 +247,7 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
     ]) {
       await update("grid_serving_start", state);
       expect(
-        control.querySelector<HTMLInputElement>('input[type="time"]')!.disabled,
+        control.querySelector<HTMLInputElement>('input[type="text"]')!.disabled,
       ).toBe(true);
     }
     await update("grid_serving_start", "09:05");
@@ -255,7 +255,7 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
       control.querySelector(".time-window-control__confirmed")!.textContent,
     ).toContain("09:05");
     expect(
-      control.querySelector<HTMLInputElement>('input[type="time"]')!.disabled,
+      control.querySelector<HTMLInputElement>('input[type="text"]')!.disabled,
     ).toBe(false);
     expect(callService).not.toHaveBeenCalled();
   });
@@ -518,7 +518,7 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
       ),
     ).toEqual(["Charging pause", "Active months"]);
     expect(
-      root.querySelectorAll('.time-window-control input[type="time"]'),
+      root.querySelectorAll('.time-window-control input[type="text"]'),
     ).toHaveLength(2);
     expect(names(root).filter((name) => name === "January")).toHaveLength(1);
     expect(names(root)).toContain("December");

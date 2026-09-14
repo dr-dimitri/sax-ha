@@ -186,6 +186,95 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+describe("REQ-BRIDGE-CHARGE: completion during a data gap", () => {
+  it.each(["de", "en-GB"])(
+    "keeps the completed result and the outage visible separately (%s)",
+    async (language) => {
+      const { root, update } = await mount(language);
+      await update("insufficient", {
+        ...planned,
+        completed_at: planned.charge_end,
+        completion_evaluated_at: "2026-09-13T22:42:00Z",
+        shortfall_kwh: 0.56,
+        reason: "charge_shortfall",
+        data_gap_reason: "pv_start_missing",
+      });
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "Netzladung ist beendet"
+          : "grid charging has ended",
+      );
+      expect(root.textContent).toContain(
+        language === "de" ? "Fehlbetrag: 0,56 kWh" : "shortfall: 0.56 kWh",
+      );
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "PV-Prognose zeitweise"
+          : "PV forecast was temporarily",
+      );
+      expect(root.textContent).toContain(
+        language === "de" ? "Bewertet am" : "Assessed at",
+      );
+      expect(root.textContent).not.toContain(
+        language === "de"
+          ? "Aufladung im Niedertarif ist"
+          : "charging is planned",
+      );
+      expect(root.textContent).not.toContain("pv_start_missing");
+      expect(root.querySelector(".charge-plan__target")).toBeNull();
+
+      await update("complete", {
+        ...planned,
+        completed_at: planned.charge_end,
+        completion_evaluated_at: "2026-09-13T22:42:00Z",
+        data_gap_reason: "measurements_missing",
+      });
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "Netzladung ist abgeschlossen"
+          : "grid charging is complete",
+      );
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "Batteriemesswerte zeitweise"
+          : "Battery measurements were temporarily",
+      );
+    },
+  );
+
+  it.each(["de", "en-GB"])(
+    "shows an ended plan with an unknown shortfall until fresh measurements return (%s)",
+    async (language) => {
+      const { root, update, callService, callWS } = await mount(language);
+      await update("waiting_for_data", {
+        ...planned,
+        completed_at: planned.charge_end,
+        completion_evaluated_at: null,
+        shortfall_kwh: null,
+        reason: "measurements_missing",
+        data_gap_reason: "measurements_missing",
+      });
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "Netzladung ist beendet"
+          : "grid charging has ended",
+      );
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "Fehlmenge ist noch unbekannt"
+          : "shortfall is still unknown",
+      );
+      expect(root.textContent).not.toContain("0,00 kWh");
+      expect(root.textContent).not.toContain("0.00 kWh");
+      expect(root.textContent).not.toContain(
+        language === "de" ? "Beobachtungszeit" : "observations",
+      );
+      expect(callService).not.toHaveBeenCalled();
+      expect(callWS).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("consumption-based charging plan", () => {
   it("explains consumption, depletion, charging and PV start in the HA timezone across midnight", async () => {
     const { root, callService, callWS } = await mount();

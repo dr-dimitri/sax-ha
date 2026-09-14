@@ -51,6 +51,10 @@ const text = computed(() =>
         paused:
           "Die Ladeplanung ist pausiert. Die geplante Netzladung ist derzeit nicht freigegeben.",
         complete: "Die geplante Netzladung ist abgeschlossen.",
+        completionPending:
+          "Die geplante Netzladung ist beendet. Für die Abschlussbewertung fehlen aktuelle Batteriemesswerte; die Fehlmenge ist noch unbekannt.",
+        completedInsufficient:
+          "Die geplante Netzladung ist beendet. Die verbleibende Speicherenergie reicht voraussichtlich nicht bis zum geplanten PV-Start.",
         not_needed: "Eine Netzladung ist derzeit nicht erforderlich.",
         insufficient:
           "Die mögliche Netzladung reicht voraussichtlich nicht aus, um die Zeit bis zum PV-Start vollständig zu überbrücken.",
@@ -70,6 +74,10 @@ const text = computed(() =>
         paused:
           "The charging plan is paused. Planned grid charging is currently not permitted.",
         complete: "The planned grid charging is complete.",
+        completionPending:
+          "The planned grid charging has ended. Completion assessment needs current battery measurements; the shortfall is still unknown.",
+        completedInsufficient:
+          "The planned grid charging has ended. The remaining battery energy is not expected to last until the planned PV start.",
         not_needed: "No grid charging is currently needed.",
         insufficient:
           "The available grid charging is not expected to cover the entire period until PV starts.",
@@ -145,6 +153,34 @@ const dates = computed(() => ({
   end: timestamp(attributes.value.charge_end),
   pv: timestamp(attributes.value.pv_start),
 }));
+const completed = computed(
+  () =>
+    ["waiting_for_data", "complete", "insufficient"].includes(
+      status.value ?? "",
+    ) && timestamp(attributes.value.completed_at) !== null,
+);
+const dataGap = computed(() => {
+  if (!completed.value) return null;
+  switch (attributes.value.data_gap_reason) {
+    case "pv_start_missing":
+      return german.value
+        ? "Während der Ladung war die PV-Prognose zeitweise nicht verfügbar."
+        : "The PV forecast was temporarily unavailable during charging.";
+    case "measurements_missing":
+      return german.value
+        ? "Während der Ladung waren Batteriemesswerte zeitweise nicht verfügbar."
+        : "Battery measurements were temporarily unavailable during charging.";
+    default:
+      return null;
+  }
+});
+const assessment = computed(() => {
+  const at = timestamp(attributes.value.completion_evaluated_at);
+  if (!completed.value || !at) return null;
+  return german.value
+    ? `Bewertet am ${at} Uhr anhand aktueller Batteriemesswerte.`
+    : `Assessed at ${at} using current battery measurements.`;
+});
 const forecast = computed(() => {
   const minutes = number(attributes.value.observation_minutes, 1, 60);
   if (!minutes || !dates.value.discharge) return null;
@@ -187,6 +223,9 @@ const paragraphs = computed(() => {
           ? ` Voraussichtlicher Fehlbetrag: ${shortfall} kWh.`
           : ` Expected shortfall: ${shortfall} kWh.`
         : "";
+      if (completed.value) {
+        return [text.value.completedInsufficient + shortage];
+      }
       const partial =
         start && end
           ? german.value
@@ -212,7 +251,11 @@ const paragraphs = computed(() => {
     case "off":
       return [text.value.off, reason.value ?? reasons.value.disabled];
     case "waiting_for_data":
-      return [reason.value ?? text.value.waiting_for_data];
+      return [
+        completed.value
+          ? text.value.completionPending
+          : (reason.value ?? text.value.waiting_for_data),
+      ];
     case "paused":
       return [text.value.paused, reason.value];
     case "complete":
@@ -222,7 +265,10 @@ const paragraphs = computed(() => {
   }
 });
 const target = computed(() => {
-  if (!["planned", "charging", "insufficient"].includes(status.value ?? ""))
+  if (
+    completed.value ||
+    !["planned", "charging", "insufficient"].includes(status.value ?? "")
+  )
     return null;
   const soc = number(attributes.value.target_soc, 0, 100);
   return soc
@@ -250,6 +296,8 @@ const target = computed(() => {
     <template v-for="(paragraph, index) in paragraphs" :key="index">
       <p v-if="paragraph">{{ paragraph }}</p>
     </template>
+    <p v-if="dataGap">{{ dataGap }}</p>
+    <p v-if="assessment">{{ assessment }}</p>
     <p v-if="target" class="charge-plan__target">{{ target }}</p>
   </section>
 </template>

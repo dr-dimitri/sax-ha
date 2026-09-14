@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -162,11 +163,110 @@ async def test_service_cache_is_limited_to_one_call_per_minute(
         await adapter.async_refresh(NOW + timedelta(seconds=seconds))
     assert len(source.calls) == 1
     assert adapter.pv_start(NOW + timedelta(seconds=59), 1000) == PV_START
-    assert adapter.pv_start(NOW + timedelta(seconds=61), 1000) is None
+    assert adapter.pv_start(NOW + timedelta(seconds=61), 1000) == PV_START
     source.now = NOW + timedelta(seconds=60)
     await adapter.async_refresh(source.now)
     assert len(source.calls) == 2
     assert adapter.pv_start(source.now, 1000) == PV_START
+
+
+@pytest.mark.parametrize("as_of_age", [0, 45, 60])
+async def test_accepted_snapshot_survives_refresh_timeout_and_poll_jitter(
+    pv_source: tuple[_Source, PvBridgeForecast], as_of_age: int
+) -> None:
+    """REQ-BRIDGE-CHARGE: accepted as_of ages must not cause periodic gaps."""
+    source, adapter = pv_source
+    source.mutation = (
+        ("window", "as_of"),
+        (NOW - timedelta(seconds=as_of_age)).isoformat(),
+    )
+    await adapter.async_refresh(NOW)
+
+    for seconds in (0, 16, 59, 60, 62, 75):
+        assert adapter.pv_start(NOW + timedelta(seconds=seconds), 1000) == PV_START
+    assert adapter.pv_start(NOW + timedelta(seconds=76), 1000) is None
+
+
+async def test_scheduled_refresh_retains_safe_snapshot_while_service_is_pending(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    """REQ-BRIDGE-CHARGE: a periodic writer may run during forecast refresh."""
+    source, adapter = pv_source
+    source.now = NOW - timedelta(seconds=45)
+    await adapter.async_refresh(NOW)
+    source.entered.clear()
+    source.block = asyncio.Event()
+    source.now = NOW + timedelta(seconds=62)
+
+    refresh = asyncio.create_task(adapter.async_refresh(source.now))
+    try:
+        await source.entered.wait()
+        assert adapter.pv_start(NOW + timedelta(seconds=64), 1000) == PV_START
+    finally:
+        source.block.set()
+        await refresh
+    assert adapter.pv_start(NOW + timedelta(seconds=64), 1000) == PV_START
+
+
+async def test_transient_failure_retries_before_unchanged_snapshot_expires(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    """REQ-BRIDGE-CHARGE: a service failure must not enforce a full minute gap."""
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    source.error = HomeAssistantError("Temporary PV service failure")
+    await adapter.async_refresh(NOW + timedelta(seconds=60))
+    assert adapter.pv_start(NOW + timedelta(seconds=62), 1000) == PV_START
+
+    for seconds in (61, 69):
+        await adapter.async_refresh(NOW + timedelta(seconds=seconds))
+    assert len(source.calls) == 2
+
+    source.error = None
+    source.now = NOW + timedelta(seconds=70)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 3
+    assert adapter.pv_start(NOW + timedelta(seconds=76), 1000) == PV_START
+
+
+async def test_repeated_failed_refreshes_cannot_extend_the_cache_deadline(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    """REQ-BRIDGE-CHARGE: retries never grant more lifetime to the old data."""
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    source.error = HomeAssistantError("PV service unavailable")
+    for seconds in (60, 70, 80):
+        await adapter.async_refresh(NOW + timedelta(seconds=seconds))
+    assert len(source.calls) == 4
+    assert adapter.pv_start(NOW + timedelta(seconds=76), 1000) is None
+
+
+async def test_invalid_refresh_immediately_revokes_the_previous_snapshot(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    """REQ-BRIDGE-CHARGE: explicit unsafe forecast data overrides the reserve."""
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    source.now = NOW + timedelta(seconds=60)
+    source.mutation = (("last_update_success",), False)
+    await adapter.async_refresh(source.now)
+
+    assert adapter.pv_start(source.now, 1000) is None
+
+
+async def test_repeated_identical_response_cannot_renew_as_of_indefinitely(
+    pv_source: tuple[_Source, PvBridgeForecast],
+) -> None:
+    """REQ-BRIDGE-CHARGE: re-reading old data cannot grant unlimited permission."""
+    source, adapter = pv_source
+    await adapter.async_refresh(NOW)
+    await adapter.async_refresh(NOW + timedelta(seconds=60))
+    assert adapter.pv_start(NOW + timedelta(seconds=135), 1000) == PV_START
+    assert adapter.pv_start(NOW + timedelta(seconds=136), 1000) is None
+    await adapter.async_refresh(NOW + timedelta(seconds=136))
+    assert len(source.calls) == 3
+    assert adapter.pv_start(NOW + timedelta(seconds=136), 1000) is None
 
 
 async def test_concurrent_refreshes_share_one_read(
@@ -182,33 +282,81 @@ async def test_concurrent_refreshes_share_one_read(
     assert len(source.calls) == 1
 
 
-async def test_failed_refresh_drops_previous_permission_and_throttles_retries(
-    pv_source: tuple[_Source, PvBridgeForecast],
+async def test_queued_refresh_uses_receipt_time_after_a_delayed_service_response(
+    pv_source: tuple[_Source, PvBridgeForecast], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """REQ-BRIDGE-CHARGE: waiting for the shared read must not start another read."""
     source, adapter = pv_source
-    await adapter.async_refresh(NOW)
-    assert adapter.pv_start(NOW, 1000) == PV_START
-    source.error = HomeAssistantError("PV source offline")
-    source.now = NOW + timedelta(seconds=60)
-    await adapter.async_refresh(source.now)
-    assert adapter.pv_start(source.now, 1000) is None
-    await adapter.async_refresh(source.now + timedelta(seconds=30))
+    monkeypatch.setattr(
+        "custom_components.sax_power.infrastructure.pv_bridge_forecast.dt_util",
+        SimpleNamespace(utcnow=lambda: source.now),
+    )
+    source.block = asyncio.Event()
+    first = asyncio.create_task(adapter.async_refresh())
+    await source.entered.wait()
+    second = asyncio.create_task(adapter.async_refresh())
+    await asyncio.sleep(0)
+    source.now = NOW + timedelta(seconds=2)
+    source.block.set()
+    await asyncio.gather(first, second)
+
+    assert len(source.calls) == 1
+    assert adapter.pv_start(NOW + timedelta(seconds=77), 1000) == PV_START
+    assert adapter.pv_start(NOW + timedelta(seconds=78), 1000) is None
+    source.now = NOW + timedelta(seconds=61)
+    await adapter.async_refresh()
+    assert len(source.calls) == 1
+    source.now = NOW + timedelta(seconds=62)
+    await adapter.async_refresh()
     assert len(source.calls) == 2
 
 
-async def test_timeout_discards_permission_and_cancels_the_slow_read(
-    pv_source: tuple[_Source, PvBridgeForecast], monkeypatch: pytest.MonkeyPatch
+async def test_initial_failed_refresh_grants_no_permission_and_retries_soon(
+    pv_source: tuple[_Source, PvBridgeForecast],
 ) -> None:
     source, adapter = pv_source
+    source.error = HomeAssistantError("PV source offline")
+    await adapter.async_refresh(NOW)
+    assert adapter.pv_start(NOW, 1000) is None
+    await adapter.async_refresh(NOW + timedelta(seconds=9))
+    assert len(source.calls) == 1
+    source.error = None
+    source.now = NOW + timedelta(seconds=10)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 2
+    assert adapter.pv_start(source.now, 1000) == PV_START
+
+
+@pytest.mark.parametrize("has_snapshot", [False, True])
+async def test_timeout_keeps_only_previously_accepted_data_and_retries_soon(
+    pv_source: tuple[_Source, PvBridgeForecast],
+    monkeypatch: pytest.MonkeyPatch,
+    has_snapshot: bool,
+) -> None:
+    """REQ-BRIDGE-CHARGE: a slow service gets a bounded retry without new permission."""
+    source, adapter = pv_source
+    if has_snapshot:
+        await adapter.async_refresh(NOW)
+        source.now = NOW + timedelta(seconds=60)
     monkeypatch.setattr(
         "custom_components.sax_power.infrastructure.pv_bridge_forecast._SERVICE_TIMEOUT",
         0.01,
     )
     source.block = asyncio.Event()
-    await adapter.async_refresh(NOW)
-    assert adapter.pv_start(NOW, 1000) is None
-    assert len(source.calls) == 1
-    source.block.set()
+    try:
+        await adapter.async_refresh(source.now)
+        assert adapter.pv_start(source.now, 1000) == (
+            PV_START if has_snapshot else None
+        )
+        assert len(source.calls) == (2 if has_snapshot else 1)
+        await adapter.async_refresh(source.now + timedelta(seconds=9))
+        assert len(source.calls) == (2 if has_snapshot else 1)
+    finally:
+        source.block.set()
+    source.now += timedelta(seconds=10)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == (3 if has_snapshot else 2)
+    assert adapter.pv_start(source.now, 1000) == PV_START
 
 
 @pytest.mark.parametrize("selected", [None, "sensor.missing", "switch.pv"])
@@ -296,6 +444,7 @@ async def test_missing_service_never_uses_the_energy_sensor_as_a_pv_start(
         (("window", "step_minutes"), 30),
         (("window", "assumption"), "instantaneous_power"),
         (("window", "as_of"), (NOW + timedelta(seconds=1)).isoformat()),
+        (("window", "as_of"), (NOW - timedelta(seconds=61)).isoformat()),
         (("window", "fetched_at"), (NOW + timedelta(seconds=1)).isoformat()),
         (("window", "fetched_at"), (NOW - timedelta(minutes=61)).isoformat()),
         (("window", "fetched_at"), "2026-09-13T20:00:00"),
@@ -322,17 +471,32 @@ async def test_invalid_or_unsafe_contract_never_authorizes_a_pv_deadline(
     assert adapter.pv_start(NOW, 1000) is None
 
 
-async def test_weather_data_age_is_checked_between_service_reads(
+@pytest.mark.parametrize(
+    ("weather_age", "accepted"),
+    [
+        (timedelta(minutes=58, seconds=45), True),
+        (timedelta(minutes=58, seconds=45, microseconds=1), False),
+        (timedelta(minutes=59, seconds=30), False),
+        (timedelta(minutes=60), False),
+    ],
+)
+async def test_weather_age_must_leave_the_entire_cache_reserve(
     pv_source: tuple[_Source, PvBridgeForecast],
+    weather_age: timedelta,
+    accepted: bool,
 ) -> None:
+    """REQ-BRIDGE-CHARGE: the reserve never exceeds the 60 minute weather limit."""
     source, adapter = pv_source
     source.mutation = (
         ("window", "fetched_at"),
-        (NOW - timedelta(minutes=59, seconds=30)).isoformat(),
+        (NOW - weather_age).isoformat(),
     )
     await adapter.async_refresh(NOW)
-    assert adapter.pv_start(NOW, 1000) == PV_START
-    assert adapter.pv_start(NOW + timedelta(seconds=31), 1000) is None
+    assert adapter.pv_start(NOW, 1000) == (PV_START if accepted else None)
+    assert adapter.pv_start(NOW + timedelta(seconds=75), 1000) == (
+        PV_START if accepted else None
+    )
+    assert adapter.pv_start(NOW + timedelta(seconds=75, microseconds=1), 1000) is None
 
 
 @pytest.mark.parametrize("consumption", [None, True, -1, 0, float("nan"), float("inf")])

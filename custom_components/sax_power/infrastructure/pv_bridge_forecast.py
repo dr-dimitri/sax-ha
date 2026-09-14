@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+_LOGGER = logging.getLogger(__name__)
 _STEP = timedelta(minutes=15)
 _REFRESH_INTERVAL = timedelta(seconds=60)
 _RETRY_INTERVAL = timedelta(seconds=10)
@@ -61,6 +63,10 @@ class _Snapshot:
     intervals: tuple[tuple[datetime, datetime, float], ...]
 
 
+class _RejectedForecast(ValueError):
+    """A received response cannot safely authorize bridge charging."""
+
+
 def _parse_snapshot(
     response: object,
     *,
@@ -68,31 +74,37 @@ def _parse_snapshot(
     start: datetime,
     end: datetime,
     timezone: str,
-) -> _Snapshot | None:
+) -> _Snapshot:
     if (
         not isinstance(response, Mapping)
         or type(response.get("schema_version")) is not int
         or response.get("schema_version") != 1
-        or response.get("last_update_success") is not True
-        or response.get("origin") != "live"
     ):
-        return None
+        raise _RejectedForecast("unsupported response schema_version")
+    if response.get("last_update_success") is not True:
+        raise _RejectedForecast("last_update_success is not true")
+    if response.get("origin") != "live":
+        raise _RejectedForecast("origin is not live")
     window = response.get("window")
     if (
         not isinstance(window, Mapping)
         or type(window.get("schema_version")) is not int
         or window.get("schema_version") != 1
-        or window.get("scope") != "total"
-        or window.get("status") != "available"
-        or window.get("reason") is not None
+    ):
+        raise _RejectedForecast("unsupported window schema_version")
+    if window.get("status") != "available" or window.get("reason") is not None:
+        raise _RejectedForecast("window is unavailable or reports a reason")
+    if window.get("quality_flags") != []:
+        raise _RejectedForecast("window quality_flags are not empty")
+    if (
+        window.get("scope") != "total"
         or window.get("timezone") != timezone
-        or window.get("quality_flags") != []
         or window.get("step_minutes") != 15
         or window.get("assumption") != "constant_interval_mean_power"
         or _timestamp(window.get("start")) != start
         or _timestamp(window.get("end")) != end
     ):
-        return None
+        raise _RejectedForecast("window metadata does not match the requested contract")
     coverage = window.get("coverage")
     if (
         not isinstance(coverage, Mapping)
@@ -100,7 +112,7 @@ def _parse_snapshot(
         or _timestamp(coverage.get("start")) != start
         or _timestamp(coverage.get("end")) != end
     ):
-        return None
+        raise _RejectedForecast("window coverage is incomplete or mismatched")
     as_of = _timestamp(window.get("as_of"))
     fetched_at = _timestamp(window.get("fetched_at"))
     if (
@@ -110,16 +122,18 @@ def _parse_snapshot(
         or not timedelta(0) <= now - fetched_at <= _MAX_FORECAST_AGE - _CACHE_LIFETIME
         or fetched_at > as_of
     ):
-        return None
+        raise _RejectedForecast(
+            "window timestamps are invalid or outside freshness limits"
+        )
     rows = window.get("intervals")
     if not isinstance(rows, list) or len(rows) != (end - start) // _STEP:
-        return None
+        raise _RejectedForecast("window intervals are missing or incomplete")
     intervals: list[tuple[datetime, datetime, float]] = []
     energies: list[float] = []
     cursor = start
     for row in rows:
         if not isinstance(row, Mapping):
-            return None
+            raise _RejectedForecast("window interval is not a mapping")
         left, right = _timestamp(row.get("start")), _timestamp(row.get("end"))
         power, energy = row.get("mean_ac_power_kw"), row.get("energy_kwh")
         if (
@@ -131,7 +145,9 @@ def _parse_snapshot(
             or not _number(energy)
             or not math.isclose(energy, power / 4, rel_tol=1e-12, abs_tol=1e-9)
         ):
-            return None
+            raise _RejectedForecast(
+                "window interval has invalid bounds, power or energy"
+            )
         intervals.append((cursor, right, float(power) * 1000))
         energies.append(float(energy))
         cursor = right
@@ -149,7 +165,7 @@ def _parse_snapshot(
             abs_tol=1e-9,
         )
     ):
-        return None
+        raise _RejectedForecast("window energy or mean power is inconsistent")
     return _Snapshot(as_of, fetched_at, now, tuple(intervals))
 
 
@@ -165,6 +181,7 @@ class PvBridgeForecast:
         self._last_attempt: datetime | None = None
         self._retry_pending = False
         self._snapshot: _Snapshot | None = None
+        self._rejection_reason: str | None = None
         self._lock = asyncio.Lock()
 
     def _current_source(self) -> tuple[str, str, str] | None:
@@ -202,10 +219,21 @@ class PvBridgeForecast:
             self._last_attempt = None
             self._retry_pending = False
             self._snapshot = None
+            self._rejection_reason = None
         return source
 
+    def _reject_snapshot(self, reason: str) -> None:
+        self._snapshot = None
+        if reason != self._rejection_reason:
+            _LOGGER.warning(
+                "PV forecast response rejected for %s: %s",
+                self._source_entity_id(),
+                reason,
+            )
+            self._rejection_reason = reason
+
     async def async_refresh(self, now: datetime | None = None) -> None:
-        """Refresh once a minute, retry failures sooner, and expire cached results."""
+        """Refresh once a minute, retrying only transient service failures sooner."""
         async with self._lock:
             instant = _timestamp(now if now is not None else dt_util.utcnow())
             if instant is None:
@@ -227,7 +255,7 @@ class PvBridgeForecast:
             ):
                 return
             self._last_attempt = instant
-            self._retry_pending = True
+            self._retry_pending = False
             # #130 anchors its raster to the supplied start. Whole future
             # quarters avoid presenting an already elapsed interval as PV start.
             start = _quarter(instant)
@@ -267,15 +295,16 @@ class PvBridgeForecast:
                         end=end,
                         timezone=source[2],
                     )
-                    if self._snapshot is not None:
-                        self._last_attempt = self._snapshot.accepted_at
-                        self._retry_pending = False
+                    self._last_attempt = self._snapshot.accepted_at
+                    self._rejection_reason = None
             except HomeAssistantError, TimeoutError:
                 # REQ-BRIDGE-CHARGE: a transient read failure cannot extend the
                 # accepted snapshot's deadline or hide a source change.
-                self._sync_source()
+                self._retry_pending = self._sync_source() == source
+            except _RejectedForecast as err:
+                self._reject_snapshot(str(err))
             except OverflowError, TypeError, ValueError:
-                self._snapshot = None
+                self._reject_snapshot("invalid forecast values or time window")
 
     def pv_start(
         self, now: datetime, average_discharge_w: float | None

@@ -946,9 +946,14 @@ Damit enthält jeder angenommene Snapshot Reserve für die nächste Abfrage,
 das 2-Sekunden-Service-Timeout und Poll-Schwankungen. Die absoluten Grenzen
 bleiben 135 Sekunden für `as_of` und 60 Minuten für Wetterdaten. Während
 Refresh oder vorübergehendem Servicefehler bleibt ein noch gültiger Snapshot
-nutzbar; ein Fehler führt nach 10 Sekunden zum nächsten Versuch, ohne seine
-Frist zu verlängern. Vertragsfehler und Quellenwechsel verwerfen ihn sofort.
-Der Adapter serialisiert und drosselt auch parallele Aufrufe.
+nutzbar; nur `HomeAssistantError` und `TimeoutError` führen nach 10 Sekunden
+zum nächsten Versuch, ohne seine Frist zu verlängern. Empfangene, aber wegen
+Qualität, Frische oder Vertrag abgelehnte Antworten und lokale
+Verarbeitungsfehler bleiben beim 60-Sekunden-Takt, auch nach einem transienten
+Fehler. Ein unveränderter Ablehnungsgrund wird einmal protokolliert; eine
+gültige Antwort oder ein Quellenwechsel setzt die Entprellung zurück.
+Vertragsfehler und Quellenwechsel verwerfen den Snapshot sofort. Der Adapter
+serialisiert und drosselt auch parallele Aufrufe.
 Es gibt keine zusätzliche Startzeit-Entity,
 manuelle PV-Uhrzeit oder Ableitung aus der Tagesenergiesumme. Fehlende oder
 ungültige Prognosedaten geben keine geplante Netzladung frei.

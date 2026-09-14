@@ -186,10 +186,16 @@ requirement_bridge_charge:
     Nutzungsgrenzen von 135 Sekunden für as_of und 60 Minuten für fetched_at.
     Ein laufender Refresh oder ein vorübergehender Servicefehler verwirft
     einen noch innerhalb dieser festen Grenzen gültigen Snapshot nicht.
-    Nach Fehlern wird ab 10 Sekunden erneut versucht, ohne die Nutzungsfrist
-    zu verlängern. Das Service-Timeout bleibt für einen reaktionsfähigen
-    Poll bei 2 Sekunden. Vertragsfehler und Quellenwechsel verwerfen den
-    Snapshot sofort; parallele Aufrufe werden gemeinsam gedrosselt.
+    Nur nach HomeAssistantError oder TimeoutError wird ab 10 Sekunden erneut
+    versucht, ohne die Nutzungsfrist zu verlängern. Empfangene, aber wegen
+    Qualität, Frische oder Vertrag abgelehnte Antworten sowie lokale
+    Verarbeitungsfehler behalten das reguläre 60-Sekunden-Abfrageintervall,
+    auch nach einem transienten Fehler (Issue #254). Ihr Ablehnungsgrund
+    wird einmalig pro unverändertem Grund protokolliert; eine gültige Antwort
+    oder ein Quellenwechsel setzt diese Entprellung zurück. Das Service-Timeout
+    bleibt für einen reaktionsfähigen Poll bei 2 Sekunden. Vertragsfehler
+    und Quellenwechsel verwerfen den Snapshot sofort; parallele Aufrufe
+    werden gemeinsam gedrosselt.
     Manuelle PV-Uhrzeiten,
     zusätzliche Startsensoren und die Tagesenergiemenge ersetzen diese
     Zeitreihe nicht.
@@ -269,6 +275,7 @@ requirement_bridge_charge:
     - "Niedertarifintervalle stammen nur aus einem gültigen TIME_OF_USE-Tarif. Änderungen am separaten Netzladezeitfenster verändern keinen verbrauchsabhängigen Plan."
     - "PV-Start erfordert zwei lückenlos folgende 15-Minuten-Intervalle der Gesamtanlagen-Prognose mit ausreichender mittlerer Leistung. Tagesenergiesummen und fremde Sensorquellen sind kein Ersatz."
     - "Bei 0, 45 und 60 Sekunden altem as_of bleiben angenommene Snapshots bis zur nächsten regulären Abfrage nutzbar. Refresh, Timeout und frühere Wiederholungen verlängern keine alte Nutzungsfrist; Vertragsfehler, Quellenwechsel und absolute Altersgrenzen bleiben wirksam."
+    - "tests/test_pv_bridge_forecast.py belegt bei 2-Sekunden-Polls über zehn Minuten zehn Serviceaufrufe auch bei dauerhaft abgelehnten Antworten. Nur HomeAssistantError/TimeoutError wechseln auf zehn Sekunden; empfangene Ablehnungen und lokale Verarbeitungsfehler beenden diesen Retry. Ein unveränderter Ablehnungsgrund erzeugt bis zu einer gültigen Antwort oder einem Quellenwechsel keinen weiteren Logeintrag."
     - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."

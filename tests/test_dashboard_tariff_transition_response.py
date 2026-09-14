@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -27,7 +26,7 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.dashboard_tariff import CONFIGURE_COMMAND
 
-from .test_dashboard_tariff_response import _get, _prepare, _toggle
+from .test_dashboard_tariff_response import _control_clock, _get, _prepare, _toggle
 from .test_month_switch_response import coordinator as coordinator
 
 
@@ -147,14 +146,7 @@ async def test_tariff_change_during_device_ack_drains_and_releases_old_charge(
 
     coordinator.client.write_register.side_effect = write
     with (
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.utcnow",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
+        _control_clock(),
         patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]
@@ -212,14 +204,7 @@ async def test_pending_source_change_stops_periodic_repetition_before_control_lo
     client = await hass_ws_client(hass)
     tariff = await _get(client, entry)
     with (
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.utcnow",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
+        _control_clock(),
         patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]
@@ -265,16 +250,7 @@ async def test_failed_tariff_reset_keeps_accepted_config_and_retries_on_poll(
         return success
 
     coordinator.client.write_register.side_effect = write
-    with (
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.utcnow",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
-    ):
+    with _control_clock():
         assert (await _toggle(client, entry, tariff, True))["success"]
         try:
             await asyncio.wait_for(started.wait(), 1)

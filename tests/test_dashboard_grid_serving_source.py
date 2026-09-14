@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from datetime import UTC, datetime
 from datetime import time as dt_time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,8 +32,8 @@ from custom_components.sax_power.sensor import (
     SaxPowerForecastSensor,
 )
 
+from .test_dashboard_tariff_response import _control_clock, _prepare, _toggle
 from .test_dashboard_tariff_response import _get as _get_tariff
-from .test_dashboard_tariff_response import _prepare, _toggle
 from .test_month_switch_response import coordinator as coordinator
 
 
@@ -308,14 +307,7 @@ async def test_changed_source_recalculates_the_live_pause_forecast_condition(
             "custom_components.sax_power.async_sync_vue_dashboard",
             new_callable=AsyncMock,
         ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.utcnow",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
+        _control_clock(),
     ):
         for source, forecast, allowed in (
             ("sensor.other", 15, True),
@@ -380,14 +372,7 @@ async def test_source_changes_during_start_and_periodic_ack_keep_sequence_intact
             "custom_components.sax_power.async_sync_vue_dashboard",
             new_callable=AsyncMock,
         ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.now",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
-        patch(
-            "custom_components.sax_power.coordinator.dt_util.utcnow",
-            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-        ),
+        _control_clock(),
         patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]

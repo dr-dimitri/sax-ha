@@ -170,6 +170,185 @@ async def test_service_cache_is_limited_to_one_call_per_minute(
     assert adapter.pv_start(source.now, 1000) == PV_START
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        None,
+        (("last_update_success",), False),
+        (("window", "quality_flags"), ["partial"]),
+        (("origin",), "restored"),
+        (("schema_version",), 2),
+        (("window", "scope"), "roof"),
+        (("window", "status"), "unavailable"),
+        (("window", "reason"), "stale_forecast"),
+        (("window", "step_minutes"), 30),
+        (("window", "timezone"), "UTC"),
+        (("window", "intervals", 0, "mean_ac_power_kw"), 10**1000),
+    ],
+    ids=[
+        "accepted",
+        "failed-update",
+        "partial-quality",
+        "restored-origin",
+        "unsupported-schema",
+        "wrong-scope",
+        "unavailable",
+        "rejection-reason",
+        "wrong-step",
+        "wrong-timezone",
+        "numeric-overflow",
+    ],
+)
+async def test_received_responses_keep_minute_cadence_under_coordinator_polling(
+    pv_source: tuple[_Source, PvBridgeForecast],
+    mutation: tuple[tuple[str | int, ...], Any] | None,
+) -> None:
+    """REQ-BRIDGE-CHARGE: rejected content must not amplify provider traffic."""
+    source, adapter = pv_source
+    source.mutation = mutation
+    call_times = []
+
+    for seconds in range(0, 600, 2):
+        source.now = NOW + timedelta(seconds=seconds)
+        previous_calls = len(source.calls)
+        await adapter.async_refresh(source.now)
+        if len(source.calls) != previous_calls:
+            call_times.append(seconds)
+        assert adapter.pv_start(source.now, 1000) == (
+            PV_START if mutation is None else None
+        )
+
+    assert call_times == list(range(0, 600, 60))
+    assert len(source.calls) == 10
+
+
+@pytest.mark.parametrize("error_type", [HomeAssistantError, TimeoutError])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        (("window", "quality_flags"), ["partial"]),
+        (("window", "intervals", 0, "mean_ac_power_kw"), 10**1000),
+    ],
+    ids=["rejected-quality", "numeric-overflow"],
+)
+async def test_rejected_retry_response_restores_normal_refresh_cadence(
+    pv_source: tuple[_Source, PvBridgeForecast],
+    error_type: type[Exception],
+    mutation: tuple[tuple[str | int, ...], Any],
+) -> None:
+    """REQ-BRIDGE-CHARGE: a received rejection ends the transient retry phase."""
+    source, adapter = pv_source
+    source.error = error_type("Temporary PV service failure")
+    await adapter.async_refresh(NOW)
+    await adapter.async_refresh(NOW + timedelta(seconds=9))
+    assert len(source.calls) == 1
+
+    source.error = None
+    source.mutation = mutation
+    source.now = NOW + timedelta(seconds=10)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 2
+    assert adapter.pv_start(source.now, 1000) is None
+
+    for seconds in range(12, 70, 2):
+        source.now = NOW + timedelta(seconds=seconds)
+        await adapter.async_refresh(source.now)
+    assert len(source.calls) == 2
+
+    source.now = NOW + timedelta(seconds=70)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 3
+    assert adapter.pv_start(source.now, 1000) is None
+
+
+@pytest.mark.parametrize("error_type", [HomeAssistantError, TimeoutError])
+async def test_transient_failure_after_rejection_retries_then_recovers(
+    pv_source: tuple[_Source, PvBridgeForecast], error_type: type[Exception]
+) -> None:
+    """REQ-BRIDGE-CHARGE: retry cadence follows the latest service outcome."""
+    source, adapter = pv_source
+    source.mutation = (("last_update_success",), False)
+    await adapter.async_refresh(NOW)
+    source.error = error_type("Temporary PV service failure")
+    await adapter.async_refresh(NOW + timedelta(seconds=60))
+    await adapter.async_refresh(NOW + timedelta(seconds=69))
+    assert len(source.calls) == 2
+
+    source.error = None
+    source.mutation = None
+    source.now = NOW + timedelta(seconds=70)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 3
+    assert adapter.pv_start(source.now, 1000) == PV_START
+    await adapter.async_refresh(NOW + timedelta(seconds=80))
+    await adapter.async_refresh(NOW + timedelta(seconds=129))
+    assert len(source.calls) == 3
+
+    source.now = NOW + timedelta(seconds=130)
+    await adapter.async_refresh(source.now)
+    assert len(source.calls) == 4
+    assert adapter.pv_start(source.now, 1000) == PV_START
+
+
+async def test_rejection_logs_once_per_reason_even_across_transient_failures(
+    pv_source: tuple[_Source, PvBridgeForecast], caplog: pytest.LogCaptureFixture
+) -> None:
+    """REQ-BRIDGE-CHARGE: persistent rejection stays diagnosable without log spam."""
+    source, adapter = pv_source
+    source.mutation = (("last_update_success",), False)
+    for seconds in (0, 60, 120):
+        source.now = NOW + timedelta(seconds=seconds)
+        await adapter.async_refresh(source.now)
+    assert caplog.messages == [
+        f"PV forecast response rejected for {source.entity_id}: "
+        "last_update_success is not true"
+    ]
+
+    source.mutation = (("window", "quality_flags"), ["partial"])
+    source.now = NOW + timedelta(seconds=180)
+    await adapter.async_refresh(source.now)
+    assert len(caplog.messages) == 2
+    assert caplog.messages[-1].endswith("window quality_flags are not empty")
+
+    source.error = HomeAssistantError("Temporary service failure")
+    await adapter.async_refresh(NOW + timedelta(seconds=240))
+    source.error = None
+    source.now = NOW + timedelta(seconds=250)
+    await adapter.async_refresh(source.now)
+    assert len(caplog.messages) == 2
+
+
+@pytest.mark.parametrize("reset", ["valid-response", "source-change"])
+async def test_rejection_log_resets_after_recovery_or_source_change(
+    pv_source: tuple[_Source, PvBridgeForecast],
+    caplog: pytest.LogCaptureFixture,
+    reset: str,
+) -> None:
+    """REQ-BRIDGE-CHARGE: a new rejection episode must be visible again."""
+    source, adapter = pv_source
+    source.mutation = (("last_update_success",), False)
+    await adapter.async_refresh(NOW)
+    assert len(caplog.messages) == 1
+
+    if reset == "valid-response":
+        source.mutation = None
+        source.now = NOW + timedelta(seconds=60)
+        await adapter.async_refresh(source.now)
+        assert adapter.pv_start(source.now, 1000) == PV_START
+        source.mutation = (("last_update_success",), False)
+        source.now = NOW + timedelta(seconds=120)
+    else:
+        source.selected = None
+        assert adapter.pv_start(NOW, 1000) is None
+        source.selected = source.entity_id
+        source.now = NOW + timedelta(seconds=1)
+
+    await adapter.async_refresh(source.now)
+    assert adapter.pv_start(source.now, 1000) is None
+    assert len(caplog.messages) == 2
+    assert caplog.messages[0] == caplog.messages[1]
+
+
 @pytest.mark.parametrize("as_of_age", [0, 45, 60])
 async def test_accepted_snapshot_survives_refresh_timeout_and_poll_jitter(
     pv_source: tuple[_Source, PvBridgeForecast], as_of_age: int
@@ -242,14 +421,23 @@ async def test_repeated_failed_refreshes_cannot_extend_the_cache_deadline(
     assert adapter.pv_start(NOW + timedelta(seconds=76), 1000) is None
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        (("last_update_success",), False),
+        (("window", "intervals", 0, "mean_ac_power_kw"), 10**1000),
+    ],
+    ids=["failed-update", "numeric-overflow"],
+)
 async def test_invalid_refresh_immediately_revokes_the_previous_snapshot(
     pv_source: tuple[_Source, PvBridgeForecast],
+    mutation: tuple[tuple[str | int, ...], Any],
 ) -> None:
     """REQ-BRIDGE-CHARGE: explicit unsafe forecast data overrides the reserve."""
     source, adapter = pv_source
     await adapter.async_refresh(NOW)
     source.now = NOW + timedelta(seconds=60)
-    source.mutation = (("last_update_success",), False)
+    source.mutation = mutation
     await adapter.async_refresh(source.now)
 
     assert adapter.pv_start(source.now, 1000) is None

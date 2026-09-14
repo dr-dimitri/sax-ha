@@ -12,6 +12,7 @@ from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from custom_components.sax_power.const import READ_BLOCK_EXT_HIGH_MAX_AGE
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS, SaxPowerSensor
 
@@ -93,7 +94,12 @@ async def test_poll_failures_clear_forecast_and_history(
     else:
         coordinator._extended_available = failure != "sunspec"
         data = {}
-        with patch(_CLOCK, return_value=65 if failure == "stale" else 62):
+        with patch(
+            _CLOCK,
+            return_value=(
+                60 + READ_BLOCK_EXT_HIGH_MAX_AGE + 0.01 if failure == "stale" else 62
+            ),
+        ):
             coordinator._update_discharge_forecast(data)
         assert data["discharge_forecast"] is None
         assert data["discharge_forecast_attributes"] == {}

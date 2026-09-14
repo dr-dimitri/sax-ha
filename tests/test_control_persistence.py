@@ -282,12 +282,12 @@ def test_sanitized_fills_fields_missing_from_an_older_store() -> None:
 
 @pytest.mark.parametrize(
     ("max_soc", "timed_charge_max_soc", "expected"),
-    [(80, None, 80), (80, 90, 80), (80, 65, 65), (80, 0, 0), (0, None, 0)],
+    [(80, None, 80), (80, 90, 90), (80, 65, 65), (80, 0, 0), (0, None, 0)],
 )
-def test_sanitized_initializes_and_caps_timed_charge_max_soc(
+def test_sanitized_initializes_and_preserves_timed_charge_max_soc(
     max_soc: int, timed_charge_max_soc: int | None, expected: int
 ) -> None:
-    """REQ-TIMED-SOC-CHARGE: Der globale Max. SOC führt auch beim Store-Upgrade."""
+    """REQ-TIMED-SOC-CHARGE: Ein vorhandenes Ziel überlebt eine globale Begrenzung."""
     config = ControlConfig(
         max_soc=max_soc, timed_charge_max_soc=timed_charge_max_soc
     ).sanitized()
@@ -491,7 +491,7 @@ async def test_missing_store_initializes_timed_max_after_all_entities_restore(
 async def test_timed_charge_max_soc_and_global_clamp_survive_reload(
     hass, hass_storage, new_global_max_soc: int, expected_timed_max_soc: int
 ) -> None:
-    """REQ-TIMED-SOC-CHARGE: Senken klemmt den Zielwert, Erhöhen zieht ihn nicht mit."""
+    """REQ-TIMED-SOC-CHARGE: Nur das wirksame Ziel folgt der globalen Begrenzung."""
     _seed_store(
         hass_storage,
         "entry",
@@ -510,12 +510,15 @@ async def test_timed_charge_max_soc_and_global_clamp_survive_reload(
     await coordinator.async_shutdown()
     saved = hass_storage[f"{STORAGE_KEY_PREFIX}.entry"]["data"]
     assert saved["max_soc"] == new_global_max_soc
-    assert saved["timed_charge_max_soc"] == expected_timed_max_soc
+    assert saved["timed_charge_max_soc"] == 80
 
     reloaded = _make_coordinator(hass, _make_client(), "entry")
     await reloaded.async_load_control_state()
     assert reloaded.max_soc == new_global_max_soc
     assert reloaded.timed_charge_max_soc == expected_timed_max_soc
+    assert reloaded.control_config().timed_charge_max_soc == 80
+    await reloaded.async_set_max_soc(90)
+    assert reloaded.timed_charge_max_soc == 80
     await reloaded.async_shutdown()
 
 

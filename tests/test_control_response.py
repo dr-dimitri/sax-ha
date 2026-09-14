@@ -84,6 +84,29 @@ async def test_configuration_confirms_and_saves_before_device_lock(
     await coordinator._month_control_task
 
 
+async def test_global_soc_changes_preserve_target_before_device_lock(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Schnelle Grenzänderungen erhalten das gespeicherte Ziel."""
+    async with coordinator._charge_control_lock:
+        for maximum, expected_target in ((60, 60), (100, 90)):
+            await asyncio.wait_for(
+                coordinator.async_set_max_soc(maximum, defer_device_update=True),
+                0.2,
+            )
+            assert coordinator.max_soc == maximum
+            assert coordinator.effective_timed_charge_max_soc == expected_target
+            assert coordinator._control_store._pending["max_soc"] == maximum
+            assert coordinator._control_store._pending["timed_charge_max_soc"] == 90
+            coordinator.client.write_register.assert_not_awaited()
+        task = coordinator._month_control_task
+        assert task is not None and not task.done()
+
+    await task
+    assert coordinator.timed_charge_max_soc == 90
+    assert coordinator.control_config().timed_charge_max_soc == 90
+
+
 @pytest.mark.parametrize("setting,args,fields,expected", SETTINGS)
 async def test_shutdown_rejects_configuration_before_mutation(
     coordinator: SaxPowerCoordinator,

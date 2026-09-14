@@ -20,6 +20,7 @@ class BridgeChargeSession:
         self.started = False
         self.completed_at: datetime | None = None
         self._fingerprint: object = None
+        self._configuration: object = None
 
     def reset(self, status: str, reason: str | None = None) -> None:
         self.plan = None
@@ -27,6 +28,30 @@ class BridgeChargeSession:
         self.completed_at = None
         self.status = status
         self.attributes = {"reason": reason} if reason else {}
+
+    def sync_configuration(self, configuration: object) -> None:
+        """Invalidate changed permissions even while planning inputs are missing."""
+        if configuration != self._configuration:
+            self.reset("waiting_for_data")
+            self._configuration = configuration
+
+    def wait_for_data(self, now: datetime, reason: str) -> None:
+        """REQ-BRIDGE-CHARGE: A transient outage preserves only a bounded charge."""
+        if (
+            self.plan is not None
+            and self.plan.end is not None
+            and (self.started or self.completed_at is not None)
+        ):
+            if self.started and now >= self.plan.end:
+                self.started = False
+                self.completed_at = now
+            if self.started:
+                self.pause(reason)
+            else:
+                self.status = "waiting_for_data"
+                self.attributes["reason"] = reason
+        else:
+            self.reset("waiting_for_data", reason)
 
     def prepare(
         self,

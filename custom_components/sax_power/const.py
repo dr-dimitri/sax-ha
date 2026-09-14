@@ -57,6 +57,10 @@ DEFAULT_SCAN_INTERVAL = 10  # Steuert nur noch NORMAL (Basic Mode), siehe unten
 # config_flow-Minimum für scan_interval (5s) liegt dabei immer über
 # READ_BLOCK_EXT_HIGH_INTERVAL, der Timer läuft also faktisch immer mit 2s.
 READ_BLOCK_EXT_HIGH_INTERVAL = 2  # Sekunden
+# REQ-HIGH-INTERVAL-REGISTERS: HA ticks and preceding Modbus reads jitter;
+# neither polling nor sample freshness may sit exactly on that boundary.
+READ_BLOCK_EXT_HIGH_POLL_TOLERANCE = 0.25
+READ_BLOCK_EXT_HIGH_MAX_AGE = 2 * READ_BLOCK_EXT_HIGH_INTERVAL + 1
 
 DEFAULT_TIMED_CHARGE_START = "00:00:00"
 DEFAULT_TIMED_CHARGE_END = "00:05:00"

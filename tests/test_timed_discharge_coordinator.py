@@ -17,7 +17,7 @@ from pymodbus.exceptions import ModbusException
 
 from custom_components.sax_power.application.timed_discharge import TimedDischargeState
 from custom_components.sax_power.const import (
-    READ_BLOCK_EXT_HIGH_INTERVAL,
+    READ_BLOCK_EXT_HIGH_MAX_AGE,
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
     SUN_IC_CONTROL_MODE_SETPOINT,
@@ -282,7 +282,7 @@ async def test_stale_or_interrupted_measurements_require_two_new_confirmations(
     await _evaluate(coordinator)
 
     _sample(coordinator, storage_power_active=-2000, smartmeter_power=2300)
-    coordinator._high_sample_time = monotonic() - 2 * READ_BLOCK_EXT_HIGH_INTERVAL - 1
+    coordinator._high_sample_time = monotonic() - READ_BLOCK_EXT_HIGH_MAX_AGE - 1
     await _evaluate(coordinator)
     assert coordinator._timed_discharge_state is None
 
@@ -538,7 +538,7 @@ async def test_hold_writer_replaces_stale_pv_without_waiting_for_coordinator(
     coordinator, client = charge_system
     await _reach_target_with_pv(coordinator)
     await coordinator._async_cancel_sun_charge_task()
-    coordinator._high_sample_time = monotonic() - 2 * READ_BLOCK_EXT_HIGH_INTERVAL - 1
+    coordinator._high_sample_time = monotonic() - READ_BLOCK_EXT_HIGH_MAX_AGE - 1
     if no_valid_scale:
         coordinator.data.pop("ic_max_power_reference")
         coordinator._high_data.pop("ic_max_power_reference")

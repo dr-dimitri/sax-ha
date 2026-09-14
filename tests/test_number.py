@@ -93,7 +93,7 @@ async def test_timed_charge_max_soc_uses_configured_global_limit(
 async def test_timed_charge_max_soc_tracks_global_limit_changes(
     hass, coordinator
 ) -> None:
-    """REQ-TIMED-SOC-CHARGE: Absenken reduziert Ziel und Slidergrenze sofort."""
+    """REQ-TIMED-SOC-CHARGE: Die globale Grenze begrenzt das Ziel nur temporär."""
     coordinator._max_soc = 90
     coordinator.async_start_sun_charge = AsyncMock()
     entity = SaxPowerTimedChargeMaxSocNumber(coordinator, "test_entry_id")
@@ -108,7 +108,7 @@ async def test_timed_charge_max_soc_tracks_global_limit_changes(
     assert entity.native_max_value == 60
 
     await coordinator.async_set_max_soc(95)
-    assert entity.native_value == 60
+    assert entity.native_value == 80
     assert entity.native_max_value == 95
 
 

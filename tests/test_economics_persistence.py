@@ -40,6 +40,8 @@ from custom_components.sax_power.infrastructure.economics_store import (
     EconomicsStateStore,
 )
 
+from .energy_samples import accumulate_economics_interval
+
 FIXED_TARIFF_OPTIONS = {
     CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
     CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
@@ -1532,7 +1534,7 @@ async def test_load_drops_all_dependent_history_from_an_incomplete_current_store
             return_value=1_000.0,
         ),
     ):
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
     assert data["economics_net_savings_today_last_reset"] == bootstrap_at
     assert data["economics_balance_last_reset"] == bootstrap_at
     assert data["economics_net_savings_last_reset"] == bootstrap_at
@@ -1550,7 +1552,7 @@ async def test_bootstrap_needs_no_numeric_capacity_or_soc(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert coordinator._economics_started_at is not None
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
@@ -1573,7 +1575,7 @@ async def test_bootstrap_values_existing_energy_at_zero(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert coordinator._economics_started_at is not None
     assert coordinator._economics_operating_result_high_water_eur == 0.0
@@ -1602,7 +1604,7 @@ async def test_disabled_tariff_reports_unavailable_and_does_not_bootstrap(
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert coordinator._economics_started_at is None
     assert data["economics_grid_charge_cost"] is None
@@ -1630,14 +1632,15 @@ async def test_a_load_error_blocks_writes_until_a_reload(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": -1000,
                 "smartmeter_power": 1000,
                 "battery_soc": 50,
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
-            }
+            },
         )
     data = {
         "storage_power_active": -1000,
@@ -1649,7 +1652,7 @@ async def test_a_load_error_blocks_writes_until_a_reload(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     # Kein Bootstrap, keine Akkumulation, solange der Store als unlesbar
     # gilt - der Status macht das Problem sichtbar, statt einen

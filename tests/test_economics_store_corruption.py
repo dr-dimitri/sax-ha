@@ -21,6 +21,8 @@ from custom_components.sax_power.infrastructure.economics_store import (
     EconomicsStateStore,
 )
 
+from .energy_samples import accumulate_economics_interval
+
 FIXED_TARIFF_OPTIONS = {
     CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
     CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
@@ -96,7 +98,7 @@ async def test_real_malformed_store_stays_frozen_across_reloads(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
     assert data["economics_status"] == "storage_error"
     await coordinator.async_shutdown()
     assert not path.exists()
@@ -134,14 +136,15 @@ async def test_real_missing_store_still_bootstraps_normally(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": 0,
                 "smartmeter_power": 0,
                 "battery_soc": 50,
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
-            }
+            },
         )
 
     assert coordinator._economics_store_write_blocked is False

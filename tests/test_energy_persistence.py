@@ -23,6 +23,8 @@ from custom_components.sax_power.infrastructure.energy_store import (
 )
 from custom_components.sax_power.sensor import SaxPowerEnergySensor
 
+from .energy_samples import accumulate_energy_sample
+
 
 def _seed_real_store(
     hass_storage, entry_id: str, payload: dict, *, version: int, minor_version: int
@@ -482,7 +484,7 @@ async def test_non_numeric_or_invalid_legacy_state_stays_uninitialized(
 
     await entity.async_added_to_hass()
     data = {"storage_power_active": 0}
-    coordinator._accumulate_energy(data)
+    accumulate_energy_sample(coordinator, data)
 
     assert data["energy_charged"] is None
     await coordinator.async_shutdown()
@@ -498,7 +500,7 @@ async def test_fresh_install_seeds_counter_with_zero(hass) -> None:
 
     await entity.async_added_to_hass()
     data = {"storage_power_active": 0}
-    coordinator._accumulate_energy(data)
+    accumulate_energy_sample(coordinator, data)
 
     assert data["energy_charged"] == 0.0
     await coordinator.async_shutdown()
@@ -522,7 +524,7 @@ async def test_numeric_legacy_state_migrates_without_new_snapshot(hass) -> None:
 
     await entity.async_added_to_hass()
     data = {"storage_power_active": 0}
-    coordinator._accumulate_energy(data)
+    accumulate_energy_sample(coordinator, data)
 
     assert data["energy_charged"] == 42.125
     coordinator._energy_store.async_delay_save.assert_called_once_with(
@@ -555,7 +557,7 @@ async def test_new_store_snapshot_wins_over_regressive_legacy_state(
 
     await entity.async_added_to_hass()
     data = {"storage_power_active": 0}
-    coordinator._accumulate_energy(data)
+    accumulate_energy_sample(coordinator, data)
 
     assert data["energy_charged"] == 100.0
     assert "Rückläufigen RestoreEntity-Altzustand" in caplog.text
@@ -600,7 +602,7 @@ async def test_shutdown_flushes_exact_counter_during_basic_mode_outage(hass) -> 
     )
     await restarted.async_load_energy_state()
     data = {"storage_power_active": 0}
-    restarted._accumulate_energy(data)
+    accumulate_energy_sample(restarted, data)
     assert data["energy_charged"] == 15.75
     assert data["energy_discharged"] == 7.25
     assert data["energy_charged_from_grid"] == 0.0

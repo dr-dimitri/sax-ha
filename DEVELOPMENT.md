@@ -1086,6 +1086,18 @@ werden.
 
 ### Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING)
 
+Die Akkuenergie verwendet weiterhin den aktuellen Leistungswert für das
+vorherige Messintervall (rechte Riemannsumme). Wie bei der Netzenergie
+grenzen nur verschiedene, frische HIGH-Messpunkte ein gültiges Intervall
+ab: Alter und Abstand dürfen höchstens `READ_BLOCK_EXT_HIGH_MAX_AGE`
+(fünf Sekunden) betragen. Fehlende oder veraltete Speicherleistung und
+längere Messpausen verwerfen die Baseline. Der erste gültige Messpunkt
+nach einer Lücke beginnt nur eine neue Messstrecke. Gecachte Refreshes
+buchen keine weitere Energie und verschieben die Baseline nicht. Damit
+entstehen während einer Lücke auch keine Herkunfts-, Geld- oder
+Beobachtungszeitbuchungen. Die Statuspublikation läuft weiterhin.
+`tests/test_battery_energy_gaps.py` prüft diese Grenzen über lokales Modbus TCP.
+
 Läuft in `SaxPowerCoordinator._accumulate_economics`, aufgerufen am Ende von
 `_accumulate_energy` mit demselben `EnergyDelta` (02/06) und demselben
 rohen, ungerundeten Entladezuwachs dieses Intervalls - keine zweite Uhr,
@@ -1335,7 +1347,8 @@ zusammen:
 Kontrollierter Bilanzneustart
 (`SaxPowerCoordinator.async_restart_economics_accounting`, Service
 `sax_power.restart_economics_accounting`, `confirm` muss exakt `true`
-sein): setzt ausschließlich die drei Geldsummen, die vier
+sein; Benutzeraufrufe verlangen einen aktiven Administrator): setzt
+ausschließlich die drei Geldsummen, die vier
 Preisabdeckungszähler, die Tages-Buckets und den Aktivierungs-/
 Payback-Zeitpunkt zurück, setzt den unbewerteten Bestand wie bei der
 erstmaligen Aktivierung auf 0 - rührt niemals `energy_charged`/
@@ -1444,11 +1457,24 @@ aktuelle Implementierung.
 Verbindung mit einem Testlesen. `__init__.py` baut daraus einen
 `AsyncModbusTcpClient` und einen `SaxPowerCoordinator` (`coordinator.py`),
 lädt anschließend die Plattformen `sensor`, `number`, `switch` und `time`
-und registriert die beiden Services. Jede Entität (`entity.py` als
+und registriert die SAX-Services. Jede Entität (`entity.py` als
 Basisklasse) liest ihren Zustand ausschließlich aus `coordinator.data` und
 schreibt Änderungen über `coordinator.async_write_register(...)` bzw.
 `coordinator.async_write_extended_register(...)` (SunSpec-Modus, Slave-ID
 `self.slave_id_extended`).
+
+Die eigenen Services prüfen Benutzerrechte vor dem Coordinator-Aufruf,
+auch bei direktem Zugriff über WebSocket. Manuelles Laden verlangt
+Kontrolle von `storage_switch`, Preisneuberechnung und Preisautomatik von
+`price_charge_enabled`. Einschalten mit `force=true` verlangt zusätzlich
+Kontrolle von `timed_charge_enabled`, weil diese Automatik dabei deaktiviert
+werden kann. Die Registry-Zuordnung muss zum adressierten SAX-Gerät passen;
+deaktivierte oder fehlende Entities erteilen keine Rechte. Zeitfenster
+verlangen weiterhin beide Time-Entities, der Bilanzneustart Administratorrechte.
+Unbekannte und inaktive Benutzer werden abgelehnt. Aktive Administratoren
+und interne Aufrufe ohne Benutzerkontext bleiben erlaubt.
+`tests/test_service_permissions.py` prüft erlaubte und abgelehnte Aufrufe
+über die echte HA-WebSocket-Grenze.
 
 **Max-SOC-Sperre, zeitgesteuertes Laden, netzdienliches Laden &
 preisoptimiertes Laden:** Kein natives Max-SOC-Register. Alle vier teilen

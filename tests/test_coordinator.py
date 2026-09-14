@@ -96,6 +96,8 @@ from custom_components.sax_power.domain.tariff import (
 )
 from custom_components.sax_power.price_optimizer import PricePlan, PriceSlot
 
+from .energy_samples import accumulate_economics_interval, accumulate_energy_samples
+
 
 @pytest.mark.parametrize(
     (
@@ -4895,6 +4897,15 @@ async def test_invalid_sunssf_preserves_counters_across_refreshes(
             await coordinator.async_refresh()
         assert coordinator.last_update_success is True
         assert coordinator.data["storage_power_active"] == power
+        assert coordinator._energy_state() == initial_energy
+        with (
+            _patched_now(12, month=5),
+            patch(
+                "custom_components.sax_power.coordinator.monotonic",
+                return_value=1000.0 + 5 * READ_BLOCK_EXT_HIGH_INTERVAL,
+            ),
+        ):
+            await coordinator.async_refresh()
         energy = coordinator._energy_state()
         expected_delta = abs(power) * READ_BLOCK_EXT_HIGH_INTERVAL / 3600 / 1000
         assert energy.charged_kwh == pytest.approx(expected_delta if power < 0 else 0)
@@ -5011,7 +5022,7 @@ def test_accumulate_energy_stays_none_before_restore(hass) -> None:
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
         data = {"storage_power_active": -1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
     assert data["energy_charged"] is None
     assert data["energy_discharged"] is None
 
@@ -5019,7 +5030,7 @@ def test_accumulate_energy_stays_none_before_restore(hass) -> None:
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
         data = {"storage_power_active": -1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
     assert data["energy_charged"] is None
     assert data["energy_discharged"] is None
 
@@ -5036,7 +5047,7 @@ def test_accumulate_energy_first_tick_establishes_baseline_only(hass) -> None:
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
         data = {"storage_power_active": -1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 0.0
     assert data["energy_discharged"] == 0.0
@@ -5052,13 +5063,13 @@ def test_accumulate_energy_charging_splits_into_charged_kwh(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": -1000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": -1000})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
         data = {"storage_power_active": -1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 1.0
     assert data["energy_discharged"] == 0.0
@@ -5074,13 +5085,13 @@ def test_accumulate_energy_discharging_splits_into_discharged_kwh(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": 2000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": 2000})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=2800.0
     ):
         data = {"storage_power_active": 2000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 0.0
     assert data["energy_discharged"] == 1.0
@@ -5090,8 +5101,8 @@ def test_accumulate_energy_skips_interval_when_power_unknown(hass) -> None:
     """Wird der SunSpec-Modus-Block zwischenzeitlich nicht erreichbar
     (storage_power_active None, siehe REQ-EXTENDED-MODE-RESILIENCE), darf
     weder die Lücke selbst noch die Zeit davor nach Wiederkehr fälschlich
-    als Energie verbucht werden - _energy_last_ts wird trotzdem
-    fortgeschrieben, damit kein "Nachhol"-Sprung entsteht."""
+    als Energie verbucht werden - erst zwei neue gültige Messungen
+    bilden wieder ein beobachtetes Intervall."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.restore_energy_charged(0.0)
     coordinator.restore_energy_discharged(0.0)
@@ -5099,24 +5110,27 @@ def test_accumulate_energy_skips_interval_when_power_unknown(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": -1000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": -1000})
 
     # SunSpec-Modus fällt für eine lange Zeitspanne aus.
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=100000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": None})
+        accumulate_energy_samples(coordinator, {"storage_power_active": None})
 
     # Wieder erreichbar, kurz danach.
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=100010.0
     ):
         data = {"storage_power_active": -1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
-    # Nur die 10s seit der Wiederkehr fließen ein (1000W * 10/3600/1000 kWh),
-    # nicht die ~99000s Ausfallzeit davor.
-    assert data["energy_charged"] == round(1000 * (10 / 3600) / 1000, 3)
+    assert data["energy_charged"] == 0.0
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100012.0
+    ):
+        accumulate_energy_samples(coordinator, data)
+    assert data["energy_charged"] == round(1000 * (2 / 3600) / 1000, 3)
 
 
 def test_restore_energy_charged_and_discharged_continue_from_saved_value(
@@ -5132,13 +5146,13 @@ def test_restore_energy_charged_and_discharged_continue_from_saved_value(
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": -1000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": -1000})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
         data = {"storage_power_active": -1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 13.5
     assert data["energy_discharged"] == 7.0
@@ -5158,7 +5172,7 @@ def test_restore_energy_rejects_negative_values(hass, caplog) -> None:
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
         data = {"storage_power_active": 0}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] is None
     assert data["energy_discharged"] is None
@@ -5195,13 +5209,13 @@ def test_accumulate_energy_origin_rounds_to_three_decimals(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": -1000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": -1000})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
     ):
         data = {"storage_power_active": -1000, "smartmeter_power": 400}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     # 1000 W Ladeleistung über 3s, davon 400 W Netzbezug, Rest PV.
     assert data["energy_charged"] == round(1000 * (3 / 3600) / 1000, 3)
@@ -5219,13 +5233,13 @@ def test_accumulate_energy_discharge_leaves_origin_counters_untouched(hass) -> N
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": 1500})
+        accumulate_energy_samples(coordinator, {"storage_power_active": 1500})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
         data = {"storage_power_active": 1500, "smartmeter_power": -500}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_discharged"] == 1.5
     assert data["energy_charged_from_grid"] == 0.0
@@ -5244,26 +5258,29 @@ def test_accumulate_energy_skips_origin_when_storage_power_unknown(hass) -> None
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy(
-            {"storage_power_active": -1000, "smartmeter_power": 1000}
+        accumulate_energy_samples(
+            coordinator, {"storage_power_active": -1000, "smartmeter_power": 1000}
         )
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=100000.0
     ):
-        coordinator._accumulate_energy(
-            {"storage_power_active": None, "smartmeter_power": None}
+        accumulate_energy_samples(
+            coordinator, {"storage_power_active": None, "smartmeter_power": None}
         )
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=100010.0
     ):
         data = {"storage_power_active": -1000, "smartmeter_power": 1000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
-    # Nur die 10s seit der Wiederkehr fließen ein, nicht die ~99000s
-    # Ausfallzeit davor.
-    assert data["energy_charged_from_grid"] == round(1000 * (10 / 3600) / 1000, 3)
+    assert data["energy_charged_from_grid"] == 0.0
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=100012.0
+    ):
+        accumulate_energy_samples(coordinator, data)
+    assert data["energy_charged_from_grid"] == round(1000 * (2 / 3600) / 1000, 3)
     assert data["energy_charged_from_pv"] == 0.0
 
 
@@ -5278,13 +5295,13 @@ def test_accumulate_energy_origin_stays_none_before_bootstrap(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": -1000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": -1000})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
         data = {"storage_power_active": -1000, "smartmeter_power": 500}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 1.0
     assert data["energy_charged_from_grid"] is None
@@ -5303,13 +5320,13 @@ def test_missing_smartmeter_value_counts_as_grid_charge(hass) -> None:
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
     ):
-        coordinator._accumulate_energy({"storage_power_active": -1000})
+        accumulate_energy_samples(coordinator, {"storage_power_active": -1000})
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
     ):
         data = {"storage_power_active": -1000, "smartmeter_power": None}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 1.0
     assert data["energy_charged_from_grid"] == 1.0
@@ -5320,7 +5337,7 @@ def test_missing_smartmeter_value_counts_as_grid_charge(hass) -> None:
     ):
         # Weitere 1 kWh, diesmal mit Messwert und komplett als PV.
         data = {"storage_power_active": -1000, "smartmeter_power": -2000}
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == 2.0
     assert data["energy_charged_from_grid"] == 1.0
@@ -5334,10 +5351,9 @@ def test_missing_smartmeter_value_counts_as_grid_charge(hass) -> None:
 # -- Wirtschaftlichkeitsbilanz (REQ-ECONOMICS-ACCOUNTING) --------------------
 # Die reine Geldbilanz (compute_economics_delta) ist erschöpfend in
 # tests/test_economics_accounting.py getestet, Store/Bootstrap/Shutdown in
-# tests/test_economics_persistence.py. Hier nur die Verdrahtung über
-# _accumulate_energy -> _accumulate_economics: Rundung, Ableitung von
-# operating_result, SOC-Minimum-Korrektur im echten Datenfluss, prospektiver
-# Tarifwechsel sowie der deaktivierte Tarif.
+# tests/test_economics_persistence.py. Hier beobachtete Intervalle an
+# _accumulate_economics: Rundung, Ableitung von operating_result,
+# SOC-Minimum-Korrektur, prospektiver Tarifwechsel und deaktivierter Tarif.
 
 _FIXED_TARIFF_OPTIONS = {
     CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value,
@@ -5377,14 +5393,15 @@ def _bootstrap_economics(coordinator, *, soc: int, capacity_wh: int = 10000) -> 
     """Erster Tick: setzt nur die Zeitbasis und bootstrapped die Bilanz -
     noch kein Delta, exakt wie beim echten ersten Refresh nach Aktivierung."""
     with _economics_clock(coordinator, 1000.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": 0,
                 "smartmeter_power": 0,
                 "battery_soc": soc,
                 "battery_capacity": capacity_wh,
                 "battery_soc_min": 5,
-            }
+            },
         )
 
 
@@ -5401,7 +5418,7 @@ def test_economics_grid_charge_cost_matches_the_grid_share(hass) -> None:
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
     assert data["economics_pv_opportunity_cost"] == 0.0
@@ -5428,7 +5445,7 @@ def test_economics_grid_charge_normalizes_eur_per_mwh(hass) -> None:
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_grid_charge_cost"] == pytest.approx(0.08)
     assert coordinator.economics_diagnostics["unpriced_charge_kwh"] == 0.0
@@ -5447,7 +5464,7 @@ def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_pv_opportunity_cost"] == pytest.approx(0.08)
     assert data["economics_grid_charge_cost"] == 0.0
@@ -5471,7 +5488,7 @@ def test_missing_smartmeter_keeps_origin_counter_but_not_money_value(hass) -> No
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged_from_grid"] == pytest.approx(1.0)
     assert data["energy_charged_from_pv"] == 0.0
@@ -5582,7 +5599,7 @@ def test_economics_amounts_round_to_four_decimals(hass) -> None:
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_grid_charge_cost"] == round(1 / 3, 4)
 
@@ -5595,14 +5612,15 @@ def test_tariff_switch_is_prospective_not_retroactive(hass) -> None:
     _bootstrap_economics(coordinator, soc=50)
 
     with _economics_clock(coordinator, 4600.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": -1000,
                 "smartmeter_power": 1000,
                 "battery_soc": 50,
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
-            }
+            },
         )
     cost_after_first_hour = coordinator._economics_grid_charge_cost_eur
     assert cost_after_first_hour == pytest.approx(0.30)
@@ -5622,7 +5640,7 @@ def test_tariff_switch_is_prospective_not_retroactive(hass) -> None:
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     # 0.30 (alter Tarif, erste Stunde) + 0.50 (neuer Tarif, zweite Stunde).
     assert data["economics_grid_charge_cost"] == pytest.approx(0.80)
@@ -5637,12 +5655,13 @@ def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
     coordinator.options = {}  # kein Tarif konfiguriert
 
     with _economics_clock(coordinator, 1000.0):
-        coordinator._accumulate_energy(
+        accumulate_energy_samples(
+            coordinator,
             {
                 "storage_power_active": -1000,
                 "battery_soc": 50,
                 "battery_capacity": 10000,
-            }
+            },
         )
     with _economics_clock(coordinator, 4600.0):
         data = {
@@ -5650,7 +5669,7 @@ def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
             "battery_soc": 50,
             "battery_capacity": 10000,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_energy_samples(coordinator, data)
 
     assert data["energy_charged"] == pytest.approx(1.0)
     assert data["economics_grid_charge_cost"] is None
@@ -5705,7 +5724,7 @@ def test_economics_current_price_sensors_track_the_tariff_independently_of_boots
             "battery_soc": None,
             "battery_capacity": None,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert coordinator._economics_started_at is not None
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
@@ -5755,7 +5774,7 @@ def _economics_tick(
             "battery_capacity": capacity_wh,
             "battery_soc_min": soc_min,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
     return data
 
 
@@ -5934,26 +5953,28 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     coordinator._economics_unvalued_inventory_kwh = 9.0
 
     with _economics_clock(coordinator, 4600.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": 0,
                 "smartmeter_power": 0,
                 "battery_soc": None,
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
-            }
+            },
         )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
     with _economics_clock(coordinator, 8200.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": 0,
                 "smartmeter_power": 0,
                 "battery_soc": 50,
                 "battery_capacity": None,
                 "battery_soc_min": 5,
-            }
+            },
         )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
@@ -5961,14 +5982,15 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     # ein gestörter Block - sonst würde der gesamte Bestand verworfen und
     # die nächste Entladung erzeugte den Scheingewinn aus Issue #42.
     with _economics_clock(coordinator, 11800.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": 0,
                 "smartmeter_power": 0,
                 "battery_soc": 50,
                 "battery_capacity": 0,
                 "battery_soc_min": 5,
-            }
+            },
         )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
@@ -5977,14 +5999,15 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     coordinator._economics_inventory_idle_confirmations = 0
     for at in (12_000.0, 12_010.0):
         with _economics_clock(coordinator, at):
-            coordinator._accumulate_energy(
+            accumulate_economics_interval(
+                coordinator,
                 {
                     "storage_power_active": None,
                     "smartmeter_power": 0,
                     "battery_soc": 50,
                     "battery_capacity": 10000,
                     "battery_soc_min": 5,
-                }
+                },
             )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
@@ -6007,14 +6030,15 @@ def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
     # Tarif pausieren, dann 1 kWh aus dem Netz laden.
     coordinator.options = {}
     with _economics_clock(coordinator, 4600.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": -1000,
                 "smartmeter_power": 1000,
                 "battery_soc": 20,  # deutlich über battery_soc_min
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
-            }
+            },
         )
 
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(1.0)
@@ -6031,7 +6055,7 @@ def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_avoided_grid_cost"] == 0.0
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(0.0)
@@ -6048,14 +6072,15 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
     _bootstrap_economics(coordinator, soc=50)
 
     with _economics_clock(coordinator, 4600.0):
-        coordinator._accumulate_energy(
+        accumulate_economics_interval(
+            coordinator,
             {
                 "storage_power_active": -1000,
                 "smartmeter_power": 1000,
                 "battery_soc": 50,
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
-            }
+            },
         )
     assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
 
@@ -6066,7 +6091,7 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
             "battery_soc": 50,
             "battery_capacity": 10000,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_grid_charge_cost"] is None
     assert data["economics_pv_opportunity_cost"] is None
@@ -6083,7 +6108,7 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
             "battery_soc": 50,
             "battery_capacity": 10000,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert data["economics_grid_charge_cost"] == pytest.approx(0.30)
 
@@ -6110,10 +6135,11 @@ def _tick_on(
     capacity_wh: int = 10000,
     soc_min: int = 5,
 ) -> dict:
-    """Ein Poll-Tick zu einem festen (monotonic-, wall-clock-)Zeitpunkt -
-    dt_util.now() bestimmt dabei das für die Tagesbuchhaltung maßgebliche
-    lokale Datum, unabhängig von der (nur für die Energiemengen
-    relevanten) monotonic-Uhr."""
+    """Bereits beobachtetes Intervall mit fester Zeitbasis für die Geldbilanz.
+
+    Diese Tages-/ROI-Tests aggregieren Messungen zwischen den Endpunkten;
+    einzelne HIGH-Abstände prüft test_battery_energy_gaps über echtes TCP.
+    """
     with (
         patch(
             "custom_components.sax_power.coordinator.monotonic",
@@ -6131,7 +6157,7 @@ def _tick_on(
             "battery_capacity": capacity_wh,
             "battery_soc_min": soc_min,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
     return data
 
 
@@ -6141,9 +6167,8 @@ def _tick_with_delta(
     """Wie _tick_on, aber mit einem exakt vorgegebenen EconomicsDelta - für
     deterministische Tagesergebnisse, unabhängig von der eigentlichen
     Energiemengen-/Preisrechnung (bereits in
-    tests/test_economics_accounting.py abgedeckt). storage_power_active
-    ungleich 0 sorgt lediglich dafür, dass _accumulate_energy überhaupt ein
-    charge_delta != None berechnet, das dann durch `delta` ersetzt wird."""
+    tests/test_economics_accounting.py abgedeckt). Das gemessene Energieintervall
+    wird an der Geldbilanzgrenze durch das vorgegebene `delta` bewertet."""
     with patch(
         "custom_components.sax_power.coordinator.compute_economics_interval",
         return_value=delta,
@@ -6986,7 +7011,7 @@ def test_economics_status_needs_no_initial_battery_state(hass) -> None:
             "battery_soc": None,
             "battery_capacity": None,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
 
     assert coordinator._economics_started_at is not None
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
@@ -7079,9 +7104,8 @@ def test_energy_origin_attributes_publish_the_accounting_start(hass) -> None:
     ):
         coordinator._bootstrap_energy_origin(None)
 
-    data = _tick_on(
-        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
-    )
+    data = {"storage_power_active": 0}
+    accumulate_energy_samples(coordinator, data)
 
     assert data["energy_origin_attributes"] == {
         "origin_accounting_started_at": started_at.isoformat()
@@ -7096,9 +7120,8 @@ def test_energy_origin_attributes_stay_empty_before_the_bootstrap(hass) -> None:
     Startzeitpunkt melden - das Attribut ist dann ausdrücklich None."""
     coordinator = _make_coordinator(hass, _make_client())
 
-    data = _tick_on(
-        coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
-    )
+    data = {"storage_power_active": 0}
+    accumulate_energy_samples(coordinator, data)
 
     assert data["energy_origin_attributes"] == {"origin_accounting_started_at": None}
 

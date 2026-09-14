@@ -465,10 +465,12 @@ def _coordinator_for_device(hass: HomeAssistant, device_id: str) -> SaxPowerCoor
     return hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
 
 
-async def _async_check_time_window_permissions(
-    hass: HomeAssistant, call: ServiceCall, kind: str
+async def _async_check_service_permissions(
+    hass: HomeAssistant,
+    call: ServiceCall,
+    required_entities: tuple[tuple[str, str], ...] = (),
 ) -> None:
-    """Atomare Fenster müssen dieselben Rechte wie beide Time-Entities verlangen."""
+    """Prüfe alle betroffenen Entities; ohne Entityfreigabe sind nur Admins erlaubt."""
     if not call.context.user_id:
         return
     user = await hass.auth.async_get_user(call.context.user_id)
@@ -476,26 +478,29 @@ async def _async_check_time_window_permissions(
         raise UnknownUser(context=call.context, user_id=call.context.user_id)
     if user.is_active and user.is_admin:
         return
-    device_id = call.data[ATTR_DEVICE_ID]
-    entry_id = _entry_id_for_device(hass, device_id)
-    registry = er.async_get(hass)
-    required_ids = {f"{entry_id}_{kind}_{part}" for part in ("start", "end")}
-    allowed_ids = {
-        entity.unique_id
-        for entity in er.async_entries_for_config_entry(registry, entry_id)
-        if entity.platform == DOMAIN
-        and entity.domain == "time"
-        and entity.device_id == device_id
-        and not entity.disabled
-        and user.permissions.check_entity(entity.entity_id, POLICY_CONTROL)
-    }
-    if not user.is_active or not required_ids <= allowed_ids:
-        raise Unauthorized(
-            context=call.context,
-            user_id=call.context.user_id,
-            permission=POLICY_CONTROL,
-            perm_category=CAT_ENTITIES,
-        )
+    if user.is_active and required_entities:
+        device_id = call.data[ATTR_DEVICE_ID]
+        entry_id = _entry_id_for_device(hass, device_id)
+        required_ids = {
+            (domain, f"{entry_id}_{key}") for domain, key in required_entities
+        }
+        registry = er.async_get(hass)
+        allowed_ids = {
+            (entity.domain, entity.unique_id)
+            for entity in er.async_entries_for_config_entry(registry, entry_id)
+            if entity.platform == DOMAIN
+            and entity.device_id == device_id
+            and not entity.disabled
+            and user.permissions.check_entity(entity.entity_id, POLICY_CONTROL)
+        }
+        if required_ids <= allowed_ids:
+            return
+    raise Unauthorized(
+        context=call.context,
+        user_id=call.context.user_id,
+        permission=POLICY_CONTROL,
+        perm_category=CAT_ENTITIES,
+    )
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
@@ -503,32 +508,54 @@ def _async_register_services(hass: HomeAssistant) -> None:
         return
 
     async def _async_start_grid_charge(call: ServiceCall) -> None:
+        await _async_check_service_permissions(
+            hass, call, (("switch", "storage_switch"),)
+        )
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_start_grid_charge(call.data[ATTR_POWER])
 
     async def _async_stop_grid_charge(call: ServiceCall) -> None:
+        await _async_check_service_permissions(
+            hass, call, (("switch", "storage_switch"),)
+        )
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_stop_grid_charge()
 
     async def _async_set_timed_charge_window(call: ServiceCall) -> None:
-        await _async_check_time_window_permissions(hass, call, "timed_charge")
+        await _async_check_service_permissions(
+            hass,
+            call,
+            (("time", "timed_charge_start"), ("time", "timed_charge_end")),
+        )
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_set_timed_charge_window(
             call.data[ATTR_START], call.data[ATTR_END], defer_device_update=True
         )
 
     async def _async_set_grid_serving_window(call: ServiceCall) -> None:
-        await _async_check_time_window_permissions(hass, call, "grid_serving")
+        await _async_check_service_permissions(
+            hass,
+            call,
+            (("time", "grid_serving_start"), ("time", "grid_serving_end")),
+        )
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_set_grid_serving_window(
             call.data[ATTR_START], call.data[ATTR_END], defer_device_update=True
         )
 
     async def _async_refresh_price_plan(call: ServiceCall) -> None:
+        await _async_check_service_permissions(
+            hass, call, (("switch", "price_charge_enabled"),)
+        )
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_refresh_price_plan()
 
     async def _async_set_price_charge_enabled(call: ServiceCall) -> None:
+        required_entities = (("switch", "price_charge_enabled"),)
+        if call.data[ATTR_ENABLED] and call.data[ATTR_FORCE]:
+            # REQ-DYNAMIC-PRICE-CHARGE: force kann auch die Netzladung deaktivieren.
+            required_entities += (("switch", "timed_charge_enabled"),)
+        await _async_check_service_permissions(hass, call, required_entities)
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         applied = await coordinator.async_set_price_charge_enabled(
             call.data[ATTR_ENABLED],
@@ -544,6 +571,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
             )
 
     async def _async_restart_economics_accounting(call: ServiceCall) -> None:
+        # REQ-ECONOMICS-OBSERVABILITY: Entitykontrolle erlaubt keinen Bilanzverlust.
+        await _async_check_service_permissions(hass, call)
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
         await coordinator.async_restart_economics_accounting(
             reason=call.data.get(ATTR_REASON)

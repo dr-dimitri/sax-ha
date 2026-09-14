@@ -612,6 +612,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._energy_charged_kwh: float | None = None
         self._energy_discharged_kwh: float | None = None
         self._energy_last_ts: float | None = None
+        self._energy_last_revision: int | None = None
         # Herkunft der Ladeenergie (REQ-ENERGY-ORIGIN): dieselbe
         # None-bis-Initialisierung wie oben, zusätzlich als Dreiergruppe
         # (zwei Zähler + Startzeitpunkt) - siehe
@@ -1030,6 +1031,36 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if delta.imported_kwh or delta.exported_kwh:
             self._async_schedule_energy_save()
 
+    def _battery_energy_interval(self, power: float | None) -> float | None:
+        """REQ-ENERGY-DASHBOARD: Only fresh HIGH samples bound measured time.
+
+        Zero starts or invalidates a baseline; None denotes a cached refresh
+        whose pending tariff history must remain available for the next sample.
+        """
+        sample_time = self._high_sample_time
+        revision = self._high_sample_revision
+        if (
+            not self._extended_available
+            or sample_time is None
+            or not 0 <= monotonic() - sample_time <= READ_BLOCK_EXT_HIGH_MAX_AGE
+            or isinstance(power, bool)
+            or not isinstance(power, int | float)
+            or not math.isfinite(power)
+        ):
+            self._energy_last_ts = None
+            self._energy_last_revision = revision
+            return 0.0
+        if revision == self._energy_last_revision:
+            return None
+        previous = self._energy_last_ts
+        self._energy_last_ts = sample_time
+        self._energy_last_revision = revision
+        if previous is None or not (
+            0 < sample_time - previous <= READ_BLOCK_EXT_HIGH_MAX_AGE
+        ):
+            return 0.0
+        return sample_time - previous
+
     def _accumulate_energy(self, data: dict[str, Any]) -> None:
         """Akkumuliert geladene/entladene Energie (kWh) aus der aktuell
         bekannten storage_power_active (positiv = Entladung, negativ =
@@ -1038,13 +1069,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Speicher selbst besitzt keine Energiezähler-Register (siehe
         anforderung.yaml, REQ-ENERGY-DASHBOARD).
 
-        self._energy_last_ts wird unabhängig vom Akkumulieren selbst bei
-        jedem Tick als Baseline für den nächsten Aufruf aktualisiert. Beim
-        ersten Tick (last_ts is None) sowie während der SunSpec-Modus nicht
-        erreichbar ist (power is None, siehe REQ-EXTENDED-MODE-RESILIENCE)
-        wird dagegen NICHT akkumuliert, um weder eine unbekannte
-        Vor-Leistung noch eine Zeitspanne ohne Leistungswert fälschlich als
-        Energie zu verbuchen.
+        Nur frische HIGH-Messungen bilden Intervalle; Cache-Refreshes
+        verschieben die Baseline nicht. Nach Ausfällen oder Messpausen setzt
+        die erste gültige Messung nur die neue Baseline, damit weder Energie
+        noch Geld oder beobachtete Zeit nachgeholt werden.
 
         self._energy_charged_kwh/_energy_discharged_kwh bleiben zusätzlich
         so lange None (statt bei 0.0 zu starten), bis der unabhängige Store
@@ -1060,10 +1088,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (REQ-ECONOMICS-ACCOUNTING) erhält denselben charge_delta sowie den
         rohen, noch ungerundeten Entladezuwachs dieses Intervalls - auch
         das keine zweite Uhr, sondern dieselbe Berechnung wie oben."""
-        now = monotonic()
         power = data.get("storage_power_active")
-        last_ts = self._energy_last_ts
-        self._energy_last_ts = now
+        interval = self._battery_energy_interval(power)
         changed = False
         charge_delta: EnergyDelta | None = None
         discharge_kwh = 0.0
@@ -1072,11 +1098,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Zeitabdeckung): Ein Neustart (last_ts is None) und eine Phase
         # ohne Leistungswert (SunSpec nicht erreichbar) sind exakt die
         # Lücken, die der Tag später als Unvollständigkeit ausweisen soll.
-        observed_seconds = 0.0
+        observed_seconds = interval or 0.0
 
-        if last_ts is not None and power is not None:
-            observed_seconds = now - last_ts
-            elapsed_hours = (now - last_ts) / 3600
+        if observed_seconds > 0 and power is not None:
+            elapsed_hours = observed_seconds / 3600
             charge_delta = compute_charge_delta(
                 power, data.get("smartmeter_power"), elapsed_hours
             )
@@ -1117,7 +1142,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else None
         )
         data["energy_origin_attributes"] = self._energy_origin_attributes()
-        self._accumulate_economics(data, charge_delta, discharge_kwh, observed_seconds)
+        self._accumulate_economics(
+            data,
+            charge_delta,
+            discharge_kwh,
+            observed_seconds,
+            advance_price_history=interval is not None,
+        )
 
     def _energy_origin_attributes(self) -> dict[str, Any]:
         """Startzeitpunkt der Herkunftszählung als Sensorattribut
@@ -1166,6 +1197,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge_delta: EnergyDelta | None,
         discharged_kwh: float,
         observed_seconds: float,
+        *,
+        advance_price_history: bool = True,
     ) -> None:
         """Bewertet die Ladeenergie-Herkunft dieses Intervalls in Geld.
 
@@ -1209,8 +1242,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Aufrufen ein Fenster ausweisen, das zum gemeldeten Preis gar
         # nicht gehört (REQ-VUE-SAVINGS).
         moment = dt_util.now()
-        price_segments = self.tariff_provider.accounting_segments(
-            moment, observed_seconds
+        price_segments = (
+            self.tariff_provider.accounting_segments(moment, observed_seconds)
+            if advance_price_history
+            else ()
         )
         quote_result = self.tariff_provider.quote(moment)
         current_price = quote_result.price_eur_kwh

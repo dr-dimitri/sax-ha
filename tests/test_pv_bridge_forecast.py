@@ -290,6 +290,14 @@ async def test_transient_failure_after_rejection_retries_then_recovers(
     assert adapter.pv_start(source.now, 1000) == PV_START
 
 
+def _forecast_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        message
+        for logger, _level, message in caplog.record_tuples
+        if logger == PvBridgeForecast.__module__
+    ]
+
+
 async def test_rejection_logs_once_per_reason_even_across_transient_failures(
     pv_source: tuple[_Source, PvBridgeForecast], caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -299,7 +307,7 @@ async def test_rejection_logs_once_per_reason_even_across_transient_failures(
     for seconds in (0, 60, 120):
         source.now = NOW + timedelta(seconds=seconds)
         await adapter.async_refresh(source.now)
-    assert caplog.messages == [
+    assert _forecast_messages(caplog) == [
         f"PV forecast response rejected for {source.entity_id}: "
         "last_update_success is not true"
     ]
@@ -307,15 +315,15 @@ async def test_rejection_logs_once_per_reason_even_across_transient_failures(
     source.mutation = (("window", "quality_flags"), ["partial"])
     source.now = NOW + timedelta(seconds=180)
     await adapter.async_refresh(source.now)
-    assert len(caplog.messages) == 2
-    assert caplog.messages[-1].endswith("window quality_flags are not empty")
+    assert len(_forecast_messages(caplog)) == 2
+    assert _forecast_messages(caplog)[-1].endswith("window quality_flags are not empty")
 
     source.error = HomeAssistantError("Temporary service failure")
     await adapter.async_refresh(NOW + timedelta(seconds=240))
     source.error = None
     source.now = NOW + timedelta(seconds=250)
     await adapter.async_refresh(source.now)
-    assert len(caplog.messages) == 2
+    assert len(_forecast_messages(caplog)) == 2
 
 
 @pytest.mark.parametrize("reset", ["valid-response", "source-change"])
@@ -328,7 +336,7 @@ async def test_rejection_log_resets_after_recovery_or_source_change(
     source, adapter = pv_source
     source.mutation = (("last_update_success",), False)
     await adapter.async_refresh(NOW)
-    assert len(caplog.messages) == 1
+    assert len(_forecast_messages(caplog)) == 1
 
     if reset == "valid-response":
         source.mutation = None
@@ -345,8 +353,9 @@ async def test_rejection_log_resets_after_recovery_or_source_change(
 
     await adapter.async_refresh(source.now)
     assert adapter.pv_start(source.now, 1000) is None
-    assert len(caplog.messages) == 2
-    assert caplog.messages[0] == caplog.messages[1]
+    messages = _forecast_messages(caplog)
+    assert len(messages) == 2
+    assert messages[0] == messages[1]
 
 
 @pytest.mark.parametrize("as_of_age", [0, 45, 60])

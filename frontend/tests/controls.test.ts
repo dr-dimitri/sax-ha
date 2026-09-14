@@ -251,13 +251,18 @@ describe("shared dashboard controls", () => {
     async (value) => {
       const { root, callService } = await mount("number");
       enter(root, value);
-      submit(root);
+      await flush();
+      expect(root.querySelector<HTMLButtonElement>("button")?.disabled).toBe(
+        false,
+      );
+      root.querySelector<HTMLButtonElement>("button")!.click();
       await flush();
       expect(callService).not.toHaveBeenCalled();
       expect(root.querySelector('[role="alert"]')?.textContent).toContain(
         "gültigen Wert",
       );
       expect(root.textContent).toContain("Bestätigter Wert: 50 %");
+      expect(input(root).getAttribute("aria-invalid")).toBe("true");
     },
   );
 

@@ -165,9 +165,15 @@ async def test_tariff_switch_off_during_write_keeps_ack_sequence_and_stops_charg
         return success
 
     coordinator.client.write_register.side_effect = write
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]
         task = coordinator._month_control_task

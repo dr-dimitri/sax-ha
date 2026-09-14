@@ -151,6 +151,10 @@ async def test_tariff_change_during_device_ack_drains_and_releases_old_charge(
             "custom_components.sax_power.coordinator.dt_util.now",
             return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
         ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
         patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]
@@ -212,6 +216,10 @@ async def test_pending_source_change_stops_periodic_repetition_before_control_lo
             "custom_components.sax_power.coordinator.dt_util.now",
             return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
         ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
         patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]
@@ -257,9 +265,15 @@ async def test_failed_tariff_reset_keeps_accepted_config_and_retries_on_poll(
         return success
 
     coordinator.client.write_register.side_effect = write
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
     ):
         assert (await _toggle(client, entry, tariff, True))["success"]
         try:

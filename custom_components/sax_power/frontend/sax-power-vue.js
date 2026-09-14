@@ -3282,7 +3282,8 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 	"max",
 	"step",
 	"disabled",
-	"aria-describedby"
+	"aria-describedby",
+	"aria-invalid"
 ], yo = ["disabled"], bo = {
 	key: 0,
 	class: "entity-control__error",
@@ -3341,7 +3342,7 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 		}
 		function S(e) {
 			let n = e.target;
-			c.value = t.domain === "time" ? x(n.value) : n.value, n.value = c.value;
+			c.value = t.domain === "time" ? x(n.value) : n.value, t.domain === "time" && (n.value = c.value);
 		}
 		U([() => r.value?.metadata.entity_id, () => d.value], ([, e]) => {
 			c.value = b(e);
@@ -3455,11 +3456,13 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 				step: e.domain === "number" ? C("step") : 60,
 				disabled: v.value,
 				"aria-describedby": h.value,
+				"aria-invalid": !!r.value.error,
 				required: "",
-				onInput: S
+				onInput: S,
+				onInvalid: Wa(T, ["prevent"])
 			}, null, 40, vo), J("button", {
 				type: "submit",
-				disabled: v.value || c.value === ""
+				disabled: v.value || e.domain === "time" && c.value === ""
 			}, L(_.value.apply), 9, yo)], 64))])], 64)),
 			J("div", {
 				id: o,
@@ -5940,7 +5943,7 @@ var Il = ["aria-busy"], Ll = {
 			zeroThreshold: "Startschwelle 0 %: Es beginnt keine neue automatische Netzladung.",
 			thresholdUnavailable: "Startschwelle nicht verfügbar.",
 			global: "Ladegrenze für alle Lademethoden (%)",
-			globalHint: "Gilt auch für Solarstrom. Wenn du diese Grenze senkst, wird ein höheres Netzladeziel ebenfalls gesenkt. Ein späteres Anheben erhöht das Netzladeziel nicht automatisch.",
+			globalHint: "Gilt auch für Solarstrom. Diese Grenze begrenzt das gespeicherte Netzladeziel vorübergehend. Wenn du sie anhebst, wird das ursprüngliche Ziel bis zur neuen globalen Grenze wieder wirksam. Nur wenn du das Netzladeziel ausdrücklich änderst, wird dessen gespeicherter Wert dauerhaft geändert.",
 			disabled: "Automatische Netzladung ist aus. Die gespeicherten Einstellungen gelten nach dem Einschalten.",
 			unavailable: "Ladeweise nicht verfügbar. Es wird keine Auswahl angenommen.",
 			valueUnavailable: "Nicht verfügbar",
@@ -5973,7 +5976,7 @@ var Il = ["aria-busy"], Ll = {
 			zeroThreshold: "Start threshold 0%: No new automatic grid charge will start.",
 			thresholdUnavailable: "Start threshold unavailable.",
 			global: "Charge limit for all charging methods (%)",
-			globalHint: "Also applies to solar charging. Lowering this limit also lowers a higher grid charge target. Raising it later does not automatically raise the grid charge target.",
+			globalHint: "Also applies to solar charging. This limit temporarily caps the saved grid charge target. Raising it makes the original target effective again, up to the new global limit. Only explicitly changing the grid charge target permanently changes its saved value.",
 			disabled: "Automatic grid charging is off. Saved settings apply after switching it on.",
 			unavailable: "Charging method unavailable. No selection is assumed.",
 			valueUnavailable: "Unavailable",

@@ -125,7 +125,8 @@ function minute(value: string): string {
 function changeDraft(event: Event): void {
   const input = event.target as HTMLInputElement;
   draft.value = props.domain === "time" ? minute(input.value) : input.value;
-  input.value = draft.value;
+  // REQ-VUE-ENTITY-BINDING: rewriting a number loses native partial input/cursor.
+  if (props.domain === "time") input.value = draft.value;
 }
 
 watch(
@@ -320,10 +321,15 @@ async function changeSelect(event: Event): Promise<void> {
             :step="domain === 'number' ? numberAttribute('step') : 60"
             :disabled="blocked"
             :aria-describedby="descriptionIds"
+            :aria-invalid="!!entity.error"
             required
             @input="changeDraft"
+            @invalid.prevent="submitDraft"
           />
-          <button type="submit" :disabled="blocked || draft === ''">
+          <button
+            type="submit"
+            :disabled="blocked || (domain === 'time' && draft === '')"
+          >
             {{ text.apply }}
           </button>
         </template>

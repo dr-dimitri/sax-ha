@@ -409,6 +409,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._bridge_session = BridgeChargeSession()
         self._bridge_charge_deadline: datetime | None = None
         self._tariff_charge_deadline: datetime | None = None
+        self._price_charge_deadline: datetime | None = None
         self._tariff_charge_source: str | None = None
         self._timed_charge_source_config: TariffConfig | None = None
         self._scan_interval = scan_interval
@@ -487,6 +488,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._max_soc_hold_is_window_bound = False
         self._max_soc_tariff_source: str | None = None
         self._max_soc_hold_is_price_slot_bound = False
+        self._max_soc_price_slot_target: int | None = None
         self._max_soc_grid_import_wait_cycles = 0
         self._max_soc_recharge_confirm_cycles = 0
         self._max_soc_released_for_discharge = False
@@ -3447,7 +3449,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise
 
     async def async_stop_grid_charge(self) -> None:
-        """Beende den Auftrag erst nach Task-Ende und sicherem Resetversuch."""
+        """Widerrufe den Auftrag und bestätige erst den quittierten Reset."""
         async with self._charge_control_lock:
             self._raise_if_shutdown()
             manual_charge_requested = self._grid_charge_power is not None
@@ -3464,7 +3466,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # haben, obwohl Modus 1 quittiert und sein Rollback fehlgeschlagen
             # ist. Dieser verwaiste Besitznachweis muss auch ohne sichtbaren
             # manuellen Auftrag zurückgesetzt werden (REQ-MANUAL-GRID-CHARGE).
-            await self.async_stop_sun_charge()
+            await self.async_stop_sun_charge(require_confirmation=True)
             if manual_charge_requested and self.data is not None:
                 # Nur ein tatsächlich beendeter manueller Auftrag gibt die
                 # zentrale Entscheidung neu frei. Ein reiner Fehler-Reset darf
@@ -3585,7 +3587,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._sun_charge_write_task = None
 
     def _active_charge_deadline(self) -> datetime | None:
-        return self._bridge_charge_deadline or self._tariff_charge_deadline
+        return (
+            self._bridge_charge_deadline
+            or self._tariff_charge_deadline
+            or self._price_charge_deadline
+        )
+
+    def _price_charge_permission_valid(self) -> bool:
+        return (
+            self._price_charge_deadline is None
+            or self.price_planner.plan_at(dt_util.utcnow()).charge_now
+        )
 
     def _tariff_charge_permission_valid(self) -> bool:
         if self._tariff_charge_deadline is None:
@@ -3625,6 +3637,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         if power < 0 and not self._tariff_charge_permission_valid():
             raise HomeAssistantError("Niedertarifzeit abgelaufen oder Tarif geändert")
+        if power < 0 and not self._price_charge_permission_valid():
+            raise HomeAssistantError("Ausgewähltes Preis-Ladeintervall abgelaufen")
         if (
             power < 0
             and self._bridge_charge_deadline is not None
@@ -3815,13 +3829,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             pass
         self._sun_charge_task = None
 
-    async def async_stop_sun_charge(self) -> None:
+    async def async_stop_sun_charge(
+        self, *, require_confirmation: bool = False
+    ) -> None:
         """Gleiche Register 40051 mit dem Sollzustand Nullregelung ab.
 
         Die erste inaktive Entscheidung jeder Coordinator-Instanz schreibt
         immer. Danach ist die Methode ein No-Op, solange weder Task/
         Rücksetzauftrag noch eine abweichende Geräte-Rückmeldung vorliegen.
         Fehlgeschlagene Rücksetzungen werden beim nächsten Takt wiederholt.
+        Explizite manuelle Stopps melden sie zusätzlich dem Serviceaufrufer.
         """
         needs_reset = (
             self._sun_charge_task is not None
@@ -3837,12 +3854,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         await self._async_cancel_sun_charge_task()
         self._sun_charge_timed_discharge = False
+        # REQ-MANUAL-GRID-CHARGE: Der beendete Writer kann beim Abbruch seinen
+        # eigenen Rollback quittieren. Der folgende Reset braucht einen neuen
+        # Auftrag, auch wenn Modus 1 zuvor nur beobachtet worden war.
+        self._sun_charge_reset_required = True
         try:
             async with self._sun_charge_write_lock:
                 await self.async_write_extended_register(
                     REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
                 )
-        except HomeAssistantError:
+        except HomeAssistantError as err:
+            if require_confirmation:
+                raise HomeAssistantError(
+                    "Netzladung wurde widerrufen, aber Register 40051 konnte "
+                    "nicht auf SmartMeter-Nullregelung zurückgesetzt werden. "
+                    f"Rücksetzauftrag bleibt aktiv: {err}"
+                ) from err
             _LOGGER.exception(
                 "Netzladung (SunSpec-Modus): Steuermodus konnte nicht auf "
                 "SmartMeter-Nullregelung zurückgesetzt werden - Gerät fällt "
@@ -3862,6 +3889,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     interval = max(
                         0,
                         min(
+                            interval,
                             READ_BLOCK_EXT_HIGH_INTERVAL,
                             (deadline - dt_util.utcnow()).total_seconds(),
                         ),
@@ -3888,6 +3916,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._active_charge_deadline() is not None:
                     async with self._charge_control_lock:
                         deadline = self._active_charge_deadline()
+                        if self._price_charge_deadline is not None and (
+                            dt_util.utcnow() >= self._price_charge_deadline
+                            or not self._price_charge_permission_valid()
+                        ):
+                            # REQ-DYNAMIC-PRICE-CHARGE: The shared worker confirms
+                            # the next state, including neutral and SOC holds,
+                            # after this writer relinquishes its own task.
+                            self._async_schedule_month_control_change()
+                            return
                         bridge_forecast_missing = (
                             self._bridge_charge_deadline is not None
                             and not self._bridge_charge_forecast_available()
@@ -3937,8 +3974,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 )
                             self._bridge_charge_deadline = None
                             self._tariff_charge_deadline = None
+                            self._price_charge_deadline = None
                             self._tariff_charge_source = None
                             self._timed_charge_active = False
+                            self._price_charge_active = False
                             if self.data is not None:
                                 self._publish_charge_state(self.data)
                                 self.async_update_listeners()
@@ -4791,6 +4830,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # charge deadline must not release it on the next writer tick.
         self._bridge_charge_deadline = None
         self._tariff_charge_deadline = None
+        self._price_charge_deadline = None
         self._tariff_charge_source = None
         self._timed_charge_source_config = None
         had_max_soc_hold = (
@@ -4839,7 +4879,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         in_price_slot = (
             self._price_charge_enabled
             and self._price_charge_strategy != PRICE_STRATEGY_OFF
-            and self.price_planner.plan.charge_now
+            and self.price_planner.plan_at(dt_util.utcnow()).charge_now
         )
         if self._max_soc_hold_is_price_slot_bound:
             return in_price_slot
@@ -5287,6 +5327,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_window = None
             self._bridge_charge_deadline = None
             self._tariff_charge_deadline = None
+            self._price_charge_deadline = None
             self._tariff_charge_source = None
             self._timed_charge_source_config = None
             await self.async_stop_sun_charge()
@@ -5304,7 +5345,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pv_surplus_active = self._cycles_confirmed(
             "_timed_charge_pv_surplus_cycles", pv_surplus_raw
         )
-        price_plan = self.price_planner.plan
+        price_plan = self.price_planner.plan_at(now)
         grid_serving_forecast_kwh = self.price_planner.grid_serving_forecast_kwh()
         grid_serving_forecast_threshold = self.grid_serving_forecast_threshold_kwh
         grid_serving_forecast_sensor_configured = (
@@ -5381,6 +5422,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             tariff_window.expires_at if tariff_window else None
         )
         self._tariff_charge_source = tariff_window.source if tariff_window else None
+        price_slot = price_plan.active_slot(now)
+        self._price_charge_deadline = (
+            price_slot.end.astimezone(dt_util.UTC)
+            if price_slot is not None
+            and price_should_charge
+            and self._grid_charge_power is None
+            else None
+        )
+        if (
+            self._max_soc_hold_is_price_slot_bound
+            and self._max_soc_price_slot_target is not None
+            and target_soc > self._max_soc_price_slot_target
+            and current_soc < target_soc
+        ):
+            # REQ-DYNAMIC-PRICE-CHARGE: Die Hysterese schützt das erreichte
+            # Ziel, darf aber weder eine Zielerhöhung noch Kalibrierung sperren.
+            self._max_soc_hold_is_price_slot_bound = False
         price_slot_hold_active = (
             self._max_soc_hold_is_price_slot_bound and price_plan.charge_now
         )
@@ -5436,6 +5494,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 if not price_slot_hold_active:
                     self._max_soc_hold_is_price_slot_bound = in_price_slot
+                if self._max_soc_hold_is_price_slot_bound:
+                    self._max_soc_price_slot_target = target_soc
                 self._max_soc_grid_import_wait_cycles = 0
                 self._max_soc_recharge_confirm_cycles = 0
                 if timed_hold_active:

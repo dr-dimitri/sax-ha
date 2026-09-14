@@ -312,6 +312,10 @@ async def test_changed_source_recalculates_the_live_pause_forecast_condition(
             "custom_components.sax_power.coordinator.dt_util.now",
             return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
         ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
     ):
         for source, forecast, allowed in (
             ("sensor.other", 15, True),
@@ -378,6 +382,10 @@ async def test_source_changes_during_start_and_periodic_ack_keep_sequence_intact
         ),
         patch(
             "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
             return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
         ),
         patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),

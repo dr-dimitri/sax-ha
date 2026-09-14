@@ -327,8 +327,8 @@ test("charging choices explain their effects and retain the confirmed method whi
   ).toHaveValue("80");
   await expect(settings).toContainText(
     english
-      ? "Raising it later does not automatically raise the grid charge target"
-      : "Ein späteres Anheben erhöht das Netzladeziel nicht automatisch",
+      ? "Raising it makes the original target effective again, up to the new global limit"
+      : "Wenn du sie anhebst, wird das ursprüngliche Ziel bis zur neuen globalen Grenze wieder wirksam",
   );
   await expectControlsToFit(settings);
   await fixed.click();

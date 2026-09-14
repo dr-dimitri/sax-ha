@@ -215,6 +215,13 @@ ohne Schreibaktionen zu wiederholen. `EntityValue.vue` zeigt bestätigte Werte;
 `hass.callService`. Zahlen und Zeiten werden ausdrücklich übernommen.
 Wertebereiche, Schritte und Auswahloptionen stammen aus den aktuellen
 Entity-Attributen; HA bleibt für die Autorisierung der Services zuständig.
+Zahlen behalten beim Tippen ihren nativen Zwischenzustand und Cursor;
+DOM-Normalisierung ist auf Zeitfelder begrenzt. Die Tastaturabnahme in
+`frontend/browser/number-input.spec.ts` prüft beide Preisfelder in Chromium
+und macOS-WebKit auf Deutsch und Englisch, einschließlich Minuszeichen,
+Dezimalwerten und feldbezogenen Fehlern. Dieselbe Suite prüft den Hilfetext
+zum temporär begrenzten Netzladeziel und die bestätigte Wertefolge
+90/80 → 60/60 → 95/80 für globalen Max-SOC und Netzladeziel.
 Alle Darstellungen einer Entität teilen ausstehende Aktionen und Fehler.
 Ein erfolgreich beantworteter Serviceaufruf verändert den angezeigten Zustand
 erst, wenn HA ihn tatsächlich meldet.
@@ -282,7 +289,7 @@ Die Reaktionsprüfung umfasst alle Aktionswege, nicht nur sichtbare Schalter:
 | Automatische Netzladung im Tarifdashboard | Sofortige WebSocket-Antwort auch bei belegtem Geräte-Lock | `tests/test_dashboard_tariff_response.py` |
 | Verbrauchsplanung und Preisplan aktualisieren | Sofortige Bestätigung; Geräteauswertung nachgelagert | `tests/test_bridge_switch.py`, `tests/test_control_response.py`, `tests/test_vue_dashboard_e2e.py` |
 | Tarif-/Quellenwechsel und vollständige Profilübernahme | Sofortige Softwarebestätigung; Quellenrevision sperrt alte Ladesollwerte, Worker übernimmt den sicheren Geräteübergang | `tests/test_dashboard_tariff_transition_response.py`, `frontend/browser/dynamic-tariff.spec.ts` |
-| Speicher Ein/Aus, manuelles Laden Start/Stop | Sofortiger ausstehender Zustand; Erfolg erst nach Gerätequittierung | `frontend/tests/controls.test.ts`, `tests/test_coordinator.py` |
+| Speicher Ein/Aus, manuelles Laden Start/Stop | Sofortiger ausstehender Zustand; Erfolg erst nach Gerätequittierung | `frontend/tests/controls.test.ts`, `tests/test_coordinator.py`, `tests/test_manual_stop_response.py` |
 | Bilanzneustart und Statistikabruf | Asynchrone lokale Speicherung bzw. Recorder-Lesen, kein Warten auf Geräte-Lock | `tests/test_economics_persistence.py`, `frontend/tests/savings.test.ts` |
 | Navigation, Details, Abbrechen, Diagrammtag und Monatsübersicht | Lokale UI-Aktion; nachgeladene Preise zeigen Fortschritt, ältere Antworten werden verworfen | `frontend/tests/panel.test.ts`, `frontend/tests/electricity-tariff.test.ts` |
 
@@ -1558,6 +1565,16 @@ Reihenfolge/Priorität in `_async_enforce_grid_charge`:
    Neutralpreis-Pausezone (`price_should_pause`, Sollwert 0 statt
    Nullregelung unterhalb des Neutralpreises; nur Absoluter Preis begrenzt
    das Band zusätzlich durch die Preisgrenze).
+   Die zeitliche Freigabe kommt aus `SaxPricePlanner.plan_at(now)` und
+   berücksichtigt die tatsächlichen UTC-Intervalle ohne neue Optimierung.
+   Preis-/Auswahlgrenzen besitzen einen eigenen Planner-Timer; die aktive
+   Preisdeadline begrenzt zusätzlich den periodischen Writer und wird vor
+   und nach den Gerätequittierungen geprüft. Am Ende bestätigt der gemeinsame
+   Geräte-Worker den passenden Folgezustand. Die Preisfenster-SOC-Sperre
+   merkt das erreichte effektive Ziel; eine Zielerhöhung über den aktuellen
+   SOC gibt nur diese alte Sperre frei und durchläuft erneut die Policy.
+   Regressionen: `tests/test_price_charge_deadline.py` und
+   `tests/test_price_soc_target.py`.
 5. **Sonst**: Task wird gestoppt, Register 40051 zurück auf 0
    (SmartMeter-Nullregelung), Zustandsmaschine zurückgesetzt.
 
@@ -1618,10 +1635,16 @@ abgebrochenen Tasks abgefangen, da pymodbus eine Cancellation, die einen
 laufenden Write trifft, als `ModbusIOException` (und damit als
 `HomeAssistantError`) statt als reine `CancelledError` durchreicht.
 
-Der ältere Basic-Mode-P-Sollwert-Pfad (Register 41,
-`_async_grid_charge_loop`, alle 30s fest) bleibt ausschließlich für den
-manuellen `start_grid_charge`/`stop_grid_charge`-Service in Verwendung; die
-Integration liest/schreibt die Basic-Mode-Register 43/44 (Ent-/Ladeleistungs-
+Auch `start_grid_charge` und `stop_grid_charge` verwenden ausschließlich
+den gemeinsamen SunSpec-Schreibpfad; Register 41 wird dabei nicht verändert.
+Der explizite manuelle Stopp verwendet `require_confirmation=True`: Erst
+nach quittiertem Modus-0-Reset darf der Service erfolgreich antworten und
+eine berechtigte Automatik übernehmen. Bei Fehler bleiben Auftrag und Writer
+widerrufen, der Reset bleibt für erneute Versuche vorgemerkt. Hintergrund-
+und Shutdown-Resets bleiben bestmöglich und blockieren weder gültige
+Messdaten noch das Aufräumen. Siehe `REQ-MANUAL-GRID-CHARGE` und
+`tests/test_manual_stop_response.py`.
+Die Integration liest/schreibt die Basic-Mode-Register 43/44 (Ent-/Ladeleistungs-
 grenzwert) nicht mehr - eine frühere Software-Einstellung "Max.
 Netzladeleistung" (`SaxPowerChargeLimitNumber`), die Register 44 einmalig
 als Vorgabewert gelesen hat, wurde entfernt (siehe unten).

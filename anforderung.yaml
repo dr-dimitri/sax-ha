@@ -1375,8 +1375,13 @@ requirement_manual_grid_charge:
     _charge_control_lock. Die Aktion löscht den manuellen Auftrag, storniert
     den gemeinsamen SunSpec-Task, wartet dessen tatsächliches Ende auch bei
     einem gleichzeitig laufenden Schreibabschnitt ab und versucht danach
-    Register 40051 aktiv auf 0 (SmartMeter-Nullregelung) zurückzusetzen. Erst
-    anschließend wird die zentrale Entscheidung erneut ausgewertet, sodass
+    Register 40051 aktiv auf 0 (SmartMeter-Nullregelung) zurückzusetzen.
+    Der explizite physische Stopp meldet erst nach Gerätequittierung Erfolg;
+    bei fehlender Bestätigung erreicht ein verständlicher HomeAssistantError
+    die Service-/WebSocket-Grenze. Auftrag und Writer bleiben auch im
+    Fehlerfall widerrufen; der offene Reset bleibt für erneute Versuche
+    vorgemerkt. Erst nach bestätigtem Reset wird die zentrale Entscheidung
+    erneut ausgewertet, sodass
     eine weiterhin berechtigte Automatik übernehmen darf. Hat ein
     unvollständiger manueller Start seinen Auftrag bereits verworfen, aber
     nach quittiertem 40051=1 sowohl den 40049-Write als auch den
@@ -1392,6 +1397,12 @@ requirement_manual_grid_charge:
     Während des Shutdowns wird keine Automatik erneut ausgewertet; danach
     existiert kein schreibender Hintergrundtask mehr.
   acceptance_criteria:
+    - "tests/test_manual_stop_response.py prüft echte HA-Service-/WebSocket-
+       Fehler bei Timeout, ModbusException und Fehlerantwort, Lock-/ACK-
+       Wartezeit, Retry ohne Auftrag, Teilstart-/Rollbackfehler sowie
+       Automatikübernahme und Schutz laufender Automatik.
+       tests/test_control_write_resilience.py belegt gültige Messdaten
+       und Pollretry nach fehlgeschlagenem manuellem Stopp."
     - "tests/test_init.py prüft den echten Service-Aufruf für negative Werte
        außerhalb des int16-Bereichs, 0 und positive Werte: übersetzbare
        ServiceValidationError und kein Modbus-Write."
@@ -2328,7 +2339,18 @@ requirement_dynamic_price_charge:
     Leistungsvorgabe). Ist die Bedingung nicht (mehr) erfüllt, wird
     Register 40051 aktiv auf 0 (SmartMeter-Nullregelung) zurückgesetzt.
     SOC-abhängige Abbrüche greifen dadurch sofort und nicht erst beim
-    nächsten 60-Sekunden-Takt.
+    nächsten 60-Sekunden-Takt. Eine ausgewählte Ladeberechtigung gilt nur
+    innerhalb ihrer tatsächlichen UTC-Grenzen [Start, Ende). Poll und
+    zentraler Schreibpfad prüfen diese Gültigkeit und den aktuellen Preis
+    unabhängig von einer vollständigen Neuoptimierung. Der Writer wacht
+    spätestens am Ende der Auswahl auf; bekannte Preis-/Auswahlgrenzen
+    lösen zusätzlich eine zeitgenaue Aktualisierung aus. Direkt angrenzende
+    weiterhin ausgewählte Slots dürfen weiterladen; teure oder unbepreiste
+    Folgeabschnitte übernehmen keine alte Freigabe. Dies gilt auch für
+    sekundengenau gekürzte Relative-/Smart-Slots und beide Herbststunden.
+    Läuft die Freigabe während der Modusquittierung ab, folgt kein negativer
+    Sollwert; nach verspäteter Sollwertquittierung greift der vorhandene
+    quittierte Rücksetzpfad. Der Folgezustand folgt der zentralen Policy.
 
     Strategien (select.SaxPowerPriceStrategySelect, jederzeit im laufenden
     Betrieb umschaltbar):
@@ -2390,15 +2412,22 @@ requirement_dynamic_price_charge:
     Netzladung UND löst zusätzlich die Max-SOC-Sperre aus (genau wie beim
     zeitgesteuerten Laden).
 
-    Erreicht der Speicher Max. SOC, während price_planner.plan.charge_now
-    einen aktuell ausgewählten Preis-Ladeslot meldet, wird die Max-SOC-
-    Sperre an diesen Slot gebunden. Dafür ist bewusst das rohe Planmerkmal
-    maßgeblich: price_should_charge ist bei erreichtem Ziel-SOC bereits
-    False und kann den Slot dann nicht mehr identifizieren. Der Sollwert
-    bleibt bis charge_now False wird bei 0 %, auch nach bestätigtem
-    Netzbezug und auch wenn der SOC innerhalb desselben Slots wieder unter
-    den Zielwert fällt. Dadurch startet kein zweiter Ladevorgang im selben
-    günstigen Slot; der Status bleibt "Pausiert (Max. SOC)". Am Slotende
+    Erreicht der Speicher Max. SOC in einem zeitlich gültigen ausgewählten
+    Preis-Ladeslot, wird die Max-SOC-Sperre an diese Auswahl und das
+    erreichte effektive Ziel gebunden. Dafür ist die zeitlich geprüfte
+    Auswahl maßgeblich: price_should_charge ist bei erreichtem Ziel-SOC
+    bereits False und kann den Slot dann nicht mehr identifizieren. Bei
+    unverändertem Ziel bleibt der Sollwert bis zum Ende der Auswahl bei 0 %,
+    auch nach bestätigtem Netzbezug und auch wenn der SOC innerhalb desselben
+    Slots wieder unter den Zielwert fällt. Dadurch startet kein zweiter
+    Ladevorgang im selben günstigen Slot; der Status bleibt
+    "Pausiert (Max. SOC)". Eine wirksame Zielerhöhung über den aktuellen SOC
+    entwertet die auf dem niedrigeren Ziel beruhende Sperre. Dies gilt für
+    eine Benutzeränderung und für den automatischen Kalibrierungsbeginn
+    nach REQ-PERIODIC-FULL-CALIBRATION. Die zentrale Policy entscheidet
+    erneut; abgelaufene Slots, PV-Überschuss oder andere Sperrgründe bleiben
+    wirksam. Zielabsenkungen oder weiterhin erreichte Ziele erteilen keine
+    neue Ladefreigabe. Am Slotende
     setzt der Coordinator Register 40051 aktiv auf SmartMeter-Nullregelung
     zurück und verhindert bei unverändert erreichtem SOC per Freigabe-Latch
     ein sofortiges erneutes Sperren im Folge-Poll.
@@ -2562,6 +2591,18 @@ requirement_dynamic_price_charge:
        Unregelmäßige Vorschauen mit überwiegend längeren Abständen und einem
        einzelnen kurzen Abstand sind in tests/test_price_optimizer.py
        abgesichert (Issue #217); nach dem abgeleiteten Ende fehlt der Preis."
+    - "tests/test_price_soc_target.py prüft mit echtem Planner die Freigabe
+       einer erreichten 60-%-Sperre durch ein Benutzerziel von 80 % oder
+       die am lokalen Tagesbeginn fällige 100-%-Kalibrierung. Unverändertes
+       Ziel, bestätigter Netzbezug, Zielabsenkung, abgelaufene Auswahl und
+       weitere Sperrgründe bleiben abgesichert; gehaltene Geräte-Locks und
+       verspätete/fehlgeschlagene Quittierungen verhindern keine prompte
+       Softwarebestätigung und erzeugen keinen optimistischen Ladebeginn."
+    - "tests/test_price_charge_deadline.py prüft das tatsächliche Ende
+       ausgewählter Preisintervalle ohne Sensorereignis oder Minutentick,
+       gekürzte Relative-/Smart-Slots, verzögerte Modus-/Sollwertquittierung,
+       angrenzende Auswahl, teure oder fehlende Folgepreise sowie UTC-
+       Vergleiche in der doppelten Herbststunde."
     - "tests/test_charge_policy.py und tests/test_price_optimizer.py sichern
        die Pause nicht ausgewählter Relativ-/Smart-Slots unterhalb der
        absoluten Preisgrenze, negative Preise, Gleichheit am Neutralpreis,
@@ -2783,6 +2824,11 @@ requirement_vue_entity_binding:
     min/max und step geprüft; Zeiten auf gültige Stunden, Minuten und Sekunden;
     Auswahlwerte müssen in den aktuellen options enthalten sein. Zahlen und
     Zeiten bleiben lokale Eingaben bis zur ausdrücklichen Übernahme.
+    Native Zahleneingaben werden beim Tippen nicht durch DOM-Zuweisungen
+    normalisiert. Zwischenzustände wie Minuszeichen oder Dezimalpunkt,
+    Cursorposition und Auswahl bleiben erhalten. Leere oder unvollständige
+    Zahlen erzeugen bei Übernahme einen zugänglichen feldbezogenen Fehler;
+    Entwurf und bestätigter HA-Wert bleiben erhalten, ohne Serviceaufruf.
     Die Ladepause aus REQ-VUE-CHARGING verwendet stattdessen den bestehenden
     Service sax_power.set_grid_serving_window mit device_id, start und end. Beide
     Grenzen werden zusammen validiert und mit genau einem Aufruf übernommen.
@@ -2825,6 +2871,12 @@ requirement_vue_entity_binding:
        werden ohne Ersatz-Nullen und ohne zusätzliche Zustandsabfragen dargestellt."
     - "Alle vier Bedienarten verwenden echte Entity-IDs und validierte Werte;
        ungültige Eingaben und fehlende Berechtigungen erzeugen keine Schreibaktion."
+    - "frontend/browser/number-input.spec.ts prüft beide Preisfelder mit
+       zeichenweiser Eingabe von -5, 0.5, 12.5 und -0.5, Cursorbearbeitung
+       und Auswahlersetzung. Sichtbarer Wert und Servicewert stimmen in
+       Chromium und macOS-WebKit auf Deutsch und Englisch überein; vor
+       Übernahme sowie bei leeren, unvollständigen oder ungültigen Werten
+       erfolgt kein Write. Weitere Zahlenfelder bleiben bedienbar."
     - "Servicefehler, doppelte Bedienung und verzögerte Zustandsbestätigung
        sind getestet; ausstehende Aktionen werden gemeinsam gesperrt."
     - "Alle Schalter zeigen auf Deutsch und Englisch keine zusätzliche

@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant import config_entries
 from homeassistant.components import frontend, repairs
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
@@ -235,8 +236,8 @@ async def test_removed_or_disabled_entry_cannot_be_reactivated_by_old_repair(
     if removed:
         await hass.config_entries.async_remove(entry.entry_id)
     else:
-        hass.config_entries.async_update_entry(
-            entry, options={CONF_VUE_DASHBOARD_ENABLED: False}
+        await hass.config_entries.async_set_disabled_by(
+            entry.entry_id, config_entries.ConfigEntryDisabler.USER
         )
     result = await manager.async_configure(flow_id, {"next_step_id": "confirm"})
     assert result["type"] == "abort" and result["reason"] == "no_longer_available"
@@ -260,8 +261,8 @@ async def test_disable_during_setup_leaves_neither_panel_nor_issue(
     with patch(f"{_MODULE}.async_setup_component", side_effect=delayed_setup):
         task = asyncio.create_task(async_sync_vue_dashboard(hass, entry))
         await started.wait()
-        hass.config_entries.async_update_entry(
-            entry, options={CONF_VUE_DASHBOARD_ENABLED: False}
+        await hass.config_entries.async_set_disabled_by(
+            entry.entry_id, config_entries.ConfigEntryDisabler.USER
         )
         finish.set()
         assert not await task

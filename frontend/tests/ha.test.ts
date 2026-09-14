@@ -138,6 +138,50 @@ afterEach(() => {
   for (const scope of scopes.splice(0)) scope.stop();
 });
 
+it.each(["de", "en"])(
+  "explains rejected consumption planning prerequisites without changing confirmed state (%s)",
+  async (language) => {
+    const item = metadata("switch", { key: "bridge_charge_enabled" });
+    const { hass, dashboard, connection } = setup([item]);
+    hass.value = {
+      ...hass.value!,
+      language,
+      states: { [item.entity_id]: state(item, { state: "off" }) },
+    };
+    await flush();
+    connection.emit([item]);
+    await flush();
+    for (const [key, expected] of [
+      [
+        "bridge_pv_start_required",
+        language === "de" ? "Solarprognose" : "solar forecast",
+      ],
+      [
+        "bridge_tariff_required",
+        language === "de" ? "gültigen Preisen" : "valid prices",
+      ],
+    ]) {
+      vi.mocked(hass.value!.callService!).mockRejectedValueOnce({
+        code: "service_validation_error",
+        translation_domain: "sax_power",
+        translation_key: key,
+      });
+      expect(await dashboard.perform("switch", item.key, true)).toBe(false);
+      expect(dashboard.entity("switch", item.key)?.error).toContain(expected);
+      expect(dashboard.entity("switch", item.key)?.state?.state).toBe("off");
+      expect(dashboard.entity("switch", item.key)?.pending).toBe(false);
+    }
+    vi.mocked(hass.value!.callService!).mockRejectedValueOnce({
+      translation_domain: "other",
+      translation_key: "bridge_pv_start_required",
+    });
+    await dashboard.perform("switch", item.key, true);
+    expect(dashboard.entity("switch", item.key)?.error).toContain(
+      language === "de" ? "fehlgeschlagen" : "failed",
+    );
+  },
+);
+
 describe("SAX entity binding (REQ-VUE-ENTITY-BINDING)", () => {
   it("uses one entry-scoped metadata subscription and only HA's existing states", async () => {
     const { hass, connection, dashboard } = setup();

@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime
+from collections import deque
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -22,6 +25,7 @@ from homeassistant.core import (
     Event,
     EventStateChangedData,
     HomeAssistant,
+    State,
     callback,
 )
 from homeassistant.helpers.event import async_track_state_change_event
@@ -34,6 +38,7 @@ from .const import (
     CONF_PRICE_UNIT,
     DEFAULT_PRICE_UNIT,
 )
+from .domain.economics_accounting import EconomicsPriceSegment
 from .domain.price_units import unit_factor
 from .domain.tariff import (
     PriceQuote,
@@ -57,15 +62,24 @@ _LOGGER = logging.getLogger(__name__)
 DISABLED_RESULT = QuoteResult(reason=QuoteUnavailable.TARIFF_DISABLED)
 
 
+@dataclass(frozen=True, slots=True)
+class _TariffSnapshot:
+    config: TariffConfig
+    entity_id: str | None
+    state: State | None
+    unit: str
+    attribute: str | None
+
+
 class SaxTariffProvider:
     """Bestimmt den zu einem Zeitpunkt gültigen Netzbezugspreis.
 
     Die Auswertung läuft bei jedem Aufruf frisch gegen die aktuellen
     Options und Sensorzustände; eine Options-Änderung wirkt dadurch sofort
     und ohne Config-Entry-Reload. Der zusätzlich registrierte
-    Zustandsbeobachter des dynamischen Preis-Sensors hält nur den
-    zwischengespeicherten Stand (`last_result`) aktuell, den Diagnose und
-    spätere Auswertungen ohne eigene Neuberechnung lesen können.
+    Zustandsbeobachter des dynamischen Preis-Sensors hält den
+    zwischengespeicherten Stand (`last_result`) aktuell und bewahrt
+    Preisänderungen bis zum nächsten gemessenen Energieintervall auf.
     """
 
     def __init__(self, hass: HomeAssistant, coordinator: SaxPowerCoordinator) -> None:
@@ -73,6 +87,7 @@ class SaxTariffProvider:
         self.coordinator = coordinator
         self.last_result: QuoteResult = DISABLED_RESULT
         self._unsub: list[CALLBACK_TYPE] = []
+        self._price_history: deque[tuple[datetime, _TariffSnapshot]] = deque(maxlen=256)
 
     # -- Konfiguration aus dem Options Flow --------------------------------
     @property
@@ -115,6 +130,7 @@ class SaxTariffProvider:
         stehen lässt noch einen zweiten auf denselben Sensor anlegt.
         """
         self.async_shutdown()
+        self._observe(dt_util.now())
         entity_id = self.price_entity_id
         if self.config.tariff_type is TariffType.DYNAMIC and entity_id:
             self._unsub.append(
@@ -130,7 +146,8 @@ class SaxTariffProvider:
             self._unsub.pop()()
 
     @callback
-    def _async_price_sensor_changed(self, _event: Event[EventStateChangedData]) -> None:
+    def _async_price_sensor_changed(self, event: Event[EventStateChangedData]) -> None:
+        self._observe(event.time_fired)
         self.evaluate()
 
     # -- Auswertung ---------------------------------------------------------
@@ -146,19 +163,44 @@ class SaxTariffProvider:
         Liefert bei jedem Problem None samt maschinenlesbarem Grund - nie
         einen Ersatzpreis.
         """
+        snapshot = self._snapshot()
+        now = dt_util.as_local(moment) if moment else dt_util.now()
+        return self._quote_snapshot(snapshot, now)
+
+    def _snapshot(self) -> _TariffSnapshot:
         config = self.config
+        entity_id = (
+            self.price_entity_id if config.tariff_type is TariffType.DYNAMIC else None
+        )
+        return _TariffSnapshot(
+            config,
+            entity_id,
+            self.hass.states.get(entity_id) if entity_id else None,
+            self.coordinator.options.get(CONF_PRICE_UNIT) or DEFAULT_PRICE_UNIT,
+            self.coordinator.options.get(CONF_PRICE_ATTRIBUTE) or None,
+        )
+
+    def _observe(self, moment: datetime) -> None:
+        snapshot = self._snapshot()
+        instant = moment.astimezone(UTC)
+        if self._price_history and instant < self._price_history[-1][0]:
+            self._price_history.clear()
+        if not self._price_history or self._price_history[-1][1] != snapshot:
+            self._price_history.append((instant, snapshot))
+
+    def _quote_snapshot(self, snapshot: _TariffSnapshot, now: datetime) -> QuoteResult:
+        config = snapshot.config
         # Gilt für alle Tarifarten, auch die dynamische: ohne gültige
         # Einspeisevergütung (und ohne die tarifeigenen Pflichtpreise)
         # entsteht gar kein Quote.
         reason = validate_tariff(config)
         if reason is not None:
             return QuoteResult(reason=reason)
-        now = dt_util.as_local(moment) if moment else dt_util.now()
         if config.tariff_type is TariffType.DYNAMIC:
-            return self._dynamic_quote(config, now)
+            return self._dynamic_quote(snapshot, now)
         return evaluate_static_tariff(config, now)
 
-    def _dynamic_quote(self, config: TariffConfig, now: datetime) -> QuoteResult:
+    def _dynamic_quote(self, snapshot: _TariffSnapshot, now: datetime) -> QuoteResult:
         """Quote aus dem im Options Flow gewählten Strompreis-Sensor.
 
         Nutzt bewusst denselben Sensor, dieselbe Attribut- und dieselbe
@@ -167,18 +209,16 @@ class SaxTariffProvider:
         Ladeentscheidung dürfen nicht gegen unterschiedliche Preise
         rechnen.
         """
-        entity_id = self.price_entity_id
+        entity_id = snapshot.entity_id
         if not entity_id:
             return QuoteResult(reason=QuoteUnavailable.PRICE_SENSOR_NOT_CONFIGURED)
-        state = self.hass.states.get(entity_id)
+        state = snapshot.state
         if state is None:
             return QuoteResult(reason=QuoteUnavailable.PRICE_SENSOR_MISSING)
         if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE, ""):
             return QuoteResult(reason=QuoteUnavailable.PRICE_SENSOR_UNAVAILABLE)
 
-        configured_unit = (
-            self.coordinator.options.get(CONF_PRICE_UNIT) or DEFAULT_PRICE_UNIT
-        )
+        configured_unit = snapshot.unit
         factor = unit_factor(
             configured_unit, state.attributes.get("unit_of_measurement")
         )
@@ -190,19 +230,25 @@ class SaxTariffProvider:
         # eine mitbringt, ist sie auch verbindlich - weder ein fehlender
         # Slot für "jetzt" (veraltete Vorschau) noch eine unlesbare Vorschau
         # darf stillschweigend durch den Sensorzustand ersetzt werden.
-        attribute = self.coordinator.options.get(CONF_PRICE_ATTRIBUTE) or None
+        attribute = snapshot.attribute
         slots = parse_price_slots(
-            state, attribute=attribute, unit=configured_unit, now=now
+            state,
+            attribute=attribute,
+            unit=configured_unit,
+            now=dt_util.as_local(state.last_updated),
         )
         if slots:
-            for slot in slots:
-                if slot.overlaps(now):
-                    return self._priced(
-                        slot.price,
-                        QuoteSource.DYNAMIC_FORECAST,
-                        slot.start,
-                        slot.end,
-                    )
+            active = [slot for slot in slots if slot.overlaps(now)]
+            if len(active) > 1:
+                return QuoteResult(reason=QuoteUnavailable.PRICE_FORECAST_UNREADABLE)
+            if active:
+                slot = active[0]
+                return self._priced(
+                    slot.price,
+                    QuoteSource.DYNAMIC_FORECAST,
+                    slot.start,
+                    slot.end,
+                )
             _LOGGER.debug(
                 "Wirtschaftlichkeit: Preisvorschau von %s deckt %s nicht ab",
                 entity_id,
@@ -223,6 +269,84 @@ class SaxTariffProvider:
         if not math.isfinite(value):
             return QuoteResult(reason=QuoteUnavailable.PRICE_NOT_FINITE)
         return self._priced(value * factor, QuoteSource.DYNAMIC_STATE)
+
+    def accounting_segments(
+        self, moment: datetime, observed_seconds: float
+    ) -> tuple[EconomicsPriceSegment, ...]:
+        """REQ-ECONOMICS-ACCOUNTING: Price only the observed measurement interval.
+
+        Source snapshots survive until the next measurement, so new options or
+        late forecast data cannot change earlier prices or fill earlier gaps.
+        Forgotten history and backward clock jumps stay explicitly unpriced.
+        """
+        self._observe(moment)
+        end = moment.astimezone(UTC)
+        latest = self._price_history[-1]
+        if not math.isfinite(observed_seconds) or observed_seconds <= 0:
+            self._price_history.clear()
+            self._price_history.append((end, latest[1]))
+            return ()
+        try:
+            start = end - timedelta(seconds=observed_seconds)
+        except OverflowError:
+            self._price_history.clear()
+            self._price_history.append((end, latest[1]))
+            return ()
+        history = list(self._price_history)
+        result: list[EconomicsPriceSegment] = []
+        first = min(end, history[0][0])
+        if start < first:
+            result.append(
+                EconomicsPriceSegment((first - start).total_seconds(), None, None)
+            )
+        for index, (observed_at, snapshot) in enumerate(history):
+            left = max(start, observed_at)
+            right = min(end, history[index + 1][0]) if index + 1 < len(history) else end
+            if right > left:
+                result.extend(self._snapshot_segments(snapshot, left, right))
+        self._price_history.clear()
+        self._price_history.append((end, latest[1]))
+        return tuple(result)
+
+    def _snapshot_segments(
+        self, snapshot: _TariffSnapshot, start: datetime, end: datetime
+    ) -> list[EconomicsPriceSegment]:
+        boundaries = {start, end}
+        if snapshot.config.tariff_type is TariffType.DYNAMIC and snapshot.state:
+            for slot in parse_price_slots(
+                snapshot.state,
+                attribute=snapshot.attribute,
+                unit=snapshot.unit,
+                now=dt_util.as_local(snapshot.state.last_updated),
+            ):
+                for boundary in (slot.start.astimezone(UTC), slot.end.astimezone(UTC)):
+                    if start < boundary < end:
+                        boundaries.add(boundary)
+        else:
+            cursor = start
+            for _ in range(1024):
+                quote = self._quote_snapshot(snapshot, dt_util.as_local(cursor)).quote
+                boundary = quote.valid_until if quote else None
+                if boundary is None or not cursor < boundary.astimezone(UTC) < end:
+                    break
+                cursor = boundary.astimezone(UTC)
+                boundaries.add(cursor)
+            else:
+                return [
+                    EconomicsPriceSegment((end - start).total_seconds(), None, None)
+                ]
+        points = sorted(boundaries)
+        feed = snapshot.config.feed_in_price_eur_kwh
+        if not snapshot.config.enabled or not is_valid_feed_in_price(feed):
+            feed = None
+        return [
+            EconomicsPriceSegment(
+                (right - left).total_seconds(),
+                self._quote_snapshot(snapshot, dt_util.as_local(left)).price_eur_kwh,
+                feed,
+            )
+            for left, right in pairwise(points)
+        ]
 
     def _priced(
         self,

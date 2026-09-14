@@ -4,16 +4,7 @@ export const tabs = [
     de: "Allgemeine Informationen",
     en: "General information",
   },
-  {
-    path: "ladeautomatik",
-    de: "Zeitvariabler Tarif",
-    en: "Time-of-use tariff",
-  },
-  {
-    path: "dynamisches-laden",
-    de: "Dynamischer Tarif",
-    en: "Dynamic tariff",
-  },
+  { path: "stromtarif", de: "Stromtarif", en: "Electricity tariff" },
   {
     path: "netzdienliches-laden",
     de: "Netzdienliches Laden",

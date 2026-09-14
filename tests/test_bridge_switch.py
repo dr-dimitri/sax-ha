@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -101,9 +102,15 @@ async def test_switch_and_options_share_live_state_without_reload(
         entity_id = "switch.my_charge_plan"
         assert not coordinator.timed_charge_enabled
         for service, enabled in (("turn_on", True), ("turn_off", False)):
-            await hass.services.async_call(
-                "switch", service, {"entity_id": entity_id}, blocking=True
-            )
+            async with coordinator._charge_control_lock:
+                await asyncio.wait_for(
+                    hass.services.async_call(
+                        "switch", service, {"entity_id": entity_id}, blocking=True
+                    ),
+                    0.2,
+                )
+                assert entry.options[CONF_BRIDGE_CHARGE_ENABLED] is enabled
+                assert hass.states.get(entity_id).state == ("on" if enabled else "off")
             await hass.async_block_till_done()
             assert dict(entry.options) == {
                 **options,

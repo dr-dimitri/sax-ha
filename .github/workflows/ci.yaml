@@ -98,13 +98,55 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Alle Dashboard-Ansichten im Browser prüfen
-        run: npm run test:browser
+        run: >-
+          npm run test:browser --
+          --project=desktop-light-de
+          --project=desktop-dark-en
+          --project=mobile-light-de
+          --project=mobile-dark-en
 
       - name: Browserbericht und Dashboard-Screenshots sichern
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: vue-dashboard-browser-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+
+  frontend-webkit:
+    name: Tarifeditor mit WebKit auf macOS prüfen
+    # REQ-VUE-TARIFF-EDITOR: Headless Linux uses WPE without editable time segments.
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v7
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend-Abhängigkeiten installieren
+        run: npm ci
+
+      - name: WebKit für die Tarifeditor-Abnahme installieren
+        run: npx playwright install webkit
+
+      - name: Tarifeditor-Eingaben in WebKit prüfen
+        run: npm run test:browser -- --project=webkit-light-de
+
+      - name: WebKit-Browserbericht und Screenshots sichern
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vue-tariff-webkit-macos-report
           path: |
             frontend/playwright-report/
             frontend/test-results/

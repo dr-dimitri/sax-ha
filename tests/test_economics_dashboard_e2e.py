@@ -11,7 +11,7 @@ Registerzugriffe.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -28,16 +28,11 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_TARIFF_TYPE,
-    CONF_ECONOMICS_TOU_BASE_PRICE,
-    CONF_ECONOMICS_WINDOW_END,
-    CONF_ECONOMICS_WINDOW_PRICE,
-    CONF_ECONOMICS_WINDOW_START,
     DOMAIN,
-    ECONOMICS_TOU_WINDOW_KEYS,
-    economics_tou_window_key,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.dashboard_api import async_register_dashboard_api
+from custom_components.sax_power.dashboard_tariff import GET_COMMAND, SAVE_COMMAND
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
 
@@ -152,7 +147,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     #    die gesamte Ladeleistung, siehe REQ-ENERGY-ORIGIN).
     pv_tick = _tick(
         1000.0 + 3600,
-        base,
+        base + timedelta(hours=1),
         storage_power_active=-1000,
         smartmeter_power=-500,
         soc=10,
@@ -161,7 +156,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     # 3) Eine Stunde Netzladung (Netzbezug deckt die Ladeleistung).
     grid_tick = _tick(
         1000.0 + 2 * 3600,
-        base,
+        base + timedelta(hours=2),
         storage_power_active=-1000,
         smartmeter_power=1000,
         soc=20,
@@ -170,7 +165,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
     # 4) Eine Stunde Entladung.
     discharge_tick = _tick(
         1000.0 + 3 * 3600,
-        base,
+        base + timedelta(hours=3),
         storage_power_active=1000,
         smartmeter_power=0,
         soc=10,
@@ -217,14 +212,16 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
         attributes = (
             description.attributes_fn(coordinator) if description.attributes_fn else {}
         )
-        hass.states.async_set(entity_id, str(discharge_tick[key]), attributes)
+        hass.states.async_set(
+            entity_id, str(description.value_fn(discharge_tick)), attributes
+        )
     investment_id = _register(hass, "binary_sensor", "economics_investment_configured")
     hass.states.async_set(investment_id, "on")
 
     states = await _dashboard_states(hass, hass_ws_client, dashboard_entry)
     assert set(states) == {*keys, "economics_investment_configured"}
     assert states["economics_status"]["state"] == "active"
-    assert float(states["economics_current_import_price"]["state"]) == 0.30
+    assert float(states["economics_current_import_price"]["state"]) == 30.0
     assert float(states["economics_net_savings"]["state"]) == pytest.approx(-0.08)
     assert float(states["economics_roi"]["state"]) == pytest.approx(-0.01)
     assert float(states["economics_amortization_progress"]["state"]) == 0.0
@@ -251,7 +248,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
     base_price: float,
     moment: datetime,
 ) -> None:
-    """REQ-VUE-CHARGING/-SAVINGS: Optionsflow -> Modell -> Sensor -> Dashboard.
+    """REQ-VUE-CHARGING/-SAVINGS: Dashboard-Editor -> Modell -> Sensor -> Dashboard.
 
     Beide Ansichten erhalten alle gespeicherten Fenster in Planreihenfolge,
     auch über Mitternacht und an direkt angrenzenden Fenstergrenzen.
@@ -274,36 +271,37 @@ async def test_tariff_plan_reaches_the_dashboard_session(
         {"start": start, "end": end, "price_eur_kwh": price}
         for start, end, price in profile
     ]
-    options_windows = {key: {} for key in ECONOMICS_TOU_WINDOW_KEYS}
-    options_windows.update(
-        {
-            economics_tou_window_key(index): {
-                CONF_ECONOMICS_WINDOW_START: start,
-                CONF_ECONOMICS_WINDOW_END: end,
-                CONF_ECONOMICS_WINDOW_PRICE: price,
-            }
-            for index, (start, end, price) in enumerate(profile, start=1)
-        }
-    )
     result = await hass.config_entries.options.async_init(dashboard_entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value},
-    )
-    assert result["step_id"] == "economics_time_of_use"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
         {
-            CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
-            CONF_ECONOMICS_TOU_BASE_PRICE: base_price,
-            **options_windows,
+            CONF_ECONOMICS_TARIFF_TYPE: TariffType.TIME_OF_USE.value,
         },
     )
-    await hass.async_block_till_done()
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert {
-        key: dashboard_entry.options[key] for key in ECONOMICS_TOU_WINDOW_KEYS
-    } == options_windows
+    editor = await hass_ws_client(hass)
+    await editor.send_json_auto_id(
+        {"type": GET_COMMAND, "entry_id": dashboard_entry.entry_id}
+    )
+    response = await editor.receive_json()
+    assert response["success"] is True
+    await editor.send_json_auto_id(
+        {
+            "type": SAVE_COMMAND,
+            "entry_id": dashboard_entry.entry_id,
+            "revision": response["result"]["revision"],
+            "base_price_ct_kwh": base_price * 100,
+            "feed_in_price_ct_kwh": 8,
+            "windows": [
+                {"start": start, "end": end, "price_ct_kwh": price * 100}
+                for start, end, price in profile
+            ],
+        }
+    )
+    response = await editor.receive_json()
+    assert response["success"] is True
+    assert len(response["result"]["windows"]) == window_count
+    await hass.async_block_till_done()
 
     coordinator = _make_coordinator(hass)
     coordinator.options = dict(dashboard_entry.options)

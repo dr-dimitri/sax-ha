@@ -16,6 +16,7 @@ from ..const import (
     ISSUE_NO_ACTIVE_MONTHS,
     ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
     ISSUE_PRICE_SENSOR_MISSING,
+    ISSUE_PRICE_UNIT_UNSUPPORTED,
     ISSUE_SUNSPEC_PERSISTENTLY_UNAVAILABLE,
     PRICE_SENSOR_MISSING_GRACE_PERIOD,
     PRICE_STATUS_NO_PRICE_DATA,
@@ -46,12 +47,13 @@ class DiagnosticSnapshot:
     grid_serving_start: dt_time | None
     grid_serving_end: dt_time | None
     grid_serving_months: frozenset[int]
+    unsupported_price_unit: bool = False
+    timed_uses_tariff: bool = False
     # REQ-ECONOMICS-OBSERVABILITY: economics_price_unavailable ist bereits
     # vom Coordinator fertig ausgewertet (Karenzzeit bzw. sofortiger
     # Konfigurationsfehler bei Fest-/Zeitfenstertarif, siehe
     # SaxPowerCoordinator._update_economics_price_availability) - hier nur
     # noch die Zustandsflanke für Issue-Erzeugung/-Löschung.
-    timed_uses_tariff: bool = False
     economics_tariff_enabled: bool = False
     economics_price_unavailable: bool = False
 
@@ -67,6 +69,13 @@ class SelfDiagnostics:
 
     def check(self, snapshot: DiagnosticSnapshot, now: float) -> None:
         """Evaluate every self-diagnostic rule for one coordinator update."""
+        self._sync_issue(
+            f"{ISSUE_PRICE_UNIT_UNSUPPORTED}_{self._entry_id}",
+            snapshot.unsupported_price_unit
+            and snapshot.price_status == PRICE_STATUS_NO_PRICE_DATA,
+            ISSUE_PRICE_UNIT_UNSUPPORTED,
+            {"price_sensor": snapshot.price_entity_id or "?"},
+        )
         self._check_price_sensor_missing(snapshot, now)
         self._check_sunspec_persistently_unavailable(snapshot, now)
         self._check_max_soc_below_min_soc(snapshot)
@@ -130,7 +139,10 @@ class SelfDiagnostics:
     def _check_price_sensor_missing(
         self, snapshot: DiagnosticSnapshot, now: float
     ) -> None:
-        problem = snapshot.price_status == PRICE_STATUS_NO_PRICE_DATA
+        problem = (
+            snapshot.price_status == PRICE_STATUS_NO_PRICE_DATA
+            and not snapshot.unsupported_price_unit
+        )
         if problem:
             if self._price_sensor_missing_since is None:
                 self._price_sensor_missing_since = now
@@ -198,8 +210,16 @@ class SelfDiagnostics:
             problem,
             ISSUE_PRICE_NEUTRAL_BELOW_LIMIT,
             {
-                "max_price": str(snapshot.price_limit),
-                "neutral_price": str(snapshot.neutral_price),
+                "max_price": (
+                    f"{snapshot.price_limit * 100:.2f}"
+                    if snapshot.price_limit is not None
+                    else ""
+                ),
+                "neutral_price": (
+                    f"{snapshot.neutral_price * 100:.2f}"
+                    if snapshot.neutral_price is not None
+                    else ""
+                ),
             },
         )
 

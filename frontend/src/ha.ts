@@ -15,7 +15,12 @@ import type {
   DashboardMetadata,
   EntityDomain,
   HassEntity,
+  GridServingForecastSource,
   HomeAssistant,
+  TariffDraft,
+  TariffConfiguration,
+  TariffPriceSeries,
+  TariffProfile,
   Unsubscribe,
 } from "./types";
 
@@ -29,6 +34,10 @@ const messages = {
     invalid: "Bitte einen gültigen Wert im erlaubten Bereich eingeben.",
     failed:
       "Die Änderung ist fehlgeschlagen. Bitte den aktuellen Zustand prüfen und erneut versuchen.",
+    bridgePvRequired:
+      "Öffne in Schritt 1 „Bearbeiten“ und ergänze die Solarprognose. Die bisherige Ladeweise bleibt erhalten.",
+    bridgeTariffRequired:
+      "Richte zuerst einen zeitvariablen Tarif mit gültigen Preisen ein. Die bisherige Ladeweise bleibt erhalten.",
     on: "Ein",
     off: "Aus",
   },
@@ -40,13 +49,23 @@ const messages = {
     forbidden: "This entity cannot be controlled at the moment.",
     invalid: "Please enter a valid value within the allowed range.",
     failed: "The change failed. Please check the current state and try again.",
+    bridgePvRequired:
+      "Open Edit in step 1 and add the solar forecast. The previous charging method is preserved.",
+    bridgeTariffRequired:
+      "First set up a time-of-use tariff with valid prices. The previous charging method is preserved.",
     on: "On",
     off: "Off",
   },
 } as const;
 
 type ErrorKey =
-  "disconnected" | "loadFailed" | "forbidden" | "invalid" | "failed";
+  | "disconnected"
+  | "loadFailed"
+  | "forbidden"
+  | "invalid"
+  | "failed"
+  | "bridgePvRequired"
+  | "bridgeTariffRequired";
 
 export interface DashboardEntity {
   metadata: DashboardEntityMetadata;
@@ -66,6 +85,15 @@ export interface SaxDashboard {
   error: ComputedRef<string | null>;
   entity(domain: EntityDomain, key: string): DashboardEntity | null;
   perform(domain: EntityDomain, key: string, value: unknown): Promise<boolean>;
+  tariff: Readonly<Ref<TariffProfile | null>>;
+  loadTariff(): Promise<TariffProfile>;
+  saveTariff(draft: TariffDraft): Promise<TariffProfile>;
+  configureTariff(configuration: TariffConfiguration): Promise<TariffProfile>;
+  loadTariffSeries(day: "today" | "tomorrow"): Promise<TariffPriceSeries>;
+  loadGridServingForecast(): Promise<GridServingForecastSource>;
+  saveGridServingForecast(
+    source: Pick<GridServingForecastSource, "pv_sensor" | "revision">,
+  ): Promise<GridServingForecastSource>;
   performTimeWindow(
     kind: "timed_charge" | "grid_serving",
     start: string,
@@ -245,6 +273,7 @@ export function useSaxDashboard(
   const language = computed(() =>
     getHass()?.language.toLowerCase().startsWith("de") ? "de" : "en",
   );
+  const tariff = shallowRef<TariffProfile | null>(null);
   const ready = ref(false);
   const connected = ref(false);
   const errorKey = ref<ErrorKey | null>(null);
@@ -261,6 +290,7 @@ export function useSaxDashboard(
   function reset(invalidateActions = true): void {
     if (invalidateActions) generation += 1;
     ready.value = false;
+    tariff.value = null;
     metadata.value = [];
     for (const [id, action] of actions) {
       if (!action.pending) actions.delete(id);
@@ -452,8 +482,24 @@ export function useSaxDashboard(
         false,
       );
       return isCurrent();
-    } catch {
-      if (isCurrent()) action.error = "failed";
+    } catch (cause) {
+      if (isCurrent()) {
+        action.error = "failed";
+        if (
+          domain === "switch" &&
+          key === "bridge_charge_enabled" &&
+          cause &&
+          typeof cause === "object" &&
+          "translation_domain" in cause &&
+          cause.translation_domain === "sax_power" &&
+          "translation_key" in cause
+        ) {
+          if (cause.translation_key === "bridge_pv_start_required")
+            action.error = "bridgePvRequired";
+          else if (cause.translation_key === "bridge_tariff_required")
+            action.error = "bridgeTariffRequired";
+        }
+      }
       return false;
     } finally {
       action.pending = false;
@@ -527,6 +573,119 @@ export function useSaxDashboard(
     }
   }
 
+  let tariffReadSequence = 0;
+  let tariffWrite: {
+    generation: number;
+    promise: Promise<TariffProfile>;
+  } | null = null;
+
+  let tariffRead: {
+    generation: number;
+    sequence: number;
+    promise: Promise<TariffProfile>;
+  } | null = null;
+
+  async function tariffRequest(
+    draft?: TariffDraft | TariffConfiguration,
+  ): Promise<TariffProfile> {
+    const hass = getHass();
+    const entryId = getEntryId();
+    if (!connected.value) throw { code: "disconnected" };
+    if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const current = generation;
+    if (!draft && tariffWrite?.generation === current)
+      return tariffWrite.promise;
+    const request = ++tariffReadSequence;
+    const response = hass.callWS<TariffProfile>({
+      type: `sax_power/dashboard/tariff/${draft ? ("tariff_type" in draft ? "configure" : "save") : "get"}`,
+      entry_id: entryId,
+      ...draft,
+    });
+    const operation: Promise<TariffProfile> =
+      (async (): Promise<TariffProfile> => {
+        const profile = await response;
+        if (current !== generation || !connected.value)
+          throw { code: "disconnected" };
+        if (!profile || typeof profile.revision !== "string")
+          throw { code: "failed" };
+        // REQ-VUE-ELECTRICITY-TARIFF: a delayed read must never undo a confirmed write.
+        if (!draft && request !== tariffReadSequence) {
+          if (tariffWrite?.generation === current) return tariffWrite.promise;
+          if (
+            tariffRead?.generation === current &&
+            tariffRead.sequence !== request
+          )
+            return tariffRead.promise;
+          return tariff.value ?? profile;
+        }
+        if (draft) tariffReadSequence++;
+        tariff.value = profile;
+        return profile;
+      })();
+    if (draft) tariffWrite = { generation: current, promise: operation };
+    else
+      tariffRead = {
+        generation: current,
+        sequence: request,
+        promise: operation,
+      };
+    try {
+      return await operation;
+    } finally {
+      if (tariffWrite?.promise === operation) tariffWrite = null;
+      if (tariffRead?.promise === operation) tariffRead = null;
+    }
+  }
+
+  async function loadTariffSeries(
+    day: "today" | "tomorrow",
+  ): Promise<TariffPriceSeries> {
+    const hass = getHass();
+    const entryId = getEntryId();
+    if (!connected.value) throw { code: "disconnected" };
+    if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const current = generation;
+    const result = await hass.callWS<TariffPriceSeries>({
+      type: "sax_power/dashboard/tariff/series",
+      entry_id: entryId,
+      day,
+    });
+    if (current !== generation || !connected.value)
+      throw { code: "disconnected" };
+    if (
+      !result ||
+      !Array.isArray(result.slots) ||
+      typeof result.start !== "string"
+    )
+      throw { code: "failed" };
+    return result;
+  }
+
+  async function gridServingForecastRequest(
+    source?: Pick<GridServingForecastSource, "pv_sensor" | "revision">,
+  ): Promise<GridServingForecastSource> {
+    const hass = getHass();
+    const entryId = getEntryId();
+    if (!connected.value) throw { code: "disconnected" };
+    if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const current = generation;
+    const result = await hass.callWS<GridServingForecastSource>({
+      type: `sax_power/dashboard/grid_serving/${source ? "save" : "get"}`,
+      entry_id: entryId,
+      ...source,
+    });
+    if (current !== generation || !connected.value)
+      throw { code: "disconnected" };
+    if (
+      !result ||
+      typeof result.revision !== "string" ||
+      typeof result.can_edit !== "boolean" ||
+      !(result.pv_sensor === null || typeof result.pv_sensor === "string")
+    )
+      throw { code: "failed" };
+    return result;
+  }
+
   return {
     language,
     ready: readonly(ready),
@@ -535,5 +694,12 @@ export function useSaxDashboard(
     entity,
     perform,
     performTimeWindow,
+    tariff: computed(() => tariff.value),
+    loadTariff: () => tariffRequest(),
+    saveTariff: (draft) => tariffRequest(draft),
+    configureTariff: (configuration) => tariffRequest(configuration),
+    loadTariffSeries,
+    loadGridServingForecast: () => gridServingForecastRequest(),
+    saveGridServingForecast: (source) => gridServingForecastRequest(source),
   };
 }

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.const import (
+    ATTR_UNIT_OF_MEASUREMENT,
+    PERCENTAGE,
+    UnitOfEnergy,
+    UnitOfTime,
+)
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -34,6 +39,19 @@ from .entity import (
     log_unmigratable_state,
     restorable_number,
 )
+
+
+def _restorable_price_eur_kwh(last_state: State) -> float | None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Altzustände waren Euro, neue Zustände Cent."""
+    value = restorable_number(last_state)
+    if value is None:
+        return None
+    unit = last_state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+    if unit == "ct/kWh":
+        return value / 100
+    if unit in (None, "EUR/kWh"):
+        return value
+    return None
 
 
 async def async_setup_entry(
@@ -279,7 +297,7 @@ class SaxPowerGridServingForecastThresholdNumber(
 
 class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity):
     """Preisgrenze für den Modus "Absoluter Preis" des preisoptimierten
-    Ladens, in EUR/kWh - siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
+    Ladens, in ct/kWh - siehe anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 
     Unterhalb dieses Arbeitspreises wird aus dem Netz geladen. Negative
     Werte sind zugelassen, weil börsenpreisgekoppelte Tarife zeitweise
@@ -293,10 +311,10 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity
     """
 
     _attr_translation_key = "price_charge_max_price"
-    _attr_native_min_value = MIN_PRICE_LIMIT
-    _attr_native_max_value = MAX_PRICE_LIMIT
-    _attr_native_step = PRICE_LIMIT_STEP
-    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_native_min_value = MIN_PRICE_LIMIT * 100
+    _attr_native_max_value = MAX_PRICE_LIMIT * 100
+    _attr_native_step = PRICE_LIMIT_STEP * 100
+    _attr_native_unit_of_measurement = "ct/kWh"
     _attr_mode = NumberMode.BOX
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
@@ -316,7 +334,7 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity
         if self.coordinator.price_charge_max_price is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            if (restored := restorable_number(last_state)) is not None:
+            if (restored := _restorable_price_eur_kwh(last_state)) is not None:
                 await self.coordinator.async_set_price_charge_max_price(restored)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
@@ -326,11 +344,12 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity
 
     @property
     def native_value(self) -> float | None:
-        return self.coordinator.price_charge_max_price
+        value = self.coordinator.price_charge_max_price
+        return None if value is None else value * 100
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_price_charge_max_price(
-            value, defer_device_update=True
+            value / 100, defer_device_update=True
         )
         self.async_write_ha_state()
 
@@ -338,7 +357,7 @@ class SaxPowerPriceLimitNumber(RestoreEntity, SaxPowerConfigEntity, NumberEntity
 class SaxPowerPriceNeutralPriceNumber(
     RestoreEntity, SaxPowerConfigEntity, NumberEntity
 ):
-    """Neutralpreis für das preisoptimierte Laden, in EUR/kWh - siehe
+    """Neutralpreis für das preisoptimierte Laden, in ct/kWh - siehe
     anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE.
 
     Bei Relativ/Smart pausieren nicht zum Laden ausgewählte Slots unterhalb
@@ -352,10 +371,10 @@ class SaxPowerPriceNeutralPriceNumber(
     """
 
     _attr_translation_key = "price_charge_neutral_price"
-    _attr_native_min_value = MIN_PRICE_LIMIT
-    _attr_native_max_value = MAX_PRICE_LIMIT
-    _attr_native_step = PRICE_LIMIT_STEP
-    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_native_min_value = MIN_PRICE_LIMIT * 100
+    _attr_native_max_value = MAX_PRICE_LIMIT * 100
+    _attr_native_step = PRICE_LIMIT_STEP * 100
+    _attr_native_unit_of_measurement = "ct/kWh"
     _attr_mode = NumberMode.BOX
 
     def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
@@ -375,7 +394,7 @@ class SaxPowerPriceNeutralPriceNumber(
         if self.coordinator.price_charge_neutral_price is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
-            if (restored := restorable_number(last_state)) is not None:
+            if (restored := _restorable_price_eur_kwh(last_state)) is not None:
                 await self.coordinator.async_set_price_charge_neutral_price(restored)
             else:
                 log_unmigratable_state(self.entity_id, last_state)
@@ -389,11 +408,12 @@ class SaxPowerPriceNeutralPriceNumber(
 
     @property
     def native_value(self) -> float | None:
-        return self.coordinator.price_charge_neutral_price
+        value = self.coordinator.price_charge_neutral_price
+        return None if value is None else value * 100
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_price_charge_neutral_price(
-            value, defer_device_update=True
+            value / 100, defer_device_update=True
         )
         self.async_write_ha_state()
 

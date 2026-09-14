@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import math
 import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -5334,12 +5336,37 @@ _FIXED_TARIFF_OPTIONS = {
 }
 
 
+@contextmanager
+def _economics_clock(coordinator, at: float) -> Iterator[None]:
+    """Advance wall and monotonic clocks together; apply options between ticks."""
+    epoch = datetime(2026, 9, 13, tzinfo=UTC)
+    if (previous := coordinator._energy_last_ts) is not None:
+        with patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=epoch + timedelta(seconds=previous),
+        ):
+            # These tests assign options immediately after the previous poll.
+            # The real options listener captures that change at the same point.
+            coordinator.tariff_provider.async_setup()
+            coordinator.tariff_provider.async_shutdown()
+    moment = epoch + timedelta(seconds=at)
+    with (
+        patch("custom_components.sax_power.coordinator.monotonic", return_value=at),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now", return_value=moment
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=moment,
+        ),
+    ):
+        yield
+
+
 def _bootstrap_economics(coordinator, *, soc: int, capacity_wh: int = 10000) -> None:
     """Erster Tick: setzt nur die Zeitbasis und bootstrapped die Bilanz -
     noch kein Delta, exakt wie beim echten ersten Refresh nach Aktivierung."""
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
-    ):
+    with _economics_clock(coordinator, 1000.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": 0,
@@ -5356,9 +5383,7 @@ def test_economics_grid_charge_cost_matches_the_grid_share(hass) -> None:
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         data = {
             "storage_power_active": -1000,
             "smartmeter_power": 1000,
@@ -5385,9 +5410,7 @@ def test_economics_grid_charge_normalizes_eur_per_mwh(hass) -> None:
     }
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         data = {
             "storage_power_active": -1000,
             "smartmeter_power": 1000,
@@ -5406,9 +5429,7 @@ def test_economics_pv_opportunity_cost_matches_the_pv_share(hass) -> None:
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         data = {
             "storage_power_active": -1000,
             "smartmeter_power": -500,  # Einspeisung während des Ladens
@@ -5432,9 +5453,7 @@ def test_missing_smartmeter_keeps_origin_counter_but_not_money_value(hass) -> No
     _seed_origin_accounting(coordinator)
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         data = {
             "storage_power_active": -1000,
             "smartmeter_power": None,
@@ -5545,9 +5564,7 @@ def test_economics_amounts_round_to_four_decimals(hass) -> None:
     }
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         data = {
             "storage_power_active": -1000,
             "smartmeter_power": 1000,
@@ -5567,9 +5584,7 @@ def test_tariff_switch_is_prospective_not_retroactive(hass) -> None:
     coordinator.options = _FIXED_TARIFF_OPTIONS  # 0.30 EUR/kWh
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": -1000,
@@ -5589,9 +5604,7 @@ def test_tariff_switch_is_prospective_not_retroactive(hass) -> None:
     }
     coordinator.notify_tariff_revision()
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
-    ):
+    with _economics_clock(coordinator, 8200.0):
         data = {
             "storage_power_active": -1000,
             "smartmeter_power": 1000,
@@ -5613,9 +5626,7 @@ def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
     coordinator.restore_energy_charged(0.0)
     coordinator.options = {}  # kein Tarif konfiguriert
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
-    ):
+    with _economics_clock(coordinator, 1000.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": -1000,
@@ -5623,9 +5634,7 @@ def test_disabled_tariff_keeps_economics_unavailable_but_energy_still_works(
                 "battery_capacity": 10000,
             }
         )
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         data = {
             "storage_power_active": -1000,
             "battery_soc": 50,
@@ -5680,9 +5689,7 @@ def test_economics_current_price_sensors_track_the_tariff_independently_of_boots
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
-    ):
+    with _economics_clock(coordinator, 1000.0):
         data = {
             "storage_power_active": 0,
             "battery_soc": None,
@@ -5730,7 +5737,7 @@ def _economics_tick(
     capacity_wh: int = 10000,
 ) -> dict:
     """Ein Poll-Tick der Bilanz zu einem festen monotonic-Zeitpunkt."""
-    with patch("custom_components.sax_power.coordinator.monotonic", return_value=at):
+    with _economics_clock(coordinator, at):
         data = {
             "storage_power_active": storage_power_active,
             "smartmeter_power": smartmeter_power,
@@ -5916,9 +5923,7 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     _bootstrap_economics(coordinator, soc=50)
     coordinator._economics_unvalued_inventory_kwh = 9.0
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": 0,
@@ -5930,9 +5935,7 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
         )
     assert coordinator._economics_unvalued_inventory_kwh == pytest.approx(9.0)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
-    ):
+    with _economics_clock(coordinator, 8200.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": 0,
@@ -5947,9 +5950,7 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     # Eine gemeldete Kapazität von 0 ist kein plausibler Messwert, sondern
     # ein gestörter Block - sonst würde der gesamte Bestand verworfen und
     # die nächste Entladung erzeugte den Scheingewinn aus Issue #42.
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=11800.0
-    ):
+    with _economics_clock(coordinator, 11800.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": 0,
@@ -5965,9 +5966,7 @@ def test_inventory_cap_is_skipped_while_capacity_or_soc_are_unknown(hass) -> Non
     # unbekannt ist: None darf nicht als bestätigter Stillstand gelten.
     coordinator._economics_inventory_idle_confirmations = 0
     for at in (12_000.0, 12_010.0):
-        with patch(
-            "custom_components.sax_power.coordinator.monotonic", return_value=at
-        ):
+        with _economics_clock(coordinator, at):
             coordinator._accumulate_energy(
                 {
                     "storage_power_active": None,
@@ -5997,9 +5996,7 @@ def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
 
     # Tarif pausieren, dann 1 kWh aus dem Netz laden.
     coordinator.options = {}
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": -1000,
@@ -6016,9 +6013,7 @@ def test_energy_during_a_tariff_pause_is_tracked_as_unpriced(hass) -> None:
 
     # Reaktivieren und exakt dieselbe Menge wieder entladen.
     coordinator.options = _FIXED_TARIFF_OPTIONS
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
-    ):
+    with _economics_clock(coordinator, 8200.0):
         data = {
             "storage_power_active": 1000,
             "smartmeter_power": 0,
@@ -6042,9 +6037,7 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
     coordinator.options = _FIXED_TARIFF_OPTIONS
     _bootstrap_economics(coordinator, soc=50)
 
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=4600.0
-    ):
+    with _economics_clock(coordinator, 4600.0):
         coordinator._accumulate_energy(
             {
                 "storage_power_active": -1000,
@@ -6057,9 +6050,7 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
     assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
 
     coordinator.options = {}
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=8200.0
-    ):
+    with _economics_clock(coordinator, 8200.0):
         data = {
             "storage_power_active": 0,
             "battery_soc": 50,
@@ -6076,9 +6067,7 @@ def test_monetary_sensors_hide_during_a_pause_but_internal_state_survives(
     assert coordinator._economics_grid_charge_cost_eur == pytest.approx(0.30)
 
     coordinator.options = _FIXED_TARIFF_OPTIONS
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=11800.0
-    ):
+    with _economics_clock(coordinator, 11800.0):
         data = {
             "storage_power_active": 0,
             "battery_soc": 50,
@@ -6146,7 +6135,7 @@ def _tick_with_delta(
     ungleich 0 sorgt lediglich dafür, dass _accumulate_energy überhaupt ein
     charge_delta != None berechnet, das dann durch `delta` ersetzt wird."""
     with patch(
-        "custom_components.sax_power.coordinator.compute_economics_delta",
+        "custom_components.sax_power.coordinator.compute_economics_interval",
         return_value=delta,
     ):
         return _tick_on(
@@ -7319,7 +7308,8 @@ async def test_restart_economics_accounting_needs_no_current_battery_data(
     _bootstrap_economics_on(coordinator, now=datetime(2026, 3, 10, 9, 0))
     coordinator.data = {}
 
-    await coordinator.async_restart_economics_accounting()
+    async with coordinator._charge_control_lock, coordinator._write_lock:
+        await asyncio.wait_for(coordinator.async_restart_economics_accounting(), 0.2)
 
     assert coordinator._economics_unvalued_inventory_kwh == 0.0
 

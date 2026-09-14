@@ -45,6 +45,7 @@ from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import SaxPowerCoordinator
 from .domain.economics_status import EconomicsStatus
 from .entity import SaxPowerEntity
+from .infrastructure.price_statistics import async_migrate_price_statistics
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -71,6 +72,16 @@ class SaxPowerSensorEntityDescription(SensorEntityDescription):
 def _direct(key: str) -> Callable[[dict[str, Any]], StateType]:
     """Liest den Wert unverändert unter demselben Schlüssel aus coordinator.data."""
     return lambda data: data.get(key)
+
+
+def _price_ct_kwh(key: str) -> Callable[[dict[str, Any]], StateType]:
+    """Interne Europreise in Cent anzeigen (REQ-VUE-TARIFF-EDITOR)."""
+
+    def value_fn(data: dict[str, Any]) -> StateType:
+        value = data.get(key)
+        return None if value is None else value * 100
+
+    return value_fn
 
 
 def _positive_part(key: str) -> Callable[[dict[str, Any]], StateType]:
@@ -308,6 +319,11 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         value_fn=_direct("grid_serving_forecast_kwh"),
+        attributes_fn=lambda coordinator: {
+            "source_entity_id": (
+                coordinator.price_planner.grid_serving_pv_forecast_entity_id
+            )
+        },
     ),
     SaxPowerSensorEntityDescription(
         key="grid_serving_pause_status",
@@ -349,9 +365,9 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         key="price_charge_current_price",
         translation_key="price_charge_current_price",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="EUR/kWh",
-        suggested_display_precision=4,
-        value_fn=_direct("price_charge_current_price"),
+        native_unit_of_measurement="ct/kWh",
+        suggested_display_precision=2,
+        value_fn=_price_ct_kwh("price_charge_current_price"),
     ),
     SaxPowerSensorEntityDescription(
         key="setpoint_power",
@@ -896,18 +912,18 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         key="economics_current_import_price",
         translation_key="economics_current_import_price",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="EUR/kWh",
-        suggested_display_precision=4,
-        value_fn=_direct("economics_current_import_price"),
+        native_unit_of_measurement="ct/kWh",
+        suggested_display_precision=2,
+        value_fn=_price_ct_kwh("economics_current_import_price"),
         attributes_fn=_economics_price_attributes,
     ),
     SaxPowerSensorEntityDescription(
         key="economics_feed_in_price",
         translation_key="economics_feed_in_price",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="EUR/kWh",
-        suggested_display_precision=4,
-        value_fn=_direct("economics_feed_in_price"),
+        native_unit_of_measurement="ct/kWh",
+        suggested_display_precision=2,
+        value_fn=_price_ct_kwh("economics_feed_in_price"),
     ),
     # -- ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION) -------------
     # Ohne konfigurierte Investitionskosten (economics_investment_cost_eur)
@@ -1005,6 +1021,12 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         super().__init__(coordinator, entry_id)
         self.entity_description = description
         self._assign_ids("sensor", description.key)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        async_migrate_price_statistics(
+            self.hass, self._entry_id, self.entity_description.key
+        )
 
     @property
     def native_value(self) -> StateType | date | datetime:

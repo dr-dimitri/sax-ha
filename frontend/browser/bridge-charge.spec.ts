@@ -61,15 +61,16 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
   page.on("pageerror", (error) => errors.push(error.message));
   const english = testInfo.project.name.endsWith("en");
   const mobile = testInfo.project.name.startsWith("mobile");
-  await page.goto("/sax-power-vue/ladeautomatik?bridge-plan");
+  await page.goto("/sax-power-vue/stromtarif?bridge-plan");
   const panel = page.locator("sax-power-vue-panel");
   const plan = panel.locator(".charge-plan");
+  await panel.locator(".electricity-plan > summary").click();
   await expect(plan).toBeVisible();
   if (english) await page.locator("#language").click();
   if (testInfo.project.name.includes("dark"))
     await page.locator("#theme").click();
   await expect(panel.getByRole("heading", { level: 1 })).toHaveText(
-    english ? "Time-of-use tariff" : "Zeitvariabler Tarif",
+    english ? "Electricity tariff" : "Stromtarif",
   );
   await expect(plan.getByRole("heading", { level: 2 })).toHaveText(
     english ? "Charging plan" : "Ladeplanung",
@@ -106,20 +107,8 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
       hasText: english ? "Grid charge min. SOC" : "Netzladung Min. SOC",
     }),
   ).toHaveCount(0);
-  await expect(
-    panel.locator(".entity-control__name").filter({
-      hasText: english ? "Grid charge max. SOC" : "Netzladen Max. SOC",
-    }),
-  ).toBeVisible();
-  await expect(panel.locator("input[type=number]")).toHaveCount(1);
-  await expect(
-    panel.getByRole("heading", {
-      name: english ? "Active months" : "Aktive Monate",
-      exact: true,
-    }),
-  ).toBeVisible();
   await expect(panel.locator(".tariff-plan")).toBeVisible();
-  await expect(plan.getByRole("switch")).toBeChecked();
+  await expect(plan.getByRole("switch")).toHaveCount(0);
 
   for (const width of mobile ? [390, 320] : [1440, 1100]) {
     await page.setViewportSize({ width, height: mobile ? 844 : 1000 });
@@ -168,17 +157,5 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
     await attachScreenshot(plan, testInfo, "not-needed", width);
   }
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
-  const planning = plan.getByRole("switch");
-  await planning.click();
-  await expect(planning).not.toBeChecked();
-  await expect(panel.locator("input[type=number]")).toHaveCount(2);
-  await expect(page.locator("#actions")).toContainText("switch.turn_off");
-  await expect(page.locator("#actions")).toContainText(
-    "switch.demo_bridge_charge_enabled",
-  );
-  await planning.click();
-  await expect(planning).toBeChecked();
-  await expect(panel.locator("input[type=number]")).toHaveCount(1);
-  await expect(page.locator("#actions")).toContainText("switch.turn_on");
   expect(errors).toEqual([]);
 });

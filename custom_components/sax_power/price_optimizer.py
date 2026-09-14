@@ -19,8 +19,9 @@ import asyncio
 import logging
 import math
 from collections.abc import Iterable, Mapping, Sequence, Sized
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -56,6 +57,7 @@ from .const import (
 )
 from .domain.forecast import normalize_energy_kwh
 from .domain.price_units import unit_factor
+from .domain.tariff import TariffType, is_valid_import_price
 from .infrastructure.price_plan_store import (
     PricePlanCycleState,
     PricePlanCycleStore,
@@ -196,17 +198,9 @@ def _local_datetime(value: datetime) -> datetime:
     return dt_util.as_local(value)
 
 
-def _unit_factor(configured_unit: str, sensor_unit: Any) -> float:
-    """Umrechnungsfaktor auf EUR/kWh (siehe domain/price_units.py).
-
-    Anders als die Wirtschaftlichkeitsauswertung interpretiert die
-    Ladeplanung eine fremde Einheit nicht als Fehler, sondern rechnet den
-    Wert unverändert weiter: Ein Plan mit auffällig falschen Preisen ist im
-    Preis-Sensor sofort sichtbar und über CONF_PRICE_UNIT korrigierbar,
-    während ein plötzlich planloser Ladevorgang nur schwer zuzuordnen wäre.
-    """
-    factor = unit_factor(configured_unit, sensor_unit)
-    return 1.0 if factor is None else factor
+def _unit_factor(configured_unit: str, sensor_unit: Any) -> float | None:
+    """REQ-VUE-ELECTRICITY-TARIFF: planning and accounting share price units."""
+    return unit_factor(configured_unit, sensor_unit)
 
 
 def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
@@ -239,7 +233,7 @@ def _coerce_price(value: Any) -> float | None:
         return None
     try:
         price = float(value)
-    except TypeError, ValueError:
+    except TypeError, ValueError, OverflowError:
         return None
     if not math.isfinite(price):
         return None
@@ -321,13 +315,10 @@ def _finalize_slots(
     REQ-DYNAMIC-PRICE-CHARGE: Bei unregelmäßigen Daten begrenzt diese
     vorsichtige Annahme die unbestätigte Gültigkeit des letzten Preises.
     """
-    by_start: dict[datetime, tuple[datetime, datetime | None, float | None]] = {}
+    by_start: dict[datetime, list[tuple[datetime, datetime | None, float | None]]] = {}
     for start, end, price in raw:
         instant = _instant(start)
-        if instant not in by_start or (
-            by_start[instant][2] is None and price is not None
-        ):
-            by_start[instant] = (start, end, price)
+        by_start.setdefault(instant, []).append((start, end, price))
     instants = sorted(by_start)
     if not instants:
         return []
@@ -344,20 +335,24 @@ def _finalize_slots(
     )
 
     slots: list[PriceSlot] = []
+    seen: set[tuple[datetime, datetime, float]] = set()
     for index, start_instant in enumerate(instants):
-        start, end, price = by_start[start_instant]
-        # REQ-DYNAMIC-PRICE-CHARGE / REQ-ECONOMICS-TARIFFS: Die bekannte
-        # Grenze eines unlesbaren Preises begrenzt weiterhin den Vorgänger.
-        if price is None:
-            continue
-        if end is None or _instant(end) <= start_instant:
-            if index + 1 < len(instants):
-                end = by_start[instants[index + 1]][0]
-            else:
-                end = (start_instant + timedelta(seconds=default_seconds)).astimezone(
-                    start.tzinfo
-                )
-        slots.append(PriceSlot(start=start, end=end, price=price * factor))
+        for start, end, price in by_start[start_instant]:
+            # Unreadable prices still bound their predecessor. Conflicting
+            # duplicates must survive so consumers can mark ambiguous coverage.
+            if price is None:
+                continue
+            if end is None or _instant(end) <= start_instant:
+                if index + 1 < len(instants):
+                    end = by_start[instants[index + 1]][0][0]
+                else:
+                    end = (
+                        start_instant + timedelta(seconds=default_seconds)
+                    ).astimezone(start.tzinfo)
+            identity = start_instant, _instant(end), price * factor
+            if identity not in seen:
+                seen.add(identity)
+                slots.append(PriceSlot(start=start, end=end, price=price * factor))
     return slots
 
 
@@ -376,10 +371,16 @@ def parse_price_slots(
     Gibt eine leere Liste zurück, wenn sich nichts Verwertbares finden
     lässt - der Aufrufer meldet das dann als "Keine Preisdaten".
     """
-    if state is None:
+    if state is None or getattr(state, "state", None) in (
+        STATE_UNKNOWN,
+        STATE_UNAVAILABLE,
+        "",
+    ):
         return []
     attributes: Mapping[str, Any] = getattr(state, "attributes", {}) or {}
     factor = _unit_factor(unit, attributes.get("unit_of_measurement"))
+    if factor is None:
+        return []
     now = now or dt_util.now()
 
     groups: tuple[tuple[str, ...], ...] = (
@@ -446,10 +447,33 @@ def _has_value(value: Any) -> bool:
 
 
 def current_price(slots: Sequence[PriceSlot], moment: datetime) -> float | None:
-    for slot in slots:
-        if slot.overlaps(moment):
-            return slot.price
-    return None
+    matches = [slot for slot in slots if slot.overlaps(moment)]
+    return matches[0].price if len(matches) == 1 else None
+
+
+def unambiguous_price_slots(slots: Sequence[PriceSlot]) -> list[PriceSlot]:
+    """Keep known prices around a conflicting overlap without inventing its price."""
+    ordered = sorted(slots, key=lambda slot: _instant(slot.start))
+    if all(
+        _instant(left.end) <= _instant(right.start) for left, right in pairwise(ordered)
+    ):
+        return ordered
+    boundaries = sorted(
+        {_instant(boundary) for slot in ordered for boundary in (slot.start, slot.end)}
+    )
+    result: list[PriceSlot] = []
+    for start, end in pairwise(boundaries):
+        matches = [slot for slot in ordered if slot.overlaps(start)]
+        if len(matches) == 1:
+            slot = matches[0]
+            result.append(
+                PriceSlot(
+                    start.astimezone(slot.start.tzinfo),
+                    end.astimezone(slot.end.tzinfo),
+                    slot.price,
+                )
+            )
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -546,6 +570,7 @@ def compute_plan(
     Coordinator zusätzlich anhand von Max-SOC-Sperre, PV-Überschuss und
     Vorrang der (zeitgesteuerten) Netzladung.
     """
+    slots = unambiguous_price_slots(slots)
     price_now = current_price(slots, now)
     if not ctx.enabled or ctx.strategy == PRICE_STRATEGY_OFF:
         return PricePlan(status=PRICE_STATUS_OFF, current_price=price_now)
@@ -698,6 +723,19 @@ class SaxPricePlanner:
     @property
     def price_unit(self) -> str:
         return self.coordinator.options.get(CONF_PRICE_UNIT) or DEFAULT_PRICE_UNIT
+
+    @property
+    def has_unsupported_price_unit(self) -> bool:
+        """REQ-SELF-DIAGNOSIS-REPAIRS: Fremde Einheiten sind kein Datenaussetzer."""
+        entity_id = self.price_entity_id
+        state = self.hass.states.get(entity_id) if entity_id else None
+        return (
+            state is not None
+            and _unit_factor(
+                self.price_unit, state.attributes.get("unit_of_measurement")
+            )
+            is None
+        )
 
     @property
     def pv_factor(self) -> float:
@@ -873,18 +911,36 @@ class SaxPricePlanner:
         now = dt_util.now()
         slots: list[PriceSlot] = []
         if entity_id:
+            state = self.hass.states.get(entity_id)
             slots = parse_price_slots(
-                self.hass.states.get(entity_id),
+                state,
                 attribute=self.price_attribute,
                 unit=self.price_unit,
-                now=now,
+                now=dt_util.as_local(state.last_updated) if state is not None else now,
             )
+            slots = [
+                slot
+                for slot in unambiguous_price_slots(slots)
+                if is_valid_import_price(slot.price)
+            ]
             if not slots:
                 _LOGGER.debug(
                     "Preisoptimiertes Laden: keine auswertbaren Preisdaten in %s",
                     entity_id,
                 )
         self.plan = self._evaluate_price_charge(now, slots, entity_id)
+        if self.coordinator.tariff_provider.config.tariff_type is TariffType.DYNAMIC:
+            quote = self.coordinator.tariff_provider.quote(now)
+            self.plan = replace(
+                self.plan,
+                current_price=quote.price_eur_kwh,
+                charge_now=self.plan.charge_now and quote.quote is not None,
+                status=(
+                    PRICE_STATUS_NO_PRICE_DATA
+                    if self.plan.charge_now and quote.quote is None
+                    else self.plan.status
+                ),
+            )
         return self.plan
 
     def _evaluate_price_charge(

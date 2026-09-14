@@ -1,4 +1,4 @@
-"""Optionales SAX-Power-Dashboard (REQ-VUE-DASHBOARD)."""
+"""Integriertes SAX-Power-Dashboard (REQ-VUE-DASHBOARD)."""
 
 from __future__ import annotations
 
@@ -18,9 +18,7 @@ from homeassistant.util.hass_dict import HassKey
 
 from .const import (
     CONF_VUE_DASHBOARD_DISMISSED_VERSION,
-    CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
-    DEFAULT_VUE_DASHBOARD_ENABLED,
     DOMAIN,
     ISSUE_VUE_DASHBOARD_UPDATE,
 )
@@ -72,10 +70,7 @@ def _remove_owned_panel(hass: HomeAssistant, runtime: _PanelRuntime) -> bool:
 
 
 def _enabled(entry: ConfigEntry) -> bool:
-    return entry.disabled_by is None and entry.options.get(
-        CONF_VUE_DASHBOARD_ENABLED,
-        entry.data.get(CONF_VUE_DASHBOARD_ENABLED, DEFAULT_VUE_DASHBOARD_ENABLED),
-    )
+    return entry.disabled_by is None
 
 
 def _issue_id(entry: ConfigEntry) -> str:
@@ -121,7 +116,7 @@ def _update_issue(
 
 
 def vue_dashboard_available(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Ob der Eintrag noch existiert und sein Vue-Dashboard aktiviert ist."""
+    """Ob der Eintrag noch existiert und nicht deaktiviert ist."""
     return hass.config_entries.async_get_entry(entry.entry_id) is entry and _enabled(
         entry
     )
@@ -134,7 +129,7 @@ async def async_sync_vue_dashboard(
     force: bool = False,
     expected_version: str | None = None,
 ) -> bool:
-    """Synchronisiere die dauerhafte Option, ohne das Batterie-Setup zu blockieren."""
+    """Registriere das integrierte Dashboard, ohne das Batterie-Setup zu blockieren."""
     if _DATA_RUNTIME not in hass.data and not _enabled(entry):
         ir.async_delete_issue(hass, DOMAIN, _issue_id(entry))
         return not force
@@ -231,7 +226,7 @@ async def async_sync_vue_dashboard(
                 return False
             _update_issue(hass, entry, version, initialize=not force)
         except Exception:  # noqa: BLE001
-            # Die optionale Oberfläche darf die Geräteverbindung und ihre
+            # Die Oberfläche darf die Geräteverbindung und ihre
             # Schutz-/Ladefunktionen nicht von einem Frontendfehler abhängig machen.
             _LOGGER.exception("Vue-Dashboard konnte nicht aktiviert werden")
             if vue_dashboard_available(hass, entry):

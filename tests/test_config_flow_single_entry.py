@@ -31,7 +31,7 @@ async def _open_flow_at_step(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    for expected_step in ("user", "grid_charge", "dashboard", "finish"):
+    for expected_step in ("user", "grid_charge", "finish"):
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == expected_step
         if expected_step == step_id:
@@ -82,7 +82,7 @@ async def test_dhcp_rejects_another_storage_without_touching_existing_entry(
     assert entry.source == config_entries.SOURCE_DHCP
 
 
-@pytest.mark.parametrize("step_id", ["grid_charge", "dashboard", "finish"])
+@pytest.mark.parametrize("step_id", ["grid_charge", "finish"])
 async def test_open_onboarding_stops_when_an_entry_was_added(
     hass: HomeAssistant, step_id: str
 ) -> None:
@@ -197,7 +197,7 @@ async def test_ignored_discovery_does_not_block_first_storage(
         )
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "user"
-        for user_input in (CONNECTION_DATA, {}, {}, {}):
+        for user_input in (CONNECTION_DATA, {}, {}):
             result = await hass.config_entries.flow.async_configure(
                 result["flow_id"], user_input
             )

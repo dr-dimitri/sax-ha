@@ -57,12 +57,12 @@ export function chargingSample(language = "de"): {
         if (key === "timed_charge_max_soc") attributes.max = 90;
         if (key === "timed_charge_min_soc") state = "20";
         if (key.includes("price") && !key.endsWith("hours")) {
-          state = key.endsWith("neutral_price") ? "0.3" : "-0.05";
+          state = key.endsWith("neutral_price") ? "30" : "-5";
           attributes = {
-            min: -1,
-            max: 2,
-            step: 0.001,
-            unit_of_measurement: "EUR/kWh",
+            min: -100,
+            max: 200,
+            step: 0.1,
+            unit_of_measurement: "ct/kWh",
           };
         }
         if (key.endsWith("hours")) {
@@ -92,8 +92,8 @@ export function chargingSample(language = "de"): {
           };
         }
         if (key === "price_charge_current_price") {
-          state = "-0.04";
-          attributes = { unit_of_measurement: "EUR/kWh" };
+          state = "-4";
+          attributes = { unit_of_measurement: "ct/kWh" };
         }
         if (key === "price_charge_next_start") {
           state = "2026-09-14T05:00:00Z";

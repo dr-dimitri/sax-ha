@@ -62,7 +62,6 @@ async def test_installed_asset_and_repair_hash_are_served_by_home_assistant(
     entry = MockConfigEntry(
         domain=const.DOMAIN,
         data={const.CONF_VUE_DASHBOARD_VERSION: ""},
-        options={const.CONF_VUE_DASHBOARD_ENABLED: True},
     )
     entry.add_to_hass(hass)
     # Enable discovery of the installed repairs platform without starting the

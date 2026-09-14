@@ -141,7 +141,20 @@ async def _active_economics_coordinator(hass) -> SaxPowerCoordinator:
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
     await coordinator.async_load_energy_state()
     await coordinator.async_load_economics_state()
-    coordinator._accumulate_economics({}, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0)
+    now = dt_util.now()
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=now - timedelta(seconds=2),
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=dt_util.as_utc(now) - timedelta(seconds=2),
+        ),
+    ):
+        coordinator._accumulate_economics({}, None, 0.0, 0.0)
+    with patch("custom_components.sax_power.coordinator.dt_util.now", return_value=now):
+        coordinator._accumulate_economics({}, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0)
     await coordinator._async_flush_economics_state()
     return coordinator
 
@@ -974,7 +987,7 @@ async def test_concurrent_writes_do_not_falsely_fail_the_readback(hass) -> None:
 
 @pytest.mark.parametrize("concurrent_write", [None, "delayed", "flush"])
 async def test_reset_supersedes_polls_and_waiting_old_writes(
-    hass, concurrent_write: str | None
+    hass, freezer, concurrent_write: str | None
 ) -> None:
     """REQ-ECONOMICS-OBSERVABILITY: Polls während Reset-I/O frieren die
     neue Bilanz nicht ein; alte Timer/Flushes schreiben sie nie zurück (#168)."""
@@ -985,6 +998,7 @@ async def test_reset_supersedes_polls_and_waiting_old_writes(
     reset = asyncio.create_task(coordinator.async_restart_economics_accounting())
     await entered.wait()
 
+    freezer.tick(2)
     coordinator._accumulate_economics({}, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
     assert coordinator._economics_priced_charge_kwh == pytest.approx(1.01)
     waiting_write = None
@@ -1007,6 +1021,7 @@ async def test_reset_supersedes_polls_and_waiting_old_writes(
     assert store._unsub_final_write_listener is None
 
     data = {}
+    freezer.tick(2)
     coordinator._accumulate_economics(data, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
     assert data["economics_status"] == "active"
     assert data["economics_net_savings"] == pytest.approx(-0.003)
@@ -1024,7 +1039,7 @@ async def test_reset_supersedes_polls_and_waiting_old_writes(
 
 @pytest.mark.parametrize("start_delayed_write", [False, True])
 async def test_failed_reset_preserves_concurrent_poll_and_pending_persistence(
-    hass, start_delayed_write: bool
+    hass, freezer, start_delayed_write: bool
 ) -> None:
     """REQ-ECONOMICS-OBSERVABILITY: Ein fehlgeschlagener Reset erhält auch
     den während seiner Datei-I/O gewachsenen Altstand und dessen Timer (#168)."""
@@ -1034,6 +1049,7 @@ async def test_failed_reset_preserves_concurrent_poll_and_pending_persistence(
     entered, release = _pause_next_store_write(store, fail=True)
     reset = asyncio.create_task(coordinator.async_restart_economics_accounting())
     await entered.wait()
+    freezer.tick(2)
     coordinator._accumulate_economics({}, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
     pending_write = None
     if start_delayed_write:

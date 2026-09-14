@@ -25,7 +25,9 @@ from custom_components.sax_power.const import (
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SOC,
+    MIN_PRICE_LIMIT,
     MIN_SOC,
+    PRICE_LIMIT_STEP,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.number import (
@@ -285,6 +287,78 @@ async def test_grid_serving_forecast_threshold_restore_clamps_value(
 
 
 # -- Preisoptimiertes Laden (anforderung.yaml, REQ-DYNAMIC-PRICE-CHARGE) ----
+@pytest.mark.parametrize(
+    ("entity_class", "field"),
+    [
+        (SaxPowerPriceLimitNumber, "price_charge_max_price"),
+        (SaxPowerPriceNeutralPriceNumber, "price_charge_neutral_price"),
+    ],
+)
+@pytest.mark.parametrize("price_ct_kwh", [-100, -5.2, 0, 34.21, 200])
+async def test_price_numbers_display_and_accept_cents(
+    hass, coordinator, entity_class, field, price_ct_kwh
+) -> None:
+    """REQ-VUE-TARIFF-EDITOR: Cent-Eingaben erhalten interne Euro-Schwellwerte."""
+    entity = entity_class(coordinator, "test_entry_id")
+    _prepare_entity(entity, hass, "number.test_price", None)
+
+    assert entity.native_value is None
+    assert entity.native_unit_of_measurement == "ct/kWh"
+    assert entity.native_min_value == MIN_PRICE_LIMIT * 100
+    assert entity.native_max_value == MAX_PRICE_LIMIT * 100
+    assert entity.native_step == pytest.approx(PRICE_LIMIT_STEP * 100)
+
+    await entity.async_set_native_value(price_ct_kwh)
+
+    assert getattr(coordinator, field) == pytest.approx(price_ct_kwh / 100)
+    assert entity.native_value == pytest.approx(price_ct_kwh)
+
+
+@pytest.mark.parametrize(
+    ("entity_class", "field"),
+    [
+        (SaxPowerPriceLimitNumber, "price_charge_max_price"),
+        (SaxPowerPriceNeutralPriceNumber, "price_charge_neutral_price"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("unit", "state", "expected_eur"),
+    [
+        (None, "-0.05", -0.05),
+        ("EUR/kWh", "-0.05", -0.05),
+        ("ct/kWh", "-5", -0.05),
+        ("ct/kWh", "42", 0.42),
+        ("ct/kWh", "999", MAX_PRICE_LIMIT),
+        ("ct/kWh", "-999", MIN_PRICE_LIMIT),
+        ("ct/kWh", "nan", None),
+        ("ct/kWh", "inf", None),
+        ("ct/kWh", "unavailable", None),
+        ("EUR/kWh", "nan", None),
+        ("EUR/MWh", "42", None),
+    ],
+)
+async def test_price_number_restore_obeys_saved_unit(
+    hass, coordinator, entity_class, field, unit, state, expected_eur
+) -> None:
+    """REQ-VUE-TARIFF-EDITOR: Neue Cent- und alte Euro-States migrieren."""
+    entity = entity_class(coordinator, "test_entry_id")
+    _prepare_entity(
+        entity,
+        hass,
+        "number.test_price",
+        State("number.test_price", state, {"unit_of_measurement": unit}),
+    )
+
+    await entity.async_added_to_hass()
+
+    if expected_eur is None:
+        assert getattr(coordinator, field) is None
+        assert entity.native_value is None
+    else:
+        assert getattr(coordinator, field) == pytest.approx(expected_eur)
+        assert entity.native_value == pytest.approx(expected_eur * 100)
+
+
 async def test_price_limit_defaults_on_fresh_install(hass, coordinator) -> None:
     """Ohne gespeicherten Zustand steht die Preisgrenze auf dem Vorgabewert
     statt auf 0 EUR/kWh (dabei würde nie geladen)."""

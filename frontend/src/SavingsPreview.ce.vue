@@ -6,6 +6,7 @@ import type {
   DashboardEntityMetadata,
   HassEntity,
   HomeAssistant,
+  TariffProfile,
 } from "./types";
 import type { SavingsStatistics } from "./savings";
 
@@ -13,6 +14,17 @@ const language = ref("de");
 const dark = ref(false);
 const state = ref("active");
 const tariff = ref("time_of_use");
+const previewTariff = ref<TariffProfile>({
+  tariff_type: "time_of_use",
+  base_price_ct_kwh: 28.92,
+  feed_in_price_ct_kwh: 7.8,
+  windows: [
+    { start: "00:00:00", end: "06:00:00", price_ct_kwh: 18.92 },
+    { start: "17:00:00", end: "21:00:00", price_ct_kwh: 38.92 },
+  ],
+  revision: "preview-1",
+  can_edit: true,
+});
 const empty = ref(false);
 const investment = ref(true);
 const metadata: DashboardEntityMetadata[] = [
@@ -60,7 +72,7 @@ const hass = computed<HomeAssistant>(() => {
     "3251.45",
     "251.45",
     state.value,
-    ".2892",
+    "28.92",
   ];
   const states: Record<string, HassEntity> = Object.fromEntries(
     metadata.map((item, index) => [
@@ -76,23 +88,19 @@ const hass = computed<HomeAssistant>(() => {
               : item.key === "economics_current_import_price"
                 ? {
                     tariff_type: tariff.value,
-                    windows: [
-                      {
-                        start: "00:00:00",
-                        end: "06:00:00",
-                        price_eur_kwh: 0.1892,
-                        low_tariff: true,
-                      },
-                      {
-                        start: "17:00:00",
-                        end: "21:00:00",
-                        price_eur_kwh: 0.3892,
-                        low_tariff: false,
-                      },
-                    ],
+                    unit_of_measurement: "ct/kWh",
+                    windows: previewTariff.value.windows.map(
+                      (window, index) => ({
+                        ...window,
+                        price_eur_kwh: window.price_ct_kwh / 100,
+                        low_tariff: index === 0,
+                      }),
+                    ),
                     active_window: null,
-                    base_price_eur_kwh: 0.2892,
-                    feed_in_price_eur_kwh: 0.078,
+                    base_price_eur_kwh:
+                      previewTariff.value.base_price_ct_kwh! / 100,
+                    feed_in_price_eur_kwh:
+                      previewTariff.value.feed_in_price_ct_kwh! / 100,
                     next_price_change_at: "2026-09-12T17:00:00+02:00",
                     unavailable_reason: null,
                     low_tariff_price_eur_kwh: 0.1892,
@@ -115,6 +123,16 @@ const hass = computed<HomeAssistant>(() => {
       first_weekday: "language",
     },
     async callWS<T>(message: Readonly<Record<string, unknown>>) {
+      if (message.type === "sax_power/dashboard/tariff/get")
+        return { ...previewTariff.value, tariff_type: tariff.value } as T;
+      if (message.type === "sax_power/dashboard/tariff/save") {
+        previewTariff.value = {
+          ...previewTariff.value,
+          ...message,
+          revision: `${previewTariff.value.revision}-saved`,
+        } as TariffProfile;
+        return previewTariff.value as T;
+      }
       const startDate =
         typeof message.start_date === "string"
           ? message.start_date

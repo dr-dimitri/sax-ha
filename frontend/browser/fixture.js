@@ -15,7 +15,12 @@ let language = "de";
 let connected = true;
 let unavailable = false;
 let rejectNext = false;
+let holdNextAction = false;
+let releaseAction = null;
+let tariffConfigureRequests = 0;
 let writes = 0;
+let activeTariff = "time_of_use";
+let tariffRevision = 1;
 const bridgePlan = new URLSearchParams(location.search).has("bridge-plan");
 
 const general = [
@@ -56,7 +61,9 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
       key !== "bridge_charge_enabled" &&
       !general.includes(key) &&
       !economics.includes(key) &&
-      !(bridgePlan && key === "bridge_charge_plan") &&
+      !(
+        bridgePlan && ["bridge_charge_plan", "discharge_forecast"].includes(key)
+      ) &&
       !["timed_charge_", "grid_serving_", "price_charge_"].some((prefix) =>
         key.startsWith(prefix),
       )
@@ -106,12 +113,12 @@ function example({ domain, key, entity_id }) {
     attributes.options = ["off", "absolute", "relative", "smart"];
   }
   if (key.includes("price") && domain === "number") {
-    state = "-0.05";
+    state = "-5";
     attributes = {
-      min: -1,
-      max: 2,
-      step: 0.001,
-      unit_of_measurement: "EUR/kWh",
+      min: -100,
+      max: 200,
+      step: 0.1,
+      unit_of_measurement: "ct/kWh",
     };
   }
   if (key === "price_charge_hours") {
@@ -144,15 +151,16 @@ function example({ domain, key, entity_id }) {
     price_charge_active_text: "Inaktiv",
     price_charge_status_text: "Warte auf Preisfenster",
     price_charge_next_start: "2026-09-13T20:00:00Z",
-    price_charge_current_price: "-0.04",
+    price_charge_current_price: "-4",
     economics_investment_configured: "on",
     economics_amortization_progress: "28.5",
     economics_remaining_to_payback: "7150",
     economics_roi: "28.5",
     economics_net_savings: "1350.25",
     economics_status: "active",
-    economics_current_import_price: "0.2456",
+    economics_current_import_price: "24.56",
     bridge_charge_plan: "planned",
+    discharge_forecast: "2026-09-14T01:15:00Z",
   };
   state = values[key] ?? state;
   if (["soc", "economics_amortization_progress", "economics_roi"].includes(key))
@@ -167,7 +175,7 @@ function example({ domain, key, entity_id }) {
   if (key === "next_cell_calibration") attributes.device_class = "date";
   if (key === "price_charge_next_start") attributes.device_class = "timestamp";
   if (key === "price_charge_current_price")
-    attributes.unit_of_measurement = "EUR/kWh";
+    attributes.unit_of_measurement = "ct/kWh";
   if (key === "grid_serving_forecast")
     attributes.friendly_name = "PV-Prognose 13.9.";
   if (key === "economics_roi") attributes.prior_result_eur = 1499.75;
@@ -175,7 +183,7 @@ function example({ domain, key, entity_id }) {
     attributes.economics_started_at = "2026-01-01T00:00:00Z";
   if (key === "economics_current_import_price")
     attributes = {
-      unit_of_measurement: "EUR/kWh",
+      unit_of_measurement: "ct/kWh",
       tariff_type: "time_of_use",
       windows: [
         { start: "00:00", end: "06:00", price_eur_kwh: 0.18, low_tariff: true },
@@ -196,6 +204,13 @@ function example({ domain, key, entity_id }) {
       low_tariff_active: false,
       low_tariff_valid_until: null,
     };
+  if (key === "discharge_forecast")
+    attributes = {
+      device_class: "timestamp",
+      observation_minutes: 12,
+      average_discharge_w: 800,
+      observed_at: "2026-09-13T21:00:00Z",
+    };
   if (key === "bridge_charge_plan")
     attributes = {
       enabled: true,
@@ -213,6 +228,33 @@ function example({ domain, key, entity_id }) {
 let states = Object.fromEntries(
   definitions.map((item) => [item.entity_id, example(item)]),
 );
+const tariffProfiles = {
+  time_of_use: {
+    base_price_ct_kwh: 32,
+    feed_in_price_ct_kwh: 8.12,
+    windows: [
+      { start: "00:00:00", end: "06:00:00", price_ct_kwh: 18 },
+      { start: "18:00:00", end: "22:00:00", price_ct_kwh: 24.56 },
+    ],
+    pv_sensor: null,
+  },
+  dynamic: {
+    feed_in_price_ct_kwh: 8.12,
+    price_sensor: "sensor.demo_dynamic_price",
+    price_attribute: null,
+    price_unit: "ct_kwh",
+    pv_sensor: null,
+    pv_factor: 70,
+  },
+};
+states["sensor.demo_dynamic_price"] = {
+  entity_id: "sensor.demo_dynamic_price",
+  state: "24.56",
+  attributes: {
+    friendly_name: "Day-ahead electricity price",
+    unit_of_measurement: "ct/kWh",
+  },
+};
 const tariffModes = {
   timed: ["on", "off"],
   dynamic: ["off", "on"],
@@ -220,6 +262,14 @@ const tariffModes = {
   both: ["on", "on"],
 };
 function setTariffMode(mode) {
+  if (mode === "timed" || mode === "dynamic") {
+    activeTariff = mode === "dynamic" ? "dynamic" : "time_of_use";
+    const id = "sensor.demo_economics_current_import_price";
+    states[id] = {
+      ...states[id],
+      attributes: { ...states[id].attributes, tariff_type: activeTariff },
+    };
+  }
   for (const [index, key] of [
     "timed_charge_enabled",
     "price_charge_enabled",
@@ -278,9 +328,21 @@ function update() {
     callWS,
   };
 }
+async function waitForActionRelease() {
+  if (!holdNextAction) return;
+  holdNextAction = false;
+  const button = document.querySelector("#release-action");
+  button.disabled = false;
+  await new Promise((resolve) => {
+    releaseAction = resolve;
+  });
+  releaseAction = null;
+  button.disabled = true;
+}
 async function callService(domain, service, data, target) {
   writes += 1;
   actions.textContent = `${writes}: ${domain}.${service} ${JSON.stringify({ ...data, ...target })}`;
+  await waitForActionRelease();
   await new Promise((resolve) => setTimeout(resolve, 150));
   if (rejectNext) {
     rejectNext = false;
@@ -325,7 +387,224 @@ function berlinMidnight(day) {
     .value.replace("GMT", "");
   return `${day}T00:00:00${offset}`;
 }
+function tariffResult() {
+  const attrs = states["sensor.demo_economics_current_import_price"].attributes;
+  const tou = {
+    ...tariffProfiles.time_of_use,
+    base_price_ct_kwh:
+      attrs.base_price_eur_kwh === null ? null : attrs.base_price_eur_kwh * 100,
+    feed_in_price_ct_kwh:
+      attrs.feed_in_price_eur_kwh === null
+        ? null
+        : attrs.feed_in_price_eur_kwh * 100,
+    windows: (attrs.windows ?? []).map((window) => ({
+      start: window.start,
+      end: window.end,
+      price_ct_kwh: window.price_eur_kwh * 100,
+    })),
+  };
+  return {
+    tariff_type: activeTariff,
+    base_price_ct_kwh:
+      activeTariff === "time_of_use" ? tou.base_price_ct_kwh : null,
+    feed_in_price_ct_kwh:
+      activeTariff === "time_of_use"
+        ? tou.feed_in_price_ct_kwh
+        : tariffProfiles.dynamic.feed_in_price_ct_kwh,
+    windows: activeTariff === "time_of_use" ? tou.windows : [],
+    profiles: { ...tariffProfiles, time_of_use: tou },
+    revision: String(tariffRevision),
+    can_edit: activeTariff === "time_of_use",
+    can_configure: true,
+    automation_enabled:
+      states[
+        `switch.demo_${activeTariff === "dynamic" ? "price" : "timed"}_charge_enabled`
+      ]?.state === "on",
+  };
+}
+function tariffSeries(day) {
+  const date = day === "tomorrow" ? "2026-09-14" : "2026-09-13";
+  const start = `${date}T00:00:00+02:00`;
+  const stop = day === "tomorrow" ? "2026-09-15" : "2026-09-14";
+  const end = `${stop}T00:00:00+02:00`;
+  const dayStart = Date.parse(start);
+  const slots = Array.from({ length: 24 }, (_, hour) => {
+    let price;
+    if (activeTariff === "dynamic")
+      price = [
+        25, 24, 23, 22, 21, 22, 25, 30, 28, 24, 20, 12, 3, -2, -4, 6, 18, 28,
+        35, 38, 32, 29, 27, 26,
+      ][hour];
+    else {
+      const minute = hour * 60;
+      const profile = tariffResult();
+      const window = profile.windows.find((window) => {
+        const [sh, sm] = window.start.split(":").map(Number),
+          [eh, em] = window.end.split(":").map(Number);
+        const a = sh * 60 + sm,
+          b = eh * 60 + em;
+        return a < b ? minute >= a && minute < b : minute >= a || minute < b;
+      });
+      price = window?.price_ct_kwh ?? profile.base_price_ct_kwh;
+    }
+    return {
+      start: new Date(dayStart + hour * 3600000).toISOString(),
+      end: new Date(dayStart + (hour + 1) * 3600000).toISOString(),
+      price_ct_kwh: price,
+    };
+  });
+  return {
+    tariff_type: activeTariff,
+    day,
+    date,
+    time_zone: "Europe/Berlin",
+    start,
+    end,
+    now: "2026-09-13T10:15:00+02:00",
+    current_price_ct_kwh:
+      activeTariff === "dynamic" ? 20 : tariffResult().base_price_ct_kwh,
+    status: "available",
+    reason: null,
+    slots,
+    gaps: [],
+    revision: String(tariffRevision),
+  };
+}
+let gridServingSource = "sensor.demo_remaining_forecast";
+let gridServingSourceRevision = 1;
+states[gridServingSource] = {
+  entity_id: gridServingSource,
+  state: "24.3",
+  attributes: {
+    friendly_name: "Solarertrag heute verbleibend",
+    unit_of_measurement: "kWh",
+  },
+};
+states["sensor.demo_remaining_forecast_alternative"] = {
+  entity_id: "sensor.demo_remaining_forecast_alternative",
+  state: "8300",
+  attributes: {
+    friendly_name: "Alternative Solarprognose heute",
+    unit_of_measurement: "Wh",
+  },
+};
 async function callWS(request) {
+  if (request.type.startsWith("sax_power/dashboard/grid_serving/")) {
+    if (request.type.endsWith("/save")) {
+      await waitForActionRelease();
+      if (rejectNext) {
+        rejectNext = false;
+        throw { code: "failed" };
+      }
+      if (request.revision !== String(gridServingSourceRevision))
+        throw { code: "conflict" };
+      gridServingSource = request.pv_sensor;
+      gridServingSourceRevision++;
+      states["sensor.demo_grid_serving_forecast"].attributes.source_entity_id =
+        gridServingSource;
+      writes++;
+      actions.textContent = `${writes}: sax_power.grid_serving_source ${JSON.stringify(request)}`;
+      update();
+    }
+    return {
+      pv_sensor: gridServingSource,
+      revision: String(gridServingSourceRevision),
+      can_edit: true,
+    };
+  }
+  if (request.type === "sax_power/dashboard/tariff/series")
+    return tariffSeries(request.day);
+  if (request.type === "sax_power/dashboard/tariff/get") return tariffResult();
+  if (request.type === "sax_power/dashboard/tariff/configure") {
+    panel.dataset.tariffConfigureRequests = String(++tariffConfigureRequests);
+    await waitForActionRelease();
+    if (rejectNext) {
+      rejectNext = false;
+      throw { code: "invalid_tariff" };
+    }
+    if (request.revision !== String(tariffRevision)) throw { code: "conflict" };
+    const enabled =
+      request.automation_enabled ?? tariffResult().automation_enabled;
+    activeTariff = request.tariff_type;
+    if (request.profile) {
+      tariffProfiles[activeTariff] = { ...request.profile };
+      if (activeTariff === "time_of_use") {
+        const id = "sensor.demo_economics_current_import_price";
+        states[id] = {
+          ...states[id],
+          attributes: {
+            ...states[id].attributes,
+            base_price_eur_kwh: request.profile.base_price_ct_kwh / 100,
+            feed_in_price_eur_kwh: request.profile.feed_in_price_ct_kwh / 100,
+            windows: request.profile.windows.map((window) => ({
+              ...window,
+              price_eur_kwh: window.price_ct_kwh / 100,
+              low_tariff: false,
+            })),
+          },
+        };
+      }
+    }
+    for (const kind of ["timed", "price"]) {
+      const id = `switch.demo_${kind}_charge_enabled`;
+      states[id] = {
+        ...states[id],
+        state:
+          enabled && (kind === "price") === (activeTariff === "dynamic")
+            ? "on"
+            : "off",
+      };
+    }
+    const id = "sensor.demo_economics_current_import_price";
+    states[id] = {
+      ...states[id],
+      attributes: { ...states[id].attributes, tariff_type: activeTariff },
+    };
+    tariffRevision++;
+    writes++;
+    actions.textContent = `${writes}: sax_power.configure_tariff ${JSON.stringify(request)}`;
+    update();
+    return tariffResult();
+  }
+  if (request.type.startsWith("sax_power/dashboard/tariff/")) {
+    const id = "sensor.demo_economics_current_import_price";
+    const attrs = states[id].attributes;
+    if (request.type.endsWith("/save")) {
+      if (rejectNext) {
+        rejectNext = false;
+        throw { code: "invalid_tariff" };
+      }
+      if (request.revision !== String(tariffRevision))
+        throw { code: "conflict" };
+      tariffRevision += 1;
+      writes += 1;
+      actions.textContent = `${writes}: sax_power.save_tariff ${JSON.stringify(request)}`;
+      const lowPrice = Math.min(
+        request.base_price_ct_kwh,
+        ...request.windows.map((window) => window.price_ct_kwh),
+      );
+      states = {
+        ...states,
+        [id]: {
+          ...states[id],
+          attributes: {
+            ...attrs,
+            base_price_eur_kwh: request.base_price_ct_kwh / 100,
+            feed_in_price_eur_kwh: request.feed_in_price_ct_kwh / 100,
+            low_tariff_price_eur_kwh: lowPrice / 100,
+            base_price_is_low_tariff: request.base_price_ct_kwh === lowPrice,
+            windows: request.windows.map((window) => ({
+              ...window,
+              price_eur_kwh: window.price_ct_kwh / 100,
+              low_tariff: window.price_ct_kwh === lowPrice,
+            })),
+          },
+        },
+      };
+      update();
+    }
+    return tariffResult();
+  }
   if (request.type !== "sax_power/dashboard/statistics")
     throw new Error("Unknown demo request");
   const start = request.start_date ?? "2026-09-12";
@@ -403,6 +682,12 @@ document.querySelector("#unavailable").onclick = () => {
 document.querySelector("#failure").onclick = () => {
   rejectNext = true;
 };
+document.querySelector("#hold-action").onclick = () => {
+  holdNextAction = true;
+};
+document.querySelector("#release-action").onclick = () => {
+  releaseAction?.();
+};
 for (const mode of Object.keys(tariffModes)) {
   document.querySelector(`#tariff-${mode}`).onclick = () => {
     setTariffMode(mode);
@@ -422,6 +707,7 @@ document.querySelector("#legacy-times").onclick = () => {
   update();
 };
 document.querySelector("#legacy-tariff").onclick = () => {
+  activeTariff = "fixed";
   const id = "sensor.demo_economics_current_import_price";
   states[id] = {
     ...states[id],

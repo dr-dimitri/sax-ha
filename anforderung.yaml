@@ -1347,6 +1347,14 @@ requirement_manual_grid_charge:
     translation_key invalid_grid_charge_power) abgelehnt. Eine positive
     manuelle Entladung bleibt ausgeschlossen (REQ-MANUAL-DISCHARGE).
 
+    Benutzeraufrufe von start_grid_charge und stop_grid_charge benötigen
+    Kontrollrechte für die aktivierte storage_switch-Entity genau dieses
+    SAX-Geräts. Fehlende, fremde oder deaktivierte Entities erteilen keine
+    Berechtigung. Unbekannte und inaktive Benutzer werden abgelehnt, bevor
+    der Coordinator aufgerufen wird. Aktive Administratoren und interne
+    Aufrufe ohne Benutzerkontext bleiben erlaubt. Dieselbe Prüfung gilt
+    auch bei direktem Aufruf über Home Assistants WebSocket-Servicegrenze.
+
     Der Service schreibt Register 41 (Basic Mode) nicht. Er hinterlegt nur
     den manuellen Ladeauftrag und wertet unter _charge_control_lock sofort
     SaxPowerCoordinator._async_enforce_grid_charge_locked aus. Die
@@ -1397,6 +1405,10 @@ requirement_manual_grid_charge:
     Während des Shutdowns wird keine Automatik erneut ausgewertet; danach
     existiert kein schreibender Hintergrundtask mehr.
   acceptance_criteria:
+    - "tests/test_service_permissions.py prüft direkte HA-WebSocket-Aufrufe:
+       Lesebenutzer dürfen weder manuelles Laden starten noch stoppen;
+       berechtigte aktive Benutzer und Administratoren dürfen dies weiterhin.
+       Abgelehnte Aufrufe erreichen den Coordinator nicht."
     - "tests/test_manual_stop_response.py prüft echte HA-Service-/WebSocket-
        Fehler bei Timeout, ModbusException und Fehlerantwort, Lock-/ACK-
        Wartezeit, Retry ohne Auftrag, Teilstart-/Rollbackfehler sowie
@@ -2177,8 +2189,8 @@ requirement_energy_dashboard_compatibility:
 
     SaxPowerCoordinator akkumuliert deshalb selbst zwei laufende kWh-Zähler
     (_energy_charged_kwh, _energy_discharged_kwh) aus storage_power_active
-    per gehaltener Riemann-Summe (Wert seit dem letzten
-    _async_update_data-Tick × verstrichene Zeit,
+    per rechter Riemann-Summe (aktueller Leistungswert × Zeit seit dem
+    vorherigen gültigen SunSpec-HIGH-Messpunkt,
     SaxPowerCoordinator._accumulate_energy) - kein zusätzlicher
     Konfigurationsaufwand (z. B. ein manuell anzulegender
     "Integration"-Helfer) für den Nutzer nötig.
@@ -2216,6 +2228,18 @@ requirement_energy_dashboard_compatibility:
     zählte sie als beobachtete Zeit des Kalendertages
     (REQ-ECONOMICS-AMORTIZATION). Der erste Tick nach einem Ausfall setzt
     damit - wie nach jedem Neustart - nur die Zeitbasis neu.
+
+    Dasselbe gilt für einen erfolgreichen Poll nach einer Prozesspause oder
+    verzögerten Kommunikation: Nur positive Abstände von höchstens
+    READ_BLOCK_EXT_HIGH_MAX_AGE (derzeit fünf Sekunden) dürfen als gemessene
+    Akkuenergie verbucht werden. Auch das Alter des HIGH-Messpunkts darf
+    diese Grenze nicht überschreiten. Gecachte Refreshes erzeugen keine
+    zusätzliche Buchung und verschieben die Messbaseline nicht. Größere
+    Messlücken und unbekannte Speicherleistung verwerfen die bisherige
+    Zeitbasis. Der erste gültige
+    Tick danach erzeugt keine Energie-, Herkunfts- oder Geldbuchung und
+    keine beobachtete Zeit. Normale Zwei-Sekunden-Polls und ein Abstand
+    von 4,05 Sekunden bleiben innerhalb der tolerierten Messstrecke.
   requirements:
     - "Zwei Sensoren 'energy_charged'/'energy_discharged' (device_class
        energy, state_class total_increasing, Einheit kWh), über Neustarts
@@ -2236,6 +2260,11 @@ requirement_energy_dashboard_compatibility:
        energy_charged, positive (Entladung) ausschließlich in
        energy_discharged."
   acceptance_criteria:
+    - "tests/test_battery_energy_gaps.py prüft mit lokalem Modbus TCP, dass
+       Prozesspausen und SunSpec-Ausfälle keine Akkuenergie, Herkunft,
+       Geldbeträge oder beobachtete Zeit nachholen. Erst das nächste gültige
+       Messintervall wird wieder gebucht; normale Poll-Schwankungen bleiben
+       vollständig erfasst."
     - "tests/test_coordinator.py und tests/test_energy_persistence.py decken
        ab: Akkumulation/Vorzeichen-Split, SunSpec-Ausfall ohne Nachhol-Sprung,
        Basic-Mode-Ausfall mit exaktem Final-Flush, Legacy-Migration,
@@ -2560,7 +2589,14 @@ requirement_dynamic_price_charge:
        Geräteauswertung an den gemeinsamen Worker. Shutdown wird vor der
        Neuberechnung abgelehnt. sax_power.set_price_charge_enabled dient zum
        nicht-interaktiven Schalten mit
-       optionalem force."
+       optionalem force. Beide Services verlangen bei Benutzeraufrufen
+       Kontrollrechte für die aktivierte price_charge_enabled-Entity des
+       adressierten SAX-Geräts. Einschalten mit force=true benötigt zusätzlich
+       Kontrollrechte für timed_charge_enabled, weil dieser Schalter dabei
+       ausgeschaltet werden kann. Aktive Administratoren und interne Aufrufe
+       ohne Benutzerkontext bleiben erlaubt; unbekannte oder inaktive Benutzer
+       sowie fehlende Rechte werden vor jeder Planung oder Änderung abgelehnt.
+       tests/test_service_permissions.py prüft diese Grenzen über WebSocket."
     - "Die Prüfung der Ladebedingungen läuft mindestens alle 60 Sekunden."
     - "__init__.async_update_options wendet eine Options-Flow-Änderung
        (Strompreis-/PV-Prognose-Sensor) live auf den laufenden Coordinator
@@ -5781,7 +5817,12 @@ requirement_economics_observability:
     wird zusammen mit dem UTC-Zeitpunkt dieses Neustarts persistiert
     (`EconomicsState.last_restart_at`/`last_restart_reason`, unabhängig
     vom Sieben-Felder-Bündel) und im Diagnose-Download angezeigt -
-    beeinflusst keine Berechnung. Lehnt mit ServiceValidationError ab, wenn der Tarif
+    beeinflusst keine Berechnung. Benutzeraufrufe verlangen einen aktiven
+    Administrator, da der Service die gesamte Wirtschaftlichkeitsbilanz
+    zurücksetzt. Interne Aufrufe ohne Benutzerkontext bleiben erlaubt.
+    tests/test_service_permissions.py prüft über die HA-WebSocket-Grenze,
+    dass Lesebenutzer und gewöhnliche Benutzer trotz confirm=true keine
+    Bilanz zurücksetzen können. Lehnt mit ServiceValidationError ab, wenn der Tarif
     deaktiviert ist oder die Bilanz noch nie initialisiert wurde. Setzt
     AUSSCHLIESSLICH zurück: die drei Economics-Geldsummen, den
     den historischen Diagnose-Peak, die vier Preisabdeckungszähler

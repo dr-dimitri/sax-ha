@@ -24,6 +24,8 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 
+from .energy_samples import accumulate_energy_sample
+
 _ZONE = ZoneInfo("Europe/Berlin")
 
 
@@ -80,7 +82,7 @@ def _tick(
         "battery_capacity": 10000,
     }
     with patch("custom_components.sax_power.coordinator.monotonic", return_value=at):
-        coordinator._accumulate_energy(data)
+        accumulate_energy_sample(coordinator, data)
     coordinator.data = data
     return data
 
@@ -88,25 +90,25 @@ def _tick(
 async def test_coordinator_prices_both_halves_of_a_window_change(
     coordinator: SaxPowerCoordinator, freezer: Any
 ) -> None:
-    start = datetime(2026, 9, 13, 21, 59, 55, tzinfo=_ZONE)
+    start = datetime(2026, 9, 13, 21, 59, 58, tzinfo=_ZONE)
     freezer.move_to(start)
     coordinator.tariff_provider.async_setup()
     _tick(coordinator, 1000, power=0, meter=0)
-    freezer.move_to(start + timedelta(seconds=10))
+    freezer.move_to(start + timedelta(seconds=4))
 
-    charged = _tick(coordinator, 1010, power=-3600, meter=3600)
+    charged = _tick(coordinator, 1004, power=-3600, meter=3600)
 
-    assert charged["energy_charged"] == pytest.approx(0.01)
+    assert charged["energy_charged"] == pytest.approx(0.004)
     assert charged["economics_current_import_price"] == pytest.approx(0.20)
     assert coordinator._economics_grid_charge_cost_eur == pytest.approx(
-        0.005 * 0.30 + 0.005 * 0.20
+        0.002 * 0.30 + 0.002 * 0.20
     )
     assert coordinator._economics_unpriced_charge_kwh == 0
-    freezer.move_to(start + timedelta(seconds=20))
-    discharged = _tick(coordinator, 1020, power=3600, meter=0)
-    assert discharged["energy_discharged"] == pytest.approx(0.01)
-    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(0.01 * 0.20)
-    assert discharged["economics_operating_result"] == pytest.approx(-0.0005)
+    freezer.move_to(start + timedelta(seconds=8))
+    discharged = _tick(coordinator, 1008, power=3600, meter=0)
+    assert discharged["energy_discharged"] == pytest.approx(0.004)
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(0.004 * 0.20)
+    assert discharged["economics_operating_result"] == pytest.approx(-0.0002)
 
 
 async def test_live_options_listener_splits_new_tariff_without_repricing_old_costs(
@@ -116,12 +118,12 @@ async def test_live_options_listener_splits_new_tariff_without_repricing_old_cos
     freezer.move_to(start)
     coordinator.tariff_provider.async_setup()
     _tick(coordinator, 1000, power=0, meter=0)
-    freezer.move_to(start + timedelta(seconds=10))
-    _tick(coordinator, 1010, power=-3600, meter=3600)
+    freezer.move_to(start + timedelta(seconds=4))
+    _tick(coordinator, 1004, power=-3600, meter=3600)
     old_cost = coordinator._economics_grid_charge_cost_eur
-    assert old_cost == pytest.approx(0.003)
+    assert old_cost == pytest.approx(0.0012)
 
-    freezer.move_to(start + timedelta(seconds=15))
+    freezer.move_to(start + timedelta(seconds=6))
     entry = hass.config_entries.async_get_entry(coordinator.entry_id)
     assert entry is not None
     hass.config_entries.async_update_entry(
@@ -134,14 +136,14 @@ async def test_live_options_listener_splits_new_tariff_without_repricing_old_cos
     )
     await hass.async_block_till_done()
     assert coordinator._economics_grid_charge_cost_eur == old_cost
-    freezer.move_to(start + timedelta(seconds=20))
+    freezer.move_to(start + timedelta(seconds=8))
 
-    charged = _tick(coordinator, 1020, power=-3600, meter=3600)
+    charged = _tick(coordinator, 1008, power=-3600, meter=3600)
 
     assert charged["economics_current_import_price"] == pytest.approx(0.50)
     assert coordinator._economics_grid_charge_cost_eur == pytest.approx(
-        old_cost + 0.005 * 0.30 + 0.005 * 0.50
+        old_cost + 0.002 * 0.30 + 0.002 * 0.50
     )
-    freezer.move_to(start + timedelta(seconds=30))
-    _tick(coordinator, 1030, power=3600, meter=0)
-    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(0.005)
+    freezer.move_to(start + timedelta(seconds=12))
+    _tick(coordinator, 1012, power=3600, meter=0)
+    assert coordinator._economics_avoided_grid_cost_eur == pytest.approx(0.002)

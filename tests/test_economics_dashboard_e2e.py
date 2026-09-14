@@ -36,6 +36,8 @@ from custom_components.sax_power.dashboard_tariff import GET_COMMAND, SAVE_COMMA
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
 
+from .energy_samples import accumulate_economics_interval, accumulate_energy_samples
+
 ENTRY_ID = "e2e_entry"
 
 
@@ -135,7 +137,7 @@ async def test_pv_grid_discharge_flow_reaches_money_sensors_and_dashboard(
                 "battery_capacity": 10000,
                 "battery_soc_min": 5,
             }
-            coordinator._accumulate_energy(data)
+            accumulate_energy_samples(coordinator, data)
         return data
 
     base = datetime(2026, 6, 1, 8, 0)
@@ -373,7 +375,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
             "battery_capacity": 10000,
             "battery_soc_min": 5,
         }
-        coordinator._accumulate_energy(data)
+        accumulate_economics_interval(coordinator, data)
     coordinator.data = data
 
     # Genau der Weg, den auch die Sensor-Entity nimmt (sensor.py,

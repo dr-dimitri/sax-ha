@@ -860,9 +860,10 @@ HIGH-Messung Speicherleistung, Kapazität, SunSpec-SOC und Geräte-Minimal-SOC.
 Die Domain hält höchstens 60 Minuten Verlauf, integriert die positive Leistung
 zeitgewichtet mit dem jeweils vorherigen Messwert und liefert nach mindestens
 60 Sekunden die verbleibende Zeit. Kurzes Laden und Leerlauf zählen mit 0 W;
-60 Sekunden ununterbrochenes Laden löschen den Verlauf. Messlücken über zwei
-HIGH-Intervalle sowie ungültige Eingaben verwerfen die Historie. Es gibt keine
-Persistenz. Der Coordinator wandelt die Restzeit in einen UTC-Zeitpunkt um und
+60 Sekunden ununterbrochenes Laden löschen den Verlauf. Messlücken über
+`READ_BLOCK_EXT_HIGH_MAX_AGE` (zwei HIGH-Intervalle plus eine Sekunde Reserve,
+derzeit fünf Sekunden) sowie ungültige Eingaben verwerfen die Historie. Es gibt
+keine Persistenz. Der Coordinator wandelt die Restzeit in einen UTC-Zeitpunkt um und
 veröffentlicht ihn als `discharge_forecast` für den gleichnamigen Timestamp-Sensor.
 Cache-Refreshs übernehmen den zuletzt berechneten Zeitpunkt unverändert.
 Die Attribute `observation_minutes`, `average_discharge_w` und `observed_at`
@@ -948,9 +949,23 @@ veraltete Messwerte und fehlender PV-Start geben keinen Ladeauftrag frei.
 `application/bridge_session.py` bindet den Auftrag an seine Konfiguration und
 hält nach dem bestätigten Start die Verbrauchsbasis fest. So kann die normale
 Entladeprognose nach einer Minute Ladung zurückgesetzt werden, ohne den aktiven
-Auftrag zu verlieren. Festes Ende oder erreichtes Ziel beenden den Auftrag;
+Auftrag zu verlieren. Vorübergehende PV-Prognoselücken oder fehlende, ungültige
+und veraltete Messwerte pausieren einen gestarteten Auftrag. Das gilt auch
+für Basic-Lesefehler. Plan und Verbrauchsbasis bleiben erhalten, während
+weitere Ladesollwerte gesperrt sind. Nach Rückkehr gültiger Daten läuft der
+Auftrag innerhalb seiner ursprünglichen Grenzen weiter, auch wenn die
+wieder gültige Prognose einen anderen PV-Start nennt. Relevante
+Konfigurationsänderungen entwerten ihn auch während einer Datenlücke.
+Dieser Abgleich läuft bereits bei der Annahme von Softwareänderungen und
+vor dem vorzeitigen Rücksprung bei fehlendem Basic-SOC,
+damit Aus-/Einschalten oder vorübergehend geänderte SOC-Grenzen keinen alten
+Auftrag über den Ausfall hinweg erhalten.
+Die PV-Verfügbarkeit wird zusätzlich im periodischen Writer und vor sowie
+nach den beiden Gerätequittierungen geprüft.
+Festes Ende oder erreichtes Ziel beenden den Auftrag;
 eine Neuplanung benötigt mindestens eine Minute nach Abschluss und wieder
-gültige Beobachtungen. Es gibt keine Auftragspersistenz und keine Wiederaufnahme
+gültige Beobachtungen, auch beim Ablauf während einer Datenlücke.
+Es gibt keine Auftragspersistenz und keine Wiederaufnahme
 ohne neue Messungen nach einem Neustart.
 
 Der Coordinator bleibt alleiniger Besitzer des vorhandenen SunSpec-Schreibpfads.
@@ -995,7 +1010,8 @@ vorherige Leistung (linke Riemannsumme). Der erste gültige Messpunkt setzt
 die Baseline; gecachte Refreshes zählen nicht erneut. Ungültige, fehlende
 oder veraltete Werte sowie Poll-Ausfälle verwerfen die Baseline. Das Alter
 einer Messung und der Abstand zweier Messpunkte dürfen jeweils höchstens
-`2 * READ_BLOCK_EXT_HIGH_INTERVAL` (derzeit vier Sekunden) betragen,
+`READ_BLOCK_EXT_HIGH_MAX_AGE` (zwei HIGH-Intervalle plus eine Sekunde Reserve,
+derzeit fünf Sekunden) betragen,
 unabhängig vom Basic-Mode-Intervall. Größere Lücken werden übersprungen.
 Erst ein neuer gültiger Messpunkt startet die nächste Messstrecke; keine
 verlorene Zeit wird nachgeholt. Die Schätzung bildet deshalb ausschließlich
@@ -1594,10 +1610,12 @@ während PV weiterhin bis zum globalen Ziel laden kann. Ohne bestätigte
 Netzladung wird unterhalb des globalen Maximums die SmartMeter-Nullregelung
 freigegeben. Der globale
 "Max. SOC" bleibt führend: Er bestimmt dynamisch die Obergrenze des
-Netzladeziel-Sliders. Eine globale Absenkung reduziert sofort auch einen
-höheren Netzladezielwert und persistiert beide zusammen. Eine globale
-Erhöhung erweitert nur den Sliderbereich und verändert den gewählten
-Netzladezielwert nicht. Das Dashboard zeigt den Regler unter
+Netzladeziel-Sliders. Eine globale Absenkung begrenzt sofort den wirksamen
+und angezeigten Netzladezielwert. Das gespeicherte Ziel bleibt erhalten,
+auch über einen Neustart. Eine globale Erhöhung gibt das ursprüngliche Ziel
+bis zur neuen Grenze wieder frei. Nur eine ausdrückliche Zieländerung
+ersetzt den gespeicherten Wert, begrenzt auf den aktuellen Sliderbereich.
+Das Dashboard zeigt den Regler unter
 „Stromtarif“ → „2. Wie viel möchtest du laden?“; die Startschwelle liegt unter
 „Weitere Einstellungen“.
 Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
@@ -1659,7 +1677,8 @@ ihre eigene Logik und die bisherige Writer-Kadenz.
 
 Im Haltezustand berechnet `application/charge_policy.py` aus Batterie- und
 Netzleistung einen ausschließlich nichtpositiven PV-Sollwert. Fehlende,
-ungültige oder über vier Sekunden alte Messwerte ergeben 0 W, ebenso ein
+ungültige oder über `READ_BLOCK_EXT_HIGH_MAX_AGE` (fünf Sekunden) alte
+Messwerte ergeben 0 W, ebenso ein
 erreichtes globales SOC-Ziel. Der Halte-Writer prüft alle zwei Sekunden
 zusätzlich die absolute Frist, auch wenn Basic-Lesefehler die normale
 Steuerentscheidung verhindern. Sein 0-%-Fallback bleibt ohne gelesene
@@ -1708,7 +1727,9 @@ Bei einer einmaligen Migration ohne Store wird er erst am Bootstrap-Ende
 initialisiert, nachdem die vorhandene globale Einstellung wiederhergestellt
 ist. Die Entity-Reihenfolge beeinflusst den Anfangswert dadurch nicht;
 ein eigener RestoreEntity-Pfad ist für die neue Number-Entity überflüssig.
-Gespeicherte Netzladezielwerte werden auf den globalen Max. SOC begrenzt.
+Gespeicherte Netzladezielwerte werden im Bereich 0 bis 100 validiert. Die
+globale Max-SOC-Grenze begrenzt ihren wirksamen Wert dynamisch; sie verändert
+den gespeicherten Zielwert auch beim Restore nicht.
 
 `__init__.async_setup_entry` hält eine verbindliche Reihenfolge ein:
 
@@ -1902,6 +1923,13 @@ da das config_flow-Minimum für `scan_interval` (5s) immer über
 jeweils eigenständig per Zeitstempel-Cache, ob ihr Teilblock tatsächlich
 fällig ist, und liefern sonst den zuletzt gelesenen Wert zurück – nur ein
 fälliger Teilblock löst einen echten `read_holding_registers`-Aufruf aus.
+Die HIGH-Drosselung lässt mit `READ_BLOCK_EXT_HIGH_POLL_TOLERANCE` eine
+Reserve von 0,25 Sekunden zu. Dadurch überspringen kleine Schwankungen des
+HA-Timers oder vorgelagerter Modbus-Abfragen keinen regulären 2s-Takt.
+Deutlich frühere zusätzliche Refreshes nutzen den Cache. Messalter und
+Messlücken für Netzenergie, Entladeprognose und die Messfrischeprüfung der
+Lade-/Entladesperre teilen `READ_BLOCK_EXT_HIGH_MAX_AGE` (5 Sekunden).
+Fehlgeschlagene Reads entziehen die Messgültigkeit weiterhin sofort.
 Ein Schreibzugriff auf ein Basic-Mode-Register
 (`SaxPowerCoordinator.async_write_register`) invalidiert den NORMAL-Cache
 explizit, damit ein direkt danach ausgelöster `coordinator.async_refresh()`

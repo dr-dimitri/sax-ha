@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.sax_power.const import (
+    READ_BLOCK_EXT_HIGH_MAX_AGE,
     READ_BLOCK_EXT_START,
     REG_SOC,
     REG_SUN_METER_POWER_ACTIVE_SF,
@@ -108,7 +109,7 @@ async def test_cached_refresh_does_not_double_count_or_extend_sample_time(
     assert _sample(coordinator, 2, 1800)["energy_imported_from_grid"] == 0.001
 
 
-@pytest.mark.parametrize("gap", [4.01, 3600])
+@pytest.mark.parametrize("gap", [READ_BLOCK_EXT_HIGH_MAX_AGE + 0.01, 3600])
 async def test_long_gap_starts_a_new_baseline(
     coordinator: SaxPowerCoordinator, gap: float
 ) -> None:
@@ -123,7 +124,7 @@ async def test_stale_cached_sample_cannot_be_reused_as_a_baseline(
 ) -> None:
     """REQ-GRID-ENERGY: Invalidating stale data precedes the revision guard."""
     _sample(coordinator, 0, 1800)
-    with patch(_CLOCK, return_value=5):
+    with patch(_CLOCK, return_value=READ_BLOCK_EXT_HIGH_MAX_AGE + 0.01):
         coordinator._accumulate_grid_energy({})
     assert coordinator._grid_energy_last_sample is None
     assert _sample(coordinator, 6, 1800)["energy_imported_from_grid"] == 0

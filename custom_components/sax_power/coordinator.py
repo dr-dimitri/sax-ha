@@ -95,6 +95,8 @@ from .const import (
     READ_BLOCK_COUNT,
     READ_BLOCK_EXT_COUNT,
     READ_BLOCK_EXT_HIGH_INTERVAL,
+    READ_BLOCK_EXT_HIGH_MAX_AGE,
+    READ_BLOCK_EXT_HIGH_POLL_TOLERANCE,
     READ_BLOCK_EXT_LOW1_COUNT,
     READ_BLOCK_EXT_LOW1_START,
     READ_BLOCK_EXT_LOW2_COUNT,
@@ -623,7 +625,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_energy_last_sample: tuple[float, float] | None = None
         self._grid_energy_last_revision: int | None = None
         self._discharge_forecast = DischargeForecast(
-            max_sample_gap=2 * READ_BLOCK_EXT_HIGH_INTERVAL
+            max_sample_gap=READ_BLOCK_EXT_HIGH_MAX_AGE
         )
         self._discharge_forecast_revision: int | None = None
         self._discharge_forecast_at: datetime | None = None
@@ -754,7 +756,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._invalidate_grid_energy_sample()
             self._discharge_forecast.reset()
             self._discharge_forecast_at = None
-            self._bridge_session.reset("waiting_for_data", "measurements_missing")
+            self._bridge_session.wait_for_data(dt_util.utcnow(), "measurements_missing")
             self._discharge_forecast_attributes = {}
             raise
         self._accumulate_grid_energy(data)
@@ -817,17 +819,36 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def bridge_charge_enabled(self) -> bool:
         return self.options.get(CONF_BRIDGE_CHARGE_ENABLED) is True
 
+    def _sync_bridge_charge_configuration(self) -> tuple[object, ...]:
+        """Revoke frozen permissions even while a Basic outage prevents planning."""
+        configuration = (
+            frozenset(self._timed_charge_months),
+            self.effective_timed_charge_max_soc,
+            self.tariff_provider.config,
+            self.price_planner.pv_forecast_entity_id,
+        )
+        if (
+            not self.bridge_charge_enabled
+            or not self._timed_charge_enabled
+            or self._price_charge_enabled
+        ):
+            self._bridge_session.reset("off", "disabled")
+        else:
+            self._bridge_session.sync_configuration(configuration)
+        return configuration
+
     def _prepare_bridge_charge(
         self, data: dict[str, Any], now: datetime
     ) -> bool | None:
         """Adapt explicit user sources to the reusable planner (REQ-BRIDGE-CHARGE)."""
         session = self._bridge_session
+        configuration = self._sync_bridge_charge_configuration()
         if not self.bridge_charge_enabled:
-            session.reset("off", "disabled")
             return None
         if not self._timed_charge_enabled or self._price_charge_enabled:
-            session.reset("off", "disabled")
             return False
+        tariff = self.tariff_provider.config
+        max_soc = self.effective_timed_charge_max_soc
         observation = data.get("discharge_forecast_attributes") or {}
         retain_observation = session.started or (
             session.completed_at is not None
@@ -851,7 +872,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             average_power,
         )
         if pv_start is None:
-            session.reset("waiting_for_data", "pv_start_missing")
+            session.wait_for_data(now, "pv_start_missing")
             return False
         if not self._timed_discharge_measurements_fresh() or any(
             isinstance(data.get(key), bool)
@@ -864,29 +885,23 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "ic_max_power_reference",
             )
         ):
-            session.reset("waiting_for_data", "measurements_missing")
+            session.wait_for_data(now, "measurements_missing")
             return False
         if (
             data["battery_capacity"] <= 0
             or data["ic_max_power_reference"] <= 0
             or not 0 <= data["battery_soc_min"] <= data["battery_soc"] <= 100
         ):
-            session.reset("waiting_for_data", "measurements_missing")
+            session.wait_for_data(now, "measurements_missing")
             return False
-        tariff = self.tariff_provider.config
         windows = charge_windows(
             now=now,
             pv_start=pv_start,
             active_months=self._timed_charge_months,
             tariff=tariff,
         )
-        max_soc = self.effective_timed_charge_max_soc
         fingerprint = (
-            pv_start,
-            frozenset(self._timed_charge_months),
-            max_soc,
-            tariff,
-            self.price_planner.pv_forecast_entity_id,
+            configuration,
             data["battery_capacity"],
             data["battery_soc_min"],
             data["ic_max_power_reference"],
@@ -907,7 +922,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             not self._extended_available
             or sample_time is None
-            or not 0 <= monotonic() - sample_time <= 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+            or not 0 <= monotonic() - sample_time <= READ_BLOCK_EXT_HIGH_MAX_AGE
         ):
             self._discharge_forecast.reset()
             self._discharge_forecast_at = None
@@ -978,7 +993,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sample_time = self._high_sample_time
         revision = self._high_sample_revision
         power = self._high_data.get("smartmeter_power")
-        max_age = 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+        max_age = READ_BLOCK_EXT_HIGH_MAX_AGE
         sample_age = monotonic() - sample_time if sample_time is not None else None
         if (
             self._grid_imported_kwh is None
@@ -2711,7 +2726,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (
             self._high_data
             and self._high_last_read is not None
-            and now - self._high_last_read < READ_BLOCK_EXT_HIGH_INTERVAL
+            and now - self._high_last_read
+            < READ_BLOCK_EXT_HIGH_INTERVAL - READ_BLOCK_EXT_HIGH_POLL_TOLERANCE
         ):
             return self._high_data
 
@@ -3359,8 +3375,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         regulären Service-Call-Pfads."""
         self._raise_if_shutdown()
         self._max_soc = _clamp_int(max_soc, MIN_SOC, MAX_SOC)
-        if self._timed_charge_max_soc is not None:
-            self._timed_charge_max_soc = self.timed_charge_max_soc
         self.clear_control_field_unresolved("max_soc")
         self.price_planner.evaluate()
         await self._async_apply_grid_charge_change(
@@ -3584,6 +3598,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and window.expires_at == self._tariff_charge_deadline
         )
 
+    def _bridge_charge_forecast_available(self) -> bool:
+        return (
+            self._pv_bridge_forecast.pv_start(
+                dt_util.utcnow(),
+                self._bridge_session.attributes.get("average_discharge_w"),
+            )
+            is not None
+        )
+
     def _check_timed_charge_write(self, power: int) -> None:
         """Late ACKs cannot authorize an expired plan or changed tariff window."""
         if power < 0 and self._tariff_control_revision != self._tariff_source_revision:
@@ -3606,9 +3629,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and (
                 dt_util.utcnow() >= self._bridge_charge_deadline
                 or not self._timed_discharge_measurements_fresh()
+                or not self._bridge_charge_forecast_available()
             )
         ):
-            raise HomeAssistantError("Ladeplan abgelaufen oder Messdaten veraltet")
+            raise HomeAssistantError(
+                "Ladeplan abgelaufen, Messdaten veraltet oder PV-Prognose fehlt"
+            )
 
     async def _async_write_sun_charge_setpoint_unlocked(
         self,
@@ -3860,6 +3886,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._active_charge_deadline() is not None:
                     async with self._charge_control_lock:
                         deadline = self._active_charge_deadline()
+                        bridge_forecast_missing = (
+                            self._bridge_charge_deadline is not None
+                            and not self._bridge_charge_forecast_available()
+                        )
                         if deadline is not None and (
                             dt_util.utcnow() >= deadline
                             or not self._tariff_charge_permission_valid()
@@ -3867,6 +3897,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 self._bridge_charge_deadline is not None
                                 and not self._timed_discharge_measurements_fresh()
                             )
+                            or bridge_forecast_missing
                             or self._basic_read_failed
                         ):
                             # REQ-TIME-OF-USE-CHARGE-SOURCE / REQ-BRIDGE-CHARGE:
@@ -3881,7 +3912,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                     SUN_IC_CONTROL_MODE_SMARTMETER
                                 )
                             if self._bridge_charge_deadline is not None:
-                                self._bridge_session.pause("awaiting_confirmation")
+                                self._bridge_session.wait_for_data(
+                                    dt_util.utcnow(),
+                                    (
+                                        "pv_start_missing"
+                                        if bridge_forecast_missing
+                                        else "awaiting_confirmation"
+                                    ),
+                                )
                             self._bridge_charge_deadline = None
                             self._tariff_charge_deadline = None
                             self._tariff_charge_source = None
@@ -4283,9 +4321,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return (
             self._extended_available
             and self._high_sample_time is not None
-            and 0
-            <= monotonic() - self._high_sample_time
-            <= 2 * READ_BLOCK_EXT_HIGH_INTERVAL
+            and 0 <= monotonic() - self._high_sample_time <= READ_BLOCK_EXT_HIGH_MAX_AGE
         )
 
     def _timed_discharge_pv_setpoint(self) -> int:
@@ -4636,6 +4672,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._raise_if_shutdown()
         if self._control_bootstrap_pending:
             return
+        self._sync_bridge_charge_configuration()
         self._async_schedule_control_save()
         self._month_control_revision += 1
         # REQ-VUE-CHARGING: Fenster-Services und erzwungene Tarifwechsel
@@ -4713,6 +4750,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         einer Anwenderänderung, deshalb entscheidet der Bootstrap selbst, ob
         und wie sie geschrieben wird (siehe _async_persist_bootstrap_result).
         """
+        if not self._control_bootstrap_pending:
+            self._sync_bridge_charge_configuration()
         if defer_device_update:
             self._async_schedule_month_control_change()
             return
@@ -5143,6 +5182,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_window = timed_window_state
         if self._timed_charge_restore_state != timed_window_state:
             self._timed_charge_restore_state = None
+        self._sync_bridge_charge_configuration()
         current_soc = data.get("soc")
         if (
             self._basic_read_failed

@@ -174,8 +174,9 @@ class ControlConfig:
         Fehlende Felder (Store von vor der Einführung eines Feldes, oder von
         der Feldvalidierung verworfen) bekommen ihren Hard-Default -
         fail-safe: lieber der dokumentierte Default als ein aus einem
-        korrupten Wert abgeleiteter Zustand. Netzladen Max. SOC übernimmt
-        den sanierten globalen Max. SOC und darf diesen nicht überschreiten
+        korrupten Wert abgeleiteter Zustand. Ein fehlendes Netzladeziel
+        übernimmt den sanierten globalen Max. SOC; vorhandene Ziele bleiben
+        erhalten und werden erst bei Verwendung dynamisch begrenzt
         (REQ-TIMED-SOC-CHARGE).
         """
         defaults: dict[str, Any] = {
@@ -200,17 +201,10 @@ class ControlConfig:
             if getattr(self, field) is None
         }
         config = replace(self, **filled) if filled else self
-        max_soc = config.max_soc if config.max_soc is not None else MAX_SOC
-        timed_charge_max_soc = min(
-            (
-                config.timed_charge_max_soc
-                if config.timed_charge_max_soc is not None
-                else max_soc
-            ),
-            max_soc,
-        )
-        if config.timed_charge_max_soc != timed_charge_max_soc:
-            config = replace(config, timed_charge_max_soc=timed_charge_max_soc)
+        # REQ-TIMED-SOC-CHARGE: Ein bestehendes Ziel darf durch eine
+        # temporäre globale Begrenzung auch beim Neustart nicht verloren gehen.
+        if config.timed_charge_max_soc is None:
+            config = replace(config, timed_charge_max_soc=config.max_soc)
         if config.timed_charge_enabled and config.price_charge_enabled:
             # Netzladung und preisoptimiertes Laden laden beide aktiv über
             # denselben SunSpec-Schreibpfad und schließen sich gegenseitig

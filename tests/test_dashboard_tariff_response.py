@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +25,6 @@ from custom_components.sax_power.const import (
     DOMAIN,
     PRICE_STRATEGY_ABSOLUTE,
     REG_SUN_IC_CONTROL_MODE,
-    REG_SUN_IC_POWER_SETPOINT_PCT,
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
 )
@@ -31,6 +33,28 @@ from custom_components.sax_power.dashboard_api import async_register_dashboard_a
 from custom_components.sax_power.dashboard_tariff import CONFIGURE_COMMAND, GET_COMMAND
 
 from .test_month_switch_response import coordinator as coordinator
+
+
+@contextmanager
+def _control_clock() -> Iterator[None]:
+    """Keep HA boundary timers on the test date without freezing asyncio sleep."""
+    now = datetime(2024, 1, 1, 2, tzinfo=UTC)
+    with (
+        patch("custom_components.sax_power.coordinator.dt_util.now", return_value=now),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow", return_value=now
+        ),
+        patch(
+            "homeassistant.helpers.event.time",
+            SimpleNamespace(time=lambda: now.timestamp()),
+        ),
+        patch(
+            "homeassistant.helpers.event.time_tracker_timestamp",
+            return_value=now.timestamp(),
+        ),
+        patch("homeassistant.helpers.event.time_tracker_utcnow", return_value=now),
+    ):
+        yield
 
 
 def _prepare(
@@ -146,29 +170,32 @@ async def test_tariff_switch_confirms_and_coalesces_while_device_control_is_busy
     listener.assert_not_awaited()
 
 
-async def test_tariff_switch_off_during_write_keeps_ack_sequence_and_stops_charging(
+async def test_tariff_switch_off_during_write_awaits_ack_and_rolls_back(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
     coordinator: SaxPowerCoordinator,
 ) -> None:
-    """Sofort bestätigtes Aus bricht den laufenden Start nicht zwischen Writes ab."""
+    """Sofort bestätigtes Aus wartet den Modus-ACK ab und widerruft den Sollwert."""
     entry = _prepare(hass, coordinator, "dynamic")
     client = await hass_ws_client(hass)
     tariff = await _get(client, entry)
     started, finish = asyncio.Event(), asyncio.Event()
+    cancelled = False
     success = coordinator.client.write_register.return_value
 
     async def write(*, address: int, value: int, device_id: int) -> MagicMock:
+        nonlocal cancelled
         if address == REG_SUN_IC_CONTROL_MODE and value == SUN_IC_CONTROL_MODE_SETPOINT:
             started.set()
-            await finish.wait()
+            try:
+                await finish.wait()
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
         return success
 
     coordinator.client.write_register.side_effect = write
-    with patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=datetime(2024, 1, 1, 2, tzinfo=UTC),
-    ):
+    with _control_clock():
         assert (await _toggle(client, entry, tariff, True))["success"]
         task = coordinator._month_control_task
         try:
@@ -188,11 +215,14 @@ async def test_tariff_switch_off_during_write_keeps_ack_sequence_and_stops_charg
         (call.kwargs["address"], call.kwargs["value"])
         for call in coordinator.client.write_register.await_args_list
     ]
-    assert writes[0] == (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT)
-    assert writes[1][0] == REG_SUN_IC_POWER_SETPOINT_PCT
-    assert writes[-1] == (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER)
+    assert writes == [
+        (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT),
+        (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER),
+    ]
+    assert not cancelled
     assert not coordinator.sun_charge_active
     assert not coordinator.price_charge_active
+    assert not coordinator._sun_charge_reset_required
 
 
 @pytest.mark.parametrize("tariff_type", ["time_of_use", "dynamic"])

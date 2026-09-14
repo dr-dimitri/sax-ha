@@ -94,7 +94,7 @@ from custom_components.sax_power.domain.tariff import (
     QuoteUnavailable,
     TariffType,
 )
-from custom_components.sax_power.price_optimizer import PricePlan
+from custom_components.sax_power.price_optimizer import PricePlan, PriceSlot
 
 
 @pytest.mark.parametrize(
@@ -2205,7 +2205,6 @@ async def test_timed_charge_own_target_does_not_limit_other_modes(
     elif mode == "price":
         coordinator._price_charge_enabled = True
         coordinator._price_charge_strategy = PRICE_STRATEGY_ABSOLUTE
-        coordinator.price_planner.plan = PricePlan(charge_now=True)
     elif mode == "manual":
         coordinator._grid_charge_power = -1000
     else:
@@ -2213,7 +2212,18 @@ async def test_timed_charge_own_target_does_not_limit_other_modes(
         coordinator.data["storage_power_active"] = -200
 
     try:
-        with _patched_now(2):
+        with (
+            _patched_now(2),
+            patch.object(
+                dt_util, "utcnow", side_effect=lambda: dt_util.now().astimezone(UTC)
+            ),
+        ):
+            now = dt_util.now()
+            if mode == "price":
+                coordinator.price_planner.plan = PricePlan(
+                    charge_now=True,
+                    slots=(PriceSlot(now, now + timedelta(hours=1), 0.1),),
+                )
             for _ in range(PV_SURPLUS_HYSTERESIS_CYCLES):
                 coordinator._high_sample_revision += 1
                 await coordinator._async_enforce_grid_charge(coordinator.data)

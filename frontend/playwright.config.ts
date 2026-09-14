@@ -14,10 +14,23 @@ export default defineConfig({
   projects: [
     {
       name: "webkit-light-de",
-      testMatch: ["tariff-editor.spec.ts", "time-window.spec.ts"],
+      testMatch: [
+        "tariff-editor.spec.ts",
+        "time-window.spec.ts",
+        "number-input.spec.ts",
+      ],
       use: {
         ...devices["Desktop Safari"],
         locale: "de-DE",
+        viewport: { width: 1440, height: 1000 },
+      },
+    },
+    {
+      name: "webkit-light-en",
+      testMatch: ["number-input.spec.ts"],
+      use: {
+        ...devices["Desktop Safari"],
+        locale: "en-GB",
         viewport: { width: 1440, height: 1000 },
       },
     },

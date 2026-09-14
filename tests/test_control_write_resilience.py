@@ -173,3 +173,30 @@ async def test_explicit_control_write_failure_reaches_caller(
 
     assert coordinator.sun_charge_active is False
     assert coordinator.grid_charge_active is False
+
+
+async def test_poll_preserves_measurements_after_failed_manual_stop(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-MANUAL-GRID-CHARGE: Ein offener Stopp bleibt im Poll reparierbar."""
+    coordinator._max_soc = 100
+    await coordinator.async_start_grid_charge(-1000)
+    coordinator.client.write_register.side_effect = ModbusException(
+        "Reset fehlgeschlagen"
+    )
+
+    with pytest.raises(HomeAssistantError, match="Rücksetzauftrag bleibt aktiv"):
+        await coordinator.async_stop_grid_charge()
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert coordinator.data["soc"] == 85
+    assert coordinator._sun_charge_reset_required
+    assert not coordinator.grid_charge_active
+    assert not coordinator.sun_charge_active
+
+    coordinator.client.write_register.side_effect = None
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success
+    assert not coordinator._sun_charge_reset_required

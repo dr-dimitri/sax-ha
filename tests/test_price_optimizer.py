@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -84,14 +85,20 @@ def _local(hour: int, minute: int = 0, day: int = 15) -> datetime:
     return datetime(2024, 1, day, hour, minute, tzinfo=dt_util.DEFAULT_TIME_ZONE)
 
 
+@contextmanager
 def _patched_now(hour: int, minute: int = 0):
     """Patcht dt_util.now() auf einen festen Zeitpunkt - siehe
     tests/test_coordinator.py für die Begründung (freezegun würde den
     Hintergrund-Task für die Netzladung/netzdienliches Laden einfrieren)."""
-    return patch(
-        "custom_components.sax_power.coordinator.dt_util.now",
-        return_value=_local(hour, minute, day=1),
-    )
+    now = _local(hour, minute, day=1)
+    with (
+        patch("custom_components.sax_power.coordinator.dt_util.now", return_value=now),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=now.astimezone(UTC),
+        ),
+    ):
+        yield
 
 
 def _now() -> datetime:
@@ -877,7 +884,8 @@ def _make_coordinator(hass, client: MagicMock | None = None) -> SaxPowerCoordina
 
 def _charging_plan() -> PricePlan:
     """Plan, der für "jetzt" ein ausgewähltes Preisfenster meldet."""
-    slot = PriceSlot(start=_local(12), end=_local(13), price=0.05)
+    now = dt_util.now()
+    slot = PriceSlot(start=now, end=now + timedelta(hours=1), price=0.05)
     return PricePlan(
         status=PRICE_STATUS_CHARGING,
         charge_now=True,
@@ -1727,8 +1735,9 @@ async def test_price_charge_publishes_state_into_coordinator_data(hass) -> None:
     coordinator.price_planner.plan = _waiting_plan()
 
     data = {"soc": 50}
-    await coordinator._async_enforce_grid_charge(data)
-    coordinator._publish_charge_state(data)
+    with patch.object(dt_util, "now", return_value=_local(12)):
+        await coordinator._async_enforce_grid_charge(data)
+        coordinator._publish_charge_state(data)
 
     assert data["price_charge_active"] is False
     assert data["price_charge_status"] == PRICE_STATUS_WAITING

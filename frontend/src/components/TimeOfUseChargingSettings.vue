@@ -56,7 +56,7 @@ const text = computed(() =>
         thresholdUnavailable: "Startschwelle nicht verfügbar.",
         global: "Ladegrenze für alle Lademethoden (%)",
         globalHint:
-          "Gilt auch für Solarstrom. Wenn du diese Grenze senkst, wird ein höheres Netzladeziel ebenfalls gesenkt. Ein späteres Anheben erhöht das Netzladeziel nicht automatisch.",
+          "Gilt auch für Solarstrom. Diese Grenze begrenzt das gespeicherte Netzladeziel vorübergehend. Wenn du sie anhebst, wird das ursprüngliche Ziel bis zur neuen globalen Grenze wieder wirksam. Nur wenn du das Netzladeziel ausdrücklich änderst, wird dessen gespeicherter Wert dauerhaft geändert.",
         disabled:
           "Automatische Netzladung ist aus. Die gespeicherten Einstellungen gelten nach dem Einschalten.",
         unavailable:
@@ -102,7 +102,7 @@ const text = computed(() =>
         thresholdUnavailable: "Start threshold unavailable.",
         global: "Charge limit for all charging methods (%)",
         globalHint:
-          "Also applies to solar charging. Lowering this limit also lowers a higher grid charge target. Raising it later does not automatically raise the grid charge target.",
+          "Also applies to solar charging. This limit temporarily caps the saved grid charge target. Raising it makes the original target effective again, up to the new global limit. Only explicitly changing the grid charge target permanently changes its saved value.",
         disabled:
           "Automatic grid charging is off. Saved settings apply after switching it on.",
         unavailable: "Charging method unavailable. No selection is assumed.",

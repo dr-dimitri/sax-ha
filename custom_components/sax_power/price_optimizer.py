@@ -28,6 +28,7 @@ from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import (
+    async_track_point_in_utc_time,
     async_track_state_change_event,
     async_track_time_interval,
 )
@@ -172,6 +173,10 @@ class PricePlan:
     threshold: float | None = None
     needed_hours: int | None = None
     pv_forecast_kwh: float | None = None
+
+    def active_slot(self, moment: datetime) -> PriceSlot | None:
+        """REQ-DYNAMIC-PRICE-CHARGE: permissions use half-open UTC intervals."""
+        return next((slot for slot in self.slots if slot.overlaps(moment)), None)
 
 
 EMPTY_PLAN = PricePlan()
@@ -690,6 +695,8 @@ class SaxPricePlanner:
         self.coordinator = coordinator
         self.plan: PricePlan = EMPTY_PLAN
         self._unsub: list[Any] = []
+        self._unsub_boundary: Any = None
+        self._price_slots: tuple[PriceSlot, ...] = ()
         self._pending_tasks: set[asyncio.Task[None]] = set()
         self._shutdown = False
         self._cycle_store = PricePlanCycleStore(hass, coordinator.entry_id)
@@ -812,8 +819,48 @@ class SaxPricePlanner:
 
     @callback
     def _async_remove_listeners(self) -> None:
+        if self._unsub_boundary is not None:
+            self._unsub_boundary()
+            self._unsub_boundary = None
         while self._unsub:
             self._unsub.pop()()
+
+    @callback
+    def _schedule_boundary(self, now: datetime) -> None:
+        if self._unsub_boundary is not None:
+            self._unsub_boundary()
+            self._unsub_boundary = None
+        if self._shutdown or not self._unsub:
+            return
+        boundary = min(
+            (
+                _instant(bound)
+                for slot in (*self._price_slots, *self.plan.slots)
+                for bound in (slot.start, slot.end)
+                if _instant(bound) > _instant(now)
+            ),
+            default=None,
+        )
+        if boundary is not None:
+            self._unsub_boundary = async_track_point_in_utc_time(
+                self.hass, self._async_boundary_evaluate, boundary
+            )
+
+    async def _async_boundary_evaluate(self, now: datetime) -> None:
+        """Apply the selected budget without extending it through reoptimization."""
+        if self._shutdown:
+            return
+        task = asyncio.current_task()
+        if task is not None:
+            self._pending_tasks.add(task)
+        try:
+            now = dt_util.utcnow()
+            self.plan_at(now)
+            self._schedule_boundary(now)
+            await self.coordinator.async_apply_price_plan()
+        finally:
+            if task is not None:
+                self._pending_tasks.discard(task)
 
     async def async_shutdown(self) -> None:
         """Finish callbacks before the coordinator performs its final reset."""
@@ -928,19 +975,64 @@ class SaxPricePlanner:
                     "Preisoptimiertes Laden: keine auswertbaren Preisdaten in %s",
                     entity_id,
                 )
+        self._price_slots = tuple(slots)
         self.plan = self._evaluate_price_charge(now, slots, entity_id)
+        self.plan_at(now)
+        self._schedule_boundary(now)
+        return self.plan
+
+    @callback
+    def plan_at(self, now: datetime) -> PricePlan:
+        """Validate cached selection and current price without optimizing again."""
+        selected = self.plan.active_slot(now)
+        charge_now = (
+            selected is not None
+            and self.coordinator.price_charge_enabled
+            and self.coordinator.price_charge_strategy != PRICE_STRATEGY_OFF
+        )
+        price_now = (
+            current_price(self._price_slots, now)
+            if self._price_slots
+            else self.plan.current_price
+        )
         if self.coordinator.tariff_provider.config.tariff_type is TariffType.DYNAMIC:
             quote = self.coordinator.tariff_provider.quote(now)
-            self.plan = replace(
-                self.plan,
-                current_price=quote.price_eur_kwh,
-                charge_now=self.plan.charge_now and quote.quote is not None,
-                status=(
-                    PRICE_STATUS_NO_PRICE_DATA
-                    if self.plan.charge_now and quote.quote is None
-                    else self.plan.status
-                ),
+            price_now = quote.price_eur_kwh
+            charge_now = charge_now and quote.quote is not None
+            # A changed source cannot reuse selection made for another price.
+            if selected is not None and price_now != selected.price:
+                charge_now = False
+        status = self.plan.status
+        if status in (
+            PRICE_STATUS_CHARGING,
+            PRICE_STATUS_WAITING,
+            PRICE_STATUS_NO_PRICE_DATA,
+        ):
+            status = PRICE_STATUS_CHARGING if charge_now else PRICE_STATUS_WAITING
+            if price_now is None:
+                status = PRICE_STATUS_NO_PRICE_DATA
+        next_start = None
+        if charge_now and selected is not None:
+            provider_slot = next(
+                (slot for slot in self._price_slots if slot.overlaps(now)), selected
             )
+            next_start = provider_slot.start
+        elif self.plan.slots:
+            next_start = next(
+                (
+                    slot.start
+                    for slot in self.plan.slots
+                    if _instant(slot.start) > _instant(now)
+                ),
+                None,
+            )
+        self.plan = replace(
+            self.plan,
+            charge_now=charge_now,
+            current_price=price_now,
+            status=status,
+            next_start=next_start,
+        )
         return self.plan
 
     def _evaluate_price_charge(

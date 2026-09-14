@@ -139,8 +139,8 @@ jobs:
       - name: WebKit für die Tarifeditor-Abnahme installieren
         run: npx playwright install webkit
 
-      - name: Tarifeditor-Eingaben in WebKit prüfen
-        run: npm run test:browser -- --project=webkit-light-de
+      - name: Tarif-, Zeit- und Zahleneingaben in WebKit prüfen
+        run: npm run test:browser -- --project=webkit-light-de --project=webkit-light-en
 
       - name: WebKit-Browserbericht und Screenshots sichern
         if: always()

@@ -10,14 +10,14 @@ const german = computed(() => dashboard?.language.value === "de");
 const text = computed(() =>
   german.value
     ? {
-        mode: "1. Wann soll der Speicher aus dem Netz laden?",
+        mode: "Wann soll der Speicher aus dem Netz laden?",
         saved: "Gespeicherte Ladeweise",
         immediate:
           "Änderungen gelten nach der Bestätigung durch Home Assistant. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
-        target: "2. Wie voll soll der Speicher werden?",
+        target: "Wie voll soll der Speicher werden?",
         targetLabel: "Ladeziel (%)",
         targetHint:
-          "Dies ist die globale Ladegrenze für alle Lademethoden, auch für PV-Ladung. Smart kann weniger Netzstrom laden, wenn die PV-Prognose den übrigen Bedarf deckt. Das Ziel ist keine Garantie: Preise, Ladezeit und andere aktive Regeln können die Ladung begrenzen.",
+          "Dies ist die globale Ladegrenze für alle Lademethoden, auch für PV-Ladung. Bedarfsgerechtes Laden kann weniger Netzstrom nutzen, wenn die PV-Prognose den übrigen Bedarf deckt. Das Ziel ist keine Garantie: Preise, Ladezeit und andere aktive Regeln können die Ladung begrenzen.",
         hours: "Maximale Ladezeit je 24 Stunden",
         hoursHint:
           "Die günstigsten Zeitabschnitte ergeben zusammen höchstens diese Dauer. Der 24-Stunden-Zyklus beginnt beim Aktivieren dieser Ladeweise, nicht um Mitternacht. Heute/Morgen ändert nur die Preisansicht. Weniger Stunden begrenzen den Netzstrombezug, können aber ein volles Ladeziel verhindern.",
@@ -29,9 +29,9 @@ const text = computed(() =>
         noPriceLimit:
           "Es gilt keine feste Preisgrenze: Auch die günstigsten verfügbaren Stunden können teuer sein. Diese Ladeweise benötigt eine Preisvorschau mit Zeitabschnitten; ein einzelner aktueller Preis reicht nicht.",
         pvMissing:
-          "Ohne PV-Prognose wird keine künftige PV-Energie abgezogen. Eine Prognose kannst du unter Tarif & Preise ergänzen.",
+          "Ohne PV-Prognose wird keine künftige PV-Energie abgezogen. Eine Prognose kannst du in Schritt 1 ergänzen.",
         pvUsed:
-          "Die gespeicherte PV-Prognose wird berücksichtigt, soweit sie verfügbar ist. Sie kann den benötigten Netzstrom reduzieren. Den angerechneten Anteil findest du unter Tarif & Preise.",
+          "Die gespeicherte PV-Prognose wird berücksichtigt, soweit sie verfügbar ist. Sie kann den benötigten Netzstrom reduzieren. Den angerechneten Anteil findest du in Schritt 1.",
         offHint:
           "Diese Ladeweise setzt die preisgesteuerte Automatik aus, auch wenn der Hauptschalter eingeschaltet ist. Preise und Einstellungen bleiben erhalten.",
         advanced: "Weitere Einstellungen · Speicher schonen",
@@ -75,14 +75,14 @@ const text = computed(() =>
         },
       }
     : {
-        mode: "1. When should the battery charge from the grid?",
+        mode: "When should the battery charge from the grid?",
         saved: "Saved charging method",
         immediate:
           "Changes apply once confirmed by Home Assistant. Automatic grid charging must also be switched on.",
-        target: "2. How full should the battery be?",
+        target: "How full should the battery be?",
         targetLabel: "Charge target (%)",
         targetHint:
-          "This is the global charge limit for every charging method, including solar charging. Smart charging may use less grid energy when forecast solar production covers the remaining need. Reaching the target is not guaranteed: prices, charging time and other active rules may limit charging.",
+          "This is the global charge limit for every charging method, including solar charging. Charging what is needed may use less grid energy when forecast solar production covers the remaining need. Reaching the target is not guaranteed: prices, charging time and other active rules may limit charging.",
         hours: "Maximum charging time per 24 hours",
         hoursHint:
           "The cheapest time slots add up to at most this duration. The 24-hour cycle starts when you activate this charging method, not at midnight. Today/Tomorrow only changes the price chart. Fewer hours limit grid energy use but may prevent reaching the charge target.",
@@ -94,9 +94,9 @@ const text = computed(() =>
         noPriceLimit:
           "There is no fixed price cap: even the cheapest available hours may be expensive. This method requires a price forecast with time slots; a single current price is not enough.",
         pvMissing:
-          "Without a solar forecast, no future solar energy is deducted. You can add a forecast under Tariff & prices.",
+          "Without a solar forecast, no future solar energy is deducted. You can add a forecast in step 1.",
         pvUsed:
-          "The saved solar forecast is used when available. It may reduce the grid energy needed. Its contribution is configured under Tariff & prices.",
+          "The saved solar forecast is used when available. It may reduce the grid energy needed. Its contribution is configured in step 1.",
         offHint:
           "This method pauses price-controlled automation even when the main switch is on. Prices and settings are preserved.",
         advanced: "More settings · Preserve battery energy",

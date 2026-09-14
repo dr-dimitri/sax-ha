@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, useId } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
-import EntityControl from "./EntityControl.vue";
 import {
   finiteValue,
   formatSavingsDate,
@@ -9,7 +8,7 @@ import {
 } from "../savings";
 import type { HomeAssistant } from "../types";
 
-const props = defineProps<{ hass?: HomeAssistant; hideControl?: boolean }>();
+const props = defineProps<{ hass?: HomeAssistant }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
 const german = computed(() => dashboard?.language.value === "de");
@@ -18,16 +17,19 @@ const control = computed(() =>
   dashboard?.entity("switch", "bridge_charge_enabled"),
 );
 const attributes = computed(() => plan.value?.state?.attributes ?? {});
+const discharge = computed(() =>
+  dashboard?.entity("sensor", "discharge_forecast"),
+);
 const configurationHint = computed(() => {
   switch (control.value?.state?.attributes.configuration_error) {
     case "bridge_pv_start_required":
       return german.value
-        ? "Zum Einschalten unter Konfigurieren eine PV-Prognosequelle auswählen."
-        : "To enable planning, select a PV forecast source in the integration options.";
+        ? "Zum Einschalten in Schritt 1 eine PV-Prognosequelle auswählen."
+        : "To enable planning, select a PV forecast source in step 1.";
     case "bridge_tariff_required":
       return german.value
-        ? "Zum Einschalten unter Konfigurieren einen zeitvariablen Tarif einrichten."
-        : "To enable planning, configure a time-of-use tariff in the integration options.";
+        ? "Zum Einschalten in Schritt 1 einen zeitvariablen Tarif einrichten."
+        : "To enable planning, configure a time-of-use tariff in step 1.";
     default:
       return null;
   }
@@ -36,8 +38,10 @@ const text = computed(() =>
   german.value
     ? {
         title: "Ladeplanung",
-        setup:
-          "Die Planung lädt nur den benötigten Bedarf bis zum PV-Start. „Netzladung aktiv“ muss ebenfalls eingeschaltet sein. Tarif und PV-Prognosequelle werden unter Konfigurieren ausgewählt.",
+        currentForecast: "Aktuelle Entladeprognose",
+        calculatedPlan: "Berechneter Ladeplan",
+        forecastHint:
+          "Schätzung aus dem gemessenen Verbrauch bis zur unteren Ladegrenze. Änderungen beim Verbrauch oder neue Ladung verändern die Prognose.",
         unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
         incomplete:
           "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
@@ -53,8 +57,10 @@ const text = computed(() =>
       }
     : {
         title: "Charging plan",
-        setup:
-          "Planning charges only the energy needed until PV starts. The main grid charging switch must also be on. Select the tariff and PV forecast source in the integration options.",
+        currentForecast: "Current discharge forecast",
+        calculatedPlan: "Calculated charging plan",
+        forecastHint:
+          "An estimate based on measured consumption until the lower charge limit is reached. Changes in consumption or additional charging change the forecast.",
         unavailable: "The charging plan is currently unavailable.",
         incomplete:
           "The charging plan is still incomplete. Charging times cannot currently be displayed.",
@@ -76,7 +82,7 @@ const reasons = computed<Record<string, string>>(() =>
   german.value
     ? {
         pv_start_missing:
-          "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognose in den Integrationsoptionen prüfen.",
+          "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle in Schritt 1 prüfen.",
         consumption_missing:
           "Für die Verbrauchsprognose wird mindestens eine Minute Entlademessung benötigt.",
         measurements_missing: "Aktuelle Batteriemesswerte fehlen.",
@@ -84,11 +90,11 @@ const reasons = computed<Record<string, string>>(() =>
         pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
         manual_charge: "Die manuelle Ladung hat Vorrang.",
         disabled:
-          "Den Schalter „Verbrauchsbasierte Ladeplanung“ hier und den Hauptschalter „Netzladung aktiv“ einschalten.",
+          "In Schritt 2 „Nur Bedarf bis Solarstrom“ wählen und in Schritt 3 die automatische Netzladung einschalten.",
       }
     : {
         pv_start_missing:
-          "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast in the integration options.",
+          "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source in step 1.",
         consumption_missing:
           "The consumption forecast needs at least one minute of discharge measurements.",
         measurements_missing: "Current battery measurements are missing.",
@@ -96,7 +102,7 @@ const reasons = computed<Record<string, string>>(() =>
         pv_surplus: "PV surplus pauses planned grid charging.",
         manual_charge: "Manual charging takes priority.",
         disabled:
-          "Turn on “Consumption-based charging planning” here and the main grid charging switch.",
+          "Choose “Only what is needed until solar power” in step 2 and turn on automatic grid charging in step 3.",
       },
 );
 const reason = computed(() =>
@@ -117,6 +123,22 @@ function timestamp(value: unknown) {
     ? formatSavingsDate(value, props.hass)
     : null;
 }
+const currentForecast = computed(() => {
+  if (!discharge.value?.available) return null;
+  const state = discharge.value.state;
+  const at = timestamp(state?.state);
+  const minutes = number(state?.attributes.observation_minutes, 1, 60);
+  const average = number(
+    state?.attributes.average_discharge_w,
+    Number.MIN_VALUE,
+    Infinity,
+    0,
+  );
+  if (!at || !minutes || !average) return null;
+  return german.value
+    ? `Bei durchschnittlich ${average} W Verbrauch in den letzten ${minutes} Minuten reicht der Speicher voraussichtlich bis ${at} Uhr.`
+    : `With average consumption of ${average} W over the last ${minutes} minutes, the battery is expected to last until ${at}.`;
+});
 const dates = computed(() => ({
   discharge: timestamp(attributes.value.discharge_at),
   start: timestamp(attributes.value.charge_start),
@@ -213,17 +235,17 @@ const target = computed(() => {
 
 <template>
   <section
-    v-if="plan || control"
+    v-if="plan || control || currentForecast"
     class="charge-plan"
     :aria-labelledby="`${id}-charge-plan`"
   >
     <h2 :id="`${id}-charge-plan`">{{ text.title }}</h2>
-    <EntityControl
-      v-if="!hideControl"
-      domain="switch"
-      entity-key="bridge_charge_enabled"
-    />
-    <p v-if="control">{{ text.setup }}</p>
+    <section v-if="currentForecast" class="charge-plan__forecast">
+      <h3>{{ text.currentForecast }}</h3>
+      <p>{{ currentForecast }}</p>
+      <p class="charge-plan__forecast-hint">{{ text.forecastHint }}</p>
+    </section>
+    <h3 v-if="currentForecast && plan">{{ text.calculatedPlan }}</h3>
     <p v-if="configurationHint">{{ configurationHint }}</p>
     <template v-for="(paragraph, index) in paragraphs" :key="index">
       <p v-if="paragraph">{{ paragraph }}</p>
@@ -256,6 +278,14 @@ const target = computed(() => {
 .charge-plan p:last-child {
   margin-bottom: 0;
 }
+.charge-plan__forecast {
+  margin-bottom: 20px;
+}
+.charge-plan__forecast h3 {
+  margin-top: 0;
+  font-size: 16px;
+}
+.charge-plan__forecast-hint,
 .charge-plan__target {
   color: var(--secondary-text-color, #666);
 }

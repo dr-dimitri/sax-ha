@@ -93,16 +93,15 @@ Einrichtung oder Update automatisch als **SAX Power** in der Seitenleiste.
 Es gibt dafür keine Auswahl im Einrichtungs- oder Konfigurationsdialog und
 keine zusätzliche Installation. Auch eine früher gespeicherte Abwahl entfällt.
 Preise und Zeitfenster eines zeitvariablen Tarifs bearbeitest du direkt unter
-**Stromtarif → Tarif & Preise**.
+**Stromtarif → Schritt 1 → Bearbeiten**.
 
-Die Screenshots zeigen das Dashboard mit Beispieldaten.
+Die Screenshots zeigen die aktuelle Oberfläche mit vier Bereichen und Beispieldaten: am Computer auf Deutsch im hellen Design, auf dem Smartphone auf Englisch im dunklen Design.
 
 | Bereich | Das findest du dort |
 | --- | --- |
 | Allgemeine Informationen | Ladezustand, Leistung, Temperatur, Energiezähler und Speicherschalter |
 | Stromtarif | Aktiven Tarif wählen, Tagespreise vergleichen, Tarifpreise und automatische Netzladung einstellen |
-| Zeitvariabler Tarif | Bisherige Ansicht als Fallback für Tarifpreisfenster, Ladegrenzen, Monate und Verbrauchsplanung bis zum PV-Start |
-| Netzdienliches Laden | PV-Ladepause, Monate und Prognoseschwelle |
+| Netzdienliches Laden | PV-Ladepause, PV-Sensor auswählen, Monate und Prognoseschwelle |
 | Amortisation | Netto-Ersparnis, Tarifplan und Auswertung eigener Zeiträume |
 
 Schalter und Monatsauswahl zeigen ihren Zustand direkt am Haken. Zahlen
@@ -119,21 +118,18 @@ Netzladung bleiben die Preise für Anzeige und Amortisation gültig.
 
 Das Diagramm zeigt die Strompreise des heutigen Tages in **ct/kWh**, bei
 dynamischen Tarifen auch die bereits verfügbaren Preise für morgen.
-Beim zeitvariablen Tarif führen drei Schritte durch Preise, Ladeziel und
-Aktivierung. Der Preisverlauf ist bei Bedarf aufklappbar. Beim dynamischen
-Tarif bleiben **Tarif & Preise** und **Ladeverhalten** die Einstiege zum
-Bearbeiten. Geschlossene Einstellungen zeigen ihre gespeicherten Werte. Der bisherige
-Tab **Zeitvariabler Tarif** bleibt als Fallback erreichbar und verwendet
-dieselben Einstellungen.
+Beide Tarifarten führen in drei Schritten durch Preise oder Preisquelle,
+Ladeverhalten und Aktivierung. Geschlossene Einstellungen zeigen ihre
+bestätigten Werte. Preisverlauf und Ladeplan lassen sich bei Bedarf aufklappen.
 
-![Stromtarif mit Tagespreisen und kompakten Einstellungen](docs/images/vue-stromtarif-desktop-light-de.png)
+![Zeitvariabler Stromtarif: Preise, Ladeziel und Aktivierung in drei Schritten](docs/images/vue-stromtarif-desktop-light-de.png)
 
 <details>
 <summary>So sieht das Dashboard auf dem Smartphone aus</summary>
 
 <p>
   <img src="docs/images/vue-allgemein-mobile-dark-en.png" alt="Geräteübersicht auf dem Smartphone im dunklen Design, englische Sprache" width="320">
-  <img src="docs/images/vue-stromtarif-mobile-dark-en.png" alt="Stromtarif mit Tagespreisen und kompakten Einstellungen auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+  <img src="docs/images/vue-stromtarif-mobile-dark-en.png" alt="Zeitvariabler Stromtarif mit drei Einrichtungsschritten auf dem Smartphone im dunklen Design, englische Sprache" width="320">
 </p>
 
 </details>
@@ -240,10 +236,14 @@ die Bedarfsladung plant deshalb keine zusätzliche Vollladung ein.
 Zahlen werden jeweils mit **Übernehmen** gespeichert; **Fertig** schließt nur
 die Bearbeitung. Bereits gespeicherte Werte ändern sich beim Öffnen nicht.
 
-Die bisherige Ansicht **Zeitvariabler Tarif** bleibt als Fallback verfügbar.
-Die folgenden Namen beziehen sich auf deren native Home-Assistant-Entitäten.
+Unter **Ladeplan & Prognose** erscheint die aktuelle Entladeprognose, sobald
+ausreichend gültige Verbrauchsdaten vorliegen. Sie zeigt, wie lange der Speicher
+voraussichtlich bis zur unteren Ladegrenze reicht, auch bei ausgeschalteter
+Ladeautomatik. Ohne gültige Prognose werden keine Zeiten geschätzt.
 
-![Zeitvariabler Tarif mit verbindlichen Tarifpreisfenstern, Ladegrenzen und Monatsauswahl](docs/images/vue-ladeautomatik-desktop-light-de.png)
+Der bisherige Tab **Zeitvariabler Tarif** entfällt. Alte Links öffnen automatisch
+**Stromtarif**. Die folgenden technischen Namen bezeichnen weiterhin die
+vorhandenen Home-Assistant-Entitäten.
 
 Schalte **Netzladung aktiv** ein und wähle die gewünschten Monate. Beim
 Tarifmodell **Tageszeitabhängig** bestimmen die gespeicherten
@@ -270,8 +270,8 @@ auf eine andere Tarifart werden sie erneut auf Überschneidungen mit der
 PV-Ladepause geprüft; ein widersprüchliches altes Netzladefenster wird geleert.
 Bei ungültigen
 Tarifdaten startet keine automatische Tarifladung. Für andere Tarifarten ohne
-verbrauchsbasierte Planung bleibt das **Netzladezeitfenster** mit Start und
-Ende verfügbar. Diese Vereinheitlichung setzt
+verbrauchsbasierte Planung bleiben die bisherigen Start-/Endwerte über die
+nativen Home-Assistant-Time-Entitäten verfügbar. Diese Vereinheitlichung setzt
 [Issue #237](https://github.com/dr-dimitri/sax-ha/issues/237) um.
 
 Erkennt die Integration ausreichend PV-Überschuss, beendet sie die
@@ -279,14 +279,22 @@ Netzladung und der Speicher kann Sonnenstrom nutzen.
 
 #### Verbrauchsabhängig bis zum PV-Start laden
 
-Aktiviere im Dashboard **Zeitvariabler Tarif → Ladeplanung** den Schalter
-**Verbrauchsbasierte Ladeplanung**. Er verwendet dieselbe gespeicherte Einstellung
-wie die Option unter **Konfigurieren**; Änderungen sind in beiden Oberflächen
-sichtbar und bleiben nach einem Neustart erhalten. Zum Einschalten müssen ein
-zeitvariabler Tarif und eine PV-Prognosequelle konfiguriert sein. Ausschalten
-ist jederzeit möglich und wechselt zurück zur festen SOC-Steuerung.
+![Aktuelle Entladeprognose und davon getrennt berechneter Ladeplan](docs/images/vue-stromtarif-prognose-desktop-light-de.png)
+
+<details>
+<summary>Prognose und Ladeplan auf dem Smartphone</summary>
+
+<img src="docs/images/vue-stromtarif-prognose-mobile-dark-en.png" alt="Aktuelle Entladeprognose und berechneter Ladeplan auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+
+</details>
+
+Wähle unter **Stromtarif → 2. Wie viel möchtest du laden? → Bearbeiten** die
+Ladeweise **Nur Bedarf bis Solarstrom**. Sie verwendet dieselbe gespeicherte
+Einstellung wie die Option unter **Konfigurieren**. Zum Einschalten müssen
+ein zeitvariabler Tarif und eine PV-Start-Quelle konfiguriert sein. Mit
+**Festes Ladeziel** wechselst du jederzeit zurück zur festen SOC-Steuerung.
 Solange diese Ladeplanung eingeschaltet ist, bleibt ihre PV-Start-Quelle
-erforderlich. Du kannst sie unter **Stromtarif → Tarif & Preise** ersetzen;
+erforderlich. Du kannst sie in Schritt 1 unter **Bearbeiten → Zusätzlich: Solarprognose für die Ladeplanung** ersetzen;
 zum Entfernen schaltest du zuerst die verbrauchsbasierte Ladeplanung aus.
 Ein abgelehnter Speicherversuch erhält deine Eingaben und die bisherigen Werte.
 **Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
@@ -315,7 +323,7 @@ oder die prognostizierte Tagesenergiemenge allein bestimmen den Start nicht.
 Ohne passende PV-Prognose, ausreichenden vorhergesagten Ertrag oder gültige
 Batteriemesswerte startet keine geplante Netzladung.
 
-Die Karte **Ladeplanung** im Tab **Zeitvariabler Tarif** nennt die beobachteten
+Die Karte **Ladeplanung** unter **Stromtarif → Ladeplan & Prognose** nennt die beobachteten
 Minuten, den erwarteten Entladezeitpunkt, Ladebeginn und Ladeende sowie den
 PV-Start. Reicht die vorhandene Energie aus, meldet sie ausdrücklich, dass keine
 Netzladung nötig ist. Reichen Ladefenster oder Speicherkapazität nicht aus, zeigt
@@ -342,18 +350,25 @@ dessen bestehende Ladesteuerung wird dadurch nicht umgestellt.
 
 ### Netzdienliches Laden
 
+Unter **Solarprognose für die Ladepause** kannst du den Sensor für den heute verbleibenden
+Solarertrag auswählen und speichern. Verwende einen Energiesensor, keine
+aktuelle Leistung. Diese Auswahl gehört nur zur Ladepause; die Prognosequelle
+des dynamischen Tarifs bleibt davon unabhängig. Die bestätigte Prognose zeigt,
+ob die eingestellte Schwelle erreicht wird.
+
 Eine Ladepause hält morgens Kapazität frei, damit der Speicher mehr von der
 PV-Mittagsspitze aufnehmen kann. Typisch wäre eine Pause von 08:00 bis
 13:00 Uhr in den Monaten Mai bis August.
 
-![Netzdienliches Laden mit Ladepause, PV-Prognose und Monaten](docs/images/vue-netzdienliches-laden-desktop-light-de.png)
+![Netzdienliches Laden mit auswählbarer PV-Quelle, Ladepause und aktiven Monaten](docs/images/vue-netzdienliches-laden-desktop-light-de.png)
 
 Aktiviere **Netzdienliches Laden**, lege Start und Ende der Ladepause fest
 und wähle die Monate. Außerhalb dieser Zeiten arbeitet der Speicher normal.
 
-Wähle unter **Konfigurieren** den **PV-Prognose-Sensor für die Ladepause
-(heute verbleibend)**. Sein Wert muss den heute noch erwarteten PV-Ertrag
-angeben. Die **Mindest-PV-Prognose** entscheidet, ob die Pause sinnvoll ist:
+Wähle den Sensor direkt unter **Solarprognose für die Ladepause → Bearbeiten**.
+Alternativ findest du ihn in den Integrationsoptionen unter **Konfigurieren**
+als **PV-Prognose-Sensor für die Ladepause (heute verbleibend)**.
+Die **Mindest-PV-Prognose** entscheidet, ob die Pause sinnvoll ist:
 Bei 8 kWh gilt sie nur, wenn mindestens 8 kWh Ertrag erwartet werden.
 Liegt die Prognose darunter oder fehlt sie, darf der Speicher früher laden.
 Mit **0 kWh** schaltest du die Prognoseprüfung aus.
@@ -371,13 +386,23 @@ Der Tarif **Dynamisch** im Tab **Stromtarif** nutzt einen vorhandenen Strompreis
 zum Beispiel von Tibber, Nordpool, EPEX Spot, ENTSO-E oder aWATTar.
 Die Integration ruft selbst keine Preise vom Anbieter ab.
 
-![Dynamischer Stromtarif mit Tagespreisen und Ladesteuerung](docs/images/vue-stromtarif-dynamisch-desktop-light-de.png)
+![Dynamischer Stromtarif: Preisquelle, Ladeweise und Aktivierung im gleichen Aufbau](docs/images/vue-stromtarif-dynamisch-desktop-light-de.png)
+
+<details>
+<summary>Dynamischer Tarif auf dem Smartphone</summary>
+
+<p>
+  <img src="docs/images/vue-stromtarif-dynamisch-mobile-dark-en.png" alt="Dynamischer Tarif mit drei Einrichtungsschritten im dunklen Design, englische Sprache" width="320">
+  <img src="docs/images/vue-stromtarif-ladehilfe-mobile-dark-en.png" alt="Geöffnete dynamische Ladeeinstellungen auf dem Smartphone mit Erläuterungen zu Ladegrenze und Ladedauer" width="320">
+</p>
+
+</details>
 
 Die Einrichtung besteht aus drei Schritten:
 
-1. Wähle unter **Tarif & Preise → Bearbeiten** deinen Strompreis-Sensor
+1. Wähle unter **1. Woher kommen deine Strompreise? → Bearbeiten** deinen Strompreis-Sensor
    und trage die Einspeisevergütung in ct/kWh ein. Bestätige mit **Speichern**.
-2. Öffne **Ladeverhalten → Bearbeiten**. Wähle, wie der Speicher laden soll,
+2. Öffne **2. Wie möchtest du laden? → Bearbeiten**. Wähle, wie der Speicher laden soll,
    und stelle den gewünschten maximalen Speicherfüllstand ein. Die Erklärung
    zur Ladeweise zeigt, welche Einstellungen dafür benötigt werden. Bestätige
    geänderte Zahlen jeweils mit **Übernehmen**.
@@ -423,7 +448,7 @@ können dazu führen, dass weniger Netzstrom geladen wird.
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
 verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
 **Smart** verwendet den **PV-Prognose-Sensor (optional)** aus
-**Tarif & Preise**, getrennt vom heutigen Rest-Ertrag der Ladepause.
+Schritt 1, getrennt vom heutigen Rest-Ertrag der Ladepause.
 Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
 der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
 **Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
@@ -435,7 +460,7 @@ die bestätigten Einstellungen; allein das Öffnen des Einstellbereichs
 verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick;
 **Fertig** schließt den Bereich und speichert keine offenen Zahleneingaben.
 
-![Geführte Ladeeinstellungen mit erklärten Auswirkungen](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
+![Dynamischer Tarif: geöffnete Ladeeinstellungen mit erklärten Auswirkungen](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
 
 Unter **Weitere Einstellungen · Speicher schonen** bestimmt die Grenze
 **Speicher bei günstigem Strom schonen bis (ct/kWh)** (Neutralpreis), unter welchem Strompreis der Speicher
@@ -486,8 +511,8 @@ Investitionskosten bleiben Eurobeträge. Beim tageszeitabhängigen
 Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
 hinterlegten Plan bearbeitest du als Administrator im Tab **Stromtarif** unter
-**Tarif & Preise → Bearbeiten**. Derselbe Editor ist unter **Tarifpreisfenster →
-Bearbeiten** in den Tabs **Zeitvariabler Tarif** und **Amortisation** verfügbar.
+**Schritt 1 → Bearbeiten**. Derselbe Editor ist unter **Tarifpreisfenster →
+Bearbeiten** im Tab **Amortisation** verfügbar.
 Der Editor klappt direkt in der Karte auf: Standardpreis, Einspeisevergütung
 und vorhandene Zeitfenster mit **Von**, **Bis** und **Preis**. Über
 **Zeitfenster hinzufügen** lassen sich bis zu acht Fenster anlegen; Fenster
@@ -499,13 +524,13 @@ ein Arbeitspreis pro kWh; monatliche Grundgebühren gehören nicht dazu.
 
 Für diesen Tarif entfallen die Preiseingaben im Konfigurationsdialog.
 Standardpreis, Einspeisevergütung und Zeitfenster bearbeitest du im Dashboard
-unter **Stromtarif → Tarif & Preise**.
+unter **Stromtarif → Schritt 1 → Bearbeiten**.
 Bestehende Tarifwerte bleiben beim Update und bei Änderungen anderer
 Einstellungen erhalten. Nach der erstmaligen Auswahl von **Tageszeitabhängig**
 vervollständigst du das Profil im Dashboard. Bis dahin gibt es keinen gültigen
 Tarif und keine automatische Tarifladung. Den Festpreis bearbeitest du
 weiterhin unter **Konfigurieren**, die dynamische Einspeisevergütung auch
-direkt unter **Stromtarif → Tarif & Preise**.
+direkt unter **Stromtarif → Schritt 1 → Bearbeiten**.
 
 Diese Preisfenster dienen der
 Geldbilanz und bestimmen den erlaubten Niedertarifbereich für feste SOC-Ladung

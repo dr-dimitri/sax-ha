@@ -61,7 +61,9 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
       key !== "bridge_charge_enabled" &&
       !general.includes(key) &&
       !economics.includes(key) &&
-      !(bridgePlan && key === "bridge_charge_plan") &&
+      !(
+        bridgePlan && ["bridge_charge_plan", "discharge_forecast"].includes(key)
+      ) &&
       !["timed_charge_", "grid_serving_", "price_charge_"].some((prefix) =>
         key.startsWith(prefix),
       )
@@ -158,6 +160,7 @@ function example({ domain, key, entity_id }) {
     economics_status: "active",
     economics_current_import_price: "24.56",
     bridge_charge_plan: "planned",
+    discharge_forecast: "2026-09-14T01:15:00Z",
   };
   state = values[key] ?? state;
   if (["soc", "economics_amortization_progress", "economics_roi"].includes(key))
@@ -200,6 +203,13 @@ function example({ domain, key, entity_id }) {
       base_price_is_low_tariff: false,
       low_tariff_active: false,
       low_tariff_valid_until: null,
+    };
+  if (key === "discharge_forecast")
+    attributes = {
+      device_class: "timestamp",
+      observation_minutes: 12,
+      average_discharge_w: 800,
+      observed_at: "2026-09-13T21:00:00Z",
     };
   if (key === "bridge_charge_plan")
     attributes = {
@@ -460,7 +470,48 @@ function tariffSeries(day) {
     revision: String(tariffRevision),
   };
 }
+let gridServingSource = "sensor.demo_remaining_forecast";
+let gridServingSourceRevision = 1;
+states[gridServingSource] = {
+  entity_id: gridServingSource,
+  state: "24.3",
+  attributes: {
+    friendly_name: "Solarertrag heute verbleibend",
+    unit_of_measurement: "kWh",
+  },
+};
+states["sensor.demo_remaining_forecast_alternative"] = {
+  entity_id: "sensor.demo_remaining_forecast_alternative",
+  state: "8300",
+  attributes: {
+    friendly_name: "Alternative Solarprognose heute",
+    unit_of_measurement: "Wh",
+  },
+};
 async function callWS(request) {
+  if (request.type.startsWith("sax_power/dashboard/grid_serving/")) {
+    if (request.type.endsWith("/save")) {
+      await waitForActionRelease();
+      if (rejectNext) {
+        rejectNext = false;
+        throw { code: "failed" };
+      }
+      if (request.revision !== String(gridServingSourceRevision))
+        throw { code: "conflict" };
+      gridServingSource = request.pv_sensor;
+      gridServingSourceRevision++;
+      states["sensor.demo_grid_serving_forecast"].attributes.source_entity_id =
+        gridServingSource;
+      writes++;
+      actions.textContent = `${writes}: sax_power.grid_serving_source ${JSON.stringify(request)}`;
+      update();
+    }
+    return {
+      pv_sensor: gridServingSource,
+      revision: String(gridServingSourceRevision),
+      can_edit: true,
+    };
+  }
   if (request.type === "sax_power/dashboard/tariff/series")
     return tariffSeries(request.day);
   if (request.type === "sax_power/dashboard/tariff/get") return tariffResult();

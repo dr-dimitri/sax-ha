@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, h, nextTick, provide, shallowRef, type App } from "vue";
 import ElectricityTariffView from "../src/views/ElectricityTariffView.vue";
 import TariffPriceChart from "../src/components/TariffPriceChart.vue";
-import TimedChargingView from "../src/views/TimedChargingView.vue";
 import {
   SAX_DASHBOARD_KEY,
   useSaxDashboard,
@@ -89,7 +88,6 @@ async function mount(
     readonly?: boolean;
     language?: string;
     enabled?: boolean;
-    legacy?: boolean;
   } = {},
 ) {
   const sample = chargingSample(options.language ?? "de");
@@ -192,7 +190,7 @@ async function mount(
       provide(SAX_DASHBOARD_KEY, dashboard);
       void dashboard.loadTariff();
       return () =>
-        h(options.legacy ? TimedChargingView : ElectricityTariffView, {
+        h(ElectricityTariffView, {
           hass: hass.value,
         });
     },
@@ -366,14 +364,6 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     expect((await read).tariff_type).toBe("dynamic");
     expect(fixture.dashboard.tariff.value?.tariff_type).toBe("dynamic");
   });
-  it("shows the legacy fallback without a second automation when dynamic is selected even with both native switches off", async () => {
-    const fixture = await mount({ type: "dynamic", legacy: true });
-    expect(fixture.root.textContent).toContain("Aktiver Tarif: Dynamisch");
-    expect(fixture.root.querySelector("input,form")).toBeNull();
-    expect(fixture.root.querySelector("a")?.getAttribute("href")).toBe(
-      "/sax-power-vue/stromtarif",
-    );
-  });
   it.each(["dynamic", "time_of_use"])(
     "unlocks controls after an external tariff switch closes the %s editor",
     async (type) => {
@@ -421,9 +411,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     resolve({ ...sampleSeries("tomorrow"), tariff_type: "dynamic" });
     await flush();
     expect(fixture.root.querySelector(".tariff-price-chart svg")).toBeNull();
-    expect(
-      fixture.root.querySelector(".electricity-current-price")?.textContent,
-    ).toContain("Nicht verfügbar");
+    expect(fixture.root.querySelector(".electricity-current-price")).toBeNull();
   });
   it("loads tomorrow prices on demand and preserves a missing tomorrow as unavailable", async () => {
     const fixture = await mount({ type: "dynamic" });
@@ -1119,10 +1107,15 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
   });
 });
 describe("REQ-VUE-ELECTRICITY-TARIFF: activation feedback beside step 3", () => {
-  it.each(["failed", "conflict"])(
-    "keeps delayed %s feedback and recovery beside the confirmed time-of-use switch",
-    async (code) => {
-      const fixture = await mount();
+  it.each([
+    ["time_of_use", "failed"],
+    ["time_of_use", "conflict"],
+    ["dynamic", "failed"],
+    ["dynamic", "conflict"],
+  ])(
+    "keeps delayed %s/%s feedback and recovery beside the confirmed switch",
+    async (type, code) => {
+      const fixture = await mount({ type });
       let reject!: (cause: unknown) => void;
       fixture.callWS.mockImplementationOnce(
         () =>
@@ -1246,5 +1239,116 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: exact price steps and gaps", () => {
     expect(chart.end - chart.start).toBe(23 * 3600000);
     expect(chart.x(chart.start)).toBe(48);
     expect(chart.x(chart.end)).toBe(308);
+  });
+});
+
+describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
+  it.each(["de", "en"])(
+    "orders setup, charging and activation before optional details (%s)",
+    async (language) => {
+      const fixture = await mount({ type: "dynamic", language });
+      const headings = [
+        ...fixture.root.querySelectorAll(
+          ".electricity-prices h2, .electricity-charging h2, .electricity-activation h2",
+        ),
+      ].map((heading) => heading.textContent?.trim());
+      expect(headings).toEqual(
+        language === "de"
+          ? [
+              "1. Woher kommen deine Strompreise?",
+              "2. Wie möchtest du laden?",
+              "3. Automatik einschalten",
+            ]
+          : [
+              "1. Where do your electricity prices come from?",
+              "2. How should the battery charge?",
+              "3. Turn on automatic charging",
+            ],
+      );
+      expect(
+        fixture.root.querySelectorAll(".electricity-master input"),
+      ).toHaveLength(1);
+      expect(
+        fixture.root.querySelector(
+          ".electricity-tariff-bar .electricity-master",
+        ),
+      ).toBeNull();
+      expect(
+        fixture.root.querySelector<HTMLDetailsElement>(
+          ".electricity-price-details",
+        )?.open,
+      ).toBe(false);
+      expect(
+        fixture.root.querySelector(
+          ".electricity-activation + .electricity-price-card",
+        ),
+      ).not.toBeNull();
+      expect(
+        fixture.root.querySelector(
+          ".electricity-price-details .electricity-days",
+        ),
+      ).not.toBeNull();
+      expect(
+        fixture.root.querySelector(".electricity-activation")?.textContent,
+      ).toContain(
+        language === "de"
+          ? "Preisgrenze oder günstigste Stunden"
+          : "price cap or cheapest hours",
+      );
+      await click(
+        fixture.root.querySelector(".electricity-charging")!,
+        language === "de" ? "Bearbeiten" : "Edit",
+      );
+      expect(
+        [
+          ...fixture.root.querySelectorAll(".dynamic-charging-settings h3"),
+        ].every((heading) => !/^\d\./.test(heading.textContent ?? "")),
+      ).toBe(true);
+      expect(writes(fixture)).toHaveLength(0);
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it("shows only PV energy accounted for by the backend plan with its matching dynamic source", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    fixture.stored.profiles!.dynamic.pv_sensor = "sensor.tomorrow_solar";
+    await fixture.dashboard.loadTariff();
+    const id = fixture.dashboard.entity("sensor", "price_charge_status_text")!
+      .metadata.entity_id;
+    const setPlan = async (source: unknown, value: unknown) => {
+      fixture.hass.value = {
+        ...fixture.hass.value,
+        states: {
+          ...fixture.hass.value.states,
+          [id]: {
+            ...fixture.hass.value.states[id]!,
+            attributes: { pv_prognose_sensor: source, pv_prognose_kwh: value },
+          },
+        },
+      };
+      await flush();
+    };
+    expect(
+      fixture.root.querySelector(".electricity-plan")?.textContent,
+    ).not.toContain("24,3");
+    await setPlan("sensor.tomorrow_solar", 6.75);
+    expect(
+      fixture.root.querySelector(".electricity-planned-pv")?.textContent,
+    ).toContain("6,8 kWh");
+    for (const [source, value] of [
+      ["sensor.grid_serving_source", 24.3],
+      ["sensor.tomorrow_solar", null],
+      ["sensor.tomorrow_solar", -1],
+      ["sensor.tomorrow_solar", "NaN"],
+    ]) {
+      await setPlan(source, value);
+      expect(fixture.root.querySelector(".electricity-planned-pv")).toBeNull();
+    }
+    await setPlan("sensor.tomorrow_solar", 0);
+    expect(
+      fixture.root.querySelector(".electricity-planned-pv")?.textContent,
+    ).toContain("0,0 kWh");
+    await fixture.disconnect();
+    expect(fixture.root.querySelector(".electricity-planned-pv")).toBeNull();
   });
 });

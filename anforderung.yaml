@@ -2562,18 +2562,18 @@ requirement_vue_dashboard:
     Das Panel enthält die responsive,
     in Deutsch und Englisch beschriftete Navigation zu
     Allgemeine Informationen (allgemein), Stromtarif (stromtarif),
-    Zeitvariabler Tarif (ladeautomatik), Netzdienliches Laden
+    Netzdienliches Laden
     (netzdienliches-laden) und Amortisation (ersparnis), in dieser Reihenfolge.
-    Die englischen Tarif-Tabnamen sind Electricity tariff und Time-of-use tariff;
+    Der englische Tarif-Tabname ist Electricity tariff;
     Amortisation heißt auf Englisch Amortization.
-    Beide Tarifzugänge bleiben unabhängig vom Zustand der Ladeautomatik sichtbar.
+    Der Tarifzugang bleibt unabhängig vom Zustand der Ladeautomatik sichtbar.
     Der gespeicherte Tariftyp bestimmt den Inhalt von Stromtarif, auch bei
-    ausgeschalteter Netzladung. Die bisherige Route dynamisches-laden wird ohne
-    Serviceaufruf und ohne zusätzlichen History-Eintrag nach stromtarif umgeleitet.
-    Zeitvariabler Tarif bleibt als Fallback bestehen; bei aktivem dynamischem
-    Tarif zeigt er den Verweis auf Stromtarif statt einer zweiten Ladeautomatik.
+    ausgeschalteter Netzladung. Die bisherigen Routen dynamisches-laden und
+    ladeautomatik werden ohne Serviceaufruf und ohne zusätzlichen History-Eintrag
+    nach stromtarif umgeleitet. Beide alten Tarifansichten und ihre redundante
+    Entwicklungsvorschau sind entfernt.
     Entity-Schlüssel bleiben unverändert.
-    Alle fünf Ansichten zeigen die vorhandenen Entitäten und Bedienfunktionen. Die
+    Alle vier Ansichten zeigen die vorhandenen Entitäten und Bedienfunktionen. Die
     gemeinsame Datenanbindung ist in REQ-VUE-ENTITY-BINDING beschrieben,
     die Ansichten in REQ-VUE-GENERAL, REQ-VUE-CHARGING,
     REQ-VUE-ELECTRICITY-TARIFF und REQ-VUE-SAVINGS. REQ-VUE-PARITY sichert
@@ -2644,7 +2644,7 @@ requirement_vue_dashboard:
        Batterieintegration betriebsbereit; fremde Panels werden nicht entfernt."
     - "Alte Dashboard-Options-Werte deaktivieren das Panel nicht und erzeugen
        keine zusätzliche Geräteaktion."
-    - "Die fünf Unterpfade funktionieren bei Navigation, direktem Einstieg
+    - "Die vier Unterpfade funktionieren bei Navigation, direktem Einstieg
        und Browser-Zurück; Mount/Unmount räumt Frontend-Listener auf."
     - "Browserprüfungen belegen geringeren Desktop-Platzbedarf auch mit
        HA-Seitenleiste, vollständige Inhalte, erreichbare Bedienelemente
@@ -2707,9 +2707,8 @@ requirement_vue_entity_binding:
     min/max und step geprüft; Zeiten auf gültige Stunden, Minuten und Sekunden;
     Auswahlwerte müssen in den aktuellen options enthalten sein. Zahlen und
     Zeiten bleiben lokale Eingaben bis zur ausdrücklichen Übernahme.
-    Die beiden Zeitfenster aus REQ-VUE-CHARGING verwenden stattdessen die
-    bestehenden Services sax_power.set_timed_charge_window und
-    sax_power.set_grid_serving_window mit device_id, start und end. Beide
+    Die Ladepause aus REQ-VUE-CHARGING verwendet stattdessen den bestehenden
+    Service sax_power.set_grid_serving_window mit device_id, start und end. Beide
     Grenzen werden zusammen validiert und mit genau einem Aufruf übernommen.
     Die aufgelösten Time-Entitäten müssen bedienbar sein und dieselbe Device-ID
     besitzen; Benutzeraufrufe werden auch serverseitig auf Bedienrechte für
@@ -2849,73 +2848,15 @@ requirement_vue_charging:
   title: "Zeitvariabler Vue-Tarif und netzdienliche Ladepause mit Status und Monaten (Issue #200)"
   status: done
   description: >
-    Die Vue-Ansichten ladeautomatik und netzdienliches-laden verwenden
-    die folgenden vorhandenen Entitäten in der beschriebenen Reihenfolge.
-    Gemeinsame Bedienkomponenten verwenden ausschließlich den Kontext aus
-    REQ-VUE-ENTITY-BINDING. Namen, Monate, Start/Ende und Enum-Zustände
-    stammen aus den übersetzten HA-Metadaten.
-
-    Zeitvariabler Tarif beginnt mit switch.timed_charge_enabled. Danach folgen
-    Netzladezeitfenster (EN: Grid charging window) mit time.timed_charge_start
-    und time.timed_charge_end,
-    direkt darunter Entladestatus mit sensor.timed_charge_discharge_status,
-    Einstellungen mit number.timed_charge_max_soc vor
-    number.timed_charge_min_soc und Aktive Monate mit den zwölf Schaltern
-    timed_charge_month_1 bis timed_charge_month_12. Entladestatus zeigt die
-    HA-Zustände normal, discharge_blocked und grid_charging mit ihren
-    vorhandenen Texten. Die aktuelle Obergrenze des Netzladeziels wird
-    aus dem max-Attribut der zugehörigen Number-Entity übernommen.
-    Bei bridge_charge_plan.attributes.enabled=true entfallen das
-    Netzladezeitfenster und die Startschwelle timed_charge_min_soc, auch wenn
-    der Plan auf Daten wartet oder pausiert. Netzlade-Max-SOC und Monate
-    bleiben bedienbar; diese Grenzen gelten weiterhin für REQ-BRIDGE-CHARGE.
-    Im TIME_OF_USE-Modus entfällt das Netzladezeitfenster außerdem auch bei
-    fester SOC-Ladung nach REQ-TIME-OF-USE-CHARGE-SOURCE; die Startschwelle
-    bleibt in dieser Betriebsart sichtbar.
-
-    Bei aktivem dynamischem Tarif ersetzt ein Hinweis auf Stromtarif die
-    Bedienung dieser Fallback-Ansicht. Die Tarifwahl folgt den bestätigten
-    Tarifdaten, nicht den Zuständen der beiden alten Hauptschalter.
-
-    Nach diesen Ladekarten zeigt der Tab die wiederverwendbare Karte
-    Ladeplanung (EN: Charging plan) aus ChargePlan.vue mit
-    sensor.bridge_charge_plan nach REQ-BRIDGE-CHARGE. Die Karte erläutert den
-    Verbrauchszeitraum, erwartete Entladung, geplante oder laufende
-    Niedertarifladung und den PV-Start. Sie meldet auch keinen Ladebedarf,
-    unzureichende Bedarfsdeckung sowie fehlende Eingaben und Pausen. Ein
-    Fehlbetrag bleibt bei laufender Teilaufladung sichtbar. Bekannte Gründe
-    erhalten DE-/EN-Texte, unbekannte Gründe eine allgemeine Meldung. Datum,
-    Uhrzeit und Zahlen folgen HA-Sprache und HA-Zeitzone; fehlende Daten
-    erzeugen keine erfundenen Zeiten. Fehlt die Sensor-Entity, entfällt die
-    Karte. Die Karte liest ausschließlich Backend-Zustände und Attribute.
-
-    Danach zeigt der Tab über die volle Breite dieselbe gemeinsame
-    Karte „Dein Stromtarif“ (EN: Your electricity tariff) wie
-    Amortisation nach REQ-VUE-SAVINGS (Issue #219).
-    Sichtbarkeit und laufende Tarifbewertung folgen dem aktuellen Zustand von
-    sensor.economics_current_import_price: bei tariff_type=time_of_use
-    erscheinen aktueller Preis und günstigste Ladezeiten; „Alle Preise ansehen“
-    öffnet die konfigurierten windows in der vom Sensor gelieferten Reihenfolge.
-    Bei anderen Tarifarten entfällt die Karte. Fehlen Entität oder
-    Tarifattribute, kann die gesicherte Dashboard-API ein TIME_OF_USE-Profil für
-    die Bearbeitung bestätigen. Das erzeugt keine erfundene Preisbewertung.
-    Auch zwei oder acht Fenster, Mitternachtsfenster und angrenzende Grenzen
-    werden vollständig dargestellt. active_window, Grundpreis,
-    Einspeisevergütung, nächster Preiswechsel und Nichtverfügbarkeit werden
-    live aus den Sensorattributen übernommen. Preise erscheinen in ct/kWh mit
-    zwei Nachkommastellen; der Browser berechnet weder aktive Fenster noch Preise.
-    Die Preiseingabe erfolgt im ausklappbaren Editor nach REQ-VUE-TARIFF-EDITOR.
-    Ihre Verwendung für
-    feste SOC-Ladung und REQ-BRIDGE-CHARGE bestimmt das Backend nach
-    REQ-TIME-OF-USE-CHARGE-SOURCE anhand der Konfiguration.
-    Ein Tarifwechsel, Mount oder erneutes Rendern löst im Browser keinen
-    HA-Service und keinen Registerzugriff aus.
-
-    Die Zahlen-Bedienzeilen im Tab Zeitvariabler Tarif lassen den Präfix
-    Bestätigter Wert: beziehungsweise Confirmed value: weg. Der von HA
-    bestätigte Wert bleibt auch während eines lokalen Zahlenentwurfs und
-    einer ausstehenden Übernahme sichtbar und zugänglich. Die gemeinsame
-    Zeitfenster-Zeile Bestätigt: beziehungsweise Confirmed: bleibt erhalten.
+    Die Ladebedienung für zeitvariable und dynamische Tarife liegt ausschließlich
+    unter stromtarif nach REQ-VUE-ELECTRICITY-TARIFF. Die frühere Ansicht
+    ladeautomatik und ihr separater Aktivierungsschalter sind entfernt.
+    Native Entities und ihre Services bleiben erhalten. ChargePlan zeigt die
+    Backend-Ladeplanung unter Ladeplan & Prognose ohne zweiten Hauptschalter;
+    Aktivierung und Ladeweise werden in den drei Einrichtungsschritten bedient.
+    Tarifpreisfenster sind in Stromtarif und Amortisation dieselbe TarifPlan-Karte
+    nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
+    aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
 
     Netzdienliches Laden beginnt mit switch.grid_serving_enabled. Die Karte
     Ladepause enthält in dieser Reihenfolge time.grid_serving_start,
@@ -2925,6 +2866,26 @@ requirement_vue_charging:
     grid_serving_month_12 unter Aktive Monate. Die PV-Prognose verwendet
     den dynamischen friendly_name und ihre kWh-Einheit; eine zusätzliche
     Einstellungen-Karte wird nicht erzeugt.
+
+    Innerhalb der Ladepause kann ein Administrator die getrennte PV-Quelle
+    grid_serving_pv_forecast_sensor explizit auswählen oder entfernen. Zulässig
+    sind Energiesensoren in Wh, kWh oder MWh für den heute verbleibenden Ertrag;
+    aktuelle Leistung ist keine Energieprognose. Ein eigener revisionierter
+    Dashboard-Endpunkt liest und speichert ausschließlich diese Option.
+    Leserechte, Administrator-Schreibrechte, Quelle, Einheit und Revision werden
+    serverseitig geprüft. Tarifprofile und deren PV-Quellen bleiben unverändert.
+    Bestätigte Quelle und Entwurf sind getrennt; Speichern zeigt Pending,
+    verhindert doppelte Aufrufe und erhält bei Fehlern den Entwurf. Eine
+    erfolgreiche Optionsänderung wartet nicht auf Geräte-Locks oder Modbus-ACKs;
+    der vorhandene Options-Lifecycle übernimmt die geänderte Pausenentscheidung.
+    Prognosewert und source_entity_id des Prognosesensors werden bei einem
+    Quellenwechsel gemeinsam als reine Softwaredaten aktualisiert, auch bei
+    gehaltenem Geräte-Lock. Die tatsächliche Geräteaktivität bleibt bis zur
+    Gerätebestätigung unverändert. Der eigene abgeleitete Prognosesensor ist
+    keine zulässige Quelle. Änderungen von source_entity_id aktualisieren die
+    bestätigte Auswahl ereignisbasiert, ohne einen offenen Entwurf zu ersetzen.
+    Änderungen während laufender Requests werden zu einem erneuten Abruf
+    zusammengefasst; verspätete Antworten dürfen den neueren Stand nicht ersetzen.
 
     Beide Monatsauswahlen sind zunächst eingeklappt und zeigen eine kompakte
     Zusammenfassung der bestätigten aktiven Monate samt Anzahl. Nur
@@ -2957,7 +2918,7 @@ requirement_vue_charging:
     atomare Zeitfenster bestätigen die Softwarekonfiguration ohne Warten auf
     Modbus; der gemeinsame Ablauf ist in REQ-VUE-ENTITY-BINDING festgelegt.
 
-    Die beiden editierbaren Zeitfenster verwenden dieselbe Komponente
+    Das Zeitfenster der netzdienlichen Ladepause verwendet die Komponente
     TimeWindowControl. Eine 24-Stunden-Leiste mit getrennt verschiebbaren
     Start- und Endmarken sowie Eingabefelder im Format HH:MM bearbeiten
     ein gemeinsames lokales Entwurfspaar. Eingaben mit step=60, Ziehen und
@@ -2968,8 +2929,8 @@ requirement_vue_charging:
     übernimmt Übernehmen beide Grenzen als HH:MM:00. Dies gilt auch für die
     Einzelzeit-Komponente der Controls-Vorschau. Maus, Touch und Tastatur sind
     unterstützt, mit sichtbarem Fokus, zugänglichen Start-/Endbeschriftungen
-    und mindestens 44 mal 44 Pixel großen Bedienflächen. Beide Fenster
-    bleiben auf mobilen und breiten Ansichten sowie mit hellen und dunklen
+    und mindestens 44 mal 44 Pixel großen Bedienflächen. Die Ladepause
+    bleibt auf mobilen und breiten Ansichten sowie mit hellen und dunklen
     HA-Themes und deutscher oder englischer Sprache bedienbar.
 
     Ein Fenster über Mitternacht wird auf der Leiste in zwei Abschnitte
@@ -2977,8 +2938,7 @@ requirement_vue_charging:
     24 Stunden. Die Leiste zeigt bis zur ersten Bearbeitung den bestätigten
     Zeitraum, danach ausschließlich den lokalen Entwurf.
     Erst die gemeinsame Schaltfläche Übernehmen sendet beide Grenzen atomar
-    über den vorhandenen set_timed_charge_window- beziehungsweise
-    set_grid_serving_window-Service (REQ-VUE-ENTITY-BINDING). Die bestehende
+    über den vorhandenen set_grid_serving_window-Service (REQ-VUE-ENTITY-BINDING). Die bestehende
     Überschneidungsprüfung bewertet nur das fertige Zielpaar und leert bei
     echter Überschneidung beide Grenzen mit HA-Benachrichtigung.
 
@@ -2991,13 +2951,13 @@ requirement_vue_charging:
     sperren die Übernahme. Fehler bleiben sichtbar; eine automatische
     Schreibwiederholung findet nicht statt.
 
-    Beide Fenster zeigen verfügbare bestätigte Start- und Endzeit in einer
+    Das Fenster zeigt verfügbare bestätigte Start- und Endzeit in einer
     gemeinsamen Zeile. Bei deutscher HA-Sprache erhält diese das Suffix
     " Uhr", etwa 22:00–06:00 Uhr. Eingabefelder und Service-Payloads erhalten
     keinen Sprachzusatz; englische, unbekannte und nicht verfügbare Werte
     bleiben ebenfalls ohne Uhr-Suffix.
 
-    Beide Ansichten zeigen keinen zusätzlichen globalen Max-SOC-Regler.
+    Die Ladepause zeigt keinen zusätzlichen globalen Max-SOC-Regler.
     Netzladeziel und geräteweiter Max-SOC bleiben unterschiedliche Entitäten.
     Uhrzeiten werden auch für Zeitfenster über Mitternacht unverändert an
     die vorhandenen atomaren Zeitfenster-Services übergeben. Vue ermittelt keine
@@ -3014,7 +2974,7 @@ requirement_vue_charging:
     - "Die Ladeplanung erklärt geplante und laufende Aufträge, keinen Bedarf, Teilaufladung und fehlende Daten in DE/EN. Alle Zeiten und Zahlen stammen aus Sensorattributen; die Anzeige erzeugt keine eigenen Ladeaufträge."
     - "frontend/tests/tariff-plan.test.ts prüft die gemeinsame Tarifpreisfenster-Karte:
        Sie erscheint bei time_of_use in
-       Zeitvariabler Tarif und Amortisation; fixed, dynamic, disabled und eine
+       Stromtarif und Amortisation; fixed, dynamic, disabled und eine
        fehlende Entity erzeugen keine Karte. DE/EN, alle acht Fenster,
        Mitternacht, Live-Fenster-/Tarifwechsel, Grundpreis, leere Fensterliste
        und Nichtverfügbarkeit sind ohne Serviceaufruf abgesichert."
@@ -3022,7 +2982,7 @@ requirement_vue_charging:
        prüfen ein, zwei und acht Fenster vom Dashboard-Editor über gespeicherte
        Options und Tarifmodell bis zu Sensorattributen und authentifizierten
        Dashboard-States, einschließlich Mitternacht und angrenzender Grenzen."
-    - "Zeitvariabler Tarif zeigt auf Deutsch und Englisch bestätigte Werte
+    - "Stromtarif zeigt auf Deutsch und Englisch bestätigte Werte
        ohne Präfix; lokale Entwürfe ersetzen diese Werte nicht. Die gemeinsame
        Zeitfenster-Bestätigung und Beschriftungen anderer Ansichten bleiben erhalten."
     - "22:00 bis 06:00 wird als zwei Abschnitte über Mitternacht dargestellt
@@ -3037,7 +2997,7 @@ requirement_vue_charging:
        andere Telemetrie erhält ihn. Fehlende oder nicht verfügbare Grenzen,
        Rechteentzug, Geräte-/Registrywechsel, Verbindungsabbruch, doppelte
        Übernahme und Servicefehler verursachen keine veralteten Schreibaktionen."
-    - "Beide Zeitfenster bleiben mit Maus, Touch und Tastatur, auf Smartphone
+    - "Das Ladepausen-Zeitfenster bleibt mit Maus, Touch und Tastatur, auf Smartphone
        und Desktop, auf Deutsch und Englisch sowie in hellen und dunklen
        HA-Themes lesbar und bedienbar. Start- und Endmarken bleiben auch bei
        gleichen Grenzen einzeln erreichbar."
@@ -3087,7 +3047,7 @@ requirement_vue_tariff_editor:
   title: "Tarifpreisfenster direkt im Dashboard bearbeiten und Preise in Cent anzeigen"
   status: done
   description: >
-    Die gemeinsame Tarifpreisfenster-Karte in Stromtarif, Zeitvariabler Tarif und Amortisation
+    Die gemeinsame Tarifpreisfenster-Karte in Stromtarif und Amortisation
     zeigt zunächst eine kompakte Übersicht. Im Stromtarif heißt sie
     „1. Wann ist dein Strom günstig?“, ansonsten „Dein Stromtarif“.
     Gespeicherte tägliche Preiszeiten und Standardpreis sind direkt lesbar;
@@ -3217,15 +3177,31 @@ requirement_vue_electricity_tariff:
     Ladeeinstellungen beginnen mit einer Zusammenfassung und einer ausdrücklichen
     Bearbeiten-Aktion; Öffnen und Schließen ändern keine Werte. Aktueller Preis
     und Entladestatus bleiben sichtbar, der vollständige Tagespreisverlauf ist
-    unter „Preisverlauf anzeigen“ einklappbar. Dynamisch bleiben Tarifauswahl,
-    breite Tagespreiskurve, kompakte Einstellungen und Ladeplan erhalten.
+    unter „Preisverlauf anzeigen“ einklappbar. Der dynamische Tarif verwendet
+    dieselbe Gestaltung und Reihenfolge: Preisquelle, Ladeverhalten und
+    Automatik einschalten. Aktueller Preis und Status bleiben sichtbar, während
+    Tagespreiskurve und Prognose anfangs eingeklappt sind.
 
-    Die bestehende Route ladeautomatik bleibt als Fallback erhalten und verwendet
-    dieselben aktiven Tarifdaten und Steuerwerte. Bei dynamischem Tarif zeigt
-    sie einen Verweis auf Stromtarif. Der Tab Dynamischer Tarif entfällt; seine
-    alten Links werden ohne zusätzliche History-Einträge nach stromtarif geleitet.
+    Die separaten Tabs Zeitvariabler Tarif und Dynamischer Tarif entfallen;
+    ihre alten Links werden ohne zusätzliche History-Einträge nach stromtarif
+    geleitet. Redundante Views, Layoutzweige und Entwicklungsvorschau sind entfernt.
     Festpreis und deaktivierte Tarife bleiben als bestehende Optionswerte gültig;
     die neue Auswahl erfindet dafür weder einen zeitvariablen noch dynamischen Preis.
+
+    Unter Ladeplan & Prognose zeigt ChargePlan im zeitvariablen Tarif zusätzlich
+    die aktuelle Entladeprognose aus sensor.discharge_forecast unabhängig vom
+    Aktivierungsstatus der Ladeplanung. Voraussetzungen sind ein verfügbarer,
+    verbundener Sensor, ein gültiger Zeitstempel mit Zeitzone, eine endliche
+    Beobachtungsdauer von 1 bis 60 Minuten und positive mittlere Entladeleistung.
+    Datum und Werte werden nach HA-Sprache und -Zeitzone formatiert. Die Anzeige
+    benennt die untere Ladegrenze; ungültige Daten werden nicht ergänzt oder aus
+    früheren Ladeplanwerten ersetzt. Berechneter Ladeplan und aktuelle Prognose
+    stehen getrennt. Die bisherige zweite Aktivierung in ChargePlan entfällt.
+    Im dynamischen Tarif stammt die angerechnete PV-Energie ausschließlich aus
+    price_charge_status_text.pv_prognose_kwh und nur bei passender
+    pv_prognose_sensor-Quelle zum gespeicherten Tarifprofil. 0 kWh ist erlaubt,
+    fehlende Werte erhalten keinen Ersatz. Die Ladepausen-Prognose wird dort
+    nicht mehr als Prognose des dynamischen Tarifs angezeigt.
 
     Tarif & Preise verwendet lokale Entwürfe mit Speichern und Abbrechen. Bei
     Zeitvariabel enthält es Standardpreis, Einspeisevergütung und bis zu acht
@@ -3443,7 +3419,7 @@ requirement_vue_savings:
     Tarifpreise und Einspeisevergütung zwei Nachkommastellen in ct/kWh.
     Die interne Genauigkeit bleibt unverändert.
 
-    Die mit Zeitvariabler Tarif gemeinsam verwendete Karte „Dein Stromtarif“
+    Die mit Stromtarif gemeinsam verwendete Karte „Dein Stromtarif“
     (EN: Your electricity tariff) ist sichtbar, wenn die Attribute von
     sensor.economics_current_import_price tariff_type=time_of_use melden oder
     bei fehlenden Sensorattributen die gesicherte API diesen Tarif bestätigt.
@@ -3523,7 +3499,7 @@ requirement_vue_parity:
   title: "Funktionsmatrix, HA-Anbindung, Browser- und isolierte Paketprüfung (Issue #203)"
   status: done
   description: >
-    docs/vue-dashboard-parity.md ordnet alle fünf Vue-Ansichten und deren
+    docs/vue-dashboard-parity.md ordnet alle vier Vue-Ansichten und deren
     Entitäten, Attribute, Sichtbarkeitsregeln und Statistikfunktionen den
     zugehörigen automatisierten Prüfungen zu. README beschreibt Aktivierung,
     Seitenleisteneintrag, Deaktivierung, Migration und Reparatur; DEVELOPMENT
@@ -3571,7 +3547,7 @@ requirement_vue_parity:
     - "Die Funktionsmatrix ist vollständig und referenziert vorhandene Tests
        für alle Entity-Schlüssel, Attribute, Sichtbarkeiten und Auswertungen."
     - "Browsertests prüfen 1440x1000 und 390x844 Pixel mit DE/hell und EN/dunkel
-       und erzeugen Bilder aller fünf Tabs ohne zweiten Dashboard-Einstieg."
+       und erzeugen Bilder aller vier Tabs ohne zweiten Dashboard-Einstieg."
     - "tests/test_vue_dashboard_e2e.py prüft bidirektionale HA-Änderungen
        gegen simuliertes Modbus-TCP ohne zweite Verbindung oder doppelte Aktionen."
     - "tests/test_vue_dashboard_restart.py prüft automatische Einrichtung,

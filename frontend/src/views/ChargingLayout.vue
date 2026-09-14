@@ -9,12 +9,10 @@ import type { EntityDomain } from "../types";
 
 const props = defineProps<{
   switchKey: string;
-  hideConfirmedLabel?: boolean;
   cards: readonly {
     key: string;
-    group?: string;
     layout?: "columns" | "months";
-    timeWindow?: "timed_charge" | "grid_serving";
+    timeWindow?: "grid_serving";
     title: { de: string; en: string };
     entities: readonly (readonly [EntityDomain, string])[];
   }[];
@@ -46,26 +44,6 @@ const cards = computed(() =>
     })
     .filter((card) => card.entities.length || card.showTimeWindow),
 );
-const groups = computed(() => {
-  const grouped: {
-    key: string;
-    cards: typeof cards.value;
-    wide: boolean;
-  }[] = [];
-  for (const card of cards.value) {
-    const key = card.group ?? card.key;
-    const previous = grouped.at(-1);
-    if (previous?.key === key) previous.cards.push(card);
-    else grouped.push({ key, cards: [card], wide: false });
-  }
-  const narrowCount = grouped.filter(
-    (group) => !group.cards.some((card) => card.layout),
-  ).length;
-  return grouped.map((group) => ({
-    ...group,
-    wide: narrowCount <= 1 || group.cards.some((card) => card.layout),
-  }));
-});
 const hasSwitch = computed(() =>
   Boolean(dashboard?.entity("switch", props.switchKey)),
 );
@@ -98,63 +76,51 @@ const text = computed(() =>
     >
       {{ text.empty }}
     </p>
-    <EntityControl
-      v-if="hasSwitch"
-      domain="switch"
-      :entity-key="switchKey"
-      :hide-confirmed-label="hideConfirmedLabel"
-    />
-    <div v-if="groups.length" class="charging-view__cards">
-      <div
-        v-for="group in groups"
-        :key="group.key"
-        class="charging-view__group"
-        :class="{ 'charging-view__group--wide': group.wide }"
+    <EntityControl v-if="hasSwitch" domain="switch" :entity-key="switchKey" />
+    <div v-if="cards.length" class="charging-view__cards">
+      <section
+        v-for="card in cards"
+        :key="card.key"
+        class="charging-view__card"
+        :aria-labelledby="`${id}-${card.key}`"
       >
-        <section
-          v-for="card in group.cards"
-          :key="card.key"
-          class="charging-view__card"
-          :aria-labelledby="`${id}-${card.key}`"
+        <h2 :id="`${id}-${card.key}`">{{ card.title[language] }}</h2>
+        <TimeWindowControl
+          v-if="card.showTimeWindow && card.timeWindow"
+          :kind="card.timeWindow"
+        />
+        <slot :name="`${card.key}-settings`" />
+        <div
+          v-if="card.entities.length"
+          class="charging-view__rows"
+          :class="{
+            'charging-view__rows--columns': card.layout === 'columns',
+            'charging-view__rows--months': card.layout === 'months',
+          }"
         >
-          <h2 :id="`${id}-${card.key}`">{{ card.title[language] }}</h2>
-          <TimeWindowControl
-            v-if="card.showTimeWindow && card.timeWindow"
-            :kind="card.timeWindow"
+          <MonthSelection
+            v-if="card.layout === 'months'"
+            :entity-keys="card.entities.map(([, key]) => key)"
           />
-          <div
-            v-if="card.entities.length"
-            class="charging-view__rows"
-            :class="{
-              'charging-view__rows--columns': card.layout === 'columns',
-              'charging-view__rows--months': card.layout === 'months',
-            }"
+          <template
+            v-else
+            v-for="[domain, key] in card.entities"
+            :key="`${domain}.${key}`"
           >
-            <MonthSelection
-              v-if="card.layout === 'months'"
-              :entity-keys="card.entities.map(([, key]) => key)"
+            <EntityControl
+              v-if="
+                domain === 'switch' ||
+                domain === 'number' ||
+                domain === 'time' ||
+                domain === 'select'
+              "
+              :domain="domain"
+              :entity-key="key"
             />
-            <template
-              v-else
-              v-for="[domain, key] in card.entities"
-              :key="`${domain}.${key}`"
-            >
-              <EntityControl
-                v-if="
-                  domain === 'switch' ||
-                  domain === 'number' ||
-                  domain === 'time' ||
-                  domain === 'select'
-                "
-                :domain="domain"
-                :entity-key="key"
-                :hide-confirmed-label="hideConfirmedLabel"
-              />
-              <EntityValue v-else :domain="domain" :entity-key="key" />
-            </template>
-          </div>
-        </section>
-      </div>
+            <EntityValue v-else :domain="domain" :entity-key="key" />
+          </template>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -166,8 +132,7 @@ const text = computed(() =>
   margin-top: 24px;
   min-width: 0;
 }
-.charging-view__cards,
-.charging-view__group {
+.charging-view__cards {
   display: grid;
   gap: 20px;
   min-width: 0;
@@ -216,8 +181,7 @@ const text = computed(() =>
 }
 @media (max-width: 600px) {
   .charging-view,
-  .charging-view__cards,
-  .charging-view__group {
+  .charging-view__cards {
     gap: 16px;
   }
   .charging-view__card {
@@ -231,15 +195,8 @@ const text = computed(() =>
     margin-top: 16px;
   }
   .charging-view__cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
     align-items: start;
-  }
-  .charging-view__group {
-    gap: 14px;
-  }
-  .charging-view__group--wide {
-    grid-column: 1 / -1;
   }
   .charging-view__card {
     padding: 18px;

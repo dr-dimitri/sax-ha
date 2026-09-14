@@ -12,7 +12,6 @@ import {
 import { messages, tabPath, tabs } from "./tabs";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "./ha";
 import GeneralView from "./views/GeneralView.vue";
-import TimedChargingView from "./views/TimedChargingView.vue";
 import GridServingView from "./views/GridServingView.vue";
 import ElectricityTariffView from "./views/ElectricityTariffView.vue";
 import SavingsView from "./views/SavingsView.vue";
@@ -45,7 +44,7 @@ const path = ref(props.route?.path ?? window.location.pathname);
 const visibleTabs = tabs;
 const requestedPath = computed(() => tabPath(path.value, basePath.value));
 const activePath = computed(() =>
-  requestedPath.value === "dynamisches-laden"
+  ["dynamisches-laden", "ladeautomatik"].includes(requestedPath.value)
     ? "stromtarif"
     : requestedPath.value,
 );
@@ -195,13 +194,10 @@ function openSidebar(): void {
           {{ text.missingEntry }}
         </p>
         <GeneralView v-else-if="activePath === 'allgemein'" />
-        <TimedChargingView
-          v-else-if="activePath === 'ladeautomatik'"
+        <GridServingView
+          v-else-if="activePath === 'netzdienliches-laden'"
           :hass="hass"
-          :tariff-url="`${basePath}/stromtarif`"
-          @navigate="navigate($event, `${basePath}/stromtarif`)"
         />
-        <GridServingView v-else-if="activePath === 'netzdienliches-laden'" />
         <ElectricityTariffView
           v-else-if="activePath === 'stromtarif'"
           :hass="hass"

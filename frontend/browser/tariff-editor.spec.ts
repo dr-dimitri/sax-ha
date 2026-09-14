@@ -148,7 +148,7 @@ test("tariff editor saves cents explicitly and remains compact after editing on 
   const english = testInfo.project.name.endsWith("en");
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/sax-power-vue/ladeautomatik");
+  await page.goto("/sax-power-vue/stromtarif");
   if (english) await page.locator("#language").click();
   if (testInfo.project.name.includes("dark"))
     await page.locator("#theme").click();

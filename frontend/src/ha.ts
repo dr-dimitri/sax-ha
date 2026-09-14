@@ -15,6 +15,7 @@ import type {
   DashboardMetadata,
   EntityDomain,
   HassEntity,
+  GridServingForecastSource,
   HomeAssistant,
   TariffDraft,
   TariffConfiguration,
@@ -89,6 +90,10 @@ export interface SaxDashboard {
   saveTariff(draft: TariffDraft): Promise<TariffProfile>;
   configureTariff(configuration: TariffConfiguration): Promise<TariffProfile>;
   loadTariffSeries(day: "today" | "tomorrow"): Promise<TariffPriceSeries>;
+  loadGridServingForecast(): Promise<GridServingForecastSource>;
+  saveGridServingForecast(
+    source: Pick<GridServingForecastSource, "pv_sensor" | "revision">,
+  ): Promise<GridServingForecastSource>;
   performTimeWindow(
     kind: "timed_charge" | "grid_serving",
     start: string,
@@ -656,6 +661,31 @@ export function useSaxDashboard(
     return result;
   }
 
+  async function gridServingForecastRequest(
+    source?: Pick<GridServingForecastSource, "pv_sensor" | "revision">,
+  ): Promise<GridServingForecastSource> {
+    const hass = getHass();
+    const entryId = getEntryId();
+    if (!connected.value) throw { code: "disconnected" };
+    if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const current = generation;
+    const result = await hass.callWS<GridServingForecastSource>({
+      type: `sax_power/dashboard/grid_serving/${source ? "save" : "get"}`,
+      entry_id: entryId,
+      ...source,
+    });
+    if (current !== generation || !connected.value)
+      throw { code: "disconnected" };
+    if (
+      !result ||
+      typeof result.revision !== "string" ||
+      typeof result.can_edit !== "boolean" ||
+      !(result.pv_sensor === null || typeof result.pv_sensor === "string")
+    )
+      throw { code: "failed" };
+    return result;
+  }
+
   return {
     language,
     ready: readonly(ready),
@@ -669,5 +699,7 @@ export function useSaxDashboard(
     saveTariff: (draft) => tariffRequest(draft),
     configureTariff: (configuration) => tariffRequest(configuration),
     loadTariffSeries,
+    loadGridServingForecast: () => gridServingForecastRequest(),
+    saveGridServingForecast: (source) => gridServingForecastRequest(source),
   };
 }

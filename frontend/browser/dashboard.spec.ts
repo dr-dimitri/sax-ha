@@ -1,8 +1,15 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { tabs } from "../src/tabs";
-import type { HomeAssistant } from "../src/types";
+import type { HomeAssistant, TariffProfile } from "../src/types";
 
 const pageErrors = new WeakMap<Page, string[]>();
+
+async function openTariffMonths(panel: Locator) {
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await panel.locator(".electricity-charging header > button").click();
+  await panel.locator(".tou-charging-advanced > summary").click();
+  return panel.locator(".tou-charging-settings .month-selection");
+}
 
 // REQ-VUE-PARITY: load the HACS bundle, with explicit simulated HA boundaries.
 test.beforeEach(async ({ page }, testInfo) => {
@@ -34,7 +41,6 @@ test("compact views retain readable controls and all entities across available p
       ];
   const heightBudgets: Record<string, number> = {
     allgemein: 850,
-    ladeautomatik: 1150,
     "netzdienliches-laden": 1100,
     stromtarif: 900,
     ersparnis: 1600,
@@ -49,8 +55,13 @@ test("compact views retain readable controls and all entities across available p
     if (tab.path === "ersparnis")
       await expect(panel.locator(".savings-chart")).toBeVisible();
     else await expect(panel.locator(".entity-control").first()).toBeVisible();
-    if (tab.path === "ladeautomatik" || tab.path === "netzdienliches-laden")
+    if (tab.path === "netzdienliches-laden") {
       await panel.locator(".month-selection__toggle").click();
+      await expect(
+        panel.locator(".grid-serving-source__confirmed"),
+      ).toBeVisible();
+      await expect(panel.locator(".grid-serving-source h3")).toBeVisible();
+    }
     const expectedLabels = await contentLabels.allTextContents();
     expect(expectedLabels.length).toBeGreaterThan(0);
     const expectedControls = await panel
@@ -77,22 +88,21 @@ test("compact views retain readable controls and all entities across available p
       const hasMonths = (await monthToggle.count()) > 0;
       if (hasMonths) await monthToggle.click();
       const compactSize = await panel.evaluate((element) => {
-        const root = element.shadowRoot ?? element;
-        const tariff = root.querySelector(".timed-charging-view__tariff");
-        const tariffStyle = tariff ? getComputedStyle(tariff) : null;
-        const tariffHeight = tariff?.getBoundingClientRect().height ?? 0;
-        const tariffSpacing = tariffStyle
-          ? parseFloat(tariffStyle.marginTop) +
-            parseFloat(tariffStyle.marginBottom)
+        const source = (element.shadowRoot ?? element).querySelector(
+          ".grid-serving-source",
+        );
+        const style = source ? getComputedStyle(source) : null;
+        const sourceHeight = source?.getBoundingClientRect().height ?? 0;
+        const sourceSpacing = style
+          ? parseFloat(style.marginTop) + parseFloat(style.marginBottom)
           : 0;
         const compactPanelHeight = element.getBoundingClientRect().height;
         return {
           compactPanelHeight,
-          tariffHeight,
-          tariffSpacing,
-          // The added price schedule must not relax the existing charging-control budget.
-          compactHeightWithoutTariff:
-            compactPanelHeight - tariffHeight - tariffSpacing,
+          sourceHeight,
+          // Keep the original control budget and account only for the added source.
+          originalControlsHeight:
+            compactPanelHeight - sourceHeight - sourceSpacing,
         };
       });
       if (hasMonths) await monthToggle.click();
@@ -310,11 +320,13 @@ test("compact views retain readable controls and all entities across available p
           mobile ? 700 : 400,
         );
       }
-      if (!mobile)
+      if (!mobile) {
+        expect(compactSize.sourceHeight, description).toBeLessThanOrEqual(240);
         expect(
-          compactSize.compactHeightWithoutTariff,
+          compactSize.originalControlsHeight,
           description,
         ).toBeLessThanOrEqual(heightBudgets[tab.path]);
+      }
     }
   }
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
@@ -418,7 +430,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
   }
 });
 
-test("one dashboard with five complete views, local assets and responsive screenshots", async ({
+test("one dashboard with four complete views, local assets and responsive screenshots", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
@@ -428,14 +440,12 @@ test("one dashboard with five complete views, local assets and responsive screen
       ? [
           "Allgemeine Informationen",
           "Stromtarif",
-          "Zeitvariabler Tarif",
           "Netzdienliches Laden",
           "Amortisation",
         ]
       : [
           "General information",
           "Electricity tariff",
-          "Time-of-use tariff",
           "Grid-serving charging",
           "Amortization",
         ],
@@ -447,7 +457,6 @@ test("one dashboard with five complete views, local assets and responsive screen
   ).toEqual([
     "/sax-power-vue/allgemein",
     "/sax-power-vue/stromtarif",
-    "/sax-power-vue/ladeautomatik",
     "/sax-power-vue/netzdienliches-laden",
     "/sax-power-vue/ersparnis",
   ]);
@@ -478,24 +487,6 @@ test("one dashboard with five complete views, local assets and responsive screen
     await expect(panel).not.toContainText(
       /Änderung wird an Home Assistant gesendet|Sending change to Home Assistant/,
     );
-    if (tab.path === "ladeautomatik") {
-      await expect(panel).not.toContainText(
-        /Bestätigter Wert:|Confirmed value:/,
-      );
-      await expect(
-        panel.locator(".entity-control__value").filter({ hasText: "80 %" }),
-      ).toHaveCount(1);
-      await expect(
-        panel.locator(".entity-control__value").filter({
-          hasText:
-            tab.path === "ladeautomatik"
-              ? "20 %"
-              : language === "de"
-                ? "-5 ct/kWh"
-                : "-5 ct/kWh",
-        }),
-      ).toHaveCount(tab.path === "ladeautomatik" ? 1 : 2);
-    }
     if (tab.path === "ersparnis") {
       await expect(panel.locator(".savings-chart")).toBeVisible();
     } else {
@@ -503,7 +494,7 @@ test("one dashboard with five complete views, local assets and responsive screen
         panel.locator(".entity-control input, .entity-control select").first(),
       ).toBeVisible();
     }
-    if (tab.path === "ladeautomatik" || tab.path === "netzdienliches-laden") {
+    if (tab.path === "netzdienliches-laden") {
       const months = panel.locator(".charging-view__rows--months");
       const toggle = months.getByRole("button", {
         name: language === "de" ? "Ändern" : "Edit",
@@ -519,10 +510,6 @@ test("one dashboard with five complete views, local assets and responsive screen
       await expect(months.locator(".month-selection__quarter")).toHaveCount(4);
       await expect(months.getByRole("switch")).toHaveCount(12);
       await expect(months.locator(".entity-control__value")).toHaveCount(0);
-    }
-    if (tab.path === "ladeautomatik") {
-      await expect(panel.locator(".time-window-control")).toHaveCount(0);
-      await expect(panel.locator(".tariff-plan")).toBeVisible();
     }
     if (tab.path === "netzdienliches-laden") {
       const window = panel.locator(".time-window-control");
@@ -577,7 +564,7 @@ test("one dashboard with five complete views, local assets and responsive screen
 });
 
 // REQ-VUE-PARITY / REQ-ECONOMICS-TARIFFS: show price windows on the tariff tab.
-test("eight tariff price windows stay readable on the time-of-use tab and match amortization without service actions", async ({
+test("eight tariff windows match the compact electricity summary and detailed amortization table without service actions", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
@@ -603,8 +590,30 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
     const host = element as HTMLElement & { hass: HomeAssistant };
     const entityId = "sensor.demo_economics_current_import_price";
     const current = host.hass.states[entityId];
+    const original = host.hass.callWS!;
     host.hass = {
       ...host.hass,
+      callWS: async <T>(
+        request: Readonly<Record<string, unknown>>,
+      ): Promise<T> => {
+        const result = await original<T>(request);
+        if (request.type !== "sax_power/dashboard/tariff/get") return result;
+        const profile = result as TariffProfile;
+        const windows = configuredWindows.map((window) => ({
+          start: window.start,
+          end: window.end,
+          price_ct_kwh: window.price_eur_kwh * 100,
+        }));
+        return {
+          ...profile,
+          revision: "eight-window-fixture",
+          windows,
+          profiles: {
+            ...profile.profiles,
+            time_of_use: { ...profile.profiles!.time_of_use, windows },
+          },
+        } as T;
+      },
       states: {
         ...host.hass.states,
         [entityId]: {
@@ -622,9 +631,9 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
       },
     };
   }, windows);
-  await panel.locator("nav a[href$='/ladeautomatik']").click();
+  await panel.locator("nav a[href$='/stromtarif']").click();
   await expect(panel.getByRole("heading", { level: 1 })).toHaveText(
-    english ? "Time-of-use tariff" : "Zeitvariabler Tarif",
+    english ? "Electricity tariff" : "Stromtarif",
   );
   await expect(
     panel.getByRole("heading", {
@@ -636,16 +645,49 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
   await expect(
     panel.locator(".time-window-control input[type=time]"),
   ).toHaveCount(0);
-  await expect(
-    panel.getByText(english ? "Grid charge min. SOC" : "Netzladung Min. SOC", {
-      exact: true,
-    }),
-  ).toBeVisible();
   const tariff = panel.locator(".tariff-plan");
-  const rows = tariff.locator(".tariff-plan__table tbody tr");
   await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
-    english ? "Your electricity tariff" : "Dein Stromtarif",
+    english
+      ? "1. When is your electricity cheaper?"
+      : "1. Wann ist dein Strom günstig?",
   );
+  const periods = tariff.locator(".tariff-plan__periods li");
+  await expect(periods).toHaveCount(8);
+  for (const [index, window] of windows.entries()) {
+    await expect(periods.nth(index)).toContainText(window.start);
+    await expect(periods.nth(index)).toContainText(window.end);
+    await expect(periods.nth(index)).toContainText(price(window.price_eur_kwh));
+  }
+  await expect(periods.first()).toContainText(
+    english ? "overnight" : "über Nacht",
+  );
+  await expect(tariff.locator(".tariff-plan__badge")).toHaveCount(1);
+  await expect(periods.nth(1).locator(".tariff-plan__badge")).toBeVisible();
+  await expect(tariff).toContainText(price(0.32));
+  await expect(tariff.locator("input, select, [role=slider]")).toHaveCount(0);
+  const expectedPeriods = await periods.allTextContents();
+  for (const width of mobile ? [390, 320] : [1440, 1100]) {
+    await page.setViewportSize({ width, height: mobile ? 844 : 1000 });
+    await expect(periods).toHaveText(expectedPeriods);
+    const geometry = await periods.evaluateAll((items) => ({
+      pageWidth: document.documentElement.scrollWidth,
+      viewportWidth: innerWidth,
+      overflowing: items
+        .filter((item) => {
+          const bounds = item.getBoundingClientRect();
+          return [...item.children].some((child) => {
+            const rect = child.getBoundingClientRect();
+            return rect.left < bounds.left - 1 || rect.right > bounds.right + 1;
+          });
+        })
+        .map((item) => item.textContent),
+    }));
+    expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+    expect(geometry.overflowing).toEqual([]);
+  }
+  await panel.locator("nav a[href$='/ersparnis']").click();
+  await expect(panel.locator(".savings-tariff")).toBeVisible();
+  const rows = tariff.locator(".tariff-plan__table tbody tr");
   await tariff.locator(".tariff-plan__all-prices > summary").click();
   await expect(rows).toHaveCount(9);
   for (const [index, window] of windows.entries()) {
@@ -755,12 +797,8 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
       },
     );
   }
-  await panel.locator("nav a[href$='/ersparnis']").click();
-  await expect(panel.locator(".savings-tariff")).toBeVisible();
-  await expect(rows).toHaveText(expectedRows);
-  await expect(tariff.locator(".tariff-plan__current")).toHaveCount(1);
-  await panel.locator("nav a[href$='/ladeautomatik']").click();
-  await expect(rows).toHaveText(expectedRows);
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await expect(periods).toHaveText(expectedPeriods);
   await panel.evaluate((element) => {
     const host = element as HTMLElement & { hass: HomeAssistant };
     const id = "sensor.demo_economics_current_import_price";
@@ -779,16 +817,16 @@ test("eight tariff price windows stay readable on the time-of-use tab and match 
       },
     };
   });
-  await expect(tariff.locator(".tariff-plan__low")).toHaveCount(0);
+  await expect(tariff.locator(".tariff-plan__badge")).toHaveCount(0);
   await expect(tariff.locator(".tariff-plan__low-unavailable")).toContainText(
     english ? "SOC charging remains blocked" : "SOC-Ladung bleibt gesperrt",
   );
   await expect(panel.locator(".time-window-control")).toHaveCount(0);
   await page.locator("#legacy-tariff").click();
   await expect(tariff).toHaveCount(0);
-  await expect(panel.locator(".time-window-control")).toHaveCount(1);
-  await expect(panel.locator("input[type=time]").nth(0)).toHaveValue("22:00");
-  await expect(panel.locator("input[type=time]").nth(1)).toHaveValue("06:00");
+  await expect(panel.locator(".time-window-control")).toHaveCount(0);
+  await expect(panel.locator(".electricity-charging")).toHaveCount(0);
+  await expect(panel.locator(".electricity-activation")).toHaveCount(0);
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
@@ -848,31 +886,14 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await expect(page.locator("#actions")).toContainText("2: number.set_value");
 });
 
-test("overnight times, months, guided strategy options and negative prices", async ({
+test("tariff months, grid-serving overnight window and guided negative price settings use their matching controls", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
-  await page.locator("#legacy-tariff").click();
-  await panel.locator("nav a[href$='/ladeautomatik']").click();
-  await panel.locator(".month-selection__toggle").click();
-  await expect(panel.locator(".charging-view").getByRole("switch")).toHaveCount(
-    13,
-  );
-  const times = panel.locator("input[type=time]");
-  await expect(times.nth(0)).toHaveValue("22:00");
-  await expect(times.nth(1)).toHaveValue("06:00");
-  await times.nth(0).fill("23:15");
-  await panel
-    .locator("form")
-    .filter({ has: page.locator("input[type=time]") })
-    .first()
-    .locator("button[type=submit]")
-    .click();
-  await expect(page.locator("#actions")).toContainText(
-    "sax_power.set_timed_charge_window",
-  );
-  await expect(page.locator("#actions")).toContainText('"start":"23:15:00"');
-  const months = panel.locator(".charging-view__rows--months");
+  const months = await openTariffMonths(panel);
+  await months.locator(".month-selection__toggle").click();
+  await expect(months.getByRole("switch")).toHaveCount(12);
+  await expect(panel.locator(".time-window-control")).toHaveCount(0);
   const firstMonth = months.getByRole("switch").first();
   const firstTarget = months.locator(".entity-control__switch-target").first();
   const outsideIndicator = await firstTarget.evaluate((target) => {
@@ -891,14 +912,14 @@ test("overnight times, months, guided strategy options and negative prices", asy
   await firstTarget.click({ position: { x: 4, y: 4 } });
   await expect(firstMonth).not.toBeChecked();
   await expect(page.locator("#actions")).toHaveText(
-    '2: switch.turn_off {"entity_id":"switch.demo_timed_charge_month_1"}',
+    '1: switch.turn_off {"entity_id":"switch.demo_timed_charge_month_1"}',
   );
   await firstMonth.focus();
   await expect(firstMonth).toBeFocused();
   await page.keyboard.press("Space");
   await expect(firstMonth).toBeChecked();
   await expect(page.locator("#actions")).toHaveText(
-    '3: switch.turn_on {"entity_id":"switch.demo_timed_charge_month_1"}',
+    '2: switch.turn_on {"entity_id":"switch.demo_timed_charge_month_1"}',
   );
   await page.locator("#failure").click();
   const secondMonth = months.getByRole("switch").nth(1);
@@ -906,7 +927,7 @@ test("overnight times, months, guided strategy options and negative prices", asy
   await expect(secondMonth).toBeChecked();
   await expect(months.getByRole("alert")).toBeVisible();
   await expect(page.locator("#actions")).toHaveText(
-    '4: switch.turn_off {"entity_id":"switch.demo_timed_charge_month_2"}',
+    '3: switch.turn_off {"entity_id":"switch.demo_timed_charge_month_2"}',
   );
   const longName = testInfo.project.name.endsWith("en")
     ? "February – additional custom month description"
@@ -957,6 +978,15 @@ test("overnight times, months, guided strategy options and negative prices", asy
   await expect(
     panel.getByText("PV-Prognose 13.9.", { exact: true }),
   ).toBeVisible();
+  const timeWindow = panel.locator(".time-window-control");
+  const times = timeWindow.locator("input[type=time]");
+  await expect(times.nth(0)).toHaveValue("22:00");
+  await expect(times.nth(1)).toHaveValue("06:00");
+  await times.nth(0).fill("23:15");
+  await timeWindow.locator("button[type=submit]").click();
+  await expect(page.locator("#actions")).toHaveText(
+    '4: sax_power.set_grid_serving_window {"device_id":"demo-device","start":"23:15:00","end":"06:00:00"}',
+  );
   await page.locator("#tariff-dynamic").click();
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header button").click();
@@ -988,11 +1018,14 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [path, kind] of [
-    ["ladeautomatik", "timed_charge"],
+    ["stromtarif", "timed_charge"],
     ["netzdienliches-laden", "grid_serving"],
   ]) {
     await panel.locator(`nav a[href$='/${path}']`).click();
-    const months = panel.locator(".month-selection");
+    const months =
+      kind === "timed_charge"
+        ? await openTariffMonths(panel)
+        : panel.locator(".month-selection");
     const toggle = months.locator(".month-selection__toggle");
     const quarters = months.locator(".month-selection__quarters");
     const summary = months.locator(".month-selection__summary");
@@ -1082,152 +1115,138 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
   }
 });
 
-test("both minute-only time windows support dragging, keyboard and atomic submission", async ({
+test("grid-serving time window supports dragging, keyboard and atomic submission", async ({
   page,
   context,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
-  await page.locator("#legacy-tariff").click();
   const mobile = testInfo.project.name.startsWith("mobile");
-  let actions = 0;
   await page.locator("#legacy-times").click();
-  for (const [path, kind] of [
-    ["ladeautomatik", "timed_charge"],
-    ["netzdienliches-laden", "grid_serving"],
-  ]) {
-    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-    await panel.locator(`nav a[href$='/${path}']`).click();
-    const window = panel.locator(".time-window-control");
-    const inputs = window.locator("input[type=time]");
-    const markers = window.getByRole("slider");
-    const apply = window.locator("button[type=submit]");
-    const confirmed = window.locator(".time-window-control__confirmed");
-    const before = await page.locator("#actions").innerText();
-    await expect(markers).toHaveCount(2);
-    await expect(window.locator(".time-window-control__segment")).toHaveCount(
-      2,
-    );
-    await expect(inputs.nth(0)).toHaveAttribute("step", "60");
-    await expect(inputs.nth(1)).toHaveAttribute("step", "60");
-    await expect(confirmed).toContainText("22:00:17");
-    await expect(confirmed).toContainText("06:00:29");
-    await expect(apply).toBeDisabled();
-    await markers.nth(0).click();
-    await expect(inputs.nth(0)).toHaveValue("22:00");
-    await expect(apply).toBeDisabled();
-    await markers.nth(0).press("ArrowRight");
-    await expect(inputs.nth(0)).toHaveValue("22:01");
-    await expect(inputs.nth(1)).toHaveValue("06:00");
-    await expect(confirmed).toContainText("22:00");
-    await expect(page.locator("#actions")).toHaveText(before);
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+  await panel.locator("nav a[href$='/netzdienliches-laden']").click();
+  const window = panel.locator(".time-window-control");
+  const inputs = window.locator("input[type=time]");
+  const markers = window.getByRole("slider");
+  const apply = window.locator("button[type=submit]");
+  const confirmed = window.locator(".time-window-control__confirmed");
+  const before = await page.locator("#actions").innerText();
+  await expect(markers).toHaveCount(2);
+  await expect(window.locator(".time-window-control__segment")).toHaveCount(2);
+  await expect(inputs.nth(0)).toHaveAttribute("step", "60");
+  await expect(inputs.nth(1)).toHaveAttribute("step", "60");
+  await expect(confirmed).toContainText("22:00:17");
+  await expect(confirmed).toContainText("06:00:29");
+  await expect(apply).toBeDisabled();
+  await markers.nth(0).click();
+  await expect(inputs.nth(0)).toHaveValue("22:00");
+  await expect(apply).toBeDisabled();
+  await markers.nth(0).press("ArrowRight");
+  await expect(inputs.nth(0)).toHaveValue("22:01");
+  await expect(inputs.nth(1)).toHaveValue("06:00");
+  await expect(confirmed).toContainText("22:00");
+  await expect(page.locator("#actions")).toHaveText(before);
 
-    await markers.nth(0).scrollIntoViewIfNeeded();
-    const rail = await window
-      .locator(".time-window-control__rail")
-      .boundingBox();
-    const marker = await markers.nth(0).boundingBox();
-    expect(rail).not.toBeNull();
-    expect(marker).not.toBeNull();
-    const from = {
-      x: marker!.x + marker!.width / 2,
-      y: marker!.y + marker!.height / 2,
-    };
-    const to = { x: rail!.x + rail!.width / 2, y: from.y };
-    if (mobile) {
-      const touch = await context.newCDPSession(page);
-      await touch.send("Input.dispatchTouchEvent", {
-        type: "touchStart",
-        touchPoints: [{ ...from, id: 0 }],
-      });
-      await touch.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{ ...to, id: 0 }],
-      });
-      await touch.send("Input.dispatchTouchEvent", {
-        type: "touchEnd",
-        touchPoints: [],
-      });
-      await touch.detach();
-    } else {
-      await page.mouse.move(from.x, from.y);
-      await page.mouse.down();
-      await page.mouse.move(to.x, to.y, { steps: 8 });
-      await page.mouse.up();
-    }
-    await expect(inputs.nth(0)).toHaveValue("12:00");
-    await expect(inputs.nth(1)).toHaveValue("06:00");
-    await expect(page.locator("#actions")).toHaveText(before);
+  await markers.nth(0).scrollIntoViewIfNeeded();
+  const rail = await window.locator(".time-window-control__rail").boundingBox();
+  const marker = await markers.nth(0).boundingBox();
+  expect(rail).not.toBeNull();
+  expect(marker).not.toBeNull();
+  const from = {
+    x: marker!.x + marker!.width / 2,
+    y: marker!.y + marker!.height / 2,
+  };
+  const to = { x: rail!.x + rail!.width / 2, y: from.y };
+  if (mobile) {
+    const touch = await context.newCDPSession(page);
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ ...from, id: 0 }],
+    });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ ...to, id: 0 }],
+    });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await touch.detach();
+  } else {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    await page.mouse.up();
+  }
+  await expect(inputs.nth(0)).toHaveValue("12:00");
+  await expect(inputs.nth(1)).toHaveValue("06:00");
+  await expect(page.locator("#actions")).toHaveText(before);
 
-    await inputs.nth(1).fill("12:00");
-    await expect(window.locator(".time-window-control__segment")).toHaveCount(
-      0,
-    );
-    const same = await markers.evaluateAll((elements) =>
+  await inputs.nth(1).fill("12:00");
+  await expect(window.locator(".time-window-control__segment")).toHaveCount(0);
+  const same = await markers.evaluateAll((elements) =>
+    elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    }),
+  );
+  expect(same[0].x).toBeCloseTo(same[1].x);
+  expect(same[0].y + same[0].height).toBeLessThanOrEqual(same[1].y);
+  await markers.nth(1).press("Home");
+  await expect(inputs.nth(1)).toHaveValue("00:00");
+  await markers.nth(1).press("End");
+  await expect(inputs.nth(1)).toHaveValue("23:59");
+  await expect(markers.nth(1)).toHaveAttribute("aria-valuemax", "86340");
+  await expect(markers.nth(1)).toHaveAttribute("aria-valuenow", "86340");
+  await inputs.nth(0).fill("23:15");
+  await inputs.nth(1).fill("06:30");
+  await apply.click();
+  await expect(page.locator("#actions")).toHaveText(
+    '1: sax_power.set_grid_serving_window {"device_id":"demo-device","start":"23:15:00","end":"06:30:00"}',
+  );
+  await expect(confirmed).toContainText("23:15");
+  await expect(confirmed).toContainText("06:30");
+  await expect(confirmed).not.toContainText(":17");
+  await expect(confirmed).not.toContainText(":29");
+  await expect(apply).toBeDisabled();
+  if (mobile) {
+    await page.setViewportSize({ width: 320, height: 1100 });
+    const narrow = await inputs.evaluateAll((elements) =>
       elements.map((element) => {
         const bounds = element.getBoundingClientRect();
         return {
-          x: bounds.x,
-          y: bounds.y,
+          left: bounds.left,
+          right: bounds.right,
           width: bounds.width,
-          height: bounds.height,
         };
       }),
     );
-    expect(same[0].x).toBeCloseTo(same[1].x);
-    expect(same[0].y + same[0].height).toBeLessThanOrEqual(same[1].y);
-    await markers.nth(1).press("Home");
-    await expect(inputs.nth(1)).toHaveValue("00:00");
-    await markers.nth(1).press("End");
-    await expect(inputs.nth(1)).toHaveValue("23:59");
-    await expect(markers.nth(1)).toHaveAttribute("aria-valuemax", "86340");
-    await expect(markers.nth(1)).toHaveAttribute("aria-valuenow", "86340");
-    await inputs.nth(0).fill("23:15");
-    await inputs.nth(1).fill("06:30");
-    await apply.click();
-    actions += 1;
-    await expect(page.locator("#actions")).toHaveText(
-      `${actions}: sax_power.set_${kind}_window {"device_id":"demo-device","start":"23:15:00","end":"06:30:00"}`,
-    );
-    await expect(confirmed).toContainText("23:15");
-    await expect(confirmed).toContainText("06:30");
-    await expect(confirmed).not.toContainText(":17");
-    await expect(confirmed).not.toContainText(":29");
-    await expect(apply).toBeDisabled();
-    if (mobile) {
-      await page.setViewportSize({ width: 320, height: 1100 });
-      const narrow = await inputs.evaluateAll((elements) =>
+    for (const field of narrow) {
+      expect(field.width).toBeGreaterThanOrEqual(136);
+      expect(field.left).toBeGreaterThanOrEqual(0);
+      expect(field.right).toBeLessThanOrEqual(320);
+    }
+    const ticks = await window
+      .locator(".time-window-control__ticks span")
+      .evaluateAll((elements) =>
         elements.map((element) => {
-          const bounds = element.getBoundingClientRect();
-          return {
-            left: bounds.left,
-            right: bounds.right,
-            width: bounds.width,
-          };
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const bounds = range.getBoundingClientRect();
+          return { left: bounds.left, right: bounds.right };
         }),
       );
-      for (const field of narrow) {
-        expect(field.width).toBeGreaterThanOrEqual(136);
-        expect(field.left).toBeGreaterThanOrEqual(0);
-        expect(field.right).toBeLessThanOrEqual(320);
-      }
-      const ticks = await window
-        .locator(".time-window-control__ticks span")
-        .evaluateAll((elements) =>
-          elements.map((element) => {
-            const range = document.createRange();
-            range.selectNodeContents(element);
-            const bounds = range.getBoundingClientRect();
-            return { left: bounds.left, right: bounds.right };
-          }),
-        );
-      for (let index = 1; index < ticks.length; index++)
-        expect(ticks[index].left).toBeGreaterThan(ticks[index - 1].right);
-    }
-    await testInfo.attach(`time-window-${kind}-${testInfo.project.name}`, {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: "image/png",
-    });
+    for (let index = 1; index < ticks.length; index++)
+      expect(ticks[index].left).toBeGreaterThan(ticks[index - 1].right);
   }
+  await testInfo.attach(`time-window-grid_serving-${testInfo.project.name}`, {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
 });
 
 test("failed time-window submission preserves both confirmed values and can be retried", async ({
@@ -1302,106 +1321,29 @@ test("one inclusive date selection drives signed chart and accessible table", as
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
-test("the legacy TOU switch clears pending feedback after the simulated HA service completes", async ({
-  page,
-}, testInfo) => {
-  const panel = page.locator("sax-power-vue-panel");
-  const pending = testInfo.project.name.endsWith("en")
-    ? "Sending change to Home Assistant …"
-    : "Änderung wird an Home Assistant gesendet …";
-  for (const path of ["ladeautomatik"]) {
-    await panel.locator(`nav a[href$='/${path}']`).click();
-    const control = panel.locator(".charging-view > .entity-control");
-    const input = control.getByRole("switch");
-    await expect(input).not.toBeChecked();
-    await expect(control).toHaveAttribute("aria-busy", "false");
-    await expect(panel).not.toContainText(pending);
-    await panel.evaluate((element) => {
-      const host = element as HTMLElement & { hass: HomeAssistant };
-      const service = host.hass.callService!;
-      const completion = new Promise<void>((resolve) => {
-        host.addEventListener("finish-simulated-service", () => resolve(), {
-          once: true,
-        });
-      });
-      host.hass = {
-        ...host.hass,
-        callService: async (...args) => {
-          await completion;
-          return service(...args);
-        },
-      };
-    });
-    await input.click();
-    await expect(input).toBeDisabled();
-    await expect(input).not.toBeChecked();
-    await expect(control).toHaveAttribute("aria-busy", "true");
-    await expect(control.getByRole("status")).toHaveText(pending);
-
-    await panel.locator("nav a[href$='/allgemein']").click();
-    await panel.locator(`nav a[href$='/${path}']`).click();
-    await expect(input).toBeDisabled();
-    await expect(control.getByRole("status")).toHaveText(pending);
-    await panel.evaluate((element) => {
-      element.dispatchEvent(new Event("finish-simulated-service"));
-    });
-    await expect(input).toBeChecked();
-    await expect(input).toBeEnabled();
-    await expect(control).toHaveAttribute("aria-busy", "false");
-    await expect(panel).not.toContainText(pending);
-
-    await input.click();
-    await expect(input).not.toBeChecked();
-    await expect(input).toBeEnabled();
-    await expect(panel).not.toContainText(pending);
-  }
-});
-
-test("tariff navigation remains stable while the saved tariff controls the legacy fallback", async ({
-  page,
-}) => {
-  const panel = page.locator("sax-power-vue-panel");
-  const timed = panel.locator("nav a[href$='/ladeautomatik']");
-  const electricity = panel.locator("nav a[href$='/stromtarif']");
-  await page.locator("#tariff-timed").click();
-  await timed.click();
-  await expect(panel.locator("nav a")).toHaveCount(5);
-  await expect(panel.locator(".timed-charging-view__fallback")).toHaveCount(0);
-  await page.locator("#tariff-dynamic").click();
-  await expect(page).toHaveURL(/ladeautomatik$/);
-  await expect(panel.locator(".timed-charging-view__fallback")).toBeVisible();
-  await expect(
-    panel.locator(".timed-charging-view__fallback input"),
-  ).toHaveCount(0);
-  await page.locator("#tariff-off").click();
-  await expect(panel.locator("nav a")).toHaveCount(5);
-  await expect(electricity).toBeVisible();
-  await expect(panel.locator(".timed-charging-view__fallback")).toBeVisible();
-  await page.locator("#connection").click();
-  await expect(panel.locator("nav a")).toHaveCount(5);
-  await page.locator("#connection").click();
-  await expect(panel.locator("nav a")).toHaveCount(5);
-  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
-});
-test("old dynamic deep links redirect to electricity tariff and preserve history without activation", async ({
-  page,
-}) => {
-  const panel = page.locator("sax-power-vue-panel");
-  await page.goto("/sax-power-vue/dynamisches-laden");
-  await expect(page).toHaveURL(/stromtarif$/);
-  await expect(panel.locator("nav [aria-current='page']")).toHaveAttribute(
-    "href",
-    "/sax-power-vue/stromtarif",
-  );
-  await page.reload();
-  await expect(panel.locator(".electricity-tariff-view")).toBeVisible();
-  await panel.locator("nav a[href$='/netzdienliches-laden']").click();
-  await page.goBack();
-  await expect(page).toHaveURL(/stromtarif$/);
-  await page.goForward();
-  await expect(page).toHaveURL(/netzdienliches-laden$/);
-  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
-});
+for (const legacyPath of ["ladeautomatik", "dynamisches-laden"]) {
+  test(`old ${legacyPath} deep link redirects to electricity tariff and preserves history without activation`, async ({
+    page,
+  }) => {
+    const panel = page.locator("sax-power-vue-panel");
+    await page.goto(`/sax-power-vue/${legacyPath}`);
+    await expect(page).toHaveURL(/stromtarif$/);
+    await expect(panel.locator("nav [aria-current='page']")).toHaveAttribute(
+      "href",
+      "/sax-power-vue/stromtarif",
+    );
+    await expect(panel.locator("nav a")).toHaveCount(4);
+    await expect(panel.locator(`nav a[href$='/${legacyPath}']`)).toHaveCount(0);
+    await page.reload();
+    await expect(panel.locator(".electricity-tariff-view")).toBeVisible();
+    await panel.locator("nav a[href$='/netzdienliches-laden']").click();
+    await page.goBack();
+    await expect(page).toHaveURL(/stromtarif$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/netzdienliches-laden$/);
+    await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+  });
+}
 
 test("next cell calibration displays only the calendar date in the HA language", async ({
   page,
@@ -1428,12 +1370,12 @@ test("keyboard navigation, deep links, reload and browser history", async ({
   page,
 }) => {
   const panel = page.locator("sax-power-vue-panel");
-  const link = panel.locator("nav a[href$='/ladeautomatik']");
+  const link = panel.locator("nav a[href$='/stromtarif']");
   await link.focus();
   await expect(link).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(panel.getByRole("heading", { level: 1 })).toBeFocused();
-  await expect(page).toHaveURL(/ladeautomatik$/);
+  await expect(page).toHaveURL(/stromtarif$/);
   await page.goBack();
   await expect(page).toHaveURL(/allgemein$/);
   await page.goto("/sax-power-vue/ersparnis");
@@ -1528,13 +1470,6 @@ test("electricity tariff explicitly selects dynamic and uses one central automat
   await expect(page.locator("#actions")).toContainText(
     '"tariff_type":"dynamic"',
   );
-  await panel.locator("nav a[href='/sax-power-vue/ladeautomatik']").click();
-  await expect(panel.locator(".timed-charging-view input")).toHaveCount(0);
-  await expect(panel.locator(".timed-charging-view a")).toHaveAttribute(
-    "href",
-    "/sax-power-vue/stromtarif",
-  );
-  await panel.locator(".timed-charging-view a").click();
   const prices = panel.locator(".electricity-prices");
   await prices
     .getByRole("button", { name: en ? "Edit" : "Bearbeiten", exact: true })
@@ -1592,6 +1527,7 @@ test("electricity chart preserves negative values and gaps and marks missing tom
   });
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href='/sax-power-vue/stromtarif']").click();
+  await panel.locator(".electricity-price-details > summary").click();
   const chart = panel.locator(".tariff-price-chart");
   await expect(chart).toContainText(
     en ? "Gaps remain empty" : "Lücken werden nicht aufgefüllt",

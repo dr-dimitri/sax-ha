@@ -8,9 +8,7 @@ import {
   type App,
   type Component,
 } from "vue";
-import TimedChargingView from "../src/views/TimedChargingView.vue";
 import GridServingView from "../src/views/GridServingView.vue";
-import DynamicChargingView from "../src/views/DynamicChargingView.vue";
 import GeneralView from "../src/views/GeneralView.vue";
 import { chargingSample } from "../src/charging-preview-data";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "../src/ha";
@@ -74,10 +72,7 @@ async function mount(
         h(
           "div",
           (Array.isArray(view) ? view : [view]).map((component) =>
-            h(
-              component,
-              component === TimedChargingView ? { hass: hass.value } : {},
-            ),
+            h(component, { hass: hass.value }),
           ),
         );
     },
@@ -128,14 +123,6 @@ function names(root: Element): string[] {
     ...root.querySelectorAll(".entity-control__name, .entity-value__name"),
   ].map((element) => element.textContent!);
 }
-async function submit(form: HTMLFormElement, value: string): Promise<void> {
-  const input = form.querySelector("input")!;
-  input.value = value;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  await flush();
-  form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-  await flush();
-}
 
 afterEach(() => {
   for (const app of applications.splice(0)) app.unmount();
@@ -143,18 +130,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
+describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
   it.each(["de", "en-GB"])(
     "omits confirmed values for every switch across all views with valid feedback descriptions (%s)",
     async (language) => {
-      const { root } = await mount(
-        [GeneralView, TimedChargingView, DynamicChargingView, GridServingView],
-        { language },
-      );
+      const { root } = await mount([GeneralView, GridServingView], {
+        language,
+      });
       const switches = root.querySelectorAll<HTMLInputElement>(
         'input[role="switch"]',
       );
-      expect(switches.length).toBeGreaterThan(24);
+      expect(switches.length).toBeGreaterThan(12);
       for (const field of switches) {
         const control = field.closest(".entity-control")!;
         expect(control.querySelector(".entity-control__value")).toBeNull();
@@ -169,122 +155,12 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     },
   );
 
-  it.each(["de", "en-GB"])(
-    "omits the confirmed-value label only in both tariff views (%s)",
-    async (language) => {
-      const { root } = await mount(
-        [TimedChargingView, DynamicChargingView, GridServingView],
-        { language },
-      );
-      const [timed, dynamic, grid] = root.querySelectorAll(".charging-view");
-      const label =
-        language === "de" ? "Bestätigter Wert:" : "Confirmed value:";
-      for (const view of [timed, dynamic]) {
-        expect(view.textContent).not.toContain(label);
-        const values = view.querySelectorAll(".entity-control__value");
-        expect(values.length).toBeGreaterThan(0);
-        for (const value of values)
-          expect(value.textContent?.trim()).not.toBe("");
-      }
-      expect(
-        timed.querySelector(".time-window-control")?.textContent,
-      ).toContain(language === "de" ? "Bestätigt:" : "Confirmed:");
-      expect(grid.textContent).toContain(label);
-    },
-  );
-
-  it("preserves the timed charging card and entity order including all translated months", async () => {
-    const { root, callService } = await mount(TimedChargingView);
-    expect(
-      [...root.querySelectorAll("h2")].map((item) => item.textContent),
-    ).toEqual([
-      "Netzladezeitfenster",
-      "Entladestatus",
-      "Einstellungen",
-      "Aktive Monate",
-    ]);
-    expect(names(root)).toEqual([
-      "Netzladung aktiv",
-      "Entladestatus",
-      "Netzladen Max. SOC",
-      "Netzladung Min. SOC",
-      "Januar",
-      "Februar",
-      "März",
-      "April",
-      "Mai",
-      "Juni",
-      "Juli",
-      "August",
-      "September",
-      "Oktober",
-      "November",
-      "Dezember",
-    ]);
-    expect(root.querySelectorAll('input[type="number"]')).toHaveLength(2);
-    expect(callService).not.toHaveBeenCalled();
-  });
-
-  it("hides the separate grid charging window and start threshold only when consumption planning is enabled", async () => {
-    const { root, hass, metadata, emit, callService } =
-      await mount(TimedChargingView);
-    const entityId = "sensor.renamed_bridge_plan";
-    const planMetadata: DashboardEntityMetadata = {
-      domain: "sensor",
-      key: "bridge_charge_plan",
-      entity_id: entityId,
-      name: "Ladeplanung bis PV-Start",
-      states: {},
-      can_control: false,
-    };
-    await emit([...metadata, planMetadata]);
-    for (const state of ["planned", "waiting_for_data", "paused", "off"]) {
-      hass.value = {
-        ...hass.value,
-        states: {
-          ...hass.value.states,
-          [entityId]: {
-            entity_id: entityId,
-            state,
-            attributes: { enabled: true },
-          },
-        },
-      };
-      await flush();
-      expect(root.querySelector(".time-window-control")).toBeNull();
-      expect(root.textContent).not.toContain("Netzladezeitfenster");
-      expect(names(root)).not.toContain("Netzladung Min. SOC");
-      expect(names(root)).toContain("Netzladen Max. SOC");
-      expect(root.querySelectorAll('input[type="number"]')).toHaveLength(1);
-      expect(root.textContent).toContain("Aktive Monate");
-    }
-    for (const enabled of [false, undefined, "true"]) {
-      hass.value = {
-        ...hass.value,
-        states: {
-          ...hass.value.states,
-          [entityId]: {
-            entity_id: entityId,
-            state: "off",
-            attributes: { enabled },
-          },
-        },
-      };
-      await flush();
-      expect(root.querySelector(".time-window-control")).not.toBeNull();
-      expect(names(root)).toContain("Netzladung Min. SOC");
-      expect(root.querySelectorAll('input[type="number"]')).toHaveLength(2);
-    }
-    await emit(metadata);
-    expect(root.querySelector(".time-window-control")).not.toBeNull();
-    expect(names(root)).toContain("Netzladung Min. SOC");
-    expect(callService).not.toHaveBeenCalled();
-  });
-
   it("preserves the grid-serving pause order, forecast and all month names without an extra settings card", async () => {
     const { root, callService } = await mount(GridServingView);
     expect(
-      [...root.querySelectorAll("h2")].map((item) => item.textContent),
+      [...root.querySelectorAll(".charging-view h2")].map(
+        (item) => item.textContent,
+      ),
     ).toEqual(["Ladepause", "Aktive Monate"]);
     expect(names(root)).toEqual([
       "Netzdienliches Laden aktiv",
@@ -311,9 +187,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   });
 
   it.each([
-    [TimedChargingView, "timed_charge", "de"],
     [GridServingView, "grid_serving", "de"],
-    [TimedChargingView, "timed_charge", "en-GB"],
     [GridServingView, "grid_serving", "en-GB"],
   ] as const)(
     "applies each overnight window atomically and waits for confirmed HA states (%s)",
@@ -361,7 +235,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   );
 
   it("blocks the shared window when a confirmed time is unavailable or malformed", async () => {
-    const { root, update, callService } = await mount(TimedChargingView);
+    const { root, update, callService } = await mount(GridServingView);
     const control = root.querySelector(".time-window-control")!;
     for (const state of [
       "unknown",
@@ -371,12 +245,12 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
       "12:60:00",
       "12:30:60",
     ]) {
-      await update("timed_charge_start", state);
+      await update("grid_serving_start", state);
       expect(
         control.querySelector<HTMLInputElement>('input[type="time"]')!.disabled,
       ).toBe(true);
     }
-    await update("timed_charge_start", "09:05");
+    await update("grid_serving_start", "09:05");
     expect(
       control.querySelector(".time-window-control__confirmed")!.textContent,
     ).toContain("09:05");
@@ -386,10 +260,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(callService).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [TimedChargingView, "timed_charge"],
-    [GridServingView, "grid_serving"],
-  ] as const)(
+  it.each([[GridServingView, "grid_serving"]] as const)(
     "updates month switches only after HA confirmation and does not infer a month schedule (%s)",
     async (view, prefix) => {
       const { root, callService, update } = await mount(view);
@@ -451,9 +322,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   );
 
   it.each([
-    [TimedChargingView, "timed_charge", "de"],
     [GridServingView, "grid_serving", "de"],
-    [TimedChargingView, "timed_charge", "en-GB"],
     [GridServingView, "grid_serving", "en-GB"],
   ] as const)(
     "summarises separate selected ranges and opens all four quarters without writing (%s, %s, %s)",
@@ -528,10 +397,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     },
   );
 
-  it.each([
-    [TimedChargingView, "timed_charge"],
-    [GridServingView, "grid_serving"],
-  ] as const)(
+  it.each([[GridServingView, "grid_serving"]] as const)(
     "distinguishes no selected months from missing or unavailable month states (%s)",
     async (view, prefix) => {
       const { root, update, emit, metadata, callService } = await mount(view);
@@ -560,9 +426,9 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   );
 
   it("keeps the confirmed summary during a pending write and displays rejection after collapsing", async () => {
-    const { root, update, callService } = await mount(TimedChargingView);
+    const { root, update, callService } = await mount(GridServingView);
     for (let month = 1; month <= 12; month++)
-      await update(`timed_charge_month_${month}`, "off");
+      await update(`grid_serving_month_${month}`, "off");
     let reject: (error: Error) => void = () => {};
     callService.mockImplementationOnce(
       () =>
@@ -609,39 +475,6 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(callService).toHaveBeenCalledTimes(1);
   });
 
-  it("renders all live discharge statuses supplied by HA without initiating actions", async () => {
-    const { root, update, callService } = await mount(TimedChargingView);
-    expect(root.textContent).toContain("Normalbetrieb");
-    await update("timed_charge_discharge_status", "discharge_blocked");
-    expect(root.textContent).toContain("Entladung wg. Netzladen gestoppt");
-    await update("timed_charge_discharge_status", "grid_charging");
-    expect(root.querySelector(".entity-value__state")?.textContent).toBe(
-      "Netzladen",
-    );
-    expect(callService).not.toHaveBeenCalled();
-  });
-
-  it("uses a changed HA target-SOC maximum without conflating it with global max-SOC", async () => {
-    const { root, update, callService } = await mount(TimedChargingView);
-    const target = form(root, "Netzladen Max. SOC");
-    expect(target.querySelector("input")!.max).toBe("90");
-    await update("timed_charge_max_soc", "70", { max: 75 });
-    expect(target.querySelector("input")!.max).toBe("75");
-    await submit(target, "80");
-    expect(callService).not.toHaveBeenCalled();
-    expect(target.querySelector('[role="alert"]')?.textContent).toContain(
-      "gültigen Wert",
-    );
-    await submit(target, "75");
-    expect(callService).toHaveBeenCalledExactlyOnceWith(
-      "number",
-      "set_value",
-      { value: 75 },
-      { entity_id: "number.renamed_timed_charge_max_soc" },
-      false,
-    );
-  });
-
   it("keeps the live charging pause status and unavailable forecast supplied by HA", async () => {
     const { root, update, callService } = await mount(GridServingView);
     await update("grid_serving_pause_status", "Ladepause aktiv");
@@ -659,7 +492,7 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
     expect(callService).not.toHaveBeenCalled();
   });
 
-  it.each([TimedChargingView, GridServingView, DynamicChargingView])(
+  it.each([GridServingView])(
     "omits absent entities and empty cards while distinguishing initial loading (%s)",
     async (view) => {
       const { root, emit } = await mount(view, {
@@ -676,212 +509,19 @@ describe("REQ-VUE-CHARGING: timed and grid-serving charging views", () => {
   );
 
   it("renders translated English headings, Start/End and month labels", async () => {
-    const { root } = await mount([TimedChargingView, GridServingView], {
+    const { root } = await mount([GridServingView], {
       language: "en-GB",
     });
     expect(
-      [...root.querySelectorAll("h2")].map((item) => item.textContent),
-    ).toEqual([
-      "Grid charging window",
-      "Discharge status",
-      "Settings",
-      "Active months",
-      "Charging pause",
-      "Active months",
-    ]);
+      [...root.querySelectorAll(".charging-view h2")].map(
+        (item) => item.textContent,
+      ),
+    ).toEqual(["Charging pause", "Active months"]);
     expect(
       root.querySelectorAll('.time-window-control input[type="time"]'),
-    ).toHaveLength(4);
-    expect(names(root).filter((name) => name === "January")).toHaveLength(2);
+    ).toHaveLength(2);
+    expect(names(root).filter((name) => name === "January")).toHaveLength(1);
     expect(names(root)).toContain("December");
     expect(root.textContent).toContain("PV forecast tomorrow");
-  });
-});
-
-describe("REQ-VUE-DYNAMIC-CHARGING: price-optimised charging view", () => {
-  it("renders the dynamic charging controls and status values with all strategy options", async () => {
-    const { root, callService } = await mount(DynamicChargingView);
-    expect(names(root)).toEqual([
-      "Preisoptimiertes Laden aktiv",
-      "Strategie",
-      "Netzbezug und Laden bis",
-      "Netzbezug ohne Laden bis",
-      "Anzahl Stunden",
-      "Max. SOC",
-      "Aktiv",
-      "Status",
-      "PV-Prognose morgen",
-      "Nächster Start",
-      "Aktueller Strompreis",
-    ]);
-    expect(
-      [...root.querySelectorAll("option")].map((item) => [
-        item.value,
-        item.textContent,
-      ]),
-    ).toEqual([
-      ["off", "Manuell / Aus"],
-      ["absolute", "Absoluter Preis"],
-      ["relative", "Relativ / Günstigste Stunden"],
-      ["smart", "Smart / PV-optimiert"],
-    ]);
-    expect(root.textContent).toContain("14.09.2026, 07:00");
-    expect(root.textContent).toContain("-4 ct/kWh");
-    expect(callService).not.toHaveBeenCalled();
-  });
-
-  it.each(["off", "absolute", "relative", "smart"])(
-    "passes strategy %s to the existing select entity and waits for HA state",
-    async (strategy) => {
-      const { root, callService, update } = await mount(DynamicChargingView);
-      const select = root.querySelector("select")!;
-      select.value = strategy;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-      await flush();
-      expect(callService).toHaveBeenCalledExactlyOnceWith(
-        "select",
-        "select_option",
-        { option: strategy },
-        { entity_id: "select.renamed_price_charge_strategy" },
-        false,
-      );
-      expect(select.value).toBe("absolute");
-      await update("price_charge_strategy", strategy);
-      expect(select.value).toBe(strategy);
-    },
-  );
-
-  it("accepts negative prices in HA-provided units, bounds and step and never writes while typing", async () => {
-    const { root, callService, update } = await mount(DynamicChargingView);
-    await update("price_charge_max_price", "-5", {
-      min: -50,
-      max: 120,
-      step: 0.25,
-      unit_of_measurement: "ct/kWh",
-    });
-    const price = form(root, "Netzbezug und Laden bis");
-    const input = price.querySelector("input")!;
-    expect([input.min, input.max, input.step]).toEqual(["-50", "120", "0.25"]);
-    expect(price.textContent).toContain("-5 ct/kWh");
-    input.value = "-6.25";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await flush();
-    expect(callService).not.toHaveBeenCalled();
-    await submit(price, "-6.25");
-    expect(callService).toHaveBeenCalledExactlyOnceWith(
-      "number",
-      "set_value",
-      { value: -6.25 },
-      { entity_id: "number.renamed_price_charge_max_price" },
-      false,
-    );
-    expect(
-      price.querySelector(".entity-control__value")?.textContent?.trim(),
-    ).toBe("-5 ct/kWh");
-    await update("price_charge_max_price", "-6.25");
-    expect(
-      price.querySelector(".entity-control__value")?.textContent?.trim(),
-    ).toBe("-6,25 ct/kWh");
-  });
-
-  it("shares the authoritative max-SOC and action state with the general view", async () => {
-    const { root, callService, update } = await mount([
-      GeneralView,
-      DynamicChargingView,
-    ]);
-    const controls = [...root.querySelectorAll("form")].filter(
-      (item) => item.querySelector("label")?.textContent === "Max. SOC",
-    );
-    expect(controls).toHaveLength(2);
-    let finish: () => void = () => {};
-    callService.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    await submit(controls[1], "70");
-    for (const control of controls)
-      expect(control.querySelector("input")!.disabled).toBe(true);
-    expect(callService).toHaveBeenCalledExactlyOnceWith(
-      "number",
-      "set_value",
-      { value: 70 },
-      { entity_id: "number.renamed_max_soc" },
-      false,
-    );
-    finish();
-    await flush();
-    expect(controls[0].textContent).toContain("Bestätigter Wert: 80 %");
-    expect(
-      controls[1].querySelector(".entity-control__value")?.textContent?.trim(),
-    ).toBe("80 %");
-    await update("max_soc", "70");
-    for (const control of controls) {
-      expect(control.querySelector("input")!.value).toBe("70");
-      expect(control.textContent).toContain("70 %");
-    }
-    expect(controls[0].textContent).toContain("Bestätigter Wert: 70 %");
-    expect(controls[1].textContent).not.toContain("Bestätigter Wert:");
-  });
-
-  it("shows disabled charging, missing price and unknown next start without deriving a schedule", async () => {
-    const { root, update, callService } = await mount(DynamicChargingView);
-    await update("price_charge_enabled", "off");
-    await update("price_charge_current_price", "unavailable");
-    await update("price_charge_next_start", "unknown");
-    await update("price_charge_status_text", "Deaktiviert");
-    expect(
-      form(root, "Preisoptimiertes Laden aktiv").querySelector("input")!
-        .checked,
-    ).toBe(false);
-    const values = [...root.querySelectorAll(".entity-value")];
-    expect(
-      values.find((item) => item.textContent?.includes("Aktueller Strompreis"))
-        ?.textContent,
-    ).toBe("Aktueller StrompreisNicht verfügbar");
-    expect(
-      values.find((item) => item.textContent?.includes("Nächster Start"))
-        ?.textContent,
-    ).toBe("Nächster StartUnbekannt");
-    expect(root.textContent).toContain("Deaktiviert");
-    expect(callService).not.toHaveBeenCalled();
-  });
-
-  it("displays failed price writes while preserving the HA state and permits explicit retry", async () => {
-    const { root, callService } = await mount(DynamicChargingView);
-    const price = form(root, "Netzbezug ohne Laden bis");
-    callService.mockRejectedValueOnce(new Error("server detail"));
-    await submit(price, "25");
-    expect(price.querySelector('[role="alert"]')?.textContent).toContain(
-      "Änderung ist fehlgeschlagen",
-    );
-    expect(price.textContent).not.toContain("server detail");
-    expect(
-      price.querySelector(".entity-control__value")?.textContent?.trim(),
-    ).toBe("30 ct/kWh");
-    expect(callService).toHaveBeenCalledTimes(1);
-    await submit(price, "25");
-    expect(callService).toHaveBeenCalledTimes(2);
-    expect(price.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it("keeps only available dynamic rows and uses a live HA forecast name and formatter", async () => {
-    const { root, hass, update } = await mount(DynamicChargingView, {
-      keys: ["grid_serving_forecast", "price_charge_next_start"],
-    });
-    expect(root.querySelectorAll("form")).toHaveLength(0);
-    expect(root.querySelectorAll("section")).toHaveLength(1);
-    await update("grid_serving_forecast", "32", {
-      friendly_name: "PV-Prognose heute",
-    });
-    expect(names(root)).toEqual(["PV-Prognose heute", "Nächster Start"]);
-    hass.value = {
-      ...hass.value,
-      formatEntityState: (entity) => `HA: ${entity.state}`,
-    };
-    await flush();
-    expect(root.textContent).toContain("HA: 32");
-    expect(root.textContent).toContain("HA: 2026-09-14T05:00:00Z");
   });
 });

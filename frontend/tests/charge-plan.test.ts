@@ -10,6 +10,15 @@ import type {
 
 const apps: App[] = [];
 const entityId = "sensor.my_renamed_charging_plan";
+const forecastId = "sensor.renamed_discharge_estimate";
+const forecastMetadata = {
+  domain: "sensor" as const,
+  key: "discharge_forecast",
+  entity_id: forecastId,
+  name: "Entladeprognose",
+  states: {},
+  can_control: false,
+};
 const planned = {
   observation_minutes: 32.5,
   average_discharge_w: 456,
@@ -50,7 +59,11 @@ async function mount(language = "de", withControl = false) {
     async subscribeMessage<T>(callback: (message: T) => void) {
       emitMetadata = (data) => callback(data as T);
       emitMetadata({
-        entities: withControl ? [metadata, switchMetadata] : [metadata],
+        entities: [
+          metadata,
+          forecastMetadata,
+          ...(withControl ? [switchMetadata] : []),
+        ],
       });
       return () => {};
     },
@@ -112,7 +125,11 @@ async function mount(language = "de", withControl = false) {
       configurationError: string | null = null,
     ) {
       emitMetadata({
-        entities: [metadata, { ...switchMetadata, can_control: canControl }],
+        entities: [
+          metadata,
+          forecastMetadata,
+          { ...switchMetadata, can_control: canControl },
+        ],
       });
       hass.value = {
         ...hass.value,
@@ -138,6 +155,23 @@ async function mount(language = "de", withControl = false) {
     },
     async metadata(visible: boolean) {
       emitMetadata({ entities: visible ? [metadata] : [] });
+      await flush();
+    },
+    async forecast(
+      state: string,
+      attributes: Record<string, unknown> = {
+        observation_minutes: 12,
+        average_discharge_w: 800,
+        observed_at: "2026-09-13T21:00:00Z",
+      },
+    ) {
+      hass.value = {
+        ...hass.value,
+        states: {
+          ...hass.value.states,
+          [forecastId]: { entity_id: forecastId, state, attributes },
+        },
+      };
       await flush();
     },
     async disconnect() {
@@ -224,8 +258,8 @@ describe("consumption-based charging plan", () => {
     [
       "off",
       "disabled",
-      "Verbrauchsbasierte Ladeplanung",
-      "Consumption-based charging planning",
+      "Nur Bedarf bis Solarstrom",
+      "Only what is needed until solar power",
     ],
   ])(
     "explains the reason %s/%s in both languages without exposing internal codes",
@@ -247,8 +281,8 @@ describe("consumption-based charging plan", () => {
   it("gives an activation hint without a reason and keeps unknown reasons generic", async () => {
     const { root, update } = await mount();
     await update("off", {});
-    expect(root.textContent).toContain("Verbrauchsbasierte Ladeplanung");
-    expect(root.textContent).toContain("Netzladung aktiv");
+    expect(root.textContent).toContain("Nur Bedarf bis Solarstrom");
+    expect(root.textContent).toContain("Schritt 3 die automatische Netzladung");
     await update("waiting_for_data", { reason: "private_new_reason" });
     expect(root.textContent).toContain(
       "mindestens eine Minute Beobachtungszeit",
@@ -351,66 +385,6 @@ describe("consumption-based charging plan", () => {
   });
 });
 
-describe("charging planning activation", () => {
-  it("uses the discovered switch and waits for confirmed HA state", async () => {
-    const { root, callService, control } = await mount("de", true);
-    const input = root.querySelector<HTMLInputElement>('[role="switch"]')!;
-    expect(input.checked).toBe(false);
-    expect(callService).not.toHaveBeenCalled();
-    input.click();
-    await flush();
-    expect(callService).toHaveBeenCalledWith(
-      "switch",
-      "turn_on",
-      {},
-      { entity_id: "switch.renamed_planning" },
-      false,
-    );
-    expect(input.checked).toBe(false);
-    await control("on");
-    expect(input.checked).toBe(true);
-    input.click();
-    await flush();
-    expect(callService).toHaveBeenLastCalledWith(
-      "switch",
-      "turn_off",
-      {},
-      { entity_id: "switch.renamed_planning" },
-      false,
-    );
-    await control("off");
-    expect(input.checked).toBe(false);
-  });
-
-  it("shows configuration errors without claiming activation", async () => {
-    const { root, callService } = await mount("de", true);
-    callService.mockRejectedValueOnce(
-      new Error("Wähle eine PV-Prognosequelle aus."),
-    );
-    const input = root.querySelector<HTMLInputElement>('[role="switch"]')!;
-    input.click();
-    await flush();
-    expect(input.checked).toBe(false);
-    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
-      "Änderung ist fehlgeschlagen",
-    );
-  });
-
-  it("blocks writes for read-only, unavailable and disconnected sessions", async () => {
-    const { root, callService, control, disconnect } = await mount("de", true);
-    const input = root.querySelector<HTMLInputElement>('[role="switch"]')!;
-    await control("off", false);
-    expect(input.disabled).toBe(true);
-    await control("unavailable");
-    expect(input.disabled).toBe(true);
-    await control("off");
-    expect(input.disabled).toBe(false);
-    await disconnect();
-    expect(root.querySelector('[role="switch"]:not(:disabled)')).toBeNull();
-    expect(callService).not.toHaveBeenCalled();
-  });
-});
-
 it.each([
   ["de", "bridge_pv_start_required", "PV-Prognosequelle auswählen"],
   ["de", "bridge_tariff_required", "zeitvariablen Tarif einrichten"],
@@ -426,3 +400,72 @@ it.each([
     expect(root.textContent).not.toContain(hint);
   },
 );
+
+describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan", () => {
+  it.each(["off", "waiting_for_data", "paused", "planned"])(
+    "shows the independent current forecast while planning is %s",
+    async (status) => {
+      const fixture = await mount();
+      await fixture.update(status, { reason: "pv_start_missing" });
+      await fixture.forecast("2026-09-14T00:30:00Z");
+      const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
+      expect(forecast.textContent).toContain("Aktuelle Entladeprognose");
+      expect(forecast.textContent).toContain("durchschnittlich 800 W");
+      expect(forecast.textContent).toContain("letzten 12,0 Minuten");
+      expect(forecast.textContent).toContain("14.09.2026, 02:30 Uhr");
+      expect(forecast.textContent).toContain("bis zur unteren Ladegrenze");
+      expect(fixture.root.querySelector("button, input, form")).toBeNull();
+      expect(fixture.callService).not.toHaveBeenCalled();
+      expect(fixture.callWS).not.toHaveBeenCalled();
+    },
+  );
+
+  it("updates the current timestamp in the HA locale without reusing retained plan observations", async () => {
+    const fixture = await mount("en-GB");
+    await fixture.forecast("2026-09-14T00:30:00Z");
+    const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
+    expect(forecast.textContent).toContain("Current discharge forecast");
+    expect(forecast.textContent).toContain("average consumption of 800 W");
+    expect(forecast.textContent).not.toContain("456 W");
+    expect(forecast.textContent).not.toContain("32.5 minutes");
+    fixture.hass.value = {
+      ...fixture.hass.value,
+      config: { time_zone: "America/New_York" },
+      locale: { language: "en-US", time_format: "am_pm" },
+    };
+    await fixture.forecast("2026-09-14T01:30:00Z");
+    expect(forecast.textContent).toContain("Sep 13, 2026, 9:30 PM");
+    expect(forecast.textContent).not.toContain("02:30");
+    await fixture.disconnect();
+    expect(fixture.root.querySelector(".charge-plan__forecast")).toBeNull();
+  });
+
+  it.each([
+    ["unknown", 12, 800],
+    ["unavailable", 12, 800],
+    ["invalid", 12, 800],
+    ["2026-09-14T00:30:00", 12, 800],
+    ["2026-09-14T00:30:00Z", 0.5, 800],
+    ["2026-09-14T00:30:00Z", 61, 800],
+    ["2026-09-14T00:30:00Z", true, 800],
+    ["2026-09-14T00:30:00Z", 12, 0],
+    ["2026-09-14T00:30:00Z", 12, -1],
+    ["2026-09-14T00:30:00Z", 12, "NaN"],
+    ["2026-09-14T00:30:00Z", 12, null],
+  ])(
+    "hides invalid or incomplete live observations (%s/%s/%s)",
+    async (state, minutes, power) => {
+      const fixture = await mount();
+      await fixture.forecast("2026-09-14T00:30:00Z");
+      expect(
+        fixture.root.querySelector(".charge-plan__forecast"),
+      ).not.toBeNull();
+      await fixture.forecast(String(state), {
+        observation_minutes: minutes,
+        average_discharge_w: power,
+      });
+      expect(fixture.root.querySelector(".charge-plan__forecast")).toBeNull();
+      expect(fixture.root.textContent).not.toContain("NaN");
+    },
+  );
+});

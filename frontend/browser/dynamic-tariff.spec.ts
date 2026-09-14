@@ -50,6 +50,7 @@ test("automatic grid charging acknowledges clicks immediately while HA confirms 
   const target = panel.locator(".electricity-master");
   const status = panel.locator(".electricity-master-status");
   const actions = page.locator("#actions");
+  await panel.locator(".electricity-price-details > summary").click();
   await expect(master).toHaveAccessibleName(
     english ? "Automatic grid charging" : "Automatische Netzladung",
   );
@@ -115,7 +116,7 @@ test("automatic grid charging acknowledges clicks immediately while HA confirms 
   await expect(master).toBeDisabled();
   await page.locator("#release-action").click();
   await expect(
-    panel.locator(".electricity-tariff-bar [role='alert']"),
+    panel.locator(".electricity-activation [role='alert']"),
   ).toBeVisible();
   await expect(master).toBeChecked();
   await expect(master).toBeEnabled();
@@ -125,7 +126,7 @@ test("automatic grid charging acknowledges clicks immediately while HA confirms 
   await master.click();
   await expect(master).not.toBeChecked();
   await expect(
-    panel.locator(".electricity-tariff-bar [role='alert']"),
+    panel.locator(".electricity-activation [role='alert']"),
   ).toHaveCount(0);
   await expect(panel).toHaveAttribute("data-tariff-configure-requests", "4");
 });
@@ -334,7 +335,7 @@ test("dynamic prices keep advanced values and show progress while saving and cha
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   const prices = panel.locator(".electricity-prices");
-  const before = prices.locator("header p");
+  const before = prices.locator(".electricity-price-summary");
   await prices.locator("header > button").click();
   const form = prices.locator(".electricity-price-editor");
   const advanced = prices.locator(".electricity-price-advanced");
@@ -440,4 +441,92 @@ test("dynamic prices keep advanced values and show progress while saving and cha
     english ? "Time of use" : "Zeitvariabel",
   );
   await expect(panel).toHaveAttribute("data-tariff-configure-requests", "2");
+});
+
+test("dynamic setup matches the time-of-use steps and keeps price detail optional", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const panel = page.locator("sax-power-vue-panel");
+  await expect(
+    panel.locator(
+      ".electricity-prices h2, .electricity-charging h2, .electricity-activation h2",
+    ),
+  ).toHaveText(
+    english
+      ? [
+          "1. Where do your electricity prices come from?",
+          "2. How should the battery charge?",
+          "3. Turn on automatic charging",
+        ]
+      : [
+          "1. Woher kommen deine Strompreise?",
+          "2. Wie möchtest du laden?",
+          "3. Automatik einschalten",
+        ],
+  );
+  await expect(panel.locator(".electricity-master input")).toHaveCount(1);
+  await expect(panel.locator(".electricity-tariff-bar input")).toHaveCount(0);
+  const activation = panel.locator(".electricity-activation");
+  const prices = panel.locator(".electricity-price-card");
+  const details = prices.locator(".electricity-price-details");
+  await expect(details).not.toHaveAttribute("open", "");
+  await expect(prices.locator("svg")).toBeHidden();
+  expect((await prices.boundingBox())!.y).toBeGreaterThanOrEqual(
+    (await activation.boundingBox())!.y +
+      (await activation.boundingBox())!.height,
+  );
+  for (const width of testInfo.project.name.startsWith("mobile")
+    ? [390, 320]
+    : [1440, 1100]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(
+      await panel.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        return (
+          document.documentElement.scrollWidth <= innerWidth &&
+          [...element.querySelectorAll("button, input, select, summary")].every(
+            (control) => {
+              const box = control.getBoundingClientRect();
+              return (
+                !box.width ||
+                !box.height ||
+                (box.left >= bounds.left && box.right <= bounds.right)
+              );
+            },
+          )
+        );
+      }),
+    ).toBe(true);
+    if (!english) {
+      expect(
+        await panel
+          .locator(".electricity-price-summary")
+          .evaluate((element) => {
+            const text = element.firstChild!;
+            const word = "Einspeisevergütung";
+            const start = text.textContent!.indexOf(word);
+            const range = document.createRange();
+            range.setStart(text, start);
+            range.setEnd(text, start + word.length);
+            return range.getClientRects().length;
+          }),
+      ).toBe(1);
+    }
+    await screenshot(page, testInfo, `dynamic-overview-steps-${width}`);
+  }
+  const summary = details.locator(":scope > summary");
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(prices.locator("svg")).toBeVisible();
+  await prices
+    .getByRole("button", { name: english ? "Tomorrow" : "Morgen", exact: true })
+    .click();
+  await expect(prices.locator(".electricity-day")).toContainText(
+    english ? "Tomorrow" : "Morgen",
+  );
+  await summary.focus();
+  await page.keyboard.press("Space");
+  await expect(details).not.toHaveAttribute("open", "");
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

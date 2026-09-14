@@ -16,7 +16,11 @@ import SensorPicker from "../components/SensorPicker.vue";
 import DynamicChargingSettings from "../components/DynamicChargingSettings.vue";
 import TimeOfUseChargingSettings from "../components/TimeOfUseChargingSettings.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
-import { formatSavingsDate, formatSavingsNumber } from "../savings";
+import {
+  finiteValue,
+  formatSavingsDate,
+  formatSavingsNumber,
+} from "../savings";
 import type {
   DynamicTariffProfile,
   HomeAssistant,
@@ -46,25 +50,21 @@ const text = computed(() =>
         automatic: "Automatische Netzladung",
         turningOn: "Einschalten wird übernommen …",
         turningOff: "Ausschalten wird übernommen …",
-        off: "Automatische Netzladung aus",
-        on: "Automatische Netzladung ein",
-        offHint: "Der aktive Tarif bleibt für Preise und Auswertung erhalten.",
         chooseHint:
           "Nur der gewählte Tarif ist aktiv. Gespeicherte Einstellungen bleiben beim Wechsel erhalten.",
         incomplete:
-          "Dieser Tarif ist noch nicht eingerichtet. Nach dem Wechsel bleibt die automatische Netzladung aus. Richte danach Tarif & Preise ein.",
+          "Dieser Tarif ist noch nicht eingerichtet. Nach dem Wechsel bleibt die automatische Netzladung aus. Richte danach die Preise in Schritt 1 ein.",
         touHint: "Feste Preise zu wiederkehrenden Uhrzeiten",
         dynamicHint: "Preise aus einem Strompreis-Sensor",
         price: "Strompreis",
         current: "Aktuell",
         today: "Heute",
         tomorrow: "Morgen",
-        prices: "Tarif & Preise",
+        prices: "1. Woher kommen deine Strompreise?",
         feed: "Einspeisevergütung",
         source: "Strompreis-Sensor (erforderlich)",
         attribute: "Preisattribut (optional)",
         unit: "Einheit der Preisquelle",
-        autoUnit: "Automatisch erkennen",
         pv: "PV-Prognose-Sensor (optional)",
         pvFactor: "Anrechenbarer PV-Anteil (%)",
         advanced: "Weitere Einstellungen",
@@ -95,11 +95,13 @@ const text = computed(() =>
           "Bitte einen Attributnamen mit höchstens 128 Zeichen eingeben oder das Feld für die automatische Erkennung leer lassen.",
         invalidPvFactor:
           "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
-        charging: "Ladeverhalten",
+        charging: "2. Wie möchtest du laden?",
         touCharging: "2. Wie viel möchtest du laden?",
         activate: "3. Automatik einschalten",
         activationHint:
           "Nach dem Einschalten darf der Speicher zu deinen günstigsten Tarifzeiten aus dem Netz laden. Ladeziel, aktive Monate und Schutzregeln gelten weiterhin.",
+        dynamicActivationHint:
+          "Nach dem Einschalten lädt der Speicher nach deiner gewählten Ladeweise. Preisgrenze oder günstigste Stunden, Ladegrenze und Schutzregeln bestimmen, wann und wie viel geladen wird.",
         activationOff:
           "Ausgeschaltet: Diese Automatik lädt derzeit keinen Netzstrom.",
         activationOn:
@@ -109,15 +111,10 @@ const text = computed(() =>
         chart: "Preisverlauf anzeigen",
         touIntro:
           "Trage die Preise aus deinem Stromvertrag ein und wähle dein Ladeziel. Schalte die Automatik anschließend in Schritt 3 ein.",
+        dynamicIntro:
+          "Wähle deinen Strompreis-Sensor und die gewünschte Ladeweise. Schalte die Automatik anschließend in Schritt 3 ein.",
+        plannedPv: "Im Ladeplan angerechnete PV-Energie",
         details: "Ladeplan & Prognose",
-        global: "Globale SOC-Obergrenze",
-        globalHint:
-          "Gilt für alle Lademethoden. Das zeitvariable Ladeziel kann zusätzlich niedriger sein.",
-        target: "Zeitvariables Ladeziel",
-        minimum: "Startschwelle der Netzladung",
-        minimumHint: "Ladung beginnt nur unter diesem SOC.",
-        bridge: "Verbrauchsbasiert bis zum PV-Start laden",
-        months: "Aktive Monate",
         priceHint:
           "Alle Preise brutto in ct/kWh. Die Quelleneinheit wird nur zur Umrechnung verwendet.",
         readonly: "Keine Berechtigung zum Ändern des Tarifs.",
@@ -137,8 +134,6 @@ const text = computed(() =>
         unavailable: "Nicht verfügbar",
         sourceHint:
           "Die Preisquelle muss die Preise inklusive der gewünschten Steuern und Zuschläge liefern.",
-        fixed: "Festes Ladeziel",
-        pvMode: "Bis PV-Start",
         units: {
           auto: "Automatisch erkennen",
           eur_kwh: "EUR/kWh",
@@ -165,26 +160,21 @@ const text = computed(() =>
         automatic: "Automatic grid charging",
         turningOn: "Turning on …",
         turningOff: "Turning off …",
-        off: "Automatic grid charging off",
-        on: "Automatic grid charging on",
-        offHint:
-          "The active tariff remains available for prices and accounting.",
         chooseHint:
           "Only the selected tariff is active. Saved settings are preserved when switching.",
         incomplete:
-          "This tariff is not configured yet. Automatic grid charging will be off after switching. Set up Tariff & prices next.",
+          "This tariff is not configured yet. Automatic grid charging will be off after switching. Set up the prices in step 1 next.",
         touHint: "Fixed prices at recurring times",
         dynamicHint: "Prices from an electricity price sensor",
         price: "Electricity price",
         current: "Current",
         today: "Today",
         tomorrow: "Tomorrow",
-        prices: "Tariff & prices",
+        prices: "1. Where do your electricity prices come from?",
         feed: "Feed-in remuneration",
         source: "Electricity price sensor (required)",
         attribute: "Price attribute (optional)",
         unit: "Price source unit",
-        autoUnit: "Detect automatically",
         pv: "PV forecast sensor (optional)",
         pvFactor: "PV share to account for (%)",
         advanced: "More settings",
@@ -214,11 +204,13 @@ const text = computed(() =>
         invalidAttribute:
           "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
         invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
-        charging: "Charging settings",
+        charging: "2. How should the battery charge?",
         touCharging: "2. How much should the battery charge?",
         activate: "3. Turn on automatic charging",
         activationHint:
           "Once enabled, the battery may charge from the grid during your cheapest tariff periods. The charge target, active months and protection rules still apply.",
+        dynamicActivationHint:
+          "Once enabled, the battery follows your selected charging method. The price cap or cheapest hours, charge limit and protection rules determine when and how much it charges.",
         activationOff:
           "Switched off: This automation is not charging from the grid.",
         activationOn:
@@ -227,15 +219,10 @@ const text = computed(() =>
         chart: "Show price chart",
         touIntro:
           "Enter the prices from your electricity contract and choose a charge target. Then switch on automatic charging in step 3.",
+        dynamicIntro:
+          "Choose your electricity price sensor and charging method. Then switch on automatic charging in step 3.",
+        plannedPv: "Solar energy accounted for in the charging plan",
         details: "Charging plan & forecast",
-        global: "Global SOC limit",
-        globalHint:
-          "Applies to every charging method. The time-of-use charge target can additionally be lower.",
-        target: "Time-of-use charge target",
-        minimum: "Grid charging start threshold",
-        minimumHint: "Charging starts only below this SOC.",
-        bridge: "Charge based on consumption until PV starts",
-        months: "Active months",
         priceHint:
           "All prices include tax and use ct/kWh. The source unit is used for conversion only.",
         readonly: "You do not have permission to change the tariff.",
@@ -255,8 +242,6 @@ const text = computed(() =>
         unavailable: "Unavailable",
         sourceHint:
           "The price source must include the taxes and fees you want to account for.",
-        fixed: "Fixed charge target",
-        pvMode: "Until PV starts",
         units: {
           auto: "Detect automatically",
           eur_kwh: "EUR/kWh",
@@ -379,6 +364,21 @@ const sourceState = computed(() => {
       : dashboard?.entity("sensor", "economics_current_import_price")?.metadata
           .entity_id;
   return sensor ? props.hass?.states[sensor] : undefined;
+});
+const plannedPv = computed(() => {
+  const entity = dashboard?.entity("sensor", "price_charge_status_text");
+  const attributes = entity?.state?.attributes;
+  const source = profile.value?.profiles?.dynamic.pv_sensor;
+  if (
+    !entity?.available ||
+    !source ||
+    attributes?.pv_prognose_sensor !== source
+  )
+    return null;
+  const value = finiteValue(attributes.pv_prognose_kwh);
+  return value !== null && value >= 0
+    ? formatSavingsNumber(value, props.hass, 1)
+    : null;
 });
 const months = Array.from(
   { length: 12 },
@@ -603,7 +603,7 @@ async function toggle(event: Event) {
       automation_enabled: enabled,
     });
   } catch (cause) {
-    showError(cause, active.value === "time_of_use" ? "activation" : null);
+    showError(cause, "activation");
   } finally {
     togglePending.value = null;
     pending.value = false;
@@ -748,41 +748,7 @@ function closeCharging() {
             {{ text.change }}
           </button>
         </div>
-        <label
-          v-if="active !== 'time_of_use' && known"
-          class="electricity-master"
-          :aria-busy="togglePending !== null"
-          ><input
-            type="checkbox"
-            role="switch"
-            :checked="automatic === true"
-            aria-describedby="electricity-master-status"
-            :disabled="
-              !canConfigure ||
-              pending ||
-              automatic === null ||
-              changing ||
-              editorOpen
-            "
-            @change="toggle"
-          />{{ text.automatic }}</label
-        >
       </div>
-      <p
-        v-if="active !== 'time_of_use'"
-        id="electricity-master-status"
-        class="electricity-master-status"
-        role="status"
-        aria-live="polite"
-      >
-        {{
-          togglePending === null
-            ? ""
-            : togglePending
-              ? text.turningOn
-              : text.turningOff
-        }}
-      </p>
       <form
         v-if="changing"
         class="electricity-choice"
@@ -852,63 +818,9 @@ function closeCharging() {
       <p v-if="changed" role="status">{{ text.saved }}</p>
       <p v-if="externalTariffChange" role="status">{{ text.tariffChanged }}</p>
       <p v-if="!profile && !error" role="status">{{ text.loading }}</p>
-      <p v-if="active === 'time_of_use'" class="electricity-muted">
-        {{ text.touIntro }}
+      <p v-if="known" class="electricity-muted">
+        {{ active === "time_of_use" ? text.touIntro : text.dynamicIntro }}
       </p>
-    </section>
-    <section
-      v-if="active !== 'time_of_use'"
-      class="electricity-card electricity-price-card"
-    >
-      <div class="electricity-price-card__heading">
-        <div>
-          <h2>{{ text.price }}</h2>
-          <p class="electricity-current-price">
-            {{ currentPrice ?? text.unavailable
-            }}<span v-if="currentPrice !== null"> ct/kWh</span>
-          </p>
-          <p class="electricity-muted">{{ text.current }} · {{ activeName }}</p>
-        </div>
-        <div
-          v-if="active === 'dynamic'"
-          class="electricity-days"
-          :aria-label="text.price"
-        >
-          <button
-            v-for="value in ['today', 'tomorrow'] as const"
-            :key="value"
-            type="button"
-            :aria-pressed="day === value"
-            @click="day = value"
-          >
-            {{ value === "today" ? text.today : text.tomorrow }}
-          </button>
-        </div>
-      </div>
-      <p class="electricity-day">
-        {{ day === "today" ? text.today : text.tomorrow
-        }}<span v-if="date"> · {{ date }}</span>
-      </p>
-      <TariffPriceChart
-        :series="series"
-        :hass="hass"
-        :loading="seriesLoading"
-      />
-      <div class="electricity-charge-status">
-        <strong>{{
-          automatic === null ? text.unavailable : automatic ? text.on : text.off
-        }}</strong>
-        <p v-if="automatic === false">{{ text.offHint }}</p>
-        <EntityValue
-          v-if="active === 'dynamic'"
-          domain="sensor"
-          entity-key="price_charge_status_text"
-        /><EntityValue
-          v-else
-          domain="sensor"
-          entity-key="timed_charge_discharge_status"
-        />
-      </div>
     </section>
     <TariffPlan
       v-if="active === 'time_of_use'"
@@ -927,7 +839,6 @@ function closeCharging() {
       <header>
         <div>
           <h2>{{ text.prices }}</h2>
-          <p class="electricity-muted">{{ dynamicSummary }}</p>
         </div>
         <button
           v-if="!priceEditing"
@@ -940,6 +851,9 @@ function closeCharging() {
           {{ pendingOperation === "loading" ? text.loading : text.edit }}
         </button>
       </header>
+      <p class="electricity-muted electricity-price-summary">
+        {{ dynamicSummary }}
+      </p>
       <form
         v-if="priceEditing"
         ref="pricesEditor"
@@ -1122,12 +1036,15 @@ function closeCharging() {
         </div>
       </div>
     </section>
-    <section
-      v-if="active === 'time_of_use'"
-      class="electricity-card electricity-activation"
-    >
+    <section v-if="known" class="electricity-card electricity-activation">
       <h2>{{ text.activate }}</h2>
-      <p>{{ text.activationHint }}</p>
+      <p>
+        {{
+          active === "time_of_use"
+            ? text.activationHint
+            : text.dynamicActivationHint
+        }}
+      </p>
       <label class="electricity-master" :aria-busy="togglePending !== null"
         ><input
           type="checkbox"
@@ -1196,10 +1113,7 @@ function closeCharging() {
         }}
       </p>
     </section>
-    <section
-      v-if="active === 'time_of_use'"
-      class="electricity-card electricity-price-card"
-    >
+    <section v-if="known" class="electricity-card electricity-price-card">
       <header>
         <div>
           <h2>{{ text.price }}</h2>
@@ -1211,13 +1125,33 @@ function closeCharging() {
         </div>
         <EntityValue
           domain="sensor"
-          entity-key="timed_charge_discharge_status"
+          :entity-key="
+            active === 'dynamic'
+              ? 'price_charge_status_text'
+              : 'timed_charge_discharge_status'
+          "
         />
       </header>
       <details class="electricity-price-details">
         <summary>{{ text.chart }}</summary>
+        <div
+          v-if="active === 'dynamic'"
+          class="electricity-days"
+          :aria-label="text.price"
+        >
+          <button
+            v-for="value in ['today', 'tomorrow'] as const"
+            :key="value"
+            type="button"
+            :aria-pressed="day === value"
+            @click="day = value"
+          >
+            {{ value === "today" ? text.today : text.tomorrow }}
+          </button>
+        </div>
         <p class="electricity-day">
-          {{ text.today }}<span v-if="date"> · {{ date }}</span>
+          {{ day === "today" ? text.today : text.tomorrow
+          }}<span v-if="date"> · {{ date }}</span>
         </p>
         <TariffPriceChart
           :series="series"
@@ -1228,21 +1162,19 @@ function closeCharging() {
     </section>
     <details v-if="known" class="electricity-card electricity-plan">
       <summary>{{ text.details }}</summary>
-      <ChargePlan
-        v-if="active === 'time_of_use'"
-        :hass="hass"
-        hide-control
-      /><template v-else
+      <ChargePlan v-if="active === 'time_of_use'" :hass="hass" /><template
+        v-else
         ><EntityValue
           domain="sensor"
-          entity-key="price_charge_active_text" /><EntityValue
+          entity-key="price_charge_active_text"
+        /><EntityValue
           domain="sensor"
-          entity-key="price_charge_status_text" /><EntityValue
-          domain="sensor"
-          entity-key="price_charge_next_start" /><EntityValue
-          domain="sensor"
-          entity-key="grid_serving_forecast"
-      /></template>
+          entity-key="price_charge_status_text"
+        /><EntityValue domain="sensor" entity-key="price_charge_next_start" />
+        <p v-if="plannedPv !== null" class="electricity-planned-pv">
+          {{ text.plannedPv }}: <strong>{{ plannedPv }} kWh</strong>
+        </p></template
+      >
     </details>
   </div>
 </template>
@@ -1287,8 +1219,7 @@ function closeCharging() {
   cursor: default;
 }
 .electricity-card header,
-.electricity-tariff-bar__row,
-.electricity-price-card__heading {
+.electricity-tariff-bar__row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1403,6 +1334,7 @@ function closeCharging() {
   font-weight: 400;
 }
 .electricity-days {
+  margin-top: 12px;
   display: flex;
   gap: 6px;
 }
@@ -1412,11 +1344,6 @@ function closeCharging() {
 }
 .electricity-day {
   margin: 20px 0 !important;
-}
-.electricity-charge-status {
-  border-top: 1px solid var(--divider-color, #ddd);
-  padding-top: 14px;
-  margin-top: 12px;
 }
 .electricity-error {
   color: var(--error-color, #db4437);
@@ -1500,10 +1427,6 @@ function closeCharging() {
   .electricity-choice fieldset {
     grid-template-columns: minmax(0, 1fr);
   }
-  .electricity-price-card__heading {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
   .electricity-card {
     padding: 16px;
   }
@@ -1512,6 +1435,23 @@ function closeCharging() {
   }
   .electricity-current-price {
     font-size: 28px;
+  }
+}
+@media (max-width: 400px) {
+  .electricity-prices > header,
+  .electricity-charging > header,
+  .electricity-tariff-view .tariff-plan__header {
+    flex-wrap: wrap;
+  }
+  .electricity-prices > header > div,
+  .electricity-charging > header > div,
+  .electricity-tariff-view .tariff-plan__header > h2 {
+    flex: 1 1 100%;
+  }
+  .electricity-prices > header > button,
+  .electricity-charging > header > button,
+  .electricity-tariff-view .tariff-plan__header > button {
+    margin-left: auto;
   }
 }
 </style>

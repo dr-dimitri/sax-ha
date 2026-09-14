@@ -91,6 +91,12 @@ export interface TariffDraft {
   windows: TariffPriceWindow[];
 }
 
+export interface GridServingForecastSource {
+  pv_sensor: string | null;
+  revision: string;
+  can_edit: boolean;
+}
+
 export type ConnectionEvent = "ready" | "disconnected" | "reconnect-error";
 export type Unsubscribe = () => Promise<void> | void;
 

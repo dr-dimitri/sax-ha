@@ -4015,6 +4015,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         previous_enabled = self._timed_charge_enabled, self._price_charge_enabled
         source_changed = self._tariff_sources_changed(options)
         self.options = dict(options)
+        if source_changed:
+            # REQ-GRID-SERVING-CHARGE: Forecast value and selected source are
+            # software data; publish them together before the device lock clears.
+            self._grid_serving_forecast_kwh = (
+                self.price_planner.grid_serving_forecast_kwh()
+            )
+            if self.data is not None:
+                self.data["grid_serving_forecast_kwh"] = self._grid_serving_forecast_kwh
         self._reconcile_tariff_automation(
             previous_tariff_type=previous_tariff_type, enabled=enabled
         )

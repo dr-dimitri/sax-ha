@@ -150,7 +150,7 @@ describe("dashboard paths", () => {
 
 describe("Home Assistant panel", () => {
   it.each(["de", "en"])(
-    "opens both tariff tabs without writes or pending feedback in %s",
+    "opens the tariff view and general view without writes or pending feedback in %s",
     async (language) => {
       const { element, callService } = await mountTariffs(
         "off",
@@ -160,7 +160,7 @@ describe("Home Assistant panel", () => {
         language,
       );
       const root = shadow(element);
-      for (const path of ["ladeautomatik", "stromtarif", "ladeautomatik"]) {
+      for (const path of ["allgemein", "stromtarif", "allgemein"]) {
         root
           .querySelector<HTMLAnchorElement>(`nav a[href$='/${path}']`)!
           .click();
@@ -191,13 +191,13 @@ describe("Home Assistant panel", () => {
     ["on", "unknown"],
     ["unavailable", "on"],
   ])(
-    "keeps electricity tariff and TOU fallback available independently of switch states (%s/%s)",
+    "keeps one electricity tariff tab available independently of switch states (%s/%s)",
     async (timed, dynamic) => {
       const { element, callService } = await mountTariffs(timed, dynamic);
-      expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+      expect(shadow(element).querySelectorAll("nav a")).toHaveLength(4);
       expect(
         shadow(element).querySelector('nav a[href$="/ladeautomatik"]'),
-      ).not.toBeNull();
+      ).toBeNull();
       expect(
         shadow(element).querySelector('nav a[href$="/stromtarif"]'),
       ).not.toBeNull();
@@ -233,7 +233,7 @@ describe("Home Assistant panel", () => {
       "/sax-power-vue/ladeautomatik",
     );
     await update("off", "on");
-    expect(window.location.pathname).toBe("/sax-power-vue/ladeautomatik");
+    expect(window.location.pathname).toBe("/sax-power-vue/stromtarif");
     element.route = { path: "/dynamisches-laden", prefix: "/sax-power-vue" };
     await flush();
     expect(window.location.pathname).toBe("/sax-power-vue/stromtarif");
@@ -241,11 +241,11 @@ describe("Home Assistant panel", () => {
     window.dispatchEvent(new PopStateEvent("popstate"));
     await flush();
     expect(selectedLink(element)?.getAttribute("href")).toBe(
-      "/sax-power-vue/ladeautomatik",
+      "/sax-power-vue/stromtarif",
     );
     listeners.get("disconnected")?.();
     await flush();
-    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(4);
     expect(callService).not.toHaveBeenCalled();
   });
 
@@ -307,18 +307,18 @@ describe("Home Assistant panel", () => {
     expect(shadow(element).querySelector('[role="alert"]')?.textContent).toBe(
       "Die SAX Power Entitäten konnten nicht geladen werden.",
     );
-    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(4);
     element.remove();
     await flush();
     expect(connection.removeEventListener).toHaveBeenCalledTimes(3);
   });
 
-  it("mounts five stable sections and the general view with isolated styles", async () => {
+  it("mounts four stable sections and the general view with isolated styles", async () => {
     const element = await mount();
     const root = shadow(element);
 
     expect(customElements.get("sax-power-vue-panel")).toBe(SaxPowerVuePanel);
-    expect(root.querySelectorAll("nav a")).toHaveLength(5);
+    expect(root.querySelectorAll("nav a")).toHaveLength(4);
     expect(
       [...root.querySelectorAll("nav a")].map((link) =>
         link.getAttribute("href"),
@@ -326,7 +326,6 @@ describe("Home Assistant panel", () => {
     ).toEqual([
       "/sax-power-vue/allgemein",
       "/sax-power-vue/stromtarif",
-      "/sax-power-vue/ladeautomatik",
       "/sax-power-vue/netzdienliches-laden",
       "/sax-power-vue/ersparnis",
     ]);
@@ -337,7 +336,6 @@ describe("Home Assistant panel", () => {
     ).toEqual([
       "Allgemeine Informationen",
       "Stromtarif",
-      "Zeitvariabler Tarif",
       "Netzdienliches Laden",
       "Amortisation",
     ]);
@@ -427,7 +425,6 @@ describe("Home Assistant panel", () => {
     ).toEqual([
       "General information",
       "Electricity tariff",
-      "Time-of-use tariff",
       "Grid-serving charging",
       "Amortization",
     ]);
@@ -549,7 +546,7 @@ describe("Home Assistant panel", () => {
     window.dispatchEvent(new CustomEvent("location-changed"));
     await flush();
     expect(shadow(element).querySelector("h1")?.textContent?.trim()).toBe(
-      "Zeitvariabler Tarif",
+      "Stromtarif",
     );
   });
 

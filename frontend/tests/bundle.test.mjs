@@ -38,28 +38,25 @@ test("production module runs independently in a browser context", async () => {
     const root = element.shadowRoot;
     assert.equal(root.querySelector(".header").textContent.trim(), "SAX Power");
     assert.equal(root.querySelector("h1").textContent.trim(), "Amortisation");
-    assert.equal(root.querySelectorAll("nav a").length, 5);
+    assert.equal(root.querySelectorAll("nav a").length, 4);
     assert.match(
       [...root.querySelectorAll("style")]
         .map((style) => style.textContent)
         .join("\n"),
       /--primary-background-color/,
     );
-    root.querySelector('nav a[href="/sax-power-vue/ladeautomatik"]').click();
+    root.querySelector('nav a[href="/sax-power-vue/stromtarif"]').click();
     await Promise.resolve();
     await Promise.resolve();
-    assert.equal(window.location.pathname, "/sax-power-vue/ladeautomatik");
-    assert.equal(
-      root.querySelector("h1").textContent.trim(),
-      "Zeitvariabler Tarif",
-    );
+    assert.equal(window.location.pathname, "/sax-power-vue/stromtarif");
+    assert.equal(root.querySelector("h1").textContent.trim(), "Stromtarif");
 
     element.hass = { language: "en", states: {} };
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(
       root.querySelector("h1").textContent.trim(),
-      "Time-of-use tariff",
+      "Electricity tariff",
     );
 
     const calls = [];

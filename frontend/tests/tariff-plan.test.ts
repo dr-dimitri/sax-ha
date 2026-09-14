@@ -4,7 +4,6 @@ import { chargingSample } from "../src/charging-preview-data";
 import TariffPlan from "../src/components/TariffPlan.vue";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "../src/ha";
 import SavingsView from "../src/views/SavingsView.vue";
-import TimedChargingView from "../src/views/TimedChargingView.vue";
 import type {
   DashboardEntityMetadata,
   DashboardMetadata,
@@ -163,7 +162,7 @@ async function mount(
           ? h(TariffPlan, { hass: hass.value, compact: true })
           : h("div", [
               h("div", { class: "timed-fixture" }, [
-                h(TimedChargingView, { hass: hass.value }),
+                h(TariffPlan, { hass: hass.value }),
               ]),
               h("div", { class: "savings-fixture" }, [
                 h(SavingsView, { hass: hass.value, entryId: "entry-1" }),
@@ -258,9 +257,6 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
         expect(plan.querySelectorAll("input, select, form")).toHaveLength(0);
       }
       expect(chargingTimes(fixture.root)).toEqual([]);
-      expect(fixture.root.textContent).toContain("Netzladung Min. SOC");
-      expect(fixture.root.textContent).toContain("Netzladen Max. SOC");
-      expect(fixture.root.textContent).toContain("Aktive Monate");
       expect(fixture.callService).not.toHaveBeenCalled();
       expect(fixture.callWS).not.toHaveBeenCalled();
     },
@@ -342,7 +338,6 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
         ).toContain("SOC-Ladung bleibt gesperrt");
       }
       expect(chargingTimes(fixture.root)).toEqual([]);
-      expect(fixture.root.textContent).toContain("Netzladung Min. SOC");
       expect(fixture.callService).not.toHaveBeenCalled();
     },
   );
@@ -369,10 +364,10 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 
-  it("updates windows and hides legacy charging times only for the registered time-of-use tariff", async () => {
+  it("updates windows only for the registered time-of-use tariff", async () => {
     const fixture = await mount({ tariffType: "fixed" });
     expect(fixture.plans()).toHaveLength(0);
-    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+    expect(chargingTimes(fixture.root)).toEqual([]);
     await fixture.update("-0.015", tariffAttributes());
     expect(fixture.plans()).toHaveLength(2);
     expect(chargingTimes(fixture.root)).toEqual([]);
@@ -380,13 +375,13 @@ describe("REQ-VUE-CHARGING / REQ-VUE-SAVINGS: shared tariff price windows", () =
     for (const plan of fixture.plans()) expect(rows(plan)).toHaveLength(9);
     await fixture.metadata(false);
     expect(fixture.plans()).toHaveLength(0);
-    expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+    expect(chargingTimes(fixture.root)).toEqual([]);
     await fixture.metadata(true);
     expect(fixture.plans()).toHaveLength(2);
     for (const tariffType of ["dynamic", "fixed", "disabled"]) {
       await fixture.update(".35", { tariff_type: tariffType });
       expect(fixture.plans()).toHaveLength(0);
-      expect(chargingTimes(fixture.root)).toEqual(["22:00", "06:00"]);
+      expect(chargingTimes(fixture.root)).toEqual([]);
     }
     await fixture.update(".35", {
       ...tariffAttributes(),

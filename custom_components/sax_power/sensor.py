@@ -319,6 +319,11 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         value_fn=_direct("grid_serving_forecast_kwh"),
+        attributes_fn=lambda coordinator: {
+            "source_entity_id": (
+                coordinator.price_planner.grid_serving_pv_forecast_entity_id
+            )
+        },
     ),
     SaxPowerSensorEntityDescription(
         key="grid_serving_pause_status",

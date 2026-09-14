@@ -6,6 +6,8 @@ import {
   type TestInfo,
 } from "@playwright/test";
 
+import type { HomeAssistant } from "../src/types";
+
 const pageErrors = new WeakMap<Page, string[]>();
 
 async function capture(page: Page, testInfo: TestInfo, state: string) {
@@ -390,4 +392,63 @@ test("charge target keeps its draft and confirmed value through delayed failure,
     '2: number.set_value {"value":65,"entity_id":"number.demo_timed_charge_max_soc"}',
   );
   await expect(panel.locator(".electricity-master input")).not.toBeChecked();
+});
+
+test("current discharge forecast remains visible independently of automatic charging and hides when measurements are unavailable", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  await page.goto("/sax-power-vue/stromtarif?bridge-plan");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator(".electricity-plan > summary").click();
+  const forecast = panel.locator(".charge-plan__forecast");
+  await expect(forecast).toBeVisible();
+  await expect(forecast).toContainText(
+    english ? "Current discharge forecast" : "Aktuelle Entladeprognose",
+  );
+  await expect(forecast).toContainText("800 W");
+  await expect(forecast).toContainText("03:15");
+  await expect(forecast).toContainText(
+    english ? "lower charge limit" : "unteren Ladegrenze",
+  );
+  await expect(forecast).not.toContainText("1000 W");
+  await panel.evaluate((element) => {
+    const host = element as HTMLElement & { hass: HomeAssistant };
+    const id = "sensor.demo_bridge_charge_plan";
+    host.hass = {
+      ...host.hass,
+      states: {
+        ...host.hass.states,
+        [id]: {
+          entity_id: id,
+          state: "off",
+          attributes: { reason: "disabled" },
+        },
+      },
+    };
+  });
+  await expect(forecast).toBeVisible();
+  await expect(forecast).toContainText("03:15");
+  await expect(panel.locator(".charge-plan")).toContainText(
+    english ? "planning is turned off" : "Ladeplanung ist ausgeschaltet",
+  );
+  await expectControlsToFit(panel);
+  await capture(page, testInfo, "current-forecast");
+  await panel.evaluate((element) => {
+    const host = element as HTMLElement & { hass: HomeAssistant };
+    const id = "sensor.demo_discharge_forecast";
+    host.hass = {
+      ...host.hass,
+      states: {
+        ...host.hass.states,
+        [id]: { ...host.hass.states[id]!, state: "unavailable" },
+      },
+    };
+  });
+  await expect(forecast).toHaveCount(0);
+  await expect(panel.locator(".charge-plan")).not.toContainText("03:15");
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

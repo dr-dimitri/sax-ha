@@ -6,11 +6,6 @@ export const tabs = [
   },
   { path: "stromtarif", de: "Stromtarif", en: "Electricity tariff" },
   {
-    path: "ladeautomatik",
-    de: "Zeitvariabler Tarif",
-    en: "Time-of-use tariff",
-  },
-  {
     path: "netzdienliches-laden",
     de: "Netzdienliches Laden",
     en: "Grid-serving charging",

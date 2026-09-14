@@ -90,6 +90,8 @@ async function mount(
     saveTariff: vi.fn(),
     configureTariff: vi.fn(),
     loadTariffSeries: vi.fn(),
+    loadGridServingForecast: vi.fn(),
+    saveGridServingForecast: vi.fn(),
     language: computed(() => options.language ?? "de"),
     ready: ref(true),
     connected,

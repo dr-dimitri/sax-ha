@@ -158,8 +158,18 @@ async def test_cached_sample_age_cannot_extend_the_measurement_baseline(
     await _tick(battery, 100)
     data = await _tick(battery, 102)
     before = _totals(battery)
-    with patch(
-        "custom_components.sax_power.coordinator.monotonic", return_value=102 + age
+    moment = _EPOCH + timedelta(seconds=102 + age)
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.monotonic", return_value=102 + age
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.now", return_value=moment
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            return_value=moment,
+        ),
     ):
         battery._accumulate_energy(data)
     assert _totals(battery) == before

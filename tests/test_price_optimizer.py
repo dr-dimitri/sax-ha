@@ -404,6 +404,56 @@ def test_parse_awattar_marketprice_converts_eur_per_mwh(
     assert slots[0].price == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("marketprice", [-42.09, 0, 42.09])
+def test_parse_awattar_data_uses_epoch_milliseconds(marketprice: float) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Read the documented aWATTar data contract."""
+    start = datetime(2026, 9, 26, 8, tzinfo=UTC)
+    end = start + timedelta(minutes=15)
+    state = _FakeState(
+        unit_of_measurement="Eur/MWh",
+        data=[
+            {
+                "start_timestamp": int(start.timestamp() * 1000),
+                "end_timestamp": int(end.timestamp() * 1000),
+                "marketprice": marketprice,
+                "unit": "Eur/MWh",
+            }
+        ],
+    )
+
+    slots = parse_price_slots(state, now=_now())
+
+    assert len(slots) == 1
+    assert slots[0].start.astimezone(UTC) == start
+    assert slots[0].end.astimezone(UTC) == end
+    assert slots[0].price == pytest.approx(marketprice / 1000)
+
+
+@pytest.mark.parametrize(
+    "invalid_start", [None, True, "bad", float("nan"), float("inf"), 10**400]
+)
+def test_invalid_awattar_timestamp_preserves_other_slots(invalid_start: object) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: One malformed timestamp cannot lose valid prices."""
+    start = datetime(2026, 9, 26, 8, tzinfo=UTC)
+    state = _FakeState(
+        unit_of_measurement="Eur/MWh",
+        data=[
+            {"start_timestamp": invalid_start, "marketprice": 10},
+            {
+                "start_timestamp": int(start.timestamp() * 1000),
+                "end_timestamp": int(start.timestamp() * 1000) + 3600000,
+                "marketprice": 80,
+            },
+        ],
+    )
+
+    slots = parse_price_slots(state, now=_now())
+
+    assert len(slots) == 1
+    assert slots[0].start.astimezone(UTC) == start
+    assert slots[0].price == pytest.approx(0.08)
+
+
 @pytest.mark.parametrize("unit", ["SEK/kWh", "USD/MWh", "kWh", "%"])
 def test_parse_price_slots_rejects_foreign_units(unit: str) -> None:
     """REQ-ECONOMICS-TARIFFS: Fremde Werte sind keine Euro-Preisvorschau."""

@@ -102,8 +102,9 @@ _START_KEYS = (
     "time",
     "datetime",
     "hour",
+    "start_timestamp",
 )
-_END_KEYS = ("end", "end_time", "endsAt", "ends_at", "to")
+_END_KEYS = ("end", "end_time", "endsAt", "ends_at", "to", "end_timestamp")
 _PRICE_KEYS = (
     "value",
     "price",
@@ -208,15 +209,21 @@ def _unit_factor(configured_unit: str, sensor_unit: Any) -> float | None:
     return unit_factor(configured_unit, sensor_unit)
 
 
-def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
+def _coerce_datetime(
+    value: Any, base_day: datetime | None, *, epoch_milliseconds: bool = False
+) -> datetime | None:
     """Startzeit eines Listeneintrags in eine lokale datetime umwandeln.
 
     Neben ISO-Strings und datetime-Objekten wird auch eine reine
     Stundenzahl unterstützt (Attribut "hour" mancher Template-Sensoren) -
     dafür wird `base_day` (lokale Mitternacht des betreffenden Tages)
-    benötigt.
+    benötigt. aWATTars *_timestamp-Felder enthalten dagegen Epoch-Millisekunden.
     """
     try:
+        if epoch_milliseconds:
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                return None
+            return _local_datetime(datetime.fromtimestamp(value / 1000, UTC))
         if isinstance(value, datetime):
             return _local_datetime(value)
         if isinstance(value, str):
@@ -226,7 +233,7 @@ def _coerce_datetime(value: Any, base_day: datetime | None) -> datetime | None:
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
             if base_day is not None:
                 return base_day + timedelta(hours=float(value))
-    except ValueError, OverflowError:
+    except OSError, ValueError, OverflowError:
         # REQ-DYNAMIC-PRICE-CHARGE: Auch wohlgeformte, aber unmögliche
         # ISO-Daten und nicht-endliche Stundenangaben sind Sensorfehler.
         return None
@@ -258,13 +265,17 @@ def _entry_values(
         start = None
         for key in _START_KEYS:
             if key in entry:
-                start = _coerce_datetime(entry[key], base_day)
+                start = _coerce_datetime(
+                    entry[key], base_day, epoch_milliseconds=key == "start_timestamp"
+                )
                 if start is not None:
                     break
         end = None
         for key in _END_KEYS:
             if key in entry:
-                end = _coerce_datetime(entry[key], base_day)
+                end = _coerce_datetime(
+                    entry[key], base_day, epoch_milliseconds=key == "end_timestamp"
+                )
                 if end is not None:
                     break
         price = None

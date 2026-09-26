@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.core import HomeAssistant, State
@@ -97,6 +98,48 @@ async def test_live_plan_and_accounting_quote_use_identical_cent_conversion(
     assert plan.current_price == coordinator.tariff_provider.quote(NOW).price_eur_kwh
     assert plan.current_price == pytest.approx(price / 100)
     assert plan.charge_now is (price <= 30)
+
+
+@pytest.mark.parametrize("fold", [0, 1])
+async def test_awattar_data_plan_and_quote_keep_both_autumn_hours(
+    coordinator: SaxPowerCoordinator, hass: HomeAssistant, fold: int
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: Epoch times retain both real autumn intervals."""
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    zone = ZoneInfo("Europe/Berlin")
+    first = datetime(2026, 10, 25, 0, tzinfo=UTC)
+    now = datetime(2026, 10, 25, 2, 30, tzinfo=zone, fold=fold)
+    prices = (-42.09, 420.9)
+    hass.states.async_set(
+        "sensor.price",
+        "999",
+        {
+            "unit_of_measurement": "Eur/MWh",
+            "data": [
+                {
+                    "start_timestamp": int(first.timestamp() * 1000) + index * 3600000,
+                    "end_timestamp": int(first.timestamp() * 1000)
+                    + (index + 1) * 3600000,
+                    "marketprice": price,
+                    "unit": "Eur/MWh",
+                }
+                for index, price in enumerate(prices)
+            ],
+        },
+    )
+
+    with patch(
+        "custom_components.sax_power.price_optimizer.dt_util.now", return_value=now
+    ):
+        plan = coordinator.price_planner.evaluate()
+    quote = coordinator.tariff_provider.quote(now).quote
+
+    assert quote is not None
+    assert plan.current_price == quote.price_eur_kwh
+    assert plan.current_price == pytest.approx(prices[fold] / 1000)
+    assert quote.valid_from.astimezone(UTC) == first + timedelta(hours=fold)
+    assert quote.valid_until.astimezone(UTC) == first + timedelta(hours=fold + 1)
+    assert plan.charge_now is (fold == 0)
 
 
 async def test_numeric_state_is_current_price_but_never_an_invented_day_curve(

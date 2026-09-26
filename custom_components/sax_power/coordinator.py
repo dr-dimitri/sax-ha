@@ -1148,6 +1148,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             discharge_kwh,
             observed_seconds,
             advance_price_history=interval is not None,
+            fresh_sample=interval is not None and self._energy_last_ts is not None,
         )
 
     def _energy_origin_attributes(self) -> dict[str, Any]:
@@ -1199,6 +1200,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         observed_seconds: float,
         *,
         advance_price_history: bool = True,
+        fresh_sample: bool = True,
     ) -> None:
         """Bewertet die Ladeenergie-Herkunft dieses Intervalls in Geld.
 
@@ -1395,26 +1397,31 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                 )
 
-            charging_now = self._economics_is_charging(data, charge_delta)
-            if charging_now:
+            # REQ-ECONOMICS-ACCOUNTING: Messlücken unterbrechen die
+            # Stillstandsbestätigung; Cache-Refreshes bestätigen nichts neu.
+            if advance_price_history and observed_seconds <= 0:
                 self._economics_inventory_idle_confirmations = 0
-                self._economics_inventory_discharged_since_charge = False
-            elif self._economics_is_discharging(data, discharged_kwh):
-                self._economics_inventory_idle_confirmations = 0
-                self._economics_inventory_discharged_since_charge = True
-            elif self._economics_is_stationary(data):
-                self._economics_inventory_idle_confirmations = min(
-                    self._economics_inventory_idle_confirmations + 1,
-                    INVENTORY_CORRECTION_IDLE_CONFIRMATIONS,
-                )
-            else:
-                # Ein fehlender Leistungswert ist kein bestätigter
-                # Stillstand. Ohne Bewegungsqualität darf keine Korrektur
-                # freigeschaltet werden (Issue #145).
-                self._economics_inventory_idle_confirmations = 0
+            if fresh_sample:
+                if self._economics_is_charging(data, charge_delta):
+                    self._economics_inventory_idle_confirmations = 0
+                    self._economics_inventory_discharged_since_charge = False
+                elif self._economics_is_discharging(data, discharged_kwh):
+                    self._economics_inventory_idle_confirmations = 0
+                    self._economics_inventory_discharged_since_charge = True
+                elif self._economics_is_stationary(data):
+                    self._economics_inventory_idle_confirmations = min(
+                        self._economics_inventory_idle_confirmations + 1,
+                        INVENTORY_CORRECTION_IDLE_CONFIRMATIONS,
+                    )
+                else:
+                    # Ein fehlender Leistungswert ist kein bestätigter
+                    # Stillstand. Ohne Bewegungsqualität darf keine Korrektur
+                    # freigeschaltet werden (Issue #145).
+                    self._economics_inventory_idle_confirmations = 0
 
             if (
-                self._economics_inventory_idle_confirmations
+                fresh_sample
+                and self._economics_inventory_idle_confirmations
                 >= INVENTORY_CORRECTION_IDLE_CONFIRMATIONS
             ):
                 # Läuft unabhängig davon, ob der Tarif gerade aktiv ist - die
@@ -3352,6 +3359,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning(
                 "Ladeeinstellungen konnten nicht gespeichert werden: %s", err
             )
+            self._async_schedule_control_save()
 
     def _async_schedule_control_save(self) -> None:
         """Merkt den aktuellen Snapshot für einen gesammelten Store-Write vor.
@@ -3394,7 +3402,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._control_bootstrap_pending or self._control_store_write_blocked:
             return
         try:
-            await self._control_store.async_save(self.control_config())
+            await self._control_store.async_save(self.control_config(), final=True)
         except (HomeAssistantError, OSError, ValueError) as err:
             _LOGGER.warning(
                 "Ladeeinstellungen konnten beim Entladen nicht gespeichert "

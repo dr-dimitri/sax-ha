@@ -2326,6 +2326,11 @@ requirement_dynamic_price_charge:
     (Start, Ende, Preis in EUR/kWh). Stunden- und Viertelstunden-Auflösung
     werden gleichermaßen unterstützt; ct/kWh wird anhand der Sensor-Einheit
     (oder einer expliziten Vorgabe) auf EUR/kWh umgerechnet.
+    Das originale aWATTar-Format im Attribut data verwendet
+    start_timestamp/end_timestamp als Unix-Zeitstempel in Millisekunden
+    sowie marketprice als Preisfeld. Die Zeitstempel werden als absolute
+    UTC-Zeitpunkte ausgewertet; beide Herbststunden bleiben getrennt.
+    EUR/MWh wird über die ausgewählte Preis-Einheit in EUR/kWh umgerechnet.
 
     Einträge mit ungültigem Preis behalten ihren lesbaren Startzeitpunkt
     als Grenze des vorherigen Slots ohne explizites Ende. Eine Preislücke
@@ -2644,6 +2649,10 @@ requirement_dynamic_price_charge:
        absoluten Preisgrenze, negative Preise, Gleichheit am Neutralpreis,
        fehlende Preise, die unveränderten Vorränge und den aktiven Wechsel
        von Sollwert 0 zur SmartMeter-Nullregelung ab (Issue #214)."
+    - "Das originale aWATTar-Format ist mit negativen Preisen und ungültigen
+       Zeitstempeln in tests/test_price_optimizer.py geprüft;
+       tests/test_electricity_tariff_prices.py sichert die gemeinsame
+       Tarifquote und Ladeplanung in beiden Herbststunden ab."
     - "tests/test_price_optimizer.py deckt ab: Einlesen der Attributformate
        (raw_today/raw_tomorrow, Zahlenlisten, data/start_time,
        Viertelstunden, ct-Umrechnung, Attribut-Override, unbrauchbare
@@ -4589,10 +4598,16 @@ requirement_control_config_bootstrap:
     Software-Serviceänderungen bereits bei Annahme der Konfiguration,
     unabhängig von der nachgelagerten Geräteauswertung
     (REQ-VUE-ENTITY-BINDING); direkte interne Änderungen im gemeinsamen
-    Endpunkt _async_apply_grid_charge_change. Ein
-    unveränderter Snapshot löst keinen Schreibvorgang aus. Beim Entladen des
+    Endpunkt _async_apply_grid_charge_change.
+    Ein Snapshot gilt erst nach erfolgreichem Schreiben und übereinstimmendem
+    Rücklesen als gespeichert. Fehlgeschlagene verzögerte Schreibvorgänge
+    und Bootstrap-Schreibvorgänge werden erneut versucht; eine inzwischen
+    angenommene Änderung ersetzt den älteren Schreibauftrag. Ein unveränderter, bereits
+    bestätigter Snapshot löst keinen Schreibvorgang aus. Beim Entladen des
     Config Entry wird der neueste Stand zusätzlich best-effort sofort
-    geschrieben.
+    geschrieben. Danach dürfen keine Wiederholungen der entladenen Instanz
+    den Stand einer neu geladenen Instanz überschreiben. Beim Herunterfahren
+    von Home Assistant bleibt das abschließende FINAL_WRITE-Ereignis erhalten.
   requirements:
     - "Ein versionierter Store je Config Entry hält alle softwareseitigen
        Steuerwerte; er wird vor async_config_entry_first_refresh geladen."
@@ -4620,6 +4635,9 @@ requirement_control_config_bootstrap:
     - "Reine Software-Konfigurationsentities bleiben bei einem
        Basic-Mode-Ausfall verfügbar."
   acceptance_criteria:
+    - "tests/test_control_store_write_failures.py prüft echte Datei-Schreibfehler,
+       erneutes Speichern ohne weitere Bedienung, neuere Einstellungen während
+       Write/Readback und das abschließende Schreiben beim Herunterfahren."
     - "tests/test_control_persistence.py deckt ab: Store-Round-Trip,
        korrupter/unvollständiger/alter Store, nicht lesbarer Store und
        unbekannte künftige Storage-Version (keine Migration, kein
@@ -5276,6 +5294,10 @@ requirement_economics_accounting:
     (ebenso wenig wie unpriced_charge_kwh). Minimum- und Kapazitätskorrektur
     laufen niemals während einer Lade- oder Entladebewegung. Nach einer
     Bewegung sind zwei aufeinanderfolgende frische Stillstands-Ticks nötig.
+    Jeder gültige HIGH-Messwert zählt dafür höchstens einmal; Cache-Refreshs
+    bestätigen keinen weiteren Stillstand. Fehlende oder veraltete Werte
+    und Messlücken verwerfen die Bestätigung, sodass eine Korrektur erst
+    nach zwei neuen zusammenhängenden Stillstandsmessungen zulässig ist.
     Ein Rest am geräteseitig gemeldeten battery_soc_min wird nur verworfen,
     wenn seit der letzten Ladung tatsächlich entladen wurde; so kann eine
     gerade geladene Energiemenge innerhalb derselben quantisierten SOC-Stufe
@@ -5499,6 +5521,9 @@ requirement_economics_accounting:
        Stillstand erlaubt eine Deckelung auf den konservativen oberen
        Stufenrand; ein echtes Entladen bis zum Minimum kann einen Rest
        weiterhin beseitigen (Issues #132/#145)."
+    - "tests/test_economics_inventory_samples.py prüft, dass Cache-Abrufe,
+       veraltete Messwerte und Messpausen weder einen Bestand vorzeitig
+       löschen noch dadurch spätere Ersparnisse erzeugen."
     - "Ladeverluste senken das aktuelle Nettoergebnis über die gemessene
        Energiedifferenz, ohne einen angenommenen Wirkungsgrad zu benötigen."
     - "Die Folge Rohwert 100 -> 80 -> 95 -> 105 veröffentlicht exakt

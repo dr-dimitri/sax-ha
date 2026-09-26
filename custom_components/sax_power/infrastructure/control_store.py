@@ -9,6 +9,7 @@ Store gibt.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from dataclasses import asdict, dataclass, replace
@@ -16,8 +17,10 @@ from datetime import time as dt_time
 from enum import StrEnum
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
+from homeassistant.core import CALLBACK_TYPE, CoreState, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -268,6 +271,9 @@ class ControlConfigStore:
         self._last_persisted: dict[str, Any] | None = None
         self._pending: dict[str, Any] | None = None
         self._save_scheduled = False
+        self._unsub_delayed_write: CALLBACK_TYPE | None = None
+        self._unsub_final_write: CALLBACK_TYPE | None = None
+        self._write_lock = asyncio.Lock()
 
     async def async_load(self) -> ControlConfigLoadResult:
         """Load the snapshot, dropping each invalid field independently.
@@ -382,28 +388,93 @@ class ControlConfigStore:
         Schreibvorgänge ohne Anlass aus.
         """
         payload = _serialize(config)
-        if payload == (self._pending or self._last_persisted):
+        if payload == (self._pending or self._last_persisted) and (
+            self._pending is None or self._save_scheduled or self._write_lock.locked()
+        ):
             return False
         self._pending = payload
-        if not self._save_scheduled:
-            self._save_scheduled = True
-            self._store.async_delay_save(self._consume_pending, delay)
+        self._schedule_write(delay)
         return True
 
-    async def async_save(self, config: ControlConfig) -> None:
-        """Immediately persist a snapshot, cancelling a delayed write."""
-        payload = _serialize(config)
-        self._pending = None
-        self._save_scheduled = False
-        await self._store.async_save(payload)
-        self._last_persisted = payload
+    @callback
+    def _schedule_write(self, delay: float = CONTROL_SAVE_DELAY) -> None:
+        if not self._save_scheduled:
+            self._save_scheduled = True
+            self._unsub_delayed_write = async_call_later(
+                self._hass, delay, self._async_delayed_write
+            )
+        self._ensure_final_write_listener()
 
-    def _consume_pending(self) -> dict[str, Any]:
-        payload = self._pending or self._last_persisted or {}
-        self._pending = None
+    @callback
+    def _ensure_final_write_listener(self) -> None:
+        if self._unsub_final_write is None:
+            self._unsub_final_write = self._hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_FINAL_WRITE, self._async_final_write
+            )
+
+    async def _async_final_write(self, event: Any) -> None:
+        self._unsub_final_write = None
+        await self._async_delayed_write(event)
+
+    @callback
+    def _cancel_delayed_write(self) -> None:
+        if self._unsub_delayed_write is not None:
+            self._unsub_delayed_write()
+            self._unsub_delayed_write = None
+        if self._unsub_final_write is not None:
+            self._unsub_final_write()
+            self._unsub_final_write = None
         self._save_scheduled = False
-        self._last_persisted = payload
-        return payload
+
+    async def _async_delayed_write(self, _event: Any) -> None:
+        try:
+            await self._async_write_pending()
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Ladeeinstellungen konnten nicht gespeichert werden; "
+                "der letzte Stand wird erneut versucht: %s",
+                err,
+            )
+            if self._pending is not None:
+                if self._hass.state is CoreState.stopping:
+                    self._ensure_final_write_listener()
+                elif not self._hass.is_stopping:
+                    self._schedule_write()
+
+    async def async_save(self, config: ControlConfig, *, final: bool = False) -> None:
+        """Flush immediately; final owners cannot retry over a reloaded entry."""
+        self._pending = _serialize(config)
+        self._cancel_delayed_write()
+        try:
+            await self._async_write_pending()
+        except HomeAssistantError, OSError, ValueError:
+            if self._hass.state is CoreState.stopping or (
+                not final and self._hass.state is not CoreState.final_write
+            ):
+                self._ensure_final_write_listener()
+            raise
+
+    async def _async_write_pending(self) -> None:
+        async with self._write_lock:
+            self._cancel_delayed_write()
+            payload = self._pending
+            if payload is None:
+                return
+            if self._hass.state is CoreState.stopping:
+                # Core verschiebt Writes selbst bis FINAL_WRITE. Ein Readback
+                # bestätigt hier nur RAM (REQ-CONTROL-CONFIG-BOOTSTRAP).
+                self._ensure_final_write_listener()
+                return
+            # Core schluckt WriteError. Erst der Readback bestätigt den
+            # gespeicherten Stand (REQ-CONTROL-CONFIG-BOOTSTRAP).
+            await self._store.async_save(payload)
+            if await self._store.async_load() != payload:
+                raise HomeAssistantError(
+                    "Ladeeinstellungen nach dem Speichern nicht wie erwartet lesbar"
+                )
+            self._last_persisted = payload
+            if self._pending is payload:
+                self._pending = None
 
 
 def _serialize(config: ControlConfig) -> dict[str, Any]:

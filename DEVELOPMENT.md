@@ -25,7 +25,7 @@ Ist-Zustand-Anforderungen je REQ-ID).
 
 ```
 custom_components/sax_power/
-├── manifest.json      Metadaten, Requirements (pymodbus==3.13.1), Domain
+├── manifest.json      Metadaten, Requirements (pymodbus>=3.13.1), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          SunSpec-Blockdecodierung (sunspec.py),
@@ -2149,6 +2149,12 @@ Preis-Slotgrenzen gelten weiterhin, alte Leistungsmessungen lösen keine
 neue Freigabe aus (Details: REQ-TIMED-SOC-CHARGE, Issue #167).
 
 ## Tests
+
+Das Manifest verwendet `pymodbus>=3.13.1`, weil Home Assistant die Bibliothek
+selbst benötigt und dessen Paket-Constraints die konkrete Version bestimmen.
+Ein eigener exakter Pin würde Core-Updates blockieren und wird von hassfest
+abgelehnt. `requirements_test.txt` hält die getestete Version weiterhin exakt
+fest; `tests/test_manifest.py` prüft die Kompatibilität mit dem Core-Constraint.
 
 ```
 tests/

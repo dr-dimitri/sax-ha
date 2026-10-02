@@ -5764,9 +5764,10 @@ requirement_economics_observability:
 
     Speicherfehler (`SaxPowerCoordinator._economics_storage_error`) sind reine
     Diagnose und sperren weder Bootstrap noch Akkumulation oder weitere Writes.
-    Bei einem unlesbaren Store startet automatisch eine neue Bilanz; vorhandene
-    lesbare In-Memory-Beträge bleiben bei Schreibfehlern erhalten. Fehler werden
-    ohne erforderliche Benutzeraktion übersprungen (Debug-Protokollierung).
+    Bei einem unlesbaren Store wird zuerst das rollierende Backup automatisch
+    wiederhergestellt. Nur ohne gültiges Backup startet eine neue Bilanz;
+    vorhandene lesbare In-Memory-Beträge bleiben bei Schreibfehlern erhalten.
+    Fehler werden ohne erforderliche Benutzeraktion übersprungen (Debug-Protokollierung).
     Der Status `storage_error` beschreibt nur die fehlende Persistierung. Das
     Dashboard zeigt dafür keinen Fehlerhinweis und hält alle Amortisationswerte
     sichtbar; Wiederherstellung ist nicht erforderlich. Eine erfolgreiche
@@ -5797,12 +5798,54 @@ requirement_economics_observability:
     lesbare historische Beträge können ohne gültiges Backup nicht übernommen
     werden; der neue Aktivierungszeitpunkt kennzeichnet die neue Bilanz.
 
+    Rollierendes Amortisations-Backup (EconomicsStateStore): pro Config Entry
+    genau eine Datei `.storage/sax_power.economics.<entry_id>.backup` mit dem
+    vollständigen versionierten Bilanzzustand (Geldsummen, Bestands- und
+    Preisabdeckungszähler, Tageshistorie/laufender Tag, Payback- und
+    Revisions-/Neustartzeitpunkte). Investition und Tarifoptionen bleiben in
+    Home Assistants Config Entry; Recorder-Zeitraumstatistiken werden nicht
+    durch dieses Bilanz-Backup ersetzt.
+
+    Nach dem Laden startet genau ein unabhängiger 600-Sekunden-Timer. Er ersetzt
+    das Backup alle zehn Minuten atomar über Home Assistants Store, auch ohne
+    neue Energiebewegung, und bestätigt es durch eine Lese-Rückprobe. Quelle
+    ist nur der zuletzt erfolgreich gespeicherte gültige Hauptstand; unbestätigte
+    oder abgelehnte Writes gelangen nie ins Backup. Das erste reguläre Backup
+    entsteht nach zehn Minuten. Es gibt keine Backup-Rotation oder Historie.
+    Bei einem fehlgeschlagenen Backup bleibt die vorherige atomare Kopie
+    erhalten; der nächste Takt versucht es erneut, ohne die Rechnung anzuhalten.
+    Der Timer wird beim Entladen und bei Home Assistants Final-Write gestoppt;
+    bereits laufende Backup-I/O wird abgewartet, ohne einen neuen Timer anzulegen.
+
+    Beim Laden hat eine gültige Hauptdatei Vorrang. Fehlt sie, ist sie syntaktisch
+    beschädigt, besitzt eine nicht unterstützte Hauptversion oder ein ungültiges
+    Kernbündel, wird das gültige Backup mit derselben Migration/Feldvalidierung
+    gelesen und sein vollständiger Stand übernommen. Die Hauptdatei wird unter
+    dem Store-Lock aus diesem Stand neu geschrieben. Scheitert diese Reparatur,
+    läuft die Bilanz mit dem Backup-Stand im Arbeitsspeicher weiter; spätere
+    Speicherungen werden weiter versucht. Beschädigte Originale werden wie oben
+    gesichert. Ein beschädigtes oder fehlendes Backup erzeugt keine neue Sperre:
+    ohne lesbaren Stand gilt weiterhin der automatische Nullstart. Es werden
+    keine verloren gegangenen Beträge seit dem gesicherten Stand erfunden.
+
+    Ein expliziter Bilanzneustart entwertet sein bisheriges Backup vor dem
+    Hauptwrite; ist das alte Backup nicht entfernbar, bleibt der Reset erfolglos
+    und die bestehende Bilanz unverändert. Bei einem fehlgeschlagenen Hauptwrite
+    wird ein Backup des weiterhin bestätigten alten Stands wieder angelegt.
+    Nach erfolgreichem Hauptwrite wird der neue Stand sofort gesichert. Scheitert
+    nur dieses Backup, bleibt der Reset gültig und der nächste Zehn-Minuten-Takt
+    sichert den neuen Stand; ein altes Backup darf nie die zurückgesetzte Bilanz
+    wiederbeleben. Der Generationwechsel erfolgt erst nach der letzten Backup-I/O
+    ohne weiteres await: Polls dürfen vorher noch den Altstand vormerken; alle
+    ausstehenden Alt-Writes werden beim erfolgreichen Reset abgelöst.
+
     Diagnostics (diagnostics.py, Schlüssel "economics"): zusätzlich zu den
     bereits vorhandenen Rohsummen/Zeitstempeln jetzt auch `status`,
     `store_write_blocked` (immer false, keine Fehlersperre), `storage_error`,
     `store_minor_version`, `priced_charge_kwh`/
     `priced_discharge_kwh` und `price_unavailable`/
-    `last_successful_quote_at`. Schlüssel "tariff"
+    `last_successful_quote_at`, `backup_last_saved_at` und `backup_restored_at`
+    (UTC-ISO-Zeitstempel oder null). Schlüssel "tariff"
     (SaxTariffProvider.diagnostics) zusätzlich um `price_sensor_entity_id`
     ergänzt. Bestehende Redaction-Regeln (TO_REDACT, nur der Host) bleiben
     unverändert.
@@ -5902,14 +5945,28 @@ requirement_economics_observability:
        Problemzustand erneut angelegt zu werden
        (tests/test_repairs.py)."
     - "Lade-, Schreib- und Berechnungsfehler halten die Amortisation nie
-       dauerhaft an: beschädigte Stores und ältere Korrupt-Backups erlauben
-       einen neuen Bootstrap; Schreibfehler erhalten bestehende Beträge
-       und werden automatisch erneut versucht, auch bei ruhendem Speicher.
+       dauerhaft an: ein gültiges rollierendes Backup wird wiederhergestellt;
+       nur ohne gültiges Backup erlauben beschädigte Stores und ältere
+       Korrupt-Dateien einen neuen Bootstrap; Schreibfehler erhalten bestehende
+       Beträge und werden automatisch erneut versucht, auch bei ruhendem Speicher.
        Fehlerhafte Intervalle werden ohne Teilbeträge übersprungen; die
        bestätigten Sensorwerte bleiben bis zum nächsten erfolgreichen Tick
        erhalten. Das Dashboard zeigt keinen Speicher-Stop-Hinweis
        (tests/test_economics_persistence.py,
        tests/test_economics_store_corruption.py, frontend/tests/savings.test.ts)."
+    - "Genau ein Backup wird alle 600 Sekunden atomar ersetzt, auch im
+       Stillstand; fehlgeschlagene oder ungültige Haupt-Writes ersetzen kein
+       gültiges Backup. Timer, Final-Write und Entladen hinterlassen keine
+       laufenden Backup-Jobs (tests/test_economics_backup.py)."
+    - "Ein fehlender, syntaktisch beschädigter, versionstechnisch unlesbarer
+       oder im Kernbündel ungültiger Hauptstand wird automatisch aus dem
+       gültigen Backup vollständig wiederhergestellt. Eine gültige Hauptdatei
+       gewinnt gegen ein älteres Backup; fehlen beide, bleibt die bisherige
+       Fehlertoleranz wirksam (tests/test_economics_backup.py)."
+    - "Ein manueller Bilanzneustart kann nie durch sein altes Backup rückgängig
+       werden. Polls und wartende Alt-Writes während der Backup-I/O lösen weder
+       storage_error aus noch überschreiben sie den neuen Stand
+       (tests/test_economics_backup.py)."
     - "Der Bilanzneustart verlangt confirm=true, ist atomar (ein
        fehlgeschlagener Speicherversuch lässt den In-Memory-Zustand
        vollständig unverändert), setzt den unbewerteten Bestand auf 0 und

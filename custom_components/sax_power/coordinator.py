@@ -2122,6 +2122,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self._economics_store_loaded = True
             self._economics_storage_error = True
+            self._economics_store.async_start_backup()
             return
 
         legacy_result_history = (
@@ -2187,6 +2188,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     state.current_day_observed_seconds
                 )
         self._economics_store_loaded = True
+        self._economics_store.async_start_backup()
 
     def _economics_state(self) -> EconomicsState:
         return EconomicsState(
@@ -2480,6 +2482,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "status": (self.data or {}).get("economics_status"),
             "store_write_blocked": False,
             "storage_error": self._economics_storage_error,
+            "backup_last_saved_at": (
+                self._economics_store.backup_last_saved_at.isoformat()
+                if self._economics_store.backup_last_saved_at
+                else None
+            ),
+            "backup_restored_at": (
+                self._economics_store.backup_restored_at.isoformat()
+                if self._economics_store.backup_restored_at
+                else None
+            ),
             "store_minor_version": ECONOMICS_STORE_MINOR_VERSION,
             "priced_charge_kwh": self._economics_priced_charge_kwh,
             "priced_discharge_kwh": self._economics_priced_discharge_kwh,
@@ -6395,6 +6407,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Aufruf lief der Timer beim Entladen des Config Entry (siehe
         # __init__.async_unload_entry) unbemerkt im Hintergrund weiter.
         await super().async_shutdown()
+        await self._economics_store.async_stop_backup()
         # Externe Zustandsänderungen und der Preisintervall-Timer dürfen
         # während der folgenden Store-Flushes keine neuen Entscheidungen
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).

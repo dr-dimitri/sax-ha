@@ -617,10 +617,20 @@ Tarifeinstellung neu beginnen. Dafür ist **Bestätigen: wahr** nötig.
 Preisabdeckungszähler zurückgesetzt.** Energie- und Herkunftszähler bleiben
 erhalten; eine rückwirkende Neuberechnung findet nicht statt.
 
-Bei einem beschädigten Bilanz-Speicher bleibt die Rechnung angehalten.
-Stelle eine gültige Sicherung wieder her und lade die Integration neu.
-Ein bloßes Neuladen behebt die beschädigte Datei nicht. Länger andauernde
-Speicher- oder Preisprobleme erscheinen zusätzlich unter **Reparaturen**.
+Die Integration sichert die Amortisationsbilanz alle **zehn Minuten** in
+`.storage/sax_power.economics.<entry_id>.backup`. Diese eine Backup-Datei wird
+jeweils ersetzt; es entsteht keine Historie. Gesichert wird der zuletzt
+bestätigte Bilanzstand. Das erste Backup entsteht nach zehn Minuten Betrieb.
+
+Ist die Hauptdatei beim Laden beschädigt oder fehlt sie, stellt die Integration
+den letzten gültigen Backup-Stand automatisch wieder her und rechnet weiter.
+Beträge seit diesem Stand können dabei verloren gehen. Ohne gültiges Backup
+beginnt automatisch eine neue Bilanz; beschädigte Originaldateien bleiben als
+Korrupt-Backup erhalten. Auch Speicherfehler halten die laufende Rechnung
+nicht an: fehlgeschlagene Speicherungen werden erneut versucht.
+Tarifeinstellungen, Investitionskosten und die Recorder-Zeitraumstatistik sind
+nicht Bestandteil dieser Bilanzsicherung. Ein manueller Bilanzneustart ersetzt
+auch das Backup, damit alte Beträge nicht wiederhergestellt werden.
 
 ## Herkunft der Ladeenergie
 

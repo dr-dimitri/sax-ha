@@ -1394,13 +1394,43 @@ Versuch, auch ohne neue Bilanzbewegung. Nach erfolgreicher Lese-Rückprobe wird
 `_economics_storage_error` gelöscht; Final-Write beim Shutdown plant keine
 neuen Timer.
 
-Bei einem Ladefehler startet eine neue Bilanz automatisch. Core-quarantänierte
-JSON-Dateien und bereits vorhandene `.corrupt.*`-Backups bleiben erhalten;
+Bei einem Ladefehler wird zuerst der gültige rollierende Backup-Stand
+wiederhergestellt; erst ohne gültiges Backup startet eine neue Bilanz automatisch.
+Core-quarantänierte JSON-Dateien und bereits vorhandene `.corrupt.*`-Backups bleiben erhalten;
 sie sperren auch nach einem Reload nichts. Eine noch vorhandene unlesbare
 Originaldatei wird vor dem ersten Ersatzwrite im Executor als Korrupt-Backup
 gesichert. Scheitert diese Sicherung, bleibt das Original unverändert und nur
 der Write wird später erneut versucht. Historische Beträge, die sich nicht
 lesen lassen, sind ohne ein gültiges Backup nicht wiederherstellbar.
+
+`EconomicsStateStore` verwaltet zusätzlich genau einen 600-Sekunden-Timer und
+einen versionierten Store unter `.storage/sax_power.economics.<entry_id>.backup`.
+Alle zehn Minuten ersetzt er die Datei atomar durch den zuletzt bestätigten
+gültigen Hauptstand und prüft die Speicherung durch eine Lese-Rückprobe. Auch
+bei ruhendem Speicher läuft der Timer weiter; ungültige oder fehlgeschlagene
+Haupt-Writes ersetzen keinen guten Backup-Stand. Das erste reguläre Backup
+entsteht nach zehn Minuten; eine Historie wird nicht angelegt. Backup-Fehler
+werden ohne Berechnungssperre beim nächsten Takt erneut versucht.
+
+Beim Laden gewinnt eine gültige Hauptdatei. Ist sie fehlend, syntaktisch,
+versionstechnisch oder im Kernbündel beschädigt, wird das Backup mit derselben
+Migration und Feldvalidierung geladen und die Hauptdatei unter dem Store-Lock
+repariert. Auch ein fehlgeschlagener Reparaturwrite hält die Rechnung nicht an:
+der Backup-Stand bleibt im Arbeitsspeicher verfügbar. Der Diagnose-Download
+enthält `backup_last_saved_at` und `backup_restored_at` als UTC-ISO-Zeitstempel.
+Das Backup umfasst die gesamte operative Bilanz samt Tagen und Zeitstempeln;
+Tarif-/Investitionsoptionen und Recorder-Langzeitstatistiken bleiben separat.
+
+Ein expliziter Reset entwertet das alte Backup vor dem Hauptwrite und sichert
+danach den neuen Stand sofort. Bei einem fehlgeschlagenen Hauptwrite wird der
+weiterhin bestätigte Altstand wieder gesichert; ist bereits das Entwerten nicht
+möglich, wird der Reset abgelehnt. Ein fehlgeschlagener neuer Backup-Write macht
+einen erfolgreich bestätigten Reset nicht rückgängig, und der nächste Takt
+versucht ihn erneut. Während dieser I/O dürfen Polls weiterhin den Altstand
+vormerken. Erst danach werden Baseline/Generation und ausstehende Writes ohne
+weiteres `await` umgestellt, damit kein Altstand den Reset überschreiben kann.
+Entladen und Final-Write stoppen den Timer und warten laufende Backup-I/O ab.
+`tests/test_economics_backup.py` prüft diese Pfade mit echten Dateien.
 
 Home Assistants `Store` fängt eine echte `WriteError`/`SerializationError`
 beim Schreiben intern ab und kehrt regulär zurück

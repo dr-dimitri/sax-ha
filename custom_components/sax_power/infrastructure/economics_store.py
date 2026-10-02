@@ -65,6 +65,7 @@ STORAGE_VERSION = 1
 STORAGE_MINOR_VERSION = 8
 STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
+ECONOMICS_BACKUP_INTERVAL = 600
 
 
 def _store_file_presence(path_value: str) -> tuple[bool, bool]:
@@ -238,6 +239,17 @@ class EconomicsStateStore:
             f"{STORAGE_KEY_PREFIX}.{entry_id}",
             minor_version=STORAGE_MINOR_VERSION,
         )
+        self._backup_store: Store[dict[str, Any]] = _EconomicsStore(
+            hass,
+            STORAGE_VERSION,
+            f"{STORAGE_KEY_PREFIX}.{entry_id}.backup",
+            minor_version=STORAGE_MINOR_VERSION,
+        )
+        self._backup_active = False
+        self._unsub_backup_timer: CALLBACK_TYPE | None = None
+        self._unsub_backup_final_write: CALLBACK_TYPE | None = None
+        self.backup_last_saved_at: datetime | None = None
+        self.backup_restored_at: datetime | None = None
         self._last_persisted = EconomicsState()
         self._pending: EconomicsState | None = None
         self._unsub_delayed_write: CALLBACK_TYPE | None = None
@@ -261,12 +273,93 @@ class EconomicsStateStore:
         self._generation = 0
 
     async def async_load(self) -> EconomicsState | None:
-        """Unreadable data must be preserved even if field decoding fails."""
+        """REQ-ECONOMICS-OBSERVABILITY: vor einem Nullstart das Backup prüfen."""
+        state: EconomicsState | None = None
+        error: Exception | None = None
         try:
-            return await self._async_load_state()
-        except Exception:  # noqa: BLE001
+            state = await self._async_load_state()
+            if state is not None and state.initialized:
+                return state
+        except Exception as err:  # noqa: BLE001
             self._load_failed = True
-            raise
+            error = err
+        try:
+            raw = await self._backup_store.async_load()
+            recovered = self._deserialize(raw) if isinstance(raw, dict) else None
+            if recovered is not None and recovered.initialized:
+                async with self._write_lock:
+                    self._load_failed = True
+                    self._last_persisted = recovered
+                    if not await self._write_and_verify(recovered):
+                        if self._on_persist_failed:
+                            self._on_persist_failed()
+                    self.backup_restored_at = dt_util.utcnow()
+                return recovered
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Wirtschaftlichkeits-Backup nicht lesbar: %s", err)
+        if error is not None:
+            raise error
+        return state
+
+    @callback
+    def async_start_backup(self) -> None:
+        """Ein Timer pro Config Entry; wiederholtes Laden dupliziert ihn nicht."""
+        if self._backup_active:
+            return
+        self._backup_active = True
+        self._unsub_backup_final_write = self._hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_FINAL_WRITE, self._async_stop_backup_at_shutdown
+        )
+        self._schedule_backup()
+
+    @callback
+    def _schedule_backup(self) -> None:
+        if self._backup_active:
+            self._unsub_backup_timer = async_call_later(
+                self._hass, ECONOMICS_BACKUP_INTERVAL, self._async_backup_tick
+            )
+
+    async def _async_backup_tick(self, _now: datetime) -> None:
+        self._unsub_backup_timer = None
+        try:
+            async with self._write_lock:
+                if self._backup_active:
+                    await self._async_write_backup(self._last_persisted)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Wirtschaftlichkeits-Backup übersprungen: %s", err)
+        finally:
+            self._schedule_backup()
+
+    async def _async_stop_backup_at_shutdown(self, _event: Any) -> None:
+        await self.async_stop_backup()
+
+    async def async_stop_backup(self) -> None:
+        """Auch einen bereits laufenden Backup-Write vor dem Entladen abwarten."""
+        self._backup_active = False
+        if self._unsub_backup_timer is not None:
+            self._unsub_backup_timer()
+            self._unsub_backup_timer = None
+        if self._unsub_backup_final_write is not None:
+            self._unsub_backup_final_write()
+            self._unsub_backup_final_write = None
+        async with self._write_lock:
+            pass
+
+    async def _async_write_backup(self, state: EconomicsState) -> bool:
+        """Nur bestätigte gültige Stände atomar im selben Backup ersetzen."""
+        if not state.initialized or not self._valid_snapshot(state):
+            return False
+        now = dt_util.utcnow()
+        data = {**self._serialize(state), "backup_created_at": now.isoformat()}
+        try:
+            await self._backup_store.async_save(data)
+            if await self._backup_store.async_load() != data:
+                return False
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Wirtschaftlichkeits-Backup übersprungen: %s", err)
+            return False
+        self.backup_last_saved_at = now
+        return True
 
     async def _async_load_state(self) -> EconomicsState | None:
         """Load the balance, distinguishing new from Core-quarantined data."""
@@ -294,55 +387,59 @@ class EconomicsStateStore:
             self._load_failed = True
             return EconomicsState()
 
-        state = EconomicsState(
-            grid_charge_cost_eur=self._validated_amount(
+        state = self._deserialize(raw)
+        self._last_persisted = self._baseline(state)
+        return state
+
+    @classmethod
+    def _deserialize(cls, raw: dict[str, Any]) -> EconomicsState:
+        return EconomicsState(
+            grid_charge_cost_eur=cls._validated_amount(
                 raw.get("grid_charge_cost_eur"), "Netzladekosten"
             ),
-            pv_opportunity_cost_eur=self._validated_amount(
+            pv_opportunity_cost_eur=cls._validated_amount(
                 raw.get("pv_opportunity_cost_eur"), "PV-Opportunitätskosten"
             ),
-            avoided_grid_cost_eur=self._validated_amount(
+            avoided_grid_cost_eur=cls._validated_amount(
                 raw.get("avoided_grid_cost_eur"), "Vermiedene Netzkosten"
             ),
-            operating_result_high_water_eur=self._validated_nonnegative(
+            operating_result_high_water_eur=cls._validated_nonnegative(
                 raw.get("operating_result_high_water_eur"),
                 "Netto-Ersparnis-Höchststand",
             ),
-            unvalued_inventory_kwh=self._validated_nonnegative(
+            unvalued_inventory_kwh=cls._validated_nonnegative(
                 raw.get("unvalued_inventory_kwh"), "Unbewerteter Bestand"
             ),
-            unpriced_charge_kwh=self._validated_nonnegative(
+            unpriced_charge_kwh=cls._validated_nonnegative(
                 raw.get("unpriced_charge_kwh"), "Unbepreiste Ladung"
             ),
-            unpriced_discharge_kwh=self._validated_nonnegative(
+            unpriced_discharge_kwh=cls._validated_nonnegative(
                 raw.get("unpriced_discharge_kwh"), "Unbepreiste Entladung"
             ),
-            economics_started_at=self._validated_timestamp(
+            economics_started_at=cls._validated_timestamp(
                 raw.get("economics_started_at"), "Aktivierungszeitpunkt"
             ),
-            last_tariff_revision_at=self._validated_timestamp(
+            last_tariff_revision_at=cls._validated_timestamp(
                 raw.get("last_tariff_revision_at"), "letzte Tarifrevision"
             ),
-            day_results=self._validated_day_results(raw.get("day_results")),
-            payback_achieved_at=self._validated_timestamp(
+            day_results=cls._validated_day_results(raw.get("day_results")),
+            payback_achieved_at=cls._validated_timestamp(
                 raw.get("payback_achieved_at"), "Payback-Erreichungszeitpunkt"
             ),
-            priced_charge_kwh=self._validated_nonnegative(
+            priced_charge_kwh=cls._validated_nonnegative(
                 raw.get("priced_charge_kwh"), "Bepreiste Ladung"
             ),
-            priced_discharge_kwh=self._validated_nonnegative(
+            priced_discharge_kwh=cls._validated_nonnegative(
                 raw.get("priced_discharge_kwh"), "Bepreiste Entladung"
             ),
-            last_restart_at=self._validated_timestamp(
+            last_restart_at=cls._validated_timestamp(
                 raw.get("last_restart_at"), "letzter Bilanzneustart"
             ),
-            last_restart_reason=self._validated_restart_reason(
+            last_restart_reason=cls._validated_restart_reason(
                 raw.get("last_restart_reason")
             ),
-            **self._validated_current_day(raw),
+            **cls._validated_current_day(raw),
         )
-        self._last_persisted = self._baseline(state)
-        return state
 
     @staticmethod
     def _baseline(state: EconomicsState) -> EconomicsState:
@@ -498,8 +595,22 @@ class EconomicsStateStore:
         if not self._valid_snapshot(state):
             return False
         async with self._write_lock:
-            if not await self._write_and_verify(state):
+            old_baseline = self._last_persisted
+            try:
+                await self._backup_store.async_remove()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Altes Wirtschaftlichkeits-Backup nicht entfernbar: %s", err
+                )
                 return False
+            if not await self._write_and_verify(state):
+                await self._async_write_backup(self._last_persisted)
+                return False
+            # Während der Backup-I/O dürfen Polls noch die alte Bilanz
+            # vormerken; der Generationwechsel erfolgt ohne weiteres await.
+            self._last_persisted = old_baseline
+            await self._async_write_backup(state)
+            self._last_persisted = state
             self._generation += 1
             self._cancel_delayed_write()
             return True

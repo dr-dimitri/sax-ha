@@ -1027,7 +1027,7 @@ async def test_reset_supersedes_polls_and_waiting_old_writes(
     coordinator._accumulate_economics(data, EnergyDelta(0.01, 0.01, 0.0), 0.0, 2.0)
     assert data["economics_status"] == "active"
     assert data["economics_net_savings"] == pytest.approx(-0.003)
-    assert not coordinator._economics_store_write_blocked
+    assert not coordinator._economics_storage_error
     await coordinator._async_flush_economics_state()
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=301))
     await hass.async_block_till_done()
@@ -1068,7 +1068,7 @@ async def test_failed_reset_preserves_concurrent_poll_and_pending_persistence(
 
     assert coordinator._economics_started_at == old_start
     assert coordinator._economics_priced_charge_kwh == pytest.approx(1.01)
-    assert not coordinator._economics_store_write_blocked
+    assert not coordinator._economics_storage_error
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=301))
     await hass.async_block_till_done()
     reloaded = await EconomicsStateStore(hass, coordinator.entry_id).async_load()
@@ -1118,7 +1118,7 @@ async def test_concurrent_coordinator_resets_serialize_their_snapshots(hass) -> 
         release.set()
         await asyncio.gather(first, second)
 
-    assert not coordinator._economics_store_write_blocked
+    assert not coordinator._economics_storage_error
     reloaded = await EconomicsStateStore(hass, coordinator.entry_id).async_load()
     assert reloaded.last_restart_reason == "Zweiter Neustart"
     assert reloaded.economics_started_at == coordinator._economics_started_at
@@ -1174,6 +1174,8 @@ async def test_a_silently_swallowed_delayed_write_error_invokes_the_callback(
     await hass.async_block_till_done()
 
     assert failures == [True]
+    assert store._pending is not None
+    store._cancel_delayed_write()
 
 
 async def test_a_successful_delayed_write_never_invokes_the_callback(hass) -> None:
@@ -1192,7 +1194,7 @@ async def test_a_successful_delayed_write_never_invokes_the_callback(hass) -> No
     assert failures == []
 
 
-async def test_coordinator_freezes_the_balance_when_a_delayed_write_is_silently_lost(
+async def test_coordinator_continues_when_a_delayed_write_is_silently_lost(
     hass,
 ) -> None:
     """End-to-End durch die echte EconomicsStateStore (nicht auf
@@ -1215,7 +1217,23 @@ async def test_coordinator_freezes_the_balance_when_a_delayed_write_is_silently_
     )
     await hass.async_block_till_done()
 
-    assert coordinator._economics_store_write_blocked is True
+    assert coordinator._economics_storage_error is True
+    before = coordinator._economics_grid_charge_cost_eur
+    now = dt_util.now()
+    with patch("custom_components.sax_power.coordinator.dt_util.now", return_value=now):
+        coordinator._accumulate_economics({}, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0)
+    with patch(
+        "custom_components.sax_power.coordinator.dt_util.now",
+        return_value=now + timedelta(seconds=2),
+    ):
+        coordinator._accumulate_economics({}, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0)
+    assert coordinator._economics_grid_charge_cost_eur > before
+    _stub_store_with_initial_data(coordinator._economics_store)
+    await coordinator._economics_store._async_delayed_write(dt_util.utcnow())
+    assert coordinator._economics_storage_error is False
+    restored = await EconomicsStateStore.async_load(coordinator._economics_store)
+    assert restored.grid_charge_cost_eur == coordinator._economics_grid_charge_cost_eur
+    await coordinator.async_shutdown()
 
 
 # --------------------------------------------------------------------------
@@ -1522,7 +1540,7 @@ async def test_load_drops_all_dependent_history_from_an_incomplete_current_store
     assert coordinator._economics_operating_result_high_water_eur == 0.0
     assert coordinator._economics_day_results == ()
     assert coordinator._economics_payback_achieved_at is None
-    assert coordinator._economics_store_write_blocked is False
+    assert coordinator._economics_storage_error is False
 
     with (
         patch(
@@ -1613,21 +1631,17 @@ async def test_disabled_tariff_reports_unavailable_and_does_not_bootstrap(
     await coordinator.async_shutdown()
 
 
-async def test_a_load_error_blocks_writes_until_a_reload(hass) -> None:
-    """Ein Lesefehler darf einen vorhandenen, nur unlesbaren Store nicht
-    durch eine frisch gebootstrappte Nullbilanz überschreiben. Anders als
-    zuvor (REQ-ECONOMICS-ACCOUNTING) startet die Bilanz dabei jetzt auch
-    NICHT mehr rein im Arbeitsspeicher weiter (REQ-ECONOMICS-OBSERVABILITY,
-    Status storage_error) - "keine weitere Akkumulation auf ungesicherter/
-    unklarer Baseline"."""
+@pytest.mark.parametrize("error", [OSError, ValueError, RuntimeError, TypeError])
+async def test_a_load_error_keeps_accounting_and_saving(hass, error) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Ladefehler hält die Rechnung nie an."""
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
-    coordinator._economics_store.async_load = AsyncMock(side_effect=OSError("kaputt"))
+    coordinator._economics_store.async_load = AsyncMock(side_effect=error("kaputt"))
     coordinator._economics_store.async_delay_save = MagicMock(return_value=True)
     coordinator._economics_store.async_save = AsyncMock(return_value=True)
 
     await coordinator.async_load_economics_state()
 
-    assert coordinator._economics_store_write_blocked is True
+    assert coordinator._economics_storage_error is True
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
@@ -1654,17 +1668,15 @@ async def test_a_load_error_blocks_writes_until_a_reload(hass) -> None:
     ):
         accumulate_economics_interval(coordinator, data)
 
-    # Kein Bootstrap, keine Akkumulation, solange der Store als unlesbar
-    # gilt - der Status macht das Problem sichtbar, statt einen
-    # unbeobachteten 0-Start im Arbeitsspeicher zu riskieren.
-    assert coordinator._economics_started_at is None
-    assert coordinator._economics_grid_charge_cost_eur is None
+    assert coordinator._economics_started_at is not None
+    assert coordinator._economics_grid_charge_cost_eur > 0
     assert data["economics_status"] == "storage_error"
-    coordinator._economics_store.async_delay_save.assert_not_called()
+    assert coordinator._economics_store.async_delay_save.call_count >= 2
 
     await coordinator.async_shutdown()
 
-    coordinator._economics_store.async_save.assert_not_called()
+    coordinator._economics_store.async_save.assert_awaited_once()
+    assert coordinator._economics_storage_error is False
 
 
 async def test_shutdown_flushes_the_current_balance(hass) -> None:
@@ -1685,12 +1697,8 @@ async def test_shutdown_flushes_the_current_balance(hass) -> None:
     assert saved.economics_started_at == started_at
 
 
-async def test_a_rejected_delayed_save_freezes_the_balance(hass) -> None:
-    """REQ-ECONOMICS-OBSERVABILITY: schlägt async_delay_save fehl (_accept
-    lehnt den Snapshot ab, z. B. wegen eines Bugs, der einen regressiven
-    Wert erzeugt), gilt der Store ab sofort als storage_error - keine
-    weitere Akkumulation auf einer nicht mehr vertrauenswürdigen
-    Baseline."""
+async def test_a_rejected_delayed_save_does_not_block_later_saves(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: abgelehnte Writes sperren nichts."""
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
     coordinator._economics_store.async_load = AsyncMock(
         return_value=_full_state(dt_util.utcnow())
@@ -1700,10 +1708,14 @@ async def test_a_rejected_delayed_save_freezes_the_balance(hass) -> None:
 
     coordinator._async_schedule_economics_save()
 
-    assert coordinator._economics_store_write_blocked is True
+    assert coordinator._economics_storage_error is True
+    coordinator._economics_store.async_delay_save.return_value = True
+    coordinator._async_schedule_economics_save()
+    assert coordinator._economics_store.async_delay_save.call_count == 2
+    await coordinator.async_shutdown()
 
 
-async def test_a_rejected_final_save_freezes_the_balance(hass) -> None:
+async def test_a_rejected_final_save_does_not_block_later_saves(hass) -> None:
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
     coordinator._economics_store.async_load = AsyncMock(
         return_value=_full_state(dt_util.utcnow())
@@ -1713,10 +1725,13 @@ async def test_a_rejected_final_save_freezes_the_balance(hass) -> None:
 
     await coordinator._async_flush_economics_state()
 
-    assert coordinator._economics_store_write_blocked is True
+    assert coordinator._economics_storage_error is True
+    coordinator._economics_store.async_save.return_value = True
+    await coordinator._async_flush_economics_state()
+    assert coordinator._economics_storage_error is False
 
 
-async def test_a_raised_final_save_error_freezes_the_balance(hass) -> None:
+async def test_a_raised_final_save_error_does_not_block_later_saves(hass) -> None:
     coordinator = _coordinator(hass, options=FIXED_TARIFF_OPTIONS)
     coordinator._economics_store.async_load = AsyncMock(
         return_value=_full_state(dt_util.utcnow())
@@ -1728,7 +1743,11 @@ async def test_a_raised_final_save_error_freezes_the_balance(hass) -> None:
 
     await coordinator._async_flush_economics_state()
 
-    assert coordinator._economics_store_write_blocked is True
+    assert coordinator._economics_storage_error is True
+    coordinator._economics_store.async_save.side_effect = None
+    coordinator._economics_store.async_save.return_value = True
+    await coordinator._async_flush_economics_state()
+    assert coordinator._economics_storage_error is False
 
 
 async def test_notify_tariff_revision_updates_the_timestamp_and_schedules_a_save(
@@ -1747,3 +1766,121 @@ async def test_notify_tariff_revision_updates_the_timestamp_and_schedules_a_save
     assert coordinator._last_tariff_revision_at is not None
     coordinator._economics_store.async_delay_save.assert_called_once()
     await coordinator.async_shutdown()
+
+
+@pytest.mark.parametrize("phase", ["quote", "compute", "publish"])
+async def test_failed_interval_is_skipped_atomically_and_next_tick_continues(
+    hass, phase
+) -> None:
+    """REQ-ECONOMICS-ACCOUNTING: kein Teilbetrag und keine dauerhafte Sperre."""
+    coordinator = await _active_economics_coordinator(hass)
+    before = coordinator._economics_state()
+    data = {"storage_power_active": -1000}
+    if phase == "quote":
+        context = patch.object(
+            coordinator.tariff_provider, "quote", side_effect=RuntimeError("Fehler")
+        )
+    elif phase == "compute":
+        context = patch(
+            "custom_components.sax_power.coordinator.compute_economics_interval",
+            side_effect=RuntimeError("Fehler"),
+        )
+    else:
+        context = patch.object(
+            coordinator, "_publish_amortization", side_effect=RuntimeError("Fehler")
+        )
+    now = dt_util.now()
+    with context:
+        coordinator._accumulate_economics(data, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0)
+    assert coordinator._economics_state() == before
+    assert "economics_grid_charge_cost" not in data
+    for seconds in (2, 4):
+        with patch(
+            "custom_components.sax_power.coordinator.dt_util.now",
+            return_value=now + timedelta(seconds=seconds),
+        ):
+            coordinator._accumulate_economics(
+                data, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0
+            )
+    assert coordinator._economics_grid_charge_cost_eur > before.grid_charge_cost_eur
+    assert data["economics_roi"] is None  # Keine Investition hinterlegt.
+    await coordinator.async_shutdown()
+
+
+async def test_failed_write_retries_without_new_energy_and_recovers(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Wiederholung auch ohne nächste Bewegung."""
+    failed, succeeded = [], []
+    store = EconomicsStateStore(
+        hass,
+        "idle-retry",
+        on_persist_failed=lambda: failed.append(True),
+        on_persist_succeeded=lambda: succeeded.append(True),
+    )
+    store._store.async_save = AsyncMock(side_effect=RuntimeError("Fehler"))
+    state = _full_state(dt_util.utcnow())
+    assert store.async_delay_save(state)
+    await store._async_delayed_write(dt_util.utcnow())
+    assert failed == [True]
+    assert store._pending == state
+    _stub_store_with_initial_data(store)
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=ECONOMICS_SAVE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+    assert succeeded == [True]
+    assert store._pending is None
+    assert await store.async_load() == state
+
+
+async def test_final_write_failure_leaves_no_retry_timer(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: beim Shutdown keine neuen Timer."""
+    store = EconomicsStateStore(hass, "final-no-retry")
+    store._store.async_save = AsyncMock(side_effect=OSError("Fehler"))
+    assert store.async_delay_save(_full_state(dt_util.utcnow()))
+    await store._async_handle_final_write(None)
+    assert store._pending is None
+    assert store._unsub_delayed_write is None
+    assert store._unsub_final_write_listener is None
+
+
+async def test_interval_error_retains_confirmed_sensor_values(hass) -> None:
+    """REQ-ECONOMICS-ACCOUNTING: UI behält zuletzt bestätigte Werte."""
+    coordinator = await _active_economics_coordinator(hass)
+    confirmed = {}
+    coordinator._accumulate_economics(confirmed, None, 0.0, 0.0)
+    coordinator.async_set_updated_data(confirmed)
+    with patch.object(
+        coordinator.tariff_provider, "quote", side_effect=ValueError("Fehler")
+    ):
+        next_data = {"storage_power_active": -1000}
+        coordinator._accumulate_economics(
+            next_data, EnergyDelta(1.0, 1.0, 0.0), 0.0, 2.0
+        )
+    assert (
+        next_data["economics_grid_charge_cost"]
+        == confirmed["economics_grid_charge_cost"]
+    )
+    assert next_data["economics_net_savings"] == confirmed["economics_net_savings"]
+    assert next_data["storage_power_active"] == -1000
+    assert coordinator._economics_store._pending is None
+    await coordinator.async_shutdown()
+
+
+async def test_final_flush_cancels_retry_from_inflight_failed_write(hass) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: kein Altstand-Timer nach dem Flush."""
+    store = EconomicsStateStore(hass, "inflight-failure-flush")
+    _stub_store_with_initial_data(store)
+    entered, release = _pause_next_store_write(store, fail=True)
+    state = _full_state(dt_util.utcnow())
+    store.async_delay_save(state)
+    delayed = asyncio.create_task(store._async_delayed_write(dt_util.utcnow()))
+    await entered.wait()
+    final = asyncio.create_task(store.async_save(state))
+    await asyncio.sleep(0)
+    release.set()
+    await delayed
+    assert await final
+    assert store._pending is None
+    assert store._unsub_delayed_write is None
+    assert store._unsub_final_write_listener is None
+    assert await store.async_load() == state

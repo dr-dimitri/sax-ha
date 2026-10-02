@@ -6886,7 +6886,6 @@ var Il = ["aria-busy"], Ll = {
 			price_unavailable: "Der Strompreis ist derzeit nicht verfügbar. Aktuelle Zeitraumwerte können unvollständig sein.",
 			origin_unavailable: "Die Herkunft der Ladeenergie ist derzeit nicht bestimmbar.",
 			partial_price_coverage: "Für einen Teil der Energie fehlte heute ein Preis. Das Ergebnis kann unvollständig sein.",
-			storage_error: "Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers angehalten. Bitte in den Home-Assistant-Reparaturen das Korrupt-Backup wiederherstellen; bloßes Neuladen startet keine neue Bilanz.",
 			missing: "Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar."
 		} : {
 			loading: "Loading statistics …",
@@ -6924,7 +6923,6 @@ var Il = ["aria-busy"], Ll = {
 			price_unavailable: "The electricity price is currently unavailable. Current period values may be incomplete.",
 			origin_unavailable: "The origin of the charging energy cannot currently be determined.",
 			partial_price_coverage: "A price was missing for some of today's energy. The result may be incomplete.",
-			storage_error: "Accounting has stopped because of a storage error. Restore the corrupt backup in Home Assistant Repairs; reloading alone does not start a new ledger.",
 			missing: "Economics data are currently unavailable."
 		}), o = Q(() => n?.entity("binary_sensor", "economics_investment_configured")), s = Q(() => n?.entity("sensor", "economics_amortization_progress")), c = Q(() => n?.entity("sensor", "economics_remaining_to_payback")), l = Q(() => n?.entity("sensor", "economics_roi")), u = Q(() => n?.entity("sensor", "economics_net_savings")), d = Q(() => n?.entity("sensor", "economics_status")), f = Q(() => s.value?.available ? cc(s.value.state?.state) : null), p = Q(() => f.value === null ? null : Math.max(0, Math.min(100, f.value))), m = (e) => {
 			let n = uc(e, t.hass);
@@ -6934,7 +6932,7 @@ var Il = ["aria-busy"], Ll = {
 			timeZone: "UTC"
 		}) ?? e, _ = Q(() => {
 			let e = d.value?.available ? d.value.state?.state : void 0;
-			return e === "active" ? null : e === "disabled" || e === "price_unavailable" || e === "origin_unavailable" || e === "partial_price_coverage" || e === "storage_error" ? a.value[e] : a.value.missing;
+			return e === "active" || e === "storage_error" ? null : e === "disabled" || e === "price_unavailable" || e === "origin_unavailable" || e === "partial_price_coverage" ? a.value[e] : a.value.missing;
 		}), v = mc(() => t.hass, () => t.entryId, () => u.value?.metadata.entity_id), y = /* @__PURE__ */ V(""), b = /* @__PURE__ */ V(""), x = null;
 		U(v.data, (e) => {
 			e && ((!y.value && !b.value || y.value === x?.start && b.value === x?.end) && (y.value = e.selected.start_date, b.value = e.selected.end_date), x = {

@@ -25,7 +25,7 @@ Ist-Zustand-Anforderungen je REQ-ID).
 
 ```
 custom_components/sax_power/
-├── manifest.json      Metadaten, Requirements (pymodbus==3.13.1), Domain
+├── manifest.json      Metadaten, Requirements (pymodbus>=3.13.1), Domain
 ├── const.py            Register-/Konfigurationskonstanten, Defaults
 ├── domain/              Reine, frameworkunabhängige Regeln: Register-Codecs,
 │                          SunSpec-Blockdecodierung (sunspec.py),
@@ -1243,15 +1243,12 @@ Geldbewertung verwendet die beobachteten Preisintervalle; ein Tarifwechsel
 ändert weder vorherige Intervalle noch bereits gebuchte Beträge. Die
 Amortisation und Recorder-Kalenderwerte übernehmen diese fortlaufende Bilanz.
 
-Scheitert `EconomicsStateStore.async_load()` selbst (I/O-Fehler, unbekannte
-künftige Storage-Hauptversion), setzt `async_load_economics_state`
-`_economics_store_write_blocked` - Rechnung und Bootstrap laufen normal im
-Arbeitsspeicher weiter (analog zu `ControlConfigLoadStatus.FAILED`), aber
-`_async_schedule_economics_save`/`_async_flush_economics_state` verweigern
-jeden Schreibversuch, bis ein Neuladen des Config Entry eine frische
-Coordinator-Instanz erzeugt. Ohne diese Sperre würde eine aus lauter Nullen
-neu gebootstrappte Bilanz den eigentlich vorhandenen, nur unlesbaren Store
-überschreiben und dessen Inhalt endgültig verlieren.
+Scheitert `EconomicsStateStore.async_load()` (I/O-Fehler, unbekannte künftige
+Storage-Hauptversion), laufen Rechnung und Bootstrap weiter. Vor einem
+Ersatzwrite sichert der Store ein noch vorhandenes unlesbares Original als
+Korrupt-Backup; scheitert diese Sicherung, wird der Write später wiederholt.
+Die Fehlertoleranz aus REQ-ECONOMICS-OBSERVABILITY verhindert jede dauerhafte
+Berechnungssperre und hält fehlerhafte Intervalle von bestätigten Beträgen fern.
 
 ### ROI und Amortisationsstand (REQ-ECONOMICS-AMORTIZATION)
 
@@ -1307,7 +1304,7 @@ selbst neue Geldwerte zu berechnen. Die reine Ableitung liegt in
   Zustandsauslöser.
 
 `SaxPowerCoordinator._publish_economics_status` (aufgerufen am Ende von
-`_accumulate_economics`, unabhängig vom `frozen`-Zweig, damit auch
+`_accumulate_economics`, unabhängig vom Bootstrap, damit auch
 `storage_error` sichtbar wird, bevor die Bilanz je gestartet ist) setzt das
 zusammen:
 
@@ -1336,13 +1333,15 @@ zusammen:
   Issue in der Registry weiterbestehen kann - ohne die zusätzliche
   Registry-Prüfung bliebe ein solches Issue nach einem Reload dauerhaft
   bestehen, selbst wenn der Preis inzwischen wieder gültig ist.
-- Ein Speicherfehler (`_economics_store_write_blocked`) ergibt
-  `storage_error` UND verhindert - Abweichung von REQ-ECONOMICS-
-  ACCOUNTING - sowohl einen frischen 0-Bootstrap im Arbeitsspeicher
-  (`_bootstrap_economics_if_ready`) als auch jede weitere Akkumulation
-  (`_accumulate_economics` wickelt den gesamten Mutationsblock in
-  `if not frozen:`). Die Energiezähler/Herkunftsaufteilung aus 02/06
-  laufen davon unberührt weiter.
+- Ein Speicherfehler (`_economics_storage_error`) ergibt `storage_error` als
+  Diagnose; Bootstrap, Akkumulation und weitere Speicherversuche laufen weiter.
+  Ein erfolgreich bestätigter Write löscht den Fehlerstatus. Das Dashboard
+  überspringt diesen Fehlerhinweis stillschweigend und zeigt die Werte weiter.
+- `_accumulate_economics` hält Zustand und Veröffentlichung eines Intervalls
+  vorläufig. Jede Exception verwirft dessen Teiländerungen; bereits bestätigte
+  Sensorwerte bleiben erhalten, das nächste Intervall wird normal verarbeitet.
+  Fehler erfordern keinen Benutzereingriff (REQ-ECONOMICS-ACCOUNTING).
+
 
 Kontrollierter Bilanzneustart
 (`SaxPowerCoordinator.async_restart_economics_accounting`, Service
@@ -1388,12 +1387,20 @@ ohne bekannte Beobachtungsdauer ließe er sich nur mit einer erfundenen
 Abdeckung abschließen, und verloren geht dabei nur der ohnehin
 unvollständige laufende Tag.
 
-Ein von `EconomicsStateStore._accept`/`_valid_snapshot` abgelehnter oder ein
-technisch fehlgeschlagener Schreibversuch (verzögert wie beim finalen
-Speichern beim Entladen) setzt `SaxPowerCoordinator.
-_economics_store_write_blocked` - die Bilanz friert daraufhin ein (Status
-`storage_error`) statt unbemerkt weiter zu akkumulieren, bis der Config
-Entry neu geladen wird.
+Ein abgelehnter oder fehlgeschlagener Write setzt nur den Diagnosefehler.
+Die Bilanz läuft im Arbeitsspeicher weiter, spätere Writes werden versucht.
+Verzögerte Schreibfehler planen nach 300 Sekunden automatisch einen neuen
+Versuch, auch ohne neue Bilanzbewegung. Nach erfolgreicher Lese-Rückprobe wird
+`_economics_storage_error` gelöscht; Final-Write beim Shutdown plant keine
+neuen Timer.
+
+Bei einem Ladefehler startet eine neue Bilanz automatisch. Core-quarantänierte
+JSON-Dateien und bereits vorhandene `.corrupt.*`-Backups bleiben erhalten;
+sie sperren auch nach einem Reload nichts. Eine noch vorhandene unlesbare
+Originaldatei wird vor dem ersten Ersatzwrite im Executor als Korrupt-Backup
+gesichert. Scheitert diese Sicherung, bleibt das Original unverändert und nur
+der Write wird später erneut versucht. Historische Beträge, die sich nicht
+lesen lassen, sind ohne ein gültiges Backup nicht wiederherstellbar.
 
 Home Assistants `Store` fängt eine echte `WriteError`/`SerializationError`
 beim Schreiben intern ab und kehrt regulär zurück
@@ -2143,6 +2150,12 @@ neue Freigabe aus (Details: REQ-TIMED-SOC-CHARGE, Issue #167).
 
 ## Tests
 
+Das Manifest verwendet `pymodbus>=3.13.1`, weil Home Assistant die Bibliothek
+selbst benötigt und dessen Paket-Constraints die konkrete Version bestimmen.
+Ein eigener exakter Pin würde Core-Updates blockieren und wird von hassfest
+abgelehnt. `requirements_test.txt` hält die getestete Version weiterhin exakt
+fest; `tests/test_manifest.py` prüft die Kompatibilität mit dem Core-Constraint.
+
 ```
 tests/
 ├── conftest.py                  Aktiviert das Laden von custom_components in Tests
@@ -2286,7 +2299,7 @@ tests/
 │                                  100 % bei Nenner 0; die Coordinator-seitige Verdrahtung
 │                                  (Preisausfall-Karenzzeit vs. sofortiger
 │                                  Konfigurationsfehler, Herkunfts-/Preisabdeckung aus
-│                                  echten Zählern, Speicherfehler-Freeze, kontrollierter
+│                                  echten Zählern, Fortschreibung bei Speicherfehlern, kontrollierter
 │                                  Bilanzneustart inkl. Atomarität) liegt in
 │                                  test_coordinator.py/test_init.py
 ├── test_control_persistence.py     Persistenz und Startreihenfolge der Ladeeinstellungen

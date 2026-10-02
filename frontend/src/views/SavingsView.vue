@@ -64,8 +64,6 @@ const text = computed(() =>
           "Die Herkunft der Ladeenergie ist derzeit nicht bestimmbar.",
         partial_price_coverage:
           "Für einen Teil der Energie fehlte heute ein Preis. Das Ergebnis kann unvollständig sein.",
-        storage_error:
-          "Die Wirtschaftlichkeitsbilanz ist wegen eines Speicherfehlers angehalten. Bitte in den Home-Assistant-Reparaturen das Korrupt-Backup wiederherstellen; bloßes Neuladen startet keine neue Bilanz.",
         missing: "Die Wirtschaftlichkeitsdaten sind momentan nicht verfügbar.",
       }
     : {
@@ -114,8 +112,6 @@ const text = computed(() =>
           "The origin of the charging energy cannot currently be determined.",
         partial_price_coverage:
           "A price was missing for some of today's energy. The result may be incomplete.",
-        storage_error:
-          "Accounting has stopped because of a storage error. Restore the corrupt backup in Home Assistant Repairs; reloading alone does not start a new ledger.",
         missing: "Economics data are currently unavailable.",
       },
 );
@@ -154,13 +150,12 @@ const dateLabel = (value: string) =>
   }) ?? value;
 const statusMessage = computed(() => {
   const state = status.value?.available ? status.value.state?.state : undefined;
-  if (state === "active") return null;
+  if (state === "active" || state === "storage_error") return null;
   if (
     state === "disabled" ||
     state === "price_unavailable" ||
     state === "origin_unavailable" ||
-    state === "partial_price_coverage" ||
-    state === "storage_error"
+    state === "partial_price_coverage"
   )
     return text.value[state];
   return text.value.missing;

@@ -7,6 +7,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).parents[1]
 
@@ -37,7 +38,15 @@ def test_pymodbus_requirement_matches_home_assistant_constraint(
         .splitlines()
     )
 
-    assert pymodbus_requirement in home_assistant_constraints
+    dependency = Requirement(pymodbus_requirement)
+    core_dependency = next(
+        Requirement(line)
+        for line in home_assistant_constraints
+        if line.startswith("pymodbus==")
+    )
+    core_version = next(iter(core_dependency.specifier)).version
+    assert dependency.specifier.contains(core_version)
+    assert all(spec.operator == ">=" for spec in dependency.specifier)
 
 
 def test_hacs_minimum_matches_tested_home_assistant_version() -> None:

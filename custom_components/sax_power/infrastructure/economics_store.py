@@ -44,7 +44,6 @@ from typing import Any
 
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -68,14 +67,20 @@ STORAGE_KEY_PREFIX = f"{DOMAIN}.economics"
 ECONOMICS_SAVE_DELAY = 300
 
 
-class EconomicsStoreLoadError(HomeAssistantError):
-    """Ein vorhandener Store wurde von Home Assistant als leer verworfen."""
-
-
 def _store_file_presence(path_value: str) -> tuple[bool, bool]:
     """(kanonische Datei, Korrupt-Backup) ohne Zugriff auf Core-Interna."""
     path = Path(path_value)
     return path.exists(), any(path.parent.glob(f"{path.name}.corrupt.*"))
+
+
+def _preserve_unreadable_store(path_value: str) -> None:
+    """REQ-ECONOMICS-OBSERVABILITY: Original vor einem Ersatzwrite sichern."""
+    path = Path(path_value)
+    if path.exists():
+        backup = path.with_name(
+            f"{path.name}.corrupt.{dt_util.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+        )
+        path.rename(backup)
 
 
 @dataclass(frozen=True)
@@ -224,6 +229,7 @@ class EconomicsStateStore:
         hass: HomeAssistant,
         entry_id: str,
         on_persist_failed: Callable[[], None] | None = None,
+        on_persist_succeeded: Callable[[], None] | None = None,
     ) -> None:
         self._hass = hass
         self._store: Store[dict[str, Any]] = _EconomicsStore(
@@ -245,6 +251,8 @@ class EconomicsStateStore:
         # z. B. als "Lingering timer" in Tests).
         self._unsub_final_write_listener: CALLBACK_TYPE | None = None
         self._on_persist_failed = on_persist_failed
+        self._on_persist_succeeded = on_persist_succeeded
+        self._load_failed = False
         # REQ-ECONOMICS-OBSERVABILITY: Ein Reset muss auch während seiner
         # Datei-I/O vorgemerkte Altstände atomar ablösen. Die Generation
         # schützt bereits wartende Sofort-Writes; der Lock umfasst zusätzlich
@@ -253,6 +261,14 @@ class EconomicsStateStore:
         self._generation = 0
 
     async def async_load(self) -> EconomicsState | None:
+        """Unreadable data must be preserved even if field decoding fails."""
+        try:
+            return await self._async_load_state()
+        except Exception:  # noqa: BLE001
+            self._load_failed = True
+            raise
+
+    async def _async_load_state(self) -> EconomicsState | None:
         """Load the balance, distinguishing new from Core-quarantined data."""
         path = self._store.path
         existed_before, corrupt_before = await self._hass.async_add_executor_job(
@@ -264,14 +280,10 @@ class EconomicsStateStore:
                 _store_file_presence, path
             )
             if existed_before or corrupt_before or existed_after or corrupt_after:
-                # Store.async_load() benennt syntaktisch defektes JSON selbst
-                # in .corrupt.* um und gibt None wie bei einer Neuinstallation
-                # zurück. Read-only ist ein zusätzliches Sicherheitsnetz gegen
-                # jeden versehentlichen Ersatzwrite dieser Instanz.
-                self._store.make_read_only()
-                raise EconomicsStoreLoadError(
-                    "Vorhandener Wirtschaftlichkeits-Store ist unlesbar; "
-                    "Korrupt-Backup wiederherstellen oder bewusst neu beginnen"
+                self._load_failed = True
+                _LOGGER.debug(
+                    "Unlesbaren Wirtschaftlichkeitszustand übersprungen; "
+                    "Berechnung startet neu, Korrupt-Backup bleibt erhalten"
                 )
             return None
         if not isinstance(raw, dict):
@@ -279,6 +291,7 @@ class EconomicsStateStore:
                 "Ungültigen gespeicherten Wirtschaftlichkeitszustand "
                 "verworfen: kein Objekt"
             )
+            self._load_failed = True
             return EconomicsState()
 
         state = EconomicsState(
@@ -434,9 +447,9 @@ class EconomicsStateStore:
         self._unsub_final_write_listener = None
         if self._unsub_delayed_write is not None:
             self._unsub_delayed_write()
-        await self._async_delayed_write(dt_util.utcnow())
+        await self._async_delayed_write(dt_util.utcnow(), retry=False)
 
-    async def _async_delayed_write(self, _now: datetime) -> None:
+    async def _async_delayed_write(self, _now: datetime, *, retry: bool = True) -> None:
         """Vom `async_call_later`-Timer (oder dem Sicherheitsnetz
         `_async_handle_final_write`) aufgerufen - schreibt den zuletzt
         koaleszierten Stand und meldet einen tatsächlichen Fehlschlag über
@@ -447,8 +460,12 @@ class EconomicsStateStore:
             self._cancel_delayed_write()
             if state is None:
                 return
-            if not await self._write_and_verify(state) and self._on_persist_failed:
-                self._on_persist_failed()
+            if not await self._write_and_verify(state):
+                if self._on_persist_failed:
+                    self._on_persist_failed()
+                # Auch bei ruhendem Speicher den letzten Stand erneut versuchen.
+                if retry and self._pending is None:
+                    self.async_delay_save(state)
 
     async def async_save(self, state: EconomicsState) -> bool:
         """Persist a final snapshot unless a successful reset superseded it."""
@@ -459,6 +476,9 @@ class EconomicsStateStore:
         async with self._write_lock:
             if generation != self._generation:
                 return True
+            # Ein laufender verzögerter Write kann nach unserer ersten
+            # Stornierung noch einen Retry geplant haben (REQ-ECONOMICS-OBSERVABILITY).
+            self._cancel_delayed_write()
             return await self._write_and_verify(state)
 
     async def async_reset(self, state: EconomicsState) -> bool:
@@ -502,12 +522,17 @@ class EconomicsStateStore:
         Der Aufrufer hält `_write_lock` über diese Sequenz und die zugehörige
         Snapshot-/Reset-Verwaltung hinweg.
         """
-        data = self._serialize(state)
         try:
+            if self._load_failed:
+                await self._hass.async_add_executor_job(
+                    _preserve_unreadable_store, self._store.path
+                )
+                self._load_failed = False
+            data = self._serialize(state)
             await self._store.async_save(data)
             written = await self._store.async_load()
-        except (HomeAssistantError, OSError) as err:
-            _LOGGER.warning(
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug(
                 "Wirtschaftlichkeitszustand konnte nicht gespeichert werden: %s",
                 err,
             )
@@ -519,6 +544,8 @@ class EconomicsStateStore:
             )
             return False
         self._last_persisted = state
+        if self._on_persist_succeeded:
+            self._on_persist_succeeded()
         return True
 
     @staticmethod

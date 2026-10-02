@@ -7031,19 +7031,17 @@ def test_economics_status_is_active_once_healthy(hass) -> None:
 
 
 def test_economics_status_reports_storage_error(hass) -> None:
-    """Ein unlesbarer Store friert die Bilanz ein - Status storage_error,
-    kein Bootstrap im Arbeitsspeicher (siehe test_economics_persistence.py
-    für den vollen Lade-/Speicherpfad)."""
+    """REQ-ECONOMICS-OBSERVABILITY: Fehlerstatus erlaubt den Bootstrap."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator.options = _FIXED_TARIFF_OPTIONS
-    coordinator._economics_store_write_blocked = True
+    coordinator._economics_storage_error = True
 
     data = _tick_on(
         coordinator, monotonic_value=1000.0, now=datetime(2026, 3, 10, 9, 0)
     )
 
     assert data["economics_status"] == EconomicsStatus.STORAGE_ERROR.value
-    assert coordinator._economics_started_at is None
+    assert coordinator._economics_started_at is not None
 
 
 def test_economics_status_price_unavailable_after_grace_period(hass) -> None:

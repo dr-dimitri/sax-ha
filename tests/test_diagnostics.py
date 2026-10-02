@@ -210,8 +210,9 @@ async def test_diagnostics_includes_the_economics_data_quality_state(hass) -> No
     assert diagnostics["economics"]["priced_charge_kwh"] is None
     assert diagnostics["economics"]["price_unavailable"] is False
 
-    coordinator._economics_store_write_blocked = True
+    coordinator._economics_storage_error = True
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert diagnostics["economics"]["store_write_blocked"] is True
+    assert diagnostics["economics"]["store_write_blocked"] is False
+    assert diagnostics["economics"]["storage_error"] is True

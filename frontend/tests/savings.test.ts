@@ -314,7 +314,6 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
     "price_unavailable",
     "origin_unavailable",
     "partial_price_coverage",
-    "storage_error",
     "unknown",
     "unavailable",
     "unexpected",
@@ -326,11 +325,17 @@ describe("REQ-VUE-SAVINGS: economics view", () => {
       price_unavailable: "Strompreis",
       origin_unavailable: "Herkunft",
       partial_price_coverage: "Teil der Energie",
-      storage_error: "Korrupt-Backup",
     };
     expect(root.querySelector(".savings-status")?.textContent).toContain(
       expected[status] ?? "momentan nicht verfügbar",
     );
+  });
+  it("keeps amortization visible and skips storage error notices", async () => {
+    const { root } = await mount({ status: "storage_error" });
+    expect(root.querySelector(".savings-status")).toBeNull();
+    expect(root.textContent).not.toContain("Korrupt-Backup");
+    expect(root.textContent).not.toContain("angehalten");
+    expect(root.querySelector(".savings-periods")).not.toBeNull();
   });
   it("omits missing optional cards and statistics instead of empty containers", async () => {
     const { root, callWS } = await mount({ omit: keys });

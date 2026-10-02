@@ -5475,14 +5475,12 @@ requirement_economics_accounting:
     Bestand und Preisabdeckungszähler bleiben unverändert.
 
     Scheitert das Laden selbst (I/O-Fehler, unbekannte künftige
-    Storage-Hauptversion), bleiben Rechnung und Bootstrap normal im
-    Arbeitsspeicher aktiv (analog zu ControlConfigLoadStatus.FAILED), aber
-    SaxPowerCoordinator._economics_store_write_blocked wird gesetzt und
-    unterbindet jeden weiteren Schreibversuch (gedrosselt wie sofort) bis
-    zu einem erfolgreichen Neuladen des Config Entry - ohne diese Sperre
-    würde eine aus lauter Nullen neu gebootstrappte Bilanz den eigentlich
-    vorhandenen, nur unlesbaren Store überschreiben und dessen Inhalt
-    endgültig verlieren.
+    Storage-Hauptversion), laufen Rechnung und Bootstrap weiter. Vor einem
+    Ersatzwrite sichert der Store das unlesbare Original als Korrupt-Backup;
+    scheitert die Sicherung, wird nur der Write später wiederholt. Es gibt
+    keine dauerhafte Fehlersperre und keine erforderliche Reparaturaktion.
+    Auch Fehler bei der Intervallverarbeitung werden atomar übersprungen,
+    ohne bestätigte Beträge zu verändern (REQ-ECONOMICS-OBSERVABILITY).
 
     Diagnose-Download (diagnostics.py, Schlüssel "economics") zeigt
     zusätzlich zu den bereits über coordinator_data sichtbaren, gerundeten
@@ -5553,10 +5551,9 @@ requirement_economics_accounting:
     - "Eine außerhalb von 0 bis 2 EUR/kWh liegende, aber endliche
        gespeicherte Einspeisevergütung ergibt None statt eines
        ungeprüften Rohwerts (SaxTariffProvider.feed_in_price_eur_kwh)."
-    - "Ein Lesefehler des Wirtschaftlichkeits-Stores blockiert jeden
-       weiteren Schreibversuch bis zu einem erfolgreichen Neuladen des
-       Config Entry, während Rechnung und Bootstrap im Arbeitsspeicher
-       normal weiterlaufen."
+    - "Ein Lesefehler hält weder Bootstrap noch Rechnung an. Vor einem
+       Ersatzwrite wird das Original gesichert; ein fehlgeschlagener
+       Schreibversuch wird automatisch erneut versucht."
     - "strings.json, translations/de.json, translations/en.json,
        README.md, DEVELOPMENT.md, diagnostics.py und anforderung.yaml
        sind aktualisiert."
@@ -5757,74 +5754,53 @@ requirement_economics_observability:
     würde sonst nach einem Reload nie gelöscht, selbst wenn der Preis
     inzwischen wieder gültig ist.
 
-    Speicherfehler (`SaxPowerCoordinator._economics_store_write_blocked`,
-    gesetzt sowohl bei einem Ladefehler als auch bei einem abgelehnten oder
-    fehlgeschlagenen Schreibversuch des Wirtschaftlichkeits-Stores):
-    `_async_schedule_economics_save`/`_async_flush_economics_state` prüfen
-    den Rückgabewert von `async_delay_save`/`async_save` und setzen das
-    Flag, sobald `_accept()`/`_valid_snapshot()` einen Snapshot ablehnt.
-    Ein tatsächlicher Schreibfehler ist damit allein noch nicht erkennbar:
-    Home Assistants `Store` fängt eine echte `WriteError`/
-    `SerializationError` intern ab und kehrt regulär zurück
-    (`Store._async_handle_write_data`), ohne sie an den Aufrufer
-    weiterzureichen - weder `Store.async_save()` noch der über
-    `Store.async_delay_save()` verzögerte Pfad melden einen solchen Fehler
-    zurück. `EconomicsStateStore` verzichtet deshalb bewusst auf
-    `Store.async_delay_save()` und verwaltet die Verzögerung selbst
-    (`async_call_later`, mit einem `EVENT_HOMEASSISTANT_FINAL_WRITE`-
-    Sicherheitsnetz analog zu `Store._async_ensure_final_write_listener`):
-    `_write_and_verify` liest nach jedem Schreibversuch den soeben
-    geschriebenen Schlüssel über die öffentliche `Store.async_load()`-API
-    zurück und vergleicht ihn mit den beabsichtigten Daten - eine
-    schweigend verschluckte `WriteError` lässt die Datei unverändert und
-    wird dadurch als Abweichung sichtbar. Für den sofortigen Pfad
-    (`async_save`/`async_reset`) fließt das Ergebnis in den normalen
-    Rückgabewert ein (`async_restart_economics_accounting` meldet einen
-    dadurch erkannten stillen Fehlschlag deshalb korrekt als
-    `HomeAssistantError`, statt fälschlich Erfolg zu melden); für den
-    zeitversetzten Pfad, der keinen wartenden Aufrufer mehr hat, über den
-    optionalen `on_persist_failed`-Callback
-    (`SaxPowerCoordinator._on_economics_persist_failed`). Die gesamte
-    save-then-load-Sequenz aus `_write_and_verify` läuft dabei unter einem
-    pro `EconomicsStateStore`-Instanz gehaltenen `asyncio.Lock`
-    (`_write_lock`): `Store.async_save()` überschreibt
-    `Store._data` sofort, unabhängig von einem eventuell noch laufenden
-    anderen Schreibvorgang (nur die eigentliche Schreib-E/A ist über
-    `Store._write_lock` serialisiert) - ein zweiter, überlappender
-    Schreibversuch (z. B. ein bereits laufender verzögerter Write parallel
-    zu `async_reset()`/dem Shutdown-Flush) könnte sonst zwischen den
-    Save- und den Load-Aufruf des ersten geraten und dessen
-    `Store.async_load()` fälschlich die eigenen, noch ausstehenden Daten
-    statt der soeben geschriebenen zurückgeben lassen - der erste,
-    tatsächlich erfolgreiche Write würde dann fälschlich als
-    Schreibfehler gemeldet. In beiden Fällen
-    identisch: Status `storage_error`, UND - Abweichung von
-    REQ-ECONOMICS-ACCOUNTING -
-    `_bootstrap_economics_if_ready` bootstrapped in diesem Fall NICHT mehr
-    frisch im Arbeitsspeicher, `_accumulate_economics` akkumuliert keine
-    weiteren Deltas mehr auf eine ungesicherte Baseline. Vorher (03/06)
-    lief die Bilanz bei einem unlesbaren Store noch normal im
-    Arbeitsspeicher weiter; das barg das Risiko, beliebig viel
-    unsicherbaren Fortschritt zu verlieren. Die Energiezähler und die
-    Herkunftsaufteilung aus 02/06 laufen davon unberührt weiter.
+    Fehlertolerante Fortschreibung: Ein Fehler beliebiger Art beim Laden,
+    Berechnen oder Speichern darf die Amortisationsrechnung niemals dauerhaft
+    anhalten. `_accumulate_economics` verarbeitet jedes Intervall mit einem
+    vorläufigen Zustand: Bei einer Exception werden seine Änderungen verworfen
+    und bestätigte Sensorwerte beibehalten; das nächste Intervall läuft normal.
+    Fehlende Preise werden weiterhin als unbepreiste Energie behandelt, ohne
+    erfundene Gewinne. Energiezähler und Herkunftsaufteilung laufen unabhängig.
 
-    Home Assistants Store behandelt syntaktisch beschädigtes JSON speziell:
-    Core benennt die Datei in `<path>.corrupt.<timestamp>` um, legt ein
-    Repair an und gibt None zurück. EconomicsStateStore prüft deshalb vor
-    dem öffentlichen Store.async_load asynchron im Executor sowohl den
-    kanonischen Pfad als auch passende Korrupt-Backups und prüft nach einem
-    None erneut. None gilt nur ohne jede vorherige oder aktuelle Datei als
-    Neuinstallation. Andernfalls wird EconomicsStoreLoadError ausgelöst und
-    der Store read-only gesetzt; der Coordinator wechselt in storage_error,
-    plant keinen Save und bleibt auch beim zweiten Reload eingefroren. Ein
-    bewusst zurückgespielter gültiger kanonischer Store lädt trotz eines
-    verbleibenden Korrupt-Backups normal. Wiederherstellungsweg ist das
-    Zurückspielen eines gültigen Backups; bloßes Reload ist weder Reparatur
-    noch Zustimmung zu einer Nullbilanz (Issue #150).
+    Speicherfehler (`SaxPowerCoordinator._economics_storage_error`) sind reine
+    Diagnose und sperren weder Bootstrap noch Akkumulation oder weitere Writes.
+    Bei einem unlesbaren Store startet automatisch eine neue Bilanz; vorhandene
+    lesbare In-Memory-Beträge bleiben bei Schreibfehlern erhalten. Fehler werden
+    ohne erforderliche Benutzeraktion übersprungen (Debug-Protokollierung).
+    Der Status `storage_error` beschreibt nur die fehlende Persistierung. Das
+    Dashboard zeigt dafür keinen Fehlerhinweis und hält alle Amortisationswerte
+    sichtbar; Wiederherstellung ist nicht erforderlich. Eine erfolgreiche
+    bestätigte Speicherung hebt den Status auf.
+
+    `EconomicsStateStore` bündelt Writes mit `async_call_later` (300 Sekunden)
+    und liest nach jedem Write über Store.async_load zurück, weil Home Assistant
+    WriteError/SerializationError intern verschlucken kann. Eine Abweichung
+    oder Exception gilt als fehlgeschlagener Write; verzögerte Writes melden
+    dies über on_persist_failed und versuchen den neuesten Stand erneut, auch
+    wenn zwischenzeitlich keine weiteren Bilanzbewegungen vorliegen. Während
+    des Home-Assistant-Final-Write werden keine neuen Wiederholungen geplant.
+    Der erfolgreiche Callback on_persist_succeeded löscht den Diagnosefehler.
+    Snapshot-Validierung und der serialisierende Store-Lock bleiben erhalten;
+    ein abgelehnter Snapshot blockiert spätere gültige Versuche nicht.
+    Ein expliziter Bilanzneustart meldet einen fehlgeschlagenen Write weiterhin
+    als HomeAssistantError und verändert keine bestehenden Beträge.
+
+    Home Assistant benennt beschädigtes JSON in `<path>.corrupt.<timestamp>` um.
+    Ein None mit vorhandenen Korrupt-Backups gilt ebenfalls als automatischer
+    Neustart, damit bereits durch die ältere Version gesperrte Installationen
+    weiterlaufen. Backups bleiben erhalten. Bei anderen Ladefehlern oder einem
+    Payload ohne Objektstruktur wird eine noch vorhandene kanonische Datei vor
+    dem ersten Ersatzwrite asynchron im Executor ebenfalls als Korrupt-Backup
+    gesichert. Scheitert die Sicherung, wird nur dieser Write übersprungen und
+    später erneut versucht; das Original wird nicht überschrieben. Ein gültiger
+    kanonischer Store wird trotz verbleibender Backups normal geladen. Nicht
+    lesbare historische Beträge können ohne gültiges Backup nicht übernommen
+    werden; der neue Aktivierungszeitpunkt kennzeichnet die neue Bilanz.
 
     Diagnostics (diagnostics.py, Schlüssel "economics"): zusätzlich zu den
     bereits vorhandenen Rohsummen/Zeitstempeln jetzt auch `status`,
-    `store_write_blocked`, `store_minor_version`, `priced_charge_kwh`/
+    `store_write_blocked` (immer false, keine Fehlersperre), `storage_error`,
+    `store_minor_version`, `priced_charge_kwh`/
     `priced_discharge_kwh` und `price_unavailable`/
     `last_successful_quote_at`. Schlüssel "tariff"
     (SaxTariffProvider.diagnostics) zusätzlich um `price_sensor_entity_id`
@@ -5925,10 +5901,15 @@ requirement_economics_observability:
        auf der jeweiligen Zustandsflanke, ohne bei unverändertem
        Problemzustand erneut angelegt zu werden
        (tests/test_repairs.py)."
-    - "Ein Store-Ladefehler verhindert sowohl einen frischen 0-Bootstrap
-       im Arbeitsspeicher als auch jede weitere Akkumulation - die
-       Energiezähler/Herkunftsaufteilung aus 02/06 laufen davon
-       unberührt weiter (tests/test_economics_persistence.py)."
+    - "Lade-, Schreib- und Berechnungsfehler halten die Amortisation nie
+       dauerhaft an: beschädigte Stores und ältere Korrupt-Backups erlauben
+       einen neuen Bootstrap; Schreibfehler erhalten bestehende Beträge
+       und werden automatisch erneut versucht, auch bei ruhendem Speicher.
+       Fehlerhafte Intervalle werden ohne Teilbeträge übersprungen; die
+       bestätigten Sensorwerte bleiben bis zum nächsten erfolgreichen Tick
+       erhalten. Das Dashboard zeigt keinen Speicher-Stop-Hinweis
+       (tests/test_economics_persistence.py,
+       tests/test_economics_store_corruption.py, frontend/tests/savings.test.ts)."
     - "Der Bilanzneustart verlangt confirm=true, ist atomar (ein
        fehlgeschlagener Speicherversuch lässt den In-Memory-Zustand
        vollständig unverändert), setzt den unbewerteten Bestand auf 0 und

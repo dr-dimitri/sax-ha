@@ -788,7 +788,7 @@ class SaxPricePlanner:
         if not self._cycle_store_loaded:
             return
         try:
-            await self._cycle_store.async_save(self._cycle_state)
+            await self._cycle_store.async_save(self._cycle_state, final=True)
         except (HomeAssistantError, OSError, ValueError) as err:
             _LOGGER.warning(
                 "Preisplan-Zyklus konnte beim Entladen nicht gespeichert werden: %s",

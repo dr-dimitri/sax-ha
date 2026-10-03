@@ -8,13 +8,17 @@ bereits verstrichenen bzw. aktuell noch ausgewählten Intervalle.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
+from homeassistant.core import CALLBACK_TYPE, CoreState, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -70,14 +74,19 @@ class PricePlanCycleStore:
     """Persist one price-planning cycle per config entry."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+        self._hass = hass
         self._store: Store[dict[str, Any]] = Store(
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY_PREFIX}.{entry_id}",
+            atomic_writes=True,
         )
         self._last_persisted: dict[str, Any] | None = None
         self._pending: dict[str, Any] | None = None
         self._save_scheduled = False
+        self._unsub_delayed_write: CALLBACK_TYPE | None = None
+        self._unsub_final_write: CALLBACK_TYPE | None = None
+        self._write_lock = asyncio.Lock()
 
     async def async_load(self) -> PricePlanCycleState | None:
         """Load a cycle, discarding the complete snapshot when inconsistent."""
@@ -110,28 +119,97 @@ class PricePlanCycleStore:
     ) -> bool:
         """Coalesce plan changes and avoid writes for unchanged allocations."""
         payload = _serialize(state)
-        if payload == (self._pending or self._last_persisted):
+        if payload == (self._pending or self._last_persisted) and (
+            self._pending is None or self._save_scheduled or self._write_lock.locked()
+        ):
             return False
         self._pending = payload
-        if not self._save_scheduled:
-            self._save_scheduled = True
-            self._store.async_delay_save(self._consume_pending, delay)
+        self._schedule_write(delay)
         return True
 
-    async def async_save(self, state: PricePlanCycleState | None) -> None:
-        """Immediately persist the newest cycle and cancel a delayed write."""
-        payload = _serialize(state)
-        self._pending = None
-        self._save_scheduled = False
-        await self._store.async_save(payload)
-        self._last_persisted = payload
+    @callback
+    def _schedule_write(self, delay: float = PRICE_PLAN_SAVE_DELAY) -> None:
+        if not self._save_scheduled:
+            self._save_scheduled = True
+            self._unsub_delayed_write = async_call_later(
+                self._hass, delay, self._async_delayed_write
+            )
+        self._ensure_final_write_listener()
 
-    def _consume_pending(self) -> dict[str, Any]:
-        payload = self._pending or self._last_persisted or {"active": False}
-        self._pending = None
+    @callback
+    def _ensure_final_write_listener(self) -> None:
+        if self._unsub_final_write is None:
+            self._unsub_final_write = self._hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_FINAL_WRITE, self._async_final_write
+            )
+
+    @callback
+    def _cancel_delayed_write(self) -> None:
+        if self._unsub_delayed_write is not None:
+            self._unsub_delayed_write()
+            self._unsub_delayed_write = None
+        if self._unsub_final_write is not None:
+            self._unsub_final_write()
+            self._unsub_final_write = None
         self._save_scheduled = False
-        self._last_persisted = payload
-        return payload
+
+    @callback
+    def _retry_pending(self) -> None:
+        if self._pending is None:
+            return
+        if self._hass.state is CoreState.stopping:
+            self._ensure_final_write_listener()
+        elif not self._hass.is_stopping:
+            self._schedule_write()
+
+    async def _async_final_write(self, event: Any) -> None:
+        self._unsub_final_write = None
+        await self._async_delayed_write(event)
+
+    async def _async_delayed_write(self, _event: Any) -> None:
+        try:
+            await self._async_write_pending()
+        except (HomeAssistantError, OSError, ValueError) as err:
+            _LOGGER.warning(
+                "Preisplan-Zyklus konnte nicht gespeichert werden; "
+                "der letzte Stand wird erneut versucht: %s",
+                err,
+            )
+        self._retry_pending()
+
+    async def async_save(
+        self, state: PricePlanCycleState | None, *, final: bool = False
+    ) -> None:
+        """Flush the newest cycle; unloaded owners must not retry after reload."""
+        self._pending = _serialize(state)
+        self._cancel_delayed_write()
+        try:
+            await self._async_write_pending()
+        finally:
+            if self._hass.state is CoreState.stopping or not final:
+                self._retry_pending()
+
+    async def _async_write_pending(self) -> None:
+        async with self._write_lock:
+            self._cancel_delayed_write()
+            payload = self._pending
+            if payload is None:
+                return
+            if self._hass.state is CoreState.stopping:
+                # REQ-DYNAMIC-PRICE-CHARGE: Core defers stopping writes; a
+                # readback at that point would confirm only its RAM snapshot.
+                self._ensure_final_write_listener()
+                return
+            await self._store.async_save(payload)
+            # REQ-DYNAMIC-PRICE-CHARGE: Core logs WriteError without raising;
+            # elapsed budget is durable only after the disk snapshot matches.
+            if await self._store.async_load() != payload:
+                raise HomeAssistantError(
+                    "Preisplan-Zyklus nach dem Speichern nicht wie erwartet lesbar"
+                )
+            self._last_persisted = payload
+            if self._pending is payload:
+                self._pending = None
 
 
 def _serialize(state: PricePlanCycleState | None) -> dict[str, Any]:

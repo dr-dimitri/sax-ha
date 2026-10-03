@@ -1027,7 +1027,13 @@ requirement_timed_soc_charge:
     Fenster darf denselben abgeschlossenen Ladezyklus auch nach Neustart
     weder neu bestätigen noch erneut an die globale Max-SOC-Sperre binden.
     Das nächste reguläre Fenster beginnt ohne aktive Sperre. Abschalten
-    und Preiswechsel löschen auch den Endmarker. Mitternachts-/Monatswechsel und
+    und Preiswechsel löschen auch den Endmarker. Aktive und inaktive Zustände
+    werden atomar gespeichert und erst nach passendem Rücklesen bestätigt.
+    Ein Speicherfehler verändert nicht die laufende Sperrentscheidung, hält
+    aber den neuesten Zustand für weitere Steuerzyklen und den Shutdown-Flush
+    offen. Beim Home-Assistant-Stopp erfolgt der Flush in FINAL_WRITE;
+    entladene Store-Besitzer dürfen spätere Reload-Zustände nicht überschreiben.
+    Mitternachts-/Monatswechsel und
     Sommer-/Winterzeit werden anhand der absoluten Ablaufzeit behandelt.
     Spätere Änderungen an Uhrzeiten/Monaten verlängern eine bestehende
     Sperre nicht; die ursprünglich gespeicherte Frist bleibt maßgeblich.
@@ -2436,7 +2442,15 @@ requirement_dynamic_price_charge:
     bemessen und bereits verbrauchte Zeit nie freigegeben. Zyklusanker,
     Budget und ausgewählte Intervalle liegen in einem eigenen,
     Config-Entry-spezifischen Store; ein Home-Assistant-Neustart innerhalb
-    des Zyklus eröffnet daher kein frisches Kontingent.
+    des Zyklus eröffnet daher kein frisches Kontingent. Der Store bestätigt
+    atomare Schreibvorgänge durch Rücklesen. Nach einem Schreib- oder
+    Rücklesefehler bleibt der neueste Snapshot offen und wird nach zehn
+    Sekunden erneut versucht, auch ohne inhaltliche Neuplanung. Änderungen
+    während langsamer Speicherung ersetzen ausstehende ältere Snapshots.
+    Shutdown und FINAL_WRITE sichern den neuesten Stand; ein fehlgeschlagener
+    regulärer Unload hinterlässt keine Timer, die einen neu geladenen
+    Store überschreiben könnten. Nach einem Absturz vor bestätigter Speicherung
+    steht ausschließlich der tatsächlich gespeicherte Stand zur Verfügung.
 
     Leistung: lädt wie das zeitgesteuerte Laden immer mit maximal möglicher
     Leistung, keine eigene (oder geteilte) Watt-Einstellung (siehe
@@ -2575,6 +2589,10 @@ requirement_dynamic_price_charge:
        ist nur noch der einmalige Migrationspfad. Ohne beides gelten die
        Defaults aus const.py - für die Strategie DEFAULT_PRICE_STRATEGY
        (kein Options-Flow-Fallback mehr, siehe oben)."
+    - "tests/test_price_cycle_write_failures.py prüft echte Speicherfehler,
+       Wiederholung unveränderter Zyklen, erhaltenes Restbudget nach Neustart,
+       neue Snapshots während Write/Readback sowie Shutdown, FINAL_WRITE und
+       die Trennung alter und neu geladener Store-Besitzer."
     - "Der Status-Sensor benennt den jeweils wirksamen Grund: Aus, Keine
        Preisdaten, Warten auf Preisabfall, Lade aus Netz, PV-Prognose deckt
        Bedarf, Pausiert (PV-Überschuss), Pausiert (Max. SOC), Pausiert
@@ -3423,7 +3441,11 @@ requirement_vue_electricity_tariff:
     bridge_pv_start_required und bridge_tariff_required aus dem HA-Service
     erhalten konkrete DE-/EN-Hinweise. Ausstehende Änderungen sperren weitere
     Modusaufrufe. Bestätigte Zustände, Fehlermeldungen und Zahlentwürfe bleiben
-    beim Schließen und erneuten Öffnen erhalten. Dynamisch führt
+    in beiden Tarifarten beim Schließen und erneuten Öffnen erhalten. Dies
+    umfasst ungesendete und unvollständige Zahlen sowie verspätet fehlgeschlagene
+    Änderungen. Ein ausdrücklicher Wiederholungsversuch sendet den erhaltenen
+    Entwurf; bestätigte HA-Änderungen aktualisieren weiterhin das Feld.
+    Dynamisch führt
     die Bedienung mit alltagssprachlichen Ladeweisen durch die Einrichtung:
     bedarfsgerechtes Laden (Smart), günstigste Stunden (Relativ), feste
     Preisgrenze (Absolut) oder ausgeschaltete Preisautomatik (Off). Die Ansicht
@@ -5233,7 +5255,11 @@ requirement_economics_accounting:
     füllen keine alte Preislücke. Sommer-/Winterzeit und Rückwärtszeit werden
     anhand realer Zeitpunkte behandelt. compute_economics_interval verwendet
     compute_economics_delta chronologisch pro Abschnitt und führt den
-    unbewerteten Bestand fort. Bereits gebuchte Summen werden nie neu bewertet.
+    unbewerteten Bestand fort. Der Bestandssaldo entspricht der Differenz
+    zwischen diesem Endbestand und dem Anfangsbestand, damit vollständiger
+    Verbrauch exakt bei null endet und Rundungsreste die Bilanzspeicherung
+    nicht blockieren. Tatsächlich negative oder nicht endliche gespeicherte
+    Bestände bleiben ungültig. Bereits gebuchte Summen werden nie neu bewertet.
 
     Verbindliche Geldbilanz je EnergyDelta (02/06,
     domain.economics_accounting.compute_economics_delta), alle Beträge
@@ -5501,6 +5527,10 @@ requirement_economics_accounting:
        Rückwärtszeit und begrenzte Historie sind in
        tests/test_economics_price_intervals.py geprüft; echte Coordinator-
        Messungen und Optionslistener in tests/test_economics_tariff_coordinator.py."
+    - "tests/test_economics_inventory_roundoff.py prüft vollständigen Verbrauch
+       an einer echten Tarifgrenze, anschließende Entladung, SOC-Minimum,
+       bepreiste PV-/Netzladung und aktuelle JSON-Store-Roundtrips. Negative,
+       NaN- und Inf-Bestände werden weiterhin abgelehnt."
     - "PV-Ladung wird mit der Einspeisevergütung bewertet; reine
        Netz-/PV-/Mischladung stimmen mit der Herkunftsaufteilung aus
        02/06 überein (tests/test_economics_accounting.py)."

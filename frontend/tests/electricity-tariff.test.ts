@@ -121,9 +121,11 @@ async function mount(
     can_edit: !options.readonly,
   };
   const listeners = new Map<string, Set<() => void>>();
+  let emitMetadata: (entities: typeof sample.metadata) => void = () => {};
   const connection = {
     connected: true,
     async subscribeMessage<T>(callback: (message: T) => void) {
+      emitMetadata = (entities) => callback({ entities } as T);
       callback({ entities: sample.metadata } as T);
       return () => {};
     },
@@ -223,6 +225,24 @@ async function mount(
       };
       await flush();
     },
+    async rename(key: string, entityId: string, state: string) {
+      const index = sample.metadata.findIndex((item) => item.key === key);
+      const previous = sample.metadata[index]!;
+      sample.metadata[index] = { ...previous, entity_id: entityId };
+      hass.value = {
+        ...hass.value,
+        states: {
+          ...hass.value.states,
+          [entityId]: {
+            ...hass.value.states[previous.entity_id]!,
+            entity_id: entityId,
+            state,
+          },
+        },
+      };
+      emitMetadata([...sample.metadata]);
+      await flush();
+    },
   };
 }
 function button(root: Element, label: string) {
@@ -244,6 +264,32 @@ const writes = (fixture: Awaited<ReturnType<typeof mount>>) =>
   fixture.callWS.mock.calls.filter(
     ([request]) => request.type === "sax_power/dashboard/tariff/configure",
   );
+const dynamicNumberCases = [
+  {
+    key: "max_soc",
+    de: "Ladeziel (%)",
+    en: "Charge target (%)",
+    value: "85",
+  },
+  {
+    key: "price_charge_max_price",
+    de: "Höchster Preis zum Laden (ct/kWh)",
+    en: "Maximum price for charging (ct/kWh)",
+    value: "12.5",
+  },
+  {
+    key: "price_charge_hours",
+    de: "Maximale Ladezeit je 24 Stunden",
+    en: "Maximum charging time per 24 hours",
+    value: "3",
+  },
+  {
+    key: "price_charge_neutral_price",
+    de: "Speicher bei günstigem Strom schonen bis (ct/kWh)",
+    en: "Preserve battery energy below (ct/kWh)",
+    value: "12.5",
+  },
+];
 afterEach(() => {
   apps.splice(0).forEach((app) => app.unmount());
   document.body.replaceChildren();
@@ -574,6 +620,146 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         feed_in_price_ct_kwh: expected,
       });
       expect(section.querySelector("form")).toBeNull();
+    },
+  );
+  // REQ-VUE-ELECTRICITY-TARIFF / #268: collapsing must retain failed drafts
+  // so retry repeats the intended setting, not the confirmed previous value.
+  it.each(
+    ["de", "en"].flatMap((language) =>
+      dynamicNumberCases.map((control) => ({ language, ...control })),
+    ),
+  )(
+    "retains $key through collapse, delayed failure and retry in $language",
+    async ({ language, key, de, en, value }) => {
+      const fixture = await mount({ type: "dynamic", language });
+      if (key === "price_charge_hours")
+        await fixture.update("price_charge_strategy", "smart");
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      const english = language === "en";
+      const edit = english ? "Edit" : "Bearbeiten";
+      const done = english ? "Done" : "Fertig";
+      const apply = english ? "Apply" : "Übernehmen";
+      await click(section, edit);
+      const form = [...section.querySelectorAll(".entity-control")].find(
+        (form) =>
+          form.querySelector("label")?.textContent === (english ? en : de),
+      )!;
+      const input = form.querySelector<HTMLInputElement>("input")!;
+      const confirmed = input.value;
+      let reject!: (cause: unknown) => void;
+      fixture.callService.mockImplementationOnce(
+        () =>
+          new Promise<void>((_, fail) => {
+            reject = fail;
+          }),
+      );
+      await fill(form, "input", value);
+      await click(form, apply);
+      await click(section, done);
+      expect(
+        section.querySelector(".electricity-charging-feedback [role='status']")
+          ?.textContent,
+      ).toContain(english ? "Sending change" : "Änderung wird");
+      await click(section, edit);
+      expect(input.isConnected).toBe(true);
+      expect(input.value).toBe(value);
+      expect(input.disabled).toBe(true);
+      await click(form, apply);
+      expect(fixture.callService).toHaveBeenCalledTimes(1);
+      await click(section, done);
+      reject(new Error("Service failed"));
+      await flush();
+      expect(
+        section.querySelector(".electricity-charging-feedback [role='alert']")
+          ?.textContent,
+      ).toContain(english ? "failed" : "fehlgeschlagen");
+      await click(section, edit);
+      expect(input.value).toBe(value);
+      expect(input.disabled).toBe(false);
+      expect(
+        form.querySelector(".entity-control__value")?.textContent,
+      ).toContain(confirmed);
+      await click(form, apply);
+      expect(fixture.callService).toHaveBeenCalledTimes(2);
+      expect(fixture.callService).toHaveBeenLastCalledWith(
+        "number",
+        "set_value",
+        { value: Number(value) },
+        { entity_id: `number.renamed_${key}` },
+        false,
+      );
+      expect(form.querySelector("[role='alert']")).toBeNull();
+      expect(input.value).toBe(value);
+      await fixture.update(key, value);
+      expect(input.value).toBe(value);
+      expect(
+        form.querySelector(".entity-control__value")?.textContent,
+      ).toContain(english ? value : value.replace(".", ","));
+    },
+  );
+  it.each(
+    ["de", "en"].flatMap((language) =>
+      dynamicNumberCases.map((control) => ({ language, ...control })),
+    ),
+  )(
+    "keeps unsent and empty $key drafts across collapse, then follows external confirmation in $language",
+    async ({ language, key, de, en, value }) => {
+      const fixture = await mount({ type: "dynamic", language });
+      if (key === "price_charge_hours")
+        await fixture.update("price_charge_strategy", "smart");
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      const english = language === "en";
+      const edit = english ? "Edit" : "Bearbeiten";
+      const done = english ? "Done" : "Fertig";
+      await click(section, edit);
+      const form = [...section.querySelectorAll(".entity-control")].find(
+        (form) =>
+          form.querySelector("label")?.textContent === (english ? en : de),
+      )!;
+      const input = form.querySelector<HTMLInputElement>("input")!;
+      for (const draft of [value, ""]) {
+        await fill(form, "input", draft);
+        await click(section, done);
+        await click(section, edit);
+        expect(input.isConnected).toBe(true);
+        expect(input.value).toBe(draft);
+        expect(fixture.callService).not.toHaveBeenCalled();
+      }
+      await click(section, done);
+      const external = String(Number(value) + 2);
+      await fixture.update(key, external);
+      await click(section, edit);
+      expect(input.value).toBe(external);
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["de", "en"])(
+    "replaces a hidden number draft with the renamed entity's confirmed value in %s",
+    async (language) => {
+      const fixture = await mount({ type: "dynamic", language });
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      const english = language === "en";
+      const edit = english ? "Edit" : "Bearbeiten";
+      await click(section, edit);
+      const form = [...section.querySelectorAll(".entity-control")].find(
+        (form) =>
+          form.querySelector("label")?.textContent ===
+          (english ? "Charge target (%)" : "Ladeziel (%)"),
+      )!;
+      await fill(form, "input", "85");
+      await click(section, english ? "Done" : "Fertig");
+      await fixture.rename("max_soc", "number.new_charge_limit", "90");
+      await click(section, edit);
+      expect(form.querySelector<HTMLInputElement>("input")!.value).toBe("90");
+      expect(fixture.callService).not.toHaveBeenCalled();
+      await click(form, english ? "Apply" : "Übernehmen");
+      expect(fixture.callService).toHaveBeenCalledWith(
+        "number",
+        "set_value",
+        { value: 90 },
+        { entity_id: "number.new_charge_limit" },
+        false,
+      );
     },
   );
   it.each(["de", "en"])(

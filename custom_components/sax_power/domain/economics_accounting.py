@@ -104,9 +104,9 @@ def compute_economics_interval(
             item.pv_opportunity_cost_delta for item in deltas
         ),
         avoided_grid_cost_delta=sum(item.avoided_grid_cost_delta for item in deltas),
-        unvalued_inventory_delta_kwh=sum(
-            item.unvalued_inventory_delta_kwh for item in deltas
-        ),
+        # REQ-ECONOMICS-ACCOUNTING: A second summation can round an exhausted
+        # inventory below zero and prevent every later balance save (Issue #266).
+        unvalued_inventory_delta_kwh=inventory - unvalued_inventory_kwh,
         unpriced_charge_delta_kwh=sum(
             item.unpriced_charge_delta_kwh for item in deltas
         ),

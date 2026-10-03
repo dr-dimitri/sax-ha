@@ -4351,10 +4351,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_set_timed_discharge_state(
         self, state: TimedDischargeState | None, *, retain_expiry: bool = False
     ) -> None:
-        if self._timed_discharge_state == state and (
-            state is not None
-            or retain_expiry
-            or self._timed_discharge_last_window_end is None
+        if (
+            self._timed_discharge_state == state
+            and (
+                state is not None
+                or retain_expiry
+                or self._timed_discharge_last_window_end is None
+            )
+            and not self._timed_discharge_store.save_pending
         ):
             return
         self._timed_discharge_state = state
@@ -4437,6 +4441,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if not self._timed_discharge_is_active(now):
             await self._async_set_timed_discharge_state(None, retain_expiry=True)
+        else:
+            await self._async_set_timed_discharge_state(self._timed_discharge_state)
         if self._timed_window_completed(now):
             self._timed_charge_grid_measured = False
             self._timed_charge_confirmation_cycles = 0
@@ -6432,6 +6438,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async with self._charge_control_lock:
             if self._shutdown_complete:
                 return
+            try:
+                await self._timed_discharge_store.async_flush(final=True)
+            except (HomeAssistantError, OSError, ValueError) as err:
+                _LOGGER.warning(
+                    "Netzlade-Entladesperre beim Entladen nicht gespeichert: %s", err
+                )
             self._grid_charge_power = None
             # A running sequence may establish its reset marker only after
             # the next acknowledgement. Drain it before deciding whether

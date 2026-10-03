@@ -5696,7 +5696,11 @@ var Il = ["aria-busy"], Ll = {
 	__name: "DynamicChargingSettings",
 	props: { editing: { type: Boolean } },
 	setup(e) {
-		let t = kn(no), n = Q(() => t?.language.value === "de"), r = Q(() => n.value ? {
+		let t = e, n = kn(no), r = /* @__PURE__ */ V(t.editing);
+		U(() => t.editing, (e) => {
+			e && (r.value = !0);
+		});
+		let i = Q(() => n?.language.value === "de"), a = Q(() => i.value ? {
 			mode: "Wann soll der Speicher aus dem Netz laden?",
 			saved: "Gespeicherte Ladeweise",
 			immediate: "Änderungen gelten nach der Bestätigung durch Home Assistant. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
@@ -5792,87 +5796,87 @@ var Il = ["aria-busy"], Ll = {
 					hint: "Pauses price-controlled charging. All other settings are preserved."
 				}
 			}
-		}), i = Q(() => t?.entity("select", "price_charge_strategy")), a = [
+		}), o = Q(() => n?.entity("select", "price_charge_strategy")), s = [
 			"smart",
 			"relative",
 			"absolute",
 			"off"
-		], o = Q(() => {
-			let e = i.value?.state?.state;
-			return i.value?.available && a.includes(e) ? e : null;
-		}), s = Q(() => i.value?.state?.attributes.options), c = Q(() => !i.value?.canControl || i.value.pending), l = Q(() => t?.connected.value ? i.value?.available ? i.value.metadata.can_control ? i.value.pending ? r.value.pending : "" : r.value.readonly : r.value.unavailable : r.value.disconnected), u = Q(() => !!t?.tariff.value?.profiles?.dynamic.pv_sensor), d = Q(() => {
-			if (!o.value) return r.value.unavailable;
-			let e = r.value.modes[o.value].title;
-			if (o.value === "off") return e;
-			let n = t?.entity("number", "max_soc")?.displayValue ?? "—";
-			return `${e} · ${t?.entity("number", o.value === "absolute" ? "price_charge_max_price" : "price_charge_hours")?.displayValue ?? "—"} · ${r.value.targetSummary} ${n}`;
-		}), f = Q(() => {
-			let e = t?.entity("number", "price_charge_neutral_price"), n = t?.entity("number", "price_charge_max_price"), i = cc(e?.state?.state), a = cc(n?.state?.state);
-			return !e?.available || i === null || o.value === "absolute" && (!n?.available || a === null) ? r.value.neutralUnavailable : o.value === "absolute" && a !== null && i <= a ? r.value.neutralInactive : `${r.value.neutralSummary} ${e.displayValue}${o.value === "absolute" ? ` ${r.value.neutralBand}` : ""}.`;
+		], c = Q(() => {
+			let e = o.value?.state?.state;
+			return o.value?.available && s.includes(e) ? e : null;
+		}), l = Q(() => o.value?.state?.attributes.options), u = Q(() => !o.value?.canControl || o.value.pending), d = Q(() => n?.connected.value ? o.value?.available ? o.value.metadata.can_control ? o.value.pending ? a.value.pending : "" : a.value.readonly : a.value.unavailable : a.value.disconnected), f = Q(() => !!n?.tariff.value?.profiles?.dynamic.pv_sensor), p = Q(() => {
+			if (!c.value) return a.value.unavailable;
+			let e = a.value.modes[c.value].title;
+			if (c.value === "off") return e;
+			let t = n?.entity("number", "max_soc")?.displayValue ?? "—";
+			return `${e} · ${n?.entity("number", c.value === "absolute" ? "price_charge_max_price" : "price_charge_hours")?.displayValue ?? "—"} · ${a.value.targetSummary} ${t}`;
+		}), m = Q(() => {
+			let e = n?.entity("number", "price_charge_neutral_price"), t = n?.entity("number", "price_charge_max_price"), r = cc(e?.state?.state), i = cc(t?.state?.state);
+			return !e?.available || r === null || c.value === "absolute" && (!t?.available || i === null) ? a.value.neutralUnavailable : c.value === "absolute" && i !== null && r <= i ? a.value.neutralInactive : `${a.value.neutralSummary} ${e.displayValue}${c.value === "absolute" ? ` ${a.value.neutralBand}` : ""}.`;
 		});
-		async function p(e) {
-			!c.value && Array.isArray(s.value) && s.value.includes(e) && o.value !== e && await t?.perform("select", "price_charge_strategy", e);
+		async function h(e) {
+			!u.value && Array.isArray(l.value) && l.value.includes(e) && c.value !== e && await n?.perform("select", "price_charge_strategy", e);
 		}
-		return (n, m) => (K(), q("div", Ql, [
-			J("p", $l, [J("span", null, L(r.value.saved) + ":", 1), X(" " + L(d.value), 1)]),
-			o.value && o.value !== "off" ? (K(), q("p", eu, L(f.value), 1)) : Z("", !0),
-			H(t)?.tariff.value?.automation_enabled === !1 ? (K(), q("p", tu, L(r.value.disabled), 1)) : Z("", !0),
-			i.value?.error ? (K(), q("p", nu, L(i.value.error), 1)) : l.value ? (K(), q("p", ru, L(l.value), 1)) : Z("", !0),
-			e.editing ? (K(), q("div", iu, [
-				J("h3", null, L(r.value.mode), 1),
-				J("p", au, L(r.value.immediate), 1),
+		return (t, i) => (K(), q("div", Ql, [
+			J("p", $l, [J("span", null, L(a.value.saved) + ":", 1), X(" " + L(p.value), 1)]),
+			c.value && c.value !== "off" ? (K(), q("p", eu, L(m.value), 1)) : Z("", !0),
+			H(n)?.tariff.value?.automation_enabled === !1 ? (K(), q("p", tu, L(a.value.disabled), 1)) : Z("", !0),
+			o.value?.error ? (K(), q("p", nu, L(o.value.error), 1)) : d.value ? (K(), q("p", ru, L(d.value), 1)) : Z("", !0),
+			r.value ? En((K(), q("div", iu, [
+				J("h3", null, L(a.value.mode), 1),
+				J("p", au, L(a.value.immediate), 1),
 				J("div", {
 					class: "dynamic-charging-methods",
 					role: "group",
-					"aria-label": r.value.mode,
-					"aria-busy": i.value?.pending ?? !1
-				}, [(K(), q(G, null, W(a, (e) => J("button", {
+					"aria-label": a.value.mode,
+					"aria-busy": o.value?.pending ?? !1
+				}, [(K(), q(G, null, W(s, (e) => J("button", {
 					key: e,
 					type: "button",
 					"data-strategy": e,
-					"aria-pressed": o.value === e,
-					disabled: c.value || !Array.isArray(s.value) || !s.value.includes(e),
-					onClick: (t) => p(e)
-				}, [J("strong", null, L(r.value.modes[e].title), 1), J("span", null, L(r.value.modes[e].hint), 1)], 8, su)), 64))], 8, ou),
-				o.value === "off" ? (K(), q("p", cu, L(r.value.offHint), 1)) : Z("", !0),
-				o.value && o.value !== "off" ? (K(), q(G, { key: 1 }, [
-					J("h3", null, L(r.value.target), 1),
+					"aria-pressed": c.value === e,
+					disabled: u.value || !Array.isArray(l.value) || !l.value.includes(e),
+					onClick: (t) => h(e)
+				}, [J("strong", null, L(a.value.modes[e].title), 1), J("span", null, L(a.value.modes[e].hint), 1)], 8, su)), 64))], 8, ou),
+				c.value === "off" ? (K(), q("p", cu, L(a.value.offHint), 1)) : Z("", !0),
+				c.value && c.value !== "off" ? (K(), q(G, { key: 1 }, [
+					J("h3", null, L(a.value.target), 1),
 					Y(Ao, {
 						domain: "number",
 						"entity-key": "max_soc",
-						label: r.value.targetLabel,
+						label: a.value.targetLabel,
 						"hide-confirmed-label": ""
 					}, null, 8, ["label"]),
-					J("p", lu, L(r.value.targetHint), 1),
-					o.value === "absolute" ? (K(), q(G, { key: 0 }, [Y(Ao, {
+					J("p", lu, L(a.value.targetHint), 1),
+					c.value === "absolute" ? (K(), q(G, { key: 0 }, [Y(Ao, {
 						domain: "number",
 						"entity-key": "price_charge_max_price",
-						label: r.value.price,
+						label: a.value.price,
 						"hide-confirmed-label": ""
-					}, null, 8, ["label"]), J("p", uu, L(r.value.priceHint), 1)], 64)) : (K(), q(G, { key: 1 }, [
+					}, null, 8, ["label"]), J("p", uu, L(a.value.priceHint), 1)], 64)) : (K(), q(G, { key: 1 }, [
 						Y(Ao, {
 							domain: "number",
 							"entity-key": "price_charge_hours",
-							label: r.value.hours,
+							label: a.value.hours,
 							"hide-confirmed-label": ""
 						}, null, 8, ["label"]),
-						J("p", du, L(r.value.hoursHint), 1),
-						J("p", fu, L(r.value.noPriceLimit), 1),
-						o.value === "smart" ? (K(), q(G, { key: 0 }, [J("p", pu, L(r.value.smartHours), 1), J("p", mu, L(u.value ? r.value.pvUsed : r.value.pvMissing), 1)], 64)) : Z("", !0)
+						J("p", du, L(a.value.hoursHint), 1),
+						J("p", fu, L(a.value.noPriceLimit), 1),
+						c.value === "smart" ? (K(), q(G, { key: 0 }, [J("p", pu, L(a.value.smartHours), 1), J("p", mu, L(f.value ? a.value.pvUsed : a.value.pvMissing), 1)], 64)) : Z("", !0)
 					], 64)),
 					J("details", hu, [
-						J("summary", null, L(r.value.advanced), 1),
+						J("summary", null, L(a.value.advanced), 1),
 						Y(Ao, {
 							domain: "number",
 							"entity-key": "price_charge_neutral_price",
-							label: r.value.neutral,
+							label: a.value.neutral,
 							"hide-confirmed-label": ""
 						}, null, 8, ["label"]),
-						J("p", gu, L(r.value.neutralHint), 1),
-						o.value === "absolute" ? (K(), q("p", _u, L(r.value.absoluteNeutral), 1)) : Z("", !0)
+						J("p", gu, L(a.value.neutralHint), 1),
+						c.value === "absolute" ? (K(), q("p", _u, L(a.value.absoluteNeutral), 1)) : Z("", !0)
 					])
 				], 64)) : Z("", !0)
-			])) : Z("", !0)
+			], 512)), [[Xi, e.editing]]) : Z("", !0)
 		]));
 	}
 }), [["styles", [".dynamic-charging-summary span{font-weight:600}.dynamic-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;display:grid}.dynamic-charging-methods button{text-align:left;color:var(--primary-text-color,#212121);padding:16px}.dynamic-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:15px}.dynamic-charging-methods strong,.dynamic-charging-methods span{line-height:1.5;display:block}.dynamic-charging-methods span{color:var(--secondary-text-color,#666);margin-top:6px;font-size:14px}.dynamic-charging-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:20px;padding-top:12px}.dynamic-charging-advanced summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-notice{border-left:3px solid var(--primary-color,#03a9f4);padding-left:12px}@media (max-width:700px){.dynamic-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), yu = { class: "tou-charging-settings" }, bu = { class: "tou-charging-summary" }, xu = {

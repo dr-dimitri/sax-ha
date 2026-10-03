@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import EntityControl from "./EntityControl.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { finiteValue } from "../savings";
 
-defineProps<{ editing: boolean }>();
+const props = defineProps<{ editing: boolean }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
+const visited = ref(props.editing);
+watch(
+  () => props.editing,
+  (editing) => {
+    if (editing) visited.value = true;
+  },
+);
 const german = computed(() => dashboard?.language.value === "de");
 const text = computed(() =>
   german.value
@@ -229,7 +236,7 @@ async function choose(method: Strategy) {
       {{ strategy.error }}
     </p>
     <p v-else-if="status" role="status" aria-live="polite">{{ status }}</p>
-    <div v-if="editing">
+    <div v-if="visited" v-show="editing">
       <h3>{{ text.mode }}</h3>
       <p class="electricity-muted">{{ text.immediate }}</p>
       <div

@@ -725,6 +725,21 @@ Stundenbudget bei `relative`/`smart`; der Neutralpreis bleibt verfügbar und
 wirkt in diesen aktiven Strategien. Smart verwendet das Stundenbudget als
 Obergrenze seines festen 24-Stunden-Planungszyklus. „Ladeplan & Prognose“ zeigt
 weiterhin ausschließlich Backend-Ergebnisse.
+Auch `DynamicChargingSettings.vue` erhält die besuchten Zahlkomponenten mit
+`v-show`. Ungesendete und unvollständige Entwürfe sowie spät fehlgeschlagene
+Änderungen überleben das Einklappen; ein erneuter bewusster Versuch verwendet
+denselben Entwurf. Bestätigte HA-Werte aktualisieren die Eingaben weiterhin.
+
+`PricePlanCycleStore` schreibt Zyklusbudget und Intervalle atomar und bestätigt
+das Ergebnis durch Rücklesen. Home Assistants intern protokollierter
+`WriteError` gilt dadurch nicht als erfolgreiche Persistenz. Fehlgeschlagene
+Snapshots bleiben ausstehend und werden nach zehn Sekunden auch ohne neue
+Planung erneut versucht. Ein eigener Schreib-Lock erhält den neuesten Zustand
+bei Änderungen während Dateizugriffen. Shutdown und `FINAL_WRITE` sichern
+ausstehende Zustände; nach regulärem Unload werden keine alten Timer oder
+Final-Write-Listener über einen neu geladenen Store weitergeführt.
+`tests/test_price_cycle_write_failures.py` prüft dafür echte Dateifehler,
+Restbudget nach Neustart und konkurrierende Planänderungen.
 
 `ChargePlan.vue` zeigt im zeitvariablen Tarif zusätzlich die aktuelle
 Entladeprognose aus `discharge_forecast`, unabhängig vom Status des Bridge-Plans.
@@ -1176,6 +1191,14 @@ Rechenfehler, obwohl beide Werte korrekt waren. Sichtbar gemacht wird das
 Diagnose-Download) neben dem längst vorhandenen `economics_started_at`
 sowie über die bewertete Menge `priced_charge_kwh`/`priced_discharge_kwh`
 in der Geldkarte, aus der sich jeder Betrag zurückrechnen lässt.
+
+`compute_economics_interval` führt den unbewerteten Bestand chronologisch über
+Tarifsegmente und leitet den zurückgegebenen Bestandssaldo aus Endbestand minus
+Anfangsbestand ab. Vollständiger Verbrauch endet so exakt bei null. Ein anders
+aufsummierter negativer Rundungsrest könnte sonst alle späteren Snapshots
+ungültig machen. Die strikte Store-Prüfung negativer oder nicht endlicher
+Bestände bleibt erhalten; `tests/test_economics_inventory_roundoff.py` prüft
+Tarifgrenze, Folgemessungen und tatsächliche JSON-Roundtrips.
 
 Der einmalige Bootstrap läuft nur, solange `SaxTariffProvider.config.enabled`
 wahr ist. Nach dem Bootstrap akkumuliert `_accumulate_economics` aber AUCH
@@ -1796,6 +1819,13 @@ startet oder erneut an die globale Max-SOC-Sperre bindet. Das nächste
 reguläre Fenster bleibt möglich. Geänderte Uhrzeiten oder Monatsauswahlen
 verlängern diese Frist nicht. Ausschalten der Netzladung und Wechsel zum
 preisoptimierten Laden verwerfen den Nachweis und geben diese Sperre frei.
+Der Store schreibt aktive und inaktive Datensätze atomar und bestätigt sie
+durch Rücklesen. Der neueste nicht bestätigte Zustand bleibt für weitere
+Steuerzyklen und den Shutdown-Flush offen, auch wenn der RAM-Zustand bereits
+identisch ist. `FINAL_WRITE` übernimmt während des HA-Stopps; beim regulären
+Unload werden ausstehende Listener vom bisherigen Store-Besitzer entfernt.
+`tests/test_timed_discharge_write_failures.py` prüft beide Übergangsrichtungen,
+unveränderte Steuerzyklen, langsame Dateizugriffe und saubere Reloads.
 Die Preisplanung, Neutralpreiszone und Preis-Slot-Bindung nutzen weiterhin
 ihre eigene Logik und die bisherige Writer-Kadenz.
 
@@ -2241,6 +2271,9 @@ tests/
 │                                  Vorrang des zeitgesteuerten Ladens sowie der
 │                                  Bestätigungsdialog beim Konflikt der beiden netzladenden
 │                                  Automatiken (repairs.py)
+├── test_price_cycle_write_failures.py Echte Dateifehler, Wiederholung ohne Neuplanung,
+│                                  Restbudget nach Neustart, neue Snapshots während I/O
+│                                  sowie Shutdown/FINAL_WRITE und Reload-Besitzer
 ├── test_tariff.py                  Tarifmodell der Wirtschaftlichkeitsauswertung
 │                                  (REQ-ECONOMICS-TARIFFS): Festpreis, Grundpreis und acht
 │                                  Zeitfenster (halboffen, über Mitternacht, angrenzend,

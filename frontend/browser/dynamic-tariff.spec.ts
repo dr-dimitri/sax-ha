@@ -218,7 +218,7 @@ test("guided charging methods explain their effects and reveal relevant settings
       exact: true,
     })
     .click();
-  await expect(methods).toHaveCount(0);
+  await expect(settings.locator(".dynamic-charging-methods")).toBeHidden();
   await expect(settings.getByRole("status")).toHaveText(
     english ? "Applying charging method …" : "Ladeweise wird übernommen …",
   );

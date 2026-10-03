@@ -214,6 +214,11 @@ async function mount(
       listeners.get("disconnected")?.forEach((callback) => callback());
       await flush();
     },
+    async reconnect() {
+      connection.connected = true;
+      listeners.get("ready")?.forEach((callback) => callback());
+      await flush();
+    },
     async update(key: string, state: string) {
       const id = sample.metadata.find((item) => item.key === key)?.entity_id!;
       hass.value = {
@@ -391,6 +396,305 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fixture.callWS).not.toHaveBeenCalled();
   });
+  it.each(
+    ["time_of_use", "dynamic"].flatMap((type) =>
+      [true, false].flatMap((initial) =>
+        [false, true].map((editor) => ({ type, initial, editor })),
+      ),
+    ),
+  )(
+    "follows native master changes for $type, initial=$initial, editor=$editor",
+    async ({ type, initial, editor }) => {
+      const fixture = await mount({ type, enabled: initial });
+      const key =
+        type === "time_of_use"
+          ? "timed_charge_enabled"
+          : "price_charge_enabled";
+      await fixture.update(key, initial ? "on" : "off");
+      const section = fixture.root.querySelector(".electricity-charging")!;
+      if (editor) await click(section, "Bearbeiten");
+      fixture.stored.automation_enabled = !initial;
+      const revision = fixture.stored.revision;
+      fixture.callWS.mockClear();
+      await fixture.update(key, initial ? "off" : "on");
+      const master = fixture.root.querySelector<HTMLInputElement>(
+        ".electricity-master input",
+      )!;
+      expect(master.checked).toBe(!initial);
+      expect(writes(fixture)).toHaveLength(0);
+      expect(fixture.stored.revision).toBe(revision);
+      if (editor) await click(section, "Fertig");
+      expect(
+        fixture.root.querySelector(".electricity-activation")?.textContent,
+      ).toContain(initial ? "Ausgeschaltet:" : "Eingeschaltet:");
+      master.click();
+      await flush();
+      expect(writes(fixture)).toHaveLength(1);
+      expect(writes(fixture)[0]![0].automation_enabled).toBe(initial);
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+  it("keeps a confirmed write when late native telemetry disagrees", async () => {
+    const fixture = await mount();
+    await fixture.update("timed_charge_enabled", "off");
+    const master = fixture.root.querySelector<HTMLInputElement>(
+      ".electricity-master input",
+    )!;
+    master.click();
+    await flush();
+    expect(master.checked).toBe(true);
+    await fixture.update("timed_charge_enabled", "on");
+    await fixture.update("timed_charge_enabled", "off");
+    expect(master.checked).toBe(true);
+    expect(writes(fixture)).toHaveLength(1);
+    expect(fixture.stored.automation_enabled).toBe(true);
+  });
+  it.each([false, true])(
+    "refreshes native changes after a pending write, failed=%s",
+    async (failed) => {
+      const fixture = await mount();
+      await fixture.update("timed_charge_enabled", "off");
+      const master = fixture.root.querySelector<HTMLInputElement>(
+        ".electricity-master input",
+      )!;
+      const confirmed = {
+        ...structuredClone(fixture.stored),
+        automation_enabled: true,
+      };
+      fixture.callWS.mockClear();
+      let resolve!: (value: TariffProfile) => void;
+      let reject!: (cause: unknown) => void;
+      fixture.callWS.mockImplementationOnce(
+        () =>
+          new Promise<TariffProfile>((done, fail) => {
+            resolve = done;
+            reject = fail;
+          }),
+      );
+      master.click();
+      await flush();
+      expect(master.disabled).toBe(true);
+      expect(master.checked).toBe(false);
+      await fixture.update("timed_charge_enabled", "on");
+      await fixture.update("timed_charge_enabled", "off");
+      master.click();
+      expect(writes(fixture)).toHaveLength(1);
+      // The write response predates the externally accepted off state.
+      if (failed) reject(new Error("write failed"));
+      else resolve(confirmed);
+      await flush();
+      expect(master.checked).toBe(false);
+      expect(master.disabled).toBe(false);
+      expect(
+        fixture.callWS.mock.calls.filter(
+          ([request]) => request.type === "sax_power/dashboard/tariff/get",
+        ).length,
+      ).toBe(1);
+      if (failed)
+        expect(
+          fixture.root.querySelector(".electricity-activation [role=alert]")
+            ?.textContent,
+        ).toContain("fehlgeschlagen");
+    },
+  );
+  it("refreshes the new tariff's master when it changes during a tariff switch", async () => {
+    const fixture = await mount();
+    await fixture.update("price_charge_enabled", "off");
+    const confirmed = {
+      ...structuredClone(fixture.stored),
+      tariff_type: "dynamic",
+      automation_enabled: true,
+    };
+    let resolve!: (value: TariffProfile) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((done) => {
+          resolve = done;
+        }),
+    );
+    const write = fixture.dashboard.configureTariff({
+      revision: fixture.stored.revision,
+      tariff_type: "dynamic",
+    });
+    fixture.stored.tariff_type = "dynamic";
+    // Both updates arrive before the old write response is published.
+    const on = fixture.update("price_charge_enabled", "on");
+    const off = fixture.update("price_charge_enabled", "off");
+    await Promise.all([on, off]);
+    resolve(confirmed);
+    await write;
+    await flush();
+    expect(fixture.dashboard.tariff.value?.tariff_type).toBe("dynamic");
+    expect(fixture.dashboard.tariff.value?.automation_enabled).toBe(false);
+    expect(writes(fixture)).toHaveLength(1);
+  });
+  it.each([false, true])(
+    "keeps the master pending until its follow-up read settles, failed=%s",
+    async (failed) => {
+      const fixture = await mount();
+      await fixture.update("timed_charge_enabled", "off");
+      const previous = structuredClone(fixture.stored);
+      const confirmed = { ...previous, automation_enabled: true };
+      let confirm!: (value: TariffProfile) => void;
+      let refresh!: (value: TariffProfile) => void;
+      let rejectRefresh!: (cause: unknown) => void;
+      fixture.callWS.mockImplementationOnce(
+        () =>
+          new Promise<TariffProfile>((done) => {
+            confirm = done;
+          }),
+      );
+      const master = fixture.root.querySelector<HTMLInputElement>(
+        ".electricity-master input",
+      )!;
+      master.click();
+      await flush();
+      await fixture.update("timed_charge_enabled", "on");
+      await fixture.update("timed_charge_enabled", "off");
+      fixture.callWS.mockImplementationOnce(
+        () =>
+          new Promise<TariffProfile>((done, fail) => {
+            refresh = done;
+            rejectRefresh = fail;
+          }),
+      );
+      confirm(confirmed);
+      await flush();
+      expect(master.disabled).toBe(true);
+      expect(master.checked).toBe(false);
+      expect(
+        fixture.root
+          .querySelector(".electricity-master")
+          ?.getAttribute("aria-busy"),
+      ).toBe("true");
+      master.click();
+      expect(writes(fixture)).toHaveLength(1);
+      if (failed) rejectRefresh(new Error("refresh failed"));
+      else refresh(previous);
+      await flush();
+      expect(master.disabled).toBe(false);
+      expect(master.checked).toBe(false);
+      expect(writes(fixture)).toHaveLength(1);
+      if (failed)
+        expect(
+          fixture.root.querySelector(".electricity-activation [role=alert]")
+            ?.textContent,
+        ).toContain("fehlgeschlagen");
+    },
+  );
+  it("rechecks an external change arriving during the follow-up read", async () => {
+    const fixture = await mount();
+    await fixture.update("timed_charge_enabled", "off");
+    const stale = structuredClone(fixture.stored);
+    let confirm!: (value: TariffProfile) => void;
+    let refresh!: (value: TariffProfile) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((done) => {
+          confirm = done;
+        }),
+    );
+    const master = fixture.root.querySelector<HTMLInputElement>(
+      ".electricity-master input",
+    )!;
+    master.click();
+    await flush();
+    await fixture.update("timed_charge_enabled", "on");
+    await fixture.update("timed_charge_enabled", "off");
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((done) => {
+          refresh = done;
+        }),
+    );
+    confirm({ ...stale, automation_enabled: true });
+    await flush();
+    fixture.stored.automation_enabled = true;
+    await fixture.update("timed_charge_enabled", "on");
+    expect(master.disabled).toBe(true);
+    refresh(stale);
+    await flush();
+    expect(master.disabled).toBe(false);
+    expect(master.checked).toBe(true);
+    expect(writes(fixture)).toHaveLength(1);
+  });
+  it("does not refresh an old connection after a delayed write finishes", async () => {
+    const fixture = await mount();
+    await fixture.update("timed_charge_enabled", "off");
+    const confirmed = {
+      ...structuredClone(fixture.stored),
+      automation_enabled: true,
+    };
+    let resolve!: (value: TariffProfile) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((done) => {
+          resolve = done;
+        }),
+    );
+    fixture.root
+      .querySelector<HTMLInputElement>(".electricity-master input")!
+      .click();
+    await flush();
+    await fixture.update("timed_charge_enabled", "on");
+    await fixture.disconnect();
+    fixture.callWS.mockClear();
+    resolve(confirmed);
+    await flush();
+    expect(fixture.callWS).not.toHaveBeenCalled();
+    expect(fixture.dashboard.tariff.value).toBeNull();
+    await fixture.reconnect();
+    expect(fixture.dashboard.tariff.value?.automation_enabled).toBe(false);
+    expect(
+      fixture.root.querySelector<HTMLInputElement>(".electricity-master input")
+        ?.checked,
+    ).toBe(false);
+  });
+  it("ignores a delayed profile read superseded by a second native change", async () => {
+    const fixture = await mount();
+    await fixture.update("timed_charge_enabled", "off");
+    const stale = {
+      ...structuredClone(fixture.stored),
+      automation_enabled: true,
+    };
+    let resolve!: (value: TariffProfile) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffProfile>((done) => {
+          resolve = done;
+        }),
+    );
+    fixture.stored.automation_enabled = true;
+    await fixture.update("timed_charge_enabled", "on");
+    fixture.stored.automation_enabled = false;
+    await fixture.update("timed_charge_enabled", "off");
+    resolve(stale);
+    await flush();
+    expect(
+      fixture.root.querySelector<HTMLInputElement>(".electricity-master input")
+        ?.checked,
+    ).toBe(false);
+    expect(writes(fixture)).toHaveLength(0);
+  });
+  it.each(["unknown", "unavailable", "rename"])(
+    "refreshes the native master after %s without inventing a state",
+    async (change) => {
+      const fixture = await mount();
+      await fixture.update("timed_charge_enabled", "off");
+      if (change !== "rename")
+        await fixture.update("timed_charge_enabled", change);
+      fixture.stored.automation_enabled = true;
+      if (change === "rename")
+        await fixture.rename("timed_charge_enabled", "switch.new_master", "on");
+      else await fixture.update("timed_charge_enabled", "on");
+      expect(
+        fixture.root.querySelector<HTMLInputElement>(
+          ".electricity-master input",
+        )?.checked,
+      ).toBe(true);
+      expect(writes(fixture)).toHaveLength(0);
+    },
+  );
   it("ignores a delayed tariff read after a confirmed configuration write", async () => {
     const fixture = await mount();
     let resolve!: (value: TariffProfile) => void;

@@ -3516,7 +3516,18 @@ requirement_vue_electricity_tariff:
     automation_enabled=false. Das Profil ist danach erreichbar und kann
     vervollständigt werden. Live-Änderungen anderer Clients und nativer Schalter
     werden übernommen; ältere Leseantworten überschreiben keine bestätigten
-    Schreibvorgänge. Die offene Ansicht aktualisiert Zeitmarkierung, Tagesgrenzen
+    Schreibvorgänge. Der gemeinsame Dashboard-Kontext beobachtet Entity-ID und
+    Zustand beider nativer Ladeschalter und bestätigt Änderungen durch einen
+    Tarifabruf, statt verspätete Telemetrie direkt zu bevorzugen. Treffen Änderungen
+    während eines Tarif-Schreibvorgangs ein, folgt nach dessen Erfolg oder Fehler
+    ein erneuter Abruf des aktuellen Softwarezustands; auch der während eines
+    Tarifwechsels erst künftig zuständige Schalter wird berücksichtigt. Bis zum
+    Abschluss dieses Abgleichs bleiben Fortschrittsanzeige und Schreibsperre aktiv;
+    weitere Zustandswechsel während des Abrufs werden erneut abgeglichen.
+    Ein fehlgeschlagener Folgeabruf erhält den zuletzt bestätigten Profilzustand
+    und zeigt den Aktionsfehler, statt eine überholte Schreibantwort freizugeben. Alte
+    Verbindungen dürfen diesen Folgeabruf nicht auslösen (Issue #271).
+    Die offene Ansicht aktualisiert Zeitmarkierung, Tagesgrenzen
     und Tarifzustand zusätzlich minütlich und räumt den Timer beim Verlassen ab.
     Ein extern geänderter Tariftyp schließt offene Editoren mit sichtbarem Hinweis,
     ohne unsichtbare Bediensperren zurückzulassen. Preisantworten müssen weiterhin
@@ -3578,6 +3589,11 @@ requirement_vue_electricity_tariff:
        Schreibvorgänge. Verzögerte oder fehlerhafte Hauptschalterantworten zeigen
        sofort den Fortschritt, blockieren Doppelklicks und bestätigen keinen
        erfundenen Zustand."
+    - "Komponenten- und Browsertests prüfen native Hauptschalteränderungen in beiden
+       Tarifen und Richtungen während verzögerter Schreibbestätigungen. Der neueste
+       Backendzustand gewinnt auch bei Tarifwechseln, synchron gebündelten
+       Zustandswechseln, verspäteten Reads, Schreibfehlern, Entity-Rename und
+       Verbindungswechseln; die Synchronisierung erzeugt keine Schaltbefehle."
     - "Backendtests halten den Geräte-Control-Lock belegt und weisen die sofortige
        Antwort auf reine Hauptschalteränderungen nach. Options, Revision und
        Anbieter bleiben unverändert; nach Freigabe greift der neueste Steuerstand."

@@ -1,6 +1,36 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
+import type { HomeAssistant } from "../src/types";
+
 const pageErrors = new WeakMap<Page, string[]>();
+
+async function prepareMasterTariff(
+  page: Page,
+  tariff: "time_of_use" | "dynamic",
+  enabled: boolean,
+  english: boolean,
+) {
+  const panel = page.locator("sax-power-vue-panel");
+  const master = panel.locator(".electricity-master input");
+  const mode = tariff === "dynamic" ? "dynamic" : "timed";
+  const tariffName =
+    tariff === "dynamic"
+      ? english
+        ? "Dynamic"
+        : "Dynamisch"
+      : english
+        ? "Time of use"
+        : "Zeitvariabel";
+  await panel.locator("nav a[href$='/allgemein']").click();
+  await page.locator(`#tariff-${mode}`).click();
+  if (!enabled) await page.locator("#tariff-off").click();
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await expect(panel.locator(".electricity-active strong")).toHaveText(
+    tariffName,
+  );
+  await expect(master).toBeChecked({ checked: enabled });
+  return { panel, master, mode, tariffName };
+}
 
 async function screenshot(page: Page, testInfo: TestInfo, name: string) {
   const path = testInfo.outputPath(`${name}.png`);
@@ -130,6 +160,158 @@ test("automatic grid charging acknowledges clicks immediately while HA confirms 
   ).toHaveCount(0);
   await expect(panel).toHaveAttribute("data-tariff-configure-requests", "4");
 });
+
+// REQ-VUE-ELECTRICITY-TARIFF: native HA changes must reach the master switch
+// before the periodic profile refresh, so its next click uses the current state.
+for (const tariff of ["time_of_use", "dynamic"] as const) {
+  for (const externalEnabled of [false, true]) {
+    test(`${tariff} master follows external ${externalEnabled ? "off-to-on" : "on-to-off"} changes and sends the inverse on its next click`, async ({
+      page,
+    }, testInfo) => {
+      const { panel, master, mode, tariffName } = await prepareMasterTariff(
+        page,
+        tariff,
+        !externalEnabled,
+        testInfo.project.name.endsWith("en"),
+      );
+      const confirmedAction = await page.locator("#actions").innerText();
+
+      await page
+        .locator(externalEnabled ? `#tariff-${mode}` : "#tariff-off")
+        .click();
+      await expect(master).toBeChecked({
+        checked: externalEnabled,
+        timeout: 2_000,
+      });
+      await expect(master).toBeEnabled();
+      await expect(panel.locator(".electricity-active strong")).toHaveText(
+        tariffName,
+      );
+      await expect(page.locator("#actions")).toHaveText(confirmedAction);
+
+      await master.click();
+      await expect(panel).toHaveAttribute(
+        "data-tariff-configure-requests",
+        "1",
+      );
+      await expect(page.locator("#actions")).toContainText(
+        `"automation_enabled":${!externalEnabled}`,
+      );
+      await expect(page.locator("#actions")).toContainText(
+        `"tariff_type":"${tariff}"`,
+      );
+      await expect(master).toBeChecked({ checked: !externalEnabled });
+      await expect(master).toBeEnabled();
+    });
+
+    // REQ-VUE-ENTITY-BINDING: external HA updates can arrive after the backend
+    // accepted a write but before its older WebSocket acknowledgement returns;
+    // the confirming read also needs pending feedback and duplicate prevention.
+    test(`${tariff} master preserves newer external ${externalEnabled ? "on" : "off"} state across a delayed write acknowledgement`, async ({
+      page,
+    }, testInfo) => {
+      const { panel, master, mode } = await prepareMasterTariff(
+        page,
+        tariff,
+        externalEnabled,
+        testInfo.project.name.endsWith("en"),
+      );
+      await panel.evaluate((element) => {
+        const host = element as HTMLElement & {
+          hass: HomeAssistant;
+          releaseTariffConfirmation?: () => void;
+          releaseTariffRefresh?: () => void;
+        };
+        const original = host.hass.callWS!;
+        let holdTariffRefresh = false;
+        host.hass = {
+          ...host.hass,
+          callWS: async <T>(
+            request: Readonly<Record<string, unknown>>,
+          ): Promise<T> => {
+            const response = await original<T>(request);
+            if (request.type === "sax_power/dashboard/tariff/configure") {
+              await new Promise<void>((resolve) => {
+                host.releaseTariffConfirmation = resolve;
+                host.dataset.heldTariffConfirmation = "true";
+              });
+              holdTariffRefresh = true;
+            } else if (
+              request.type === "sax_power/dashboard/tariff/get" &&
+              holdTariffRefresh
+            ) {
+              holdTariffRefresh = false;
+              await new Promise<void>((resolve) => {
+                host.releaseTariffRefresh = resolve;
+                host.dataset.heldTariffRefresh = "true";
+              });
+            }
+            return response;
+          },
+        };
+      });
+
+      await master.click();
+      await expect(panel).toHaveAttribute(
+        "data-held-tariff-confirmation",
+        "true",
+      );
+      await expect(master).toBeDisabled();
+      await expect(page.locator("#actions")).toContainText(
+        `"automation_enabled":${!externalEnabled}`,
+      );
+      await page
+        .locator(externalEnabled ? `#tariff-${mode}` : "#tariff-off")
+        .click();
+      await panel.evaluate((element) => {
+        const host = element as HTMLElement & {
+          releaseTariffConfirmation?: () => void;
+        };
+        host.releaseTariffConfirmation!();
+        delete host.releaseTariffConfirmation;
+      });
+
+      await expect(panel).toHaveAttribute("data-held-tariff-refresh", "true");
+      await expect(master).toBeDisabled();
+      await expect(panel.locator(".electricity-master")).toHaveAttribute(
+        "aria-busy",
+        "true",
+      );
+      await master.click({ force: true });
+      await expect(panel).toHaveAttribute(
+        "data-tariff-configure-requests",
+        "1",
+      );
+      await panel.evaluate((element) => {
+        const host = element as HTMLElement & {
+          releaseTariffRefresh?: () => void;
+        };
+        host.releaseTariffRefresh!();
+        delete host.releaseTariffRefresh;
+      });
+
+      await expect(master).toBeEnabled();
+      await expect(master).toBeChecked({
+        checked: externalEnabled,
+        timeout: 2_000,
+      });
+      await expect(panel).toHaveAttribute(
+        "data-tariff-configure-requests",
+        "1",
+      );
+      await master.click();
+      await expect(panel).toHaveAttribute(
+        "data-tariff-configure-requests",
+        "2",
+      );
+      await expect(page.locator("#actions")).toContainText(
+        `"automation_enabled":${!externalEnabled}`,
+      );
+      await expect(master).toBeChecked({ checked: !externalEnabled });
+      await expect(master).toBeEnabled();
+    });
+  }
+}
 
 // REQ-VUE-ELECTRICITY-TARIFF: understandable choices expose only relevant
 // parameters, and both the selected method and saved values belong to HA.

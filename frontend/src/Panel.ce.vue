@@ -63,8 +63,6 @@ watch(
         attrs.price_sensor_entity_id,
       ]);
     },
-    () => dashboard.entity("switch", "timed_charge_enabled")?.state?.state,
-    () => dashboard.entity("switch", "price_charge_enabled")?.state?.state,
   ],
   ([ready]) => {
     if (ready) void dashboard.loadTariff().catch(() => {});

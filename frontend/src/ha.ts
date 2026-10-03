@@ -577,6 +577,7 @@ export function useSaxDashboard(
   let tariffWrite: {
     generation: number;
     promise: Promise<TariffProfile>;
+    refreshAutomation: boolean;
   } | null = null;
 
   let tariffRead: {
@@ -592,22 +593,72 @@ export function useSaxDashboard(
     const entryId = getEntryId();
     if (!connected.value) throw { code: "disconnected" };
     if (!ready.value || !hass?.callWS || !entryId) throw { code: "forbidden" };
+    const callWS = hass.callWS.bind(hass);
     const current = generation;
     if (!draft && tariffWrite?.generation === current)
       return tariffWrite.promise;
     const request = ++tariffReadSequence;
-    const response = hass.callWS<TariffProfile>({
+    const response = callWS<TariffProfile>({
       type: `sax_power/dashboard/tariff/${draft ? ("tariff_type" in draft ? "configure" : "save") : "get"}`,
       entry_id: entryId,
       ...draft,
     });
-    const operation: Promise<TariffProfile> =
-      (async (): Promise<TariffProfile> => {
-        const profile = await response;
-        if (current !== generation || !connected.value)
-          throw { code: "disconnected" };
-        if (!profile || typeof profile.revision !== "string")
-          throw { code: "failed" };
+    function checkedProfile(profile: TariffProfile): TariffProfile {
+      if (current !== generation || !connected.value)
+        throw { code: "disconnected" };
+      if (!profile || typeof profile.revision !== "string")
+        throw { code: "failed" };
+      return profile;
+    }
+    function automationChanged(): boolean {
+      return (
+        tariffWrite?.promise === operation &&
+        tariffWrite.refreshAutomation &&
+        current === generation &&
+        connected.value &&
+        ready.value
+      );
+    }
+    async function refreshAutomation(
+      profile?: TariffProfile,
+    ): Promise<TariffProfile | undefined> {
+      // REQ-VUE-ELECTRICITY-TARIFF: hold write completion until changes newer
+      // than its response snapshot are confirmed, including changes during GET.
+      while (automationChanged()) {
+        tariffWrite!.refreshAutomation = false;
+        tariffReadSequence++;
+        profile = checkedProfile(
+          await callWS<TariffProfile>({
+            type: "sax_power/dashboard/tariff/get",
+            entry_id: entryId,
+          }),
+        );
+      }
+      return profile;
+    }
+    let operation!: Promise<TariffProfile>;
+    operation = (async (): Promise<TariffProfile> => {
+      try {
+        let profile: TariffProfile;
+        try {
+          profile = checkedProfile(await response);
+        } catch (cause) {
+          if (draft && automationChanged()) {
+            try {
+              let latest: TariffProfile | undefined;
+              do {
+                latest = await refreshAutomation(latest);
+              } while (automationChanged());
+              if (latest) {
+                tariffReadSequence++;
+                tariff.value = checkedProfile(latest);
+              }
+            } catch {
+              // Keep the original write failure and the last confirmed profile.
+            }
+          }
+          throw cause;
+        }
         // REQ-VUE-ELECTRICITY-TARIFF: a delayed read must never undo a confirmed write.
         if (!draft && request !== tariffReadSequence) {
           if (tariffWrite?.generation === current) return tariffWrite.promise;
@@ -618,24 +669,53 @@ export function useSaxDashboard(
             return tariffRead.promise;
           return tariff.value ?? profile;
         }
-        if (draft) tariffReadSequence++;
+        if (draft) {
+          while (automationChanged()) {
+            profile = checkedProfile((await refreshAutomation(profile))!);
+          }
+          tariffReadSequence++;
+        }
         tariff.value = profile;
         return profile;
-      })();
-    if (draft) tariffWrite = { generation: current, promise: operation };
+      } finally {
+        if (tariffWrite?.promise === operation) tariffWrite = null;
+        if (tariffRead?.promise === operation) tariffRead = null;
+      }
+    })();
+    if (draft)
+      tariffWrite = {
+        generation: current,
+        promise: operation,
+        refreshAutomation: false,
+      };
     else
       tariffRead = {
         generation: current,
         sequence: request,
         promise: operation,
       };
-    try {
-      return await operation;
-    } finally {
-      if (tariffWrite?.promise === operation) tariffWrite = null;
-      if (tariffRead?.promise === operation) tariffRead = null;
-    }
+    return operation;
   }
+
+  watch(
+    [
+      () => entity("switch", "timed_charge_enabled")?.metadata.entity_id,
+      () => entity("switch", "timed_charge_enabled")?.state?.state,
+      () => entity("switch", "price_charge_enabled")?.metadata.entity_id,
+      () => entity("switch", "price_charge_enabled")?.state?.state,
+    ],
+    () => {
+      if (!connected.value || !ready.value) return;
+      if (tariffWrite?.generation === generation) {
+        tariffWrite.refreshAutomation = true;
+      } else if (tariff.value) {
+        // REQ-VUE-ELECTRICITY-TARIFF: HA telemetry can arrive after our own
+        // acknowledgement; confirm with the backend instead of undoing it.
+        void tariffRequest().catch(() => {});
+      }
+    },
+    { flush: "sync" },
+  );
 
   async function loadTariffSeries(
     day: "today" | "tomorrow",

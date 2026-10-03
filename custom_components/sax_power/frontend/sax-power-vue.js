@@ -3188,32 +3188,71 @@ function oo(e, t) {
 		let o = e(), s = t();
 		if (!a.value) throw { code: "disconnected" };
 		if (!i.value || !o?.callWS || !s) throw { code: "forbidden" };
-		let c = f;
-		if (!n && y?.generation === c) return y.promise;
-		let l = ++v, u = o.callWS({
+		let c = o.callWS.bind(o), l = f;
+		if (!n && y?.generation === l) return y.promise;
+		let u = ++v, d = c({
 			type: `sax_power/dashboard/tariff/${n ? "tariff_type" in n ? "configure" : "save" : "get"}`,
 			entry_id: s,
 			...n
-		}), d = (async () => {
-			let e = await u;
-			if (c !== f || !a.value) throw { code: "disconnected" };
+		});
+		function p(e) {
+			if (l !== f || !a.value) throw { code: "disconnected" };
 			if (!e || typeof e.revision != "string") throw { code: "failed" };
-			return !n && l !== v ? y?.generation === c ? y.promise : b?.generation === c && b.sequence !== l ? b.promise : r.value ?? e : (n && v++, r.value = e, e);
-		})();
-		n ? y = {
-			generation: c,
-			promise: d
-		} : b = {
-			generation: c,
-			sequence: l,
-			promise: d
-		};
-		try {
-			return await d;
-		} finally {
-			y?.promise === d && (y = null), b?.promise === d && (b = null);
+			return e;
 		}
+		function m() {
+			return y?.promise === g && y.refreshAutomation && l === f && a.value && i.value;
+		}
+		async function h(e) {
+			for (; m();) y.refreshAutomation = !1, v++, e = p(await c({
+				type: "sax_power/dashboard/tariff/get",
+				entry_id: s
+			}));
+			return e;
+		}
+		let g;
+		return g = (async () => {
+			try {
+				let e;
+				try {
+					e = p(await d);
+				} catch (e) {
+					if (n && m()) try {
+						let e;
+						do
+							e = await h(e);
+						while (m());
+						e && (v++, r.value = p(e));
+					} catch {}
+					throw e;
+				}
+				if (!n && u !== v) return y?.generation === l ? y.promise : b?.generation === l && b.sequence !== u ? b.promise : r.value ?? e;
+				if (n) {
+					for (; m();) e = p(await h(e));
+					v++;
+				}
+				return r.value = e, e;
+			} finally {
+				y?.promise === g && (y = null), b?.promise === g && (b = null);
+			}
+		})(), n ? y = {
+			generation: l,
+			promise: g,
+			refreshAutomation: !1
+		} : b = {
+			generation: l,
+			sequence: u,
+			promise: g
+		}, g;
 	}
+	U([
+		() => h("switch", "timed_charge_enabled")?.metadata.entity_id,
+		() => h("switch", "timed_charge_enabled")?.state?.state,
+		() => h("switch", "price_charge_enabled")?.metadata.entity_id,
+		() => h("switch", "price_charge_enabled")?.state?.state
+	], () => {
+		a.value && i.value && (y?.generation === f ? y.refreshAutomation = !0 : r.value && x().catch(() => {}));
+	}, { flush: "sync" });
 	async function S(n) {
 		let r = e(), o = t();
 		if (!a.value) throw { code: "disconnected" };
@@ -7178,21 +7217,16 @@ var Il = ["aria-busy"], Ll = {
 		let t = e, n = ka(), r = oo(() => t.hass, () => t.panel?.config?.entry_id);
 		On(no, r);
 		let i = Q(() => t.hass?.language.toLowerCase().startsWith("de") ? "de" : "en"), a = Q(() => eo[i.value]), o = Q(() => !t.hass?.kioskMode && (t.narrow || t.hass?.dockedSidebar === "always_hidden")), s = Q(() => `/${t.panel?.url_path || "sax-power-vue"}`), c = /* @__PURE__ */ V(t.route?.path ?? window.location.pathname), l = Qa, u = Q(() => $a(c.value, s.value)), d = Q(() => ["dynamisches-laden", "ladeautomatik"].includes(u.value) ? "stromtarif" : u.value);
-		U([
-			() => r.ready.value,
-			() => {
-				let e = r.entity("sensor", "economics_current_import_price")?.state?.attributes ?? {};
-				return JSON.stringify([
-					e.tariff_type,
-					e.base_price_eur_kwh,
-					e.feed_in_price_eur_kwh,
-					e.windows,
-					e.price_sensor_entity_id
-				]);
-			},
-			() => r.entity("switch", "timed_charge_enabled")?.state?.state,
-			() => r.entity("switch", "price_charge_enabled")?.state?.state
-		], ([e]) => {
+		U([() => r.ready.value, () => {
+			let e = r.entity("sensor", "economics_current_import_price")?.state?.attributes ?? {};
+			return JSON.stringify([
+				e.tariff_type,
+				e.base_price_eur_kwh,
+				e.feed_in_price_eur_kwh,
+				e.windows,
+				e.price_sensor_entity_id
+			]);
+		}], ([e]) => {
 			e && r.loadTariff().catch(() => {});
 		}, { immediate: !0 });
 		let f = Q(() => Qa.find((e) => e.path === d.value)), p = /* @__PURE__ */ V();

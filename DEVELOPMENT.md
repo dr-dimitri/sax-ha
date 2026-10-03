@@ -275,6 +275,17 @@ Dieser Weg wartet nicht auf `_charge_control_lock`, verändert keine
 Tarif-Options und startet keine Preisquelle neu. Der bestehende gemeinsame
 Worker setzt den jeweils aktuellen Steuerstand unter dem Lock um;
 Geräteaktivität wird weiterhin erst nach Gerätebestätigung gemeldet.
+Der gemeinsame Kontext in `ha.ts` beobachtet die Entity-IDs und Zustände beider
+nativer Ladeschalter und bestätigt Änderungen über den Tarifabruf. Änderungen
+während einer laufenden Schreibantwort werden nach deren Erfolg oder Fehler
+nochmals abgefragt. So kann eine ältere Antwort einen neueren externen Zustand
+auch während eines Tarifwechsels nicht bis zum Minutenabruf verdecken. Verspätete
+HA-Telemetrie wird ebenfalls gegen das Backend geprüft; sie nimmt eine eigene
+Bestätigung nicht direkt zurück. Der Hauptschalter bleibt während des nötigen
+Folgeabrufs ausstehend und gesperrt; bei dessen Fehler bleibt das zuletzt
+bestätigte Profil erhalten. Komponenten- und Browserregressionen in
+`frontend/tests/electricity-tariff.test.ts` und
+`frontend/browser/dynamic-tariff.spec.ts` sichern diesen Ablauf ab (Issue #271).
 Auch tatsächliche Tarif-/Quellenwechsel werden ohne Geräte-Lock atomar angenommen.
 Eine Quellenrevision sperrt alte Ladesollwerte; der gemeinsame Worker übernimmt
 den sicheren Geräteübergang nach laufenden Quittierungssequenzen unter den

@@ -155,13 +155,13 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
     },
   );
 
-  it("preserves the grid-serving pause order, forecast and all month names without an extra settings card", async () => {
+  it("places manual charging before the grid-serving pause and preserves all month names", async () => {
     const { root, callService } = await mount(GridServingView);
     expect(
       [...root.querySelectorAll(".charging-view h2")].map(
         (item) => item.textContent,
       ),
-    ).toEqual(["Ladepause", "Aktive Monate"]);
+    ).toEqual(["Manuelles Netzladen", "Ladepause", "Aktive Monate"]);
     expect(names(root)).toEqual([
       "Netzdienliches Laden aktiv",
       "PV-Prognose morgen",
@@ -182,7 +182,8 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
     ]);
     expect(root.textContent).toContain("24,3 kWh");
     expect(root.textContent).not.toContain("Zeitfenster");
-    expect(root.querySelectorAll('input[type="number"]')).toHaveLength(1);
+    expect(root.querySelectorAll('input[type="number"]')).toHaveLength(2);
+    expect(root.querySelector(".manual-grid-charge")).not.toBeNull();
     expect(callService).not.toHaveBeenCalled();
   });
 
@@ -493,18 +494,29 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
   });
 
   it.each([GridServingView])(
-    "omits absent entities and empty cards while distinguishing initial loading (%s)",
+    "keeps manual controls visible but disabled while entities load or are absent (%s)",
     async (view) => {
       const { root, emit } = await mount(view, {
         keys: [],
         deferMetadata: true,
       });
-      expect(root.textContent).toBe("Die Entitäten werden geladen …");
-      await emit();
-      expect(root.textContent).toBe(
-        "Für diese Ansicht sind keine Entitäten verfügbar.",
+      expect(root.querySelector(".charging-view__status")?.textContent).toBe(
+        "Die Entitäten werden geladen …",
       );
-      expect(root.querySelectorAll("section, form")).toHaveLength(0);
+      expect(
+        root.querySelector(".manual-grid-charge [role=status]")?.textContent,
+      ).toBe("Die Entitäten werden geladen …");
+      await emit();
+      expect(
+        root.querySelector(".manual-grid-charge [role=status]")?.textContent,
+      ).toBe("Die Speichersteuerung ist nicht verfügbar.");
+      expect(root.querySelector(".charging-view__status")).toBeNull();
+      expect(root.querySelectorAll(".charging-view__card")).toHaveLength(0);
+      expect(root.querySelectorAll(".manual-grid-charge")).toHaveLength(1);
+      for (const button of root.querySelectorAll<HTMLButtonElement>(
+        ".manual-grid-charge button",
+      ))
+        expect(button.disabled).toBe(true);
     },
   );
 
@@ -516,7 +528,7 @@ describe("REQ-VUE-CHARGING: grid-serving charging view", () => {
       [...root.querySelectorAll(".charging-view h2")].map(
         (item) => item.textContent,
       ),
-    ).toEqual(["Charging pause", "Active months"]);
+    ).toEqual(["Manual grid charging", "Charging pause", "Active months"]);
     expect(
       root.querySelectorAll('.time-window-control input[type="text"]'),
     ).toHaveLength(2);

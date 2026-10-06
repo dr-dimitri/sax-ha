@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ChargingLayout from "./ChargingLayout.vue";
 import GridServingForecastSource from "../components/GridServingForecastSource.vue";
+import ManualGridCharge from "../components/ManualGridCharge.vue";
 import type { HomeAssistant } from "../types";
 
 defineProps<{ hass?: HomeAssistant }>();
@@ -33,6 +34,9 @@ const cards = [
 
 <template>
   <ChargingLayout switch-key="grid_serving_enabled" :cards="cards">
+    <template #manual-charge>
+      <ManualGridCharge />
+    </template>
     <template #pause-settings>
       <GridServingForecastSource :hass="hass" />
     </template>

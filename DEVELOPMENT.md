@@ -129,7 +129,7 @@ keine Vue-/Vorschaukennzeichnung.
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
 | `ElectricityTariffView.vue` | `REQ-VUE-ELECTRICITY-TARIFF` | Gemeinsame Tarifwahl, Tagespreiskurve und kompakt bearbeitbare Tarif-/Ladeeinstellungen für zeitvariablen und dynamischen Tarif. |
-| `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
+| `GridServingView.vue` | `REQ-VUE-CHARGING` | Manuelles Netzladen, Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
 Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
@@ -142,6 +142,16 @@ Entity-Schlüssel und bestehende Steuerparameter bleiben erhalten.
 `ChargingLayout.vue` stellt die Karten für netzdienliches Laden dar und filtert
 leere Karten. `EntityControl` und `EntityValue` werden mit der allgemeinen
 Ansicht geteilt; `TimeWindowControl` bearbeitet die Ladepause.
+`ManualGridCharge.vue` bietet direkt nach dem Hauptschalter zwei Aktionen zum
+sofortigen manuellen Starten und Stoppen. Die positive Leistungseingabe
+(vorbelegt mit 1000 W) wird validiert und als negativer Sollwert an den
+bestehenden `start_grid_charge`-Service gesendet. Eine gültige Referenzleistung
+desselben Geräts begrenzt den Eingabebereich zusätzlich. `stop_grid_charge`
+bleibt auch bei ungültigem Leistungsentwurf bedienbar. Der gemeinsame HA-Kontext
+leitet Gerät und Befugnis aus `storage_switch` ab und teilt dessen
+Aktionssperre, bis der physische Service die Gerätequittierung erhalten hat.
+Bestätigte Telemetrie wird unverändert angezeigt; nach dem manuellen Stopp
+dürfen aktive Automatiken wieder übernehmen (`REQ-MANUAL-GRID-CHARGE`).
 [`components/MonthSelection.vue`](frontend/src/components/MonthSelection.vue)
 kapselt Zusammenfassung und Quartalsauswahl der Monatsgruppen für Netzladung
 und Ladepause. Im Stromtarif entfernen die Bedienkomponenten den Präfix
@@ -300,7 +310,7 @@ Die Reaktionsprüfung umfasst alle Aktionswege, nicht nur sichtbare Schalter:
 | Automatische Netzladung im Tarifdashboard | Sofortige WebSocket-Antwort auch bei belegtem Geräte-Lock | `tests/test_dashboard_tariff_response.py` |
 | Verbrauchsplanung und Preisplan aktualisieren | Sofortige Bestätigung; Geräteauswertung nachgelagert | `tests/test_bridge_switch.py`, `tests/test_control_response.py`, `tests/test_vue_dashboard_e2e.py` |
 | Tarif-/Quellenwechsel und vollständige Profilübernahme | Sofortige Softwarebestätigung; Quellenrevision sperrt alte Ladesollwerte, Worker übernimmt den sicheren Geräteübergang | `tests/test_dashboard_tariff_transition_response.py`, `frontend/browser/dynamic-tariff.spec.ts` |
-| Speicher Ein/Aus, manuelles Laden Start/Stop | Sofortiger ausstehender Zustand; Erfolg erst nach Gerätequittierung | `frontend/tests/controls.test.ts`, `tests/test_coordinator.py`, `tests/test_manual_stop_response.py` |
+| Speicher Ein/Aus, manuelles Laden Start/Stop | Sofortiger ausstehender Zustand; Erfolg erst nach Gerätequittierung | `frontend/tests/controls.test.ts`, `frontend/tests/manual-grid-charge.test.ts`, `frontend/browser/manual-grid-charge.spec.ts`, `tests/test_coordinator.py`, `tests/test_manual_stop_response.py` |
 | Bilanzneustart und Statistikabruf | Asynchrone lokale Speicherung bzw. Recorder-Lesen, kein Warten auf Geräte-Lock | `tests/test_economics_persistence.py`, `frontend/tests/savings.test.ts` |
 | Navigation, Details, Abbrechen, Diagrammtag und Monatsübersicht | Lokale UI-Aktion; nachgeladene Preise zeigen Fortschritt, ältere Antworten werden verworfen | `frontend/tests/panel.test.ts`, `frontend/tests/electricity-tariff.test.ts` |
 

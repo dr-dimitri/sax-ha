@@ -1345,7 +1345,7 @@ requirement_manual_grid_charge:
   description: >
     Die Aktionen sax_power.start_grid_charge und
     sax_power.stop_grid_charge stellen eine nicht persistierte manuelle
-    Netzladung für Automationen bereit. start_grid_charge verlangt device_id
+    Netzladung für Automationen und das Dashboard bereit. start_grid_charge verlangt device_id
     und einen ganzzahligen, strikt negativen Watt-Sollwert von -32768 bis -1.
     Boolesche Werte, nicht ganzzahlige Werte, 0, positive Werte und Werte
     außerhalb dieses Gerätegrenzbereichs werden vor jedem Modbus-Write als
@@ -3049,7 +3049,28 @@ requirement_vue_charging:
     nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
     aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
 
-    Netzdienliches Laden beginnt mit switch.grid_serving_enabled. Die Karte
+    Netzdienliches Laden beginnt mit switch.grid_serving_enabled. Danach bietet
+    die Karte Manuelles Netzladen die Schaltflächen Netzladen aktivieren und
+    Netzladen abschalten über die vorhandenen physischen Services
+    start_grid_charge und stop_grid_charge (REQ-MANUAL-GRID-CHARGE).
+    Die sichtbare Ladeleistung beginnt bei 1000 W und bleibt als lokaler
+    Entwurf editierbar. Start akzeptiert nur ganze positive Wattwerte von
+    1 bis 32768 und sendet deren negatives Vorzeichen. Eine verfügbare,
+    gültige ic_max_power_reference desselben Geräts begrenzt den Eingabebereich
+    zusätzlich. Stop benötigt keine gültige Leistungseingabe.
+    Gerätezuordnung und Kontrollrechte stammen aus der aufgelösten
+    storage_switch-Entity. Fehlende Rechte, Entitäten oder Verbindung sperren
+    beide Aktionen. Beide Buttons und der Speicherschalter teilen die
+    ausstehende Aktion bis zur Gerätequittierung und verhindern konkurrierende
+    Aufrufe. Zugängliche Fortschritts- und Fehlerhinweise erscheinen sofort;
+    bei Fehlern bleibt der Leistungsentwurf erhalten. Geräteaktivität wird
+    ausschließlich aus bestätigten HA-Zuständen angezeigt. Mount, Navigation
+    und Wiederverbindung starten keine Netzladung. Ein Hinweis erklärt den
+    Vorrang der Max-SOC-Grenze und dass aktive Ladeautomatiken nach dem
+    manuellen Stopp übernehmen können. Texte und Bedienung unterstützen
+    Deutsch, Englisch, mobile Ansichten sowie helle und dunkle HA-Themes.
+
+    Die Karte
     Ladepause enthält in dieser Reihenfolge time.grid_serving_start,
     time.grid_serving_end, sensor.grid_serving_forecast,
     number.grid_serving_forecast_threshold und sensor.grid_serving_pause_status.
@@ -3170,6 +3191,16 @@ requirement_vue_charging:
   acceptance_criteria:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
+    - "frontend/tests/manual-grid-charge.test.ts und
+       frontend/browser/manual-grid-charge.spec.ts prüfen manuelles Starten und
+       Stoppen über tatsächliche Geräte-Metadaten, gültige negative Sollwerte,
+       gemeinsame Sperre, verzögerte und fehlgeschlagene Antworten, erhaltene
+       Entwürfe, Kontrollrechte und bestätigte Telemetrie. Der Stop funktioniert
+       auch mit ungültigem Leistungsentwurf."
+    - "tests/test_manual_stop_response.py prüft manuelles Starten und Stoppen
+       über echte HA-Service-/WebSocket-Grenzen mit gehaltenem Geräte-Lock,
+       verzögerten Quittierungen beider Startphasen und Modbus-/Timeout-/
+       Fehlerantworten, ohne vorzeitig Geräteerfolg zu bestätigen."
     - "Die Ladeplanung erklärt geplante und laufende Aufträge, keinen Bedarf, Teilaufladung und fehlende Daten in DE/EN. Alle Zeiten und Zahlen stammen aus Sensorattributen; die Anzeige erzeugt keine eigenen Ladeaufträge."
     - "frontend/tests/tariff-plan.test.ts prüft die gemeinsame Tarifpreisfenster-Karte:
        Sie erscheint bei time_of_use in

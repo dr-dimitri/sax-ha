@@ -332,10 +332,10 @@ test("max SOC and solar forecast threshold remain usable with keyboard entry", a
     ["netzdienliches-laden", "grid_serving_forecast_threshold", "12"],
   ].entries()) {
     await panel.locator(`nav a[href$='/${path}']`).click();
-    const input = panel.getByRole("spinbutton");
     const form = panel.locator(".entity-control").filter({
       has: page.getByRole("spinbutton"),
     });
+    const input = form.getByRole("spinbutton");
     await typeNumber(input, value!);
     await expect(input).toHaveValue(value!);
     await form.getByRole("button").click();

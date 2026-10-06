@@ -349,6 +349,26 @@ async function callService(domain, service, data, target) {
     throw new Error("Simulated service failure");
   }
   if (domain === "sax_power") {
+    if (["start_grid_charge", "stop_grid_charge"].includes(service)) {
+      if (
+        data.device_id !== "demo-device" ||
+        (service === "start_grid_charge" &&
+          (!Number.isInteger(data.power) ||
+            data.power < -32768 ||
+            data.power >= 0))
+      )
+        throw new Error("Invalid demo manual charge command");
+      const entityId = "sensor.demo_charge_power";
+      states = {
+        ...states,
+        [entityId]: {
+          ...states[entityId],
+          state: service === "start_grid_charge" ? String(-data.power) : "0",
+        },
+      };
+      update();
+      return;
+    }
     const prefix =
       service === "set_timed_charge_window"
         ? "timed_charge"

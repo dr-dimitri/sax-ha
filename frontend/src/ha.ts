@@ -78,6 +78,13 @@ export interface DashboardEntity {
   error: string | null;
 }
 
+export interface DashboardManualGridCharge {
+  canControl: boolean;
+  pending: boolean;
+  error: string | null;
+  maxPower: number;
+}
+
 export interface SaxDashboard {
   language: ComputedRef<"de" | "en">;
   ready: Readonly<Ref<boolean>>;
@@ -85,6 +92,9 @@ export interface SaxDashboard {
   error: ComputedRef<string | null>;
   entity(domain: EntityDomain, key: string): DashboardEntity | null;
   perform(domain: EntityDomain, key: string, value: unknown): Promise<boolean>;
+  manualGridCharge: ComputedRef<DashboardManualGridCharge>;
+  startGridCharge(power: unknown): Promise<boolean>;
+  stopGridCharge(): Promise<boolean>;
   tariff: Readonly<Ref<TariffProfile | null>>;
   loadTariff(): Promise<TariffProfile>;
   saveTariff(draft: TariffDraft): Promise<TariffProfile>;
@@ -283,6 +293,12 @@ export function useSaxDashboard(
   const metadata = shallowRef<readonly DashboardEntityMetadata[]>([]);
   const actions = reactive(new Map<string, Action>());
   const running = reactive(new Map<string, Action>());
+  const gridChargeActions = reactive(
+    new Map<
+      string,
+      { action: Action; entityId: string; deviceId: string | null | undefined }
+    >(),
+  );
   const operationKey = (domain: EntityDomain, key: string) =>
     JSON.stringify([getEntryId(), domain, key]);
   let generation = 0;
@@ -294,6 +310,10 @@ export function useSaxDashboard(
     metadata.value = [];
     for (const [id, action] of actions) {
       if (!action.pending) actions.delete(id);
+      else action.error = null;
+    }
+    for (const [id, { action }] of gridChargeActions) {
+      if (!action.pending) gridChargeActions.delete(id);
       else action.error = null;
     }
   }
@@ -443,6 +463,105 @@ export function useSaxDashboard(
       pending: action?.pending ?? false,
       error: action?.error ? messages[language.value][action.error] : null,
     };
+  }
+
+  function gridChargeMaxPower(): number {
+    const storage = entity("switch", "storage_switch");
+    const reference = entity("sensor", "ic_max_power_reference");
+    const value = reference?.state?.state;
+    const power =
+      typeof value === "string" && value.trim() ? Number(value) : NaN;
+    return storage?.metadata.device_id &&
+      reference?.available &&
+      reference.metadata.device_id === storage.metadata.device_id &&
+      reference.state?.attributes.unit_of_measurement === "W" &&
+      Number.isFinite(power) &&
+      power >= 1
+      ? Math.min(32768, Math.floor(power))
+      : 32768;
+  }
+
+  const manualGridCharge = computed<DashboardManualGridCharge>(() => {
+    const storage = entity("switch", "storage_switch");
+    const operation = operationKey("switch", "storage_switch");
+    const own = gridChargeActions.get(operation);
+    const error =
+      own?.entityId === storage?.metadata.entity_id &&
+      own?.deviceId === storage?.metadata.device_id
+        ? own?.action.error
+        : null;
+    return {
+      canControl: Boolean(
+        ready.value && storage?.canControl && storage.metadata.device_id,
+      ),
+      pending: storage?.pending ?? running.get(operation)?.pending ?? false,
+      error: error ? messages[language.value][error] : null,
+      maxPower: gridChargeMaxPower(),
+    };
+  });
+
+  async function performGridCharge(
+    start: boolean,
+    power?: unknown,
+  ): Promise<boolean> {
+    const storage = entity("switch", "storage_switch");
+    const operation = operationKey("switch", "storage_switch");
+    if (running.get(operation)?.pending || storage?.pending) return false;
+    const action: Action = reactive({ pending: false, error: null });
+    gridChargeActions.set(operation, {
+      action,
+      entityId: storage?.metadata.entity_id ?? "",
+      deviceId: storage?.metadata.device_id,
+    });
+    const hass = getHass();
+    const deviceId = storage?.metadata.device_id;
+    if (!manualGridCharge.value.canControl || !hass?.callService || !deviceId) {
+      action.error = connected.value ? "forbidden" : "disconnected";
+      return false;
+    }
+    const watts =
+      typeof power === "number" ||
+      (typeof power === "string" && power.trim() !== "")
+        ? Number(power)
+        : NaN;
+    if (
+      start &&
+      (!Number.isInteger(watts) || watts < 1 || watts > gridChargeMaxPower())
+    ) {
+      action.error = "invalid";
+      return false;
+    }
+    action.pending = true;
+    // REQ-VUE-CHARGING: battery switching and manual commands share one lock.
+    running.set(operation, action);
+    const current = generation;
+    const isCurrent = () => {
+      const currentStorage = entity("switch", "storage_switch");
+      return (
+        current === generation &&
+        gridChargeActions.get(operation)?.action === action &&
+        currentStorage?.metadata.entity_id === storage?.metadata.entity_id &&
+        currentStorage?.metadata.device_id === deviceId
+      );
+    };
+    try {
+      await hass.callService(
+        "sax_power",
+        start ? "start_grid_charge" : "stop_grid_charge",
+        start
+          ? { device_id: deviceId, power: -watts }
+          : { device_id: deviceId },
+        undefined,
+        false,
+      );
+      return isCurrent();
+    } catch {
+      if (isCurrent()) action.error = "failed";
+      return false;
+    } finally {
+      action.pending = false;
+      if (running.get(operation) === action) running.delete(operation);
+    }
   }
 
   async function perform(
@@ -773,6 +892,9 @@ export function useSaxDashboard(
     error,
     entity,
     perform,
+    manualGridCharge,
+    startGridCharge: (power) => performGridCharge(true, power),
+    stopGridCharge: () => performGridCharge(false),
     performTimeWindow,
     tariff: computed(() => tariff.value),
     loadTariff: () => tariffRequest(),

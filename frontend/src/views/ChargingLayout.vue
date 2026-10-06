@@ -70,13 +70,19 @@ const text = computed(() =>
       {{ text.loading }}
     </p>
     <p
-      v-else-if="dashboard?.ready.value && !hasSwitch && !cards.length"
+      v-else-if="
+        dashboard?.ready.value &&
+        !hasSwitch &&
+        !cards.length &&
+        !$slots['manual-charge']
+      "
       class="charging-view__status"
       role="status"
     >
       {{ text.empty }}
     </p>
     <EntityControl v-if="hasSwitch" domain="switch" :entity-key="switchKey" />
+    <slot name="manual-charge" />
     <div v-if="cards.length" class="charging-view__cards">
       <section
         v-for="card in cards"

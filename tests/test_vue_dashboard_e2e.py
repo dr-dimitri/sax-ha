@@ -180,6 +180,128 @@ async def test_dashboard_clients_share_services_states_and_one_modbus_client(
         await server.shutdown()
 
 
+@pytest.mark.parametrize("max_soc", [90, 70])
+async def test_manual_start_response_matches_actual_modbus_control_mode(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    unused_tcp_port: int,
+    max_soc: int,
+) -> None:
+    """REQ-MANUAL-GRID-CHARGE: Antwort und HA-Modus folgen echten Gerätequittungen."""
+    basic = _build_basic_registers()
+    basic[46] = 72
+    server = _modbus_server(unused_tcp_port, basic, _build_extended_registers())
+    await server.serve_forever(background=True)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": unused_tcp_port,
+            "slave_id_basic": 64,
+            "slave_id_extended": 100,
+            "scan_interval": 3600,
+        },
+    )
+    entry.add_to_hass(hass)
+    verifier = AsyncModbusTcpClient(host="127.0.0.1", port=unused_tcp_port)
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        registry = er.async_get(hass)
+        switch_id = registry.async_get_entity_id(
+            "switch", DOMAIN, f"{entry.entry_id}_storage_switch"
+        )
+        mode_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_ic_control_mode_text"
+        )
+        limit_id = registry.async_get_entity_id(
+            "number", DOMAIN, f"{entry.entry_id}_max_soc"
+        )
+        assert switch_id and mode_id and limit_id
+        device_id = registry.async_get(switch_id).device_id
+        assert device_id
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": limit_id, "value": max_soc},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+        if max_soc == 70:
+            # REQ-TIMED-SOC-CHARGE: Erst frische Netzbezugsmessungen geben
+            # die erreichte Grenze zur Hausversorgung frei. Ein manueller
+            # Auftrag darf diese Freigabe anschließend nicht rückgängig machen.
+            for _ in range(5):
+                coordinator._high_last_read = float("-inf")
+                await coordinator.async_refresh()
+                await hass.async_block_till_done()
+            assert coordinator._max_soc_released_for_discharge
+            assert hass.states.get(mode_id).state == "SmartMeter-Nullregelung"
+
+        sender = await hass_ws_client(hass)
+        await sender.send_json(
+            {
+                "id": 1,
+                "type": "call_service",
+                "domain": DOMAIN,
+                "service": "start_grid_charge",
+                "service_data": {"device_id": device_id, "power": -1000},
+                "return_response": True,
+            }
+        )
+        result = (await _result(sender, 1))["response"]
+        await hass.async_block_till_done()
+        assert result == {
+            "state": "charging" if max_soc == 90 else "blocked",
+            "reason": None if max_soc == 90 else "max_soc",
+            "requested_power_w": -1000,
+            "current_soc": 72,
+            "effective_max_soc": max_soc,
+        }
+        assert coordinator.grid_charge_active
+        assert await verifier.connect()
+        registers = await verifier.read_holding_registers(
+            address=49, count=3, device_id=100
+        )
+        assert not registers.isError()
+        assert registers.registers[2] == (1 if max_soc == 90 else 0)
+        if max_soc == 90:
+            assert registers.registers[0] > 32767
+        assert hass.states.get(mode_id).state == (
+            "Sollwertvorgabe" if max_soc == 90 else "SmartMeter-Nullregelung"
+        )
+        basic_mode = await verifier.read_holding_registers(
+            address=41, count=1, device_id=64
+        )
+        assert not basic_mode.isError()
+        assert basic_mode.registers == [0]
+
+        await sender.send_json(
+            {
+                "id": 2,
+                "type": "call_service",
+                "domain": DOMAIN,
+                "service": "stop_grid_charge",
+                "service_data": {"device_id": device_id},
+            }
+        )
+        await _result(sender, 2)
+        await hass.async_block_till_done()
+        assert not coordinator.grid_charge_active
+        assert hass.states.get(mode_id).state == "SmartMeter-Nullregelung"
+        stopped_mode = await verifier.read_holding_registers(
+            address=51, count=1, device_id=100
+        )
+        assert not stopped_mode.isError()
+        assert stopped_mode.registers == [0]
+        await sender.close()
+    finally:
+        verifier.close()
+        await hass.config_entries.async_unload(entry.entry_id)
+        await server.shutdown()
+
+
 async def test_configuration_services_confirm_without_waiting_for_device_control(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,

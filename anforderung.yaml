@@ -1345,7 +1345,7 @@ requirement_manual_grid_charge:
   description: >
     Die Aktionen sax_power.start_grid_charge und
     sax_power.stop_grid_charge stellen eine nicht persistierte manuelle
-    Netzladung für Automationen bereit. start_grid_charge verlangt device_id
+    Netzladung für Automationen und das Dashboard bereit. start_grid_charge verlangt device_id
     und einen ganzzahligen, strikt negativen Watt-Sollwert von -32768 bis -1.
     Boolesche Werte, nicht ganzzahlige Werte, 0, positive Werte und Werte
     außerhalb dieses Gerätegrenzbereichs werden vor jedem Modbus-Write als
@@ -1379,11 +1379,32 @@ requirement_manual_grid_charge:
     Service-Aufruf zurückgegeben und ein neuer Auftrag wird nicht als aktiv
     veröffentlicht. Ändert start_grid_charge einen bereits laufenden
     Sollwert, schreibt der gemeinsame Pfad die neue Sequenz sofort, ohne bis
-    zum periodischen Wiederholungsintervall zu warten. Ist der wirksame
-    Max-SOC erreicht, gewinnt stattdessen die Sperre und der Start wartet
-    deren 40051=1-/40049=0-Sequenz ab, während der manuelle Auftrag bis zu
-    stop_grid_charge vorgemerkt bleibt; eine negative Ladeleistung darf in
-    diesem Zustand nie gewinnen.
+    zum periodischen Wiederholungsintervall zu warten. Gewinnt die Max-SOC-
+    Sperre, bleibt der manuelle Auftrag bis zu stop_grid_charge vorgemerkt;
+    eine negative Ladeleistung darf in diesem Zustand nie gewinnen. Die
+    zentrale Entscheidung kann dabei einen quittierten 0-%-Sollwert halten
+    oder die SmartMeter-Nullregelung zur Hausversorgung bereits freigegeben
+    haben. Ein manueller Start hebt diese Freigabe nicht auf.
+
+    start_grid_charge unterstützt eine optionale Serviceantwort. Bestehende
+    Automationen ohne Antwortanforderung bleiben kompatibel. Die Antwort
+    enthält state (charging oder blocked), reason (null oder max_soc),
+    requested_power_w, current_soc und effective_max_soc. charging bedeutet,
+    dass die vollständige negative Sollwertsequenz quittiert wurde; blocked
+    bedeutet einen durch Max-SOC zurückgehaltenen, vorgemerkten Auftrag,
+    einschließlich einer noch gehaltenen Preis-Slot-Sperre unterhalb der
+    Grenze. Die Antwort wird unter demselben Control-Lock aus der aktuellen
+    Entscheidung ermittelt und berücksichtigt Softwareänderungen während
+    der Quittierungen. Ungültiger oder fehlender SOC wird vor Annahme des
+    Auftrags als Servicefehler abgewiesen. Eine negative manuelle Leistung,
+    die mit Referenzleistung und SunSpec-Skalierung auf einen 0-%-Rohsollwert
+    gerundet würde, wird vor dem ersten Write als übersetzbarer
+    Validierungsfehler abgewiesen; sie wird nicht auf eine höhere Leistung
+    aufgerundet. Ein vorhandener Auftrag bleibt dabei erhalten.
+    Die Antwort beschreibt den
+    Quittierungszeitpunkt, nicht eine gemessene Ladeleistung. Bei Start und
+    Stopp werden quittierte Steuerwerte vor der Serviceantwort an die HA-
+    Entitäten veröffentlicht; der nächste Messzyklus ist dafür nicht nötig.
 
     stop_grid_charge läuft ebenfalls vollständig unter
     _charge_control_lock. Die Aktion löscht den manuellen Auftrag, storniert
@@ -1427,6 +1448,15 @@ requirement_manual_grid_charge:
     - "tests/test_coordinator.py prüft zusätzlich boolesche und gebrochene
        Werte, sichtbare Fehler beim ersten 40051-Write, ausschließlich
        40051/40049 beim Start sowie die sofortige Sollwertänderung."
+    - "tests/test_manual_start_response.py prüft optionale echte Service-/
+       WebSocket-Antworten, zurückgehaltene Aufträge bei Max-SOC einschließlich
+       freigegebener Nullregelung und Preis-Slot-Sperre, ungültigen SOC,
+       verzögerte oder fehlgeschlagene Quittierungen und Änderungen der
+       Schutzgrenze während der Quittierung sowie die Grenze zwischen auf
+       null gerundeten und negativ darstellbaren Ladeleistungen ohne
+       unzulässige Gerätewrites. tests/test_vue_dashboard_e2e.py
+       vergleicht Antwort und bestätigten HA-Modus mit den tatsächlichen
+       Registern eines lokalen Modbus-Simulators."
     - "Coordinator-Tests belegen die Priorität Max-SOC > manuell >
        Automatiken, die Freigabe einer berechtigten Automatik nach Stop,
        den erfolgreichen Stop nach fehlgeschlagenem 40049-Write und ebenfalls
@@ -3049,7 +3079,35 @@ requirement_vue_charging:
     nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
     aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
 
-    Netzdienliches Laden beginnt mit switch.grid_serving_enabled. Die Karte
+    Netzdienliches Laden beginnt mit switch.grid_serving_enabled. Danach bietet
+    die Karte Manuelles Netzladen die Schaltflächen Netzladen aktivieren und
+    Netzladen abschalten über die vorhandenen physischen Services
+    start_grid_charge und stop_grid_charge (REQ-MANUAL-GRID-CHARGE).
+    Die sichtbare Ladeleistung beginnt bei 1000 W und bleibt als lokaler
+    Entwurf editierbar. Start akzeptiert nur ganze positive Wattwerte von
+    1 bis 32768 und sendet deren negatives Vorzeichen. Eine verfügbare,
+    gültige ic_max_power_reference desselben Geräts begrenzt den Eingabebereich
+    zusätzlich. Stop benötigt keine gültige Leistungseingabe.
+    Gerätezuordnung und Kontrollrechte stammen aus der aufgelösten
+    storage_switch-Entity. Fehlende Rechte, Entitäten oder Verbindung sperren
+    beide Aktionen. Beide Buttons und der Speicherschalter teilen die
+    ausstehende Aktion bis zur Gerätequittierung und verhindern konkurrierende
+    Aufrufe. Zugängliche Fortschritts- und Fehlerhinweise erscheinen sofort;
+    bei Fehlern bleibt der Leistungsentwurf erhalten. Start fordert die
+    optionale Serviceantwort an und zeigt entweder den quittierten
+    Ladebefehl oder die Max-SOC-Sperre mit aktuellem SOC und wirksamer Grenze
+    zum Antwortzeitpunkt. Ein zurückgehaltener Auftrag wird ausdrücklich
+    als vorgemerkt gekennzeichnet. Die konkrete übersetzte HA-Fehlermeldung
+    erscheint als Text; unbekannte Fehler behalten einen allgemeinen
+    Fehlerhinweis. Bestätigter Steuermodus und gemessene Ladeleistung werden
+    getrennt davon aus HA-Zuständen desselben Geräts angezeigt. Ungültige
+    Antworten dürfen keinen Ladeerfolg anzeigen. Mount, Navigation
+    und Wiederverbindung starten keine Netzladung. Ein Hinweis erklärt den
+    Vorrang der Max-SOC-Grenze und dass aktive Ladeautomatiken nach dem
+    manuellen Stopp übernehmen können. Texte und Bedienung unterstützen
+    Deutsch, Englisch, mobile Ansichten sowie helle und dunkle HA-Themes.
+
+    Die Karte
     Ladepause enthält in dieser Reihenfolge time.grid_serving_start,
     time.grid_serving_end, sensor.grid_serving_forecast,
     number.grid_serving_forecast_threshold und sensor.grid_serving_pause_status.
@@ -3170,6 +3228,16 @@ requirement_vue_charging:
   acceptance_criteria:
     - "frontend/tests/charging.test.ts prüft vollständige Reihenfolge,
        alle zwölf übersetzten Monate und die Trennung von Ladepause und Zeitfenster."
+    - "frontend/tests/manual-grid-charge.test.ts und
+       frontend/browser/manual-grid-charge.spec.ts prüfen manuelles Starten und
+       Stoppen über tatsächliche Geräte-Metadaten, gültige negative Sollwerte,
+       gemeinsame Sperre, verzögerte und fehlgeschlagene Antworten, erhaltene
+       Entwürfe, Kontrollrechte und bestätigte Telemetrie. Der Stop funktioniert
+       auch mit ungültigem Leistungsentwurf."
+    - "tests/test_manual_stop_response.py prüft manuelles Starten und Stoppen
+       über echte HA-Service-/WebSocket-Grenzen mit gehaltenem Geräte-Lock,
+       verzögerten Quittierungen beider Startphasen und Modbus-/Timeout-/
+       Fehlerantworten, ohne vorzeitig Geräteerfolg zu bestätigen."
     - "Die Ladeplanung erklärt geplante und laufende Aufträge, keinen Bedarf, Teilaufladung und fehlende Daten in DE/EN. Alle Zeiten und Zahlen stammen aus Sensorattributen; die Anzeige erzeugt keine eigenen Ladeaufträge."
     - "frontend/tests/tariff-plan.test.ts prüft die gemeinsame Tarifpreisfenster-Karte:
        Sie erscheint bei time_of_use in

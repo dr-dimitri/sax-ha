@@ -21,12 +21,20 @@ export function chargingSample(language = "de"): {
   const states: Record<string, HassEntity> = {};
   for (const [domain, values] of Object.entries(translations)) {
     if (domain === "binary_sensor") continue;
-    for (const [key, translation] of Object.entries(values) as [
+    for (const [translationKey, translation] of Object.entries(values) as [
       string,
       Translation,
     ][]) {
+      const key =
+        domain === "switch" && translationKey === "storage"
+          ? "storage_switch"
+          : translationKey;
       if (
         key !== "max_soc" &&
+        key !== "storage_switch" &&
+        key !== "charge_power" &&
+        key !== "soc" &&
+        key !== "ic_control_mode_text" &&
         !key.startsWith("timed_charge_") &&
         !key.startsWith("grid_serving_") &&
         !key.startsWith("price_charge_")
@@ -82,6 +90,19 @@ export function chargingSample(language = "de"): {
       if (domain === "sensor") {
         state = language.startsWith("de") ? "Inaktiv" : "Inactive";
         if (key === "timed_charge_discharge_status") state = "normal";
+        if (key === "charge_power") {
+          state = "0";
+          attributes = { unit_of_measurement: "W" };
+        }
+        if (key === "soc") {
+          state = "50";
+          attributes = { unit_of_measurement: "%" };
+        }
+        if (key === "ic_control_mode_text") {
+          state = language.startsWith("de")
+            ? "SmartMeter-Nullregelung"
+            : "Smart meter zero regulation";
+        }
         if (key === "grid_serving_forecast") {
           state = "24.3";
           attributes = {

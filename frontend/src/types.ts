@@ -97,6 +97,14 @@ export interface GridServingForecastSource {
   can_edit: boolean;
 }
 
+export interface GridChargeStartResult {
+  state: "charging" | "blocked";
+  reason: "max_soc" | null;
+  requested_power_w: number;
+  current_soc: number;
+  effective_max_soc: number;
+}
+
 export type ConnectionEvent = "ready" | "disconnected" | "reconnect-error";
 export type Unsubscribe = () => Promise<void> | void;
 
@@ -125,6 +133,10 @@ export interface HomeAssistant {
   };
   config?: { time_zone?: string };
   formatEntityState?(entity: HassEntity, state?: string): string;
+  loadBackendTranslation?(
+    category: "exceptions",
+    integration: "sax_power",
+  ): Promise<(key: string, placeholders?: Record<string, unknown>) => string>;
   callService?(
     domain: string,
     service: string,

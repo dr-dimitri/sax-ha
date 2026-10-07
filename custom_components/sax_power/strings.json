@@ -615,6 +615,12 @@
     "invalid_grid_charge_power": {
       "message": "Der Leistungssollwert {power} ist ungültig. Für eine sichere manuelle Netzladung ist eine ganze Zahl zwischen {min_power} W und {max_power} W erforderlich; Null und positive Werte werden nicht unterstützt."
     },
+    "manual_grid_charge_power_resolution": {
+      "message": "Die Leistung {power} W ist mit der aktuellen Geräteskalierung nicht als negativer Ladesollwert darstellbar. Bitte eine größere Ladeleistung wählen."
+    },
+    "manual_grid_charge_soc_unavailable": {
+      "message": "Der aktuelle SOC ist nicht gültig. Manuelles Netzladen benötigt einen bestätigten SOC zwischen 0 und 100 %."
+    },
     "economics_restart_not_ready": {
       "message": "Ein Bilanzneustart ist nur möglich, solange die Wirtschaftlichkeit aktiviert und bereits initialisiert ist."
     },
@@ -628,7 +634,7 @@
   "services": {
     "start_grid_charge": {
       "name": "Netzladung starten",
-      "description": "Fordert eine manuelle Netzladung über den zentralen, Max-SOC-geschützten Steuerpfad an.",
+      "description": "Fordert eine manuelle Netzladung über den zentralen, Max-SOC-geschützten Steuerpfad an. Die optionale Antwort meldet quittierte Ladung oder einen durch Max-SOC blockierten, vorgemerkten Auftrag.",
       "fields": {
         "device_id": {
           "name": "Gerät",

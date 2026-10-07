@@ -85,6 +85,16 @@ async function mount(
     .fn<(kind: Kind, start: string, end: string) => Promise<boolean>>()
     .mockResolvedValue(true);
   const dashboard: SaxDashboard = {
+    manualGridCharge: computed(() => ({
+      canControl: false,
+      pending: false,
+      error: null,
+      errorDetail: null,
+      result: null,
+      maxPower: 32768,
+    })),
+    startGridCharge: vi.fn().mockResolvedValue(false),
+    stopGridCharge: vi.fn().mockResolvedValue(false),
     tariff: ref(null),
     loadTariff: vi.fn(),
     saveTariff: vi.fn(),

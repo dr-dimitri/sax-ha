@@ -88,21 +88,30 @@ test("compact views retain readable controls and all entities across available p
       const hasMonths = (await monthToggle.count()) > 0;
       if (hasMonths) await monthToggle.click();
       const compactSize = await panel.evaluate((element) => {
-        const source = (element.shadowRoot ?? element).querySelector(
-          ".grid-serving-source",
-        );
+        const root = element.shadowRoot ?? element;
+        const source = root.querySelector(".grid-serving-source");
         const style = source ? getComputedStyle(source) : null;
         const sourceHeight = source?.getBoundingClientRect().height ?? 0;
         const sourceSpacing = style
           ? parseFloat(style.marginTop) + parseFloat(style.marginBottom)
           : 0;
+        const manual = root.querySelector(".manual-grid-charge");
+        const manualHeight = manual?.getBoundingClientRect().height ?? 0;
+        const manualSpacing = manual?.parentElement
+          ? parseFloat(getComputedStyle(manual.parentElement).rowGap) || 0
+          : 0;
         const compactPanelHeight = element.getBoundingClientRect().height;
         return {
           compactPanelHeight,
           sourceHeight,
-          // Keep the original control budget and account only for the added source.
+          manualHeight,
+          // Keep the existing control budget and bound added cards separately.
           originalControlsHeight:
-            compactPanelHeight - sourceHeight - sourceSpacing,
+            compactPanelHeight -
+            sourceHeight -
+            sourceSpacing -
+            manualHeight -
+            manualSpacing,
         };
       });
       if (hasMonths) await monthToggle.click();
@@ -322,6 +331,7 @@ test("compact views retain readable controls and all entities across available p
       }
       if (!mobile) {
         expect(compactSize.sourceHeight, description).toBeLessThanOrEqual(240);
+        expect(compactSize.manualHeight, description).toBeLessThanOrEqual(300);
         expect(
           compactSize.originalControlsHeight,
           description,

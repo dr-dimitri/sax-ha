@@ -102,6 +102,34 @@ function state(
   };
 }
 
+function storageMetadata(
+  changes: Partial<DashboardEntityMetadata> = {},
+): DashboardEntityMetadata {
+  return metadata("switch", {
+    key: "storage_switch",
+    entity_id: "switch.renamed_storage",
+    device_id: "device-from-registry",
+    ...changes,
+  });
+}
+
+function gridChargeResponse(
+  power = 1000,
+  changes: Record<string, unknown> = {},
+) {
+  return {
+    response: {
+      state: "charging",
+      reason: null,
+      requested_power_w: -power,
+      current_soc: 50,
+      effective_max_soc: 100,
+      ...changes,
+    },
+    context: { id: "service-context", user_id: "test-user" },
+  };
+}
+
 const scopes: ReturnType<typeof effectScope>[] = [];
 
 function setup(
@@ -114,7 +142,15 @@ function setup(
       items.map((item) => [item.entity_id, state(item)]),
     ),
     connection,
-    callService: vi.fn().mockResolvedValue({}),
+    callService: vi
+      .fn()
+      .mockImplementation((_domain, service, data) =>
+        Promise.resolve(
+          service === "start_grid_charge"
+            ? gridChargeResponse(-data.power)
+            : {},
+        ),
+      ),
   });
   const entryId = shallowRef<string | undefined>("entry-1");
   const scope = effectScope();
@@ -136,6 +172,425 @@ async function flush(): Promise<void> {
 
 afterEach(() => {
   for (const scope of scopes.splice(0)) scope.stop();
+});
+
+describe("manual grid-charge services (REQ-VUE-CHARGING)", () => {
+  it("uses the registry device for explicit start/stop and keeps HA telemetry confirmed", async () => {
+    const storage = storageMetadata();
+    const { dashboard, hass } = setup([storage]);
+    hass.value = {
+      ...hass.value!,
+      states: { [storage.entity_id]: state(storage, { state: "off" }) },
+    };
+    expect(hass.value.callService).not.toHaveBeenCalled();
+    expect(dashboard.manualGridCharge.value).toMatchObject({
+      canControl: true,
+      pending: false,
+      maxPower: 32768,
+      error: null,
+    });
+    expect(await dashboard.startGridCharge("1250")).toBe(true);
+    expect(dashboard.manualGridCharge.value.result).toEqual(
+      gridChargeResponse(1250).response,
+    );
+    expect(await dashboard.stopGridCharge()).toBe(true);
+    expect(dashboard.manualGridCharge.value.result).toBeNull();
+    expect(vi.mocked(hass.value.callService!).mock.calls).toEqual([
+      [
+        "sax_power",
+        "start_grid_charge",
+        { device_id: "device-from-registry", power: -1250 },
+        undefined,
+        false,
+        true,
+      ],
+      [
+        "sax_power",
+        "stop_grid_charge",
+        { device_id: "device-from-registry" },
+        undefined,
+        false,
+      ],
+    ]);
+    expect(dashboard.entity("switch", "storage_switch")?.state?.state).toBe(
+      "off",
+    );
+  });
+
+  it.each([
+    "",
+    " ",
+    "NaN",
+    "Infinity",
+    Infinity,
+    NaN,
+    0,
+    -1,
+    1.5,
+    32769,
+    true,
+    undefined,
+    null,
+    {},
+  ])("rejects unsafe manual power %s and leaves stop usable", async (power) => {
+    const { dashboard, hass } = setup([storageMetadata()]);
+    expect(await dashboard.startGridCharge(power)).toBe(false);
+    expect(dashboard.manualGridCharge.value.error).toBeTruthy();
+    expect(hass.value!.callService).not.toHaveBeenCalled();
+    expect(await dashboard.stopGridCharge()).toBe(true);
+    expect(dashboard.manualGridCharge.value.error).toBeNull();
+    expect(hass.value!.callService).toHaveBeenCalledExactlyOnceWith(
+      "sax_power",
+      "stop_grid_charge",
+      { device_id: "device-from-registry" },
+      undefined,
+      false,
+    );
+  });
+
+  it.each([
+    ["2500", "device-from-registry", 2500],
+    ["40000", "device-from-registry", 32768],
+    ["2500", "another-device", 32768],
+    ["unknown", "device-from-registry", 32768],
+    ["unavailable", "device-from-registry", 32768],
+    ["0", "device-from-registry", 32768],
+    ["-1", "device-from-registry", 32768],
+    ["NaN", "device-from-registry", 32768],
+  ])(
+    "honors only valid device power references (%s, %s)",
+    async (value, deviceId, maximum) => {
+      const reference = metadata("sensor", {
+        key: "ic_max_power_reference",
+        entity_id: "sensor.reference_from_registry",
+        device_id: deviceId,
+        can_control: false,
+      });
+      const { dashboard, hass } = setup([storageMetadata(), reference]);
+      hass.value = {
+        ...hass.value!,
+        states: {
+          ...hass.value!.states,
+          [reference.entity_id]: state(reference, {
+            state: value,
+            attributes: { unit_of_measurement: "W" },
+          }),
+        },
+      };
+      expect(dashboard.manualGridCharge.value.maxPower).toBe(maximum);
+      expect(await dashboard.startGridCharge(maximum + 1)).toBe(false);
+      expect(hass.value.callService).not.toHaveBeenCalled();
+      expect(await dashboard.startGridCharge(maximum)).toBe(true);
+    },
+  );
+
+  it.each([
+    "permission",
+    "device",
+    "missing",
+    "unknown",
+    "unavailable",
+    "service",
+    "disconnected",
+  ])(
+    "blocks manual start and stop when the storage boundary is %s",
+    async (reason) => {
+      const item = storageMetadata({
+        can_control: reason !== "permission",
+        device_id: reason === "device" ? null : "device-from-registry",
+      });
+      const { dashboard, hass, connection } = setup(
+        reason === "missing" ? [] : [item],
+      );
+      const service = hass.value!.callService;
+      if (reason === "unknown" || reason === "unavailable")
+        hass.value = {
+          ...hass.value!,
+          states: { [item.entity_id]: state(item, { state: reason }) },
+        };
+      if (reason === "service")
+        hass.value = { ...hass.value!, callService: undefined };
+      if (reason === "disconnected") connection.fire("disconnected");
+      expect(dashboard.manualGridCharge.value.canControl).toBe(false);
+      expect(await dashboard.startGridCharge(1000)).toBe(false);
+      expect(await dashboard.stopGridCharge()).toBe(false);
+      expect(service).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["start", "stop", "storage"])(
+    "shares the device action lock while %s waits for acknowledgement",
+    async (firstAction) => {
+      const { dashboard, hass } = setup([storageMetadata()]);
+      const waiting = deferred<unknown>();
+      const service = vi.fn(() => waiting.promise);
+      hass.value = { ...hass.value!, callService: service };
+      const first =
+        firstAction === "start"
+          ? dashboard.startGridCharge(1000)
+          : firstAction === "stop"
+            ? dashboard.stopGridCharge()
+            : dashboard.perform("switch", "storage_switch", false);
+      expect(dashboard.manualGridCharge.value.pending).toBe(true);
+      expect(dashboard.entity("switch", "storage_switch")?.pending).toBe(true);
+      expect(await dashboard.startGridCharge(1500)).toBe(false);
+      expect(await dashboard.stopGridCharge()).toBe(false);
+      expect(await dashboard.perform("switch", "storage_switch", true)).toBe(
+        false,
+      );
+      expect(service).toHaveBeenCalledOnce();
+      waiting.resolve(firstAction === "start" ? gridChargeResponse() : {});
+      expect(await first).toBe(true);
+      expect(dashboard.manualGridCharge.value.pending).toBe(false);
+      expect(dashboard.entity("switch", "storage_switch")?.pending).toBe(false);
+    },
+  );
+
+  it.each(["de", "en"])(
+    "keeps failed manual action errors separate and localized (%s)",
+    async (language) => {
+      const { dashboard, hass, connection } = setup([storageMetadata()]);
+      hass.value = { ...hass.value!, language };
+      connection.emit([storageMetadata()]);
+      vi.mocked(hass.value.callService!).mockRejectedValueOnce(
+        new Error("device rejected"),
+      );
+      expect(await dashboard.startGridCharge(1000)).toBe(false);
+      expect(dashboard.manualGridCharge.value.error).toContain(
+        language === "de" ? "fehlgeschlagen" : "failed",
+      );
+      expect(dashboard.manualGridCharge.value.pending).toBe(false);
+      expect(dashboard.entity("switch", "storage_switch")?.error).toBeNull();
+      expect(await dashboard.stopGridCharge()).toBe(true);
+      expect(dashboard.manualGridCharge.value.error).toBeNull();
+    },
+  );
+
+  it("preserves the lock over reconnect and rejects the stale acknowledgement", async () => {
+    const items = [storageMetadata()];
+    const { dashboard, hass, connection } = setup(items);
+    const waiting = deferred<unknown>();
+    hass.value = { ...hass.value!, callService: vi.fn(() => waiting.promise) };
+    const first = dashboard.startGridCharge(1000);
+    connection.fire("disconnected");
+    connection.fire("ready");
+    connection.emit(items);
+    expect(dashboard.manualGridCharge.value.pending).toBe(true);
+    expect(await dashboard.stopGridCharge()).toBe(false);
+    waiting.resolve(gridChargeResponse());
+    expect(await first).toBe(false);
+    expect(dashboard.manualGridCharge.value.pending).toBe(false);
+    expect(dashboard.manualGridCharge.value.error).toBeNull();
+    expect(dashboard.manualGridCharge.value.result).toBeNull();
+  });
+
+  it("reports a retained order blocked by maximum SOC without claiming device charging", async () => {
+    const { dashboard, hass } = setup([storageMetadata()]);
+    const response = gridChargeResponse(1000, {
+      state: "blocked",
+      reason: "max_soc",
+      current_soc: 72,
+      effective_max_soc: 70,
+    });
+    vi.mocked(hass.value!.callService!).mockResolvedValueOnce(response);
+    expect(await dashboard.startGridCharge(1000)).toBe(true);
+    expect(dashboard.manualGridCharge.value).toMatchObject({
+      pending: false,
+      error: null,
+      errorDetail: null,
+      result: response.response,
+    });
+    expect(dashboard.entity("switch", "storage_switch")?.state?.state).toBe(
+      "50",
+    );
+    expect(await dashboard.stopGridCharge()).toBe(true);
+    expect(dashboard.manualGridCharge.value.result).toBeNull();
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    [],
+    gridChargeResponse().response,
+    { response: null },
+    { response: "charging" },
+    gridChargeResponse(1000, { state: "active" }),
+    gridChargeResponse(1000, { reason: "max_soc" }),
+    gridChargeResponse(1000, { state: "blocked", reason: null }),
+    gridChargeResponse(1000, { requested_power_w: 1000 }),
+    gridChargeResponse(2000),
+    gridChargeResponse(1000, { current_soc: "50" }),
+    gridChargeResponse(1000, { current_soc: NaN }),
+    gridChargeResponse(1000, { current_soc: -1 }),
+    gridChargeResponse(1000, { effective_max_soc: 101 }),
+    gridChargeResponse(1000, { effective_max_soc: Infinity }),
+  ])(
+    "rejects absent or malformed requested service responses (%j)",
+    async (response) => {
+      const { dashboard, hass } = setup([storageMetadata()]);
+      vi.mocked(hass.value!.callService!).mockResolvedValueOnce(response);
+      expect(await dashboard.startGridCharge(1000)).toBe(false);
+      expect(dashboard.manualGridCharge.value).toMatchObject({
+        pending: false,
+        result: null,
+        errorDetail: null,
+      });
+      expect(dashboard.manualGridCharge.value.error).toContain(
+        "fehlgeschlagen",
+      );
+      expect(await dashboard.stopGridCharge()).toBe(true);
+    },
+  );
+
+  it.each(["home_assistant_error", "service_validation_error"])(
+    "exposes safe HA backend details for %s while retaining confirmed states",
+    async (code) => {
+      const { dashboard, hass } = setup([storageMetadata()]);
+      const detail = "SOC ist nicht verfügbar; Netzladung kann nicht starten.";
+      vi.mocked(hass.value!.callService!).mockRejectedValueOnce({
+        code,
+        message: detail,
+      });
+      expect(await dashboard.startGridCharge(1000)).toBe(false);
+      expect(dashboard.manualGridCharge.value).toMatchObject({
+        result: null,
+        errorDetail: detail,
+        pending: false,
+      });
+      expect(dashboard.manualGridCharge.value.error).toContain(
+        "fehlgeschlagen",
+      );
+      expect(dashboard.entity("switch", "storage_switch")?.state?.state).toBe(
+        "50",
+      );
+      expect(await dashboard.stopGridCharge()).toBe(true);
+      expect(dashboard.manualGridCharge.value.errorDetail).toBeNull();
+    },
+  );
+
+  it.each([
+    new Error("transport implementation details"),
+    { code: "unknown_error", message: "untrusted details" },
+    { code: "home_assistant_error", message: { html: "unsafe" } },
+    { code: "home_assistant_error", message: " " },
+  ])(
+    "uses generic feedback for unsafe or absent backend messages (%j)",
+    async (cause) => {
+      const { dashboard, hass } = setup([storageMetadata()]);
+      vi.mocked(hass.value!.callService!).mockRejectedValueOnce(cause);
+      expect(await dashboard.startGridCharge(1000)).toBe(false);
+      expect(dashboard.manualGridCharge.value.error).toContain(
+        "fehlgeschlagen",
+      );
+      expect(dashboard.manualGridCharge.value.errorDetail).toBeNull();
+    },
+  );
+
+  it.each(["device", "entity", "entry"])(
+    "ignores stale responses after the current %s mapping changes",
+    async (change) => {
+      const storage = storageMetadata();
+      const { dashboard, hass, connection, entryId } = setup([storage]);
+      const waiting = deferred<unknown>();
+      vi.mocked(hass.value!.callService!).mockReturnValueOnce(waiting.promise);
+      const first = dashboard.startGridCharge(1000);
+      const next = storageMetadata({
+        device_id: change === "device" ? "next-device" : storage.device_id,
+        entity_id:
+          change === "entity" ? "switch.new_storage" : storage.entity_id,
+      });
+      if (change === "entry") entryId.value = "entry-next";
+      hass.value = {
+        ...hass.value!,
+        states: { [next.entity_id]: state(next, { state: "off" }) },
+      };
+      connection.emit([next]);
+      expect(dashboard.manualGridCharge.value.pending).toBe(change !== "entry");
+      if (change !== "entry")
+        expect(await dashboard.stopGridCharge()).toBe(false);
+      waiting.resolve(gridChargeResponse());
+      expect(await first).toBe(false);
+      expect(dashboard.manualGridCharge.value).toMatchObject({
+        pending: false,
+        result: null,
+        error: null,
+        errorDetail: null,
+      });
+    },
+  );
+
+  it("shows backend detail promptly and translates it without holding the action lock", async () => {
+    const { dashboard, hass } = setup([storageMetadata()]);
+    const waiting =
+      deferred<
+        (key: string, placeholders?: Record<string, unknown>) => string
+      >();
+    const loadTranslation = vi.fn(() => waiting.promise);
+    hass.value = { ...hass.value!, loadBackendTranslation: loadTranslation };
+    vi.mocked(hass.value.callService!).mockRejectedValueOnce({
+      code: "service_validation_error",
+      message: "A valid state of charge is required.",
+      translation_domain: "sax_power",
+      translation_key: "grid_charge_soc_unavailable",
+      translation_placeholders: { soc: "unknown" },
+    });
+    expect(await dashboard.startGridCharge(1000)).toBe(false);
+    expect(dashboard.manualGridCharge.value).toMatchObject({
+      pending: false,
+      errorDetail: "A valid state of charge is required.",
+    });
+    await flush();
+    expect(loadTranslation).toHaveBeenCalledExactlyOnceWith(
+      "exceptions",
+      "sax_power",
+    );
+    const translate = vi.fn(() => "Ein gültiger Ladezustand ist erforderlich.");
+    waiting.resolve(translate);
+    await flush();
+    expect(translate).toHaveBeenCalledExactlyOnceWith(
+      "component.sax_power.exceptions.grid_charge_soc_unavailable.message",
+      { soc: "unknown" },
+    );
+    expect(dashboard.manualGridCharge.value.errorDetail).toBe(
+      "Ein gültiger Ladezustand ist erforderlich.",
+    );
+  });
+
+  it.each(["stop", "reconnect"])(
+    "ignores a late error translation after %s replaces the failed command",
+    async (change) => {
+      const items = [storageMetadata()];
+      const { dashboard, hass, connection } = setup(items);
+      const waiting = deferred<(key: string) => string>();
+      hass.value = {
+        ...hass.value!,
+        loadBackendTranslation: vi.fn(() => waiting.promise),
+      };
+      vi.mocked(hass.value.callService!).mockRejectedValueOnce({
+        code: "home_assistant_error",
+        message: "Initial error detail.",
+        translation_domain: "sax_power",
+        translation_key: "grid_charge_start_unavailable",
+      });
+      expect(await dashboard.startGridCharge(1000)).toBe(false);
+      if (change === "stop") {
+        expect(await dashboard.stopGridCharge()).toBe(true);
+      } else {
+        connection.fire("disconnected");
+        connection.fire("ready");
+        connection.emit(items);
+      }
+      waiting.resolve(() => "Veralteter Fehler darf nicht erscheinen.");
+      await flush();
+      expect(dashboard.manualGridCharge.value).toMatchObject({
+        pending: false,
+        error: null,
+        errorDetail: null,
+        result: null,
+      });
+    },
+  );
 });
 
 it.each(["de", "en"])(

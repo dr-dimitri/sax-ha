@@ -4,6 +4,9 @@ start_grid_charge:
     Fordert eine manuelle Netzladung über den zentralen SunSpec-Steuerpfad an.
     Die Max-SOC-Sperre hat Vorrang; der manuelle Auftrag hat Vorrang vor den
     Ladeautomatiken und bleibt bis zum Aufruf von stop_grid_charge aktiv.
+    Eine optionale Antwort unterscheidet quittierte Ladung von einem durch
+    Max-SOC blockierten, vorgemerkten Auftrag und nennt den aktuellen SOC
+    sowie die wirksame Obergrenze.
   fields:
     device_id:
       name: Gerät

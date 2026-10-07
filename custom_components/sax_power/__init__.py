@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant.auth.permissions.const import CAT_ENTITIES, POLICY_CONTROL
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
@@ -58,7 +58,7 @@ from .const import (
     SERVICE_START_GRID_CHARGE,
     SERVICE_STOP_GRID_CHARGE,
 )
-from .coordinator import SaxPowerCoordinator
+from .coordinator import ManualGridChargeResult, SaxPowerCoordinator
 from .domain.tariff import TariffType
 from .vue_dashboard import async_sync_vue_dashboard, async_unload_vue_dashboard
 
@@ -507,12 +507,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_START_GRID_CHARGE):
         return
 
-    async def _async_start_grid_charge(call: ServiceCall) -> None:
+    async def _async_start_grid_charge(call: ServiceCall) -> ManualGridChargeResult:
         await _async_check_service_permissions(
             hass, call, (("switch", "storage_switch"),)
         )
         coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
-        await coordinator.async_start_grid_charge(call.data[ATTR_POWER])
+        return await coordinator.async_start_grid_charge(call.data[ATTR_POWER])
 
     async def _async_stop_grid_charge(call: ServiceCall) -> None:
         await _async_check_service_permissions(
@@ -583,6 +583,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_START_GRID_CHARGE,
         _async_start_grid_charge,
         schema=SERVICE_GRID_CHARGE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN,

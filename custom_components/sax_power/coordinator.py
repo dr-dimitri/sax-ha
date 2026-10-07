@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from time import monotonic
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
@@ -361,6 +361,16 @@ def _grid_serving_pause_status(
         f"{active} Die PV-Prognose von {forecast_text} kWh ist {comparison} "
         f"Mindestwert von {threshold_text} kWh."
     )
+
+
+class ManualGridChargeResult(TypedDict):
+    """REQ-MANUAL-GRID-CHARGE: Quittierte Entscheidung zum Antwortzeitpunkt."""
+
+    state: Literal["charging", "blocked"]
+    reason: Literal["max_soc"] | None
+    requested_power_w: int
+    current_soc: int | float
+    effective_max_soc: int
 
 
 class _SunChargeWriteError(HomeAssistantError):
@@ -3426,7 +3436,44 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def grid_charge_active(self) -> bool:
         return self._grid_charge_power is not None
 
-    async def async_start_grid_charge(self, power: int) -> None:
+    def _manual_grid_charge_soc(self) -> int | float:
+        if self.data is None:
+            raise HomeAssistantError(
+                "Netzladung kann erst nach dem ersten erfolgreichen "
+                "Coordinator-Update gestartet werden"
+            )
+        if self._basic_read_failed:
+            raise HomeAssistantError(
+                "Netzladung benötigt einen erfolgreichen Basic-Mode-Read "
+                "mit aktuellem SOC"
+            )
+        current_soc = self.data.get("soc")
+        if (
+            isinstance(current_soc, bool)
+            or not isinstance(current_soc, int | float)
+            or not math.isfinite(current_soc)
+            or not MIN_SOC <= current_soc <= MAX_SOC
+        ):
+            raise HomeAssistantError(
+                "Netzladung benötigt einen gültigen aktuellen SOC "
+                f"zwischen {MIN_SOC} und {MAX_SOC} %: {current_soc!r}",
+                translation_domain=DOMAIN,
+                translation_key="manual_grid_charge_soc_unavailable",
+            )
+        return current_soc
+
+    @staticmethod
+    def _validate_manual_grid_charge_setpoint(power: int, raw: int) -> None:
+        if to_signed16(raw) >= 0:
+            raise ServiceValidationError(
+                f"Die Leistung {power} W ist mit der aktuellen Geräteskalierung "
+                "nicht als negativer Ladesollwert darstellbar",
+                translation_domain=DOMAIN,
+                translation_key="manual_grid_charge_power_resolution",
+                translation_placeholders={"power": str(power)},
+            )
+
+    async def async_start_grid_charge(self, power: int) -> ManualGridChargeResult:
         """Starte oder aktualisiere einen zentral arbitrierten Ladeauftrag."""
         self._raise_if_shutdown()
         if (
@@ -3445,39 +3492,61 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "power": repr(power),
                 },
             )
-        if self.data is None:
-            raise HomeAssistantError(
-                "Netzladung kann erst nach dem ersten erfolgreichen "
-                "Coordinator-Update gestartet werden"
-            )
         async with self._charge_control_lock:
             self._raise_if_shutdown()
-            if self._basic_read_failed:
-                raise HomeAssistantError(
-                    "Netzladung benötigt einen erfolgreichen Basic-Mode-Read "
-                    "mit aktuellem SOC"
-                )
+            self._manual_grid_charge_soc()
+            self._validate_manual_grid_charge_setpoint(
+                power, self._watts_to_ic_setpoint_raw(power, self.data)
+            )
             previous_power = self._grid_charge_power
             self._grid_charge_power = power
             try:
-                # Der Aufruf kehrt erst zurück, wenn die wirksame zentrale
-                # Entscheidung (manueller Sollwert oder höherrangige Max-SOC-
-                # Sperre) vom Gerät quittiert wurde.
+                # REQ-MANUAL-GRID-CHARGE: Die Antwort beschreibt die wirksame
+                # Entscheidung, ohne eine bestätigte Max-SOC-Freigabe aufzuheben.
                 while True:
                     self._raise_if_shutdown()
                     if self._control_bootstrap_pending:
                         raise HomeAssistantError(
                             "Ladeeinstellungen werden noch geladen"
                         )
+                    revision = self._month_control_revision
                     await self._async_enforce_grid_charge_locked(self.data)
-                    if self._tariff_control_revision == self._tariff_source_revision:
+                    if (
+                        self._tariff_control_revision == self._tariff_source_revision
+                        and revision == self._month_control_revision
+                    ):
                         break
-                    # REQ-MANUAL-GRID-CHARGE: Ein Tarifwechsel während der
-                    # Persistenz verwirft die alte Entscheidung. Der physische
-                    # Service muss ihren aktuellen Nachfolger selbst quittieren.
+                    # Softwareänderungen während Persistenz/ACKs dürfen nicht
+                    # als überholter Gerätestand bestätigt werden.
+                self._raise_if_shutdown()
+                current_soc = self._manual_grid_charge_soc()
+                charging = (
+                    self.sun_charge_active
+                    and self._sun_charge_power < 0
+                    and self._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SETPOINT
+                )
+                if not charging and not (
+                    self._max_soc_clamped or current_soc >= self.effective_max_soc
+                ):
+                    raise HomeAssistantError(
+                        "Der manuelle Ladeauftrag wurde vom Gerät nicht angewendet"
+                    )
+                return ManualGridChargeResult(
+                    state="charging" if charging else "blocked",
+                    reason=None if charging else "max_soc",
+                    requested_power_w=power,
+                    current_soc=current_soc,
+                    effective_max_soc=self.effective_max_soc,
+                )
             except HomeAssistantError:
                 self._grid_charge_power = previous_power
                 raise
+            finally:
+                # Auch bei Teilfehlern ist der letzte quittierte Modus verbindlich;
+                # die HA-Entitäten dürfen nicht bis zum nächsten Poll zurückbleiben.
+                if self.data is not None:
+                    self._publish_charge_state(self.data)
+                    self.async_update_listeners()
 
     async def async_stop_grid_charge(self) -> None:
         """Widerrufe den Auftrag und bestätige erst den quittierten Reset."""
@@ -3497,12 +3566,17 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # haben, obwohl Modus 1 quittiert und sein Rollback fehlgeschlagen
             # ist. Dieser verwaiste Besitznachweis muss auch ohne sichtbaren
             # manuellen Auftrag zurückgesetzt werden (REQ-MANUAL-GRID-CHARGE).
-            await self.async_stop_sun_charge(require_confirmation=True)
-            if manual_charge_requested and self.data is not None:
-                # Nur ein tatsächlich beendeter manueller Auftrag gibt die
-                # zentrale Entscheidung neu frei. Ein reiner Fehler-Reset darf
-                # keine laufende Automatik unterbrechen oder neu anstoßen.
-                await self._async_enforce_grid_charge_locked(self.data)
+            try:
+                await self.async_stop_sun_charge(require_confirmation=True)
+                if manual_charge_requested and self.data is not None:
+                    # Nur ein tatsächlich beendeter manueller Auftrag gibt die
+                    # zentrale Entscheidung neu frei. Ein reiner Fehler-Reset darf
+                    # keine laufende Automatik unterbrechen oder neu anstoßen.
+                    await self._async_enforce_grid_charge_locked(self.data)
+            finally:
+                if self.data is not None:
+                    self._publish_charge_state(self.data)
+                    self.async_update_listeners()
 
     # -- Netzladung (SunSpec-Modus, Immediate Controls) ----------------------
     # Schreibpfad für zeitgesteuertes Laden (siehe Abschnitt weiter unten):
@@ -3705,6 +3779,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if requested_power == 0
             else self._watts_to_ic_setpoint_raw(requested_power, data)
         )
+        if requested_power < 0 and self._grid_charge_power is not None:
+            # Ein inzwischen geänderter Scale-Faktor darf einen manuellen
+            # Ladeauftrag nicht unbemerkt in einen 0-%-Hold verwandeln.
+            self._validate_manual_grid_charge_setpoint(requested_power, setpoint_raw)
         try:
             await self.async_write_extended_register(
                 REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT

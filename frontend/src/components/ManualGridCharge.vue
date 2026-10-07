@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, useId } from "vue";
-import { SAX_DASHBOARD_KEY } from "../ha";
+import { SAX_DASHBOARD_KEY, type DashboardEntity } from "../ha";
+import type { EntityDomain } from "../types";
 
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = `manual-grid-charge-${useId()}`;
@@ -9,13 +10,38 @@ const powerInput = ref<HTMLInputElement>();
 const invalidSubmittedPower = ref(false);
 const action = computed(() => dashboard?.manualGridCharge.value);
 const storage = computed(() => dashboard?.entity("switch", "storage_switch"));
-const chargePower = computed(() => {
-  const sensor = dashboard?.entity("sensor", "charge_power");
-  return sensor?.metadata.device_id &&
-    sensor.metadata.device_id === storage.value?.metadata.device_id
-    ? sensor
+function confirmedEntity(
+  domain: EntityDomain,
+  key: string,
+): DashboardEntity | null {
+  const entity = dashboard?.entity(domain, key);
+  return entity?.metadata.device_id &&
+    entity.metadata.device_id === storage.value?.metadata.device_id
+    ? entity
     : null;
-});
+}
+const chargePower = computed(() => confirmedEntity("sensor", "charge_power"));
+const controlMode = computed(() =>
+  confirmedEntity("sensor", "ic_control_mode_text"),
+);
+const soc = computed(() => confirmedEntity("sensor", "soc"));
+const maxSoc = computed(() => confirmedEntity("number", "max_soc"));
+const calibration = computed(() =>
+  confirmedEntity("binary_sensor", "cell_calibration_active"),
+);
+function percentage(entity: DashboardEntity | null): number | null {
+  const value = entity?.state?.state;
+  if (
+    !entity?.available ||
+    entity.state?.attributes.unit_of_measurement !== "%" ||
+    !value?.trim()
+  )
+    return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 100
+    ? number
+    : null;
+}
 const blocked = computed(
   () => !action.value?.canControl || action.value.pending,
 );
@@ -36,6 +62,17 @@ const text = computed(() =>
         start: "Netzladen aktivieren",
         stop: "Netzladen abschalten",
         telemetry: "Bestätigte aktuelle Ladeleistung",
+        diagnostics: "Bestätigte aktuelle Gerätewerte",
+        controlMode: "Bestätigter Steuermodus",
+        soc: "Bestätigter Ladezustand (SOC)",
+        maxSoc: "Bestätigte globale Max-SOC-Grenze",
+        missingValue: "Nicht verfügbar",
+        limitReached:
+          "Der bestätigte SOC erreicht die konfigurierte globale Max-SOC-Grenze. Eine aktive Max-SOC-Sperre hat Vorrang vor manuellen Ladeaufträgen.",
+        calibration:
+          "Die Zellkalibrierung ist aktiv; die wirksame Max-SOC-Grenze beträgt dabei 100 %.",
+        acknowledged:
+          "Rückmeldung zum Antwortzeitpunkt: Ladebefehl vom Gerät quittiert. Die aktuellen Gerätewerte stehen oben.",
         hint: "Die Max-SOC-Sperre hat Vorrang. Abschalten beendet den manuellen Ladeauftrag; aktive Ladeautomatiken können danach übernehmen.",
         pending: "Netzladebefehl wird an das Gerät gesendet …",
         loading: "Die Entitäten werden geladen …",
@@ -50,6 +87,17 @@ const text = computed(() =>
         start: "Enable grid charging",
         stop: "Disable grid charging",
         telemetry: "Confirmed current charging power",
+        diagnostics: "Confirmed current device values",
+        controlMode: "Confirmed control mode",
+        soc: "Confirmed state of charge (SOC)",
+        maxSoc: "Confirmed global maximum SOC",
+        missingValue: "Unavailable",
+        limitReached:
+          "The confirmed SOC has reached the configured global maximum SOC. An active maximum SOC lock takes priority over manual charging requests.",
+        calibration:
+          "Cell calibration is active; the effective maximum SOC is 100% during calibration.",
+        acknowledged:
+          "Response at the time of the command: charging command acknowledged by the device. Current device values are shown above.",
         hint: "The maximum SOC lock takes priority. Disabling ends the manual charging request; active charging automations may then take over.",
         pending: "Sending grid charging command to the device …",
         loading: "Loading entities …",
@@ -58,6 +106,37 @@ const text = computed(() =>
         forbidden: "You do not have permission to control the battery.",
       },
 );
+const socDisplay = computed(() =>
+  percentage(soc.value) === null
+    ? text.value.missingValue
+    : soc.value!.displayValue,
+);
+const maxSocDisplay = computed(() =>
+  percentage(maxSoc.value) === null
+    ? text.value.missingValue
+    : maxSoc.value!.displayValue,
+);
+const limitHint = computed(() => {
+  const current = percentage(soc.value);
+  const maximum = percentage(maxSoc.value);
+  if (current === null || maximum === null || current < maximum) return "";
+  return calibration.value?.available && calibration.value.state?.state === "on"
+    ? text.value.calibration
+    : text.value.limitReached;
+});
+const resultStatus = computed(() => {
+  const result = action.value?.result;
+  if (!result) return "";
+  if (result.state === "charging") return text.value.acknowledged;
+  const format = new Intl.NumberFormat(dashboard?.language.value ?? "en", {
+    maximumFractionDigits: 20,
+  });
+  const current = format.format(result.current_soc);
+  const maximum = format.format(result.effective_max_soc);
+  return dashboard?.language.value === "de"
+    ? `Rückmeldung zum Antwortzeitpunkt: Der manuelle Ladeauftrag wurde vorgemerkt, aber die wirksame Max-SOC-Sperre verhinderte das Laden (SOC ${current} %; wirksame Grenze ${maximum} %). Bei späterer Freigabe kann der Auftrag automatisch laden.`
+    : `Response at the time of the command: the manual charging request was retained, but the effective maximum SOC lock prevented charging (SOC ${current}%; effective limit ${maximum}%). The request may charge automatically when the lock is released.`;
+});
 const status = computed(() => {
   if (!dashboard?.connected.value) return text.value.disconnected;
   if (action.value?.pending) return text.value.pending;
@@ -99,6 +178,23 @@ async function stop(): Promise<void> {
     <p v-if="chargePower" class="manual-grid-charge__telemetry">
       {{ text.telemetry }}: {{ chargePower.displayValue }}
     </p>
+    <dl class="manual-grid-charge__diagnostics" :aria-label="text.diagnostics">
+      <div>
+        <dt>{{ text.controlMode }}</dt>
+        <dd class="manual-grid-charge__mode">
+          {{ controlMode?.displayValue ?? text.missingValue }}
+        </dd>
+      </div>
+      <div>
+        <dt>{{ text.soc }}</dt>
+        <dd class="manual-grid-charge__soc">{{ socDisplay }}</dd>
+      </div>
+      <div>
+        <dt>{{ text.maxSoc }}</dt>
+        <dd class="manual-grid-charge__max-soc">{{ maxSocDisplay }}</dd>
+      </div>
+    </dl>
+    <p v-if="limitHint" class="manual-grid-charge__limit">{{ limitHint }}</p>
     <form novalidate @submit.prevent="start">
       <div class="manual-grid-charge__power">
         <label :for="`${id}-power`">{{ text.power }}</label>
@@ -141,8 +237,20 @@ async function stop(): Promise<void> {
     <div :id="`${id}-feedback`" class="manual-grid-charge__feedback">
       <p v-if="action?.error" class="manual-grid-charge__error" role="alert">
         {{ action.error }}
+        <span
+          v-if="action.errorDetail"
+          class="manual-grid-charge__error-detail"
+          >{{ action.errorDetail }}</span
+        >
       </p>
       <p v-else-if="status" role="status">{{ status }}</p>
+      <p
+        v-else-if="resultStatus"
+        class="manual-grid-charge__result"
+        role="status"
+      >
+        {{ resultStatus }}
+      </p>
     </div>
   </section>
 </template>
@@ -166,6 +274,8 @@ async function stop(): Promise<void> {
 }
 .manual-grid-charge__hint,
 .manual-grid-charge__telemetry,
+.manual-grid-charge__diagnostics,
+.manual-grid-charge__limit,
 .manual-grid-charge__range,
 .manual-grid-charge__feedback {
   color: var(--secondary-text-color, #666);
@@ -175,6 +285,23 @@ async function stop(): Promise<void> {
   margin: 0 0 16px;
 }
 .manual-grid-charge__telemetry {
+  margin: 0 0 16px;
+}
+.manual-grid-charge__diagnostics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 12px 24px;
+  margin: 0 0 16px;
+  font-size: 0.9em;
+}
+.manual-grid-charge__diagnostics dt {
+  font-weight: 500;
+}
+.manual-grid-charge__diagnostics dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.manual-grid-charge__limit {
   margin: 0 0 16px;
 }
 .manual-grid-charge form {
@@ -236,6 +363,11 @@ async function stop(): Promise<void> {
 }
 .manual-grid-charge__error {
   color: var(--error-color, #b71c1c);
+}
+.manual-grid-charge__error-detail {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 600px) {
   .manual-grid-charge {

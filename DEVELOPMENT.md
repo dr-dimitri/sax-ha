@@ -150,7 +150,17 @@ desselben Geräts begrenzt den Eingabebereich zusätzlich. `stop_grid_charge`
 bleibt auch bei ungültigem Leistungsentwurf bedienbar. Der gemeinsame HA-Kontext
 leitet Gerät und Befugnis aus `storage_switch` ab und teilt dessen
 Aktionssperre, bis der physische Service die Gerätequittierung erhalten hat.
-Bestätigte Telemetrie wird unverändert angezeigt; nach dem manuellen Stopp
+Der Start fordert die optionale Serviceantwort an: Ein quittierter negativer
+Ladebefehl und ein durch Max-SOC vorgemerkter Auftrag erhalten unterschiedliche
+Rückmeldungen mit SOC und wirksamer Grenze zum Antwortzeitpunkt. Freigegebene
+SmartMeter-Nullregelung wird dadurch nicht erneut gesperrt. Konkrete
+HA-Servicefehler erscheinen als Text, ohne den Leistungsentwurf zu verwerfen.
+Der bestätigte Steuermodus und die gemessene Ladeleistung bleiben separate
+HA-Werte desselben Geräts; eine Servicequittierung ersetzt keine Messung.
+Die Antwort entsteht unter dem Control-Lock und berücksichtigt auch während
+der Gerätequittierung angenommene Softwareänderungen. Bestehende Automationen
+können den Service weiterhin ohne Antwortanforderung verwenden.
+Nach dem manuellen Stopp
 dürfen aktive Automatiken wieder übernehmen (`REQ-MANUAL-GRID-CHARGE`).
 [`components/MonthSelection.vue`](frontend/src/components/MonthSelection.vue)
 kapselt Zusammenfassung und Quartalsauswahl der Monatsgruppen für Netzladung

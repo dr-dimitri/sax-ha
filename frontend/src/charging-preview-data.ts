@@ -33,6 +33,8 @@ export function chargingSample(language = "de"): {
         key !== "max_soc" &&
         key !== "storage_switch" &&
         key !== "charge_power" &&
+        key !== "soc" &&
+        key !== "ic_control_mode_text" &&
         !key.startsWith("timed_charge_") &&
         !key.startsWith("grid_serving_") &&
         !key.startsWith("price_charge_")
@@ -91,6 +93,15 @@ export function chargingSample(language = "de"): {
         if (key === "charge_power") {
           state = "0";
           attributes = { unit_of_measurement: "W" };
+        }
+        if (key === "soc") {
+          state = "50";
+          attributes = { unit_of_measurement: "%" };
+        }
+        if (key === "ic_control_mode_text") {
+          state = language.startsWith("de")
+            ? "SmartMeter-Nullregelung"
+            : "Smart meter zero regulation";
         }
         if (key === "grid_serving_forecast") {
           state = "24.3";

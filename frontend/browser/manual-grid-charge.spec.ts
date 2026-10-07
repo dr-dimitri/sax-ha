@@ -92,6 +92,7 @@ test("manual start and stop wait for physical responses, preserve drafts on fail
   const power = card.getByRole("spinbutton");
   const telemetry = card.locator(".manual-grid-charge__telemetry");
   const confirmed = await telemetry.textContent();
+  await expect(card).toContainText("SmartMeter-Nullregelung");
   await power.fill("1250");
   await page.locator("#hold-action").click();
   await start.click();
@@ -109,6 +110,7 @@ test("manual start and stop wait for physical responses, preserve drafts on fail
   await expect(stop).toBeDisabled();
   await expect(power).toBeDisabled();
   await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("SmartMeter-Nullregelung");
   await card.locator("form").evaluate((form) => {
     form.dispatchEvent(
       new Event("submit", { bubbles: true, cancelable: true }),
@@ -123,6 +125,9 @@ test("manual start and stop wait for physical responses, preserve drafts on fail
   await expect(card.getByRole("alert")).toContainText(
     english ? "failed" : "fehlgeschlagen",
   );
+  await expect(card.getByRole("alert")).toContainText(
+    english ? "valid state of charge" : "gültigen SOC",
+  );
   await expect(power).toHaveValue("1250");
   await expect(power).toHaveAttribute("aria-invalid", "false");
   await expect(telemetry).toHaveText(confirmed!);
@@ -131,7 +136,11 @@ test("manual start and stop wait for physical responses, preserve drafts on fail
     "2: sax_power.start_grid_charge",
   );
   await expect(card).toHaveAttribute("aria-busy", "false");
-  await expect(telemetry).toContainText(english ? "1,250 W" : "1.250 W");
+  await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("Sollwertvorgabe");
+  await expect(card.getByRole("status")).toContainText(
+    english ? "acknowledged" : "quittiert",
+  );
   await power.fill("0");
   await start.click();
   await expect(card.getByRole("alert")).toBeVisible();
@@ -145,23 +154,84 @@ test("manual start and stop wait for physical responses, preserve drafts on fail
   await expect(page.locator("#actions")).toContainText(
     '3: sax_power.stop_grid_charge {"device_id":"demo-device"}',
   );
-  await expect(telemetry).toContainText(english ? "1,250 W" : "1.250 W");
+  await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("Sollwertvorgabe");
   await page.locator("#failure").click();
   await page.locator("#release-action").click();
   await expect(card.getByRole("alert")).toContainText(
     english ? "failed" : "fehlgeschlagen",
   );
+  await expect(card.getByRole("alert")).toContainText(
+    english ? "SmartMeter reset" : "SmartMeter-Nullregelung",
+  );
   await expect(power).toHaveValue("0");
   await expect(power).toHaveAttribute("aria-invalid", "false");
-  await expect(telemetry).toContainText(english ? "1,250 W" : "1.250 W");
+  await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("Sollwertvorgabe");
   await stop.click();
   await expect(page.locator("#actions")).toContainText(
     "4: sax_power.stop_grid_charge",
   );
   await expect(card).toHaveAttribute("aria-busy", "false");
-  await expect(telemetry).toContainText("0 W");
+  await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("SmartMeter-Nullregelung");
   await expect(power).toHaveValue("0");
   expect(errors).toEqual([]);
+});
+
+test("a maximum-SOC blocked order explains the response without inventing charging telemetry or changing SmartMeter mode", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/sax-power-vue/netzdienliches-laden?manual-blocked");
+  const english = testInfo.project.name.endsWith("en");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const card = page.locator("sax-power-vue-panel .manual-grid-charge");
+  const power = card.getByRole("spinbutton");
+  const telemetry = card.locator(".manual-grid-charge__telemetry");
+  const confirmed = await telemetry.textContent();
+  await expect(card).toContainText("SmartMeter-Nullregelung");
+  await page.locator("#hold-action").click();
+  await card
+    .getByRole("button", {
+      name: english ? "Enable grid charging" : "Netzladen aktivieren",
+      exact: true,
+    })
+    .click();
+  await expect(card).toHaveAttribute("aria-busy", "true");
+  await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("SmartMeter-Nullregelung");
+  await expect(card).not.toContainText("Sollwertvorgabe");
+  await page.locator("#release-action").click();
+  await expect(card).toHaveAttribute("aria-busy", "false");
+  const status = card.getByRole("status");
+  await expect(status).toContainText(english ? "retained" : "vorgemerkt");
+  await expect(status).toContainText(english ? "Response" : "Antwortzeitpunkt");
+  await expect(status).toContainText(english ? "72%" : "72 %");
+  await expect(status).toContainText(english ? "70%" : "70 %");
+  await expect(card.getByRole("alert")).toHaveCount(0);
+  await expect(telemetry).toHaveText(confirmed!);
+  await expect(card).toContainText("SmartMeter-Nullregelung");
+  await expect(card).not.toContainText("Sollwertvorgabe");
+  await expect(power).toHaveValue("1000");
+  await expect(page.locator("#actions")).toContainText(
+    "1: sax_power.start_grid_charge",
+  );
+  await power.fill("");
+  await card
+    .getByRole("button", {
+      name: english ? "Disable grid charging" : "Netzladen abschalten",
+      exact: true,
+    })
+    .click();
+  await expect(card).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("#actions")).toContainText(
+    "2: sax_power.stop_grid_charge",
+  );
+  await expect(status).toHaveCount(0);
+  await expect(power).toHaveValue("");
+  await expect(telemetry).toHaveText(confirmed!);
 });
 
 test("manual controls disable on unavailable telemetry and connection loss without writing", async ({

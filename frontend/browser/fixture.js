@@ -21,7 +21,9 @@ let tariffConfigureRequests = 0;
 let writes = 0;
 let activeTariff = "time_of_use";
 let tariffRevision = 1;
-const bridgePlan = new URLSearchParams(location.search).has("bridge-plan");
+const scenarios = new URLSearchParams(location.search);
+const bridgePlan = scenarios.has("bridge-plan");
+const manualBlocked = scenarios.has("manual-blocked");
 
 const general = [
   "soc",
@@ -126,7 +128,8 @@ function example({ domain, key, entity_id }) {
     attributes = { min: 1, max: 24, step: 1, unit_of_measurement: "h" };
   }
   const values = {
-    soc: "63.5",
+    soc: manualBlocked ? "72" : "63.5",
+    max_soc: manualBlocked ? "70" : "80",
     storage_max_cell_temp: "24.3",
     charge_power: "1820",
     discharge_power: "0",
@@ -137,7 +140,7 @@ function example({ domain, key, entity_id }) {
     sun_version_gateway: "2.4.0",
     sun_serial_number: "DEMO-2026",
     storage_event_text: "Normalbetrieb",
-    ic_control_mode_text: "Normalbetrieb",
+    ic_control_mode_text: "SmartMeter-Nullregelung",
     cell_calibration_active: "off",
     next_cell_calibration: "2026-09-14",
     timed_charge_enabled: "off",
@@ -339,13 +342,35 @@ async function waitForActionRelease() {
   releaseAction = null;
   button.disabled = true;
 }
-async function callService(domain, service, data, target) {
+async function callService(
+  domain,
+  service,
+  data,
+  target,
+  _notifyOnError,
+  returnResponse,
+) {
   writes += 1;
   actions.textContent = `${writes}: ${domain}.${service} ${JSON.stringify({ ...data, ...target })}`;
   await waitForActionRelease();
   await new Promise((resolve) => setTimeout(resolve, 150));
   if (rejectNext) {
     rejectNext = false;
+    if (
+      domain === "sax_power" &&
+      ["start_grid_charge", "stop_grid_charge"].includes(service)
+    )
+      throw {
+        code: "home_assistant_error",
+        message:
+          service === "start_grid_charge"
+            ? language === "de"
+              ? "Die Netzladung benötigt einen gültigen SOC."
+              : "Grid charging requires a valid state of charge."
+            : language === "de"
+              ? "SmartMeter-Nullregelung wurde nicht quittiert."
+              : "The SmartMeter reset was not acknowledged.",
+      };
     throw new Error("Simulated service failure");
   }
   if (domain === "sax_power") {
@@ -358,16 +383,37 @@ async function callService(domain, service, data, target) {
             data.power >= 0))
       )
         throw new Error("Invalid demo manual charge command");
-      const entityId = "sensor.demo_charge_power";
-      states = {
-        ...states,
-        [entityId]: {
-          ...states[entityId],
-          state: service === "start_grid_charge" ? String(-data.power) : "0",
-        },
+      const soc = Number(states["sensor.demo_soc"].state);
+      const maximum = Number(states["number.demo_max_soc"].state);
+      const blocked = service === "start_grid_charge" && soc >= maximum;
+      if (!blocked) {
+        const modeId = "sensor.demo_ic_control_mode_text";
+        states = {
+          ...states,
+          [modeId]: {
+            ...states[modeId],
+            state:
+              service === "start_grid_charge"
+                ? "Sollwertvorgabe"
+                : "SmartMeter-Nullregelung",
+          },
+        };
+        update();
+      }
+      return {
+        context: { id: `demo-service-${writes}` },
+        ...(service === "start_grid_charge" && returnResponse
+          ? {
+              response: {
+                state: blocked ? "blocked" : "charging",
+                reason: blocked ? "max_soc" : null,
+                requested_power_w: data.power,
+                current_soc: soc,
+                effective_max_soc: maximum,
+              },
+            }
+          : {}),
       };
-      update();
-      return;
     }
     const prefix =
       service === "set_timed_charge_window"

@@ -89,6 +89,8 @@ async function mount(
       canControl: false,
       pending: false,
       error: null,
+      errorDetail: null,
+      result: null,
       maxPower: 32768,
     })),
     startGridCharge: vi.fn().mockResolvedValue(false),

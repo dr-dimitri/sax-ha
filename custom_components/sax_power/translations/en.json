@@ -615,6 +615,12 @@
     "invalid_grid_charge_power": {
       "message": "The power setpoint {power} is invalid. Safe manual grid charging requires an integer between {min_power} W and {max_power} W; zero and positive values are not supported."
     },
+    "manual_grid_charge_power_resolution": {
+      "message": "The power {power} W cannot be represented as a negative charging setpoint with the current device scaling. Please choose a higher charging power."
+    },
+    "manual_grid_charge_soc_unavailable": {
+      "message": "The current SOC is invalid. Manual grid charging requires a confirmed SOC between 0 and 100%."
+    },
     "economics_restart_not_ready": {
       "message": "A balance restart is only possible while economics is enabled and already initialized."
     },
@@ -628,7 +634,7 @@
   "services": {
     "start_grid_charge": {
       "name": "Start grid charge",
-      "description": "Requests manual grid charging through the central control path protected by the max SOC limit.",
+      "description": "Requests manual grid charging through the central control path protected by the max SOC limit. The optional response reports acknowledged charging or a pending request blocked by max SOC.",
       "fields": {
         "device_id": {
           "name": "Device",

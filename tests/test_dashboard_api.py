@@ -17,7 +17,10 @@ from pytest_homeassistant_custom_component.typing import (
     WebSocketGenerator,
 )
 
-from custom_components.sax_power.const import DOMAIN
+from custom_components.sax_power import _async_remove_stale_entities
+from custom_components.sax_power.const import (
+    DOMAIN,
+)
 from custom_components.sax_power.dashboard_api import (
     SUBSCRIBE_COMMAND,
     async_register_dashboard_api,
@@ -127,30 +130,40 @@ async def test_metadata_reports_registry_device_for_renamed_time_entities(
     assert (await client.receive_json())["event"]["entities"][0]["device_id"] is None
 
 
-async def test_metadata_matches_registry_names_and_enum_translations(
+@pytest.mark.parametrize(
+    "language, storage_name",
+    [("de", "Speicher On/Off"), ("en", "Storage on/off")],
+)
+async def test_metadata_matches_registry_names_and_excludes_retired_status(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
     entity_registry: er.EntityRegistry,
     dashboard_entry: MockConfigEntry,
+    language: str,
+    storage_name: str,
 ) -> None:
-    """Sondernamen, Enum-Werte und dynamische Forecast-Namen bleiben korrekt."""
+    """Sondernamen bleiben erhalten; die bereinigte Status-Entity entfällt."""
     _entity(entity_registry, dashboard_entry, "storage_switch", "switch")
     _entity(entity_registry, dashboard_entry, "grid_serving_forecast")
-    _entity(entity_registry, dashboard_entry, "timed_charge_discharge_status")
+    retired = _entity(entity_registry, dashboard_entry, "timed_charge_discharge_status")
+    entity_registry.async_update_entity(
+        retired.entity_id, new_entity_id="sensor.my_old_discharge_status"
+    )
+    _async_remove_stale_entities(hass, dashboard_entry)
+    assert entity_registry.async_get("sensor.my_old_discharge_status") is None
     custom = _entity(entity_registry, dashboard_entry)
     entity_registry.async_update_entity(custom.entity_id, name="Meine Batterie")
     client = await hass_ws_client(hass)
-    entities = {item["key"]: item for item in await _subscribe(client, dashboard_entry)}
+    entities = {
+        item["key"]: item
+        for item in await _subscribe(client, dashboard_entry, language)
+    }
 
     assert entities["soc"]["name"] == "Meine Batterie"
-    assert entities["storage_switch"]["name"] == "Speicher On/Off"
+    assert entities["storage_switch"]["name"] == storage_name
     assert entities["storage_switch"]["can_control"] is True
     assert entities["grid_serving_forecast"]["name"] is None
-    assert entities["timed_charge_discharge_status"]["states"] == {
-        "normal": "Normalbetrieb",
-        "grid_charging": "Netzladen",
-        "discharge_blocked": "Entladung wg. Netzladen gestoppt",
-    }
+    assert "timed_charge_discharge_status" not in entities
 
 
 async def test_metadata_excludes_foreign_disabled_and_invalid_entities(

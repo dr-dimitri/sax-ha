@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from pymodbus.exceptions import ModbusException
 
 from custom_components.sax_power.const import (
@@ -56,6 +56,79 @@ SETTINGS = [
         (dt_time(6), dt_time(10)),
     ),
 ]
+
+
+@pytest.mark.parametrize("calibration", [False, True])
+@pytest.mark.parametrize(
+    "setting,value", [("timed_charge_max_soc", 19), ("timed_charge_min_soc", 91)]
+)
+async def test_soc_order_rejected_before_mutation_or_device_lock(
+    coordinator: SaxPowerCoordinator, setting: str, value: int, calibration: bool
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Auch bei Kalibrierung gilt Start <= Ladeziel."""
+    coordinator._timed_charge_min_soc = 20
+    coordinator._cell_calibration_active = calibration
+    before = coordinator.control_config()
+    async with coordinator._charge_control_lock:
+        with pytest.raises(ServiceValidationError) as error:
+            await asyncio.wait_for(
+                getattr(coordinator, f"async_set_{setting}")(
+                    value, defer_device_update=True
+                ),
+                0.2,
+            )
+        assert error.value.translation_key == "timed_charge_soc_order"
+        assert coordinator.control_config() == before
+        assert coordinator._control_store._pending is None
+        assert coordinator._month_control_task is None
+        coordinator.client.write_register.assert_not_awaited()
+
+
+@pytest.mark.parametrize("value", [0, 20, 90])
+async def test_equal_soc_limits_and_zero_confirm_without_device_lock(
+    coordinator: SaxPowerCoordinator, value: int
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Gleichheit ist gültig, auch bei beiden Werten 0."""
+    async with coordinator._charge_control_lock:
+        await asyncio.wait_for(
+            coordinator.async_set_timed_charge_min_soc(value, defer_device_update=True),
+            0.2,
+        )
+        await asyncio.wait_for(
+            coordinator.async_set_timed_charge_max_soc(value, defer_device_update=True),
+            0.2,
+        )
+        assert coordinator.timed_charge_min_soc == value
+        assert coordinator.timed_charge_max_soc == value
+        assert coordinator._control_store._pending["timed_charge_min_soc"] == value
+        assert coordinator._control_store._pending["timed_charge_max_soc"] == value
+        coordinator.client.write_register.assert_not_awaited()
+    await coordinator._month_control_task
+
+
+async def test_soc_validation_uses_latest_accepted_values_and_global_cap(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: Kein veralteter Grenzwert autorisiert Folgesaves."""
+    async with coordinator._charge_control_lock:
+        await coordinator.async_set_timed_charge_min_soc(40, defer_device_update=True)
+        await coordinator.async_set_timed_charge_max_soc(60, defer_device_update=True)
+        for setting, value in [("min", 61), ("max", 39)]:
+            with pytest.raises(ServiceValidationError):
+                await getattr(coordinator, f"async_set_timed_charge_{setting}_soc")(
+                    value, defer_device_update=True
+                )
+        await coordinator.async_set_max_soc(30, defer_device_update=True)
+        assert coordinator.control_config().timed_charge_max_soc == 60
+        assert coordinator.timed_charge_max_soc == 30
+        assert coordinator.timed_charge_min_soc == 40
+        with pytest.raises(ServiceValidationError):
+            await coordinator.async_set_timed_charge_max_soc(
+                60, defer_device_update=True
+            )
+        await coordinator.async_set_max_soc(100, defer_device_update=True)
+        assert coordinator.timed_charge_max_soc == 60
+    await coordinator._month_control_task
 
 
 @pytest.mark.parametrize("setting,args,fields,expected", SETTINGS)

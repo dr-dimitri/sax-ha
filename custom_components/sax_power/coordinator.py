@@ -31,6 +31,7 @@ from .application.charge_policy import (
     ChargePolicyInput,
     evaluate_charge_policy,
     tariff_automation_controls,
+    timed_charge_start_allowed,
     timed_discharge_hold_active,
     timed_discharge_pv_power,
 )
@@ -52,6 +53,7 @@ from .const import (
     ALL_MONTHS,
     CELL_CALIBRATION_INTERVAL,
     CHARGE_CONFLICT_ISSUES,
+    CHARGING_SETTING_KEYS,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_PRICE_SENSOR,
@@ -80,6 +82,7 @@ from .const import (
     MIN_PRICE_LIMIT,
     MIN_SETPOINT_POWER,
     MIN_SOC,
+    PRICE_LIMIT_STEP,
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
@@ -183,6 +186,7 @@ from .infrastructure.economics_store import (
 from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.pv_bridge_forecast import PvBridgeForecast
+from .infrastructure.pv_forecast_reading import PvForecastReading
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .infrastructure.timed_charge_store import TimedChargeStateStore
 from .infrastructure.timed_discharge_store import TimedDischargeStateStore
@@ -514,7 +518,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_discharge_state: TimedDischargeState | None = None
         self._timed_discharge_last_window_end: datetime | None = None
         self._timed_discharge_last_source: str | None = None
-        self._timed_charge_discharge_status: str | None = "normal"
         self._timed_charge_grid_measured = False
         self._timed_charge_confirmation_cycles = 0
         self._timed_charge_start_revision = 0
@@ -554,6 +557,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
+        self.pv_forecast_reading = PvForecastReading(
+            hass,
+            lambda: self.price_planner.pv_forecast_entity_id,
+            self.async_update_listeners,
+        )
         self._pv_bridge_forecast = PvBridgeForecast(
             hass, lambda: self.price_planner.pv_forecast_entity_id
         )
@@ -801,7 +809,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         können."""
         plan = self.price_planner.plan
         data["timed_charge_active"] = self._timed_charge_active
-        data["timed_charge_discharge_status"] = self._timed_charge_discharge_status
         data["grid_serving_active"] = self._grid_serving_active
         data["grid_serving_window_active"] = self._grid_serving_window_active
         data["grid_serving_forecast_kwh"] = self._grid_serving_forecast_kwh
@@ -3398,6 +3405,96 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
             )
 
+    async def async_set_charging_settings(
+        self,
+        values: Mapping[str, Any],
+        *,
+        defer_device_update: bool = True,
+    ) -> None:
+        """Accept one validated dashboard draft before scheduling device work."""
+        self._raise_if_shutdown()
+        if not values:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="charging_settings_required",
+            )
+        validated: dict[str, int | float] = {}
+        for key, value in values.items():
+            if key in ("max_soc", "timed_charge_min_soc", "timed_charge_max_soc"):
+                minimum, maximum, step = MIN_SOC, MAX_SOC, 1
+            elif key == "price_charge_hours":
+                minimum, maximum, step = MIN_PRICE_HOURS, MAX_PRICE_HOURS, 1
+            elif key in ("price_charge_max_price", "price_charge_neutral_price"):
+                minimum, maximum, step = (
+                    MIN_PRICE_LIMIT * 100,
+                    MAX_PRICE_LIMIT * 100,
+                    PRICE_LIMIT_STEP * 100,
+                )
+            else:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_charging_setting",
+                    translation_placeholders={
+                        "field": key,
+                        "min": "—",
+                        "max": "—",
+                        "step": "—",
+                    },
+                )
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not minimum <= value <= maximum
+                or not math.isfinite(value)
+                or not math.isclose(
+                    value / step, round(value / step), rel_tol=0, abs_tol=1e-9
+                )
+            ):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_charging_setting",
+                    translation_placeholders={
+                        "field": key,
+                        "min": str(minimum),
+                        "max": str(maximum),
+                        "step": str(step),
+                    },
+                )
+            validated[key] = int(value) if step == 1 else float(value) / 100
+
+        maximum_soc = validated.get("max_soc", self._max_soc)
+        maximum_soc = MAX_SOC if maximum_soc is None else int(maximum_soc)
+        if "timed_charge_min_soc" in validated or "timed_charge_max_soc" in validated:
+            target = validated.get("timed_charge_max_soc", self._timed_charge_max_soc)
+            target = maximum_soc if target is None else min(int(target), maximum_soc)
+            minimum_soc = validated.get(
+                "timed_charge_min_soc", self._timed_charge_min_soc
+            )
+            self._validate_timed_charge_soc(
+                target, None if minimum_soc is None else int(minimum_soc)
+            )
+        if validated.get("timed_charge_max_soc", 0) > maximum_soc:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_charging_setting",
+                translation_placeholders={
+                    "field": "timed_charge_max_soc",
+                    "min": str(MIN_SOC),
+                    "max": str(maximum_soc),
+                    "step": "1",
+                },
+            )
+
+        # REQ-VUE-ENTITY-BINDING: a shared Apply must never expose a partial draft.
+        for key in CHARGING_SETTING_KEYS:
+            if key in validated:
+                setattr(self, f"_{key}", validated[key])
+                self.clear_control_field_unresolved(key)
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
+
     async def async_set_max_soc(
         self, max_soc: int | None, *, defer_device_update: bool = False
     ) -> None:
@@ -3845,9 +3942,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_serving_setpoint_active = False
         self._price_charge_active = False
         self._max_soc_clamped = False
-        self._timed_charge_discharge_status = None
-        if self.data is not None:
-            self.data["timed_charge_discharge_status"] = None
 
     async def _async_cancel_sun_charge_task(self) -> None:
         """Cancel and forget the periodic writer without another mode write."""
@@ -3891,9 +3985,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._sun_charge_reset_required = True
         try:
             async with self._sun_charge_write_lock:
-                await self.async_write_extended_register(
-                    REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
-                )
+                await self._async_reset_sun_charge_mode_unlocked()
         except HomeAssistantError as err:
             if require_confirmation:
                 raise HomeAssistantError(
@@ -3907,9 +3999,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "spätestens nach Ablauf des Timeouts (Register 40050) "
                 "automatisch zurück."
             )
-        else:
-            self._sun_charge_reset_required = False
-            self._record_ic_control_mode(SUN_IC_CONTROL_MODE_SMARTMETER)
+
+    async def _async_reset_sun_charge_mode_unlocked(self) -> None:
+        """Clear the reset request only after the device acknowledges mode zero."""
+        await self.async_write_extended_register(
+            REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
+        )
+        self._sun_charge_reset_required = False
+        self._record_ic_control_mode(SUN_IC_CONTROL_MODE_SMARTMETER)
 
     async def _async_sun_charge_loop(self) -> None:
         try:
@@ -3973,14 +4070,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             # REQ-TIME-OF-USE-CHARGE-SOURCE / REQ-BRIDGE-CHARGE:
                             # Expire even without a completed coordinator poll.
                             async with self._sun_charge_write_lock:
-                                await self.async_write_extended_register(
-                                    REG_SUN_IC_CONTROL_MODE,
-                                    SUN_IC_CONTROL_MODE_SMARTMETER,
-                                )
-                                self._sun_charge_reset_required = False
-                                self._record_ic_control_mode(
-                                    SUN_IC_CONTROL_MODE_SMARTMETER
-                                )
+                                await self._async_reset_sun_charge_mode_unlocked()
                             if self._bridge_charge_deadline is not None:
                                 bridge_measurements_fresh = (
                                     not self._basic_read_failed
@@ -4023,17 +4113,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             # This task cannot call async_stop_sun_charge:
                             # that method would cancel and await itself.
                             async with self._sun_charge_write_lock:
-                                await self.async_write_extended_register(
-                                    REG_SUN_IC_CONTROL_MODE,
-                                    SUN_IC_CONTROL_MODE_SMARTMETER,
-                                )
-                                self._sun_charge_reset_required = False
-                                self._record_ic_control_mode(
-                                    SUN_IC_CONTROL_MODE_SMARTMETER
-                                )
+                                await self._async_reset_sun_charge_mode_unlocked()
                             self._sun_charge_timed_discharge = False
                             self._max_soc_hold_during_basic_outage = False
-                            self._timed_charge_discharge_status = "normal"
                             if self._max_soc_clamped:
                                 self._max_soc_released_for_discharge = True
                                 self._max_soc_clamped = False
@@ -4070,6 +4152,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
         except HomeAssistantError:
             self._clear_sun_charge_active_flags(preserve_grid_serving_hold=True)
+            if self.data is not None:
+                self._publish_charge_state(self.data)
+                self.async_update_listeners()
             _LOGGER.exception(
                 "Netzladung (SunSpec-Modus): periodischer Schreibvorgang fehlgeschlagen"
             )
@@ -4163,6 +4248,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._tariff_source_revision += 1
             self.reconcile_charge_time_source()
             self.price_planner.async_setup()
+            self.pv_forecast_reading.async_setup()
             self.tariff_provider.async_setup()
             self.notify_tariff_revision()
         elif previous_enabled != (
@@ -4526,7 +4612,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set the grid-charge target and immediately reevaluate charging."""
         self._raise_if_shutdown()
         maximum = self._max_soc if self._max_soc is not None else MAX_SOC
-        self._timed_charge_max_soc = _clamp_int(value, MIN_SOC, maximum)
+        target = _clamp_int(value, MIN_SOC, maximum)
+        self._validate_timed_charge_soc(
+            maximum if target is None else target, self._timed_charge_min_soc
+        )
+        self._timed_charge_max_soc = target
         await self._async_apply_grid_charge_change(
             defer_device_update=defer_device_update
         )
@@ -4585,7 +4675,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, value: int | None, *, defer_device_update: bool = False
     ) -> None:
         """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
-        unterhalb dessen die Netzladung starten darf - siehe
+        unterhalb dessen die Netzladung starten darf (bei 0 % genau bei 0 %) - siehe
         _async_enforce_grid_charge/_timed_charge_armed für die
         Hysterese-Logik (im selben Fenster einmal unterschritten, wird darin
         bis zum "Netzladen Max. SOC" durchgeladen, statt über Min. SOC sofort
@@ -4593,11 +4683,26 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
         NumberEntity-Validierung)."""
         self._raise_if_shutdown()
-        self._timed_charge_min_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
+        minimum = _clamp_int(value, MIN_SOC, MAX_SOC)
+        self._validate_timed_charge_soc(self.timed_charge_max_soc, minimum)
+        self._timed_charge_min_soc = minimum
         self.clear_control_field_unresolved("timed_charge_min_soc")
         await self._async_apply_grid_charge_change(
             defer_device_update=defer_device_update
         )
+
+    def _validate_timed_charge_soc(self, target: int, minimum: int | None) -> None:
+        # REQ-CONTROL-CONFIG-BOOTSTRAP: migration restores partial settings;
+        # a temporary global cap must not rewrite the saved start/target pair.
+        if (
+            not self._control_bootstrap_pending
+            and minimum is not None
+            and target < minimum
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="timed_charge_soc_order",
+            )
 
     async def async_set_timed_charge_start(
         self, value: dt_time, *, defer_device_update: bool = False
@@ -4883,13 +4988,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # charging is safe without its independent global SOC cap.
                 await self.async_start_sun_charge(0, timed_discharge_hold=True)
                 self._max_soc_clamped = had_max_soc_hold
-                self._timed_charge_discharge_status = "discharge_blocked"
             elif self._max_soc_hold_during_basic_outage:
                 # Losing the SOC cannot undo an already confirmed cap and
                 # thereby permit PV charging above that cap (Issue #167).
                 await self.async_start_sun_charge(0)
                 self._max_soc_clamped = True
-                self._timed_charge_discharge_status = "normal"
             else:
                 await self.async_stop_sun_charge()
                 if had_max_soc_hold and self._max_soc_hold_is_window_bound:
@@ -4900,9 +5003,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     None,
                     retain_expiry=self._timed_charge_enabled
                     and not self._price_charge_enabled,
-                )
-                self._timed_charge_discharge_status = (
-                    None if self._sun_charge_reset_required else "normal"
                 )
         except HomeAssistantError:
             _LOGGER.exception("Ladesteuerung: sicherer Zustand ohne SOC fehlgeschlagen")
@@ -5145,7 +5245,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
            "Min. SOC" (self._timed_charge_min_soc, NumberEntity analog zu
            "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
-           Schwellwert im aktuellen Fenster unterschritten hat -
+           Schwellwert im aktuellen Fenster unterschritten hat (bei 0 %
+           genau bei 0 % SOC) -
            _timed_charge_armed hält diesen Zustand nur für dieselbe
            Fensterinstanz fest (REQ-TIMED-SOC-CHARGE), damit einmal
            gestartetes Laden darin bis zum eigenen "Netzladen Max. SOC" durchläuft,
@@ -5341,10 +5442,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_restore_state = None
         if timed_window_state is None or current_soc >= timed_target_soc:
             self._timed_charge_armed = False
-        elif (
-            self._timed_charge_min_soc is not None
-            and current_soc < self._timed_charge_min_soc
-        ):
+        elif timed_charge_start_allowed(current_soc, self._timed_charge_min_soc):
             self._timed_charge_armed = True
         if self.bridge_charge_enabled:
             self._timed_charge_armed = False
@@ -5723,18 +5821,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_started_at = monotonic()
             self._timed_charge_confirmation_cycles = 0
             self._timed_charge_grid_measured = False
-        if self._timed_discharge_state is None:
-            self._timed_charge_discharge_status = (
-                None
-                if self._sun_charge_reset_required and not self.sun_charge_active
-                else "normal"
-            )
-        elif not self.sun_charge_active:
-            self._timed_charge_discharge_status = None
-        elif self._timed_charge_active and self._timed_charge_grid_measured:
-            self._timed_charge_discharge_status = "grid_charging"
-        else:
-            self._timed_charge_discharge_status = "discharge_blocked"
         self._grid_serving_active = grid_serving_active_now
         self._price_charge_active = (
             price_should_charge
@@ -6418,6 +6504,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # während der folgenden Store-Flushes keine neuen Entscheidungen
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
         await self.price_planner.async_shutdown()
+        await self.pv_forecast_reading.async_shutdown()
         self.tariff_provider.async_shutdown()
         # REQ-GRID-SERVING-CHARGE: Eine begonnene Modus-/Sollwertsequenz nie
         # abbrechen; das Shutdown-Gate sperrt weitere Konfigurationsentscheidungen.

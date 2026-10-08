@@ -27,6 +27,7 @@ export function chargingSample(language = "de"): {
     ][]) {
       if (
         key !== "max_soc" &&
+        key !== "charging_pv_forecast" &&
         !key.startsWith("timed_charge_") &&
         !key.startsWith("grid_serving_") &&
         !key.startsWith("price_charge_")
@@ -81,7 +82,13 @@ export function chargingSample(language = "de"): {
       }
       if (domain === "sensor") {
         state = language.startsWith("de") ? "Inaktiv" : "Inactive";
-        if (key === "timed_charge_discharge_status") state = "normal";
+        if (key === "charging_pv_forecast") {
+          state = "12.4";
+          attributes = {
+            unit_of_measurement: "kWh",
+            source_entity_id: "sensor.pv_forecast",
+          };
+        }
         if (key === "grid_serving_forecast") {
           state = "24.3";
           attributes = {

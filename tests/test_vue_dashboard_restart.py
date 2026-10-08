@@ -42,6 +42,7 @@ def _setup_boundaries(
     coordinator.options = dict(entry.options)
     coordinator.price_planner = MagicMock()
     coordinator.price_planner.async_load_cycle_state = AsyncMock()
+    coordinator.pv_forecast_reading = MagicMock()
     coordinator.tariff_provider = MagicMock()
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)

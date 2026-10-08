@@ -298,20 +298,25 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         ),
     ),
     SaxPowerSensorEntityDescription(
-        key="timed_charge_discharge_status",
-        translation_key="timed_charge_discharge_status",
-        device_class=SensorDeviceClass.ENUM,
-        options=["normal", "grid_charging", "discharge_blocked"],
-        icon="mdi:battery-lock",
-        value_fn=_direct("timed_charge_discharge_status"),
-    ),
-    SaxPowerSensorEntityDescription(
         key="grid_serving_active_text",
         translation_key="grid_serving_active_text",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_bool_text(
             "grid_serving_active", true_text="Aktiv", false_text="Inaktiv"
         ),
+    ),
+    SaxPowerSensorEntityDescription(
+        key="charging_pv_forecast",
+        translation_key="charging_pv_forecast",
+        device_class=SensorDeviceClass.ENERGY,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        value_fn=_direct("charging_pv_forecast_kwh"),
+        attributes_fn=lambda coordinator: {
+            "source_entity_id": coordinator.pv_forecast_reading.source_entity_id,
+            "last_successful_update": (
+                coordinator.pv_forecast_reading.last_successful_update
+            ),
+        },
     ),
     SaxPowerSensorEntityDescription(
         key="grid_serving_forecast",
@@ -977,7 +982,11 @@ async def async_setup_entry(
         (
             SaxPowerForecastSensor(coordinator, entry.entry_id, description)
             if description.key == "grid_serving_forecast"
-            else SaxPowerSensor(coordinator, entry.entry_id, description)
+            else (
+                SaxPowerChargingForecastSensor(coordinator, entry.entry_id, description)
+                if description.key == "charging_pv_forecast"
+                else SaxPowerSensor(coordinator, entry.entry_id, description)
+            )
         )
         for description in SENSOR_DESCRIPTIONS
     ]
@@ -1047,6 +1056,24 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
         if self.coordinator.data is None:
             return None
         return last_reset_fn(self.coordinator.data)
+
+
+class SaxPowerChargingForecastSensor(SaxPowerSensor):
+    """Display the cached HA forecast independently of battery connectivity."""
+
+    @property
+    def available(self) -> bool:
+        return self.native_value is not None
+
+    @property
+    def native_value(self) -> float | None:
+        reading = self.coordinator.pv_forecast_reading
+        if (
+            reading.source_entity_id
+            != self.coordinator.price_planner.pv_forecast_entity_id
+        ):
+            return None
+        return reading.value_kwh
 
 
 class SaxPowerForecastSensor(SaxPowerSensor):

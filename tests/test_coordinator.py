@@ -1921,9 +1921,9 @@ async def test_enforce_grid_charge_inactive_when_soc_at_or_above_min_soc(hass) -
     assert coordinator._timed_charge_active is False
 
 
-async def test_enforce_grid_charge_starts_when_soc_below_min_soc(hass) -> None:
-    """Unterschreitet der SOC "Netzladung Min. SOC", startet zeitgesteuertes
-    Laden (bei erfüllten übrigen Bedingungen)."""
+@pytest.mark.parametrize("minimum", [0, 40])
+async def test_enforce_grid_charge_starts_when_soc_below_min_soc(hass, minimum) -> None:
+    """REQ-TIMED-SOC-CHARGE: Start unter der Schwelle bzw. bei genau 0 %."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False
@@ -1931,14 +1931,14 @@ async def test_enforce_grid_charge_starts_when_soc_below_min_soc(hass) -> None:
 
     coordinator = _make_coordinator(hass, client)
     coordinator.data = {
-        "soc": 39,
+        "soc": max(0, minimum - 1),
         "ic_max_power_reference": 4600,
         "ic_timeout": 300,
     }
     await coordinator.async_set_timed_charge_start(dt_time(1, 0))
     await coordinator.async_set_timed_charge_end(dt_time(5, 0))
     await coordinator.async_set_max_soc(90)
-    await coordinator.async_set_timed_charge_min_soc(40)
+    await coordinator.async_set_timed_charge_min_soc(minimum)
 
     try:
         with _patched_now(2):
@@ -1946,6 +1946,11 @@ async def test_enforce_grid_charge_starts_when_soc_below_min_soc(hass) -> None:
         await asyncio.sleep(0.1)
 
         assert coordinator._timed_charge_active is True
+        client.write_register.assert_any_await(
+            address=REG_SUN_IC_POWER_SETPOINT_PCT,
+            value=to_unsigned16(-10000),
+            device_id=100,
+        )
     finally:
         await coordinator.async_stop_sun_charge()
 
@@ -2060,6 +2065,7 @@ async def test_timed_charge_own_target_setter_clamps_to_global_limit(
     """REQ-TIMED-SOC-CHARGE: Auch direkte Aufrufe beachten das globale Limit."""
     coordinator = _make_coordinator(hass, _make_client())
     coordinator._max_soc = 80
+    coordinator._timed_charge_min_soc = 0
     try:
         await coordinator.async_set_timed_charge_max_soc(value)
         assert coordinator.timed_charge_max_soc == expected

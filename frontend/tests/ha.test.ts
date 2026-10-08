@@ -138,6 +138,186 @@ afterEach(() => {
   for (const scope of scopes.splice(0)) scope.stop();
 });
 
+describe("REQ-VUE-ELECTRICITY-TARIFF: atomic charging numbers", () => {
+  function charging() {
+    const items = [
+      "timed_charge_min_soc",
+      "timed_charge_max_soc",
+      "max_soc",
+    ].map((key) =>
+      metadata("number", {
+        key,
+        entity_id: `number.renamed_${key}`,
+        device_id: "device-1",
+      }),
+    );
+    const fixture = setup(items);
+    fixture.hass.value = {
+      ...fixture.hass.value!,
+      states: Object.fromEntries(
+        items.map((item, index) => [
+          item.entity_id,
+          state(item, {
+            state: index === 0 ? "20" : "80",
+            attributes: { min: 0, max: index === 1 ? 80 : 100, step: 1 },
+          }),
+        ]),
+      ),
+    };
+    return { ...fixture, items };
+  }
+  it("accepts a complete new SOC pair above the old global cap in one request", async () => {
+    const { dashboard, hass } = charging();
+    expect(
+      await dashboard.performChargingSettings({
+        timed_charge_min_soc: "85",
+        timed_charge_max_soc: "95",
+        max_soc: "100",
+      }),
+    ).toBe(true);
+    expect(hass.value!.callService).toHaveBeenCalledExactlyOnceWith(
+      "sax_power",
+      "set_charging_settings",
+      {
+        device_id: "device-1",
+        timed_charge_min_soc: 85,
+        timed_charge_max_soc: 95,
+        max_soc: 100,
+      },
+      undefined,
+      false,
+    );
+    expect(
+      dashboard.entity("number", "timed_charge_max_soc")?.state?.state,
+    ).toBe("80");
+  });
+  const invalidDrafts: Record<string, string>[] = [
+    { timed_charge_min_soc: "85", timed_charge_max_soc: "80" },
+    { max_soc: "" },
+    { max_soc: "100.5" },
+    { timed_charge_max_soc: "90" },
+  ];
+  it.each(invalidDrafts)(
+    "rejects invalid drafts without a partial service call: %j",
+    async (values) => {
+      const { dashboard, hass } = charging();
+      expect(await dashboard.performChargingSettings(values)).toBe(false);
+      expect(hass.value!.callService).not.toHaveBeenCalled();
+    },
+  );
+  it("allows an independent lower global limit and a zero SOC pair", async () => {
+    const { dashboard, hass } = charging();
+    expect(await dashboard.performChargingSettings({ max_soc: "10" })).toBe(
+      true,
+    );
+    expect(
+      await dashboard.performChargingSettings({
+        timed_charge_min_soc: "0",
+        timed_charge_max_soc: "0",
+      }),
+    ).toBe(true);
+    expect(hass.value!.callService).toHaveBeenCalledTimes(2);
+  });
+  it("shares immediate pending and blocks individual and duplicate writes through failure", async () => {
+    const { dashboard, hass } = charging();
+    const response = deferred<void>();
+    vi.mocked(hass.value!.callService!).mockReturnValueOnce(response.promise);
+    const write = dashboard.performChargingSettings({
+      timed_charge_min_soc: "25",
+      timed_charge_max_soc: "75",
+    });
+    expect(dashboard.entity("number", "timed_charge_min_soc")?.pending).toBe(
+      true,
+    );
+    expect(dashboard.entity("number", "timed_charge_max_soc")?.pending).toBe(
+      true,
+    );
+    expect(
+      await dashboard.performChargingSettings({ timed_charge_max_soc: "70" }),
+    ).toBe(false);
+    expect(
+      await dashboard.perform("number", "timed_charge_min_soc", "30"),
+    ).toBe(false);
+    response.reject({
+      translation_domain: "sax_power",
+      translation_key: "timed_charge_soc_order",
+    });
+    expect(await write).toBe(false);
+    expect(dashboard.entity("number", "timed_charge_max_soc")?.error).toContain(
+      "Netzladeziel",
+    );
+    expect(dashboard.entity("number", "timed_charge_min_soc")?.pending).toBe(
+      false,
+    );
+    expect(hass.value!.callService).toHaveBeenCalledTimes(1);
+    expect(
+      await dashboard.performChargingSettings({
+        timed_charge_min_soc: "25",
+        timed_charge_max_soc: "75",
+      }),
+    ).toBe(true);
+  });
+  it.each(["device", "permission"])(
+    "rejects mismatched %s before any call",
+    async (kind) => {
+      const { dashboard, hass, connection, items } = charging();
+      connection.emit(
+        items.map((item, index) =>
+          index === 1
+            ? {
+                ...item,
+                ...(kind === "device"
+                  ? { device_id: "other-device" }
+                  : { can_control: false }),
+              }
+            : item,
+        ),
+      );
+      expect(
+        await dashboard.performChargingSettings({
+          timed_charge_min_soc: "25",
+          timed_charge_max_soc: "75",
+        }),
+      ).toBe(false);
+      expect(hass.value!.callService).not.toHaveBeenCalled();
+    },
+  );
+  it("attaches a backend range failure to the identified field only", async () => {
+    const { dashboard, hass } = charging();
+    vi.mocked(hass.value!.callService!).mockRejectedValueOnce({
+      translation_domain: "sax_power",
+      translation_key: "invalid_charging_setting",
+      translation_placeholders: { field: "max_soc" },
+    });
+    expect(
+      await dashboard.performChargingSettings({
+        timed_charge_min_soc: "25",
+        max_soc: "90",
+      }),
+    ).toBe(false);
+    expect(dashboard.entity("number", "max_soc")?.error).toContain(
+      "gültigen Wert",
+    );
+    expect(
+      dashboard.entity("number", "timed_charge_min_soc")?.error,
+    ).toBeNull();
+    expect(dashboard.entity("number", "max_soc")?.pending).toBe(false);
+    dashboard.clearControlError("number", "max_soc");
+    expect(dashboard.entity("number", "max_soc")?.error).toBeNull();
+    expect(hass.value!.callService).toHaveBeenCalledTimes(1);
+  });
+  it("does not report stale success after the entry changes during a batch", async () => {
+    const { dashboard, hass, entryId } = charging();
+    const response = deferred<void>();
+    vi.mocked(hass.value!.callService!).mockReturnValueOnce(response.promise);
+    const write = dashboard.performChargingSettings({ max_soc: "90" });
+    entryId.value = "other-entry";
+    await flush();
+    response.resolve();
+    expect(await write).toBe(false);
+  });
+});
+
 it.each(["de", "en"])(
   "explains rejected consumption planning prerequisites without changing confirmed state (%s)",
   async (language) => {

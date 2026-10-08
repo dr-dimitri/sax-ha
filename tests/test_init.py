@@ -518,6 +518,7 @@ async def test_removed_entities_are_purged_from_the_registry(hass) -> None:
             config_entry=entry,
         ).entity_id
         for suffix in (
+            "timed_charge_discharge_status",
             "energy_charged_origin_unknown",
             "energy_origin_coverage",
             "economics_result_today",

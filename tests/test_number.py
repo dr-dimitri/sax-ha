@@ -142,7 +142,10 @@ async def test_timed_charge_min_soc_seeds_to_default_on_fresh_install(
     assert coordinator.timed_charge_min_soc == DEFAULT_TIMED_CHARGE_MIN_SOC
 
 
-async def test_timed_charge_min_soc_restores_a_genuine_value(hass, coordinator) -> None:
+@pytest.mark.parametrize("minimum", [0, 40])
+async def test_timed_charge_min_soc_restores_a_genuine_value(
+    hass, coordinator, minimum
+) -> None:
     """Ein echter, zuvor vom Nutzer gesetzter Wert hat Vorrang vor dem
     Vorgabewert."""
     entity = SaxPowerTimedChargeMinSocNumber(coordinator, "test_entry_id")
@@ -150,12 +153,12 @@ async def test_timed_charge_min_soc_restores_a_genuine_value(hass, coordinator) 
         entity,
         hass,
         "number.test_timed_charge_min_soc",
-        State("number.test_timed_charge_min_soc", "40"),
+        State("number.test_timed_charge_min_soc", str(minimum)),
     )
 
     await entity.async_added_to_hass()
 
-    assert coordinator.timed_charge_min_soc == 40
+    assert coordinator.timed_charge_min_soc == minimum
 
 
 async def test_timed_charge_min_soc_restore_clamps_out_of_range_value(

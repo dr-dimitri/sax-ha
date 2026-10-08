@@ -61,6 +61,7 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
       key !== "bridge_charge_enabled" &&
       !general.includes(key) &&
       !economics.includes(key) &&
+      key !== "charging_pv_forecast" &&
       !(
         bridgePlan && ["bridge_charge_plan", "discharge_forecast"].includes(key)
       ) &&
@@ -144,8 +145,8 @@ function example({ domain, key, entity_id }) {
     bridge_charge_enabled: bridgePlan ? "on" : "off",
     price_charge_enabled: "off",
     timed_charge_min_soc: "20",
-    timed_charge_discharge_status: "normal",
     grid_serving_forecast: "24.3",
+    charging_pv_forecast: "12.4",
     grid_serving_pause_status: "Inaktiv",
     grid_serving_forecast_threshold: "10",
     price_charge_active_text: "Inaktiv",
@@ -168,8 +169,13 @@ function example({ domain, key, entity_id }) {
   if (key === "storage_max_cell_temp") attributes.unit_of_measurement = "°C";
   if (["charge_power", "discharge_power", "smartmeter_power"].includes(key))
     attributes.unit_of_measurement = "W";
-  if (key.startsWith("energy_") || key === "grid_serving_forecast")
+  if (
+    key.startsWith("energy_") ||
+    ["grid_serving_forecast", "charging_pv_forecast"].includes(key)
+  )
     attributes.unit_of_measurement = "kWh";
+  if (key === "charging_pv_forecast")
+    attributes.source_entity_id = "sensor.pv_forecast";
   if (key === "grid_serving_forecast_threshold")
     attributes = { min: 0, max: 100, step: 0.1, unit_of_measurement: "kWh" };
   if (key === "next_cell_calibration") attributes.device_class = "date";
@@ -347,6 +353,20 @@ async function callService(domain, service, data, target) {
   if (rejectNext) {
     rejectNext = false;
     throw new Error("Simulated service failure");
+  }
+  if (domain === "sax_power" && service === "set_charging_settings") {
+    if (data.device_id !== "demo-device")
+      throw new Error("Unknown demo device");
+    const updates = Object.entries(data)
+      .filter(([key]) => key !== "device_id")
+      .map(([key, value]) => {
+        const entityId = `number.demo_${key}`;
+        if (!states[entityId]) throw new Error("Unknown demo charging setting");
+        return [entityId, { ...states[entityId], state: String(value) }];
+      });
+    states = { ...states, ...Object.fromEntries(updates) };
+    update();
+    return;
   }
   if (domain === "sax_power") {
     const prefix =

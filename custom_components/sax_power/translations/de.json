@@ -109,16 +109,11 @@
       "timed_charge_active_text": {
         "name": "Zeitgesteuertes Laden aktiv"
       },
-      "timed_charge_discharge_status": {
-        "name": "Entladestatus",
-        "state": {
-          "normal": "Normalbetrieb",
-          "grid_charging": "Netzladen",
-          "discharge_blocked": "Entladung wg. Netzladen gestoppt"
-        }
-      },
       "grid_serving_active_text": {
         "name": "Netzdienliches Laden aktiv"
+      },
+      "charging_pv_forecast": {
+        "name": "PV-Prognose Netzladung"
       },
       "grid_serving_forecast": {
         "name": "PV-Prognose"
@@ -612,6 +607,9 @@
     }
   },
   "exceptions": {
+    "timed_charge_soc_order": {
+      "message": "Das Netzladeziel muss mindestens so hoch wie der Ladestart sein."
+    },
     "invalid_grid_charge_power": {
       "message": "Der Leistungssollwert {power} ist ungültig. Für eine sichere manuelle Netzladung ist eine ganze Zahl zwischen {min_power} W und {max_power} W erforderlich; Null und positive Werte werden nicht unterstützt."
     },
@@ -623,6 +621,12 @@
     },
     "bridge_tariff_required": {
       "message": "Richte unter Konfigurieren einen zeitvariablen Tarif ein, bevor du die Ladeplanung einschaltest."
+    },
+    "invalid_charging_setting": {
+      "message": "Der Wert für {field} ist ungültig. Erlaubt sind Werte von {min} bis {max} in Schritten von {step}."
+    },
+    "charging_settings_required": {
+      "message": "Übergebe mindestens eine Ladeeinstellung."
     }
   },
   "services": {
@@ -729,6 +733,33 @@
         "reason": {
           "name": "Grund",
           "description": "Optionaler freier Text (höchstens 120 Zeichen), rein diagnostisch."
+        }
+      }
+    },
+    "set_charging_settings": {
+      "name": "Ladeeinstellungen übernehmen",
+      "description": "Validiert und übernimmt die übergebenen Ladeeinstellungen gemeinsam. Mindestens ein Zahlenwert ist erforderlich. Preise werden in ct/kWh angegeben.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät"
+        },
+        "max_soc": {
+          "name": "Max SOC"
+        },
+        "timed_charge_min_soc": {
+          "name": "Ladestart"
+        },
+        "timed_charge_max_soc": {
+          "name": "Netzladeziel"
+        },
+        "price_charge_max_price": {
+          "name": "Netzbezug und Laden bis"
+        },
+        "price_charge_hours": {
+          "name": "Stunden"
+        },
+        "price_charge_neutral_price": {
+          "name": "Netzbezug ohne Laden bis"
         }
       }
     }

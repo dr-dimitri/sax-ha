@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "./EditorActions.vue";
 import {
   computed,
   inject,
@@ -29,6 +30,7 @@ const statusId = `sax-status-${id}`;
 const valueId = `sax-value-${id}`;
 const draft = ref("");
 const dialog = ref<HTMLDialogElement>();
+const draftInput = ref<HTMLInputElement>();
 const confirmation = shallowRef<{
   entityId: string;
   domain: string;
@@ -68,8 +70,6 @@ const text = computed(() =>
         readOnly: "Keine Berechtigung zum Ändern",
         pending: "Änderung wird an Home Assistant gesendet …",
         cancel: "Abbrechen",
-        turnOn: "Einschalten",
-        turnOff: "Ausschalten",
         confirmationTitle: confirmation.value?.desired
           ? "Speicher einschalten?"
           : "Speicher ausschalten?",
@@ -85,8 +85,6 @@ const text = computed(() =>
         readOnly: "You do not have permission to change this setting",
         pending: "Sending change to Home Assistant …",
         cancel: "Cancel",
-        turnOn: "Turn on",
-        turnOff: "Turn off",
         confirmationTitle: confirmation.value?.desired
           ? "Turn on the battery?"
           : "Turn off the battery?",
@@ -146,6 +144,14 @@ function numberAttribute(key: "min" | "max" | "step"): number | undefined {
 
 function optionLabel(value: string): string {
   return entity.value?.metadata.states[value] ?? value;
+}
+
+function cancelDraft(): void {
+  if (entity.value?.pending) return;
+  draft.value = initialDraft(state.value);
+  // REQ-VUE-ENTITY-BINDING: reset native partial values even if the draft is unchanged.
+  if (draftInput.value) draftInput.value.value = draft.value;
+  dashboard?.clearControlError(props.domain, props.entityKey);
 }
 
 async function submitDraft(): Promise<void> {
@@ -313,6 +319,7 @@ async function changeSelect(event: Event): Promise<void> {
         </select>
         <template v-else>
           <input
+            ref="draftInput"
             :id="inputId"
             :value="draft"
             :type="domain === 'number' ? 'number' : 'time'"
@@ -326,12 +333,20 @@ async function changeSelect(event: Event): Promise<void> {
             @input="changeDraft"
             @invalid.prevent="submitDraft"
           />
-          <button
-            type="submit"
-            :disabled="blocked || (domain === 'time' && draft === '')"
+          <EditorActions
+            ><button
+              type="submit"
+              :disabled="blocked || (domain === 'time' && draft === '')"
+            >
+              {{ text.apply }}</button
+            ><button
+              type="button"
+              :disabled="entity.pending"
+              @click="cancelDraft"
+            >
+              {{ text.cancel }}
+            </button></EditorActions
           >
-            {{ text.apply }}
-          </button>
         </template>
       </div>
     </template>
@@ -353,18 +368,18 @@ async function changeSelect(event: Event): Promise<void> {
     >
       <h3 :id="`${id}-confirmation-title`">{{ text.confirmationTitle }}</h3>
       <p :id="`${id}-confirmation-question`">{{ text.confirmationQuestion }}</p>
-      <div class="entity-control__confirmation-actions">
-        <button type="button" autofocus @click="cancelConfirmation">
-          {{ text.cancel }}
-        </button>
+      <EditorActions class="entity-control__confirmation-actions">
         <button
           type="button"
           :disabled="blocked || !confirmation"
           @click="confirmChange"
         >
-          {{ confirmation?.desired ? text.turnOn : text.turnOff }}
+          {{ text.apply }}
         </button>
-      </div>
+        <button type="button" autofocus @click="cancelConfirmation">
+          {{ text.cancel }}
+        </button>
+      </EditorActions>
     </dialog>
   </form>
 </template>
@@ -515,10 +530,7 @@ async function changeSelect(event: Event): Promise<void> {
 }
 
 .entity-control__confirmation-actions {
-  display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 12px;
 }
 @container sax-content (min-width: 860px) {
   .entity-control {

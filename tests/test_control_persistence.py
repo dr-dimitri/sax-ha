@@ -486,7 +486,7 @@ async def test_missing_store_initializes_timed_max_after_all_entities_restore(
 
 
 @pytest.mark.parametrize(
-    ("new_global_max_soc", "expected_timed_max_soc"), [(70, 70), (95, 80)]
+    ("new_global_max_soc", "expected_timed_max_soc"), [(0, 0), (70, 70), (95, 80)]
 )
 async def test_timed_charge_max_soc_and_global_clamp_survive_reload(
     hass, hass_storage, new_global_max_soc: int, expected_timed_max_soc: int
@@ -495,7 +495,11 @@ async def test_timed_charge_max_soc_and_global_clamp_survive_reload(
     _seed_store(
         hass_storage,
         "entry",
-        {**ACTIVE_WINDOW_PAYLOAD, "timed_charge_max_soc": 75},
+        {
+            **ACTIVE_WINDOW_PAYLOAD,
+            "timed_charge_max_soc": 75,
+            "timed_charge_min_soc": 75,
+        },
     )
     coordinator = _make_coordinator(hass, _make_client(), "entry")
     _patched_reads(coordinator)
@@ -517,6 +521,7 @@ async def test_timed_charge_max_soc_and_global_clamp_survive_reload(
     assert reloaded.max_soc == new_global_max_soc
     assert reloaded.timed_charge_max_soc == expected_timed_max_soc
     assert reloaded.control_config().timed_charge_max_soc == 80
+    assert reloaded.timed_charge_min_soc == 75
     await reloaded.async_set_max_soc(90)
     assert reloaded.timed_charge_max_soc == 80
     await reloaded.async_shutdown()

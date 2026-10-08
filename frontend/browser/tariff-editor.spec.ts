@@ -1,6 +1,68 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { HomeAssistant, TariffProfile } from "../src/types";
 
+for (const type of ["time_of_use", "dynamic"] as const) {
+  test(`${type} price header and footer Apply share validation, pending feedback and retry`, async ({
+    page,
+  }, testInfo) => {
+    const english = testInfo.project.name.endsWith("en");
+    await page.goto("/sax-power-vue/stromtarif");
+    if (english) await page.locator("#language").click();
+    if (type === "dynamic") await page.locator("#tariff-dynamic").click();
+    const panel = page.locator("sax-power-vue-panel");
+    const prices = panel.locator(
+      type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
+    );
+    const top = prices.locator("header .editor-actions > button:first-child");
+    await top.click();
+    const form = prices.locator("form");
+    const footer = form.locator('button[type="submit"]');
+    const cancel = form.getByRole("button", {
+      name: english ? "Cancel" : "Abbrechen",
+      exact: true,
+    });
+    const apply = english ? "Apply" : "Übernehmen";
+    await expect(top).toHaveText(apply);
+    await expect(footer).toHaveText(apply);
+    await expect(
+      prices.getByRole("button", { name: apply, exact: true }),
+    ).toHaveCount(2);
+    const feed = form.locator(
+      type === "dynamic" ? '[name="dynamic_feed"]' : '[name="feed_in_price"]',
+    );
+    await feed.fill("");
+    await top.click();
+    await expect(prices.getByRole("alert")).toBeVisible();
+    await expect(form).toBeVisible();
+    await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+    await feed.fill(english ? "9.25" : "9,25");
+    await page.locator("#hold-action").click();
+    await page.locator("#failure").click();
+    await top.click();
+    await expect(form).toHaveAttribute("aria-busy", "true");
+    await expect(top).toBeDisabled();
+    await expect(footer).toBeDisabled();
+    await expect(cancel).toBeDisabled();
+    await top.evaluate((button: HTMLButtonElement) => button.click());
+    await footer.evaluate((button: HTMLButtonElement) => button.click());
+    await cancel.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(panel).toHaveAttribute("data-tariff-configure-requests", "1");
+    await page.locator("#release-action").click();
+    await expect(panel.getByRole("alert")).toBeVisible();
+    await expect(form).toHaveAttribute("aria-busy", "false");
+    await expect(feed).toHaveValue(english ? "9.25" : "9,25");
+    await expect(top).toBeEnabled();
+    await expect(footer).toBeEnabled();
+    await footer.click();
+    await expect(form).toHaveCount(0);
+    await expect(top).toHaveText(english ? "Edit" : "Bearbeiten");
+    await expect(panel).toHaveAttribute("data-tariff-configure-requests", "2");
+    await expect(page.locator("#actions")).toContainText(
+      '"feed_in_price_ct_kwh":9.25',
+    );
+  });
+}
+
 async function enterTime(page: Page, field: Locator, time: string) {
   const [hour, minute] = time.split(":");
   await field.fill("");
@@ -50,7 +112,10 @@ test("two separate low tariffs accept keyboard entry while HA states update", as
     await enterTime(page, fields.nth(1), end);
     await row.locator(".tariff-plan__price").fill("16");
   }
-  await tariff.getByRole("button", { name: "Speichern", exact: true }).click();
+  await tariff
+    .locator(".tariff-plan__header")
+    .getByRole("button", { name: "Übernehmen", exact: true })
+    .click();
   await expect(tariff.locator("form")).toHaveCount(0);
   await expect(tariff.getByRole("alert")).toHaveCount(0);
   await expect(page.locator("#actions")).toContainText(
@@ -81,7 +146,9 @@ test("partial hours stay visibly incomplete and numeric times normalize on blur"
   await end.fill("15:30");
   await row.locator(".tariff-plan__price").fill("16");
   await expect(start).toHaveValue("12");
-  const save = tariff.getByRole("button", { name: "Speichern", exact: true });
+  const save = tariff
+    .locator(".tariff-plan__header")
+    .getByRole("button", { name: "Übernehmen", exact: true });
   await save.click();
   await expect(tariff.getByRole("alert")).toContainText("Zeitfenster 2");
   await expect(start).toBeFocused();
@@ -131,7 +198,8 @@ for (const notification of ["change", "submit"] as const) {
     await expect(row.locator(".tariff-plan__time").nth(0)).toHaveValue("12:30");
     await expect(row.locator(".tariff-plan__time").nth(1)).toHaveValue("14:30");
     await tariff
-      .getByRole("button", { name: "Speichern", exact: true })
+      .locator(".tariff-plan__header")
+      .getByRole("button", { name: "Übernehmen", exact: true })
       .click();
     await expect(tariff.locator("form")).toHaveCount(0);
     await expect(tariff.getByRole("alert")).toHaveCount(0);
@@ -182,8 +250,8 @@ test("tariff editor saves cents explicitly and remains compact after editing on 
   await last.locator(".tariff-plan__time").nth(0).fill("22:00");
   await last.locator(".tariff-plan__time").nth(1).fill("03:00");
   await last.locator(".tariff-plan__price").fill("-2,50");
-  const save = tariff.getByRole("button", {
-    name: english ? "Save" : "Speichern",
+  const save = tariff.locator(".tariff-plan__header").getByRole("button", {
+    name: english ? "Apply" : "Übernehmen",
     exact: true,
   });
   await save.click();
@@ -240,6 +308,7 @@ test("tariff editor saves cents explicitly and remains compact after editing on 
       name: english ? "Cancel" : "Abbrechen",
       exact: true,
     })
+    .last()
     .click();
   await expect(edit).toBeFocused();
   await expect(tariff).not.toContainText("99,00");
@@ -324,8 +393,8 @@ test("active consumption plan keeps the tariff draft after a required PV source 
     .locator(".tariff-plan__window .tariff-plan__price")
     .first();
   await windowPrice.fill(english ? "17.75" : "17,75");
-  const save = tariff.getByRole("button", {
-    name: english ? "Save" : "Speichern",
+  const save = tariff.locator(".tariff-plan__header").getByRole("button", {
+    name: english ? "Apply" : "Übernehmen",
     exact: true,
   });
   await save.click();
@@ -361,3 +430,93 @@ test("active consumption plan keeps the tariff draft after a required PV source 
   ).toBe("on");
   expect(errors).toEqual([]);
 });
+
+for (const type of ["time_of_use", "dynamic"] as const) {
+  test(`${type} PV summary shows the cached energy rather than the source name`, async ({
+    page,
+  }, testInfo) => {
+    const english = testInfo.project.name.endsWith("en");
+    await page.goto("/sax-power-vue/stromtarif");
+    if (english) await page.locator("#language").click();
+    if (type === "dynamic") await page.locator("#tariff-dynamic").click();
+    await page.evaluate((type) => {
+      const panel = document.querySelector(
+        "sax-power-vue-panel",
+      ) as HTMLElement & { hass: HomeAssistant };
+      const original = panel.hass.callWS!;
+      const source = "sensor.pv_forecast";
+      panel.hass = {
+        ...panel.hass,
+        states: {
+          ...panel.hass.states,
+          [source]: {
+            entity_id: source,
+            state: "unavailable",
+            attributes: {
+              friendly_name: "PV-Ertragsprognose Prognose heute",
+              unit_of_measurement: "kWh",
+            },
+          },
+        },
+        callWS: async <T>(
+          request: Readonly<Record<string, unknown>>,
+        ): Promise<T> => {
+          const result = await original<T>(request);
+          if (request.type !== "sax_power/dashboard/tariff/get") return result;
+          const profile = result as TariffProfile;
+          return {
+            ...profile,
+            profiles: {
+              ...profile.profiles,
+              [type]: { ...profile.profiles![type], pv_sensor: source },
+            },
+          } as T;
+        },
+      };
+    }, type);
+    const panel = page.locator("sax-power-vue-panel");
+    const prices = panel.locator(
+      type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
+    );
+    await prices.locator("header .editor-actions > button:first-child").click();
+    const plan = panel.locator(".electricity-plan");
+    const value = plan.locator(".electricity-pv-summary dd");
+    await expect(value).not.toBeVisible();
+    await plan.locator("summary").first().click();
+    await expect(value).toBeVisible();
+    await expect(value).toHaveText(english ? "12.4 kWh" : "12,4 kWh");
+    await expect(value).not.toContainText("PV-Ertragsprognose");
+    await prices
+      .getByRole("button", {
+        name: english ? "Cancel" : "Abbrechen",
+        exact: true,
+      })
+      .last()
+      .click();
+    await page.evaluate(() => {
+      const panel = document.querySelector(
+        "sax-power-vue-panel",
+      ) as HTMLElement & { hass: HomeAssistant };
+      const id = "sensor.demo_charging_pv_forecast";
+      panel.hass = {
+        ...panel.hass,
+        states: {
+          ...panel.hass.states,
+          [id]: { ...panel.hass.states[id], state: "0" },
+        },
+      };
+    });
+    await expect(value).toHaveText("0 kWh");
+    const charging = panel.locator(".electricity-charging");
+    await charging
+      .locator("header .editor-actions > button:first-child")
+      .click();
+    await expect(value).toBeVisible();
+    await charging
+      .locator("header .editor-actions > button:last-child")
+      .click();
+    await plan.locator("summary").first().click();
+    await expect(value).not.toBeVisible();
+    await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+  });
+}

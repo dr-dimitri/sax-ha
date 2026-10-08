@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "./EditorActions.vue";
 import { normalizeTime, timeSeconds } from "../time";
 import {
   computed,
@@ -25,9 +26,7 @@ const id = useId();
 const text = computed(() =>
   dashboard?.language.value === "de"
     ? {
-        tariff: props.compact
-          ? "1. Wann ist dein Strom günstig?"
-          : "Dein Stromtarif",
+        tariff: props.compact ? "Preise & Zeiten" : "Dein Stromtarif",
         introduction:
           "Trage die Preise aus deinem Stromvertrag ein. Sie gelten jeden Tag zu denselben Zeiten.",
         currentPrice: "Strompreis jetzt",
@@ -42,13 +41,14 @@ const text = computed(() =>
           "Wie viel erhältst du für eine eingespeiste kWh? Dieser Wert wird für die Ersparnisberechnung verwendet. Ohne Vergütung 0 eintragen.",
         impact: "Das bewirkt dein Tarif",
         impactHint:
-          "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Ladeziel und aktive Monate gelten zusätzlich.",
+          "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Netzladeziel und aktive Monate gelten zusätzlich.",
         saveHint:
-          "Speichern übernimmt Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
+          "Übernehmen speichert Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
         pvDetails: "Zusätzlich: Solarprognose für die Ladeplanung",
         pvHint:
           "Nur für verbrauchsbasierte Ladeplanung erforderlich. Wähle die eingerichtete PV-Prognosequelle, damit die Planung den Bedarf bis zum Solarstart berechnen kann.",
         allPrices: "Alle Preise ansehen",
+        compactImpact: "Die Netzladung nutzt die günstigsten Tarifzeiten.",
         everyDay: "Täglich",
         remaining: "zu allen übrigen Zeiten",
         overnightLabel: "über Nacht",
@@ -59,7 +59,7 @@ const text = computed(() =>
         gross:
           "Alle Preise in ct/kWh inklusive Steuern, ohne monatliche Grundgebühr. Beispiel: 30 eingeben für 30 ct/kWh.",
         edit: "Bearbeiten",
-        save: "Speichern",
+        save: "Übernehmen",
         cancel: "Abbrechen",
         saving: "Wird gespeichert …",
         loading: "Wird geladen …",
@@ -117,9 +117,7 @@ const text = computed(() =>
         noPrice: "Derzeit ist kein aktueller Strompreis verfügbar.",
       }
     : {
-        tariff: props.compact
-          ? "1. When is your electricity cheaper?"
-          : "Your electricity tariff",
+        tariff: props.compact ? "Prices & times" : "Your electricity tariff",
         introduction:
           "Enter the prices from your electricity contract. They apply at the same times every day.",
         currentPrice: "Electricity price now",
@@ -136,11 +134,12 @@ const text = computed(() =>
         impactHint:
           "Automation uses the cheapest times for fixed-target and consumption-based grid charging. Battery level, charging target and active months also apply.",
         saveHint:
-          "Saving applies the prices and possible charging times. It does not turn on grid charging.",
+          "Apply saves the prices and possible charging times. It does not turn on grid charging.",
         pvDetails: "Additional setup: solar forecast for charging planning",
         pvHint:
           "Only required for consumption-based charging planning. Select your configured PV forecast source so planning can calculate the energy needed until solar production starts.",
         allPrices: "View all prices",
+        compactImpact: "Grid charging uses the cheapest tariff periods.",
         everyDay: "Every day",
         remaining: "at all remaining times",
         overnightLabel: "overnight",
@@ -151,7 +150,7 @@ const text = computed(() =>
         gross:
           "All prices in ct/kWh including tax, excluding the monthly standing charge. Example: enter 30 for 30 ct/kWh.",
         edit: "Edit",
-        save: "Save",
+        save: "Apply",
         cancel: "Cancel",
         saving: "Saving …",
         loading: "Loading …",
@@ -708,36 +707,47 @@ watch(tariffVisible, (visible) => {
   <section
     v-if="tariffVisible"
     class="tariff-plan"
+    :class="{ 'tariff-plan--compact': compact }"
     :aria-labelledby="`${id}-tariff`"
   >
     <header class="tariff-plan__header">
       <h2 :id="`${id}-tariff`">{{ text.tariff }}</h2>
-      <button
-        v-if="!editing"
-        ref="editButton"
-        type="button"
-        :disabled="pending || !connectionAvailable"
-        :aria-expanded="editing"
-        :aria-controls="`${id}-editor`"
-        @click="openEditor"
-      >
-        {{ pending ? text.loading : text.edit }}
-      </button>
+      <EditorActions>
+        <button
+          ref="editButton"
+          type="button"
+          :disabled="pending || !connectionAvailable || (editing && conflict)"
+          :aria-expanded="editing"
+          :aria-controls="`${id}-editor`"
+          @click="editing ? save() : openEditor()"
+        >
+          {{ pending ? text[pendingAction] : editing ? text.save : text.edit }}
+        </button>
+        <button
+          v-if="editing"
+          type="button"
+          :disabled="pending"
+          @click="cancel"
+        >
+          {{ text.cancel }}
+        </button>
+      </EditorActions>
     </header>
     <p v-if="pending" role="status">
       {{ text[pendingAction] }}
     </p>
-    <p v-if="!editing" class="tariff-plan__introduction">
+    <p v-if="!editing && !compact" class="tariff-plan__introduction">
       {{ text.introduction }}
     </p>
-    <div v-if="compact && !editing" class="tariff-plan__compact-summary">
-      <p>
-        <strong
-          >{{ text.base }}:
-          {{ tariffPrice(attributes.base_price_eur_kwh) }}</strong
-        ><span v-if="baseLow" class="tariff-plan__badge">{{ text.low }}</span
-        ><br />{{ text.remaining }}
+    <div v-if="compact" class="tariff-plan__price-highlights">
+      <slot name="current-price" />
+      <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
+        <span>{{ text.lowTariffPrice }}</span
+        ><strong>{{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}</strong>
       </p>
+    </div>
+
+    <div v-if="compact && !editing" class="tariff-plan__compact-summary">
       <ul v-if="windows.length" class="tariff-plan__periods">
         <li v-for="(window, index) in windows" :key="index">
           <span
@@ -756,13 +766,25 @@ watch(tariffVisible, (visible) => {
         </li>
       </ul>
       <p v-else>{{ text.noWindows }}</p>
-      <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
-        <strong>{{ text.lowTariffPrice }}:</strong>
-        {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
+      <div class="tariff-plan__base-row">
+        <span
+          >{{ text.base }}<small>{{ text.remaining }}</small></span
+        >
+        <span class="tariff-plan__period-price"
+          ><span v-if="baseLow" class="tariff-plan__badge">{{ text.low }}</span
+          ><strong>{{
+            tariffPrice(attributes.base_price_eur_kwh)
+          }}</strong></span
+        >
+      </div>
+      <div class="tariff-plan__feed-row">
+        <span>{{ text.feed }}</span
+        ><strong>{{ tariffPrice(attributes.feed_in_price_eur_kwh) }}</strong>
+      </div>
+      <p v-if="lowTariffAvailable" class="tariff-plan__period-status">
         <template v-if="lowTariffActive"
           >{{ text.lowUntil }} {{ lowTariffUntil }}.</template
-        >
-        <template v-else>{{ text.notLow }}</template>
+        ><template v-else>{{ text.notLow }}</template>
       </p>
       <p
         v-else-if="savedProfile || !tariffMetadataMatches"
@@ -771,7 +793,7 @@ watch(tariffVisible, (visible) => {
         {{ text.awaitingTariff }}
       </p>
       <p v-else class="tariff-plan__low-unavailable">{{ text.noLowTariff }}</p>
-      <p class="tariff-plan__impact">{{ text.impactHint }}</p>
+      <p class="tariff-plan__impact">{{ text.compactImpact }}</p>
     </div>
     <p v-if="saved" role="status">{{ text.saved }}</p>
     <p
@@ -935,16 +957,18 @@ watch(tariffVisible, (visible) => {
         </div>
       </fieldset>
       <div class="tariff-plan__actions">
-        <button
-          type="submit"
-          class="tariff-plan__save"
-          :disabled="pending || !connectionAvailable || conflict"
+        <EditorActions>
+          <button
+            type="submit"
+            class="tariff-plan__save"
+            :disabled="pending || !connectionAvailable || conflict"
+          >
+            {{ pending ? text[pendingAction] : text.save }}
+          </button>
+          <button type="button" :disabled="pending" @click="cancel">
+            {{ text.cancel }}
+          </button></EditorActions
         >
-          {{ pending ? text[pendingAction] : text.save }}
-        </button>
-        <button type="button" :disabled="pending" @click="cancel">
-          {{ text.cancel }}
-        </button>
         <button
           v-if="conflict"
           type="button"
@@ -1303,10 +1327,6 @@ watch(tariffVisible, (visible) => {
   flex-wrap: wrap;
   gap: 8px;
 }
-.tariff-plan .tariff-plan__save {
-  background: var(--primary-color, #03a9f4);
-  color: var(--text-primary-color, #fff);
-}
 .tariff-plan__error {
   color: var(--error-color, #db4437);
 }
@@ -1351,5 +1371,84 @@ watch(tariffVisible, (visible) => {
   .tariff-plan__table td {
     padding: 7px 8px;
   }
+}
+
+.tariff-plan.tariff-plan--compact {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.tariff-plan--compact .tariff-plan__header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider-color, #ddd);
+  margin-bottom: 14px;
+  flex-wrap: nowrap;
+}
+.tariff-plan--compact .tariff-plan__header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.tariff-plan--compact .tariff-plan__header button {
+  flex-shrink: 0;
+}
+.tariff-plan__price-highlights {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.tariff-plan--compact .tariff-plan__low-status {
+  margin: 0;
+  padding: 0;
+  text-align: right;
+}
+.tariff-plan__low-status > span {
+  display: block;
+  color: var(--secondary-text-color, #666);
+}
+.tariff-plan__low-status > strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 500;
+}
+.tariff-plan__base-row,
+.tariff-plan__feed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--divider-color, #ddd);
+}
+.tariff-plan__base-row small {
+  display: block;
+  color: var(--secondary-text-color, #666);
+  font-size: 13px;
+}
+.tariff-plan__feed-row > span {
+  color: var(--secondary-text-color, #666);
+}
+.tariff-plan__feed-row strong {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tariff-plan--compact .tariff-plan__periods {
+  margin: 0;
+}
+.tariff-plan--compact .tariff-plan__period-status {
+  font-size: 13px;
+  color: var(--secondary-text-color, #666);
+}
+.tariff-plan--compact .tariff-plan__impact {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+}
+.tariff-plan--compact > .tariff-plan__details {
+  margin-top: 8px;
+  border-top: 1px solid var(--divider-color, #ddd);
 }
 </style>

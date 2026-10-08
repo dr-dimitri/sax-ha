@@ -892,6 +892,20 @@ requirement_timed_soc_charge:
        globalen Grenze wieder frei. Ein ausdrücklich neu eingestelltes
        Netzladeziel wird dagegen auf den aktuellen Sliderbereich begrenzt
        und gespeichert. Änderungen am Netzladeziel gelten sofort.
+       Ausdrückliche Änderungen von Ladeziel oder Ladestart müssen
+       Ladestart <= Ladeziel einhalten; gleiche Werte sind erlaubt.
+       Dashboard und Coordinator lehnen ein kleineres Ziel oder einen
+       höheren Ladestart feldbezogen ab, bevor Zustand, Store oder
+       Geräteauftrag verändert werden. Die Prüfung verwendet die aktuell
+       angenommenen Werte ohne Warten auf Geräte-Locks und gilt auch für
+       direkte Home-Assistant-Serviceaufrufe und während Zellkalibrierung.
+       Maßgeblich ist das konfigurierte, global begrenzte Ziel, nicht das
+       temporäre Kalibrierungsziel. Eine unabhängige Absenkung der globalen
+       Grenze bleibt erlaubt; sie verändert weder gespeichertes Ziel noch
+       Ladestart. Liegt dadurch das wirksame Ziel unter dem Ladestart, muss
+       vor einer Zieländerung der Ladestart gesenkt oder die globale Grenze
+       angehoben werden. Bestehende Konfigurationen und Teilwerte während
+       der RestoreEntity-Migration werden nicht automatisch umgeschrieben.
 
        Bei current_soc >= dem effektiven Netzladeziel wird die Netzladung
        beendet und _timed_charge_armed zurückgesetzt. Liegt das Ziel unter
@@ -909,11 +923,17 @@ requirement_timed_soc_charge:
 
        "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
        SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
-       unterhalb dessen die Netzladung starten darf.
+       unterhalb dessen die Netzladung starten darf. Sonderfall 0 %:
+       Bei gültigem SOC von genau 0 % darf die Netzladung beginnen;
+       0 % ist keine implizite Abschaltung. Positive Startschwellen bleiben
+       strikt (z. B. Start erst unter 20 %). Tarif-/Zeitfenster, aktive Monate,
+       Automatikschalter, PV-Prüfung und SOC-Obergrenzen gelten unverändert.
+       Ein Ziel von ebenfalls 0 % ist bereits erreicht und startet keine
+       Ladung. Nach einem Start bei 0 % gilt dieselbe Hysterese bis zum Ziel.
        SaxPowerCoordinator._timed_charge_armed hält als Hysterese fest, ob
        der Schwellwert im aktuellen aktiven Fenster unterschritten wurde:
        nur bei eingeschalteter Netzladung, freigegebenem aktuellem Monat,
-       aktiver Fensterinstanz und current_soc < "Netzladung Min. SOC" darf
+       aktiver Fensterinstanz und erfüllter Startschwelle (inkl. 0-%-Sonderfall) darf
        eine neue Freigabe entstehen. Eine Unterschreitung außerhalb des
        Fensters oder bei fehlender Freigabe wird nicht für später vorgemerkt.
        Im selben unveränderten Fenster bleibt die Freigabe auch oberhalb
@@ -926,7 +946,8 @@ requirement_timed_soc_charge:
        gespeicherten Zustand. Die Fensteridentität wird bei jeder Auswertung
        geprüft; dies gilt auch dann, wenn zwischen zwei Fenstern kein Poll
        stattgefunden hat. Jedes neue Fenster benötigt erneut einen aktuell
-       unter Min. SOC liegenden SOC. Bei Min. SOC 20 % und Netzladeziel 80 %
+       unter Min. SOC liegenden SOC, bei Min. SOC 0 % genau 0 %.
+       Bei Min. SOC 20 % und Netzladeziel 80 %
        darf eine in Nacht 1 bei 18 % gestartete, bis Fensterende nur auf
        60 % geladene Batterie in Nacht 2 bei weiterhin 60 % nicht erneut
        netzladen und keine Freigabe für Nacht 2 speichern.
@@ -1038,16 +1059,12 @@ requirement_timed_soc_charge:
     Spätere Änderungen an Uhrzeiten/Monaten verlängern eine bestehende
     Sperre nicht; die ursprünglich gespeicherte Frist bleibt maßgeblich.
     Nach Fensterende wird aktiv freigegeben, ohne den Nachweis auf das
-    nächste Fenster zu übertragen. Nach Schreibfehlern bleibt der Status
-    unbekannt, bis der Steuerzustand wieder erfolgreich angewendet wurde.
-
-    Der Enum-Sensor timed_charge_discharge_status zeigt Normalbetrieb
-    (normal; kein Nachweis und keine neue Sperre), Netzladen (grid_charging;
-    zeitgesteuerte Ladung mit bestätigter Netz-/Batterieleistung) oder
-    Entladung wg. Netzladen gestoppt (discharge_blocked; Nachweis besteht,
-    Netzladung läuft gerade nicht). Normalbetrieb bezieht sich nur auf
-    diese Sperre und hebt andere Schutzfunktionen nicht auf. Anzeige im
-    Dashboard siehe REQ-VUE-CHARGING.
+    nächste Fenster zu übertragen. Nicht bestätigte Steueraufträge dürfen
+    keinen erfolgreichen Steuerzustand anzeigen.
+    Der frühere Entladestatus-Sensor samt Statusberechnung entfällt. Die
+    bestehende Registry-Entity wird beim Einrichten entfernt. Entladesperre,
+    Nachweisbedingungen, Rücksetzaufträge, Wiederholungen und Fehlerprotokolle
+    der Gerätesteuerung bleiben erhalten.
 
     PV-Überschuss-Prüfung: Grundlage ist data["smartmeter_power"] (SunSpec-
     Modus, Register 40072 "Summenwirkleistung Netz", REG_SUN_METER_
@@ -2887,6 +2904,18 @@ requirement_vue_entity_binding:
     min/max und step geprüft; Zeiten auf gültige Stunden, Minuten und Sekunden;
     Auswahlwerte müssen in den aktuellen options enthalten sein. Zahlen und
     Zeiten bleiben lokale Eingaben bis zur ausdrücklichen Übernahme.
+    Dashboardweit stehen „Übernehmen“ und „Abbrechen“ (EN: Apply/Cancel)
+    immer unmittelbar nebeneinander, Übernehmen links und Abbrechen rechts,
+    auch auf schmalen Bildschirmen. Übernehmen verwendet überall dieselbe
+    gefüllte Primärfarbe mit kontrastierender Schrift wie bei Preise & Zeiten;
+    beide Farben folgen dem Home-Assistant-Theme.
+    Editor-Kopf und -Fuß verwenden dieselben
+    Aktionen. Einzelne Zahlen- und Zeitfelder sowie Zeitfenster verwerfen beim
+    Abbrechen lokale Entwürfe und Fehler und zeigen aktuelle bestätigte Werte;
+    dabei wird kein Service aufgerufen. Während einer Übernahme sind beide
+    Buttons gesperrt. Der Speicherschalter-Dialog benennt den Zielzustand im
+    Titel; Übernehmen bestätigt, Abbrechen verwirft mit sicherem Initialfokus.
+
     Native Zahleneingaben werden beim Tippen nicht durch DOM-Zuweisungen
     normalisiert. Zwischenzustände wie Minuszeichen oder Dezimalpunkt,
     Cursorposition und Auswahl bleiben erhalten. Leere oder unvollständige
@@ -3044,7 +3073,7 @@ requirement_vue_charging:
     ladeautomatik und ihr separater Aktivierungsschalter sind entfernt.
     Native Entities und ihre Services bleiben erhalten. ChargePlan zeigt die
     Backend-Ladeplanung unter Ladeplan & Prognose ohne zweiten Hauptschalter;
-    Aktivierung und Ladeweise werden in den drei Einrichtungsschritten bedient.
+    Aktivierung und Ladeweise werden gemeinsam in der Karte Netzladung bedient.
     Tarifpreisfenster sind in Stromtarif und Amortisation dieselbe TarifPlan-Karte
     nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
     aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
@@ -3234,7 +3263,7 @@ requirement_vue_charging:
     - "Die gemeinsame bestätigte Zeitspanne beider Fenster zeigt auf Deutsch
        Uhr; englische, unbekannte und nicht verfügbare Werte sowie
        Eingabefelder und Service-Payloads bleiben ohne zusätzliches Suffix."
-    - "Live-Entladestatus, geänderte Ziel-SOC-Grenzen, dynamischer Prognosename
+    - "Geänderte Ziel-SOC-Grenzen, dynamischer Prognosename
        sowie fehlende und nicht verfügbare Entitäten sind getestet."
     - "Bedienung verwendet echte Entity-IDs, gemeinsame Fehlerbehandlung
        und erst durch HA bestätigte Zustände; Mount und Rendern schreiben nichts."
@@ -3249,7 +3278,7 @@ requirement_vue_tariff_editor:
   description: >
     Die gemeinsame Tarifpreisfenster-Karte in Stromtarif und Amortisation
     zeigt zunächst eine kompakte Übersicht. Im Stromtarif heißt sie
-    „1. Wann ist dein Strom günstig?“, ansonsten „Dein Stromtarif“.
+    „Preise & Zeiten“, ansonsten „Dein Stromtarif“.
     Gespeicherte tägliche Preiszeiten und Standardpreis sind direkt lesbar;
     günstigste Zeiten werden nur bei exakt zum Profil passenden Sensorattributen
     anhand der Backend-Markierung hervorgehoben. Nach einer Tarifänderung bis
@@ -3371,16 +3400,43 @@ requirement_vue_electricity_tariff:
     Übernehmen speichert die Auswahl. Der Hauptschalter Automatische Netzladung
     ist von der Tarifauswahl unabhängig. Bei ausgeschalteter Automatik bleiben
     Tarif, aktuelle Preise und Amortisationsbewertung aktiv. Der zeitvariable
-    Tarif führt in drei Schritten durch die Einrichtung: „1. Wann ist dein Strom
-    günstig?“, „2. Wie viel möchtest du laden?“ und „3. Automatik einschalten“.
-    Die Reihenfolge im DOM entspricht der sichtbaren Reihenfolge. Tarif- und
-    Ladeeinstellungen beginnen mit einer Zusammenfassung und einer ausdrücklichen
-    Bearbeiten-Aktion; Öffnen und Schließen ändern keine Werte. Aktueller Preis
-    und Entladestatus bleiben sichtbar, der vollständige Tagespreisverlauf ist
-    unter „Preisverlauf anzeigen“ einklappbar. Der dynamische Tarif verwendet
-    dieselbe Gestaltung und Reihenfolge: Preisquelle, Ladeverhalten und
-    Automatik einschalten. Aktueller Preis und Status bleiben sichtbar, während
-    Tagespreiskurve und Prognose anfangs eingeklappt sind.
+    Tarif und der dynamische Tarif verwenden zwei zusammengehörige Karten:
+    „Preise & Zeiten“ enthält Tarifkonfiguration, aktuellen Preis und
+    aufklappbaren Tagespreisverlauf; „Netzladung“ enthält Automatikschalter,
+    Ladeweise, bestätigte Zielwerte, dynamischen Ladestatus und
+    aufklappbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
+    darüber.
+    Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
+    untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
+    Die Übersichten verwenden kurze Beschriftungen, Wertpaare und kompakte
+    Zeilen statt nummerierter Einrichtungsschritte und mehrfacher Hinweise.
+    Bedienflächen bleiben mindestens 44 px hoch, Checkbox-Labels mindestens
+    44 × 44 px. Tarif- und Ladeeinstellungen beginnen mit einer Zusammenfassung
+    und einer ausdrücklichen Bearbeiten-Aktion; Öffnen ändert keine Werte.
+    Preise & Zeiten bietet oben und unten „Übernehmen“ (EN: „Apply“) mit
+    identischer Validierung und Speicheraktion; daneben steht jeweils „Abbrechen“.
+    Ausstehende Aktionen und Fehler bleiben beim zugehörigen
+    Bedienelement sichtbar, auch nach dem Schließen der Bearbeitung.
+    Aktueller Preis und Status bleiben sichtbar; Tagespreiskurve und Prognose
+    sind anfangs eingeklappt.
+
+    Die PV-Zeile steht im aufklappbaren Bereich „Ladeplan & Prognose“, auch
+    während der Bearbeitung der Netzladung. Sie zeigt den Zahlenwert der
+    gewählten Prognosequelle mit
+    Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
+    charging_pv_forecast liest die Quelle beim Einrichten und nach einem
+    Quellenwechsel und fordert danach alle zehn Minuten über Home Assistant
+    eine Aktualisierung an, auch bei geschlossenem Dashboard. Gültige,
+    nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
+    Bei Lesefehlern, fehlenden, unbekannten, nicht verfügbaren oder ungültigen
+    Quellwerten bleibt der letzte gültige Wert verfügbar, auch bei einem
+    Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint Nicht verfügbar;
+    ohne ausgewählte Quelle Nicht eingerichtet. Ein Quellenwechsel verwirft
+    den alten Anzeigewert und verspätete Antworten der vorherigen Quelle.
+    source_entity_id und last_successful_update machen Herkunft und Zeitpunkt
+    nachvollziehbar. Diese Anzeige ersetzt keine Sicherheitsprüfung oder
+    Aktualitätsprüfung der Ladeplanung; deren ungültige Prognosen bleiben
+    ein Ausschlussgrund für die betroffene Ladefreigabe.
 
     Die separaten Tabs Zeitvariabler Tarif und Dynamischer Tarif entfallen;
     ihre alten Links werden ohne zusätzliche History-Einträge nach stromtarif
@@ -3403,7 +3459,7 @@ requirement_vue_electricity_tariff:
     fehlende Werte erhalten keinen Ersatz. Die Ladepausen-Prognose wird dort
     nicht mehr als Prognose des dynamischen Tarifs angezeigt.
 
-    Tarif & Preise verwendet lokale Entwürfe mit Speichern und Abbrechen. Bei
+    Tarif & Preise verwendet lokale Entwürfe mit Übernehmen und Abbrechen. Bei
     Zeitvariabel enthält es Standardpreis, Einspeisevergütung und bis zu acht
     tägliche Zeitfenster nach REQ-VUE-TARIFF-EDITOR. Dynamisch erlaubt Preis-Sensor,
     optionales Attribut, tatsächliche Quelleneinheit, Einspeisevergütung sowie
@@ -3417,42 +3473,84 @@ requirement_vue_electricity_tariff:
     Ein Wechsel verwirft
     weder Investitionsdaten noch native SOC-, Monats- oder Strategieeinstellungen.
 
-    Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
-    übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services; Fertig
-    schließt den Bereich. Zeitvariabel bietet zwei beschriebene Ladeweisen:
-    „Festes Ladeziel“ schaltet ausschließlich bridge_charge_enabled aus,
-    „Nur Bedarf bis Solarstrom“ schaltet ausschließlich diesen Schalter ein.
+    Ladeverhalten bleibt zunächst eingeklappt. Im Netzladeeditor gibt es
+    oben und unten jeweils „Übernehmen“ links und „Abbrechen“ rechts.
+    Beide Übernehmen-Buttons prüfen alle sichtbaren Zahleneingaben und speichern
+    geänderte Werte gemeinsam über
+    sax_power.set_charging_settings; neben den Zahlen stehen keine
+    Einzel-Übernehmen-Buttons. Ladestart, Netzladeziel und Max SOC werden
+    anhand des vollständigen Entwurfs geprüft, sodass auch gemeinsam erhöhte
+    Grenzen über den vorherigen Werten möglich sind. Bei dynamischem Tarif
+    gehören die sichtbaren Preis-/Stunden-/Schonpreisfelder zur gemeinsamen
+    Übernahme. Unveränderte und ausgeblendete Felder werden nicht geschrieben.
+    Ungültige Eingaben, fehlende Rechte oder Backendfehler dürfen keine
+    Teiländerung auslösen. Der Backendpfad prüft Bereiche, Schrittweiten und
+    Rechte aller tatsächlich geänderten Entities vor der gemeinsamen
+    Softwareübernahme und bestätigt ohne Warten auf den Geräte-Lock;
+    Geräteänderungen verarbeitet der vorhandene zusammenfassende Worker.
+    Während des Speicherns sind Pending unmittelbar zugänglich und
+    Doppelaufrufe gesperrt; bestätigte Werte folgen echten HA-Zuständen.
+    Erfolg schließt den Editor, Fehler lassen ihn mit erhaltenen Eingaben
+    offen und markieren das betroffene Feld. Enter nutzt denselben Save.
+    „Abbrechen“ (EN: „Cancel“) verwirft ungespeicherte
+    Zahleneingaben einschließlich ausgeblendeter Entwürfe und Clientfehler
+    und schließt die Bearbeitung ohne Schreibaufruf. Beim erneuten Öffnen
+    erscheinen die aktuellen bestätigten Zahlen. Beide Buttons sind während
+    der gemeinsamen Speicherung gesperrt. Bereits übernommene Ladeweisen
+    und Monatsauswahlen werden beim Abbrechen nicht zurückgesetzt.
+    Zeitvariabel bietet die Ladeweisen
+    „Festes Netzladeziel“ (bridge_charge_enabled aus) und
+    „Nur Bedarf bis Solarstrom“ (bridge_charge_enabled ein).
     Nur bestätigte, verfügbare on/off-Zustände markieren die Auswahl; fehlende,
     unbekannte und nicht verfügbare Werte erhalten keine erfundene Ladeweise.
     Die Auswahl aktiviert weder den Hauptschalter noch setzt sie Zielwerte.
-    Das sichtbare Netzladeziel heißt bei Verbrauchsplanung „Höchstens laden bis“
-    und wird als Obergrenze erklärt. Startschwelle (nur bei festem Ladeziel),
-    globale Ladegrenze und Monate bleiben unter „Weitere Einstellungen“
-    erreichbar. Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen
-    sichtbar; 0 % wird als verhinderter Neustart erklärt. Fehlende Monatswerte
-    dürfen nicht als ganzjährig inaktiv erscheinen. Die globale Grenze erklärt
-    ihre Wirkung auch auf Solarstrom und ein höheres Netzladeziel. Ein sichtbarer
-    Hinweis beim Ladeziel und in der geschlossenen Zusammenfassung erklärt
-    die vorübergehende 100-%-Ausnahme bei fälliger Zellkalibrierung; bei
-    Verbrauchsplanung autorisiert sie keine ungeplante Vollladung. Die feste
-    Ladeweise erklärt ihre Entladesperre nach erfolgter Netzladung bis zum
-    Fensterende, die Bedarfsladung die anschließende normale Entladefreigabe.
-    PV-Voraussetzungen werden neben der Ladeweise verständlich erklärt;
+    Das Ziel heißt durchgängig „Netzladeziel (%)“, bei Verbrauchsplanung
+    „Maximales Netzladeziel (%)“. Zusammenfassung, Ladeweise, Plananzeige und
+    Fehlermeldungen verwenden dieselbe Bezeichnung. Die globale Ladegrenze
+    für alle Lademethoden heißt im Eingabefeld „Max SOC (%)“ (DE/EN)
+    und bleibt davon ausdrücklich unterscheidbar.
+    Die Übersicht zeigt bei fester Ladeweise „Start nur unter“, „Netzladeziel“
+    und „Max SOC“ in dieser Reihenfolge in einer Zeile. Die Beschriftungen
+    bleiben über den bestätigten Zahlwerten. Diese Anordnung gilt auch auf
+    schmalen Ansichten; bei Verbrauchsplanung entfällt die unwirksame
+    Startschwelle und Netzladeziel/Max SOC stehen nebeneinander. Fehlende
+    globale Werte werden als nicht verfügbar angezeigt und spätere HA-
+    Rückmeldungen aktualisieren alle SOC-Werte ohne Öffnen der Bearbeitung.
+    Das Startfeld heißt in der Bearbeitung „Ladestart unter (%)“.
+    Während der Bearbeitung sind Ladestart (nur bei fester Ladeweise),
+    Netzladeziel, globale Ladegrenze und Monate direkt sichtbar. Es gibt dort
+    kein „Weitere Einstellungen“ und keine zusätzliche Aufklappaktion;
+    auch die zwölf Monatsfelder stehen ohne „Ändern“ direkt zur Auswahl.
+    Lange Erklärungstexte, Auswahlbeschreibungen und „Laderegeln & Ausnahmen“
+    entfallen. Der Hinweis zur vorübergehenden Kalibrierungsfreigabe bis 100 %
+    wird im Tab Stromtarif nicht angezeigt. Die Kalibrierungsfunktion und ihre
+    Statusanzeigen unter Allgemeine Informationen bleiben erhalten.
+    Die vollständigen Laderegeln bleiben in der Dokumentation.
+    Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen sichtbar;
+    bei 0 % lautet die Anzeige „Start bei 0 %“. Netzladeziel unter Ladestart und
+    Ladestart über Netzladeziel werden am betroffenen Feld verständlich
+    abgelehnt, ohne bestätigte Werte oder Eingaben zu verwerfen. Gleichheit und
+    Ladestart 0 % bleiben gültig. Fehlende Monatswerte dürfen nicht als
+    ganzjährig inaktiv erscheinen.
+    Eine fehlende PV-Prognose wird bei Verbrauchsplanung kurz benannt;
     bridge_pv_start_required und bridge_tariff_required aus dem HA-Service
     erhalten konkrete DE-/EN-Hinweise. Ausstehende Änderungen sperren weitere
     Modusaufrufe. Bestätigte Zustände, Fehlermeldungen und Zahlentwürfe bleiben
-    in beiden Tarifarten beim Schließen und erneuten Öffnen erhalten. Dies
-    umfasst ungesendete und unvollständige Zahlen sowie verspätet fehlgeschlagene
+    in beiden Tarifarten bei Fehlern erhalten. Ohne Abbrechen behalten auch
+    ausgeblendete Zahlenfelder ihren Entwurf. Dies umfasst ungesendete und
+    unvollständige Zahlen sowie verspätet fehlgeschlagene
     Änderungen. Ein ausdrücklicher Wiederholungsversuch sendet den erhaltenen
-    Entwurf; bestätigte HA-Änderungen aktualisieren weiterhin das Feld.
+    Entwurf; bestätigte HA-Änderungen aktualisieren bestätigte Werte und
+    unberührte Eingabefelder. Bereits bearbeitete Entwürfe bleiben erhalten;
+    ein Wechsel der Entity-ID setzt den betroffenen Entwurf sicher zurück.
     Dynamisch führt
     die Bedienung mit alltagssprachlichen Ladeweisen durch die Einrichtung:
     bedarfsgerechtes Laden (Smart), günstigste Stunden (Relativ), feste
     Preisgrenze (Absolut) oder ausgeschaltete Preisautomatik (Off). Die Ansicht
-    erklärt die Wirkung der bestätigten Auswahl und zeigt nur die passenden
-    Eingaben: Preisgrenze bei Absolut, maximale Ladedauer bei Relativ/Smart.
-    Das Ladeziel bezeichnet den maximalen Speicherfüllstand in Prozent und
-    erklärt ausdrücklich seine Gültigkeit für alle Ladearten. Smart berücksichtigt
+    zeigt die bestätigte Auswahl und die passenden Eingaben: Preisgrenze
+    bei Absolut, maximale Ladedauer bei Relativ/Smart. „Netzladeziel (%)“
+    bezeichnet hier weiterhin die globale Ladegrenze. Ein kurzer Hinweis
+    „gilt auch für Solarstrom“ macht diesen Unterschied sichtbar. Smart berücksichtigt
     den Energiebedarf und die optionale PV-Prognose; fehlen Gerätedaten,
     gilt weiterhin der bestehende Rückfall auf die günstigsten Stunden.
     Die Preisgrenze wirkt bei Relativ/Smart nicht als zusätzliche Obergrenze.
@@ -3460,11 +3558,12 @@ requirement_vue_electricity_tariff:
     Empfehlungen eigenmächtig geändert. Eine verständliche Zusammenfassung
     beschreibt die gespeicherte Wirkung auch außerhalb des Editors.
 
-    Der Neutralpreis bleibt in erweiterten Ladeeinstellungen erreichbar.
-    Die Erklärung macht den Netzbezug des Hauses während der Speicherpause
-    sowie das unterschiedliche Preisband bei Absolut verständlich. Auch
-    außerhalb der erweiterten Einstellungen bleibt eine vorhandene Pausegrenze
-    erkennbar. Die einfache Preisquellen-Einrichtung zeigt Strompreis-Sensor
+    Der Neutralpreis ist während der Bearbeitung bei allen aktiven Ladeweisen
+    direkt sichtbar; „Weitere Einstellungen · Speicher schonen“ entfällt.
+    Auch hier gibt es keine langen Erklärungstexte oder Auswahlbeschreibungen.
+    Die Zusammenfassung nennt die bestätigte Pausegrenze und bei Absolut das
+    zusätzliche untere Preislimit. Fehlende oder unwirksame Werte erhalten
+    einen kurzen Status. Die einfache Preisquellen-Einrichtung zeigt Strompreis-Sensor
     und Einspeisevergütung. Preisattribut, Einheit und PV-Anteil sind weiterhin
     erreichbar, aber nachgeordnet; vorhandene Sonderwerte bleiben erhalten.
     Hinweise erklären Preisvorschau, optionale PV-Quelle und die Wirkung des

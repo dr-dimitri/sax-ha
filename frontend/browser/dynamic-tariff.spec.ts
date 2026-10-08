@@ -342,7 +342,7 @@ test("guided charging methods explain their effects and reveal relevant settings
     exact: true,
   });
   const target = settings.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   await expect(summary).toContainText(
@@ -350,7 +350,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   );
   await expect(methods).toHaveCount(0);
   await screenshot(page, testInfo, `dynamic-overview-${testInfo.project.name}`);
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(methods).toHaveCount(4);
   await expect(methods.locator("strong")).toHaveText(
     english
@@ -372,11 +372,11 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(hours).toHaveCount(0);
   await expect(target).toHaveValue("80");
   await expect(settings).toContainText(
-    english ? "including solar charging" : "auch für PV-Ladung",
+    english ? "also applies to solar charging" : "gilt auch für Solarstrom",
   );
-  await expect(
-    settings.locator(".dynamic-charging-advanced"),
-  ).not.toHaveAttribute("open", "");
+  await expect(settings.locator("details")).toHaveCount(0);
+  await expect(settings.locator("input:visible")).toHaveCount(3);
+  await expect(methods.locator("span")).toHaveCount(0);
   await page.locator("#hold-action").click();
   await relative.click({ clickCount: 2 });
   await expect(settings.locator(".dynamic-charging-methods")).toHaveAttribute(
@@ -394,12 +394,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(page.locator("#actions")).toHaveText(
     '1: select.select_option {"option":"relative","entity_id":"select.demo_price_charge_strategy"}',
   );
-  await charging
-    .getByRole("button", {
-      name: english ? "Done" : "Fertig",
-      exact: true,
-    })
-    .click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(settings.locator(".dynamic-charging-methods")).toBeHidden();
   await expect(settings.getByRole("status")).toHaveText(
     english ? "Applying charging method …" : "Ladeweise wird übernommen …",
@@ -408,29 +403,28 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(summary).toContainText(
     english ? "Use the cheapest hours" : "Günstigste Stunden nutzen",
   );
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(relative).toHaveAttribute("aria-pressed", "true");
   await expect(absolute).toHaveAttribute("aria-pressed", "false");
   await expect(price).toHaveCount(0);
   await expect(hours).toHaveValue("4");
   await expect(settings).toContainText(
-    english ? "There is no fixed price cap" : "Es gilt keine feste Preisgrenze",
-  );
-  await expect(settings).toContainText(
-    english ? "not at midnight" : "nicht um Mitternacht",
+    english ? "No fixed price cap" : "Keine feste Preisgrenze",
   );
   const hoursControl = settings.locator(".entity-control").filter({
     has: page.getByRole("spinbutton", { name: hoursName, exact: true }),
   });
   await hours.fill("6");
   await page.locator("#hold-action").click();
-  await hoursControl.getByRole("button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "4",
   );
   await expect(hours).toBeDisabled();
   await expect(summary).toContainText("4 h");
   await page.locator("#release-action").click();
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "6",
   );
@@ -438,14 +432,6 @@ test("guided charging methods explain their effects and reveal relevant settings
   await smart.click();
   await expect(smart).toHaveAttribute("aria-pressed", "true");
   await expect(hours).toHaveValue("6");
-  await expect(settings).toContainText(
-    english ? "Without a solar forecast" : "Ohne PV-Prognose",
-  );
-  await expect(settings).toContainText(
-    english
-      ? "If battery level, capacity or charging power is missing"
-      : "Fehlen Ladestand, Kapazität oder Ladeleistung",
-  );
   const widths = testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100];
@@ -481,19 +467,10 @@ test("guided charging methods explain their effects and reveal relevant settings
   await off.click();
   await expect(off).toHaveAttribute("aria-pressed", "true");
   await expect(settings.locator("input")).toHaveCount(0);
-  await expect(settings).toContainText(
-    english
-      ? "even when the main switch is on"
-      : "auch wenn der Hauptschalter eingeschaltet ist",
-  );
   await expect(panel.locator(".electricity-master input")).toBeChecked();
   await absolute.click();
   await expect(price).toHaveValue("-5");
   await expect(target).toHaveValue("80");
-  await settings.locator(".dynamic-charging-advanced summary").click();
-  await expect(settings).toContainText(
-    english ? "the house uses grid energy" : "das Haus nutzt Netzstrom",
-  );
   await expect(
     settings.getByRole("spinbutton", {
       name: english
@@ -518,7 +495,7 @@ test("dynamic prices keep advanced values and show progress while saving and cha
   const panel = page.locator("sax-power-vue-panel");
   const prices = panel.locator(".electricity-prices");
   const before = prices.locator(".electricity-price-summary");
-  await prices.locator("header > button").click();
+  await prices.locator("header .editor-actions > button:first-child").click();
   const form = prices.locator(".electricity-price-editor");
   const advanced = prices.locator(".electricity-price-advanced");
   const feed = prices.locator('[name="dynamic_feed"]');
@@ -625,7 +602,7 @@ test("dynamic prices keep advanced values and show progress while saving and cha
   await expect(panel).toHaveAttribute("data-tariff-configure-requests", "2");
 });
 
-test("dynamic setup matches the time-of-use steps and keeps price detail optional", async ({
+test("dynamic setup matches the time-of-use groups and keeps price detail optional", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -636,28 +613,18 @@ test("dynamic setup matches the time-of-use steps and keeps price detail optiona
     ),
   ).toHaveText(
     english
-      ? [
-          "1. Where do your electricity prices come from?",
-          "2. How should the battery charge?",
-          "3. Turn on automatic charging",
-        ]
-      : [
-          "1. Woher kommen deine Strompreise?",
-          "2. Wie möchtest du laden?",
-          "3. Automatik einschalten",
-        ],
+      ? ["Prices & times", "Grid charging"]
+      : ["Preise & Zeiten", "Netzladung"],
   );
   await expect(panel.locator(".electricity-master input")).toHaveCount(1);
   await expect(panel.locator(".electricity-tariff-bar input")).toHaveCount(0);
-  const activation = panel.locator(".electricity-activation");
   const prices = panel.locator(".electricity-price-card");
   const details = prices.locator(".electricity-price-details");
   await expect(details).not.toHaveAttribute("open", "");
   await expect(prices.locator("svg")).toBeHidden();
-  expect((await prices.boundingBox())!.y).toBeGreaterThanOrEqual(
-    (await activation.boundingBox())!.y +
-      (await activation.boundingBox())!.height,
-  );
+  await expect(
+    panel.locator(".electricity-charging > .electricity-activation"),
+  ).toHaveCount(1);
   for (const width of testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100]) {
@@ -685,7 +652,9 @@ test("dynamic setup matches the time-of-use steps and keeps price detail optiona
         await panel
           .locator(".electricity-price-summary")
           .evaluate((element) => {
-            const text = element.firstChild!;
+            const text = element.querySelector(
+              ":scope > div:nth-child(2) dt",
+            )!.firstChild!;
             const word = "Einspeisevergütung";
             const start = text.textContent!.indexOf(word);
             const range = document.createRange();

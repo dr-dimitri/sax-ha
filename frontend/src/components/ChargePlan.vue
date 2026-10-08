@@ -24,12 +24,12 @@ const configurationHint = computed(() => {
   switch (control.value?.state?.attributes.configuration_error) {
     case "bridge_pv_start_required":
       return german.value
-        ? "Zum Einschalten in Schritt 1 eine PV-Prognosequelle auswählen."
-        : "To enable planning, select a PV forecast source in step 1.";
+        ? "Zum Einschalten unter „Preise & Zeiten“ eine PV-Prognosequelle auswählen."
+        : "To enable planning, select a PV forecast source under “Prices & times”.";
     case "bridge_tariff_required":
       return german.value
-        ? "Zum Einschalten in Schritt 1 einen zeitvariablen Tarif einrichten."
-        : "To enable planning, configure a time-of-use tariff in step 1.";
+        ? "Zum Einschalten unter „Preise & Zeiten“ einen zeitvariablen Tarif einrichten."
+        : "To enable planning, configure a time-of-use tariff under “Prices & times”.";
     default:
       return null;
   }
@@ -90,7 +90,7 @@ const reasons = computed<Record<string, string>>(() =>
   german.value
     ? {
         pv_start_missing:
-          "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle in Schritt 1 prüfen.",
+          "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle unter „Preise & Zeiten“ prüfen.",
         consumption_missing:
           "Für die Verbrauchsprognose wird mindestens eine Minute Entlademessung benötigt.",
         measurements_missing: "Aktuelle Batteriemesswerte fehlen.",
@@ -98,11 +98,11 @@ const reasons = computed<Record<string, string>>(() =>
         pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
         manual_charge: "Die manuelle Ladung hat Vorrang.",
         disabled:
-          "In Schritt 2 „Nur Bedarf bis Solarstrom“ wählen und in Schritt 3 die automatische Netzladung einschalten.",
+          "Unter „Netzladung“ die Ladeweise „Nur Bedarf bis Solarstrom“ wählen und die Automatik einschalten.",
       }
     : {
         pv_start_missing:
-          "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source in step 1.",
+          "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source under “Prices & times”.",
         consumption_missing:
           "The consumption forecast needs at least one minute of discharge measurements.",
         measurements_missing: "Current battery measurements are missing.",
@@ -110,7 +110,7 @@ const reasons = computed<Record<string, string>>(() =>
         pv_surplus: "PV surplus pauses planned grid charging.",
         manual_charge: "Manual charging takes priority.",
         disabled:
-          "Choose “Only what is needed until solar power” in step 2 and turn on automatic grid charging in step 3.",
+          "Under “Grid charging”, choose “Only what is needed until solar power” and turn on automatic charging.",
       },
 );
 const reason = computed(() =>
@@ -273,8 +273,8 @@ const target = computed(() => {
   const soc = number(attributes.value.target_soc, 0, 100);
   return soc
     ? german.value
-      ? `Geplantes Ladeziel: ${soc} %.`
-      : `Planned charge target: ${soc} %.`
+      ? `Geplantes Netzladeziel: ${soc} %.`
+      : `Planned grid charge target: ${soc} %.`
     : null;
 });
 </script>

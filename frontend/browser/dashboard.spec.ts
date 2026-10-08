@@ -6,8 +6,11 @@ const pageErrors = new WeakMap<Page, string[]>();
 
 async function openTariffMonths(panel: Locator) {
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
-  await panel.locator(".tou-charging-advanced > summary").click();
+  await panel
+    .locator(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )
+    .click();
   return panel.locator(".tou-charging-settings .month-selection");
 }
 
@@ -380,13 +383,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
       : initial
         ? "Speicher ausschalten?"
         : "Speicher einschalten?";
-    const label = english
-      ? initial
-        ? "Turn off"
-        : "Turn on"
-      : initial
-        ? "Ausschalten"
-        : "Einschalten";
+    const label = english ? "Apply" : "Übernehmen";
     const previousAction =
       index === 0
         ? "Keine Aktion"
@@ -647,9 +644,7 @@ test("eight tariff windows match the compact electricity summary and detailed am
   ).toHaveCount(0);
   const tariff = panel.locator(".tariff-plan");
   await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
-    english
-      ? "1. When is your electricity cheaper?"
-      : "1. Wann ist dein Strom günstig?",
+    english ? "Prices & times" : "Preise & Zeiten",
   );
   const periods = tariff.locator(".tariff-plan__periods li");
   await expect(periods).toHaveCount(8);
@@ -840,15 +835,19 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   const input = number.locator("input");
   await expect(input).toHaveValue("80");
   await input.fill("85");
-  await number.getByRole("button").click();
+  await number.locator('button[type="submit"]').click();
   await expect(number.locator(".entity-control__value")).toContainText("85");
   await expect(page.locator("#actions")).toContainText("1: number.set_value");
   await page.locator("#external").click();
   await expect(input).toHaveValue("75");
   await panel.locator("nav a[href$='/stromtarif']").click();
   await page.locator("#tariff-dynamic").click();
-  await panel.locator(".electricity-charging header button").click();
-  const shared = panel.locator("input[max='100']");
+  const charging = panel.locator(".electricity-charging");
+  await charging.locator("header .editor-actions > button:first-child").click();
+  const apply = charging.locator("header .editor-actions > button:first-child");
+  await expect(apply).toHaveCount(1);
+  await expect(charging.locator(".entity-control button")).toHaveCount(0);
+  const shared = charging.locator("input[max='100']");
   await expect(shared).toHaveValue("75");
   await page.locator("#connection").click();
   await expect(shared).toHaveCount(0);
@@ -871,11 +870,7 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await expect(shared).toHaveValue("75");
   await page.locator("#failure").click();
   await shared.fill("90");
-  await panel
-    .locator("form")
-    .filter({ has: page.locator("input[max='100']") })
-    .getByRole("button")
-    .click();
+  await apply.click();
   await expect(panel.getByRole("alert")).toBeVisible();
   await expect(
     panel
@@ -883,7 +878,11 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
       .filter({ has: page.locator("input[max='100']") })
       .locator(".entity-control__value"),
   ).toContainText("75");
-  await expect(page.locator("#actions")).toContainText("2: number.set_value");
+  await expect(shared).toHaveValue("90");
+  await expect(charging.locator(".electricity-charging-editor")).toBeVisible();
+  await expect(page.locator("#actions")).toHaveText(
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","max_soc":90}',
+  );
 });
 
 test("tariff months, grid-serving overnight window and guided negative price settings use their matching controls", async ({
@@ -891,7 +890,6 @@ test("tariff months, grid-serving overnight window and guided negative price set
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   const months = await openTariffMonths(panel);
-  await months.locator(".month-selection__toggle").click();
   await expect(months.getByRole("switch")).toHaveCount(12);
   await expect(panel.locator(".time-window-control")).toHaveCount(0);
   const firstMonth = months.getByRole("switch").first();
@@ -996,16 +994,23 @@ test("tariff months, grid-serving overnight window and guided negative price set
     "aria-pressed",
     "true",
   );
-  await panel.locator(".dynamic-charging-advanced summary").click();
-  const price = panel.locator("input[min='-100']").first();
+  const charging = panel.locator(".electricity-charging");
+  const price = charging.getByRole("spinbutton", {
+    name: testInfo.project.name.endsWith("en")
+      ? "Preserve battery energy below (ct/kWh)"
+      : "Speicher bei günstigem Strom schonen bis (ct/kWh)",
+    exact: true,
+  });
+  const apply = charging.locator("header .editor-actions > button:first-child");
+  await expect(apply).toHaveCount(1);
+  await expect(charging.locator(".entity-control button")).toHaveCount(0);
   await price.fill("-12.5");
-  await panel
-    .locator("form")
-    .filter({ has: page.locator("input[min='-100']") })
-    .first()
-    .getByRole("button")
-    .click();
-  await expect(page.locator("#actions")).toContainText('"value":-12.5');
+  await apply.click();
+  await expect(page.locator("#actions")).toHaveText(
+    '6: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_neutral_price":-12.5}',
+  );
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(price).toHaveValue("-12.5");
 });
 
@@ -1033,13 +1038,17 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
     const switches = months.getByRole("switch");
     const targets = months.locator(".entity-control__switch-target");
     const before = await actions.innerText();
-    await expect(toggle).toHaveAccessibleName(english ? "Edit" : "Ändern");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(quarters).toBeHidden();
-    await expect(summary).toBeVisible();
-    await toggle.focus();
-    await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    if (kind === "grid_serving") {
+      await expect(toggle).toHaveAccessibleName(english ? "Edit" : "Ändern");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(quarters).toBeHidden();
+      await expect(summary).toBeVisible();
+      await toggle.focus();
+      await page.keyboard.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    } else {
+      await expect(toggle).toHaveCount(0);
+    }
     await expect(quarters).toBeVisible();
     await expect(switches).toHaveCount(12);
     await expect(actions).toHaveText(before);
@@ -1061,8 +1070,12 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       english ? "4 of 12 months selected" : "4 von 12 Monaten ausgewählt",
     );
     const lastWrite = await actions.innerText();
-    await toggle.click();
-    await expect(quarters).toBeHidden();
+    if (kind === "grid_serving") {
+      await toggle.click();
+      await expect(quarters).toBeHidden();
+    } else {
+      await expect(quarters).toBeVisible();
+    }
     await expect(summary).toBeVisible();
     await expect(summary).toHaveText(selected);
     await expect(actions).toHaveText(lastWrite);
@@ -1070,7 +1083,7 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
     });
-    await toggle.click();
+    if (kind === "grid_serving") await toggle.click();
     for (let index = 0; index < 12; index++)
       await expect(switches.nth(index)).toBeChecked({
         checked: [1, 3, 4, 8].includes(index + 1),
@@ -1088,14 +1101,18 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       `${writes}: switch.turn_on {"entity_id":"switch.demo_${kind}_month_2"}`,
     );
     const rejectedWrite = await actions.innerText();
-    await toggle.click();
-    await expect(quarters).toBeHidden();
+    if (kind === "grid_serving") {
+      await toggle.click();
+      await expect(quarters).toBeHidden();
+    } else {
+      await expect(quarters).toBeVisible();
+    }
     await expect(months.getByRole("alert")).toBeVisible();
     await expect(summary).toHaveText(selected);
     await expect(actions).toHaveText(rejectedWrite);
 
     // Retrying a gap month joins only its neighboring run after HA confirms it.
-    await toggle.click();
+    if (kind === "grid_serving") await toggle.click();
     await switches.nth(1).focus();
     await page.keyboard.press("Space");
     await expect(switches.nth(1)).toBeChecked();
@@ -1107,7 +1124,7 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       english ? "January–April, August" : "Januar–April, August",
     );
     await expect(months.getByRole("alert")).toHaveCount(0);
-    await toggle.click();
+    if (kind === "grid_serving") await toggle.click();
     await expect(summary).toBeVisible();
     await expect(count).toHaveText(
       english ? "5 of 12 months selected" : "5 von 12 Monaten ausgewählt",
@@ -1400,7 +1417,9 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   await expect(panel.locator(".tariff-price-chart svg")).toBeVisible();
   await expect(panel.locator(".electricity-master input")).toHaveCount(1);
   await page.setViewportSize({ width: 320, height: 844 });
-  const editButton = panel.locator(".electricity-charging header > button");
+  const editButton = panel.locator(
+    ".electricity-charging header .editor-actions > button:first-child",
+  );
   expect((await editButton.boundingBox())?.height).toBeLessThanOrEqual(48);
   const price = panel.locator(".tariff-plan");
   await expect(price.locator("form")).toHaveCount(0);
@@ -1417,7 +1436,8 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   }
   await price.locator('input[name="base_price"]').fill(en ? "34.25" : "34,25");
   await price
-    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .locator("form")
+    .getByRole("button", { name: en ? "Apply" : "Übernehmen", exact: true })
     .click();
   await expect(price.locator("form")).toHaveCount(0);
   await expect(price).toContainText(en ? "34.25" : "34,25");
@@ -1430,6 +1450,7 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   await price.locator('input[name="base_price"]').fill("99");
   await price
     .getByRole("button", { name: en ? "Cancel" : "Abbrechen", exact: true })
+    .last()
     .click();
   await expect(price).toContainText(en ? "34.25" : "34,25");
   expect(
@@ -1477,14 +1498,16 @@ test("electricity tariff explicitly selects dynamic and uses one central automat
   await prices.locator('[name="dynamic_feed"]').fill(en ? "9.25" : "9,25");
   await page.locator("#failure").click();
   await prices
-    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .locator("form")
+    .getByRole("button", { name: en ? "Apply" : "Übernehmen", exact: true })
     .click();
   await expect(panel.locator('[role="alert"]')).toBeVisible();
   await expect(prices.locator('[name="dynamic_feed"]')).toHaveValue(
     en ? "9.25" : "9,25",
   );
   await prices
-    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .locator("form")
+    .getByRole("button", { name: en ? "Apply" : "Übernehmen", exact: true })
     .click();
   await expect(prices.locator("form")).toHaveCount(0);
   await expect(prices).toContainText(en ? "9.25" : "9,25");

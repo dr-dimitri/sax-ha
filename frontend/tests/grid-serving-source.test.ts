@@ -199,7 +199,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     await select(root, "sensor.other");
     const waiting = deferred<Source>();
     callWS.mockImplementationOnce(() => waiting.promise);
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     expect(root.querySelector("[role=status]")?.textContent).toContain(
       "wird gespeichert",
     );
@@ -211,7 +211,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     ).toBe("Heute verbleibend");
     expect(root.querySelector("select")?.disabled).toBe(true);
     expect(button(root, "Abbrechen").disabled).toBe(true);
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     root
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -246,7 +246,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
       await click(root, "Bearbeiten");
       await select(root, "sensor.other");
       callWS.mockRejectedValueOnce({ code });
-      await click(root, "Speichern");
+      await click(root, "Übernehmen");
       expect(root.querySelector("select")?.value).toBe("sensor.other");
       expect(
         root.querySelector(".grid-serving-source__confirmed")?.textContent,
@@ -260,7 +260,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
         expect(root.querySelector("select")?.getAttribute("aria-invalid")).toBe(
           "true",
         );
-      await click(root, "Speichern");
+      await click(root, "Übernehmen");
       expect(savedCalls(callWS)).toHaveLength(2);
       expect(root.querySelector("[role=alert]")).toBeNull();
     },
@@ -276,13 +276,13 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
       revision: "source-external",
     };
     callWS.mockRejectedValueOnce({ code: "conflict" });
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     expect(root.querySelector("select")?.value).toBe("sensor.other");
-    expect(button(root, "Speichern").disabled).toBe(true);
+    expect(button(root, "Übernehmen").disabled).toBe(true);
     await click(root, "Aktuelle Auswahl laden");
     expect(root.querySelector("select")?.value).toBe("");
     await select(root, "sensor.other");
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     expect(savedCalls(callWS).at(-1)![0].revision).toBe("source-external");
   });
 
@@ -300,7 +300,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
       ).toBe("Neue Anlage");
       if (editing) {
         expect(root.querySelector("select")?.value).toBe("");
-        expect(button(root, "Speichern").disabled).toBe(true);
+        expect(button(root, "Übernehmen").disabled).toBe(true);
         expect(root.querySelector("[role=alert]")?.textContent).toContain(
           "zwischenzeitlich",
         );
@@ -315,7 +315,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     await select(root, "sensor.other");
     const waiting = deferred<Source>();
     callWS.mockImplementationOnce(() => waiting.promise);
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     await fire("disconnected");
     waiting.resolve({
       pv_sensor: "sensor.other",
@@ -332,8 +332,8 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     );
     await fire("ready");
     await flush();
-    expect(button(root, "Speichern").disabled).toBe(false);
-    await click(root, "Speichern");
+    expect(button(root, "Übernehmen").disabled).toBe(false);
+    await click(root, "Übernehmen");
     expect(savedCalls(callWS)).toHaveLength(2);
   });
 
@@ -366,7 +366,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     await select(root, "sensor.other");
     const waiting = deferred<Source>();
     callWS.mockImplementationOnce(() => waiting.promise);
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     await externalSource(null);
     waiting.resolve({
       pv_sensor: "sensor.other",
@@ -382,7 +382,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     expect(root.querySelector("[role=alert]")?.textContent).toContain(
       "zwischenzeitlich",
     );
-    expect(button(root, "Speichern").disabled).toBe(true);
+    expect(button(root, "Übernehmen").disabled).toBe(true);
     expect(savedCalls(callWS)).toHaveLength(1);
   });
 
@@ -416,7 +416,7 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     const { root, callWS } = await mount();
     await click(root, "Bearbeiten");
     await select(root, "");
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     expect(savedCalls(callWS)[0][0].pv_sensor).toBeNull();
     expect(root.textContent).toContain("Ohne Quelle greift die Ladepause");
   });
@@ -426,9 +426,9 @@ describe("REQ-GRID-SERVING-CHARGE: dashboard PV source", () => {
     await click(root, "Bearbeiten");
     await select(root, "sensor.other");
     callWS.mockRejectedValueOnce({ code: "forbidden" });
-    await click(root, "Speichern");
+    await click(root, "Übernehmen");
     expect(root.querySelector("select")?.value).toBe("sensor.other");
-    expect(button(root, "Speichern").disabled).toBe(true);
+    expect(button(root, "Übernehmen").disabled).toBe(true);
     expect(root.textContent).toContain("Nur Administratoren");
   });
 

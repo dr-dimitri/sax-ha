@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "../components/EditorActions.vue";
 import {
   computed,
   inject,
@@ -40,8 +41,8 @@ const text = computed(() =>
         change: "Tarif wechseln",
         apply: "Tarif übernehmen",
         cancel: "Abbrechen",
-        save: "Speichern",
-        done: "Fertig",
+        save: "Übernehmen",
+        done: "Übernehmen",
         edit: "Bearbeiten",
         loading: "Wird geladen …",
         saving: "Wird gespeichert …",
@@ -53,16 +54,17 @@ const text = computed(() =>
         chooseHint:
           "Nur der gewählte Tarif ist aktiv. Gespeicherte Einstellungen bleiben beim Wechsel erhalten.",
         incomplete:
-          "Dieser Tarif ist noch nicht eingerichtet. Nach dem Wechsel bleibt die automatische Netzladung aus. Richte danach die Preise in Schritt 1 ein.",
+          "Dieser Tarif ist noch nicht eingerichtet. Nach dem Wechsel bleibt die automatische Netzladung aus. Richte danach „Preise & Zeiten“ ein.",
         touHint: "Feste Preise zu wiederkehrenden Uhrzeiten",
         dynamicHint: "Preise aus einem Strompreis-Sensor",
         price: "Strompreis",
         current: "Aktuell",
         today: "Heute",
         tomorrow: "Morgen",
-        prices: "1. Woher kommen deine Strompreise?",
+        prices: "Preise & Zeiten",
         feed: "Einspeisevergütung",
         source: "Strompreis-Sensor (erforderlich)",
+        sourceSummary: "Preisquelle",
         attribute: "Preisattribut (optional)",
         unit: "Einheit der Preisquelle",
         pv: "PV-Prognose-Sensor (optional)",
@@ -95,24 +97,14 @@ const text = computed(() =>
           "Bitte einen Attributnamen mit höchstens 128 Zeichen eingeben oder das Feld für die automatische Erkennung leer lassen.",
         invalidPvFactor:
           "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
-        charging: "2. Wie möchtest du laden?",
-        touCharging: "2. Wie viel möchtest du laden?",
-        activate: "3. Automatik einschalten",
-        activationHint:
-          "Nach dem Einschalten darf der Speicher zu deinen günstigsten Tarifzeiten aus dem Netz laden. Ladeziel, aktive Monate und Schutzregeln gelten weiterhin.",
-        dynamicActivationHint:
-          "Nach dem Einschalten lädt der Speicher nach deiner gewählten Ladeweise. Preisgrenze oder günstigste Stunden, Ladegrenze und Schutzregeln bestimmen, wann und wie viel geladen wird.",
-        activationOff:
-          "Ausgeschaltet: Diese Automatik lädt derzeit keinen Netzstrom.",
-        activationOn:
-          "Eingeschaltet: Der Speicher lädt, sobald die eingestellten Bedingungen erfüllt sind.",
-        editFirst:
-          "Beende zuerst die Bearbeitung oben, um die Automatik zu schalten.",
-        chart: "Preisverlauf anzeigen",
-        touIntro:
-          "Trage die Preise aus deinem Stromvertrag ein und wähle dein Ladeziel. Schalte die Automatik anschließend in Schritt 3 ein.",
-        dynamicIntro:
-          "Wähle deinen Strompreis-Sensor und die gewünschte Ladeweise. Schalte die Automatik anschließend in Schritt 3 ein.",
+        charging: "Netzladung",
+        pvSummary: "PV-Prognose",
+        noPv: "Nicht eingerichtet",
+        gross: "Alle Preise brutto in ct/kWh.",
+        activationOff: "Keine automatische Ladung aus dem Netz.",
+        activationOn: "Lädt, sobald die Ladebedingungen erfüllt sind.",
+        editFirst: "Beende die Bearbeitung, um die Automatik zu schalten.",
+        chart: "Preisverlauf",
         plannedPv: "Im Ladeplan angerechnete PV-Energie",
         details: "Ladeplan & Prognose",
         priceHint:
@@ -150,8 +142,8 @@ const text = computed(() =>
         change: "Change tariff",
         apply: "Apply tariff",
         cancel: "Cancel",
-        save: "Save",
-        done: "Done",
+        save: "Apply",
+        done: "Apply",
         edit: "Edit",
         loading: "Loading …",
         saving: "Saving …",
@@ -163,16 +155,17 @@ const text = computed(() =>
         chooseHint:
           "Only the selected tariff is active. Saved settings are preserved when switching.",
         incomplete:
-          "This tariff is not configured yet. Automatic grid charging will be off after switching. Set up the prices in step 1 next.",
+          "This tariff is not configured yet. Automatic grid charging will be off after switching. Then set up “Prices & times”.",
         touHint: "Fixed prices at recurring times",
         dynamicHint: "Prices from an electricity price sensor",
         price: "Electricity price",
         current: "Current",
         today: "Today",
         tomorrow: "Tomorrow",
-        prices: "1. Where do your electricity prices come from?",
+        prices: "Prices & times",
         feed: "Feed-in remuneration",
         source: "Electricity price sensor (required)",
+        sourceSummary: "Price source",
         attribute: "Price attribute (optional)",
         unit: "Price source unit",
         pv: "PV forecast sensor (optional)",
@@ -204,23 +197,14 @@ const text = computed(() =>
         invalidAttribute:
           "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
         invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
-        charging: "2. How should the battery charge?",
-        touCharging: "2. How much should the battery charge?",
-        activate: "3. Turn on automatic charging",
-        activationHint:
-          "Once enabled, the battery may charge from the grid during your cheapest tariff periods. The charge target, active months and protection rules still apply.",
-        dynamicActivationHint:
-          "Once enabled, the battery follows your selected charging method. The price cap or cheapest hours, charge limit and protection rules determine when and how much it charges.",
-        activationOff:
-          "Switched off: This automation is not charging from the grid.",
-        activationOn:
-          "Switched on: The battery charges when the configured conditions are met.",
-        editFirst: "Finish editing above before switching automatic charging.",
-        chart: "Show price chart",
-        touIntro:
-          "Enter the prices from your electricity contract and choose a charge target. Then switch on automatic charging in step 3.",
-        dynamicIntro:
-          "Choose your electricity price sensor and charging method. Then switch on automatic charging in step 3.",
+        charging: "Grid charging",
+        pvSummary: "Solar forecast",
+        noPv: "Not configured",
+        gross: "All prices include tax and use ct/kWh.",
+        activationOff: "No automatic charging from the grid.",
+        activationOn: "Charges when the configured conditions are met.",
+        editFirst: "Finish editing before switching automatic charging.",
+        chart: "Price chart",
         plannedPv: "Solar energy accounted for in the charging plan",
         details: "Charging plan & forecast",
         priceHint:
@@ -332,6 +316,12 @@ const editRevision = ref("");
 const pricesEditor = ref<HTMLElement>();
 const priceButton = ref<HTMLButtonElement>();
 const chargingButton = ref<HTMLButtonElement>();
+const chargingSettings = ref<{
+  submit(): Promise<boolean>;
+  reset(): boolean;
+  pending: boolean;
+}>();
+const chargingSaving = ref(false);
 let disposed = false;
 let seriesRequest = 0;
 onBeforeUnmount(() => {
@@ -421,12 +411,29 @@ const additionalSettings = computed(() => {
     .filter(Boolean)
     .join(" · ");
 });
-const dynamicSummary = computed(() => {
+const dynamicSource = computed(() => {
   const source = profile.value?.profiles?.dynamic.price_sensor;
-  const name = source
+  return source
     ? (props.hass?.states[source]?.attributes.friendly_name ?? source)
     : text.value.unset;
-  return `${name} · ${text.value.feed} ${formatSavingsNumber(profile.value?.profiles?.dynamic.feed_in_price_ct_kwh, props.hass, 2) ?? "—"} ct/kWh`;
+});
+const dynamicFeed = computed(() =>
+  formatSavingsNumber(
+    profile.value?.profiles?.dynamic.feed_in_price_ct_kwh,
+    props.hass,
+    2,
+  ),
+);
+const pvForecast = computed(() => {
+  const source =
+    active.value === "dynamic"
+      ? profile.value?.profiles?.dynamic.pv_sensor
+      : profile.value?.profiles?.time_of_use.pv_sensor;
+  if (!source) return text.value.noPv;
+  const entity = dashboard?.entity("sensor", "charging_pv_forecast");
+  return entity?.state?.attributes.source_entity_id === source
+    ? entity.displayValue
+    : text.value.unavailable;
 });
 function showPriceError(field: PriceErrorField, message: string) {
   error.value = message;
@@ -731,6 +738,21 @@ function closeCharging() {
   chargingOpen.value = false;
   void nextTick(() => chargingButton.value?.focus());
 }
+function cancelCharging(): void {
+  if (chargingSaving.value || chargingSettings.value?.pending) return;
+  if (chargingSettings.value?.reset() !== false) closeCharging();
+}
+async function applyCharging(): Promise<void> {
+  if (chargingSaving.value || chargingSettings.value?.pending) return;
+  const editor = chargingSettings.value;
+  if (!editor) return;
+  chargingSaving.value = true;
+  try {
+    if (await editor.submit()) closeCharging();
+  } finally {
+    chargingSaving.value = false;
+  }
+}
 </script>
 <template>
   <div class="electricity-tariff-view">
@@ -775,7 +797,7 @@ function closeCharging() {
         </fieldset>
         <p>{{ text.chooseHint }}</p>
         <p v-if="incompleteSelection" role="status">{{ text.incomplete }}</p>
-        <div class="electricity-actions">
+        <EditorActions class="electricity-actions">
           <button type="submit" :disabled="pending || !connected || conflict">
             {{
               pendingOperation === "applying" ? text.applying : text.apply
@@ -790,7 +812,7 @@ function closeCharging() {
           >
             {{ text.cancel }}
           </button>
-        </div>
+        </EditorActions>
       </form>
       <p
         v-if="pendingOperation"
@@ -818,376 +840,476 @@ function closeCharging() {
       <p v-if="changed" role="status">{{ text.saved }}</p>
       <p v-if="externalTariffChange" role="status">{{ text.tariffChanged }}</p>
       <p v-if="!profile && !error" role="status">{{ text.loading }}</p>
-      <p v-if="known" class="electricity-muted">
-        {{ active === "time_of_use" ? text.touIntro : text.dynamicIntro }}
-      </p>
     </section>
-    <TariffPlan
-      v-if="active === 'time_of_use'"
-      :hass="hass"
-      compact
-      @editing="touEditing = $event"
-      @saved="loadSeries"
-    />
-    <section
-      v-else-if="active === 'dynamic'"
-      class="electricity-card electricity-prices"
-      :aria-busy="
-        pendingOperation === 'loading' || pendingOperation === 'saving'
-      "
-    >
-      <header>
-        <div>
-          <h2>{{ text.prices }}</h2>
-        </div>
-        <button
-          v-if="!priceEditing"
-          ref="priceButton"
-          type="button"
-          :disabled="pending || !canConfigure || changing"
-          :aria-expanded="priceEditing"
-          @click="openPrices"
-        >
-          {{ pendingOperation === "loading" ? text.loading : text.edit }}
-        </button>
-      </header>
-      <p class="electricity-muted electricity-price-summary">
-        {{ dynamicSummary }}
-      </p>
-      <form
-        v-if="priceEditing"
-        ref="pricesEditor"
-        class="electricity-price-editor"
-        :aria-busy="pendingOperation === 'saving'"
-        novalidate
-        @submit.prevent="savePrices"
+    <div v-if="known" class="electricity-columns">
+      <section
+        class="electricity-card electricity-price-card"
+        :aria-label="text.prices"
       >
-        <p
-          v-if="error && priceErrorField"
-          :id="priceErrorId"
-          role="alert"
-          class="electricity-error"
+        <TariffPlan
+          v-if="active === 'time_of_use'"
+          :hass="hass"
+          compact
+          @editing="touEditing = $event"
+          @saved="loadSeries"
         >
-          {{ error }}
-        </p>
-        <fieldset :disabled="pending || !connected">
-          <p class="electricity-muted">{{ text.priceHint }}</p>
-          <div class="electricity-fields">
-            <SensorPicker
-              v-model="draft.price_sensor"
-              :hass="hass"
-              :label="text.source"
-              name="dynamic_price_sensor"
-              :invalid="priceErrorField === 'price_sensor'"
-              :described-by="
-                priceErrorField === 'price_sensor' ? priceErrorId : undefined
-              "
-            />
-            <label
-              >{{ text.feed }} (ct/kWh)<input
-                v-model="feed"
-                type="text"
-                inputmode="decimal"
-                name="dynamic_feed"
-                autocomplete="off"
-                required
-                :aria-invalid="priceErrorField === 'feed' || undefined"
-                :aria-describedby="
-                  priceErrorField === 'feed' ? priceErrorId : undefined
-                "
-            /></label>
-          </div>
-          <p class="electricity-muted">{{ text.sourceHint }}</p>
-          <p class="electricity-muted">{{ text.feedHint }}</p>
-          <div class="electricity-fields">
-            <SensorPicker
-              v-model="draft.pv_sensor"
-              :hass="hass"
-              :label="text.pv"
-              name="dynamic_pv_sensor"
-              :invalid="priceErrorField === 'pv_sensor'"
-              :described-by="
-                priceErrorField === 'pv_sensor' ? priceErrorId : undefined
-              "
-            />
-          </div>
-          <p class="electricity-muted">{{ text.pvHint }}</p>
-          <p
-            v-if="additionalSettings"
-            class="electricity-muted electricity-additional-settings"
+          <template #current-price
+            ><div class="electricity-current">
+              <span class="electricity-muted"
+                >{{ text.price }} · {{ text.current }}</span
+              >
+              <p class="electricity-current-price">
+                {{ currentPrice ?? text.unavailable
+                }}<span v-if="currentPrice !== null"> ct/kWh</span>
+              </p>
+            </div></template
           >
-            {{ text.customSettings }}: {{ additionalSettings }}
-          </p>
-          <details class="electricity-price-advanced">
-            <summary>{{ text.advanced }}</summary>
-            <h3>{{ text.sourceSettings }}</h3>
-            <div class="electricity-fields">
-              <label
-                >{{ text.attribute
-                }}<input
-                  v-model="draft.price_attribute"
-                  name="dynamic_price_attribute"
-                  type="text"
-                  autocomplete="off"
-                  :aria-invalid="
-                    priceErrorField === 'price_attribute' || undefined
-                  "
-                  :aria-describedby="
-                    priceErrorField === 'price_attribute'
+        </TariffPlan>
+        <section
+          v-else-if="active === 'dynamic'"
+          class="electricity-card electricity-prices"
+          :aria-busy="
+            pendingOperation === 'loading' || pendingOperation === 'saving'
+          "
+        >
+          <header>
+            <div>
+              <h2>{{ text.prices }}</h2>
+            </div>
+            <EditorActions>
+              <button
+                ref="priceButton"
+                type="button"
+                :disabled="
+                  pending ||
+                  !canConfigure ||
+                  changing ||
+                  (priceEditing && (!connected || conflict))
+                "
+                :aria-expanded="priceEditing"
+                @click="priceEditing ? savePrices() : openPrices()"
+              >
+                {{
+                  pendingOperation === "loading"
+                    ? text.loading
+                    : pendingOperation === "saving"
+                      ? text.saving
+                      : priceEditing
+                        ? text.save
+                        : text.edit
+                }}
+              </button>
+              <button
+                v-if="priceEditing"
+                type="button"
+                :disabled="pending"
+                @click="closePrices"
+              >
+                {{ text.cancel }}
+              </button>
+            </EditorActions>
+          </header>
+          <div class="electricity-current">
+            <span class="electricity-muted"
+              >{{ text.price }} · {{ text.current }}</span
+            >
+            <p class="electricity-current-price">
+              {{ currentPrice ?? text.unavailable
+              }}<span v-if="currentPrice !== null"> ct/kWh</span>
+            </p>
+          </div>
+          <dl class="electricity-price-summary electricity-summary-rows">
+            <div>
+              <dt>{{ text.sourceSummary }}</dt>
+              <dd>{{ dynamicSource }}</dd>
+            </div>
+            <div>
+              <dt>{{ text.feed }}</dt>
+              <dd>
+                {{ dynamicFeed ?? text.unavailable
+                }}<template v-if="dynamicFeed !== null"> ct/kWh</template>
+              </dd>
+            </div>
+          </dl>
+          <form
+            v-if="priceEditing"
+            ref="pricesEditor"
+            class="electricity-price-editor"
+            :aria-busy="pendingOperation === 'saving'"
+            novalidate
+            @submit.prevent="savePrices"
+          >
+            <p
+              v-if="error && priceErrorField"
+              :id="priceErrorId"
+              role="alert"
+              class="electricity-error"
+            >
+              {{ error }}
+            </p>
+            <fieldset :disabled="pending || !connected">
+              <p class="electricity-muted">{{ text.priceHint }}</p>
+              <div class="electricity-fields">
+                <SensorPicker
+                  v-model="draft.price_sensor"
+                  :hass="hass"
+                  :label="text.source"
+                  name="dynamic_price_sensor"
+                  :invalid="priceErrorField === 'price_sensor'"
+                  :described-by="
+                    priceErrorField === 'price_sensor'
                       ? priceErrorId
                       : undefined
                   "
-              /></label>
-              <label
-                >{{ text.unit
-                }}<select
-                  v-model="draft.price_unit"
-                  name="dynamic_price_unit"
-                  :aria-invalid="priceErrorField === 'price_unit' || undefined"
-                  :aria-describedby="
-                    priceErrorField === 'price_unit' ? priceErrorId : undefined
+                />
+                <label
+                  >{{ text.feed }} (ct/kWh)<input
+                    v-model="feed"
+                    type="text"
+                    inputmode="decimal"
+                    name="dynamic_feed"
+                    autocomplete="off"
+                    required
+                    :aria-invalid="priceErrorField === 'feed' || undefined"
+                    :aria-describedby="
+                      priceErrorField === 'feed' ? priceErrorId : undefined
+                    "
+                /></label>
+              </div>
+              <p class="electricity-muted">{{ text.sourceHint }}</p>
+              <p class="electricity-muted">{{ text.feedHint }}</p>
+              <div class="electricity-fields">
+                <SensorPicker
+                  v-model="draft.pv_sensor"
+                  :hass="hass"
+                  :label="text.pv"
+                  name="dynamic_pv_sensor"
+                  :invalid="priceErrorField === 'pv_sensor'"
+                  :described-by="
+                    priceErrorField === 'pv_sensor' ? priceErrorId : undefined
                   "
-                >
-                  <option
-                    v-for="(label, value) in text.units"
-                    :key="value"
-                    :value="value"
-                  >
-                    {{ label }}
-                  </option>
-                </select></label
+                />
+              </div>
+              <p class="electricity-muted">{{ text.pvHint }}</p>
+              <p
+                v-if="additionalSettings"
+                class="electricity-muted electricity-additional-settings"
               >
-            </div>
-            <p class="electricity-muted">{{ text.attributeHint }}</p>
-            <p class="electricity-muted">{{ text.unitHint }}</p>
-            <div class="electricity-fields">
-              <label
-                >{{ text.pvFactor
-                }}<input
-                  v-model="pvFactor"
-                  name="dynamic_pv_factor"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
-                  :aria-invalid="priceErrorField === 'pv_factor' || undefined"
-                  :aria-describedby="
-                    priceErrorField === 'pv_factor' ? priceErrorId : undefined
-                  "
-              /></label>
-            </div>
-            <p class="electricity-muted">{{ text.pvFactorHint }}</p>
-          </details>
-        </fieldset>
-        <div class="electricity-actions">
-          <button type="submit" :disabled="pending || !connected || conflict">
-            {{
-              pendingOperation === "saving" ? text.saving : text.save
-            }}</button
-          ><button type="button" :disabled="pending" @click="closePrices">
-            {{ text.cancel }}
-          </button>
-        </div>
-      </form>
-    </section>
-    <section v-if="known" class="electricity-card electricity-charging">
-      <header>
-        <div>
-          <h2>
-            {{ active === "time_of_use" ? text.touCharging : text.charging }}
-          </h2>
-        </div>
-        <button
-          v-if="!chargingOpen"
-          ref="chargingButton"
-          type="button"
-          :disabled="changing"
-          :aria-expanded="chargingOpen"
-          @click="chargingOpen = true"
-        >
-          {{ text.edit }}
-        </button>
-      </header>
-      <DynamicChargingSettings
-        v-if="active === 'dynamic'"
-        :editing="chargingOpen"
-      />
-      <TimeOfUseChargingSettings
-        v-if="active === 'time_of_use'"
-        :editing="chargingOpen"
-        :hass="hass"
-      />
-      <div v-if="!chargingOpen" class="electricity-charging-feedback">
-        <template
-          v-for="entity in chargingFeedback"
-          :key="entity?.metadata.entity_id"
-        >
-          <p v-if="entity?.error" class="electricity-error" role="alert">
-            {{ entity.name }}: {{ entity.error }}
-          </p>
-          <p v-else-if="entity?.pending" role="status" aria-live="polite">
-            {{ entity.name }}: {{ text.entityPending }}
-          </p>
-        </template>
-      </div>
-      <div v-if="chargingOpen" class="electricity-charging-editor">
-        <div class="electricity-actions">
-          <button type="button" @click="closeCharging">{{ text.done }}</button>
-        </div>
-      </div>
-    </section>
-    <section v-if="known" class="electricity-card electricity-activation">
-      <h2>{{ text.activate }}</h2>
-      <p>
-        {{
-          active === "time_of_use"
-            ? text.activationHint
-            : text.dynamicActivationHint
-        }}
-      </p>
-      <label class="electricity-master" :aria-busy="togglePending !== null"
-        ><input
-          type="checkbox"
-          role="switch"
-          :checked="automatic === true"
-          :aria-describedby="
-            error && errorOwner === 'activation'
-              ? 'electricity-master-status electricity-activation-error'
-              : 'electricity-master-status'
-          "
-          :disabled="
-            !canConfigure ||
-            pending ||
-            automatic === null ||
-            changing ||
-            editorOpen
-          "
-          @change="toggle"
-        />{{ text.automatic }}</label
-      >
-      <p
-        id="electricity-master-status"
-        class="electricity-master-status"
-        role="status"
-        aria-live="polite"
-      >
-        {{
-          togglePending === null
-            ? ""
-            : togglePending
-              ? text.turningOn
-              : text.turningOff
-        }}
-      </p>
-
-      <p
-        v-if="error && errorOwner === 'activation'"
-        id="electricity-activation-error"
-        class="electricity-error"
-        role="alert"
-      >
-        {{ error }}
-      </p>
-      <button
-        v-if="conflict && errorOwner === 'activation'"
-        type="button"
-        :disabled="pending || !connected"
-        @click="reload"
-      >
-        {{ text.reload }}
-      </button>
-      <p v-if="!connected" class="electricity-muted">{{ text.disconnected }}</p>
-      <p v-else-if="!canConfigure" class="electricity-muted">
-        {{ text.readonly }}
-      </p>
-      <p v-else-if="editorOpen || changing" class="electricity-muted">
-        {{ text.editFirst }}
-      </p>
-      <p v-else>
-        {{
-          automatic === null
-            ? text.unavailable
-            : automatic
-              ? text.activationOn
-              : text.activationOff
-        }}
-      </p>
-    </section>
-    <section v-if="known" class="electricity-card electricity-price-card">
-      <header>
-        <div>
-          <h2>{{ text.price }}</h2>
-          <p class="electricity-current-price">
-            {{ currentPrice ?? text.unavailable
-            }}<span v-if="currentPrice !== null"> ct/kWh</span>
-          </p>
-          <p class="electricity-muted">{{ text.current }} · {{ activeName }}</p>
-        </div>
-        <EntityValue
-          domain="sensor"
-          :entity-key="
-            active === 'dynamic'
-              ? 'price_charge_status_text'
-              : 'timed_charge_discharge_status'
-          "
-        />
-      </header>
-      <details class="electricity-price-details">
-        <summary>{{ text.chart }}</summary>
-        <div
-          v-if="active === 'dynamic'"
-          class="electricity-days"
-          :aria-label="text.price"
-        >
-          <button
-            v-for="value in ['today', 'tomorrow'] as const"
-            :key="value"
-            type="button"
-            :aria-pressed="day === value"
-            @click="day = value"
+                {{ text.customSettings }}: {{ additionalSettings }}
+              </p>
+              <details class="electricity-price-advanced">
+                <summary>{{ text.advanced }}</summary>
+                <h3>{{ text.sourceSettings }}</h3>
+                <div class="electricity-fields">
+                  <label
+                    >{{ text.attribute
+                    }}<input
+                      v-model="draft.price_attribute"
+                      name="dynamic_price_attribute"
+                      type="text"
+                      autocomplete="off"
+                      :aria-invalid="
+                        priceErrorField === 'price_attribute' || undefined
+                      "
+                      :aria-describedby="
+                        priceErrorField === 'price_attribute'
+                          ? priceErrorId
+                          : undefined
+                      "
+                  /></label>
+                  <label
+                    >{{ text.unit
+                    }}<select
+                      v-model="draft.price_unit"
+                      name="dynamic_price_unit"
+                      :aria-invalid="
+                        priceErrorField === 'price_unit' || undefined
+                      "
+                      :aria-describedby="
+                        priceErrorField === 'price_unit'
+                          ? priceErrorId
+                          : undefined
+                      "
+                    >
+                      <option
+                        v-for="(label, value) in text.units"
+                        :key="value"
+                        :value="value"
+                      >
+                        {{ label }}
+                      </option>
+                    </select></label
+                  >
+                </div>
+                <p class="electricity-muted">{{ text.attributeHint }}</p>
+                <p class="electricity-muted">{{ text.unitHint }}</p>
+                <div class="electricity-fields">
+                  <label
+                    >{{ text.pvFactor
+                    }}<input
+                      v-model="pvFactor"
+                      name="dynamic_pv_factor"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      :aria-invalid="
+                        priceErrorField === 'pv_factor' || undefined
+                      "
+                      :aria-describedby="
+                        priceErrorField === 'pv_factor'
+                          ? priceErrorId
+                          : undefined
+                      "
+                  /></label>
+                </div>
+                <p class="electricity-muted">{{ text.pvFactorHint }}</p>
+              </details>
+            </fieldset>
+            <EditorActions class="electricity-actions">
+              <button
+                type="submit"
+                :disabled="pending || !connected || conflict"
+              >
+                {{
+                  pendingOperation === "saving" ? text.saving : text.save
+                }}</button
+              ><button type="button" :disabled="pending" @click="closePrices">
+                {{ text.cancel }}
+              </button>
+            </EditorActions>
+          </form>
+        </section>
+        <details class="electricity-price-details">
+          <summary>{{ text.chart }}</summary>
+          <div
+            v-if="active === 'dynamic'"
+            class="electricity-days"
+            :aria-label="text.price"
           >
-            {{ value === "today" ? text.today : text.tomorrow }}
+            <button
+              v-for="value in ['today', 'tomorrow'] as const"
+              :key="value"
+              type="button"
+              :aria-pressed="day === value"
+              @click="day = value"
+            >
+              {{ value === "today" ? text.today : text.tomorrow }}
+            </button>
+          </div>
+          <p class="electricity-day">
+            {{ day === "today" ? text.today : text.tomorrow
+            }}<span v-if="date"> · {{ date }}</span>
+          </p>
+          <TariffPriceChart
+            :series="series"
+            :hass="hass"
+            :loading="seriesLoading"
+          />
+        </details>
+      </section>
+      <section v-if="known" class="electricity-card electricity-charging">
+        <header>
+          <div>
+            <h2>
+              {{ text.charging }}
+            </h2>
+          </div>
+          <EditorActions>
+            <button
+              ref="chargingButton"
+              type="button"
+              :disabled="
+                changing || chargingSaving || chargingSettings?.pending
+              "
+              :aria-busy="chargingSaving"
+              :aria-expanded="chargingOpen"
+              @click="chargingOpen ? applyCharging() : (chargingOpen = true)"
+            >
+              {{
+                chargingSaving
+                  ? text.saving
+                  : chargingOpen
+                    ? text.done
+                    : text.edit
+              }}
+            </button>
+            <button
+              v-if="chargingOpen"
+              type="button"
+              :disabled="chargingSaving || chargingSettings?.pending"
+              @click="cancelCharging"
+            >
+              {{ text.cancel }}
+            </button>
+          </EditorActions>
+        </header>
+        <section v-if="known" class="electricity-activation">
+          <label class="electricity-master" :aria-busy="togglePending !== null"
+            ><input
+              type="checkbox"
+              role="switch"
+              :checked="automatic === true"
+              :aria-describedby="
+                error && errorOwner === 'activation'
+                  ? 'electricity-master-status electricity-activation-error'
+                  : 'electricity-master-status'
+              "
+              :disabled="
+                !canConfigure ||
+                pending ||
+                automatic === null ||
+                changing ||
+                editorOpen
+              "
+              @change="toggle"
+            />{{ text.automatic }}</label
+          >
+          <p
+            id="electricity-master-status"
+            class="electricity-master-status"
+            role="status"
+            aria-live="polite"
+          >
+            {{
+              togglePending === null
+                ? ""
+                : togglePending
+                  ? text.turningOn
+                  : text.turningOff
+            }}
+          </p>
+
+          <p
+            v-if="error && errorOwner === 'activation'"
+            id="electricity-activation-error"
+            class="electricity-error"
+            role="alert"
+          >
+            {{ error }}
+          </p>
+          <button
+            v-if="conflict && errorOwner === 'activation'"
+            type="button"
+            :disabled="pending || !connected"
+            @click="reload"
+          >
+            {{ text.reload }}
           </button>
-        </div>
-        <p class="electricity-day">
-          {{ day === "today" ? text.today : text.tomorrow
-          }}<span v-if="date"> · {{ date }}</span>
-        </p>
-        <TariffPriceChart
-          :series="series"
-          :hass="hass"
-          :loading="seriesLoading"
+          <p v-if="!connected" class="electricity-muted">
+            {{ text.disconnected }}
+          </p>
+          <p v-else-if="!canConfigure" class="electricity-muted">
+            {{ text.readonly }}
+          </p>
+          <p v-else-if="editorOpen || changing" class="electricity-muted">
+            {{ text.editFirst }}
+          </p>
+          <p v-else>
+            {{
+              automatic === null
+                ? text.unavailable
+                : automatic
+                  ? text.activationOn
+                  : text.activationOff
+            }}
+          </p>
+        </section>
+        <DynamicChargingSettings
+          v-if="active === 'dynamic'"
+          ref="chargingSettings"
+          :editing="chargingOpen"
+          @apply="applyCharging"
         />
-      </details>
-    </section>
-    <details v-if="known" class="electricity-card electricity-plan">
-      <summary>{{ text.details }}</summary>
-      <ChargePlan v-if="active === 'time_of_use'" :hass="hass" /><template
-        v-else
-        ><EntityValue
-          domain="sensor"
-          entity-key="price_charge_active_text"
-        /><EntityValue
-          domain="sensor"
-          entity-key="price_charge_status_text"
-        /><EntityValue domain="sensor" entity-key="price_charge_next_start" />
-        <p v-if="plannedPv !== null" class="electricity-planned-pv">
-          {{ text.plannedPv }}: <strong>{{ plannedPv }} kWh</strong>
-        </p></template
-      >
-    </details>
+        <TimeOfUseChargingSettings
+          v-if="active === 'time_of_use'"
+          ref="chargingSettings"
+          :editing="chargingOpen"
+          :hass="hass"
+          @apply="applyCharging"
+        />
+        <div v-if="!chargingOpen" class="electricity-charging-feedback">
+          <template
+            v-for="entity in chargingFeedback"
+            :key="entity?.metadata.entity_id"
+          >
+            <p v-if="entity?.error" class="electricity-error" role="alert">
+              {{ entity.name }}: {{ entity.error }}
+            </p>
+            <p v-else-if="entity?.pending" role="status" aria-live="polite">
+              {{ entity.name }}: {{ text.entityPending }}
+            </p>
+          </template>
+        </div>
+        <div v-if="chargingOpen" class="electricity-charging-editor">
+          <EditorActions
+            class="electricity-actions"
+            :aria-busy="chargingSaving"
+          >
+            <button
+              type="button"
+              :disabled="
+                changing || chargingSaving || chargingSettings?.pending
+              "
+              @click="applyCharging"
+            >
+              {{ chargingSaving ? text.saving : text.done }}
+            </button>
+            <button
+              type="button"
+              :disabled="chargingSaving || chargingSettings?.pending"
+              @click="cancelCharging"
+            >
+              {{ text.cancel }}
+            </button>
+          </EditorActions>
+          <p v-if="chargingSaving" role="status" aria-live="polite">
+            {{ text.entityPending }}
+          </p>
+        </div>
+        <div v-if="active === 'dynamic'" class="electricity-charge-status">
+          <EntityValue domain="sensor" entity-key="price_charge_status_text" />
+        </div>
+        <details v-if="known" class="electricity-plan">
+          <summary>{{ text.details }}</summary>
+          <dl class="electricity-summary-rows electricity-pv-summary">
+            <div>
+              <dt>{{ text.pvSummary }}</dt>
+              <dd>{{ pvForecast }}</dd>
+            </div>
+          </dl>
+          <ChargePlan v-if="active === 'time_of_use'" :hass="hass" /><template
+            v-else
+            ><EntityValue
+              domain="sensor"
+              entity-key="price_charge_active_text"
+            /><EntityValue
+              domain="sensor"
+              entity-key="price_charge_status_text"
+            /><EntityValue
+              domain="sensor"
+              entity-key="price_charge_next_start"
+            />
+            <p v-if="plannedPv !== null" class="electricity-planned-pv">
+              {{ text.plannedPv }}: <strong>{{ plannedPv }} kWh</strong>
+            </p></template
+          >
+        </details>
+      </section>
+    </div>
+    <p v-if="known" class="electricity-footnote">{{ text.gross }}</p>
   </div>
 </template>
 <style>
 .electricity-tariff-view {
   display: grid;
   gap: 16px;
-  margin-top: 20px;
+  margin-top: 12px;
   min-width: 0;
 }
 .electricity-card {
   min-width: 0;
-  padding: 20px;
+  padding: 16px 18px;
   border: 1px solid var(--divider-color, #ddd);
   border-radius: var(--ha-card-border-radius, 12px);
   background: var(--card-background-color, #fff);
@@ -1223,13 +1345,14 @@ function closeCharging() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
 }
-.electricity-card header > div {
+.electricity-card header > div:not(.editor-actions) {
   min-width: 0;
   flex: 1;
 }
-.electricity-card header > button {
+.electricity-card header > .editor-actions {
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1263,7 +1386,7 @@ function closeCharging() {
   font-weight: 500;
 }
 .electricity-activation .electricity-master {
-  margin-top: 12px;
+  margin-top: 0;
   font-weight: 600;
 }
 .electricity-price-details {
@@ -1315,14 +1438,7 @@ function closeCharging() {
   font-size: 14px;
 }
 .electricity-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   margin-top: 16px;
-}
-.electricity-actions button[type="submit"] {
-  background: var(--primary-color, #03a9f4);
-  color: var(--text-primary-color, #fff);
 }
 .electricity-current-price {
   font-size: 32px;
@@ -1399,7 +1515,7 @@ function closeCharging() {
 }
 .electricity-plan > summary,
 .electricity-price-details > summary {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   min-height: 44px;
@@ -1437,21 +1553,138 @@ function closeCharging() {
     font-size: 28px;
   }
 }
-@media (max-width: 400px) {
-  .electricity-prices > header,
-  .electricity-charging > header,
-  .electricity-tariff-view .tariff-plan__header {
-    flex-wrap: wrap;
+
+.electricity-columns {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+.electricity-card.electricity-tariff-bar {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.electricity-tariff-bar__row {
+  justify-content: flex-end;
+}
+.electricity-active > strong {
+  color: var(--primary-text-color, #212121);
+}
+.electricity-price-card {
+  container: sax-tariff-prices / inline-size;
+}
+.electricity-card.electricity-prices {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+.electricity-prices > header,
+.electricity-charging > header {
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--divider-color, #ddd);
+}
+.electricity-card .electricity-current-price {
+  margin: 3px 0 0;
+}
+.electricity-current {
+  min-width: 0;
+}
+.electricity-prices > .electricity-current {
+  margin: 14px 0;
+}
+.electricity-activation {
+  padding: 8px 12px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--secondary-background-color, #f5f5f5);
+}
+.electricity-activation > p {
+  margin-top: 2px;
+  color: var(--secondary-text-color, #666);
+}
+.electricity-summary-rows {
+  margin: 0;
+}
+.electricity-summary-rows > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-height: 41px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--divider-color, #ddd);
+}
+.electricity-summary-rows dt {
+  color: var(--secondary-text-color, #666);
+}
+.electricity-summary-rows dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.electricity-targets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.electricity-target {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--secondary-background-color, #f5f5f5);
+  min-width: 0;
+}
+.electricity-target > span {
+  font-size: 14px;
+  color: var(--secondary-text-color, #666);
+}
+.electricity-target > strong {
+  font-size: 24px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.electricity-charge-status .entity-value {
+  padding: 12px 0;
+}
+.electricity-plan,
+.electricity-price-details,
+.tou-charging-rules {
+  margin-top: 10px;
+  border-top: 1px solid var(--divider-color, #ddd);
+  padding-top: 0;
+}
+.tou-charging-rules > summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+}
+.electricity-footnote {
+  margin: 0;
+  color: var(--secondary-text-color, #666);
+  font-size: 13px;
+}
+@container sax-content (min-width: 860px) {
+  .electricity-columns {
+    grid-template-columns: minmax(0, 1.14fr) minmax(0, 1fr);
   }
-  .electricity-prices > header > div,
-  .electricity-charging > header > div,
-  .electricity-tariff-view .tariff-plan__header > h2 {
-    flex: 1 1 100%;
+  .electricity-tariff-view {
+    margin-top: -36px;
   }
-  .electricity-prices > header > button,
-  .electricity-charging > header > button,
-  .electricity-tariff-view .tariff-plan__header > button {
-    margin-left: auto;
+  .electricity-tariff-bar__row {
+    padding-left: 260px;
+    min-height: 44px;
+  }
+}
+@container sax-tariff-prices (max-width: 560px) {
+  .electricity-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
   }
 }
 </style>

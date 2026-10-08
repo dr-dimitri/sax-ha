@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "./EditorActions.vue";
 import {
   computed,
   inject,
@@ -41,7 +42,7 @@ const text = computed(() =>
           "Ohne Quelle greift die Ladepause bei einer Mindest-PV-Prognose über 0 kWh nicht.",
         readonly: "Nur Administratoren können die Quelle ändern.",
         edit: "Bearbeiten",
-        save: "Speichern",
+        save: "Übernehmen",
         cancel: "Abbrechen",
         loading: "Auswahl wird geladen …",
         saving: "Auswahl wird gespeichert …",
@@ -69,7 +70,7 @@ const text = computed(() =>
           "Without a source, the charging pause does not apply when the minimum PV forecast is above 0 kWh.",
         readonly: "Only administrators can change the source.",
         edit: "Edit",
-        save: "Save",
+        save: "Apply",
         cancel: "Cancel",
         loading: "Loading selection …",
         saving: "Saving selection …",
@@ -302,7 +303,7 @@ watch(
         "
         :described-by="`${id}-hint${error ? ` ${id}-error` : ''}`"
       />
-      <div class="grid-serving-source__actions">
+      <EditorActions>
         <button
           type="submit"
           :disabled="
@@ -317,7 +318,7 @@ watch(
         <button type="button" :disabled="Boolean(pending)" @click="cancel">
           {{ text.cancel }}
         </button>
-      </div>
+      </EditorActions>
     </form>
   </section>
 </template>
@@ -362,14 +363,9 @@ watch(
   display: grid;
   gap: 12px;
 }
-.grid-serving-source__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .grid-serving-source button {
   min-height: 44px;
-  padding: 8px 16px;
+  padding: 8px 10px;
   border: 1px solid var(--divider-color, #ccc);
   border-radius: 6px;
   color: var(--primary-color, #0077a3);

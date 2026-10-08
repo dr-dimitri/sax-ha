@@ -466,3 +466,64 @@ async def test_source_change_during_persistence_cannot_rebind_old_decision(
     assert not coordinator._timed_charge_armed
     assert coordinator._active_charge_deadline() is None
     coordinator.async_stop_sun_charge.assert_awaited()
+
+
+@pytest.mark.parametrize("tariff", [False, True])
+async def test_zero_start_threshold_starts_at_zero_and_continues_to_target(
+    coordinator: SaxPowerCoordinator, tariff: bool
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: 0 % ist keine Abschaltung der Netzladung."""
+    if not tariff:
+        coordinator.options = {}
+        coordinator._timed_charge_start = dt_time(1)
+        coordinator._timed_charge_end = dt_time(6)
+    await coordinator.async_set_timed_charge_min_soc(0, defer_device_update=True)
+    await coordinator._month_control_task
+    await _evaluate(coordinator, soc=1)
+    assert not coordinator._timed_charge_active
+    await _evaluate(coordinator, soc=0)
+    assert coordinator._timed_charge_active
+    assert coordinator._timed_charge_armed
+    coordinator.async_start_sun_charge.assert_awaited_with(
+        MIN_SETPOINT_POWER, data=coordinator.data
+    )
+    await _evaluate(coordinator, soc=1)
+    assert coordinator._timed_charge_active
+    await _evaluate(coordinator, soc=59)
+    assert coordinator._timed_charge_active
+    await _evaluate(coordinator, soc=60)
+    assert not coordinator._timed_charge_active
+    assert not coordinator._timed_charge_armed
+    await _evaluate(coordinator, soc=1)
+    assert not coordinator._timed_charge_active
+    await _evaluate(coordinator, soc=0)
+    assert coordinator._timed_charge_active
+    await _evaluate(coordinator, now=NOW.replace(hour=7), soc=0)
+    assert not coordinator._timed_charge_active
+    assert not coordinator._timed_charge_armed
+
+
+@pytest.mark.parametrize("blocked", ["off", "month", "window", "target", "global"])
+async def test_zero_threshold_preserves_other_start_conditions(
+    coordinator: SaxPowerCoordinator, blocked: str
+) -> None:
+    """REQ-TIMED-SOC-CHARGE: 0 % umgeht weder Freigaben noch SOC-Obergrenzen."""
+    coordinator._timed_charge_min_soc = 0
+    now = NOW
+    if blocked == "off":
+        coordinator._timed_charge_enabled = False
+    elif blocked == "month":
+        coordinator._timed_charge_months = set()
+    elif blocked == "window":
+        now = NOW.replace(hour=7)
+    elif blocked == "target":
+        coordinator._timed_charge_max_soc = 0
+    else:
+        coordinator._max_soc = 0
+    await _evaluate(coordinator, now=now, soc=0)
+    assert not coordinator._timed_charge_active
+    assert not coordinator._timed_charge_armed
+    assert all(
+        call.args != (MIN_SETPOINT_POWER,)
+        for call in coordinator.async_start_sun_charge.await_args_list
+    )

@@ -285,7 +285,7 @@ describe("consumption-based charging plan", () => {
     expect(root.textContent).toContain("Niedertarif um 14.09.2026, 00:00 Uhr");
     expect(root.textContent).toContain("bis 14.09.2026, 00:40 Uhr");
     expect(root.textContent).toContain("PV-Start um 14.09.2026, 07:00 Uhr");
-    expect(root.textContent).toContain("Geplantes Ladeziel: 42,5 %");
+    expect(root.textContent).toContain("Geplantes Netzladeziel: 42,5 %");
     expect(root.querySelectorAll("button, input, select, form")).toHaveLength(
       0,
     );
@@ -371,7 +371,7 @@ describe("consumption-based charging plan", () => {
     const { root, update } = await mount();
     await update("off", {});
     expect(root.textContent).toContain("Nur Bedarf bis Solarstrom");
-    expect(root.textContent).toContain("Schritt 3 die automatische Netzladung");
+    expect(root.textContent).toContain("die Automatik einschalten");
     await update("waiting_for_data", { reason: "private_new_reason" });
     expect(root.textContent).toContain(
       "mindestens eine Minute Beobachtungszeit",
@@ -449,7 +449,7 @@ describe("consumption-based charging plan", () => {
     });
     expect(root.textContent).not.toContain("letzten");
     expect(root.textContent).not.toContain("NaN");
-    expect(root.textContent).not.toContain("Ladeziel");
+    expect(root.textContent).not.toContain("Netzladeziel");
     await update("not_needed", {});
     expect(root.textContent).toContain("derzeit nicht erforderlich");
     expect(root.textContent).not.toContain("PV-Start um");

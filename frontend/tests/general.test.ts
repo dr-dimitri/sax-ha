@@ -509,10 +509,10 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
   });
 
   it.each([
-    ["de", "on", "Speicher ausschalten?", "Ausschalten", "turn_off"],
-    ["de", "off", "Speicher einschalten?", "Einschalten", "turn_on"],
-    ["en", "on", "Turn off the battery?", "Turn off", "turn_off"],
-    ["en", "off", "Turn on the battery?", "Turn on", "turn_on"],
+    ["de", "on", "Speicher ausschalten?", "Übernehmen", "turn_off"],
+    ["de", "off", "Speicher einschalten?", "Übernehmen", "turn_on"],
+    ["en", "on", "Turn off the battery?", "Apply", "turn_off"],
+    ["en", "off", "Turn on the battery?", "Apply", "turn_on"],
   ] as const)(
     "confirms the %s storage action from %s exactly once and waits for HA state",
     async (language, initial, title, action, service) => {
@@ -620,7 +620,7 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
           keys: ["storage_switch"],
         });
       const dialog = await requestSwitch(root);
-      const staleConfirm = dialogButton(dialog, "Ausschalten");
+      const staleConfirm = dialogButton(dialog, "Übernehmen");
       if (change === "state") await update("storage_switch", "off");
       if (change === "unavailable")
         await update("storage_switch", "unavailable");

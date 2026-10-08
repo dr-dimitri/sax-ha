@@ -59,9 +59,15 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
-// REQ-VUE-ELECTRICITY-TARIFF: setup follows the user's decisions, and
+test("retired discharge status is absent", async ({ page }) => {
+  await expect(
+    page.locator("sax-power-vue-panel .electricity-charge-status"),
+  ).toHaveCount(0);
+});
+
+// REQ-VUE-ELECTRICITY-TARIFF: the overview groups prices and charging, and
 // inspecting prices or settings never implicitly enables grid charging.
-test("time-of-use setup presents three decisions before optional price details without mobile overflow", async ({
+test("time-of-use groups prices and grid charging into compact responsive cards", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -71,16 +77,8 @@ test("time-of-use setup presents three decisions before optional price details w
   );
   await expect(steps).toHaveText(
     english
-      ? [
-          "1. When is your electricity cheaper?",
-          "2. How much should the battery charge?",
-          "3. Turn on automatic charging",
-        ]
-      : [
-          "1. Wann ist dein Strom günstig?",
-          "2. Wie viel möchtest du laden?",
-          "3. Automatik einschalten",
-        ],
+      ? ["Prices & times", "Grid charging"]
+      : ["Preise & Zeiten", "Netzladung"],
   );
   const cheapestPeriod = panel
     .locator(".tariff-plan__periods li")
@@ -96,26 +94,74 @@ test("time-of-use setup presents three decisions before optional price details w
   const details = panel.locator(".electricity-price-details");
   await expect(details).not.toHaveAttribute("open", "");
   await expect(panel.locator(".electricity-price-card svg")).toBeHidden();
-  const priceCard = await panel
-    .locator(".electricity-price-card")
-    .boundingBox();
-  const activation = await panel
-    .locator(".electricity-activation")
-    .boundingBox();
-  expect(priceCard!.y).toBeGreaterThanOrEqual(
-    activation!.y + activation!.height,
+  await expect(
+    panel.locator(".electricity-price-card .tariff-plan"),
+  ).toHaveCount(1);
+  await expect(
+    panel.locator(".electricity-charging .electricity-activation"),
+  ).toHaveCount(1);
+  await expect(
+    panel.locator(".electricity-charging .electricity-plan"),
+  ).toHaveCount(1);
+  const socValues = panel.locator(
+    ".tou-charging-soc-row > .electricity-target",
+  );
+  await expect(socValues.locator("span")).toHaveText(
+    english
+      ? ["Start only below", "Grid charge target", "Max SOC"]
+      : ["Start nur unter", "Netzladeziel", "Max SOC"],
   );
   for (const width of testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100]) {
     await page.setViewportSize({ width, height: 1000 });
+    const pricesBox = (await panel
+      .locator(".electricity-price-card")
+      .boundingBox())!;
+    const chargingBox = (await panel
+      .locator(".electricity-charging")
+      .boundingBox())!;
+    if (width >= 1100) {
+      expect(Math.abs(pricesBox.y - chargingBox.y)).toBeLessThan(2);
+      expect(chargingBox.x).toBeGreaterThanOrEqual(
+        pricesBox.x + pricesBox.width,
+      );
+      expect(Math.max(pricesBox.height, chargingBox.height)).toBeLessThan(760);
+    } else {
+      expect(chargingBox.y).toBeGreaterThanOrEqual(
+        pricesBox.y + pricesBox.height,
+      );
+    }
+    const socBounds = await socValues.evaluateAll((values) =>
+      values.map((value) => {
+        const box = value.getBoundingClientRect();
+        const label = value.querySelector("span")!.getBoundingClientRect();
+        const number = value.querySelector("strong")!.getBoundingClientRect();
+        return {
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          labelBottom: label.bottom,
+          numberTop: number.top,
+        };
+      }),
+    );
+    for (const value of socBounds)
+      expect(value.labelBottom).toBeLessThanOrEqual(value.numberTop);
+    for (let index = 1; index < socBounds.length; index++) {
+      expect(Math.abs(socBounds[index]!.y - socBounds[0]!.y)).toBeLessThan(2);
+      expect(
+        Math.abs(socBounds[index]!.numberTop - socBounds[0]!.numberTop),
+      ).toBeLessThan(2);
+      expect(socBounds[index]!.x).toBeGreaterThanOrEqual(
+        socBounds[index - 1]!.x + socBounds[index - 1]!.width,
+      );
+    }
     await expectControlsToFit(panel);
     await capture(page, testInfo, `overview-${width}`);
   }
   const showPrices = details.locator(":scope > summary");
-  await expect(showPrices).toHaveText(
-    english ? "Show price chart" : "Preisverlauf anzeigen",
-  );
+  await expect(showPrices).toHaveText(english ? "Price chart" : "Preisverlauf");
   await showPrices.focus();
   await page.keyboard.press("Enter");
   await expect(details).toHaveAttribute("open", "");
@@ -197,9 +243,9 @@ test("charging choices explain their effects and retain the confirmed method whi
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".tou-charging-settings");
   const summary = settings.locator(".tou-charging-summary");
-  const edit = charging.locator("header > button");
+  const edit = charging.locator("header .editor-actions > button:first-child");
   await expect(summary).toContainText(
-    english ? "Fixed charge target" : "Festes Ladeziel",
+    english ? "Fixed grid charge target" : "Festes Netzladeziel",
   );
   await expect(settings.locator(".tou-charging-threshold")).toContainText(
     "20 %",
@@ -213,36 +259,24 @@ test("charging choices explain their effects and retain the confirmed method whi
   const methods = settings.locator(".tou-charging-methods");
   const fixed = methods.locator('[data-method="fixed"]');
   const bridge = methods.locator('[data-method="bridge"]');
-  const advanced = settings.locator(".tou-charging-advanced");
   const target = settings.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   await expect(methods.locator("strong")).toHaveText(
     english
-      ? ["Fixed charge target", "Only what is needed until solar power"]
-      : ["Festes Ladeziel", "Nur Bedarf bis Solarstrom"],
+      ? ["Fixed grid charge target", "Only what is needed until solar power"]
+      : ["Festes Netzladeziel", "Nur Bedarf bis Solarstrom"],
   );
   await expect(fixed).toHaveAttribute("aria-pressed", "true");
   await expect(bridge).toHaveAttribute("aria-pressed", "false");
-  await expect(advanced).not.toHaveAttribute("open", "");
-  await expect(settings.locator("input:visible")).toHaveCount(1);
+  await expect(settings.locator("details")).toHaveCount(0);
+  await expect(settings.getByRole("spinbutton")).toHaveCount(3);
+  await expect(settings.getByRole("switch")).toHaveCount(12);
+  for (const input of await settings.locator("input").all())
+    await expect(input).toBeVisible();
+  await expect(methods.locator("span")).toHaveCount(0);
   await expect(target).toHaveValue("80");
-  await expect(settings).toContainText(
-    english
-      ? "solar power can charge it further"
-      : "Solarstrom kann ihn weiter füllen",
-  );
-  await expect(settings).toContainText(
-    english
-      ? "When cell calibration is due, charging up to 100% is allowed"
-      : "Bei fälliger Zellkalibrierung sind bis 100 % erlaubt",
-  );
-  await expect(settings).toContainText(
-    english
-      ? "Each change is applied individually"
-      : "Jede Änderung wird einzeln übernommen",
-  );
   for (const width of testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100]) {
@@ -269,12 +303,10 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(page.locator("#actions")).toHaveText(
     '1: switch.turn_on {"entity_id":"switch.demo_bridge_charge_enabled"}',
   );
-  await charging
-    .getByRole("button", { name: english ? "Done" : "Fertig", exact: true })
-    .click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(methods).toBeHidden();
   await expect(summary).toContainText(
-    english ? "Fixed charge target" : "Festes Ladeziel",
+    english ? "Fixed grid charge target" : "Festes Netzladeziel",
   );
   await expect(charging.getByRole("status")).toBeVisible();
   await page.locator("#release-action").click();
@@ -289,81 +321,59 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(target).toHaveCount(0);
   await expect(
     settings.getByRole("spinbutton", {
-      name: english ? "Charge up to at most (%)" : "Höchstens laden bis (%)",
+      name: english
+        ? "Maximum grid charge target (%)"
+        : "Maximales Netzladeziel (%)",
       exact: true,
     }),
   ).toHaveValue("80");
   await expect(settings).toContainText(
-    english
-      ? "Missing consumption or forecast data prevents a new charging plan"
-      : "Ohne Verbrauchs- oder Prognosedaten wird kein neuer Ladeplan erstellt",
+    english ? "Solar forecast missing" : "PV-Prognose fehlt",
   );
-  await expect(settings).toContainText(
-    english
-      ? "requires a suitable forecast with the expected start of solar power"
-      : "benötigst du eine passende PV-Prognose mit dem erwarteten Solarstart",
-  );
-  await expect(settings).toContainText(
-    english ? "Open “Edit” in step 1" : "Öffne in Schritt 1 „Bearbeiten“",
-  );
-  await advanced.locator(":scope > summary").focus();
-  await page.keyboard.press("Space");
-  await expect(advanced).toHaveAttribute("open", "");
   await expect(
     settings.getByRole("spinbutton", {
-      name: english
-        ? "Only start below a battery level of (%)"
-        : "Nur starten unter einem Ladestand von (%)",
+      name: english ? "Start threshold (%)" : "Ladestart unter (%)",
       exact: true,
     }),
   ).toHaveCount(0);
   await expect(
     settings.getByRole("spinbutton", {
-      name: english
-        ? "Charge limit for all charging methods (%)"
-        : "Ladegrenze für alle Lademethoden (%)",
+      name: "Max SOC (%)",
       exact: true,
     }),
   ).toHaveValue("80");
-  await expect(settings).toContainText(
-    english
-      ? "Raising it makes the original target effective again, up to the new global limit"
-      : "Wenn du sie anhebst, wird das ursprüngliche Ziel bis zur neuen globalen Grenze wieder wirksam",
-  );
   await expectControlsToFit(settings);
   await fixed.click();
   await expect(target).toHaveValue("80");
   await expect(
     settings.getByRole("spinbutton", {
-      name: english
-        ? "Only start below a battery level of (%)"
-        : "Nur starten unter einem Ladestand von (%)",
+      name: english ? "Start threshold (%)" : "Ladestart unter (%)",
       exact: true,
     }),
   ).toHaveValue("20");
   await expect(panel.locator(".electricity-master input")).not.toBeChecked();
 });
 
-test("charge target keeps its draft and confirmed value through delayed failure, collapse and retry", async ({
+test("charge target keeps its draft and confirmed value through delayed failure and retry, disabling cancellation", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   const settings = charging.locator(".tou-charging-settings");
   const summary = settings.locator(".tou-charging-summary");
   const target = settings.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   const control = settings.locator(".entity-control").filter({
     has: page.getByRole("spinbutton", {
-      name: english ? "Charge target (%)" : "Ladeziel (%)",
+      name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
       exact: true,
     }),
   });
-  const apply = control.getByRole("button");
+  const apply = charging.locator("header .editor-actions > button:first-child");
   await target.fill("65");
   await page.locator("#hold-action").click();
   await page.locator("#failure").click();
@@ -374,22 +384,25 @@ test("charge target keeps its draft and confirmed value through delayed failure,
   await expect(control.getByRole("status")).toBeVisible();
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(summary).toContainText("80 %");
-  await charging
-    .getByRole("button", { name: english ? "Done" : "Fertig", exact: true })
-    .click();
-  await expect(charging.getByRole("status")).toBeVisible();
+  await expect(
+    charging.locator(
+      ".electricity-charging-editor .editor-actions button:last-child",
+    ),
+  ).toBeDisabled();
+  await expect(charging.locator(".electricity-charging-editor")).toBeVisible();
   await page.locator("#release-action").click();
-  await expect(charging.getByRole("alert")).toBeVisible();
+  await expect(control.getByRole("alert")).toBeVisible();
   await expect(summary).toContainText("80 %");
-  await charging.locator("header > button").click();
   await expect(target).toHaveValue("65");
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(control).toHaveAttribute("aria-busy", "false");
   await apply.click();
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(control.getByRole("alert")).toHaveCount(0);
   await expect(summary).toContainText("65 %");
   await expect(page.locator("#actions")).toHaveText(
-    '2: number.set_value {"value":65,"entity_id":"number.demo_timed_charge_max_soc"}',
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","timed_charge_max_soc":65}',
   );
   await expect(panel.locator(".electricity-master input")).not.toBeChecked();
 });

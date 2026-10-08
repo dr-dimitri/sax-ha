@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
     Unauthorized,
     UnknownUser,
 )
@@ -32,6 +33,7 @@ from .const import (
     ATTR_POWER,
     ATTR_REASON,
     ATTR_START,
+    CHARGING_SETTING_KEYS,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_TARIFF_TYPE,
@@ -52,6 +54,7 @@ from .const import (
     MAX_ECONOMICS_RESTART_REASON_LENGTH,
     SERVICE_REFRESH_PRICE_PLAN,
     SERVICE_RESTART_ECONOMICS_ACCOUNTING,
+    SERVICE_SET_CHARGING_SETTINGS,
     SERVICE_SET_GRID_SERVING_WINDOW,
     SERVICE_SET_PRICE_CHARGE_ENABLED,
     SERVICE_SET_TIMED_CHARGE_WINDOW,
@@ -115,6 +118,12 @@ SERVICE_SET_WINDOW_SCHEMA = vol.Schema(
         vol.Required(ATTR_END): cv.time,
     }
 )
+SERVICE_SET_CHARGING_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_DEVICE_ID): cv.string,
+        **{vol.Optional(key): object for key in CHARGING_SETTING_KEYS},
+    }
+)
 # `force` überspringt den Bestätigungsdialog für den Konflikt zwischen
 # Netzladung und preisoptimiertem Laden (siehe repairs.py) - Automationen
 # haben keine Möglichkeit, auf einen Repair-Dialog zu antworten.
@@ -154,6 +163,7 @@ SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
 #: Ohne diese Bereinigung blieben die alten Entities dauerhaft "nicht
 #: verfügbar" in der Registry.
 _REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
+    (Platform.SENSOR, "timed_charge_discharge_status"),
     (Platform.SENSOR, "energy_charged_origin_unknown"),
     (Platform.SENSOR, "energy_origin_coverage"),
     (Platform.SENSOR, "economics_result_today"),
@@ -290,6 +300,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # entweder aus dem Store (Regelfall) oder aus dem einmaligen
         # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
         coordinator.price_planner.async_setup()
+        coordinator.pv_forecast_reading.async_setup()
         # Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS): registriert
         # den Zustandsbeobachter des dynamischen Preis-Sensors. Ohne
         # konfigurierten Tarif passiert hier nichts.
@@ -543,6 +554,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call.data[ATTR_START], call.data[ATTR_END], defer_device_update=True
         )
 
+    async def _async_set_charging_settings(call: ServiceCall) -> None:
+        values = {
+            key: call.data[key] for key in CHARGING_SETTING_KEYS if key in call.data
+        }
+        if not values:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="charging_settings_required",
+            )
+        await _async_check_service_permissions(
+            hass, call, tuple(("number", key) for key in values)
+        )
+        coordinator = _coordinator_for_device(hass, call.data[ATTR_DEVICE_ID])
+        await coordinator.async_set_charging_settings(values, defer_device_update=True)
+
     async def _async_refresh_price_plan(call: ServiceCall) -> None:
         await _async_check_service_permissions(
             hass, call, (("switch", "price_charge_enabled"),)
@@ -601,6 +627,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_GRID_SERVING_WINDOW,
         _async_set_grid_serving_window,
         schema=SERVICE_SET_WINDOW_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_CHARGING_SETTINGS,
+        _async_set_charging_settings,
+        schema=SERVICE_SET_CHARGING_SETTINGS_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

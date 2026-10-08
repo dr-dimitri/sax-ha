@@ -129,7 +129,6 @@ async def test_failed_hold_setpoint_preserves_proof_and_recovers_on_next_poll(
         await _evaluate(coordinator)
 
     assert coordinator._timed_discharge_state == TimedDischargeState(EXPIRES)
-    assert coordinator.data["timed_charge_discharge_status"] is None
     assert coordinator.sun_charge_active is False
     assert coordinator.data["ic_control_mode"] == SUN_IC_CONTROL_MODE_SMARTMETER
 
@@ -137,7 +136,6 @@ async def test_failed_hold_setpoint_preserves_proof_and_recovers_on_next_poll(
     await _evaluate(coordinator)
     assert coordinator._sun_charge_power == 0
     assert coordinator.sun_charge_active is True
-    assert coordinator.data["timed_charge_discharge_status"] == "discharge_blocked"
 
 
 async def test_failed_disable_reset_is_not_reported_as_successful_release(
@@ -152,13 +150,11 @@ async def test_failed_disable_reset_is_not_reported_as_successful_release(
 
     assert coordinator._timed_discharge_state is None
     assert coordinator._sun_charge_reset_required is True
-    assert coordinator.data["timed_charge_discharge_status"] is None
     assert coordinator.sun_charge_active is False
 
     client.write_register.side_effect = None
     await _evaluate(coordinator)
     assert coordinator._sun_charge_reset_required is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     assert coordinator.sun_charge_active is False
 
 
@@ -168,7 +164,6 @@ async def test_two_fresh_measurements_confirm_and_persist_timed_grid_charging(
     coordinator, client = charge_system
     await coordinator.async_set_timed_charge_enabled(True)
     assert coordinator._timed_discharge_state is None
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     client.write_register.assert_any_await(
         address=REG_SUN_IC_CONTROL_MODE,
         value=SUN_IC_CONTROL_MODE_SETPOINT,
@@ -182,7 +177,6 @@ async def test_two_fresh_measurements_confirm_and_persist_timed_grid_charging(
     _sample(coordinator, storage_power_active=-2200, smartmeter_power=2500)
     await _evaluate(coordinator)
 
-    assert coordinator.data["timed_charge_discharge_status"] == "grid_charging"
     assert coordinator._timed_discharge_state == TimedDischargeState(EXPIRES)
     assert await TimedDischargeStateStore(hass, coordinator.entry_id).async_load() == (
         TimedDischargeState(EXPIRES)
@@ -201,7 +195,6 @@ async def test_repeated_setters_cannot_turn_one_measurement_into_confirmation(
         await coordinator.async_set_timed_charge_max_soc(60)
 
     assert coordinator._timed_discharge_state is None
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     _sample(coordinator, storage_power_active=-2100, smartmeter_power=2400)
     await _evaluate(coordinator)
     assert coordinator._timed_discharge_state == TimedDischargeState(EXPIRES)
@@ -235,7 +228,6 @@ async def test_pv_or_missing_measured_grid_charge_never_creates_protection(
         await _evaluate(coordinator)
 
     assert coordinator._timed_discharge_state is None
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
 
 
 async def test_measurement_started_before_command_ack_cannot_prove_its_effect(
@@ -270,7 +262,6 @@ async def test_optimistic_mode_cache_does_not_turn_real_mode_zero_into_proof(
         await _evaluate(coordinator)
 
     assert coordinator._timed_discharge_state is None
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
 
 
 async def test_stale_or_interrupted_measurements_require_two_new_confirmations(
@@ -304,7 +295,6 @@ async def test_own_target_keeps_discharge_blocked_and_allows_only_pv_charge(
     assert coordinator.max_soc_clamped is False
     assert coordinator.sun_charge_active is True
     assert coordinator._sun_charge_timed_discharge is True
-    assert coordinator.data["timed_charge_discharge_status"] == "discharge_blocked"
     client.write_register.assert_awaited_with(
         address=REG_SUN_IC_POWER_SETPOINT_PCT,
         value=to_unsigned16(-2174),
@@ -331,7 +321,6 @@ async def test_unconfirmed_charge_reaching_target_releases_normal_operation(
 
     assert coordinator._timed_discharge_state is None
     assert coordinator.sun_charge_active is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     client.write_register.assert_awaited_with(
         address=REG_SUN_IC_CONTROL_MODE,
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
@@ -350,7 +339,6 @@ async def test_disabling_releases_immediately_and_reenabling_is_no_measurement(
 
     assert coordinator._timed_discharge_state is None
     assert coordinator.sun_charge_active is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     client.write_register.assert_awaited_once_with(
         address=REG_SUN_IC_CONTROL_MODE,
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
@@ -365,7 +353,6 @@ async def test_disabling_releases_immediately_and_reenabling_is_no_measurement(
         await _evaluate(coordinator)
     assert coordinator._timed_discharge_state is None
     assert coordinator.sun_charge_active is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
 
 
 async def test_window_end_releases_protection_and_does_not_carry_into_next_day(
@@ -387,7 +374,6 @@ async def test_window_end_releases_protection_and_does_not_carry_into_next_day(
         await _evaluate(coordinator)
 
     assert coordinator._timed_discharge_state is None
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     client.write_register.assert_awaited_once_with(
         address=REG_SUN_IC_CONTROL_MODE,
         value=SUN_IC_CONTROL_MODE_SMARTMETER,
@@ -424,7 +410,6 @@ async def test_restart_restores_confirmed_expiry_and_reapplies_protection(
         assert restored._timed_discharge_state == TimedDischargeState(EXPIRES)
         assert restored.sun_charge_active is True
         assert restored._sun_charge_power == 0
-        assert restored.data["timed_charge_discharge_status"] == "discharge_blocked"
     finally:
         await restored.async_shutdown()
 
@@ -445,7 +430,6 @@ async def test_restart_rejects_expired_or_unbounded_protection(
 
     assert coordinator._timed_discharge_state is None
     assert coordinator.sun_charge_active is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
 
 
 @pytest.mark.parametrize("failed_block", ["basic", "extended"])
@@ -496,7 +480,6 @@ async def test_basic_outage_preserves_confirmed_charge_as_zero_hold(
     assert coordinator._sun_charge_timed_discharge
     assert coordinator._sun_charge_power == 0
     assert not coordinator._timed_charge_active
-    assert coordinator.data["timed_charge_discharge_status"] == "discharge_blocked"
     client.write_register.assert_awaited_with(
         address=REG_SUN_IC_POWER_SETPOINT_PCT, value=0, device_id=100
     )
@@ -521,7 +504,6 @@ async def test_basic_outage_preserves_confirmed_charge_as_zero_hold(
 
     assert coordinator._timed_discharge_state is None
     assert not coordinator.sun_charge_active
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     assert not coordinator.last_update_success
     assert coordinator.last_exception is exception
     client.write_register.assert_awaited_once_with(
@@ -617,7 +599,6 @@ async def test_hold_writer_releases_at_exact_deadline_without_basic_polls(
     coordinator._async_read_basic.assert_not_called()
     assert coordinator._timed_discharge_state is None
     assert coordinator._sun_charge_timed_discharge is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     assert coordinator.max_soc_clamped is False
     if global_soc_reached:
         assert coordinator._max_soc_released_for_discharge is True
@@ -672,7 +653,6 @@ async def test_extending_window_cannot_restart_charge_or_hold_after_original_end
             assert coordinator._timed_charge_active is False
             assert coordinator.sun_charge_active is False
             assert coordinator.max_soc_clamped is False
-            assert coordinator.data["timed_charge_discharge_status"] == "normal"
 
     client.write_register.assert_awaited_once_with(
         address=REG_SUN_IC_CONTROL_MODE,
@@ -729,7 +709,6 @@ async def test_restart_after_original_end_keeps_extended_window_completed(
                 assert restored._timed_charge_active is False
                 assert restored.sun_charge_active is False
                 assert restored.max_soc_clamped is False
-                assert restored.data["timed_charge_discharge_status"] == "normal"
 
         with (
             patch(
@@ -751,7 +730,6 @@ async def test_restart_after_original_end_keeps_extended_window_completed(
         assert restored._timed_discharge_state == TimedDischargeState(
             EXPIRES + timedelta(days=1, hours=1)
         )
-        assert restored.data["timed_charge_discharge_status"] == "grid_charging"
     finally:
         await restored.async_shutdown()
 
@@ -772,7 +750,6 @@ async def test_editing_schedule_keeps_original_confirmed_expiry(
         await coordinator.async_set_timed_charge_window(dt_time(22), dt_time(6))
 
     assert coordinator._timed_discharge_state == TimedDischargeState(EXPIRES)
-    assert coordinator.data["timed_charge_discharge_status"] == "discharge_blocked"
     with (
         patch(
             "custom_components.sax_power.coordinator.dt_util.now", return_value=EXPIRES
@@ -787,4 +764,3 @@ async def test_editing_schedule_keeps_original_confirmed_expiry(
 
     assert coordinator._timed_discharge_state is None
     assert coordinator.sun_charge_active is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"

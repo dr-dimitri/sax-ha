@@ -12,9 +12,12 @@ async function priceControls(page: Page, english: boolean) {
   await page.locator("#tariff-dynamic").click();
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
+  await panel
+    .locator(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )
+    .click();
   const settings = panel.locator(".dynamic-charging-settings");
-  await settings.locator(".dynamic-charging-advanced summary").click();
   return [
     {
       key: "price_charge_max_price",
@@ -36,8 +39,21 @@ async function priceControls(page: Page, english: boolean) {
     const form = settings.locator(".entity-control").filter({
       has: page.getByRole("spinbutton", { name: label, exact: true }),
     });
-    return { key, input, form, apply: form.getByRole("button") };
+    return {
+      key,
+      input,
+      form,
+      apply: panel
+        .locator(".electricity-charging > header")
+        .locator(".editor-actions > button:first-child"),
+    };
   });
+}
+
+async function reopenCharging(page: Page) {
+  const charging = page.locator("sax-power-vue-panel .electricity-charging");
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header .editor-actions > button:first-child").click();
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -60,15 +76,16 @@ test("typed negative and decimal prices reach HA unchanged in both price control
   const actions = page.locator("#actions");
   let writes = 0;
   for (const { key, input, apply } of controls) {
-    for (const value of ["-5", "0.5", "12.5", "-0.5"]) {
+    for (const value of ["-4.5", "-5", "0.5", "12.5", "-0.5"]) {
       const before = await actions.innerText();
       await typeNumber(input, value);
       await expect(input).toHaveValue(value);
       await expect(actions).toHaveText(before);
       await apply.click();
       await expect(actions).toHaveText(
-        `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`,
+        `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`,
       );
+      await reopenCharging(page);
       await expect(input).toBeEnabled();
       await expect(input).toHaveValue(value);
     }
@@ -118,8 +135,9 @@ test("cursor corrections and replacing selections preserve other digits and sign
     await expect(input).toHaveValue("-2.7");
     await apply.click();
     await expect(page.locator("#actions")).toHaveText(
-      `${index + 1}: number.set_value ${JSON.stringify({ value: -2.7, entity_id: `number.demo_${key}` })}`,
+      `${index + 1}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: -2.7 })}`,
     );
+    await reopenCharging(page);
     await expect(input).toBeEnabled();
     await expect(input).toHaveValue("-2.7");
   }
@@ -152,6 +170,7 @@ test("empty, incomplete, out-of-range and off-step prices show a field error wit
         await expect(page.locator("#actions")).toHaveText("Keine Aktion");
       }
     }
+    await typeNumber(input, "-5");
   }
 });
 
@@ -174,7 +193,7 @@ test("typed prices retain drafts and confirmed values across pending, failure an
   await expect(apply).toBeDisabled();
   await expect(form.locator(".entity-control__value")).toContainText("-5");
   await expect(page.locator("#actions")).toHaveText(
-    '1: number.set_value {"value":-0.5,"entity_id":"number.demo_price_charge_max_price"}',
+    '1: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_max_price":-0.5}',
   );
   await page.locator("#release-action").click();
   await expect(form.getByRole("alert")).toBeVisible();
@@ -185,6 +204,7 @@ test("typed prices retain drafts and confirmed values across pending, failure an
   await apply.click();
   await expect(form.locator(".entity-control__value")).toContainText("-5");
   await page.locator("#release-action").click();
+  await reopenCharging(page);
   await expect(form).toHaveAttribute("aria-busy", "false");
   await expect(form.getByRole("alert")).toHaveCount(0);
   await expect(input).toHaveValue("-0.5");
@@ -192,13 +212,13 @@ test("typed prices retain drafts and confirmed values across pending, failure an
     english ? "-0.5" : "-0,5",
   );
   await expect(page.locator("#actions")).toHaveText(
-    '2: number.set_value {"value":-0.5,"entity_id":"number.demo_price_charge_max_price"}',
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_max_price":-0.5}',
   );
 });
 
-// REQ-VUE-ELECTRICITY-TARIFF / #268: retry after collapsing must send the
-// failed draft, even if its response arrives while the editor is hidden.
-test("all dynamic number drafts survive collapse, delayed failure, reopening and retry", async ({
+// REQ-VUE-ELECTRICITY-TARIFF: retry must send the failed draft; pending
+// cancellation must not replace it with the confirmed previous value.
+test("all dynamic number drafts survive delayed failure and retry while cancellation is blocked", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -206,11 +226,11 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".dynamic-charging-settings");
-  const done = english ? "Done" : "Fertig";
+  const apply = charging.locator("header .editor-actions > button:first-child");
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [key, label, value] of [
-    ["max_soc", english ? "Charge target (%)" : "Ladeziel (%)", "85"],
+    ["max_soc", english ? "Grid charge target (%)" : "Netzladeziel (%)", "85"],
     [
       "price_charge_max_price",
       english
@@ -252,33 +272,37 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
     await typeNumber(input, value!);
     await page.locator("#hold-action").click();
     await page.locator("#failure").click();
-    await form.getByRole("button").click();
-    const request = `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`;
+    await apply.click();
+    const request = `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`;
     await expect(actions).toHaveText(request);
-    await charging.getByRole("button", { name: done, exact: true }).click();
-    await expect(
-      charging.locator(".electricity-charging-feedback"),
-    ).toContainText(english ? "Sending change" : "Änderung wird");
-    await charging.locator("header > button").click();
+    const cancel = charging.locator(
+      ".electricity-charging-editor .editor-actions button:last-child",
+    );
+    await expect(cancel).toBeDisabled();
+    await expect(form.getByRole("status")).toContainText(
+      english ? "Sending change" : "Änderung wird",
+    );
     await expect(input).toHaveValue(value!);
     await expect(input).toBeDisabled();
-    await expect(form.getByRole("button")).toBeDisabled();
+    await expect(apply).toBeDisabled();
+    await apply.evaluate((button: HTMLButtonElement) => button.click());
+    await cancel.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(
+      charging.locator(".electricity-charging-editor"),
+    ).toBeVisible();
     await expect(form.locator(".entity-control__value")).toHaveText(confirmed);
     await expect(actions).toHaveText(request);
-    await charging.getByRole("button", { name: done, exact: true }).click();
     await page.locator("#release-action").click();
-    await expect(
-      charging.locator(".electricity-charging-feedback").getByRole("alert"),
-    ).toBeVisible();
-    await charging.locator("header > button").click();
+    await expect(form.getByRole("alert")).toBeVisible();
     await expect(input).toHaveValue(value!);
     await expect(input).toBeEnabled();
     await expect(form.getByRole("alert")).toBeVisible();
     await expect(form.locator(".entity-control__value")).toHaveText(confirmed);
-    await form.getByRole("button").click();
+    await apply.click();
     await expect(actions).toHaveText(
-      `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`,
+      `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`,
     );
+    await reopenCharging(page);
     await expect(input).toBeEnabled();
     await expect(input).toHaveValue(value!);
     await expect(form.getByRole("alert")).toHaveCount(0);
@@ -288,7 +312,7 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   }
 });
 
-test("unsent native partial drafts remain editable after collapsing and reopening", async ({
+test("native partial drafts survive invalid Apply and cancellation restores confirmed values", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -307,9 +331,12 @@ test("unsent native partial drafts remain editable after collapsing and reopenin
       ),
     ).toBe(true);
     await charging
-      .getByRole("button", { name: english ? "Done" : "Fertig", exact: true })
+      .locator("header .editor-actions > button:first-child")
       .click();
-    await charging.locator("header > button").click();
+    await expect(
+      charging.locator(".electricity-charging-editor"),
+    ).toBeVisible();
+    await expect(charging.getByRole("alert")).toBeVisible();
     await expect(input).toHaveValue("");
     expect(
       await input.evaluate(
@@ -320,6 +347,17 @@ test("unsent native partial drafts remain editable after collapsing and reopenin
     await input.pressSequentially(suffix!);
     await expect(input).toHaveValue(result!);
     await expect(actions).toHaveText("Keine Aktion");
+    await charging
+      .locator(".electricity-charging-editor .editor-actions button:last-child")
+      .click();
+    await reopenCharging(page);
+    await expect(input).toHaveValue("-5");
+    expect(
+      await input.evaluate(
+        (element: HTMLInputElement) => element.validity.badInput,
+      ),
+    ).toBe(false);
+    await expect(charging.getByRole("alert")).toHaveCount(0);
   }
 });
 
@@ -338,7 +376,7 @@ test("max SOC and solar forecast threshold remain usable with keyboard entry", a
     });
     await typeNumber(input, value!);
     await expect(input).toHaveValue(value!);
-    await form.getByRole("button").click();
+    await form.locator('button[type="submit"]').click();
     await expect(page.locator("#actions")).toHaveText(
       `${index + 1}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`,
     );
@@ -349,29 +387,27 @@ test("max SOC and solar forecast threshold remain usable with keyboard entry", a
 
 // REQ-TIMED-SOC-CHARGE / #260: HA supplies the effective target while
 // preserving the stored target; the dashboard must explain these updates.
-test("global SOC help explains temporary caps and displays the restored confirmed target", async ({
+test("global SOC remains directly editable and displays the restored confirmed target", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
-  await panel.locator(".tou-charging-advanced summary").click();
+  await panel
+    .locator(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )
+    .click();
   const target = panel.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   const global = panel.getByRole("spinbutton", {
-    name: english
-      ? "Charge limit for all charging methods (%)"
-      : "Ladegrenze für alle Lademethoden (%)",
+    name: "Max SOC (%)",
     exact: true,
   });
-  await expect(panel.locator(".tou-charging-advanced")).toContainText(
-    english
-      ? "Also applies to solar charging. This limit temporarily caps the saved grid charge target. Raising it makes the original target effective again, up to the new global limit. Only explicitly changing the grid charge target permanently changes its saved value."
-      : "Gilt auch für Solarstrom. Diese Grenze begrenzt das gespeicherte Netzladeziel vorübergehend. Wenn du sie anhebst, wird das ursprüngliche Ziel bis zur neuen globalen Grenze wieder wirksam. Nur wenn du das Netzladeziel ausdrücklich änderst, wird dessen gespeicherter Wert dauerhaft geändert.",
-  );
+  await expect(panel.locator(".tou-charging-settings details")).toHaveCount(0);
+  await expect(global).toBeVisible();
   for (const [limit, effective] of [
     [90, 80],
     [60, 60],
@@ -406,4 +442,67 @@ test("global SOC help explains temporary caps and displays the restored confirme
     );
     await expect(page.locator("#actions")).toHaveText("Keine Aktion");
   }
+});
+
+// REQ-TIMED-SOC-CHARGE: native keyboard input keeps rejected drafts and
+// allows equal boundaries and the valid zero start in Chromium and Safari.
+test("charge target and start reject crossed drafts and save valid SOC values together", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const panel = page.locator("sax-power-vue-panel");
+  const charging = panel.locator(".electricity-charging");
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
+  const actions = page.locator("#actions");
+  const start = charging.getByRole("spinbutton", {
+    name: english ? "Start threshold (%)" : "Ladestart unter (%)",
+    exact: true,
+  });
+  const target = charging.getByRole("spinbutton", {
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
+    exact: true,
+  });
+  const global = charging.getByRole("spinbutton", {
+    name: "Max SOC (%)",
+    exact: true,
+  });
+  const apply = charging.locator("header .editor-actions > button:first-child");
+  await expect(charging.locator(".entity-control button")).toHaveCount(0);
+  await typeNumber(start, "85");
+  await typeNumber(target, "75");
+  await apply.click();
+  for (const input of [start, target]) {
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(
+      input.locator("xpath=ancestor::form").getByRole("alert"),
+    ).toHaveText(
+      english
+        ? "The grid charge target must be at least as high as the start threshold."
+        : "Das Netzladeziel muss mindestens so hoch wie der Ladestart sein.",
+    );
+  }
+  await expect(actions).toHaveText("Keine Aktion");
+  await typeNumber(target, "90");
+  await typeNumber(global, "100");
+  await global.press("Enter");
+  await expect(actions).toHaveText(
+    '1: sax_power.set_charging_settings {"device_id":"demo-device","timed_charge_min_soc":85,"timed_charge_max_soc":90,"max_soc":100}',
+  );
+  await reopenCharging(page);
+  await expect(start).toHaveValue("85");
+  await expect(target).toHaveValue("90");
+  await expect(global).toHaveValue("100");
+  await typeNumber(start, "0");
+  await typeNumber(target, "0");
+  await apply.click();
+  await expect(actions).toHaveText(
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","timed_charge_min_soc":0,"timed_charge_max_soc":0}',
+  );
+  await reopenCharging(page);
+  await expect(charging.locator(".tou-charging-threshold")).toContainText(
+    english ? "Start at" : "Start bei",
+  );
+  await expect(start).toHaveValue("0");
+  await expect(target).toHaveValue("0");
 });

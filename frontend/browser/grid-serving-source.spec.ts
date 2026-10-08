@@ -25,7 +25,10 @@ test("grid-serving PV source keeps confirmed values and drafts while saving or f
   await picker.selectOption("sensor.demo_remaining_forecast_alternative");
   await page.locator("#hold-action").click();
   await source
-    .getByRole("button", { name: english ? "Save" : "Speichern", exact: true })
+    .getByRole("button", {
+      name: english ? "Apply" : "Übernehmen",
+      exact: true,
+    })
     .click();
   await expect(source).toHaveAttribute("aria-busy", "true");
   await expect(source.getByRole("status")).toContainText(
@@ -43,7 +46,10 @@ test("grid-serving PV source keeps confirmed values and drafts while saving or f
   );
   await expect(picker).toBeEnabled();
   await source
-    .getByRole("button", { name: english ? "Save" : "Speichern", exact: true })
+    .getByRole("button", {
+      name: english ? "Apply" : "Übernehmen",
+      exact: true,
+    })
     .click();
   await expect(source.locator(".grid-serving-source__confirmed")).toHaveText(
     "Alternative Solarprognose heute",

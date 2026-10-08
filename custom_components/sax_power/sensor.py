@@ -41,7 +41,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
-from .const import DATA_COORDINATOR, DOMAIN, TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS
+from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import SaxPowerCoordinator
 from .domain.economics_status import EconomicsStatus
 from .entity import SaxPowerEntity
@@ -296,14 +296,6 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_bool_text(
             "timed_charge_active", true_text="Aktiv", false_text="Inaktiv"
         ),
-    ),
-    SaxPowerSensorEntityDescription(
-        key="timed_charge_discharge_status",
-        translation_key="timed_charge_discharge_status",
-        device_class=SensorDeviceClass.ENUM,
-        options=list(TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS),
-        icon="mdi:battery-lock",
-        value_fn=_direct("timed_charge_discharge_status"),
     ),
     SaxPowerSensorEntityDescription(
         key="grid_serving_active_text",

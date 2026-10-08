@@ -167,6 +167,53 @@ afterEach(() => {
 });
 
 describe("shared dashboard controls", () => {
+  it.each(["number", "time"] as const)(
+    "cancels invalid %s drafts without writing and blocks cancellation while pending",
+    async (domain) => {
+      const initial = domain === "time" ? "12:30:00" : "50";
+      const { root, callService, updateState } = await mount(domain, {
+        state: initial,
+      });
+      const buttons = root.querySelectorAll<HTMLButtonElement>(
+        ".editor-actions button",
+      );
+      expect([...buttons].map((button) => button.textContent)).toEqual([
+        "Übernehmen",
+        "Abbrechen",
+      ]);
+      enter(root, "");
+      submit(root);
+      await flush();
+      expect(root.querySelector('[role="alert"]')).not.toBeNull();
+      buttons[1].click();
+      await flush();
+      expect(input(root).value).toBe(domain === "time" ? "12:30" : "50");
+      expect(root.querySelector('[role="alert"]')).toBeNull();
+      expect(callService).not.toHaveBeenCalled();
+      const request = deferred();
+      callService.mockReturnValueOnce(request.promise);
+      enter(root, domain === "time" ? "13:45" : "60");
+      submit(root);
+      await flush();
+      expect(buttons[0].disabled).toBe(true);
+      expect(buttons[1].disabled).toBe(true);
+      buttons[1].click();
+      expect(input(root).value).toBe(domain === "time" ? "13:45" : "60");
+      request.reject(new Error("failed"));
+      await flush();
+      await flush();
+      buttons[1].click();
+      await flush();
+      expect(input(root).value).toBe(domain === "time" ? "12:30" : "50");
+      expect(root.querySelector('[role="alert"]')).toBeNull();
+      await updateState(domain === "time" ? "15:30:00" : "70");
+      enter(root, "");
+      buttons[1].click();
+      await flush();
+      expect(input(root).value).toBe(domain === "time" ? "15:30" : "70");
+      expect(callService).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each(["de", "en-GB"])(
     "retains the accessible confirmed value while hiding its label (%s)",
     async (language) => {
@@ -432,7 +479,7 @@ describe("shared dashboard controls", () => {
     expect(dialog.open).toBe(true);
     expect(input(root).checked).toBe(false);
     expect(callService).not.toHaveBeenCalled();
-    dialog.querySelectorAll("button")[1].click();
+    dialog.querySelectorAll("button")[0].click();
     await flush();
     expect(dialog.open).toBe(false);
     expect(callService).toHaveBeenCalledExactlyOnceWith(

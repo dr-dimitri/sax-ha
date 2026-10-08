@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "../components/EditorActions.vue";
 import {
   computed,
   inject,
@@ -796,7 +797,7 @@ async function applyCharging(): Promise<void> {
         </fieldset>
         <p>{{ text.chooseHint }}</p>
         <p v-if="incompleteSelection" role="status">{{ text.incomplete }}</p>
-        <div class="electricity-actions">
+        <EditorActions class="electricity-actions">
           <button type="submit" :disabled="pending || !connected || conflict">
             {{
               pendingOperation === "applying" ? text.applying : text.apply
@@ -811,7 +812,7 @@ async function applyCharging(): Promise<void> {
           >
             {{ text.cancel }}
           </button>
-        </div>
+        </EditorActions>
       </form>
       <p
         v-if="pendingOperation"
@@ -875,28 +876,38 @@ async function applyCharging(): Promise<void> {
             <div>
               <h2>{{ text.prices }}</h2>
             </div>
-            <button
-              ref="priceButton"
-              type="button"
-              :disabled="
-                pending ||
-                !canConfigure ||
-                changing ||
-                (priceEditing && (!connected || conflict))
-              "
-              :aria-expanded="priceEditing"
-              @click="priceEditing ? savePrices() : openPrices()"
-            >
-              {{
-                pendingOperation === "loading"
-                  ? text.loading
-                  : pendingOperation === "saving"
-                    ? text.saving
-                    : priceEditing
-                      ? text.save
-                      : text.edit
-              }}
-            </button>
+            <EditorActions>
+              <button
+                ref="priceButton"
+                type="button"
+                :disabled="
+                  pending ||
+                  !canConfigure ||
+                  changing ||
+                  (priceEditing && (!connected || conflict))
+                "
+                :aria-expanded="priceEditing"
+                @click="priceEditing ? savePrices() : openPrices()"
+              >
+                {{
+                  pendingOperation === "loading"
+                    ? text.loading
+                    : pendingOperation === "saving"
+                      ? text.saving
+                      : priceEditing
+                        ? text.save
+                        : text.edit
+                }}
+              </button>
+              <button
+                v-if="priceEditing"
+                type="button"
+                :disabled="pending"
+                @click="closePrices"
+              >
+                {{ text.cancel }}
+              </button>
+            </EditorActions>
           </header>
           <div class="electricity-current">
             <span class="electricity-muted"
@@ -1055,7 +1066,7 @@ async function applyCharging(): Promise<void> {
                 <p class="electricity-muted">{{ text.pvFactorHint }}</p>
               </details>
             </fieldset>
-            <div class="electricity-actions">
+            <EditorActions class="electricity-actions">
               <button
                 type="submit"
                 :disabled="pending || !connected || conflict"
@@ -1066,7 +1077,7 @@ async function applyCharging(): Promise<void> {
               ><button type="button" :disabled="pending" @click="closePrices">
                 {{ text.cancel }}
               </button>
-            </div>
+            </EditorActions>
           </form>
         </section>
         <details class="electricity-price-details">
@@ -1104,22 +1115,34 @@ async function applyCharging(): Promise<void> {
               {{ text.charging }}
             </h2>
           </div>
-          <button
-            ref="chargingButton"
-            type="button"
-            :disabled="changing || chargingSaving || chargingSettings?.pending"
-            :aria-busy="chargingSaving"
-            :aria-expanded="chargingOpen"
-            @click="chargingOpen ? applyCharging() : (chargingOpen = true)"
-          >
-            {{
-              chargingSaving
-                ? text.saving
-                : chargingOpen
-                  ? text.done
-                  : text.edit
-            }}
-          </button>
+          <EditorActions>
+            <button
+              ref="chargingButton"
+              type="button"
+              :disabled="
+                changing || chargingSaving || chargingSettings?.pending
+              "
+              :aria-busy="chargingSaving"
+              :aria-expanded="chargingOpen"
+              @click="chargingOpen ? applyCharging() : (chargingOpen = true)"
+            >
+              {{
+                chargingSaving
+                  ? text.saving
+                  : chargingOpen
+                    ? text.done
+                    : text.edit
+              }}
+            </button>
+            <button
+              v-if="chargingOpen"
+              type="button"
+              :disabled="chargingSaving || chargingSettings?.pending"
+              @click="cancelCharging"
+            >
+              {{ text.cancel }}
+            </button>
+          </EditorActions>
         </header>
         <section v-if="known" class="electricity-activation">
           <label class="electricity-master" :aria-busy="togglePending !== null"
@@ -1219,7 +1242,19 @@ async function applyCharging(): Promise<void> {
           </template>
         </div>
         <div v-if="chargingOpen" class="electricity-charging-editor">
-          <div class="electricity-actions" :aria-busy="chargingSaving">
+          <EditorActions
+            class="electricity-actions"
+            :aria-busy="chargingSaving"
+          >
+            <button
+              type="button"
+              :disabled="
+                changing || chargingSaving || chargingSettings?.pending
+              "
+              @click="applyCharging"
+            >
+              {{ chargingSaving ? text.saving : text.done }}
+            </button>
             <button
               type="button"
               :disabled="chargingSaving || chargingSettings?.pending"
@@ -1227,10 +1262,10 @@ async function applyCharging(): Promise<void> {
             >
               {{ text.cancel }}
             </button>
-            <p v-if="chargingSaving" role="status" aria-live="polite">
-              {{ text.entityPending }}
-            </p>
-          </div>
+          </EditorActions>
+          <p v-if="chargingSaving" role="status" aria-live="polite">
+            {{ text.entityPending }}
+          </p>
         </div>
         <dl
           v-if="!chargingOpen"
@@ -1241,15 +1276,8 @@ async function applyCharging(): Promise<void> {
             <dd>{{ pvForecast }}</dd>
           </div>
         </dl>
-        <div class="electricity-charge-status">
-          <EntityValue
-            domain="sensor"
-            :entity-key="
-              active === 'dynamic'
-                ? 'price_charge_status_text'
-                : 'timed_charge_discharge_status'
-            "
-          />
+        <div v-if="active === 'dynamic'" class="electricity-charge-status">
+          <EntityValue domain="sensor" entity-key="price_charge_status_text" />
         </div>
         <details v-if="known" class="electricity-plan">
           <summary>{{ text.details }}</summary>
@@ -1320,13 +1348,14 @@ async function applyCharging(): Promise<void> {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
 }
-.electricity-card header > div {
+.electricity-card header > div:not(.editor-actions) {
   min-width: 0;
   flex: 1;
 }
-.electricity-card header > button {
+.electricity-card header > .editor-actions {
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -1412,9 +1441,6 @@ async function applyCharging(): Promise<void> {
   font-size: 14px;
 }
 .electricity-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
   margin-top: 16px;
 }
 .electricity-actions button[type="submit"] {

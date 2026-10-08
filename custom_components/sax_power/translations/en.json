@@ -109,22 +109,6 @@
       "timed_charge_active_text": {
         "name": "Timed charge active"
       },
-      "timed_charge_discharge_status": {
-        "name": "Discharge status",
-        "state": {
-          "normal": "Normal operation",
-          "grid_charging": "Grid charging",
-          "discharge_blocked": "Discharge stopped due to grid charging",
-          "control_mode_failed": "Control mode could not be set",
-          "setpoint_failed": "Charging power could not be set",
-          "reset_failed": "Smart meter zero regulation could not be enabled",
-          "control_failed": "Charging permission is missing or was revoked",
-          "control_data_missing": "Device data for charging is missing or invalid",
-          "device_feedback_missing": "Device feedback missing",
-          "discharge_hold_unconfirmed": "Discharge block not confirmed",
-          "release_unconfirmed": "Discharge release not confirmed"
-        }
-      },
       "grid_serving_active_text": {
         "name": "Grid-serving charge active"
       },

@@ -12,7 +12,11 @@ async function priceControls(page: Page, english: boolean) {
   await page.locator("#tariff-dynamic").click();
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
+  await panel
+    .locator(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )
+    .click();
   const settings = panel.locator(".dynamic-charging-settings");
   return [
     {
@@ -41,7 +45,7 @@ async function priceControls(page: Page, english: boolean) {
       form,
       apply: panel
         .locator(".electricity-charging > header")
-        .getByRole("button"),
+        .locator(".editor-actions > button:first-child"),
     };
   });
 }
@@ -49,7 +53,7 @@ async function priceControls(page: Page, english: boolean) {
 async function reopenCharging(page: Page) {
   const charging = page.locator("sax-power-vue-panel .electricity-charging");
   await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -222,7 +226,7 @@ test("all dynamic number drafts survive delayed failure and retry while cancella
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".dynamic-charging-settings");
-  const apply = charging.locator("header > button");
+  const apply = charging.locator("header .editor-actions > button:first-child");
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [key, label, value] of [
@@ -271,7 +275,9 @@ test("all dynamic number drafts survive delayed failure and retry while cancella
     await apply.click();
     const request = `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`;
     await expect(actions).toHaveText(request);
-    const cancel = charging.locator(".electricity-charging-editor button");
+    const cancel = charging.locator(
+      ".electricity-charging-editor .editor-actions button:last-child",
+    );
     await expect(cancel).toBeDisabled();
     await expect(form.getByRole("status")).toContainText(
       english ? "Sending change" : "Änderung wird",
@@ -324,7 +330,9 @@ test("native partial drafts survive invalid Apply and cancellation restores conf
         (element: HTMLInputElement) => element.validity.badInput,
       ),
     ).toBe(true);
-    await charging.locator("header > button").click();
+    await charging
+      .locator("header .editor-actions > button:first-child")
+      .click();
     await expect(
       charging.locator(".electricity-charging-editor"),
     ).toBeVisible();
@@ -339,7 +347,9 @@ test("native partial drafts survive invalid Apply and cancellation restores conf
     await input.pressSequentially(suffix!);
     await expect(input).toHaveValue(result!);
     await expect(actions).toHaveText("Keine Aktion");
-    await charging.locator(".electricity-charging-editor button").click();
+    await charging
+      .locator(".electricity-charging-editor .editor-actions button:last-child")
+      .click();
     await reopenCharging(page);
     await expect(input).toHaveValue("-5");
     expect(
@@ -366,7 +376,7 @@ test("max SOC and solar forecast threshold remain usable with keyboard entry", a
     });
     await typeNumber(input, value!);
     await expect(input).toHaveValue(value!);
-    await form.getByRole("button").click();
+    await form.locator('button[type="submit"]').click();
     await expect(page.locator("#actions")).toHaveText(
       `${index + 1}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`,
     );
@@ -383,7 +393,11 @@ test("global SOC remains directly editable and displays the restored confirmed t
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
+  await panel
+    .locator(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )
+    .click();
   const target = panel.getByRole("spinbutton", {
     name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
@@ -439,7 +453,7 @@ test("charge target and start reject crossed drafts and save valid SOC values to
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   const actions = page.locator("#actions");
   const start = charging.getByRole("spinbutton", {
     name: english ? "Start threshold (%)" : "Ladestart unter (%)",
@@ -453,7 +467,7 @@ test("charge target and start reject crossed drafts and save valid SOC values to
     name: "Max SOC (%)",
     exact: true,
   });
-  const apply = charging.locator("header > button");
+  const apply = charging.locator("header .editor-actions > button:first-child");
   await expect(charging.locator(".entity-control button")).toHaveCount(0);
   await typeNumber(start, "85");
   await typeNumber(target, "75");

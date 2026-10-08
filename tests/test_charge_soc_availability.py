@@ -274,7 +274,6 @@ async def test_failed_outage_reset_cancels_writer_and_retries_without_charging(
 
     assert not coordinator.sun_charge_active
     assert coordinator._sun_charge_reset_required
-    assert coordinator.data["timed_charge_discharge_status"] == "reset_failed"
     client.write_register.side_effect = None
     client.write_register.reset_mock()
     await coordinator.price_planner._async_interval_evaluate(NOW)

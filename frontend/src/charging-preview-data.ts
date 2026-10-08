@@ -82,7 +82,6 @@ export function chargingSample(language = "de"): {
       }
       if (domain === "sensor") {
         state = language.startsWith("de") ? "Inaktiv" : "Inactive";
-        if (key === "timed_charge_discharge_status") state = "normal";
         if (key === "charging_pv_forecast") {
           state = "12.4";
           attributes = {

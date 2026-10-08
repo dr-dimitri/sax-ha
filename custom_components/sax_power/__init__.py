@@ -163,6 +163,7 @@ SERVICE_RESTART_ECONOMICS_ACCOUNTING_SCHEMA = vol.Schema(
 #: Ohne diese Bereinigung blieben die alten Entities dauerhaft "nicht
 #: verfügbar" in der Registry.
 _REMOVED_ENTITY_SUFFIXES: tuple[tuple[str, str], ...] = (
+    (Platform.SENSOR, "timed_charge_discharge_status"),
     (Platform.SENSOR, "energy_charged_origin_unknown"),
     (Platform.SENSOR, "energy_origin_coverage"),
     (Platform.SENSOR, "economics_result_today"),

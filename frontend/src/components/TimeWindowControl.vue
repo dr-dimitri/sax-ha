@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "./EditorActions.vue";
 import { computed, inject, onBeforeUnmount, ref, useId, watch } from "vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { normalizeTime, timeSeconds as seconds } from "../time";
@@ -21,6 +22,7 @@ const text = computed(() =>
         end: "Ende",
         unit: "Uhr",
         apply: "Übernehmen",
+        cancel: "Abbrechen",
         confirmed: "Bestätigt",
         draft: "Entwurf",
         duration: "Dauer",
@@ -52,6 +54,7 @@ const text = computed(() =>
         end: "End",
         unit: "",
         apply: "Apply",
+        cancel: "Cancel",
         confirmed: "Confirmed",
         draft: "Draft",
         duration: "Duration",
@@ -413,6 +416,23 @@ function finishDrag(event: PointerEvent): void {
   stopDrag();
 }
 
+function cancel(): void {
+  if (pending.value) return;
+  stopDrag();
+  edited.value = false;
+  invalidBoundary.value = null;
+  discarded.value = false;
+  start.value = available.value ? minute(confirmedStart.value) : "";
+  end.value = available.value ? minute(confirmedEnd.value) : "";
+  for (const boundary of boundaries.value) {
+    const input = form.value?.querySelector<HTMLInputElement>(
+      `[name="${boundary.key}"]`,
+    );
+    if (input) input.value = boundary.value;
+    dashboard?.clearControlError("time", `${props.kind}_${boundary.key}`);
+  }
+}
+
 async function submit(): Promise<void> {
   if (!dashboard || blocked.value) return;
   // REQ-VUE-CHARGING: browsers may commit visible values without input events.
@@ -480,13 +500,22 @@ async function submit(): Promise<void> {
           @blur="commitTime(boundary.key)"
         />
       </label>
-      <button
-        class="time-window-control__apply"
-        type="submit"
-        :disabled="blocked"
+      <EditorActions
+        ><button
+          class="time-window-control__apply"
+          type="submit"
+          :disabled="blocked"
+        >
+          {{ text.apply }}</button
+        ><button
+          class="time-window-control__cancel"
+          type="button"
+          :disabled="pending"
+          @click="cancel"
+        >
+          {{ text.cancel }}
+        </button></EditorActions
       >
-        {{ text.apply }}
-      </button>
     </div>
     <p :id="`${id}-time-hint`" class="time-window-control__hint">
       {{ text.timeHint }}
@@ -578,7 +607,8 @@ async function submit(): Promise<void> {
   font-size: 14px;
 }
 .time-window-control__field input,
-.time-window-control__apply {
+.time-window-control__apply,
+.time-window-control__cancel {
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
@@ -597,8 +627,10 @@ async function submit(): Promise<void> {
 .time-window-control__field input[aria-invalid="true"] {
   border-color: var(--error-color, #db4437);
 }
-.time-window-control__apply {
+.time-window-control__apply,
+.time-window-control__cancel {
   flex: 0 0 auto;
+  padding-inline: 7px;
   border-color: var(--primary-color, #03a9f4);
   cursor: pointer;
 }

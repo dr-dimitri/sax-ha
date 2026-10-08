@@ -59,85 +59,10 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
-test("discharge diagnostics follow HA feedback and recover without editing settings", async ({
-  page,
-}, testInfo) => {
-  const english = testInfo.project.name.endsWith("en");
-  const panel = page.locator("sax-power-vue-panel");
-  const feedback = panel.locator(".electricity-charge-status");
-  const value = feedback.locator(".entity-value__state");
-  await expect(feedback.locator(".entity-value__name")).toHaveText(
-    english ? "Discharge status" : "Entladestatus",
-  );
-  async function update(state: string) {
-    await panel.evaluate((element, state) => {
-      const host = element as HTMLElement & { hass: HomeAssistant };
-      const id = "sensor.demo_timed_charge_discharge_status";
-      host.hass = {
-        ...host.hass,
-        states: {
-          ...host.hass.states,
-          [id]: { ...host.hass.states[id]!, state },
-        },
-      };
-    }, state);
-  }
-  await update("unknown");
-  await expect(value).toHaveText(english ? "Unknown" : "Unbekannt");
-  for (const [state, de, en] of [
-    [
-      "control_mode_failed",
-      "Steuermodus konnte nicht gesetzt werden",
-      "Control mode could not be set",
-    ],
-    [
-      "setpoint_failed",
-      "Ladeleistung konnte nicht gesetzt werden",
-      "Charging power could not be set",
-    ],
-    [
-      "reset_failed",
-      "SmartMeter-Nullregelung konnte nicht aktiviert werden",
-      "Smart meter zero regulation could not be enabled",
-    ],
-    [
-      "control_failed",
-      "Ladefreigabe fehlt oder wurde widerrufen",
-      "Charging permission is missing or was revoked",
-    ],
-    [
-      "control_data_missing",
-      "Gerätedaten für Ladeauftrag fehlen oder sind ungültig",
-      "Device data for charging is missing or invalid",
-    ],
-    [
-      "device_feedback_missing",
-      "Geräterückmeldung fehlt",
-      "Device feedback missing",
-    ],
-    [
-      "discharge_hold_unconfirmed",
-      "Entladesperre nicht bestätigt",
-      "Discharge block not confirmed",
-    ],
-    [
-      "release_unconfirmed",
-      "Entladefreigabe nicht bestätigt",
-      "Discharge release not confirmed",
-    ],
-  ] as const) {
-    await update(state);
-    await expect(value).toHaveText(english ? en : de);
-    await expect(value).toBeVisible();
-    await expectControlsToFit(panel);
-    await update("normal");
-    await expect(value).toHaveText(
-      english ? "Normal operation" : "Normalbetrieb",
-    );
-    await update("grid_charging");
-    await expect(value).toHaveText(english ? "Grid charging" : "Netzladen");
-  }
-  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+test("retired discharge status is absent", async ({ page }) => {
+  await expect(
+    page.locator("sax-power-vue-panel .electricity-charge-status"),
+  ).toHaveCount(0);
 });
 
 // REQ-VUE-ELECTRICITY-TARIFF: the overview groups prices and charging, and
@@ -318,7 +243,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".tou-charging-settings");
   const summary = settings.locator(".tou-charging-summary");
-  const edit = charging.locator("header > button");
+  const edit = charging.locator("header .editor-actions > button:first-child");
   await expect(summary).toContainText(
     english ? "Fixed grid charge target" : "Festes Netzladeziel",
   );
@@ -378,7 +303,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(page.locator("#actions")).toHaveText(
     '1: switch.turn_on {"entity_id":"switch.demo_bridge_charge_enabled"}',
   );
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(methods).toBeHidden();
   await expect(summary).toContainText(
     english ? "Fixed grid charge target" : "Festes Netzladeziel",
@@ -435,7 +360,7 @@ test("charge target keeps its draft and confirmed value through delayed failure 
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   const settings = charging.locator(".tou-charging-settings");
   const summary = settings.locator(".tou-charging-summary");
   const target = settings.getByRole("spinbutton", {
@@ -448,7 +373,7 @@ test("charge target keeps its draft and confirmed value through delayed failure 
       exact: true,
     }),
   });
-  const apply = charging.locator("header > button");
+  const apply = charging.locator("header .editor-actions > button:first-child");
   await target.fill("65");
   await page.locator("#hold-action").click();
   await page.locator("#failure").click();
@@ -460,7 +385,9 @@ test("charge target keeps its draft and confirmed value through delayed failure 
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(summary).toContainText("80 %");
   await expect(
-    charging.locator(".electricity-charging-editor button"),
+    charging.locator(
+      ".electricity-charging-editor .editor-actions button:last-child",
+    ),
   ).toBeDisabled();
   await expect(charging.locator(".electricity-charging-editor")).toBeVisible();
   await page.locator("#release-action").click();
@@ -471,7 +398,7 @@ test("charge target keeps its draft and confirmed value through delayed failure 
   await expect(control).toHaveAttribute("aria-busy", "false");
   await apply.click();
   await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(control.getByRole("alert")).toHaveCount(0);
   await expect(summary).toContainText("65 %");
   await expect(page.locator("#actions")).toHaveText(

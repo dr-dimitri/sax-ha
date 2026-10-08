@@ -740,7 +740,7 @@ nur der Umrechnung und ergänzt keine Steuern oder Zuschläge.
 `ElectricityTariffView.vue` gruppiert Tarifkonfiguration und Tageskurve unter
 „Preise & Zeiten“, Aktivierung und Ladebedingungen unter „Netzladung“.
 Der Hauptschalter verwendet weiterhin denselben `tariff/configure`-Aufruf.
-Aktueller Preis und Entladestatus bleiben sichtbar; die Tageskurve ist unter
+Der aktuelle Preis bleibt sichtbar; die Tageskurve ist unter
 „Preisverlauf“ erreichbar.
 `TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise und Monatsauswahl.
 Die SOC-Übersicht stellt „Start nur unter“, „Netzladeziel“ und „Max SOC“
@@ -759,14 +759,17 @@ Die zusätzliche Aufklappfläche „Weitere Einstellungen“ entfällt. Labels,
 Zusammenfassung, Plan und Fehler verwenden durchgängig „Netzladeziel“;
 Verbrauchsplanung nennt die Obergrenze „Maximales Netzladeziel“.
 Die Preisbearbeitung bietet „Übernehmen“ oben und unten; beide Aktionen
-nutzen dieselbe Validierung und Speicherfunktion. „Abbrechen“ bleibt unten.
+nutzen dieselbe Validierung und Speicherfunktion. Rechts daneben steht jeweils „Abbrechen“.
+`EditorActions.vue` hält Übernehmen und Abbrechen in allen Ansichten und Dialogen
+in dieser Reihenfolge nebeneinander, auch mobil. Einzelne Zahlen-/Zeitfelder und
+Zeitfenster setzen beim Abbrechen Entwürfe ohne Schreibaufruf zurück.
 `ChargingNumberFields.vue` hält bestätigte Zahlen und Entwürfe getrennt.
-Der einzige Button „Übernehmen“ (EN: „Apply“) oben in der Kopfzeile speichert
+„Übernehmen“ (EN: „Apply“) in Kopf- und Fußzeile speichert
 geänderte sichtbare Zahlen gemeinsam über `performChargingSettings` und `set_charging_settings`.
 Die SOC-Paarprüfung verwendet den vollständigen Entwurf samt neuer globaler
 Grenze; Backendvalidierung und Softwareübernahme sind atomar. Die Antwort
 wartet nicht auf den Geräte-Lock; der vorhandene Worker verarbeitet Änderungen.
-Fehler lassen den Editor mit erhaltenen Eingaben offen. „Abbrechen“ unten
+Fehler lassen den Editor mit erhaltenen Eingaben offen. „Abbrechen“ rechts daneben
 ruft `ChargingNumberFields.reset()` auf, verwirft auch ausgeblendete
 Zahleneingaben und Clientfehler und schließt ohne Schreibaufruf. Bestätigte
 Ladeweisen und Monate bleiben erhalten. Pending sperrt Übernehmen und
@@ -1869,7 +1872,7 @@ werden protokolliert und bei der nächsten gültigen Auswertung erneut
 versucht; die laufende Steuerung bleibt wirksam. Bei einem Neustart vor
 erfolgreicher Persistenz ist nur der lesbare gespeicherte Stand verfügbar.
 
-**Entladestatus nach Netzladung:** `application/timed_discharge.py` bestimmt
+**Entladesperre nach Netzladung:** `application/timed_discharge.py` bestimmt
 die konkrete UTC-Ablaufzeit des aktiven lokalen Fensters (auch über
 Mitternacht und bei Zeitumstellung). Zwei frische HIGH-Messungen mit
 Netzbezug über 50 W und Batterieladung über 50 W setzen den Nachweis; beide
@@ -1913,28 +1916,11 @@ Leistungsreferenz/Skalierung schreibbar; der validierte SunSpec-Pfad und
 dessen Modus-Rollback bleiben erhalten. Die Regelung kann auf schnelle
 Last-/PV-Änderungen erst beim nächsten Mess-/Steuertakt reagieren.
 
-Das Dashboard zeigt im zeitvariablen Stromtarif den Entladestatus neben dem
-aktuellen Preis. Der Enum-Sensor
-`timed_charge_discharge_status` zeigt „Normalbetrieb“, „Netzladen“ oder „Entladung wg. Netzladen gestoppt“.
-„Normalbetrieb“ beschreibt ausschließlich diesen Mechanismus. Nach einem
-Schreibfehler wird kein erfolgreich gehaltener Zustand behauptet. Der Status
-nennt die betroffene Phase: Steuermodus, Ladeleistung oder Rückkehr zur
-SmartMeter-Nullregelung. Fehlende/ungültige Daten für den Ladeauftrag sowie
-abgelaufene/widerrufene Aufträge sind davon unterscheidbar. Ein fehlgeschlagener
-Rollback hat Vorrang vor dem ursprünglichen Sollwertfehler. Der Coordinator
-hält den Problemcode unabhängig von den Aktivitätsflags, damit äußere
-Aufräumpfade ihn nicht wieder durch „Unbekannt“ ersetzen. Eine vollständig
-quittierte Sollwertsequenz oder Rückkehr zur Nullregelung entfernt den Fehler.
-Bei einem bereits inaktiven Steuerzustand kann auch eine neue echte Modus-0-
-Rückmeldung den alten Fehler entfernen. Die Lesung muss nach dem Fehler begonnen
-haben und noch frisch sein; gecachte Zustände oder Register-ACKs reichen nicht.
-Dieser Anzeigeabgleich löst keine zusätzlichen Geräteschreibvorgänge aus.
-Ohne konkreten Fehler zeigen noch nicht bestätigte Sperren/Freigaben und ein
-ausgefallener SunSpec-HIGH-Read eigene Zustände. Die gemeinsame Publikation
-wertet den Status erneut aus; erfolgreiche Wiederholungen aktualisieren ihn
-auch ohne Einstellungsänderung. `tests/test_timed_discharge_status_problems.py`
-prüft Fehlerphasen und Erholung; Sensor-, WebSocket- und Frontendtests prüfen
-die übersetzten Texte und deren automatische Aktualisierung.
+Der frühere Sensor `timed_charge_discharge_status` und seine Statusberechnung
+sind entfernt. Beim Einrichten entfernt die bestehende Registry-Bereinigung
+auch umbenannte Instanzen dieses Sensors. Die Entladesperre selbst und ihre
+Gerätesteuerung bleiben erhalten; `tests/test_timed_discharge_recovery.py`
+prüft weiterhin fehlgeschlagene Schreibphasen, Rücksetzungen und Wiederholungen.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils

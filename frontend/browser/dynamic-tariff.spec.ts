@@ -350,7 +350,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   );
   await expect(methods).toHaveCount(0);
   await screenshot(page, testInfo, `dynamic-overview-${testInfo.project.name}`);
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(methods).toHaveCount(4);
   await expect(methods.locator("strong")).toHaveText(
     english
@@ -394,7 +394,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(page.locator("#actions")).toHaveText(
     '1: select.select_option {"option":"relative","entity_id":"select.demo_price_charge_strategy"}',
   );
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(settings.locator(".dynamic-charging-methods")).toBeHidden();
   await expect(settings.getByRole("status")).toHaveText(
     english ? "Applying charging method …" : "Ladeweise wird übernommen …",
@@ -403,7 +403,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(summary).toContainText(
     english ? "Use the cheapest hours" : "Günstigste Stunden nutzen",
   );
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(relative).toHaveAttribute("aria-pressed", "true");
   await expect(absolute).toHaveAttribute("aria-pressed", "false");
   await expect(price).toHaveCount(0);
@@ -416,7 +416,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   });
   await hours.fill("6");
   await page.locator("#hold-action").click();
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "4",
   );
@@ -424,7 +424,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(summary).toContainText("4 h");
   await page.locator("#release-action").click();
   await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "6",
   );
@@ -495,7 +495,7 @@ test("dynamic prices keep advanced values and show progress while saving and cha
   const panel = page.locator("sax-power-vue-panel");
   const prices = panel.locator(".electricity-prices");
   const before = prices.locator(".electricity-price-summary");
-  await prices.locator("header > button").click();
+  await prices.locator("header .editor-actions > button:first-child").click();
   const form = prices.locator(".electricity-price-editor");
   const advanced = prices.locator(".electricity-price-advanced");
   const feed = prices.locator('[name="dynamic_feed"]');

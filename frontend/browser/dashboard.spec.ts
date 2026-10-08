@@ -6,7 +6,11 @@ const pageErrors = new WeakMap<Page, string[]>();
 
 async function openTariffMonths(panel: Locator) {
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
+  await panel
+    .locator(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )
+    .click();
   return panel.locator(".tou-charging-settings .month-selection");
 }
 
@@ -379,13 +383,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
       : initial
         ? "Speicher ausschalten?"
         : "Speicher einschalten?";
-    const label = english
-      ? initial
-        ? "Turn off"
-        : "Turn on"
-      : initial
-        ? "Ausschalten"
-        : "Einschalten";
+    const label = english ? "Apply" : "Übernehmen";
     const previousAction =
       index === 0
         ? "Keine Aktion"
@@ -837,7 +835,7 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   const input = number.locator("input");
   await expect(input).toHaveValue("80");
   await input.fill("85");
-  await number.getByRole("button").click();
+  await number.locator('button[type="submit"]').click();
   await expect(number.locator(".entity-control__value")).toContainText("85");
   await expect(page.locator("#actions")).toContainText("1: number.set_value");
   await page.locator("#external").click();
@@ -845,8 +843,8 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await panel.locator("nav a[href$='/stromtarif']").click();
   await page.locator("#tariff-dynamic").click();
   const charging = panel.locator(".electricity-charging");
-  await charging.locator("header > button").click();
-  const apply = charging.locator("header > button");
+  await charging.locator("header .editor-actions > button:first-child").click();
+  const apply = charging.locator("header .editor-actions > button:first-child");
   await expect(apply).toHaveCount(1);
   await expect(charging.locator(".entity-control button")).toHaveCount(0);
   const shared = charging.locator("input[max='100']");
@@ -1003,7 +1001,7 @@ test("tariff months, grid-serving overnight window and guided negative price set
       : "Speicher bei günstigem Strom schonen bis (ct/kWh)",
     exact: true,
   });
-  const apply = charging.locator("header > button");
+  const apply = charging.locator("header .editor-actions > button:first-child");
   await expect(apply).toHaveCount(1);
   await expect(charging.locator(".entity-control button")).toHaveCount(0);
   await price.fill("-12.5");
@@ -1012,7 +1010,7 @@ test("tariff months, grid-serving overnight window and guided negative price set
     '6: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_neutral_price":-12.5}',
   );
   await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
-  await charging.locator("header > button").click();
+  await charging.locator("header .editor-actions > button:first-child").click();
   await expect(price).toHaveValue("-12.5");
 });
 
@@ -1419,7 +1417,9 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   await expect(panel.locator(".tariff-price-chart svg")).toBeVisible();
   await expect(panel.locator(".electricity-master input")).toHaveCount(1);
   await page.setViewportSize({ width: 320, height: 844 });
-  const editButton = panel.locator(".electricity-charging header > button");
+  const editButton = panel.locator(
+    ".electricity-charging header .editor-actions > button:first-child",
+  );
   expect((await editButton.boundingBox())?.height).toBeLessThanOrEqual(48);
   const price = panel.locator(".tariff-plan");
   await expect(price.locator("form")).toHaveCount(0);
@@ -1450,6 +1450,7 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   await price.locator('input[name="base_price"]').fill("99");
   await price
     .getByRole("button", { name: en ? "Cancel" : "Abbrechen", exact: true })
+    .last()
     .click();
   await expect(price).toContainText(en ? "34.25" : "34,25");
   expect(

@@ -103,7 +103,6 @@ async def timed_hold(
         )
         await coordinator._async_enforce_grid_charge(coordinator.data)
         assert coordinator._sun_charge_timed_discharge is True
-        assert coordinator._timed_charge_discharge_status == "discharge_blocked"
         client.write_register.reset_mock()
         try:
             yield coordinator, client
@@ -122,7 +121,6 @@ async def _enable_price(
     assert coordinator._timed_discharge_state is None
     assert await coordinator._timed_discharge_store.async_load() is None
     assert coordinator._sun_charge_timed_discharge is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
 
 
 @pytest.mark.parametrize("strategy", STRATEGIES)
@@ -270,7 +268,6 @@ async def test_disabling_timed_charge_releases_existing_hold_immediately(
     assert coordinator._timed_discharge_state is None
     assert await coordinator._timed_discharge_store.async_load() is None
     assert coordinator.sun_charge_active is False
-    assert coordinator.data["timed_charge_discharge_status"] == "normal"
     client.write_register.assert_awaited_once_with(
         address=REG_SUN_IC_CONTROL_MODE,
         value=SUN_IC_CONTROL_MODE_SMARTMETER,

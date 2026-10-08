@@ -261,7 +261,9 @@ async function click(root: Element, label: string) {
 }
 async function applyCharging(root: Element, _language = "de") {
   root
-    .querySelector<HTMLButtonElement>(".electricity-charging header > button")!
+    .querySelector<HTMLButtonElement>(
+      ".electricity-charging header .editor-actions > button:first-child",
+    )!
     .click();
   await flush();
 }
@@ -314,75 +316,15 @@ afterEach(() => {
 });
 describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuration", () => {
   it.each(["de", "en"])(
-    "updates translated discharge diagnostics from HA without changing settings in %s",
+    "does not show the retired discharge status in %s",
     async (language) => {
       const fixture = await mount({ language });
-      const english = language === "en";
-      const feedback = fixture.root.querySelector(
-        ".electricity-charge-status",
-      )!;
-      const value = () =>
-        feedback.querySelector(".entity-value__state")?.textContent;
-      expect(feedback.querySelector(".entity-value__name")?.textContent).toBe(
-        english ? "Discharge status" : "Entladestatus",
+      expect(
+        fixture.root.querySelector(".electricity-charge-status"),
+      ).toBeNull();
+      expect(fixture.root.textContent).not.toContain(
+        language === "de" ? "Entladestatus" : "Discharge status",
       );
-      await fixture.rename(
-        "timed_charge_discharge_status",
-        "sensor.custom_discharge_status",
-        "unknown",
-      );
-      expect(value()).toBe(english ? "Unknown" : "Unbekannt");
-      for (const [state, de, en] of [
-        [
-          "control_mode_failed",
-          "Steuermodus konnte nicht gesetzt werden",
-          "Control mode could not be set",
-        ],
-        [
-          "setpoint_failed",
-          "Ladeleistung konnte nicht gesetzt werden",
-          "Charging power could not be set",
-        ],
-        [
-          "reset_failed",
-          "SmartMeter-Nullregelung konnte nicht aktiviert werden",
-          "Smart meter zero regulation could not be enabled",
-        ],
-        [
-          "control_failed",
-          "Ladefreigabe fehlt oder wurde widerrufen",
-          "Charging permission is missing or was revoked",
-        ],
-        [
-          "control_data_missing",
-          "Gerätedaten für Ladeauftrag fehlen oder sind ungültig",
-          "Device data for charging is missing or invalid",
-        ],
-        [
-          "device_feedback_missing",
-          "Geräterückmeldung fehlt",
-          "Device feedback missing",
-        ],
-        [
-          "discharge_hold_unconfirmed",
-          "Entladesperre nicht bestätigt",
-          "Discharge block not confirmed",
-        ],
-        [
-          "release_unconfirmed",
-          "Entladefreigabe nicht bestätigt",
-          "Discharge release not confirmed",
-        ],
-      ] as const) {
-        await fixture.update("timed_charge_discharge_status", state);
-        expect(value()).toBe(english ? en : de);
-        await fixture.update("timed_charge_discharge_status", "normal");
-        expect(value()).toBe(english ? "Normal operation" : "Normalbetrieb");
-        await fixture.update("timed_charge_discharge_status", "grid_charging");
-        expect(value()).toBe(english ? "Grid charging" : "Netzladen");
-      }
-      expect(writes(fixture)).toHaveLength(0);
-      expect(fixture.callService).not.toHaveBeenCalled();
     },
   );
   it.each(["time_of_use", "dynamic"])(
@@ -402,9 +344,9 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       expect(
         charging.querySelector(".electricity-master input"),
       ).not.toBeNull();
-      expect(
-        charging.querySelector(".electricity-charge-status"),
-      ).not.toBeNull();
+      expect(!!charging.querySelector(".electricity-charge-status")).toBe(
+        type === "dynamic",
+      );
       expect(charging.querySelector(".electricity-plan")).not.toBeNull();
       await click(prices, "Bearbeiten");
       expect(
@@ -851,7 +793,9 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       ];
       const confirmed = inputs.map((input) => input.value);
       expect(
-        section.querySelector("header > button")?.textContent?.trim(),
+        section
+          .querySelector("header .editor-actions > button:first-child")
+          ?.textContent?.trim(),
       ).toBe(language === "de" ? "Übernehmen" : "Apply");
       for (const input of inputs) {
         input.value = "";
@@ -863,7 +807,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       await cancelCharging(section, language);
       expect(section.querySelector(".electricity-charging-editor")).toBeNull();
       expect(document.activeElement).toBe(
-        section.querySelector("header > button"),
+        section.querySelector("header .editor-actions > button:first-child"),
       );
       expect(fixture.callService).not.toHaveBeenCalled();
       await click(section, language === "de" ? "Bearbeiten" : "Edit");
@@ -1576,17 +1520,18 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       expect(
         controls.every((control) => !control.querySelector("button")),
       ).toBe(true);
-      expect(
-        section.querySelectorAll(".electricity-actions button"),
-      ).toHaveLength(1);
-      expect(
-        section
-          .querySelector(".electricity-actions button")
-          ?.textContent?.trim(),
-      ).toBe(language === "de" ? "Abbrechen" : "Cancel");
-      expect(
-        section.querySelector("header > button")?.textContent?.trim(),
-      ).toBe(language === "de" ? "Übernehmen" : "Apply");
+      for (const selector of [
+        "header .editor-actions",
+        ".electricity-actions",
+      ]) {
+        expect(
+          [...section.querySelectorAll(`${selector} button`)].map((button) =>
+            button.textContent?.trim(),
+          ),
+        ).toEqual(
+          language === "de" ? ["Übernehmen", "Abbrechen"] : ["Apply", "Cancel"],
+        );
+      }
       for (const [label, value] of [
         [
           language === "de" ? "Netzladeziel (%)" : "Grid charge target (%)",

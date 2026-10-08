@@ -13,7 +13,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     const prices = panel.locator(
       type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
     );
-    const top = prices.locator("header > button");
+    const top = prices.locator("header .editor-actions > button:first-child");
     await top.click();
     const form = prices.locator("form");
     const footer = form.locator('button[type="submit"]');
@@ -308,6 +308,7 @@ test("tariff editor saves cents explicitly and remains compact after editing on 
       name: english ? "Cancel" : "Abbrechen",
       exact: true,
     })
+    .last()
     .click();
   await expect(edit).toBeFocused();
   await expect(tariff).not.toContainText("99,00");
@@ -477,7 +478,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     const prices = panel.locator(
       type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
     );
-    await prices.locator("header > button").click();
+    await prices.locator("header .editor-actions > button:first-child").click();
     const value = panel.locator(".electricity-pv-summary dd");
     await expect(value).toHaveText(english ? "12.4 kWh" : "12,4 kWh");
     await expect(value).not.toContainText("PV-Ertragsprognose");
@@ -486,6 +487,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
         name: english ? "Cancel" : "Abbrechen",
         exact: true,
       })
+      .last()
       .click();
     await page.evaluate(() => {
       const panel = document.querySelector(

@@ -233,9 +233,6 @@ async def test_clean_reload_flushes_failed_latest_protection_state(
     replacement.data["soc"] = 60
     try:
         await _evaluate(replacement)
-        assert replacement._timed_charge_discharge_status == (
-            "normal" if released else "discharge_blocked"
-        )
         assert replacement.sun_charge_active is not released
     finally:
         await replacement.async_shutdown()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditorActions from "./EditorActions.vue";
 import { normalizeTime, timeSeconds } from "../time";
 import {
   computed,
@@ -711,16 +712,26 @@ watch(tariffVisible, (visible) => {
   >
     <header class="tariff-plan__header">
       <h2 :id="`${id}-tariff`">{{ text.tariff }}</h2>
-      <button
-        ref="editButton"
-        type="button"
-        :disabled="pending || !connectionAvailable || (editing && conflict)"
-        :aria-expanded="editing"
-        :aria-controls="`${id}-editor`"
-        @click="editing ? save() : openEditor()"
-      >
-        {{ pending ? text[pendingAction] : editing ? text.save : text.edit }}
-      </button>
+      <EditorActions>
+        <button
+          ref="editButton"
+          type="button"
+          :disabled="pending || !connectionAvailable || (editing && conflict)"
+          :aria-expanded="editing"
+          :aria-controls="`${id}-editor`"
+          @click="editing ? save() : openEditor()"
+        >
+          {{ pending ? text[pendingAction] : editing ? text.save : text.edit }}
+        </button>
+        <button
+          v-if="editing"
+          type="button"
+          :disabled="pending"
+          @click="cancel"
+        >
+          {{ text.cancel }}
+        </button>
+      </EditorActions>
     </header>
     <p v-if="pending" role="status">
       {{ text[pendingAction] }}
@@ -946,16 +957,18 @@ watch(tariffVisible, (visible) => {
         </div>
       </fieldset>
       <div class="tariff-plan__actions">
-        <button
-          type="submit"
-          class="tariff-plan__save"
-          :disabled="pending || !connectionAvailable || conflict"
+        <EditorActions>
+          <button
+            type="submit"
+            class="tariff-plan__save"
+            :disabled="pending || !connectionAvailable || conflict"
+          >
+            {{ pending ? text[pendingAction] : text.save }}
+          </button>
+          <button type="button" :disabled="pending" @click="cancel">
+            {{ text.cancel }}
+          </button></EditorActions
         >
-          {{ pending ? text[pendingAction] : text.save }}
-        </button>
-        <button type="button" :disabled="pending" @click="cancel">
-          {{ text.cancel }}
-        </button>
         <button
           v-if="conflict"
           type="button"

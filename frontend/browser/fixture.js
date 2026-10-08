@@ -145,7 +145,6 @@ function example({ domain, key, entity_id }) {
     bridge_charge_enabled: bridgePlan ? "on" : "off",
     price_charge_enabled: "off",
     timed_charge_min_soc: "20",
-    timed_charge_discharge_status: "normal",
     grid_serving_forecast: "24.3",
     charging_pv_forecast: "12.4",
     grid_serving_pause_status: "Inaktiv",

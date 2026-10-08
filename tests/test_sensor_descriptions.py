@@ -24,7 +24,6 @@ from custom_components.sax_power.const import (
     READ_BLOCK_EXT_LOW2_COUNT,
     READ_BLOCK_EXT_START,
     REG_SUN_IC_POWER_SETPOINT_SF,
-    TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS,
 )
 from custom_components.sax_power.domain.registers import to_unsigned16
 from custom_components.sax_power.domain.sunspec import (
@@ -226,75 +225,21 @@ def test_core_entities_have_no_entity_category() -> None:
         "price_charge_next_start",
         "grid_serving_forecast",
         "grid_serving_pause_status",
-        "timed_charge_discharge_status",
     )
     for key in core_keys:
         description = _description_by_key(key)
         assert description.entity_category is None, key
 
 
-@pytest.mark.parametrize("status", [*TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS, None])
-def test_timed_charge_discharge_status_reports_coordinator_state(
-    status: str | None,
-) -> None:
-    """REQ-TIMED-SOC-CHARGE: Der Status zeigt Zustand oder konkretes Problem."""
-    description = _description_by_key("timed_charge_discharge_status")
-    coordinator = MagicMock()
-    coordinator.data = {
-        "timed_charge_discharge_status": status,
-        "timed_charge_active": True,
-        "price_charge_active": True,
-    }
-    entity = SaxPowerSensor(coordinator, "test_entry_id", description)
-
-    assert entity.device_class == SensorDeviceClass.ENUM
-    assert entity.options == list(TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS)
-    assert entity.unique_id == "test_entry_id_timed_charge_discharge_status"
-    assert entity.native_value == status
-    assert description.value_fn({"timed_charge_active": True}) is None
-    coordinator.data = None
-    assert entity.native_value is None
-
-
-def test_timed_charge_discharge_status_translations_cover_all_states() -> None:
-    """REQ-TIMED-SOC-CHARGE: Alle Zustände besitzen lesbare Übersetzungen."""
-    expected_states = {
-        "normal": "Normalbetrieb",
-        "grid_charging": "Netzladen",
-        "discharge_blocked": "Entladung wg. Netzladen gestoppt",
-        "control_mode_failed": "Steuermodus konnte nicht gesetzt werden",
-        "setpoint_failed": "Ladeleistung konnte nicht gesetzt werden",
-        "reset_failed": "SmartMeter-Nullregelung konnte nicht aktiviert werden",
-        "control_failed": "Ladefreigabe fehlt oder wurde widerrufen",
-        "control_data_missing": "Gerätedaten für Ladeauftrag fehlen oder sind ungültig",
-        "device_feedback_missing": "Geräterückmeldung fehlt",
-        "discharge_hold_unconfirmed": "Entladesperre nicht bestätigt",
-        "release_unconfirmed": "Entladefreigabe nicht bestätigt",
-    }
-    assert tuple(expected_states) == TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS
-    for filename in ("strings.json", "translations/de.json"):
-        translated = _load(filename)["entity"]["sensor"][
-            "timed_charge_discharge_status"
-        ]
-        assert translated["name"] == "Entladestatus"
-        assert translated["state"] == expected_states
-    english = _load("translations/en.json")["entity"]["sensor"][
-        "timed_charge_discharge_status"
-    ]
-    assert english["name"] == "Discharge status"
-    assert english["state"] == {
-        "normal": "Normal operation",
-        "grid_charging": "Grid charging",
-        "discharge_blocked": "Discharge stopped due to grid charging",
-        "control_mode_failed": "Control mode could not be set",
-        "setpoint_failed": "Charging power could not be set",
-        "reset_failed": "Smart meter zero regulation could not be enabled",
-        "control_failed": "Charging permission is missing or was revoked",
-        "control_data_missing": "Device data for charging is missing or invalid",
-        "device_feedback_missing": "Device feedback missing",
-        "discharge_hold_unconfirmed": "Discharge block not confirmed",
-        "release_unconfirmed": "Discharge release not confirmed",
-    }
+def test_removed_discharge_status_is_not_exposed() -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: the retired sensor has no replacement status."""
+    assert all(
+        item.key != "timed_charge_discharge_status" for item in SENSOR_DESCRIPTIONS
+    )
+    for filename in ("strings.json", "translations/de.json", "translations/en.json"):
+        assert (
+            "timed_charge_discharge_status" not in _load(filename)["entity"]["sensor"]
+        )
 
 
 def test_charge_discharge_power_preserves_storage_power_sign() -> None:

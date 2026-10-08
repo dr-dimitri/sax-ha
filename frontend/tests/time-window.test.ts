@@ -227,6 +227,41 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("cancels both time drafts and validation errors without a write; pending blocks cancellation", async () => {
+  const { root, service } = await mount({ start: "22:00:00", end: "06:00:00" });
+  const [start, end] = inputs(root);
+  const cancel = root.querySelector<HTMLButtonElement>(
+    ".time-window-control__cancel",
+  )!;
+  start.value = "12";
+  start.dispatchEvent(new Event("input", { bubbles: true }));
+  apply(root).click();
+  await flush();
+  expect(root.querySelector('[role="alert"]')).not.toBeNull();
+  cancel.click();
+  await flush();
+  expect(inputs(root).map((input) => input.value)).toEqual(["22:00", "06:00"]);
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  expect(service).not.toHaveBeenCalled();
+  start.value = "23:00";
+  start.dispatchEvent(new Event("input", { bubbles: true }));
+  end.value = "07:00";
+  end.dispatchEvent(new Event("input", { bubbles: true }));
+  const request = deferred();
+  service.mockReturnValueOnce(request.promise);
+  apply(root).click();
+  await flush();
+  expect(cancel.disabled).toBe(true);
+  cancel.click();
+  expect(start.value).toBe("23:00");
+  request.resolve(false);
+  await flush();
+  cancel.click();
+  await flush();
+  expect(inputs(root).map((input) => input.value)).toEqual(["22:00", "06:00"]);
+  expect(service).toHaveBeenCalledTimes(1);
+});
+
 describe("paired time window control", () => {
   // REQ-VUE-CHARGING / #251: native macOS time segments must not erase drafts.
   it.each<Kind>(["timed_charge", "grid_serving"])(

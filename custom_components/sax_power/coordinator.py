@@ -186,6 +186,7 @@ from .infrastructure.economics_store import (
 from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.pv_bridge_forecast import PvBridgeForecast
+from .infrastructure.pv_forecast_reading import PvForecastReading
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .infrastructure.timed_charge_store import TimedChargeStateStore
 from .infrastructure.timed_discharge_store import TimedDischargeStateStore
@@ -559,6 +560,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._price_charge_active = False
         self._price_charge_status = PRICE_STATUS_OFF
         self.price_planner = SaxPricePlanner(hass, self)
+        self.pv_forecast_reading = PvForecastReading(
+            hass,
+            lambda: self.price_planner.pv_forecast_entity_id,
+            self.async_update_listeners,
+        )
         self._pv_bridge_forecast = PvBridgeForecast(
             hass, lambda: self.price_planner.pv_forecast_entity_id
         )
@@ -4322,6 +4328,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._tariff_source_revision += 1
             self.reconcile_charge_time_source()
             self.price_planner.async_setup()
+            self.pv_forecast_reading.async_setup()
             self.tariff_provider.async_setup()
             self.notify_tariff_revision()
         elif previous_enabled != (
@@ -6583,6 +6590,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # während der folgenden Store-Flushes keine neuen Entscheidungen
         # oder Schreibvorgänge mehr anstoßen (REQ-SETUP-ROLLBACK).
         await self.price_planner.async_shutdown()
+        await self.pv_forecast_reading.async_shutdown()
         self.tariff_provider.async_shutdown()
         # REQ-GRID-SERVING-CHARGE: Eine begonnene Modus-/Sollwertsequenz nie
         # abbrechen; das Shutdown-Gate sperrt weitere Konfigurationsentscheidungen.

@@ -357,6 +357,7 @@ async def test_integration_setup_and_unload_manage_optional_panel(
     coordinator = MagicMock(spec=SaxPowerCoordinator)
     coordinator.price_planner = MagicMock()
     coordinator.price_planner.async_load_cycle_state = AsyncMock()
+    coordinator.pv_forecast_reading = MagicMock()
     coordinator.tariff_provider = MagicMock()
     client = MagicMock()
     client.connect = AsyncMock(return_value=True)
@@ -385,6 +386,7 @@ async def test_integration_setup_and_unload_manage_optional_panel(
         )
         unload_platforms.return_value = False
         assert not await async_unload_entry(hass, vue_entry)
+        coordinator.pv_forecast_reading.async_setup.assert_called_once()
         coordinator.async_shutdown.assert_not_awaited()
         assert (
             frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)

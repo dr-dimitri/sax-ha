@@ -128,6 +128,9 @@
       "grid_serving_active_text": {
         "name": "Grid-serving charge active"
       },
+      "charging_pv_forecast": {
+        "name": "Grid charging solar forecast"
+      },
       "grid_serving_forecast": {
         "name": "PV forecast"
       },

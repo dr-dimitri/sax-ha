@@ -2140,3 +2140,62 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
     expect(fixture.root.querySelector(".electricity-planned-pv")).toBeNull();
   });
 });
+
+describe("PV forecast content in the grid charging summary", () => {
+  for (const type of ["time_of_use", "dynamic"] as const) {
+    for (const language of ["de", "en"]) {
+      it(`${type} shows the cached value and unit in ${language}, including zero and HA updates`, async () => {
+        const fixture = await mount({ type, language });
+        fixture.stored.profiles![type].pv_sensor = "sensor.pv_forecast";
+        fixture.hass.value = {
+          ...fixture.hass.value,
+          states: {
+            ...fixture.hass.value.states,
+            "sensor.pv_forecast": {
+              entity_id: "sensor.pv_forecast",
+              state: "unavailable",
+              attributes: {
+                friendly_name: "PV-Ertragsprognose Prognose heute",
+                unit_of_measurement: "kWh",
+              },
+            },
+          },
+        };
+        await fixture.dashboard.loadTariff();
+        await flush();
+        const summary = () =>
+          fixture.root.querySelector(".electricity-pv-summary dd")!.textContent;
+        expect(summary()).toBe(language === "de" ? "12,4 kWh" : "12.4 kWh");
+        expect(summary()).not.toContain("PV-Ertragsprognose");
+        await fixture.update("charging_pv_forecast", "0");
+        expect(summary()).toBe("0 kWh");
+        await fixture.update("charging_pv_forecast", "14.8");
+        expect(summary()).toBe(language === "de" ? "14,8 kWh" : "14.8 kWh");
+        await fixture.rename(
+          "charging_pv_forecast",
+          "sensor.renamed_pv_reading",
+          "9.1",
+        );
+        expect(summary()).toBe(language === "de" ? "9,1 kWh" : "9.1 kWh");
+        expect(fixture.callService).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  it("does not show a previous source's value and distinguishes an unconfigured source", async () => {
+    const fixture = await mount();
+    const summary = () =>
+      fixture.root.querySelector(".electricity-pv-summary dd")!.textContent;
+    expect(summary()).toBe("Nicht eingerichtet");
+    fixture.stored.profiles!.time_of_use.pv_sensor = "sensor.pv_forecast";
+    await fixture.dashboard.loadTariff();
+    await fixture.update("charging_pv_forecast", "unavailable");
+    expect(summary()).toBe("Nicht verfügbar");
+    await fixture.update("charging_pv_forecast", "12.4");
+    expect(summary()).toBe("12,4 kWh");
+    fixture.stored.profiles!.time_of_use.pv_sensor = "sensor.another_plant";
+    await fixture.dashboard.loadTariff();
+    await flush();
+    expect(summary()).toBe("Nicht verfügbar");
+  });
+});

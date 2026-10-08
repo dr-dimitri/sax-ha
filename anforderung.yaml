@@ -3423,7 +3423,7 @@ requirement_vue_electricity_tariff:
     Tarif und der dynamische Tarif verwenden zwei zusammengehörige Karten:
     „Preise & Zeiten“ enthält Tarifkonfiguration, aktuellen Preis und
     aufklappbaren Tagespreisverlauf; „Netzladung“ enthält Automatikschalter,
-    Ladeweise, bestätigte Zielwerte, PV-Quelle, Lade-/Entladestatus und
+    Ladeweise, bestätigte Zielwerte, PV-Prognosewert, Lade-/Entladestatus und
     aufklappbaren Ladeplan samt Prognose. Die Tarifwahl steht separat darüber.
     Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
     untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
@@ -3438,6 +3438,22 @@ requirement_vue_electricity_tariff:
     Bedienelement sichtbar, auch nach dem Schließen der Bearbeitung.
     Aktueller Preis und Status bleiben sichtbar; Tagespreiskurve und Prognose
     sind anfangs eingeklappt.
+
+    Die PV-Zeile zeigt den Zahlenwert der gewählten Prognosequelle mit
+    Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
+    charging_pv_forecast liest die Quelle beim Einrichten und nach einem
+    Quellenwechsel und fordert danach alle zehn Minuten über Home Assistant
+    eine Aktualisierung an, auch bei geschlossenem Dashboard. Gültige,
+    nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
+    Bei Lesefehlern, fehlenden, unbekannten, nicht verfügbaren oder ungültigen
+    Quellwerten bleibt der letzte gültige Wert verfügbar, auch bei einem
+    Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint Nicht verfügbar;
+    ohne ausgewählte Quelle Nicht eingerichtet. Ein Quellenwechsel verwirft
+    den alten Anzeigewert und verspätete Antworten der vorherigen Quelle.
+    source_entity_id und last_successful_update machen Herkunft und Zeitpunkt
+    nachvollziehbar. Diese Anzeige ersetzt keine Sicherheitsprüfung oder
+    Aktualitätsprüfung der Ladeplanung; deren ungültige Prognosen bleiben
+    ein Ausschlussgrund für die betroffene Ladefreigabe.
 
     Die separaten Tabs Zeitvariabler Tarif und Dynamischer Tarif entfallen;
     ihre alten Links werden ohne zusätzliche History-Einträge nach stromtarif

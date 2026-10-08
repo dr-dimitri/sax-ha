@@ -299,6 +299,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # entweder aus dem Store (Regelfall) oder aus dem einmaligen
         # RestoreEntity-Migrationspfad der Plattformen (select.py/number.py).
         coordinator.price_planner.async_setup()
+        coordinator.pv_forecast_reading.async_setup()
         # Wirtschaftlichkeitsauswertung (REQ-ECONOMICS-TARIFFS): registriert
         # den Zustandsbeobachter des dynamischen Preis-Sensors. Ohne
         # konfigurierten Tarif passiert hier nichts.

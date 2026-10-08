@@ -423,14 +423,16 @@ const dynamicFeed = computed(() =>
     2,
   ),
 );
-const pvSource = computed(() => {
+const pvForecast = computed(() => {
   const source =
     active.value === "dynamic"
       ? profile.value?.profiles?.dynamic.pv_sensor
       : profile.value?.profiles?.time_of_use.pv_sensor;
-  return source
-    ? (props.hass?.states[source]?.attributes.friendly_name ?? source)
-    : text.value.noPv;
+  if (!source) return text.value.noPv;
+  const entity = dashboard?.entity("sensor", "charging_pv_forecast");
+  return entity?.state?.attributes.source_entity_id === source
+    ? entity.displayValue
+    : text.value.unavailable;
 });
 function showPriceError(field: PriceErrorField, message: string) {
   error.value = message;
@@ -1236,7 +1238,7 @@ async function applyCharging(): Promise<void> {
         >
           <div>
             <dt>{{ text.pvSummary }}</dt>
-            <dd>{{ pvSource }}</dd>
+            <dd>{{ pvForecast }}</dd>
           </div>
         </dl>
         <div class="electricity-charge-status">

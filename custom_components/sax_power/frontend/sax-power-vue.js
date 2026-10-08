@@ -6617,7 +6617,9 @@ var Vl = ["aria-busy"], Hl = {
 			return e ? t.hass?.states[e]?.attributes.friendly_name ?? e : i.value.unset;
 		}), _e = Z(() => ro(o.value?.profiles?.dynamic.feed_in_price_ct_kwh, t.hass, 2)), ve = Z(() => {
 			let e = s.value === "dynamic" ? o.value?.profiles?.dynamic.pv_sensor : o.value?.profiles?.time_of_use.pv_sensor;
-			return e ? t.hass?.states[e]?.attributes.friendly_name ?? e : i.value.noPv;
+			if (!e) return i.value.noPv;
+			let t = n?.entity("sensor", "charging_pv_forecast");
+			return t?.state?.attributes.source_entity_id === e ? t.displayValue : i.value.unavailable;
 		});
 		function ye(e, t) {
 			_.value = t, O.value && (y.value = e, mn(() => {

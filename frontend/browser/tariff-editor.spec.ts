@@ -429,3 +429,78 @@ test("active consumption plan keeps the tariff draft after a required PV source 
   ).toBe("on");
   expect(errors).toEqual([]);
 });
+
+for (const type of ["time_of_use", "dynamic"] as const) {
+  test(`${type} PV summary shows the cached energy rather than the source name`, async ({
+    page,
+  }, testInfo) => {
+    const english = testInfo.project.name.endsWith("en");
+    await page.goto("/sax-power-vue/stromtarif");
+    if (english) await page.locator("#language").click();
+    if (type === "dynamic") await page.locator("#tariff-dynamic").click();
+    await page.evaluate((type) => {
+      const panel = document.querySelector(
+        "sax-power-vue-panel",
+      ) as HTMLElement & { hass: HomeAssistant };
+      const original = panel.hass.callWS!;
+      const source = "sensor.pv_forecast";
+      panel.hass = {
+        ...panel.hass,
+        states: {
+          ...panel.hass.states,
+          [source]: {
+            entity_id: source,
+            state: "unavailable",
+            attributes: {
+              friendly_name: "PV-Ertragsprognose Prognose heute",
+              unit_of_measurement: "kWh",
+            },
+          },
+        },
+        callWS: async <T>(
+          request: Readonly<Record<string, unknown>>,
+        ): Promise<T> => {
+          const result = await original<T>(request);
+          if (request.type !== "sax_power/dashboard/tariff/get") return result;
+          const profile = result as TariffProfile;
+          return {
+            ...profile,
+            profiles: {
+              ...profile.profiles,
+              [type]: { ...profile.profiles![type], pv_sensor: source },
+            },
+          } as T;
+        },
+      };
+    }, type);
+    const panel = page.locator("sax-power-vue-panel");
+    const prices = panel.locator(
+      type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
+    );
+    await prices.locator("header > button").click();
+    const value = panel.locator(".electricity-pv-summary dd");
+    await expect(value).toHaveText(english ? "12.4 kWh" : "12,4 kWh");
+    await expect(value).not.toContainText("PV-Ertragsprognose");
+    await prices
+      .getByRole("button", {
+        name: english ? "Cancel" : "Abbrechen",
+        exact: true,
+      })
+      .click();
+    await page.evaluate(() => {
+      const panel = document.querySelector(
+        "sax-power-vue-panel",
+      ) as HTMLElement & { hass: HomeAssistant };
+      const id = "sensor.demo_charging_pv_forecast";
+      panel.hass = {
+        ...panel.hass,
+        states: {
+          ...panel.hass.states,
+          [id]: { ...panel.hass.states[id], state: "0" },
+        },
+      };
+    });
+    await expect(value).toHaveText("0 kWh");
+    await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+  });
+}

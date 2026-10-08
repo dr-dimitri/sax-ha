@@ -128,6 +128,9 @@
       "grid_serving_active_text": {
         "name": "Netzdienliches Laden aktiv"
       },
+      "charging_pv_forecast": {
+        "name": "PV-Prognose Netzladung"
+      },
       "grid_serving_forecast": {
         "name": "PV-Prognose"
       },

@@ -378,13 +378,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(page.locator("#actions")).toHaveText(
     '1: switch.turn_on {"entity_id":"switch.demo_bridge_charge_enabled"}',
   );
-  await charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button", {
-      name: english ? "Apply" : "Übernehmen",
-      exact: true,
-    })
-    .click();
+  await charging.locator("header > button").click();
   await expect(methods).toBeHidden();
   await expect(summary).toContainText(
     english ? "Fixed grid charge target" : "Festes Netzladeziel",
@@ -454,7 +448,9 @@ test("charge target keeps its draft and confirmed value through delayed failure,
       exact: true,
     }),
   });
-  const apply = control.getByRole("button");
+  const apply = charging
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button");
   await target.fill("65");
   await page.locator("#hold-action").click();
   await page.locator("#failure").click();
@@ -465,13 +461,7 @@ test("charge target keeps its draft and confirmed value through delayed failure,
   await expect(control.getByRole("status")).toBeVisible();
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(summary).toContainText("80 %");
-  await charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button", {
-      name: english ? "Apply" : "Übernehmen",
-      exact: true,
-    })
-    .click();
+  await charging.locator("header > button").click();
   await expect(charging.getByRole("status")).toBeVisible();
   await page.locator("#release-action").click();
   await expect(charging.getByRole("alert")).toBeVisible();
@@ -481,10 +471,12 @@ test("charge target keeps its draft and confirmed value through delayed failure,
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(control).toHaveAttribute("aria-busy", "false");
   await apply.click();
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header > button").click();
   await expect(control.getByRole("alert")).toHaveCount(0);
   await expect(summary).toContainText("65 %");
   await expect(page.locator("#actions")).toHaveText(
-    '2: number.set_value {"value":65,"entity_id":"number.demo_timed_charge_max_soc"}',
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","timed_charge_max_soc":65}',
   );
   await expect(panel.locator(".electricity-master input")).not.toBeChecked();
 });

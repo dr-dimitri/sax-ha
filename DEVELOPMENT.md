@@ -748,12 +748,18 @@ sind direkt auswählbar. Die sonstigen Monatsansichten behalten ihre Aufklappfun
 Die zusätzliche Aufklappfläche „Weitere Einstellungen“ entfällt. Labels,
 Zusammenfassung, Plan und Fehler verwenden durchgängig „Netzladeziel“;
 Verbrauchsplanung nennt die Obergrenze „Maximales Netzladeziel“.
-Zahlen verwenden weiterhin `EntityControl`; dessen Entwürfe bleiben durch
-`v-show` beim Einklappen erhalten. Der abschließende Button „Übernehmen“
-(EN: „Apply“) klappt nur zu. Fehler und Pending
-bleiben auch bei geschlossenem Editor sichtbar. Die spezielle HA-Service-
-Fehlerübersetzung in `ha.ts` berücksichtigt nur passende SAX-Fehlerschlüssel
-für den Verbrauchsplanungsschalter. Komponenten- und Browsertests stehen in
+`ChargingNumberFields.vue` hält bestätigte Zahlen und Entwürfe getrennt.
+Der einzige Button „Übernehmen“ (EN: „Apply“) speichert geänderte sichtbare
+Zahlen gemeinsam über `performChargingSettings` und `set_charging_settings`.
+Die SOC-Paarprüfung verwendet den vollständigen Entwurf samt neuer globaler
+Grenze; Backendvalidierung und Softwareübernahme sind atomar. Die Antwort
+wartet nicht auf den Geräte-Lock; der vorhandene Worker verarbeitet Änderungen.
+Fehler lassen den Editor mit erhaltenen Eingaben offen. „Schließen“ und
+`v-show` erhalten Entwürfe ohne Speichern. Pending sperrt Doppelaufrufe sofort;
+bestätigte Zahlen werden ausschließlich aus HA-Zuständen angezeigt.
+Fehler und Pending bleiben auch bei geschlossenem Editor sichtbar. Die
+HA-Service-Fehlerübersetzung in `ha.ts` berücksichtigt passende SAX-Fehlerschlüssel
+für Verbrauchsplanung und SOC-/Bereichsfehler. Komponenten- und Browsertests stehen in
 `time-of-use-charging.test.ts` und `time-of-use-usability.spec.ts`.
 Globaler Max-SOC und zeitvariables Ladeziel bleiben unterschiedliche Grenzen.
 Ein kurzer Hinweis nennt die bestehende Kalibrierungsausnahme bis 100 %.

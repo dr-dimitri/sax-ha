@@ -35,8 +35,21 @@ async function priceControls(page: Page, english: boolean) {
     const form = settings.locator(".entity-control").filter({
       has: page.getByRole("spinbutton", { name: label, exact: true }),
     });
-    return { key, input, form, apply: form.getByRole("button") };
+    return {
+      key,
+      input,
+      form,
+      apply: panel
+        .locator(".electricity-charging-editor > .electricity-actions")
+        .getByRole("button"),
+    };
   });
+}
+
+async function reopenCharging(page: Page) {
+  const charging = page.locator("sax-power-vue-panel .electricity-charging");
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header > button").click();
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -59,15 +72,16 @@ test("typed negative and decimal prices reach HA unchanged in both price control
   const actions = page.locator("#actions");
   let writes = 0;
   for (const { key, input, apply } of controls) {
-    for (const value of ["-5", "0.5", "12.5", "-0.5"]) {
+    for (const value of ["-4.5", "-5", "0.5", "12.5", "-0.5"]) {
       const before = await actions.innerText();
       await typeNumber(input, value);
       await expect(input).toHaveValue(value);
       await expect(actions).toHaveText(before);
       await apply.click();
       await expect(actions).toHaveText(
-        `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`,
+        `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`,
       );
+      await reopenCharging(page);
       await expect(input).toBeEnabled();
       await expect(input).toHaveValue(value);
     }
@@ -117,8 +131,9 @@ test("cursor corrections and replacing selections preserve other digits and sign
     await expect(input).toHaveValue("-2.7");
     await apply.click();
     await expect(page.locator("#actions")).toHaveText(
-      `${index + 1}: number.set_value ${JSON.stringify({ value: -2.7, entity_id: `number.demo_${key}` })}`,
+      `${index + 1}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: -2.7 })}`,
     );
+    await reopenCharging(page);
     await expect(input).toBeEnabled();
     await expect(input).toHaveValue("-2.7");
   }
@@ -151,6 +166,7 @@ test("empty, incomplete, out-of-range and off-step prices show a field error wit
         await expect(page.locator("#actions")).toHaveText("Keine Aktion");
       }
     }
+    await typeNumber(input, "-5");
   }
 });
 
@@ -173,7 +189,7 @@ test("typed prices retain drafts and confirmed values across pending, failure an
   await expect(apply).toBeDisabled();
   await expect(form.locator(".entity-control__value")).toContainText("-5");
   await expect(page.locator("#actions")).toHaveText(
-    '1: number.set_value {"value":-0.5,"entity_id":"number.demo_price_charge_max_price"}',
+    '1: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_max_price":-0.5}',
   );
   await page.locator("#release-action").click();
   await expect(form.getByRole("alert")).toBeVisible();
@@ -184,6 +200,7 @@ test("typed prices retain drafts and confirmed values across pending, failure an
   await apply.click();
   await expect(form.locator(".entity-control__value")).toContainText("-5");
   await page.locator("#release-action").click();
+  await reopenCharging(page);
   await expect(form).toHaveAttribute("aria-busy", "false");
   await expect(form.getByRole("alert")).toHaveCount(0);
   await expect(input).toHaveValue("-0.5");
@@ -191,7 +208,7 @@ test("typed prices retain drafts and confirmed values across pending, failure an
     english ? "-0.5" : "-0,5",
   );
   await expect(page.locator("#actions")).toHaveText(
-    '2: number.set_value {"value":-0.5,"entity_id":"number.demo_price_charge_max_price"}',
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_max_price":-0.5}',
   );
 });
 
@@ -205,7 +222,9 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".dynamic-charging-settings");
-  const done = english ? "Apply" : "Übernehmen";
+  const apply = charging
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button");
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [key, label, value] of [
@@ -251,26 +270,20 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
     await typeNumber(input, value!);
     await page.locator("#hold-action").click();
     await page.locator("#failure").click();
-    await form.getByRole("button").click();
-    const request = `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`;
+    await apply.click();
+    const request = `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`;
     await expect(actions).toHaveText(request);
-    await charging
-      .locator(".electricity-charging-editor > .electricity-actions")
-      .getByRole("button", { name: done, exact: true })
-      .click();
+    await charging.locator("header > button").click();
     await expect(
       charging.locator(".electricity-charging-feedback"),
     ).toContainText(english ? "Sending change" : "Änderung wird");
     await charging.locator("header > button").click();
     await expect(input).toHaveValue(value!);
     await expect(input).toBeDisabled();
-    await expect(form.getByRole("button")).toBeDisabled();
+    await expect(apply).toBeDisabled();
     await expect(form.locator(".entity-control__value")).toHaveText(confirmed);
     await expect(actions).toHaveText(request);
-    await charging
-      .locator(".electricity-charging-editor > .electricity-actions")
-      .getByRole("button", { name: done, exact: true })
-      .click();
+    await charging.locator("header > button").click();
     await page.locator("#release-action").click();
     await expect(
       charging.locator(".electricity-charging-feedback").getByRole("alert"),
@@ -280,10 +293,11 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
     await expect(input).toBeEnabled();
     await expect(form.getByRole("alert")).toBeVisible();
     await expect(form.locator(".entity-control__value")).toHaveText(confirmed);
-    await form.getByRole("button").click();
+    await apply.click();
     await expect(actions).toHaveText(
-      `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`,
+      `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`,
     );
+    await reopenCharging(page);
     await expect(input).toBeEnabled();
     await expect(input).toHaveValue(value!);
     await expect(form.getByRole("alert")).toHaveCount(0);
@@ -311,13 +325,7 @@ test("unsent native partial drafts remain editable after collapsing and reopenin
         (element: HTMLInputElement) => element.validity.badInput,
       ),
     ).toBe(true);
-    await charging
-      .locator(".electricity-charging-editor > .electricity-actions")
-      .getByRole("button", {
-        name: english ? "Apply" : "Übernehmen",
-        exact: true,
-      })
-      .click();
+    await charging.locator("header > button").click();
     await charging.locator("header > button").click();
     await expect(input).toHaveValue("");
     expect(
@@ -413,68 +421,65 @@ test("global SOC remains directly editable and displays the restored confirmed t
 
 // REQ-TIMED-SOC-CHARGE: native keyboard input keeps rejected drafts and
 // allows equal boundaries and the valid zero start in Chromium and Safari.
-test("charge target and start reject crossed limits and accept zero", async ({
+test("charge target and start reject crossed drafts and save valid SOC values together", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
+  const charging = panel.locator(".electricity-charging");
   await panel.locator("nav a[href$='/stromtarif']").click();
-  await panel.locator(".electricity-charging header > button").click();
+  await charging.locator("header > button").click();
   const actions = page.locator("#actions");
-  for (const [label, invalid] of [
-    [english ? "Grid charge target (%)" : "Netzladeziel (%)", "19"],
-    [english ? "Start threshold (%)" : "Ladestart (%)", "81"],
-  ]) {
-    const input = panel.getByRole("spinbutton", { name: label, exact: true });
-    const form = panel.locator(".entity-control").filter({
-      has: page.getByRole("spinbutton", { name: label, exact: true }),
-    });
-    await typeNumber(input, invalid!);
-    await form.getByRole("button").click();
-    await expect(form.getByRole("alert")).toHaveText(
+  const start = charging.getByRole("spinbutton", {
+    name: english ? "Start threshold (%)" : "Ladestart (%)",
+    exact: true,
+  });
+  const target = charging.getByRole("spinbutton", {
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
+    exact: true,
+  });
+  const global = charging.getByRole("spinbutton", {
+    name: "Max SOC (%)",
+    exact: true,
+  });
+  const apply = charging
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button");
+  await expect(charging.locator(".entity-control button")).toHaveCount(0);
+  await typeNumber(start, "85");
+  await typeNumber(target, "75");
+  await apply.click();
+  for (const input of [start, target]) {
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(
+      input.locator("xpath=ancestor::form").getByRole("alert"),
+    ).toHaveText(
       english
         ? "The grid charge target must be at least as high as the start threshold."
         : "Das Netzladeziel muss mindestens so hoch wie der Ladestart sein.",
     );
-    await expect(input).toHaveAttribute("aria-invalid", "true");
-    await expect(input).toHaveValue(invalid!);
-    await expect(actions).toHaveText("Keine Aktion");
   }
-  const start = panel.getByRole("spinbutton", {
-    name: english ? "Start threshold (%)" : "Ladestart (%)",
-    exact: true,
-  });
-  const startForm = panel.locator(".entity-control").filter({
-    has: page.getByRole("spinbutton", {
-      name: english ? "Start threshold (%)" : "Ladestart (%)",
-      exact: true,
-    }),
-  });
-  await typeNumber(start, "0");
-  await startForm.getByRole("button").click();
+  await expect(actions).toHaveText("Keine Aktion");
+  await typeNumber(target, "90");
+  await typeNumber(global, "100");
+  await global.press("Enter");
   await expect(actions).toHaveText(
-    '1: number.set_value {"value":0,"entity_id":"number.demo_timed_charge_min_soc"}',
+    '1: sax_power.set_charging_settings {"device_id":"demo-device","timed_charge_min_soc":85,"timed_charge_max_soc":90,"max_soc":100}',
   );
-  await expect(startForm.getByRole("alert")).toHaveCount(0);
-  await expect(panel.locator(".tou-charging-threshold")).toContainText(
+  await reopenCharging(page);
+  await expect(start).toHaveValue("85");
+  await expect(target).toHaveValue("90");
+  await expect(global).toHaveValue("100");
+  await typeNumber(start, "0");
+  await typeNumber(target, "0");
+  await apply.click();
+  await expect(actions).toHaveText(
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","timed_charge_min_soc":0,"timed_charge_max_soc":0}',
+  );
+  await reopenCharging(page);
+  await expect(charging.locator(".tou-charging-threshold")).toContainText(
     english ? "Start at" : "Start bei",
   );
-  const target = panel.getByRole("spinbutton", {
-    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
-    exact: true,
-  });
-  await typeNumber(target, "0");
-  await panel
-    .locator(".entity-control")
-    .filter({
-      has: page.getByRole("spinbutton", {
-        name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
-        exact: true,
-      }),
-    })
-    .getByRole("button")
-    .click();
-  await expect(actions).toHaveText(
-    '2: number.set_value {"value":0,"entity_id":"number.demo_timed_charge_max_soc"}',
-  );
+  await expect(start).toHaveValue("0");
+  await expect(target).toHaveValue("0");
 });

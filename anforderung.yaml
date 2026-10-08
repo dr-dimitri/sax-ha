@@ -3472,10 +3472,26 @@ requirement_vue_electricity_tariff:
     Ein Wechsel verwirft
     weder Investitionsdaten noch native SOC-, Monats- oder Strategieeinstellungen.
 
-    Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
-    übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services.
-    Der abschließende Button heißt „Übernehmen“ (EN: „Apply“) und schließt
-    den Bereich. Zeitvariabel bietet die Ladeweisen
+    Ladeverhalten bleibt zunächst eingeklappt. Im Netzladeeditor gibt es
+    genau einen Button „Übernehmen“ (EN: „Apply“). Er prüft alle sichtbaren
+    Zahleneingaben und speichert geänderte Werte gemeinsam über
+    sax_power.set_charging_settings; neben den Zahlen stehen keine
+    Einzel-Übernehmen-Buttons. Ladestart, Netzladeziel und Max SOC werden
+    anhand des vollständigen Entwurfs geprüft, sodass auch gemeinsam erhöhte
+    Grenzen über den vorherigen Werten möglich sind. Bei dynamischem Tarif
+    gehören die sichtbaren Preis-/Stunden-/Schonpreisfelder zur gemeinsamen
+    Übernahme. Unveränderte und ausgeblendete Felder werden nicht geschrieben.
+    Ungültige Eingaben, fehlende Rechte oder Backendfehler dürfen keine
+    Teiländerung auslösen. Der Backendpfad prüft Bereiche, Schrittweiten und
+    Rechte aller tatsächlich geänderten Entities vor der gemeinsamen
+    Softwareübernahme und bestätigt ohne Warten auf den Geräte-Lock;
+    Geräteänderungen verarbeitet der vorhandene zusammenfassende Worker.
+    Während des Speicherns sind Pending unmittelbar zugänglich und
+    Doppelaufrufe gesperrt; bestätigte Werte folgen echten HA-Zuständen.
+    Erfolg schließt den Editor, Fehler lassen ihn mit erhaltenen Eingaben
+    offen und markieren das betroffene Feld. Enter nutzt denselben Save.
+    „Schließen“ klappt ohne Speichern ein und erhält Entwürfe. Zeitvariabel
+    bietet die Ladeweisen
     „Festes Netzladeziel“ (bridge_charge_enabled aus) und
     „Nur Bedarf bis Solarstrom“ (bridge_charge_enabled ein).
     Nur bestätigte, verfügbare on/off-Zustände markieren die Auswahl; fehlende,
@@ -3513,7 +3529,9 @@ requirement_vue_electricity_tariff:
     in beiden Tarifarten beim Schließen und erneuten Öffnen erhalten. Dies
     umfasst ungesendete und unvollständige Zahlen sowie verspätet fehlgeschlagene
     Änderungen. Ein ausdrücklicher Wiederholungsversuch sendet den erhaltenen
-    Entwurf; bestätigte HA-Änderungen aktualisieren weiterhin das Feld.
+    Entwurf; bestätigte HA-Änderungen aktualisieren bestätigte Werte und
+    unberührte Eingabefelder. Bereits bearbeitete Entwürfe bleiben erhalten;
+    ein Wechsel der Entity-ID setzt den betroffenen Entwurf sicher zurück.
     Dynamisch führt
     die Bedienung mit alltagssprachlichen Ladeweisen durch die Einrichtung:
     bedarfsgerechtes Laden (Smart), günstigste Stunden (Relativ), feste

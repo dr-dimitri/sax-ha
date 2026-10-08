@@ -348,6 +348,20 @@ async function callService(domain, service, data, target) {
     rejectNext = false;
     throw new Error("Simulated service failure");
   }
+  if (domain === "sax_power" && service === "set_charging_settings") {
+    if (data.device_id !== "demo-device")
+      throw new Error("Unknown demo device");
+    const updates = Object.entries(data)
+      .filter(([key]) => key !== "device_id")
+      .map(([key, value]) => {
+        const entityId = `number.demo_${key}`;
+        if (!states[entityId]) throw new Error("Unknown demo charging setting");
+        return [entityId, { ...states[entityId], state: String(value) }];
+      });
+    states = { ...states, ...Object.fromEntries(updates) };
+    update();
+    return;
+  }
   if (domain === "sax_power") {
     const prefix =
       service === "set_timed_charge_window"

@@ -417,6 +417,15 @@ SERVICE_START_GRID_CHARGE = "start_grid_charge"
 SERVICE_STOP_GRID_CHARGE = "stop_grid_charge"
 SERVICE_SET_TIMED_CHARGE_WINDOW = "set_timed_charge_window"
 SERVICE_SET_GRID_SERVING_WINDOW = "set_grid_serving_window"
+SERVICE_SET_CHARGING_SETTINGS = "set_charging_settings"
+CHARGING_SETTING_KEYS = (
+    "max_soc",
+    "timed_charge_min_soc",
+    "timed_charge_max_soc",
+    "price_charge_max_price",
+    "price_charge_hours",
+    "price_charge_neutral_price",
+)
 ATTR_POWER = "power"
 ATTR_DEVICE_ID = "device_id"
 ATTR_START = "start"

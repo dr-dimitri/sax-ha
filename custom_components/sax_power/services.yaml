@@ -72,6 +72,74 @@ set_timed_charge_window:
       selector:
         time:
 
+set_charging_settings:
+  name: Ladeeinstellungen übernehmen
+  description: >-
+    Validiert alle übergebenen Ladeeinstellungen gemeinsam und übernimmt sie
+    ohne Teiländerungen. Mindestens ein Zahlenwert ist erforderlich.
+  fields:
+    device_id:
+      name: Gerät
+      description: Das SAX Power Gerät.
+      required: true
+      selector:
+        device:
+          integration: sax_power
+    max_soc:
+      name: Max SOC
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+    timed_charge_min_soc:
+      name: Ladestart
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+    timed_charge_max_soc:
+      name: Netzladeziel
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+    price_charge_max_price:
+      name: Netzbezug und Laden bis
+      selector:
+        number:
+          min: -100
+          max: 200
+          step: 0.1
+          unit_of_measurement: ct/kWh
+          mode: box
+    price_charge_hours:
+      name: Stunden
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+          unit_of_measurement: h
+          mode: box
+    price_charge_neutral_price:
+      name: Netzbezug ohne Laden bis
+      selector:
+        number:
+          min: -100
+          max: 200
+          step: 0.1
+          unit_of_measurement: ct/kWh
+          mode: box
+
 set_grid_serving_window:
   name: Netzdienliches-Laden-Zeitfenster setzen
   description: >-

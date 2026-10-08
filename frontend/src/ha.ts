@@ -91,6 +91,8 @@ export interface SaxDashboard {
   error: ComputedRef<string | null>;
   entity(domain: EntityDomain, key: string): DashboardEntity | null;
   perform(domain: EntityDomain, key: string, value: unknown): Promise<boolean>;
+  performChargingSettings(values: Record<string, string>): Promise<boolean>;
+  clearControlError(domain: EntityDomain, key: string): void;
   tariff: Readonly<Ref<TariffProfile | null>>;
   loadTariff(): Promise<TariffProfile>;
   saveTariff(draft: TariffDraft): Promise<TariffProfile>;
@@ -605,6 +607,150 @@ export function useSaxDashboard(
     }
   }
 
+  async function performChargingSettings(
+    values: Record<string, string>,
+  ): Promise<boolean> {
+    const allowed = new Set([
+      "max_soc",
+      "timed_charge_min_soc",
+      "timed_charge_max_soc",
+      "price_charge_max_price",
+      "price_charge_hours",
+      "price_charge_neutral_price",
+    ]);
+    const keys = Object.keys(values);
+    if (!keys.length || keys.some((key) => !allowed.has(key))) return false;
+    const items = keys.map((key) => entity("number", key));
+    if (items.some((item) => item?.pending)) return false;
+    const action: Action = reactive({ pending: false, error: null });
+    for (const item of items) {
+      if (item) actions.set(item.metadata.entity_id, action);
+    }
+    const deviceId = items[0]?.metadata.device_id;
+    const hass = getHass();
+    if (
+      !ready.value ||
+      !hass?.callService ||
+      !deviceId ||
+      items.some(
+        (item) => !item?.canControl || item.metadata.device_id !== deviceId,
+      )
+    ) {
+      action.error = "forbidden";
+      return false;
+    }
+    const data: Record<string, number> = {};
+    const proposedGlobal =
+      values.max_soc === undefined
+        ? finiteValue(entity("number", "max_soc")?.state?.state)
+        : finiteValue(values.max_soc);
+    for (let index = 0; index < keys.length; index++) {
+      const key = keys[index]!;
+      const item = items[index]!;
+      const checked =
+        key === "timed_charge_max_soc" && proposedGlobal !== null
+          ? {
+              ...item,
+              state: {
+                ...item.state!,
+                attributes: { ...item.state!.attributes, max: proposedGlobal },
+              },
+            }
+          : item;
+      const call = serviceCall(checked, values[key]);
+      if (!call) {
+        action.error = "invalid";
+        return false;
+      }
+      data[key] = Number(call.data.value);
+    }
+    if (
+      data.timed_charge_min_soc !== undefined ||
+      data.timed_charge_max_soc !== undefined
+    ) {
+      const start =
+        data.timed_charge_min_soc ??
+        finiteValue(entity("number", "timed_charge_min_soc")?.state?.state);
+      const target =
+        data.timed_charge_max_soc ??
+        finiteValue(entity("number", "timed_charge_max_soc")?.state?.state);
+      if (start === null || target === null) {
+        action.error = "invalid";
+        return false;
+      }
+      if (target < start) {
+        action.error = "timedSocOrder";
+        return false;
+      }
+    }
+    const entityIds = items.map((item) => item!.metadata.entity_id);
+    const operations = keys.map((key) => operationKey("number", key));
+    action.pending = true;
+    for (const operation of operations) running.set(operation, action);
+    const current = generation;
+    const isCurrent = () =>
+      current === generation &&
+      entityIds.every((id, index) => {
+        const item = entity("number", keys[index]!);
+        return (
+          actions.get(id) === action &&
+          item?.metadata.entity_id === id &&
+          item.metadata.device_id === deviceId
+        );
+      });
+    try {
+      await hass.callService(
+        "sax_power",
+        "set_charging_settings",
+        { device_id: deviceId, ...data },
+        undefined,
+        false,
+      );
+      return isCurrent();
+    } catch (cause) {
+      if (isCurrent()) {
+        const failure = cause as {
+          translation_domain?: unknown;
+          translation_key?: unknown;
+          translation_placeholders?: { field?: unknown };
+        } | null;
+        const invalidField =
+          failure?.translation_domain === "sax_power" &&
+          failure.translation_key === "invalid_charging_setting" &&
+          typeof failure.translation_placeholders?.field === "string"
+            ? failure.translation_placeholders.field
+            : null;
+        if (invalidField && keys.includes(invalidField)) {
+          for (let index = 0; index < keys.length; index++) {
+            actions.set(
+              entityIds[index]!,
+              reactive({
+                pending: false,
+                error: keys[index] === invalidField ? "invalid" : null,
+              }),
+            );
+          }
+          return false;
+        }
+        action.error =
+          cause &&
+          typeof cause === "object" &&
+          "translation_domain" in cause &&
+          cause.translation_domain === "sax_power" &&
+          "translation_key" in cause &&
+          cause.translation_key === "timed_charge_soc_order"
+            ? "timedSocOrder"
+            : "failed";
+      }
+      return false;
+    } finally {
+      action.pending = false;
+      for (const operation of operations) {
+        if (running.get(operation) === action) running.delete(operation);
+      }
+    }
+  }
+
   let tariffReadSequence = 0;
   let tariffWrite: {
     generation: number;
@@ -805,6 +951,12 @@ export function useSaxDashboard(
     error,
     entity,
     perform,
+    performChargingSettings,
+    clearControlError: (domain, key) => {
+      const item = entity(domain, key);
+      const action = item && actions.get(item.metadata.entity_id);
+      if (action && !action.pending) action.error = null;
+    },
     performTimeWindow,
     tariff: computed(() => tariff.value),
     loadTariff: () => tariffRequest(),

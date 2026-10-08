@@ -20,6 +20,7 @@ from pytest_homeassistant_custom_component.typing import (
 )
 
 from custom_components.sax_power.const import (
+    CHARGING_SETTING_KEYS,
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
@@ -57,6 +58,176 @@ async def _state_event(
             data = event["data"]
             if data["entity_id"] == entity_id and data["new_state"]["state"] == state:
                 return
+
+
+async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    hass_read_only_access_token: str,
+    hass_read_only_user: MockUser,
+    unused_tcp_port: int,
+) -> None:
+    """REQ-VUE-ENTITY-BINDING: One real WS batch confirms before blocked device work."""
+    server = _modbus_server(
+        unused_tcp_port, _build_basic_registers(), _build_extended_registers()
+    )
+    await server.serve_forever(background=True)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": unused_tcp_port,
+            "slave_id_basic": 64,
+            "slave_id_extended": 100,
+            "scan_interval": 3600,
+        },
+    )
+    entry.add_to_hass(hass)
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        registry = er.async_get(hass)
+        entity_ids = {}
+        device_id = None
+        for key in CHARGING_SETTING_KEYS:
+            entity_id = registry.async_get_entity_id(
+                "number", DOMAIN, f"{entry.entry_id}_{key}"
+            )
+            assert entity_id
+            device_id = registry.async_get(entity_id).device_id
+            renamed = f"number.my_battery_{key}"
+            registry.async_update_entity(entity_id, new_entity_id=renamed)
+            entity_ids[key] = renamed
+        await hass.async_block_till_done()
+        assert device_id
+        hass_read_only_user.mock_policy(
+            {
+                "entities": {
+                    "entity_ids": {
+                        entity_id: {"read": True, "control": True}
+                        for entity_id in entity_ids.values()
+                    }
+                }
+            }
+        )
+        sender = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+        applied = []
+
+        async def record_apply(data: dict[str, Any]) -> None:
+            applied.append(coordinator.control_config())
+
+        with (
+            patch.object(
+                coordinator, "_async_enforce_grid_charge_locked", record_apply
+            ),
+            patch.object(
+                coordinator.client,
+                "write_register",
+                wraps=coordinator.client.write_register,
+            ) as write,
+        ):
+            async with coordinator._charge_control_lock:
+                worker = None
+                for request_id, values in enumerate(
+                    [
+                        {
+                            "timed_charge_min_soc": 10,
+                            "timed_charge_max_soc": 15,
+                            "max_soc": 20,
+                        },
+                        {
+                            "timed_charge_min_soc": 80,
+                            "timed_charge_max_soc": 85,
+                            "max_soc": 90,
+                            "price_charge_max_price": 12.3,
+                            "price_charge_neutral_price": 20.6,
+                            "price_charge_hours": 4,
+                        },
+                    ],
+                    1,
+                ):
+                    await sender.send_json(
+                        {
+                            "id": request_id,
+                            "type": "call_service",
+                            "domain": DOMAIN,
+                            "service": "set_charging_settings",
+                            "service_data": {"device_id": device_id, **values},
+                        }
+                    )
+                    await asyncio.wait_for(_result(sender, request_id), 0.5)
+                    for key, value in values.items():
+                        assert float(hass.states.get(entity_ids[key]).state) == value
+                    worker = worker or coordinator._month_control_task
+                    assert coordinator._month_control_task is worker
+                    assert not applied
+                    write.assert_not_called()
+                before = coordinator.control_config()
+                for request_id, values, code in (
+                    (
+                        3,
+                        {"timed_charge_min_soc": 95, "price_charge_hours": 5},
+                        "timed_charge_soc_order",
+                    ),
+                    (
+                        4,
+                        {"max_soc": 95, "price_charge_max_price": 12.35},
+                        "invalid_charging_setting",
+                    ),
+                    (5, {}, "charging_settings_required"),
+                ):
+                    await sender.send_json(
+                        {
+                            "id": request_id,
+                            "type": "call_service",
+                            "domain": DOMAIN,
+                            "service": "set_charging_settings",
+                            "service_data": {"device_id": device_id, **values},
+                        }
+                    )
+                    response = await asyncio.wait_for(sender.receive_json(), 0.5)
+                    assert response["id"] == request_id
+                    assert not response["success"]
+                    assert response["error"]["translation_key"] == code
+                    assert coordinator.control_config() == before
+                    assert coordinator._month_control_task is worker
+                    write.assert_not_called()
+                hass_read_only_user.mock_policy(
+                    {
+                        "entities": {
+                            "entity_ids": {
+                                entity_ids["max_soc"]: {"read": True, "control": True}
+                            }
+                        }
+                    }
+                )
+                await sender.send_json(
+                    {
+                        "id": 6,
+                        "type": "call_service",
+                        "domain": DOMAIN,
+                        "service": "set_charging_settings",
+                        "service_data": {
+                            "device_id": device_id,
+                            "max_soc": 95,
+                            "price_charge_hours": 5,
+                        },
+                    }
+                )
+                response = await asyncio.wait_for(sender.receive_json(), 0.5)
+                assert response["id"] == 6
+                assert not response["success"]
+                assert response["error"]["code"] == "home_assistant_error"
+                assert response["error"]["message"] == "Unauthorized"
+                assert coordinator.control_config() == before
+                write.assert_not_called()
+            await worker
+            assert applied == [before]
+        await sender.close()
+    finally:
+        await hass.config_entries.async_unload(entry.entry_id)
+        await server.shutdown()
 
 
 async def test_dashboard_clients_share_services_states_and_one_modbus_client(

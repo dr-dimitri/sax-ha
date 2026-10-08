@@ -238,9 +238,10 @@ nebeneinander, jeweils mit der Beschriftung über dem Zahlwert.
 **Ladestart 0 % erlaubt den Start bei genau 0 % SOC**. Die globale Ladegrenze gilt auch für Solarstrom. Eine fällige
 Zellkalibrierung darf die eingestellten Grenzen vorübergehend bis 100 % erweitern;
 die Bedarfsladung plant deshalb keine zusätzliche Vollladung ein.
-Zahlen werden jeweils mit **Übernehmen** am Eingabefeld gespeichert. Der
-abschließende Button **Übernehmen** schließt die Bearbeitung. Bereits
-gespeicherte Werte ändern sich beim Öffnen nicht.
+Alle geänderten Zahleneingaben werden mit einem gemeinsamen **Übernehmen**
+gespeichert. Bei ungültigen Werten bleibt die Bearbeitung offen und zeigt das
+betroffene Feld. **Schließen** klappt ohne Speichern ein und behält die Eingaben.
+Bereits gespeicherte Werte ändern sich beim Öffnen nicht.
 
 Unter **Ladeplan & Prognose** erscheint die aktuelle Entladeprognose, sobald
 ausreichend gültige Verbrauchsdaten vorliegen. Sie zeigt, wie lange der Speicher
@@ -475,9 +476,9 @@ bleibt die Obergrenze; das Ladeziel ist **Max. SOC**.
 Fehlen Messwerte für Speicherfüllung, Kapazität oder Ladeleistung, nutzt
 Smart die eingestellte Anzahl der günstigsten Stunden. Die Übersicht zeigt
 die bestätigten Einstellungen; allein das Öffnen des Einstellbereichs
-verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick;
-Der abschließende Button **Übernehmen** schließt den Bereich;
-offene Zahleneingaben werden über **Übernehmen** am jeweiligen Feld gespeichert.
+verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick.
+Der gemeinsame Button **Übernehmen** speichert die geänderten Zahleneingaben
+und schließt den Bereich bei Erfolg. Bei Fehlern bleiben die Eingaben erhalten.
 
 ![Dynamischer Tarif: alle passenden Ladeeinstellungen direkt sichtbar](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
 

@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed, inject, ref, useId, watch } from "vue";
-import EntityControl from "./EntityControl.vue";
+import ChargingNumberFields from "./ChargingNumberFields.vue";
 import MonthSelection from "./MonthSelection.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { finiteValue } from "../savings";
 import type { HomeAssistant } from "../types";
 
 const props = defineProps<{ editing: boolean; hass?: HomeAssistant }>();
+const emit = defineEmits<{ apply: [] }>();
+const numbers = ref<InstanceType<typeof ChargingNumberFields>>();
+defineExpose({
+  submit: () => numbers.value?.submit() ?? Promise.resolve(true),
+  pending: computed(() => numbers.value?.pending ?? false),
+});
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const german = computed(() => dashboard?.language.value === "de");
 const feedbackId = `sax-tou-method-${useId()}`;
@@ -86,6 +92,7 @@ const blocked = computed(
   () =>
     !bridge.value?.canControl ||
     bridge.value.pending ||
+    numbers.value?.pending ||
     selected.value === null,
 );
 const status = computed(() => {
@@ -102,6 +109,23 @@ const threshold = computed(() =>
   dashboard?.entity("number", "timed_charge_min_soc"),
 );
 const globalLimit = computed(() => dashboard?.entity("number", "max_soc"));
+const numberFields = computed(() => [
+  ...(selected.value === "fixed"
+    ? [{ key: "timed_charge_min_soc", label: text.value.threshold }]
+    : []),
+  ...(selected.value
+    ? [
+        {
+          key: "timed_charge_max_soc",
+          label:
+            selected.value === "fixed"
+              ? text.value.fixedTarget
+              : text.value.bridgeTarget,
+        },
+      ]
+    : []),
+  { key: "max_soc", label: text.value.global },
+]);
 const targetLabel = computed(() =>
   selected.value === "bridge"
     ? text.value.bridgeTarget.replace(" (%)", "")
@@ -243,25 +267,10 @@ async function choose(method: Method): Promise<void> {
         {{ text.pvRequired }}
       </p>
       <div class="tou-charging-limits">
-        <EntityControl
-          v-if="selected === 'fixed'"
-          domain="number"
-          entity-key="timed_charge_min_soc"
-          :label="text.threshold"
-          hide-confirmed-label
-        />
-        <EntityControl
-          v-if="selected"
-          domain="number"
-          entity-key="timed_charge_max_soc"
-          :label="selected === 'fixed' ? text.fixedTarget : text.bridgeTarget"
-          hide-confirmed-label
-        />
-        <EntityControl
-          domain="number"
-          entity-key="max_soc"
-          :label="text.global"
-          hide-confirmed-label
+        <ChargingNumberFields
+          ref="numbers"
+          :fields="numberFields"
+          @apply="emit('apply')"
         />
       </div>
       <h3>{{ text.months }}</h3>
@@ -288,7 +297,7 @@ async function choose(method: Method): Promise<void> {
   margin-top: auto;
   font-size: clamp(18px, 4cqi, 24px);
 }
-.tou-charging-limits > .entity-control {
+.tou-charging-limits .entity-control {
   border: 0;
   border-radius: 0;
   background: transparent;

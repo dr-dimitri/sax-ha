@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
-import EntityControl from "./EntityControl.vue";
+import ChargingNumberFields from "./ChargingNumberFields.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { finiteValue } from "../savings";
 
 const props = defineProps<{ editing: boolean }>();
+const emit = defineEmits<{ apply: [] }>();
+const numbers = ref<InstanceType<typeof ChargingNumberFields>>();
+defineExpose({
+  submit: () => numbers.value?.submit() ?? Promise.resolve(true),
+  pending: computed(() => numbers.value?.pending ?? false),
+});
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const visited = ref(props.editing);
 watch(
@@ -80,7 +86,10 @@ const selected = computed(() => {
 });
 const options = computed(() => strategy.value?.state?.attributes.options);
 const blocked = computed(
-  () => !strategy.value?.canControl || strategy.value.pending,
+  () =>
+    !strategy.value?.canControl ||
+    strategy.value.pending ||
+    numbers.value?.pending,
 );
 const status = computed(() => {
   if (!dashboard?.connected.value) return text.value.disconnected;
@@ -89,6 +98,17 @@ const status = computed(() => {
   return strategy.value.pending ? text.value.pending : "";
 });
 const limit = computed(() => dashboard?.entity("number", "max_soc"));
+const numberFields = computed(() =>
+  selected.value && selected.value !== "off"
+    ? [
+        { key: "max_soc", label: text.value.targetLabel },
+        selected.value === "absolute"
+          ? { key: "price_charge_max_price", label: text.value.price }
+          : { key: "price_charge_hours", label: text.value.hours },
+        { key: "price_charge_neutral_price", label: text.value.neutral },
+      ]
+    : [],
+);
 const chargeParameter = computed(() =>
   dashboard?.entity(
     "number",
@@ -184,37 +204,16 @@ async function choose(method: Strategy) {
           <strong>{{ text.modes[method] }}</strong>
         </button>
       </div>
+      <ChargingNumberFields
+        ref="numbers"
+        :fields="numberFields"
+        @apply="emit('apply')"
+      />
       <template v-if="selected && selected !== 'off'">
-        <EntityControl
-          domain="number"
-          entity-key="max_soc"
-          :label="text.targetLabel"
-          hide-confirmed-label
-        />
         <p class="electricity-muted">{{ text.targetHint }}</p>
-        <template v-if="selected === 'absolute'">
-          <EntityControl
-            domain="number"
-            entity-key="price_charge_max_price"
-            :label="text.price"
-            hide-confirmed-label
-          />
-        </template>
-        <template v-else>
-          <EntityControl
-            domain="number"
-            entity-key="price_charge_hours"
-            :label="text.hours"
-            hide-confirmed-label
-          />
+        <template v-if="selected !== 'absolute'">
           <p class="dynamic-charging-notice">{{ text.noPriceLimit }}</p>
         </template>
-        <EntityControl
-          domain="number"
-          entity-key="price_charge_neutral_price"
-          :label="text.neutral"
-          hide-confirmed-label
-        />
       </template>
     </div>
   </div>

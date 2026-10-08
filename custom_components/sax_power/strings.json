@@ -634,6 +634,12 @@
     },
     "bridge_tariff_required": {
       "message": "Richte unter Konfigurieren einen zeitvariablen Tarif ein, bevor du die Ladeplanung einschaltest."
+    },
+    "invalid_charging_setting": {
+      "message": "Der Wert für {field} ist ungültig. Erlaubt sind Werte von {min} bis {max} in Schritten von {step}."
+    },
+    "charging_settings_required": {
+      "message": "Übergebe mindestens eine Ladeeinstellung."
     }
   },
   "services": {
@@ -740,6 +746,33 @@
         "reason": {
           "name": "Grund",
           "description": "Optionaler freier Text (höchstens 120 Zeichen), rein diagnostisch."
+        }
+      }
+    },
+    "set_charging_settings": {
+      "name": "Ladeeinstellungen übernehmen",
+      "description": "Validiert und übernimmt die übergebenen Ladeeinstellungen gemeinsam. Mindestens ein Zahlenwert ist erforderlich. Preise werden in ct/kWh angegeben.",
+      "fields": {
+        "device_id": {
+          "name": "Gerät"
+        },
+        "max_soc": {
+          "name": "Max SOC"
+        },
+        "timed_charge_min_soc": {
+          "name": "Ladestart"
+        },
+        "timed_charge_max_soc": {
+          "name": "Netzladeziel"
+        },
+        "price_charge_max_price": {
+          "name": "Netzbezug und Laden bis"
+        },
+        "price_charge_hours": {
+          "name": "Stunden"
+        },
+        "price_charge_neutral_price": {
+          "name": "Netzbezug ohne Laden bis"
         }
       }
     }

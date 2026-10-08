@@ -634,6 +634,12 @@
     },
     "bridge_tariff_required": {
       "message": "Configure a time-of-use tariff in the integration options before enabling charging planning."
+    },
+    "invalid_charging_setting": {
+      "message": "The value for {field} is invalid. Values from {min} to {max} in steps of {step} are allowed."
+    },
+    "charging_settings_required": {
+      "message": "Provide at least one charging setting."
     }
   },
   "services": {
@@ -740,6 +746,33 @@
         "reason": {
           "name": "Reason",
           "description": "Optional free text (120 characters max), diagnostic only."
+        }
+      }
+    },
+    "set_charging_settings": {
+      "name": "Apply charging settings",
+      "description": "Validates and applies the supplied charging settings together. At least one number is required. Prices are supplied in ct/kWh.",
+      "fields": {
+        "device_id": {
+          "name": "Device"
+        },
+        "max_soc": {
+          "name": "Max SOC"
+        },
+        "timed_charge_min_soc": {
+          "name": "Start threshold"
+        },
+        "timed_charge_max_soc": {
+          "name": "Grid charge target"
+        },
+        "price_charge_max_price": {
+          "name": "Grid draw and charging up to"
+        },
+        "price_charge_hours": {
+          "name": "Hours"
+        },
+        "price_charge_neutral_price": {
+          "name": "Grid draw without charging up to"
         }
       }
     }

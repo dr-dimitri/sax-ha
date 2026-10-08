@@ -53,6 +53,7 @@ from .const import (
     ALL_MONTHS,
     CELL_CALIBRATION_INTERVAL,
     CHARGE_CONFLICT_ISSUES,
+    CHARGING_SETTING_KEYS,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_PRICE_SENSOR,
@@ -81,6 +82,7 @@ from .const import (
     MIN_PRICE_LIMIT,
     MIN_SETPOINT_POWER,
     MIN_SOC,
+    PRICE_LIMIT_STEP,
     PRICE_STATUS_CHARGING,
     PRICE_STATUS_NO_PRICE_DATA,
     PRICE_STATUS_OFF,
@@ -3401,6 +3403,96 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "werden: %s",
                 err,
             )
+
+    async def async_set_charging_settings(
+        self,
+        values: Mapping[str, Any],
+        *,
+        defer_device_update: bool = True,
+    ) -> None:
+        """Accept one validated dashboard draft before scheduling device work."""
+        self._raise_if_shutdown()
+        if not values:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="charging_settings_required",
+            )
+        validated: dict[str, int | float] = {}
+        for key, value in values.items():
+            if key in ("max_soc", "timed_charge_min_soc", "timed_charge_max_soc"):
+                minimum, maximum, step = MIN_SOC, MAX_SOC, 1
+            elif key == "price_charge_hours":
+                minimum, maximum, step = MIN_PRICE_HOURS, MAX_PRICE_HOURS, 1
+            elif key in ("price_charge_max_price", "price_charge_neutral_price"):
+                minimum, maximum, step = (
+                    MIN_PRICE_LIMIT * 100,
+                    MAX_PRICE_LIMIT * 100,
+                    PRICE_LIMIT_STEP * 100,
+                )
+            else:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_charging_setting",
+                    translation_placeholders={
+                        "field": key,
+                        "min": "—",
+                        "max": "—",
+                        "step": "—",
+                    },
+                )
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not minimum <= value <= maximum
+                or not math.isfinite(value)
+                or not math.isclose(
+                    value / step, round(value / step), rel_tol=0, abs_tol=1e-9
+                )
+            ):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_charging_setting",
+                    translation_placeholders={
+                        "field": key,
+                        "min": str(minimum),
+                        "max": str(maximum),
+                        "step": str(step),
+                    },
+                )
+            validated[key] = int(value) if step == 1 else float(value) / 100
+
+        maximum_soc = validated.get("max_soc", self._max_soc)
+        maximum_soc = MAX_SOC if maximum_soc is None else int(maximum_soc)
+        if "timed_charge_min_soc" in validated or "timed_charge_max_soc" in validated:
+            target = validated.get("timed_charge_max_soc", self._timed_charge_max_soc)
+            target = maximum_soc if target is None else min(int(target), maximum_soc)
+            minimum_soc = validated.get(
+                "timed_charge_min_soc", self._timed_charge_min_soc
+            )
+            self._validate_timed_charge_soc(
+                target, None if minimum_soc is None else int(minimum_soc)
+            )
+        if validated.get("timed_charge_max_soc", 0) > maximum_soc:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_charging_setting",
+                translation_placeholders={
+                    "field": "timed_charge_max_soc",
+                    "min": str(MIN_SOC),
+                    "max": str(maximum_soc),
+                    "step": "1",
+                },
+            )
+
+        # REQ-VUE-ENTITY-BINDING: a shared Apply must never expose a partial draft.
+        for key in CHARGING_SETTING_KEYS:
+            if key in validated:
+                setattr(self, f"_{key}", validated[key])
+                self.clear_control_field_unresolved(key)
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
 
     async def async_set_max_soc(
         self, max_soc: int | None, *, defer_device_update: bool = False

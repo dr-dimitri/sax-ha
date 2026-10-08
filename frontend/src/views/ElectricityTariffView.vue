@@ -42,6 +42,7 @@ const text = computed(() =>
         cancel: "Abbrechen",
         save: "Speichern",
         done: "Übernehmen",
+        close: "Schließen",
         edit: "Bearbeiten",
         loading: "Wird geladen …",
         saving: "Wird gespeichert …",
@@ -143,6 +144,7 @@ const text = computed(() =>
         cancel: "Cancel",
         save: "Save",
         done: "Apply",
+        close: "Close",
         edit: "Edit",
         loading: "Loading …",
         saving: "Saving …",
@@ -315,6 +317,11 @@ const editRevision = ref("");
 const pricesEditor = ref<HTMLElement>();
 const priceButton = ref<HTMLButtonElement>();
 const chargingButton = ref<HTMLButtonElement>();
+const chargingSettings = ref<{
+  submit(): Promise<boolean>;
+  pending: boolean;
+}>();
+const chargingSaving = ref(false);
 let disposed = false;
 let seriesRequest = 0;
 onBeforeUnmount(() => {
@@ -729,6 +736,17 @@ function closeCharging() {
   chargingOpen.value = false;
   void nextTick(() => chargingButton.value?.focus());
 }
+async function applyCharging(): Promise<void> {
+  if (chargingSaving.value || chargingSettings.value?.pending) return;
+  const editor = chargingSettings.value;
+  if (!editor) return;
+  chargingSaving.value = true;
+  try {
+    if (await editor.submit()) closeCharging();
+  } finally {
+    chargingSaving.value = false;
+  }
+}
 </script>
 <template>
   <div class="electricity-tariff-view">
@@ -1070,14 +1088,13 @@ function closeCharging() {
             </h2>
           </div>
           <button
-            v-if="!chargingOpen"
             ref="chargingButton"
             type="button"
             :disabled="changing"
             :aria-expanded="chargingOpen"
-            @click="chargingOpen = true"
+            @click="chargingOpen ? closeCharging() : (chargingOpen = true)"
           >
-            {{ text.edit }}
+            {{ chargingOpen ? text.close : text.edit }}
           </button>
         </header>
         <section v-if="known" class="electricity-activation">
@@ -1153,12 +1170,16 @@ function closeCharging() {
         </section>
         <DynamicChargingSettings
           v-if="active === 'dynamic'"
+          ref="chargingSettings"
           :editing="chargingOpen"
+          @apply="applyCharging"
         />
         <TimeOfUseChargingSettings
           v-if="active === 'time_of_use'"
+          ref="chargingSettings"
           :editing="chargingOpen"
           :hass="hass"
+          @apply="applyCharging"
         />
         <div v-if="!chargingOpen" class="electricity-charging-feedback">
           <template
@@ -1174,10 +1195,17 @@ function closeCharging() {
           </template>
         </div>
         <div v-if="chargingOpen" class="electricity-charging-editor">
-          <div class="electricity-actions">
-            <button type="button" @click="closeCharging">
-              {{ text.done }}
+          <div class="electricity-actions" :aria-busy="chargingSaving">
+            <button
+              type="button"
+              :disabled="chargingSaving || chargingSettings?.pending"
+              @click="applyCharging"
+            >
+              {{ chargingSaving ? text.saving : text.done }}
             </button>
+            <p v-if="chargingSaving" role="status" aria-live="polite">
+              {{ text.entityPending }}
+            </p>
           </div>
         </div>
         <dl

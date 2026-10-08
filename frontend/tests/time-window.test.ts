@@ -85,6 +85,8 @@ async function mount(
     .fn<(kind: Kind, start: string, end: string) => Promise<boolean>>()
     .mockResolvedValue(true);
   const dashboard: SaxDashboard = {
+    performChargingSettings: vi.fn().mockResolvedValue(true),
+    clearControlError: vi.fn(),
     tariff: ref(null),
     loadTariff: vi.fn(),
     saveTariff: vi.fn(),

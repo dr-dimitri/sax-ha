@@ -394,13 +394,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(page.locator("#actions")).toHaveText(
     '1: select.select_option {"option":"relative","entity_id":"select.demo_price_charge_strategy"}',
   );
-  await charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button", {
-      name: english ? "Apply" : "Übernehmen",
-      exact: true,
-    })
-    .click();
+  await charging.locator("header > button").click();
   await expect(settings.locator(".dynamic-charging-methods")).toBeHidden();
   await expect(settings.getByRole("status")).toHaveText(
     english ? "Applying charging method …" : "Ladeweise wird übernommen …",
@@ -422,13 +416,18 @@ test("guided charging methods explain their effects and reveal relevant settings
   });
   await hours.fill("6");
   await page.locator("#hold-action").click();
-  await hoursControl.getByRole("button").click();
+  await charging
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button")
+    .click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "4",
   );
   await expect(hours).toBeDisabled();
   await expect(summary).toContainText("4 h");
   await page.locator("#release-action").click();
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header > button").click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "6",
   );

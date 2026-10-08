@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, h, nextTick, provide, shallowRef, type App } from "vue";
+import {
+  createApp,
+  h,
+  nextTick,
+  provide,
+  shallowRef,
+  ref,
+  type App,
+} from "vue";
 import TimeOfUseChargingSettings from "../src/components/TimeOfUseChargingSettings.vue";
 import {
   SAX_DASHBOARD_KEY,
@@ -106,6 +114,7 @@ async function mount(
   const root = document.createElement("div");
   document.body.append(root);
   let dashboard!: SaxDashboard;
+  const settings = ref<{ submit(): Promise<boolean> } | null>(null);
   const app = createApp({
     setup() {
       dashboard = useSaxDashboard(
@@ -116,6 +125,7 @@ async function mount(
       void dashboard.loadTariff();
       return () =>
         h(TimeOfUseChargingSettings, {
+          ref: settings,
           hass: hass.value,
           editing: editing.value,
         });
@@ -129,6 +139,7 @@ async function mount(
     dashboard,
     hass,
     callService,
+    submit: () => settings.value!.submit(),
     async disconnect() {
       connection.connected = false;
       listeners.get("disconnected")?.forEach((callback) => callback());
@@ -226,6 +237,118 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       expect(fixture.callService).not.toHaveBeenCalled();
     },
   );
+
+  it("applies a valid replacement SOC pair and global ceiling together without single-field buttons", async () => {
+    const fixture = await mount();
+    const controls = fixture.root.querySelectorAll(
+      ".tou-charging-limits .entity-control",
+    );
+    expect(
+      [...controls].every((control) => !control.querySelector("button")),
+    ).toBe(true);
+    for (const [label, value] of [
+      ["Ladestart (%)", "85"],
+      ["Netzladeziel (%)", "90"],
+      ["Max SOC (%)", "100"],
+    ]) {
+      const input = control(
+        fixture.root,
+        label!,
+      ).querySelector<HTMLInputElement>("input")!;
+      input.value = value!;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+    expect(fixture.callService).not.toHaveBeenCalled();
+    expect(await fixture.submit()).toBe(true);
+    expect(fixture.callService).toHaveBeenCalledExactlyOnceWith(
+      "sax_power",
+      "set_charging_settings",
+      {
+        device_id: "charging-preview-device",
+        timed_charge_min_soc: 85,
+        timed_charge_max_soc: 90,
+        max_soc: 100,
+      },
+      undefined,
+      false,
+    );
+    expect(
+      fixture.root.querySelector(".tou-charging-summary")?.textContent,
+    ).toContain("80 %");
+  });
+
+  it("marks both crossed SOC fields and accepts a jointly entered zero pair", async () => {
+    const fixture = await mount();
+    const start = control(
+      fixture.root,
+      "Ladestart (%)",
+    ).querySelector<HTMLInputElement>("input")!;
+    const target = control(
+      fixture.root,
+      "Netzladeziel (%)",
+    ).querySelector<HTMLInputElement>("input")!;
+    const change = async (input: HTMLInputElement, value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    };
+    await change(start, "85");
+    await change(target, "75");
+    expect(await fixture.submit()).toBe(false);
+    expect(fixture.callService).not.toHaveBeenCalled();
+    expect(start.getAttribute("aria-invalid")).toBe("true");
+    expect(target.getAttribute("aria-invalid")).toBe("true");
+    await change(start, "0");
+    await change(target, "0");
+    expect(await fixture.submit()).toBe(true);
+    expect(fixture.callService).toHaveBeenCalledExactlyOnceWith(
+      "sax_power",
+      "set_charging_settings",
+      {
+        device_id: "charging-preview-device",
+        timed_charge_min_soc: 0,
+        timed_charge_max_soc: 0,
+      },
+      undefined,
+      false,
+    );
+  });
+
+  it("rejects an invalid global draft without applying the valid replacement SOC pair", async () => {
+    const fixture = await mount();
+    for (const [label, value] of [
+      ["Ladestart (%)", "25"],
+      ["Netzladeziel (%)", "75"],
+      ["Max SOC (%)", "90.5"],
+    ]) {
+      const input = control(
+        fixture.root,
+        label!,
+      ).querySelector<HTMLInputElement>("input")!;
+      input.value = value!;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flush();
+    expect(await fixture.submit()).toBe(false);
+    expect(fixture.callService).not.toHaveBeenCalled();
+    expect(
+      control(fixture.root, "Max SOC (%)")
+        .querySelector("input")
+        ?.getAttribute("aria-invalid"),
+    ).toBe("true");
+    for (const [label, value] of [
+      ["Ladestart (%)", "25"],
+      ["Netzladeziel (%)", "75"],
+    ]) {
+      const input = control(
+        fixture.root,
+        label!,
+      ).querySelector<HTMLInputElement>("input")!;
+      expect(input.value).toBe(value);
+      expect(input.getAttribute("aria-invalid")).toBe("false");
+    }
+  });
 
   it.each(["de", "en"])(
     "recovers an unavailable global SOC from later HA updates without opening settings in %s",
@@ -389,18 +512,14 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     const input = target.querySelector<HTMLInputElement>("input")!;
     input.value = "75";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    target.dispatchEvent(
-      new Event("submit", { bubbles: true, cancelable: true }),
-    );
-    target.dispatchEvent(
-      new Event("submit", { bubbles: true, cancelable: true }),
-    );
+    void fixture.submit();
+    void fixture.submit();
     await flush();
     expect(fixture.callService).toHaveBeenCalledExactlyOnceWith(
-      "number",
-      "set_value",
-      { value: 75 },
-      { entity_id: "number.renamed_timed_charge_max_soc" },
+      "sax_power",
+      "set_charging_settings",
+      { device_id: "charging-preview-device", timed_charge_max_soc: 75 },
+      undefined,
       false,
     );
     expect(input.disabled).toBe(true);
@@ -437,9 +556,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       const submit = async (value: string) => {
         input.value = value;
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        form.dispatchEvent(
-          new Event("submit", { bubbles: true, cancelable: true }),
-        );
+        await fixture.submit();
         await flush();
       };
       await submit(invalid!);
@@ -456,15 +573,15 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       ).toContain("80 %");
       await submit(equal!);
       expect(fixture.callService).toHaveBeenCalledExactlyOnceWith(
-        "number",
-        "set_value",
-        { value: Number(equal) },
+        "sax_power",
+        "set_charging_settings",
         {
-          entity_id:
-            label === "Netzladeziel (%)"
-              ? "number.renamed_timed_charge_max_soc"
-              : "number.renamed_timed_charge_min_soc",
+          device_id: "charging-preview-device",
+          [label === "Netzladeziel (%)"
+            ? "timed_charge_max_soc"
+            : "timed_charge_min_soc"]: Number(equal),
         },
+        undefined,
         false,
       );
       expect(form.querySelector("[role=alert]")).toBeNull();
@@ -486,9 +603,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       const input = form.querySelector<HTMLInputElement>("input")!;
       input.value = "75";
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      form.dispatchEvent(
-        new Event("submit", { bubbles: true, cancelable: true }),
-      );
+      await fixture.submit();
       await flush();
       expect(fixture.callService).toHaveBeenCalledTimes(1);
       expect(form.querySelector("[role=alert]")?.textContent).toContain(

@@ -2906,7 +2906,10 @@ requirement_vue_entity_binding:
     Zeiten bleiben lokale Eingaben bis zur ausdrücklichen Übernahme.
     Dashboardweit stehen „Übernehmen“ und „Abbrechen“ (EN: Apply/Cancel)
     immer unmittelbar nebeneinander, Übernehmen links und Abbrechen rechts,
-    auch auf schmalen Bildschirmen. Editor-Kopf und -Fuß verwenden dieselben
+    auch auf schmalen Bildschirmen. Übernehmen verwendet überall dieselbe
+    gefüllte Primärfarbe mit kontrastierender Schrift wie bei Preise & Zeiten;
+    beide Farben folgen dem Home-Assistant-Theme.
+    Editor-Kopf und -Fuß verwenden dieselben
     Aktionen. Einzelne Zahlen- und Zeitfelder sowie Zeitfenster verwerfen beim
     Abbrechen lokale Entwürfe und Fehler und zeigen aktuelle bestätigte Werte;
     dabei wird kein Service aufgerufen. Während einer Übernahme sind beide

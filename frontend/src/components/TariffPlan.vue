@@ -1327,10 +1327,6 @@ watch(tariffVisible, (visible) => {
   flex-wrap: wrap;
   gap: 8px;
 }
-.tariff-plan .tariff-plan__save {
-  background: var(--primary-color, #03a9f4);
-  color: var(--text-primary-color, #fff);
-}
 .tariff-plan__error {
   color: var(--error-color, #db4437);
 }

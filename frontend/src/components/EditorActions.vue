@@ -14,4 +14,8 @@
   flex: 0 0 auto;
   white-space: nowrap;
 }
+.editor-actions > button:first-child:not(:only-child) {
+  background: var(--primary-color, #03a9f4);
+  color: var(--text-primary-color, #fff);
+}
 </style>

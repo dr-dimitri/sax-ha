@@ -1443,10 +1443,6 @@ async function applyCharging(): Promise<void> {
 .electricity-actions {
   margin-top: 16px;
 }
-.electricity-actions button[type="submit"] {
-  background: var(--primary-color, #03a9f4);
-  color: var(--text-primary-color, #fff);
-}
 .electricity-current-price {
   font-size: 32px;
   font-weight: 500;

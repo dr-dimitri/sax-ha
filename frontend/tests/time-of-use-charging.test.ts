@@ -387,16 +387,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     ["en", "off"],
     ["en", "on"],
   ])(
-    "keeps only a short calibration hint in %s for bridge=%s, open and closed",
+    "omits the calibration hint in %s for bridge=%s, open and closed",
     async (language, bridge) => {
       const fixture = await mount({ language, bridge, editing: false });
       for (const editing of [false, true, false]) {
         await fixture.edit(editing);
-        const hints = fixture.root.querySelectorAll(
-          ".tou-charging-calibration",
-        );
-        expect(hints).toHaveLength(1);
-        expect(hints[0]!.textContent?.trim()).toBe(
+        expect(fixture.root.textContent).not.toContain(
           language === "de"
             ? "Zellkalibrierung: vorübergehend bis 100 % erlaubt."
             : "Cell calibration: temporarily up to 100% allowed.",

@@ -132,7 +132,8 @@ keine Vue-/Vorschaukennzeichnung.
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
-Die PV-Zeile der Netzladung verwendet den Metadaten-Schlüssel
+Die PV-Zeile im aufklappbaren Bereich „Ladeplan & Prognose“ der Netzladung
+verwendet den Metadaten-Schlüssel
 `sensor.charging_pv_forecast`. `infrastructure/pv_forecast_reading.py` fordert die
 gewählte Quelle beim Einrichten/Quellenwechsel und alle zehn Minuten über
 `async_update_entity` an. Der Coordinator verwaltet Timer und Lebenszyklus;

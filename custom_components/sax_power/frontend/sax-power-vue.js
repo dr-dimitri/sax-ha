@@ -6195,27 +6195,24 @@ var Gl = ["aria-busy"], Kl = {
 	class: "electricity-target tou-charging-threshold"
 }, Lu = { class: "electricity-target tou-charging-target" }, Ru = { class: "electricity-target tou-charging-global" }, zu = { class: "electricity-summary-rows tou-charging-month-summary" }, Bu = {
 	key: 0,
-	class: "tou-charging-hint tou-charging-calibration"
-}, Vu = {
-	key: 0,
 	class: "tou-charging-error",
 	role: "alert"
-}, Hu = {
+}, Vu = {
 	key: 1,
 	role: "status",
 	"aria-live": "polite"
-}, Uu = {
-	key: 1,
+}, Hu = {
+	key: 0,
 	class: "tou-charging-editor"
-}, Wu = ["aria-label", "aria-busy"], Gu = [
+}, Uu = ["aria-label", "aria-busy"], Wu = [
 	"data-method",
 	"aria-pressed",
 	"disabled",
 	"onClick"
-], Ku = {
+], Gu = {
 	key: 0,
 	class: "tou-charging-hint"
-}, qu = { class: "tou-charging-limits" }, Ju = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
+}, Ku = { class: "tou-charging-limits" }, qu = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
 	__name: "TimeOfUseChargingSettings",
 	props: {
 		editing: { type: Boolean },
@@ -6237,7 +6234,6 @@ var Gl = ["aria-busy"], Kl = {
 			saved: "Ladeweise",
 			start: "Start nur unter",
 			startAtZero: "Start bei",
-			calibrationShort: "Zellkalibrierung: vorübergehend bis 100 % erlaubt.",
 			mode: "Ladeweise",
 			fixed: "Festes Netzladeziel",
 			bridge: "Nur Bedarf bis Solarstrom",
@@ -6261,7 +6257,6 @@ var Gl = ["aria-busy"], Kl = {
 			saved: "Charging method",
 			start: "Start only below",
 			startAtZero: "Start at",
-			calibrationShort: "Cell calibration: temporarily up to 100% allowed.",
 			mode: "Charging method",
 			fixed: "Fixed grid charge target",
 			bridge: "Only what is needed until solar power",
@@ -6324,12 +6319,11 @@ var Gl = ["aria-busy"], Kl = {
 				], 2)) : X("", !0),
 				q("dl", zu, [q("div", null, [q("dt", null, I(u.value.months), 1), q("dd", null, I(w.value), 1)])])
 			]),
-			p.value ? (G(), K("p", Bu, I(u.value.calibrationShort), 1)) : X("", !0),
 			q("div", {
 				id: c,
 				class: "tou-charging-feedback"
-			}, [e.editing && d.value?.error ? (G(), K("p", Vu, I(d.value.error), 1)) : X("", !0), h.value && (e.editing || !d.value?.pending) ? (G(), K("p", Hu, I(h.value), 1)) : X("", !0)]),
-			l.value ? Dn((G(), K("div", Uu, [
+			}, [e.editing && d.value?.error ? (G(), K("p", Bu, I(d.value.error), 1)) : X("", !0), h.value && (e.editing || !d.value?.pending) ? (G(), K("p", Vu, I(h.value), 1)) : X("", !0)]),
+			l.value ? Dn((G(), K("div", Hu, [
 				q("h3", null, I(u.value.mode), 1),
 				q("div", {
 					class: "tou-charging-methods",
@@ -6344,9 +6338,9 @@ var Gl = ["aria-busy"], Kl = {
 					"aria-pressed": p.value === e,
 					disabled: m.value,
 					onClick: (t) => T(e)
-				}, [q("strong", null, I(u.value[e]), 1)], 8, Gu)), 64))], 8, Wu),
-				p.value === "bridge" && !S.value ? (G(), K("p", Ku, I(u.value.pvRequired), 1)) : X("", !0),
-				q("div", qu, [J(_u, {
+				}, [q("strong", null, I(u.value[e]), 1)], 8, Wu)), 64))], 8, Uu),
+				p.value === "bridge" && !S.value ? (G(), K("p", Gu, I(u.value.pvRequired), 1)) : X("", !0),
+				q("div", Ku, [J(_u, {
 					ref_key: "numbers",
 					ref: a,
 					fields: y.value,
@@ -6360,100 +6354,97 @@ var Gl = ["aria-busy"], Kl = {
 			], 512)), [[Zi, e.editing]]) : X("", !0)
 		]));
 	}
-}), [["styles", [".tou-charging-settings{min-width:0}.tou-charging-settings .tou-charging-soc-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tou-charging-settings .tou-charging-soc-row--bridge{grid-template-columns:repeat(2,minmax(0,1fr))}.tou-charging-soc-row>.electricity-target{padding:8px}.tou-charging-soc-row>.electricity-target>strong{margin-top:auto;font-size:clamp(18px,4cqi,24px)}.tou-charging-limits .entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.tou-charging-summary,.tou-charging-threshold,.tou-charging-month-summary{overflow-wrap:anywhere;line-height:1.5}.tou-charging-hint{color:var(--secondary-text-color,#666);font-size:14px;line-height:1.6}.tou-charging-error{color:var(--error-color,#b00020)}.tou-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0;display:grid}.tou-charging-methods button{border:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff);min-width:0;min-height:44px;color:var(--primary-text-color,#212121);text-align:left;font:inherit;cursor:pointer;border-radius:8px;padding:12px}.tou-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:11px}.tou-charging-methods strong{line-height:1.5;display:block}.tou-charging-methods button:disabled{opacity:.55;cursor:not-allowed}.tou-charging-methods button:focus-visible{outline:3px solid var(--primary-color,#03a9f4);outline-offset:3px}@media (max-width:700px){.tou-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Yu = { class: "electricity-tariff-view" }, Xu = { class: "electricity-card electricity-tariff-bar" }, Zu = { class: "electricity-tariff-bar__row" }, Qu = { class: "electricity-active" }, $u = ["disabled", "aria-expanded"], ed = ["aria-busy"], td = ["disabled"], nd = { class: "electricity-sr-only" }, rd = ["value"], id = {
+}), [["styles", [".tou-charging-settings{min-width:0}.tou-charging-settings .tou-charging-soc-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tou-charging-settings .tou-charging-soc-row--bridge{grid-template-columns:repeat(2,minmax(0,1fr))}.tou-charging-soc-row>.electricity-target{padding:8px}.tou-charging-soc-row>.electricity-target>strong{margin-top:auto;font-size:clamp(18px,4cqi,24px)}.tou-charging-limits .entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.tou-charging-summary,.tou-charging-threshold,.tou-charging-month-summary{overflow-wrap:anywhere;line-height:1.5}.tou-charging-hint{color:var(--secondary-text-color,#666);font-size:14px;line-height:1.6}.tou-charging-error{color:var(--error-color,#b00020)}.tou-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0;display:grid}.tou-charging-methods button{border:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff);min-width:0;min-height:44px;color:var(--primary-text-color,#212121);text-align:left;font:inherit;cursor:pointer;border-radius:8px;padding:12px}.tou-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:11px}.tou-charging-methods strong{line-height:1.5;display:block}.tou-charging-methods button:disabled{opacity:.55;cursor:not-allowed}.tou-charging-methods button:focus-visible{outline:3px solid var(--primary-color,#03a9f4);outline-offset:3px}@media (max-width:700px){.tou-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Ju = { class: "electricity-tariff-view" }, Yu = { class: "electricity-card electricity-tariff-bar" }, Xu = { class: "electricity-tariff-bar__row" }, Zu = { class: "electricity-active" }, Qu = ["disabled", "aria-expanded"], $u = ["aria-busy"], ed = ["disabled"], td = { class: "electricity-sr-only" }, nd = ["value"], rd = {
 	key: 0,
 	role: "status"
-}, ad = ["disabled"], od = ["disabled"], sd = {
+}, id = ["disabled"], ad = ["disabled"], od = {
 	key: 1,
 	class: "electricity-operation-status",
 	role: "status",
 	"aria-live": "polite"
-}, cd = {
+}, sd = {
 	key: 2,
 	role: "alert",
 	class: "electricity-error"
-}, ld = ["disabled"], ud = {
+}, cd = ["disabled"], ld = {
 	key: 4,
 	role: "status"
-}, dd = {
+}, ud = {
 	key: 5,
 	role: "status"
-}, fd = {
+}, dd = {
 	key: 6,
 	role: "status"
-}, pd = {
+}, fd = {
 	key: 0,
 	class: "electricity-columns"
-}, md = ["aria-label"], hd = { class: "electricity-current" }, gd = { class: "electricity-muted" }, _d = { class: "electricity-current-price" }, vd = { key: 0 }, yd = ["aria-busy"], bd = ["disabled", "aria-expanded"], xd = ["disabled"], Sd = { class: "electricity-current" }, Cd = { class: "electricity-muted" }, wd = { class: "electricity-current-price" }, Td = { key: 0 }, Ed = { class: "electricity-price-summary electricity-summary-rows" }, Dd = ["aria-busy"], Od = ["id"], kd = ["disabled"], Ad = { class: "electricity-muted" }, jd = { class: "electricity-fields" }, Md = ["aria-invalid", "aria-describedby"], Nd = { class: "electricity-muted" }, Pd = { class: "electricity-muted" }, Fd = { class: "electricity-fields" }, Id = { class: "electricity-muted" }, Ld = {
+}, pd = ["aria-label"], md = { class: "electricity-current" }, hd = { class: "electricity-muted" }, gd = { class: "electricity-current-price" }, _d = { key: 0 }, vd = ["aria-busy"], yd = ["disabled", "aria-expanded"], bd = ["disabled"], xd = { class: "electricity-current" }, Sd = { class: "electricity-muted" }, Cd = { class: "electricity-current-price" }, wd = { key: 0 }, Td = { class: "electricity-price-summary electricity-summary-rows" }, Ed = ["aria-busy"], Dd = ["id"], Od = ["disabled"], kd = { class: "electricity-muted" }, Ad = { class: "electricity-fields" }, jd = ["aria-invalid", "aria-describedby"], Md = { class: "electricity-muted" }, Nd = { class: "electricity-muted" }, Pd = { class: "electricity-fields" }, Fd = { class: "electricity-muted" }, Id = {
 	key: 0,
 	class: "electricity-muted electricity-additional-settings"
-}, Rd = { class: "electricity-price-advanced" }, zd = { class: "electricity-fields" }, Bd = ["aria-invalid", "aria-describedby"], Vd = ["aria-invalid", "aria-describedby"], Hd = ["value"], Ud = { class: "electricity-muted" }, Wd = { class: "electricity-muted" }, Gd = { class: "electricity-fields" }, Kd = ["aria-invalid", "aria-describedby"], qd = { class: "electricity-muted" }, Jd = ["disabled"], Yd = ["disabled"], Xd = { class: "electricity-price-details" }, Zd = ["aria-label"], Qd = ["aria-pressed", "onClick"], $d = { class: "electricity-day" }, ef = { key: 0 }, tf = {
+}, Ld = { class: "electricity-price-advanced" }, Rd = { class: "electricity-fields" }, zd = ["aria-invalid", "aria-describedby"], Bd = ["aria-invalid", "aria-describedby"], Vd = ["value"], Hd = { class: "electricity-muted" }, Ud = { class: "electricity-muted" }, Wd = { class: "electricity-fields" }, Gd = ["aria-invalid", "aria-describedby"], Kd = { class: "electricity-muted" }, qd = ["disabled"], Jd = ["disabled"], Yd = { class: "electricity-price-details" }, Xd = ["aria-label"], Zd = ["aria-pressed", "onClick"], Qd = { class: "electricity-day" }, $d = { key: 0 }, ef = {
 	key: 0,
 	class: "electricity-card electricity-charging"
-}, nf = [
+}, tf = [
 	"disabled",
 	"aria-busy",
 	"aria-expanded"
-], rf = ["disabled"], af = {
+], nf = ["disabled"], rf = {
 	key: 0,
 	class: "electricity-activation"
-}, of = ["aria-busy"], sf = [
+}, af = ["aria-busy"], of = [
 	"checked",
 	"aria-describedby",
 	"disabled"
-], cf = {
+], sf = {
 	id: "electricity-master-status",
 	class: "electricity-master-status",
 	role: "status",
 	"aria-live": "polite"
-}, lf = {
+}, cf = {
 	key: 0,
 	id: "electricity-activation-error",
 	class: "electricity-error",
 	role: "alert"
-}, uf = ["disabled"], df = {
+}, lf = ["disabled"], uf = {
 	key: 2,
 	class: "electricity-muted"
-}, ff = {
+}, df = {
 	key: 3,
 	class: "electricity-muted"
-}, pf = {
+}, ff = {
 	key: 4,
 	class: "electricity-muted"
-}, mf = { key: 5 }, hf = {
+}, pf = { key: 5 }, mf = {
 	key: 3,
 	class: "electricity-charging-feedback"
-}, gf = {
+}, hf = {
 	key: 0,
 	class: "electricity-error",
 	role: "alert"
-}, _f = {
+}, gf = {
 	key: 1,
 	role: "status",
 	"aria-live": "polite"
-}, vf = {
+}, _f = {
 	key: 4,
 	class: "electricity-charging-editor"
-}, yf = ["disabled"], bf = ["disabled"], xf = {
+}, vf = ["disabled"], yf = ["disabled"], bf = {
 	key: 0,
 	role: "status",
 	"aria-live": "polite"
-}, Sf = {
+}, xf = {
 	key: 5,
-	class: "electricity-summary-rows electricity-pv-summary"
-}, Cf = {
-	key: 6,
 	class: "electricity-charge-status"
-}, wf = {
-	key: 7,
+}, Sf = {
+	key: 6,
 	class: "electricity-plan"
-}, Tf = {
+}, Cf = { class: "electricity-summary-rows electricity-pv-summary" }, wf = {
 	key: 0,
 	class: "electricity-planned-pv"
-}, Ef = {
+}, Tf = {
 	key: 1,
 	class: "electricity-footnote"
-}, Df = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
+}, Ef = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
 	__name: "ElectricityTariffView",
 	props: { hass: { type: Object } },
 	setup(e) {
@@ -6853,9 +6844,9 @@ var Gl = ["aria-busy"], Kl = {
 				}
 			}
 		}
-		return (t, n) => (G(), K("div", Yu, [
-			q("section", Xu, [
-				q("div", Zu, [q("div", Qu, [
+		return (t, n) => (G(), K("div", Ju, [
+			q("section", Yu, [
+				q("div", Xu, [q("div", Zu, [
 					q("span", null, I(i.value.active), 1),
 					q("strong", null, I(d.value), 1),
 					q("button", {
@@ -6863,7 +6854,7 @@ var Gl = ["aria-busy"], Kl = {
 						disabled: !u.value || S.value || N.value,
 						"aria-expanded": E.value,
 						onClick: R
-					}, I(i.value.change), 9, $u)
+					}, I(i.value.change), 9, Qu)
 				])]),
 				E.value ? (G(), K("form", {
 					key: 0,
@@ -6871,41 +6862,41 @@ var Gl = ["aria-busy"], Kl = {
 					"aria-busy": w.value === "applying",
 					onSubmit: Ga(Ce, ["prevent"])
 				}, [
-					q("fieldset", { disabled: S.value || !l.value }, [q("legend", nd, I(i.value.active), 1), (G(), K(W, null, U(["time_of_use", "dynamic"], (e) => q("label", { key: e }, [Dn(q("input", {
+					q("fieldset", { disabled: S.value || !l.value }, [q("legend", td, I(i.value.active), 1), (G(), K(W, null, U(["time_of_use", "dynamic"], (e) => q("label", { key: e }, [Dn(q("input", {
 						"onUpdate:modelValue": n[0] ||= (e) => D.value = e,
 						type: "radio",
 						name: "electricity-tariff",
 						value: e
-					}, null, 8, rd), [[Ra, D.value]]), q("span", null, [q("strong", null, I(e === "time_of_use" ? i.value.tou : i.value.dynamic), 1), q("small", null, I(e === "time_of_use" ? i.value.touHint : i.value.dynamicHint), 1)])])), 64))], 8, td),
+					}, null, 8, nd), [[Ra, D.value]]), q("span", null, [q("strong", null, I(e === "time_of_use" ? i.value.tou : i.value.dynamic), 1), q("small", null, I(e === "time_of_use" ? i.value.touHint : i.value.dynamicHint), 1)])])), 64))], 8, ed),
 					q("p", null, I(i.value.chooseHint), 1),
-					Se.value ? (G(), K("p", id, I(i.value.incomplete), 1)) : X("", !0),
+					Se.value ? (G(), K("p", rd, I(i.value.incomplete), 1)) : X("", !0),
 					J(bo, { class: "electricity-actions" }, {
 						default: En(() => [q("button", {
 							type: "submit",
 							disabled: S.value || !l.value || x.value
-						}, I(w.value === "applying" ? i.value.applying : i.value.apply), 9, ad), q("button", {
+						}, I(w.value === "applying" ? i.value.applying : i.value.apply), 9, id), q("button", {
 							type: "button",
 							disabled: S.value,
 							onClick: n[1] ||= (e) => {
 								E.value = !1, _.value = null;
 							}
-						}, I(i.value.cancel), 9, od)]),
+						}, I(i.value.cancel), 9, ad)]),
 						_: 1
 					})
-				], 40, ed)) : X("", !0),
-				w.value ? (G(), K("p", sd, I(i.value[w.value]), 1)) : X("", !0),
-				_.value && !y.value && v.value !== "activation" ? (G(), K("p", cd, I(_.value), 1)) : X("", !0),
+				], 40, $u)) : X("", !0),
+				w.value ? (G(), K("p", od, I(i.value[w.value]), 1)) : X("", !0),
+				_.value && !y.value && v.value !== "activation" ? (G(), K("p", sd, I(_.value), 1)) : X("", !0),
 				x.value && v.value !== "activation" ? (G(), K("button", {
 					key: 3,
 					type: "button",
 					disabled: S.value || !l.value,
 					onClick: Oe
-				}, I(i.value.reload), 9, ld)) : X("", !0),
-				T.value ? (G(), K("p", ud, I(i.value.saved), 1)) : X("", !0),
-				ee.value ? (G(), K("p", dd, I(i.value.tariffChanged), 1)) : X("", !0),
-				!o.value && !_.value ? (G(), K("p", fd, I(i.value.loading), 1)) : X("", !0)
+				}, I(i.value.reload), 9, cd)) : X("", !0),
+				T.value ? (G(), K("p", ld, I(i.value.saved), 1)) : X("", !0),
+				ee.value ? (G(), K("p", ud, I(i.value.tariffChanged), 1)) : X("", !0),
+				!o.value && !_.value ? (G(), K("p", dd, I(i.value.loading), 1)) : X("", !0)
 			]),
-			c.value ? (G(), K("div", pd, [q("section", {
+			c.value ? (G(), K("div", fd, [q("section", {
 				class: "electricity-card electricity-price-card",
 				"aria-label": i.value.prices
 			}, [s.value === "time_of_use" ? (G(), oi(Ul, {
@@ -6915,7 +6906,7 @@ var Gl = ["aria-busy"], Kl = {
 				onEditing: n[2] ||= (e) => ne.value = e,
 				onSaved: be
 			}, {
-				"current-price": En(() => [q("div", hd, [q("span", gd, I(i.value.price) + " · " + I(i.value.current), 1), q("p", _d, [Y(I(P.value ?? i.value.unavailable), 1), P.value === null ? X("", !0) : (G(), K("span", vd, " ct/kWh"))])])]),
+				"current-price": En(() => [q("div", md, [q("span", hd, I(i.value.price) + " · " + I(i.value.current), 1), q("p", gd, [Y(I(P.value ?? i.value.unavailable), 1), P.value === null ? X("", !0) : (G(), K("span", _d, " ct/kWh"))])])]),
 				_: 1
 			}, 8, ["hass"])) : s.value === "dynamic" ? (G(), K("section", {
 				key: 1,
@@ -6930,16 +6921,16 @@ var Gl = ["aria-busy"], Kl = {
 						disabled: S.value || !u.value || E.value || O.value && (!l.value || x.value),
 						"aria-expanded": O.value,
 						onClick: n[3] ||= (e) => O.value ? De() : Te()
-					}, I(w.value === "loading" ? i.value.loading : w.value === "saving" ? i.value.saving : O.value ? i.value.save : i.value.edit), 9, bd), O.value ? (G(), K("button", {
+					}, I(w.value === "loading" ? i.value.loading : w.value === "saving" ? i.value.saving : O.value ? i.value.save : i.value.edit), 9, yd), O.value ? (G(), K("button", {
 						key: 0,
 						type: "button",
 						disabled: S.value,
 						onClick: Ee
-					}, I(i.value.cancel), 9, xd)) : X("", !0)]),
+					}, I(i.value.cancel), 9, bd)) : X("", !0)]),
 					_: 1
 				})]),
-				q("div", Sd, [q("span", Cd, I(i.value.price) + " · " + I(i.value.current), 1), q("p", wd, [Y(I(P.value ?? i.value.unavailable), 1), P.value === null ? X("", !0) : (G(), K("span", Td, " ct/kWh"))])]),
-				q("dl", Ed, [q("div", null, [q("dt", null, I(i.value.sourceSummary), 1), q("dd", null, I(ge.value), 1)]), q("div", null, [q("dt", null, I(i.value.feed), 1), q("dd", null, [Y(I(_e.value ?? i.value.unavailable), 1), _e.value === null ? X("", !0) : (G(), K(W, { key: 0 }, [Y(" ct/kWh")], 64))])])]),
+				q("div", xd, [q("span", Sd, I(i.value.price) + " · " + I(i.value.current), 1), q("p", Cd, [Y(I(P.value ?? i.value.unavailable), 1), P.value === null ? X("", !0) : (G(), K("span", wd, " ct/kWh"))])]),
+				q("dl", Td, [q("div", null, [q("dt", null, I(i.value.sourceSummary), 1), q("dd", null, I(ge.value), 1)]), q("div", null, [q("dt", null, I(i.value.feed), 1), q("dd", null, [Y(I(_e.value ?? i.value.unavailable), 1), _e.value === null ? X("", !0) : (G(), K(W, { key: 0 }, [Y(" ct/kWh")], 64))])])]),
 				O.value ? (G(), K("form", {
 					key: 0,
 					ref_key: "pricesEditor",
@@ -6954,10 +6945,10 @@ var Gl = ["aria-busy"], Kl = {
 						id: V(b),
 						role: "alert",
 						class: "electricity-error"
-					}, I(_.value), 9, Od)) : X("", !0),
+					}, I(_.value), 9, Dd)) : X("", !0),
 					q("fieldset", { disabled: S.value || !l.value }, [
-						q("p", Ad, I(i.value.priceHint), 1),
-						q("div", jd, [J(tc, {
+						q("p", kd, I(i.value.priceHint), 1),
+						q("div", Ad, [J(tc, {
 							modelValue: k.value.price_sensor,
 							"onUpdate:modelValue": n[4] ||= (e) => k.value.price_sensor = e,
 							hass: e.hass,
@@ -6980,10 +6971,10 @@ var Gl = ["aria-busy"], Kl = {
 							required: "",
 							"aria-invalid": y.value === "feed" || void 0,
 							"aria-describedby": y.value === "feed" ? V(b) : void 0
-						}, null, 8, Md), [[La, A.value]])])]),
-						q("p", Nd, I(i.value.sourceHint), 1),
-						q("p", Pd, I(i.value.feedHint), 1),
-						q("div", Fd, [J(tc, {
+						}, null, 8, jd), [[La, A.value]])])]),
+						q("p", Md, I(i.value.sourceHint), 1),
+						q("p", Nd, I(i.value.feedHint), 1),
+						q("div", Pd, [J(tc, {
 							modelValue: k.value.pv_sensor,
 							"onUpdate:modelValue": n[6] ||= (e) => k.value.pv_sensor = e,
 							hass: e.hass,
@@ -6998,19 +6989,19 @@ var Gl = ["aria-busy"], Kl = {
 							"invalid",
 							"described-by"
 						])]),
-						q("p", Id, I(i.value.pvHint), 1),
-						he.value ? (G(), K("p", Ld, I(i.value.customSettings) + ": " + I(he.value), 1)) : X("", !0),
-						q("details", Rd, [
+						q("p", Fd, I(i.value.pvHint), 1),
+						he.value ? (G(), K("p", Id, I(i.value.customSettings) + ": " + I(he.value), 1)) : X("", !0),
+						q("details", Ld, [
 							q("summary", null, I(i.value.advanced), 1),
 							q("h3", null, I(i.value.sourceSettings), 1),
-							q("div", zd, [q("label", null, [Y(I(i.value.attribute), 1), Dn(q("input", {
+							q("div", Rd, [q("label", null, [Y(I(i.value.attribute), 1), Dn(q("input", {
 								"onUpdate:modelValue": n[7] ||= (e) => k.value.price_attribute = e,
 								name: "dynamic_price_attribute",
 								type: "text",
 								autocomplete: "off",
 								"aria-invalid": y.value === "price_attribute" || void 0,
 								"aria-describedby": y.value === "price_attribute" ? V(b) : void 0
-							}, null, 8, Bd), [[La, k.value.price_attribute]])]), q("label", null, [Y(I(i.value.unit), 1), Dn(q("select", {
+							}, null, 8, zd), [[La, k.value.price_attribute]])]), q("label", null, [Y(I(i.value.unit), 1), Dn(q("select", {
 								"onUpdate:modelValue": n[8] ||= (e) => k.value.price_unit = e,
 								name: "dynamic_price_unit",
 								"aria-invalid": y.value === "price_unit" || void 0,
@@ -7018,10 +7009,10 @@ var Gl = ["aria-busy"], Kl = {
 							}, [(G(!0), K(W, null, U(i.value.units, (e, t) => (G(), K("option", {
 								key: t,
 								value: t
-							}, I(e), 9, Hd))), 128))], 8, Vd), [[za, k.value.price_unit]])])]),
-							q("p", Ud, I(i.value.attributeHint), 1),
-							q("p", Wd, I(i.value.unitHint), 1),
-							q("div", Gd, [q("label", null, [Y(I(i.value.pvFactor), 1), Dn(q("input", {
+							}, I(e), 9, Vd))), 128))], 8, Bd), [[za, k.value.price_unit]])])]),
+							q("p", Hd, I(i.value.attributeHint), 1),
+							q("p", Ud, I(i.value.unitHint), 1),
+							q("div", Wd, [q("label", null, [Y(I(i.value.pvFactor), 1), Dn(q("input", {
 								"onUpdate:modelValue": n[9] ||= (e) => j.value = e,
 								name: "dynamic_pv_factor",
 								type: "number",
@@ -7030,23 +7021,23 @@ var Gl = ["aria-busy"], Kl = {
 								step: "1",
 								"aria-invalid": y.value === "pv_factor" || void 0,
 								"aria-describedby": y.value === "pv_factor" ? V(b) : void 0
-							}, null, 8, Kd), [[La, j.value]])])]),
-							q("p", qd, I(i.value.pvFactorHint), 1)
+							}, null, 8, Gd), [[La, j.value]])])]),
+							q("p", Kd, I(i.value.pvFactorHint), 1)
 						])
-					], 8, kd),
+					], 8, Od),
 					J(bo, { class: "electricity-actions" }, {
 						default: En(() => [q("button", {
 							type: "submit",
 							disabled: S.value || !l.value || x.value
-						}, I(w.value === "saving" ? i.value.saving : i.value.save), 9, Jd), q("button", {
+						}, I(w.value === "saving" ? i.value.saving : i.value.save), 9, qd), q("button", {
 							type: "button",
 							disabled: S.value,
 							onClick: Ee
-						}, I(i.value.cancel), 9, Yd)]),
+						}, I(i.value.cancel), 9, Jd)]),
 						_: 1
 					})
-				], 40, Dd)) : X("", !0)
-			], 8, yd)) : X("", !0), q("details", Xd, [
+				], 40, Ed)) : X("", !0)
+			], 8, vd)) : X("", !0), q("details", Yd, [
 				q("summary", null, I(i.value.chart), 1),
 				s.value === "dynamic" ? (G(), K("div", {
 					key: 0,
@@ -7057,8 +7048,8 @@ var Gl = ["aria-busy"], Kl = {
 					type: "button",
 					"aria-pressed": g.value === e,
 					onClick: (t) => g.value = e
-				}, I(e === "today" ? i.value.today : i.value.tomorrow), 9, Qd)), 64))], 8, Zd)) : X("", !0),
-				q("p", $d, [Y(I(g.value === "today" ? i.value.today : i.value.tomorrow), 1), de.value ? (G(), K("span", ef, " · " + I(de.value), 1)) : X("", !0)]),
+				}, I(e === "today" ? i.value.today : i.value.tomorrow), 9, Zd)), 64))], 8, Xd)) : X("", !0),
+				q("p", Qd, [Y(I(g.value === "today" ? i.value.today : i.value.tomorrow), 1), de.value ? (G(), K("span", $d, " · " + I(de.value), 1)) : X("", !0)]),
 				J(ou, {
 					series: m.value,
 					hass: e.hass,
@@ -7068,7 +7059,7 @@ var Gl = ["aria-busy"], Kl = {
 					"hass",
 					"loading"
 				])
-			])], 8, md), c.value ? (G(), K("section", tf, [
+			])], 8, pd), c.value ? (G(), K("section", ef, [
 				q("header", null, [q("div", null, [q("h2", null, I(i.value.charging), 1)]), J(bo, null, {
 					default: En(() => [q("button", {
 						ref_key: "chargingButton",
@@ -7078,15 +7069,15 @@ var Gl = ["aria-busy"], Kl = {
 						"aria-busy": ce.value,
 						"aria-expanded": re.value,
 						onClick: n[10] ||= (e) => re.value ? je() : re.value = !0
-					}, I(ce.value ? i.value.saving : re.value ? i.value.done : i.value.edit), 9, nf), re.value ? (G(), K("button", {
+					}, I(ce.value ? i.value.saving : re.value ? i.value.done : i.value.edit), 9, tf), re.value ? (G(), K("button", {
 						key: 0,
 						type: "button",
 						disabled: ce.value || M.value?.pending,
 						onClick: Ae
-					}, I(i.value.cancel), 9, rf)) : X("", !0)]),
+					}, I(i.value.cancel), 9, nf)) : X("", !0)]),
 					_: 1
 				})]),
-				c.value ? (G(), K("section", af, [
+				c.value ? (G(), K("section", rf, [
 					q("label", {
 						class: "electricity-master",
 						"aria-busy": C.value !== null
@@ -7097,16 +7088,16 @@ var Gl = ["aria-busy"], Kl = {
 						"aria-describedby": _.value && v.value === "activation" ? "electricity-master-status electricity-activation-error" : "electricity-master-status",
 						disabled: !u.value || S.value || p.value === null || E.value || N.value,
 						onChange: we
-					}, null, 40, sf), Y(I(i.value.automatic), 1)], 8, of),
-					q("p", cf, I(C.value === null ? "" : C.value ? i.value.turningOn : i.value.turningOff), 1),
-					_.value && v.value === "activation" ? (G(), K("p", lf, I(_.value), 1)) : X("", !0),
+					}, null, 40, of), Y(I(i.value.automatic), 1)], 8, af),
+					q("p", sf, I(C.value === null ? "" : C.value ? i.value.turningOn : i.value.turningOff), 1),
+					_.value && v.value === "activation" ? (G(), K("p", cf, I(_.value), 1)) : X("", !0),
 					x.value && v.value === "activation" ? (G(), K("button", {
 						key: 1,
 						type: "button",
 						disabled: S.value || !l.value,
 						onClick: Oe
-					}, I(i.value.reload), 9, uf)) : X("", !0),
-					l.value ? u.value ? N.value || E.value ? (G(), K("p", pf, I(i.value.editFirst), 1)) : (G(), K("p", mf, I(p.value === null ? i.value.unavailable : p.value ? i.value.activationOn : i.value.activationOff), 1)) : (G(), K("p", ff, I(i.value.readonly), 1)) : (G(), K("p", df, I(i.value.disconnected), 1))
+					}, I(i.value.reload), 9, lf)) : X("", !0),
+					l.value ? u.value ? N.value || E.value ? (G(), K("p", ff, I(i.value.editFirst), 1)) : (G(), K("p", pf, I(p.value === null ? i.value.unavailable : p.value ? i.value.activationOn : i.value.activationOff), 1)) : (G(), K("p", df, I(i.value.readonly), 1)) : (G(), K("p", uf, I(i.value.disconnected), 1))
 				])) : X("", !0),
 				s.value === "dynamic" ? (G(), oi(Mu, {
 					key: 1,
@@ -7115,7 +7106,7 @@ var Gl = ["aria-busy"], Kl = {
 					editing: re.value,
 					onApply: je
 				}, null, 8, ["editing"])) : X("", !0),
-				s.value === "time_of_use" ? (G(), oi(Ju, {
+				s.value === "time_of_use" ? (G(), oi(qu, {
 					key: 2,
 					ref_key: "chargingSettings",
 					ref: M,
@@ -7123,8 +7114,8 @@ var Gl = ["aria-busy"], Kl = {
 					hass: e.hass,
 					onApply: je
 				}, null, 8, ["editing", "hass"])) : X("", !0),
-				re.value ? X("", !0) : (G(), K("div", hf, [(G(!0), K(W, null, U(me.value, (e) => (G(), K(W, { key: e?.metadata.entity_id }, [e?.error ? (G(), K("p", gf, I(e.name) + ": " + I(e.error), 1)) : e?.pending ? (G(), K("p", _f, I(e.name) + ": " + I(i.value.entityPending), 1)) : X("", !0)], 64))), 128))])),
-				re.value ? (G(), K("div", vf, [J(bo, {
+				re.value ? X("", !0) : (G(), K("div", mf, [(G(!0), K(W, null, U(me.value, (e) => (G(), K(W, { key: e?.metadata.entity_id }, [e?.error ? (G(), K("p", hf, I(e.name) + ": " + I(e.error), 1)) : e?.pending ? (G(), K("p", gf, I(e.name) + ": " + I(i.value.entityPending), 1)) : X("", !0)], 64))), 128))])),
+				re.value ? (G(), K("div", _f, [J(bo, {
 					class: "electricity-actions",
 					"aria-busy": ce.value
 				}, {
@@ -7132,80 +7123,83 @@ var Gl = ["aria-busy"], Kl = {
 						type: "button",
 						disabled: E.value || ce.value || M.value?.pending,
 						onClick: je
-					}, I(ce.value ? i.value.saving : i.value.done), 9, yf), q("button", {
+					}, I(ce.value ? i.value.saving : i.value.done), 9, vf), q("button", {
 						type: "button",
 						disabled: ce.value || M.value?.pending,
 						onClick: Ae
-					}, I(i.value.cancel), 9, bf)]),
+					}, I(i.value.cancel), 9, yf)]),
 					_: 1
-				}, 8, ["aria-busy"]), ce.value ? (G(), K("p", xf, I(i.value.entityPending), 1)) : X("", !0)])) : X("", !0),
-				re.value ? X("", !0) : (G(), K("dl", Sf, [q("div", null, [q("dt", null, I(i.value.pvSummary), 1), q("dd", null, I(ve.value), 1)])])),
-				s.value === "dynamic" ? (G(), K("div", Cf, [J(Qo, {
+				}, 8, ["aria-busy"]), ce.value ? (G(), K("p", bf, I(i.value.entityPending), 1)) : X("", !0)])) : X("", !0),
+				s.value === "dynamic" ? (G(), K("div", xf, [J(Qo, {
 					domain: "sensor",
 					"entity-key": "price_charge_status_text"
 				})])) : X("", !0),
-				c.value ? (G(), K("details", wf, [q("summary", null, I(i.value.details), 1), s.value === "time_of_use" ? (G(), oi(Oc, {
-					key: 0,
-					hass: e.hass
-				}, null, 8, ["hass"])) : (G(), K(W, { key: 1 }, [
-					J(Qo, {
-						domain: "sensor",
-						"entity-key": "price_charge_active_text"
-					}),
-					J(Qo, {
-						domain: "sensor",
-						"entity-key": "price_charge_status_text"
-					}),
-					J(Qo, {
-						domain: "sensor",
-						"entity-key": "price_charge_next_start"
-					}),
-					F.value === null ? X("", !0) : (G(), K("p", Tf, [Y(I(i.value.plannedPv) + ": ", 1), q("strong", null, I(F.value) + " kWh", 1)]))
-				], 64))])) : X("", !0)
+				c.value ? (G(), K("details", Sf, [
+					q("summary", null, I(i.value.details), 1),
+					q("dl", Cf, [q("div", null, [q("dt", null, I(i.value.pvSummary), 1), q("dd", null, I(ve.value), 1)])]),
+					s.value === "time_of_use" ? (G(), oi(Oc, {
+						key: 0,
+						hass: e.hass
+					}, null, 8, ["hass"])) : (G(), K(W, { key: 1 }, [
+						J(Qo, {
+							domain: "sensor",
+							"entity-key": "price_charge_active_text"
+						}),
+						J(Qo, {
+							domain: "sensor",
+							"entity-key": "price_charge_status_text"
+						}),
+						J(Qo, {
+							domain: "sensor",
+							"entity-key": "price_charge_next_start"
+						}),
+						F.value === null ? X("", !0) : (G(), K("p", wf, [Y(I(i.value.plannedPv) + ": ", 1), q("strong", null, I(F.value) + " kWh", 1)]))
+					], 64))
+				])) : X("", !0)
 			])) : X("", !0)])) : X("", !0),
-			c.value ? (G(), K("p", Ef, I(i.value.gross), 1)) : X("", !0)
+			c.value ? (G(), K("p", Tf, I(i.value.gross), 1)) : X("", !0)
 		]));
 	}
-}), [["styles", [".electricity-tariff-view{gap:16px;min-width:0;margin-top:12px;display:grid}.electricity-card{border:1px solid var(--divider-color,#ddd);border-radius:var(--ha-card-border-radius,12px);background:var(--card-background-color,#fff);min-width:0;padding:16px 18px}.electricity-card h2{margin:0;font-size:18px}.electricity-card h3{margin:20px 0 10px;font-size:16px}.electricity-card p{margin:10px 0 0;line-height:1.6}.electricity-card button{font:inherit;cursor:pointer;border:1px solid var(--divider-color,#ddd);min-height:44px;color:var(--primary-color,#03a9f4);background:0 0;border-radius:7px;padding:8px 12px}.electricity-card button:disabled{opacity:.5;cursor:default}.electricity-card header,.electricity-tariff-bar__row{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;display:flex}.electricity-card header>div:not(.editor-actions){flex:1;min-width:0}.electricity-card header>.editor-actions{white-space:nowrap;flex-shrink:0}.electricity-active{flex-wrap:wrap;align-items:center;gap:10px;display:flex}.electricity-active>span,.electricity-muted{color:var(--secondary-text-color,#666)}.electricity-master{cursor:pointer;align-items:center;gap:10px;min-height:44px;display:flex}.electricity-master-status:empty{display:none}.electricity-master-status{border-left:3px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:10px 14px;font-weight:500}.electricity-activation .electricity-master{margin-top:0;font-weight:600}.electricity-price-details{margin-top:16px}.electricity-master[aria-busy=true]{cursor:progress}.electricity-master input{width:22px;height:22px;accent-color:var(--primary-color,#03a9f4);flex-shrink:0}.electricity-choice{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:16px}.electricity-choice fieldset{border:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;min-width:0;padding:0;display:grid}.electricity-choice fieldset>label{border:1px solid var(--divider-color,#ddd);cursor:pointer;border-radius:8px;gap:12px;padding:14px;display:flex}.electricity-choice input{accent-color:var(--primary-color,#03a9f4);flex-shrink:0;width:20px;height:20px}.electricity-choice strong,.electricity-choice small{display:block}.electricity-choice small{color:var(--secondary-text-color,#666);margin-top:5px;font-size:14px}.electricity-actions{margin-top:16px}.electricity-current-price{font-size:32px;font-weight:500;line-height:1.1!important}.electricity-current-price span{font-size:16px;font-weight:400}.electricity-days{gap:6px;margin-top:12px;display:flex}.electricity-days [aria-pressed=true]{background:var(--secondary-background-color,#eee);border-color:var(--primary-color,#03a9f4)}.electricity-day{margin:20px 0!important}.electricity-error{color:var(--error-color,#db4437)}.electricity-price-editor [aria-invalid=true]{border-color:var(--error-color,#db4437);outline:1px solid var(--error-color,#db4437)}.electricity-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;display:grid}.electricity-fields>label{flex-direction:column;gap:6px;min-width:0;font-size:14px;display:flex}.electricity-fields input,.electricity-fields select{width:100%;min-width:0;min-height:44px;font:inherit;color:var(--primary-text-color,#222);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ccc);border-radius:6px;padding:10px}.electricity-price-editor fieldset{border:0;min-width:0;margin:0;padding:0}.electricity-price-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:12px}.electricity-price-advanced>summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-settings .entity-control,.electricity-charging-editor .entity-control{margin-top:12px}.electricity-plan>summary,.electricity-price-details>summary{cursor:pointer;align-content:center;min-height:44px;font-size:14px;font-weight:500;display:list-item}.electricity-plan>.charge-plan{box-shadow:none;border:0;padding:16px 0 0}.electricity-sr-only{clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}@media (max-width:700px){.electricity-tariff-bar__row{flex-direction:column;align-items:flex-start}.electricity-fields,.electricity-choice fieldset{grid-template-columns:minmax(0,1fr)}.electricity-card{padding:16px}.electricity-card header{align-items:flex-start}.electricity-current-price{font-size:28px}}.electricity-columns{align-items:start;gap:16px;min-width:0;display:grid}.electricity-card.electricity-tariff-bar{background:0 0;border:0;padding:0}.electricity-tariff-bar__row{justify-content:flex-end}.electricity-active>strong{color:var(--primary-text-color,#212121)}.electricity-price-card{container:sax-tariff-prices/inline-size}.electricity-card.electricity-prices{border:0;border-radius:0;padding:0}.electricity-prices>header,.electricity-charging>header{border-bottom:1px solid var(--divider-color,#ddd);margin-bottom:14px;padding-bottom:12px}.electricity-card .electricity-current-price{margin:3px 0 0}.electricity-current{min-width:0}.electricity-prices>.electricity-current{margin:14px 0}.electricity-activation{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;margin-bottom:12px;padding:8px 12px 12px}.electricity-activation>p{color:var(--secondary-text-color,#666);margin-top:2px}.electricity-summary-rows{margin:0}.electricity-summary-rows>div{border-bottom:1px solid var(--divider-color,#ddd);justify-content:space-between;align-items:center;gap:8px 16px;min-height:41px;padding:7px 0;display:flex}.electricity-summary-rows dt{color:var(--secondary-text-color,#666)}.electricity-summary-rows dd{text-align:right;overflow-wrap:anywhere;min-width:0;margin:0}.electricity-targets{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0;display:grid}.electricity-target{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;flex-direction:column;gap:4px;min-width:0;padding:10px 12px;display:flex}.electricity-target>span{color:var(--secondary-text-color,#666);font-size:14px}.electricity-target>strong{overflow-wrap:anywhere;font-size:24px;font-weight:500}.electricity-charge-status .entity-value{padding:12px 0}.electricity-plan,.electricity-price-details,.tou-charging-rules{border-top:1px solid var(--divider-color,#ddd);margin-top:10px;padding-top:0}.tou-charging-rules>summary{cursor:pointer;align-content:center;min-height:44px}.electricity-footnote{color:var(--secondary-text-color,#666);margin:0;font-size:13px}@container sax-content (width>=860px){.electricity-columns{grid-template-columns:minmax(0,1.14fr) minmax(0,1fr)}.electricity-tariff-view{margin-top:-36px}.electricity-tariff-bar__row{min-height:44px;padding-left:260px}}@container sax-tariff-prices (width<=560px){.electricity-fields{grid-template-columns:minmax(0,1fr);gap:10px}}"]]]), Of = { class: "savings-view" }, kf = { class: "savings-overview" }, Af = ["aria-labelledby"], jf = ["id"], Mf = ["aria-labelledby"], Nf = ["id"], Pf = {
+}), [["styles", [".electricity-tariff-view{gap:16px;min-width:0;margin-top:12px;display:grid}.electricity-card{border:1px solid var(--divider-color,#ddd);border-radius:var(--ha-card-border-radius,12px);background:var(--card-background-color,#fff);min-width:0;padding:16px 18px}.electricity-card h2{margin:0;font-size:18px}.electricity-card h3{margin:20px 0 10px;font-size:16px}.electricity-card p{margin:10px 0 0;line-height:1.6}.electricity-card button{font:inherit;cursor:pointer;border:1px solid var(--divider-color,#ddd);min-height:44px;color:var(--primary-color,#03a9f4);background:0 0;border-radius:7px;padding:8px 12px}.electricity-card button:disabled{opacity:.5;cursor:default}.electricity-card header,.electricity-tariff-bar__row{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;display:flex}.electricity-card header>div:not(.editor-actions){flex:1;min-width:0}.electricity-card header>.editor-actions{white-space:nowrap;flex-shrink:0}.electricity-active{flex-wrap:wrap;align-items:center;gap:10px;display:flex}.electricity-active>span,.electricity-muted{color:var(--secondary-text-color,#666)}.electricity-master{cursor:pointer;align-items:center;gap:10px;min-height:44px;display:flex}.electricity-master-status:empty{display:none}.electricity-master-status{border-left:3px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:10px 14px;font-weight:500}.electricity-activation .electricity-master{margin-top:0;font-weight:600}.electricity-price-details{margin-top:16px}.electricity-master[aria-busy=true]{cursor:progress}.electricity-master input{width:22px;height:22px;accent-color:var(--primary-color,#03a9f4);flex-shrink:0}.electricity-choice{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:16px}.electricity-choice fieldset{border:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;min-width:0;padding:0;display:grid}.electricity-choice fieldset>label{border:1px solid var(--divider-color,#ddd);cursor:pointer;border-radius:8px;gap:12px;padding:14px;display:flex}.electricity-choice input{accent-color:var(--primary-color,#03a9f4);flex-shrink:0;width:20px;height:20px}.electricity-choice strong,.electricity-choice small{display:block}.electricity-choice small{color:var(--secondary-text-color,#666);margin-top:5px;font-size:14px}.electricity-actions{margin-top:16px}.electricity-current-price{font-size:32px;font-weight:500;line-height:1.1!important}.electricity-current-price span{font-size:16px;font-weight:400}.electricity-days{gap:6px;margin-top:12px;display:flex}.electricity-days [aria-pressed=true]{background:var(--secondary-background-color,#eee);border-color:var(--primary-color,#03a9f4)}.electricity-day{margin:20px 0!important}.electricity-error{color:var(--error-color,#db4437)}.electricity-price-editor [aria-invalid=true]{border-color:var(--error-color,#db4437);outline:1px solid var(--error-color,#db4437)}.electricity-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;display:grid}.electricity-fields>label{flex-direction:column;gap:6px;min-width:0;font-size:14px;display:flex}.electricity-fields input,.electricity-fields select{width:100%;min-width:0;min-height:44px;font:inherit;color:var(--primary-text-color,#222);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ccc);border-radius:6px;padding:10px}.electricity-price-editor fieldset{border:0;min-width:0;margin:0;padding:0}.electricity-price-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:12px}.electricity-price-advanced>summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-settings .entity-control,.electricity-charging-editor .entity-control{margin-top:12px}.electricity-plan>summary,.electricity-price-details>summary{cursor:pointer;align-content:center;min-height:44px;font-size:14px;font-weight:500;display:list-item}.electricity-plan>.charge-plan{box-shadow:none;border:0;padding:16px 0 0}.electricity-sr-only{clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}@media (max-width:700px){.electricity-tariff-bar__row{flex-direction:column;align-items:flex-start}.electricity-fields,.electricity-choice fieldset{grid-template-columns:minmax(0,1fr)}.electricity-card{padding:16px}.electricity-card header{align-items:flex-start}.electricity-current-price{font-size:28px}}.electricity-columns{align-items:start;gap:16px;min-width:0;display:grid}.electricity-card.electricity-tariff-bar{background:0 0;border:0;padding:0}.electricity-tariff-bar__row{justify-content:flex-end}.electricity-active>strong{color:var(--primary-text-color,#212121)}.electricity-price-card{container:sax-tariff-prices/inline-size}.electricity-card.electricity-prices{border:0;border-radius:0;padding:0}.electricity-prices>header,.electricity-charging>header{border-bottom:1px solid var(--divider-color,#ddd);margin-bottom:14px;padding-bottom:12px}.electricity-card .electricity-current-price{margin:3px 0 0}.electricity-current{min-width:0}.electricity-prices>.electricity-current{margin:14px 0}.electricity-activation{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;margin-bottom:12px;padding:8px 12px 12px}.electricity-activation>p{color:var(--secondary-text-color,#666);margin-top:2px}.electricity-summary-rows{margin:0}.electricity-summary-rows>div{border-bottom:1px solid var(--divider-color,#ddd);justify-content:space-between;align-items:center;gap:8px 16px;min-height:41px;padding:7px 0;display:flex}.electricity-summary-rows dt{color:var(--secondary-text-color,#666)}.electricity-summary-rows dd{text-align:right;overflow-wrap:anywhere;min-width:0;margin:0}.electricity-targets{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0;display:grid}.electricity-target{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;flex-direction:column;gap:4px;min-width:0;padding:10px 12px;display:flex}.electricity-target>span{color:var(--secondary-text-color,#666);font-size:14px}.electricity-target>strong{overflow-wrap:anywhere;font-size:24px;font-weight:500}.electricity-charge-status .entity-value{padding:12px 0}.electricity-plan,.electricity-price-details,.tou-charging-rules{border-top:1px solid var(--divider-color,#ddd);margin-top:10px;padding-top:0}.tou-charging-rules>summary{cursor:pointer;align-content:center;min-height:44px}.electricity-footnote{color:var(--secondary-text-color,#666);margin:0;font-size:13px}@container sax-content (width>=860px){.electricity-columns{grid-template-columns:minmax(0,1.14fr) minmax(0,1fr)}.electricity-tariff-view{margin-top:-36px}.electricity-tariff-bar__row{min-height:44px;padding-left:260px}}@container sax-tariff-prices (width<=560px){.electricity-fields{grid-template-columns:minmax(0,1fr);gap:10px}}"]]]), Df = { class: "savings-view" }, Of = { class: "savings-overview" }, kf = ["aria-labelledby"], Af = ["id"], jf = ["aria-labelledby"], Mf = ["id"], Nf = {
 	key: 0,
 	class: "savings-progress"
-}, Ff = ["id"], If = { class: "savings-large" }, Lf = [
+}, Pf = ["id"], Ff = { class: "savings-large" }, If = [
 	"role",
 	"aria-labelledby",
 	"aria-valuemin",
 	"aria-valuemax",
 	"aria-valuenow"
-], Rf = {
+], Lf = {
 	key: 1,
 	class: "savings-rows"
-}, zf = { key: 0 }, Bf = { key: 1 }, Vf = { key: 2 }, Hf = { key: 3 }, Uf = ["aria-label"], Wf = { class: "savings-large" }, Gf = ["aria-labelledby"], Kf = ["id"], qf = ["for"], Jf = ["id", "max"], Yf = ["for"], Xf = ["id", "min"], Zf = { type: "submit" }, Qf = ["disabled"], $f = {
+}, Rf = { key: 0 }, zf = { key: 1 }, Bf = { key: 2 }, Vf = { key: 3 }, Hf = ["aria-label"], Uf = { class: "savings-large" }, Wf = ["aria-labelledby"], Gf = ["id"], Kf = ["for"], qf = ["id", "max"], Jf = ["for"], Yf = ["id", "min"], Xf = { type: "submit" }, Zf = ["disabled"], Qf = {
 	key: 0,
 	role: "status"
-}, ep = {
+}, $f = {
 	key: 1,
 	role: "alert"
-}, tp = { class: "savings-selected-dates" }, np = { class: "savings-large" }, rp = ["id"], ip = { class: "savings-chart-hint" }, ap = [
+}, ep = { class: "savings-selected-dates" }, tp = { class: "savings-large" }, np = ["id"], rp = { class: "savings-chart-hint" }, ip = [
 	"viewBox",
 	"aria-labelledby",
 	"aria-describedby"
-], op = ["id"], sp = [
+], ap = ["id"], op = [
 	"x1",
 	"x2",
 	"y1",
 	"y2"
-], cp = ["x"], lp = ["x"], up = ["x"], dp = ["x"], fp = [
+], sp = ["x"], cp = ["x"], lp = ["x"], up = ["x"], dp = [
 	"x",
 	"y",
 	"width",
 	"height"
-], pp = { class: "savings-chart-table" }, mp = { class: "savings-table-scroll" }, hp = { class: "savings-table" }, gp = {
+], fp = { class: "savings-chart-table" }, pp = { class: "savings-table-scroll" }, mp = { class: "savings-table" }, hp = {
 	key: 1,
 	class: "savings-empty"
-}, _p = { class: "savings-card savings-explanation" }, vp = {
+}, gp = { class: "savings-card savings-explanation" }, _p = {
 	key: 1,
 	class: "savings-card savings-status",
 	role: "status"
-}, yp = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
+}, vp = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
 	__name: "SavingsView",
 	props: {
 		hass: { type: Object },
@@ -7353,20 +7347,20 @@ var Gl = ["aria-busy"], Kl = {
 			day: "2-digit",
 			month: "short"
 		}) ?? e;
-		return (t, i) => (G(), K("div", Of, [
-			q("div", kf, [o.value?.available && o.value.state?.state === "off" ? (G(), K("section", {
+		return (t, i) => (G(), K("div", Df, [
+			q("div", Of, [o.value?.available && o.value.state?.state === "off" ? (G(), K("section", {
 				key: 0,
 				class: "savings-card savings-payback",
 				"aria-labelledby": `${V(r)}-investment`
-			}, [q("h2", { id: `${V(r)}-investment` }, I(a.value.payback), 9, jf), q("p", null, I(a.value.investment), 1)], 8, Af)) : o.value?.available && o.value.state?.state === "on" && (s.value || c.value || l.value || u.value || d.value) ? (G(), K("section", {
+			}, [q("h2", { id: `${V(r)}-investment` }, I(a.value.payback), 9, Af), q("p", null, I(a.value.investment), 1)], 8, kf)) : o.value?.available && o.value.state?.state === "on" && (s.value || c.value || l.value || u.value || d.value) ? (G(), K("section", {
 				key: 1,
 				class: "savings-card savings-payback",
 				"aria-labelledby": `${V(r)}-payback`
 			}, [
-				q("h2", { id: `${V(r)}-payback` }, I(a.value.payback), 9, Nf),
-				s.value ? (G(), K("div", Pf, [
-					q("h3", { id: `${V(r)}-progress` }, I(s.value.name), 9, Ff),
-					q("p", If, I(f.value === null ? a.value.unavailable : `${V(ro)(f.value, e.hass)} %`), 1),
+				q("h2", { id: `${V(r)}-payback` }, I(a.value.payback), 9, Mf),
+				s.value ? (G(), K("div", Nf, [
+					q("h3", { id: `${V(r)}-progress` }, I(s.value.name), 9, Pf),
+					q("p", Ff, I(f.value === null ? a.value.unavailable : `${V(ro)(f.value, e.hass)} %`), 1),
 					q("div", {
 						class: "savings-progress__track",
 						role: p.value === null ? void 0 : "meter",
@@ -7377,22 +7371,22 @@ var Gl = ["aria-busy"], Kl = {
 					}, [p.value === null ? X("", !0) : (G(), K("span", {
 						key: 0,
 						style: M({ width: `${p.value}%` })
-					}, null, 4))], 8, Lf)
+					}, null, 4))], 8, If)
 				])) : X("", !0),
-				c.value || l.value || u.value || d.value ? (G(), K("dl", Rf, [
-					c.value ? (G(), K("div", zf, [q("dt", null, I(c.value.name), 1), q("dd", null, I(m(c.value.available ? c.value.state?.state : null)), 1)])) : X("", !0),
-					l.value ? (G(), K("div", Bf, [q("dt", null, I(a.value.prior), 1), q("dd", null, I(m(l.value.available ? l.value.state?.attributes.prior_result_eur ?? l.value.state?.attributes.prior_result_eur_formatted : null)), 1)])) : X("", !0),
-					u.value ? (G(), K("div", Vf, [q("dt", null, I(a.value.net), 1), q("dd", null, I(m(u.value.available ? u.value.state?.state : null)), 1)])) : X("", !0),
-					d.value ? (G(), K("div", Hf, [q("dt", null, I(a.value.started), 1), q("dd", null, I(h(d.value.available ? d.value.state?.attributes.economics_started_at : null)), 1)])) : X("", !0)
+				c.value || l.value || u.value || d.value ? (G(), K("dl", Lf, [
+					c.value ? (G(), K("div", Rf, [q("dt", null, I(c.value.name), 1), q("dd", null, I(m(c.value.available ? c.value.state?.state : null)), 1)])) : X("", !0),
+					l.value ? (G(), K("div", zf, [q("dt", null, I(a.value.prior), 1), q("dd", null, I(m(l.value.available ? l.value.state?.attributes.prior_result_eur ?? l.value.state?.attributes.prior_result_eur_formatted : null)), 1)])) : X("", !0),
+					u.value ? (G(), K("div", Bf, [q("dt", null, I(a.value.net), 1), q("dd", null, I(m(u.value.available ? u.value.state?.state : null)), 1)])) : X("", !0),
+					d.value ? (G(), K("div", Vf, [q("dt", null, I(a.value.started), 1), q("dd", null, I(h(d.value.available ? d.value.state?.attributes.economics_started_at : null)), 1)])) : X("", !0)
 				])) : X("", !0)
-			], 8, Mf)) : X("", !0), u.value ? (G(), K("section", {
+			], 8, jf)) : X("", !0), u.value ? (G(), K("section", {
 				key: 2,
 				class: "savings-periods",
 				"aria-label": a.value.periods
 			}, [(G(), K(W, null, U(C, (e) => q("article", {
 				key: e,
 				class: "savings-card"
-			}, [q("h2", null, I(a.value[e]), 1), q("p", Wf, I(V(v).loading.value ? "…" : m(V(v).data.value?.periods[e].change)), 1)])), 64))], 8, Uf)) : X("", !0)]),
+			}, [q("h2", null, I(a.value[e]), 1), q("p", Uf, I(V(v).loading.value ? "…" : m(V(v).data.value?.periods[e].change)), 1)])), 64))], 8, Hf)) : X("", !0)]),
 			J(Ul, {
 				hass: e.hass,
 				class: "savings-tariff"
@@ -7402,7 +7396,7 @@ var Gl = ["aria-busy"], Kl = {
 				class: "savings-card savings-range",
 				"aria-labelledby": `${V(r)}-range`
 			}, [
-				q("h2", { id: `${V(r)}-range` }, I(a.value.range), 9, Kf),
+				q("h2", { id: `${V(r)}-range` }, I(a.value.range), 9, Gf),
 				q("form", {
 					class: "savings-dates",
 					onSubmit: i[3] ||= Ga((e) => V(v).select(y.value, b.value), ["prevent"])
@@ -7413,27 +7407,27 @@ var Gl = ["aria-busy"], Kl = {
 						type: "date",
 						required: "",
 						max: b.value || void 0
-					}, null, 8, Jf), [[La, y.value]])], 8, qf),
+					}, null, 8, qf), [[La, y.value]])], 8, Kf),
 					q("label", { for: `${V(r)}-to` }, [Y(I(a.value.to), 1), Dn(q("input", {
 						id: `${V(r)}-to`,
 						"onUpdate:modelValue": i[1] ||= (e) => b.value = e,
 						type: "date",
 						required: "",
 						min: y.value || void 0
-					}, null, 8, Xf), [[La, b.value]])], 8, Yf),
-					q("button", Zf, I(a.value.apply), 1),
+					}, null, 8, Yf), [[La, b.value]])], 8, Jf),
+					q("button", Xf, I(a.value.apply), 1),
 					q("button", {
 						type: "button",
 						disabled: V(v).loading.value,
 						onClick: i[2] ||= (...e) => V(v).refresh && V(v).refresh(...e)
-					}, I(a.value.refresh), 9, Qf)
+					}, I(a.value.refresh), 9, Zf)
 				], 32),
-				V(v).loading.value ? (G(), K("p", $f, I(a.value.loading), 1)) : S.value ? (G(), K("p", ep, I(S.value), 1)) : V(v).data.value ? (G(), K(W, { key: 2 }, [
-					q("p", tp, I(g(V(v).data.value.selected.start_date)) + " – " + I(g(V(v).data.value.selected.end_date)), 1),
+				V(v).loading.value ? (G(), K("p", Qf, I(a.value.loading), 1)) : S.value ? (G(), K("p", $f, I(S.value), 1)) : V(v).data.value ? (G(), K(W, { key: 2 }, [
+					q("p", ep, I(g(V(v).data.value.selected.start_date)) + " – " + I(g(V(v).data.value.selected.end_date)), 1),
 					q("h3", null, I(a.value.selected), 1),
-					q("p", np, I(m(V(v).data.value.selected.change)), 1),
-					q("h3", { id: `${V(r)}-chart` }, I(a.value.chart), 9, rp),
-					q("p", ip, I(a.value.chartHint), 1),
+					q("p", tp, I(m(V(v).data.value.selected.change)), 1),
+					q("h3", { id: `${V(r)}-chart` }, I(a.value.chart), 9, np),
+					q("p", rp, I(a.value.chartHint), 1),
 					D.value ? (G(), K(W, { key: 0 }, [(G(), K("svg", {
 						ref_key: "chartElement",
 						ref: T,
@@ -7443,24 +7437,24 @@ var Gl = ["aria-busy"], Kl = {
 						"aria-labelledby": `${V(r)}-chart`,
 						"aria-describedby": `${V(r)}-chart-description`
 					}, [
-						q("desc", { id: `${V(r)}-chart-description` }, I(a.value.net) + ": " + I(m(V(v).data.value.selected.change)) + ". " + I(a.value.table) + ". ", 9, op),
+						q("desc", { id: `${V(r)}-chart-description` }, I(a.value.net) + ": " + I(m(V(v).data.value.selected.change)) + ". " + I(a.value.table) + ". ", 9, ap),
 						q("line", {
 							x1: E.value.left - 2,
 							x2: E.value.right + 2,
 							y1: E.value.zero,
 							y2: E.value.zero,
 							class: "savings-chart__axis"
-						}, null, 8, sp),
+						}, null, 8, op),
 						q("text", {
 							x: E.value.left - 8,
 							y: "24",
 							"text-anchor": "end"
-						}, I(E.value.highLabel), 9, cp),
+						}, I(E.value.highLabel), 9, sp),
 						q("text", {
 							x: E.value.left - 8,
 							y: "204",
 							"text-anchor": "end"
-						}, I(E.value.lowLabel), 9, lp),
+						}, I(E.value.lowLabel), 9, cp),
 						i[4] ||= q("text", {
 							x: "10",
 							y: "226"
@@ -7469,13 +7463,13 @@ var Gl = ["aria-busy"], Kl = {
 							key: 0,
 							x: E.value.left,
 							y: "226"
-						}, I(te(E.value.start)), 9, up)) : X("", !0),
+						}, I(te(E.value.start)), 9, lp)) : X("", !0),
 						w.value.length > 1 ? (G(), K("text", {
 							key: 1,
 							x: E.value.right,
 							y: "226",
 							"text-anchor": "end"
-						}, I(te(E.value.end)), 9, dp)) : X("", !0),
+						}, I(te(E.value.end)), 9, up)) : X("", !0),
 						(G(!0), K(W, null, U(E.value.bars, (e, t) => (G(), K("rect", {
 							key: t,
 							x: e.x,
@@ -7483,8 +7477,8 @@ var Gl = ["aria-busy"], Kl = {
 							width: e.width,
 							height: e.height,
 							class: P(["savings-chart__bar", { "savings-chart__bar--negative": (e.value ?? 0) < 0 }])
-						}, [q("title", null, I(e.label) + ": " + I(m(e.value)), 1)], 10, fp))), 128))
-					], 8, ap)), q("details", pp, [q("summary", null, I(a.value.table), 1), q("div", mp, [q("table", hp, [q("thead", null, [q("tr", null, [
+						}, [q("title", null, I(e.label) + ": " + I(m(e.value)), 1)], 10, dp))), 128))
+					], 8, ip)), q("details", fp, [q("summary", null, I(a.value.table), 1), q("div", pp, [q("table", mp, [q("thead", null, [q("tr", null, [
 						q("th", null, I(a.value.from), 1),
 						q("th", null, I(a.value.to), 1),
 						q("th", null, I(a.value.net), 1)
@@ -7493,41 +7487,41 @@ var Gl = ["aria-busy"], Kl = {
 						q("td", null, I(h(e.end)), 1),
 						q("td", null, I(m(e.value)), 1)
 					]))), 128))])])])])], 64)) : X("", !0),
-					!D.value || V(v).data.value.selected.change === null ? (G(), K("p", gp, I(V(v).data.value.selected.change === null ? a.value.noData : a.value.noChartData), 1)) : X("", !0)
+					!D.value || V(v).data.value.selected.change === null ? (G(), K("p", hp, I(V(v).data.value.selected.change === null ? a.value.noData : a.value.noChartData), 1)) : X("", !0)
 				], 64)) : X("", !0)
-			], 8, Gf)) : X("", !0),
-			q("details", _p, [
+			], 8, Wf)) : X("", !0),
+			q("details", gp, [
 				q("summary", null, I(a.value.explain), 1),
 				q("p", null, I(a.value.netHint), 1),
 				q("p", null, I(a.value.calendarHint), 1),
 				q("p", null, I(a.value.rangeHint), 1)
 			]),
-			_.value && V(n)?.ready.value ? (G(), K("p", vp, I(_.value), 1)) : X("", !0)
+			_.value && V(n)?.ready.value ? (G(), K("p", _p, I(_.value), 1)) : X("", !0)
 		]));
 	}
-}), [["styles", [".savings-view{gap:20px;min-width:0;margin-top:24px;display:grid}.savings-overview{display:contents}.savings-card{border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));min-width:0;box-shadow:var(--ha-card-box-shadow,none);color:var(--primary-text-color,#212121);padding:24px}.savings-card h2{margin:0 0 20px;font-size:18px;font-weight:500;line-height:1.5}.savings-card h3{margin:20px 0 8px;font-size:16px;font-weight:500}.savings-card p{overflow-wrap:anywhere;line-height:1.6}.savings-card p:last-child{margin-bottom:0}.savings-large{font-variant-numeric:tabular-nums;margin:0 0 12px;font-size:28px;font-weight:500}.savings-progress__track{background:var(--divider-color,#e0e0e0);border-radius:8px;height:16px;overflow:hidden}.savings-progress__track span{background:var(--info-color,#039be5);height:100%;display:block}.savings-rows{margin:20px 0 0}.savings-rows>div{border-bottom:1px solid var(--divider-color,#e0e0e0);justify-content:space-between;gap:16px;padding:12px 0;line-height:1.5;display:flex}.savings-rows>div:last-child{border-bottom:0;padding-bottom:0}.savings-rows dd{text-align:right;font-variant-numeric:tabular-nums;margin:0}.savings-periods{grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:16px;display:grid}.savings-periods h2{font-size:16px}.savings-table-scroll{overflow-x:auto}.savings-table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%;line-height:1.5}.savings-table th,.savings-table td{text-align:left;border-bottom:1px solid var(--divider-color,#e0e0e0);padding:10px 8px}.savings-table th:last-child,.savings-table td:last-child{text-align:right}.savings-dates{flex-wrap:wrap;align-items:end;gap:16px;display:flex}.savings-dates label{flex:180px;gap:8px;min-width:0;display:grid}.savings-dates input,.savings-dates button{box-sizing:border-box;font:inherit;border:1px solid var(--divider-color,#bdbdbd);background:var(--ha-card-background,var(--card-background-color,#fff));min-height:44px;color:var(--primary-text-color,#212121);border-radius:6px;padding:10px 12px}.savings-dates input{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light dark;width:100%}@media (prefers-color-scheme:dark){.savings-dates input{--lightningcss-light: ;--lightningcss-dark:initial}}.savings-dates button{cursor:pointer;color:var(--primary-color,#0288d1)}.savings-dates button:disabled{opacity:.6;cursor:default}.savings-dates :focus-visible,.savings-card summary:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:3px}.savings-selected-dates,.savings-empty{color:var(--secondary-text-color,#666)}.savings-chart{width:100%;height:auto;display:block;overflow:visible}.savings-chart text{fill:var(--secondary-text-color,#666);font-size:12px}.savings-chart__axis{stroke:var(--primary-text-color,#212121);stroke-width:1px}.savings-chart__bar{fill:var(--info-color,#039be5)}.savings-chart__bar--negative{fill:var(--error-color,#db4437)}.savings-card summary{cursor:pointer;min-height:24px;font-weight:500;line-height:1.6}.savings-chart-table{margin-top:16px}.savings-status{margin:0;line-height:1.6}@container sax-content (width>=860px){.savings-view{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px;margin-top:16px}.savings-view>*{grid-column:1/-1}.savings-overview{gap:16px;min-width:0;display:grid}.savings-overview:empty{display:none}.savings-view:has(>.savings-overview>section):has(>.savings-tariff)>:is(.savings-overview,.savings-tariff){grid-column:auto}.savings-card{padding:18px}.savings-card h2{margin-bottom:12px;font-size:16px}.savings-card h3{margin-top:16px;font-size:14px}.savings-card p{margin-top:10px;line-height:1.5}.savings-progress h3{margin-top:0}.savings-card .savings-large{margin-top:0;margin-bottom:8px;font-size:24px}.savings-rows{margin-top:12px}.savings-rows>div{gap:12px;padding:8px 0}.savings-rows dt{min-width:0}.savings-rows dd{flex-shrink:0;max-width:58%}.savings-periods{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.savings-view:has(>.savings-tariff) .savings-periods{grid-template-columns:repeat(2,minmax(0,1fr))}.savings-periods .savings-card{padding:14px 16px}.savings-periods h2{margin-bottom:6px;font-size:14px}.savings-periods .savings-large{margin-bottom:0;font-size:22px}.savings-table th,.savings-table td{padding:7px 8px}.savings-dates{gap:12px}.savings-dates label{flex:0 220px;gap:6px}.savings-range .savings-selected-dates{margin-bottom:8px}.savings-range .savings-chart-hint{margin-top:0;margin-bottom:8px}.savings-chart-table{margin-top:12px}}@media (max-width:600px){.savings-view{gap:16px}.savings-card{padding:20px}.savings-rows>div{flex-wrap:wrap;gap:4px 16px}.savings-rows dd{margin-left:auto}}"]]]), bp = ["lang"], xp = { class: "header" }, Sp = ["aria-label"], Cp = ["aria-label"], wp = [
+}), [["styles", [".savings-view{gap:20px;min-width:0;margin-top:24px;display:grid}.savings-overview{display:contents}.savings-card{border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));min-width:0;box-shadow:var(--ha-card-box-shadow,none);color:var(--primary-text-color,#212121);padding:24px}.savings-card h2{margin:0 0 20px;font-size:18px;font-weight:500;line-height:1.5}.savings-card h3{margin:20px 0 8px;font-size:16px;font-weight:500}.savings-card p{overflow-wrap:anywhere;line-height:1.6}.savings-card p:last-child{margin-bottom:0}.savings-large{font-variant-numeric:tabular-nums;margin:0 0 12px;font-size:28px;font-weight:500}.savings-progress__track{background:var(--divider-color,#e0e0e0);border-radius:8px;height:16px;overflow:hidden}.savings-progress__track span{background:var(--info-color,#039be5);height:100%;display:block}.savings-rows{margin:20px 0 0}.savings-rows>div{border-bottom:1px solid var(--divider-color,#e0e0e0);justify-content:space-between;gap:16px;padding:12px 0;line-height:1.5;display:flex}.savings-rows>div:last-child{border-bottom:0;padding-bottom:0}.savings-rows dd{text-align:right;font-variant-numeric:tabular-nums;margin:0}.savings-periods{grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:16px;display:grid}.savings-periods h2{font-size:16px}.savings-table-scroll{overflow-x:auto}.savings-table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%;line-height:1.5}.savings-table th,.savings-table td{text-align:left;border-bottom:1px solid var(--divider-color,#e0e0e0);padding:10px 8px}.savings-table th:last-child,.savings-table td:last-child{text-align:right}.savings-dates{flex-wrap:wrap;align-items:end;gap:16px;display:flex}.savings-dates label{flex:180px;gap:8px;min-width:0;display:grid}.savings-dates input,.savings-dates button{box-sizing:border-box;font:inherit;border:1px solid var(--divider-color,#bdbdbd);background:var(--ha-card-background,var(--card-background-color,#fff));min-height:44px;color:var(--primary-text-color,#212121);border-radius:6px;padding:10px 12px}.savings-dates input{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light dark;width:100%}@media (prefers-color-scheme:dark){.savings-dates input{--lightningcss-light: ;--lightningcss-dark:initial}}.savings-dates button{cursor:pointer;color:var(--primary-color,#0288d1)}.savings-dates button:disabled{opacity:.6;cursor:default}.savings-dates :focus-visible,.savings-card summary:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:3px}.savings-selected-dates,.savings-empty{color:var(--secondary-text-color,#666)}.savings-chart{width:100%;height:auto;display:block;overflow:visible}.savings-chart text{fill:var(--secondary-text-color,#666);font-size:12px}.savings-chart__axis{stroke:var(--primary-text-color,#212121);stroke-width:1px}.savings-chart__bar{fill:var(--info-color,#039be5)}.savings-chart__bar--negative{fill:var(--error-color,#db4437)}.savings-card summary{cursor:pointer;min-height:24px;font-weight:500;line-height:1.6}.savings-chart-table{margin-top:16px}.savings-status{margin:0;line-height:1.6}@container sax-content (width>=860px){.savings-view{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px;margin-top:16px}.savings-view>*{grid-column:1/-1}.savings-overview{gap:16px;min-width:0;display:grid}.savings-overview:empty{display:none}.savings-view:has(>.savings-overview>section):has(>.savings-tariff)>:is(.savings-overview,.savings-tariff){grid-column:auto}.savings-card{padding:18px}.savings-card h2{margin-bottom:12px;font-size:16px}.savings-card h3{margin-top:16px;font-size:14px}.savings-card p{margin-top:10px;line-height:1.5}.savings-progress h3{margin-top:0}.savings-card .savings-large{margin-top:0;margin-bottom:8px;font-size:24px}.savings-rows{margin-top:12px}.savings-rows>div{gap:12px;padding:8px 0}.savings-rows dt{min-width:0}.savings-rows dd{flex-shrink:0;max-width:58%}.savings-periods{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.savings-view:has(>.savings-tariff) .savings-periods{grid-template-columns:repeat(2,minmax(0,1fr))}.savings-periods .savings-card{padding:14px 16px}.savings-periods h2{margin-bottom:6px;font-size:14px}.savings-periods .savings-large{margin-bottom:0;font-size:22px}.savings-table th,.savings-table td{padding:7px 8px}.savings-dates{gap:12px}.savings-dates label{flex:0 220px;gap:6px}.savings-range .savings-selected-dates{margin-bottom:8px}.savings-range .savings-chart-hint{margin-top:0;margin-bottom:8px}.savings-chart-table{margin-top:12px}}@media (max-width:600px){.savings-view{gap:16px}.savings-card{padding:20px}.savings-rows>div{flex-wrap:wrap;gap:4px 16px}.savings-rows dd{margin-left:auto}}"]]]), yp = ["lang"], bp = { class: "header" }, xp = ["aria-label"], Sp = ["aria-label"], Cp = [
 	"href",
 	"aria-current",
 	"onClick"
-], Tp = {
+], wp = {
 	key: 0,
 	class: "status",
 	role: "alert"
-}, Ep = {
+}, Tp = {
 	key: 1,
 	class: "introduction"
-}, Dp = {
+}, Ep = {
 	key: 0,
 	class: "status",
 	role: "status"
-}, Op = {
+}, Dp = {
 	key: 1,
 	class: "status",
 	role: "status"
-}, kp = {
+}, Op = {
 	key: 6,
 	class: "status"
-}, Ap = ["href"], jp = /* @__PURE__ */ Da(/* @__PURE__ */ go(/* @__PURE__ */ Bn({
+}, kp = ["href"], Ap = /* @__PURE__ */ Da(/* @__PURE__ */ go(/* @__PURE__ */ Bn({
 	__name: "Panel.ce",
 	props: {
 		hass: { type: Object },
@@ -7580,7 +7574,7 @@ var Gl = ["aria-busy"], Kl = {
 			class: P(["dashboard", { narrow: e.narrow }]),
 			lang: i.value
 		}, [
-			q("header", xp, [o.value ? (G(), K("button", {
+			q("header", bp, [o.value ? (G(), K("button", {
 				key: 0,
 				class: "menu-button",
 				type: "button",
@@ -7589,7 +7583,7 @@ var Gl = ["aria-busy"], Kl = {
 			}, [...n[1] ||= [q("svg", {
 				viewBox: "0 0 24 24",
 				"aria-hidden": "true"
-			}, [q("path", { d: "M4 6h16M4 12h16M4 18h16" })], -1)]], 8, Sp)) : X("", !0), n[2] ||= q("div", { class: "brand" }, [q("svg", {
+			}, [q("path", { d: "M4 6h16M4 12h16M4 18h16" })], -1)]], 8, xp)) : X("", !0), n[2] ||= q("div", { class: "brand" }, [q("svg", {
 				class: "brand-icon",
 				viewBox: "0 0 24 24",
 				"aria-hidden": "true"
@@ -7602,10 +7596,10 @@ var Gl = ["aria-busy"], Kl = {
 				href: `${s.value}/${e.path}`,
 				"aria-current": d.value === e.path ? "page" : void 0,
 				onClick: (t) => h(t, `${s.value}/${e.path}`)
-			}, I(e[i.value]), 9, wp))), 128))], 8, Cp),
+			}, I(e[i.value]), 9, Cp))), 128))], 8, Sp),
 			q("main", null, [
-				V(r).error.value ? (G(), K("p", Tp, I(V(r).error.value), 1)) : X("", !0),
-				d.value === "stromtarif" ? X("", !0) : (G(), K("p", Ep, I(a.value.introduction), 1)),
+				V(r).error.value ? (G(), K("p", wp, I(V(r).error.value), 1)) : X("", !0),
+				d.value === "stromtarif" ? X("", !0) : (G(), K("p", Tp, I(a.value.introduction), 1)),
 				(G(), K("section", {
 					key: e.panel?.config?.entry_id,
 					class: P(["section", { "section--tariff": d.value === "stromtarif" }]),
@@ -7618,21 +7612,21 @@ var Gl = ["aria-busy"], Kl = {
 				}, I(f.value?.[i.value] ?? a.value.notFound), 513), e.hass ? e.panel?.config?.entry_id ? d.value === "allgemein" ? (G(), oi(os, { key: 2 })) : d.value === "netzdienliches-laden" ? (G(), oi(_c, {
 					key: 3,
 					hass: e.hass
-				}, null, 8, ["hass"])) : d.value === "stromtarif" ? (G(), oi(Df, {
+				}, null, 8, ["hass"])) : d.value === "stromtarif" ? (G(), oi(Ef, {
 					key: 4,
 					hass: e.hass
-				}, null, 8, ["hass"])) : d.value === "ersparnis" ? (G(), oi(yp, {
+				}, null, 8, ["hass"])) : d.value === "ersparnis" ? (G(), oi(vp, {
 					key: 5,
 					hass: e.hass,
 					"entry-id": e.panel?.config?.entry_id
-				}, null, 8, ["hass", "entry-id"])) : (G(), K("div", kp, [q("p", null, I(a.value.notFoundDescription), 1), q("a", {
+				}, null, 8, ["hass", "entry-id"])) : (G(), K("div", Op, [q("p", null, I(a.value.notFoundDescription), 1), q("a", {
 					href: `${s.value}/allgemein`,
 					onClick: n[0] ||= (e) => h(e, `${s.value}/allgemein`)
-				}, I(a.value.returnToOverview), 9, Ap)])) : (G(), K("p", Op, I(a.value.missingEntry), 1)) : (G(), K("p", Dp, I(a.value.loading), 1))], 2))
+				}, I(a.value.returnToOverview), 9, kp)])) : (G(), K("p", Dp, I(a.value.missingEntry), 1)) : (G(), K("p", Ep, I(a.value.loading), 1))], 2))
 			])
-		], 10, bp));
+		], 10, yp));
 	}
 }), [["styles", [":host{height:100%;color:var(--primary-text-color,#212121);background:var(--primary-background-color,#fafafa);font-family:var(--paper-font-body1_-_font-family,Roboto, sans-serif);font-size:14px;display:block}*{box-sizing:border-box}.dashboard{min-height:100%;container:sax-panel/inline-size}.header{background:var(--app-header-background-color,var(--primary-color,#03a9f4));min-height:64px;color:var(--app-header-text-color,#fff);align-items:center;gap:14px;padding:8px 24px;display:flex}.brand{align-items:center;gap:10px;font-size:20px;font-weight:500;display:flex}.header svg{fill:none;stroke:currentColor;stroke-width:1.7px;stroke-linecap:round;stroke-linejoin:round}.brand-icon{width:30px;height:30px}.menu-button{width:44px;height:44px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;margin-left:-10px;display:grid}.menu-button svg{width:24px;height:24px}.navigation{border-bottom:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);padding:0 16px;display:flex;overflow-x:auto}.navigation a{min-height:56px;color:var(--secondary-text-color,#666);white-space:nowrap;border-bottom:3px solid #0000;align-items:center;padding:12px 16px;text-decoration:none;display:flex}.navigation a[aria-current=page]{border-color:var(--primary-color,#03a9f4);color:var(--primary-text-color,#212121);font-weight:600}a{color:var(--primary-text-color,#212121);text-underline-offset:3px}a:focus-visible,button:focus-visible{outline-offset:-4px;outline:2px solid}main{max-width:1120px;margin:0 auto;padding:28px 24px 48px}.introduction{color:var(--secondary-text-color,#666);margin:0 0 24px;line-height:1.6}.section{overflow-wrap:anywhere;border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));box-shadow:var(--ha-card-box-shadow,none);padding:28px;container:sax-content/inline-size}.section.section--tariff{box-shadow:none;background:0 0;border:0;padding:0}h1{margin:0;font-size:24px;font-weight:500;line-height:1.35}h1:focus{outline:none}h2{margin:0 0 12px;font-size:18px;font-weight:500;line-height:1.5}.status{margin-top:24px;line-height:1.7}.narrow .header{padding-left:16px;padding-right:16px}.narrow main{padding:16px 12px 32px}@container sax-panel (width>=940px){.header{min-height:56px;padding:6px 20px}.navigation a{min-height:48px;padding:8px 14px}main{max-width:1360px;padding:16px 20px 20px}.introduction{margin-bottom:12px}.section{padding:20px}h1{font-size:22px}}@media (max-width:600px){.header{gap:8px;padding:8px 16px}.brand{gap:6px;font-size:18px}.brand-icon{display:none}.navigation{padding:0 4px}main{padding:16px 12px 32px}.introduction{margin-bottom:16px}.section{padding:20px}h1{font-size:22px}}"]]]));
-customElements.get("sax-power-vue-panel") || customElements.define("sax-power-vue-panel", jp);
+customElements.get("sax-power-vue-panel") || customElements.define("sax-power-vue-panel", Ap);
 //#endregion
-export { jp as SaxPowerVuePanel };
+export { Ap as SaxPowerVuePanel };

@@ -2086,7 +2086,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
   });
 });
 
-describe("PV forecast content in the grid charging summary", () => {
+describe("PV forecast content inside the collapsible charging plan", () => {
   for (const type of ["time_of_use", "dynamic"] as const) {
     for (const language of ["de", "en"]) {
       it(`${type} shows the cached value and unit in ${language}, including zero and HA updates`, async () => {
@@ -2108,8 +2108,13 @@ describe("PV forecast content in the grid charging summary", () => {
         };
         await fixture.dashboard.loadTariff();
         await flush();
+        expect(
+          fixture.root.querySelectorAll(".electricity-pv-summary"),
+        ).toHaveLength(1);
         const summary = () =>
-          fixture.root.querySelector(".electricity-pv-summary dd")!.textContent;
+          fixture.root.querySelector(
+            ".electricity-plan > .electricity-pv-summary dd",
+          )!.textContent;
         expect(summary()).toBe(language === "de" ? "12,4 kWh" : "12.4 kWh");
         expect(summary()).not.toContain("PV-Ertragsprognose");
         await fixture.update("charging_pv_forecast", "0");

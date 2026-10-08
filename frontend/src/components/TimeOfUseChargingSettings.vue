@@ -30,7 +30,6 @@ const text = computed(() =>
         saved: "Ladeweise",
         start: "Start nur unter",
         startAtZero: "Start bei",
-        calibrationShort: "Zellkalibrierung: vorübergehend bis 100 % erlaubt.",
         mode: "Ladeweise",
         fixed: "Festes Netzladeziel",
         bridge: "Nur Bedarf bis Solarstrom",
@@ -56,7 +55,6 @@ const text = computed(() =>
         saved: "Charging method",
         start: "Start only below",
         startAtZero: "Start at",
-        calibrationShort: "Cell calibration: temporarily up to 100% allowed.",
         mode: "Charging method",
         fixed: "Fixed grid charge target",
         bridge: "Only what is needed until solar power",
@@ -224,9 +222,6 @@ async function choose(method: Method): Promise<void> {
         </div>
       </dl>
     </div>
-    <p v-if="selected" class="tou-charging-hint tou-charging-calibration">
-      {{ text.calibrationShort }}
-    </p>
     <div :id="feedbackId" class="tou-charging-feedback">
       <p
         v-if="editing && bridge?.error"

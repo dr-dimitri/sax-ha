@@ -3403,8 +3403,9 @@ requirement_vue_electricity_tariff:
     Tarif und der dynamische Tarif verwenden zwei zusammengehörige Karten:
     „Preise & Zeiten“ enthält Tarifkonfiguration, aktuellen Preis und
     aufklappbaren Tagespreisverlauf; „Netzladung“ enthält Automatikschalter,
-    Ladeweise, bestätigte Zielwerte, PV-Prognosewert, dynamischen Ladestatus und
-    aufklappbaren Ladeplan samt Prognose. Die Tarifwahl steht separat darüber.
+    Ladeweise, bestätigte Zielwerte, dynamischen Ladestatus und
+    aufklappbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
+    darüber.
     Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
     untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
     Die Übersichten verwenden kurze Beschriftungen, Wertpaare und kompakte
@@ -3419,7 +3420,9 @@ requirement_vue_electricity_tariff:
     Aktueller Preis und Status bleiben sichtbar; Tagespreiskurve und Prognose
     sind anfangs eingeklappt.
 
-    Die PV-Zeile zeigt den Zahlenwert der gewählten Prognosequelle mit
+    Die PV-Zeile steht im aufklappbaren Bereich „Ladeplan & Prognose“, auch
+    während der Bearbeitung der Netzladung. Sie zeigt den Zahlenwert der
+    gewählten Prognosequelle mit
     Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
     charging_pv_forecast liest die Quelle beim Einrichten und nach einem
     Quellenwechsel und fordert danach alle zehn Minuten über Home Assistant
@@ -3519,8 +3522,10 @@ requirement_vue_electricity_tariff:
     kein „Weitere Einstellungen“ und keine zusätzliche Aufklappaktion;
     auch die zwölf Monatsfelder stehen ohne „Ändern“ direkt zur Auswahl.
     Lange Erklärungstexte, Auswahlbeschreibungen und „Laderegeln & Ausnahmen“
-    entfallen. Ein kurzer Hinweis nennt die vorübergehende Kalibrierungsfreigabe
-    bis 100 %. Die vollständigen Laderegeln bleiben in der Dokumentation.
+    entfallen. Der Hinweis zur vorübergehenden Kalibrierungsfreigabe bis 100 %
+    wird im Tab Stromtarif nicht angezeigt. Die Kalibrierungsfunktion und ihre
+    Statusanzeigen unter Allgemeine Informationen bleiben erhalten.
+    Die vollständigen Laderegeln bleiben in der Dokumentation.
     Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen sichtbar;
     bei 0 % lautet die Anzeige „Start bei 0 %“. Netzladeziel unter Ladestart und
     Ladestart über Netzladeziel werden am betroffenen Feld verständlich

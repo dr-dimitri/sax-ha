@@ -479,7 +479,11 @@ for (const type of ["time_of_use", "dynamic"] as const) {
       type === "dynamic" ? ".electricity-prices" : ".tariff-plan",
     );
     await prices.locator("header .editor-actions > button:first-child").click();
-    const value = panel.locator(".electricity-pv-summary dd");
+    const plan = panel.locator(".electricity-plan");
+    const value = plan.locator(".electricity-pv-summary dd");
+    await expect(value).not.toBeVisible();
+    await plan.locator("summary").first().click();
+    await expect(value).toBeVisible();
     await expect(value).toHaveText(english ? "12.4 kWh" : "12,4 kWh");
     await expect(value).not.toContainText("PV-Ertragsprognose");
     await prices
@@ -503,6 +507,16 @@ for (const type of ["time_of_use", "dynamic"] as const) {
       };
     });
     await expect(value).toHaveText("0 kWh");
+    const charging = panel.locator(".electricity-charging");
+    await charging
+      .locator("header .editor-actions > button:first-child")
+      .click();
+    await expect(value).toBeVisible();
+    await charging
+      .locator("header .editor-actions > button:last-child")
+      .click();
+    await plan.locator("summary").first().click();
+    await expect(value).not.toBeVisible();
     await expect(page.locator("#actions")).toHaveText("Keine Aktion");
   });
 }

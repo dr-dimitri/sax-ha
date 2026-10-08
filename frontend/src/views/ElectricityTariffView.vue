@@ -1267,20 +1267,17 @@ async function applyCharging(): Promise<void> {
             {{ text.entityPending }}
           </p>
         </div>
-        <dl
-          v-if="!chargingOpen"
-          class="electricity-summary-rows electricity-pv-summary"
-        >
-          <div>
-            <dt>{{ text.pvSummary }}</dt>
-            <dd>{{ pvForecast }}</dd>
-          </div>
-        </dl>
         <div v-if="active === 'dynamic'" class="electricity-charge-status">
           <EntityValue domain="sensor" entity-key="price_charge_status_text" />
         </div>
         <details v-if="known" class="electricity-plan">
           <summary>{{ text.details }}</summary>
+          <dl class="electricity-summary-rows electricity-pv-summary">
+            <div>
+              <dt>{{ text.pvSummary }}</dt>
+              <dd>{{ pvForecast }}</dd>
+            </div>
+          </dl>
           <ChargePlan v-if="active === 'time_of_use'" :hass="hass" /><template
             v-else
             ><EntityValue

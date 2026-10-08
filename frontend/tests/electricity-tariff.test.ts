@@ -301,6 +301,78 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuration", () => {
+  it.each(["de", "en"])(
+    "updates translated discharge diagnostics from HA without changing settings in %s",
+    async (language) => {
+      const fixture = await mount({ language });
+      const english = language === "en";
+      const feedback = fixture.root.querySelector(
+        ".electricity-charge-status",
+      )!;
+      const value = () =>
+        feedback.querySelector(".entity-value__state")?.textContent;
+      expect(feedback.querySelector(".entity-value__name")?.textContent).toBe(
+        english ? "Discharge status" : "Entladestatus",
+      );
+      await fixture.rename(
+        "timed_charge_discharge_status",
+        "sensor.custom_discharge_status",
+        "unknown",
+      );
+      expect(value()).toBe(english ? "Unknown" : "Unbekannt");
+      for (const [state, de, en] of [
+        [
+          "control_mode_failed",
+          "Steuermodus konnte nicht gesetzt werden",
+          "Control mode could not be set",
+        ],
+        [
+          "setpoint_failed",
+          "Ladeleistung konnte nicht gesetzt werden",
+          "Charging power could not be set",
+        ],
+        [
+          "reset_failed",
+          "SmartMeter-Nullregelung konnte nicht aktiviert werden",
+          "Smart meter zero regulation could not be enabled",
+        ],
+        [
+          "control_failed",
+          "Ladefreigabe fehlt oder wurde widerrufen",
+          "Charging permission is missing or was revoked",
+        ],
+        [
+          "control_data_missing",
+          "Gerätedaten für Ladeauftrag fehlen oder sind ungültig",
+          "Device data for charging is missing or invalid",
+        ],
+        [
+          "device_feedback_missing",
+          "Geräterückmeldung fehlt",
+          "Device feedback missing",
+        ],
+        [
+          "discharge_hold_unconfirmed",
+          "Entladesperre nicht bestätigt",
+          "Discharge block not confirmed",
+        ],
+        [
+          "release_unconfirmed",
+          "Entladefreigabe nicht bestätigt",
+          "Discharge release not confirmed",
+        ],
+      ] as const) {
+        await fixture.update("timed_charge_discharge_status", state);
+        expect(value()).toBe(english ? en : de);
+        await fixture.update("timed_charge_discharge_status", "normal");
+        expect(value()).toBe(english ? "Normal operation" : "Normalbetrieb");
+        await fixture.update("timed_charge_discharge_status", "grid_charging");
+        expect(value()).toBe(english ? "Grid charging" : "Netzladen");
+      }
+      expect(writes(fixture)).toHaveLength(0);
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
   it.each(["time_of_use", "dynamic"])(
     "keeps the current price visible while editing %s and groups feedback with charging",
     async (type) => {

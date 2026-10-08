@@ -270,6 +270,13 @@ er bis 70 % oder bis 05:00 Uhr. PV-Strom darf anschließend weiter bis 90 %
 laden. Nach tatsächlich erfolgter Netzladung bleibt die Entladung bis zum
 Fensterende gesperrt; den Zustand zeigt **Entladestatus**.
 
+Bei einem fehlgeschlagenen Steuerauftrag nennt **Entladestatus** die Ursache,
+etwa „Steuermodus konnte nicht gesetzt werden“, „Ladeleistung konnte nicht
+gesetzt werden“ oder „SmartMeter-Nullregelung konnte nicht aktiviert werden“.
+Fehlende Gerätedaten und noch nicht bestätigte Sperren/Freigaben werden ebenfalls
+benannt. Nach erfolgreicher Wiederholung aktualisiert sich die Anzeige
+automatisch; dazu muss keine Einstellung geändert werden.
+
 Der gespeicherte Tarif gilt sofort nach einem Update oder Tarifwechsel.
 Bisherige Start-/Endzeiten werden weder übertragen noch mit dem Tarif
 kombiniert: Sie bleiben für andere Tarifarten gespeichert, sind im

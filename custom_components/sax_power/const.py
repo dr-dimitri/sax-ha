@@ -70,6 +70,19 @@ DEFAULT_TIMED_CHARGE_ENABLED = False
 # eingerichteten Eintrags - siehe anforderung.yaml, REQ-TIMED-SOC-CHARGE, für
 # die Abwägung gegenüber dem früheren 100-%-Default.
 DEFAULT_TIMED_CHARGE_MIN_SOC = 20
+TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS = (
+    "normal",
+    "grid_charging",
+    "discharge_blocked",
+    "control_mode_failed",
+    "setpoint_failed",
+    "reset_failed",
+    "control_failed",
+    "control_data_missing",
+    "device_feedback_missing",
+    "discharge_hold_unconfirmed",
+    "release_unconfirmed",
+)
 
 # Netzdienliches Laden (siehe anforderung.yaml, REQ-GRID-SERVING-CHARGE):
 # eigenes, zum zeitgesteuerten Laden (oben) nicht überlappendes Zeitfenster,

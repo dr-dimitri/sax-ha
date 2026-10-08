@@ -59,6 +59,87 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
+test("discharge diagnostics follow HA feedback and recover without editing settings", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const panel = page.locator("sax-power-vue-panel");
+  const feedback = panel.locator(".electricity-charge-status");
+  const value = feedback.locator(".entity-value__state");
+  await expect(feedback.locator(".entity-value__name")).toHaveText(
+    english ? "Discharge status" : "Entladestatus",
+  );
+  async function update(state: string) {
+    await panel.evaluate((element, state) => {
+      const host = element as HTMLElement & { hass: HomeAssistant };
+      const id = "sensor.demo_timed_charge_discharge_status";
+      host.hass = {
+        ...host.hass,
+        states: {
+          ...host.hass.states,
+          [id]: { ...host.hass.states[id]!, state },
+        },
+      };
+    }, state);
+  }
+  await update("unknown");
+  await expect(value).toHaveText(english ? "Unknown" : "Unbekannt");
+  for (const [state, de, en] of [
+    [
+      "control_mode_failed",
+      "Steuermodus konnte nicht gesetzt werden",
+      "Control mode could not be set",
+    ],
+    [
+      "setpoint_failed",
+      "Ladeleistung konnte nicht gesetzt werden",
+      "Charging power could not be set",
+    ],
+    [
+      "reset_failed",
+      "SmartMeter-Nullregelung konnte nicht aktiviert werden",
+      "Smart meter zero regulation could not be enabled",
+    ],
+    [
+      "control_failed",
+      "Ladefreigabe fehlt oder wurde widerrufen",
+      "Charging permission is missing or was revoked",
+    ],
+    [
+      "control_data_missing",
+      "Gerätedaten für Ladeauftrag fehlen oder sind ungültig",
+      "Device data for charging is missing or invalid",
+    ],
+    [
+      "device_feedback_missing",
+      "Geräterückmeldung fehlt",
+      "Device feedback missing",
+    ],
+    [
+      "discharge_hold_unconfirmed",
+      "Entladesperre nicht bestätigt",
+      "Discharge block not confirmed",
+    ],
+    [
+      "release_unconfirmed",
+      "Entladefreigabe nicht bestätigt",
+      "Discharge release not confirmed",
+    ],
+  ] as const) {
+    await update(state);
+    await expect(value).toHaveText(english ? en : de);
+    await expect(value).toBeVisible();
+    await expectControlsToFit(panel);
+    await update("normal");
+    await expect(value).toHaveText(
+      english ? "Normal operation" : "Normalbetrieb",
+    );
+    await update("grid_charging");
+    await expect(value).toHaveText(english ? "Grid charging" : "Netzladen");
+  }
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
 // REQ-VUE-ELECTRICITY-TARIFF: the overview groups prices and charging, and
 // inspecting prices or settings never implicitly enables grid charging.
 test("time-of-use groups prices and grid charging into compact responsive cards", async ({

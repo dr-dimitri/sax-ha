@@ -114,7 +114,15 @@
         "state": {
           "normal": "Normalbetrieb",
           "grid_charging": "Netzladen",
-          "discharge_blocked": "Entladung wg. Netzladen gestoppt"
+          "discharge_blocked": "Entladung wg. Netzladen gestoppt",
+          "control_mode_failed": "Steuermodus konnte nicht gesetzt werden",
+          "setpoint_failed": "Ladeleistung konnte nicht gesetzt werden",
+          "reset_failed": "SmartMeter-Nullregelung konnte nicht aktiviert werden",
+          "control_failed": "Ladefreigabe fehlt oder wurde widerrufen",
+          "control_data_missing": "Gerätedaten für Ladeauftrag fehlen oder sind ungültig",
+          "device_feedback_missing": "Geräterückmeldung fehlt",
+          "discharge_hold_unconfirmed": "Entladesperre nicht bestätigt",
+          "release_unconfirmed": "Entladefreigabe nicht bestätigt"
         }
       },
       "grid_serving_active_text": {

@@ -148,6 +148,11 @@ Sensorattribute mit `*_eur_kwh` bleiben intern Euro.
 zwischen festem Netzladeziel und Bedarf bis Solarstrom. Netzladeziel, Startschwelle und
 Monate verwenden weiter die vorhandenen HA-Entitäten. Zusammenfassung,
 Fehler und ausstehende Änderungen bleiben auch eingeklappt sichtbar.
+Der Entladestatus übernimmt konkrete übersetzte Problemzustände aus dem
+Coordinator: fehlgeschlagener Moduswechsel, Leistungsauftrag oder Rückkehr
+zur Nullregelung sowie fehlende Gerätedaten und unbestätigte Sperre/Freigabe.
+Nach erfolgreicher Wiederholung folgt die Anzeige dem neuen HA-Zustand ohne
+Einstellungsaktion. Sie deutet Gerätemodus oder Leistung nicht selbst um.
 `ChargePlan.vue` zeigt die Backend-Ergebnisse aus `bridge_charge_plan` ohne
 eigenen Aktivierungsschalter. Die aktuelle Entladeprognose wird separat aus
 `discharge_forecast` angezeigt, sobald ihre Voraussetzungen erfüllt sind.

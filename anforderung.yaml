@@ -1059,8 +1059,10 @@ requirement_timed_soc_charge:
     Spätere Änderungen an Uhrzeiten/Monaten verlängern eine bestehende
     Sperre nicht; die ursprünglich gespeicherte Frist bleibt maßgeblich.
     Nach Fensterende wird aktiv freigegeben, ohne den Nachweis auf das
-    nächste Fenster zu übertragen. Nach Schreibfehlern bleibt der Status
-    unbekannt, bis der Steuerzustand wieder erfolgreich angewendet wurde.
+    nächste Fenster zu übertragen. Nicht bestätigte Steueraufträge dürfen
+    keinen erfolgreichen Steuerzustand anzeigen. Der Entladestatus nennt
+    stattdessen den konkreten Problemgrund, bis der Steuerzustand wieder
+    erfolgreich angewendet wurde.
 
     Der Enum-Sensor timed_charge_discharge_status zeigt Normalbetrieb
     (normal; kein Nachweis und keine neue Sperre), Netzladen (grid_charging;
@@ -1069,6 +1071,32 @@ requirement_timed_soc_charge:
     Netzladung läuft gerade nicht). Normalbetrieb bezieht sich nur auf
     diese Sperre und hebt andere Schutzfunktionen nicht auf. Anzeige im
     Dashboard siehe REQ-VUE-CHARGING.
+
+    Für fehlgeschlagene Aufträge werden die Fehlerphasen unterschieden:
+    Steuermodus konnte nicht gesetzt werden (control_mode_failed), Ladeleistung
+    konnte nicht gesetzt werden (setpoint_failed; Rückkehr zur Nullregelung
+    bestätigt), SmartMeter-Nullregelung konnte nicht aktiviert werden
+    (reset_failed; reguläre Freigabe oder Rollback fehlgeschlagen).
+    Fehlende/ungültige Leistungsreferenz oder Skalierung ergeben
+    control_data_missing, ein abgelaufener/widerrufener Auftrag control_failed.
+    Ein Fehlergrund bleibt über äußere Aufräumpfade erhalten; eine vollständig
+    quittierte Sollwertsequenz oder Rückkehr zur Nullregelung entfernt ihn.
+    Ist bei einer inaktiven Entscheidung kein weiterer Reset nötig, darf auch
+    eine frische echte Modus-0-Lesung den alten Fehler entfernen, sofern diese
+    Lesung erst nach dem Fehler begonnen hat. Gecachte Rückmeldungen,
+    Register-ACK-Updates und vorher begonnene Reads reichen dazu nicht aus;
+    dafür werden keine zusätzlichen Geräteschreibvorgänge ausgelöst.
+    Ein fehlgeschlagener Rollback hat Vorrang vor dem ursprünglichen
+    Sollwertfehler. Das gilt auch für periodische Schreib- und Rücksetzaufträge.
+    Ohne konkreten Writefehler zeigt der Status bei ausgefallenem SunSpec-HIGH-
+    Read device_feedback_missing, bei einer noch nicht angewendeten Sperre
+    discharge_hold_unconfirmed und bei einem offenen Rücksetzauftrag ohne
+    aktiven Writer release_unconfirmed. Die Anzeige wird bei jeder Publikation
+    aus dem aktuellen Steuerzustand neu bestimmt; eine erfolgreiche Wiederholung
+    aktualisiert sie ohne Änderung einer Einstellung. Alle Enumwerte haben
+    deutsche und englische Übersetzungen und erreichen das Dashboard über den
+    bestehenden HA-/WebSocket-Pfad. Geräteschreibfolge, Nachweisbedingungen,
+    Prioritäten und Wiederholungsintervalle werden dadurch nicht verändert.
 
     PV-Überschuss-Prüfung: Grundlage ist data["smartmeter_power"] (SunSpec-
     Modus, Register 40072 "Summenwirkleistung Netz", REG_SUN_METER_

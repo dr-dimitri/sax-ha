@@ -17,7 +17,10 @@ from pytest_homeassistant_custom_component.typing import (
     WebSocketGenerator,
 )
 
-from custom_components.sax_power.const import DOMAIN
+from custom_components.sax_power.const import (
+    DOMAIN,
+    TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS,
+)
 from custom_components.sax_power.dashboard_api import (
     SUBSCRIBE_COMMAND,
     async_register_dashboard_api,
@@ -127,11 +130,57 @@ async def test_metadata_reports_registry_device_for_renamed_time_entities(
     assert (await client.receive_json())["event"]["entities"][0]["device_id"] is None
 
 
+@pytest.mark.parametrize(
+    "language, storage_name, expected_states",
+    [
+        (
+            "de",
+            "Speicher On/Off",
+            {
+                "normal": "Normalbetrieb",
+                "grid_charging": "Netzladen",
+                "discharge_blocked": "Entladung wg. Netzladen gestoppt",
+                "control_mode_failed": "Steuermodus konnte nicht gesetzt werden",
+                "setpoint_failed": "Ladeleistung konnte nicht gesetzt werden",
+                "reset_failed": "SmartMeter-Nullregelung konnte nicht aktiviert werden",
+                "control_failed": "Ladefreigabe fehlt oder wurde widerrufen",
+                "control_data_missing": (
+                    "Gerätedaten für Ladeauftrag fehlen oder sind ungültig"
+                ),
+                "device_feedback_missing": "Geräterückmeldung fehlt",
+                "discharge_hold_unconfirmed": "Entladesperre nicht bestätigt",
+                "release_unconfirmed": "Entladefreigabe nicht bestätigt",
+            },
+        ),
+        (
+            "en",
+            "Storage on/off",
+            {
+                "normal": "Normal operation",
+                "grid_charging": "Grid charging",
+                "discharge_blocked": "Discharge stopped due to grid charging",
+                "control_mode_failed": "Control mode could not be set",
+                "setpoint_failed": "Charging power could not be set",
+                "reset_failed": "Smart meter zero regulation could not be enabled",
+                "control_failed": "Charging permission is missing or was revoked",
+                "control_data_missing": (
+                    "Device data for charging is missing or invalid"
+                ),
+                "device_feedback_missing": "Device feedback missing",
+                "discharge_hold_unconfirmed": "Discharge block not confirmed",
+                "release_unconfirmed": "Discharge release not confirmed",
+            },
+        ),
+    ],
+)
 async def test_metadata_matches_registry_names_and_enum_translations(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,
     entity_registry: er.EntityRegistry,
     dashboard_entry: MockConfigEntry,
+    language: str,
+    storage_name: str,
+    expected_states: dict[str, str],
 ) -> None:
     """Sondernamen, Enum-Werte und dynamische Forecast-Namen bleiben korrekt."""
     _entity(entity_registry, dashboard_entry, "storage_switch", "switch")
@@ -140,17 +189,17 @@ async def test_metadata_matches_registry_names_and_enum_translations(
     custom = _entity(entity_registry, dashboard_entry)
     entity_registry.async_update_entity(custom.entity_id, name="Meine Batterie")
     client = await hass_ws_client(hass)
-    entities = {item["key"]: item for item in await _subscribe(client, dashboard_entry)}
+    entities = {
+        item["key"]: item
+        for item in await _subscribe(client, dashboard_entry, language)
+    }
 
     assert entities["soc"]["name"] == "Meine Batterie"
-    assert entities["storage_switch"]["name"] == "Speicher On/Off"
+    assert entities["storage_switch"]["name"] == storage_name
     assert entities["storage_switch"]["can_control"] is True
     assert entities["grid_serving_forecast"]["name"] is None
-    assert entities["timed_charge_discharge_status"]["states"] == {
-        "normal": "Normalbetrieb",
-        "grid_charging": "Netzladen",
-        "discharge_blocked": "Entladung wg. Netzladen gestoppt",
-    }
+    assert entities["timed_charge_discharge_status"]["states"] == expected_states
+    assert tuple(expected_states) == TIMED_CHARGE_DISCHARGE_STATUS_OPTIONS
 
 
 async def test_metadata_excludes_foreign_disabled_and_invalid_entities(

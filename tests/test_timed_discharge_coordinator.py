@@ -129,7 +129,7 @@ async def test_failed_hold_setpoint_preserves_proof_and_recovers_on_next_poll(
         await _evaluate(coordinator)
 
     assert coordinator._timed_discharge_state == TimedDischargeState(EXPIRES)
-    assert coordinator.data["timed_charge_discharge_status"] is None
+    assert coordinator.data["timed_charge_discharge_status"] == "setpoint_failed"
     assert coordinator.sun_charge_active is False
     assert coordinator.data["ic_control_mode"] == SUN_IC_CONTROL_MODE_SMARTMETER
 
@@ -152,7 +152,7 @@ async def test_failed_disable_reset_is_not_reported_as_successful_release(
 
     assert coordinator._timed_discharge_state is None
     assert coordinator._sun_charge_reset_required is True
-    assert coordinator.data["timed_charge_discharge_status"] is None
+    assert coordinator.data["timed_charge_discharge_status"] == "reset_failed"
     assert coordinator.sun_charge_active is False
 
     client.write_register.side_effect = None

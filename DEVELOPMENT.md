@@ -1891,7 +1891,24 @@ Das Dashboard zeigt im zeitvariablen Stromtarif den Entladestatus neben dem
 aktuellen Preis. Der Enum-Sensor
 `timed_charge_discharge_status` zeigt „Normalbetrieb“, „Netzladen“ oder „Entladung wg. Netzladen gestoppt“.
 „Normalbetrieb“ beschreibt ausschließlich diesen Mechanismus. Nach einem
-Schreibfehler wird kein erfolgreich gehaltener Zustand behauptet.
+Schreibfehler wird kein erfolgreich gehaltener Zustand behauptet. Der Status
+nennt die betroffene Phase: Steuermodus, Ladeleistung oder Rückkehr zur
+SmartMeter-Nullregelung. Fehlende/ungültige Daten für den Ladeauftrag sowie
+abgelaufene/widerrufene Aufträge sind davon unterscheidbar. Ein fehlgeschlagener
+Rollback hat Vorrang vor dem ursprünglichen Sollwertfehler. Der Coordinator
+hält den Problemcode unabhängig von den Aktivitätsflags, damit äußere
+Aufräumpfade ihn nicht wieder durch „Unbekannt“ ersetzen. Eine vollständig
+quittierte Sollwertsequenz oder Rückkehr zur Nullregelung entfernt den Fehler.
+Bei einem bereits inaktiven Steuerzustand kann auch eine neue echte Modus-0-
+Rückmeldung den alten Fehler entfernen. Die Lesung muss nach dem Fehler begonnen
+haben und noch frisch sein; gecachte Zustände oder Register-ACKs reichen nicht.
+Dieser Anzeigeabgleich löst keine zusätzlichen Geräteschreibvorgänge aus.
+Ohne konkreten Fehler zeigen noch nicht bestätigte Sperren/Freigaben und ein
+ausgefallener SunSpec-HIGH-Read eigene Zustände. Die gemeinsame Publikation
+wertet den Status erneut aus; erfolgreiche Wiederholungen aktualisieren ihn
+auch ohne Einstellungsänderung. `tests/test_timed_discharge_status_problems.py`
+prüft Fehlerphasen und Erholung; Sensor-, WebSocket- und Frontendtests prüfen
+die übersetzten Texte und deren automatische Aktualisierung.
 
 **Vorbelegung von Zeitfenster/Aktiviert-Status:** `SaxPowerTimedChargeSwitch`
 sowie `SaxPowerTimedChargeStartTime`/`SaxPowerTimedChargeEndTime` (jeweils

@@ -844,8 +844,14 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await expect(input).toHaveValue("75");
   await panel.locator("nav a[href$='/stromtarif']").click();
   await page.locator("#tariff-dynamic").click();
-  await panel.locator(".electricity-charging header button").click();
-  const shared = panel.locator("input[max='100']");
+  const charging = panel.locator(".electricity-charging");
+  await charging.locator("header > button").click();
+  const apply = charging
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button");
+  await expect(apply).toHaveCount(1);
+  await expect(charging.locator(".entity-control button")).toHaveCount(0);
+  const shared = charging.locator("input[max='100']");
   await expect(shared).toHaveValue("75");
   await page.locator("#connection").click();
   await expect(shared).toHaveCount(0);
@@ -868,11 +874,7 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await expect(shared).toHaveValue("75");
   await page.locator("#failure").click();
   await shared.fill("90");
-  await panel
-    .locator("form")
-    .filter({ has: page.locator("input[max='100']") })
-    .getByRole("button")
-    .click();
+  await apply.click();
   await expect(panel.getByRole("alert")).toBeVisible();
   await expect(
     panel
@@ -880,7 +882,11 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
       .filter({ has: page.locator("input[max='100']") })
       .locator(".entity-control__value"),
   ).toContainText("75");
-  await expect(page.locator("#actions")).toContainText("2: number.set_value");
+  await expect(shared).toHaveValue("90");
+  await expect(charging.locator(".electricity-charging-editor")).toBeVisible();
+  await expect(page.locator("#actions")).toHaveText(
+    '2: sax_power.set_charging_settings {"device_id":"demo-device","max_soc":90}',
+  );
 });
 
 test("tariff months, grid-serving overnight window and guided negative price settings use their matching controls", async ({
@@ -992,15 +998,25 @@ test("tariff months, grid-serving overnight window and guided negative price set
     "aria-pressed",
     "true",
   );
-  const price = panel.locator("input[min='-100']").first();
+  const charging = panel.locator(".electricity-charging");
+  const price = charging.getByRole("spinbutton", {
+    name: testInfo.project.name.endsWith("en")
+      ? "Preserve battery energy below (ct/kWh)"
+      : "Speicher bei günstigem Strom schonen bis (ct/kWh)",
+    exact: true,
+  });
+  const apply = charging
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button");
+  await expect(apply).toHaveCount(1);
+  await expect(charging.locator(".entity-control button")).toHaveCount(0);
   await price.fill("-12.5");
-  await panel
-    .locator("form")
-    .filter({ has: page.locator("input[min='-100']") })
-    .first()
-    .getByRole("button")
-    .click();
-  await expect(page.locator("#actions")).toContainText('"value":-12.5');
+  await apply.click();
+  await expect(page.locator("#actions")).toHaveText(
+    '6: sax_power.set_charging_settings {"device_id":"demo-device","price_charge_neutral_price":-12.5}',
+  );
+  await expect(charging.locator(".electricity-charging-editor")).toHaveCount(0);
+  await charging.locator("header > button").click();
   await expect(price).toHaveValue("-12.5");
 });
 

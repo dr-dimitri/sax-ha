@@ -846,9 +846,7 @@ test("confirmed shared values, errors, reconnect and unavailable controls", asyn
   await page.locator("#tariff-dynamic").click();
   const charging = panel.locator(".electricity-charging");
   await charging.locator("header > button").click();
-  const apply = charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button");
+  const apply = charging.locator("header > button");
   await expect(apply).toHaveCount(1);
   await expect(charging.locator(".entity-control button")).toHaveCount(0);
   const shared = charging.locator("input[max='100']");
@@ -1005,9 +1003,7 @@ test("tariff months, grid-serving overnight window and guided negative price set
       : "Speicher bei günstigem Strom schonen bis (ct/kWh)",
     exact: true,
   });
-  const apply = charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button");
+  const apply = charging.locator("header > button");
   await expect(apply).toHaveCount(1);
   await expect(charging.locator(".entity-control button")).toHaveCount(0);
   await price.fill("-12.5");
@@ -1440,7 +1436,8 @@ test("electricity tariff saves compact prices and keeps all editor fields usable
   }
   await price.locator('input[name="base_price"]').fill(en ? "34.25" : "34,25");
   await price
-    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .locator("form")
+    .getByRole("button", { name: en ? "Apply" : "Übernehmen", exact: true })
     .click();
   await expect(price.locator("form")).toHaveCount(0);
   await expect(price).toContainText(en ? "34.25" : "34,25");
@@ -1500,14 +1497,16 @@ test("electricity tariff explicitly selects dynamic and uses one central automat
   await prices.locator('[name="dynamic_feed"]').fill(en ? "9.25" : "9,25");
   await page.locator("#failure").click();
   await prices
-    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .locator("form")
+    .getByRole("button", { name: en ? "Apply" : "Übernehmen", exact: true })
     .click();
   await expect(panel.locator('[role="alert"]')).toBeVisible();
   await expect(prices.locator('[name="dynamic_feed"]')).toHaveValue(
     en ? "9.25" : "9,25",
   );
   await prices
-    .getByRole("button", { name: en ? "Save" : "Speichern", exact: true })
+    .locator("form")
+    .getByRole("button", { name: en ? "Apply" : "Übernehmen", exact: true })
     .click();
   await expect(prices.locator("form")).toHaveCount(0);
   await expect(prices).toContainText(en ? "9.25" : "9,25");

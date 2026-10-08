@@ -238,9 +238,13 @@ nebeneinander, jeweils mit der Beschriftung über dem Zahlwert.
 **Ladestart 0 % erlaubt den Start bei genau 0 % SOC**. Die globale Ladegrenze gilt auch für Solarstrom. Eine fällige
 Zellkalibrierung darf die eingestellten Grenzen vorübergehend bis 100 % erweitern;
 die Bedarfsladung plant deshalb keine zusätzliche Vollladung ein.
-Alle geänderten Zahleneingaben werden mit einem gemeinsamen **Übernehmen**
-gespeichert. Bei ungültigen Werten bleibt die Bearbeitung offen und zeigt das
-betroffene Feld. **Schließen** klappt ohne Speichern ein und behält die Eingaben.
+Das Startfeld heißt **Ladestart unter (%)**. Alle geänderten Zahleneingaben
+werden mit **Übernehmen** oben in der Netzladung gemeinsam gespeichert.
+Bei ungültigen Werten bleibt die Bearbeitung offen und zeigt das
+betroffene Feld. **Abbrechen** unten verwirft ungespeicherte Zahleneingaben
+und schließt die Bearbeitung. Bereits übernommene Ladeweisen und Monate
+bleiben erhalten. Bei **Preise & Zeiten** steht **Übernehmen** oben und unten
+zur Verfügung; beide Buttons speichern dieselben Eingaben.
 Bereits gespeicherte Werte ändern sich beim Öffnen nicht.
 
 Unter **Ladeplan & Prognose** erscheint die aktuelle Entladeprognose, sobald
@@ -420,17 +424,17 @@ Die Integration ruft selbst keine Preise vom Anbieter ab.
 Die Einrichtung besteht aus drei Schritten:
 
 1. Wähle unter **Preise & Zeiten → Bearbeiten** deinen Strompreis-Sensor
-   und trage die Einspeisevergütung in ct/kWh ein. Bestätige mit **Speichern**.
+   und trage die Einspeisevergütung in ct/kWh ein. Bestätige mit **Übernehmen**.
 2. Öffne **Netzladung → Bearbeiten**. Wähle, wie der Speicher laden soll,
    und stelle den gewünschten maximalen Speicherfüllstand ein. Die Erklärung
    zur Ladeweise zeigt, welche Einstellungen dafür benötigt werden. Bestätige
-   geänderte Zahlen jeweils mit **Übernehmen**.
-3. Schließe die Bearbeitung und schalte **Automatische Netzladung** ein.
+   geänderte Zahlen gemeinsam mit **Übernehmen** oben.
+3. Schalte anschließend **Automatische Netzladung** ein.
    Der Status erklärt, ob die Ladung läuft oder worauf sie wartet.
 
 Preis-Einheit und Vorschauattribut werden automatisch erkannt. Die erweiterten
 Einstellungen erlauben weiterhin eigene Vorgaben; vorhandene Werte bleiben
-beim Öffnen und Schließen erhalten. Unterstützt werden EUR/kWh, ct/kWh,
+bis zum Übernehmen oder Abbrechen erhalten. Unterstützt werden EUR/kWh, ct/kWh,
 EUR/MWh und ct/MWh. Ein Klick auf den Hauptschalter zeigt sofort den Fortschritt;
 der Haken folgt der Bestätigung aus Home Assistant, ohne auf die
 Gerätekommunikation zu warten.
@@ -536,7 +540,7 @@ Bearbeiten** im Tab **Amortisation** verfügbar.
 Der Editor klappt direkt in der Karte auf: Standardpreis, Einspeisevergütung
 und vorhandene Zeitfenster mit **Von**, **Bis** und **Preis**. Über
 **Zeitfenster hinzufügen** lassen sich bis zu acht Fenster anlegen; Fenster
-über Mitternacht sind möglich. **Speichern** übernimmt das vollständige Profil
+über Mitternacht sind möglich. **Übernehmen** übernimmt das vollständige Profil
 und klappt den Editor zu, **Abbrechen** verwirft den Entwurf. Fehler oder
 zwischenzeitliche Tarifänderungen werden angezeigt und überschreiben keine
 gespeicherten Werte. Der Standardpreis gilt außerhalb der Fenster und ist

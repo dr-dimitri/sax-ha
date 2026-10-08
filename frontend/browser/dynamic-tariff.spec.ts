@@ -416,10 +416,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   });
   await hours.fill("6");
   await page.locator("#hold-action").click();
-  await charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button")
-    .click();
+  await charging.locator("header > button").click();
   await expect(hoursControl.locator(".entity-control__value")).toContainText(
     "4",
   );

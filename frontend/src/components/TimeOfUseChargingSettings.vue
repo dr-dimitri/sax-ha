@@ -11,6 +11,7 @@ const emit = defineEmits<{ apply: [] }>();
 const numbers = ref<InstanceType<typeof ChargingNumberFields>>();
 defineExpose({
   submit: () => numbers.value?.submit() ?? Promise.resolve(true),
+  reset: () => numbers.value?.reset() ?? true,
   pending: computed(() => numbers.value?.pending ?? false),
 });
 const dashboard = inject(SAX_DASHBOARD_KEY);
@@ -42,7 +43,7 @@ const text = computed(() =>
         noMonths:
           "Keine ausgewählt · Automatische Netzladung ganzjährig inaktiv",
         unknownMonths: "Monatsauswahl nicht vollständig bekannt",
-        threshold: "Ladestart (%)",
+        threshold: "Ladestart unter (%)",
         maxSoc: "Max SOC",
         global: "Max SOC (%)",
         unavailable: "Ladeweise nicht verfügbar.",

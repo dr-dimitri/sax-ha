@@ -213,7 +213,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       expect(fixture.root.querySelector("details")).toBeNull();
       const labels = english
         ? ["Start threshold (%)", "Grid charge target (%)", "Max SOC (%)"]
-        : ["Ladestart (%)", "Netzladeziel (%)", "Max SOC (%)"];
+        : ["Ladestart unter (%)", "Netzladeziel (%)", "Max SOC (%)"];
       expect(
         [
           ...fixture.root.querySelectorAll(
@@ -247,7 +247,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       [...controls].every((control) => !control.querySelector("button")),
     ).toBe(true);
     for (const [label, value] of [
-      ["Ladestart (%)", "85"],
+      ["Ladestart unter (%)", "85"],
       ["Netzladeziel (%)", "90"],
       ["Max SOC (%)", "100"],
     ]) {
@@ -282,7 +282,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     const fixture = await mount();
     const start = control(
       fixture.root,
-      "Ladestart (%)",
+      "Ladestart unter (%)",
     ).querySelector<HTMLInputElement>("input")!;
     const target = control(
       fixture.root,
@@ -318,7 +318,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
   it("rejects an invalid global draft without applying the valid replacement SOC pair", async () => {
     const fixture = await mount();
     for (const [label, value] of [
-      ["Ladestart (%)", "25"],
+      ["Ladestart unter (%)", "25"],
       ["Netzladeziel (%)", "75"],
       ["Max SOC (%)", "90.5"],
     ]) {
@@ -338,7 +338,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
         ?.getAttribute("aria-invalid"),
     ).toBe("true");
     for (const [label, value] of [
-      ["Ladestart (%)", "25"],
+      ["Ladestart unter (%)", "25"],
       ["Netzladeziel (%)", "75"],
     ]) {
       const input = control(
@@ -461,7 +461,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     ).toEqual(["Maximales Netzladeziel", "Max SOC"]);
     expect(control(fixture.root, "Maximales Netzladeziel (%)")).toBeTruthy();
     expect(fixture.root.querySelector(".tou-charging-threshold")).toBeNull();
-    expect(control(fixture.root, "Ladestart (%)")).toBeUndefined();
+    expect(control(fixture.root, "Ladestart unter (%)")).toBeUndefined();
     method(fixture.root, "bridge").click();
     await flush();
     expect(fixture.callService).toHaveBeenCalledTimes(1);
@@ -546,7 +546,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
 
   it.each([
     ["Netzladeziel (%)", "19", "20"],
-    ["Ladestart (%)", "81", "80"],
+    ["Ladestart unter (%)", "81", "80"],
   ])(
     "rejects an inconsistent %s and retains the draft",
     async (label, invalid, equal) => {

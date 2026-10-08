@@ -3431,8 +3431,10 @@ requirement_vue_electricity_tariff:
     Zeilen statt nummerierter Einrichtungsschritte und mehrfacher Hinweise.
     Bedienflächen bleiben mindestens 44 px hoch, Checkbox-Labels mindestens
     44 × 44 px. Tarif- und Ladeeinstellungen beginnen mit einer Zusammenfassung
-    und einer ausdrücklichen Bearbeiten-Aktion; Öffnen und Schließen ändern
-    keine Werte. Ausstehende Aktionen und Fehler bleiben beim zugehörigen
+    und einer ausdrücklichen Bearbeiten-Aktion; Öffnen ändert keine Werte.
+    Preise & Zeiten bietet oben und unten „Übernehmen“ (EN: „Apply“) mit
+    identischer Validierung und Speicheraktion; unten bleibt „Abbrechen“.
+    Ausstehende Aktionen und Fehler bleiben beim zugehörigen
     Bedienelement sichtbar, auch nach dem Schließen der Bearbeitung.
     Aktueller Preis und Status bleiben sichtbar; Tagespreiskurve und Prognose
     sind anfangs eingeklappt.
@@ -3473,8 +3475,8 @@ requirement_vue_electricity_tariff:
     weder Investitionsdaten noch native SOC-, Monats- oder Strategieeinstellungen.
 
     Ladeverhalten bleibt zunächst eingeklappt. Im Netzladeeditor gibt es
-    genau einen Button „Übernehmen“ (EN: „Apply“). Er prüft alle sichtbaren
-    Zahleneingaben und speichert geänderte Werte gemeinsam über
+    genau einen Button „Übernehmen“ (EN: „Apply“) oben in der Kopfzeile.
+    Er prüft alle sichtbaren Zahleneingaben und speichert geänderte Werte gemeinsam über
     sax_power.set_charging_settings; neben den Zahlen stehen keine
     Einzel-Übernehmen-Buttons. Ladestart, Netzladeziel und Max SOC werden
     anhand des vollständigen Entwurfs geprüft, sodass auch gemeinsam erhöhte
@@ -3490,8 +3492,13 @@ requirement_vue_electricity_tariff:
     Doppelaufrufe gesperrt; bestätigte Werte folgen echten HA-Zuständen.
     Erfolg schließt den Editor, Fehler lassen ihn mit erhaltenen Eingaben
     offen und markieren das betroffene Feld. Enter nutzt denselben Save.
-    „Schließen“ klappt ohne Speichern ein und erhält Entwürfe. Zeitvariabel
-    bietet die Ladeweisen
+    „Abbrechen“ (EN: „Cancel“) steht unten, verwirft ungespeicherte
+    Zahleneingaben einschließlich ausgeblendeter Entwürfe und Clientfehler
+    und schließt die Bearbeitung ohne Schreibaufruf. Beim erneuten Öffnen
+    erscheinen die aktuellen bestätigten Zahlen. Beide Buttons sind während
+    der gemeinsamen Speicherung gesperrt. Bereits übernommene Ladeweisen
+    und Monatsauswahlen werden beim Abbrechen nicht zurückgesetzt.
+    Zeitvariabel bietet die Ladeweisen
     „Festes Netzladeziel“ (bridge_charge_enabled aus) und
     „Nur Bedarf bis Solarstrom“ (bridge_charge_enabled ein).
     Nur bestätigte, verfügbare on/off-Zustände markieren die Auswahl; fehlende,
@@ -3509,6 +3516,7 @@ requirement_vue_electricity_tariff:
     Startschwelle und Netzladeziel/Max SOC stehen nebeneinander. Fehlende
     globale Werte werden als nicht verfügbar angezeigt und spätere HA-
     Rückmeldungen aktualisieren alle SOC-Werte ohne Öffnen der Bearbeitung.
+    Das Startfeld heißt in der Bearbeitung „Ladestart unter (%)“.
     Während der Bearbeitung sind Ladestart (nur bei fester Ladeweise),
     Netzladeziel, globale Ladegrenze und Monate direkt sichtbar. Es gibt dort
     kein „Weitere Einstellungen“ und keine zusätzliche Aufklappaktion;
@@ -3526,8 +3534,9 @@ requirement_vue_electricity_tariff:
     bridge_pv_start_required und bridge_tariff_required aus dem HA-Service
     erhalten konkrete DE-/EN-Hinweise. Ausstehende Änderungen sperren weitere
     Modusaufrufe. Bestätigte Zustände, Fehlermeldungen und Zahlentwürfe bleiben
-    in beiden Tarifarten beim Schließen und erneuten Öffnen erhalten. Dies
-    umfasst ungesendete und unvollständige Zahlen sowie verspätet fehlgeschlagene
+    in beiden Tarifarten bei Fehlern erhalten. Ohne Abbrechen behalten auch
+    ausgeblendete Zahlenfelder ihren Entwurf. Dies umfasst ungesendete und
+    unvollständige Zahlen sowie verspätet fehlgeschlagene
     Änderungen. Ein ausdrücklicher Wiederholungsversuch sendet den erhaltenen
     Entwurf; bestätigte HA-Änderungen aktualisieren bestätigte Werte und
     unberührte Eingabefelder. Bereits bearbeitete Entwürfe bleiben erhalten;

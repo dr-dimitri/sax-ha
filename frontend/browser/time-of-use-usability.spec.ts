@@ -407,7 +407,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   );
   await expect(
     settings.getByRole("spinbutton", {
-      name: english ? "Start threshold (%)" : "Ladestart (%)",
+      name: english ? "Start threshold (%)" : "Ladestart unter (%)",
       exact: true,
     }),
   ).toHaveCount(0);
@@ -422,14 +422,14 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(target).toHaveValue("80");
   await expect(
     settings.getByRole("spinbutton", {
-      name: english ? "Start threshold (%)" : "Ladestart (%)",
+      name: english ? "Start threshold (%)" : "Ladestart unter (%)",
       exact: true,
     }),
   ).toHaveValue("20");
   await expect(panel.locator(".electricity-master input")).not.toBeChecked();
 });
 
-test("charge target keeps its draft and confirmed value through delayed failure, collapse and retry", async ({
+test("charge target keeps its draft and confirmed value through delayed failure and retry, disabling cancellation", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -448,9 +448,7 @@ test("charge target keeps its draft and confirmed value through delayed failure,
       exact: true,
     }),
   });
-  const apply = charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button");
+  const apply = charging.locator("header > button");
   await target.fill("65");
   await page.locator("#hold-action").click();
   await page.locator("#failure").click();
@@ -461,12 +459,13 @@ test("charge target keeps its draft and confirmed value through delayed failure,
   await expect(control.getByRole("status")).toBeVisible();
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(summary).toContainText("80 %");
-  await charging.locator("header > button").click();
-  await expect(charging.getByRole("status")).toBeVisible();
+  await expect(
+    charging.locator(".electricity-charging-editor button"),
+  ).toBeDisabled();
+  await expect(charging.locator(".electricity-charging-editor")).toBeVisible();
   await page.locator("#release-action").click();
-  await expect(charging.getByRole("alert")).toBeVisible();
+  await expect(control.getByRole("alert")).toBeVisible();
   await expect(summary).toContainText("80 %");
-  await charging.locator("header > button").click();
   await expect(target).toHaveValue("65");
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(control).toHaveAttribute("aria-busy", "false");

@@ -40,9 +40,8 @@ const text = computed(() =>
         change: "Tarif wechseln",
         apply: "Tarif übernehmen",
         cancel: "Abbrechen",
-        save: "Speichern",
+        save: "Übernehmen",
         done: "Übernehmen",
-        close: "Schließen",
         edit: "Bearbeiten",
         loading: "Wird geladen …",
         saving: "Wird gespeichert …",
@@ -142,9 +141,8 @@ const text = computed(() =>
         change: "Change tariff",
         apply: "Apply tariff",
         cancel: "Cancel",
-        save: "Save",
+        save: "Apply",
         done: "Apply",
-        close: "Close",
         edit: "Edit",
         loading: "Loading …",
         saving: "Saving …",
@@ -319,6 +317,7 @@ const priceButton = ref<HTMLButtonElement>();
 const chargingButton = ref<HTMLButtonElement>();
 const chargingSettings = ref<{
   submit(): Promise<boolean>;
+  reset(): boolean;
   pending: boolean;
 }>();
 const chargingSaving = ref(false);
@@ -736,6 +735,10 @@ function closeCharging() {
   chargingOpen.value = false;
   void nextTick(() => chargingButton.value?.focus());
 }
+function cancelCharging(): void {
+  if (chargingSaving.value || chargingSettings.value?.pending) return;
+  if (chargingSettings.value?.reset() !== false) closeCharging();
+}
 async function applyCharging(): Promise<void> {
   if (chargingSaving.value || chargingSettings.value?.pending) return;
   const editor = chargingSettings.value;
@@ -871,14 +874,26 @@ async function applyCharging(): Promise<void> {
               <h2>{{ text.prices }}</h2>
             </div>
             <button
-              v-if="!priceEditing"
               ref="priceButton"
               type="button"
-              :disabled="pending || !canConfigure || changing"
+              :disabled="
+                pending ||
+                !canConfigure ||
+                changing ||
+                (priceEditing && (!connected || conflict))
+              "
               :aria-expanded="priceEditing"
-              @click="openPrices"
+              @click="priceEditing ? savePrices() : openPrices()"
             >
-              {{ pendingOperation === "loading" ? text.loading : text.edit }}
+              {{
+                pendingOperation === "loading"
+                  ? text.loading
+                  : pendingOperation === "saving"
+                    ? text.saving
+                    : priceEditing
+                      ? text.save
+                      : text.edit
+              }}
             </button>
           </header>
           <div class="electricity-current">
@@ -1090,11 +1105,18 @@ async function applyCharging(): Promise<void> {
           <button
             ref="chargingButton"
             type="button"
-            :disabled="changing"
+            :disabled="changing || chargingSaving || chargingSettings?.pending"
+            :aria-busy="chargingSaving"
             :aria-expanded="chargingOpen"
-            @click="chargingOpen ? closeCharging() : (chargingOpen = true)"
+            @click="chargingOpen ? applyCharging() : (chargingOpen = true)"
           >
-            {{ chargingOpen ? text.close : text.edit }}
+            {{
+              chargingSaving
+                ? text.saving
+                : chargingOpen
+                  ? text.done
+                  : text.edit
+            }}
           </button>
         </header>
         <section v-if="known" class="electricity-activation">
@@ -1199,9 +1221,9 @@ async function applyCharging(): Promise<void> {
             <button
               type="button"
               :disabled="chargingSaving || chargingSettings?.pending"
-              @click="applyCharging"
+              @click="cancelCharging"
             >
-              {{ chargingSaving ? text.saving : text.done }}
+              {{ text.cancel }}
             </button>
             <p v-if="chargingSaving" role="status" aria-live="polite">
               {{ text.entityPending }}

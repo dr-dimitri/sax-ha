@@ -10,7 +10,7 @@ import {
 const apps: App[] = [];
 type Field = { key: string; label: string };
 const socFields: Field[] = [
-  { key: "timed_charge_min_soc", label: "Ladestart (%)" },
+  { key: "timed_charge_min_soc", label: "Ladestart unter (%)" },
   { key: "timed_charge_max_soc", label: "Netzladeziel (%)" },
   { key: "max_soc", label: "Max SOC (%)" },
 ];
@@ -160,6 +160,48 @@ afterEach(() => {
 });
 
 describe("shared charging number drafts", () => {
+  it("resets visible and hidden drafts to the latest confirmed values without writing", async () => {
+    const fields = [
+      { key: "price_charge_max_price", label: "Preis" },
+      { key: "max_soc", label: "Max SOC (%)" },
+    ];
+    const fixture = await mount({ fields });
+    await fixture.edit("price_charge_max_price", "12.5");
+    fixture.fields.value = [fields[1]!];
+    await flush();
+    await fixture.edit("max_soc", "");
+    expect(await fixture.submit()).toBe(false);
+    await fixture.update("max_soc", "95");
+    await fixture.update("price_charge_max_price", "-4");
+    fixture.entries.value.max_soc!.error = "Old client error";
+    expect(fixture.api.value!.reset()).toBe(true);
+    await flush();
+    expect(fixture.input("max_soc").value).toBe("95");
+    expect(fixture.root.querySelector("[role=alert]")).toBeNull();
+    fixture.fields.value = fields;
+    await flush();
+    expect(fixture.input("price_charge_max_price").value).toBe("-4");
+    expect(fixture.perform).not.toHaveBeenCalled();
+    expect(await fixture.submit()).toBe(true);
+    expect(fixture.perform).not.toHaveBeenCalled();
+  });
+
+  it("refuses to reset during an in-flight save and preserves its submitted draft", async () => {
+    const fixture = await mount();
+    let resolve!: (value: boolean) => void;
+    fixture.perform.mockImplementationOnce(
+      () => new Promise<boolean>((done) => (resolve = done)),
+    );
+    await fixture.edit("max_soc", "95");
+    const saving = fixture.submit();
+    await flush();
+    expect(fixture.api.value!.reset()).toBe(false);
+    expect(fixture.input("max_soc").value).toBe("95");
+    resolve(true);
+    expect(await saving).toBe(true);
+    expect(fixture.perform).toHaveBeenCalledExactlyOnceWith({ max_soc: "95" });
+  });
+
   it("has no individual apply buttons and delegates Enter/form submission to its parent", async () => {
     const fixture = await mount();
     expect(fixture.root.querySelectorAll("button")).toHaveLength(0);

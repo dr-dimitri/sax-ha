@@ -517,8 +517,8 @@ function saves(fixture: Awaited<ReturnType<typeof mount>>) {
 }
 describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
   it.each([
-    ["de", "Bearbeiten", "Wird geladen …", "Speichern", "Wird gespeichert …"],
-    ["en", "Edit", "Loading …", "Save", "Saving …"],
+    ["de", "Bearbeiten", "Wird geladen …", "Übernehmen", "Wird gespeichert …"],
+    ["en", "Edit", "Loading …", "Apply", "Saving …"],
   ])(
     "announces delayed reads and writes immediately in %s",
     async (language, edit, loading, save, saving) => {
@@ -586,7 +586,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
     await fill(plan, '[name="feed_in_price"]', "8.12");
     await fill(plan, ".tariff-plan__price", "-2,50");
     expect(saves(fixture)).toHaveLength(0);
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(saves(fixture)[0]?.[0]).toEqual({
       type: "sax_power/dashboard/tariff/save",
       entry_id: "entry-1",
@@ -622,7 +622,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       const plan = fixture.plans()[0]!;
       await click(plan, "Bearbeiten");
       await fill(plan, '[name="base_price"]', value);
-      await click(plan, "Speichern");
+      await click(plan, "Übernehmen");
       expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
         "zwei Nachkommastellen",
       );
@@ -639,17 +639,17 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
     const plan = fixture.plans()[0]!;
     await click(plan, "Bearbeiten");
     await fill(plan, ".tariff-plan__time", "06:00:15");
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
       "verschieden",
     );
     await fill(plan, ".tariff-plan__time", "07:00:00");
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
       "überschneiden",
     );
     await fill(plan, ".tariff-plan__time", "22:00:15");
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(saves(fixture)).toHaveLength(1);
     expect(saves(fixture)[0]?.[0].windows).toEqual([
       { start: "22:00:15", end: "06:00:15", price_ct_kwh: 18 },
@@ -673,7 +673,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       const plan = fixture.plans()[0]!;
       await click(plan, "Bearbeiten");
       await fill(plan, ".tariff-plan__time", input);
-      await click(plan, "Speichern");
+      await click(plan, "Übernehmen");
       expect(saves(fixture)[0]?.[0].windows).toEqual([
         { start: expected, end: "15:30:00", price_ct_kwh: 16 },
       ]);
@@ -690,7 +690,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
       await flush();
       expect(input.value).toBe(value);
-      await click(plan, "Speichern");
+      await click(plan, "Übernehmen");
       expect(input.value).toBe(value);
       expect(input.getAttribute("aria-invalid")).toBe("true");
       expect(document.activeElement).toBe(input);
@@ -722,7 +722,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
         if (commit === "change")
           inputs[index]!.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      await click(plan, "Speichern");
+      await click(plan, "Übernehmen");
       expect(plan.querySelector('[role="alert"]')).toBeNull();
       expect(saves(fixture)[0]?.[0].windows).toEqual([
         { start: "00:00:00", end: "04:59:00", price_ct_kwh: 18.5 },
@@ -755,7 +755,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       )!;
       input.value = "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      await click(plan, language === "de" ? "Speichern" : "Save");
+      await click(plan, language === "de" ? "Übernehmen" : "Apply");
       const alert = plan.querySelector('[role="alert"]')!;
       expect(alert.textContent).toContain(windowLabel);
       expect(alert.textContent).toContain(fieldLabel);
@@ -770,7 +770,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
       await flush();
       expect(plan.querySelector('[role="alert"]')).toBeNull();
-      await click(plan, language === "de" ? "Speichern" : "Save");
+      await click(plan, language === "de" ? "Übernehmen" : "Apply");
       expect(saves(fixture)).toHaveLength(1);
     },
   );
@@ -792,7 +792,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
     for (let index = 0; index < 8; index++) await click(plan, "Entfernen");
     await fill(plan, '[name="base_price"]', "30");
     await fill(plan, '[name="feed_in_price"]', "0");
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(saves(fixture)[0]?.[0].windows).toEqual([]);
   });
   it("keeps read-only accounts out of the editor and disables actions while disconnected", async () => {
@@ -815,13 +815,13 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       await click(plan, "Bearbeiten");
       await fill(plan, '[name="base_price"]', "32");
       fixture.callWS.mockRejectedValueOnce({ code });
-      await click(plan, "Speichern");
+      await click(plan, "Übernehmen");
       expect(
         plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
       ).toBe("32");
       expect(plan.querySelector('[role="alert"]')).not.toBeNull();
       if (code === "conflict") {
-        expect(button(plan, "Speichern").disabled).toBe(true);
+        expect(button(plan, "Übernehmen").disabled).toBe(true);
         await click(plan, "Gespeicherten Tarif laden (Entwurf verwerfen)");
         expect(
           plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
@@ -837,7 +837,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
       await click(plan, language === "de" ? "Bearbeiten" : "Edit");
       await fill(plan, '[name="base_price"]', "32");
       fixture.callWS.mockRejectedValueOnce({ code: "pv_sensor_missing" });
-      await click(plan, language === "de" ? "Speichern" : "Save");
+      await click(plan, language === "de" ? "Übernehmen" : "Apply");
       expect(plan.querySelector('[role="alert"]')?.textContent).toContain(
         language === "de"
           ? "PV-Start-Sensor wurde nicht gefunden"
@@ -861,7 +861,7 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
           resolve = done;
         }),
     );
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(button(plan, "Wird gespeichert …").disabled).toBe(true);
     await fixture.disconnect();
     resolve({
@@ -876,9 +876,9 @@ describe("REQ-VUE-TARIFF-EDITOR: explicit dashboard tariff editor", () => {
     expect(
       plan.querySelector<HTMLInputElement>('[name="base_price"]')?.value,
     ).toBe("33");
-    expect(button(plan, "Speichern").disabled).toBe(true);
+    expect(button(plan, "Übernehmen").disabled).toBe(true);
     await fixture.disconnect(false);
-    expect(button(plan, "Speichern").disabled).toBe(false);
+    expect(button(plan, "Übernehmen").disabled).toBe(false);
   });
 });
 
@@ -896,7 +896,7 @@ it.each(
     const fixture = await mount({ windows });
     const plan = fixture.plans()[0]!;
     await click(plan, "Bearbeiten");
-    await click(plan, "Speichern");
+    await click(plan, "Übernehmen");
     expect(plan.querySelector('[role="alert"]')).toBeNull();
     expect(saves(fixture)).toHaveLength(1);
   },
@@ -906,7 +906,7 @@ it("REQ-VUE-TARIFF-EDITOR retains a saved tariff until matching sensor attribute
   const plan = fixture.plans()[0]!;
   await click(plan, "Bearbeiten");
   await fill(plan, '[name="base_price"]', "42");
-  await click(plan, "Speichern");
+  await click(plan, "Übernehmen");
   await fixture.update("-1.5", {
     ...tariffAttributes(),
     next_price_change_at: "2026-03-30T16:00:00Z",
@@ -945,7 +945,7 @@ it("REQ-VUE-TARIFF-EDITOR accepts the sensor's sorted windows and later external
   const plan = fixture.plans()[0]!;
   await click(plan, "Bearbeiten");
   await fill(plan, '[name="base_price"]', "42");
-  await click(plan, "Speichern");
+  await click(plan, "Übernehmen");
   await fixture.update("10", {
     ...tariffAttributes(unordered.slice().reverse()),
     base_price_eur_kwh: 0.42,
@@ -953,7 +953,7 @@ it("REQ-VUE-TARIFF-EDITOR accepts the sensor's sorted windows and later external
   expect(plan.querySelector(".tariff-plan__low-status")).not.toBeNull();
   await click(plan, "Bearbeiten");
   await fill(plan, '[name="base_price"]', "43");
-  await click(plan, "Speichern");
+  await click(plan, "Übernehmen");
   await fixture.update("10", {
     ...tariffAttributes(unordered),
     base_price_eur_kwh: 0.5,
@@ -962,7 +962,7 @@ it("REQ-VUE-TARIFF-EDITOR accepts the sensor's sorted windows and later external
   expect(plan.textContent).not.toContain("43,00 ct/kWh");
   await click(plan, "Bearbeiten");
   await fill(plan, '[name="base_price"]', "44");
-  await click(plan, "Speichern");
+  await click(plan, "Übernehmen");
   await fixture.update("10", { tariff_type: "dynamic" });
   expect(fixture.plans()).toHaveLength(0);
 });
@@ -1119,7 +1119,7 @@ it("REQ-VUE-TARIFF-EDITOR waits for matching telemetry before marking cheap peri
     can_edit: true,
     revision: "2",
   });
-  await click(plan, "Speichern");
+  await click(plan, "Übernehmen");
   expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(0);
   expect(plan.querySelector(".tariff-plan__low-status")).toBeNull();
   expect(
@@ -1143,7 +1143,7 @@ it("REQ-VUE-TARIFF-EDITOR opens additional PV setup when the server requires it 
   await click(plan, "Bearbeiten");
   await fill(plan, '[name="base_price"]', "32");
   fixture.callWS.mockRejectedValueOnce({ code: "bridge_pv_start_required" });
-  await click(plan, "Speichern");
+  await click(plan, "Übernehmen");
   expect(
     plan.querySelector<HTMLDetailsElement>(".tariff-plan__pv-details")?.open,
   ).toBe(true);

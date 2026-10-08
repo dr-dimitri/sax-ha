@@ -654,7 +654,7 @@ Standardpreis markiert. Bei `TIME_OF_USE` entfällt die separate Karte
 „Netzladezeitfenster“ (EN: „Grid charging window“); nur bei anderen Tarifarten
 ohne Verbrauchsplanung bedient sie `timed_charge_start` und `timed_charge_end`.
 „Bearbeiten“ öffnet Standardpreis, vorhandene Fenster und Einspeisevergütung
-in derselben Karte. Nur „Speichern“ schreibt das vollständige Profil;
+in derselben Karte. „Übernehmen“ oben und unten schreibt das vollständige Profil;
 „Abbrechen“ verwirft den lokalen Entwurf. Die kompakte Übersicht und
 einklappbare Erläuterungen halten den Platzbedarf nach dem Speichern gering.
 `dashboard_tariff.py` stellt dafür die authentifizierten WebSocket-Befehle
@@ -741,22 +741,26 @@ Die zwei Auswahlflächen bilden
 nur `switch.bridge_charge_enabled` auf festes Ziel beziehungsweise Bedarf bis
 Solarstrom ab. Sie setzen keine Standardwerte und aktivieren keine Netzladung.
 Unbekannte Zustände markieren keine Auswahl. Globale Ladegrenze („Max SOC (%)“),
-Startschwelle (nur bei fester Ladeweise) und MonthSelection sind beim Bearbeiten
-sofort sichtbar.
+Startschwelle („Ladestart unter (%)“, nur bei fester Ladeweise) und
+MonthSelection sind beim Bearbeiten sofort sichtbar.
 `MonthSelection` verwendet hier `alwaysExpanded`; auch die zwölf Monate
 sind direkt auswählbar. Die sonstigen Monatsansichten behalten ihre Aufklappfunktion.
 Die zusätzliche Aufklappfläche „Weitere Einstellungen“ entfällt. Labels,
 Zusammenfassung, Plan und Fehler verwenden durchgängig „Netzladeziel“;
 Verbrauchsplanung nennt die Obergrenze „Maximales Netzladeziel“.
+Die Preisbearbeitung bietet „Übernehmen“ oben und unten; beide Aktionen
+nutzen dieselbe Validierung und Speicherfunktion. „Abbrechen“ bleibt unten.
 `ChargingNumberFields.vue` hält bestätigte Zahlen und Entwürfe getrennt.
-Der einzige Button „Übernehmen“ (EN: „Apply“) speichert geänderte sichtbare
-Zahlen gemeinsam über `performChargingSettings` und `set_charging_settings`.
+Der einzige Button „Übernehmen“ (EN: „Apply“) oben in der Kopfzeile speichert
+geänderte sichtbare Zahlen gemeinsam über `performChargingSettings` und `set_charging_settings`.
 Die SOC-Paarprüfung verwendet den vollständigen Entwurf samt neuer globaler
 Grenze; Backendvalidierung und Softwareübernahme sind atomar. Die Antwort
 wartet nicht auf den Geräte-Lock; der vorhandene Worker verarbeitet Änderungen.
-Fehler lassen den Editor mit erhaltenen Eingaben offen. „Schließen“ und
-`v-show` erhalten Entwürfe ohne Speichern. Pending sperrt Doppelaufrufe sofort;
-bestätigte Zahlen werden ausschließlich aus HA-Zuständen angezeigt.
+Fehler lassen den Editor mit erhaltenen Eingaben offen. „Abbrechen“ unten
+ruft `ChargingNumberFields.reset()` auf, verwirft auch ausgeblendete
+Zahleneingaben und Clientfehler und schließt ohne Schreibaufruf. Bestätigte
+Ladeweisen und Monate bleiben erhalten. Pending sperrt Übernehmen und
+Abbrechen sowie Doppelaufrufe sofort; bestätigte Zahlen werden ausschließlich aus HA-Zuständen angezeigt.
 Fehler und Pending bleiben auch bei geschlossenem Editor sichtbar. Die
 HA-Service-Fehlerübersetzung in `ha.ts` berücksichtigt passende SAX-Fehlerschlüssel
 für Verbrauchsplanung und SOC-/Bereichsfehler. Komponenten- und Browsertests stehen in

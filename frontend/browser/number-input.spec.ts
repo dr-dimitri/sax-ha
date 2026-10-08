@@ -40,7 +40,7 @@ async function priceControls(page: Page, english: boolean) {
       input,
       form,
       apply: panel
-        .locator(".electricity-charging-editor > .electricity-actions")
+        .locator(".electricity-charging > header")
         .getByRole("button"),
     };
   });
@@ -212,9 +212,9 @@ test("typed prices retain drafts and confirmed values across pending, failure an
   );
 });
 
-// REQ-VUE-ELECTRICITY-TARIFF / #268: retry after collapsing must send the
-// failed draft, even if its response arrives while the editor is hidden.
-test("all dynamic number drafts survive collapse, delayed failure, reopening and retry", async ({
+// REQ-VUE-ELECTRICITY-TARIFF: retry must send the failed draft; pending
+// cancellation must not replace it with the confirmed previous value.
+test("all dynamic number drafts survive delayed failure and retry while cancellation is blocked", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -222,9 +222,7 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".dynamic-charging-settings");
-  const apply = charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button");
+  const apply = charging.locator("header > button");
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [key, label, value] of [
@@ -273,22 +271,23 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
     await apply.click();
     const request = `${++writes}: sax_power.set_charging_settings ${JSON.stringify({ device_id: "demo-device", [key]: Number(value) })}`;
     await expect(actions).toHaveText(request);
-    await charging.locator("header > button").click();
-    await expect(
-      charging.locator(".electricity-charging-feedback"),
-    ).toContainText(english ? "Sending change" : "Änderung wird");
-    await charging.locator("header > button").click();
+    const cancel = charging.locator(".electricity-charging-editor button");
+    await expect(cancel).toBeDisabled();
+    await expect(form.getByRole("status")).toContainText(
+      english ? "Sending change" : "Änderung wird",
+    );
     await expect(input).toHaveValue(value!);
     await expect(input).toBeDisabled();
     await expect(apply).toBeDisabled();
+    await apply.evaluate((button: HTMLButtonElement) => button.click());
+    await cancel.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(
+      charging.locator(".electricity-charging-editor"),
+    ).toBeVisible();
     await expect(form.locator(".entity-control__value")).toHaveText(confirmed);
     await expect(actions).toHaveText(request);
-    await charging.locator("header > button").click();
     await page.locator("#release-action").click();
-    await expect(
-      charging.locator(".electricity-charging-feedback").getByRole("alert"),
-    ).toBeVisible();
-    await charging.locator("header > button").click();
+    await expect(form.getByRole("alert")).toBeVisible();
     await expect(input).toHaveValue(value!);
     await expect(input).toBeEnabled();
     await expect(form.getByRole("alert")).toBeVisible();
@@ -307,7 +306,7 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   }
 });
 
-test("unsent native partial drafts remain editable after collapsing and reopening", async ({
+test("native partial drafts survive invalid Apply and cancellation restores confirmed values", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -326,7 +325,10 @@ test("unsent native partial drafts remain editable after collapsing and reopenin
       ),
     ).toBe(true);
     await charging.locator("header > button").click();
-    await charging.locator("header > button").click();
+    await expect(
+      charging.locator(".electricity-charging-editor"),
+    ).toBeVisible();
+    await expect(charging.getByRole("alert")).toBeVisible();
     await expect(input).toHaveValue("");
     expect(
       await input.evaluate(
@@ -337,6 +339,15 @@ test("unsent native partial drafts remain editable after collapsing and reopenin
     await input.pressSequentially(suffix!);
     await expect(input).toHaveValue(result!);
     await expect(actions).toHaveText("Keine Aktion");
+    await charging.locator(".electricity-charging-editor button").click();
+    await reopenCharging(page);
+    await expect(input).toHaveValue("-5");
+    expect(
+      await input.evaluate(
+        (element: HTMLInputElement) => element.validity.badInput,
+      ),
+    ).toBe(false);
+    await expect(charging.getByRole("alert")).toHaveCount(0);
   }
 });
 
@@ -431,7 +442,7 @@ test("charge target and start reject crossed drafts and save valid SOC values to
   await charging.locator("header > button").click();
   const actions = page.locator("#actions");
   const start = charging.getByRole("spinbutton", {
-    name: english ? "Start threshold (%)" : "Ladestart (%)",
+    name: english ? "Start threshold (%)" : "Ladestart unter (%)",
     exact: true,
   });
   const target = charging.getByRole("spinbutton", {
@@ -442,9 +453,7 @@ test("charge target and start reject crossed drafts and save valid SOC values to
     name: "Max SOC (%)",
     exact: true,
   });
-  const apply = charging
-    .locator(".electricity-charging-editor > .electricity-actions")
-    .getByRole("button");
+  const apply = charging.locator("header > button");
   await expect(charging.locator(".entity-control button")).toHaveCount(0);
   await typeNumber(start, "85");
   await typeNumber(target, "75");

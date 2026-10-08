@@ -165,6 +165,27 @@ function requestApply(): void {
   if (!pending.value) emit("apply");
 }
 
+function reset(): boolean {
+  if (pending.value) return false;
+  for (const key of Object.keys(drafts)) {
+    const item = entity(key);
+    const confirmed = item?.state?.state ?? "";
+    const value =
+      item?.available && numeric(confirmed) !== null ? confirmed : "";
+    drafts[key] = {
+      entityId: item?.metadata.entity_id ?? null,
+      confirmed,
+      value,
+      edited: false,
+    };
+    const input = inputs.get(key);
+    if (input) input.value = value;
+    delete errors[key];
+    dashboard?.clearControlError("number", key);
+  }
+  return true;
+}
+
 async function submit(): Promise<boolean> {
   if (pending.value || !dashboard) return false;
   for (const { key } of props.fields) {
@@ -271,7 +292,7 @@ async function submit(): Promise<boolean> {
   }
 }
 
-defineExpose({ submit, pending });
+defineExpose({ submit, reset, pending });
 </script>
 
 <template>

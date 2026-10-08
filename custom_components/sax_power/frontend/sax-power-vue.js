@@ -5012,7 +5012,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 			feedHint: "Wie viel erhältst du für eine eingespeiste kWh? Dieser Wert wird für die Ersparnisberechnung verwendet. Ohne Vergütung 0 eintragen.",
 			impact: "Das bewirkt dein Tarif",
 			impactHint: "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Netzladeziel und aktive Monate gelten zusätzlich.",
-			saveHint: "Speichern übernimmt Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
+			saveHint: "Übernehmen speichert Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
 			pvDetails: "Zusätzlich: Solarprognose für die Ladeplanung",
 			pvHint: "Nur für verbrauchsbasierte Ladeplanung erforderlich. Wähle die eingerichtete PV-Prognosequelle, damit die Planung den Bedarf bis zum Solarstart berechnen kann.",
 			allPrices: "Alle Preise ansehen",
@@ -5026,7 +5026,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 			pvRequired: "PV-Start-Sensor (erforderlich)",
 			gross: "Alle Preise in ct/kWh inklusive Steuern, ohne monatliche Grundgebühr. Beispiel: 30 eingeben für 30 ct/kWh.",
 			edit: "Bearbeiten",
-			save: "Speichern",
+			save: "Übernehmen",
 			cancel: "Abbrechen",
 			saving: "Wird gespeichert …",
 			loading: "Wird geladen …",
@@ -5081,7 +5081,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 			feedHint: "How much do you receive for each exported kWh? This value is used to calculate savings. Enter 0 if you receive no payment.",
 			impact: "What your tariff does",
 			impactHint: "Automation uses the cheapest times for fixed-target and consumption-based grid charging. Battery level, charging target and active months also apply.",
-			saveHint: "Saving applies the prices and possible charging times. It does not turn on grid charging.",
+			saveHint: "Apply saves the prices and possible charging times. It does not turn on grid charging.",
 			pvDetails: "Additional setup: solar forecast for charging planning",
 			pvHint: "Only required for consumption-based charging planning. Select your configured PV forecast source so planning can calculate the energy needed until solar production starts.",
 			allPrices: "View all prices",
@@ -5095,7 +5095,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 			pvRequired: "PV start sensor (required)",
 			gross: "All prices in ct/kWh including tax, excluding the monthly standing charge. Example: enter 30 for 30 ct/kWh.",
 			edit: "Edit",
-			save: "Save",
+			save: "Apply",
 			cancel: "Cancel",
 			saving: "Saving …",
 			loading: "Loading …",
@@ -5364,16 +5364,15 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 			class: N(["tariff-plan", { "tariff-plan--compact": e.compact }]),
 			"aria-labelledby": `${V(a)}-tariff`
 		}, [
-			q("header", Dc, [q("h2", { id: `${V(a)}-tariff` }, I(o.value.tariff), 9, Oc), A.value ? X("", !0) : (G(), K("button", {
-				key: 0,
+			q("header", Dc, [q("h2", { id: `${V(a)}-tariff` }, I(o.value.tariff), 9, Oc), q("button", {
 				ref_key: "editButton",
 				ref: oe,
 				type: "button",
-				disabled: j.value || !he.value,
+				disabled: j.value || !he.value || A.value && pe.value,
 				"aria-expanded": A.value,
 				"aria-controls": `${V(a)}-editor`,
-				onClick: xe
-			}, I(j.value ? o.value.loading : o.value.edit), 9, kc))]),
+				onClick: n[0] ||= (e) => A.value ? Ee() : xe()
+			}, I(j.value ? o.value[ie.value] : A.value ? o.value.save : o.value.edit), 9, kc)]),
 			j.value ? (G(), K("p", Ac, I(o.value[ie.value]), 1)) : X("", !0),
 			!A.value && !e.compact ? (G(), K("p", jc, I(o.value.introduction), 1)) : X("", !0),
 			e.compact ? (G(), K("div", Mc, [er(t.$slots, "current-price"), w.value ? (G(), K("p", Nc, [q("span", null, I(o.value.lowTariffPrice), 1), q("strong", null, I(c(v.value.low_tariff_price_eur_kwh)), 1)])) : X("", !0)])) : X("", !0),
@@ -5407,7 +5406,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 					q("div", el, [q("h3", null, I(o.value.baseSection), 1), q("label", null, [
 						Y(I(o.value.base) + " (ct/kWh)", 1),
 						Dn(q("input", {
-							"onUpdate:modelValue": n[0] ||= (e) => ce.value = e,
+							"onUpdate:modelValue": n[1] ||= (e) => ce.value = e,
 							name: "base_price",
 							type: "text",
 							inputmode: "decimal",
@@ -5483,7 +5482,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 					q("div", pl, [q("h3", null, I(o.value.feedSection), 1), q("label", null, [
 						Y(I(o.value.feed) + " (ct/kWh)", 1),
 						Dn(q("input", {
-							"onUpdate:modelValue": n[1] ||= (e) => le.value = e,
+							"onUpdate:modelValue": n[2] ||= (e) => le.value = e,
 							name: "feed_in_price",
 							type: "text",
 							inputmode: "decimal",
@@ -5501,7 +5500,7 @@ var ws = ["aria-busy"], Ts = { class: "time-window-control__inputs" }, Es = ["fo
 						q("p", _l, I(o.value.pvHint), 1),
 						J(Zs, {
 							modelValue: ue.value,
-							"onUpdate:modelValue": n[2] ||= (e) => ue.value = e,
+							"onUpdate:modelValue": n[3] ||= (e) => ue.value = e,
 							hass: e.hass,
 							label: de.value ? o.value.pvRequired : o.value.pv
 						}, null, 8, [
@@ -5897,7 +5896,22 @@ var Vl = ["aria-busy"], Hl = {
 		function w() {
 			m.value || i("apply");
 		}
-		async function T() {
+		function T() {
+			if (m.value) return !1;
+			for (let e of Object.keys(s)) {
+				let t = p(e), n = t?.state?.state ?? "", r = t?.available && g(n) !== null ? n : "";
+				s[e] = {
+					entityId: t?.metadata.entity_id ?? null,
+					confirmed: n,
+					value: r,
+					edited: !1
+				};
+				let i = l.get(e);
+				i && (i.value = r), delete c[e], a?.clearControlError("number", e);
+			}
+			return !0;
+		}
+		async function ee() {
 			if (m.value || !a) return !1;
 			for (let { key: e } of r.fields) {
 				let t = l.get(e), n = s[e];
@@ -5943,7 +5957,8 @@ var Vl = ["aria-busy"], Hl = {
 			}
 		}
 		return t({
-			submit: T,
+			submit: ee,
+			reset: T,
 			pending: m
 		}), (t, n) => (G(), K("div", {
 			class: "charging-number-fields",
@@ -6016,6 +6031,7 @@ var Vl = ["aria-busy"], Hl = {
 		let r = e, i = n, a = /* @__PURE__ */ B();
 		t({
 			submit: () => a.value?.submit() ?? Promise.resolve(!0),
+			reset: () => a.value?.reset() ?? !0,
 			pending: Z(() => a.value?.pending ?? !1)
 		});
 		let o = An(lo), s = /* @__PURE__ */ B(r.editing);
@@ -6166,6 +6182,7 @@ var Vl = ["aria-busy"], Hl = {
 		let r = e, i = n, a = /* @__PURE__ */ B();
 		t({
 			submit: () => a.value?.submit() ?? Promise.resolve(!0),
+			reset: () => a.value?.reset() ?? !0,
 			pending: Z(() => a.value?.pending ?? !1)
 		});
 		let o = An(lo), s = Z(() => o?.language.value === "de"), c = `sax-tou-method-${Vn()}`, l = /* @__PURE__ */ B(r.editing);
@@ -6188,7 +6205,7 @@ var Vl = ["aria-busy"], Hl = {
 			allYear: "Ganzjährig",
 			noMonths: "Keine ausgewählt · Automatische Netzladung ganzjährig inaktiv",
 			unknownMonths: "Monatsauswahl nicht vollständig bekannt",
-			threshold: "Ladestart (%)",
+			threshold: "Ladestart unter (%)",
 			maxSoc: "Max SOC",
 			global: "Max SOC (%)",
 			unavailable: "Ladeweise nicht verfügbar.",
@@ -6329,7 +6346,11 @@ var Vl = ["aria-busy"], Hl = {
 }, Pd = { class: "electricity-price-advanced" }, Fd = { class: "electricity-fields" }, Id = ["aria-invalid", "aria-describedby"], Ld = ["aria-invalid", "aria-describedby"], Rd = ["value"], zd = { class: "electricity-muted" }, Bd = { class: "electricity-muted" }, Vd = { class: "electricity-fields" }, Hd = ["aria-invalid", "aria-describedby"], Ud = { class: "electricity-muted" }, Wd = { class: "electricity-actions" }, Gd = ["disabled"], Kd = ["disabled"], qd = { class: "electricity-price-details" }, Jd = ["aria-label"], Yd = ["aria-pressed", "onClick"], Xd = { class: "electricity-day" }, Zd = { key: 0 }, Qd = {
 	key: 0,
 	class: "electricity-card electricity-charging"
-}, $d = ["disabled", "aria-expanded"], ef = {
+}, $d = [
+	"disabled",
+	"aria-busy",
+	"aria-expanded"
+], ef = {
 	key: 0,
 	class: "electricity-activation"
 }, tf = ["aria-busy"], nf = [
@@ -6397,9 +6418,8 @@ var Vl = ["aria-busy"], Hl = {
 			change: "Tarif wechseln",
 			apply: "Tarif übernehmen",
 			cancel: "Abbrechen",
-			save: "Speichern",
+			save: "Übernehmen",
 			done: "Übernehmen",
-			close: "Schließen",
 			edit: "Bearbeiten",
 			loading: "Wird geladen …",
 			saving: "Wird gespeichert …",
@@ -6477,9 +6497,8 @@ var Vl = ["aria-busy"], Hl = {
 			change: "Change tariff",
 			apply: "Apply tariff",
 			cancel: "Cancel",
-			save: "Save",
+			save: "Apply",
 			done: "Apply",
-			close: "Close",
 			edit: "Edit",
 			loading: "Loading …",
 			saving: "Saving …",
@@ -6770,7 +6789,10 @@ var Vl = ["aria-busy"], Hl = {
 		function ke() {
 			re.value = !1, mn(() => se.value?.focus());
 		}
-		async function Ae() {
+		function Ae() {
+			le.value || ce.value?.pending || ce.value?.reset() !== !1 && ke();
+		}
+		async function je() {
 			if (le.value || ce.value?.pending) return;
 			let e = ce.value;
 			if (e) {
@@ -6848,15 +6870,14 @@ var Vl = ["aria-busy"], Hl = {
 				class: "electricity-card electricity-prices",
 				"aria-busy": w.value === "loading" || w.value === "saving"
 			}, [
-				q("header", null, [q("div", null, [q("h2", null, I(i.value.prices), 1)]), O.value ? X("", !0) : (G(), K("button", {
-					key: 0,
+				q("header", null, [q("div", null, [q("h2", null, I(i.value.prices), 1)]), q("button", {
 					ref_key: "priceButton",
 					ref: oe,
 					type: "button",
-					disabled: S.value || !u.value || E.value,
+					disabled: S.value || !u.value || E.value || O.value && (!l.value || x.value),
 					"aria-expanded": O.value,
-					onClick: Te
-				}, I(w.value === "loading" ? i.value.loading : i.value.edit), 9, _d))]),
+					onClick: n[3] ||= (e) => O.value ? De() : Te()
+				}, I(w.value === "loading" ? i.value.loading : w.value === "saving" ? i.value.saving : O.value ? i.value.save : i.value.edit), 9, _d)]),
 				q("div", vd, [q("span", yd, I(i.value.price) + " · " + I(i.value.current), 1), q("p", bd, [Y(I(N.value ?? i.value.unavailable), 1), N.value === null ? X("", !0) : (G(), K("span", xd, " ct/kWh"))])]),
 				q("dl", Sd, [q("div", null, [q("dt", null, I(i.value.sourceSummary), 1), q("dd", null, I(ge.value), 1)]), q("div", null, [q("dt", null, I(i.value.feed), 1), q("dd", null, [Y(I(_e.value ?? i.value.unavailable), 1), _e.value === null ? X("", !0) : (G(), K(W, { key: 0 }, [Y(" ct/kWh")], 64))])])]),
 				O.value ? (G(), K("form", {
@@ -6878,7 +6899,7 @@ var Vl = ["aria-busy"], Hl = {
 						q("p", Ed, I(i.value.priceHint), 1),
 						q("div", Dd, [J(Zs, {
 							modelValue: k.value.price_sensor,
-							"onUpdate:modelValue": n[3] ||= (e) => k.value.price_sensor = e,
+							"onUpdate:modelValue": n[4] ||= (e) => k.value.price_sensor = e,
 							hass: e.hass,
 							label: i.value.source,
 							name: "dynamic_price_sensor",
@@ -6891,7 +6912,7 @@ var Vl = ["aria-busy"], Hl = {
 							"invalid",
 							"described-by"
 						]), q("label", null, [Y(I(i.value.feed) + " (ct/kWh)", 1), Dn(q("input", {
-							"onUpdate:modelValue": n[4] ||= (e) => A.value = e,
+							"onUpdate:modelValue": n[5] ||= (e) => A.value = e,
 							type: "text",
 							inputmode: "decimal",
 							name: "dynamic_feed",
@@ -6904,7 +6925,7 @@ var Vl = ["aria-busy"], Hl = {
 						q("p", Ad, I(i.value.feedHint), 1),
 						q("div", jd, [J(Zs, {
 							modelValue: k.value.pv_sensor,
-							"onUpdate:modelValue": n[5] ||= (e) => k.value.pv_sensor = e,
+							"onUpdate:modelValue": n[6] ||= (e) => k.value.pv_sensor = e,
 							hass: e.hass,
 							label: i.value.pv,
 							name: "dynamic_pv_sensor",
@@ -6923,14 +6944,14 @@ var Vl = ["aria-busy"], Hl = {
 							q("summary", null, I(i.value.advanced), 1),
 							q("h3", null, I(i.value.sourceSettings), 1),
 							q("div", Fd, [q("label", null, [Y(I(i.value.attribute), 1), Dn(q("input", {
-								"onUpdate:modelValue": n[6] ||= (e) => k.value.price_attribute = e,
+								"onUpdate:modelValue": n[7] ||= (e) => k.value.price_attribute = e,
 								name: "dynamic_price_attribute",
 								type: "text",
 								autocomplete: "off",
 								"aria-invalid": y.value === "price_attribute" || void 0,
 								"aria-describedby": y.value === "price_attribute" ? V(b) : void 0
 							}, null, 8, Id), [[La, k.value.price_attribute]])]), q("label", null, [Y(I(i.value.unit), 1), Dn(q("select", {
-								"onUpdate:modelValue": n[7] ||= (e) => k.value.price_unit = e,
+								"onUpdate:modelValue": n[8] ||= (e) => k.value.price_unit = e,
 								name: "dynamic_price_unit",
 								"aria-invalid": y.value === "price_unit" || void 0,
 								"aria-describedby": y.value === "price_unit" ? V(b) : void 0
@@ -6941,7 +6962,7 @@ var Vl = ["aria-busy"], Hl = {
 							q("p", zd, I(i.value.attributeHint), 1),
 							q("p", Bd, I(i.value.unitHint), 1),
 							q("div", Vd, [q("label", null, [Y(I(i.value.pvFactor), 1), Dn(q("input", {
-								"onUpdate:modelValue": n[8] ||= (e) => j.value = e,
+								"onUpdate:modelValue": n[9] ||= (e) => j.value = e,
 								name: "dynamic_pv_factor",
 								type: "number",
 								min: "0",
@@ -6989,10 +7010,11 @@ var Vl = ["aria-busy"], Hl = {
 					ref_key: "chargingButton",
 					ref: se,
 					type: "button",
-					disabled: E.value,
+					disabled: E.value || le.value || ce.value?.pending,
+					"aria-busy": le.value,
 					"aria-expanded": re.value,
-					onClick: n[9] ||= (e) => re.value ? ke() : re.value = !0
-				}, I(re.value ? i.value.close : i.value.edit), 9, $d)]),
+					onClick: n[10] ||= (e) => re.value ? je() : re.value = !0
+				}, I(le.value ? i.value.saving : re.value ? i.value.done : i.value.edit), 9, $d)]),
 				c.value ? (G(), K("section", ef, [
 					q("label", {
 						class: "electricity-master",
@@ -7020,7 +7042,7 @@ var Vl = ["aria-busy"], Hl = {
 					ref_key: "chargingSettings",
 					ref: ce,
 					editing: re.value,
-					onApply: Ae
+					onApply: je
 				}, null, 8, ["editing"])) : X("", !0),
 				s.value === "time_of_use" ? (G(), oi(Wu, {
 					key: 2,
@@ -7028,7 +7050,7 @@ var Vl = ["aria-busy"], Hl = {
 					ref: ce,
 					editing: re.value,
 					hass: e.hass,
-					onApply: Ae
+					onApply: je
 				}, null, 8, ["editing", "hass"])) : X("", !0),
 				re.value ? X("", !0) : (G(), K("div", df, [(G(!0), K(W, null, U(me.value, (e) => (G(), K(W, { key: e?.metadata.entity_id }, [e?.error ? (G(), K("p", ff, I(e.name) + ": " + I(e.error), 1)) : e?.pending ? (G(), K("p", pf, I(e.name) + ": " + I(i.value.entityPending), 1)) : X("", !0)], 64))), 128))])),
 				re.value ? (G(), K("div", mf, [q("div", {
@@ -7038,7 +7060,7 @@ var Vl = ["aria-busy"], Hl = {
 					type: "button",
 					disabled: le.value || ce.value?.pending,
 					onClick: Ae
-				}, I(le.value ? i.value.saving : i.value.done), 9, gf), le.value ? (G(), K("p", _f, I(i.value.entityPending), 1)) : X("", !0)], 8, hf)])) : X("", !0),
+				}, I(i.value.cancel), 9, gf), le.value ? (G(), K("p", _f, I(i.value.entityPending), 1)) : X("", !0)], 8, hf)])) : X("", !0),
 				re.value ? X("", !0) : (G(), K("dl", vf, [q("div", null, [q("dt", null, I(i.value.pvSummary), 1), q("dd", null, I(ve.value), 1)])])),
 				q("div", yf, [J(Yo, {
 					domain: "sensor",

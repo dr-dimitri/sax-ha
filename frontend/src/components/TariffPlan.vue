@@ -42,7 +42,7 @@ const text = computed(() =>
         impactHint:
           "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Netzladeziel und aktive Monate gelten zusätzlich.",
         saveHint:
-          "Speichern übernimmt Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
+          "Übernehmen speichert Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
         pvDetails: "Zusätzlich: Solarprognose für die Ladeplanung",
         pvHint:
           "Nur für verbrauchsbasierte Ladeplanung erforderlich. Wähle die eingerichtete PV-Prognosequelle, damit die Planung den Bedarf bis zum Solarstart berechnen kann.",
@@ -58,7 +58,7 @@ const text = computed(() =>
         gross:
           "Alle Preise in ct/kWh inklusive Steuern, ohne monatliche Grundgebühr. Beispiel: 30 eingeben für 30 ct/kWh.",
         edit: "Bearbeiten",
-        save: "Speichern",
+        save: "Übernehmen",
         cancel: "Abbrechen",
         saving: "Wird gespeichert …",
         loading: "Wird geladen …",
@@ -133,7 +133,7 @@ const text = computed(() =>
         impactHint:
           "Automation uses the cheapest times for fixed-target and consumption-based grid charging. Battery level, charging target and active months also apply.",
         saveHint:
-          "Saving applies the prices and possible charging times. It does not turn on grid charging.",
+          "Apply saves the prices and possible charging times. It does not turn on grid charging.",
         pvDetails: "Additional setup: solar forecast for charging planning",
         pvHint:
           "Only required for consumption-based charging planning. Select your configured PV forecast source so planning can calculate the energy needed until solar production starts.",
@@ -149,7 +149,7 @@ const text = computed(() =>
         gross:
           "All prices in ct/kWh including tax, excluding the monthly standing charge. Example: enter 30 for 30 ct/kWh.",
         edit: "Edit",
-        save: "Save",
+        save: "Apply",
         cancel: "Cancel",
         saving: "Saving …",
         loading: "Loading …",
@@ -712,15 +712,14 @@ watch(tariffVisible, (visible) => {
     <header class="tariff-plan__header">
       <h2 :id="`${id}-tariff`">{{ text.tariff }}</h2>
       <button
-        v-if="!editing"
         ref="editButton"
         type="button"
-        :disabled="pending || !connectionAvailable"
+        :disabled="pending || !connectionAvailable || (editing && conflict)"
         :aria-expanded="editing"
         :aria-controls="`${id}-editor`"
-        @click="openEditor"
+        @click="editing ? save() : openEditor()"
       >
-        {{ pending ? text.loading : text.edit }}
+        {{ pending ? text[pendingAction] : editing ? text.save : text.edit }}
       </button>
     </header>
     <p v-if="pending" role="status">

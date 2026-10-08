@@ -55,6 +55,13 @@ def timed_discharge_hold_active(
     return enabled and not price_enabled and expires_at is not None and now < expires_at
 
 
+def timed_charge_start_allowed(current_soc: int | float, minimum: int | None) -> bool:
+    """REQ-TIMED-SOC-CHARGE: zero is a start threshold, not an off switch."""
+    return minimum is not None and (
+        current_soc < minimum or current_soc == minimum == 0
+    )
+
+
 def timed_discharge_pv_power(storage_power: object, grid_power: object) -> int:
     """REQ-TIMED-SOC-CHARGE: S + M is house demand minus generation."""
     if any(

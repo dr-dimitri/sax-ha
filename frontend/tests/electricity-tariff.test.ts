@@ -1310,7 +1310,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     await click(section, "Bearbeiten");
     expect(section.textContent).toContain("Ladegrenze für alle Lademethoden");
     expect(section.textContent).toContain("Ladeziel (%)");
-    expect(section.textContent).toContain("Nur starten unter einem Ladestand");
+    expect(section.textContent).toContain("Ladestart");
     expect(section.textContent).toContain("Aktive Monate");
     await click(section, "Fertig");
     expect(section.querySelector(".electricity-charging-editor")).toBeNull();

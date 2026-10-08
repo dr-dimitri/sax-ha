@@ -320,9 +320,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(advanced).toHaveAttribute("open", "");
   await expect(
     settings.getByRole("spinbutton", {
-      name: english
-        ? "Only start below a battery level of (%)"
-        : "Nur starten unter einem Ladestand von (%)",
+      name: english ? "Start threshold (%)" : "Ladestart (%)",
       exact: true,
     }),
   ).toHaveCount(0);
@@ -344,9 +342,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   await expect(target).toHaveValue("80");
   await expect(
     settings.getByRole("spinbutton", {
-      name: english
-        ? "Only start below a battery level of (%)"
-        : "Nur starten unter einem Ladestand von (%)",
+      name: english ? "Start threshold (%)" : "Ladestart (%)",
       exact: true,
     }),
   ).toHaveValue("20");

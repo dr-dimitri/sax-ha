@@ -407,3 +407,75 @@ test("global SOC help explains temporary caps and displays the restored confirme
     await expect(page.locator("#actions")).toHaveText("Keine Aktion");
   }
 });
+
+// REQ-TIMED-SOC-CHARGE: native keyboard input keeps rejected drafts and
+// allows equal boundaries and the valid zero start in Chromium and Safari.
+test("charge target and start reject crossed limits and accept zero", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.locator("nav a[href$='/stromtarif']").click();
+  await panel.locator(".electricity-charging header > button").click();
+  await panel.locator(".tou-charging-advanced summary").click();
+  const actions = page.locator("#actions");
+  for (const [label, invalid] of [
+    [english ? "Charge target (%)" : "Ladeziel (%)", "19"],
+    [english ? "Start threshold (%)" : "Ladestart (%)", "81"],
+  ]) {
+    const input = panel.getByRole("spinbutton", { name: label, exact: true });
+    const form = panel.locator(".entity-control").filter({
+      has: page.getByRole("spinbutton", { name: label, exact: true }),
+    });
+    await typeNumber(input, invalid!);
+    await form.getByRole("button").click();
+    await expect(form.getByRole("alert")).toHaveText(
+      english
+        ? "The charge target must be at least as high as the start threshold."
+        : "Das Ladeziel muss mindestens so hoch wie der Ladestart sein.",
+    );
+    await expect(input).toHaveAttribute("aria-invalid", "true");
+    await expect(input).toHaveValue(invalid!);
+    await expect(actions).toHaveText("Keine Aktion");
+  }
+  const start = panel.getByRole("spinbutton", {
+    name: english ? "Start threshold (%)" : "Ladestart (%)",
+    exact: true,
+  });
+  const startForm = panel.locator(".entity-control").filter({
+    has: page.getByRole("spinbutton", {
+      name: english ? "Start threshold (%)" : "Ladestart (%)",
+      exact: true,
+    }),
+  });
+  await typeNumber(start, "0");
+  await startForm.getByRole("button").click();
+  await expect(actions).toHaveText(
+    '1: number.set_value {"value":0,"entity_id":"number.demo_timed_charge_min_soc"}',
+  );
+  await expect(startForm.getByRole("alert")).toHaveCount(0);
+  await expect(panel.locator(".tou-charging-threshold")).toContainText(
+    english ? "Start at" : "Start bei",
+  );
+  await expect(panel.locator(".tou-charging-summary")).toContainText(
+    english ? "starts at 0% battery level" : "beginnt bei 0 % Ladestand",
+  );
+  const target = panel.getByRole("spinbutton", {
+    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    exact: true,
+  });
+  await typeNumber(target, "0");
+  await panel
+    .locator(".entity-control")
+    .filter({
+      has: page.getByRole("spinbutton", {
+        name: english ? "Charge target (%)" : "Ladeziel (%)",
+        exact: true,
+      }),
+    })
+    .getByRole("button")
+    .click();
+  await expect(actions).toHaveText(
+    '2: number.set_value {"value":0,"entity_id":"number.demo_timed_charge_max_soc"}',
+  );
+});

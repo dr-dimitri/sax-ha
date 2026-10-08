@@ -255,6 +255,11 @@ verbrauchsbasierte Planung bestimmt **Netzladung Min. SOC**,
 wann eine Ladung beginnen darf;
 **Netzladen Max. SOC** bestimmt das Ziel. Das Ziel kann unter der globalen
 Grenze **Max. SOC** liegen, etwa um Platz für späteren PV-Ertrag zu lassen.
+Das Ladeziel darf nicht kleiner als der Ladestart eingestellt werden; auch
+umgekehrt wird ein Ladestart über dem Ziel abgelehnt. Gleiche Werte sind erlaubt.
+Bei einem Ladestart von **0 %** beginnt die Netzladung bei **0 % SOC**, sobald
+auch die übrigen Ladebedingungen erfüllt sind. 0 % schaltet die Netzladung
+nicht ab. Bei ebenfalls 0 % Ladeziel ist das Ziel schon erreicht.
 
 **Beispiel:** Günstigster Tarifabschnitt von 01:00 bis 05:00 Uhr,
 Startschwelle 40 %, Netzladeziel 70 %

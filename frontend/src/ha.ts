@@ -23,6 +23,7 @@ import type {
   TariffProfile,
   Unsubscribe,
 } from "./types";
+import { finiteValue } from "./savings";
 
 const messages = {
   de: {
@@ -32,6 +33,8 @@ const messages = {
     loadFailed: "Die SAX Power Entitäten konnten nicht geladen werden.",
     forbidden: "Diese Entität kann derzeit nicht bedient werden.",
     invalid: "Bitte einen gültigen Wert im erlaubten Bereich eingeben.",
+    timedSocOrder:
+      "Das Ladeziel muss mindestens so hoch wie der Ladestart sein.",
     failed:
       "Die Änderung ist fehlgeschlagen. Bitte den aktuellen Zustand prüfen und erneut versuchen.",
     bridgePvRequired:
@@ -48,6 +51,8 @@ const messages = {
     loadFailed: "The SAX Power entities could not be loaded.",
     forbidden: "This entity cannot be controlled at the moment.",
     invalid: "Please enter a valid value within the allowed range.",
+    timedSocOrder:
+      "The charge target must be at least as high as the start threshold.",
     failed: "The change failed. Please check the current state and try again.",
     bridgePvRequired:
       "Open Edit under Prices & times and add the solar forecast. The previous charging method is preserved.",
@@ -63,6 +68,7 @@ type ErrorKey =
   | "loadFailed"
   | "forbidden"
   | "invalid"
+  | "timedSocOrder"
   | "failed"
   | "bridgePvRequired"
   | "bridgeTariffRequired";
@@ -465,6 +471,27 @@ export function useSaxDashboard(
       action.error = "invalid";
       return false;
     }
+    if (
+      domain === "number" &&
+      (key === "timed_charge_max_soc" || key === "timed_charge_min_soc")
+    ) {
+      const changingTarget = key === "timed_charge_max_soc";
+      const other = entity(
+        "number",
+        changingTarget ? "timed_charge_min_soc" : "timed_charge_max_soc",
+      );
+      const confirmed = other?.available
+        ? finiteValue(other.state?.state)
+        : null;
+      const proposed = Number(call.data.value);
+      if (
+        confirmed !== null &&
+        (changingTarget ? proposed < confirmed : proposed > confirmed)
+      ) {
+        action.error = "timedSocOrder";
+        return false;
+      }
+    }
     action.pending = true;
     const operation = operationKey(domain, key);
     running.set(operation, action);
@@ -486,18 +513,23 @@ export function useSaxDashboard(
       if (isCurrent()) {
         action.error = "failed";
         if (
-          domain === "switch" &&
-          key === "bridge_charge_enabled" &&
           cause &&
           typeof cause === "object" &&
           "translation_domain" in cause &&
           cause.translation_domain === "sax_power" &&
           "translation_key" in cause
         ) {
-          if (cause.translation_key === "bridge_pv_start_required")
-            action.error = "bridgePvRequired";
-          else if (cause.translation_key === "bridge_tariff_required")
-            action.error = "bridgeTariffRequired";
+          if (
+            domain === "number" &&
+            cause.translation_key === "timed_charge_soc_order"
+          )
+            action.error = "timedSocOrder";
+          else if (domain === "switch" && key === "bridge_charge_enabled") {
+            if (cause.translation_key === "bridge_pv_start_required")
+              action.error = "bridgePvRequired";
+            else if (cause.translation_key === "bridge_tariff_required")
+              action.error = "bridgeTariffRequired";
+          }
         }
       }
       return false;

@@ -892,6 +892,20 @@ requirement_timed_soc_charge:
        globalen Grenze wieder frei. Ein ausdrücklich neu eingestelltes
        Netzladeziel wird dagegen auf den aktuellen Sliderbereich begrenzt
        und gespeichert. Änderungen am Netzladeziel gelten sofort.
+       Ausdrückliche Änderungen von Ladeziel oder Ladestart müssen
+       Ladestart <= Ladeziel einhalten; gleiche Werte sind erlaubt.
+       Dashboard und Coordinator lehnen ein kleineres Ziel oder einen
+       höheren Ladestart feldbezogen ab, bevor Zustand, Store oder
+       Geräteauftrag verändert werden. Die Prüfung verwendet die aktuell
+       angenommenen Werte ohne Warten auf Geräte-Locks und gilt auch für
+       direkte Home-Assistant-Serviceaufrufe und während Zellkalibrierung.
+       Maßgeblich ist das konfigurierte, global begrenzte Ziel, nicht das
+       temporäre Kalibrierungsziel. Eine unabhängige Absenkung der globalen
+       Grenze bleibt erlaubt; sie verändert weder gespeichertes Ziel noch
+       Ladestart. Liegt dadurch das wirksame Ziel unter dem Ladestart, muss
+       vor einer Zieländerung der Ladestart gesenkt oder die globale Grenze
+       angehoben werden. Bestehende Konfigurationen und Teilwerte während
+       der RestoreEntity-Migration werden nicht automatisch umgeschrieben.
 
        Bei current_soc >= dem effektiven Netzladeziel wird die Netzladung
        beendet und _timed_charge_armed zurückgesetzt. Liegt das Ziel unter
@@ -909,11 +923,17 @@ requirement_timed_soc_charge:
 
        "Netzladung Min. SOC" (self._timed_charge_min_soc, NumberEntity
        SaxPowerTimedChargeMinSocNumber, 0-100 %): unterer SOC-Schwellwert,
-       unterhalb dessen die Netzladung starten darf.
+       unterhalb dessen die Netzladung starten darf. Sonderfall 0 %:
+       Bei gültigem SOC von genau 0 % darf die Netzladung beginnen;
+       0 % ist keine implizite Abschaltung. Positive Startschwellen bleiben
+       strikt (z. B. Start erst unter 20 %). Tarif-/Zeitfenster, aktive Monate,
+       Automatikschalter, PV-Prüfung und SOC-Obergrenzen gelten unverändert.
+       Ein Ziel von ebenfalls 0 % ist bereits erreicht und startet keine
+       Ladung. Nach einem Start bei 0 % gilt dieselbe Hysterese bis zum Ziel.
        SaxPowerCoordinator._timed_charge_armed hält als Hysterese fest, ob
        der Schwellwert im aktuellen aktiven Fenster unterschritten wurde:
        nur bei eingeschalteter Netzladung, freigegebenem aktuellem Monat,
-       aktiver Fensterinstanz und current_soc < "Netzladung Min. SOC" darf
+       aktiver Fensterinstanz und erfüllter Startschwelle (inkl. 0-%-Sonderfall) darf
        eine neue Freigabe entstehen. Eine Unterschreitung außerhalb des
        Fensters oder bei fehlender Freigabe wird nicht für später vorgemerkt.
        Im selben unveränderten Fenster bleibt die Freigabe auch oberhalb
@@ -926,7 +946,8 @@ requirement_timed_soc_charge:
        gespeicherten Zustand. Die Fensteridentität wird bei jeder Auswertung
        geprüft; dies gilt auch dann, wenn zwischen zwei Fenstern kein Poll
        stattgefunden hat. Jedes neue Fenster benötigt erneut einen aktuell
-       unter Min. SOC liegenden SOC. Bei Min. SOC 20 % und Netzladeziel 80 %
+       unter Min. SOC liegenden SOC, bei Min. SOC 0 % genau 0 %.
+       Bei Min. SOC 20 % und Netzladeziel 80 %
        darf eine in Nacht 1 bei 18 % gestartete, bis Fensterende nur auf
        60 % geladene Batterie in Nacht 2 bei weiterhin 60 % nicht erneut
        netzladen und keine Freigabe für Nacht 2 speichern.
@@ -3435,7 +3456,11 @@ requirement_vue_electricity_tariff:
     und wird als Obergrenze erklärt. Startschwelle (nur bei festem Ladeziel),
     globale Ladegrenze und Monate bleiben unter „Weitere Einstellungen“
     erreichbar. Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen
-    sichtbar; 0 % wird als verhinderter Neustart erklärt. Fehlende Monatswerte
+    sichtbar; bei 0 % lautet die Anzeige „Start bei 0 %“ und erklärt den
+    Start bei genau 0 % SOC unter den übrigen Ladebedingungen. Ziel unter
+    Ladestart und Ladestart über Ziel werden am betroffenen Feld mit einer
+    verständlichen Meldung abgelehnt, ohne bestätigte Werte oder Eingaben
+    zu verwerfen. Gleichheit und Ladestart 0 % bleiben gültig. Fehlende Monatswerte
     dürfen nicht als ganzjährig inaktiv erscheinen. Die globale Grenze erklärt
     ihre Wirkung auch auf Solarstrom und ein höheres Netzladeziel. Ein sichtbarer
     Hinweis beim Ladeziel und in der geschlossenen Zusammenfassung erklärt

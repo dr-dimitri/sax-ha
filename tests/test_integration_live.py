@@ -478,8 +478,9 @@ async def test_live_modbus_extended_mode_unavailable_keeps_basic_sensors(
         await server.shutdown()
 
 
+@pytest.mark.parametrize("soc,minimum", [(50, 60), (0, 0)])
 async def test_live_timed_charge_writes_setpoint_when_in_window(
-    hass, socket_enabled
+    hass, socket_enabled, soc: int, minimum: int
 ) -> None:
     """End-to-End-Test für das zeitgesteuerte Laden: Zeitfenster über die
     entsprechenden Time-Entities setzen, dann per Switch aktivieren - das
@@ -488,11 +489,10 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
     erst Register 40051 (Steuermodus) auf Sollwertvorgabe, dann Register
     40049 (Leistungsvorgabe %, negativ = Laden, immer maximal möglich -
     siehe anforderung.yaml REQ-TIMED-SOC-CHARGE zum Wegfall von "Max.
-    Netzladeleistung"). Der Ziel-SOC (zentrales "Max. SOC", Register 46 als
-    Vergleichswert) ist bewusst keine eigene Einstellung, siehe
-    anforderung.yaml REQ-TIMED-SOC-CHARGE."""
+    Netzladeleistung"). Ladestart 0 % muss auch über die echten HA-Services
+    bei SOC 0 % einen negativen Sollwert am Simulator auslösen."""
     basic_registers = _build_basic_registers()
-    basic_registers[46] = 50  # SOC 50%, unterhalb des unten gesetzten Ziel-SOC
+    basic_registers[46] = soc
     server = _modbus_server(TEST_PORT + 2, basic_registers, _build_extended_registers())
     await server.serve_forever(background=True)
 
@@ -538,14 +538,11 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
             {"entity_id": timed_max_soc_id, "value": 80},
             blocking=True,
         )
-        # "Netzladung Min. SOC" muss über dem simulierten SOC (50 %) liegen,
-        # damit Netzladung armt - der Vorgabewert (DEFAULT_TIMED_CHARGE_MIN_SOC,
-        # 20 %) reicht dafür bewusst nicht, siehe anforderung.yaml,
-        # REQ-TIMED-SOC-CHARGE.
+        # REQ-TIMED-SOC-CHARGE: positive Schwellen gelten strikt, 0 % inklusiv.
         await hass.services.async_call(
             "number",
             "set_value",
-            {"entity_id": min_soc_id, "value": 60},
+            {"entity_id": min_soc_id, "value": minimum},
             blocking=True,
         )
         await hass.services.async_call(
@@ -610,10 +607,16 @@ async def test_live_timed_charge_writes_setpoint_when_in_window(
                 await hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": timed_max_soc_id, "value": 50},
+                    {"entity_id": min_soc_id, "value": max(0, soc - 10)},
                     blocking=True,
                 )
-                assert hass.states.get(timed_max_soc_id).state == "50"
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": timed_max_soc_id, "value": soc},
+                    blocking=True,
+                )
+                assert hass.states.get(timed_max_soc_id).state == str(soc)
                 # REQ-VUE-ENTITY-BINDING: Die Konfiguration quittiert vor I/O;
                 # der Aktivitätswert darf erst nach Gerätebestätigung folgen.
                 await hass.async_block_till_done()

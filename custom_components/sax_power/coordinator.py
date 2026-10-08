@@ -31,6 +31,7 @@ from .application.charge_policy import (
     ChargePolicyInput,
     evaluate_charge_policy,
     tariff_automation_controls,
+    timed_charge_start_allowed,
     timed_discharge_hold_active,
     timed_discharge_pv_power,
 )
@@ -4526,7 +4527,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set the grid-charge target and immediately reevaluate charging."""
         self._raise_if_shutdown()
         maximum = self._max_soc if self._max_soc is not None else MAX_SOC
-        self._timed_charge_max_soc = _clamp_int(value, MIN_SOC, maximum)
+        target = _clamp_int(value, MIN_SOC, maximum)
+        self._validate_timed_charge_soc(
+            maximum if target is None else target, self._timed_charge_min_soc
+        )
+        self._timed_charge_max_soc = target
         await self._async_apply_grid_charge_change(
             defer_device_update=defer_device_update
         )
@@ -4585,7 +4590,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, value: int | None, *, defer_device_update: bool = False
     ) -> None:
         """Set (or clear with None) den unteren SOC-Schwellwert ("Min. SOC"),
-        unterhalb dessen die Netzladung starten darf - siehe
+        unterhalb dessen die Netzladung starten darf (bei 0 % genau bei 0 %) - siehe
         _async_enforce_grid_charge/_timed_charge_armed für die
         Hysterese-Logik (im selben Fenster einmal unterschritten, wird darin
         bis zum "Netzladen Max. SOC" durchgeladen, statt über Min. SOC sofort
@@ -4593,11 +4598,26 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async_set_max_soc für die Begründung (RestoreEntity-Pfad ohne
         NumberEntity-Validierung)."""
         self._raise_if_shutdown()
-        self._timed_charge_min_soc = _clamp_int(value, MIN_SOC, MAX_SOC)
+        minimum = _clamp_int(value, MIN_SOC, MAX_SOC)
+        self._validate_timed_charge_soc(self.timed_charge_max_soc, minimum)
+        self._timed_charge_min_soc = minimum
         self.clear_control_field_unresolved("timed_charge_min_soc")
         await self._async_apply_grid_charge_change(
             defer_device_update=defer_device_update
         )
+
+    def _validate_timed_charge_soc(self, target: int, minimum: int | None) -> None:
+        # REQ-CONTROL-CONFIG-BOOTSTRAP: migration restores partial settings;
+        # a temporary global cap must not rewrite the saved start/target pair.
+        if (
+            not self._control_bootstrap_pending
+            and minimum is not None
+            and target < minimum
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="timed_charge_soc_order",
+            )
 
     async def async_set_timed_charge_start(
         self, value: dt_time, *, defer_device_update: bool = False
@@ -5145,7 +5165,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
            "Min. SOC" (self._timed_charge_min_soc, NumberEntity analog zu
            "Max. SOC"): Netzladung startet nur, wenn der SOC diesen
-           Schwellwert im aktuellen Fenster unterschritten hat -
+           Schwellwert im aktuellen Fenster unterschritten hat (bei 0 %
+           genau bei 0 % SOC) -
            _timed_charge_armed hält diesen Zustand nur für dieselbe
            Fensterinstanz fest (REQ-TIMED-SOC-CHARGE), damit einmal
            gestartetes Laden darin bis zum eigenen "Netzladen Max. SOC" durchläuft,
@@ -5341,10 +5362,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._timed_charge_restore_state = None
         if timed_window_state is None or current_soc >= timed_target_soc:
             self._timed_charge_armed = False
-        elif (
-            self._timed_charge_min_soc is not None
-            and current_soc < self._timed_charge_min_soc
-        ):
+        elif timed_charge_start_allowed(current_soc, self._timed_charge_min_soc):
             self._timed_charge_armed = True
         if self.bridge_charge_enabled:
             self._timed_charge_armed = False

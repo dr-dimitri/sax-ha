@@ -612,6 +612,9 @@
     }
   },
   "exceptions": {
+    "timed_charge_soc_order": {
+      "message": "Das Ladeziel muss mindestens so hoch wie der Ladestart sein."
+    },
     "invalid_grid_charge_power": {
       "message": "Der Leistungssollwert {power} ist ungültig. Für eine sichere manuelle Netzladung ist eine ganze Zahl zwischen {min_power} W und {max_power} W erforderlich; Null und positive Werte werden nicht unterstützt."
     },

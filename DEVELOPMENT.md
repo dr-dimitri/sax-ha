@@ -1792,6 +1792,21 @@ Das Dashboard zeigt den Regler unter
 „Stromtarif“ → „Netzladung“ → „Bearbeiten“; die Startschwelle liegt unter
 „Weitere Einstellungen“.
 Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
+Änderungen beider SOC-Werte prüfen vor jeder Mutation `Ladestart <= Ladeziel`.
+Dashboard und Coordinator weisen ungültige Werte zurück, ohne den Geräte-Lock
+abzuwarten. Der Coordinator schützt dadurch auch direkte HA-Serviceaufrufe
+und konkurrierende Änderungen. Gleichheit ist erlaubt. Der globale Grenzwert
+bleibt unabhängig: Eine temporäre Kappung verändert keine gespeicherten Werte;
+Migration und Restore schreiben bestehende Paare nicht stillschweigend um.
+Die Kalibrierung hebt diese Eingabeprüfung nicht auf.
+`application/charge_policy.timed_charge_start_allowed` lässt bei Ladestart 0 %
+einen Start bei genau 0 % SOC zu; positive Schwellen bleiben strikt.
+Auch dieser Start benötigt alle übrigen Freigaben und läuft nach demselben
+Hystereseverfahren bis zum Ziel. Ein Ziel von 0 % ist bereits erreicht.
+Die Regressionen liegen in `test_control_response.py`,
+`test_tariff_charge_coordinator.py`, `test_coordinator.py` und dem echten
+HA-Service-/WebSocket-Pfad in `test_vue_dashboard_e2e.py`; die Oberfläche wird
+in `time-of-use-charging.test.ts` sowie `number-input.spec.ts` geprüft.
 
 `infrastructure/timed_charge_store.py` speichert die offene Hysterese
 unabhängig von Konfiguration und Entladeschutznachweis. Start-/Enduhrzeit

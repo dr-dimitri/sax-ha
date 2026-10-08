@@ -193,10 +193,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     const target = control(fixture.root, "Ladeziel (%)");
     expect(target.closest("details")).toBeNull();
     expect(
-      control(
-        fixture.root,
-        "Nur starten unter einem Ladestand von (%)",
-      ).closest("details"),
+      control(fixture.root, "Ladestart (%)").closest("details"),
     ).not.toBeNull();
     expect(
       control(fixture.root, "Ladegrenze für alle Lademethoden (%)").closest(
@@ -311,9 +308,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     ).toContain("Höchstens laden bis80 %");
     expect(control(fixture.root, "Höchstens laden bis (%)")).toBeTruthy();
     expect(fixture.root.querySelector(".tou-charging-threshold")).toBeNull();
-    expect(
-      control(fixture.root, "Nur starten unter einem Ladestand von (%)"),
-    ).toBeUndefined();
+    expect(control(fixture.root, "Ladestart (%)")).toBeUndefined();
     method(fixture.root, "bridge").click();
     await flush();
     expect(fixture.callService).toHaveBeenCalledTimes(1);
@@ -400,6 +395,83 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     ).toContain("80 %");
   });
 
+  it.each([
+    ["Ladeziel (%)", "19", "20"],
+    ["Ladestart (%)", "81", "80"],
+  ])(
+    "rejects an inconsistent %s and retains the draft",
+    async (label, invalid, equal) => {
+      const fixture = await mount();
+      const form = control(fixture.root, label!);
+      const input = form.querySelector<HTMLInputElement>("input")!;
+      const submit = async (value: string) => {
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        form.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+        await flush();
+      };
+      await submit(invalid!);
+      expect(fixture.callService).not.toHaveBeenCalled();
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      expect(form.querySelector("[role=alert]")?.textContent).toContain(
+        "mindestens so hoch wie der Ladestart",
+      );
+      await fixture.edit(false);
+      await fixture.edit(true);
+      expect(input.value).toBe(invalid);
+      expect(
+        fixture.root.querySelector(".tou-charging-summary")?.textContent,
+      ).toContain("80 %");
+      await submit(equal!);
+      expect(fixture.callService).toHaveBeenCalledExactlyOnceWith(
+        "number",
+        "set_value",
+        { value: Number(equal) },
+        {
+          entity_id:
+            label === "Ladeziel (%)"
+              ? "number.renamed_timed_charge_max_soc"
+              : "number.renamed_timed_charge_min_soc",
+        },
+        false,
+      );
+      expect(form.querySelector("[role=alert]")).toBeNull();
+    },
+  );
+
+  it.each(["de", "en"])(
+    "explains backend SOC validation after a concurrent change in %s",
+    async (language) => {
+      const fixture = await mount({ language });
+      fixture.callService.mockRejectedValueOnce({
+        translation_domain: "sax_power",
+        translation_key: "timed_charge_soc_order",
+      });
+      const form = control(
+        fixture.root,
+        language === "de" ? "Ladeziel (%)" : "Charge target (%)",
+      );
+      const input = form.querySelector<HTMLInputElement>("input")!;
+      input.value = "75";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      await flush();
+      expect(fixture.callService).toHaveBeenCalledTimes(1);
+      expect(form.querySelector("[role=alert]")?.textContent).toContain(
+        language === "de" ? "Ladestart" : "start threshold",
+      );
+      expect(input.value).toBe("75");
+      expect(input.disabled).toBe(false);
+      expect(
+        fixture.root.querySelector(".tou-charging-summary")?.textContent,
+      ).toContain("80 %");
+    },
+  );
+
   it.each(["unknown", "unavailable", "unexpected", null])(
     "does not pretend %s is fixed charging",
     async (state) => {
@@ -424,8 +496,11 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
   it("explains zero start threshold and does not call an incomplete month selection inactive", async () => {
     const fixture = await mount({ threshold: "0" });
     expect(
+      fixture.root.querySelector(".tou-charging-threshold")?.textContent,
+    ).toContain("Start bei0 %");
+    expect(
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Es beginnt keine neue automatische Netzladung");
+    ).toContain("Die Netzladung beginnt bei 0 % Ladestand");
     await fixture.update("timed_charge_month_1", "unavailable");
     expect(
       fixture.root.querySelector(".tou-charging-month-summary")?.textContent,

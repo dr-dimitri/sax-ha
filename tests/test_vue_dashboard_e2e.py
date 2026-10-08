@@ -384,6 +384,50 @@ async def test_configuration_services_confirm_without_waiting_for_device_control
                     evaluate.assert_called_once()
                 write.assert_not_called()
                 assert coordinator._month_control_task is worker
+                # REQ-TIMED-SOC-CHARGE: backend validation must also reject
+                # direct WebSocket writes while the device worker is blocked.
+                before = coordinator.control_config()
+                for request_id, (key, value) in enumerate(
+                    [("timed_charge_max_soc", 29), ("timed_charge_min_soc", 86)],
+                    50,
+                ):
+                    target = entity_id("number", key)
+                    previous = hass.states.get(target).state
+                    await sender.send_json(
+                        {
+                            "id": request_id,
+                            "type": "call_service",
+                            "domain": "number",
+                            "service": "set_value",
+                            "service_data": {"value": value},
+                            "target": {"entity_id": target},
+                        }
+                    )
+                    response = await asyncio.wait_for(sender.receive_json(), 0.5)
+                    assert response["id"] == request_id
+                    assert not response["success"]
+                    assert (
+                        response["error"]["translation_key"] == "timed_charge_soc_order"
+                    )
+                    assert hass.states.get(target).state == previous
+                    assert coordinator.control_config() == before
+                    assert coordinator._month_control_task is worker
+                    write.assert_not_called()
+                target = entity_id("number", "timed_charge_min_soc")
+                await sender.send_json(
+                    {
+                        "id": 52,
+                        "type": "call_service",
+                        "domain": "number",
+                        "service": "set_value",
+                        "service_data": {"value": 0},
+                        "target": {"entity_id": target},
+                    }
+                )
+                await _result(sender, 52)
+                await _state_event(observer, target, "0")
+                assert coordinator.timed_charge_min_soc == 0
+                write.assert_not_called()
             await worker
         await sender.close()
         await observer.close()

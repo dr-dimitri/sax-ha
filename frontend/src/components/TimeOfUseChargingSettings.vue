@@ -22,6 +22,7 @@ const text = computed(() =>
     ? {
         saved: "Ladeweise",
         start: "Start nur unter",
+        startAtZero: "Start bei",
         calibrationShort:
           "Zellkalibrierung: bis 100 % erlaubt, auch über Ladeziel und globale Grenze.",
         rules: "Laderegeln & Ausnahmen",
@@ -30,7 +31,7 @@ const text = computed(() =>
           "Jede Änderung wird einzeln übernommen. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
         fixed: "Festes Ladeziel",
         fixedHint:
-          "Lädt in den günstigsten Tarifzeiten bis zu deinem Ladeziel. Beginnt nur, wenn der Ladestand unter der Startschwelle liegt.",
+          "Lädt in den günstigsten Tarifzeiten bis zu deinem Ladeziel. Beginnt unter dem Ladestart; bei einem Ladestart von 0 % genau bei 0 %.",
         bridge: "Nur Bedarf bis Solarstrom",
         bridgeHint:
           "Plant anhand deines bisherigen Verbrauchs nur die fehlende Energie bis zum erwarteten Solarstrom. Ist genug Energie im Speicher, wird nicht geladen.",
@@ -51,12 +52,12 @@ const text = computed(() =>
           "Keine ausgewählt · Automatische Netzladung ganzjährig inaktiv",
         unknownMonths: "Monatsauswahl nicht vollständig bekannt",
         advanced: "Weitere Einstellungen",
-        threshold: "Nur starten unter einem Ladestand von (%)",
+        threshold: "Ladestart (%)",
         thresholdHint:
-          "Beispiel: Bei 20 % beginnt eine neue Netzladung erst unter 20 %. Danach darf sie im selben günstigen Zeitfenster bis zum Ladeziel weiterlaufen. 0 % verhindert einen neuen Start.",
+          "Beispiel: Bei 20 % beginnt eine neue Netzladung erst unter 20 %. Danach darf sie im selben günstigen Zeitfenster bis zum Ladeziel weiterlaufen. Bei 0 % beginnt sie genau bei 0 % Ladestand. Das Ladeziel darf nicht unter dem Ladestart liegen.",
         thresholdSummary: "Neue Netzladung startet nur unter",
         zeroThreshold:
-          "Startschwelle 0 %: Es beginnt keine neue automatische Netzladung.",
+          "Ladestart 0 %: Die Netzladung beginnt bei 0 % Ladestand, wenn die übrigen Ladebedingungen erfüllt sind.",
         thresholdUnavailable: "Startschwelle nicht verfügbar.",
         global: "Ladegrenze für alle Lademethoden (%)",
         globalHint:
@@ -73,6 +74,7 @@ const text = computed(() =>
     : {
         saved: "Charging method",
         start: "Start only below",
+        startAtZero: "Start at",
         calibrationShort:
           "Cell calibration: up to 100% allowed, even above the target and global limit.",
         rules: "Charging rules & exceptions",
@@ -81,7 +83,7 @@ const text = computed(() =>
           "Each change is applied individually. Automatic grid charging must also be switched on.",
         fixed: "Fixed charge target",
         fixedHint:
-          "Charges to your target during the cheapest tariff periods. Only starts when the battery level is below the start threshold.",
+          "Charges to your target during the cheapest tariff periods. Starts below the start threshold; a threshold of 0% starts at exactly 0%.",
         bridge: "Only what is needed until solar power",
         bridgeHint:
           "Uses your recent consumption to plan only the missing energy until solar power is expected. Does not charge when the battery already holds enough energy.",
@@ -101,12 +103,12 @@ const text = computed(() =>
         noMonths: "None selected · Automatic grid charging inactive all year",
         unknownMonths: "Month selection is not fully known",
         advanced: "More settings",
-        threshold: "Only start below a battery level of (%)",
+        threshold: "Start threshold (%)",
         thresholdHint:
-          "For example, 20% means a new grid charge starts only below 20%. It can then continue to the target within the same cheap period. 0% prevents a new start.",
+          "For example, 20% means a new grid charge starts only below 20%. It can then continue to the target within the same cheap period. A threshold of 0% starts at exactly 0% battery level. The target must not be below the start threshold.",
         thresholdSummary: "New grid charging starts only below",
         zeroThreshold:
-          "Start threshold 0%: No new automatic grid charge will start.",
+          "Start threshold 0%: Grid charging starts at 0% battery level when the other charging conditions are met.",
         thresholdUnavailable: "Start threshold unavailable.",
         global: "Charge limit for all charging methods (%)",
         globalHint:
@@ -223,7 +225,11 @@ async function choose(method: Method): Promise<void> {
           v-if="selected === 'fixed'"
           class="electricity-target tou-charging-threshold"
         >
-          <span>{{ text.start }}</span
+          <span>{{
+            finiteValue(threshold?.state?.state) === 0
+              ? text.startAtZero
+              : text.start
+          }}</span
           ><strong>{{
             threshold?.available
               ? threshold.displayValue

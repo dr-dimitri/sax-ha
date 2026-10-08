@@ -647,9 +647,7 @@ test("eight tariff windows match the compact electricity summary and detailed am
   ).toHaveCount(0);
   const tariff = panel.locator(".tariff-plan");
   await expect(tariff.getByRole("heading", { level: 2 })).toHaveText(
-    english
-      ? "1. When is your electricity cheaper?"
-      : "1. Wann ist dein Strom günstig?",
+    english ? "Prices & times" : "Preise & Zeiten",
   );
   const periods = tariff.locator(".tariff-plan__periods li");
   await expect(periods).toHaveCount(8);

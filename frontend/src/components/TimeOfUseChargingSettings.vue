@@ -20,7 +20,11 @@ watch(
 const text = computed(() =>
   german.value
     ? {
-        saved: "Gespeicherte Ladeweise",
+        saved: "Ladeweise",
+        start: "Start nur unter",
+        calibrationShort:
+          "Zellkalibrierung: bis 100 % erlaubt, auch über Ladeziel und globale Grenze.",
+        rules: "Laderegeln & Ausnahmen",
         mode: "Ladeweise",
         immediate:
           "Jede Änderung wird einzeln übernommen. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
@@ -40,7 +44,7 @@ const text = computed(() =>
         calibration:
           "Ausnahme: Bei fälliger Zellkalibrierung sind bis 100 % erlaubt, auch über Ladeziel und globale Ladegrenze hinaus. Alle anderen Ladebedingungen gelten weiter.",
         pvRequired:
-          "Für „Nur Bedarf bis Solarstrom“ benötigst du eine passende PV-Prognose mit dem erwarteten Solarstart. Öffne in Schritt 1 „Bearbeiten“ und ergänze die Solarprognose.",
+          "Für „Nur Bedarf bis Solarstrom“ benötigst du eine passende PV-Prognose mit dem erwarteten Solarstart. Öffne unter „Preise & Zeiten“ die Bearbeitung und ergänze die Solarprognose.",
         months: "Aktive Monate",
         allYear: "Ganzjährig",
         noMonths:
@@ -67,7 +71,11 @@ const text = computed(() =>
         pending: "Ladeweise wird übernommen …",
       }
     : {
-        saved: "Saved charging method",
+        saved: "Charging method",
+        start: "Start only below",
+        calibrationShort:
+          "Cell calibration: up to 100% allowed, even above the target and global limit.",
+        rules: "Charging rules & exceptions",
         mode: "Charging method",
         immediate:
           "Each change is applied individually. Automatic grid charging must also be switched on.",
@@ -87,7 +95,7 @@ const text = computed(() =>
         calibration:
           "Exception: When cell calibration is due, charging up to 100% is allowed beyond both the charge target and global limit. Other charging conditions still apply.",
         pvRequired:
-          "“Only what is needed until solar power” requires a suitable forecast with the expected start of solar power. Open “Edit” in step 1 and add the solar forecast.",
+          "“Only what is needed until solar power” requires a suitable forecast with the expected start of solar power. Open “Edit” under “Prices & times” and add the solar forecast.",
         months: "Active months",
         allYear: "All year",
         noMonths: "None selected · Automatic grid charging inactive all year",
@@ -149,17 +157,16 @@ const thresholdSummary = computed(() => {
   if (value === 0) return text.value.zeroThreshold;
   return `${text.value.thresholdSummary} ${threshold.value.displayValue}.`;
 });
-const summary = computed(() => {
-  if (!selected.value) return text.value.unavailable;
-  const label =
-    selected.value === "fixed"
-      ? text.value.fixedTarget
-      : text.value.bridgeTarget;
-  const value = target.value?.available
+const targetLabel = computed(() =>
+  selected.value === "bridge"
+    ? text.value.bridgeTarget.replace(" (%)", "")
+    : text.value.target,
+);
+const targetValue = computed(() =>
+  target.value?.available
     ? target.value.displayValue
-    : text.value.valueUnavailable;
-  return `${text.value[selected.value]} · ${label.replace(" (%)", "")} ${value}`;
-});
+    : text.value.valueUnavailable,
+);
 const hasForecast = computed(
   () => !!dashboard?.tariff.value?.profiles?.time_of_use.pv_sensor,
 );
@@ -200,27 +207,61 @@ async function choose(method: Method): Promise<void> {
 
 <template>
   <div class="tou-charging-settings">
-    <p class="tou-charging-summary">
-      <strong>{{ text.saved }}:</strong> {{ summary }}
-    </p>
+    <div class="tou-charging-summary">
+      <dl class="electricity-summary-rows">
+        <div>
+          <dt>{{ text.saved }}</dt>
+          <dd>{{ selected ? text[selected] : text.unavailable }}</dd>
+        </div>
+      </dl>
+      <div v-if="selected" class="electricity-targets">
+        <div class="electricity-target">
+          <span>{{ targetLabel }}</span
+          ><strong>{{ targetValue }}</strong>
+        </div>
+        <div
+          v-if="selected === 'fixed'"
+          class="electricity-target tou-charging-threshold"
+        >
+          <span>{{ text.start }}</span
+          ><strong>{{
+            threshold?.available
+              ? threshold.displayValue
+              : text.valueUnavailable
+          }}</strong>
+        </div>
+      </div>
+      <p
+        v-if="
+          selected === 'fixed' &&
+          (!threshold?.available || finiteValue(threshold.state?.state) === 0)
+        "
+        class="tou-charging-hint"
+      >
+        {{ thresholdSummary }}
+      </p>
+      <dl class="electricity-summary-rows tou-charging-month-summary">
+        <div>
+          <dt>{{ text.months }}</dt>
+          <dd>{{ monthSummary }}</dd>
+        </div>
+      </dl>
+    </div>
     <p
       v-if="selected && !editing"
       class="tou-charging-hint tou-charging-calibration"
     >
-      {{ text.calibration }}
+      {{ text.calibrationShort }}
     </p>
-    <p v-if="selected === 'fixed'" class="tou-charging-threshold">
-      {{ thresholdSummary }}
-    </p>
-    <p class="tou-charging-month-summary">
-      <strong>{{ text.months }}:</strong> {{ monthSummary }}
-    </p>
-    <p
-      v-if="dashboard?.tariff.value?.automation_enabled === false"
-      class="tou-charging-hint"
-    >
-      {{ text.disabled }}
-    </p>
+    <details v-if="selected && !editing" class="tou-charging-rules">
+      <summary>{{ text.rules }}</summary>
+      <p class="tou-charging-hint">
+        {{
+          selected === "fixed" ? text.fixedTargetHint : text.bridgeTargetHint
+        }}
+      </p>
+      <p class="tou-charging-hint">{{ text.calibration }}</p>
+    </details>
     <div :id="feedbackId" class="tou-charging-feedback">
       <p
         v-if="editing && bridge?.error"

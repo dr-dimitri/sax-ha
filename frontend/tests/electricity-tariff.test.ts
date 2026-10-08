@@ -301,6 +301,44 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuration", () => {
+  it.each(["time_of_use", "dynamic"])(
+    "keeps the current price visible while editing %s and groups feedback with charging",
+    async (type) => {
+      const fixture = await mount({ type });
+      const columns = fixture.root.querySelector(".electricity-columns")!;
+      expect([...columns.children].map((element) => element.className)).toEqual(
+        [
+          "electricity-card electricity-price-card",
+          "electricity-card electricity-charging",
+        ],
+      );
+      const prices = columns.children[0]!;
+      const charging = columns.children[1]!;
+      expect(prices.querySelector(".electricity-price-details")).not.toBeNull();
+      expect(
+        charging.querySelector(".electricity-master input"),
+      ).not.toBeNull();
+      expect(
+        charging.querySelector(".electricity-charge-status"),
+      ).not.toBeNull();
+      expect(charging.querySelector(".electricity-plan")).not.toBeNull();
+      await click(prices, "Bearbeiten");
+      expect(
+        prices.querySelector(".electricity-current-price")?.textContent,
+      ).toContain("-2,50");
+      expect(
+        charging.querySelector<HTMLInputElement>(".electricity-master input")
+          ?.disabled,
+      ).toBe(true);
+      await click(prices, "Abbrechen");
+      expect(
+        charging.querySelector<HTMLInputElement>(".electricity-master input")
+          ?.disabled,
+      ).toBe(false);
+      expect(writes(fixture)).toHaveLength(0);
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
   it("keeps tariff selection independent of disabled charging and exposes one main switch", async () => {
     const fixture = await mount();
     expect(
@@ -308,7 +346,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     ).toHaveLength(1);
     expect(fixture.root.textContent).toContain("Zeitvariabel");
     expect(fixture.root.textContent).toContain(
-      "Ausgeschaltet: Diese Automatik",
+      "Keine automatische Ladung aus dem Netz.",
     );
     expect(fixture.root.textContent).toContain("-2,50");
     expect(
@@ -426,7 +464,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       if (editor) await click(section, "Fertig");
       expect(
         fixture.root.querySelector(".electricity-activation")?.textContent,
-      ).toContain(initial ? "Ausgeschaltet:" : "Eingeschaltet:");
+      ).toContain(initial ? "Keine automatische Ladung" : "Lädt, sobald");
       master.click();
       await flush();
       expect(writes(fixture)).toHaveLength(1);
@@ -1474,14 +1512,22 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       }
       await click(section, "Fertig");
       expect(section.querySelector(".electricity-charging-editor")).toBeNull();
-      expect(section.querySelector('[role="status"]')?.textContent).toContain(
+      expect(
+        section.querySelector(
+          '.dynamic-charging-settings [role="status"], .electricity-charging-feedback [role="status"]',
+        )?.textContent,
+      ).toContain(
         control === "strategy"
           ? "Ladeweise wird übernommen"
           : "Änderung wird an Home Assistant gesendet",
       );
       reject(new Error("Service failed"));
       await flush();
-      expect(section.querySelector('[role="status"]')).toBeNull();
+      expect(
+        section.querySelector(
+          '.dynamic-charging-settings [role="status"], .electricity-charging-feedback [role="status"]',
+        ),
+      ).toBeNull();
       expect(section.querySelector('[role="alert"]')?.textContent).toContain(
         "fehlgeschlagen",
       );
@@ -1596,7 +1642,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     );
   });
 });
-describe("REQ-VUE-ELECTRICITY-TARIFF: activation feedback beside step 3", () => {
+describe("REQ-VUE-ELECTRICITY-TARIFF: activation feedback inside grid charging", () => {
   it.each([
     ["time_of_use", "failed"],
     ["time_of_use", "conflict"],
@@ -1734,7 +1780,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: exact price steps and gaps", () => {
 
 describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
   it.each(["de", "en"])(
-    "orders setup, charging and activation before optional details (%s)",
+    "groups prices separately from charging and its activation (%s)",
     async (language) => {
       const fixture = await mount({ type: "dynamic", language });
       const headings = [
@@ -1744,16 +1790,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
       ].map((heading) => heading.textContent?.trim());
       expect(headings).toEqual(
         language === "de"
-          ? [
-              "1. Woher kommen deine Strompreise?",
-              "2. Wie möchtest du laden?",
-              "3. Automatik einschalten",
-            ]
-          : [
-              "1. Where do your electricity prices come from?",
-              "2. How should the battery charge?",
-              "3. Turn on automatic charging",
-            ],
+          ? ["Preise & Zeiten", "Netzladung"]
+          : ["Prices & times", "Grid charging"],
       );
       expect(
         fixture.root.querySelectorAll(".electricity-master input"),
@@ -1770,7 +1808,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
       ).toBe(false);
       expect(
         fixture.root.querySelector(
-          ".electricity-activation + .electricity-price-card",
+          ".electricity-charging > .electricity-activation",
         ),
       ).not.toBeNull();
       expect(
@@ -1782,8 +1820,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
         fixture.root.querySelector(".electricity-activation")?.textContent,
       ).toContain(
         language === "de"
-          ? "Preisgrenze oder günstigste Stunden"
-          : "price cap or cheapest hours",
+          ? "Keine automatische Ladung aus dem Netz."
+          : "No automatic charging from the grid.",
       );
       await click(
         fixture.root.querySelector(".electricity-charging")!,

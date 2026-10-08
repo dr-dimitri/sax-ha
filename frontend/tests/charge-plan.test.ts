@@ -371,7 +371,7 @@ describe("consumption-based charging plan", () => {
     const { root, update } = await mount();
     await update("off", {});
     expect(root.textContent).toContain("Nur Bedarf bis Solarstrom");
-    expect(root.textContent).toContain("Schritt 3 die automatische Netzladung");
+    expect(root.textContent).toContain("die Automatik einschalten");
     await update("waiting_for_data", { reason: "private_new_reason" });
     expect(root.textContent).toContain(
       "mindestens eine Minute Beobachtungszeit",

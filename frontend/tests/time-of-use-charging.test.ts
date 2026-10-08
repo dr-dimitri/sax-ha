@@ -170,10 +170,13 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     const fixture = await mount({ editing: false });
     expect(
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Festes Ladeziel · Ladeziel 80 %");
+    ).toContain("Festes Ladeziel");
+    expect(
+      fixture.root.querySelector(".electricity-target strong")?.textContent,
+    ).toBe("80 %");
     expect(
       fixture.root.querySelector(".tou-charging-threshold")?.textContent,
-    ).toContain("nur unter 20 %");
+    ).toContain("Start nur unter20 %");
     expect(
       fixture.root.querySelector(".tou-charging-month-summary")?.textContent,
     ).toContain("Ganzjährig");
@@ -201,7 +204,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       ),
     ).not.toBeNull();
     expect(fixture.root.textContent).toContain(
-      "Öffne in Schritt 1 „Bearbeiten“",
+      "Öffne unter „Preise & Zeiten“ die Bearbeitung",
     );
     expect(fixture.callService).not.toHaveBeenCalled();
   });
@@ -226,7 +229,20 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
           ".tou-charging-calibration",
         );
         expect(hints).toHaveLength(1);
-        expect(hints[0]!.textContent?.trim()).toBe(expected);
+        expect(hints[0]!.textContent?.trim()).toBe(
+          editing
+            ? expected
+            : language === "de"
+              ? "Zellkalibrierung: bis 100 % erlaubt, auch über Ladeziel und globale Grenze."
+              : "Cell calibration: up to 100% allowed, even above the target and global limit.",
+        );
+        expect(fixture.root.textContent).toContain(expected);
+        if (!editing)
+          expect(
+            fixture.root.querySelector<HTMLDetailsElement>(
+              ".tou-charging-rules",
+            )?.open,
+          ).toBe(false);
         expect(hints[0]!.closest("details")).toBeNull();
         if (editing)
           expect(hints[0]!.closest(".tou-charging-editor")).not.toBeNull();
@@ -289,7 +305,10 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     );
     expect(
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Nur Bedarf bis Solarstrom · Höchstens laden bis 80 %");
+    ).toContain("Nur Bedarf bis Solarstrom");
+    expect(
+      fixture.root.querySelector(".electricity-target")?.textContent,
+    ).toContain("Höchstens laden bis80 %");
     expect(control(fixture.root, "Höchstens laden bis (%)")).toBeTruthy();
     expect(fixture.root.querySelector(".tou-charging-threshold")).toBeNull();
     expect(
@@ -327,7 +346,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       "Solarprognose",
     );
     expect(fixture.root.querySelector("[role=alert]")?.textContent).toContain(
-      "Schritt 1",
+      "Preise & Zeiten",
     );
     expect(fixture.callService).toHaveBeenCalledTimes(1);
   });
@@ -405,7 +424,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
   it("explains zero start threshold and does not call an incomplete month selection inactive", async () => {
     const fixture = await mount({ threshold: "0" });
     expect(
-      fixture.root.querySelector(".tou-charging-threshold")?.textContent,
+      fixture.root.querySelector(".tou-charging-summary")?.textContent,
     ).toContain("Es beginnt keine neue automatische Netzladung");
     await fixture.update("timed_charge_month_1", "unavailable");
     expect(
@@ -468,7 +487,9 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     expect(
       fixture.root.querySelector(".tou-charging-advanced")?.textContent,
     ).toContain("Also applies to solar charging");
-    expect(fixture.root.textContent).not.toContain("Open “Edit” in step 1");
+    expect(fixture.root.textContent).not.toContain(
+      "Open “Edit” under “Prices & times”",
+    );
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 });

@@ -3044,7 +3044,7 @@ requirement_vue_charging:
     ladeautomatik und ihr separater Aktivierungsschalter sind entfernt.
     Native Entities und ihre Services bleiben erhalten. ChargePlan zeigt die
     Backend-Ladeplanung unter Ladeplan & Prognose ohne zweiten Hauptschalter;
-    Aktivierung und Ladeweise werden in den drei Einrichtungsschritten bedient.
+    Aktivierung und Ladeweise werden gemeinsam in der Karte Netzladung bedient.
     Tarifpreisfenster sind in Stromtarif und Amortisation dieselbe TarifPlan-Karte
     nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
     aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
@@ -3249,7 +3249,7 @@ requirement_vue_tariff_editor:
   description: >
     Die gemeinsame Tarifpreisfenster-Karte in Stromtarif und Amortisation
     zeigt zunächst eine kompakte Übersicht. Im Stromtarif heißt sie
-    „1. Wann ist dein Strom günstig?“, ansonsten „Dein Stromtarif“.
+    „Preise & Zeiten“, ansonsten „Dein Stromtarif“.
     Gespeicherte tägliche Preiszeiten und Standardpreis sind direkt lesbar;
     günstigste Zeiten werden nur bei exakt zum Profil passenden Sensorattributen
     anhand der Backend-Markierung hervorgehoben. Nach einer Tarifänderung bis
@@ -3371,16 +3371,22 @@ requirement_vue_electricity_tariff:
     Übernehmen speichert die Auswahl. Der Hauptschalter Automatische Netzladung
     ist von der Tarifauswahl unabhängig. Bei ausgeschalteter Automatik bleiben
     Tarif, aktuelle Preise und Amortisationsbewertung aktiv. Der zeitvariable
-    Tarif führt in drei Schritten durch die Einrichtung: „1. Wann ist dein Strom
-    günstig?“, „2. Wie viel möchtest du laden?“ und „3. Automatik einschalten“.
-    Die Reihenfolge im DOM entspricht der sichtbaren Reihenfolge. Tarif- und
-    Ladeeinstellungen beginnen mit einer Zusammenfassung und einer ausdrücklichen
-    Bearbeiten-Aktion; Öffnen und Schließen ändern keine Werte. Aktueller Preis
-    und Entladestatus bleiben sichtbar, der vollständige Tagespreisverlauf ist
-    unter „Preisverlauf anzeigen“ einklappbar. Der dynamische Tarif verwendet
-    dieselbe Gestaltung und Reihenfolge: Preisquelle, Ladeverhalten und
-    Automatik einschalten. Aktueller Preis und Status bleiben sichtbar, während
-    Tagespreiskurve und Prognose anfangs eingeklappt sind.
+    Tarif und der dynamische Tarif verwenden zwei zusammengehörige Karten:
+    „Preise & Zeiten“ enthält Tarifkonfiguration, aktuellen Preis und
+    aufklappbaren Tagespreisverlauf; „Netzladung“ enthält Automatikschalter,
+    Ladeweise, bestätigte Zielwerte, PV-Quelle, Lade-/Entladestatus und
+    aufklappbaren Ladeplan samt Prognose. Die Tarifwahl steht separat darüber.
+    Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
+    untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
+    Die Übersichten verwenden kurze Beschriftungen, Wertpaare und kompakte
+    Zeilen statt nummerierter Einrichtungsschritte und mehrfacher Hinweise.
+    Bedienflächen bleiben mindestens 44 px hoch, Checkbox-Labels mindestens
+    44 × 44 px. Tarif- und Ladeeinstellungen beginnen mit einer Zusammenfassung
+    und einer ausdrücklichen Bearbeiten-Aktion; Öffnen und Schließen ändern
+    keine Werte. Ausstehende Aktionen und Fehler bleiben beim zugehörigen
+    Bedienelement sichtbar, auch nach dem Schließen der Bearbeitung.
+    Aktueller Preis und Status bleiben sichtbar; Tagespreiskurve und Prognose
+    sind anfangs eingeklappt.
 
     Die separaten Tabs Zeitvariabler Tarif und Dynamischer Tarif entfallen;
     ihre alten Links werden ohne zusätzliche History-Einträge nach stromtarif
@@ -3433,7 +3439,9 @@ requirement_vue_electricity_tariff:
     dürfen nicht als ganzjährig inaktiv erscheinen. Die globale Grenze erklärt
     ihre Wirkung auch auf Solarstrom und ein höheres Netzladeziel. Ein sichtbarer
     Hinweis beim Ladeziel und in der geschlossenen Zusammenfassung erklärt
-    die vorübergehende 100-%-Ausnahme bei fälliger Zellkalibrierung; bei
+    die vorübergehende 100-%-Ausnahme bei fälliger Zellkalibrierung. Die
+    geschlossene Übersicht verwendet einen kurzen Hinweis mit beiden Grenzen;
+    „Laderegeln & Ausnahmen“ enthält zusätzlich die vollständige Erklärung. Bei
     Verbrauchsplanung autorisiert sie keine ungeplante Vollladung. Die feste
     Ladeweise erklärt ihre Entladesperre nach erfolgter Netzladung bis zum
     Fensterende, die Bedarfsladung die anschließende normale Entladefreigabe.

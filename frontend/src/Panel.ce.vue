@@ -177,11 +177,14 @@ function openSidebar(): void {
       <p v-if="dashboard.error.value" class="status" role="alert">
         {{ dashboard.error.value }}
       </p>
-      <p class="introduction">{{ text.introduction }}</p>
+      <p v-if="activePath !== 'stromtarif'" class="introduction">
+        {{ text.introduction }}
+      </p>
 
       <section
         :key="panel?.config?.entry_id"
         class="section"
+        :class="{ 'section--tariff': activePath === 'stromtarif' }"
         aria-labelledby="section-heading"
       >
         <h1 id="section-heading" ref="heading" tabindex="-1">
@@ -344,6 +347,13 @@ main {
   border-radius: var(--ha-card-border-radius, 12px);
   background: var(--ha-card-background, var(--card-background-color, #fff));
   box-shadow: var(--ha-card-box-shadow, none);
+}
+
+.section.section--tariff {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 h1 {

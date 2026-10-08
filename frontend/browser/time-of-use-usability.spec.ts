@@ -59,9 +59,9 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
-// REQ-VUE-ELECTRICITY-TARIFF: setup follows the user's decisions, and
+// REQ-VUE-ELECTRICITY-TARIFF: the overview groups prices and charging, and
 // inspecting prices or settings never implicitly enables grid charging.
-test("time-of-use setup presents three decisions before optional price details without mobile overflow", async ({
+test("time-of-use groups prices and grid charging into compact responsive cards", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -71,16 +71,8 @@ test("time-of-use setup presents three decisions before optional price details w
   );
   await expect(steps).toHaveText(
     english
-      ? [
-          "1. When is your electricity cheaper?",
-          "2. How much should the battery charge?",
-          "3. Turn on automatic charging",
-        ]
-      : [
-          "1. Wann ist dein Strom günstig?",
-          "2. Wie viel möchtest du laden?",
-          "3. Automatik einschalten",
-        ],
+      ? ["Prices & times", "Grid charging"]
+      : ["Preise & Zeiten", "Netzladung"],
   );
   const cheapestPeriod = panel
     .locator(".tariff-plan__periods li")
@@ -96,26 +88,41 @@ test("time-of-use setup presents three decisions before optional price details w
   const details = panel.locator(".electricity-price-details");
   await expect(details).not.toHaveAttribute("open", "");
   await expect(panel.locator(".electricity-price-card svg")).toBeHidden();
-  const priceCard = await panel
-    .locator(".electricity-price-card")
-    .boundingBox();
-  const activation = await panel
-    .locator(".electricity-activation")
-    .boundingBox();
-  expect(priceCard!.y).toBeGreaterThanOrEqual(
-    activation!.y + activation!.height,
-  );
+  await expect(
+    panel.locator(".electricity-price-card .tariff-plan"),
+  ).toHaveCount(1);
+  await expect(
+    panel.locator(".electricity-charging .electricity-activation"),
+  ).toHaveCount(1);
+  await expect(
+    panel.locator(".electricity-charging .electricity-plan"),
+  ).toHaveCount(1);
   for (const width of testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100]) {
     await page.setViewportSize({ width, height: 1000 });
+    const pricesBox = (await panel
+      .locator(".electricity-price-card")
+      .boundingBox())!;
+    const chargingBox = (await panel
+      .locator(".electricity-charging")
+      .boundingBox())!;
+    if (width >= 1100) {
+      expect(Math.abs(pricesBox.y - chargingBox.y)).toBeLessThan(2);
+      expect(chargingBox.x).toBeGreaterThanOrEqual(
+        pricesBox.x + pricesBox.width,
+      );
+      expect(Math.max(pricesBox.height, chargingBox.height)).toBeLessThan(760);
+    } else {
+      expect(chargingBox.y).toBeGreaterThanOrEqual(
+        pricesBox.y + pricesBox.height,
+      );
+    }
     await expectControlsToFit(panel);
     await capture(page, testInfo, `overview-${width}`);
   }
   const showPrices = details.locator(":scope > summary");
-  await expect(showPrices).toHaveText(
-    english ? "Show price chart" : "Preisverlauf anzeigen",
-  );
+  await expect(showPrices).toHaveText(english ? "Price chart" : "Preisverlauf");
   await showPrices.focus();
   await page.keyboard.press("Enter");
   await expect(details).toHaveAttribute("open", "");
@@ -304,7 +311,9 @@ test("charging choices explain their effects and retain the confirmed method whi
       : "benötigst du eine passende PV-Prognose mit dem erwarteten Solarstart",
   );
   await expect(settings).toContainText(
-    english ? "Open “Edit” in step 1" : "Öffne in Schritt 1 „Bearbeiten“",
+    english
+      ? "Open “Edit” under “Prices & times”"
+      : "Öffne unter „Preise & Zeiten“ die Bearbeitung",
   );
   await advanced.locator(":scope > summary").focus();
   await page.keyboard.press("Space");

@@ -234,6 +234,21 @@ Die Navigation bleibt unabhängig vom Tarif sichtbar; beide alten Routen
 `dynamisches-laden` und `ladeautomatik` werden per `replaceState` nach `stromtarif` umgeleitet.
 Der Tab Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
 
+Der Stromtarif gruppiert beide Tarifarten in zwei Karten: „Preise & Zeiten“
+bündelt aktuelle Preise, Tarifkonfiguration und den aufklappbaren Preisverlauf.
+„Netzladung“ enthält Hauptschalter mit lokalem Status-/Fehlerfeedback,
+Ladeweise, bestätigte Ziel- und Startwerte, PV-Quelle, Gerätestatus und
+„Ladeplan & Prognose“. Ab 860 px nutzbarer Inhaltsbreite stehen die Karten
+nebeneinander, darunter in derselben DOM-Reihenfolge untereinander.
+Die Tarifwahl steht separat oberhalb. Die zeitvariable Übersicht stellt
+Ladeziel und Startschwelle nebeneinander dar; Monate und PV-Quelle bilden
+beschriftete Zeilen. Die 100-%-Kalibrierungsausnahme bleibt als kurzer
+sichtbarer Hinweis erhalten, ihre vollständige Erklärung und die
+Entladesperre stehen unter „Laderegeln & Ausnahmen“. Die bestehenden
+Bearbeitungsformulare, Entwürfe, Bestätigungen und Servicewege bleiben erhalten.
+Browserprüfungen in `time-of-use-usability.spec.ts` und `dynamic-tariff.spec.ts`
+sichern Gruppierung, Größen, Tastaturbedienung und Rückmeldungen ab.
+
 Im dynamischen Tarif erklärt die Ladebedienung die Wirkung jeder Ladeweise
 und zeigt nur deren relevante Eingaben. Die einfachen Bezeichnungen bilden
 weiterhin `smart`, `relative`, `absolute` und `off` ab; Planung, Grenzwerte
@@ -614,8 +629,8 @@ und die acht verschachtelten Fenster-Mappings in `entry.options` bleiben in EUR/
 damit bestehende Konfigurationen und die interne Bilanz unverändert weiterlaufen.
 
 `TariffPlan.vue` stellt diese Preisfenster in `ElectricityTariffView.vue` und
-`SavingsView.vue` dar. Im gemeinsamen Stromtarif ist sie Schritt 1 „Wann ist dein
-Strom günstig?“, unter Amortisation heißt sie „Dein Stromtarif“.
+`SavingsView.vue` dar. Im gemeinsamen Stromtarif heißt sie „Preise & Zeiten“,
+unter Amortisation „Dein Stromtarif“.
 Die kompakte Ansicht zeigt gespeicherte tägliche Preiszeiten; günstige Fenster
 und gültige Standardpreislücken werden nur aus übereinstimmenden Backenddaten
 markiert. Ein Profil-/Telemetrievergleich über den bestehenden Fingerprint
@@ -658,7 +673,7 @@ angewendet. Die API verwendet ausdrücklich `*_ct_kwh`, während gespeicherte
 Options und bestehende Sensorattribute `*_eur_kwh` in Euro bleiben.
 
 Der gemeinsame Tab `ElectricityTariffView.vue` verwendet diese Tarifkarte
-für Schritt 1 der geführten Einrichtung. Zeitvariabler und dynamischer Tarif
+im Bereich „Preise & Zeiten“. Zeitvariabler und dynamischer Tarif
 verwenden dieselbe `TariffPriceChart.vue`: vollständiger heutiger Preistag,
 beim dynamischen Tarif zusätzlich morgen, aktuelle Preisangabe und Ladezustand.
 UTC-Intervallgrenzen erhalten 23-/25-Stunden-Tage; negative Preise liegen unter
@@ -704,18 +719,18 @@ Lesende Benutzer benötigen auch Zugriff auf die dynamische Preisquelle.
 der Tab aktualisiert bei Quellen-/Tarifänderung und alle 60 Sekunden nur die
 Dashboard-Daten, ohne zusätzliche Modbus-Abfrage.
 
-Schritt 1 bearbeitet beim zeitvariablen Tarif Standardpreis,
+„Preise & Zeiten“ bearbeitet beim zeitvariablen Tarif Standardpreis,
 Einspeisevergütung, bis zu acht Fenster und die PV-Start-Prognosequelle. Beim
 dynamischen Tarif bleiben Preisquelle, optionales Attribut, Quelleneinheit
 (`auto`, `eur_kwh`, `ct_kwh`, `eur_mwh`, `ct_mwh`), Einspeisevergütung sowie
 Smart-PV-Sensor und anrechenbarer PV-Anteil erhalten. Beide Profile speichern
 getrennte PV-Quellen. Preiseingaben erfolgen in ct/kWh; die Quelleneinheit dient
 nur der Umrechnung und ergänzt keine Steuern oder Zuschläge.
-Im zeitvariablen Tarif ordnet `ElectricityTariffView.vue` die Bedienung als
-„1. Wann ist dein Strom günstig?“, „2. Wie viel möchtest du laden?“ und
-„3. Automatik einschalten“. Der Hauptschalter verwendet weiterhin denselben
-`tariff/configure`-Aufruf. Aktueller Preis und Entladestatus bleiben sichtbar;
-die Tageskurve ist nachgeordnet unter „Preisverlauf anzeigen“ erreichbar.
+`ElectricityTariffView.vue` gruppiert Tarifkonfiguration und Tageskurve unter
+„Preise & Zeiten“, Aktivierung und Ladebedingungen unter „Netzladung“.
+Der Hauptschalter verwendet weiterhin denselben `tariff/configure`-Aufruf.
+Aktueller Preis und Entladestatus bleiben sichtbar; die Tageskurve ist unter
+„Preisverlauf“ erreichbar.
 `TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise, Ladeziel,
 Startschwelle und Monatsauswahl. Die zwei beschriebenen Auswahlflächen bilden
 nur `switch.bridge_charge_enabled` auf festes Ziel beziehungsweise Bedarf bis
@@ -1774,7 +1789,7 @@ auch über einen Neustart. Eine globale Erhöhung gibt das ursprüngliche Ziel
 bis zur neuen Grenze wieder frei. Nur eine ausdrückliche Zieländerung
 ersetzt den gespeicherten Wert, begrenzt auf den aktuellen Sliderbereich.
 Das Dashboard zeigt den Regler unter
-„Stromtarif“ → „2. Wie viel möchtest du laden?“; die Startschwelle liegt unter
+„Stromtarif“ → „Netzladung“ → „Bearbeiten“; die Startschwelle liegt unter
 „Weitere Einstellungen“.
 Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
 

@@ -8,73 +8,73 @@ function e(e) {
 var t = {}, n = [], r = () => {}, i = () => !1, a = (e) => e.charCodeAt(0) === 111 && e.charCodeAt(1) === 110 && (e.charCodeAt(2) > 122 || e.charCodeAt(2) < 97), o = (e) => e.startsWith("onUpdate:"), s = Object.assign, c = (e, t) => {
 	let n = e.indexOf(t);
 	n > -1 && e.splice(n, 1);
-}, l = Object.prototype.hasOwnProperty, u = (e, t) => l.call(e, t), d = Array.isArray, f = (e) => x(e) === "[object Map]", p = (e) => x(e) === "[object Set]", m = (e) => x(e) === "[object Date]", h = (e) => typeof e == "function", g = (e) => typeof e == "string", _ = (e) => typeof e == "symbol", v = (e) => typeof e == "object" && !!e, y = (e) => (v(e) || h(e)) && h(e.then) && h(e.catch), b = Object.prototype.toString, x = (e) => b.call(e), S = (e) => x(e).slice(8, -1), C = (e) => x(e) === "[object Object]", w = (e) => g(e) && e !== "NaN" && e[0] !== "-" && "" + parseInt(e, 10) === e, T = /* @__PURE__ */ e(",key,ref,ref_for,ref_key,onVnodeBeforeMount,onVnodeMounted,onVnodeBeforeUpdate,onVnodeUpdated,onVnodeBeforeUnmount,onVnodeUnmounted"), ee = (e) => {
+}, l = Object.prototype.hasOwnProperty, u = (e, t) => l.call(e, t), d = Array.isArray, f = (e) => x(e) === "[object Map]", p = (e) => x(e) === "[object Set]", m = (e) => x(e) === "[object Date]", h = (e) => typeof e == "function", g = (e) => typeof e == "string", _ = (e) => typeof e == "symbol", v = (e) => typeof e == "object" && !!e, y = (e) => (v(e) || h(e)) && h(e.then) && h(e.catch), b = Object.prototype.toString, x = (e) => b.call(e), S = (e) => x(e).slice(8, -1), C = (e) => x(e) === "[object Object]", w = (e) => g(e) && e !== "NaN" && e[0] !== "-" && "" + parseInt(e, 10) === e, T = /* @__PURE__ */ e(",key,ref,ref_for,ref_key,onVnodeBeforeMount,onVnodeMounted,onVnodeBeforeUpdate,onVnodeUpdated,onVnodeBeforeUnmount,onVnodeUnmounted"), E = (e) => {
 	let t = /* @__PURE__ */ Object.create(null);
 	return ((n) => t[n] || (t[n] = e(n)));
-}, E = /-\w/g, D = ee((e) => e.replace(E, (e) => e.slice(1).toUpperCase())), te = /\B([A-Z])/g, O = ee((e) => e.replace(te, "-$1").toLowerCase()), ne = ee((e) => e.charAt(0).toUpperCase() + e.slice(1)), re = ee((e) => e ? `on${ne(e)}` : ""), k = (e, t) => !Object.is(e, t), A = (e, ...t) => {
+}, D = /-\w/g, O = E((e) => e.replace(D, (e) => e.slice(1).toUpperCase())), ee = /\B([A-Z])/g, k = E((e) => e.replace(ee, "-$1").toLowerCase()), te = E((e) => e.charAt(0).toUpperCase() + e.slice(1)), ne = E((e) => e ? `on${te(e)}` : ""), A = (e, t) => !Object.is(e, t), j = (e, ...t) => {
 	for (let n = 0; n < e.length; n++) e[n](...t);
-}, j = (e, t, n, r = !1) => {
+}, M = (e, t, n, r = !1) => {
 	Object.defineProperty(e, t, {
 		configurable: !0,
 		enumerable: !1,
 		writable: r,
 		value: n
 	});
-}, ie = (e) => {
+}, re = (e) => {
 	let t = parseFloat(e);
 	return isNaN(t) ? e : t;
-}, ae = (e) => {
+}, ie = (e) => {
 	let t = g(e) ? Number(e) : NaN;
 	return isNaN(t) ? e : t;
-}, oe, se = () => oe ||= typeof globalThis < "u" ? globalThis : typeof self < "u" ? self : typeof window < "u" ? window : typeof global < "u" ? global : {};
-function M(e) {
+}, ae, oe = () => ae ||= typeof globalThis < "u" ? globalThis : typeof self < "u" ? self : typeof window < "u" ? window : typeof global < "u" ? global : {};
+function N(e) {
 	if (d(e)) {
 		let t = {};
 		for (let n = 0; n < e.length; n++) {
-			let r = e[n], i = g(r) ? N(r) : M(r);
+			let r = e[n], i = g(r) ? P(r) : N(r);
 			if (i) for (let e in i) t[e] = i[e];
 		}
 		return t;
 	}
 	if (g(e) || v(e)) return e;
 }
-var ce = /;(?![^(]*\))/g, le = /:([^]+)/, ue = /\/\*[^]*?\*\//g;
-function N(e) {
+var se = /;(?![^(]*\))/g, ce = /:([^]+)/, le = /\/\*[^]*?\*\//g;
+function P(e) {
 	let t = {};
-	return e.replace(ue, "").split(ce).forEach((e) => {
+	return e.replace(le, "").split(se).forEach((e) => {
 		if (e) {
-			let n = e.split(le);
+			let n = e.split(ce);
 			n.length > 1 && (t[n[0].trim()] = n[1].trim());
 		}
 	}), t;
 }
-function de(e) {
+function ue(e) {
 	let t = "";
 	if (g(e)) t = e;
 	else if (d(e)) for (let n = 0; n < e.length; n++) {
-		let r = de(e[n]);
+		let r = ue(e[n]);
 		r && (t += r + " ");
 	}
 	else if (v(e)) for (let n in e) e[n] && (t += n + " ");
 	return t.trim();
 }
-var fe = "itemscope,allowfullscreen,formnovalidate,ismap,nomodule,novalidate,readonly", P = /* @__PURE__ */ e(fe);
-fe + "";
-function F(e) {
+var de = "itemscope,allowfullscreen,formnovalidate,ismap,nomodule,novalidate,readonly", F = /* @__PURE__ */ e(de);
+de + "";
+function I(e) {
 	return !!e || e === "";
 }
-function pe(e, t) {
+function fe(e, t) {
 	if (e.length !== t.length) return !1;
 	let n = !0;
-	for (let r = 0; n && r < e.length; r++) n = I(e[r], t[r]);
+	for (let r = 0; n && r < e.length; r++) n = me(e[r], t[r]);
 	return n;
 }
-function me(e, t) {
+function pe(e, t) {
 	if (e.size !== t.size) return !1;
 	let n = Array.from(t), r = new Uint8Array(n.length);
 	for (let t of e) {
 		let e = -1;
-		for (let i = 0; i < n.length; i++) if (!r[i] && I(t, n[i])) {
+		for (let i = 0; i < n.length; i++) if (!r[i] && me(t, n[i])) {
 			e = i;
 			break;
 		}
@@ -83,25 +83,25 @@ function me(e, t) {
 	}
 	return !0;
 }
-function I(e, t) {
+function me(e, t) {
 	if (e === t) return !0;
 	let n = m(e), r = m(t);
 	if (n || r) return n && r ? e.getTime() === t.getTime() : !1;
 	if (n = _(e), r = _(t), n || r) return e === t;
-	if (n = d(e), r = d(t), n || r) return n && r ? pe(e, t) : !1;
+	if (n = d(e), r = d(t), n || r) return n && r ? fe(e, t) : !1;
 	if (n = v(e), r = v(t), n || r) {
 		if (!n || !r) return !1;
-		if (n = f(e), r = f(t), n || r || (n = p(e), r = p(t), n || r)) return n && r ? me(e, t) : !1;
+		if (n = f(e), r = f(t), n || r || (n = p(e), r = p(t), n || r)) return n && r ? pe(e, t) : !1;
 		if (Object.keys(e).length !== Object.keys(t).length) return !1;
 		for (let n in e) {
 			let r = e.hasOwnProperty(n), i = t.hasOwnProperty(n);
-			if (r && !i || !r && i || !I(e[n], t[n])) return !1;
+			if (r && !i || !r && i || !me(e[n], t[n])) return !1;
 		}
 	}
 	return String(e) === String(t);
 }
 function he(e, t) {
-	return e.findIndex((e) => I(e, t));
+	return e.findIndex((e) => me(e, t));
 }
 var ge = (e) => !!(e && e.__v_isRef === !0), L = (e) => g(e) ? e : e == null ? "" : d(e) || v(e) && (e.toString === b || !h(e.toString)) ? ge(e) ? L(e.value) : JSON.stringify(e, _e, 2) : String(e), _e = (e, t) => ge(t) ? _e(e, t.value) : f(t) ? { [`Map(${t.size})`]: [...t.entries()].reduce((e, [t, n], r) => (e[ve(t, r) + " =>"] = n, e), {}) } : p(t) ? { [`Set(${t.size})`]: [...t.values()].map((e) => ve(e)) } : _(t) ? ve(t) : v(t) && !d(t) && !C(t) ? String(t) : t, ve = (e, t = "") => _(e) ? `Symbol(${e.description ?? t})` : e, R, ye = class {
 	constructor(e = !1) {
@@ -284,7 +284,7 @@ function Ne(e) {
 	try {
 		Ae(e);
 		let n = e.fn(e._value);
-		(t.version === 0 || k(n, e._value)) && (e.flags |= 128, e._value = n, t.version++);
+		(t.version === 0 || A(n, e._value)) && (e.flags |= 128, e._value = n, t.version++);
 	} catch (e) {
 		throw t.version++, e;
 	} finally {
@@ -582,7 +582,7 @@ var ut = class {
 			if (!/* @__PURE__ */ It(n) && !/* @__PURE__ */ Ft(n) && (i = /* @__PURE__ */ B(i), n = /* @__PURE__ */ B(n)), !a && /* @__PURE__ */ Vt(i) && !/* @__PURE__ */ Vt(n)) return e || (i.value = n), !0;
 		}
 		let o = a ? Number(t) < e.length : u(e, t), s = Reflect.set(e, t, n, /* @__PURE__ */ Vt(e) ? e : r);
-		return e === /* @__PURE__ */ B(r) && s && (o ? k(n, i) && Xe(e, "set", t, n, i) : Xe(e, "add", t, n)), s;
+		return e === /* @__PURE__ */ B(r) && s && (o ? A(n, i) && Xe(e, "set", t, n, i) : Xe(e, "add", t, n)), s;
 	}
 	deleteProperty(e, t) {
 		let n = u(e, t), r = e[t], i = Reflect.deleteProperty(e, t);
@@ -630,7 +630,7 @@ function bt(e, t) {
 	let n = {
 		get(n) {
 			let r = this.__v_raw, i = /* @__PURE__ */ B(r), a = /* @__PURE__ */ B(n);
-			e || (k(n, a) && Ye(i, "get", n), Ye(i, "get", a));
+			e || (A(n, a) && Ye(i, "get", n), Ye(i, "get", a));
 			let { has: o } = _t(i), s = t ? gt : e ? Bt : zt;
 			if (o.call(i, n)) return s(r.get(n));
 			if (o.call(i, a)) return s(r.get(a));
@@ -642,7 +642,7 @@ function bt(e, t) {
 		},
 		has(t) {
 			let n = this.__v_raw, r = /* @__PURE__ */ B(n), i = /* @__PURE__ */ B(t);
-			return e || (k(t, i) && Ye(r, "has", t), Ye(r, "has", i)), t === i ? n.has(t) : n.has(t) || n.has(i);
+			return e || (A(t, i) && Ye(r, "has", t), Ye(r, "has", i)), t === i ? n.has(t) : n.has(t) || n.has(i);
 		},
 		forEach(n, r) {
 			let i = this, a = i.__v_raw, o = /* @__PURE__ */ B(a), s = t ? gt : e ? Bt : zt;
@@ -657,14 +657,14 @@ function bt(e, t) {
 	} : {
 		add(e) {
 			let n = /* @__PURE__ */ B(this), r = _t(n), i = /* @__PURE__ */ B(e), a = !t && !/* @__PURE__ */ It(e) && !/* @__PURE__ */ Ft(e) ? i : e;
-			return r.has.call(n, a) || k(e, a) && r.has.call(n, e) || k(i, a) && r.has.call(n, i) || (n.add(a), Xe(n, "add", a, a)), this;
+			return r.has.call(n, a) || A(e, a) && r.has.call(n, e) || A(i, a) && r.has.call(n, i) || (n.add(a), Xe(n, "add", a, a)), this;
 		},
 		set(e, n) {
 			!t && !/* @__PURE__ */ It(n) && !/* @__PURE__ */ Ft(n) && (n = /* @__PURE__ */ B(n));
 			let r = /* @__PURE__ */ B(this), { has: i, get: a } = _t(r), o = i.call(r, e);
 			o ||= (e = /* @__PURE__ */ B(e), i.call(r, e));
 			let s = a.call(r, e);
-			return r.set(e, n), o ? k(n, s) && Xe(r, "set", e, n, s) : Xe(r, "add", e, n), this;
+			return r.set(e, n), o ? A(n, s) && Xe(r, "set", e, n, s) : Xe(r, "add", e, n), this;
 		},
 		delete(e) {
 			let t = /* @__PURE__ */ B(this), { has: n, get: r } = _t(t), i = n.call(t, e);
@@ -744,7 +744,7 @@ function B(e) {
 	return t ? /* @__PURE__ */ B(t) : e;
 }
 function Rt(e) {
-	return !u(e, "__v_skip") && Object.isExtensible(e) && j(e, "__v_skip", !0), e;
+	return !u(e, "__v_skip") && Object.isExtensible(e) && M(e, "__v_skip", !0), e;
 }
 var zt = (e) => v(e) ? /* @__PURE__ */ At(e) : e, Bt = (e) => v(e) ? /* @__PURE__ */ Mt(e) : e;
 // @__NO_SIDE_EFFECTS__
@@ -771,7 +771,7 @@ var Wt = class {
 	}
 	set value(e) {
 		let t = this._rawValue, n = this.__v_isShallow || /* @__PURE__ */ It(e) || /* @__PURE__ */ Ft(e);
-		e = n ? e : /* @__PURE__ */ B(e), k(e, t) && (this._rawValue = e, this._value = n ? e : zt(e), this.dep.trigger());
+		e = n ? e : /* @__PURE__ */ B(e), A(e, t) && (this._rawValue = e, this._value = n ? e : zt(e), this.dep.trigger());
 	}
 };
 function H(e) {
@@ -854,7 +854,7 @@ function $t(e, n, i = t) {
 		if (m.flags & 1 && (m.dirty || e)) {
 			if (n) {
 				let t = m.run();
-				if (e || o || y || (b ? t.some((e, t) => k(e, C[t])) : k(t, C))) {
+				if (e || o || y || (b ? t.some((e, t) => A(e, C[t])) : A(t, C))) {
 					_ && _();
 					let e = Zt;
 					Zt = m;
@@ -1195,7 +1195,7 @@ function Gn(e) {
 	let t = Un.get(e);
 	t && (t.flags |= 8, Un.delete(e));
 }
-se().requestIdleCallback, se().cancelIdleCallback;
+oe().requestIdleCallback, oe().cancelIdleCallback;
 var Kn = (e) => !!e.type.__asyncLoader, qn = (e) => e.type.__isKeepAlive;
 function Jn(e, t, n = xi, r = !1) {
 	if (n) {
@@ -1386,13 +1386,13 @@ function sr(e, t) {
 		return l;
 	};
 }
-var cr = null, lr = (e, t) => t === "modelValue" || t === "model-value" ? e.modelModifiers : e[`${t}Modifiers`] || e[`${D(t)}Modifiers`] || e[`${O(t)}Modifiers`];
+var cr = null, lr = (e, t) => t === "modelValue" || t === "model-value" ? e.modelModifiers : e[`${t}Modifiers`] || e[`${O(t)}Modifiers`] || e[`${k(t)}Modifiers`];
 function ur(e, n, ...r) {
 	if (e.isUnmounted) return;
 	let i = e.vnode.props || t, a = r, o = n.startsWith("update:"), s = o && lr(i, n.slice(7));
-	s && (s.trim && (a = r.map((e) => g(e) ? e.trim() : e)), s.number && (a = a.map(ie)));
-	let c, l = i[c = re(n)] || i[c = re(D(n))];
-	!l && o && (l = i[c = re(O(n))]), l && nn(l, e, 6, a);
+	s && (s.trim && (a = r.map((e) => g(e) ? e.trim() : e)), s.number && (a = a.map(re)));
+	let c, l = i[c = ne(n)] || i[c = ne(O(n))];
+	!l && o && (l = i[c = ne(k(n))]), l && nn(l, e, 6, a);
 	let u = i[c + "Once"];
 	if (u) {
 		if (!e.emitted) e.emitted = {};
@@ -1407,7 +1407,7 @@ function dr(e, t, n = !1) {
 	return a ? (d(a) ? a.forEach((e) => o[e] = null) : s(o, a), v(e) && r.set(e, o), o) : (v(e) && r.set(e, null), null);
 }
 function fr(e, t) {
-	return !e || !a(t) ? !1 : (t = t.slice(2), t = t === "Once" ? t : t.replace(/Once$/, ""), u(e, t[0].toLowerCase() + t.slice(1)) || u(e, O(t)) || u(e, t));
+	return !e || !a(t) ? !1 : (t = t.slice(2), t = t === "Once" ? t : t.replace(/Once$/, ""), u(e, t[0].toLowerCase() + t.slice(1)) || u(e, k(t)) || u(e, t));
 }
 function pr(e) {
 	let { type: t, vnode: n, proxy: r, withProxy: i, propsOptions: [a], slots: s, attrs: c, emit: l, render: u, renderCache: d, props: f, data: p, setupState: m, ctx: h, inheritAttrs: g } = e, _ = wn(e), v, y;
@@ -1469,7 +1469,7 @@ function _r(e, t, n) {
 }
 function vr(e, t, n) {
 	let r = e[n], i = t[n];
-	return n === "style" && v(r) && v(i) ? !I(r, i) : r !== i;
+	return n === "style" && v(r) && v(i) ? !me(r, i) : r !== i;
 }
 function yr({ vnode: e, parent: t, suspense: n }, r) {
 	for (; t;) {
@@ -1498,7 +1498,7 @@ function wr(e, t, n, r) {
 				if (c) {
 					if (u(a, o)) d !== a[o] && (a[o] = d, l = !0);
 					else {
-						let t = D(o);
+						let t = O(o);
 						i[t] = Er(c, s, t, d, e, !1);
 					}
 				} else d !== a[o] && (a[o] = d, l = !0);
@@ -1507,7 +1507,7 @@ function wr(e, t, n, r) {
 	} else {
 		Tr(e, t, i, a) && (l = !0);
 		let r;
-		for (let a in s) (!t || !u(t, a) && ((r = O(a)) === a || !u(t, r))) && (c ? n && (n[a] !== void 0 || n[r] !== void 0) && (i[a] = Er(c, s, a, void 0, e, !0)) : delete i[a]);
+		for (let a in s) (!t || !u(t, a) && ((r = k(a)) === a || !u(t, r))) && (c ? n && (n[a] !== void 0 || n[r] !== void 0) && (i[a] = Er(c, s, a, void 0, e, !0)) : delete i[a]);
 		if (a !== s) for (let e in a) (!t || !u(t, e)) && (delete a[e], l = !0);
 	}
 	l && Xe(e.attrs, "set", "");
@@ -1517,7 +1517,7 @@ function Tr(e, n, r, i) {
 	if (n) for (let t in n) {
 		if (T(t)) continue;
 		let l = n[t], d;
-		a && u(a, d = D(t)) ? !o || !o.includes(d) ? r[d] = l : (c ||= {})[d] = l : fr(e.emitsOptions, t) || (!(t in i) || l !== i[t]) && (i[t] = l, s = !0);
+		a && u(a, d = O(t)) ? !o || !o.includes(d) ? r[d] = l : (c ||= {})[d] = l : fr(e.emitsOptions, t) || (!(t in i) || l !== i[t]) && (i[t] = l, s = !0);
 	}
 	if (o) {
 		let n = /* @__PURE__ */ B(r), i = c || t;
@@ -1544,7 +1544,7 @@ function Er(e, t, n, r, i, a) {
 			} else r = e;
 			i.ce && i.ce._setProp(n, r);
 		}
-		o[0] && (a && !e ? r = !1 : o[1] && (r === "" || r === O(n)) && (r = !0));
+		o[0] && (a && !e ? r = !1 : o[1] && (r === "" || r === k(n)) && (r = !0));
 	}
 	return r;
 }
@@ -1554,11 +1554,11 @@ function Dr(e, r, i = !1) {
 	let c = e.props, l = {}, f = [];
 	if (!c) return v(e) && a.set(e, n), n;
 	if (d(c)) for (let e = 0; e < c.length; e++) {
-		let n = D(c[e]);
+		let n = O(c[e]);
 		Or(n) && (l[n] = t);
 	}
 	else if (c) for (let e in c) {
-		let t = D(e);
+		let t = O(e);
 		if (Or(t)) {
 			let n = c[e], r = l[t] = d(n) || h(n) ? { type: n } : s({}, n), i = r.type, a = !1, o = !0;
 			if (d(i)) for (let e = 0; e < i.length; ++e) {
@@ -1603,7 +1603,7 @@ var kr = (e) => e === "_" || e === "_ctx" || e === "$stable", Ar = (e) => d(e) ?
 	let r = e.slots = xr();
 	if (e.vnode.shapeFlag & 32) {
 		let e = t._;
-		e ? (Pr(r, t, n), n && j(r, "_", e, !0)) : Mr(t, r);
+		e ? (Pr(r, t, n), n && M(r, "_", e, !0)) : Mr(t, r);
 	} else t && Nr(e, t);
 }, Ir = (e, n, r) => {
 	let { vnode: i, slots: a } = e, o = !0, s = t;
@@ -1617,11 +1617,11 @@ function Rr(e) {
 	return zr(e);
 }
 function zr(e, i) {
-	let a = se();
+	let a = oe();
 	a.__VUE__ = !0;
 	let { insert: o, remove: s, patchProp: c, createElement: l, createText: u, createComment: d, setText: f, setElementText: p, parentNode: m, nextSibling: h, setScopeId: g = r, insertStaticContent: _ } = e, v = (e, t, n, r = null, i = null, a = null, o = void 0, s = null, c = !!t.dynamicChildren) => {
 		if (e === t) return;
-		e && !si(e, t) && (r = pe(e), N(e, i, a, !0), e = null), t.patchFlag === -2 && (c = !1, t.dynamicChildren = null);
+		e && !si(e, t) && (r = fe(e), P(e, i, a, !0), e = null), t.patchFlag === -2 && (c = !1, t.dynamicChildren = null);
 		let { type: l, ref: u, shapeFlag: d } = t;
 		switch (l) {
 			case Xr:
@@ -1634,9 +1634,9 @@ function zr(e, i) {
 				e ?? x(t, n, r, o);
 				break;
 			case G:
-				re(e, t, n, r, i, a, o, s, c);
+				ne(e, t, n, r, i, a, o, s, c);
 				break;
-			default: d & 1 ? w(e, t, n, r, i, a, o, s, c) : d & 6 ? k(e, t, n, r, i, a, o, s, c) : (d & 64 || d & 128) && l.process(e, t, n, r, i, a, o, s, c, he);
+			default: d & 1 ? w(e, t, n, r, i, a, o, s, c) : d & 6 ? A(e, t, n, r, i, a, o, s, c) : (d & 64 || d & 128) && l.process(e, t, n, r, i, a, o, s, c, he);
 		}
 		u != null && i ? Wn(u, e && e.ref, a, t || e, !t) : u == null && e && e.ref != null && Wn(e.ref, null, a, e, !0);
 	}, y = (e, t, n, r) => {
@@ -1658,18 +1658,18 @@ function zr(e, i) {
 		for (; e && e !== t;) n = h(e), s(e), e = n;
 		s(t);
 	}, w = (e, t, n, r, i, a, o, s, c) => {
-		if (t.type === "svg" ? o = "svg" : t.type === "math" && (o = "mathml"), e == null) ee(t, n, r, i, a, o, s, c);
+		if (t.type === "svg" ? o = "svg" : t.type === "math" && (o = "mathml"), e == null) E(t, n, r, i, a, o, s, c);
 		else {
 			let n = e.el && e.el._isVueCE ? e.el : null;
 			try {
-				n && n._beginPatch(), te(e, t, i, a, o, s, c);
+				n && n._beginPatch(), ee(e, t, i, a, o, s, c);
 			} finally {
 				n && n._endPatch();
 			}
 		}
-	}, ee = (e, t, n, r, i, a, s, u) => {
+	}, E = (e, t, n, r, i, a, s, u) => {
 		let d, f, { props: m, shapeFlag: h, transition: g, dirs: _ } = e;
-		if (d = e.el = l(e.type, a, m && m.is, m), h & 8 ? p(d, e.children) : h & 16 && D(e.children, d, null, r, i, Br(e, a), s, u), _ && Dn(e, null, r, "created"), E(d, e, e.scopeId, s, r), m) {
+		if (d = e.el = l(e.type, a, m && m.is, m), h & 8 ? p(d, e.children) : h & 16 && O(e.children, d, null, r, i, Br(e, a), s, u), _ && Dn(e, null, r, "created"), D(d, e, e.scopeId, s, r), m) {
 			for (let e in m) e !== "value" && !T(e) && c(d, e, null, m[e], a, r);
 			"value" in m && c(d, "value", null, m.value, a), (f = m.onVnodeBeforeMount) && _i(f, r, e);
 		}
@@ -1680,26 +1680,26 @@ function zr(e, i) {
 				f && _i(f, r, e), v && g.enter(d), _ && Dn(e, null, r, "mounted");
 			} finally {}
 		}, i);
-	}, E = (e, t, n, r, i) => {
+	}, D = (e, t, n, r, i) => {
 		if (n && g(e, n), r) for (let t = 0; t < r.length; t++) g(e, r[t]);
 		if (i) {
 			let n = i.subTree;
 			if (t === n || Jr(n.type) && (n.ssContent === t || n.ssFallback === t)) {
 				let t = i.vnode;
-				E(e, t, t.scopeId, t.slotScopeIds, i.parent);
+				D(e, t, t.scopeId, t.slotScopeIds, i.parent);
 			}
 		}
-	}, D = (e, t, n, r, i, a, o, s, c = 0) => {
+	}, O = (e, t, n, r, i, a, o, s, c = 0) => {
 		for (let l = c; l < e.length; l++) {
 			let c = e[l] = s ? mi(e[l]) : pi(e[l]);
 			v(null, c, t, n, r, i, a, o, s);
 		}
-	}, te = (e, n, r, i, a, o, s) => {
+	}, ee = (e, n, r, i, a, o, s) => {
 		let l = n.el = e.el, { patchFlag: u, dynamicChildren: d, dirs: f } = n;
 		u |= e.patchFlag & 16;
 		let m = e.props || t, h = n.props || t, g;
-		if (r && Vr(r, !1), (g = h.onVnodeBeforeUpdate) && _i(g, r, n, e), f && Dn(n, e, r, "beforeUpdate"), r && Vr(r, !0), d && (!e.dynamicChildren || e.dynamicChildren.length !== d.length) && (u = 0, s = !1, d = null), (m.innerHTML && h.innerHTML == null || m.textContent && h.textContent == null) && p(l, ""), d ? O(e.dynamicChildren, d, l, r, i, Br(n, a), o) : s || M(e, n, l, null, r, i, Br(n, a), o, !1), u > 0) {
-			if (u & 16) ne(l, m, h, r, a);
+		if (r && Vr(r, !1), (g = h.onVnodeBeforeUpdate) && _i(g, r, n, e), f && Dn(n, e, r, "beforeUpdate"), r && Vr(r, !0), d && (!e.dynamicChildren || e.dynamicChildren.length !== d.length) && (u = 0, s = !1, d = null), (m.innerHTML && h.innerHTML == null || m.textContent && h.textContent == null) && p(l, ""), d ? k(e.dynamicChildren, d, l, r, i, Br(n, a), o) : s || N(e, n, l, null, r, i, Br(n, a), o, !1), u > 0) {
+			if (u & 16) te(l, m, h, r, a);
 			else if (u & 2 && m.class !== h.class && c(l, "class", null, h.class, a), u & 4 && c(l, "style", m.style, h.style, a), u & 8) {
 				let e = n.dynamicProps;
 				for (let t = 0; t < e.length; t++) {
@@ -1708,16 +1708,16 @@ function zr(e, i) {
 				}
 			}
 			u & 1 && e.children !== n.children && p(l, n.children);
-		} else !s && d == null && ne(l, m, h, r, a);
+		} else !s && d == null && te(l, m, h, r, a);
 		((g = h.onVnodeUpdated) || f) && Lr(() => {
 			g && _i(g, r, n, e), f && Dn(n, e, r, "updated");
 		}, i);
-	}, O = (e, t, n, r, i, a, o) => {
+	}, k = (e, t, n, r, i, a, o) => {
 		for (let s = 0; s < t.length; s++) {
 			let c = e[s], l = t[s], u = c.el && (c.type === G || !si(c, l) || c.shapeFlag & 198) ? m(c.el) : n;
 			v(c, l, u, null, r, i, a, o, !0);
 		}
-	}, ne = (e, n, r, i, a) => {
+	}, te = (e, n, r, i, a) => {
 		if (n !== r) {
 			if (n !== t) for (let t in n) !T(t) && !(t in r) && c(e, t, n[t], null, a, i);
 			for (let t in r) {
@@ -1727,36 +1727,36 @@ function zr(e, i) {
 			}
 			"value" in r && c(e, "value", n.value, r.value, a);
 		}
-	}, re = (e, t, n, r, i, a, s, c, l) => {
+	}, ne = (e, t, n, r, i, a, s, c, l) => {
 		let d = t.el = e ? e.el : u(""), f = t.anchor = e ? e.anchor : u(""), { patchFlag: p, dynamicChildren: m, slotScopeIds: h } = t;
-		h && (c = c ? c.concat(h) : h), e == null ? (o(d, n, r), o(f, n, r), D(t.children || [], n, f, i, a, s, c, l)) : p > 0 && p & 64 && m && e.dynamicChildren && e.dynamicChildren.length === m.length ? (O(e.dynamicChildren, m, n, i, a, s, c), (t.key != null || i && t === i.subTree) && Ur(e, t, !0)) : M(e, t, n, f, i, a, s, c, l);
-	}, k = (e, t, n, r, i, a, o, s, c) => {
-		t.slotScopeIds = s, e == null ? t.shapeFlag & 512 ? i.ctx.activate(t, n, r, o, c) : j(t, n, r, i, a, o, c) : ie(e, t, c);
-	}, j = (e, t, n, r, i, a, o) => {
+		h && (c = c ? c.concat(h) : h), e == null ? (o(d, n, r), o(f, n, r), O(t.children || [], n, f, i, a, s, c, l)) : p > 0 && p & 64 && m && e.dynamicChildren && e.dynamicChildren.length === m.length ? (k(e.dynamicChildren, m, n, i, a, s, c), (t.key != null || i && t === i.subTree) && Ur(e, t, !0)) : N(e, t, n, f, i, a, s, c, l);
+	}, A = (e, t, n, r, i, a, o, s, c) => {
+		t.slotScopeIds = s, e == null ? t.shapeFlag & 512 ? i.ctx.activate(t, n, r, o, c) : M(t, n, r, i, a, o, c) : re(e, t, c);
+	}, M = (e, t, n, r, i, a, o) => {
 		let s = e.component = bi(e, r, i);
 		if (qn(e) && (s.ctx.renderer = he), ki(s, !1, o), s.asyncDep) {
-			if (i && i.registerDep(s, ae, o), !e.el) {
+			if (i && i.registerDep(s, ie, o), !e.el) {
 				let r = s.subTree = Y(Zr);
 				b(null, r, t, n), e.placeholder = r.el;
 			}
-		} else ae(s, e, t, n, i, a, o);
-	}, ie = (e, t, n) => {
+		} else ie(s, e, t, n, i, a, o);
+	}, re = (e, t, n) => {
 		let r = t.component = e.component;
 		if (gr(e, t, n)) {
 			if (r.asyncDep && !r.asyncResolved) {
-				oe(r, t, n);
+				ae(r, t, n);
 				return;
 			}
 			r.next = t, r.update();
 		} else t.el = e.el, r.vnode = t;
-	}, ae = (e, t, n, r, i, a, o) => {
+	}, ie = (e, t, n, r, i, a, o) => {
 		let s = () => {
 			if (e.isMounted) {
 				let { next: t, bu: n, u: r, parent: s, vnode: c } = e;
 				{
 					let n = Gr(e);
 					if (n) {
-						t && (t.el = c.el, oe(e, t, o)), n.asyncDep.then(() => {
+						t && (t.el = c.el, ae(e, t, o)), n.asyncDep.then(() => {
 							Lr(() => {
 								e.isUnmounted || l();
 							}, i);
@@ -1765,12 +1765,12 @@ function zr(e, i) {
 					}
 				}
 				let u = t, d;
-				Vr(e, !1), t ? (t.el = c.el, oe(e, t, o)) : t = c, n && A(n), (d = t.props && t.props.onVnodeBeforeUpdate) && _i(d, s, t, c), Vr(e, !0);
+				Vr(e, !1), t ? (t.el = c.el, ae(e, t, o)) : t = c, n && j(n), (d = t.props && t.props.onVnodeBeforeUpdate) && _i(d, s, t, c), Vr(e, !0);
 				let f = pr(e), p = e.subTree;
-				e.subTree = f, v(p, f, m(p.el), pe(p), e, i, a), t.el = f.el, u === null && yr(e, f.el), r && Lr(r, i), (d = t.props && t.props.onVnodeUpdated) && Lr(() => _i(d, s, t, c), i);
+				e.subTree = f, v(p, f, m(p.el), fe(p), e, i, a), t.el = f.el, u === null && yr(e, f.el), r && Lr(r, i), (d = t.props && t.props.onVnodeUpdated) && Lr(() => _i(d, s, t, c), i);
 			} else {
 				let o, { el: s, props: c } = t, { bm: l, m: u, parent: d, root: f, type: p } = e, m = Kn(t);
-				if (Vr(e, !1), l && A(l), !m && (o = c && c.onVnodeBeforeMount) && _i(o, d, t), Vr(e, !0), s && L) {
+				if (Vr(e, !1), l && j(l), !m && (o = c && c.onVnodeBeforeMount) && _i(o, d, t), Vr(e, !0), s && L) {
 					let t = () => {
 						e.subTree = pr(e), L(s, e.subTree, e, i, null);
 					};
@@ -1792,32 +1792,32 @@ function zr(e, i) {
 		e.scope.off();
 		let l = e.update = c.run.bind(c), u = e.job = c.runIfDirty.bind(c);
 		u.i = e, u.id = e.uid, c.scheduler = () => hn(u), Vr(e, !0), l();
-	}, oe = (e, t, n) => {
+	}, ae = (e, t, n) => {
 		t.component = e;
 		let r = e.vnode.props;
 		e.vnode = t, e.next = null, wr(e, t.props, r, n), Ir(e, t.children, n), Re(), vn(e), ze();
-	}, M = (e, t, n, r, i, a, o, s, c = !1) => {
+	}, N = (e, t, n, r, i, a, o, s, c = !1) => {
 		let l = e && e.children, u = e ? e.shapeFlag : 0, d = t.children, { patchFlag: f, shapeFlag: m } = t;
 		if (f > 0) {
 			if (f & 128) {
-				le(l, d, n, r, i, a, o, s, c);
-				return;
-			}
-			if (f & 256) {
 				ce(l, d, n, r, i, a, o, s, c);
 				return;
 			}
+			if (f & 256) {
+				se(l, d, n, r, i, a, o, s, c);
+				return;
+			}
 		}
-		m & 8 ? (u & 16 && F(l, i, a), d !== l && p(n, d)) : u & 16 ? m & 16 ? le(l, d, n, r, i, a, o, s, c) : F(l, i, a, !0) : (u & 8 && p(n, ""), m & 16 && D(d, n, r, i, a, o, s, c));
-	}, ce = (e, t, r, i, a, o, s, c, l) => {
+		m & 8 ? (u & 16 && I(l, i, a), d !== l && p(n, d)) : u & 16 ? m & 16 ? ce(l, d, n, r, i, a, o, s, c) : I(l, i, a, !0) : (u & 8 && p(n, ""), m & 16 && O(d, n, r, i, a, o, s, c));
+	}, se = (e, t, r, i, a, o, s, c, l) => {
 		e ||= n, t ||= n;
 		let u = e.length, d = t.length, f = Math.min(u, d), p = 0;
 		for (; p < f; p++) {
 			let n = t[p] = l ? mi(t[p]) : pi(t[p]);
 			v(e[p], n, r, null, a, o, s, c, l);
 		}
-		u > d ? F(e, a, o, !0, !1, f) : D(t, r, i, a, o, s, c, l, f);
-	}, le = (e, t, r, i, a, o, s, c, l) => {
+		u > d ? I(e, a, o, !0, !1, f) : O(t, r, i, a, o, s, c, l, f);
+	}, ce = (e, t, r, i, a, o, s, c, l) => {
 		let u = 0, d = t.length, f = e.length - 1, p = d - 1;
 		for (; u <= f && u <= p;) {
 			let n = e[u], i = t[u] = l ? mi(t[u]) : pi(t[u]);
@@ -1836,7 +1836,7 @@ function zr(e, i) {
 				let e = p + 1, n = e < d ? t[e].el : i;
 				for (; u <= p;) v(null, t[u] = l ? mi(t[u]) : pi(t[u]), r, n, a, o, s, c, l), u++;
 			}
-		} else if (u > p) for (; u <= f;) N(e[u], a, o, !0), u++;
+		} else if (u > p) for (; u <= f;) P(e[u], a, o, !0), u++;
 		else {
 			let m = u, h = u, g = /* @__PURE__ */ new Map();
 			for (u = h; u <= p; u++) {
@@ -1848,7 +1848,7 @@ function zr(e, i) {
 			for (u = m; u <= f; u++) {
 				let n = e[u];
 				if (y >= b) {
-					N(n, a, o, !0);
+					P(n, a, o, !0);
 					continue;
 				}
 				let i;
@@ -1857,18 +1857,18 @@ function zr(e, i) {
 					i = _;
 					break;
 				}
-				i === void 0 ? N(n, a, o, !0) : (C[i - h] = u + 1, i >= S ? S = i : x = !0, v(n, t[i], r, null, a, o, s, c, l), y++);
+				i === void 0 ? P(n, a, o, !0) : (C[i - h] = u + 1, i >= S ? S = i : x = !0, v(n, t[i], r, null, a, o, s, c, l), y++);
 			}
 			let w = x ? Wr(C) : n;
 			for (_ = w.length - 1, u = b - 1; u >= 0; u--) {
 				let e = h + u, n = t[e], f = t[e + 1], p = e + 1 < d ? f.el || qr(f) : i;
-				C[u] === 0 ? v(null, n, r, p, a, o, s, c, l) : x && (_ < 0 || u !== w[_] ? ue(n, r, p, 2) : _--);
+				C[u] === 0 ? v(null, n, r, p, a, o, s, c, l) : x && (_ < 0 || u !== w[_] ? le(n, r, p, 2) : _--);
 			}
 		}
-	}, ue = (e, t, n, r, i = null) => {
+	}, le = (e, t, n, r, i = null) => {
 		let { el: a, type: c, transition: l, children: u, shapeFlag: d } = e;
 		if (d & 6) {
-			ue(e.component.subTree, t, n, r);
+			le(e.component.subTree, t, n, r);
 			return;
 		}
 		if (d & 128) {
@@ -1881,7 +1881,7 @@ function zr(e, i) {
 		}
 		if (c === G) {
 			o(a, t, n);
-			for (let e = 0; e < u.length; e++) ue(u[e], t, n, r);
+			for (let e = 0; e < u.length; e++) le(u[e], t, n, r);
 			o(e.anchor, t, n);
 			return;
 		}
@@ -1903,29 +1903,29 @@ function zr(e, i) {
 				i ? i(a, u, d) : d();
 			}
 		} else o(a, t, n);
-	}, N = (e, t, n, r = !1, i = !1) => {
+	}, P = (e, t, n, r = !1, i = !1) => {
 		let { type: a, props: o, ref: s, children: c, dynamicChildren: l, shapeFlag: u, patchFlag: d, dirs: f, cacheIndex: p, memo: m } = e;
 		if (d === -2 && (i = !1), s != null && (Re(), Wn(s, null, n, e, !0), ze()), p != null && (t.renderCache[p] = void 0), u & 256) {
 			t.ctx.deactivate(e);
 			return;
 		}
 		let h = u & 1 && f, g = !Kn(e), _;
-		if (g && (_ = o && o.onVnodeBeforeUnmount) && _i(_, t, e), u & 6) P(e.component, n, r);
+		if (g && (_ = o && o.onVnodeBeforeUnmount) && _i(_, t, e), u & 6) F(e.component, n, r);
 		else {
 			if (u & 128) {
 				e.suspense.unmount(n, r);
 				return;
 			}
-			h && Dn(e, null, t, "beforeUnmount"), u & 64 ? e.type.remove(e, t, n, he, r) : l && !l.hasOnce && (a !== G || d > 0 && d & 64) ? F(l, t, n, !1, !0) : (a === G && d & 384 || !i && u & 16) && F(c, t, n), r && de(e);
+			h && Dn(e, null, t, "beforeUnmount"), u & 64 ? e.type.remove(e, t, n, he, r) : l && !l.hasOnce && (a !== G || d > 0 && d & 64) ? I(l, t, n, !1, !0) : (a === G && d & 384 || !i && u & 16) && I(c, t, n), r && ue(e);
 		}
 		let v = m != null && p == null;
 		(g && (_ = o && o.onVnodeUnmounted) || h || v) && Lr(() => {
 			_ && _i(_, t, e), h && Dn(e, null, t, "unmounted"), v && (e.el = null);
 		}, n);
-	}, de = (e) => {
+	}, ue = (e) => {
 		let { type: t, el: n, anchor: r, transition: i } = e;
 		if (t === G) {
-			fe(n, r);
+			de(n, r);
 			return;
 		}
 		if (t === Qr) {
@@ -1939,41 +1939,41 @@ function zr(e, i) {
 			let { leave: t, delayLeave: r } = i, o = () => t(n, a);
 			r ? r(e.el, a, o) : o();
 		} else a();
-	}, fe = (e, t) => {
+	}, de = (e, t) => {
 		let n;
 		for (; e !== t;) n = h(e), s(e), e = n;
 		s(t);
-	}, P = (e, t, n) => {
+	}, F = (e, t, n) => {
 		let { bum: r, scope: i, job: a, subTree: o, um: s, m: c, a: l } = e;
-		Kr(c), Kr(l), r && A(r), i.stop(), a && (a.flags |= 8, N(o, e, t, n)), s && Lr(s, t), Lr(() => {
+		Kr(c), Kr(l), r && j(r), i.stop(), a && (a.flags |= 8, P(o, e, t, n)), s && Lr(s, t), Lr(() => {
 			e.isUnmounted = !0;
 		}, t);
-	}, F = (e, t, n, r = !1, i = !1, a = 0) => {
-		for (let o = a; o < e.length; o++) N(e[o], t, n, r, i);
-	}, pe = (e) => {
-		if (e.shapeFlag & 6) return pe(e.component.subTree);
+	}, I = (e, t, n, r = !1, i = !1, a = 0) => {
+		for (let o = a; o < e.length; o++) P(e[o], t, n, r, i);
+	}, fe = (e) => {
+		if (e.shapeFlag & 6) return fe(e.component.subTree);
 		if (e.shapeFlag & 128) return e.suspense.next();
 		let t = h(e.anchor || e.el), n = t && t[Nn];
 		return n ? h(n) : t;
-	}, me = !1, I = (e, t, n) => {
+	}, pe = !1, me = (e, t, n) => {
 		let r;
-		e == null ? t._vnode && (N(t._vnode, null, null, !0), r = t._vnode.component) : v(t._vnode || null, e, t, null, null, null, n), t._vnode = e, me ||= (me = !0, vn(r), yn(), !1);
+		e == null ? t._vnode && (P(t._vnode, null, null, !0), r = t._vnode.component) : v(t._vnode || null, e, t, null, null, null, n), t._vnode = e, pe ||= (pe = !0, vn(r), yn(), !1);
 	}, he = {
 		p: v,
-		um: N,
-		m: ue,
-		r: de,
-		mt: j,
-		mc: D,
-		pc: M,
-		pbc: O,
-		n: pe,
+		um: P,
+		m: le,
+		r: ue,
+		mt: M,
+		mc: O,
+		pc: N,
+		pbc: k,
+		n: fe,
 		o: e
 	}, ge, L;
 	return i && ([ge, L] = i(he)), {
-		render: I,
+		render: me,
 		hydrate: ge,
-		createApp: sr(I, ge)
+		createApp: sr(me, ge)
 	};
 }
 function Br({ type: e, props: t }, n) {
@@ -2097,7 +2097,7 @@ function ui(e, t = null, n = null, r = 0, i = null, a = !1) {
 	if (Ii(e) && (e = e.__vccOpts), t) {
 		t = di(t);
 		let { class: e, style: n } = t;
-		e && !g(e) && (t.class = de(e)), v(n) && (/* @__PURE__ */ Lt(n) && !d(n) && (n = s({}, n)), t.style = M(n));
+		e && !g(e) && (t.class = ue(e)), v(n) && (/* @__PURE__ */ Lt(n) && !d(n) && (n = s({}, n)), t.style = N(n));
 	}
 	let o = g(e) ? 1 : Jr(e) ? 128 : Pn(e) ? 64 : v(e) ? 4 : h(e) ? 2 : 0;
 	return J(e, t, n, r, i, o, a, !0);
@@ -2182,8 +2182,8 @@ function gi(...e) {
 	let t = {};
 	for (let n = 0; n < e.length; n++) {
 		let r = e[n];
-		for (let e in r) if (e === "class") t.class !== r.class && (t.class = de([t.class, r.class]));
-		else if (e === "style") t.style = M([t.style, r.style]);
+		for (let e in r) if (e === "class") t.class !== r.class && (t.class = ue([t.class, r.class]));
+		else if (e === "style") t.style = N([t.style, r.style]);
 		else if (a(e)) {
 			let n = t[e], i = r[e];
 			i && n !== i && !(d(n) && n.includes(i)) ? t[e] = n ? [].concat(n, i) : i : i == null && n == null && !o(e) && (t[e] = i);
@@ -2264,7 +2264,7 @@ function bi(e, n, r) {
 }
 var xi = null, Si = () => xi || Sn, Ci, wi;
 {
-	let e = se(), t = (t, n) => {
+	let e = oe(), t = (t, n) => {
 		let r;
 		return (r = e[t]) || (r = e[t] = []), r.push(n), (e) => {
 			r.length > 1 ? r.forEach((t) => t(e)) : r[0](e);
@@ -2447,7 +2447,7 @@ function na(e, t, n) {
 	else if (n ??= "", t.startsWith("--")) ta.test(n) ? e.setProperty(t, n.replace(ta, ""), "important") : e.setProperty(t, n);
 	else {
 		let r = aa(e, t);
-		ta.test(n) ? e.setProperty(O(r), n.replace(ta, ""), "important") : e[r] = n;
+		ta.test(n) ? e.setProperty(k(r), n.replace(ta, ""), "important") : e[r] = n;
 	}
 }
 var ra = [
@@ -2458,9 +2458,9 @@ var ra = [
 function aa(e, t) {
 	let n = ia[t];
 	if (n) return n;
-	let r = D(t);
+	let r = O(t);
 	if (r !== "filter" && r in e) return ia[t] = r;
-	r = ne(r);
+	r = te(r);
 	for (let n = 0; n < ra.length; n++) {
 		let i = ra[n] + r;
 		if (i in e) return ia[t] = i;
@@ -2471,8 +2471,8 @@ function oa(e, t, n, r) {
 	return e.tagName === "TEXTAREA" && (t === "width" || t === "height") && g(r) && n === r;
 }
 var sa = "http://www.w3.org/1999/xlink";
-function ca(e, t, n, r, i, a = P(t)) {
-	r && t.startsWith("xlink:") ? n == null ? e.removeAttributeNS(sa, t.slice(6, t.length)) : e.setAttributeNS(sa, t, n) : n == null || a && !F(n) ? e.removeAttribute(t) : e.setAttribute(t, a ? "" : _(n) ? String(n) : n);
+function ca(e, t, n, r, i, a = F(t)) {
+	r && t.startsWith("xlink:") ? n == null ? e.removeAttributeNS(sa, t.slice(6, t.length)) : e.setAttributeNS(sa, t, n) : n == null || a && !I(n) ? e.removeAttribute(t) : e.setAttribute(t, a ? "" : _(n) ? String(n) : n);
 }
 function la(e, t, n, r, i) {
 	if (t === "innerHTML" || t === "textContent") {
@@ -2488,7 +2488,7 @@ function la(e, t, n, r, i) {
 	let o = !1;
 	if (n === "" || n == null) {
 		let r = typeof e[t];
-		r === "boolean" ? n = F(n) : n == null && r === "string" ? (n = "", o = !0) : r === "number" && (n = 0, o = !0);
+		r === "boolean" ? n = I(n) : n == null && r === "string" ? (n = "", o = !0) : r === "number" && (n = 0, o = !0);
 	}
 	try {
 		e[t] = n;
@@ -2514,7 +2514,7 @@ var ma = /(Once|Passive|Capture)$/, ha = /^on:?(?:Once|Passive|Capture)$/;
 function ga(e) {
 	let t, n;
 	for (; (n = e.match(ma)) && !ha.test(e);) t ||= {}, e = e.slice(0, e.length - n[1].length), t[n[1].toLowerCase()] = !0;
-	return [e[2] === ":" ? e.slice(3) : O(e.slice(2)), t];
+	return [e[2] === ":" ? e.slice(3) : k(e.slice(2)), t];
 }
 var _a = 0, va = /* @__PURE__ */ Promise.resolve(), ya = () => _a ||= (va.then(() => _a = 0), Date.now());
 function ba(e, t) {
@@ -2538,7 +2538,7 @@ function ba(e, t) {
 }
 var xa = (e) => e.charCodeAt(0) === 111 && e.charCodeAt(1) === 110 && e.charCodeAt(2) > 96 && e.charCodeAt(2) < 123, Sa = (e, t, n, r, i, s) => {
 	let c = i === "svg";
-	t === "class" ? qi(e, r, c) : t === "style" ? ea(e, n, r) : a(t) ? o(t) || pa(e, t, n, r, s) : (t[0] === "." ? (t = t.slice(1), 1) : t[0] === "^" ? (t = t.slice(1), 0) : Ca(e, t, r, c)) ? (la(e, t, r), !e.tagName.includes("-") && (t === "value" || t === "checked" || t === "selected") && ca(e, t, r, c, s, t !== "value")) : e._isVueCE && (wa(e, t) || e._def.__asyncLoader && (/[A-Z]/.test(t) || !g(r))) ? la(e, D(t), r, s, t) : (t === "true-value" ? e._trueValue = r : t === "false-value" && (e._falseValue = r), ca(e, t, r, c));
+	t === "class" ? qi(e, r, c) : t === "style" ? ea(e, n, r) : a(t) ? o(t) || pa(e, t, n, r, s) : (t[0] === "." ? (t = t.slice(1), 1) : t[0] === "^" ? (t = t.slice(1), 0) : Ca(e, t, r, c)) ? (la(e, t, r), !e.tagName.includes("-") && (t === "value" || t === "checked" || t === "selected") && ca(e, t, r, c, s, t !== "value")) : e._isVueCE && (wa(e, t) || e._def.__asyncLoader && (/[A-Z]/.test(t) || !g(r))) ? la(e, O(t), r, s, t) : (t === "true-value" ? e._trueValue = r : t === "false-value" && (e._falseValue = r), ca(e, t, r, c));
 };
 function Ca(e, t, n, r) {
 	if (r) return !!(t === "innerHTML" || t === "textContent" || t in e && xa(t) && h(n));
@@ -2552,8 +2552,8 @@ function Ca(e, t, n, r) {
 function wa(e, t) {
 	let n = e._def.props;
 	if (!n) return !1;
-	let r = D(t);
-	return Array.isArray(n) ? n.some((e) => D(e) === r) : Object.keys(n).some((e) => D(e) === r);
+	let r = O(t);
+	return Array.isArray(n) ? n.some((e) => O(e) === r) : Object.keys(n).some((e) => O(e) === r);
 }
 var Ta = {};
 // @__NO_SIDE_EFFECTS__
@@ -2606,7 +2606,7 @@ var Da = typeof HTMLElement < "u" ? HTMLElement : class {}, Oa = class e extends
 			let { props: n, styles: r } = e, i;
 			if (n && !d(n)) for (let e in n) {
 				let t = n[e];
-				(t === Number || t && t.type === Number) && (e in this._props && (this._props[e] = ae(this._props[e])), (i ||= /* @__PURE__ */ Object.create(null))[D(e)] = !0);
+				(t === Number || t && t.type === Number) && (e in this._props && (this._props[e] = ie(this._props[e])), (i ||= /* @__PURE__ */ Object.create(null))[O(e)] = !0);
 			}
 			this._numberProps = i, this._resolveProps(e), this.shadowRoot && this._applyStyles(r), this._mount(e);
 		}, t = this._def.__asyncLoader;
@@ -2623,7 +2623,7 @@ var Da = typeof HTMLElement < "u" ? HTMLElement : class {}, Oa = class e extends
 	_resolveProps(e) {
 		let { props: t } = e, n = d(t) ? t : Object.keys(t || {});
 		for (let e of Object.keys(this)) e[0] !== "_" && n.includes(e) && this._setProp(e, this[e]);
-		for (let e of n.map(D)) Object.defineProperty(this, e, {
+		for (let e of n.map(O)) Object.defineProperty(this, e, {
 			get() {
 				return this._getProp(e);
 			},
@@ -2634,8 +2634,8 @@ var Da = typeof HTMLElement < "u" ? HTMLElement : class {}, Oa = class e extends
 	}
 	_setAttr(e) {
 		if (e.startsWith("data-v-")) return;
-		let t = this.hasAttribute(e), n = t ? this.getAttribute(e) : Ta, r = D(e);
-		t && this._numberProps && this._numberProps[r] && (n = ae(n)), this._setProp(r, n, !1, !0);
+		let t = this.hasAttribute(e), n = t ? this.getAttribute(e) : Ta, r = O(e);
+		t && this._numberProps && this._numberProps[r] && (n = ie(n)), this._setProp(r, n, !1, !0);
 	}
 	_getProp(e) {
 		return this._props[e];
@@ -2643,7 +2643,7 @@ var Da = typeof HTMLElement < "u" ? HTMLElement : class {}, Oa = class e extends
 	_setProp(e, t, n = !0, r = !1) {
 		if (t !== this._props[e] && (this._dirty = !0, t === Ta ? delete this._props[e] : (this._props[e] = t, e === "key" && this._app && (this._app._ceVNode.key = t)), r && this._instance && this._update(), n)) {
 			let n = this._ob;
-			n && (this._processMutations(n.takeRecords()), n.disconnect()), t === !0 ? this.setAttribute(O(e), "") : typeof t == "string" || typeof t == "number" ? this.setAttribute(O(e), t + "") : t || this.removeAttribute(O(e)), n && n.observe(this, { attributes: !0 });
+			n && (this._processMutations(n.takeRecords()), n.disconnect()), t === !0 ? this.setAttribute(k(e), "") : typeof t == "string" || typeof t == "number" ? this.setAttribute(k(e), t + "") : t || this.removeAttribute(k(e)), n && n.observe(this, { attributes: !0 });
 		}
 	}
 	_update() {
@@ -2660,7 +2660,7 @@ var Da = typeof HTMLElement < "u" ? HTMLElement : class {}, Oa = class e extends
 				this.dispatchEvent(new CustomEvent(e, C(t[0]) ? s({ detail: t }, t[0]) : { detail: t }));
 			};
 			e.emit = (e, ...n) => {
-				t(e, n), O(e) !== e && t(O(e), n);
+				t(e, n), k(e) !== e && t(k(e), n);
 			}, this._setParent();
 		}), t;
 	}
@@ -2742,7 +2742,7 @@ function ka(e) {
 }
 var Aa = (e) => {
 	let t = e.props["onUpdate:modelValue"] || !1;
-	return d(t) ? (e) => A(t, e) : t;
+	return d(t) ? (e) => j(t, e) : t;
 };
 function ja(e) {
 	e.target.composing = !0;
@@ -2753,7 +2753,7 @@ function Ma(e) {
 }
 var Na = /* @__PURE__ */ Symbol("_assign"), Pa = /* @__PURE__ */ Symbol("_initialValue");
 function Fa(e, t, n) {
-	return t && (e = e.trim()), n && (e = ie(e)), e;
+	return t && (e = e.trim()), n && (e = re(e)), e;
 }
 var Ia = {
 	created(e, { modifiers: { lazy: t, trim: n, number: r } }, i) {
@@ -2771,25 +2771,25 @@ var Ia = {
 	},
 	beforeUpdate(e, { value: t, oldValue: n, modifiers: { lazy: r, trim: i, number: a } }, o) {
 		if (e[Na] = Aa(o), e.composing) return;
-		let s = (a || e.type === "number") && !/^0\d/.test(e.value) ? ie(e.value) : e.value, c = t ?? "";
+		let s = (a || e.type === "number") && !/^0\d/.test(e.value) ? re(e.value) : e.value, c = t ?? "";
 		if (s === c) return;
 		let l = e.getRootNode();
 		(l instanceof Document || l instanceof ShadowRoot) && l.activeElement === e && e.type !== "range" && (r && t === n || i && e.value.trim() === c) || (e.value = c);
 	}
 }, La = {
 	created(e, { value: t }, n) {
-		e.checked = I(t, n.props.value), e[Na] = Aa(n), ua(e, "change", () => {
+		e.checked = me(t, n.props.value), e[Na] = Aa(n), ua(e, "change", () => {
 			e[Na](Va(e));
 		});
 	},
 	beforeUpdate(e, { value: t, oldValue: n }, r) {
-		e[Na] = Aa(r), t !== n && (e.checked = I(t, r.props.value));
+		e[Na] = Aa(r), t !== n && (e.checked = me(t, r.props.value));
 	}
 }, Ra = {
 	deep: !0,
 	created(e, { value: t, modifiers: { number: n } }, r) {
 		e._modelValue = t, ua(e, "change", () => {
-			let t = Array.prototype.filter.call(e.options, (e) => e.selected).map((e) => n ? ie(Va(e)) : Va(e)), r = e.multiple, i = r ? p(e._modelValue) ? new Set(t) : t : t[0], a = e._pendingValue = [r, r ? d(i) ? t.slice() : t : i];
+			let t = Array.prototype.filter.call(e.options, (e) => e.selected).map((e) => n ? re(Va(e)) : Va(e)), r = e.multiple, i = r ? p(e._modelValue) ? new Set(t) : t : t[0], a = e._pendingValue = [r, r ? d(i) ? t.slice() : t : i];
 			try {
 				e[Na](i);
 			} finally {
@@ -2811,7 +2811,7 @@ var Ia = {
 	}
 };
 function za(e, t, n) {
-	if (!n || d(e)) return I(e, t);
+	if (!n || d(e)) return me(e, t);
 	if (p(e)) {
 		if (e.size !== t.length) return !1;
 		for (let n of t) if (!e.has(n)) return !1;
@@ -2829,7 +2829,7 @@ function Ba(e, t) {
 					let e = typeof o;
 					a.selected = e === "string" || e === "number" ? t.some((e) => String(e) === String(o)) : he(t, o) > -1;
 				} else a.selected = t.has(o);
-			} else if (I(Va(a), t)) {
+			} else if (me(Va(a), t)) {
 				e.selectedIndex !== i && (e.selectedIndex = i);
 				return;
 			}
@@ -2949,7 +2949,7 @@ var eo = {
 		forbidden: "Diese Entität kann derzeit nicht bedient werden.",
 		invalid: "Bitte einen gültigen Wert im erlaubten Bereich eingeben.",
 		failed: "Die Änderung ist fehlgeschlagen. Bitte den aktuellen Zustand prüfen und erneut versuchen.",
-		bridgePvRequired: "Öffne in Schritt 1 „Bearbeiten“ und ergänze die Solarprognose. Die bisherige Ladeweise bleibt erhalten.",
+		bridgePvRequired: "Öffne unter „Preise & Zeiten“ die Bearbeitung und ergänze die Solarprognose. Die bisherige Ladeweise bleibt erhalten.",
 		bridgeTariffRequired: "Richte zuerst einen zeitvariablen Tarif mit gültigen Preisen ein. Die bisherige Ladeweise bleibt erhalten.",
 		on: "Ein",
 		off: "Aus"
@@ -2962,7 +2962,7 @@ var eo = {
 		forbidden: "This entity cannot be controlled at the moment.",
 		invalid: "Please enter a valid value within the allowed range.",
 		failed: "The change failed. Please check the current state and try again.",
-		bridgePvRequired: "Open Edit in step 1 and add the solar forecast. The previous charging method is preserved.",
+		bridgePvRequired: "Open Edit under Prices & times and add the solar forecast. The previous charging method is preserved.",
 		bridgeTariffRequired: "First set up a time-of-use tariff with valid prices. The previous charging method is preserved.",
 		on: "On",
 		off: "Off"
@@ -3396,10 +3396,10 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 		async function T() {
 			v.value || !n || t.domain !== "number" && t.domain !== "time" || await n.perform(t.domain, t.entityKey, t.domain === "time" && c.value ? `${c.value}:00` : c.value);
 		}
-		function ee() {
+		function E() {
 			u.value = null, l.value?.open && l.value.close();
 		}
-		function E() {
+		function D() {
 			l.value?.open || (u.value = null);
 		}
 		U([
@@ -3409,12 +3409,12 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 			() => t.domain,
 			() => t.entityKey,
 			() => t.confirmSwitch
-		], ee, { flush: "sync" }), Zn(ee);
-		async function D() {
+		], E, { flush: "sync" }), Zn(E);
+		async function O() {
 			let e = u.value;
-			ee(), e && !v.value && n && e.entityId === r.value?.metadata.entity_id && e.sourceState === d.value && e.domain === t.domain && e.key === t.entityKey && await n.perform(t.domain, t.entityKey, e.desired);
+			E(), e && !v.value && n && e.entityId === r.value?.metadata.entity_id && e.sourceState === d.value && e.domain === t.domain && e.key === t.entityKey && await n.perform(t.domain, t.entityKey, e.desired);
 		}
-		async function te(e) {
+		async function ee(e) {
 			let i = e.target, a = i.checked;
 			if (i.checked = d.value === "on", !v.value && n) {
 				if (t.confirmSwitch && r.value) {
@@ -3431,13 +3431,13 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 				await n.perform(t.domain, t.entityKey, a);
 			}
 		}
-		async function O(e) {
+		async function k(e) {
 			let r = e.target, i = r.value;
 			r.value = d.value, !v.value && n && await n.perform(t.domain, t.entityKey, i);
 		}
 		return (t, n) => r.value ? (K(), q("form", {
 			key: 0,
-			class: de(["entity-control", {
+			class: ue(["entity-control", {
 				"entity-control--month": e.monthTile,
 				"entity-control--selected": e.monthTile && r.value.available && d.value === "on"
 			}]),
@@ -3456,7 +3456,7 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 				indeterminate: !r.value.available || d.value !== "on" && d.value !== "off",
 				disabled: v.value,
 				"aria-describedby": o,
-				onChange: te
+				onChange: ee
 			}, null, 40, lo)])) : (K(), q(G, { key: 1 }, [J("div", uo, [J("label", {
 				for: a,
 				class: "entity-control__name"
@@ -3475,14 +3475,14 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 				checked: d.value === "on",
 				disabled: v.value,
 				"aria-describedby": h.value,
-				onChange: te
+				onChange: ee
 			}, null, 40, mo)])) : e.domain === "select" ? (K(), q("select", {
 				key: 1,
 				id: a,
 				value: r.value.available ? d.value : "",
 				disabled: v.value,
 				"aria-describedby": h.value,
-				onChange: O
+				onChange: k
 			}, [r.value.available ? Z("", !0) : (K(), q("option", go, L(_.value.unavailable), 1)), (K(!0), q(G, null, W(p.value, (e) => (K(), q("option", {
 				key: e,
 				value: e
@@ -3514,19 +3514,19 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 				class: "entity-control__confirmation",
 				"aria-labelledby": `${H(i)}-confirmation-title`,
 				"aria-describedby": `${H(i)}-confirmation-question`,
-				onCancel: Wa(ee, ["prevent"]),
-				onClose: E
+				onCancel: Wa(E, ["prevent"]),
+				onClose: D
 			}, [
 				J("h3", { id: `${H(i)}-confirmation-title` }, L(_.value.confirmationTitle), 9, Co),
 				J("p", { id: `${H(i)}-confirmation-question` }, L(_.value.confirmationQuestion), 9, wo),
 				J("div", To, [J("button", {
 					type: "button",
 					autofocus: "",
-					onClick: ee
+					onClick: E
 				}, L(_.value.cancel), 1), J("button", {
 					type: "button",
 					disabled: v.value || !u.value,
-					onClick: D
+					onClick: O
 				}, L(u.value?.desired ? _.value.turnOn : _.value.turnOff), 9, Eo)])
 			], 40, So)) : Z("", !0)
 		], 42, so)) : Z("", !0);
@@ -3588,7 +3588,7 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 			}, null, -1), o.value === null ? Z("", !0) : (K(), q(G, { key: 0 }, [
 				(K(!0), q(G, null, W(l.value, (e) => (K(), q("path", {
 					key: e.from,
-					class: de(["entity-gauge__segment", `entity-gauge__segment--${e.color}`]),
+					class: ue(["entity-gauge__segment", `entity-gauge__segment--${e.color}`]),
 					d: "M20 110 A100 100 0 0 1 220 110",
 					pathLength: "100",
 					"stroke-dasharray": `${e.length} 100`,
@@ -3730,7 +3730,7 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 			}, null, 8, ["segments"])])) : Z("", !0),
 			(K(!0), q(G, null, W(a.value, (e) => (K(), q("section", {
 				key: e.title,
-				class: de(["general-view__card", `general-view__card--${e.title}`]),
+				class: ue(["general-view__card", `general-view__card--${e.title}`]),
 				"aria-labelledby": `${H(n)}-${e.title}`
 			}, [J("h2", { id: `${H(n)}-${e.title}` }, L(r.value[e.title]), 9, Jo), J("div", Yo, [(K(!0), q(G, null, W(e.entities, ([e, t]) => (K(), q(G, { key: `${e}.${t}` }, [e === "number" || e === "switch" ? (K(), ai(Ao, {
 				key: 0,
@@ -3843,7 +3843,7 @@ var so = ["aria-busy"], co = { class: "entity-control__name" }, lo = [
 				width: "18",
 				height: "18",
 				"aria-hidden": "true",
-				class: de({ "month-selection__chevron--expanded": r.value })
+				class: ue({ "month-selection__chevron--expanded": r.value })
 			}, [...t[1] ||= [J("path", { d: "m6 9 6 6 6-6" }, null, -1)]], 2))], 8, ns)]),
 			J("div", rs, [
 				r.value ? Z("", !0) : (K(), q(G, { key: 0 }, [(K(!0), q(G, null, W(m.value, (e) => (K(), q("p", {
@@ -3989,8 +3989,8 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 		function x(e) {
 			return $(e) === null ? "" : e.slice(0, 5);
 		}
-		let S = Q(() => r.value?.state?.state ?? ""), C = Q(() => i.value?.state?.state ?? ""), w = Q(() => !!r.value?.available && !!i.value?.available && $(S.value) !== null && $(C.value) !== null), T = Q(() => typeof r.value?.metadata.device_id == "string" && r.value.metadata.device_id.length > 0 && r.value.metadata.device_id === i.value?.metadata.device_id), ee = Q(() => w.value ? `${b(S.value)} – ${b(C.value)}${s.value.unit ? ` ${s.value.unit}` : ""}` : [r.value, i.value].map((e) => e?.available && $(e.state?.state ?? "") !== null ? `${b(e.state.state)}${s.value.unit ? ` ${s.value.unit}` : ""}` : s.value.missingValue).join(" – ")), E = Q(() => $(c.value) !== null && $(l.value) !== null), D = Q(() => u.value && ($(c.value) !== $(S.value) || $(l.value) !== $(C.value))), te = Q(() => m.value || !!r.value?.pending || !!i.value?.pending), O = Q(() => !n?.ready.value || !n.connected.value || !w.value || !T.value || !r.value?.canControl || !i.value?.canControl || te.value), ne = Q(() => p.value ? `${ae.value.find((e) => e.key === p.value).name}: ${s.value.invalid}` : r.value?.error || i.value?.error), re = Q(() => n?.connected.value ? w.value ? T.value ? !r.value?.canControl || !i.value?.canControl ? s.value.readOnly : te.value ? s.value.pending : h.value ? s.value.awaiting : g.value ? s.value.changed : "" : s.value.incompatible : s.value.unavailable : s.value.disconnected), k = Q(() => u.value || !w.value ? c.value : S.value), A = Q(() => u.value || !w.value ? l.value : C.value), j = Q(() => {
-			let e = $(k.value), t = $(A.value);
+		let S = Q(() => r.value?.state?.state ?? ""), C = Q(() => i.value?.state?.state ?? ""), w = Q(() => !!r.value?.available && !!i.value?.available && $(S.value) !== null && $(C.value) !== null), T = Q(() => typeof r.value?.metadata.device_id == "string" && r.value.metadata.device_id.length > 0 && r.value.metadata.device_id === i.value?.metadata.device_id), E = Q(() => w.value ? `${b(S.value)} – ${b(C.value)}${s.value.unit ? ` ${s.value.unit}` : ""}` : [r.value, i.value].map((e) => e?.available && $(e.state?.state ?? "") !== null ? `${b(e.state.state)}${s.value.unit ? ` ${s.value.unit}` : ""}` : s.value.missingValue).join(" – ")), D = Q(() => $(c.value) !== null && $(l.value) !== null), O = Q(() => u.value && ($(c.value) !== $(S.value) || $(l.value) !== $(C.value))), ee = Q(() => m.value || !!r.value?.pending || !!i.value?.pending), k = Q(() => !n?.ready.value || !n.connected.value || !w.value || !T.value || !r.value?.canControl || !i.value?.canControl || ee.value), te = Q(() => p.value ? `${ie.value.find((e) => e.key === p.value).name}: ${s.value.invalid}` : r.value?.error || i.value?.error), ne = Q(() => n?.connected.value ? w.value ? T.value ? !r.value?.canControl || !i.value?.canControl ? s.value.readOnly : ee.value ? s.value.pending : h.value ? s.value.awaiting : g.value ? s.value.changed : "" : s.value.incompatible : s.value.unavailable : s.value.disconnected), A = Q(() => u.value || !w.value ? c.value : S.value), j = Q(() => u.value || !w.value ? l.value : C.value), M = Q(() => {
+			let e = $(A.value), t = $(j.value);
 			if (e === null || t === null) return "—";
 			let n = (t - e + 86400) % 86400;
 			if (!n) return s.value.empty;
@@ -4001,13 +4001,13 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				a && `${a} ${s.value.second}`,
 				t < e && s.value.nextDay
 			].filter(Boolean).join(" · ");
-		}), ie = Q(() => {
-			let e = $(k.value), t = $(A.value);
+		}), re = Q(() => {
+			let e = $(A.value), t = $(j.value);
 			return e === null || t === null || e === t ? [] : (t > e ? [[e, t]] : [[e, 86400], [0, t]]).filter(([e, t]) => e !== t).map(([e, t]) => ({
 				left: `${e / 864}%`,
 				width: `${(t - e) / 864}%`
 			}));
-		}), ae = Q(() => [{
+		}), ie = Q(() => [{
 			key: "start",
 			value: c.value,
 			name: r.value?.name || s.value.start,
@@ -4020,7 +4020,7 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 			shortName: s.value.end,
 			marker: s.value.endMarker
 		}]);
-		function oe() {
+		function ae() {
 			let e = v;
 			v = null, e?.target.hasPointerCapture?.(e.pointerId) && e.target.releasePointerCapture(e.pointerId);
 		}
@@ -4035,41 +4035,41 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 			() => i.value?.metadata.device_id,
 			() => t.kind
 		], (e, t) => {
-			let n = typeof t?.[2] == "string" ? t[2] : "", r = typeof t?.[3] == "string" ? t[3] : "", i = u.value && ($(c.value) !== $(n) || $(l.value) !== $(r)), a = te.value || h.value;
-			_ += 1, oe(), m.value = !1, h.value = !1, u.value = !1, p.value = null, g.value = !!t?.length && i && !a && w.value, c.value = w.value ? x(S.value) : "", l.value = w.value ? x(C.value) : "";
+			let n = typeof t?.[2] == "string" ? t[2] : "", r = typeof t?.[3] == "string" ? t[3] : "", i = u.value && ($(c.value) !== $(n) || $(l.value) !== $(r)), a = ee.value || h.value;
+			_ += 1, ae(), m.value = !1, h.value = !1, u.value = !1, p.value = null, g.value = !!t?.length && i && !a && w.value, c.value = w.value ? x(S.value) : "", l.value = w.value ? x(C.value) : "";
 		}, {
 			immediate: !0,
 			flush: "sync"
-		}), U(O, (e) => {
-			e && oe();
-		}, { flush: "sync" }), Zn(oe);
+		}), U(k, (e) => {
+			e && ae();
+		}, { flush: "sync" }), Zn(ae);
+		function oe(e, t) {
+			k.value || (e === "start" ? c.value = t : l.value = t, p.value === e && (p.value = null), u.value = !0, h.value = !1, g.value = !1);
+		}
 		function se(e, t) {
-			O.value || (e === "start" ? c.value = t : l.value = t, p.value === e && (p.value = null), u.value = !0, h.value = !1, g.value = !1);
-		}
-		function ce(e, t) {
 			let n = t.target;
-			se(e, n.value);
+			oe(e, n.value);
 		}
-		function le(e) {
+		function ce(e) {
 			let t = gs(e);
 			return $(t) === null ? e : x(t);
 		}
-		function ue(e) {
+		function le(e) {
 			let t = ["start", "end"].map((e) => ({
 				boundary: e,
 				input: f.value?.querySelector(`[name="${e}"]`)
 			}));
 			for (let { boundary: n, input: r } of t) {
 				if (!r) continue;
-				let t = n === "start" ? c.value : l.value, i = !e || n === e ? le(r.value) : r.value;
-				(r.value !== t || i !== t) && se(n, i), r.value = i;
+				let t = n === "start" ? c.value : l.value, i = !e || n === e ? ce(r.value) : r.value;
+				(r.value !== t || i !== t) && oe(n, i), r.value = i;
 			}
 		}
-		function N(e) {
-			O.value || ue(e);
+		function P(e) {
+			k.value || le(e);
 		}
-		function fe(e, t) {
-			if (O.value) return;
+		function de(e, t) {
+			if (k.value) return;
 			let n = $(e === "start" ? c.value : l.value);
 			if (n === null) return;
 			let r = {
@@ -4080,17 +4080,17 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				PageUp: 900,
 				PageDown: -900
 			};
-			(t.key in r || t.key === "Home" || t.key === "End") && (t.preventDefault(), se(e, x(y(t.key === "Home" ? 0 : t.key === "End" ? 86340 : Math.max(0, Math.min(86340, Math.floor(n / 60) * 60 + r[t.key]))))));
+			(t.key in r || t.key === "Home" || t.key === "End") && (t.preventDefault(), oe(e, x(y(t.key === "Home" ? 0 : t.key === "End" ? 86340 : Math.max(0, Math.min(86340, Math.floor(n / 60) * 60 + r[t.key]))))));
 		}
-		function P(e) {
-			if (!v || v.pointerId !== e.pointerId || O.value || !d.value) return;
+		function F(e) {
+			if (!v || v.pointerId !== e.pointerId || k.value || !d.value) return;
 			let t = d.value.getBoundingClientRect();
 			if (t.width <= 0 || !v.moved && e.clientX === v.originX) return;
 			let n = Math.max(0, Math.min(1439, Math.round(v.originSeconds / 60 + (e.clientX - v.originX) / t.width * 1440)));
-			v.moved = !0, se(v.boundary, y(n * 60).slice(0, 5));
+			v.moved = !0, oe(v.boundary, y(n * 60).slice(0, 5));
 		}
-		function F(e, t) {
-			if (O.value || !E.value || t.button !== 0 || t.isPrimary === !1) return;
+		function I(e, t) {
+			if (k.value || !D.value || t.button !== 0 || t.isPrimary === !1) return;
 			let n = t.currentTarget;
 			n.focus(), v = {
 				boundary: e,
@@ -4101,30 +4101,30 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				originSeconds: $(e === "start" ? c.value : l.value)
 			}, n.setPointerCapture?.(t.pointerId), t.preventDefault();
 		}
-		function pe(e) {
-			v?.pointerId === e.pointerId && (v.moved && P(e), oe());
+		function fe(e) {
+			v?.pointerId === e.pointerId && (v.moved && F(e), ae());
 		}
-		async function me() {
-			if (!n || O.value) return;
-			if (ue(), p.value = $(c.value) === null ? "start" : $(l.value) === null ? "end" : null, p.value) {
+		async function pe() {
+			if (!n || k.value) return;
+			if (le(), p.value = $(c.value) === null ? "start" : $(l.value) === null ? "end" : null, p.value) {
 				f.value?.querySelector(`[name="${p.value}"]`)?.focus();
 				return;
 			}
-			if (!D.value) return;
+			if (!O.value) return;
 			let e = _;
 			m.value = !0, g.value = !1;
 			let r = await n.performTimeWindow(t.kind, `${c.value}:00`, `${l.value}:00`);
-			e === _ && (m.value = !1, h.value = r && D.value);
+			e === _ && (m.value = !1, h.value = r && O.value);
 		}
 		return (e, t) => r.value || i.value ? (K(), q("form", {
 			key: 0,
 			ref_key: "form",
 			ref: f,
 			class: "time-window-control",
-			"aria-busy": te.value,
-			onSubmit: Wa(me, ["prevent"])
+			"aria-busy": ee.value,
+			onSubmit: Wa(pe, ["prevent"])
 		}, [
-			J("div", vs, [(K(!0), q(G, null, W(ae.value, (e) => (K(), q("label", {
+			J("div", vs, [(K(!0), q(G, null, W(ie.value, (e) => (K(), q("label", {
 				key: e.key,
 				for: `${a}-${e.key}`,
 				class: "time-window-control__field"
@@ -4136,16 +4136,16 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				autocomplete: "off",
 				placeholder: "HH:MM",
 				value: e.value,
-				disabled: O.value,
+				disabled: k.value,
 				"aria-invalid": p.value === e.key,
 				"aria-describedby": `${a}-time-hint ${a}-confirmed ${a}-status`,
-				onInput: (t) => ce(e.key, t),
-				onChange: (t) => N(e.key),
-				onBlur: (t) => N(e.key)
+				onInput: (t) => se(e.key, t),
+				onChange: (t) => P(e.key),
+				onBlur: (t) => P(e.key)
 			}, null, 40, bs)], 8, ys))), 128)), J("button", {
 				class: "time-window-control__apply",
 				type: "submit",
-				disabled: O.value
+				disabled: k.value
 			}, L(s.value.apply), 9, xs)]),
 			J("p", {
 				id: `${a}-time-hint`,
@@ -4154,7 +4154,7 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 			J("p", {
 				id: `${a}-confirmed`,
 				class: "time-window-control__confirmed"
-			}, L(s.value.confirmed) + ": " + L(ee.value), 9, Cs),
+			}, L(s.value.confirmed) + ": " + L(E.value), 9, Cs),
 			J("div", {
 				class: "time-window-control__timeline",
 				"aria-label": s.value.timeline,
@@ -4162,18 +4162,18 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 			}, [J("div", {
 				ref_key: "rail",
 				ref: d,
-				class: de(["time-window-control__rail", { "time-window-control__rail--draft": D.value }])
-			}, [(K(!0), q(G, null, W(ie.value, (e, t) => (K(), q("span", {
+				class: ue(["time-window-control__rail", { "time-window-control__rail--draft": O.value }])
+			}, [(K(!0), q(G, null, W(re.value, (e, t) => (K(), q("span", {
 				key: t,
 				class: "time-window-control__segment",
-				style: M(e)
-			}, null, 4))), 128))], 2), (K(!0), q(G, null, W(ae.value, (e) => (K(), q("button", {
+				style: N(e)
+			}, null, 4))), 128))], 2), (K(!0), q(G, null, W(ie.value, (e) => (K(), q("button", {
 				key: e.key,
 				type: "button",
 				role: "slider",
-				class: de(["time-window-control__handle", `time-window-control__handle--${e.key}`]),
-				style: M({ left: `${(H($)(e.value) ?? 0) / 864}%` }),
-				disabled: O.value || !E.value,
+				class: ue(["time-window-control__handle", `time-window-control__handle--${e.key}`]),
+				style: N({ left: `${(H($)(e.value) ?? 0) / 864}%` }),
+				disabled: k.value || !D.value,
 				"aria-label": e.marker,
 				"aria-valuemin": "0",
 				"aria-valuemax": "86340",
@@ -4181,12 +4181,12 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				"aria-valuetext": `${b(e.value)}${s.value.unit ? ` ${s.value.unit}` : ""}`,
 				"aria-describedby": `${a}-help ${a}-confirmed`,
 				"aria-orientation": "horizontal",
-				onKeydown: (t) => fe(e.key, t),
-				onPointerdown: (t) => F(e.key, t),
-				onPointermove: P,
-				onPointerup: pe,
-				onPointercancel: oe,
-				onLostpointercapture: oe
+				onKeydown: (t) => de(e.key, t),
+				onPointerdown: (t) => I(e.key, t),
+				onPointermove: F,
+				onPointerup: fe,
+				onPointercancel: ae,
+				onLostpointercapture: ae
 			}, [J("span", Es, L(e.shortName), 1), t[0] ||= J("span", {
 				class: "time-window-control__marker-dot",
 				"aria-hidden": "true"
@@ -4201,7 +4201,7 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				J("span", null, "18"),
 				J("span", null, "24")
 			], -1),
-			J("p", Ds, [J("span", null, L(D.value ? s.value.draft : s.value.duration) + ":", 1), X(" " + L(j.value), 1)]),
+			J("p", Ds, [J("span", null, L(O.value ? s.value.draft : s.value.duration) + ":", 1), X(" " + L(M.value), 1)]),
 			J("p", {
 				id: `${a}-help`,
 				class: "time-window-control__sr-only"
@@ -4209,7 +4209,7 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 			J("div", {
 				id: `${a}-status`,
 				class: "time-window-control__feedback"
-			}, [ne.value ? (K(), q("p", As, L(ne.value), 1)) : re.value ? (K(), q("p", js, L(re.value), 1)) : Z("", !0)], 8, ks)
+			}, [te.value ? (K(), q("p", As, L(te.value), 1)) : ne.value ? (K(), q("p", js, L(ne.value), 1)) : Z("", !0)], 8, ks)
 		], 40, _s)) : Z("", !0);
 	}
 }), [["styles", [".time-window-control{min-width:0;color:var(--primary-text-color,#212121)}.time-window-control__inputs{flex-wrap:wrap;align-items:end;gap:10px;display:flex}.time-window-control__field{flex:136px;gap:5px;min-width:0;font-size:14px;display:grid}.time-window-control__field input,.time-window-control__apply{box-sizing:border-box;border:1px solid var(--divider-color,#767676);min-width:0;max-width:100%;min-height:44px;color:inherit;background:var(--card-background-color,#fff);font:inherit;border-radius:6px;padding:8px 10px;font-size:16px}.time-window-control__field input{width:100%}.time-window-control__field input[aria-invalid=true]{border-color:var(--error-color,#db4437)}.time-window-control__apply{border-color:var(--primary-color,#03a9f4);cursor:pointer;flex:none}.time-window-control__hint,.time-window-control__confirmed,.time-window-control__duration{color:var(--secondary-text-color,#666);overflow-wrap:anywhere;margin:9px 0 0;font-size:14px;line-height:1.5}.time-window-control__timeline{height:94px;margin:6px 22px 0;position:relative}.time-window-control__rail{background:var(--divider-color,#ddd);border-radius:3px;height:6px;position:absolute;top:44px;left:0;right:0;overflow:hidden}.time-window-control__segment{background:var(--primary-color,#03a9f4);height:100%;position:absolute}.time-window-control__rail--draft .time-window-control__segment{background-image:repeating-linear-gradient(135deg,#0000 0 5px,#ffffff3d 5px 8px)}.time-window-control__handle{width:44px;height:44px;min-height:0;color:inherit;font:inherit;cursor:ew-resize;touch-action:none;background:0 0;border:0;border-radius:6px;padding:0;display:block;position:absolute;transform:translate(-50%)}.time-window-control__handle--start{top:0}.time-window-control__handle--end{top:50px}.time-window-control__marker-label{white-space:nowrap;width:max-content;font-size:12px;line-height:16px;position:absolute;left:50%;transform:translate(-50%)}.time-window-control__handle--start .time-window-control__marker-label{top:0}.time-window-control__handle--end .time-window-control__marker-label{bottom:0}.time-window-control__marker-dot{box-sizing:border-box;border:2px solid var(--primary-color,#03a9f4);background:var(--card-background-color,#fff);border-radius:50%;width:18px;height:18px;position:absolute;left:13px}.time-window-control__handle--start .time-window-control__marker-dot{bottom:3px}.time-window-control__handle--end .time-window-control__marker-dot{top:3px}.time-window-control__marker-dot:after{content:\"\";background:var(--primary-color,#03a9f4);width:2px;height:6px;position:absolute;left:6px}.time-window-control__handle--start .time-window-control__marker-dot:after{top:14px}.time-window-control__handle--end .time-window-control__marker-dot:after{bottom:14px}.time-window-control__ticks{height:18px;color:var(--secondary-text-color,#666);margin:0 22px;font-size:12px;position:relative}.time-window-control__ticks span{white-space:nowrap;position:absolute;left:0}.time-window-control__ticks span:nth-child(2){left:25%;transform:translate(-50%)}.time-window-control__ticks span:nth-child(3){left:50%;transform:translate(-50%)}.time-window-control__ticks span:nth-child(4){left:75%;transform:translate(-50%)}.time-window-control__ticks span:last-child{left:auto;right:0}.time-window-control :disabled{opacity:.6;cursor:not-allowed}.time-window-control input:focus-visible,.time-window-control button:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:2px}.time-window-control__feedback{color:var(--secondary-text-color,#666);overflow-wrap:anywhere;margin-top:6px;font-size:14px;line-height:1.5}.time-window-control__feedback:empty{display:none}.time-window-control__feedback p{margin:0}.time-window-control__error{color:var(--error-color,#b71c1c)}.time-window-control__sr-only{clip-path:inset(50%);white-space:nowrap;border:0;width:1px;height:1px;margin:-1px;padding:0;position:absolute;overflow:hidden}"]]]), Ns = { class: "charging-view" }, Ps = {
@@ -4264,7 +4264,7 @@ var _s = ["aria-busy"], vs = { class: "time-window-control__inputs" }, ys = ["fo
 				$n(t.$slots, `${e.key}-settings`),
 				e.entities.length ? (K(), q("div", {
 					key: 1,
-					class: de(["charging-view__rows", {
+					class: ue(["charging-view__rows", {
 						"charging-view__rows--columns": e.layout === "columns",
 						"charging-view__rows--months": e.layout === "months"
 					}])
@@ -4690,8 +4690,8 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 	setup(e) {
 		let t = e, n = kn(no), r = Bn(), i = Q(() => n?.language.value === "de"), a = Q(() => n?.entity("sensor", "bridge_charge_plan")), o = Q(() => n?.entity("switch", "bridge_charge_enabled")), s = Q(() => a.value?.state?.attributes ?? {}), c = Q(() => n?.entity("sensor", "discharge_forecast")), l = Q(() => {
 			switch (o.value?.state?.attributes.configuration_error) {
-				case "bridge_pv_start_required": return i.value ? "Zum Einschalten in Schritt 1 eine PV-Prognosequelle auswählen." : "To enable planning, select a PV forecast source in step 1.";
-				case "bridge_tariff_required": return i.value ? "Zum Einschalten in Schritt 1 einen zeitvariablen Tarif einrichten." : "To enable planning, configure a time-of-use tariff in step 1.";
+				case "bridge_pv_start_required": return i.value ? "Zum Einschalten unter „Preise & Zeiten“ eine PV-Prognosequelle auswählen." : "To enable planning, select a PV forecast source under “Prices & times”.";
+				case "bridge_tariff_required": return i.value ? "Zum Einschalten unter „Preise & Zeiten“ einen zeitvariablen Tarif einrichten." : "To enable planning, configure a time-of-use tariff under “Prices & times”.";
 				default: return null;
 			}
 		}), u = Q(() => i.value ? {
@@ -4725,21 +4725,21 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			not_needed: "No grid charging is currently needed.",
 			insufficient: "The available grid charging is not expected to cover the entire period until PV starts."
 		}), d = Q(() => a.value?.available ? a.value.state?.state : "unavailable"), f = Q(() => i.value ? {
-			pv_start_missing: "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle in Schritt 1 prüfen.",
+			pv_start_missing: "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle unter „Preise & Zeiten“ prüfen.",
 			consumption_missing: "Für die Verbrauchsprognose wird mindestens eine Minute Entlademessung benötigt.",
 			measurements_missing: "Aktuelle Batteriemesswerte fehlen.",
 			calibration: "Die Batteriekalibrierung hat Vorrang.",
 			pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
 			manual_charge: "Die manuelle Ladung hat Vorrang.",
-			disabled: "In Schritt 2 „Nur Bedarf bis Solarstrom“ wählen und in Schritt 3 die automatische Netzladung einschalten."
+			disabled: "Unter „Netzladung“ die Ladeweise „Nur Bedarf bis Solarstrom“ wählen und die Automatik einschalten."
 		} : {
-			pv_start_missing: "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source in step 1.",
+			pv_start_missing: "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source under “Prices & times”.",
 			consumption_missing: "The consumption forecast needs at least one minute of discharge measurements.",
 			measurements_missing: "Current battery measurements are missing.",
 			calibration: "Battery calibration takes priority.",
 			pv_surplus: "PV surplus pauses planned grid charging.",
 			manual_charge: "Manual charging takes priority.",
-			disabled: "Choose “Only what is needed until solar power” in step 2 and turn on automatic grid charging in step 3."
+			disabled: "Under “Grid charging”, choose “Only what is needed until solar power” and turn on automatic charging."
 		}), p = Q(() => typeof s.value.reason == "string" ? f.value[s.value.reason] : void 0);
 		function m(e, n, r, i = 1) {
 			let a = cc(e);
@@ -4843,32 +4843,38 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 	class: "tariff-plan__introduction"
 }, Mc = {
 	key: 2,
-	class: "tariff-plan__compact-summary"
+	class: "tariff-plan__price-highlights"
 }, Nc = {
 	key: 0,
-	class: "tariff-plan__badge"
+	class: "tariff-plan__low-status"
 }, Pc = {
+	key: 3,
+	class: "tariff-plan__compact-summary"
+}, Fc = {
 	key: 0,
 	class: "tariff-plan__periods"
-}, Fc = { key: 0 }, Ic = { class: "tariff-plan__period-price" }, Lc = {
+}, Ic = { key: 0 }, Lc = { class: "tariff-plan__period-price" }, Rc = {
 	key: 0,
 	class: "tariff-plan__badge"
-}, Rc = { key: 1 }, zc = {
+}, zc = { key: 1 }, Bc = { class: "tariff-plan__base-row" }, Vc = { class: "tariff-plan__period-price" }, Hc = {
+	key: 0,
+	class: "tariff-plan__badge"
+}, Uc = { class: "tariff-plan__feed-row" }, Wc = {
 	key: 2,
-	class: "tariff-plan__low-status"
-}, Bc = {
+	class: "tariff-plan__period-status"
+}, Gc = {
 	key: 3,
 	class: "tariff-plan__pending-status"
-}, Vc = {
+}, Kc = {
 	key: 4,
 	class: "tariff-plan__low-unavailable"
-}, Hc = { class: "tariff-plan__impact" }, Uc = {
-	key: 3,
+}, qc = { class: "tariff-plan__impact" }, Jc = {
+	key: 4,
 	role: "status"
-}, Wc = ["id"], Gc = ["id", "aria-busy"], Kc = { key: 0 }, qc = ["disabled"], Jc = { class: "tariff-plan__hint" }, Yc = { class: "tariff-plan__step" }, Xc = ["aria-describedby"], Zc = ["id"], Qc = { class: "tariff-plan__step" }, $c = { class: "tariff-plan__hint" }, el = ["id"], tl = {
+}, Yc = ["id"], Xc = ["id", "aria-busy"], Zc = { key: 0 }, Qc = ["disabled"], $c = { class: "tariff-plan__hint" }, el = { class: "tariff-plan__step" }, tl = ["aria-describedby"], nl = ["id"], rl = { class: "tariff-plan__step" }, il = { class: "tariff-plan__hint" }, al = ["id"], ol = {
 	key: 0,
 	class: "tariff-plan__empty"
-}, nl = { class: "tariff-plan__window-name" }, rl = [
+}, sl = { class: "tariff-plan__window-name" }, cl = [
 	"onUpdate:modelValue",
 	"name",
 	"aria-invalid",
@@ -4876,7 +4882,7 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 	"onInput",
 	"onChange",
 	"aria-label"
-], il = [
+], ll = [
 	"onUpdate:modelValue",
 	"name",
 	"aria-invalid",
@@ -4884,22 +4890,22 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 	"onInput",
 	"onChange",
 	"aria-label"
-], al = ["onUpdate:modelValue", "aria-label"], ol = ["aria-label", "onClick"], sl = {
+], ul = ["onUpdate:modelValue", "aria-label"], dl = ["aria-label", "onClick"], fl = {
 	key: 2,
 	class: "tariff-plan__hint"
-}, cl = { class: "tariff-plan__step" }, ll = ["aria-describedby"], ul = ["id"], dl = ["open"], fl = { class: "tariff-plan__hint" }, pl = { class: "tariff-plan__impact" }, ml = { class: "tariff-plan__actions" }, hl = ["disabled"], gl = ["disabled"], _l = ["disabled"], vl = {
-	key: 6,
+}, pl = { class: "tariff-plan__step" }, ml = ["aria-describedby"], hl = ["id"], gl = ["open"], _l = { class: "tariff-plan__hint" }, vl = { class: "tariff-plan__impact" }, yl = { class: "tariff-plan__actions" }, bl = ["disabled"], xl = ["disabled"], Sl = ["disabled"], Cl = {
+	key: 7,
 	class: "tariff-plan__overview"
-}, yl = { class: "tariff-plan__current-price" }, bl = {
+}, wl = { class: "tariff-plan__current-price" }, Tl = {
 	key: 0,
 	class: "tariff-plan__low-status"
-}, xl = {
+}, El = {
 	key: 1,
 	class: "tariff-plan__low-unavailable"
-}, Sl = { key: 7 }, Cl = {
-	key: 8,
+}, Dl = { key: 8 }, Ol = {
+	key: 9,
 	class: "tariff-plan__details tariff-plan__all-prices"
-}, wl = ["aria-label"], Tl = { class: "tariff-plan__table" }, El = { scope: "col" }, Dl = { scope: "col" }, Ol = { scope: "col" }, kl = { scope: "col" }, Al = { colspan: "2" }, jl = { key: 0 }, Ml = { key: 0 }, Nl = { class: "tariff-plan__details" }, Pl = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
+}, kl = ["aria-label"], Al = { class: "tariff-plan__table" }, jl = { scope: "col" }, Ml = { scope: "col" }, Nl = { scope: "col" }, Pl = { scope: "col" }, Fl = { colspan: "2" }, Il = { key: 0 }, Ll = { key: 0 }, Rl = { class: "tariff-plan__details" }, zl = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
 	__name: "TariffPlan",
 	props: {
 		hass: { type: Object },
@@ -4908,7 +4914,7 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 	emits: ["saved", "editing"],
 	setup(e, { emit: t }) {
 		let n = e, r = t, i = kn(no), a = Bn(), o = Q(() => i?.language.value === "de" ? {
-			tariff: n.compact ? "1. Wann ist dein Strom günstig?" : "Dein Stromtarif",
+			tariff: n.compact ? "Preise & Zeiten" : "Dein Stromtarif",
 			introduction: "Trage die Preise aus deinem Stromvertrag ein. Sie gelten jeden Tag zu denselben Zeiten.",
 			currentPrice: "Strompreis jetzt",
 			baseSection: "Normaler Strompreis",
@@ -4923,6 +4929,7 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			pvDetails: "Zusätzlich: Solarprognose für die Ladeplanung",
 			pvHint: "Nur für verbrauchsbasierte Ladeplanung erforderlich. Wähle die eingerichtete PV-Prognosequelle, damit die Planung den Bedarf bis zum Solarstart berechnen kann.",
 			allPrices: "Alle Preise ansehen",
+			compactImpact: "Die Netzladung nutzt die günstigsten Tarifzeiten.",
 			everyDay: "Täglich",
 			remaining: "zu allen übrigen Zeiten",
 			overnightLabel: "über Nacht",
@@ -4976,7 +4983,7 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			unavailable: "Nicht verfügbar",
 			noPrice: "Derzeit ist kein aktueller Strompreis verfügbar."
 		} : {
-			tariff: n.compact ? "1. When is your electricity cheaper?" : "Your electricity tariff",
+			tariff: n.compact ? "Prices & times" : "Your electricity tariff",
 			introduction: "Enter the prices from your electricity contract. They apply at the same times every day.",
 			currentPrice: "Electricity price now",
 			baseSection: "Regular electricity price",
@@ -4991,6 +4998,7 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			pvDetails: "Additional setup: solar forecast for charging planning",
 			pvHint: "Only required for consumption-based charging planning. Select your configured PV forecast source so planning can calculate the energy needed until solar production starts.",
 			allPrices: "View all prices",
+			compactImpact: "Grid charging uses the cheapest tariff periods.",
 			everyDay: "Every day",
 			remaining: "at all remaining times",
 			overnightLabel: "overnight",
@@ -5106,35 +5114,35 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 				low_tariff_price_eur_kwh: null
 			};
 			return h(t) === h(p.value) ? p.value : t;
-		}), y = Q(() => h(v.value) === h(p.value)), b = Q(() => v.value.tariff_type === "time_of_use"), x = Q(() => Array.isArray(v.value.windows) ? v.value.windows.filter((e) => !!e && typeof e == "object" && typeof e.start == "string" && typeof e.end == "string") : []), S = Q(() => v.value.unavailable_reason), C = Q(() => s.value?.available === !0 && cc(s.value.state?.state) !== null && S.value == null && !d.value), w = Q(() => C.value && cc(v.value.low_tariff_price_eur_kwh) !== null && typeof v.value.low_tariff_active == "boolean" && (v.value.low_tariff_active === !1 || T.value !== null) && typeof v.value.base_price_is_low_tariff == "boolean" && Array.isArray(v.value.windows) && x.value.length === v.value.windows.length && x.value.every((e) => typeof e.low_tariff == "boolean" && cc(e.price_eur_kwh) !== null)), T = Q(() => dc(v.value.low_tariff_valid_until, n.hass)), ee = Q(() => w.value && v.value.low_tariff_active === !0 && T.value !== null), E = (e) => w.value && e.low_tariff === !0, D = Q(() => w.value && v.value.base_price_is_low_tariff === !0), te = (e, t) => [e ? o.value.now : "", t ? o.value.low : ""].filter(Boolean).join(" · "), O = Q(() => {
+		}), y = Q(() => h(v.value) === h(p.value)), b = Q(() => v.value.tariff_type === "time_of_use"), x = Q(() => Array.isArray(v.value.windows) ? v.value.windows.filter((e) => !!e && typeof e == "object" && typeof e.start == "string" && typeof e.end == "string") : []), S = Q(() => v.value.unavailable_reason), C = Q(() => s.value?.available === !0 && cc(s.value.state?.state) !== null && S.value == null && !d.value), w = Q(() => C.value && cc(v.value.low_tariff_price_eur_kwh) !== null && typeof v.value.low_tariff_active == "boolean" && (v.value.low_tariff_active === !1 || T.value !== null) && typeof v.value.base_price_is_low_tariff == "boolean" && Array.isArray(v.value.windows) && x.value.length === v.value.windows.length && x.value.every((e) => typeof e.low_tariff == "boolean" && cc(e.price_eur_kwh) !== null)), T = Q(() => dc(v.value.low_tariff_valid_until, n.hass)), E = Q(() => w.value && v.value.low_tariff_active === !0 && T.value !== null), D = (e) => w.value && e.low_tariff === !0, O = Q(() => w.value && v.value.base_price_is_low_tariff === !0), ee = (e, t) => [e ? o.value.now : "", t ? o.value.low : ""].filter(Boolean).join(" · "), k = Q(() => {
 			let e = v.value.active_window;
 			return e && typeof e == "object" ? e : null;
-		}), ne = (e) => C.value && cc(e.price_eur_kwh) !== null && O.value?.start === e.start && O.value?.end === e.end, re = Q(() => C.value && O.value === null && cc(v.value.base_price_eur_kwh) !== null), k = (e) => dc(`2000-01-01T${e.length === 5 ? `${e}:00` : e}Z`, n.hass, {
+		}), te = (e) => C.value && cc(e.price_eur_kwh) !== null && k.value?.start === e.start && k.value?.end === e.end, ne = Q(() => C.value && k.value === null && cc(v.value.base_price_eur_kwh) !== null), A = (e) => dc(`2000-01-01T${e.length === 5 ? `${e}:00` : e}Z`, n.hass, {
 			timeStyle: "short",
 			timeZone: "UTC"
-		}) ?? e.slice(0, 5), A = /* @__PURE__ */ V(!1);
-		U(A, (e) => r("editing", e));
-		let j = /* @__PURE__ */ V(!1), ie = /* @__PURE__ */ V("loading"), ae = /* @__PURE__ */ V(), oe = /* @__PURE__ */ V(), se = /* @__PURE__ */ V(null), M = /* @__PURE__ */ V(""), ce = /* @__PURE__ */ V(""), le = /* @__PURE__ */ V(null), ue = Q(() => i?.entity("switch", "bridge_charge_enabled")?.state?.state === "on"), N = /* @__PURE__ */ V([]), fe = 0, P = /* @__PURE__ */ V(null), F = /* @__PURE__ */ V(null), pe = /* @__PURE__ */ V(!1), me = /* @__PURE__ */ V(!1), I = Q(() => i?.connected.value === !0 && i.ready.value), he = Q(() => {
-			if (P.value === "timeError" && F.value) {
-				let e = N.value.findIndex((e) => e.key === F.value.key);
-				return `${o.value.window} ${e + 1}: ${o.value[F.value.reason]}`;
+		}) ?? e.slice(0, 5), j = /* @__PURE__ */ V(!1);
+		U(j, (e) => r("editing", e));
+		let M = /* @__PURE__ */ V(!1), re = /* @__PURE__ */ V("loading"), ie = /* @__PURE__ */ V(), ae = /* @__PURE__ */ V(), oe = /* @__PURE__ */ V(null), N = /* @__PURE__ */ V(""), se = /* @__PURE__ */ V(""), ce = /* @__PURE__ */ V(null), le = Q(() => i?.entity("switch", "bridge_charge_enabled")?.state?.state === "on"), P = /* @__PURE__ */ V([]), de = 0, F = /* @__PURE__ */ V(null), I = /* @__PURE__ */ V(null), fe = /* @__PURE__ */ V(!1), pe = /* @__PURE__ */ V(!1), me = Q(() => i?.connected.value === !0 && i.ready.value), he = Q(() => {
+			if (F.value === "timeError" && I.value) {
+				let e = P.value.findIndex((e) => e.key === I.value.key);
+				return `${o.value.window} ${e + 1}: ${o.value[I.value.reason]}`;
 			}
-			return P.value ? o.value[P.value] : null;
+			return F.value ? o.value[F.value] : null;
 		});
 		function ge(e, t) {
-			return ae.value?.querySelector(`[name="window_${e}_${t}"]`);
+			return ie.value?.querySelector(`[name="window_${e}_${t}"]`);
 		}
 		function _e(e, t, n) {
-			let r = N.value.find((t) => t.key === e), i = n.target;
+			let r = P.value.find((t) => t.key === e), i = n.target;
 			r && (i.value = r[t] = gs(i.value)), ve(e);
 		}
 		function ve(e) {
-			(e === void 0 || F.value?.key === e) && (F.value = null, P.value === "timeError" && (P.value = null));
+			(e === void 0 || I.value?.key === e) && (I.value = null, F.value === "timeError" && (F.value = null));
 		}
 		function R(e) {
 			if (_) return;
 			let t = e && typeof e == "object" && "code" in e ? e.code : "failed";
-			pe.value = t === "conflict", P.value = t === "bridge_pv_start_required" ? "bridgePvRequired" : t === "pv_sensor_missing" ? "pvMissing" : t === "invalid_tariff" || t === "invalid_format" ? "invalid" : [
+			fe.value = t === "conflict", F.value = t === "bridge_pv_start_required" ? "bridgePvRequired" : t === "pv_sensor_missing" ? "pvMissing" : t === "invalid_tariff" || t === "invalid_format" ? "invalid" : [
 				"conflict",
 				"disconnected",
 				"forbidden"
@@ -5144,40 +5152,40 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			return e === null ? "" : e.toFixed(2).replace(".", i?.language.value === "de" ? "," : ".");
 		}
 		async function be() {
-			if (i && !j.value) {
-				ie.value = "loading", j.value = !0, P.value = null, ve(), me.value = !1;
+			if (i && !M.value) {
+				re.value = "loading", M.value = !0, F.value = null, ve(), pe.value = !1;
 				try {
 					let e = await i.loadTariff();
 					if (_) return;
 					if (!e.can_edit || e.tariff_type !== "time_of_use") throw { code: "forbidden" };
-					se.value = e, M.value = ye(e.base_price_ct_kwh), ce.value = ye(e.feed_in_price_ct_kwh), le.value = e.profiles?.time_of_use.pv_sensor ?? null, N.value = e.windows.map((e) => ({
-						key: fe++,
+					oe.value = e, N.value = ye(e.base_price_ct_kwh), se.value = ye(e.feed_in_price_ct_kwh), ce.value = e.profiles?.time_of_use.pv_sensor ?? null, P.value = e.windows.map((e) => ({
+						key: de++,
 						start: we(e.start),
 						end: we(e.end),
 						price: ye(e.price_ct_kwh)
-					})), pe.value = !1, A.value = !0;
+					})), fe.value = !1, j.value = !0;
 				} catch (e) {
 					R(e);
 				} finally {
-					j.value = !1, await pn(), A.value && ae.value?.querySelector("input")?.focus();
+					M.value = !1, await pn(), j.value && ie.value?.querySelector("input")?.focus();
 				}
 			}
 		}
 		function xe() {
-			A.value = !1, P.value = null, ve(), pe.value = !1, N.value = [], pn(() => oe.value?.focus());
+			j.value = !1, F.value = null, ve(), fe.value = !1, P.value = [], pn(() => ae.value?.focus());
 		}
 		async function z() {
-			N.value.push({
-				key: fe++,
+			P.value.push({
+				key: de++,
 				start: "",
 				end: "",
 				price: ""
-			}), await pn(), ae.value?.querySelector(".tariff-plan__window:last-of-type input")?.focus();
+			}), await pn(), ie.value?.querySelector(".tariff-plan__window:last-of-type input")?.focus();
 		}
 		async function Se(e) {
-			ve(N.value[e]?.key), N.value.splice(e, 1), await pn();
-			let t = ae.value?.querySelectorAll(".tariff-plan__window");
-			(t?.[Math.min(e, t.length - 1)]?.querySelector("input") ?? ae.value?.querySelector(".tariff-plan__add"))?.focus();
+			ve(P.value[e]?.key), P.value.splice(e, 1), await pn();
+			let t = ie.value?.querySelectorAll(".tariff-plan__window");
+			(t?.[Math.min(e, t.length - 1)]?.querySelector("input") ?? ie.value?.querySelector(".tariff-plan__add"))?.focus();
 		}
 		function Ce(e, t, n) {
 			if (!/^-?\d+(?:[.,]\d{1,2})?$/.test(e.trim())) return null;
@@ -5188,18 +5196,18 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			return e.length === 8 && e.endsWith(":00") ? e.slice(0, 5) : e;
 		}
 		async function Te() {
-			if (!i || !se.value || j.value || pe.value) return;
-			P.value = null, ve();
-			for (let e of N.value) for (let t of ["start", "end"]) {
+			if (!i || !oe.value || M.value || fe.value) return;
+			F.value = null, ve();
+			for (let e of P.value) for (let t of ["start", "end"]) {
 				let n = ge(e.key, t);
 				n && (e[t] = gs(n.value));
 			}
-			let e = Ce(M.value, -200, 500), t = Ce(ce.value, 0, 200), a = N.value.map((e) => ({
+			let e = Ce(N.value, -200, 500), t = Ce(se.value, 0, 200), a = P.value.map((e) => ({
 				...e,
 				value: Ce(e.price, -200, 500)
 			}));
 			if (e === null || t === null || a.some((e) => e.value === null)) {
-				P.value = "priceError";
+				F.value = "priceError";
 				return;
 			}
 			let o = [];
@@ -5207,11 +5215,11 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 				let t = $(e.start), n = $(e.end);
 				if (t === null || n === null || t === n) {
 					let r = t === null ? "start" : "end";
-					F.value = {
+					I.value = {
 						key: e.key,
 						field: r,
 						reason: t === null ? "startError" : n === null ? "endError" : "equalTimeError"
-					}, P.value = "timeError", await pn(), ge(e.key, r)?.focus();
+					}, F.value = "timeError", await pn(), ge(e.key, r)?.focus();
 					return;
 				}
 				o.push(...t < n ? [{
@@ -5227,14 +5235,14 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 			}
 			let s = o.filter((e) => e.start < e.end).sort((e, t) => e.start - t.start);
 			if (s.some((e, t) => t > 0 && e.start < s[t - 1].end)) {
-				P.value = "overlap";
+				F.value = "overlap";
 				return;
 			}
-			ie.value = "saving", j.value = !0;
+			re.value = "saving", M.value = !0;
 			let c = h(p.value);
 			try {
 				let o = {
-					revision: se.value.revision,
+					revision: oe.value.revision,
 					base_price_ct_kwh: e,
 					feed_in_price_ct_kwh: t,
 					windows: a.map((e) => ({
@@ -5249,98 +5257,91 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 						base_price_ct_kwh: o.base_price_ct_kwh,
 						feed_in_price_ct_kwh: o.feed_in_price_ct_kwh,
 						windows: o.windows,
-						pv_sensor: le.value
+						pv_sensor: ce.value
 					}
 				}) : await i.saveTariff(o);
 				if (_) return;
-				d.value = s, m.value = c, g(), xe(), me.value = !0, r("saved");
+				d.value = s, m.value = c, g(), xe(), pe.value = !0, r("saved");
 			} catch (e) {
 				R(e);
 			} finally {
-				j.value = !1;
+				M.value = !1;
 			}
 		}
-		return U(I, (e) => {
-			!e && A.value ? P.value = "disconnected" : e && P.value === "disconnected" && (P.value = null);
+		return U(me, (e) => {
+			!e && j.value ? F.value = "disconnected" : e && F.value === "disconnected" && (F.value = null);
 		}), U(b, (e) => {
 			!e && i?.ready.value && xe();
 		}), (t, n) => b.value ? (K(), q("section", {
 			key: 0,
-			class: "tariff-plan",
+			class: ue(["tariff-plan", { "tariff-plan--compact": e.compact }]),
 			"aria-labelledby": `${H(a)}-tariff`
 		}, [
-			J("header", Dc, [J("h2", { id: `${H(a)}-tariff` }, L(o.value.tariff), 9, Oc), A.value ? Z("", !0) : (K(), q("button", {
+			J("header", Dc, [J("h2", { id: `${H(a)}-tariff` }, L(o.value.tariff), 9, Oc), j.value ? Z("", !0) : (K(), q("button", {
 				key: 0,
 				ref_key: "editButton",
-				ref: oe,
+				ref: ae,
 				type: "button",
-				disabled: j.value || !I.value,
-				"aria-expanded": A.value,
+				disabled: M.value || !me.value,
+				"aria-expanded": j.value,
 				"aria-controls": `${H(a)}-editor`,
 				onClick: be
-			}, L(j.value ? o.value.loading : o.value.edit), 9, kc))]),
-			j.value ? (K(), q("p", Ac, L(o.value[ie.value]), 1)) : Z("", !0),
-			A.value ? Z("", !0) : (K(), q("p", jc, L(o.value.introduction), 1)),
-			e.compact && !A.value ? (K(), q("div", Mc, [
-				J("p", null, [
-					J("strong", null, L(o.value.base) + ": " + L(c(v.value.base_price_eur_kwh)), 1),
-					D.value ? (K(), q("span", Nc, L(o.value.low), 1)) : Z("", !0),
-					n[3] ||= J("br", null, null, -1),
-					X(L(o.value.remaining), 1)
-				]),
-				x.value.length ? (K(), q("ul", Pc, [(K(!0), q(G, null, W(x.value, (e, t) => (K(), q("li", { key: t }, [J("span", null, [X(L(o.value.everyDay) + " " + L(k(e.start)) + " – " + L(k(e.end)), 1), e.end < e.start ? (K(), q("span", Fc, " (" + L(o.value.overnightLabel) + ")", 1)) : Z("", !0)]), J("span", Ic, [E(e) ? (K(), q("span", Lc, L(o.value.low), 1)) : Z("", !0), J("strong", null, L(c(e.price_eur_kwh)), 1)])]))), 128))])) : (K(), q("p", Rc, L(o.value.noWindows), 1)),
-				w.value ? (K(), q("p", zc, [
-					J("strong", null, L(o.value.lowTariffPrice) + ":", 1),
-					X(" " + L(c(v.value.low_tariff_price_eur_kwh)) + ". ", 1),
-					ee.value ? (K(), q(G, { key: 0 }, [X(L(o.value.lowUntil) + " " + L(T.value) + ".", 1)], 64)) : (K(), q(G, { key: 1 }, [X(L(o.value.notLow), 1)], 64))
-				])) : d.value || !y.value ? (K(), q("p", Bc, L(o.value.awaitingTariff), 1)) : (K(), q("p", Vc, L(o.value.noLowTariff), 1)),
-				J("p", Hc, L(o.value.impactHint), 1)
+			}, L(M.value ? o.value.loading : o.value.edit), 9, kc))]),
+			M.value ? (K(), q("p", Ac, L(o.value[re.value]), 1)) : Z("", !0),
+			!j.value && !e.compact ? (K(), q("p", jc, L(o.value.introduction), 1)) : Z("", !0),
+			e.compact ? (K(), q("div", Mc, [$n(t.$slots, "current-price"), w.value ? (K(), q("p", Nc, [J("span", null, L(o.value.lowTariffPrice), 1), J("strong", null, L(c(v.value.low_tariff_price_eur_kwh)), 1)])) : Z("", !0)])) : Z("", !0),
+			e.compact && !j.value ? (K(), q("div", Pc, [
+				x.value.length ? (K(), q("ul", Fc, [(K(!0), q(G, null, W(x.value, (e, t) => (K(), q("li", { key: t }, [J("span", null, [X(L(o.value.everyDay) + " " + L(A(e.start)) + " – " + L(A(e.end)), 1), e.end < e.start ? (K(), q("span", Ic, " (" + L(o.value.overnightLabel) + ")", 1)) : Z("", !0)]), J("span", Lc, [D(e) ? (K(), q("span", Rc, L(o.value.low), 1)) : Z("", !0), J("strong", null, L(c(e.price_eur_kwh)), 1)])]))), 128))])) : (K(), q("p", zc, L(o.value.noWindows), 1)),
+				J("div", Bc, [J("span", null, [X(L(o.value.base), 1), J("small", null, L(o.value.remaining), 1)]), J("span", Vc, [O.value ? (K(), q("span", Hc, L(o.value.low), 1)) : Z("", !0), J("strong", null, L(c(v.value.base_price_eur_kwh)), 1)])]),
+				J("div", Uc, [J("span", null, L(o.value.feed), 1), J("strong", null, L(c(v.value.feed_in_price_eur_kwh)), 1)]),
+				w.value ? (K(), q("p", Wc, [E.value ? (K(), q(G, { key: 0 }, [X(L(o.value.lowUntil) + " " + L(T.value) + ".", 1)], 64)) : (K(), q(G, { key: 1 }, [X(L(o.value.notLow), 1)], 64))])) : d.value || !y.value ? (K(), q("p", Gc, L(o.value.awaitingTariff), 1)) : (K(), q("p", Kc, L(o.value.noLowTariff), 1)),
+				J("p", qc, L(o.value.compactImpact), 1)
 			])) : Z("", !0),
-			me.value ? (K(), q("p", Uc, L(o.value.saved), 1)) : Z("", !0),
+			pe.value ? (K(), q("p", Jc, L(o.value.saved), 1)) : Z("", !0),
 			he.value ? (K(), q("p", {
-				key: 4,
+				key: 5,
 				id: `${H(a)}-error`,
 				role: "alert",
 				class: "tariff-plan__error"
-			}, L(he.value), 9, Wc)) : Z("", !0),
-			A.value ? (K(), q("form", {
-				key: 5,
+			}, L(he.value), 9, Yc)) : Z("", !0),
+			j.value ? (K(), q("form", {
+				key: 6,
 				id: `${H(a)}-editor`,
 				ref_key: "editor",
-				ref: ae,
+				ref: ie,
 				class: "tariff-plan__editor",
-				"aria-busy": j.value,
+				"aria-busy": M.value,
 				novalidate: "",
 				onSubmit: Wa(Te, ["prevent"])
 			}, [
-				se.value?.base_price_ct_kwh === null ? (K(), q("p", Kc, L(o.value.first), 1)) : Z("", !0),
-				J("fieldset", { disabled: j.value || !I.value }, [
-					J("p", Jc, L(o.value.gross), 1),
-					J("div", Yc, [J("h3", null, L(o.value.baseSection), 1), J("label", null, [
+				oe.value?.base_price_ct_kwh === null ? (K(), q("p", Zc, L(o.value.first), 1)) : Z("", !0),
+				J("fieldset", { disabled: M.value || !me.value }, [
+					J("p", $c, L(o.value.gross), 1),
+					J("div", el, [J("h3", null, L(o.value.baseSection), 1), J("label", null, [
 						X(L(o.value.base) + " (ct/kWh)", 1),
 						En(J("input", {
-							"onUpdate:modelValue": n[0] ||= (e) => M.value = e,
+							"onUpdate:modelValue": n[0] ||= (e) => N.value = e,
 							name: "base_price",
 							type: "text",
 							inputmode: "decimal",
 							autocomplete: "off",
 							"aria-describedby": `${H(a)}-base-hint`
-						}, null, 8, Xc), [[Ia, M.value]]),
-						J("small", { id: `${H(a)}-base-hint` }, L(o.value.baseHint), 9, Zc)
+						}, null, 8, tl), [[Ia, N.value]]),
+						J("small", { id: `${H(a)}-base-hint` }, L(o.value.baseHint), 9, nl)
 					])]),
-					J("div", Qc, [
+					J("div", rl, [
 						J("h3", null, L(o.value.windowsSection), 1),
-						J("p", $c, L(o.value.windowsHint), 1),
+						J("p", il, L(o.value.windowsHint), 1),
 						J("p", {
 							id: `${H(a)}-time-hint`,
 							class: "tariff-plan__hint"
-						}, L(o.value.timeHint), 9, el),
-						N.value.length ? Z("", !0) : (K(), q("p", tl, L(o.value.noWindows), 1)),
-						(K(!0), q(G, null, W(N.value, (e, t) => (K(), q("div", {
+						}, L(o.value.timeHint), 9, al),
+						P.value.length ? Z("", !0) : (K(), q("p", ol, L(o.value.noWindows), 1)),
+						(K(!0), q(G, null, W(P.value, (e, t) => (K(), q("div", {
 							key: e.key,
 							class: "tariff-plan__window"
 						}, [
-							J("span", nl, L(o.value.window) + " " + L(t + 1), 1),
+							J("span", sl, L(o.value.window) + " " + L(t + 1), 1),
 							J("label", null, [X(L(o.value.from), 1), En(J("input", {
 								"onUpdate:modelValue": (t) => e.start = t,
 								name: `window_${e.key}_start`,
@@ -5349,12 +5350,12 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 								inputmode: "numeric",
 								autocomplete: "off",
 								placeholder: "HH:MM",
-								"aria-invalid": F.value?.key === e.key && F.value.field === "start",
-								"aria-describedby": F.value?.key === e.key && F.value.field === "start" ? `${H(a)}-time-hint ${H(a)}-error` : `${H(a)}-time-hint`,
+								"aria-invalid": I.value?.key === e.key && I.value.field === "start",
+								"aria-describedby": I.value?.key === e.key && I.value.field === "start" ? `${H(a)}-time-hint ${H(a)}-error` : `${H(a)}-time-hint`,
 								onInput: (t) => ve(e.key),
 								onChange: (t) => _e(e.key, "start", t),
 								"aria-label": `${o.value.window} ${t + 1}: ${o.value.from}`
-							}, null, 40, rl), [[Ia, e.start]])]),
+							}, null, 40, cl), [[Ia, e.start]])]),
 							J("label", null, [X(L(o.value.to), 1), En(J("input", {
 								"onUpdate:modelValue": (t) => e.end = t,
 								name: `window_${e.key}_end`,
@@ -5363,12 +5364,12 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 								inputmode: "numeric",
 								autocomplete: "off",
 								placeholder: "HH:MM",
-								"aria-invalid": F.value?.key === e.key && F.value.field === "end",
-								"aria-describedby": F.value?.key === e.key && F.value.field === "end" ? `${H(a)}-time-hint ${H(a)}-error` : `${H(a)}-time-hint`,
+								"aria-invalid": I.value?.key === e.key && I.value.field === "end",
+								"aria-describedby": I.value?.key === e.key && I.value.field === "end" ? `${H(a)}-time-hint ${H(a)}-error` : `${H(a)}-time-hint`,
 								onInput: (t) => ve(e.key),
 								onChange: (t) => _e(e.key, "end", t),
 								"aria-label": `${o.value.window} ${t + 1}: ${o.value.to}`
-							}, null, 40, il), [[Ia, e.end]])]),
+							}, null, 40, ll), [[Ia, e.end]])]),
 							J("label", null, [X(L(o.value.price) + " (ct/kWh)", 1), En(J("input", {
 								"onUpdate:modelValue": (t) => e.price = t,
 								class: "tariff-plan__price",
@@ -5376,128 +5377,128 @@ var hc = ["aria-labelledby"], gc = ["id"], _c = {
 								inputmode: "decimal",
 								autocomplete: "off",
 								"aria-label": `${o.value.window} ${t + 1}: ${o.value.price} (ct/kWh)`
-							}, null, 8, al), [[Ia, e.price]])]),
+							}, null, 8, ul), [[Ia, e.price]])]),
 							J("button", {
 								type: "button",
 								class: "tariff-plan__remove",
 								"aria-label": `${o.value.window} ${t + 1}: ${o.value.remove}`,
 								onClick: (e) => Se(t)
-							}, L(o.value.remove), 9, ol)
+							}, L(o.value.remove), 9, dl)
 						]))), 128)),
-						N.value.length < 8 ? (K(), q("button", {
+						P.value.length < 8 ? (K(), q("button", {
 							key: 1,
 							type: "button",
 							class: "tariff-plan__add",
 							onClick: z
 						}, L(o.value.add), 1)) : Z("", !0),
-						N.value.length ? (K(), q("p", sl, L(o.value.overnight), 1)) : Z("", !0)
+						P.value.length ? (K(), q("p", fl, L(o.value.overnight), 1)) : Z("", !0)
 					]),
-					J("div", cl, [J("h3", null, L(o.value.feedSection), 1), J("label", null, [
+					J("div", pl, [J("h3", null, L(o.value.feedSection), 1), J("label", null, [
 						X(L(o.value.feed) + " (ct/kWh)", 1),
 						En(J("input", {
-							"onUpdate:modelValue": n[1] ||= (e) => ce.value = e,
+							"onUpdate:modelValue": n[1] ||= (e) => se.value = e,
 							name: "feed_in_price",
 							type: "text",
 							inputmode: "decimal",
 							autocomplete: "off",
 							"aria-describedby": `${H(a)}-feed-hint`
-						}, null, 8, ll), [[Ia, ce.value]]),
-						J("small", { id: `${H(a)}-feed-hint` }, L(o.value.feedHint), 9, ul)
+						}, null, 8, ml), [[Ia, se.value]]),
+						J("small", { id: `${H(a)}-feed-hint` }, L(o.value.feedHint), 9, hl)
 					])]),
 					e.compact ? (K(), q("details", {
 						key: 0,
 						class: "tariff-plan__details tariff-plan__pv-details",
-						open: ue.value || P.value === "bridgePvRequired" || P.value === "pvMissing"
+						open: le.value || F.value === "bridgePvRequired" || F.value === "pvMissing"
 					}, [
 						J("summary", null, L(o.value.pvDetails), 1),
-						J("p", fl, L(o.value.pvHint), 1),
+						J("p", _l, L(o.value.pvHint), 1),
 						Y(Ws, {
-							modelValue: le.value,
-							"onUpdate:modelValue": n[2] ||= (e) => le.value = e,
+							modelValue: ce.value,
+							"onUpdate:modelValue": n[2] ||= (e) => ce.value = e,
 							hass: e.hass,
-							label: ue.value ? o.value.pvRequired : o.value.pv
+							label: le.value ? o.value.pvRequired : o.value.pv
 						}, null, 8, [
 							"modelValue",
 							"hass",
 							"label"
 						])
-					], 8, dl)) : Z("", !0),
-					J("div", pl, [
+					], 8, gl)) : Z("", !0),
+					J("div", vl, [
 						J("strong", null, L(o.value.impact), 1),
 						J("p", null, L(o.value.impactHint), 1),
 						J("p", null, L(o.value.saveHint), 1)
 					])
-				], 8, qc),
-				J("div", ml, [
+				], 8, Qc),
+				J("div", yl, [
 					J("button", {
 						type: "submit",
 						class: "tariff-plan__save",
-						disabled: j.value || !I.value || pe.value
-					}, L(j.value ? o.value[ie.value] : o.value.save), 9, hl),
+						disabled: M.value || !me.value || fe.value
+					}, L(M.value ? o.value[re.value] : o.value.save), 9, bl),
 					J("button", {
 						type: "button",
-						disabled: j.value,
+						disabled: M.value,
 						onClick: xe
-					}, L(o.value.cancel), 9, gl),
-					pe.value ? (K(), q("button", {
+					}, L(o.value.cancel), 9, xl),
+					fe.value ? (K(), q("button", {
 						key: 0,
 						type: "button",
-						disabled: j.value || !I.value,
+						disabled: M.value || !me.value,
 						onClick: be
-					}, L(o.value.reload), 9, _l)) : Z("", !0)
+					}, L(o.value.reload), 9, Sl)) : Z("", !0)
 				])
-			], 40, Gc)) : Z("", !0),
-			!A.value && !e.compact && !d.value ? (K(), q("div", vl, [J("p", yl, [J("span", null, L(o.value.currentPrice), 1), J("strong", null, L(C.value ? l.value : o.value.unavailable), 1)]), w.value ? (K(), q("p", bl, [
+			], 40, Xc)) : Z("", !0),
+			!j.value && !e.compact && !d.value ? (K(), q("div", Cl, [J("p", wl, [J("span", null, L(o.value.currentPrice), 1), J("strong", null, L(C.value ? l.value : o.value.unavailable), 1)]), w.value ? (K(), q("p", Tl, [
 				J("strong", null, L(o.value.lowTariffPrice) + ":", 1),
 				X(" " + L(c(v.value.low_tariff_price_eur_kwh)) + ". ", 1),
-				ee.value ? (K(), q(G, { key: 0 }, [X(L(o.value.lowUntil) + " " + L(T.value) + ". ", 1)], 64)) : (K(), q(G, { key: 1 }, [X(L(o.value.notLow), 1)], 64))
-			])) : (K(), q("p", xl, L(o.value.noLowTariff), 1))])) : Z("", !0),
-			!A.value && !e.compact && C.value && v.value.next_price_change_at && !d.value ? (K(), q("p", Sl, [J("strong", null, L(o.value.next) + ":", 1), X(" " + L(u(v.value.next_price_change_at)), 1)])) : Z("", !0),
-			!A.value && !e.compact ? (K(), q("details", Cl, [
+				E.value ? (K(), q(G, { key: 0 }, [X(L(o.value.lowUntil) + " " + L(T.value) + ". ", 1)], 64)) : (K(), q(G, { key: 1 }, [X(L(o.value.notLow), 1)], 64))
+			])) : (K(), q("p", El, L(o.value.noLowTariff), 1))])) : Z("", !0),
+			!j.value && !e.compact && C.value && v.value.next_price_change_at && !d.value ? (K(), q("p", Dl, [J("strong", null, L(o.value.next) + ":", 1), X(" " + L(u(v.value.next_price_change_at)), 1)])) : Z("", !0),
+			!j.value && !e.compact ? (K(), q("details", Ol, [
 				J("summary", null, L(o.value.allPrices), 1),
 				J("div", {
 					class: "tariff-plan__scroll",
 					tabindex: "0",
 					role: "region",
 					"aria-label": o.value.allPrices
-				}, [J("table", Tl, [J("thead", null, [J("tr", null, [
-					J("th", El, L(o.value.status), 1),
-					J("th", Dl, L(o.value.from), 1),
-					J("th", Ol, L(o.value.to), 1),
-					J("th", kl, L(o.value.price), 1)
+				}, [J("table", Al, [J("thead", null, [J("tr", null, [
+					J("th", jl, L(o.value.status), 1),
+					J("th", Ml, L(o.value.from), 1),
+					J("th", Nl, L(o.value.to), 1),
+					J("th", Pl, L(o.value.price), 1)
 				])]), J("tbody", null, [(K(!0), q(G, null, W(x.value, (e, t) => (K(), q("tr", {
 					key: t,
-					class: de({
-						"tariff-plan__current": ne(e),
-						"tariff-plan__low": E(e)
+					class: ue({
+						"tariff-plan__current": te(e),
+						"tariff-plan__low": D(e)
 					})
 				}, [
-					J("td", null, L(te(ne(e), E(e))), 1),
-					J("td", null, L(k(e.start)), 1),
-					J("td", null, L(k(e.end)), 1),
+					J("td", null, L(ee(te(e), D(e))), 1),
+					J("td", null, L(A(e.start)), 1),
+					J("td", null, L(A(e.end)), 1),
 					J("td", null, L(c(e.price_eur_kwh)), 1)
-				], 2))), 128)), J("tr", { class: de({
-					"tariff-plan__current": re.value,
-					"tariff-plan__low": D.value
+				], 2))), 128)), J("tr", { class: ue({
+					"tariff-plan__current": ne.value,
+					"tariff-plan__low": O.value
 				}) }, [
-					J("td", null, L(te(re.value, D.value)), 1),
-					J("td", Al, L(o.value.base), 1),
+					J("td", null, L(ee(ne.value, O.value)), 1),
+					J("td", Fl, L(o.value.base), 1),
 					J("td", null, L(c(v.value.base_price_eur_kwh)), 1)
-				], 2)])])], 8, wl),
+				], 2)])])], 8, kl),
 				J("p", null, [J("strong", null, L(o.value.feed) + ":", 1), X(" " + L(c(v.value.feed_in_price_eur_kwh)), 1)]),
-				!C.value && !d.value ? (K(), q("p", jl, [X(L(o.value.noPrice), 1), typeof S.value == "string" && S.value ? (K(), q("span", Ml, L(o.value.technicalReason) + ": " + L(S.value), 1)) : Z("", !0)])) : Z("", !0)
+				!C.value && !d.value ? (K(), q("p", Il, [X(L(o.value.noPrice), 1), typeof S.value == "string" && S.value ? (K(), q("span", Ll, L(o.value.technicalReason) + ": " + L(S.value), 1)) : Z("", !0)])) : Z("", !0)
 			])) : Z("", !0),
-			J("details", Nl, [
+			J("details", Rl, [
 				J("summary", null, L(o.value.details), 1),
 				J("p", null, L(o.value.rule), 1),
 				J("p", null, L(o.value.configure), 1)
 			])
-		], 8, Ec)) : Z("", !0);
+		], 10, Ec)) : Z("", !0);
 	}
-}), [["styles", [".tariff-plan{border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));min-width:0;box-shadow:var(--ha-card-box-shadow,none);color:var(--primary-text-color,#212121);padding:24px}.tariff-plan h2{margin:0 0 20px;font-size:18px;font-weight:500;line-height:1.5}.tariff-plan__introduction{color:var(--secondary-text-color,#666);margin:0 0 16px}.tariff-plan__compact-summary{margin:0}.tariff-plan__periods{margin:12px 0;padding:0;list-style:none}.tariff-plan__periods li{border-top:1px solid var(--divider-color,#e0e0e0);flex-wrap:wrap;justify-content:space-between;gap:4px 12px;padding:10px 0;line-height:1.5;display:flex}.tariff-plan__period-price{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.tariff-plan__badge{border:1px solid var(--success-color,#43a047);border-radius:6px;margin-inline-start:8px;padding:2px 7px;font-size:12px;font-weight:500;line-height:1.5;display:inline-block}.tariff-plan__periods strong{white-space:nowrap}.tariff-plan__step{margin:20px 0}.tariff-plan__step h3{margin:0 0 10px;font-size:15px;line-height:1.5}.tariff-plan__step>label{max-width:460px}.tariff-plan__step>label input{max-width:240px}.tariff-plan__step .tariff-plan__hint{margin-top:0}.tariff-plan__impact{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;margin:16px 0;padding:14px;font-size:14px;line-height:1.6}.tariff-plan__impact p{margin:6px 0}.tariff-plan__empty{color:var(--secondary-text-color,#666);font-size:14px}.tariff-plan__overview{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;display:grid}.tariff-plan__overview>p{margin:0}.tariff-plan__current-price{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;flex-direction:column;gap:4px;padding:12px;display:flex}.tariff-plan__current-price>span{color:var(--secondary-text-color,#666);font-size:14px}.tariff-plan__current-price>strong{font-variant-numeric:tabular-nums;font-size:26px}.tariff-plan__low-status{padding:12px 0;font-size:14px}.tariff-plan__low-unavailable{border-inline-start:3px solid var(--warning-color,#ff9800);padding-inline-start:12px;font-size:14px}.tariff-plan p{overflow-wrap:anywhere;line-height:1.6}.tariff-plan p:last-child{margin-bottom:0}.tariff-plan__scroll{overflow-x:auto}.tariff-plan__table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%;line-height:1.5}.tariff-plan__table th,.tariff-plan__table td{text-align:left;white-space:nowrap;border-bottom:1px solid var(--divider-color,#e0e0e0);padding:10px 8px}.tariff-plan__table th:last-child,.tariff-plan__table td:last-child{text-align:right}.tariff-plan__current{background:var(--secondary-background-color,color-mix(in srgb, currentColor 8%, transparent));font-weight:600}.tariff-plan__header{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;display:flex}.tariff-plan__header h2{margin:0}.tariff-plan button{font:inherit;cursor:pointer;min-height:44px;color:var(--primary-color,#03a9f4);border:1px solid var(--divider-color,#e0e0e0);background:0 0;border-radius:8px;padding:8px 12px}.tariff-plan button:disabled{cursor:default;opacity:.5}.tariff-plan button:focus-visible,.tariff-plan input:focus-visible,.tariff-plan summary:focus-visible,.tariff-plan__scroll:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:2px}.tariff-plan__editor{margin-bottom:16px}.tariff-plan__editor fieldset{border:0;min-width:0;margin:0;padding:0}.tariff-plan__editor label{flex-direction:column;gap:6px;min-width:0;font-size:14px;display:flex}.tariff-plan__editor input{box-sizing:border-box;border:1px solid var(--divider-color,#bbb);width:100%;min-width:0;min-height:44px;font:inherit;font-variant-numeric:tabular-nums;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border-radius:6px;padding:10px}.tariff-plan__editor small,.tariff-plan__hint{color:var(--secondary-text-color,#666);font-size:13px}.tariff-plan__window{border-top:1px solid var(--divider-color,#e0e0e0);grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:12px;margin-top:20px;padding-top:16px;display:grid}.tariff-plan__window-name{grid-column:1/-1;font-size:14px;font-weight:600}.tariff-plan__window label:nth-of-type(3){grid-column:1}.tariff-plan__remove{justify-self:end}.tariff-plan__add{margin-top:16px}.tariff-plan__actions{flex-wrap:wrap;gap:8px;display:flex}.tariff-plan .tariff-plan__save{background:var(--primary-color,#03a9f4);color:var(--text-primary-color,#fff)}.tariff-plan__error{color:var(--error-color,#db4437)}.tariff-plan input[aria-invalid=true]{border-color:var(--error-color,#db4437)}.tariff-plan__details{margin-top:14px;font-size:14px}.tariff-plan__details summary{cursor:pointer;color:var(--secondary-text-color,#666);box-sizing:border-box;min-height:44px;padding:12px 0;line-height:1.5}@media (max-width:400px){.tariff-plan__window{grid-template-columns:minmax(0,1fr)}}@media (max-width:600px){.tariff-plan{padding:20px}}@container sax-content (width>=860px){.tariff-plan{padding:18px}.tariff-plan h2{margin-bottom:12px;font-size:16px}.tariff-plan p{margin-top:10px;line-height:1.5}.tariff-plan__table th,.tariff-plan__table td{padding:7px 8px}}"]]]);
+}), [["styles", [".tariff-plan{border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));min-width:0;box-shadow:var(--ha-card-box-shadow,none);color:var(--primary-text-color,#212121);padding:24px}.tariff-plan h2{margin:0 0 20px;font-size:18px;font-weight:500;line-height:1.5}.tariff-plan__introduction{color:var(--secondary-text-color,#666);margin:0 0 16px}.tariff-plan__compact-summary{margin:0}.tariff-plan__periods{margin:12px 0;padding:0;list-style:none}.tariff-plan__periods li{border-top:1px solid var(--divider-color,#e0e0e0);flex-wrap:wrap;justify-content:space-between;gap:4px 12px;padding:10px 0;line-height:1.5;display:flex}.tariff-plan__period-price{flex-wrap:wrap;align-items:center;gap:8px;display:flex}.tariff-plan__badge{border:1px solid var(--success-color,#43a047);border-radius:6px;margin-inline-start:8px;padding:2px 7px;font-size:12px;font-weight:500;line-height:1.5;display:inline-block}.tariff-plan__periods strong{white-space:nowrap}.tariff-plan__step{margin:20px 0}.tariff-plan__step h3{margin:0 0 10px;font-size:15px;line-height:1.5}.tariff-plan__step>label{max-width:460px}.tariff-plan__step>label input{max-width:240px}.tariff-plan__step .tariff-plan__hint{margin-top:0}.tariff-plan__impact{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;margin:16px 0;padding:14px;font-size:14px;line-height:1.6}.tariff-plan__impact p{margin:6px 0}.tariff-plan__empty{color:var(--secondary-text-color,#666);font-size:14px}.tariff-plan__overview{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;display:grid}.tariff-plan__overview>p{margin:0}.tariff-plan__current-price{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;flex-direction:column;gap:4px;padding:12px;display:flex}.tariff-plan__current-price>span{color:var(--secondary-text-color,#666);font-size:14px}.tariff-plan__current-price>strong{font-variant-numeric:tabular-nums;font-size:26px}.tariff-plan__low-status{padding:12px 0;font-size:14px}.tariff-plan__low-unavailable{border-inline-start:3px solid var(--warning-color,#ff9800);padding-inline-start:12px;font-size:14px}.tariff-plan p{overflow-wrap:anywhere;line-height:1.6}.tariff-plan p:last-child{margin-bottom:0}.tariff-plan__scroll{overflow-x:auto}.tariff-plan__table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%;line-height:1.5}.tariff-plan__table th,.tariff-plan__table td{text-align:left;white-space:nowrap;border-bottom:1px solid var(--divider-color,#e0e0e0);padding:10px 8px}.tariff-plan__table th:last-child,.tariff-plan__table td:last-child{text-align:right}.tariff-plan__current{background:var(--secondary-background-color,color-mix(in srgb, currentColor 8%, transparent));font-weight:600}.tariff-plan__header{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;display:flex}.tariff-plan__header h2{margin:0}.tariff-plan button{font:inherit;cursor:pointer;min-height:44px;color:var(--primary-color,#03a9f4);border:1px solid var(--divider-color,#e0e0e0);background:0 0;border-radius:8px;padding:8px 12px}.tariff-plan button:disabled{cursor:default;opacity:.5}.tariff-plan button:focus-visible,.tariff-plan input:focus-visible,.tariff-plan summary:focus-visible,.tariff-plan__scroll:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:2px}.tariff-plan__editor{margin-bottom:16px}.tariff-plan__editor fieldset{border:0;min-width:0;margin:0;padding:0}.tariff-plan__editor label{flex-direction:column;gap:6px;min-width:0;font-size:14px;display:flex}.tariff-plan__editor input{box-sizing:border-box;border:1px solid var(--divider-color,#bbb);width:100%;min-width:0;min-height:44px;font:inherit;font-variant-numeric:tabular-nums;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border-radius:6px;padding:10px}.tariff-plan__editor small,.tariff-plan__hint{color:var(--secondary-text-color,#666);font-size:13px}.tariff-plan__window{border-top:1px solid var(--divider-color,#e0e0e0);grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:12px;margin-top:20px;padding-top:16px;display:grid}.tariff-plan__window-name{grid-column:1/-1;font-size:14px;font-weight:600}.tariff-plan__window label:nth-of-type(3){grid-column:1}.tariff-plan__remove{justify-self:end}.tariff-plan__add{margin-top:16px}.tariff-plan__actions{flex-wrap:wrap;gap:8px;display:flex}.tariff-plan .tariff-plan__save{background:var(--primary-color,#03a9f4);color:var(--text-primary-color,#fff)}.tariff-plan__error{color:var(--error-color,#db4437)}.tariff-plan input[aria-invalid=true]{border-color:var(--error-color,#db4437)}.tariff-plan__details{margin-top:14px;font-size:14px}.tariff-plan__details summary{cursor:pointer;color:var(--secondary-text-color,#666);box-sizing:border-box;min-height:44px;padding:12px 0;line-height:1.5}@media (max-width:400px){.tariff-plan__window{grid-template-columns:minmax(0,1fr)}}@media (max-width:600px){.tariff-plan{padding:20px}}@container sax-content (width>=860px){.tariff-plan{padding:18px}.tariff-plan h2{margin-bottom:12px;font-size:16px}.tariff-plan p{margin-top:10px;line-height:1.5}.tariff-plan__table th,.tariff-plan__table td{padding:7px 8px}}.tariff-plan.tariff-plan--compact{box-shadow:none;background:0 0;border:0;border-radius:0;padding:0}.tariff-plan--compact .tariff-plan__header{border-bottom:1px solid var(--divider-color,#ddd);flex-wrap:nowrap;margin-bottom:14px;padding-bottom:12px}.tariff-plan--compact .tariff-plan__header h2{margin:0;font-size:18px}.tariff-plan--compact .tariff-plan__header button{flex-shrink:0}.tariff-plan__price-highlights{flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px;margin-bottom:12px;display:flex}.tariff-plan--compact .tariff-plan__low-status{text-align:right;margin:0;padding:0}.tariff-plan__low-status>span{color:var(--secondary-text-color,#666);display:block}.tariff-plan__low-status>strong{font-size:20px;font-weight:500;display:block}.tariff-plan__base-row,.tariff-plan__feed-row{border-top:1px solid var(--divider-color,#ddd);justify-content:space-between;align-items:center;gap:8px 12px;padding:10px 0;display:flex}.tariff-plan__base-row small{color:var(--secondary-text-color,#666);font-size:13px;display:block}.tariff-plan__feed-row>span{color:var(--secondary-text-color,#666)}.tariff-plan__feed-row strong{white-space:nowrap;font-weight:500}.tariff-plan--compact .tariff-plan__periods{margin:0}.tariff-plan--compact .tariff-plan__period-status{color:var(--secondary-text-color,#666);font-size:13px}.tariff-plan--compact .tariff-plan__impact{margin:10px 0 0;padding:8px 10px}.tariff-plan--compact>.tariff-plan__details{border-top:1px solid var(--divider-color,#ddd);margin-top:8px}"]]]);
 //#endregion
 //#region src/tariff-chart.ts
-function Fl(e, t = 1e3) {
+function Bl(e, t = 1e3) {
 	let n = Date.parse(e?.start ?? ""), r = Date.parse(e?.end ?? ""), i = Number.isFinite(n) && Number.isFinite(r) && r > n ? (e?.slots ?? []).flatMap((e) => {
 		let t = Date.parse(e.start), i = Date.parse(e.end);
 		return Number.isFinite(t) && Number.isFinite(i) && i > t && t >= n && i <= r && Number.isFinite(e.price_ct_kwh) ? [{
@@ -5530,29 +5531,29 @@ function Fl(e, t = 1e3) {
 }
 //#endregion
 //#region src/components/TariffPriceChart.vue?vue&type=script&setup=true&lang.ts
-var Il = ["aria-busy"], Ll = {
+var Vl = ["aria-busy"], Hl = {
 	key: 0,
 	role: "status"
-}, Rl = {
+}, Ul = {
 	key: 1,
 	class: "tariff-price-chart__empty",
 	role: "status"
-}, zl = {
+}, Wl = {
 	key: 0,
 	class: "tariff-price-chart__partial"
-}, Bl = ["viewBox", "aria-label"], Vl = [
+}, Gl = ["viewBox", "aria-label"], Kl = [
 	"x2",
 	"y1",
 	"y2"
-], Hl = ["y"], Ul = ["d"], Wl = ["x1", "x2"], Gl = ["x"], Kl = { key: 2 }, ql = [
+], ql = ["y"], Jl = ["d"], Yl = ["x1", "x2"], Xl = ["x"], Zl = { key: 2 }, Ql = [
 	"x1",
 	"x2",
 	"y1",
 	"y2"
-], Jl = ["x", "text-anchor"], Yl = {
+], $l = ["x", "text-anchor"], eu = {
 	class: "tariff-price-chart__detail",
 	"aria-live": "polite"
-}, Xl = { class: "tariff-price-chart__scroll" }, Zl = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
+}, tu = { class: "tariff-price-chart__scroll" }, nu = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
 	__name: "TariffPriceChart",
 	props: {
 		series: { type: [Object, null] },
@@ -5590,7 +5591,7 @@ var Il = ["aria-busy"], Ll = {
 				a.value = Math.max(180, e[0]?.contentRect.width ?? 620);
 			}), o.observe(i.value));
 		}), Zn(() => o?.disconnect());
-		let s = Q(() => Fl(t.series, a.value)), c = /* @__PURE__ */ V(null), l = /* @__PURE__ */ V(!1);
+		let s = Q(() => Bl(t.series, a.value)), c = /* @__PURE__ */ V(null), l = /* @__PURE__ */ V(!1);
 		U(() => t.series, () => {
 			c.value = null, l.value = !1;
 		});
@@ -5634,8 +5635,8 @@ var Il = ["aria-busy"], Ll = {
 			ref: i,
 			class: "tariff-price-chart",
 			"aria-busy": e.loading
-		}, [e.loading ? (K(), q("p", Ll, L(r.value.loading), 1)) : s.value.slots.length ? (K(), q(G, { key: 2 }, [
-			e.series?.status === "partial" ? (K(), q("p", zl, L(r.value.partial), 1)) : Z("", !0),
+		}, [e.loading ? (K(), q("p", Hl, L(r.value.loading), 1)) : s.value.slots.length ? (K(), q(G, { key: 2 }, [
+			e.series?.status === "partial" ? (K(), q("p", Wl, L(r.value.partial), 1)) : Z("", !0),
 			(K(), q("svg", {
 				viewBox: `0 0 ${a.value} 252`,
 				preserveAspectRatio: "none",
@@ -5657,15 +5658,15 @@ var Il = ["aria-busy"], Ll = {
 					y1: s.value.y(e),
 					y2: s.value.y(e),
 					class: "tariff-price-chart__grid"
-				}, null, 8, Vl), J("text", {
+				}, null, 8, Kl), J("text", {
 					x: "40",
 					y: s.value.y(e) + 4,
 					"text-anchor": "end"
-				}, L(u(e)), 9, Hl)]))), 128)),
+				}, L(u(e)), 9, ql)]))), 128)),
 				J("path", {
 					d: s.value.path,
 					class: "tariff-price-chart__line"
-				}, null, 8, Ul),
+				}, null, 8, Jl),
 				h.value ? (K(), q("line", {
 					key: 0,
 					x1: s.value.x(m.value),
@@ -5673,29 +5674,29 @@ var Il = ["aria-busy"], Ll = {
 					y1: "25",
 					y2: "216",
 					class: "tariff-price-chart__now"
-				}, null, 8, Wl)) : Z("", !0),
+				}, null, 8, Yl)) : Z("", !0),
 				h.value ? (K(), q("text", {
 					key: 1,
 					x: Math.max(68, Math.min(a.value - 30, s.value.x(m.value))),
 					y: "23",
 					"text-anchor": "middle"
-				}, L(r.value.now), 9, Gl)) : Z("", !0),
-				p.value ? (K(), q("g", Kl, [J("line", {
+				}, L(r.value.now), 9, Xl)) : Z("", !0),
+				p.value ? (K(), q("g", Zl, [J("line", {
 					x1: s.value.x(p.value.from),
 					x2: s.value.x(p.value.to),
 					y1: s.value.y(p.value.price_ct_kwh),
 					y2: s.value.y(p.value.price_ct_kwh),
 					class: "tariff-price-chart__selected"
-				}, null, 8, ql)])) : Z("", !0),
+				}, null, 8, Ql)])) : Z("", !0),
 				(K(!0), q(G, null, W(g.value, (e, t) => (K(), q("text", {
 					key: e,
 					x: s.value.x(e),
 					y: "244",
 					"text-anchor": t === 0 ? "start" : t === 2 ? "end" : "middle"
-				}, L(t === 2 ? "24:00" : f(new Date(e).toISOString())), 9, Jl))), 128))
-			], 40, Bl)),
-			J("p", Yl, L(p.value ? `${f(p.value.start, !0)}–${f(p.value.end, !0)} · ${u(p.value.price_ct_kwh)} ct/kWh` : l.value ? r.value.gap : r.value.hint), 1),
-			J("details", null, [J("summary", null, L(r.value.table), 1), J("div", Xl, [J("table", null, [J("thead", null, [J("tr", null, [
+				}, L(t === 2 ? "24:00" : f(new Date(e).toISOString())), 9, $l))), 128))
+			], 40, Gl)),
+			J("p", eu, L(p.value ? `${f(p.value.start, !0)}–${f(p.value.end, !0)} · ${u(p.value.price_ct_kwh)} ct/kWh` : l.value ? r.value.gap : r.value.hint), 1),
+			J("details", null, [J("summary", null, L(r.value.table), 1), J("div", tu, [J("table", null, [J("thead", null, [J("tr", null, [
 				J("th", null, L(r.value.from), 1),
 				J("th", null, L(r.value.to), 1),
 				J("th", null, L(r.value.price), 1)
@@ -5704,34 +5705,34 @@ var Il = ["aria-busy"], Ll = {
 				J("td", null, L(f(e.end, !0)), 1),
 				J("td", null, L(u(e.price_ct_kwh)) + " ct/kWh", 1)
 			]))), 128))])])])])
-		], 64)) : (K(), q("div", Rl, L(r.value.empty), 1))], 8, Il));
+		], 64)) : (K(), q("div", Ul, L(r.value.empty), 1))], 8, Vl));
 	}
-}), [["styles", [".tariff-price-chart{min-width:0}.tariff-price-chart svg{touch-action:pan-y;width:100%;height:240px;display:block;overflow:visible}.tariff-price-chart svg text{fill:var(--secondary-text-color,#666);font-size:14px}.tariff-price-chart__line{fill:none;stroke:var(--primary-color,#03a9f4);stroke-width:3px;vector-effect:non-scaling-stroke}.tariff-price-chart__grid{stroke:var(--divider-color,#ddd);vector-effect:non-scaling-stroke}.tariff-price-chart__now{stroke:var(--secondary-text-color,#666);stroke-dasharray:4;vector-effect:non-scaling-stroke}.tariff-price-chart__selected{stroke:var(--success-color,#38964b);stroke-width:6px;vector-effect:non-scaling-stroke}.tariff-price-chart__empty{text-align:center;min-height:240px;color:var(--secondary-text-color,#666);place-items:center;display:grid}.tariff-price-chart__detail,.tariff-price-chart__partial{min-height:20px;color:var(--secondary-text-color,#666);font-size:14px}.tariff-price-chart summary{cursor:pointer;min-height:32px;padding:6px 0}.tariff-price-chart__scroll{overflow:auto}.tariff-price-chart table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%}.tariff-price-chart th,.tariff-price-chart td{text-align:left;border-bottom:1px solid var(--divider-color,#ddd);white-space:nowrap;padding:8px}.tariff-price-chart th:last-child,.tariff-price-chart td:last-child{text-align:right}"]]]), Ql = { class: "dynamic-charging-settings" }, $l = { class: "dynamic-charging-summary" }, eu = {
+}), [["styles", [".tariff-price-chart{min-width:0}.tariff-price-chart svg{touch-action:pan-y;width:100%;height:240px;display:block;overflow:visible}.tariff-price-chart svg text{fill:var(--secondary-text-color,#666);font-size:14px}.tariff-price-chart__line{fill:none;stroke:var(--primary-color,#03a9f4);stroke-width:3px;vector-effect:non-scaling-stroke}.tariff-price-chart__grid{stroke:var(--divider-color,#ddd);vector-effect:non-scaling-stroke}.tariff-price-chart__now{stroke:var(--secondary-text-color,#666);stroke-dasharray:4;vector-effect:non-scaling-stroke}.tariff-price-chart__selected{stroke:var(--success-color,#38964b);stroke-width:6px;vector-effect:non-scaling-stroke}.tariff-price-chart__empty{text-align:center;min-height:240px;color:var(--secondary-text-color,#666);place-items:center;display:grid}.tariff-price-chart__detail,.tariff-price-chart__partial{min-height:20px;color:var(--secondary-text-color,#666);font-size:14px}.tariff-price-chart summary{cursor:pointer;min-height:32px;padding:6px 0}.tariff-price-chart__scroll{overflow:auto}.tariff-price-chart table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%}.tariff-price-chart th,.tariff-price-chart td{text-align:left;border-bottom:1px solid var(--divider-color,#ddd);white-space:nowrap;padding:8px}.tariff-price-chart th:last-child,.tariff-price-chart td:last-child{text-align:right}"]]]), ru = { class: "dynamic-charging-settings" }, iu = { class: "dynamic-charging-summary" }, au = { class: "electricity-summary-rows" }, ou = {
+	key: 0,
+	class: "electricity-targets"
+}, su = { class: "electricity-target" }, cu = { class: "electricity-target" }, lu = {
 	key: 0,
 	class: "electricity-muted dynamic-charging-neutral-summary"
-}, tu = {
+}, uu = {
 	key: 1,
-	class: "electricity-muted"
-}, nu = {
-	key: 2,
 	class: "electricity-error",
 	role: "alert"
-}, ru = {
-	key: 3,
+}, du = {
+	key: 2,
 	role: "status",
 	"aria-live": "polite"
-}, iu = { key: 4 }, au = { class: "electricity-muted" }, ou = ["aria-label", "aria-busy"], su = [
+}, fu = { key: 3 }, pu = { class: "electricity-muted" }, mu = ["aria-label", "aria-busy"], hu = [
 	"data-strategy",
 	"aria-pressed",
 	"disabled",
 	"onClick"
-], cu = {
+], gu = {
 	key: 0,
 	class: "electricity-muted"
-}, lu = { class: "electricity-muted" }, uu = { class: "electricity-muted" }, du = { class: "electricity-muted" }, fu = { class: "dynamic-charging-notice" }, pu = { class: "electricity-muted" }, mu = { class: "electricity-muted" }, hu = { class: "dynamic-charging-advanced" }, gu = { class: "electricity-muted" }, _u = {
+}, _u = { class: "electricity-muted" }, vu = { class: "electricity-muted" }, yu = { class: "electricity-muted" }, bu = { class: "dynamic-charging-notice" }, xu = { class: "electricity-muted" }, Su = { class: "electricity-muted" }, Cu = { class: "dynamic-charging-advanced" }, wu = { class: "electricity-muted" }, Tu = {
 	key: 0,
 	class: "electricity-muted"
-}, vu = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
+}, Eu = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
 	__name: "DynamicChargingSettings",
 	props: { editing: { type: Boolean } },
 	setup(e) {
@@ -5741,7 +5742,7 @@ var Il = ["aria-busy"], Ll = {
 		});
 		let i = Q(() => n?.language.value === "de"), a = Q(() => i.value ? {
 			mode: "Wann soll der Speicher aus dem Netz laden?",
-			saved: "Gespeicherte Ladeweise",
+			saved: "Ladeweise",
 			immediate: "Änderungen gelten nach der Bestätigung durch Home Assistant. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
 			target: "Wie voll soll der Speicher werden?",
 			targetLabel: "Ladeziel (%)",
@@ -5752,8 +5753,8 @@ var Il = ["aria-busy"], Ll = {
 			price: "Höchster Preis zum Laden (ct/kWh)",
 			priceHint: "Bei einem Preis bis einschließlich dieser Grenze wird geladen, bis die globale Ladegrenze erreicht ist. Oberhalb findet keine preisgesteuerte Netzladung statt. Auch negative Preise sind möglich.",
 			noPriceLimit: "Es gilt keine feste Preisgrenze: Auch die günstigsten verfügbaren Stunden können teuer sein. Diese Ladeweise benötigt eine Preisvorschau mit Zeitabschnitten; ein einzelner aktueller Preis reicht nicht.",
-			pvMissing: "Ohne PV-Prognose wird keine künftige PV-Energie abgezogen. Eine Prognose kannst du in Schritt 1 ergänzen.",
-			pvUsed: "Die gespeicherte PV-Prognose wird berücksichtigt, soweit sie verfügbar ist. Sie kann den benötigten Netzstrom reduzieren. Den angerechneten Anteil findest du in Schritt 1.",
+			pvMissing: "Ohne PV-Prognose wird keine künftige PV-Energie abgezogen. Eine Prognose kannst du unter „Preise & Zeiten“ ergänzen.",
+			pvUsed: "Die gespeicherte PV-Prognose wird berücksichtigt, soweit sie verfügbar ist. Sie kann den benötigten Netzstrom reduzieren. Den angerechneten Anteil findest du unter „Preise & Zeiten“.",
 			offHint: "Diese Ladeweise setzt die preisgesteuerte Automatik aus, auch wenn der Hauptschalter eingeschaltet ist. Preise und Einstellungen bleiben erhalten.",
 			advanced: "Weitere Einstellungen · Speicher schonen",
 			neutral: "Speicher bei günstigem Strom schonen bis (ct/kWh)",
@@ -5789,7 +5790,7 @@ var Il = ["aria-busy"], Ll = {
 			}
 		} : {
 			mode: "When should the battery charge from the grid?",
-			saved: "Saved charging method",
+			saved: "Charging method",
 			immediate: "Changes apply once confirmed by Home Assistant. Automatic grid charging must also be switched on.",
 			target: "How full should the battery be?",
 			targetLabel: "Charge target (%)",
@@ -5800,8 +5801,8 @@ var Il = ["aria-busy"], Ll = {
 			price: "Maximum price for charging (ct/kWh)",
 			priceHint: "Charging is allowed at or below this price until the global charge limit is reached. Above it, price-controlled grid charging stops. Negative prices are supported.",
 			noPriceLimit: "There is no fixed price cap: even the cheapest available hours may be expensive. This method requires a price forecast with time slots; a single current price is not enough.",
-			pvMissing: "Without a solar forecast, no future solar energy is deducted. You can add a forecast in step 1.",
-			pvUsed: "The saved solar forecast is used when available. It may reduce the grid energy needed. Its contribution is configured in step 1.",
+			pvMissing: "Without a solar forecast, no future solar energy is deducted. You can add a forecast under “Prices & times”.",
+			pvUsed: "The saved solar forecast is used when available. It may reduce the grid energy needed. Its contribution is configured under “Prices & times”.",
 			offHint: "This method pauses price-controlled automation even when the main switch is on. Prices and settings are preserved.",
 			advanced: "More settings · Preserve battery energy",
 			neutral: "Preserve battery energy below (ct/kWh)",
@@ -5843,27 +5844,20 @@ var Il = ["aria-busy"], Ll = {
 		], c = Q(() => {
 			let e = o.value?.state?.state;
 			return o.value?.available && s.includes(e) ? e : null;
-		}), l = Q(() => o.value?.state?.attributes.options), u = Q(() => !o.value?.canControl || o.value.pending), d = Q(() => n?.connected.value ? o.value?.available ? o.value.metadata.can_control ? o.value.pending ? a.value.pending : "" : a.value.readonly : a.value.unavailable : a.value.disconnected), f = Q(() => !!n?.tariff.value?.profiles?.dynamic.pv_sensor), p = Q(() => {
-			if (!c.value) return a.value.unavailable;
-			let e = a.value.modes[c.value].title;
-			if (c.value === "off") return e;
-			let t = n?.entity("number", "max_soc")?.displayValue ?? "—";
-			return `${e} · ${n?.entity("number", c.value === "absolute" ? "price_charge_max_price" : "price_charge_hours")?.displayValue ?? "—"} · ${a.value.targetSummary} ${t}`;
-		}), m = Q(() => {
+		}), l = Q(() => o.value?.state?.attributes.options), u = Q(() => !o.value?.canControl || o.value.pending), d = Q(() => n?.connected.value ? o.value?.available ? o.value.metadata.can_control ? o.value.pending ? a.value.pending : "" : a.value.readonly : a.value.unavailable : a.value.disconnected), f = Q(() => !!n?.tariff.value?.profiles?.dynamic.pv_sensor), p = Q(() => n?.entity("number", "max_soc")), m = Q(() => n?.entity("number", c.value === "absolute" ? "price_charge_max_price" : "price_charge_hours")), h = Q(() => {
 			let e = n?.entity("number", "price_charge_neutral_price"), t = n?.entity("number", "price_charge_max_price"), r = cc(e?.state?.state), i = cc(t?.state?.state);
 			return !e?.available || r === null || c.value === "absolute" && (!t?.available || i === null) ? a.value.neutralUnavailable : c.value === "absolute" && i !== null && r <= i ? a.value.neutralInactive : `${a.value.neutralSummary} ${e.displayValue}${c.value === "absolute" ? ` ${a.value.neutralBand}` : ""}.`;
 		});
-		async function h(e) {
+		async function g(e) {
 			!u.value && Array.isArray(l.value) && l.value.includes(e) && c.value !== e && await n?.perform("select", "price_charge_strategy", e);
 		}
-		return (t, i) => (K(), q("div", Ql, [
-			J("p", $l, [J("span", null, L(a.value.saved) + ":", 1), X(" " + L(p.value), 1)]),
-			c.value && c.value !== "off" ? (K(), q("p", eu, L(m.value), 1)) : Z("", !0),
-			H(n)?.tariff.value?.automation_enabled === !1 ? (K(), q("p", tu, L(a.value.disabled), 1)) : Z("", !0),
-			o.value?.error ? (K(), q("p", nu, L(o.value.error), 1)) : d.value ? (K(), q("p", ru, L(d.value), 1)) : Z("", !0),
-			r.value ? En((K(), q("div", iu, [
+		return (t, n) => (K(), q("div", ru, [
+			J("div", iu, [J("dl", au, [J("div", null, [J("dt", null, L(a.value.saved), 1), J("dd", null, L(c.value ? a.value.modes[c.value].title : a.value.unavailable), 1)])]), c.value && c.value !== "off" ? (K(), q("div", ou, [J("div", su, [J("span", null, L(a.value.targetSummary), 1), J("strong", null, L(p.value?.available ? p.value.displayValue : "—"), 1)]), J("div", cu, [J("span", null, L(c.value === "absolute" ? a.value.price : a.value.hours), 1), J("strong", null, L(m.value?.available ? m.value.displayValue : "—"), 1)])])) : Z("", !0)]),
+			c.value && c.value !== "off" ? (K(), q("p", lu, L(h.value), 1)) : Z("", !0),
+			o.value?.error ? (K(), q("p", uu, L(o.value.error), 1)) : d.value ? (K(), q("p", du, L(d.value), 1)) : Z("", !0),
+			r.value ? En((K(), q("div", fu, [
 				J("h3", null, L(a.value.mode), 1),
-				J("p", au, L(a.value.immediate), 1),
+				J("p", pu, L(a.value.immediate), 1),
 				J("div", {
 					class: "dynamic-charging-methods",
 					role: "group",
@@ -5875,9 +5869,9 @@ var Il = ["aria-busy"], Ll = {
 					"data-strategy": e,
 					"aria-pressed": c.value === e,
 					disabled: u.value || !Array.isArray(l.value) || !l.value.includes(e),
-					onClick: (t) => h(e)
-				}, [J("strong", null, L(a.value.modes[e].title), 1), J("span", null, L(a.value.modes[e].hint), 1)], 8, su)), 64))], 8, ou),
-				c.value === "off" ? (K(), q("p", cu, L(a.value.offHint), 1)) : Z("", !0),
+					onClick: (t) => g(e)
+				}, [J("strong", null, L(a.value.modes[e].title), 1), J("span", null, L(a.value.modes[e].hint), 1)], 8, hu)), 64))], 8, mu),
+				c.value === "off" ? (K(), q("p", gu, L(a.value.offHint), 1)) : Z("", !0),
 				c.value && c.value !== "off" ? (K(), q(G, { key: 1 }, [
 					J("h3", null, L(a.value.target), 1),
 					Y(Ao, {
@@ -5886,24 +5880,24 @@ var Il = ["aria-busy"], Ll = {
 						label: a.value.targetLabel,
 						"hide-confirmed-label": ""
 					}, null, 8, ["label"]),
-					J("p", lu, L(a.value.targetHint), 1),
+					J("p", _u, L(a.value.targetHint), 1),
 					c.value === "absolute" ? (K(), q(G, { key: 0 }, [Y(Ao, {
 						domain: "number",
 						"entity-key": "price_charge_max_price",
 						label: a.value.price,
 						"hide-confirmed-label": ""
-					}, null, 8, ["label"]), J("p", uu, L(a.value.priceHint), 1)], 64)) : (K(), q(G, { key: 1 }, [
+					}, null, 8, ["label"]), J("p", vu, L(a.value.priceHint), 1)], 64)) : (K(), q(G, { key: 1 }, [
 						Y(Ao, {
 							domain: "number",
 							"entity-key": "price_charge_hours",
 							label: a.value.hours,
 							"hide-confirmed-label": ""
 						}, null, 8, ["label"]),
-						J("p", du, L(a.value.hoursHint), 1),
-						J("p", fu, L(a.value.noPriceLimit), 1),
-						c.value === "smart" ? (K(), q(G, { key: 0 }, [J("p", pu, L(a.value.smartHours), 1), J("p", mu, L(f.value ? a.value.pvUsed : a.value.pvMissing), 1)], 64)) : Z("", !0)
+						J("p", yu, L(a.value.hoursHint), 1),
+						J("p", bu, L(a.value.noPriceLimit), 1),
+						c.value === "smart" ? (K(), q(G, { key: 0 }, [J("p", xu, L(a.value.smartHours), 1), J("p", Su, L(f.value ? a.value.pvUsed : a.value.pvMissing), 1)], 64)) : Z("", !0)
 					], 64)),
-					J("details", hu, [
+					J("details", Cu, [
 						J("summary", null, L(a.value.advanced), 1),
 						Y(Ao, {
 							domain: "number",
@@ -5911,45 +5905,51 @@ var Il = ["aria-busy"], Ll = {
 							label: a.value.neutral,
 							"hide-confirmed-label": ""
 						}, null, 8, ["label"]),
-						J("p", gu, L(a.value.neutralHint), 1),
-						c.value === "absolute" ? (K(), q("p", _u, L(a.value.absoluteNeutral), 1)) : Z("", !0)
+						J("p", wu, L(a.value.neutralHint), 1),
+						c.value === "absolute" ? (K(), q("p", Tu, L(a.value.absoluteNeutral), 1)) : Z("", !0)
 					])
 				], 64)) : Z("", !0)
 			], 512)), [[Xi, e.editing]]) : Z("", !0)
 		]));
 	}
-}), [["styles", [".dynamic-charging-summary span{font-weight:600}.dynamic-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;display:grid}.dynamic-charging-methods button{text-align:left;color:var(--primary-text-color,#212121);padding:16px}.dynamic-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:15px}.dynamic-charging-methods strong,.dynamic-charging-methods span{line-height:1.5;display:block}.dynamic-charging-methods span{color:var(--secondary-text-color,#666);margin-top:6px;font-size:14px}.dynamic-charging-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:20px;padding-top:12px}.dynamic-charging-advanced summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-notice{border-left:3px solid var(--primary-color,#03a9f4);padding-left:12px}@media (max-width:700px){.dynamic-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), yu = { class: "tou-charging-settings" }, bu = { class: "tou-charging-summary" }, xu = {
+}), [["styles", [".dynamic-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;display:grid}.dynamic-charging-methods button{text-align:left;color:var(--primary-text-color,#212121);padding:16px}.dynamic-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:15px}.dynamic-charging-methods strong,.dynamic-charging-methods span{line-height:1.5;display:block}.dynamic-charging-methods span{color:var(--secondary-text-color,#666);margin-top:6px;font-size:14px}.dynamic-charging-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:20px;padding-top:12px}.dynamic-charging-advanced summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-notice{border-left:3px solid var(--primary-color,#03a9f4);padding-left:12px}@media (max-width:700px){.dynamic-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Du = { class: "tou-charging-settings" }, Ou = { class: "tou-charging-summary" }, ku = { class: "electricity-summary-rows" }, Au = {
+	key: 0,
+	class: "electricity-targets"
+}, ju = { class: "electricity-target" }, Mu = {
+	key: 0,
+	class: "electricity-target tou-charging-threshold"
+}, Nu = {
+	key: 1,
+	class: "tou-charging-hint"
+}, Pu = { class: "electricity-summary-rows tou-charging-month-summary" }, Fu = {
 	key: 0,
 	class: "tou-charging-hint tou-charging-calibration"
-}, Su = {
+}, Iu = {
 	key: 1,
-	class: "tou-charging-threshold"
-}, Cu = { class: "tou-charging-month-summary" }, wu = {
-	key: 2,
-	class: "tou-charging-hint"
-}, Tu = {
+	class: "tou-charging-rules"
+}, Lu = { class: "tou-charging-hint" }, Ru = { class: "tou-charging-hint" }, zu = {
 	key: 0,
 	class: "tou-charging-error",
 	role: "alert"
-}, Eu = {
+}, Bu = {
 	key: 1,
 	role: "status",
 	"aria-live": "polite"
-}, Du = {
-	key: 3,
+}, Vu = {
+	key: 2,
 	class: "tou-charging-editor"
-}, Ou = { class: "tou-charging-hint" }, ku = ["aria-label", "aria-busy"], Au = [
+}, Hu = { class: "tou-charging-hint" }, Uu = ["aria-label", "aria-busy"], Wu = [
 	"data-method",
 	"aria-pressed",
 	"disabled",
 	"onClick"
-], ju = {
+], Gu = {
 	key: 0,
 	class: "tou-charging-hint"
-}, Mu = { class: "tou-charging-hint" }, Nu = {
+}, Ku = { class: "tou-charging-hint" }, qu = {
 	key: 0,
 	class: "tou-charging-hint tou-charging-calibration"
-}, Pu = { class: "tou-charging-advanced" }, Fu = { class: "tou-charging-hint" }, Iu = { class: "tou-charging-hint" }, Lu = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
+}, Ju = { class: "tou-charging-advanced" }, Yu = { class: "tou-charging-hint" }, Xu = { class: "tou-charging-hint" }, Zu = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
 	__name: "TimeOfUseChargingSettings",
 	props: {
 		editing: { type: Boolean },
@@ -5961,7 +5961,10 @@ var Il = ["aria-busy"], Ll = {
 			e && (a.value = !0);
 		});
 		let o = Q(() => r.value ? {
-			saved: "Gespeicherte Ladeweise",
+			saved: "Ladeweise",
+			start: "Start nur unter",
+			calibrationShort: "Zellkalibrierung: bis 100 % erlaubt, auch über Ladeziel und globale Grenze.",
+			rules: "Laderegeln & Ausnahmen",
 			mode: "Ladeweise",
 			immediate: "Jede Änderung wird einzeln übernommen. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
 			fixed: "Festes Ladeziel",
@@ -5974,7 +5977,7 @@ var Il = ["aria-busy"], Ll = {
 			fixedTargetHint: "Die Netzladung endet beim Ladeziel oder am Ende der günstigen Tarifzeit. Nach der Netzladung entlädt der Speicher bis zum Ende dieser Zeit nicht; Solarstrom kann ihn weiter füllen. Andere aktive Regeln können die Ladung begrenzen.",
 			bridgeTargetHint: "Der berechnete Bedarf kann unter dieser Obergrenze liegen. Geladen wird nur in den günstigsten Tarifzeiten. Danach darf der Speicher wieder normal entladen. Ohne Verbrauchs- oder Prognosedaten wird kein neuer Ladeplan erstellt.",
 			calibration: "Ausnahme: Bei fälliger Zellkalibrierung sind bis 100 % erlaubt, auch über Ladeziel und globale Ladegrenze hinaus. Alle anderen Ladebedingungen gelten weiter.",
-			pvRequired: "Für „Nur Bedarf bis Solarstrom“ benötigst du eine passende PV-Prognose mit dem erwarteten Solarstart. Öffne in Schritt 1 „Bearbeiten“ und ergänze die Solarprognose.",
+			pvRequired: "Für „Nur Bedarf bis Solarstrom“ benötigst du eine passende PV-Prognose mit dem erwarteten Solarstart. Öffne unter „Preise & Zeiten“ die Bearbeitung und ergänze die Solarprognose.",
 			months: "Aktive Monate",
 			allYear: "Ganzjährig",
 			noMonths: "Keine ausgewählt · Automatische Netzladung ganzjährig inaktiv",
@@ -5994,7 +5997,10 @@ var Il = ["aria-busy"], Ll = {
 			disconnected: "Keine Verbindung zu Home Assistant.",
 			pending: "Ladeweise wird übernommen …"
 		} : {
-			saved: "Saved charging method",
+			saved: "Charging method",
+			start: "Start only below",
+			calibrationShort: "Cell calibration: up to 100% allowed, even above the target and global limit.",
+			rules: "Charging rules & exceptions",
 			mode: "Charging method",
 			immediate: "Each change is applied individually. Automatic grid charging must also be switched on.",
 			fixed: "Fixed charge target",
@@ -6007,7 +6013,7 @@ var Il = ["aria-busy"], Ll = {
 			fixedTargetHint: "Grid charging ends at the target or the end of the cheap tariff period. After grid charging, the battery does not discharge until this period ends; solar power can charge it further. Other active rules may limit charging.",
 			bridgeTargetHint: "The calculated need may be below this upper limit. Charging only uses the cheapest tariff periods. Afterwards, the battery may discharge normally again. Missing consumption or forecast data prevents a new charging plan.",
 			calibration: "Exception: When cell calibration is due, charging up to 100% is allowed beyond both the charge target and global limit. Other charging conditions still apply.",
-			pvRequired: "“Only what is needed until solar power” requires a suitable forecast with the expected start of solar power. Open “Edit” in step 1 and add the solar forecast.",
+			pvRequired: "“Only what is needed until solar power” requires a suitable forecast with the expected start of solar power. Open “Edit” under “Prices & times” and add the solar forecast.",
 			months: "Active months",
 			allYear: "All year",
 			noMonths: "None selected · Automatic grid charging inactive all year",
@@ -6029,15 +6035,11 @@ var Il = ["aria-busy"], Ll = {
 		}), s = Q(() => n?.entity("switch", "bridge_charge_enabled")), c = ["fixed", "bridge"], l = Q(() => s.value?.available ? s.value.state?.state === "off" ? "fixed" : s.value.state?.state === "on" ? "bridge" : null : null), u = Q(() => !s.value?.canControl || s.value.pending || l.value === null), d = Q(() => s.value?.pending ? o.value.pending : n?.connected.value ? l.value ? s.value?.metadata.can_control ? "" : o.value.readonly : o.value.unavailable : o.value.disconnected), f = Q(() => n?.entity("number", "timed_charge_max_soc")), p = Q(() => n?.entity("number", "timed_charge_min_soc")), m = Q(() => {
 			let e = cc(p.value?.state?.state);
 			return !p.value?.available || e === null ? o.value.thresholdUnavailable : e === 0 ? o.value.zeroThreshold : `${o.value.thresholdSummary} ${p.value.displayValue}.`;
-		}), h = Q(() => {
-			if (!l.value) return o.value.unavailable;
-			let e = l.value === "fixed" ? o.value.fixedTarget : o.value.bridgeTarget, t = f.value?.available ? f.value.displayValue : o.value.valueUnavailable;
-			return `${o.value[l.value]} · ${e.replace(" (%)", "")} ${t}`;
-		}), g = Q(() => !!n?.tariff.value?.profiles?.time_of_use.pv_sensor), _ = Array.from({ length: 12 }, (e, t) => `timed_charge_month_${t + 1}`), v = Q(() => {
+		}), h = Q(() => l.value === "bridge" ? o.value.bridgeTarget.replace(" (%)", "") : o.value.target), g = Q(() => f.value?.available ? f.value.displayValue : o.value.valueUnavailable), _ = Q(() => !!n?.tariff.value?.profiles?.time_of_use.pv_sensor), v = Array.from({ length: 12 }, (e, t) => `timed_charge_month_${t + 1}`), y = Q(() => {
 			let e = new Intl.DateTimeFormat(r.value ? "de" : "en", {
 				month: "short",
 				timeZone: "UTC"
-			}), t = _.map((t, r) => {
+			}), t = v.map((t, r) => {
 				let i = n?.entity("switch", t), a = i?.state?.state;
 				return {
 					known: i?.available && (a === "on" || a === "off"),
@@ -6047,22 +6049,29 @@ var Il = ["aria-busy"], Ll = {
 			}), i = t.filter((e) => e.selected), a = t.some((e) => !e.known);
 			return i.length === 12 ? o.value.allYear : i.length ? `${i.map((e) => e.name).join(", ")}${a ? ` · ${o.value.unknownMonths}` : ""}` : a ? o.value.unknownMonths : o.value.noMonths;
 		});
-		async function y(e) {
+		async function b(e) {
 			u.value || l.value === e || await n?.perform("switch", "bridge_charge_enabled", e === "bridge");
 		}
-		return (t, r) => (K(), q("div", yu, [
-			J("p", bu, [J("strong", null, L(o.value.saved) + ":", 1), X(" " + L(h.value), 1)]),
-			l.value && !e.editing ? (K(), q("p", xu, L(o.value.calibration), 1)) : Z("", !0),
-			l.value === "fixed" ? (K(), q("p", Su, L(m.value), 1)) : Z("", !0),
-			J("p", Cu, [J("strong", null, L(o.value.months) + ":", 1), X(" " + L(v.value), 1)]),
-			H(n)?.tariff.value?.automation_enabled === !1 ? (K(), q("p", wu, L(o.value.disabled), 1)) : Z("", !0),
+		return (t, n) => (K(), q("div", Du, [
+			J("div", Ou, [
+				J("dl", ku, [J("div", null, [J("dt", null, L(o.value.saved), 1), J("dd", null, L(l.value ? o.value[l.value] : o.value.unavailable), 1)])]),
+				l.value ? (K(), q("div", Au, [J("div", ju, [J("span", null, L(h.value), 1), J("strong", null, L(g.value), 1)]), l.value === "fixed" ? (K(), q("div", Mu, [J("span", null, L(o.value.start), 1), J("strong", null, L(p.value?.available ? p.value.displayValue : o.value.valueUnavailable), 1)])) : Z("", !0)])) : Z("", !0),
+				l.value === "fixed" && (!p.value?.available || H(cc)(p.value.state?.state) === 0) ? (K(), q("p", Nu, L(m.value), 1)) : Z("", !0),
+				J("dl", Pu, [J("div", null, [J("dt", null, L(o.value.months), 1), J("dd", null, L(y.value), 1)])])
+			]),
+			l.value && !e.editing ? (K(), q("p", Fu, L(o.value.calibrationShort), 1)) : Z("", !0),
+			l.value && !e.editing ? (K(), q("details", Iu, [
+				J("summary", null, L(o.value.rules), 1),
+				J("p", Lu, L(l.value === "fixed" ? o.value.fixedTargetHint : o.value.bridgeTargetHint), 1),
+				J("p", Ru, L(o.value.calibration), 1)
+			])) : Z("", !0),
 			J("div", {
 				id: i,
 				class: "tou-charging-feedback"
-			}, [e.editing && s.value?.error ? (K(), q("p", Tu, L(s.value.error), 1)) : Z("", !0), d.value && (e.editing || !s.value?.pending) ? (K(), q("p", Eu, L(d.value), 1)) : Z("", !0)]),
-			a.value ? En((K(), q("div", Du, [
+			}, [e.editing && s.value?.error ? (K(), q("p", zu, L(s.value.error), 1)) : Z("", !0), d.value && (e.editing || !s.value?.pending) ? (K(), q("p", Bu, L(d.value), 1)) : Z("", !0)]),
+			a.value ? En((K(), q("div", Vu, [
 				J("h3", null, L(o.value.mode), 1),
-				J("p", Ou, L(o.value.immediate), 1),
+				J("p", Hu, L(o.value.immediate), 1),
 				J("div", {
 					class: "tou-charging-methods",
 					role: "group",
@@ -6075,9 +6084,9 @@ var Il = ["aria-busy"], Ll = {
 					"data-method": e,
 					"aria-pressed": l.value === e,
 					disabled: u.value,
-					onClick: (t) => y(e)
-				}, [J("strong", null, L(o.value[e]), 1), J("span", null, L(e === "fixed" ? o.value.fixedHint : o.value.bridgeHint), 1)], 8, Au)), 64))], 8, ku),
-				g.value ? Z("", !0) : (K(), q("p", ju, L(o.value.pvRequired), 1)),
+					onClick: (t) => b(e)
+				}, [J("strong", null, L(o.value[e]), 1), J("span", null, L(e === "fixed" ? o.value.fixedHint : o.value.bridgeHint), 1)], 8, Wu)), 64))], 8, Uu),
+				_.value ? Z("", !0) : (K(), q("p", Gu, L(o.value.pvRequired), 1)),
 				l.value ? (K(), q(G, { key: 1 }, [
 					J("h3", null, L(o.value.target), 1),
 					Y(Ao, {
@@ -6086,110 +6095,113 @@ var Il = ["aria-busy"], Ll = {
 						label: l.value === "fixed" ? o.value.fixedTarget : o.value.bridgeTarget,
 						"hide-confirmed-label": ""
 					}, null, 8, ["label"]),
-					J("p", Mu, L(l.value === "fixed" ? o.value.fixedTargetHint : o.value.bridgeTargetHint), 1),
-					e.editing ? (K(), q("p", Nu, L(o.value.calibration), 1)) : Z("", !0)
+					J("p", Ku, L(l.value === "fixed" ? o.value.fixedTargetHint : o.value.bridgeTargetHint), 1),
+					e.editing ? (K(), q("p", qu, L(o.value.calibration), 1)) : Z("", !0)
 				], 64)) : Z("", !0),
-				J("details", Pu, [
+				J("details", Ju, [
 					J("summary", null, L(o.value.advanced), 1),
 					l.value === "fixed" ? (K(), q(G, { key: 0 }, [Y(Ao, {
 						domain: "number",
 						"entity-key": "timed_charge_min_soc",
 						label: o.value.threshold,
 						"hide-confirmed-label": ""
-					}, null, 8, ["label"]), J("p", Fu, L(o.value.thresholdHint), 1)], 64)) : Z("", !0),
+					}, null, 8, ["label"]), J("p", Yu, L(o.value.thresholdHint), 1)], 64)) : Z("", !0),
 					Y(Ao, {
 						domain: "number",
 						"entity-key": "max_soc",
 						label: o.value.global,
 						"hide-confirmed-label": ""
 					}, null, 8, ["label"]),
-					J("p", Iu, L(o.value.globalHint), 1),
+					J("p", Xu, L(o.value.globalHint), 1),
 					J("h3", null, L(o.value.months), 1),
-					Y(hs, { "entity-keys": H(_) }, null, 8, ["entity-keys"])
+					Y(hs, { "entity-keys": H(v) }, null, 8, ["entity-keys"])
 				])
 			], 512)), [[Xi, e.editing]]) : Z("", !0)
 		]));
 	}
-}), [["styles", [".tou-charging-settings{min-width:0}.tou-charging-editor>.entity-control,.tou-charging-advanced>.entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.tou-charging-summary,.tou-charging-threshold,.tou-charging-month-summary{overflow-wrap:anywhere;line-height:1.5}.tou-charging-hint{color:var(--secondary-text-color,#666);font-size:14px;line-height:1.6}.tou-charging-error{color:var(--error-color,#b00020)}.tou-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0;display:grid}.tou-charging-methods button{border:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff);min-width:0;min-height:44px;color:var(--primary-text-color,#212121);text-align:left;font:inherit;cursor:pointer;border-radius:8px;padding:16px}.tou-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:15px}.tou-charging-methods strong,.tou-charging-methods span{line-height:1.5;display:block}.tou-charging-methods span{color:var(--secondary-text-color,#666);margin-top:6px;font-size:14px}.tou-charging-methods button:disabled{opacity:.55;cursor:not-allowed}.tou-charging-methods button:focus-visible,.tou-charging-advanced summary:focus-visible{outline:3px solid var(--primary-color,#03a9f4);outline-offset:3px}.tou-charging-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:20px;padding-top:12px}.tou-charging-advanced summary{cursor:pointer;align-content:center;min-height:44px}@media (max-width:700px){.tou-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Ru = { class: "electricity-tariff-view" }, zu = { class: "electricity-card electricity-tariff-bar" }, Bu = { class: "electricity-tariff-bar__row" }, Vu = { class: "electricity-active" }, Hu = ["disabled", "aria-expanded"], Uu = ["aria-busy"], Wu = ["disabled"], Gu = { class: "electricity-sr-only" }, Ku = ["value"], qu = {
+}), [["styles", [".tou-charging-settings{min-width:0}.tou-charging-editor>.entity-control,.tou-charging-advanced>.entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.tou-charging-summary,.tou-charging-threshold,.tou-charging-month-summary{overflow-wrap:anywhere;line-height:1.5}.tou-charging-hint{color:var(--secondary-text-color,#666);font-size:14px;line-height:1.6}.tou-charging-error{color:var(--error-color,#b00020)}.tou-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0;display:grid}.tou-charging-methods button{border:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff);min-width:0;min-height:44px;color:var(--primary-text-color,#212121);text-align:left;font:inherit;cursor:pointer;border-radius:8px;padding:16px}.tou-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:15px}.tou-charging-methods strong,.tou-charging-methods span{line-height:1.5;display:block}.tou-charging-methods span{color:var(--secondary-text-color,#666);margin-top:6px;font-size:14px}.tou-charging-methods button:disabled{opacity:.55;cursor:not-allowed}.tou-charging-methods button:focus-visible,.tou-charging-advanced summary:focus-visible{outline:3px solid var(--primary-color,#03a9f4);outline-offset:3px}.tou-charging-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:20px;padding-top:12px}.tou-charging-advanced summary{cursor:pointer;align-content:center;min-height:44px}@media (max-width:700px){.tou-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Qu = { class: "electricity-tariff-view" }, $u = { class: "electricity-card electricity-tariff-bar" }, ed = { class: "electricity-tariff-bar__row" }, td = { class: "electricity-active" }, nd = ["disabled", "aria-expanded"], rd = ["aria-busy"], id = ["disabled"], ad = { class: "electricity-sr-only" }, od = ["value"], sd = {
 	key: 0,
 	role: "status"
-}, Ju = { class: "electricity-actions" }, Yu = ["disabled"], Xu = ["disabled"], Zu = {
+}, cd = { class: "electricity-actions" }, ld = ["disabled"], ud = ["disabled"], dd = {
 	key: 1,
 	class: "electricity-operation-status",
 	role: "status",
 	"aria-live": "polite"
-}, Qu = {
+}, fd = {
 	key: 2,
 	role: "alert",
 	class: "electricity-error"
-}, $u = ["disabled"], ed = {
+}, pd = ["disabled"], md = {
 	key: 4,
 	role: "status"
-}, td = {
+}, hd = {
 	key: 5,
 	role: "status"
-}, nd = {
+}, gd = {
 	key: 6,
 	role: "status"
-}, rd = {
-	key: 7,
-	class: "electricity-muted"
-}, id = ["aria-busy"], ad = ["disabled", "aria-expanded"], od = { class: "electricity-muted electricity-price-summary" }, sd = ["aria-busy"], cd = ["id"], ld = ["disabled"], ud = { class: "electricity-muted" }, dd = { class: "electricity-fields" }, fd = ["aria-invalid", "aria-describedby"], pd = { class: "electricity-muted" }, md = { class: "electricity-muted" }, hd = { class: "electricity-fields" }, gd = { class: "electricity-muted" }, _d = {
+}, _d = {
+	key: 0,
+	class: "electricity-columns"
+}, vd = ["aria-label"], yd = { class: "electricity-current" }, bd = { class: "electricity-muted" }, xd = { class: "electricity-current-price" }, Sd = { key: 0 }, Cd = ["aria-busy"], wd = ["disabled", "aria-expanded"], Td = { class: "electricity-current" }, Ed = { class: "electricity-muted" }, Dd = { class: "electricity-current-price" }, Od = { key: 0 }, kd = { class: "electricity-price-summary electricity-summary-rows" }, Ad = ["aria-busy"], jd = ["id"], Md = ["disabled"], Nd = { class: "electricity-muted" }, Pd = { class: "electricity-fields" }, Fd = ["aria-invalid", "aria-describedby"], Id = { class: "electricity-muted" }, Ld = { class: "electricity-muted" }, Rd = { class: "electricity-fields" }, zd = { class: "electricity-muted" }, Bd = {
 	key: 0,
 	class: "electricity-muted electricity-additional-settings"
-}, vd = { class: "electricity-price-advanced" }, yd = { class: "electricity-fields" }, bd = ["aria-invalid", "aria-describedby"], xd = ["aria-invalid", "aria-describedby"], Sd = ["value"], Cd = { class: "electricity-muted" }, wd = { class: "electricity-muted" }, Td = { class: "electricity-fields" }, Ed = ["aria-invalid", "aria-describedby"], Dd = { class: "electricity-muted" }, Od = { class: "electricity-actions" }, kd = ["disabled"], Ad = ["disabled"], jd = {
-	key: 2,
-	class: "electricity-card electricity-charging"
-}, Md = ["disabled", "aria-expanded"], Nd = {
-	key: 2,
-	class: "electricity-charging-feedback"
-}, Pd = {
+}, Vd = { class: "electricity-price-advanced" }, Hd = { class: "electricity-fields" }, Ud = ["aria-invalid", "aria-describedby"], Wd = ["aria-invalid", "aria-describedby"], Gd = ["value"], Kd = { class: "electricity-muted" }, qd = { class: "electricity-muted" }, Jd = { class: "electricity-fields" }, Yd = ["aria-invalid", "aria-describedby"], Xd = { class: "electricity-muted" }, Zd = { class: "electricity-actions" }, Qd = ["disabled"], $d = ["disabled"], ef = { class: "electricity-price-details" }, tf = ["aria-label"], nf = ["aria-pressed", "onClick"], rf = { class: "electricity-day" }, af = { key: 0 }, of = {
 	key: 0,
-	class: "electricity-error",
-	role: "alert"
-}, Fd = {
-	key: 1,
-	role: "status",
-	"aria-live": "polite"
-}, Id = {
-	key: 3,
-	class: "electricity-charging-editor"
-}, Ld = { class: "electricity-actions" }, Rd = {
-	key: 3,
-	class: "electricity-card electricity-activation"
-}, zd = ["aria-busy"], Bd = [
+	class: "electricity-card electricity-charging"
+}, sf = ["disabled", "aria-expanded"], cf = {
+	key: 0,
+	class: "electricity-activation"
+}, lf = ["aria-busy"], uf = [
 	"checked",
 	"aria-describedby",
 	"disabled"
-], Vd = {
+], df = {
 	id: "electricity-master-status",
 	class: "electricity-master-status",
 	role: "status",
 	"aria-live": "polite"
-}, Hd = {
+}, ff = {
 	key: 0,
 	id: "electricity-activation-error",
 	class: "electricity-error",
 	role: "alert"
-}, Ud = ["disabled"], Wd = {
+}, pf = ["disabled"], mf = {
 	key: 2,
 	class: "electricity-muted"
-}, Gd = {
+}, hf = {
 	key: 3,
 	class: "electricity-muted"
-}, Kd = {
+}, gf = {
 	key: 4,
 	class: "electricity-muted"
-}, qd = { key: 5 }, Jd = {
+}, _f = { key: 5 }, vf = {
+	key: 3,
+	class: "electricity-charging-feedback"
+}, yf = {
+	key: 0,
+	class: "electricity-error",
+	role: "alert"
+}, bf = {
+	key: 1,
+	role: "status",
+	"aria-live": "polite"
+}, xf = {
 	key: 4,
-	class: "electricity-card electricity-price-card"
-}, Yd = { class: "electricity-current-price" }, Xd = { key: 0 }, Zd = { class: "electricity-muted" }, Qd = { class: "electricity-price-details" }, $d = ["aria-label"], ef = ["aria-pressed", "onClick"], tf = { class: "electricity-day" }, nf = { key: 0 }, rf = {
+	class: "electricity-charging-editor"
+}, Sf = { class: "electricity-actions" }, Cf = {
 	key: 5,
-	class: "electricity-card electricity-plan"
-}, af = {
+	class: "electricity-summary-rows electricity-pv-summary"
+}, wf = { class: "electricity-charge-status" }, Tf = {
+	key: 6,
+	class: "electricity-plan"
+}, Ef = {
 	key: 0,
 	class: "electricity-planned-pv"
-}, of = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
+}, Df = {
+	key: 1,
+	class: "electricity-footnote"
+}, Of = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
 	__name: "ElectricityTariffView",
 	props: { hass: { type: Object } },
 	setup(e) {
@@ -6212,16 +6224,17 @@ var Il = ["aria-busy"], Ll = {
 			turningOn: "Einschalten wird übernommen …",
 			turningOff: "Ausschalten wird übernommen …",
 			chooseHint: "Nur der gewählte Tarif ist aktiv. Gespeicherte Einstellungen bleiben beim Wechsel erhalten.",
-			incomplete: "Dieser Tarif ist noch nicht eingerichtet. Nach dem Wechsel bleibt die automatische Netzladung aus. Richte danach die Preise in Schritt 1 ein.",
+			incomplete: "Dieser Tarif ist noch nicht eingerichtet. Nach dem Wechsel bleibt die automatische Netzladung aus. Richte danach „Preise & Zeiten“ ein.",
 			touHint: "Feste Preise zu wiederkehrenden Uhrzeiten",
 			dynamicHint: "Preise aus einem Strompreis-Sensor",
 			price: "Strompreis",
 			current: "Aktuell",
 			today: "Heute",
 			tomorrow: "Morgen",
-			prices: "1. Woher kommen deine Strompreise?",
+			prices: "Preise & Zeiten",
 			feed: "Einspeisevergütung",
 			source: "Strompreis-Sensor (erforderlich)",
+			sourceSummary: "Preisquelle",
 			attribute: "Preisattribut (optional)",
 			unit: "Einheit der Preisquelle",
 			pv: "PV-Prognose-Sensor (optional)",
@@ -6242,17 +6255,14 @@ var Il = ["aria-busy"], Ll = {
 			pvSensorMissing: "Der gewählte PV-Prognose-Sensor wurde nicht gefunden. Bitte einen vorhandenen Sensor auswählen oder die optionale Auswahl löschen.",
 			invalidAttribute: "Bitte einen Attributnamen mit höchstens 128 Zeichen eingeben oder das Feld für die automatische Erkennung leer lassen.",
 			invalidPvFactor: "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
-			charging: "2. Wie möchtest du laden?",
-			touCharging: "2. Wie viel möchtest du laden?",
-			activate: "3. Automatik einschalten",
-			activationHint: "Nach dem Einschalten darf der Speicher zu deinen günstigsten Tarifzeiten aus dem Netz laden. Ladeziel, aktive Monate und Schutzregeln gelten weiterhin.",
-			dynamicActivationHint: "Nach dem Einschalten lädt der Speicher nach deiner gewählten Ladeweise. Preisgrenze oder günstigste Stunden, Ladegrenze und Schutzregeln bestimmen, wann und wie viel geladen wird.",
-			activationOff: "Ausgeschaltet: Diese Automatik lädt derzeit keinen Netzstrom.",
-			activationOn: "Eingeschaltet: Der Speicher lädt, sobald die eingestellten Bedingungen erfüllt sind.",
-			editFirst: "Beende zuerst die Bearbeitung oben, um die Automatik zu schalten.",
-			chart: "Preisverlauf anzeigen",
-			touIntro: "Trage die Preise aus deinem Stromvertrag ein und wähle dein Ladeziel. Schalte die Automatik anschließend in Schritt 3 ein.",
-			dynamicIntro: "Wähle deinen Strompreis-Sensor und die gewünschte Ladeweise. Schalte die Automatik anschließend in Schritt 3 ein.",
+			charging: "Netzladung",
+			pvSummary: "PV-Prognose",
+			noPv: "Nicht eingerichtet",
+			gross: "Alle Preise brutto in ct/kWh.",
+			activationOff: "Keine automatische Ladung aus dem Netz.",
+			activationOn: "Lädt, sobald die Ladebedingungen erfüllt sind.",
+			editFirst: "Beende die Bearbeitung, um die Automatik zu schalten.",
+			chart: "Preisverlauf",
 			plannedPv: "Im Ladeplan angerechnete PV-Energie",
 			details: "Ladeplan & Prognose",
 			priceHint: "Alle Preise brutto in ct/kWh. Die Quelleneinheit wird nur zur Umrechnung verwendet.",
@@ -6293,16 +6303,17 @@ var Il = ["aria-busy"], Ll = {
 			turningOn: "Turning on …",
 			turningOff: "Turning off …",
 			chooseHint: "Only the selected tariff is active. Saved settings are preserved when switching.",
-			incomplete: "This tariff is not configured yet. Automatic grid charging will be off after switching. Set up the prices in step 1 next.",
+			incomplete: "This tariff is not configured yet. Automatic grid charging will be off after switching. Then set up “Prices & times”.",
 			touHint: "Fixed prices at recurring times",
 			dynamicHint: "Prices from an electricity price sensor",
 			price: "Electricity price",
 			current: "Current",
 			today: "Today",
 			tomorrow: "Tomorrow",
-			prices: "1. Where do your electricity prices come from?",
+			prices: "Prices & times",
 			feed: "Feed-in remuneration",
 			source: "Electricity price sensor (required)",
+			sourceSummary: "Price source",
 			attribute: "Price attribute (optional)",
 			unit: "Price source unit",
 			pv: "PV forecast sensor (optional)",
@@ -6323,17 +6334,14 @@ var Il = ["aria-busy"], Ll = {
 			pvSensorMissing: "The selected PV forecast sensor was not found. Select an existing sensor or clear this optional selection.",
 			invalidAttribute: "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
 			invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
-			charging: "2. How should the battery charge?",
-			touCharging: "2. How much should the battery charge?",
-			activate: "3. Turn on automatic charging",
-			activationHint: "Once enabled, the battery may charge from the grid during your cheapest tariff periods. The charge target, active months and protection rules still apply.",
-			dynamicActivationHint: "Once enabled, the battery follows your selected charging method. The price cap or cheapest hours, charge limit and protection rules determine when and how much it charges.",
-			activationOff: "Switched off: This automation is not charging from the grid.",
-			activationOn: "Switched on: The battery charges when the configured conditions are met.",
-			editFirst: "Finish editing above before switching automatic charging.",
-			chart: "Show price chart",
-			touIntro: "Enter the prices from your electricity contract and choose a charge target. Then switch on automatic charging in step 3.",
-			dynamicIntro: "Choose your electricity price sensor and charging method. Then switch on automatic charging in step 3.",
+			charging: "Grid charging",
+			pvSummary: "Solar forecast",
+			noPv: "Not configured",
+			gross: "All prices include tax and use ct/kWh.",
+			activationOff: "No automatic charging from the grid.",
+			activationOn: "Charges when the configured conditions are met.",
+			editFirst: "Finish editing before switching automatic charging.",
+			chart: "Price chart",
 			plannedPv: "Solar energy accounted for in the charging plan",
 			details: "Charging plan & forecast",
 			priceHint: "All prices include tax and use ct/kWh. The source unit is used for conversion only.",
@@ -6359,29 +6367,29 @@ var Il = ["aria-busy"], Ll = {
 		U(() => n?.tariff.value, (e) => {
 			e && (a.value = e);
 		}, { immediate: !0 });
-		let o = Q(() => n?.tariff.value ?? a.value), s = Q(() => o.value?.tariff_type), c = Q(() => s.value === "time_of_use" || s.value === "dynamic"), l = Q(() => n?.connected.value === !0 && n.ready.value), u = Q(() => o.value?.can_configure === !0 && l.value), d = Q(() => s.value === "dynamic" ? i.value.dynamic : s.value === "time_of_use" ? i.value.tou : i.value.unset), f = Q(() => n?.entity("switch", s.value === "dynamic" ? "price_charge_enabled" : "timed_charge_enabled")), p = Q(() => typeof o.value?.automation_enabled == "boolean" ? o.value.automation_enabled : f.value?.available ? f.value.state?.state === "on" : null), m = /* @__PURE__ */ V(null), h = /* @__PURE__ */ V(!1), g = /* @__PURE__ */ V("today"), _ = /* @__PURE__ */ V(null), v = /* @__PURE__ */ V(null), y = /* @__PURE__ */ V(null), b = Bn(), x = /* @__PURE__ */ V(!1), S = /* @__PURE__ */ V(!1), C = /* @__PURE__ */ V(null), w = /* @__PURE__ */ V(null), T = /* @__PURE__ */ V(!1), ee = /* @__PURE__ */ V(!1), E = /* @__PURE__ */ V(!1), D = /* @__PURE__ */ V("time_of_use"), te = /* @__PURE__ */ V(""), O = /* @__PURE__ */ V(!1), ne = /* @__PURE__ */ V(!1), re = /* @__PURE__ */ V(!1), k = /* @__PURE__ */ V({
+		let o = Q(() => n?.tariff.value ?? a.value), s = Q(() => o.value?.tariff_type), c = Q(() => s.value === "time_of_use" || s.value === "dynamic"), l = Q(() => n?.connected.value === !0 && n.ready.value), u = Q(() => o.value?.can_configure === !0 && l.value), d = Q(() => s.value === "dynamic" ? i.value.dynamic : s.value === "time_of_use" ? i.value.tou : i.value.unset), f = Q(() => n?.entity("switch", s.value === "dynamic" ? "price_charge_enabled" : "timed_charge_enabled")), p = Q(() => typeof o.value?.automation_enabled == "boolean" ? o.value.automation_enabled : f.value?.available ? f.value.state?.state === "on" : null), m = /* @__PURE__ */ V(null), h = /* @__PURE__ */ V(!1), g = /* @__PURE__ */ V("today"), _ = /* @__PURE__ */ V(null), v = /* @__PURE__ */ V(null), y = /* @__PURE__ */ V(null), b = Bn(), x = /* @__PURE__ */ V(!1), S = /* @__PURE__ */ V(!1), C = /* @__PURE__ */ V(null), w = /* @__PURE__ */ V(null), T = /* @__PURE__ */ V(!1), E = /* @__PURE__ */ V(!1), D = /* @__PURE__ */ V(!1), O = /* @__PURE__ */ V("time_of_use"), ee = /* @__PURE__ */ V(""), k = /* @__PURE__ */ V(!1), te = /* @__PURE__ */ V(!1), ne = /* @__PURE__ */ V(!1), A = /* @__PURE__ */ V({
 			feed_in_price_ct_kwh: null,
 			price_sensor: null,
 			price_attribute: null,
 			price_unit: "auto",
 			pv_sensor: null,
 			pv_factor: 100
-		}), A = /* @__PURE__ */ V(""), j = /* @__PURE__ */ V(""), ie = /* @__PURE__ */ V(""), ae = /* @__PURE__ */ V(), oe = /* @__PURE__ */ V(), se = /* @__PURE__ */ V(), M = !1, ce = 0;
+		}), j = /* @__PURE__ */ V(""), M = /* @__PURE__ */ V(""), re = /* @__PURE__ */ V(""), ie = /* @__PURE__ */ V(), ae = /* @__PURE__ */ V(), oe = /* @__PURE__ */ V(), N = !1, se = 0;
 		Zn(() => {
-			M = !0, ce++, window.clearInterval(_e);
+			N = !0, se++, window.clearInterval(R);
 		});
-		let le = Q(() => O.value || ne.value || re.value), ue = Q(() => uc(l.value ? m.value?.current_price_ct_kwh : null, t.hass, 2)), N = Q(() => m.value ? dc(`${m.value.date}T12:00:00Z`, t.hass, {
+		let ce = Q(() => k.value || te.value || ne.value), le = Q(() => uc(l.value ? m.value?.current_price_ct_kwh : null, t.hass, 2)), P = Q(() => m.value ? dc(`${m.value.date}T12:00:00Z`, t.hass, {
 			dateStyle: "medium",
 			timeZone: "UTC"
-		}) : null), de = Q(() => {
+		}) : null), ue = Q(() => {
 			let e = s.value === "dynamic" ? o.value?.profiles?.dynamic.price_sensor : n?.entity("sensor", "economics_current_import_price")?.metadata.entity_id;
 			return e ? t.hass?.states[e] : void 0;
-		}), fe = Q(() => {
+		}), de = Q(() => {
 			let e = n?.entity("sensor", "price_charge_status_text"), r = e?.state?.attributes, i = o.value?.profiles?.dynamic.pv_sensor;
 			if (!e?.available || !i || r?.pv_prognose_sensor !== i) return null;
 			let a = cc(r.pv_prognose_kwh);
 			return a !== null && a >= 0 ? uc(a, t.hass, 1) : null;
-		}), P = Array.from({ length: 12 }, (e, t) => `timed_charge_month_${t + 1}`), F = Q(() => (s.value === "dynamic" ? [
+		}), F = Array.from({ length: 12 }, (e, t) => `timed_charge_month_${t + 1}`), I = Q(() => (s.value === "dynamic" ? [
 			["number", "max_soc"],
 			["number", "price_charge_max_price"],
 			["number", "price_charge_hours"],
@@ -6391,27 +6399,30 @@ var Il = ["aria-busy"], Ll = {
 			["number", "timed_charge_max_soc"],
 			["number", "timed_charge_min_soc"],
 			["switch", "bridge_charge_enabled"],
-			...P.map((e) => ["switch", e])
-		]).map(([e, t]) => n?.entity(e, t)).filter((e) => e && (e.pending || e.error))), pe = Q(() => {
+			...F.map((e) => ["switch", e])
+		]).map(([e, t]) => n?.entity(e, t)).filter((e) => e && (e.pending || e.error))), fe = Q(() => {
 			let e = o.value?.profiles?.dynamic;
 			return e ? [
 				e.price_attribute ? `${i.value.attribute}: ${e.price_attribute}` : "",
 				e.price_unit === "auto" ? "" : `${i.value.unit}: ${i.value.units[e.price_unit]}`,
 				e.pv_factor === 100 ? "" : `${i.value.pvFactor}: ${e.pv_factor}`
 			].filter(Boolean).join(" · ") : "";
-		}), me = Q(() => {
+		}), pe = Q(() => {
 			let e = o.value?.profiles?.dynamic.price_sensor;
-			return `${e ? t.hass?.states[e]?.attributes.friendly_name ?? e : i.value.unset} · ${i.value.feed} ${uc(o.value?.profiles?.dynamic.feed_in_price_ct_kwh, t.hass, 2) ?? "—"} ct/kWh`;
+			return e ? t.hass?.states[e]?.attributes.friendly_name ?? e : i.value.unset;
+		}), me = Q(() => uc(o.value?.profiles?.dynamic.feed_in_price_ct_kwh, t.hass, 2)), he = Q(() => {
+			let e = s.value === "dynamic" ? o.value?.profiles?.dynamic.pv_sensor : o.value?.profiles?.time_of_use.pv_sensor;
+			return e ? t.hass?.states[e]?.attributes.friendly_name ?? e : i.value.noPv;
 		});
-		function I(e, t) {
-			_.value = t, O.value && (y.value = e, pn(() => {
-				if (M) return;
-				let t = ae.value?.querySelector(`[name="dynamic_${e}"]`), n = t?.closest("details");
+		function ge(e, t) {
+			_.value = t, k.value && (y.value = e, pn(() => {
+				if (N) return;
+				let t = ie.value?.querySelector(`[name="dynamic_${e}"]`), n = t?.closest("details");
 				n && (n.open = !0), t?.focus();
 			}));
 		}
-		function he(e, t = null) {
-			if (M) return;
+		function _e(e, t = null) {
+			if (N) return;
 			v.value = t;
 			let n = e && typeof e == "object" && "code" in e ? String(e.code) : "failed";
 			x.value = n === "conflict", y.value = null;
@@ -6421,17 +6432,17 @@ var Il = ["aria-busy"], Ll = {
 				price_unit_unsupported: ["price_unit", i.value.unsupportedPriceUnit],
 				pv_sensor_missing: ["pv_sensor", i.value.pvSensorMissing],
 				invalid_price_attribute: ["price_attribute", i.value.invalidAttribute],
-				invalid_feed_in_price: ["feed", A.value.trim() ? i.value.invalidFeed : i.value.missingFeed],
+				invalid_feed_in_price: ["feed", j.value.trim() ? i.value.invalidFeed : i.value.missingFeed],
 				invalid_pv_factor: ["pv_factor", i.value.invalidPvFactor]
 			}[n];
 			if (r) {
-				I(...r);
+				ge(...r);
 				return;
 			}
 			_.value = n === "bridge_pv_start_required" ? i.value.bridgePvRequired : n === "conflict" ? i.value.conflict : n === "forbidden" ? i.value.readonly : n === "disconnected" ? i.value.disconnected : n === "invalid_tariff" || n === "invalid_format" ? i.value.invalid : i.value.failed;
 		}
-		async function ge() {
-			let e = ++ce;
+		async function ve() {
+			let e = ++se;
 			if (!n || !l.value || !c.value) {
 				m.value = null, h.value = !1;
 				return;
@@ -6440,11 +6451,11 @@ var Il = ["aria-busy"], Ll = {
 			h.value = !0;
 			try {
 				let a = await n.loadTariffSeries(i);
-				!M && e === ce && s.value === t && o.value?.revision === r && g.value === i && (m.value = a.tariff_type === t && a.revision === r && a.day === i ? a : null);
+				!N && e === se && s.value === t && o.value?.revision === r && g.value === i && (m.value = a.tariff_type === t && a.revision === r && a.day === i ? a : null);
 			} catch {
-				!M && e === ce && (m.value = null);
+				!N && e === se && (m.value = null);
 			} finally {
-				!M && e === ce && (h.value = !1);
+				!N && e === se && (h.value = !1);
 			}
 		}
 		U([
@@ -6452,40 +6463,40 @@ var Il = ["aria-busy"], Ll = {
 			s,
 			() => o.value?.revision,
 			g,
-			de
+			ue
 		], () => {
-			ge();
+			ve();
 		}, { immediate: !0 }), U(s, (e, t) => {
-			t && e !== t && le.value && (O.value = !1, ne.value = !1, re.value = !1, _.value = null, y.value = null, x.value = !1, ee.value = !0), g.value = "today", m.value = null;
+			t && e !== t && ce.value && (k.value = !1, te.value = !1, ne.value = !1, _.value = null, y.value = null, x.value = !1, E.value = !0), g.value = "today", m.value = null;
 		}), U(l, (e) => {
-			e && n?.loadTariff().catch(he);
+			e && n?.loadTariff().catch(_e);
 		}, { immediate: !0 });
-		let _e = window.setInterval(() => {
-			l.value && (ge(), S.value || n?.loadTariff().catch(() => {}));
-		}, 6e4), ve = Q(() => {
-			let e = o.value?.profiles?.[D.value];
+		let R = window.setInterval(() => {
+			l.value && (ve(), S.value || n?.loadTariff().catch(() => {}));
+		}, 6e4), ye = Q(() => {
+			let e = o.value?.profiles?.[O.value];
 			return !e || e.feed_in_price_ct_kwh === null ? !0 : "price_sensor" in e ? !e.price_sensor : e.base_price_ct_kwh === null;
 		});
-		function R() {
-			ee.value = !1, D.value = s.value === "dynamic" ? "dynamic" : "time_of_use", te.value = o.value?.revision ?? "", E.value = !0, _.value = null, T.value = !1;
+		function be() {
+			E.value = !1, O.value = s.value === "dynamic" ? "dynamic" : "time_of_use", ee.value = o.value?.revision ?? "", D.value = !0, _.value = null, T.value = !1;
 		}
-		async function ye() {
+		async function xe() {
 			if (n && u.value && !S.value) {
 				S.value = !0, w.value = "applying", _.value = null;
 				try {
 					await n.configureTariff({
-						revision: te.value,
-						tariff_type: D.value,
-						...ve.value ? { automation_enabled: !1 } : {}
-					}), M || (E.value = !1, T.value = !0);
+						revision: ee.value,
+						tariff_type: O.value,
+						...ye.value ? { automation_enabled: !1 } : {}
+					}), N || (D.value = !1, T.value = !0);
 				} catch (e) {
-					he(e);
+					_e(e);
 				} finally {
 					w.value = null, S.value = !1;
 				}
 			}
 		}
-		async function be(e) {
+		async function z(e) {
 			let t = e.target, r = t.checked;
 			if (t.checked = p.value === !0, n && u.value && c.value && !S.value) {
 				S.value = !0, C.value = r, _.value = null, T.value = !1;
@@ -6496,174 +6507,180 @@ var Il = ["aria-busy"], Ll = {
 						automation_enabled: r
 					});
 				} catch (e) {
-					he(e, "activation");
+					_e(e, "activation");
 				} finally {
 					C.value = null, S.value = !1;
 				}
 			}
 		}
-		async function xe() {
-			if (ee.value = !1, n && !S.value) {
+		async function Se() {
+			if (E.value = !1, n && !S.value) {
 				S.value = !0, w.value = "loading", _.value = null, y.value = null, T.value = !1;
 				try {
 					let e = await n.loadTariff();
-					if (M) return;
+					if (N) return;
 					if (!e.can_configure || e.tariff_type !== "dynamic" || !e.profiles) throw { code: "forbidden" };
-					k.value = { ...e.profiles.dynamic }, A.value = k.value.feed_in_price_ct_kwh === null ? "" : String(k.value.feed_in_price_ct_kwh).replace(".", r.value ? "," : "."), j.value = String(k.value.pv_factor), ie.value = e.revision, O.value = !0, x.value = !1;
+					A.value = { ...e.profiles.dynamic }, j.value = A.value.feed_in_price_ct_kwh === null ? "" : String(A.value.feed_in_price_ct_kwh).replace(".", r.value ? "," : "."), M.value = String(A.value.pv_factor), re.value = e.revision, k.value = !0, x.value = !1;
 				} catch (e) {
-					he(e);
+					_e(e);
 				} finally {
-					w.value = null, S.value = !1, await pn(), ae.value?.querySelector("select,input")?.focus();
+					w.value = null, S.value = !1, await pn(), ie.value?.querySelector("select,input")?.focus();
 				}
 			}
 		}
-		function z() {
-			O.value = !1, _.value = null, y.value = null, x.value = !1, pn(() => oe.value?.focus());
+		function Ce() {
+			k.value = !1, _.value = null, y.value = null, x.value = !1, pn(() => ae.value?.focus());
 		}
-		async function Se() {
+		async function we() {
 			if (!n || S.value || x.value) return;
-			if (y.value = null, !k.value.price_sensor) {
-				I("price_sensor", i.value.missingPriceSensor);
+			if (y.value = null, !A.value.price_sensor) {
+				ge("price_sensor", i.value.missingPriceSensor);
 				return;
 			}
-			if (!A.value.trim()) {
-				I("feed", i.value.missingFeed);
+			if (!j.value.trim()) {
+				ge("feed", i.value.missingFeed);
 				return;
 			}
-			let e = /^\d+(?:[.,]\d{1,2})?$/.test(A.value.trim()) ? Number(A.value.trim().replace(",", ".")) : NaN;
+			let e = /^\d+(?:[.,]\d{1,2})?$/.test(j.value.trim()) ? Number(j.value.trim().replace(",", ".")) : NaN;
 			if (!Number.isFinite(e) || e < 0 || e > 200) {
-				I("feed", i.value.invalidFeed);
+				ge("feed", i.value.invalidFeed);
 				return;
 			}
-			let t = Number(j.value);
-			if (String(j.value).trim() === "" || !Number.isInteger(t) || t < 0 || t > 100) {
-				I("pv_factor", i.value.invalidPvFactor);
+			let t = Number(M.value);
+			if (String(M.value).trim() === "" || !Number.isInteger(t) || t < 0 || t > 100) {
+				ge("pv_factor", i.value.invalidPvFactor);
 				return;
 			}
 			S.value = !0, w.value = "saving", _.value = null;
 			try {
 				await n.configureTariff({
-					revision: ie.value,
+					revision: re.value,
 					tariff_type: "dynamic",
 					profile: {
-						...k.value,
-						price_attribute: k.value.price_attribute?.trim() || null,
+						...A.value,
+						price_attribute: A.value.price_attribute?.trim() || null,
 						feed_in_price_ct_kwh: e,
 						pv_factor: t
 					}
-				}), M || (z(), T.value = !0);
+				}), N || (Ce(), T.value = !0);
 			} catch (e) {
-				he(e);
+				_e(e);
 			} finally {
 				w.value = null, S.value = !1;
 			}
 		}
-		async function Ce() {
+		async function Te() {
 			if (n && !S.value) {
 				S.value = !0, w.value = "loading";
 				try {
-					await n.loadTariff(), M || (O.value = !1, E.value = !1, _.value = null, y.value = null, x.value = !1);
+					await n.loadTariff(), N || (k.value = !1, D.value = !1, _.value = null, y.value = null, x.value = !1);
 				} catch (e) {
-					he(e);
+					_e(e);
 				} finally {
 					w.value = null, S.value = !1;
 				}
 			}
 		}
-		function we() {
-			re.value = !1, pn(() => se.value?.focus());
+		function Ee() {
+			ne.value = !1, pn(() => oe.value?.focus());
 		}
-		return (t, n) => (K(), q("div", Ru, [
-			J("section", zu, [
-				J("div", Bu, [J("div", Vu, [
+		return (t, n) => (K(), q("div", Qu, [
+			J("section", $u, [
+				J("div", ed, [J("div", td, [
 					J("span", null, L(i.value.active), 1),
 					J("strong", null, L(d.value), 1),
 					J("button", {
 						type: "button",
-						disabled: !u.value || S.value || le.value,
-						"aria-expanded": E.value,
-						onClick: R
-					}, L(i.value.change), 9, Hu)
+						disabled: !u.value || S.value || ce.value,
+						"aria-expanded": D.value,
+						onClick: be
+					}, L(i.value.change), 9, nd)
 				])]),
-				E.value ? (K(), q("form", {
+				D.value ? (K(), q("form", {
 					key: 0,
 					class: "electricity-choice",
 					"aria-busy": w.value === "applying",
-					onSubmit: Wa(ye, ["prevent"])
+					onSubmit: Wa(xe, ["prevent"])
 				}, [
-					J("fieldset", { disabled: S.value || !l.value }, [J("legend", Gu, L(i.value.active), 1), (K(), q(G, null, W(["time_of_use", "dynamic"], (e) => J("label", { key: e }, [En(J("input", {
-						"onUpdate:modelValue": n[0] ||= (e) => D.value = e,
+					J("fieldset", { disabled: S.value || !l.value }, [J("legend", ad, L(i.value.active), 1), (K(), q(G, null, W(["time_of_use", "dynamic"], (e) => J("label", { key: e }, [En(J("input", {
+						"onUpdate:modelValue": n[0] ||= (e) => O.value = e,
 						type: "radio",
 						name: "electricity-tariff",
 						value: e
-					}, null, 8, Ku), [[La, D.value]]), J("span", null, [J("strong", null, L(e === "time_of_use" ? i.value.tou : i.value.dynamic), 1), J("small", null, L(e === "time_of_use" ? i.value.touHint : i.value.dynamicHint), 1)])])), 64))], 8, Wu),
+					}, null, 8, od), [[La, O.value]]), J("span", null, [J("strong", null, L(e === "time_of_use" ? i.value.tou : i.value.dynamic), 1), J("small", null, L(e === "time_of_use" ? i.value.touHint : i.value.dynamicHint), 1)])])), 64))], 8, id),
 					J("p", null, L(i.value.chooseHint), 1),
-					ve.value ? (K(), q("p", qu, L(i.value.incomplete), 1)) : Z("", !0),
-					J("div", Ju, [J("button", {
+					ye.value ? (K(), q("p", sd, L(i.value.incomplete), 1)) : Z("", !0),
+					J("div", cd, [J("button", {
 						type: "submit",
 						disabled: S.value || !l.value || x.value
-					}, L(w.value === "applying" ? i.value.applying : i.value.apply), 9, Yu), J("button", {
+					}, L(w.value === "applying" ? i.value.applying : i.value.apply), 9, ld), J("button", {
 						type: "button",
 						disabled: S.value,
 						onClick: n[1] ||= (e) => {
-							E.value = !1, _.value = null;
+							D.value = !1, _.value = null;
 						}
-					}, L(i.value.cancel), 9, Xu)])
-				], 40, Uu)) : Z("", !0),
-				w.value ? (K(), q("p", Zu, L(i.value[w.value]), 1)) : Z("", !0),
-				_.value && !y.value && v.value !== "activation" ? (K(), q("p", Qu, L(_.value), 1)) : Z("", !0),
+					}, L(i.value.cancel), 9, ud)])
+				], 40, rd)) : Z("", !0),
+				w.value ? (K(), q("p", dd, L(i.value[w.value]), 1)) : Z("", !0),
+				_.value && !y.value && v.value !== "activation" ? (K(), q("p", fd, L(_.value), 1)) : Z("", !0),
 				x.value && v.value !== "activation" ? (K(), q("button", {
 					key: 3,
 					type: "button",
 					disabled: S.value || !l.value,
-					onClick: Ce
-				}, L(i.value.reload), 9, $u)) : Z("", !0),
-				T.value ? (K(), q("p", ed, L(i.value.saved), 1)) : Z("", !0),
-				ee.value ? (K(), q("p", td, L(i.value.tariffChanged), 1)) : Z("", !0),
-				!o.value && !_.value ? (K(), q("p", nd, L(i.value.loading), 1)) : Z("", !0),
-				c.value ? (K(), q("p", rd, L(s.value === "time_of_use" ? i.value.touIntro : i.value.dynamicIntro), 1)) : Z("", !0)
+					onClick: Te
+				}, L(i.value.reload), 9, pd)) : Z("", !0),
+				T.value ? (K(), q("p", md, L(i.value.saved), 1)) : Z("", !0),
+				E.value ? (K(), q("p", hd, L(i.value.tariffChanged), 1)) : Z("", !0),
+				!o.value && !_.value ? (K(), q("p", gd, L(i.value.loading), 1)) : Z("", !0)
 			]),
-			s.value === "time_of_use" ? (K(), ai(Pl, {
+			c.value ? (K(), q("div", _d, [J("section", {
+				class: "electricity-card electricity-price-card",
+				"aria-label": i.value.prices
+			}, [s.value === "time_of_use" ? (K(), ai(zl, {
 				key: 0,
 				hass: e.hass,
 				compact: "",
-				onEditing: n[2] ||= (e) => ne.value = e,
-				onSaved: ge
-			}, null, 8, ["hass"])) : s.value === "dynamic" ? (K(), q("section", {
+				onEditing: n[2] ||= (e) => te.value = e,
+				onSaved: ve
+			}, {
+				"current-price": Tn(() => [J("div", yd, [J("span", bd, L(i.value.price) + " · " + L(i.value.current), 1), J("p", xd, [X(L(le.value ?? i.value.unavailable), 1), le.value === null ? Z("", !0) : (K(), q("span", Sd, " ct/kWh"))])])]),
+				_: 1
+			}, 8, ["hass"])) : s.value === "dynamic" ? (K(), q("section", {
 				key: 1,
 				class: "electricity-card electricity-prices",
 				"aria-busy": w.value === "loading" || w.value === "saving"
 			}, [
-				J("header", null, [J("div", null, [J("h2", null, L(i.value.prices), 1)]), O.value ? Z("", !0) : (K(), q("button", {
+				J("header", null, [J("div", null, [J("h2", null, L(i.value.prices), 1)]), k.value ? Z("", !0) : (K(), q("button", {
 					key: 0,
 					ref_key: "priceButton",
-					ref: oe,
+					ref: ae,
 					type: "button",
-					disabled: S.value || !u.value || E.value,
-					"aria-expanded": O.value,
-					onClick: xe
-				}, L(w.value === "loading" ? i.value.loading : i.value.edit), 9, ad))]),
-				J("p", od, L(me.value), 1),
-				O.value ? (K(), q("form", {
+					disabled: S.value || !u.value || D.value,
+					"aria-expanded": k.value,
+					onClick: Se
+				}, L(w.value === "loading" ? i.value.loading : i.value.edit), 9, wd))]),
+				J("div", Td, [J("span", Ed, L(i.value.price) + " · " + L(i.value.current), 1), J("p", Dd, [X(L(le.value ?? i.value.unavailable), 1), le.value === null ? Z("", !0) : (K(), q("span", Od, " ct/kWh"))])]),
+				J("dl", kd, [J("div", null, [J("dt", null, L(i.value.sourceSummary), 1), J("dd", null, L(pe.value), 1)]), J("div", null, [J("dt", null, L(i.value.feed), 1), J("dd", null, [X(L(me.value ?? i.value.unavailable), 1), me.value === null ? Z("", !0) : (K(), q(G, { key: 0 }, [X(" ct/kWh")], 64))])])]),
+				k.value ? (K(), q("form", {
 					key: 0,
 					ref_key: "pricesEditor",
-					ref: ae,
+					ref: ie,
 					class: "electricity-price-editor",
 					"aria-busy": w.value === "saving",
 					novalidate: "",
-					onSubmit: Wa(Se, ["prevent"])
+					onSubmit: Wa(we, ["prevent"])
 				}, [
 					_.value && y.value ? (K(), q("p", {
 						key: 0,
 						id: H(b),
 						role: "alert",
 						class: "electricity-error"
-					}, L(_.value), 9, cd)) : Z("", !0),
+					}, L(_.value), 9, jd)) : Z("", !0),
 					J("fieldset", { disabled: S.value || !l.value }, [
-						J("p", ud, L(i.value.priceHint), 1),
-						J("div", dd, [Y(Ws, {
-							modelValue: k.value.price_sensor,
-							"onUpdate:modelValue": n[3] ||= (e) => k.value.price_sensor = e,
+						J("p", Nd, L(i.value.priceHint), 1),
+						J("div", Pd, [Y(Ws, {
+							modelValue: A.value.price_sensor,
+							"onUpdate:modelValue": n[3] ||= (e) => A.value.price_sensor = e,
 							hass: e.hass,
 							label: i.value.source,
 							name: "dynamic_price_sensor",
@@ -6676,7 +6693,7 @@ var Il = ["aria-busy"], Ll = {
 							"invalid",
 							"described-by"
 						]), J("label", null, [X(L(i.value.feed) + " (ct/kWh)", 1), En(J("input", {
-							"onUpdate:modelValue": n[4] ||= (e) => A.value = e,
+							"onUpdate:modelValue": n[4] ||= (e) => j.value = e,
 							type: "text",
 							inputmode: "decimal",
 							name: "dynamic_feed",
@@ -6684,12 +6701,12 @@ var Il = ["aria-busy"], Ll = {
 							required: "",
 							"aria-invalid": y.value === "feed" || void 0,
 							"aria-describedby": y.value === "feed" ? H(b) : void 0
-						}, null, 8, fd), [[Ia, A.value]])])]),
-						J("p", pd, L(i.value.sourceHint), 1),
-						J("p", md, L(i.value.feedHint), 1),
-						J("div", hd, [Y(Ws, {
-							modelValue: k.value.pv_sensor,
-							"onUpdate:modelValue": n[5] ||= (e) => k.value.pv_sensor = e,
+						}, null, 8, Fd), [[Ia, j.value]])])]),
+						J("p", Id, L(i.value.sourceHint), 1),
+						J("p", Ld, L(i.value.feedHint), 1),
+						J("div", Rd, [Y(Ws, {
+							modelValue: A.value.pv_sensor,
+							"onUpdate:modelValue": n[5] ||= (e) => A.value.pv_sensor = e,
 							hass: e.hass,
 							label: i.value.pv,
 							name: "dynamic_pv_sensor",
@@ -6702,31 +6719,31 @@ var Il = ["aria-busy"], Ll = {
 							"invalid",
 							"described-by"
 						])]),
-						J("p", gd, L(i.value.pvHint), 1),
-						pe.value ? (K(), q("p", _d, L(i.value.customSettings) + ": " + L(pe.value), 1)) : Z("", !0),
-						J("details", vd, [
+						J("p", zd, L(i.value.pvHint), 1),
+						fe.value ? (K(), q("p", Bd, L(i.value.customSettings) + ": " + L(fe.value), 1)) : Z("", !0),
+						J("details", Vd, [
 							J("summary", null, L(i.value.advanced), 1),
 							J("h3", null, L(i.value.sourceSettings), 1),
-							J("div", yd, [J("label", null, [X(L(i.value.attribute), 1), En(J("input", {
-								"onUpdate:modelValue": n[6] ||= (e) => k.value.price_attribute = e,
+							J("div", Hd, [J("label", null, [X(L(i.value.attribute), 1), En(J("input", {
+								"onUpdate:modelValue": n[6] ||= (e) => A.value.price_attribute = e,
 								name: "dynamic_price_attribute",
 								type: "text",
 								autocomplete: "off",
 								"aria-invalid": y.value === "price_attribute" || void 0,
 								"aria-describedby": y.value === "price_attribute" ? H(b) : void 0
-							}, null, 8, bd), [[Ia, k.value.price_attribute]])]), J("label", null, [X(L(i.value.unit), 1), En(J("select", {
-								"onUpdate:modelValue": n[7] ||= (e) => k.value.price_unit = e,
+							}, null, 8, Ud), [[Ia, A.value.price_attribute]])]), J("label", null, [X(L(i.value.unit), 1), En(J("select", {
+								"onUpdate:modelValue": n[7] ||= (e) => A.value.price_unit = e,
 								name: "dynamic_price_unit",
 								"aria-invalid": y.value === "price_unit" || void 0,
 								"aria-describedby": y.value === "price_unit" ? H(b) : void 0
 							}, [(K(!0), q(G, null, W(i.value.units, (e, t) => (K(), q("option", {
 								key: t,
 								value: t
-							}, L(e), 9, Sd))), 128))], 8, xd), [[Ra, k.value.price_unit]])])]),
-							J("p", Cd, L(i.value.attributeHint), 1),
-							J("p", wd, L(i.value.unitHint), 1),
-							J("div", Td, [J("label", null, [X(L(i.value.pvFactor), 1), En(J("input", {
-								"onUpdate:modelValue": n[8] ||= (e) => j.value = e,
+							}, L(e), 9, Gd))), 128))], 8, Wd), [[Ra, A.value.price_unit]])])]),
+							J("p", Kd, L(i.value.attributeHint), 1),
+							J("p", qd, L(i.value.unitHint), 1),
+							J("div", Jd, [J("label", null, [X(L(i.value.pvFactor), 1), En(J("input", {
+								"onUpdate:modelValue": n[8] ||= (e) => M.value = e,
 								name: "dynamic_pv_factor",
 								type: "number",
 								min: "0",
@@ -6734,77 +6751,20 @@ var Il = ["aria-busy"], Ll = {
 								step: "1",
 								"aria-invalid": y.value === "pv_factor" || void 0,
 								"aria-describedby": y.value === "pv_factor" ? H(b) : void 0
-							}, null, 8, Ed), [[Ia, j.value]])])]),
-							J("p", Dd, L(i.value.pvFactorHint), 1)
+							}, null, 8, Yd), [[Ia, M.value]])])]),
+							J("p", Xd, L(i.value.pvFactorHint), 1)
 						])
-					], 8, ld),
-					J("div", Od, [J("button", {
+					], 8, Md),
+					J("div", Zd, [J("button", {
 						type: "submit",
 						disabled: S.value || !l.value || x.value
-					}, L(w.value === "saving" ? i.value.saving : i.value.save), 9, kd), J("button", {
+					}, L(w.value === "saving" ? i.value.saving : i.value.save), 9, Qd), J("button", {
 						type: "button",
 						disabled: S.value,
-						onClick: z
-					}, L(i.value.cancel), 9, Ad)])
-				], 40, sd)) : Z("", !0)
-			], 8, id)) : Z("", !0),
-			c.value ? (K(), q("section", jd, [
-				J("header", null, [J("div", null, [J("h2", null, L(s.value === "time_of_use" ? i.value.touCharging : i.value.charging), 1)]), re.value ? Z("", !0) : (K(), q("button", {
-					key: 0,
-					ref_key: "chargingButton",
-					ref: se,
-					type: "button",
-					disabled: E.value,
-					"aria-expanded": re.value,
-					onClick: n[9] ||= (e) => re.value = !0
-				}, L(i.value.edit), 9, Md))]),
-				s.value === "dynamic" ? (K(), ai(vu, {
-					key: 0,
-					editing: re.value
-				}, null, 8, ["editing"])) : Z("", !0),
-				s.value === "time_of_use" ? (K(), ai(Lu, {
-					key: 1,
-					editing: re.value,
-					hass: e.hass
-				}, null, 8, ["editing", "hass"])) : Z("", !0),
-				re.value ? Z("", !0) : (K(), q("div", Nd, [(K(!0), q(G, null, W(F.value, (e) => (K(), q(G, { key: e?.metadata.entity_id }, [e?.error ? (K(), q("p", Pd, L(e.name) + ": " + L(e.error), 1)) : e?.pending ? (K(), q("p", Fd, L(e.name) + ": " + L(i.value.entityPending), 1)) : Z("", !0)], 64))), 128))])),
-				re.value ? (K(), q("div", Id, [J("div", Ld, [J("button", {
-					type: "button",
-					onClick: we
-				}, L(i.value.done), 1)])])) : Z("", !0)
-			])) : Z("", !0),
-			c.value ? (K(), q("section", Rd, [
-				J("h2", null, L(i.value.activate), 1),
-				J("p", null, L(s.value === "time_of_use" ? i.value.activationHint : i.value.dynamicActivationHint), 1),
-				J("label", {
-					class: "electricity-master",
-					"aria-busy": C.value !== null
-				}, [J("input", {
-					type: "checkbox",
-					role: "switch",
-					checked: p.value === !0,
-					"aria-describedby": _.value && v.value === "activation" ? "electricity-master-status electricity-activation-error" : "electricity-master-status",
-					disabled: !u.value || S.value || p.value === null || E.value || le.value,
-					onChange: be
-				}, null, 40, Bd), X(L(i.value.automatic), 1)], 8, zd),
-				J("p", Vd, L(C.value === null ? "" : C.value ? i.value.turningOn : i.value.turningOff), 1),
-				_.value && v.value === "activation" ? (K(), q("p", Hd, L(_.value), 1)) : Z("", !0),
-				x.value && v.value === "activation" ? (K(), q("button", {
-					key: 1,
-					type: "button",
-					disabled: S.value || !l.value,
-					onClick: Ce
-				}, L(i.value.reload), 9, Ud)) : Z("", !0),
-				l.value ? u.value ? le.value || E.value ? (K(), q("p", Kd, L(i.value.editFirst), 1)) : (K(), q("p", qd, L(p.value === null ? i.value.unavailable : p.value ? i.value.activationOn : i.value.activationOff), 1)) : (K(), q("p", Gd, L(i.value.readonly), 1)) : (K(), q("p", Wd, L(i.value.disconnected), 1))
-			])) : Z("", !0),
-			c.value ? (K(), q("section", Jd, [J("header", null, [J("div", null, [
-				J("h2", null, L(i.value.price), 1),
-				J("p", Yd, [X(L(ue.value ?? i.value.unavailable), 1), ue.value === null ? Z("", !0) : (K(), q("span", Xd, " ct/kWh"))]),
-				J("p", Zd, L(i.value.current) + " · " + L(d.value), 1)
-			]), Y(Ho, {
-				domain: "sensor",
-				"entity-key": s.value === "dynamic" ? "price_charge_status_text" : "timed_charge_discharge_status"
-			}, null, 8, ["entity-key"])]), J("details", Qd, [
+						onClick: Ce
+					}, L(i.value.cancel), 9, $d)])
+				], 40, Ad)) : Z("", !0)
+			], 8, Cd)) : Z("", !0), J("details", ef, [
 				J("summary", null, L(i.value.chart), 1),
 				s.value === "dynamic" ? (K(), q("div", {
 					key: 0,
@@ -6815,9 +6775,9 @@ var Il = ["aria-busy"], Ll = {
 					type: "button",
 					"aria-pressed": g.value === e,
 					onClick: (t) => g.value = e
-				}, L(e === "today" ? i.value.today : i.value.tomorrow), 9, ef)), 64))], 8, $d)) : Z("", !0),
-				J("p", tf, [X(L(g.value === "today" ? i.value.today : i.value.tomorrow), 1), N.value ? (K(), q("span", nf, " · " + L(N.value), 1)) : Z("", !0)]),
-				Y(Zl, {
+				}, L(e === "today" ? i.value.today : i.value.tomorrow), 9, nf)), 64))], 8, tf)) : Z("", !0),
+				J("p", rf, [X(L(g.value === "today" ? i.value.today : i.value.tomorrow), 1), P.value ? (K(), q("span", af, " · " + L(P.value), 1)) : Z("", !0)]),
+				Y(nu, {
 					series: m.value,
 					hass: e.hass,
 					loading: h.value
@@ -6826,67 +6786,119 @@ var Il = ["aria-busy"], Ll = {
 					"hass",
 					"loading"
 				])
-			])])) : Z("", !0),
-			c.value ? (K(), q("details", rf, [J("summary", null, L(i.value.details), 1), s.value === "time_of_use" ? (K(), ai(Tc, {
-				key: 0,
-				hass: e.hass
-			}, null, 8, ["hass"])) : (K(), q(G, { key: 1 }, [
-				Y(Ho, {
+			])], 8, vd), c.value ? (K(), q("section", of, [
+				J("header", null, [J("div", null, [J("h2", null, L(i.value.charging), 1)]), ne.value ? Z("", !0) : (K(), q("button", {
+					key: 0,
+					ref_key: "chargingButton",
+					ref: oe,
+					type: "button",
+					disabled: D.value,
+					"aria-expanded": ne.value,
+					onClick: n[9] ||= (e) => ne.value = !0
+				}, L(i.value.edit), 9, sf))]),
+				c.value ? (K(), q("section", cf, [
+					J("label", {
+						class: "electricity-master",
+						"aria-busy": C.value !== null
+					}, [J("input", {
+						type: "checkbox",
+						role: "switch",
+						checked: p.value === !0,
+						"aria-describedby": _.value && v.value === "activation" ? "electricity-master-status electricity-activation-error" : "electricity-master-status",
+						disabled: !u.value || S.value || p.value === null || D.value || ce.value,
+						onChange: z
+					}, null, 40, uf), X(L(i.value.automatic), 1)], 8, lf),
+					J("p", df, L(C.value === null ? "" : C.value ? i.value.turningOn : i.value.turningOff), 1),
+					_.value && v.value === "activation" ? (K(), q("p", ff, L(_.value), 1)) : Z("", !0),
+					x.value && v.value === "activation" ? (K(), q("button", {
+						key: 1,
+						type: "button",
+						disabled: S.value || !l.value,
+						onClick: Te
+					}, L(i.value.reload), 9, pf)) : Z("", !0),
+					l.value ? u.value ? ce.value || D.value ? (K(), q("p", gf, L(i.value.editFirst), 1)) : (K(), q("p", _f, L(p.value === null ? i.value.unavailable : p.value ? i.value.activationOn : i.value.activationOff), 1)) : (K(), q("p", hf, L(i.value.readonly), 1)) : (K(), q("p", mf, L(i.value.disconnected), 1))
+				])) : Z("", !0),
+				s.value === "dynamic" ? (K(), ai(Eu, {
+					key: 1,
+					editing: ne.value
+				}, null, 8, ["editing"])) : Z("", !0),
+				s.value === "time_of_use" ? (K(), ai(Zu, {
+					key: 2,
+					editing: ne.value,
+					hass: e.hass
+				}, null, 8, ["editing", "hass"])) : Z("", !0),
+				ne.value ? Z("", !0) : (K(), q("div", vf, [(K(!0), q(G, null, W(I.value, (e) => (K(), q(G, { key: e?.metadata.entity_id }, [e?.error ? (K(), q("p", yf, L(e.name) + ": " + L(e.error), 1)) : e?.pending ? (K(), q("p", bf, L(e.name) + ": " + L(i.value.entityPending), 1)) : Z("", !0)], 64))), 128))])),
+				ne.value ? (K(), q("div", xf, [J("div", Sf, [J("button", {
+					type: "button",
+					onClick: Ee
+				}, L(i.value.done), 1)])])) : Z("", !0),
+				ne.value ? Z("", !0) : (K(), q("dl", Cf, [J("div", null, [J("dt", null, L(i.value.pvSummary), 1), J("dd", null, L(he.value), 1)])])),
+				J("div", wf, [Y(Ho, {
 					domain: "sensor",
-					"entity-key": "price_charge_active_text"
-				}),
-				Y(Ho, {
-					domain: "sensor",
-					"entity-key": "price_charge_status_text"
-				}),
-				Y(Ho, {
-					domain: "sensor",
-					"entity-key": "price_charge_next_start"
-				}),
-				fe.value === null ? Z("", !0) : (K(), q("p", af, [X(L(i.value.plannedPv) + ": ", 1), J("strong", null, L(fe.value) + " kWh", 1)]))
-			], 64))])) : Z("", !0)
+					"entity-key": s.value === "dynamic" ? "price_charge_status_text" : "timed_charge_discharge_status"
+				}, null, 8, ["entity-key"])]),
+				c.value ? (K(), q("details", Tf, [J("summary", null, L(i.value.details), 1), s.value === "time_of_use" ? (K(), ai(Tc, {
+					key: 0,
+					hass: e.hass
+				}, null, 8, ["hass"])) : (K(), q(G, { key: 1 }, [
+					Y(Ho, {
+						domain: "sensor",
+						"entity-key": "price_charge_active_text"
+					}),
+					Y(Ho, {
+						domain: "sensor",
+						"entity-key": "price_charge_status_text"
+					}),
+					Y(Ho, {
+						domain: "sensor",
+						"entity-key": "price_charge_next_start"
+					}),
+					de.value === null ? Z("", !0) : (K(), q("p", Ef, [X(L(i.value.plannedPv) + ": ", 1), J("strong", null, L(de.value) + " kWh", 1)]))
+				], 64))])) : Z("", !0)
+			])) : Z("", !0)])) : Z("", !0),
+			c.value ? (K(), q("p", Df, L(i.value.gross), 1)) : Z("", !0)
 		]));
 	}
-}), [["styles", [".electricity-tariff-view{gap:16px;min-width:0;margin-top:20px;display:grid}.electricity-card{border:1px solid var(--divider-color,#ddd);border-radius:var(--ha-card-border-radius,12px);background:var(--card-background-color,#fff);min-width:0;padding:20px}.electricity-card h2{margin:0;font-size:18px}.electricity-card h3{margin:20px 0 10px;font-size:16px}.electricity-card p{margin:10px 0 0;line-height:1.6}.electricity-card button{font:inherit;cursor:pointer;border:1px solid var(--divider-color,#ddd);min-height:44px;color:var(--primary-color,#03a9f4);background:0 0;border-radius:7px;padding:8px 12px}.electricity-card button:disabled{opacity:.5;cursor:default}.electricity-card header,.electricity-tariff-bar__row{justify-content:space-between;align-items:center;gap:16px;display:flex}.electricity-card header>div{flex:1;min-width:0}.electricity-card header>button{white-space:nowrap;flex-shrink:0}.electricity-active{flex-wrap:wrap;align-items:center;gap:10px;display:flex}.electricity-active>span,.electricity-muted{color:var(--secondary-text-color,#666)}.electricity-active>strong{color:var(--primary-color,#03a9f4)}.electricity-master{cursor:pointer;align-items:center;gap:10px;min-height:44px;display:flex}.electricity-master-status:empty{display:none}.electricity-master-status{border-left:3px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:10px 14px;font-weight:500}.electricity-activation .electricity-master{margin-top:12px;font-weight:600}.electricity-price-details{margin-top:16px}.electricity-master[aria-busy=true]{cursor:progress}.electricity-master input{width:22px;height:22px;accent-color:var(--primary-color,#03a9f4);flex-shrink:0}.electricity-choice{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:16px}.electricity-choice fieldset{border:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;min-width:0;padding:0;display:grid}.electricity-choice fieldset>label{border:1px solid var(--divider-color,#ddd);cursor:pointer;border-radius:8px;gap:12px;padding:14px;display:flex}.electricity-choice input{accent-color:var(--primary-color,#03a9f4);flex-shrink:0;width:20px;height:20px}.electricity-choice strong,.electricity-choice small{display:block}.electricity-choice small{color:var(--secondary-text-color,#666);margin-top:5px;font-size:14px}.electricity-actions{flex-wrap:wrap;gap:8px;margin-top:16px;display:flex}.electricity-actions button[type=submit]{background:var(--primary-color,#03a9f4);color:var(--text-primary-color,#fff)}.electricity-current-price{font-size:32px;font-weight:500;line-height:1.1!important}.electricity-current-price span{font-size:16px;font-weight:400}.electricity-days{gap:6px;margin-top:12px;display:flex}.electricity-days [aria-pressed=true]{background:var(--secondary-background-color,#eee);border-color:var(--primary-color,#03a9f4)}.electricity-day{margin:20px 0!important}.electricity-error{color:var(--error-color,#db4437)}.electricity-price-editor [aria-invalid=true]{border-color:var(--error-color,#db4437);outline:1px solid var(--error-color,#db4437)}.electricity-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;display:grid}.electricity-fields>label{flex-direction:column;gap:6px;min-width:0;font-size:14px;display:flex}.electricity-fields input,.electricity-fields select{width:100%;min-width:0;min-height:44px;font:inherit;color:var(--primary-text-color,#222);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ccc);border-radius:6px;padding:10px}.electricity-price-editor fieldset{border:0;min-width:0;margin:0;padding:0}.electricity-price-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:12px}.electricity-price-advanced>summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-settings .entity-control,.electricity-charging-editor .entity-control{margin-top:12px}.electricity-plan>summary,.electricity-price-details>summary{cursor:pointer;align-content:center;min-height:44px;font-size:18px;font-weight:500;display:list-item}.electricity-plan>.charge-plan{box-shadow:none;border:0;padding:16px 0 0}.electricity-sr-only{clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}@media (max-width:700px){.electricity-tariff-bar__row{flex-direction:column;align-items:flex-start}.electricity-fields,.electricity-choice fieldset{grid-template-columns:minmax(0,1fr)}.electricity-card{padding:16px}.electricity-card header{align-items:flex-start}.electricity-current-price{font-size:28px}}@media (max-width:400px){.electricity-prices>header,.electricity-charging>header,.electricity-tariff-view .tariff-plan__header{flex-wrap:wrap}.electricity-prices>header>div,.electricity-charging>header>div,.electricity-tariff-view .tariff-plan__header>h2{flex:100%}.electricity-prices>header>button,.electricity-charging>header>button,.electricity-tariff-view .tariff-plan__header>button{margin-left:auto}}"]]]), sf = { class: "savings-view" }, cf = { class: "savings-overview" }, lf = ["aria-labelledby"], uf = ["id"], df = ["aria-labelledby"], ff = ["id"], pf = {
+}), [["styles", [".electricity-tariff-view{gap:16px;min-width:0;margin-top:12px;display:grid}.electricity-card{border:1px solid var(--divider-color,#ddd);border-radius:var(--ha-card-border-radius,12px);background:var(--card-background-color,#fff);min-width:0;padding:16px 18px}.electricity-card h2{margin:0;font-size:18px}.electricity-card h3{margin:20px 0 10px;font-size:16px}.electricity-card p{margin:10px 0 0;line-height:1.6}.electricity-card button{font:inherit;cursor:pointer;border:1px solid var(--divider-color,#ddd);min-height:44px;color:var(--primary-color,#03a9f4);background:0 0;border-radius:7px;padding:8px 12px}.electricity-card button:disabled{opacity:.5;cursor:default}.electricity-card header,.electricity-tariff-bar__row{justify-content:space-between;align-items:center;gap:16px;display:flex}.electricity-card header>div{flex:1;min-width:0}.electricity-card header>button{white-space:nowrap;flex-shrink:0}.electricity-active{flex-wrap:wrap;align-items:center;gap:10px;display:flex}.electricity-active>span,.electricity-muted{color:var(--secondary-text-color,#666)}.electricity-master{cursor:pointer;align-items:center;gap:10px;min-height:44px;display:flex}.electricity-master-status:empty{display:none}.electricity-master-status{border-left:3px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:10px 14px;font-weight:500}.electricity-activation .electricity-master{margin-top:0;font-weight:600}.electricity-price-details{margin-top:16px}.electricity-master[aria-busy=true]{cursor:progress}.electricity-master input{width:22px;height:22px;accent-color:var(--primary-color,#03a9f4);flex-shrink:0}.electricity-choice{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:16px}.electricity-choice fieldset{border:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;min-width:0;padding:0;display:grid}.electricity-choice fieldset>label{border:1px solid var(--divider-color,#ddd);cursor:pointer;border-radius:8px;gap:12px;padding:14px;display:flex}.electricity-choice input{accent-color:var(--primary-color,#03a9f4);flex-shrink:0;width:20px;height:20px}.electricity-choice strong,.electricity-choice small{display:block}.electricity-choice small{color:var(--secondary-text-color,#666);margin-top:5px;font-size:14px}.electricity-actions{flex-wrap:wrap;gap:8px;margin-top:16px;display:flex}.electricity-actions button[type=submit]{background:var(--primary-color,#03a9f4);color:var(--text-primary-color,#fff)}.electricity-current-price{font-size:32px;font-weight:500;line-height:1.1!important}.electricity-current-price span{font-size:16px;font-weight:400}.electricity-days{gap:6px;margin-top:12px;display:flex}.electricity-days [aria-pressed=true]{background:var(--secondary-background-color,#eee);border-color:var(--primary-color,#03a9f4)}.electricity-day{margin:20px 0!important}.electricity-error{color:var(--error-color,#db4437)}.electricity-price-editor [aria-invalid=true]{border-color:var(--error-color,#db4437);outline:1px solid var(--error-color,#db4437)}.electricity-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;display:grid}.electricity-fields>label{flex-direction:column;gap:6px;min-width:0;font-size:14px;display:flex}.electricity-fields input,.electricity-fields select{width:100%;min-width:0;min-height:44px;font:inherit;color:var(--primary-text-color,#222);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#ccc);border-radius:6px;padding:10px}.electricity-price-editor fieldset{border:0;min-width:0;margin:0;padding:0}.electricity-price-advanced{border-top:1px solid var(--divider-color,#ddd);margin-top:16px;padding-top:12px}.electricity-price-advanced>summary{cursor:pointer;align-content:center;min-height:44px}.dynamic-charging-settings .entity-control,.electricity-charging-editor .entity-control{margin-top:12px}.electricity-plan>summary,.electricity-price-details>summary{cursor:pointer;align-content:center;min-height:44px;font-size:14px;font-weight:500;display:list-item}.electricity-plan>.charge-plan{box-shadow:none;border:0;padding:16px 0 0}.electricity-sr-only{clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}@media (max-width:700px){.electricity-tariff-bar__row{flex-direction:column;align-items:flex-start}.electricity-fields,.electricity-choice fieldset{grid-template-columns:minmax(0,1fr)}.electricity-card{padding:16px}.electricity-card header{align-items:flex-start}.electricity-current-price{font-size:28px}}.electricity-columns{align-items:start;gap:16px;min-width:0;display:grid}.electricity-card.electricity-tariff-bar{background:0 0;border:0;padding:0}.electricity-tariff-bar__row{justify-content:flex-end}.electricity-active>strong{color:var(--primary-text-color,#212121)}.electricity-price-card{container:sax-tariff-prices/inline-size}.electricity-card.electricity-prices{border:0;border-radius:0;padding:0}.electricity-prices>header,.electricity-charging>header{border-bottom:1px solid var(--divider-color,#ddd);margin-bottom:14px;padding-bottom:12px}.electricity-card .electricity-current-price{margin:3px 0 0}.electricity-current{min-width:0}.electricity-prices>.electricity-current{margin:14px 0}.electricity-activation{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;margin-bottom:12px;padding:8px 12px 12px}.electricity-activation>p{color:var(--secondary-text-color,#666);margin-top:2px}.electricity-summary-rows{margin:0}.electricity-summary-rows>div{border-bottom:1px solid var(--divider-color,#ddd);justify-content:space-between;align-items:center;gap:8px 16px;min-height:41px;padding:7px 0;display:flex}.electricity-summary-rows dt{color:var(--secondary-text-color,#666)}.electricity-summary-rows dd{text-align:right;overflow-wrap:anywhere;min-width:0;margin:0}.electricity-targets{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0;display:grid}.electricity-target{background:var(--secondary-background-color,#f5f5f5);border-radius:8px;flex-direction:column;gap:4px;min-width:0;padding:10px 12px;display:flex}.electricity-target>span{color:var(--secondary-text-color,#666);font-size:14px}.electricity-target>strong{overflow-wrap:anywhere;font-size:24px;font-weight:500}.electricity-charge-status .entity-value{padding:12px 0}.electricity-plan,.electricity-price-details,.tou-charging-rules{border-top:1px solid var(--divider-color,#ddd);margin-top:10px;padding-top:0}.tou-charging-rules>summary{cursor:pointer;align-content:center;min-height:44px}.electricity-footnote{color:var(--secondary-text-color,#666);margin:0;font-size:13px}@container sax-content (width>=860px){.electricity-columns{grid-template-columns:minmax(0,1.14fr) minmax(0,1fr)}.electricity-tariff-view{margin-top:-36px}.electricity-tariff-bar__row{min-height:44px;padding-left:260px}}@container sax-tariff-prices (width<=560px){.electricity-fields{grid-template-columns:minmax(0,1fr);gap:10px}}"]]]), kf = { class: "savings-view" }, Af = { class: "savings-overview" }, jf = ["aria-labelledby"], Mf = ["id"], Nf = ["aria-labelledby"], Pf = ["id"], Ff = {
 	key: 0,
 	class: "savings-progress"
-}, mf = ["id"], hf = { class: "savings-large" }, gf = [
+}, If = ["id"], Lf = { class: "savings-large" }, Rf = [
 	"role",
 	"aria-labelledby",
 	"aria-valuemin",
 	"aria-valuemax",
 	"aria-valuenow"
-], _f = {
+], zf = {
 	key: 1,
 	class: "savings-rows"
-}, vf = { key: 0 }, yf = { key: 1 }, bf = { key: 2 }, xf = { key: 3 }, Sf = ["aria-label"], Cf = { class: "savings-large" }, wf = ["aria-labelledby"], Tf = ["id"], Ef = ["for"], Df = ["id", "max"], Of = ["for"], kf = ["id", "min"], Af = { type: "submit" }, jf = ["disabled"], Mf = {
+}, Bf = { key: 0 }, Vf = { key: 1 }, Hf = { key: 2 }, Uf = { key: 3 }, Wf = ["aria-label"], Gf = { class: "savings-large" }, Kf = ["aria-labelledby"], qf = ["id"], Jf = ["for"], Yf = ["id", "max"], Xf = ["for"], Zf = ["id", "min"], Qf = { type: "submit" }, $f = ["disabled"], ep = {
 	key: 0,
 	role: "status"
-}, Nf = {
+}, tp = {
 	key: 1,
 	role: "alert"
-}, Pf = { class: "savings-selected-dates" }, Ff = { class: "savings-large" }, If = ["id"], Lf = { class: "savings-chart-hint" }, Rf = [
+}, np = { class: "savings-selected-dates" }, rp = { class: "savings-large" }, ip = ["id"], ap = { class: "savings-chart-hint" }, op = [
 	"viewBox",
 	"aria-labelledby",
 	"aria-describedby"
-], zf = ["id"], Bf = [
+], sp = ["id"], cp = [
 	"x1",
 	"x2",
 	"y1",
 	"y2"
-], Vf = ["x"], Hf = ["x"], Uf = ["x"], Wf = ["x"], Gf = [
+], lp = ["x"], up = ["x"], dp = ["x"], fp = ["x"], pp = [
 	"x",
 	"y",
 	"width",
 	"height"
-], Kf = { class: "savings-chart-table" }, qf = { class: "savings-table-scroll" }, Jf = { class: "savings-table" }, Yf = {
+], mp = { class: "savings-chart-table" }, hp = { class: "savings-table-scroll" }, gp = { class: "savings-table" }, _p = {
 	key: 1,
 	class: "savings-empty"
-}, Xf = { class: "savings-card savings-explanation" }, Zf = {
+}, vp = { class: "savings-card savings-explanation" }, yp = {
 	key: 1,
 	class: "savings-card savings-status",
 	role: "status"
-}, Qf = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
+}, bp = /*#__PURE__*/ ko(/* @__PURE__ */ zn({
 	__name: "SavingsView",
 	props: {
 		hass: { type: Object },
@@ -6990,11 +7002,11 @@ var Il = ["aria-busy"], Ll = {
 			"week",
 			"month",
 			"year"
-		], w = Q(() => v.data.value?.selected.buckets ?? []), T = /* @__PURE__ */ V(null), ee = /* @__PURE__ */ V(720);
+		], w = Q(() => v.data.value?.selected.buckets ?? []), T = /* @__PURE__ */ V(null), E = /* @__PURE__ */ V(720);
 		U(T, (e, t, n) => {
 			if (!e) return;
 			let r = (e) => {
-				Number.isFinite(e) && e > 0 && (ee.value = e);
+				Number.isFinite(e) && e > 0 && (E.value = e);
 			};
 			if (r(e.getBoundingClientRect().width), typeof ResizeObserver > "u") return;
 			let i = new ResizeObserver((e) => {
@@ -7002,8 +7014,8 @@ var Il = ["aria-busy"], Ll = {
 			});
 			i.observe(e), n(() => i.disconnect());
 		});
-		let E = Q(() => {
-			let e = w.value.map((e) => cc(e.change)), n = Math.max(0, ...e.map((e) => e ?? 0)), r = Math.min(0, ...e.map((e) => e ?? 0)), i = n - r || 1, a = (e) => 20 + (n - e) / i * 180, o = v.data.value?.selected, s = Date.parse(o?.start ?? ""), c = Date.parse(o?.end ?? ""), l = c - s, u = uc(n, t.hass) ?? "", d = uc(r, t.hass) ?? "", f = Math.max(56, Math.max(u.length, d.length) * 7.1 + 12), p = ee.value - 24, m = Math.max(1, p - f), g = (e) => f + Math.max(0, Math.min(1, (Date.parse(e) - s) / l)) * m;
+		let D = Q(() => {
+			let e = w.value.map((e) => cc(e.change)), n = Math.max(0, ...e.map((e) => e ?? 0)), r = Math.min(0, ...e.map((e) => e ?? 0)), i = n - r || 1, a = (e) => 20 + (n - e) / i * 180, o = v.data.value?.selected, s = Date.parse(o?.start ?? ""), c = Date.parse(o?.end ?? ""), l = c - s, u = uc(n, t.hass) ?? "", d = uc(r, t.hass) ?? "", f = Math.max(56, Math.max(u.length, d.length) * 7.1 + 12), p = E.value - 24, m = Math.max(1, p - f), g = (e) => f + Math.max(0, Math.min(1, (Date.parse(e) - s) / l)) * m;
 			return {
 				zero: a(0),
 				high: n,
@@ -7027,27 +7039,27 @@ var Il = ["aria-busy"], Ll = {
 					};
 				})
 			};
-		}), D = Q(() => w.value.some((e) => cc(e.change) !== null)), te = (e) => dc(e, t.hass, v.data.value?.selected.period === "hour" ? { timeStyle: "short" } : v.data.value?.selected.period === "month" ? {
+		}), O = Q(() => w.value.some((e) => cc(e.change) !== null)), ee = (e) => dc(e, t.hass, v.data.value?.selected.period === "hour" ? { timeStyle: "short" } : v.data.value?.selected.period === "month" ? {
 			month: "short",
 			year: "numeric"
 		} : {
 			day: "2-digit",
 			month: "short"
 		}) ?? e;
-		return (t, i) => (K(), q("div", sf, [
-			J("div", cf, [o.value?.available && o.value.state?.state === "off" ? (K(), q("section", {
+		return (t, i) => (K(), q("div", kf, [
+			J("div", Af, [o.value?.available && o.value.state?.state === "off" ? (K(), q("section", {
 				key: 0,
 				class: "savings-card savings-payback",
 				"aria-labelledby": `${H(r)}-investment`
-			}, [J("h2", { id: `${H(r)}-investment` }, L(a.value.payback), 9, uf), J("p", null, L(a.value.investment), 1)], 8, lf)) : o.value?.available && o.value.state?.state === "on" && (s.value || c.value || l.value || u.value || d.value) ? (K(), q("section", {
+			}, [J("h2", { id: `${H(r)}-investment` }, L(a.value.payback), 9, Mf), J("p", null, L(a.value.investment), 1)], 8, jf)) : o.value?.available && o.value.state?.state === "on" && (s.value || c.value || l.value || u.value || d.value) ? (K(), q("section", {
 				key: 1,
 				class: "savings-card savings-payback",
 				"aria-labelledby": `${H(r)}-payback`
 			}, [
-				J("h2", { id: `${H(r)}-payback` }, L(a.value.payback), 9, ff),
-				s.value ? (K(), q("div", pf, [
-					J("h3", { id: `${H(r)}-progress` }, L(s.value.name), 9, mf),
-					J("p", hf, L(f.value === null ? a.value.unavailable : `${H(uc)(f.value, e.hass)} %`), 1),
+				J("h2", { id: `${H(r)}-payback` }, L(a.value.payback), 9, Pf),
+				s.value ? (K(), q("div", Ff, [
+					J("h3", { id: `${H(r)}-progress` }, L(s.value.name), 9, If),
+					J("p", Lf, L(f.value === null ? a.value.unavailable : `${H(uc)(f.value, e.hass)} %`), 1),
 					J("div", {
 						class: "savings-progress__track",
 						role: p.value === null ? void 0 : "meter",
@@ -7057,24 +7069,24 @@ var Il = ["aria-busy"], Ll = {
 						"aria-valuenow": p.value ?? void 0
 					}, [p.value === null ? Z("", !0) : (K(), q("span", {
 						key: 0,
-						style: M({ width: `${p.value}%` })
-					}, null, 4))], 8, gf)
+						style: N({ width: `${p.value}%` })
+					}, null, 4))], 8, Rf)
 				])) : Z("", !0),
-				c.value || l.value || u.value || d.value ? (K(), q("dl", _f, [
-					c.value ? (K(), q("div", vf, [J("dt", null, L(c.value.name), 1), J("dd", null, L(m(c.value.available ? c.value.state?.state : null)), 1)])) : Z("", !0),
-					l.value ? (K(), q("div", yf, [J("dt", null, L(a.value.prior), 1), J("dd", null, L(m(l.value.available ? l.value.state?.attributes.prior_result_eur ?? l.value.state?.attributes.prior_result_eur_formatted : null)), 1)])) : Z("", !0),
-					u.value ? (K(), q("div", bf, [J("dt", null, L(a.value.net), 1), J("dd", null, L(m(u.value.available ? u.value.state?.state : null)), 1)])) : Z("", !0),
-					d.value ? (K(), q("div", xf, [J("dt", null, L(a.value.started), 1), J("dd", null, L(h(d.value.available ? d.value.state?.attributes.economics_started_at : null)), 1)])) : Z("", !0)
+				c.value || l.value || u.value || d.value ? (K(), q("dl", zf, [
+					c.value ? (K(), q("div", Bf, [J("dt", null, L(c.value.name), 1), J("dd", null, L(m(c.value.available ? c.value.state?.state : null)), 1)])) : Z("", !0),
+					l.value ? (K(), q("div", Vf, [J("dt", null, L(a.value.prior), 1), J("dd", null, L(m(l.value.available ? l.value.state?.attributes.prior_result_eur ?? l.value.state?.attributes.prior_result_eur_formatted : null)), 1)])) : Z("", !0),
+					u.value ? (K(), q("div", Hf, [J("dt", null, L(a.value.net), 1), J("dd", null, L(m(u.value.available ? u.value.state?.state : null)), 1)])) : Z("", !0),
+					d.value ? (K(), q("div", Uf, [J("dt", null, L(a.value.started), 1), J("dd", null, L(h(d.value.available ? d.value.state?.attributes.economics_started_at : null)), 1)])) : Z("", !0)
 				])) : Z("", !0)
-			], 8, df)) : Z("", !0), u.value ? (K(), q("section", {
+			], 8, Nf)) : Z("", !0), u.value ? (K(), q("section", {
 				key: 2,
 				class: "savings-periods",
 				"aria-label": a.value.periods
 			}, [(K(), q(G, null, W(C, (e) => J("article", {
 				key: e,
 				class: "savings-card"
-			}, [J("h2", null, L(a.value[e]), 1), J("p", Cf, L(H(v).loading.value ? "…" : m(H(v).data.value?.periods[e].change)), 1)])), 64))], 8, Sf)) : Z("", !0)]),
-			Y(Pl, {
+			}, [J("h2", null, L(a.value[e]), 1), J("p", Gf, L(H(v).loading.value ? "…" : m(H(v).data.value?.periods[e].change)), 1)])), 64))], 8, Wf)) : Z("", !0)]),
+			Y(zl, {
 				hass: e.hass,
 				class: "savings-tariff"
 			}, null, 8, ["hass"]),
@@ -7083,7 +7095,7 @@ var Il = ["aria-busy"], Ll = {
 				class: "savings-card savings-range",
 				"aria-labelledby": `${H(r)}-range`
 			}, [
-				J("h2", { id: `${H(r)}-range` }, L(a.value.range), 9, Tf),
+				J("h2", { id: `${H(r)}-range` }, L(a.value.range), 9, qf),
 				J("form", {
 					class: "savings-dates",
 					onSubmit: i[3] ||= Wa((e) => H(v).select(y.value, b.value), ["prevent"])
@@ -7094,118 +7106,121 @@ var Il = ["aria-busy"], Ll = {
 						type: "date",
 						required: "",
 						max: b.value || void 0
-					}, null, 8, Df), [[Ia, y.value]])], 8, Ef),
+					}, null, 8, Yf), [[Ia, y.value]])], 8, Jf),
 					J("label", { for: `${H(r)}-to` }, [X(L(a.value.to), 1), En(J("input", {
 						id: `${H(r)}-to`,
 						"onUpdate:modelValue": i[1] ||= (e) => b.value = e,
 						type: "date",
 						required: "",
 						min: y.value || void 0
-					}, null, 8, kf), [[Ia, b.value]])], 8, Of),
-					J("button", Af, L(a.value.apply), 1),
+					}, null, 8, Zf), [[Ia, b.value]])], 8, Xf),
+					J("button", Qf, L(a.value.apply), 1),
 					J("button", {
 						type: "button",
 						disabled: H(v).loading.value,
 						onClick: i[2] ||= (...e) => H(v).refresh && H(v).refresh(...e)
-					}, L(a.value.refresh), 9, jf)
+					}, L(a.value.refresh), 9, $f)
 				], 32),
-				H(v).loading.value ? (K(), q("p", Mf, L(a.value.loading), 1)) : S.value ? (K(), q("p", Nf, L(S.value), 1)) : H(v).data.value ? (K(), q(G, { key: 2 }, [
-					J("p", Pf, L(g(H(v).data.value.selected.start_date)) + " – " + L(g(H(v).data.value.selected.end_date)), 1),
+				H(v).loading.value ? (K(), q("p", ep, L(a.value.loading), 1)) : S.value ? (K(), q("p", tp, L(S.value), 1)) : H(v).data.value ? (K(), q(G, { key: 2 }, [
+					J("p", np, L(g(H(v).data.value.selected.start_date)) + " – " + L(g(H(v).data.value.selected.end_date)), 1),
 					J("h3", null, L(a.value.selected), 1),
-					J("p", Ff, L(m(H(v).data.value.selected.change)), 1),
-					J("h3", { id: `${H(r)}-chart` }, L(a.value.chart), 9, If),
-					J("p", Lf, L(a.value.chartHint), 1),
-					D.value ? (K(), q(G, { key: 0 }, [(K(), q("svg", {
+					J("p", rp, L(m(H(v).data.value.selected.change)), 1),
+					J("h3", { id: `${H(r)}-chart` }, L(a.value.chart), 9, ip),
+					J("p", ap, L(a.value.chartHint), 1),
+					O.value ? (K(), q(G, { key: 0 }, [(K(), q("svg", {
 						ref_key: "chartElement",
 						ref: T,
 						class: "savings-chart",
-						viewBox: `0 0 ${ee.value} 240`,
+						viewBox: `0 0 ${E.value} 240`,
 						role: "img",
 						"aria-labelledby": `${H(r)}-chart`,
 						"aria-describedby": `${H(r)}-chart-description`
 					}, [
-						J("desc", { id: `${H(r)}-chart-description` }, L(a.value.net) + ": " + L(m(H(v).data.value.selected.change)) + ". " + L(a.value.table) + ". ", 9, zf),
+						J("desc", { id: `${H(r)}-chart-description` }, L(a.value.net) + ": " + L(m(H(v).data.value.selected.change)) + ". " + L(a.value.table) + ". ", 9, sp),
 						J("line", {
-							x1: E.value.left - 2,
-							x2: E.value.right + 2,
-							y1: E.value.zero,
-							y2: E.value.zero,
+							x1: D.value.left - 2,
+							x2: D.value.right + 2,
+							y1: D.value.zero,
+							y2: D.value.zero,
 							class: "savings-chart__axis"
-						}, null, 8, Bf),
+						}, null, 8, cp),
 						J("text", {
-							x: E.value.left - 8,
+							x: D.value.left - 8,
 							y: "24",
 							"text-anchor": "end"
-						}, L(E.value.highLabel), 9, Vf),
+						}, L(D.value.highLabel), 9, lp),
 						J("text", {
-							x: E.value.left - 8,
+							x: D.value.left - 8,
 							y: "204",
 							"text-anchor": "end"
-						}, L(E.value.lowLabel), 9, Hf),
+						}, L(D.value.lowLabel), 9, up),
 						i[4] ||= J("text", {
 							x: "10",
 							y: "226"
 						}, "EUR", -1),
 						w.value.length ? (K(), q("text", {
 							key: 0,
-							x: E.value.left,
+							x: D.value.left,
 							y: "226"
-						}, L(te(E.value.start)), 9, Uf)) : Z("", !0),
+						}, L(ee(D.value.start)), 9, dp)) : Z("", !0),
 						w.value.length > 1 ? (K(), q("text", {
 							key: 1,
-							x: E.value.right,
+							x: D.value.right,
 							y: "226",
 							"text-anchor": "end"
-						}, L(te(E.value.end)), 9, Wf)) : Z("", !0),
-						(K(!0), q(G, null, W(E.value.bars, (e, t) => (K(), q("rect", {
+						}, L(ee(D.value.end)), 9, fp)) : Z("", !0),
+						(K(!0), q(G, null, W(D.value.bars, (e, t) => (K(), q("rect", {
 							key: t,
 							x: e.x,
 							y: e.y,
 							width: e.width,
 							height: e.height,
-							class: de(["savings-chart__bar", { "savings-chart__bar--negative": (e.value ?? 0) < 0 }])
-						}, [J("title", null, L(e.label) + ": " + L(m(e.value)), 1)], 10, Gf))), 128))
-					], 8, Rf)), J("details", Kf, [J("summary", null, L(a.value.table), 1), J("div", qf, [J("table", Jf, [J("thead", null, [J("tr", null, [
+							class: ue(["savings-chart__bar", { "savings-chart__bar--negative": (e.value ?? 0) < 0 }])
+						}, [J("title", null, L(e.label) + ": " + L(m(e.value)), 1)], 10, pp))), 128))
+					], 8, op)), J("details", mp, [J("summary", null, L(a.value.table), 1), J("div", hp, [J("table", gp, [J("thead", null, [J("tr", null, [
 						J("th", null, L(a.value.from), 1),
 						J("th", null, L(a.value.to), 1),
 						J("th", null, L(a.value.net), 1)
-					])]), J("tbody", null, [(K(!0), q(G, null, W(E.value.bars, (e, t) => (K(), q("tr", { key: t }, [
+					])]), J("tbody", null, [(K(!0), q(G, null, W(D.value.bars, (e, t) => (K(), q("tr", { key: t }, [
 						J("td", null, L(e.label), 1),
 						J("td", null, L(h(e.end)), 1),
 						J("td", null, L(m(e.value)), 1)
 					]))), 128))])])])])], 64)) : Z("", !0),
-					!D.value || H(v).data.value.selected.change === null ? (K(), q("p", Yf, L(H(v).data.value.selected.change === null ? a.value.noData : a.value.noChartData), 1)) : Z("", !0)
+					!O.value || H(v).data.value.selected.change === null ? (K(), q("p", _p, L(H(v).data.value.selected.change === null ? a.value.noData : a.value.noChartData), 1)) : Z("", !0)
 				], 64)) : Z("", !0)
-			], 8, wf)) : Z("", !0),
-			J("details", Xf, [
+			], 8, Kf)) : Z("", !0),
+			J("details", vp, [
 				J("summary", null, L(a.value.explain), 1),
 				J("p", null, L(a.value.netHint), 1),
 				J("p", null, L(a.value.calendarHint), 1),
 				J("p", null, L(a.value.rangeHint), 1)
 			]),
-			_.value && H(n)?.ready.value ? (K(), q("p", Zf, L(_.value), 1)) : Z("", !0)
+			_.value && H(n)?.ready.value ? (K(), q("p", yp, L(_.value), 1)) : Z("", !0)
 		]));
 	}
-}), [["styles", [".savings-view{gap:20px;min-width:0;margin-top:24px;display:grid}.savings-overview{display:contents}.savings-card{border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));min-width:0;box-shadow:var(--ha-card-box-shadow,none);color:var(--primary-text-color,#212121);padding:24px}.savings-card h2{margin:0 0 20px;font-size:18px;font-weight:500;line-height:1.5}.savings-card h3{margin:20px 0 8px;font-size:16px;font-weight:500}.savings-card p{overflow-wrap:anywhere;line-height:1.6}.savings-card p:last-child{margin-bottom:0}.savings-large{font-variant-numeric:tabular-nums;margin:0 0 12px;font-size:28px;font-weight:500}.savings-progress__track{background:var(--divider-color,#e0e0e0);border-radius:8px;height:16px;overflow:hidden}.savings-progress__track span{background:var(--info-color,#039be5);height:100%;display:block}.savings-rows{margin:20px 0 0}.savings-rows>div{border-bottom:1px solid var(--divider-color,#e0e0e0);justify-content:space-between;gap:16px;padding:12px 0;line-height:1.5;display:flex}.savings-rows>div:last-child{border-bottom:0;padding-bottom:0}.savings-rows dd{text-align:right;font-variant-numeric:tabular-nums;margin:0}.savings-periods{grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:16px;display:grid}.savings-periods h2{font-size:16px}.savings-table-scroll{overflow-x:auto}.savings-table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%;line-height:1.5}.savings-table th,.savings-table td{text-align:left;border-bottom:1px solid var(--divider-color,#e0e0e0);padding:10px 8px}.savings-table th:last-child,.savings-table td:last-child{text-align:right}.savings-dates{flex-wrap:wrap;align-items:end;gap:16px;display:flex}.savings-dates label{flex:180px;gap:8px;min-width:0;display:grid}.savings-dates input,.savings-dates button{box-sizing:border-box;font:inherit;border:1px solid var(--divider-color,#bdbdbd);background:var(--ha-card-background,var(--card-background-color,#fff));min-height:44px;color:var(--primary-text-color,#212121);border-radius:6px;padding:10px 12px}.savings-dates input{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light dark;width:100%}@media (prefers-color-scheme:dark){.savings-dates input{--lightningcss-light: ;--lightningcss-dark:initial}}.savings-dates button{cursor:pointer;color:var(--primary-color,#0288d1)}.savings-dates button:disabled{opacity:.6;cursor:default}.savings-dates :focus-visible,.savings-card summary:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:3px}.savings-selected-dates,.savings-empty{color:var(--secondary-text-color,#666)}.savings-chart{width:100%;height:auto;display:block;overflow:visible}.savings-chart text{fill:var(--secondary-text-color,#666);font-size:12px}.savings-chart__axis{stroke:var(--primary-text-color,#212121);stroke-width:1px}.savings-chart__bar{fill:var(--info-color,#039be5)}.savings-chart__bar--negative{fill:var(--error-color,#db4437)}.savings-card summary{cursor:pointer;min-height:24px;font-weight:500;line-height:1.6}.savings-chart-table{margin-top:16px}.savings-status{margin:0;line-height:1.6}@container sax-content (width>=860px){.savings-view{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px;margin-top:16px}.savings-view>*{grid-column:1/-1}.savings-overview{gap:16px;min-width:0;display:grid}.savings-overview:empty{display:none}.savings-view:has(>.savings-overview>section):has(>.savings-tariff)>:is(.savings-overview,.savings-tariff){grid-column:auto}.savings-card{padding:18px}.savings-card h2{margin-bottom:12px;font-size:16px}.savings-card h3{margin-top:16px;font-size:14px}.savings-card p{margin-top:10px;line-height:1.5}.savings-progress h3{margin-top:0}.savings-card .savings-large{margin-top:0;margin-bottom:8px;font-size:24px}.savings-rows{margin-top:12px}.savings-rows>div{gap:12px;padding:8px 0}.savings-rows dt{min-width:0}.savings-rows dd{flex-shrink:0;max-width:58%}.savings-periods{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.savings-view:has(>.savings-tariff) .savings-periods{grid-template-columns:repeat(2,minmax(0,1fr))}.savings-periods .savings-card{padding:14px 16px}.savings-periods h2{margin-bottom:6px;font-size:14px}.savings-periods .savings-large{margin-bottom:0;font-size:22px}.savings-table th,.savings-table td{padding:7px 8px}.savings-dates{gap:12px}.savings-dates label{flex:0 220px;gap:6px}.savings-range .savings-selected-dates{margin-bottom:8px}.savings-range .savings-chart-hint{margin-top:0;margin-bottom:8px}.savings-chart-table{margin-top:12px}}@media (max-width:600px){.savings-view{gap:16px}.savings-card{padding:20px}.savings-rows>div{flex-wrap:wrap;gap:4px 16px}.savings-rows dd{margin-left:auto}}"]]]), $f = ["lang"], ep = { class: "header" }, tp = ["aria-label"], np = ["aria-label"], rp = [
+}), [["styles", [".savings-view{gap:20px;min-width:0;margin-top:24px;display:grid}.savings-overview{display:contents}.savings-card{border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));min-width:0;box-shadow:var(--ha-card-box-shadow,none);color:var(--primary-text-color,#212121);padding:24px}.savings-card h2{margin:0 0 20px;font-size:18px;font-weight:500;line-height:1.5}.savings-card h3{margin:20px 0 8px;font-size:16px;font-weight:500}.savings-card p{overflow-wrap:anywhere;line-height:1.6}.savings-card p:last-child{margin-bottom:0}.savings-large{font-variant-numeric:tabular-nums;margin:0 0 12px;font-size:28px;font-weight:500}.savings-progress__track{background:var(--divider-color,#e0e0e0);border-radius:8px;height:16px;overflow:hidden}.savings-progress__track span{background:var(--info-color,#039be5);height:100%;display:block}.savings-rows{margin:20px 0 0}.savings-rows>div{border-bottom:1px solid var(--divider-color,#e0e0e0);justify-content:space-between;gap:16px;padding:12px 0;line-height:1.5;display:flex}.savings-rows>div:last-child{border-bottom:0;padding-bottom:0}.savings-rows dd{text-align:right;font-variant-numeric:tabular-nums;margin:0}.savings-periods{grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:16px;display:grid}.savings-periods h2{font-size:16px}.savings-table-scroll{overflow-x:auto}.savings-table{border-collapse:collapse;font-variant-numeric:tabular-nums;width:100%;line-height:1.5}.savings-table th,.savings-table td{text-align:left;border-bottom:1px solid var(--divider-color,#e0e0e0);padding:10px 8px}.savings-table th:last-child,.savings-table td:last-child{text-align:right}.savings-dates{flex-wrap:wrap;align-items:end;gap:16px;display:flex}.savings-dates label{flex:180px;gap:8px;min-width:0;display:grid}.savings-dates input,.savings-dates button{box-sizing:border-box;font:inherit;border:1px solid var(--divider-color,#bdbdbd);background:var(--ha-card-background,var(--card-background-color,#fff));min-height:44px;color:var(--primary-text-color,#212121);border-radius:6px;padding:10px 12px}.savings-dates input{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light dark;width:100%}@media (prefers-color-scheme:dark){.savings-dates input{--lightningcss-light: ;--lightningcss-dark:initial}}.savings-dates button{cursor:pointer;color:var(--primary-color,#0288d1)}.savings-dates button:disabled{opacity:.6;cursor:default}.savings-dates :focus-visible,.savings-card summary:focus-visible{outline:2px solid var(--primary-color,#03a9f4);outline-offset:3px}.savings-selected-dates,.savings-empty{color:var(--secondary-text-color,#666)}.savings-chart{width:100%;height:auto;display:block;overflow:visible}.savings-chart text{fill:var(--secondary-text-color,#666);font-size:12px}.savings-chart__axis{stroke:var(--primary-text-color,#212121);stroke-width:1px}.savings-chart__bar{fill:var(--info-color,#039be5)}.savings-chart__bar--negative{fill:var(--error-color,#db4437)}.savings-card summary{cursor:pointer;min-height:24px;font-weight:500;line-height:1.6}.savings-chart-table{margin-top:16px}.savings-status{margin:0;line-height:1.6}@container sax-content (width>=860px){.savings-view{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px;margin-top:16px}.savings-view>*{grid-column:1/-1}.savings-overview{gap:16px;min-width:0;display:grid}.savings-overview:empty{display:none}.savings-view:has(>.savings-overview>section):has(>.savings-tariff)>:is(.savings-overview,.savings-tariff){grid-column:auto}.savings-card{padding:18px}.savings-card h2{margin-bottom:12px;font-size:16px}.savings-card h3{margin-top:16px;font-size:14px}.savings-card p{margin-top:10px;line-height:1.5}.savings-progress h3{margin-top:0}.savings-card .savings-large{margin-top:0;margin-bottom:8px;font-size:24px}.savings-rows{margin-top:12px}.savings-rows>div{gap:12px;padding:8px 0}.savings-rows dt{min-width:0}.savings-rows dd{flex-shrink:0;max-width:58%}.savings-periods{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.savings-view:has(>.savings-tariff) .savings-periods{grid-template-columns:repeat(2,minmax(0,1fr))}.savings-periods .savings-card{padding:14px 16px}.savings-periods h2{margin-bottom:6px;font-size:14px}.savings-periods .savings-large{margin-bottom:0;font-size:22px}.savings-table th,.savings-table td{padding:7px 8px}.savings-dates{gap:12px}.savings-dates label{flex:0 220px;gap:6px}.savings-range .savings-selected-dates{margin-bottom:8px}.savings-range .savings-chart-hint{margin-top:0;margin-bottom:8px}.savings-chart-table{margin-top:12px}}@media (max-width:600px){.savings-view{gap:16px}.savings-card{padding:20px}.savings-rows>div{flex-wrap:wrap;gap:4px 16px}.savings-rows dd{margin-left:auto}}"]]]), xp = ["lang"], Sp = { class: "header" }, Cp = ["aria-label"], wp = ["aria-label"], Tp = [
 	"href",
 	"aria-current",
 	"onClick"
-], ip = {
+], Ep = {
 	key: 0,
 	class: "status",
 	role: "alert"
-}, ap = { class: "introduction" }, op = {
+}, Dp = {
+	key: 1,
+	class: "introduction"
+}, Op = {
 	key: 0,
 	class: "status",
 	role: "status"
-}, sp = {
+}, kp = {
 	key: 1,
 	class: "status",
 	role: "status"
-}, cp = {
+}, Ap = {
 	key: 6,
 	class: "status"
-}, lp = ["href"], up = /* @__PURE__ */ Ea(/* @__PURE__ */ ko(/* @__PURE__ */ zn({
+}, jp = ["href"], Mp = /* @__PURE__ */ Ea(/* @__PURE__ */ ko(/* @__PURE__ */ zn({
 	__name: "Panel.ce",
 	props: {
 		hass: { type: Object },
@@ -7255,10 +7270,10 @@ var Il = ["aria-busy"], Ll = {
 			}));
 		}
 		return (t, n) => (K(), q("div", {
-			class: de(["dashboard", { narrow: e.narrow }]),
+			class: ue(["dashboard", { narrow: e.narrow }]),
 			lang: i.value
 		}, [
-			J("header", ep, [o.value ? (K(), q("button", {
+			J("header", Sp, [o.value ? (K(), q("button", {
 				key: 0,
 				class: "menu-button",
 				type: "button",
@@ -7267,7 +7282,7 @@ var Il = ["aria-busy"], Ll = {
 			}, [...n[1] ||= [J("svg", {
 				viewBox: "0 0 24 24",
 				"aria-hidden": "true"
-			}, [J("path", { d: "M4 6h16M4 12h16M4 18h16" })], -1)]], 8, tp)) : Z("", !0), n[2] ||= J("div", { class: "brand" }, [J("svg", {
+			}, [J("path", { d: "M4 6h16M4 12h16M4 18h16" })], -1)]], 8, Cp)) : Z("", !0), n[2] ||= J("div", { class: "brand" }, [J("svg", {
 				class: "brand-icon",
 				viewBox: "0 0 24 24",
 				"aria-hidden": "true"
@@ -7280,13 +7295,13 @@ var Il = ["aria-busy"], Ll = {
 				href: `${s.value}/${e.path}`,
 				"aria-current": d.value === e.path ? "page" : void 0,
 				onClick: (t) => h(t, `${s.value}/${e.path}`)
-			}, L(e[i.value]), 9, rp))), 128))], 8, np),
+			}, L(e[i.value]), 9, Tp))), 128))], 8, wp),
 			J("main", null, [
-				H(r).error.value ? (K(), q("p", ip, L(H(r).error.value), 1)) : Z("", !0),
-				J("p", ap, L(a.value.introduction), 1),
+				H(r).error.value ? (K(), q("p", Ep, L(H(r).error.value), 1)) : Z("", !0),
+				d.value === "stromtarif" ? Z("", !0) : (K(), q("p", Dp, L(a.value.introduction), 1)),
 				(K(), q("section", {
 					key: e.panel?.config?.entry_id,
-					class: "section",
+					class: ue(["section", { "section--tariff": d.value === "stromtarif" }]),
 					"aria-labelledby": "section-heading"
 				}, [J("h1", {
 					id: "section-heading",
@@ -7296,21 +7311,21 @@ var Il = ["aria-busy"], Ll = {
 				}, L(f.value?.[i.value] ?? a.value.notFound), 513), e.hass ? e.panel?.config?.entry_id ? d.value === "allgemein" ? (K(), ai(Xo, { key: 2 })) : d.value === "netzdienliches-laden" ? (K(), ai(sc, {
 					key: 3,
 					hass: e.hass
-				}, null, 8, ["hass"])) : d.value === "stromtarif" ? (K(), ai(of, {
+				}, null, 8, ["hass"])) : d.value === "stromtarif" ? (K(), ai(Of, {
 					key: 4,
 					hass: e.hass
-				}, null, 8, ["hass"])) : d.value === "ersparnis" ? (K(), ai(Qf, {
+				}, null, 8, ["hass"])) : d.value === "ersparnis" ? (K(), ai(bp, {
 					key: 5,
 					hass: e.hass,
 					"entry-id": e.panel?.config?.entry_id
-				}, null, 8, ["hass", "entry-id"])) : (K(), q("div", cp, [J("p", null, L(a.value.notFoundDescription), 1), J("a", {
+				}, null, 8, ["hass", "entry-id"])) : (K(), q("div", Ap, [J("p", null, L(a.value.notFoundDescription), 1), J("a", {
 					href: `${s.value}/allgemein`,
 					onClick: n[0] ||= (e) => h(e, `${s.value}/allgemein`)
-				}, L(a.value.returnToOverview), 9, lp)])) : (K(), q("p", sp, L(a.value.missingEntry), 1)) : (K(), q("p", op, L(a.value.loading), 1))]))
+				}, L(a.value.returnToOverview), 9, jp)])) : (K(), q("p", kp, L(a.value.missingEntry), 1)) : (K(), q("p", Op, L(a.value.loading), 1))], 2))
 			])
-		], 10, $f));
+		], 10, xp));
 	}
-}), [["styles", [":host{height:100%;color:var(--primary-text-color,#212121);background:var(--primary-background-color,#fafafa);font-family:var(--paper-font-body1_-_font-family,Roboto, sans-serif);font-size:14px;display:block}*{box-sizing:border-box}.dashboard{min-height:100%;container:sax-panel/inline-size}.header{background:var(--app-header-background-color,var(--primary-color,#03a9f4));min-height:64px;color:var(--app-header-text-color,#fff);align-items:center;gap:14px;padding:8px 24px;display:flex}.brand{align-items:center;gap:10px;font-size:20px;font-weight:500;display:flex}.header svg{fill:none;stroke:currentColor;stroke-width:1.7px;stroke-linecap:round;stroke-linejoin:round}.brand-icon{width:30px;height:30px}.menu-button{width:44px;height:44px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;margin-left:-10px;display:grid}.menu-button svg{width:24px;height:24px}.navigation{border-bottom:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);padding:0 16px;display:flex;overflow-x:auto}.navigation a{min-height:56px;color:var(--secondary-text-color,#666);white-space:nowrap;border-bottom:3px solid #0000;align-items:center;padding:12px 16px;text-decoration:none;display:flex}.navigation a[aria-current=page]{border-color:var(--primary-color,#03a9f4);color:var(--primary-text-color,#212121);font-weight:600}a{color:var(--primary-text-color,#212121);text-underline-offset:3px}a:focus-visible,button:focus-visible{outline-offset:-4px;outline:2px solid}main{max-width:1120px;margin:0 auto;padding:28px 24px 48px}.introduction{color:var(--secondary-text-color,#666);margin:0 0 24px;line-height:1.6}.section{overflow-wrap:anywhere;border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));box-shadow:var(--ha-card-box-shadow,none);padding:28px;container:sax-content/inline-size}h1{margin:0;font-size:24px;font-weight:500;line-height:1.35}h1:focus{outline:none}h2{margin:0 0 12px;font-size:18px;font-weight:500;line-height:1.5}.status{margin-top:24px;line-height:1.7}.narrow .header{padding-left:16px;padding-right:16px}.narrow main{padding:16px 12px 32px}@container sax-panel (width>=940px){.header{min-height:56px;padding:6px 20px}.navigation a{min-height:48px;padding:8px 14px}main{max-width:1360px;padding:16px 20px 20px}.introduction{margin-bottom:12px}.section{padding:20px}h1{font-size:22px}}@media (max-width:600px){.header{gap:8px;padding:8px 16px}.brand{gap:6px;font-size:18px}.brand-icon{display:none}.navigation{padding:0 4px}main{padding:16px 12px 32px}.introduction{margin-bottom:16px}.section{padding:20px}h1{font-size:22px}}"]]]));
-customElements.get("sax-power-vue-panel") || customElements.define("sax-power-vue-panel", up);
+}), [["styles", [":host{height:100%;color:var(--primary-text-color,#212121);background:var(--primary-background-color,#fafafa);font-family:var(--paper-font-body1_-_font-family,Roboto, sans-serif);font-size:14px;display:block}*{box-sizing:border-box}.dashboard{min-height:100%;container:sax-panel/inline-size}.header{background:var(--app-header-background-color,var(--primary-color,#03a9f4));min-height:64px;color:var(--app-header-text-color,#fff);align-items:center;gap:14px;padding:8px 24px;display:flex}.brand{align-items:center;gap:10px;font-size:20px;font-weight:500;display:flex}.header svg{fill:none;stroke:currentColor;stroke-width:1.7px;stroke-linecap:round;stroke-linejoin:round}.brand-icon{width:30px;height:30px}.menu-button{width:44px;height:44px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;margin-left:-10px;display:grid}.menu-button svg{width:24px;height:24px}.navigation{border-bottom:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);padding:0 16px;display:flex;overflow-x:auto}.navigation a{min-height:56px;color:var(--secondary-text-color,#666);white-space:nowrap;border-bottom:3px solid #0000;align-items:center;padding:12px 16px;text-decoration:none;display:flex}.navigation a[aria-current=page]{border-color:var(--primary-color,#03a9f4);color:var(--primary-text-color,#212121);font-weight:600}a{color:var(--primary-text-color,#212121);text-underline-offset:3px}a:focus-visible,button:focus-visible{outline-offset:-4px;outline:2px solid}main{max-width:1120px;margin:0 auto;padding:28px 24px 48px}.introduction{color:var(--secondary-text-color,#666);margin:0 0 24px;line-height:1.6}.section{overflow-wrap:anywhere;border:var(--ha-card-border-width,1px) solid var(--ha-card-border-color,var(--divider-color,#e0e0e0));border-radius:var(--ha-card-border-radius,12px);background:var(--ha-card-background,var(--card-background-color,#fff));box-shadow:var(--ha-card-box-shadow,none);padding:28px;container:sax-content/inline-size}.section.section--tariff{box-shadow:none;background:0 0;border:0;padding:0}h1{margin:0;font-size:24px;font-weight:500;line-height:1.35}h1:focus{outline:none}h2{margin:0 0 12px;font-size:18px;font-weight:500;line-height:1.5}.status{margin-top:24px;line-height:1.7}.narrow .header{padding-left:16px;padding-right:16px}.narrow main{padding:16px 12px 32px}@container sax-panel (width>=940px){.header{min-height:56px;padding:6px 20px}.navigation a{min-height:48px;padding:8px 14px}main{max-width:1360px;padding:16px 20px 20px}.introduction{margin-bottom:12px}.section{padding:20px}h1{font-size:22px}}@media (max-width:600px){.header{gap:8px;padding:8px 16px}.brand{gap:6px;font-size:18px}.brand-icon{display:none}.navigation{padding:0 4px}main{padding:16px 12px 32px}.introduction{margin-bottom:16px}.section{padding:20px}h1{font-size:22px}}"]]]));
+customElements.get("sax-power-vue-panel") || customElements.define("sax-power-vue-panel", Mp);
 //#endregion
-export { up as SaxPowerVuePanel };
+export { Mp as SaxPowerVuePanel };

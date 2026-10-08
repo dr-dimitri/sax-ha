@@ -18,7 +18,7 @@ const text = computed(() =>
   german.value
     ? {
         mode: "Wann soll der Speicher aus dem Netz laden?",
-        saved: "Gespeicherte Ladeweise",
+        saved: "Ladeweise",
         immediate:
           "Änderungen gelten nach der Bestätigung durch Home Assistant. Die automatische Netzladung muss zusätzlich eingeschaltet sein.",
         target: "Wie voll soll der Speicher werden?",
@@ -36,9 +36,9 @@ const text = computed(() =>
         noPriceLimit:
           "Es gilt keine feste Preisgrenze: Auch die günstigsten verfügbaren Stunden können teuer sein. Diese Ladeweise benötigt eine Preisvorschau mit Zeitabschnitten; ein einzelner aktueller Preis reicht nicht.",
         pvMissing:
-          "Ohne PV-Prognose wird keine künftige PV-Energie abgezogen. Eine Prognose kannst du in Schritt 1 ergänzen.",
+          "Ohne PV-Prognose wird keine künftige PV-Energie abgezogen. Eine Prognose kannst du unter „Preise & Zeiten“ ergänzen.",
         pvUsed:
-          "Die gespeicherte PV-Prognose wird berücksichtigt, soweit sie verfügbar ist. Sie kann den benötigten Netzstrom reduzieren. Den angerechneten Anteil findest du in Schritt 1.",
+          "Die gespeicherte PV-Prognose wird berücksichtigt, soweit sie verfügbar ist. Sie kann den benötigten Netzstrom reduzieren. Den angerechneten Anteil findest du unter „Preise & Zeiten“.",
         offHint:
           "Diese Ladeweise setzt die preisgesteuerte Automatik aus, auch wenn der Hauptschalter eingeschaltet ist. Preise und Einstellungen bleiben erhalten.",
         advanced: "Weitere Einstellungen · Speicher schonen",
@@ -83,7 +83,7 @@ const text = computed(() =>
       }
     : {
         mode: "When should the battery charge from the grid?",
-        saved: "Saved charging method",
+        saved: "Charging method",
         immediate:
           "Changes apply once confirmed by Home Assistant. Automatic grid charging must also be switched on.",
         target: "How full should the battery be?",
@@ -101,9 +101,9 @@ const text = computed(() =>
         noPriceLimit:
           "There is no fixed price cap: even the cheapest available hours may be expensive. This method requires a price forecast with time slots; a single current price is not enough.",
         pvMissing:
-          "Without a solar forecast, no future solar energy is deducted. You can add a forecast in step 1.",
+          "Without a solar forecast, no future solar energy is deducted. You can add a forecast under “Prices & times”.",
         pvUsed:
-          "The saved solar forecast is used when available. It may reduce the grid energy needed. Its contribution is configured in step 1.",
+          "The saved solar forecast is used when available. It may reduce the grid energy needed. Its contribution is configured under “Prices & times”.",
         offHint:
           "This method pauses price-controlled automation even when the main switch is on. Prices and settings are preserved.",
         advanced: "More settings · Preserve battery energy",
@@ -170,20 +170,15 @@ const status = computed(() => {
 const hasForecast = computed(
   () => !!dashboard?.tariff.value?.profiles?.dynamic.pv_sensor,
 );
-const summary = computed(() => {
-  if (!selected.value) return text.value.unavailable;
-  const method = text.value.modes[selected.value].title;
-  if (selected.value === "off") return method;
-  const limit = dashboard?.entity("number", "max_soc")?.displayValue ?? "—";
-  const value =
-    dashboard?.entity(
-      "number",
-      selected.value === "absolute"
-        ? "price_charge_max_price"
-        : "price_charge_hours",
-    )?.displayValue ?? "—";
-  return `${method} · ${value} · ${text.value.targetSummary} ${limit}`;
-});
+const limit = computed(() => dashboard?.entity("number", "max_soc"));
+const chargeParameter = computed(() =>
+  dashboard?.entity(
+    "number",
+    selected.value === "absolute"
+      ? "price_charge_max_price"
+      : "price_charge_hours",
+  ),
+);
 const neutralSummary = computed(() => {
   const neutral = dashboard?.entity("number", "price_charge_neutral_price");
   const cap = dashboard?.entity("number", "price_charge_max_price");
@@ -217,20 +212,33 @@ async function choose(method: Strategy) {
 
 <template>
   <div class="dynamic-charging-settings">
-    <p class="dynamic-charging-summary">
-      <span>{{ text.saved }}:</span> {{ summary }}
-    </p>
+    <div class="dynamic-charging-summary">
+      <dl class="electricity-summary-rows">
+        <div>
+          <dt>{{ text.saved }}</dt>
+          <dd>
+            {{ selected ? text.modes[selected].title : text.unavailable }}
+          </dd>
+        </div>
+      </dl>
+      <div v-if="selected && selected !== 'off'" class="electricity-targets">
+        <div class="electricity-target">
+          <span>{{ text.targetSummary }}</span
+          ><strong>{{ limit?.available ? limit.displayValue : "—" }}</strong>
+        </div>
+        <div class="electricity-target">
+          <span>{{ selected === "absolute" ? text.price : text.hours }}</span
+          ><strong>{{
+            chargeParameter?.available ? chargeParameter.displayValue : "—"
+          }}</strong>
+        </div>
+      </div>
+    </div>
     <p
       v-if="selected && selected !== 'off'"
       class="electricity-muted dynamic-charging-neutral-summary"
     >
       {{ neutralSummary }}
-    </p>
-    <p
-      v-if="dashboard?.tariff.value?.automation_enabled === false"
-      class="electricity-muted"
-    >
-      {{ text.disabled }}
     </p>
     <p v-if="strategy?.error" class="electricity-error" role="alert">
       {{ strategy.error }}
@@ -316,9 +324,6 @@ async function choose(method: Strategy) {
 </template>
 
 <style>
-.dynamic-charging-summary span {
-  font-weight: 600;
-}
 .dynamic-charging-methods {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

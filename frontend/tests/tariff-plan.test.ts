@@ -1009,9 +1009,7 @@ describe("REQ-VUE-TARIFF-EDITOR: guided everyday tariff setup", () => {
       });
       const plan = fixture.plans()[0]!;
       expect(plan.querySelector("h2")?.textContent).toBe(
-        language === "de"
-          ? "1. Wann ist dein Strom günstig?"
-          : "1. When is your electricity cheaper?",
+        language === "de" ? "Preise & Zeiten" : "Prices & times",
       );
       const summary = plan.querySelector(".tariff-plan__compact-summary")!;
       expect(summary.textContent).toContain(
@@ -1022,7 +1020,9 @@ describe("REQ-VUE-TARIFF-EDITOR: guided everyday tariff setup", () => {
         language === "de" ? "über Nacht" : "overnight",
       );
       expect(summary.textContent).toContain(
-        language === "de" ? "aktive Monate" : "active months",
+        language === "de"
+          ? "günstigsten Tarifzeiten"
+          : "cheapest tariff periods",
       );
       expect(plan.querySelector("form")).toBeNull();
       expect(saves(fixture)).toHaveLength(0);
@@ -1082,9 +1082,9 @@ it("REQ-VUE-TARIFF-EDITOR marks only backend-selected cheap periods in the compa
     low_tariff_price_eur_kwh: 0.35,
   });
   expect(plan.querySelectorAll(".tariff-plan__badge")).toHaveLength(3);
-  expect(
-    plan.querySelector(".tariff-plan__compact-summary > p")?.textContent,
-  ).toContain("günstig");
+  expect(plan.querySelector(".tariff-plan__base-row")?.textContent).toContain(
+    "günstig",
+  );
   await fixture.update("35", {
     ...tariffAttributes(),
     windows: [],

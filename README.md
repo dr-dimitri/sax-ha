@@ -93,7 +93,7 @@ Einrichtung oder Update automatisch als **SAX Power** in der Seitenleiste.
 Es gibt dafür keine Auswahl im Einrichtungs- oder Konfigurationsdialog und
 keine zusätzliche Installation. Auch eine früher gespeicherte Abwahl entfällt.
 Preise und Zeitfenster eines zeitvariablen Tarifs bearbeitest du direkt unter
-**Stromtarif → Schritt 1 → Bearbeiten**.
+**Stromtarif → Preise & Zeiten → Bearbeiten**.
 
 Die Screenshots zeigen die aktuelle Oberfläche mit vier Bereichen und Beispieldaten: am Computer auf Deutsch im hellen Design, auf dem Smartphone auf Englisch im dunklen Design.
 
@@ -118,18 +118,19 @@ Netzladung bleiben die Preise für Anzeige und Amortisation gültig.
 
 Das Diagramm zeigt die Strompreise des heutigen Tages in **ct/kWh**, bei
 dynamischen Tarifen auch die bereits verfügbaren Preise für morgen.
-Beide Tarifarten führen in drei Schritten durch Preise oder Preisquelle,
-Ladeverhalten und Aktivierung. Geschlossene Einstellungen zeigen ihre
-bestätigten Werte. Preisverlauf und Ladeplan lassen sich bei Bedarf aufklappen.
+Beide Tarifarten bündeln die Einstellungen in **Preise & Zeiten** und
+**Netzladung**. Auf breiten Ansichten stehen die Bereiche nebeneinander, auf
+dem Smartphone untereinander. Ladeziel, Startschwelle und Monate sind direkt
+sichtbar; Preisverlauf, Laderegeln und Ladeplan lassen sich bei Bedarf aufklappen.
 
-![Zeitvariabler Stromtarif: Preise, Ladeziel und Aktivierung in drei Schritten](docs/images/vue-stromtarif-desktop-light-de.png)
+![Zeitvariabler Stromtarif: Preise und Zeiten links, Netzladung mit Ladeziel und Automatik rechts](docs/images/vue-stromtarif-desktop-light-de.png)
 
 <details>
 <summary>So sieht das Dashboard auf dem Smartphone aus</summary>
 
 <p>
   <img src="docs/images/vue-allgemein-mobile-dark-en.png" alt="Geräteübersicht auf dem Smartphone im dunklen Design, englische Sprache" width="320">
-  <img src="docs/images/vue-stromtarif-mobile-dark-en.png" alt="Zeitvariabler Stromtarif mit drei Einrichtungsschritten auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+  <img src="docs/images/vue-stromtarif-mobile-dark-en.png" alt="Zeitvariabler Stromtarif mit gruppierten Preis- und Ladeeinstellungen auf dem Smartphone im dunklen Design, englische Sprache" width="320">
 </p>
 
 </details>
@@ -215,15 +216,15 @@ und hat während seiner wirksamen Ladepause Vorrang vor der Preisoptimierung.
 Wähle im Tab **Stromtarif** den Tarif **Zeitvariabel**. Er passt zu festen
 günstigen Tarifzeiten, etwa einem Nachttarif. Die Einrichtung hat drei Schritte:
 
-1. **Wann ist dein Strom günstig?** Öffne **Bearbeiten** und übertrage die
+1. **Preise & Zeiten:** Öffne **Bearbeiten** und übertrage die
    Preise aus deinem Vertrag in **ct/kWh**. Der Standardpreis gilt außerhalb
    deiner abweichenden Preiszeiten. Speichere den Tarif.
-2. **Wie viel möchtest du laden?** Wähle **Festes Ladeziel**, wenn der Speicher
+2. **Netzladung:** Öffne **Bearbeiten** und wähle **Festes Ladeziel**, wenn der Speicher
    in den günstigsten Zeiten bis zu deinem eingestellten Prozentwert laden
    soll. **Nur Bedarf bis Solarstrom** plant stattdessen die noch fehlende
    Energie bis zum erwarteten Solarstrom; dafür ist eine passende PV-Prognose
    erforderlich. Das Ladeziel ist dann eine Obergrenze.
-3. **Automatik einschalten.** Aktiviere **Automatische Netzladung**, sobald
+3. **Automatik einschalten:** Schließe die Bearbeitung und aktiviere **Automatische Netzladung**, sobald
    die Einstellungen passen. Einschalten erlaubt die Ladung unter den
    angezeigten Bedingungen; es bedeutet nicht, dass der Speicher sofort lädt.
 
@@ -288,13 +289,13 @@ Netzladung und der Speicher kann Sonnenstrom nutzen.
 
 </details>
 
-Wähle unter **Stromtarif → 2. Wie viel möchtest du laden? → Bearbeiten** die
+Wähle unter **Stromtarif → Netzladung → Bearbeiten** die
 Ladeweise **Nur Bedarf bis Solarstrom**. Sie verwendet dieselbe gespeicherte
 Einstellung wie die Option unter **Konfigurieren**. Zum Einschalten müssen
 ein zeitvariabler Tarif und eine PV-Start-Quelle konfiguriert sein. Mit
 **Festes Ladeziel** wechselst du jederzeit zurück zur festen SOC-Steuerung.
 Solange diese Ladeplanung eingeschaltet ist, bleibt ihre PV-Start-Quelle
-erforderlich. Du kannst sie in Schritt 1 unter **Bearbeiten → Zusätzlich: Solarprognose für die Ladeplanung** ersetzen;
+erforderlich. Du kannst sie unter **Preise & Zeiten → Bearbeiten → Zusätzlich: Solarprognose für die Ladeplanung** ersetzen;
 zum Entfernen schaltest du zuerst die verbrauchsbasierte Ladeplanung aus.
 Ein abgelehnter Speicherversuch erhält deine Eingaben und die bisherigen Werte.
 **Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
@@ -392,7 +393,7 @@ Die Integration ruft selbst keine Preise vom Anbieter ab.
 <summary>Dynamischer Tarif auf dem Smartphone</summary>
 
 <p>
-  <img src="docs/images/vue-stromtarif-dynamisch-mobile-dark-en.png" alt="Dynamischer Tarif mit drei Einrichtungsschritten im dunklen Design, englische Sprache" width="320">
+  <img src="docs/images/vue-stromtarif-dynamisch-mobile-dark-en.png" alt="Dynamischer Tarif mit gruppierten Preis- und Ladeeinstellungen im dunklen Design, englische Sprache" width="320">
   <img src="docs/images/vue-stromtarif-ladehilfe-mobile-dark-en.png" alt="Geöffnete dynamische Ladeeinstellungen auf dem Smartphone mit Erläuterungen zu Ladegrenze und Ladedauer" width="320">
 </p>
 
@@ -400,9 +401,9 @@ Die Integration ruft selbst keine Preise vom Anbieter ab.
 
 Die Einrichtung besteht aus drei Schritten:
 
-1. Wähle unter **1. Woher kommen deine Strompreise? → Bearbeiten** deinen Strompreis-Sensor
+1. Wähle unter **Preise & Zeiten → Bearbeiten** deinen Strompreis-Sensor
    und trage die Einspeisevergütung in ct/kWh ein. Bestätige mit **Speichern**.
-2. Öffne **2. Wie möchtest du laden? → Bearbeiten**. Wähle, wie der Speicher laden soll,
+2. Öffne **Netzladung → Bearbeiten**. Wähle, wie der Speicher laden soll,
    und stelle den gewünschten maximalen Speicherfüllstand ein. Die Erklärung
    zur Ladeweise zeigt, welche Einstellungen dafür benötigt werden. Bestätige
    geänderte Zahlen jeweils mit **Übernehmen**.
@@ -448,7 +449,7 @@ können dazu führen, dass weniger Netzstrom geladen wird.
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
 verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
 **Smart** verwendet den **PV-Prognose-Sensor (optional)** aus
-Schritt 1, getrennt vom heutigen Rest-Ertrag der Ladepause.
+**Preise & Zeiten**, getrennt vom heutigen Rest-Ertrag der Ladepause.
 Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
 der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
 **Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
@@ -511,7 +512,7 @@ Investitionskosten bleiben Eurobeträge. Beim tageszeitabhängigen
 Tarif dürfen sich Fenster nicht überschneiden; außerhalb der Fenster gilt
 der Standardpreis. Maßgeblich ist die Home-Assistant-Zeitzone. Den
 hinterlegten Plan bearbeitest du als Administrator im Tab **Stromtarif** unter
-**Schritt 1 → Bearbeiten**. Derselbe Editor ist unter **Tarifpreisfenster →
+**Preise & Zeiten → Bearbeiten**. Derselbe Editor ist unter **Tarifpreisfenster →
 Bearbeiten** im Tab **Amortisation** verfügbar.
 Der Editor klappt direkt in der Karte auf: Standardpreis, Einspeisevergütung
 und vorhandene Zeitfenster mit **Von**, **Bis** und **Preis**. Über
@@ -524,13 +525,13 @@ ein Arbeitspreis pro kWh; monatliche Grundgebühren gehören nicht dazu.
 
 Für diesen Tarif entfallen die Preiseingaben im Konfigurationsdialog.
 Standardpreis, Einspeisevergütung und Zeitfenster bearbeitest du im Dashboard
-unter **Stromtarif → Schritt 1 → Bearbeiten**.
+unter **Stromtarif → Preise & Zeiten → Bearbeiten**.
 Bestehende Tarifwerte bleiben beim Update und bei Änderungen anderer
 Einstellungen erhalten. Nach der erstmaligen Auswahl von **Tageszeitabhängig**
 vervollständigst du das Profil im Dashboard. Bis dahin gibt es keinen gültigen
 Tarif und keine automatische Tarifladung. Den Festpreis bearbeitest du
 weiterhin unter **Konfigurieren**, die dynamische Einspeisevergütung auch
-direkt unter **Stromtarif → Schritt 1 → Bearbeiten**.
+direkt unter **Stromtarif → Preise & Zeiten → Bearbeiten**.
 
 Diese Preisfenster dienen der
 Geldbilanz und bestimmen den erlaubten Niedertarifbereich für feste SOC-Ladung

@@ -35,7 +35,7 @@ const messages = {
     failed:
       "Die Änderung ist fehlgeschlagen. Bitte den aktuellen Zustand prüfen und erneut versuchen.",
     bridgePvRequired:
-      "Öffne in Schritt 1 „Bearbeiten“ und ergänze die Solarprognose. Die bisherige Ladeweise bleibt erhalten.",
+      "Öffne unter „Preise & Zeiten“ die Bearbeitung und ergänze die Solarprognose. Die bisherige Ladeweise bleibt erhalten.",
     bridgeTariffRequired:
       "Richte zuerst einen zeitvariablen Tarif mit gültigen Preisen ein. Die bisherige Ladeweise bleibt erhalten.",
     on: "Ein",
@@ -50,7 +50,7 @@ const messages = {
     invalid: "Please enter a valid value within the allowed range.",
     failed: "The change failed. Please check the current state and try again.",
     bridgePvRequired:
-      "Open Edit in step 1 and add the solar forecast. The previous charging method is preserved.",
+      "Open Edit under Prices & times and add the solar forecast. The previous charging method is preserved.",
     bridgeTariffRequired:
       "First set up a time-of-use tariff with valid prices. The previous charging method is preserved.",
     on: "On",

@@ -625,7 +625,7 @@ test("dynamic prices keep advanced values and show progress while saving and cha
   await expect(panel).toHaveAttribute("data-tariff-configure-requests", "2");
 });
 
-test("dynamic setup matches the time-of-use steps and keeps price detail optional", async ({
+test("dynamic setup matches the time-of-use groups and keeps price detail optional", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -636,28 +636,18 @@ test("dynamic setup matches the time-of-use steps and keeps price detail optiona
     ),
   ).toHaveText(
     english
-      ? [
-          "1. Where do your electricity prices come from?",
-          "2. How should the battery charge?",
-          "3. Turn on automatic charging",
-        ]
-      : [
-          "1. Woher kommen deine Strompreise?",
-          "2. Wie möchtest du laden?",
-          "3. Automatik einschalten",
-        ],
+      ? ["Prices & times", "Grid charging"]
+      : ["Preise & Zeiten", "Netzladung"],
   );
   await expect(panel.locator(".electricity-master input")).toHaveCount(1);
   await expect(panel.locator(".electricity-tariff-bar input")).toHaveCount(0);
-  const activation = panel.locator(".electricity-activation");
   const prices = panel.locator(".electricity-price-card");
   const details = prices.locator(".electricity-price-details");
   await expect(details).not.toHaveAttribute("open", "");
   await expect(prices.locator("svg")).toBeHidden();
-  expect((await prices.boundingBox())!.y).toBeGreaterThanOrEqual(
-    (await activation.boundingBox())!.y +
-      (await activation.boundingBox())!.height,
-  );
+  await expect(
+    panel.locator(".electricity-charging > .electricity-activation"),
+  ).toHaveCount(1);
   for (const width of testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100]) {
@@ -685,7 +675,9 @@ test("dynamic setup matches the time-of-use steps and keeps price detail optiona
         await panel
           .locator(".electricity-price-summary")
           .evaluate((element) => {
-            const text = element.firstChild!;
+            const text = element.querySelector(
+              ":scope > div:nth-child(2) dt",
+            )!.firstChild!;
             const word = "Einspeisevergütung";
             const start = text.textContent!.indexOf(word);
             const range = document.createRange();

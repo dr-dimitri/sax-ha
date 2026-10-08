@@ -370,9 +370,7 @@ test("global SOC remains directly editable and displays the restored confirmed t
     exact: true,
   });
   const global = panel.getByRole("spinbutton", {
-    name: english
-      ? "Charge limit for all charging methods (%)"
-      : "Ladegrenze für alle Lademethoden (%)",
+    name: "Max SOC (%)",
     exact: true,
   });
   await expect(panel.locator(".tou-charging-settings details")).toHaveCount(0);

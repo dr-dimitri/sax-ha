@@ -1384,7 +1384,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     const fixture = await mount();
     const section = fixture.root.querySelector(".electricity-charging")!;
     await click(section, "Bearbeiten");
-    expect(section.textContent).toContain("Ladegrenze für alle Lademethoden");
+    expect(section.textContent).toContain("Max SOC (%)");
     expect(section.textContent).toContain("Netzladeziel (%)");
     expect(section.textContent).toContain("Ladestart");
     expect(section.textContent).toContain("Aktive Monate");

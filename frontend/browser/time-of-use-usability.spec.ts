@@ -419,9 +419,7 @@ test("charging choices explain their effects and retain the confirmed method whi
   ).toHaveCount(0);
   await expect(
     settings.getByRole("spinbutton", {
-      name: english
-        ? "Charge limit for all charging methods (%)"
-        : "Ladegrenze für alle Lademethoden (%)",
+      name: "Max SOC (%)",
       exact: true,
     }),
   ).toHaveValue("80");

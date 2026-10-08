@@ -740,8 +740,9 @@ unwirksame Startschwelle; Netzladeziel und Max SOC bleiben sichtbar.
 Die zwei Auswahlflächen bilden
 nur `switch.bridge_charge_enabled` auf festes Ziel beziehungsweise Bedarf bis
 Solarstrom ab. Sie setzen keine Standardwerte und aktivieren keine Netzladung.
-Unbekannte Zustände markieren keine Auswahl. Globale Ladegrenze, Startschwelle
-(nur bei fester Ladeweise) und MonthSelection sind beim Bearbeiten sofort sichtbar.
+Unbekannte Zustände markieren keine Auswahl. Globale Ladegrenze („Max SOC (%)“),
+Startschwelle (nur bei fester Ladeweise) und MonthSelection sind beim Bearbeiten
+sofort sichtbar.
 `MonthSelection` verwendet hier `alwaysExpanded`; auch die zwölf Monate
 sind direkt auswählbar. Die sonstigen Monatsansichten behalten ihre Aufklappfunktion.
 Die zusätzliche Aufklappfläche „Weitere Einstellungen“ entfällt. Labels,

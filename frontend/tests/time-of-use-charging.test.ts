@@ -201,16 +201,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       );
       expect(fixture.root.querySelector("details")).toBeNull();
       const labels = english
-        ? [
-            "Start threshold (%)",
-            "Grid charge target (%)",
-            "Charge limit for all charging methods (%)",
-          ]
-        : [
-            "Ladestart (%)",
-            "Netzladeziel (%)",
-            "Ladegrenze für alle Lademethoden (%)",
-          ];
+        ? ["Start threshold (%)", "Grid charge target (%)", "Max SOC (%)"]
+        : ["Ladestart (%)", "Netzladeziel (%)", "Max SOC (%)"];
       expect(
         [
           ...fixture.root.querySelectorAll(
@@ -601,12 +593,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
         "Maximum grid charge target (%)",
       ).querySelector<HTMLInputElement>("input")?.disabled,
     ).toBe(true);
-    expect(
-      control(
-        fixture.root,
-        "Charge limit for all charging methods (%)",
-      ).closest("details"),
-    ).toBeNull();
+    expect(control(fixture.root, "Max SOC (%)").closest("details")).toBeNull();
     expect(
       fixture.root.querySelector(".tou-charging-editor")?.textContent,
     ).not.toContain("Solar forecast missing");

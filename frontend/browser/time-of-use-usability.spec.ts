@@ -178,6 +178,14 @@ test("time-of-use groups prices and grid charging into compact responsive cards"
   await expect(
     panel.locator(".electricity-charging .electricity-plan"),
   ).toHaveCount(1);
+  const socValues = panel.locator(
+    ".tou-charging-soc-row > .electricity-target",
+  );
+  await expect(socValues.locator("span")).toHaveText(
+    english
+      ? ["Start only below", "Grid charge target", "Max SOC"]
+      : ["Start nur unter", "Netzladeziel", "Max SOC"],
+  );
   for (const width of testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100]) {
@@ -197,6 +205,31 @@ test("time-of-use groups prices and grid charging into compact responsive cards"
     } else {
       expect(chargingBox.y).toBeGreaterThanOrEqual(
         pricesBox.y + pricesBox.height,
+      );
+    }
+    const socBounds = await socValues.evaluateAll((values) =>
+      values.map((value) => {
+        const box = value.getBoundingClientRect();
+        const label = value.querySelector("span")!.getBoundingClientRect();
+        const number = value.querySelector("strong")!.getBoundingClientRect();
+        return {
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          labelBottom: label.bottom,
+          numberTop: number.top,
+        };
+      }),
+    );
+    for (const value of socBounds)
+      expect(value.labelBottom).toBeLessThanOrEqual(value.numberTop);
+    for (let index = 1; index < socBounds.length; index++) {
+      expect(Math.abs(socBounds[index]!.y - socBounds[0]!.y)).toBeLessThan(2);
+      expect(
+        Math.abs(socBounds[index]!.numberTop - socBounds[0]!.numberTop),
+      ).toBeLessThan(2);
+      expect(socBounds[index]!.x).toBeGreaterThanOrEqual(
+        socBounds[index - 1]!.x + socBounds[index - 1]!.width,
       );
     }
     await expectControlsToFit(panel);
@@ -346,7 +379,11 @@ test("charging choices explain their effects and retain the confirmed method whi
     '1: switch.turn_on {"entity_id":"switch.demo_bridge_charge_enabled"}',
   );
   await charging
-    .getByRole("button", { name: english ? "Done" : "Fertig", exact: true })
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button", {
+      name: english ? "Apply" : "Übernehmen",
+      exact: true,
+    })
     .click();
   await expect(methods).toBeHidden();
   await expect(summary).toContainText(
@@ -431,7 +468,11 @@ test("charge target keeps its draft and confirmed value through delayed failure,
   await expect(control.locator(".entity-control__value")).toContainText("80 %");
   await expect(summary).toContainText("80 %");
   await charging
-    .getByRole("button", { name: english ? "Done" : "Fertig", exact: true })
+    .locator(".electricity-charging-editor > .electricity-actions")
+    .getByRole("button", {
+      name: english ? "Apply" : "Übernehmen",
+      exact: true,
+    })
     .click();
   await expect(charging.getByRole("status")).toBeVisible();
   await page.locator("#release-action").click();

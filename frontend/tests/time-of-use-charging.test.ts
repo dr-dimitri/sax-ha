@@ -24,6 +24,7 @@ async function mount(
     readonly?: boolean;
     pv?: boolean;
     threshold?: string;
+    maxSoc?: string;
   } = {},
 ) {
   const sample = chargingSample(options.language ?? "de");
@@ -45,6 +46,8 @@ async function mount(
   if (options.threshold)
     sample.states["number.renamed_timed_charge_min_soc"]!.state =
       options.threshold;
+  if (options.maxSoc)
+    sample.states["number.renamed_max_soc"]!.state = options.maxSoc;
   if (options.readonly)
     sample.metadata.forEach((item) => {
       item.can_control = false;
@@ -166,46 +169,102 @@ afterEach(() => {
 });
 
 describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () => {
-  it("summarizes confirmed method, target, threshold and months before opening settings", async () => {
-    const fixture = await mount({ editing: false });
-    expect(
-      fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Festes Netzladeziel");
-    expect(
-      fixture.root.querySelector(".electricity-target strong")?.textContent,
-    ).toBe("80 %");
-    expect(
-      fixture.root.querySelector(".tou-charging-threshold")?.textContent,
-    ).toContain("Start nur unter20 %");
-    expect(
-      fixture.root.querySelector(".tou-charging-month-summary")?.textContent,
-    ).toContain("Ganzjährig");
-    expect(fixture.root.querySelectorAll("input")).toHaveLength(0);
-    expect(fixture.callService).not.toHaveBeenCalled();
-    await fixture.edit(true);
-    expect(method(fixture.root, "fixed").getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(fixture.root.querySelector("details")).toBeNull();
-    for (const label of [
-      "Netzladeziel (%)",
-      "Ladestart (%)",
-      "Ladegrenze für alle Lademethoden (%)",
-    ])
-      expect(control(fixture.root, label).closest("details")).toBeNull();
-    expect(fixture.root.querySelectorAll('input[role="switch"]')).toHaveLength(
-      12,
-    );
-    expect(fixture.root.textContent).not.toContain("Weitere Einstellungen");
-    expect(fixture.root.querySelector(".month-selection__toggle")).toBeNull();
-    expect(
-      fixture.root.querySelector<HTMLElement>(".month-selection__details")
-        ?.style.display,
-    ).not.toBe("none");
-    expect(method(fixture.root, "fixed").querySelector("span")).toBeNull();
-    expect(method(fixture.root, "bridge").querySelector("span")).toBeNull();
-    expect(fixture.callService).not.toHaveBeenCalled();
-  });
+  it.each(["de", "en"])(
+    "summarizes start, grid target and global SOC in order before opening settings in %s",
+    async (language) => {
+      const fixture = await mount({ editing: false, language, maxSoc: "90" });
+      const english = language === "en";
+      expect(
+        fixture.root.querySelector(".tou-charging-summary")?.textContent,
+      ).toContain(english ? "Fixed grid charge target" : "Festes Netzladeziel");
+      const cards = fixture.root.querySelectorAll(
+        ".tou-charging-soc-row .electricity-target",
+      );
+      expect(
+        [...cards].map((card) => [
+          card.querySelector("span")?.textContent?.trim(),
+          card.querySelector("strong")?.textContent?.trim(),
+        ]),
+      ).toEqual([
+        [english ? "Start only below" : "Start nur unter", "20 %"],
+        [english ? "Grid charge target" : "Netzladeziel", "80 %"],
+        ["Max SOC", "90 %"],
+      ]);
+      expect(
+        fixture.root.querySelector(".tou-charging-month-summary")?.textContent,
+      ).toContain(english ? "All year" : "Ganzjährig");
+      expect(fixture.root.querySelectorAll("input")).toHaveLength(0);
+      expect(fixture.callService).not.toHaveBeenCalled();
+      await fixture.edit(true);
+      expect(method(fixture.root, "fixed").getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      expect(fixture.root.querySelector("details")).toBeNull();
+      const labels = english
+        ? [
+            "Start threshold (%)",
+            "Grid charge target (%)",
+            "Charge limit for all charging methods (%)",
+          ]
+        : [
+            "Ladestart (%)",
+            "Netzladeziel (%)",
+            "Ladegrenze für alle Lademethoden (%)",
+          ];
+      expect(
+        [
+          ...fixture.root.querySelectorAll(
+            ".tou-charging-limits .entity-control__name",
+          ),
+        ].map((label) => label.textContent?.trim()),
+      ).toEqual(labels);
+      for (const label of labels)
+        expect(control(fixture.root, label).closest("details")).toBeNull();
+      expect(
+        fixture.root.querySelectorAll('input[role="switch"]'),
+      ).toHaveLength(12);
+      expect(fixture.root.textContent).not.toContain("Weitere Einstellungen");
+      expect(fixture.root.querySelector(".month-selection__toggle")).toBeNull();
+      expect(
+        fixture.root.querySelector<HTMLElement>(".month-selection__details")
+          ?.style.display,
+      ).not.toBe("none");
+      expect(method(fixture.root, "fixed").querySelector("span")).toBeNull();
+      expect(method(fixture.root, "bridge").querySelector("span")).toBeNull();
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["de", "en"])(
+    "recovers an unavailable global SOC from later HA updates without opening settings in %s",
+    async (language) => {
+      const fixture = await mount({
+        editing: false,
+        language,
+        maxSoc: "unavailable",
+      });
+      const global = fixture.root.querySelector(".tou-charging-global strong")!;
+      expect(global.textContent?.trim()).toBe(
+        language === "de" ? "Nicht verfügbar" : "Unavailable",
+      );
+      expect(
+        fixture.root.querySelector(".tou-charging-target strong")?.textContent,
+      ).toBe("80 %");
+      await fixture.update("max_soc", "90");
+      expect(global.textContent?.trim()).toBe("90 %");
+      await fixture.update("timed_charge_min_soc", "25");
+      await fixture.update("timed_charge_max_soc", "85");
+      expect(
+        fixture.root.querySelector(".tou-charging-threshold strong")
+          ?.textContent,
+      ).toBe("25 %");
+      expect(
+        fixture.root.querySelector(".tou-charging-target strong")?.textContent,
+      ).toBe("85 %");
+      expect(fixture.root.querySelector(".tou-charging-editor")).toBeNull();
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ["de", "off"],
@@ -276,8 +335,15 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
     ).toContain("Nur Bedarf bis Solarstrom");
     expect(
-      fixture.root.querySelector(".electricity-target")?.textContent,
+      fixture.root.querySelector(".tou-charging-target")?.textContent,
     ).toContain("Maximales Netzladeziel80 %");
+    expect(
+      [
+        ...fixture.root.querySelectorAll(
+          ".tou-charging-soc-row .electricity-target span",
+        ),
+      ].map((label) => label.textContent?.trim()),
+    ).toEqual(["Maximales Netzladeziel", "Max SOC"]);
     expect(control(fixture.root, "Maximales Netzladeziel (%)")).toBeTruthy();
     expect(fixture.root.querySelector(".tou-charging-threshold")).toBeNull();
     expect(control(fixture.root, "Ladestart (%)")).toBeUndefined();
@@ -515,6 +581,13 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     expect(
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
     ).toContain("Only what is needed until solar power");
+    expect(
+      [
+        ...fixture.root.querySelectorAll(
+          ".tou-charging-soc-row .electricity-target span",
+        ),
+      ].map((label) => label.textContent?.trim()),
+    ).toEqual(["Maximum grid charge target", "Max SOC"]);
     expect(method(fixture.root, "bridge").getAttribute("aria-pressed")).toBe(
       "true",
     );

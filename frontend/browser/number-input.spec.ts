@@ -205,7 +205,7 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   const panel = page.locator("sax-power-vue-panel");
   const charging = panel.locator(".electricity-charging");
   const settings = charging.locator(".dynamic-charging-settings");
-  const done = english ? "Done" : "Fertig";
+  const done = english ? "Apply" : "Übernehmen";
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [key, label, value] of [
@@ -254,7 +254,10 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
     await form.getByRole("button").click();
     const request = `${++writes}: number.set_value ${JSON.stringify({ value: Number(value), entity_id: `number.demo_${key}` })}`;
     await expect(actions).toHaveText(request);
-    await charging.getByRole("button", { name: done, exact: true }).click();
+    await charging
+      .locator(".electricity-charging-editor > .electricity-actions")
+      .getByRole("button", { name: done, exact: true })
+      .click();
     await expect(
       charging.locator(".electricity-charging-feedback"),
     ).toContainText(english ? "Sending change" : "Änderung wird");
@@ -264,7 +267,10 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
     await expect(form.getByRole("button")).toBeDisabled();
     await expect(form.locator(".entity-control__value")).toHaveText(confirmed);
     await expect(actions).toHaveText(request);
-    await charging.getByRole("button", { name: done, exact: true }).click();
+    await charging
+      .locator(".electricity-charging-editor > .electricity-actions")
+      .getByRole("button", { name: done, exact: true })
+      .click();
     await page.locator("#release-action").click();
     await expect(
       charging.locator(".electricity-charging-feedback").getByRole("alert"),
@@ -306,7 +312,11 @@ test("unsent native partial drafts remain editable after collapsing and reopenin
       ),
     ).toBe(true);
     await charging
-      .getByRole("button", { name: english ? "Done" : "Fertig", exact: true })
+      .locator(".electricity-charging-editor > .electricity-actions")
+      .getByRole("button", {
+        name: english ? "Apply" : "Übernehmen",
+        exact: true,
+      })
       .click();
     await charging.locator("header > button").click();
     await expect(input).toHaveValue("");

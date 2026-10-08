@@ -37,6 +37,7 @@ const text = computed(() =>
           "Keine ausgewählt · Automatische Netzladung ganzjährig inaktiv",
         unknownMonths: "Monatsauswahl nicht vollständig bekannt",
         threshold: "Ladestart (%)",
+        maxSoc: "Max SOC",
         global: "Ladegrenze für alle Lademethoden (%)",
         unavailable: "Ladeweise nicht verfügbar.",
         valueUnavailable: "Nicht verfügbar",
@@ -61,6 +62,7 @@ const text = computed(() =>
         noMonths: "None selected · Automatic grid charging inactive all year",
         unknownMonths: "Month selection is not fully known",
         threshold: "Start threshold (%)",
+        maxSoc: "Max SOC",
         global: "Charge limit for all charging methods (%)",
         unavailable: "Charging method unavailable.",
         valueUnavailable: "Unavailable",
@@ -99,6 +101,7 @@ const target = computed(() =>
 const threshold = computed(() =>
   dashboard?.entity("number", "timed_charge_min_soc"),
 );
+const globalLimit = computed(() => dashboard?.entity("number", "max_soc"));
 const targetLabel = computed(() =>
   selected.value === "bridge"
     ? text.value.bridgeTarget.replace(" (%)", "")
@@ -156,11 +159,11 @@ async function choose(method: Method): Promise<void> {
           <dd>{{ selected ? text[selected] : text.unavailable }}</dd>
         </div>
       </dl>
-      <div v-if="selected" class="electricity-targets">
-        <div class="electricity-target">
-          <span>{{ targetLabel }}</span
-          ><strong>{{ targetValue }}</strong>
-        </div>
+      <div
+        v-if="selected"
+        class="electricity-targets tou-charging-soc-row"
+        :class="{ 'tou-charging-soc-row--bridge': selected === 'bridge' }"
+      >
         <div
           v-if="selected === 'fixed'"
           class="electricity-target tou-charging-threshold"
@@ -173,6 +176,18 @@ async function choose(method: Method): Promise<void> {
           ><strong>{{
             threshold?.available
               ? threshold.displayValue
+              : text.valueUnavailable
+          }}</strong>
+        </div>
+        <div class="electricity-target tou-charging-target">
+          <span>{{ targetLabel }}</span
+          ><strong>{{ targetValue }}</strong>
+        </div>
+        <div class="electricity-target tou-charging-global">
+          <span>{{ text.maxSoc }}</span
+          ><strong>{{
+            globalLimit?.available
+              ? globalLimit.displayValue
               : text.valueUnavailable
           }}</strong>
         </div>
@@ -229,17 +244,17 @@ async function choose(method: Method): Promise<void> {
       </p>
       <div class="tou-charging-limits">
         <EntityControl
-          v-if="selected"
-          domain="number"
-          entity-key="timed_charge_max_soc"
-          :label="selected === 'fixed' ? text.fixedTarget : text.bridgeTarget"
-          hide-confirmed-label
-        />
-        <EntityControl
           v-if="selected === 'fixed'"
           domain="number"
           entity-key="timed_charge_min_soc"
           :label="text.threshold"
+          hide-confirmed-label
+        />
+        <EntityControl
+          v-if="selected"
+          domain="number"
+          entity-key="timed_charge_max_soc"
+          :label="selected === 'fixed' ? text.fixedTarget : text.bridgeTarget"
           hide-confirmed-label
         />
         <EntityControl
@@ -258,6 +273,20 @@ async function choose(method: Method): Promise<void> {
 <style>
 .tou-charging-settings {
   min-width: 0;
+}
+.tou-charging-settings .tou-charging-soc-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.tou-charging-settings .tou-charging-soc-row--bridge {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tou-charging-soc-row > .electricity-target {
+  padding: 8px;
+}
+.tou-charging-soc-row > .electricity-target > strong {
+  margin-top: auto;
+  font-size: clamp(18px, 4cqi, 24px);
 }
 .tou-charging-limits > .entity-control {
   border: 0;

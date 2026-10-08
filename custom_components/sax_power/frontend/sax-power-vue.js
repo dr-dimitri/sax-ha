@@ -5864,11 +5864,8 @@ var Vl = ["aria-busy"], Hl = {
 	}
 }), [["styles", [".dynamic-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;display:grid}.dynamic-charging-methods button{text-align:left;color:var(--primary-text-color,#212121);padding:12px}.dynamic-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:11px}.dynamic-charging-methods strong{line-height:1.5;display:block}.dynamic-charging-editor>.entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.dynamic-charging-notice{border-left:3px solid var(--primary-color,#03a9f4);padding-left:12px}@media (max-width:700px){.dynamic-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), vu = { class: "tou-charging-settings" }, yu = { class: "tou-charging-summary" }, bu = { class: "electricity-summary-rows" }, xu = {
 	key: 0,
-	class: "electricity-targets"
-}, Su = { class: "electricity-target" }, Cu = {
-	key: 0,
 	class: "electricity-target tou-charging-threshold"
-}, wu = { class: "electricity-summary-rows tou-charging-month-summary" }, Tu = {
+}, Su = { class: "electricity-target tou-charging-target" }, Cu = { class: "electricity-target tou-charging-global" }, wu = { class: "electricity-summary-rows tou-charging-month-summary" }, Tu = {
 	key: 0,
 	class: "tou-charging-hint tou-charging-calibration"
 }, Eu = {
@@ -5918,6 +5915,7 @@ var Vl = ["aria-busy"], Hl = {
 			noMonths: "Keine ausgewählt · Automatische Netzladung ganzjährig inaktiv",
 			unknownMonths: "Monatsauswahl nicht vollständig bekannt",
 			threshold: "Ladestart (%)",
+			maxSoc: "Max SOC",
 			global: "Ladegrenze für alle Lademethoden (%)",
 			unavailable: "Ladeweise nicht verfügbar.",
 			valueUnavailable: "Nicht verfügbar",
@@ -5941,17 +5939,18 @@ var Vl = ["aria-busy"], Hl = {
 			noMonths: "None selected · Automatic grid charging inactive all year",
 			unknownMonths: "Month selection is not fully known",
 			threshold: "Start threshold (%)",
+			maxSoc: "Max SOC",
 			global: "Charge limit for all charging methods (%)",
 			unavailable: "Charging method unavailable.",
 			valueUnavailable: "Unavailable",
 			readonly: "You do not have permission to change the charging method.",
 			disconnected: "Disconnected from Home Assistant.",
 			pending: "Applying charging method …"
-		}), s = Q(() => n?.entity("switch", "bridge_charge_enabled")), c = ["fixed", "bridge"], l = Q(() => s.value?.available ? s.value.state?.state === "off" ? "fixed" : s.value.state?.state === "on" ? "bridge" : null : null), u = Q(() => !s.value?.canControl || s.value.pending || l.value === null), d = Q(() => s.value?.pending ? o.value.pending : n?.connected.value ? l.value ? s.value?.metadata.can_control ? "" : o.value.readonly : o.value.unavailable : o.value.disconnected), f = Q(() => n?.entity("number", "timed_charge_max_soc")), p = Q(() => n?.entity("number", "timed_charge_min_soc")), m = Q(() => l.value === "bridge" ? o.value.bridgeTarget.replace(" (%)", "") : o.value.target), h = Q(() => f.value?.available ? f.value.displayValue : o.value.valueUnavailable), g = Q(() => !!n?.tariff.value?.profiles?.time_of_use.pv_sensor), _ = Array.from({ length: 12 }, (e, t) => `timed_charge_month_${t + 1}`), v = Q(() => {
+		}), s = Q(() => n?.entity("switch", "bridge_charge_enabled")), c = ["fixed", "bridge"], l = Q(() => s.value?.available ? s.value.state?.state === "off" ? "fixed" : s.value.state?.state === "on" ? "bridge" : null : null), u = Q(() => !s.value?.canControl || s.value.pending || l.value === null), d = Q(() => s.value?.pending ? o.value.pending : n?.connected.value ? l.value ? s.value?.metadata.can_control ? "" : o.value.readonly : o.value.unavailable : o.value.disconnected), f = Q(() => n?.entity("number", "timed_charge_max_soc")), p = Q(() => n?.entity("number", "timed_charge_min_soc")), m = Q(() => n?.entity("number", "max_soc")), h = Q(() => l.value === "bridge" ? o.value.bridgeTarget.replace(" (%)", "") : o.value.target), g = Q(() => f.value?.available ? f.value.displayValue : o.value.valueUnavailable), _ = Q(() => !!n?.tariff.value?.profiles?.time_of_use.pv_sensor), v = Array.from({ length: 12 }, (e, t) => `timed_charge_month_${t + 1}`), y = Q(() => {
 			let e = new Intl.DateTimeFormat(r.value ? "de" : "en", {
 				month: "short",
 				timeZone: "UTC"
-			}), t = _.map((t, r) => {
+			}), t = v.map((t, r) => {
 				let i = n?.entity("switch", t), a = i?.state?.state;
 				return {
 					known: i?.available && (a === "on" || a === "off"),
@@ -5961,14 +5960,21 @@ var Vl = ["aria-busy"], Hl = {
 			}), i = t.filter((e) => e.selected), a = t.some((e) => !e.known);
 			return i.length === 12 ? o.value.allYear : i.length ? `${i.map((e) => e.name).join(", ")}${a ? ` · ${o.value.unknownMonths}` : ""}` : a ? o.value.unknownMonths : o.value.noMonths;
 		});
-		async function y(e) {
+		async function b(e) {
 			u.value || l.value === e || await n?.perform("switch", "bridge_charge_enabled", e === "bridge");
 		}
 		return (t, n) => (G(), K("div", vu, [
 			J("div", yu, [
 				J("dl", bu, [J("div", null, [J("dt", null, I(o.value.saved), 1), J("dd", null, I(l.value ? o.value[l.value] : o.value.unavailable), 1)])]),
-				l.value ? (G(), K("div", xu, [J("div", Su, [J("span", null, I(m.value), 1), J("strong", null, I(h.value), 1)]), l.value === "fixed" ? (G(), K("div", Cu, [J("span", null, I(V(to)(p.value?.state?.state) === 0 ? o.value.startAtZero : o.value.start), 1), J("strong", null, I(p.value?.available ? p.value.displayValue : o.value.valueUnavailable), 1)])) : Z("", !0)])) : Z("", !0),
-				J("dl", wu, [J("div", null, [J("dt", null, I(o.value.months), 1), J("dd", null, I(v.value), 1)])])
+				l.value ? (G(), K("div", {
+					key: 0,
+					class: de(["electricity-targets tou-charging-soc-row", { "tou-charging-soc-row--bridge": l.value === "bridge" }])
+				}, [
+					l.value === "fixed" ? (G(), K("div", xu, [J("span", null, I(V(to)(p.value?.state?.state) === 0 ? o.value.startAtZero : o.value.start), 1), J("strong", null, I(p.value?.available ? p.value.displayValue : o.value.valueUnavailable), 1)])) : Z("", !0),
+					J("div", Su, [J("span", null, I(h.value), 1), J("strong", null, I(g.value), 1)]),
+					J("div", Cu, [J("span", null, I(o.value.maxSoc), 1), J("strong", null, I(m.value?.available ? m.value.displayValue : o.value.valueUnavailable), 1)])
+				], 2)) : Z("", !0),
+				J("dl", wu, [J("div", null, [J("dt", null, I(o.value.months), 1), J("dd", null, I(y.value), 1)])])
 			]),
 			l.value ? (G(), K("p", Tu, I(o.value.calibrationShort), 1)) : Z("", !0),
 			J("div", {
@@ -5989,22 +5995,22 @@ var Vl = ["aria-busy"], Hl = {
 					"data-method": e,
 					"aria-pressed": l.value === e,
 					disabled: u.value,
-					onClick: (t) => y(e)
+					onClick: (t) => b(e)
 				}, [J("strong", null, I(o.value[e]), 1)], 8, Au)), 64))], 8, ku),
-				l.value === "bridge" && !g.value ? (G(), K("p", ju, I(o.value.pvRequired), 1)) : Z("", !0),
+				l.value === "bridge" && !_.value ? (G(), K("p", ju, I(o.value.pvRequired), 1)) : Z("", !0),
 				J("div", Mu, [
-					l.value ? (G(), q(Lo, {
-						key: 0,
-						domain: "number",
-						"entity-key": "timed_charge_max_soc",
-						label: l.value === "fixed" ? o.value.fixedTarget : o.value.bridgeTarget,
-						"hide-confirmed-label": ""
-					}, null, 8, ["label"])) : Z("", !0),
 					l.value === "fixed" ? (G(), q(Lo, {
-						key: 1,
+						key: 0,
 						domain: "number",
 						"entity-key": "timed_charge_min_soc",
 						label: o.value.threshold,
+						"hide-confirmed-label": ""
+					}, null, 8, ["label"])) : Z("", !0),
+					l.value ? (G(), q(Lo, {
+						key: 1,
+						domain: "number",
+						"entity-key": "timed_charge_max_soc",
+						label: l.value === "fixed" ? o.value.fixedTarget : o.value.bridgeTarget,
 						"hide-confirmed-label": ""
 					}, null, 8, ["label"])) : Z("", !0),
 					Y(Lo, {
@@ -6016,13 +6022,13 @@ var Vl = ["aria-busy"], Hl = {
 				]),
 				J("h3", null, I(o.value.months), 1),
 				Y(Ss, {
-					"entity-keys": V(_),
+					"entity-keys": V(v),
 					"always-expanded": ""
 				}, null, 8, ["entity-keys"])
 			], 512)), [[Xi, e.editing]]) : Z("", !0)
 		]));
 	}
-}), [["styles", [".tou-charging-settings{min-width:0}.tou-charging-limits>.entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.tou-charging-summary,.tou-charging-threshold,.tou-charging-month-summary{overflow-wrap:anywhere;line-height:1.5}.tou-charging-hint{color:var(--secondary-text-color,#666);font-size:14px;line-height:1.6}.tou-charging-error{color:var(--error-color,#b00020)}.tou-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0;display:grid}.tou-charging-methods button{border:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff);min-width:0;min-height:44px;color:var(--primary-text-color,#212121);text-align:left;font:inherit;cursor:pointer;border-radius:8px;padding:12px}.tou-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:11px}.tou-charging-methods strong{line-height:1.5;display:block}.tou-charging-methods button:disabled{opacity:.55;cursor:not-allowed}.tou-charging-methods button:focus-visible{outline:3px solid var(--primary-color,#03a9f4);outline-offset:3px}@media (max-width:700px){.tou-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Pu = { class: "electricity-tariff-view" }, Fu = { class: "electricity-card electricity-tariff-bar" }, Iu = { class: "electricity-tariff-bar__row" }, Lu = { class: "electricity-active" }, Ru = ["disabled", "aria-expanded"], zu = ["aria-busy"], Bu = ["disabled"], Vu = { class: "electricity-sr-only" }, Hu = ["value"], Uu = {
+}), [["styles", [".tou-charging-settings{min-width:0}.tou-charging-settings .tou-charging-soc-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.tou-charging-settings .tou-charging-soc-row--bridge{grid-template-columns:repeat(2,minmax(0,1fr))}.tou-charging-soc-row>.electricity-target{padding:8px}.tou-charging-soc-row>.electricity-target>strong{margin-top:auto;font-size:clamp(18px,4cqi,24px)}.tou-charging-limits>.entity-control{box-shadow:none;background:0 0;border:0;border-radius:0;padding:12px 0}.tou-charging-summary,.tou-charging-threshold,.tou-charging-month-summary{overflow-wrap:anywhere;line-height:1.5}.tou-charging-hint{color:var(--secondary-text-color,#666);font-size:14px;line-height:1.6}.tou-charging-error{color:var(--error-color,#b00020)}.tou-charging-methods{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0;display:grid}.tou-charging-methods button{border:1px solid var(--divider-color,#ddd);background:var(--card-background-color,#fff);min-width:0;min-height:44px;color:var(--primary-text-color,#212121);text-align:left;font:inherit;cursor:pointer;border-radius:8px;padding:12px}.tou-charging-methods button[aria-pressed=true]{border:2px solid var(--primary-color,#03a9f4);background:var(--secondary-background-color,#f5f5f5);padding:11px}.tou-charging-methods strong{line-height:1.5;display:block}.tou-charging-methods button:disabled{opacity:.55;cursor:not-allowed}.tou-charging-methods button:focus-visible{outline:3px solid var(--primary-color,#03a9f4);outline-offset:3px}@media (max-width:700px){.tou-charging-methods{grid-template-columns:minmax(0,1fr)}}"]]]), Pu = { class: "electricity-tariff-view" }, Fu = { class: "electricity-card electricity-tariff-bar" }, Iu = { class: "electricity-tariff-bar__row" }, Lu = { class: "electricity-active" }, Ru = ["disabled", "aria-expanded"], zu = ["aria-busy"], Bu = ["disabled"], Vu = { class: "electricity-sr-only" }, Hu = ["value"], Uu = {
 	key: 0,
 	role: "status"
 }, Wu = { class: "electricity-actions" }, Gu = ["disabled"], Ku = ["disabled"], qu = {
@@ -6117,7 +6123,7 @@ var Vl = ["aria-busy"], Hl = {
 			apply: "Tarif übernehmen",
 			cancel: "Abbrechen",
 			save: "Speichern",
-			done: "Fertig",
+			done: "Übernehmen",
 			edit: "Bearbeiten",
 			loading: "Wird geladen …",
 			saving: "Wird gespeichert …",
@@ -6196,7 +6202,7 @@ var Vl = ["aria-busy"], Hl = {
 			apply: "Apply tariff",
 			cancel: "Cancel",
 			save: "Save",
-			done: "Done",
+			done: "Apply",
 			edit: "Edit",
 			loading: "Loading …",
 			saving: "Saving …",

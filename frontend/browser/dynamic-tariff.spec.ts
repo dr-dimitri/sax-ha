@@ -395,8 +395,9 @@ test("guided charging methods explain their effects and reveal relevant settings
     '1: select.select_option {"option":"relative","entity_id":"select.demo_price_charge_strategy"}',
   );
   await charging
+    .locator(".electricity-charging-editor > .electricity-actions")
     .getByRole("button", {
-      name: english ? "Done" : "Fertig",
+      name: english ? "Apply" : "Übernehmen",
       exact: true,
     })
     .click();

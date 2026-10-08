@@ -233,11 +233,14 @@ und aktive Monate direkt sichtbar. Zusätzliche Aufklappbereiche und lange
 Erklärungstexte entfallen. Bei Bedarfsladung heißt die Obergrenze
 **Maximales Netzladeziel (%)**. Die Zusammenfassung zeigt die bestätigten Werte.
 Bei festem Netzladeziel startet die Ladung unter der Startschwelle;
+die Übersicht zeigt **Start nur unter**, **Netzladeziel** und **Max SOC**
+nebeneinander, jeweils mit der Beschriftung über dem Zahlwert.
 **Ladestart 0 % erlaubt den Start bei genau 0 % SOC**. Die globale Ladegrenze gilt auch für Solarstrom. Eine fällige
 Zellkalibrierung darf die eingestellten Grenzen vorübergehend bis 100 % erweitern;
 die Bedarfsladung plant deshalb keine zusätzliche Vollladung ein.
-Zahlen werden jeweils mit **Übernehmen** gespeichert; **Fertig** schließt nur
-die Bearbeitung. Bereits gespeicherte Werte ändern sich beim Öffnen nicht.
+Zahlen werden jeweils mit **Übernehmen** am Eingabefeld gespeichert. Der
+abschließende Button **Übernehmen** schließt die Bearbeitung. Bereits
+gespeicherte Werte ändern sich beim Öffnen nicht.
 
 Unter **Ladeplan & Prognose** erscheint die aktuelle Entladeprognose, sobald
 ausreichend gültige Verbrauchsdaten vorliegen. Sie zeigt, wie lange der Speicher
@@ -473,7 +476,8 @@ Fehlen Messwerte für Speicherfüllung, Kapazität oder Ladeleistung, nutzt
 Smart die eingestellte Anzahl der günstigsten Stunden. Die Übersicht zeigt
 die bestätigten Einstellungen; allein das Öffnen des Einstellbereichs
 verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick;
-**Fertig** schließt den Bereich und speichert keine offenen Zahleneingaben.
+Der abschließende Button **Übernehmen** schließt den Bereich;
+offene Zahleneingaben werden über **Übernehmen** am jeweiligen Feld gespeichert.
 
 ![Dynamischer Tarif: alle passenden Ladeeinstellungen direkt sichtbar](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
 

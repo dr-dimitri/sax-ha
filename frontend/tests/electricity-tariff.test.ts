@@ -259,6 +259,12 @@ async function click(root: Element, label: string) {
   button(root, label).click();
   await flush();
 }
+async function closeCharging(root: Element, language = "de") {
+  await click(
+    root.querySelector(".electricity-charging-editor .electricity-actions")!,
+    language === "en" ? "Apply" : "Übernehmen",
+  );
+}
 async function fill(root: Element, selector: string, value: string) {
   const input = root.querySelector<HTMLInputElement>(selector)!;
   input.value = value;
@@ -533,7 +539,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       expect(master.checked).toBe(!initial);
       expect(writes(fixture)).toHaveLength(0);
       expect(fixture.stored.revision).toBe(revision);
-      if (editor) await click(section, "Fertig");
+      if (editor) await closeCharging(section);
       expect(
         fixture.root.querySelector(".electricity-activation")?.textContent,
       ).toContain(initial ? "Keine automatische Ladung" : "Lädt, sobald");
@@ -1051,7 +1057,6 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       const section = fixture.root.querySelector(".electricity-charging")!;
       const english = language === "en";
       const edit = english ? "Edit" : "Bearbeiten";
-      const done = english ? "Done" : "Fertig";
       const apply = english ? "Apply" : "Übernehmen";
       await click(section, edit);
       const form = [...section.querySelectorAll(".entity-control")].find(
@@ -1069,7 +1074,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       );
       await fill(form, "input", value);
       await click(form, apply);
-      await click(section, done);
+      await closeCharging(section, language);
       expect(
         section.querySelector(".electricity-charging-feedback [role='status']")
           ?.textContent,
@@ -1080,7 +1085,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       expect(input.disabled).toBe(true);
       await click(form, apply);
       expect(fixture.callService).toHaveBeenCalledTimes(1);
-      await click(section, done);
+      await closeCharging(section, language);
       reject(new Error("Service failed"));
       await flush();
       expect(
@@ -1124,7 +1129,6 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       const section = fixture.root.querySelector(".electricity-charging")!;
       const english = language === "en";
       const edit = english ? "Edit" : "Bearbeiten";
-      const done = english ? "Done" : "Fertig";
       await click(section, edit);
       const form = [...section.querySelectorAll(".entity-control")].find(
         (form) =>
@@ -1133,13 +1137,13 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       const input = form.querySelector<HTMLInputElement>("input")!;
       for (const draft of [value, ""]) {
         await fill(form, "input", draft);
-        await click(section, done);
+        await closeCharging(section, language);
         await click(section, edit);
         expect(input.isConnected).toBe(true);
         expect(input.value).toBe(draft);
         expect(fixture.callService).not.toHaveBeenCalled();
       }
-      await click(section, done);
+      await closeCharging(section, language);
       const external = String(Number(value) + 2);
       await fixture.update(key, external);
       await click(section, edit);
@@ -1161,7 +1165,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
           (english ? "Grid charge target (%)" : "Netzladeziel (%)"),
       )!;
       await fill(form, "input", "85");
-      await click(section, english ? "Done" : "Fertig");
+      await closeCharging(section, language);
       await fixture.rename("max_soc", "number.new_charge_limit", "90");
       await click(section, edit);
       expect(form.querySelector<HTMLInputElement>("input")!.value).toBe("90");
@@ -1384,7 +1388,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     expect(section.textContent).toContain("Netzladeziel (%)");
     expect(section.textContent).toContain("Ladestart");
     expect(section.textContent).toContain("Aktive Monate");
-    await click(section, "Fertig");
+    await closeCharging(section);
     expect(section.querySelector(".electricity-charging-editor")).toBeNull();
   });
   it.each(["de", "en"])(
@@ -1562,11 +1566,14 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
           .click();
         await flush();
       } else {
-        const form = section.querySelector(".entity-control")!;
+        const form = [...section.querySelectorAll(".entity-control")].find(
+          (form) =>
+            form.querySelector("label")?.textContent === "Netzladeziel (%)",
+        )!;
         await fill(form, "input", "85");
         await click(form, "Übernehmen");
       }
-      await click(section, "Fertig");
+      await closeCharging(section);
       expect(section.querySelector(".electricity-charging-editor")).toBeNull();
       expect(
         section.querySelector(

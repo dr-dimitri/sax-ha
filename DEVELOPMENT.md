@@ -732,8 +732,12 @@ nur der Umrechnung und ergänzt keine Steuern oder Zuschläge.
 Der Hauptschalter verwendet weiterhin denselben `tariff/configure`-Aufruf.
 Aktueller Preis und Entladestatus bleiben sichtbar; die Tageskurve ist unter
 „Preisverlauf“ erreichbar.
-`TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise, Netzladeziel,
-Startschwelle und Monatsauswahl. Die zwei Auswahlflächen bilden
+`TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise und Monatsauswahl.
+Die SOC-Übersicht stellt „Start nur unter“, „Netzladeziel“ und „Max SOC“
+in dieser Reihenfolge nebeneinander dar, auch auf schmalen Ansichten.
+Jede Beschriftung bleibt über ihrem Zahlwert. Bei Bedarfsladung entfällt die
+unwirksame Startschwelle; Netzladeziel und Max SOC bleiben sichtbar.
+Die zwei Auswahlflächen bilden
 nur `switch.bridge_charge_enabled` auf festes Ziel beziehungsweise Bedarf bis
 Solarstrom ab. Sie setzen keine Standardwerte und aktivieren keine Netzladung.
 Unbekannte Zustände markieren keine Auswahl. Globale Ladegrenze, Startschwelle
@@ -744,7 +748,8 @@ Die zusätzliche Aufklappfläche „Weitere Einstellungen“ entfällt. Labels,
 Zusammenfassung, Plan und Fehler verwenden durchgängig „Netzladeziel“;
 Verbrauchsplanung nennt die Obergrenze „Maximales Netzladeziel“.
 Zahlen verwenden weiterhin `EntityControl`; dessen Entwürfe bleiben durch
-`v-show` beim Einklappen erhalten. „Fertig“ klappt nur zu. Fehler und Pending
+`v-show` beim Einklappen erhalten. Der abschließende Button „Übernehmen“
+(EN: „Apply“) klappt nur zu. Fehler und Pending
 bleiben auch bei geschlossenem Editor sichtbar. Die spezielle HA-Service-
 Fehlerübersetzung in `ha.ts` berücksichtigt nur passende SAX-Fehlerschlüssel
 für den Verbrauchsplanungsschalter. Komponenten- und Browsertests stehen in

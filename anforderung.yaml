@@ -3473,8 +3473,9 @@ requirement_vue_electricity_tariff:
     weder Investitionsdaten noch native SOC-, Monats- oder Strategieeinstellungen.
 
     Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
-    übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services; Fertig
-    schließt den Bereich. Zeitvariabel bietet die Ladeweisen
+    übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services.
+    Der abschließende Button heißt „Übernehmen“ (EN: „Apply“) und schließt
+    den Bereich. Zeitvariabel bietet die Ladeweisen
     „Festes Netzladeziel“ (bridge_charge_enabled aus) und
     „Nur Bedarf bis Solarstrom“ (bridge_charge_enabled ein).
     Nur bestätigte, verfügbare on/off-Zustände markieren die Auswahl; fehlende,
@@ -3484,8 +3485,15 @@ requirement_vue_electricity_tariff:
     „Maximales Netzladeziel (%)“. Zusammenfassung, Ladeweise, Plananzeige und
     Fehlermeldungen verwenden dieselbe Bezeichnung. Die globale Ladegrenze
     für alle Lademethoden bleibt davon ausdrücklich unterscheidbar.
-    Während der Bearbeitung sind Netzladeziel, Ladestart (nur bei fester
-    Ladeweise), globale Ladegrenze und Monate direkt sichtbar. Es gibt dort
+    Die Übersicht zeigt bei fester Ladeweise „Start nur unter“, „Netzladeziel“
+    und „Max SOC“ in dieser Reihenfolge in einer Zeile. Die Beschriftungen
+    bleiben über den bestätigten Zahlwerten. Diese Anordnung gilt auch auf
+    schmalen Ansichten; bei Verbrauchsplanung entfällt die unwirksame
+    Startschwelle und Netzladeziel/Max SOC stehen nebeneinander. Fehlende
+    globale Werte werden als nicht verfügbar angezeigt und spätere HA-
+    Rückmeldungen aktualisieren alle SOC-Werte ohne Öffnen der Bearbeitung.
+    Während der Bearbeitung sind Ladestart (nur bei fester Ladeweise),
+    Netzladeziel, globale Ladegrenze und Monate direkt sichtbar. Es gibt dort
     kein „Weitere Einstellungen“ und keine zusätzliche Aufklappaktion;
     auch die zwölf Monatsfelder stehen ohne „Ändern“ direkt zur Auswahl.
     Lange Erklärungstexte, Auswahlbeschreibungen und „Laderegeln & Ausnahmen“

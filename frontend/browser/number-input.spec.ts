@@ -14,7 +14,6 @@ async function priceControls(page: Page, english: boolean) {
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header > button").click();
   const settings = panel.locator(".dynamic-charging-settings");
-  await settings.locator(".dynamic-charging-advanced summary").click();
   return [
     {
       key: "price_charge_max_price",
@@ -210,7 +209,7 @@ test("all dynamic number drafts survive collapse, delayed failure, reopening and
   const actions = page.locator("#actions");
   let writes = 0;
   for (const [key, label, value] of [
-    ["max_soc", english ? "Charge target (%)" : "Ladeziel (%)", "85"],
+    ["max_soc", english ? "Grid charge target (%)" : "Netzladeziel (%)", "85"],
     [
       "price_charge_max_price",
       english
@@ -349,16 +348,15 @@ test("max SOC and solar forecast threshold remain usable with keyboard entry", a
 
 // REQ-TIMED-SOC-CHARGE / #260: HA supplies the effective target while
 // preserving the stored target; the dashboard must explain these updates.
-test("global SOC help explains temporary caps and displays the restored confirmed target", async ({
+test("global SOC remains directly editable and displays the restored confirmed target", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header > button").click();
-  await panel.locator(".tou-charging-advanced summary").click();
   const target = panel.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   const global = panel.getByRole("spinbutton", {
@@ -367,11 +365,8 @@ test("global SOC help explains temporary caps and displays the restored confirme
       : "Ladegrenze für alle Lademethoden (%)",
     exact: true,
   });
-  await expect(panel.locator(".tou-charging-advanced")).toContainText(
-    english
-      ? "Also applies to solar charging. This limit temporarily caps the saved grid charge target. Raising it makes the original target effective again, up to the new global limit. Only explicitly changing the grid charge target permanently changes its saved value."
-      : "Gilt auch für Solarstrom. Diese Grenze begrenzt das gespeicherte Netzladeziel vorübergehend. Wenn du sie anhebst, wird das ursprüngliche Ziel bis zur neuen globalen Grenze wieder wirksam. Nur wenn du das Netzladeziel ausdrücklich änderst, wird dessen gespeicherter Wert dauerhaft geändert.",
-  );
+  await expect(panel.locator(".tou-charging-settings details")).toHaveCount(0);
+  await expect(global).toBeVisible();
   for (const [limit, effective] of [
     [90, 80],
     [60, 60],
@@ -417,10 +412,9 @@ test("charge target and start reject crossed limits and accept zero", async ({
   const panel = page.locator("sax-power-vue-panel");
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header > button").click();
-  await panel.locator(".tou-charging-advanced summary").click();
   const actions = page.locator("#actions");
   for (const [label, invalid] of [
-    [english ? "Charge target (%)" : "Ladeziel (%)", "19"],
+    [english ? "Grid charge target (%)" : "Netzladeziel (%)", "19"],
     [english ? "Start threshold (%)" : "Ladestart (%)", "81"],
   ]) {
     const input = panel.getByRole("spinbutton", { name: label, exact: true });
@@ -431,8 +425,8 @@ test("charge target and start reject crossed limits and accept zero", async ({
     await form.getByRole("button").click();
     await expect(form.getByRole("alert")).toHaveText(
       english
-        ? "The charge target must be at least as high as the start threshold."
-        : "Das Ladeziel muss mindestens so hoch wie der Ladestart sein.",
+        ? "The grid charge target must be at least as high as the start threshold."
+        : "Das Netzladeziel muss mindestens so hoch wie der Ladestart sein.",
     );
     await expect(input).toHaveAttribute("aria-invalid", "true");
     await expect(input).toHaveValue(invalid!);
@@ -457,11 +451,8 @@ test("charge target and start reject crossed limits and accept zero", async ({
   await expect(panel.locator(".tou-charging-threshold")).toContainText(
     english ? "Start at" : "Start bei",
   );
-  await expect(panel.locator(".tou-charging-summary")).toContainText(
-    english ? "starts at 0% battery level" : "beginnt bei 0 % Ladestand",
-  );
   const target = panel.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   await typeNumber(target, "0");
@@ -469,7 +460,7 @@ test("charge target and start reject crossed limits and accept zero", async ({
     .locator(".entity-control")
     .filter({
       has: page.getByRole("spinbutton", {
-        name: english ? "Charge target (%)" : "Ladeziel (%)",
+        name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
         exact: true,
       }),
     })

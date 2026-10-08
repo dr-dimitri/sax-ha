@@ -241,22 +241,23 @@ Ladeweise, bestätigte Ziel- und Startwerte, PV-Quelle, Gerätestatus und
 „Ladeplan & Prognose“. Ab 860 px nutzbarer Inhaltsbreite stehen die Karten
 nebeneinander, darunter in derselben DOM-Reihenfolge untereinander.
 Die Tarifwahl steht separat oberhalb. Die zeitvariable Übersicht stellt
-Ladeziel und Startschwelle nebeneinander dar; Monate und PV-Quelle bilden
+Netzladeziel und Startschwelle nebeneinander dar; Monate und PV-Quelle bilden
 beschriftete Zeilen. Die 100-%-Kalibrierungsausnahme bleibt als kurzer
-sichtbarer Hinweis erhalten, ihre vollständige Erklärung und die
-Entladesperre stehen unter „Laderegeln & Ausnahmen“. Die bestehenden
+sichtbarer Hinweis erhalten. Lange Erklärungen und der Unterbereich
+„Laderegeln & Ausnahmen“ entfallen. Die bestehenden
 Bearbeitungsformulare, Entwürfe, Bestätigungen und Servicewege bleiben erhalten.
 Browserprüfungen in `time-of-use-usability.spec.ts` und `dynamic-tariff.spec.ts`
 sichern Gruppierung, Größen, Tastaturbedienung und Rückmeldungen ab.
 
-Im dynamischen Tarif erklärt die Ladebedienung die Wirkung jeder Ladeweise
-und zeigt nur deren relevante Eingaben. Die einfachen Bezeichnungen bilden
+Im dynamischen Tarif zeigt die Ladebedienung die gewählte Ladeweise
+und deren relevante Eingaben direkt. Die einfachen Bezeichnungen bilden
 weiterhin `smart`, `relative`, `absolute` und `off` ab; Planung, Grenzwerte
 und Services bleiben im Backend. Die Zusammenfassung verwendet bestätigte
-Werte. Preisquellen-Sonderoptionen und die Speicherpause durch den Neutralpreis
-bleiben in erweiterten Einstellungen erreichbar, ohne vorhandene Werte zu
-überschreiben. Ladeziel und Preis-/Stundenregler verwenden weiterhin die
-gemeinsamen HA-Entitäten.
+Werte. Der Neutralpreis ist beim Bearbeiten ohne weiteres Aufklappen sichtbar;
+Preisquellen-Sonderoptionen bleiben unter „Preise & Zeiten“ nachgeordnet.
+Netzladeziel und Preis-/Stundenregler verwenden weiterhin die gemeinsamen
+HA-Entitäten. Ein kurzer Hinweis kennzeichnet die globale Wirkung des
+dynamischen Netzladeziels auch auf Solarstrom.
 
 Die Preisprüfung benennt das tatsächlich betroffene Feld: fehlender/gelöschter
 Preissensor, nicht unterstützte Einheit, Einspeisevergütung, PV-Quelle,
@@ -731,12 +732,17 @@ nur der Umrechnung und ergänzt keine Steuern oder Zuschläge.
 Der Hauptschalter verwendet weiterhin denselben `tariff/configure`-Aufruf.
 Aktueller Preis und Entladestatus bleiben sichtbar; die Tageskurve ist unter
 „Preisverlauf“ erreichbar.
-`TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise, Ladeziel,
-Startschwelle und Monatsauswahl. Die zwei beschriebenen Auswahlflächen bilden
+`TimeOfUseChargingSettings.vue` zeigt bestätigte Ladeweise, Netzladeziel,
+Startschwelle und Monatsauswahl. Die zwei Auswahlflächen bilden
 nur `switch.bridge_charge_enabled` auf festes Ziel beziehungsweise Bedarf bis
 Solarstrom ab. Sie setzen keine Standardwerte und aktivieren keine Netzladung.
 Unbekannte Zustände markieren keine Auswahl. Globale Ladegrenze, Startschwelle
-(nur bei fester Ladeweise) und MonthSelection stehen unter „Weitere Einstellungen“.
+(nur bei fester Ladeweise) und MonthSelection sind beim Bearbeiten sofort sichtbar.
+`MonthSelection` verwendet hier `alwaysExpanded`; auch die zwölf Monate
+sind direkt auswählbar. Die sonstigen Monatsansichten behalten ihre Aufklappfunktion.
+Die zusätzliche Aufklappfläche „Weitere Einstellungen“ entfällt. Labels,
+Zusammenfassung, Plan und Fehler verwenden durchgängig „Netzladeziel“;
+Verbrauchsplanung nennt die Obergrenze „Maximales Netzladeziel“.
 Zahlen verwenden weiterhin `EntityControl`; dessen Entwürfe bleiben durch
 `v-show` beim Einklappen erhalten. „Fertig“ klappt nur zu. Fehler und Pending
 bleiben auch bei geschlossenem Editor sichtbar. Die spezielle HA-Service-
@@ -744,8 +750,8 @@ Fehlerübersetzung in `ha.ts` berücksichtigt nur passende SAX-Fehlerschlüssel
 für den Verbrauchsplanungsschalter. Komponenten- und Browsertests stehen in
 `time-of-use-charging.test.ts` und `time-of-use-usability.spec.ts`.
 Globaler Max-SOC und zeitvariables Ladeziel bleiben unterschiedliche Grenzen.
-Ein sichtbarer Hinweis erklärt die bestehende Kalibrierungsausnahme bis 100 %;
-die feste Ladeweise erläutert zusätzlich ihre Entladesperre bis Fensterende.
+Ein kurzer Hinweis nennt die bestehende Kalibrierungsausnahme bis 100 %.
+Die ausführlichen Erklärungen stehen in der Dokumentation statt im Formular.
 Dynamisch erscheint die absolute Preisgrenze nur bei `absolute`, das
 Stundenbudget bei `relative`/`smart`; der Neutralpreis bleibt verfügbar und
 wirkt in diesen aktiven Strategien. Smart verwendet das Stundenbudget als
@@ -1789,8 +1795,8 @@ auch über einen Neustart. Eine globale Erhöhung gibt das ursprüngliche Ziel
 bis zur neuen Grenze wieder frei. Nur eine ausdrückliche Zieländerung
 ersetzt den gespeicherten Wert, begrenzt auf den aktuellen Sliderbereich.
 Das Dashboard zeigt den Regler unter
-„Stromtarif“ → „Netzladung“ → „Bearbeiten“; die Startschwelle liegt unter
-„Weitere Einstellungen“.
+„Stromtarif“ → „Netzladung“ → „Bearbeiten“ als „Netzladeziel (%)“;
+die Startschwelle, globale Grenze und Monatsauswahl sind dort direkt sichtbar.
 Seine Grenzen und der bestätigte Wert kommen aus der vorhandenen Number-Entity.
 Änderungen beider SOC-Werte prüfen vor jeder Mutation `Ladestart <= Ladeziel`.
 Dashboard und Coordinator weisen ungültige Werte zurück, ohne den Geräte-Lock

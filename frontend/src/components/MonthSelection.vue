@@ -3,9 +3,13 @@ import { computed, inject, ref, useId } from "vue";
 import EntityControl from "./EntityControl.vue";
 import { SAX_DASHBOARD_KEY } from "../ha";
 
-const props = defineProps<{ entityKeys: readonly string[] }>();
+const props = defineProps<{
+  entityKeys: readonly string[];
+  alwaysExpanded?: boolean;
+}>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const expanded = ref(false);
+const visible = computed(() => props.alwaysExpanded || expanded.value);
 const id = useId();
 const detailsId = `sax-months-${id}`;
 const language = computed(() => dashboard?.language.value ?? "en");
@@ -142,6 +146,7 @@ const readOnlyMonths = computed(() =>
         <p class="month-selection__count">{{ count }}</p>
       </div>
       <button
+        v-if="!alwaysExpanded"
         type="button"
         class="month-selection__toggle"
         :aria-expanded="expanded"
@@ -161,7 +166,7 @@ const readOnlyMonths = computed(() =>
       </button>
     </div>
     <div class="month-selection__feedback">
-      <template v-if="!expanded">
+      <template v-if="!visible">
         <p
           v-for="error in errors"
           :key="error"
@@ -184,8 +189,10 @@ const readOnlyMonths = computed(() =>
         {{ readOnlyMonths.map((month) => month.name).join(", ") }}
       </p>
     </div>
-    <div v-show="expanded" :id="detailsId" class="month-selection__details">
-      <p class="month-selection__hint">{{ text.hint }}</p>
+    <div v-show="visible" :id="detailsId" class="month-selection__details">
+      <p v-if="!alwaysExpanded" class="month-selection__hint">
+        {{ text.hint }}
+      </p>
       <div class="month-selection__quarters">
         <fieldset
           v-for="quarter in quarters"

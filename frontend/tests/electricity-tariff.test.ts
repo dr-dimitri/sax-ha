@@ -272,8 +272,8 @@ const writes = (fixture: Awaited<ReturnType<typeof mount>>) =>
 const dynamicNumberCases = [
   {
     key: "max_soc",
-    de: "Ladeziel (%)",
-    en: "Charge target (%)",
+    de: "Netzladeziel (%)",
+    en: "Grid charge target (%)",
     value: "85",
   },
   {
@@ -1086,7 +1086,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       const form = [...section.querySelectorAll(".entity-control")].find(
         (form) =>
           form.querySelector("label")?.textContent ===
-          (english ? "Charge target (%)" : "Ladeziel (%)"),
+          (english ? "Grid charge target (%)" : "Netzladeziel (%)"),
       )!;
       await fill(form, "input", "85");
       await click(section, english ? "Done" : "Fertig");
@@ -1309,7 +1309,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     const section = fixture.root.querySelector(".electricity-charging")!;
     await click(section, "Bearbeiten");
     expect(section.textContent).toContain("Ladegrenze für alle Lademethoden");
-    expect(section.textContent).toContain("Ladeziel (%)");
+    expect(section.textContent).toContain("Netzladeziel (%)");
     expect(section.textContent).toContain("Ladestart");
     expect(section.textContent).toContain("Aktive Monate");
     await click(section, "Fertig");
@@ -1322,6 +1322,10 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       const section = fixture.root.querySelector(".electricity-charging")!;
       await click(section, language === "de" ? "Bearbeiten" : "Edit");
       const english = language === "en";
+      expect(
+        section.querySelector(".dynamic-charging-editor details"),
+      ).toBeNull();
+      expect(section.querySelectorAll("[data-strategy] span")).toHaveLength(0);
       expect(section.querySelectorAll("[data-strategy]")).toHaveLength(4);
       expect(section.textContent).toContain(
         english ? "Maximum price for charging" : "Höchster Preis zum Laden",
@@ -1330,9 +1334,15 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         english ? "Maximum charging time" : "Maximale Ladezeit",
       );
       expect(
-        section.querySelector<HTMLDetailsElement>(".dynamic-charging-advanced")
-          ?.open,
-      ).toBe(false);
+        section.querySelector(".dynamic-charging-settings details"),
+      ).toBeNull();
+      expect(
+        section.querySelector(".dynamic-charging-editor")?.textContent,
+      ).toContain(
+        english
+          ? "Preserve battery energy below"
+          : "Speicher bei günstigem Strom schonen bis",
+      );
       expect(
         section.querySelector(".dynamic-charging-neutral-summary")?.textContent,
       ).toContain("30 ct/kWh");
@@ -1341,19 +1351,6 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         english
           ? "Maximum charging time per 24 hours"
           : "Maximale Ladezeit je 24 Stunden",
-      );
-      expect(section.textContent).toContain(
-        english
-          ? "battery level, capacity or charging power is missing"
-          : "Fehlen Ladestand, Kapazität oder Ladeleistung",
-      );
-      expect(section.textContent).toContain(
-        english
-          ? "a single current price is not enough"
-          : "ein einzelner aktueller Preis reicht nicht",
-      );
-      expect(section.textContent).toContain(
-        english ? "Without a solar forecast" : "Ohne PV-Prognose",
       );
       expect(section.textContent).not.toContain(
         english ? "Maximum price for charging" : "Höchster Preis zum Laden",
@@ -1365,21 +1362,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         section.querySelector(".dynamic-charging-summary")?.textContent,
       ).toContain("80 %");
       await fixture.update("price_charge_strategy", "relative");
-      expect(section.textContent).toContain(
-        english
-          ? "even the cheapest available hours may be expensive"
-          : "Auch die günstigsten verfügbaren Stunden können teuer sein",
-      );
-      expect(section.textContent).not.toContain(
-        english ? "Without a solar forecast" : "Ohne PV-Prognose",
-      );
       await fixture.update("price_charge_strategy", "off");
       expect(section.querySelector(".entity-control")).toBeNull();
-      expect(section.textContent).toContain(
-        english
-          ? "even when the main switch is on"
-          : "auch wenn der Hauptschalter eingeschaltet ist",
-      );
       expect(fixture.callService).not.toHaveBeenCalled();
       expect(writes(fixture)).toHaveLength(0);
     },
@@ -1460,7 +1444,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     const section = fixture.root.querySelector(".electricity-charging")!;
     await click(section, "Bearbeiten");
     for (const [label, key, value] of [
-      ["Ladeziel (%)", "max_soc", "85"],
+      ["Netzladeziel (%)", "max_soc", "85"],
       ["Maximale Ladezeit je 24 Stunden", "price_charge_hours", "3"],
       [
         "Speicher bei günstigem Strom schonen bis (ct/kWh)",

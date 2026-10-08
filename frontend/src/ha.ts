@@ -34,7 +34,7 @@ const messages = {
     forbidden: "Diese Entität kann derzeit nicht bedient werden.",
     invalid: "Bitte einen gültigen Wert im erlaubten Bereich eingeben.",
     timedSocOrder:
-      "Das Ladeziel muss mindestens so hoch wie der Ladestart sein.",
+      "Das Netzladeziel muss mindestens so hoch wie der Ladestart sein.",
     failed:
       "Die Änderung ist fehlgeschlagen. Bitte den aktuellen Zustand prüfen und erneut versuchen.",
     bridgePvRequired:
@@ -52,7 +52,7 @@ const messages = {
     forbidden: "This entity cannot be controlled at the moment.",
     invalid: "Please enter a valid value within the allowed range.",
     timedSocOrder:
-      "The charge target must be at least as high as the start threshold.",
+      "The grid charge target must be at least as high as the start threshold.",
     failed: "The change failed. Please check the current state and try again.",
     bridgePvRequired:
       "Open Edit under Prices & times and add the solar forecast. The previous charging method is preserved.",

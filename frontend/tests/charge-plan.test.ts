@@ -285,7 +285,7 @@ describe("consumption-based charging plan", () => {
     expect(root.textContent).toContain("Niedertarif um 14.09.2026, 00:00 Uhr");
     expect(root.textContent).toContain("bis 14.09.2026, 00:40 Uhr");
     expect(root.textContent).toContain("PV-Start um 14.09.2026, 07:00 Uhr");
-    expect(root.textContent).toContain("Geplantes Ladeziel: 42,5 %");
+    expect(root.textContent).toContain("Geplantes Netzladeziel: 42,5 %");
     expect(root.querySelectorAll("button, input, select, form")).toHaveLength(
       0,
     );
@@ -449,7 +449,7 @@ describe("consumption-based charging plan", () => {
     });
     expect(root.textContent).not.toContain("letzten");
     expect(root.textContent).not.toContain("NaN");
-    expect(root.textContent).not.toContain("Ladeziel");
+    expect(root.textContent).not.toContain("Netzladeziel");
     await update("not_needed", {});
     expect(root.textContent).toContain("derzeit nicht erforderlich");
     expect(root.textContent).not.toContain("PV-Start um");

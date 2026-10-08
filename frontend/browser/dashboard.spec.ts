@@ -7,7 +7,6 @@ const pageErrors = new WeakMap<Page, string[]>();
 async function openTariffMonths(panel: Locator) {
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header > button").click();
-  await panel.locator(".tou-charging-advanced > summary").click();
   return panel.locator(".tou-charging-settings .month-selection");
 }
 
@@ -889,7 +888,6 @@ test("tariff months, grid-serving overnight window and guided negative price set
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
   const months = await openTariffMonths(panel);
-  await months.locator(".month-selection__toggle").click();
   await expect(months.getByRole("switch")).toHaveCount(12);
   await expect(panel.locator(".time-window-control")).toHaveCount(0);
   const firstMonth = months.getByRole("switch").first();
@@ -994,7 +992,6 @@ test("tariff months, grid-serving overnight window and guided negative price set
     "aria-pressed",
     "true",
   );
-  await panel.locator(".dynamic-charging-advanced summary").click();
   const price = panel.locator("input[min='-100']").first();
   await price.fill("-12.5");
   await panel
@@ -1031,13 +1028,17 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
     const switches = months.getByRole("switch");
     const targets = months.locator(".entity-control__switch-target");
     const before = await actions.innerText();
-    await expect(toggle).toHaveAccessibleName(english ? "Edit" : "Ändern");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(quarters).toBeHidden();
-    await expect(summary).toBeVisible();
-    await toggle.focus();
-    await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    if (kind === "grid_serving") {
+      await expect(toggle).toHaveAccessibleName(english ? "Edit" : "Ändern");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(quarters).toBeHidden();
+      await expect(summary).toBeVisible();
+      await toggle.focus();
+      await page.keyboard.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    } else {
+      await expect(toggle).toHaveCount(0);
+    }
     await expect(quarters).toBeVisible();
     await expect(switches).toHaveCount(12);
     await expect(actions).toHaveText(before);
@@ -1059,8 +1060,12 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       english ? "4 of 12 months selected" : "4 von 12 Monaten ausgewählt",
     );
     const lastWrite = await actions.innerText();
-    await toggle.click();
-    await expect(quarters).toBeHidden();
+    if (kind === "grid_serving") {
+      await toggle.click();
+      await expect(quarters).toBeHidden();
+    } else {
+      await expect(quarters).toBeVisible();
+    }
     await expect(summary).toBeVisible();
     await expect(summary).toHaveText(selected);
     await expect(actions).toHaveText(lastWrite);
@@ -1068,7 +1073,7 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
     });
-    await toggle.click();
+    if (kind === "grid_serving") await toggle.click();
     for (let index = 0; index < 12; index++)
       await expect(switches.nth(index)).toBeChecked({
         checked: [1, 3, 4, 8].includes(index + 1),
@@ -1086,14 +1091,18 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       `${writes}: switch.turn_on {"entity_id":"switch.demo_${kind}_month_2"}`,
     );
     const rejectedWrite = await actions.innerText();
-    await toggle.click();
-    await expect(quarters).toBeHidden();
+    if (kind === "grid_serving") {
+      await toggle.click();
+      await expect(quarters).toBeHidden();
+    } else {
+      await expect(quarters).toBeVisible();
+    }
     await expect(months.getByRole("alert")).toBeVisible();
     await expect(summary).toHaveText(selected);
     await expect(actions).toHaveText(rejectedWrite);
 
     // Retrying a gap month joins only its neighboring run after HA confirms it.
-    await toggle.click();
+    if (kind === "grid_serving") await toggle.click();
     await switches.nth(1).focus();
     await page.keyboard.press("Space");
     await expect(switches.nth(1)).toBeChecked();
@@ -1105,7 +1114,7 @@ test("compact month summaries retain gaps, whole-tile controls and errors when c
       english ? "January–April, August" : "Januar–April, August",
     );
     await expect(months.getByRole("alert")).toHaveCount(0);
-    await toggle.click();
+    if (kind === "grid_serving") await toggle.click();
     await expect(summary).toBeVisible();
     await expect(count).toHaveText(
       english ? "5 of 12 months selected" : "5 von 12 Monaten ausgewählt",

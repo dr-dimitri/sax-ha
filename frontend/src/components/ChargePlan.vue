@@ -273,8 +273,8 @@ const target = computed(() => {
   const soc = number(attributes.value.target_soc, 0, 100);
   return soc
     ? german.value
-      ? `Geplantes Ladeziel: ${soc} %.`
-      : `Planned charge target: ${soc} %.`
+      ? `Geplantes Netzladeziel: ${soc} %.`
+      : `Planned grid charge target: ${soc} %.`
     : null;
 });
 </script>

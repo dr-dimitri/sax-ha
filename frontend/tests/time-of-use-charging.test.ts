@@ -170,7 +170,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     const fixture = await mount({ editing: false });
     expect(
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Festes Ladeziel");
+    ).toContain("Festes Netzladeziel");
     expect(
       fixture.root.querySelector(".electricity-target strong")?.textContent,
     ).toBe("80 %");
@@ -186,23 +186,24 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     expect(method(fixture.root, "fixed").getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(
-      fixture.root.querySelector<HTMLDetailsElement>(".tou-charging-advanced")
-        ?.open,
-    ).toBe(false);
-    const target = control(fixture.root, "Ladeziel (%)");
-    expect(target.closest("details")).toBeNull();
-    expect(
-      control(fixture.root, "Ladestart (%)").closest("details"),
-    ).not.toBeNull();
-    expect(
-      control(fixture.root, "Ladegrenze für alle Lademethoden (%)").closest(
-        "details",
-      ),
-    ).not.toBeNull();
-    expect(fixture.root.textContent).toContain(
-      "Öffne unter „Preise & Zeiten“ die Bearbeitung",
+    expect(fixture.root.querySelector("details")).toBeNull();
+    for (const label of [
+      "Netzladeziel (%)",
+      "Ladestart (%)",
+      "Ladegrenze für alle Lademethoden (%)",
+    ])
+      expect(control(fixture.root, label).closest("details")).toBeNull();
+    expect(fixture.root.querySelectorAll('input[role="switch"]')).toHaveLength(
+      12,
     );
+    expect(fixture.root.textContent).not.toContain("Weitere Einstellungen");
+    expect(fixture.root.querySelector(".month-selection__toggle")).toBeNull();
+    expect(
+      fixture.root.querySelector<HTMLElement>(".month-selection__details")
+        ?.style.display,
+    ).not.toBe("none");
+    expect(method(fixture.root, "fixed").querySelector("span")).toBeNull();
+    expect(method(fixture.root, "bridge").querySelector("span")).toBeNull();
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 
@@ -212,14 +213,9 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     ["en", "off"],
     ["en", "on"],
   ])(
-    "explains the calibration exception to both charge limits in %s for bridge=%s, open and closed",
+    "keeps only a short calibration hint in %s for bridge=%s, open and closed",
     async (language, bridge) => {
-      // REQ-PERIODIC-FULL-CALIBRATION / REQ-BRIDGE-CHARGE: 100% permits charging; it does not force an extra full charge.
       const fixture = await mount({ language, bridge, editing: false });
-      const expected =
-        language === "de"
-          ? "Ausnahme: Bei fälliger Zellkalibrierung sind bis 100 % erlaubt, auch über Ladeziel und globale Ladegrenze hinaus. Alle anderen Ladebedingungen gelten weiter."
-          : "Exception: When cell calibration is due, charging up to 100% is allowed beyond both the charge target and global limit. Other charging conditions still apply.";
       for (const editing of [false, true, false]) {
         await fixture.edit(editing);
         const hints = fixture.root.querySelectorAll(
@@ -227,36 +223,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
         );
         expect(hints).toHaveLength(1);
         expect(hints[0]!.textContent?.trim()).toBe(
-          editing
-            ? expected
-            : language === "de"
-              ? "Zellkalibrierung: bis 100 % erlaubt, auch über Ladeziel und globale Grenze."
-              : "Cell calibration: up to 100% allowed, even above the target and global limit.",
+          language === "de"
+            ? "Zellkalibrierung: vorübergehend bis 100 % erlaubt."
+            : "Cell calibration: temporarily up to 100% allowed.",
         );
-        expect(fixture.root.textContent).toContain(expected);
-        if (!editing)
-          expect(
-            fixture.root.querySelector<HTMLDetailsElement>(
-              ".tou-charging-rules",
-            )?.open,
-          ).toBe(false);
-        expect(hints[0]!.closest("details")).toBeNull();
-        if (editing)
-          expect(hints[0]!.closest(".tou-charging-editor")).not.toBeNull();
-        else expect(hints[0]!.closest(".tou-charging-editor")).toBeNull();
+        expect(fixture.root.querySelector("details")).toBeNull();
       }
-      await fixture.edit(true);
-      expect(
-        fixture.root.querySelector(".tou-charging-editor")?.textContent,
-      ).toContain(
-        language === "de"
-          ? bridge === "on"
-            ? "Danach darf der Speicher wieder normal entladen."
-            : "Nach der Netzladung entlädt der Speicher bis zum Ende dieser Zeit nicht"
-          : bridge === "on"
-            ? "Afterwards, the battery may discharge normally again."
-            : "After grid charging, the battery does not discharge until this period ends",
-      );
       expect(fixture.callService).not.toHaveBeenCalled();
     },
   );
@@ -290,7 +262,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     );
     expect(
       fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Festes Ladeziel");
+    ).toContain("Festes Netzladeziel");
     resolve();
     await flush();
     expect(method(fixture.root, "fixed").getAttribute("aria-pressed")).toBe(
@@ -305,8 +277,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     ).toContain("Nur Bedarf bis Solarstrom");
     expect(
       fixture.root.querySelector(".electricity-target")?.textContent,
-    ).toContain("Höchstens laden bis80 %");
-    expect(control(fixture.root, "Höchstens laden bis (%)")).toBeTruthy();
+    ).toContain("Maximales Netzladeziel80 %");
+    expect(control(fixture.root, "Maximales Netzladeziel (%)")).toBeTruthy();
     expect(fixture.root.querySelector(".tou-charging-threshold")).toBeNull();
     expect(control(fixture.root, "Ladestart (%)")).toBeUndefined();
     method(fixture.root, "bridge").click();
@@ -355,7 +327,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
           reject = () => failed(new Error("offline"));
         }),
     );
-    const target = control(fixture.root, "Ladeziel (%)");
+    const target = control(fixture.root, "Netzladeziel (%)");
     const input = target.querySelector<HTMLInputElement>("input")!;
     input.value = "75";
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -385,7 +357,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     await flush();
     await fixture.edit(true);
     expect(
-      control(fixture.root, "Ladeziel (%)").querySelector<HTMLInputElement>(
+      control(fixture.root, "Netzladeziel (%)").querySelector<HTMLInputElement>(
         "input",
       )?.value,
     ).toBe("75");
@@ -396,7 +368,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
   });
 
   it.each([
-    ["Ladeziel (%)", "19", "20"],
+    ["Netzladeziel (%)", "19", "20"],
     ["Ladestart (%)", "81", "80"],
   ])(
     "rejects an inconsistent %s and retains the draft",
@@ -431,7 +403,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
         { value: Number(equal) },
         {
           entity_id:
-            label === "Ladeziel (%)"
+            label === "Netzladeziel (%)"
               ? "number.renamed_timed_charge_max_soc"
               : "number.renamed_timed_charge_min_soc",
         },
@@ -451,7 +423,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       });
       const form = control(
         fixture.root,
-        language === "de" ? "Ladeziel (%)" : "Charge target (%)",
+        language === "de" ? "Netzladeziel (%)" : "Grid charge target (%)",
       );
       const input = form.querySelector<HTMLInputElement>("input")!;
       input.value = "75";
@@ -498,9 +470,6 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     expect(
       fixture.root.querySelector(".tou-charging-threshold")?.textContent,
     ).toContain("Start bei0 %");
-    expect(
-      fixture.root.querySelector(".tou-charging-summary")?.textContent,
-    ).toContain("Die Netzladung beginnt bei 0 % Ladestand");
     await fixture.update("timed_charge_month_1", "unavailable");
     expect(
       fixture.root.querySelector(".tou-charging-month-summary")?.textContent,
@@ -556,15 +525,18 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
     expect(
       control(
         fixture.root,
-        "Charge up to at most (%)",
+        "Maximum grid charge target (%)",
       ).querySelector<HTMLInputElement>("input")?.disabled,
     ).toBe(true);
     expect(
-      fixture.root.querySelector(".tou-charging-advanced")?.textContent,
-    ).toContain("Also applies to solar charging");
-    expect(fixture.root.textContent).not.toContain(
-      "Open “Edit” under “Prices & times”",
-    );
+      control(
+        fixture.root,
+        "Charge limit for all charging methods (%)",
+      ).closest("details"),
+    ).toBeNull();
+    expect(
+      fixture.root.querySelector(".tou-charging-editor")?.textContent,
+    ).not.toContain("Solar forecast missing");
     expect(fixture.callService).not.toHaveBeenCalled();
   });
 });

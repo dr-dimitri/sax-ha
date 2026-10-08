@@ -3446,31 +3446,30 @@ requirement_vue_electricity_tariff:
 
     Ladeverhalten bleibt zunächst eingeklappt. Vorhandene EntityControls
     übernehmen bestätigte Einzelwerte über die vorhandenen HA-Services; Fertig
-    schließt den Bereich. Zeitvariabel bietet zwei beschriebene Ladeweisen:
-    „Festes Ladeziel“ schaltet ausschließlich bridge_charge_enabled aus,
-    „Nur Bedarf bis Solarstrom“ schaltet ausschließlich diesen Schalter ein.
+    schließt den Bereich. Zeitvariabel bietet die Ladeweisen
+    „Festes Netzladeziel“ (bridge_charge_enabled aus) und
+    „Nur Bedarf bis Solarstrom“ (bridge_charge_enabled ein).
     Nur bestätigte, verfügbare on/off-Zustände markieren die Auswahl; fehlende,
     unbekannte und nicht verfügbare Werte erhalten keine erfundene Ladeweise.
     Die Auswahl aktiviert weder den Hauptschalter noch setzt sie Zielwerte.
-    Das sichtbare Netzladeziel heißt bei Verbrauchsplanung „Höchstens laden bis“
-    und wird als Obergrenze erklärt. Startschwelle (nur bei festem Ladeziel),
-    globale Ladegrenze und Monate bleiben unter „Weitere Einstellungen“
-    erreichbar. Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen
-    sichtbar; bei 0 % lautet die Anzeige „Start bei 0 %“ und erklärt den
-    Start bei genau 0 % SOC unter den übrigen Ladebedingungen. Ziel unter
-    Ladestart und Ladestart über Ziel werden am betroffenen Feld mit einer
-    verständlichen Meldung abgelehnt, ohne bestätigte Werte oder Eingaben
-    zu verwerfen. Gleichheit und Ladestart 0 % bleiben gültig. Fehlende Monatswerte
-    dürfen nicht als ganzjährig inaktiv erscheinen. Die globale Grenze erklärt
-    ihre Wirkung auch auf Solarstrom und ein höheres Netzladeziel. Ein sichtbarer
-    Hinweis beim Ladeziel und in der geschlossenen Zusammenfassung erklärt
-    die vorübergehende 100-%-Ausnahme bei fälliger Zellkalibrierung. Die
-    geschlossene Übersicht verwendet einen kurzen Hinweis mit beiden Grenzen;
-    „Laderegeln & Ausnahmen“ enthält zusätzlich die vollständige Erklärung. Bei
-    Verbrauchsplanung autorisiert sie keine ungeplante Vollladung. Die feste
-    Ladeweise erklärt ihre Entladesperre nach erfolgter Netzladung bis zum
-    Fensterende, die Bedarfsladung die anschließende normale Entladefreigabe.
-    PV-Voraussetzungen werden neben der Ladeweise verständlich erklärt;
+    Das Ziel heißt durchgängig „Netzladeziel (%)“, bei Verbrauchsplanung
+    „Maximales Netzladeziel (%)“. Zusammenfassung, Ladeweise, Plananzeige und
+    Fehlermeldungen verwenden dieselbe Bezeichnung. Die globale Ladegrenze
+    für alle Lademethoden bleibt davon ausdrücklich unterscheidbar.
+    Während der Bearbeitung sind Netzladeziel, Ladestart (nur bei fester
+    Ladeweise), globale Ladegrenze und Monate direkt sichtbar. Es gibt dort
+    kein „Weitere Einstellungen“ und keine zusätzliche Aufklappaktion;
+    auch die zwölf Monatsfelder stehen ohne „Ändern“ direkt zur Auswahl.
+    Lange Erklärungstexte, Auswahlbeschreibungen und „Laderegeln & Ausnahmen“
+    entfallen. Ein kurzer Hinweis nennt die vorübergehende Kalibrierungsfreigabe
+    bis 100 %. Die vollständigen Laderegeln bleiben in der Dokumentation.
+    Bestätigte Startschwelle und Monatsauswahl sind auch geschlossen sichtbar;
+    bei 0 % lautet die Anzeige „Start bei 0 %“. Netzladeziel unter Ladestart und
+    Ladestart über Netzladeziel werden am betroffenen Feld verständlich
+    abgelehnt, ohne bestätigte Werte oder Eingaben zu verwerfen. Gleichheit und
+    Ladestart 0 % bleiben gültig. Fehlende Monatswerte dürfen nicht als
+    ganzjährig inaktiv erscheinen.
+    Eine fehlende PV-Prognose wird bei Verbrauchsplanung kurz benannt;
     bridge_pv_start_required und bridge_tariff_required aus dem HA-Service
     erhalten konkrete DE-/EN-Hinweise. Ausstehende Änderungen sperren weitere
     Modusaufrufe. Bestätigte Zustände, Fehlermeldungen und Zahlentwürfe bleiben
@@ -3482,10 +3481,10 @@ requirement_vue_electricity_tariff:
     die Bedienung mit alltagssprachlichen Ladeweisen durch die Einrichtung:
     bedarfsgerechtes Laden (Smart), günstigste Stunden (Relativ), feste
     Preisgrenze (Absolut) oder ausgeschaltete Preisautomatik (Off). Die Ansicht
-    erklärt die Wirkung der bestätigten Auswahl und zeigt nur die passenden
-    Eingaben: Preisgrenze bei Absolut, maximale Ladedauer bei Relativ/Smart.
-    Das Ladeziel bezeichnet den maximalen Speicherfüllstand in Prozent und
-    erklärt ausdrücklich seine Gültigkeit für alle Ladearten. Smart berücksichtigt
+    zeigt die bestätigte Auswahl und die passenden Eingaben: Preisgrenze
+    bei Absolut, maximale Ladedauer bei Relativ/Smart. „Netzladeziel (%)“
+    bezeichnet hier weiterhin die globale Ladegrenze. Ein kurzer Hinweis
+    „gilt auch für Solarstrom“ macht diesen Unterschied sichtbar. Smart berücksichtigt
     den Energiebedarf und die optionale PV-Prognose; fehlen Gerätedaten,
     gilt weiterhin der bestehende Rückfall auf die günstigsten Stunden.
     Die Preisgrenze wirkt bei Relativ/Smart nicht als zusätzliche Obergrenze.
@@ -3493,11 +3492,12 @@ requirement_vue_electricity_tariff:
     Empfehlungen eigenmächtig geändert. Eine verständliche Zusammenfassung
     beschreibt die gespeicherte Wirkung auch außerhalb des Editors.
 
-    Der Neutralpreis bleibt in erweiterten Ladeeinstellungen erreichbar.
-    Die Erklärung macht den Netzbezug des Hauses während der Speicherpause
-    sowie das unterschiedliche Preisband bei Absolut verständlich. Auch
-    außerhalb der erweiterten Einstellungen bleibt eine vorhandene Pausegrenze
-    erkennbar. Die einfache Preisquellen-Einrichtung zeigt Strompreis-Sensor
+    Der Neutralpreis ist während der Bearbeitung bei allen aktiven Ladeweisen
+    direkt sichtbar; „Weitere Einstellungen · Speicher schonen“ entfällt.
+    Auch hier gibt es keine langen Erklärungstexte oder Auswahlbeschreibungen.
+    Die Zusammenfassung nennt die bestätigte Pausegrenze und bei Absolut das
+    zusätzliche untere Preislimit. Fehlende oder unwirksame Werte erhalten
+    einen kurzen Status. Die einfache Preisquellen-Einrichtung zeigt Strompreis-Sensor
     und Einspeisevergütung. Preisattribut, Einheit und PV-Anteil sind weiterhin
     erreichbar, aber nachgeordnet; vorhandene Sonderwerte bleiben erhalten.
     Hinweise erklären Preisvorschau, optionale PV-Quelle und die Wirkung des

@@ -120,10 +120,10 @@ Das Diagramm zeigt die Strompreise des heutigen Tages in **ct/kWh**, bei
 dynamischen Tarifen auch die bereits verfügbaren Preise für morgen.
 Beide Tarifarten bündeln die Einstellungen in **Preise & Zeiten** und
 **Netzladung**. Auf breiten Ansichten stehen die Bereiche nebeneinander, auf
-dem Smartphone untereinander. Ladeziel, Startschwelle und Monate sind direkt
-sichtbar; Preisverlauf, Laderegeln und Ladeplan lassen sich bei Bedarf aufklappen.
+dem Smartphone untereinander. Netzladeziel, Startschwelle und Monate sind direkt
+sichtbar; Preisverlauf und Ladeplan lassen sich bei Bedarf aufklappen.
 
-![Zeitvariabler Stromtarif: Preise und Zeiten links, Netzladung mit Ladeziel und Automatik rechts](docs/images/vue-stromtarif-desktop-light-de.png)
+![Zeitvariabler Stromtarif: Preise und Zeiten links, Netzladung mit Netzladeziel und Automatik rechts](docs/images/vue-stromtarif-desktop-light-de.png)
 
 <details>
 <summary>So sieht das Dashboard auf dem Smartphone aus</summary>
@@ -219,7 +219,7 @@ günstigen Tarifzeiten, etwa einem Nachttarif. Die Einrichtung hat drei Schritte
 1. **Preise & Zeiten:** Öffne **Bearbeiten** und übertrage die
    Preise aus deinem Vertrag in **ct/kWh**. Der Standardpreis gilt außerhalb
    deiner abweichenden Preiszeiten. Speichere den Tarif.
-2. **Netzladung:** Öffne **Bearbeiten** und wähle **Festes Ladeziel**, wenn der Speicher
+2. **Netzladung:** Öffne **Bearbeiten** und wähle **Festes Netzladeziel**, wenn der Speicher
    in den günstigsten Zeiten bis zu deinem eingestellten Prozentwert laden
    soll. **Nur Bedarf bis Solarstrom** plant stattdessen die noch fehlende
    Energie bis zum erwarteten Solarstrom; dafür ist eine passende PV-Prognose
@@ -228,10 +228,12 @@ günstigen Tarifzeiten, etwa einem Nachttarif. Die Einrichtung hat drei Schritte
    die Einstellungen passen. Einschalten erlaubt die Ladung unter den
    angezeigten Bedingungen; es bedeutet nicht, dass der Speicher sofort lädt.
 
-Unter **Weitere Einstellungen** findest du Startschwelle, globale Ladegrenze
-und aktive Monate. Die Zusammenfassung zeigt, was aktuell gilt. Bei festem
-Ladeziel startet die Ladung nur unter der Startschwelle; **0 % verhindert einen
-neuen Start**. Die globale Ladegrenze gilt auch für Solarstrom. Eine fällige
+Beim **Bearbeiten** sind **Netzladeziel (%)**, Ladestart, globale Ladegrenze
+und aktive Monate direkt sichtbar. Zusätzliche Aufklappbereiche und lange
+Erklärungstexte entfallen. Bei Bedarfsladung heißt die Obergrenze
+**Maximales Netzladeziel (%)**. Die Zusammenfassung zeigt die bestätigten Werte.
+Bei festem Netzladeziel startet die Ladung unter der Startschwelle;
+**Ladestart 0 % erlaubt den Start bei genau 0 % SOC**. Die globale Ladegrenze gilt auch für Solarstrom. Eine fällige
 Zellkalibrierung darf die eingestellten Grenzen vorübergehend bis 100 % erweitern;
 die Bedarfsladung plant deshalb keine zusätzliche Vollladung ein.
 Zahlen werden jeweils mit **Übernehmen** gespeichert; **Fertig** schließt nur
@@ -298,7 +300,7 @@ Wähle unter **Stromtarif → Netzladung → Bearbeiten** die
 Ladeweise **Nur Bedarf bis Solarstrom**. Sie verwendet dieselbe gespeicherte
 Einstellung wie die Option unter **Konfigurieren**. Zum Einschalten müssen
 ein zeitvariabler Tarif und eine PV-Start-Quelle konfiguriert sein. Mit
-**Festes Ladeziel** wechselst du jederzeit zurück zur festen SOC-Steuerung.
+**Festes Netzladeziel** wechselst du jederzeit zurück zur festen SOC-Steuerung.
 Solange diese Ladeplanung eingeschaltet ist, bleibt ihre PV-Start-Quelle
 erforderlich. Du kannst sie unter **Preise & Zeiten → Bearbeiten → Zusätzlich: Solarprognose für die Ladeplanung** ersetzen;
 zum Entfernen schaltest du zuerst die verbrauchsbasierte Ladeplanung aus.
@@ -446,7 +448,7 @@ Die Ansicht zeigt nur die Felder, die zur gewählten Ladeweise passen.
 Bei einer festen Preisgrenze stellst du den höchsten erlaubten Preis ein;
 bei den beiden anderen aktiven Ladeweisen die maximale Ladedauer. Dort ist
 die absolute Preisgrenze unwirksam: Auch die günstigsten verfügbaren Stunden
-können teuer sein. Das **Ladeziel (%)** ist dieselbe globale Obergrenze wie
+können teuer sein. Das **Netzladeziel (%)** ist dieselbe globale Obergrenze wie
 **Max. SOC** und gilt auch für PV-Ladung. Zeitbudget, Preise und PV-Prognose
 können dazu führen, dass weniger Netzstrom geladen wird.
 
@@ -466,10 +468,10 @@ die bestätigten Einstellungen; allein das Öffnen des Einstellbereichs
 verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick;
 **Fertig** schließt den Bereich und speichert keine offenen Zahleneingaben.
 
-![Dynamischer Tarif: geöffnete Ladeeinstellungen mit erklärten Auswirkungen](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
+![Dynamischer Tarif: alle passenden Ladeeinstellungen direkt sichtbar](docs/images/vue-stromtarif-ladehilfe-desktop-light-de.png)
 
-Unter **Weitere Einstellungen · Speicher schonen** bestimmt die Grenze
-**Speicher bei günstigem Strom schonen bis (ct/kWh)** (Neutralpreis), unter welchem Strompreis der Speicher
+Die beim **Bearbeiten** direkt sichtbare Grenze
+**Speicher bei günstigem Strom schonen bis (ct/kWh)** (Neutralpreis) bestimmt, unter welchem Strompreis der Speicher
 pausiert, wenn gerade keine Netzladung läuft. Bei **Relativ** und **Smart**
 gilt das für alle nicht zum Laden ausgewählten Stunden unter diesem Wert,
 auch unterhalb der absoluten Preisgrenze oder bei erschöpfter Ladedauer.

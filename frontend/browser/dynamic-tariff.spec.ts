@@ -342,7 +342,7 @@ test("guided charging methods explain their effects and reveal relevant settings
     exact: true,
   });
   const target = settings.getByRole("spinbutton", {
-    name: english ? "Charge target (%)" : "Ladeziel (%)",
+    name: english ? "Grid charge target (%)" : "Netzladeziel (%)",
     exact: true,
   });
   await expect(summary).toContainText(
@@ -372,11 +372,11 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(hours).toHaveCount(0);
   await expect(target).toHaveValue("80");
   await expect(settings).toContainText(
-    english ? "including solar charging" : "auch für PV-Ladung",
+    english ? "also applies to solar charging" : "gilt auch für Solarstrom",
   );
-  await expect(
-    settings.locator(".dynamic-charging-advanced"),
-  ).not.toHaveAttribute("open", "");
+  await expect(settings.locator("details")).toHaveCount(0);
+  await expect(settings.locator("input:visible")).toHaveCount(3);
+  await expect(methods.locator("span")).toHaveCount(0);
   await page.locator("#hold-action").click();
   await relative.click({ clickCount: 2 });
   await expect(settings.locator(".dynamic-charging-methods")).toHaveAttribute(
@@ -414,10 +414,7 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(price).toHaveCount(0);
   await expect(hours).toHaveValue("4");
   await expect(settings).toContainText(
-    english ? "There is no fixed price cap" : "Es gilt keine feste Preisgrenze",
-  );
-  await expect(settings).toContainText(
-    english ? "not at midnight" : "nicht um Mitternacht",
+    english ? "No fixed price cap" : "Keine feste Preisgrenze",
   );
   const hoursControl = settings.locator(".entity-control").filter({
     has: page.getByRole("spinbutton", { name: hoursName, exact: true }),
@@ -438,14 +435,6 @@ test("guided charging methods explain their effects and reveal relevant settings
   await smart.click();
   await expect(smart).toHaveAttribute("aria-pressed", "true");
   await expect(hours).toHaveValue("6");
-  await expect(settings).toContainText(
-    english ? "Without a solar forecast" : "Ohne PV-Prognose",
-  );
-  await expect(settings).toContainText(
-    english
-      ? "If battery level, capacity or charging power is missing"
-      : "Fehlen Ladestand, Kapazität oder Ladeleistung",
-  );
   const widths = testInfo.project.name.startsWith("mobile")
     ? [390, 320]
     : [1440, 1100];
@@ -481,19 +470,10 @@ test("guided charging methods explain their effects and reveal relevant settings
   await off.click();
   await expect(off).toHaveAttribute("aria-pressed", "true");
   await expect(settings.locator("input")).toHaveCount(0);
-  await expect(settings).toContainText(
-    english
-      ? "even when the main switch is on"
-      : "auch wenn der Hauptschalter eingeschaltet ist",
-  );
   await expect(panel.locator(".electricity-master input")).toBeChecked();
   await absolute.click();
   await expect(price).toHaveValue("-5");
   await expect(target).toHaveValue("80");
-  await settings.locator(".dynamic-charging-advanced summary").click();
-  await expect(settings).toContainText(
-    english ? "the house uses grid energy" : "das Haus nutzt Netzstrom",
-  );
   await expect(
     settings.getByRole("spinbutton", {
       name: english

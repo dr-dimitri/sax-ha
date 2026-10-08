@@ -40,7 +40,7 @@ const text = computed(() =>
           "Wie viel erhältst du für eine eingespeiste kWh? Dieser Wert wird für die Ersparnisberechnung verwendet. Ohne Vergütung 0 eintragen.",
         impact: "Das bewirkt dein Tarif",
         impactHint:
-          "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Ladeziel und aktive Monate gelten zusätzlich.",
+          "Die Automatik nutzt die günstigsten Zeiten für die feste und verbrauchsbasierte Netzladung. Ladestand, Netzladeziel und aktive Monate gelten zusätzlich.",
         saveHint:
           "Speichern übernimmt Preise und mögliche Ladezeiten. Es schaltet die Netzladung nicht ein.",
         pvDetails: "Zusätzlich: Solarprognose für die Ladeplanung",

@@ -613,7 +613,7 @@
   },
   "exceptions": {
     "timed_charge_soc_order": {
-      "message": "The charge target must be at least as high as the start threshold."
+      "message": "The grid charge target must be at least as high as the start threshold."
     },
     "invalid_grid_charge_power": {
       "message": "The power setpoint {power} is invalid. Safe manual grid charging requires an integer between {min_power} W and {max_power} W; zero and positive values are not supported."

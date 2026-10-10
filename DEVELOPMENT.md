@@ -135,8 +135,13 @@ keine Vue-/Vorschaukennzeichnung.
 Die PV-Zeile im dauerhaft sichtbaren Planungsbereich der Netzladung
 verwendet den Metadaten-Schlüssel
 `sensor.charging_pv_forecast`. `infrastructure/pv_forecast_reading.py` fordert die
-gewählte Quelle beim Einrichten/Quellenwechsel und alle zehn Minuten über
-`async_update_entity` an. Der Coordinator verwaltet Timer und Lebenszyklus;
+gewählte Quelle beim Einrichten/Quellenwechsel sofort über `async_update_entity`
+an. Ohne gültigen Anzeigewert folgt 30 Sekunden nach Abschluss eines erfolglosen
+Versuchs ein neuer; mit gültigem Wert beträgt der Abstand zehn Minuten.
+Ein HA-Zustandslistener übernimmt neue Quellwerte sofort, einschließlich 0 kWh,
+und beendet dadurch schnelle Wiederholungen. Es läuft höchstens ein Abruf je
+aktuellem Quellenstand; ein Quellenwechsel beendet alte Listener, Timer und Tasks.
+Der Coordinator verwaltet Timer und Lebenszyklus;
 der Sensor veröffentlicht den letzten gültigen, nach kWh normalisierten Wert
 auch während Quell- oder Modbus-Ausfällen. Quellenwechsel löschen den alten
 Anzeigewert. `source_entity_id` und `last_successful_update` erklären Herkunft

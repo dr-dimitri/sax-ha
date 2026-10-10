@@ -109,7 +109,7 @@ async def test_update_exception_retains_value_and_timestamp(
     reader.async_setup()
     await hass.async_block_till_done(wait_background_tasks=True)
     last_success = reader.last_successful_update
-    hass.states.async_set(SOURCE, "99", {"unit_of_measurement": "kWh"})
+    hass.states.async_set(SOURCE, "unavailable", {"unit_of_measurement": "kWh"})
     update.side_effect = error
     await reader.async_refresh()
 
@@ -131,7 +131,7 @@ async def test_polling_refreshes_every_ten_minutes_without_dashboard(
     freezer.move_to(start + timedelta(minutes=9, seconds=59))
     async_fire_time_changed(hass, dt_util.utcnow())
     await hass.async_block_till_done(wait_background_tasks=True)
-    assert reader.value_kwh == 12.4
+    assert reader.value_kwh == 14.8
     assert update.await_count == 1
 
     freezer.move_to(start + timedelta(minutes=10))
@@ -141,7 +141,7 @@ async def test_polling_refreshes_every_ten_minutes_without_dashboard(
     assert update.await_count == 2
     await reader.async_shutdown()
     reader.async_setup()
-    reader._async_interval(dt_util.utcnow())
+    reader._schedule_refresh()
     freezer.move_to(start + timedelta(minutes=20))
     async_fire_time_changed(hass, dt_util.utcnow())
     await hass.async_block_till_done(wait_background_tasks=True)
@@ -162,12 +162,233 @@ async def test_pending_refresh_prevents_duplicate_calls_and_shutdown_cancels(
     update.side_effect = wait
     reader.async_setup()
     await entered.wait()
-    reader._async_interval(dt_util.utcnow())
-    reader._async_interval(dt_util.utcnow())
+    reader._schedule_refresh()
+    reader._schedule_refresh()
+    await reader.async_refresh()
     assert update.await_count == 1
     task = reader._task
     await reader.async_shutdown()
     assert task.cancelled()
+
+
+@pytest.mark.parametrize(
+    ("state", "error"),
+    [
+        (None, None),
+        ("unknown", None),
+        ("unavailable", None),
+        ("-1", None),
+        (None, HomeAssistantError("source failed")),
+        (None, TimeoutError()),
+    ],
+)
+async def test_missing_yield_retries_every_thirty_seconds_until_zero_is_read(
+    hass: HomeAssistant,
+    reading: ReadingFixture,
+    freezer: FrozenDateTimeFactory,
+    state: str | None,
+    error: Exception | None,
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: retries recover without an open dashboard."""
+    reader, _, _, update = reading
+    start = dt_util.utcnow()
+    if state is not None:
+        hass.states.async_set(SOURCE, state, {"unit_of_measurement": "kWh"})
+    update.side_effect = error
+    reader.async_setup()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert update.await_count == 1
+    for seconds, attempts in [(29, 1), (30, 2), (59, 2), (60, 3)]:
+        freezer.move_to(start + timedelta(seconds=seconds))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        reader.async_setup()
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert update.await_count == attempts
+        assert reader.value_kwh is None
+
+    async def recover(*_: object) -> None:
+        hass.states.async_set(SOURCE, "0", {"unit_of_measurement": "kWh"})
+
+    update.side_effect = recover
+    freezer.move_to(start + timedelta(seconds=90))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert update.await_count == 4
+    assert reader.value_kwh == 0
+    assert reader.status == "available"
+    for seconds, attempts in [(120, 4), (689, 4), (690, 5)]:
+        freezer.move_to(start + timedelta(seconds=seconds))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert update.await_count == attempts
+
+
+@pytest.mark.parametrize(
+    ("state", "unit", "expected"), [("0", "kWh", 0), ("12400", "Wh", 12.4)]
+)
+async def test_source_event_immediately_recovers_without_an_extra_request(
+    hass: HomeAssistant,
+    reading: ReadingFixture,
+    freezer: FrozenDateTimeFactory,
+    state: str,
+    unit: str,
+    expected: float,
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: pushed values cancel the pending retry."""
+    reader, _, notify, update = reading
+    start = dt_util.utcnow()
+    reader.async_setup()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    freezer.move_to(start + timedelta(seconds=10))
+    notify.reset_mock()
+    hass.states.async_set(SOURCE, state, {"unit_of_measurement": unit})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert reader.value_kwh == expected
+    assert reader.status == "available"
+    assert reader.last_successful_update == dt_util.utcnow()
+    notify.assert_called_once()
+    for seconds, attempts in [(30, 1), (609, 1), (610, 2)]:
+        freezer.move_to(start + timedelta(seconds=seconds))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert update.await_count == attempts
+
+
+async def test_retry_delay_starts_after_failed_request_and_events_do_not_loop(
+    hass: HomeAssistant, reading: ReadingFixture, freezer: FrozenDateTimeFactory
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: slow requests and source events never pile up."""
+    reader, _, _, update = reading
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    start = dt_util.utcnow()
+
+    async def slow_failure(*_: object) -> None:
+        entered.set()
+        await release.wait()
+        raise HomeAssistantError("slow source failed")
+
+    update.side_effect = slow_failure
+    reader.async_setup()
+    await entered.wait()
+    for value in ["unknown", "unavailable", "-1"]:
+        hass.states.async_set(SOURCE, value, {"unit_of_measurement": "kWh"})
+        await hass.async_block_till_done()
+    reader._schedule_refresh()
+    await reader.async_refresh()
+    assert update.await_count == 1
+    freezer.move_to(start + timedelta(seconds=20))
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    hass.states.async_set(SOURCE, "unknown", {"unit_of_measurement": "kWh"})
+    for seconds, attempts in [(30, 1), (49, 1), (50, 2)]:
+        freezer.move_to(start + timedelta(seconds=seconds))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert update.await_count == attempts
+
+
+async def test_source_metadata_does_not_loop_but_changed_units_update_the_yield(
+    hass: HomeAssistant, reading: ReadingFixture
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: derived sources cannot cause a feedback loop."""
+    reader, _, notify, update = reading
+    hass.states.async_set(SOURCE, "12.4", {"unit_of_measurement": "kWh"})
+    reader.async_setup()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    notify.reset_mock()
+    last_success = reader.last_successful_update
+
+    def update_metadata() -> None:
+        if notify.call_count < 5:
+            hass.states.async_set(
+                SOURCE,
+                "12.4",
+                {"unit_of_measurement": "kWh", "metadata_revision": notify.call_count},
+            )
+
+    notify.side_effect = update_metadata
+    hass.states.async_set(
+        SOURCE, "12.4", {"unit_of_measurement": "kWh", "metadata_revision": 0}
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    notify.assert_not_called()
+    assert reader.last_successful_update == last_success
+    notify.side_effect = None
+    hass.states.async_set(SOURCE, "12.4", {"unit_of_measurement": "MWh"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert reader.value_kwh == 12400
+    notify.assert_called_once()
+    assert update.await_count == 1
+
+
+async def test_valid_source_event_survives_a_later_inflight_failure(
+    hass: HomeAssistant, reading: ReadingFixture, freezer: FrozenDateTimeFactory
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: a late read error cannot undo a pushed yield."""
+    reader, _, _, update = reading
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_failure(*_: object) -> None:
+        entered.set()
+        await release.wait()
+        raise HomeAssistantError("late failure")
+
+    update.side_effect = slow_failure
+    reader.async_setup()
+    await entered.wait()
+    hass.states.async_set(SOURCE, "0", {"unit_of_measurement": "kWh"})
+    await hass.async_block_till_done()
+    assert reader.value_kwh == 0
+    assert reader.status == "available"
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert reader.status == "available"
+    freezer.tick(timedelta(seconds=30))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert update.await_count == 1
+
+
+@pytest.mark.parametrize("shutdown", [False, True])
+async def test_source_change_and_stop_remove_old_retries_and_listeners(
+    hass: HomeAssistant,
+    reading: ReadingFixture,
+    freezer: FrozenDateTimeFactory,
+    shutdown: bool,
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: old sources cannot repopulate or reschedule."""
+    reader, selected, notify, update = reading
+    other = "sensor.other_forecast"
+    start = dt_util.utcnow()
+    reader.async_setup()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    freezer.move_to(start + timedelta(seconds=10))
+    selected[0] = other
+    reader.async_setup()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert update.await_count == 2
+    hass.states.async_set(SOURCE, "99", {"unit_of_measurement": "kWh"})
+    for seconds, attempts in [(30, 2), (40, 3)]:
+        freezer.move_to(start + timedelta(seconds=seconds))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert update.await_count == attempts
+        assert reader.value_kwh is None
+    if shutdown:
+        await reader.async_shutdown()
+    else:
+        selected[0] = None
+        reader.async_setup()
+    notify.reset_mock()
+    hass.states.async_set(other, "5", {"unit_of_measurement": "kWh"})
+    freezer.tick(timedelta(hours=1))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert reader.value_kwh is None
+    assert update.await_count == 3
+    notify.assert_not_called()
 
 
 async def test_changed_source_rejects_late_old_response(
@@ -337,10 +558,11 @@ async def test_unknown_ha_entity_publishes_waiting_error_and_recovery(
             assert state.attributes["reading_status"] == "error"
             update.side_effect = None
             hass.states.async_set(SOURCE, "0", {"unit_of_measurement": "kWh"})
-            await reader.async_refresh()
+            await hass.async_block_till_done(wait_background_tasks=True)
             state = hass.states.get(sensor.entity_id)
             assert float(state.state) == 0
             assert state.attributes["reading_status"] == "available"
+            assert update.await_count == 2
         finally:
             await reader.async_shutdown()
             await sensor.async_remove()

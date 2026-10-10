@@ -262,6 +262,11 @@ bei vorübergehenden Ausfällen erhalten. Der PV-Start wird separat aus den
 Zeitabschnitten der Solarprognose berechnet und kann bereits bekannt sein,
 während der Ertragswert noch fehlt.
 
+Die Integration fordert den Wert beim Start und Quellenwechsel sofort an.
+Solange noch kein gültiger Wert vorliegt, versucht sie es 30 Sekunden nach jedem
+erfolglosen Abruf erneut. Neue Werte der PV-Quelle erscheinen sofort; mit gültigem
+Ertrag bleibt es bei zusätzlichen Abfragen im Abstand von zehn Minuten.
+
 Der bisherige Tab **Zeitvariabler Tarif** entfällt. Alte Links öffnen automatisch
 **Stromtarif**. Die folgenden technischen Namen bezeichnen weiterhin die
 vorhandenen Home-Assistant-Entitäten.

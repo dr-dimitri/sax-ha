@@ -3458,9 +3458,19 @@ requirement_vue_electricity_tariff:
     gewählten Prognosequelle mit
     Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
     charging_pv_forecast liest die Quelle beim Einrichten und nach einem
-    Quellenwechsel und fordert danach alle zehn Minuten über Home Assistant
-    eine Aktualisierung an, auch bei geschlossenem Dashboard. Gültige,
-    nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
+    Quellenwechsel sofort und fordert mit gültigem Anzeigewert im Abstand von
+    zehn Minuten über Home Assistant eine Aktualisierung an, auch bei geschlossenem
+    Dashboard. Fehlt ein gültiger Anzeigewert, wird 30 Sekunden nach Abschluss jedes
+    erfolglosen Abrufs erneut angefragt; ein Abruf darf höchstens 30 Sekunden dauern.
+    Neue Ertragswerte und Verfügbarkeitsänderungen der PV-Quelle werden sofort
+    ohne weitere Abfrage übernommen. Ein gültiger Wert einschließlich 0 kWh
+    beendet schnelle Wiederholungen.
+    Pro aktuellem Quellenstand darf nur ein Abruf gleichzeitig laufen; Quellereignisse
+    und erneute Einrichtung dürfen weder Abrufschleifen noch doppelte Timer auslösen.
+    Quellenwechsel, Quellenentfernung und Entladen der Integration beenden alte
+    Timer und Listener; verspätete Ereignisse, Antworten und Fehler bleiben wirkungslos.
+    Reine Metadatenänderungen lösen keine Rückmeldeschleifen aus.
+    Gültige, nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
     Bei Lesefehlern, fehlenden, unbekannten, nicht verfügbaren oder ungültigen
     Quellwerten bleibt der letzte gültige Wert verfügbar, auch bei einem
     Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint bei fehlender oder
@@ -3768,6 +3778,12 @@ requirement_vue_electricity_tariff:
        alter Quellen sowie die Statusübertragung über echte HA-Entitäten.
        Komponenten- und Browsertests prüfen die übersetzte PV-Ertragsprognose,
        Quellenwechsel und den unabhängig weiterhin sichtbaren PV-Start."
+    - "Zeitgesteuerte Tests prüfen den sofortigen Erstabruf, wiederholte Versuche
+       mit 30 Sekunden Abstand nach Abschluss, sofortige Quellwertübernahme
+       einschließlich 0 kWh ohne Zusatzabruf, Rückkehr zum Zehn-Minuten-Takt,
+       parallele Auslöser, Quellenwechsel, Quellenentfernung und Shutdown.
+       Echte HA-Zustandsereignisse aktualisieren den Anzeigesensor auch bei
+       ausstehendem oder später fehlschlagendem Abruf."
     - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver
        Ladeplanung, vorhandene/fehlende Laufzeit, ausgeschalteten Hauptschalter,
        Archiv-Restore, zulässigen Quellenwechsel und konkurrierende Optionsänderungen."

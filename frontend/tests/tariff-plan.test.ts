@@ -1029,6 +1029,39 @@ describe("REQ-VUE-TARIFF-EDITOR: guided everyday tariff setup", () => {
     },
   );
 
+  it.each([
+    ["00:00:00", "04:59:00", "4 Stunden 59 Minuten", "4 hours 59 minutes"],
+    ["23:30:00", "00:31:00", "1 Stunde 1 Minute", "1 hour 1 minute"],
+    ["22:00:00", "06:00:00", "8 Stunden", "8 hours"],
+    ["23:00:00", "00:00:00", "1 Stunde", "1 hour"],
+    ["12:00:00", "12:01:00", "1 Minute", "1 minute"],
+    ["12:00:00", "12:30:00", "30 Minuten", "30 minutes"],
+  ])(
+    "REQ-VUE-ELECTRICITY-TARIFF shows the duration of %s–%s next to the saved times",
+    async (start, end, german, english) => {
+      for (const [language, expected] of [
+        ["de", german],
+        ["en", english],
+      ]) {
+        const fixture = await mount({
+          compact: true,
+          language,
+          windows: [
+            { start, end, price_eur_kwh: 0.18, low_tariff: true },
+            { start: "08:00:00", end: "09:00:00", price_eur_kwh: 0.22 },
+          ],
+        });
+        const period = fixture
+          .plans()[0]!
+          .querySelector(".tariff-plan__periods li")!;
+        expect(period.textContent).toContain(
+          `${start.slice(0, 5)} – ${end.slice(0, 5)} (${expected})`,
+        );
+        expect(saves(fixture)).toHaveLength(0);
+      }
+    },
+  );
+
   it.each(["de", "en"])(
     "places prices, different times and feed-in payment in order and explains saving in %s",
     async (language) => {

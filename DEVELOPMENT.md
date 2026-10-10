@@ -247,6 +247,9 @@ Der Tab Amortisation (EN: Amortization) behält den Pfad `ersparnis`.
 
 Der Stromtarif gruppiert beide Tarifarten in zwei Karten: „Preise & Zeiten“
 bündelt aktuelle Preise, Tarifkonfiguration und den aufklappbaren Preisverlauf.
+Die täglichen Zeitfenster zeigen ihre Dauer in Klammern direkt hinter den
+Uhrzeiten, auch über Mitternacht, mit ausgeschriebenen Stunden und Minuten
+in der Dashboard-Sprache (REQ-VUE-ELECTRICITY-TARIFF).
 „Netzladung“ enthält Hauptschalter mit lokalem Status-/Fehlerfeedback,
 Ladeweise, bestätigte Ziel- und Startwerte, PV-Quelle, Gerätestatus und
 „Ladeplan & Prognose“. Ab 860 px nutzbarer Inhaltsbreite stehen die Karten

@@ -436,6 +436,24 @@ const clock = (value: string) =>
     { timeStyle: "short", timeZone: "UTC" },
   ) ?? value.slice(0, 5);
 
+function duration(window: TariffWindow): string | null {
+  const start = timeSeconds(window.start);
+  const end = timeSeconds(window.end);
+  if (start === null || end === null || start === end) return null;
+  const elapsed = Math.floor(((end - start + 86400) % 86400) / 60);
+  const hours = Math.floor(elapsed / 60);
+  const minutes = elapsed % 60;
+  const german = dashboard?.language.value === "de";
+  return [
+    hours &&
+      `${hours} ${german ? (hours === 1 ? "Stunde" : "Stunden") : hours === 1 ? "hour" : "hours"}`,
+    (minutes || !hours) &&
+      `${minutes} ${german ? (minutes === 1 ? "Minute" : "Minuten") : minutes === 1 ? "minute" : "minutes"}`,
+  ]
+    .filter((part) => typeof part === "string")
+    .join(" ");
+}
+
 const editing = ref(false);
 watch(editing, (value) => emit("editing", value));
 const pending = ref(false);
@@ -753,7 +771,8 @@ watch(tariffVisible, (visible) => {
           <span
             >{{ text.everyDay }} {{ clock(window.start) }} –
             {{ clock(window.end)
-            }}<span v-if="window.end < window.start">
+            }}<span v-if="duration(window)"> ({{ duration(window) }})</span
+            ><span v-if="window.end < window.start">
               ({{ text.overnightLabel }})</span
             ></span
           >

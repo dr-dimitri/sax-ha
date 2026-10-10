@@ -432,11 +432,11 @@ test("active consumption plan keeps the tariff draft after a required PV source 
 });
 
 for (const type of ["time_of_use", "dynamic"] as const) {
-  test(`${type} PV summary shows the cached energy rather than the source name`, async ({
+  test(`${type} PV yield distinguishes waiting and failure while preserving the independent plan`, async ({
     page,
   }, testInfo) => {
     const english = testInfo.project.name.endsWith("en");
-    await page.goto("/sax-power-vue/stromtarif");
+    await page.goto("/sax-power-vue/stromtarif?bridge-plan");
     if (english) await page.locator("#language").click();
     if (type === "dynamic") await page.locator("#tariff-dynamic").click();
     await page.evaluate((type) => {
@@ -481,8 +481,10 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await prices.locator("header .editor-actions > button:first-child").click();
     const plan = panel.locator(".electricity-plan");
     const value = plan.locator(".electricity-pv-summary dd");
-    await expect(value).not.toBeVisible();
-    await plan.locator("summary").first().click();
+    await expect(plan.locator(".electricity-pv-summary dt")).toHaveText(
+      english ? "Solar yield forecast" : "PV-Ertragsprognose",
+    );
+    await expect(plan.locator("summary")).toHaveCount(0);
     await expect(value).toBeVisible();
     await expect(value).toHaveText(english ? "12.4 kWh" : "12,4 kWh");
     await expect(value).not.toContainText("PV-Ertragsprognose");
@@ -493,6 +495,50 @@ for (const type of ["time_of_use", "dynamic"] as const) {
       })
       .last()
       .click();
+    const chargingPlan = panel.locator(".charge-plan");
+    const description =
+      type === "time_of_use" ? await chargingPlan.innerText() : null;
+    if (description) expect(description).toContain("07:00");
+    for (const status of ["waiting", "error"]) {
+      await panel.evaluate((element, status) => {
+        const host = element as HTMLElement & { hass: HomeAssistant };
+        const id = "sensor.demo_charging_pv_forecast";
+        host.hass = {
+          ...host.hass,
+          states: {
+            ...host.hass.states,
+            [id]: {
+              ...host.hass.states[id],
+              state: "unknown",
+              attributes: {
+                ...host.hass.states[id].attributes,
+                reading_status: status,
+              },
+            },
+          },
+        };
+      }, status);
+      await expect(value).toHaveText(
+        status === "waiting"
+          ? english
+            ? "Waiting for yield data …"
+            : "Warte auf Ertragswert …"
+          : english
+            ? "Yield data currently unavailable"
+            : "Ertragswert derzeit nicht abrufbar",
+      );
+      if (description)
+        await expect(chargingPlan).toHaveText(description, {
+          useInnerText: true,
+        });
+      const fits = await value.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      );
+      expect(fits).toBe(true);
+      await plan.screenshot({
+        path: testInfo.outputPath(`pv-yield-${status}.png`),
+      });
+    }
     await page.evaluate(() => {
       const panel = document.querySelector(
         "sax-power-vue-panel",
@@ -502,7 +548,14 @@ for (const type of ["time_of_use", "dynamic"] as const) {
         ...panel.hass,
         states: {
           ...panel.hass.states,
-          [id]: { ...panel.hass.states[id], state: "0" },
+          [id]: {
+            ...panel.hass.states[id],
+            state: "0",
+            attributes: {
+              ...panel.hass.states[id].attributes,
+              reading_status: "available",
+            },
+          },
         },
       };
     });
@@ -515,8 +568,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await charging
       .locator("header .editor-actions > button:last-child")
       .click();
-    await plan.locator("summary").first().click();
-    await expect(value).not.toBeVisible();
+    await expect(value).toBeVisible();
     await expect(page.locator("#actions")).toHaveText("Keine Aktion");
   });
 }

@@ -418,16 +418,18 @@ test("current discharge forecast remains visible independently of automatic char
   if (testInfo.project.name.includes("dark"))
     await page.locator("#theme").click();
   const panel = page.locator("sax-power-vue-panel");
-  await panel.locator(".electricity-plan > summary").click();
+  await expect(
+    panel.locator("details.electricity-plan, .electricity-plan > summary"),
+  ).toHaveCount(0);
   const forecast = panel.locator(".charge-plan__forecast");
   await expect(forecast).toBeVisible();
-  await expect(forecast).toContainText(
-    english ? "Current discharge forecast" : "Aktuelle Entladeprognose",
-  );
   await expect(forecast).toContainText("800 W");
   await expect(forecast).toContainText("03:15");
-  await expect(forecast).toContainText(
-    english ? "lower charge limit" : "unteren Ladegrenze",
+  await expect(panel.locator(".charge-plan h2, .charge-plan h3")).toHaveText([
+    english ? "Charging plan" : "Ladeplanung",
+  ]);
+  await expect(panel.locator(".charge-plan")).not.toContainText(
+    english ? "An estimate based on measured" : "Schätzung aus dem gemessenen",
   );
   await expect(forecast).not.toContainText("1000 W");
   await panel.evaluate((element) => {

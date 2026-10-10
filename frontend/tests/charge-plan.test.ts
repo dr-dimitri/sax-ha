@@ -491,6 +491,52 @@ it.each([
 );
 
 describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan", () => {
+  it.each(["de", "en-GB"])(
+    "combines live consumption and the decision once without subheadings or the discarded hint (%s)",
+    async (language) => {
+      const fixture = await mount(language);
+      const observation = {
+        observation_minutes: 7.3,
+        average_discharge_w: 342,
+      };
+      await fixture.update("not_needed", {
+        ...planned,
+        ...observation,
+        discharge_at: "2026-10-11T11:46:00Z",
+        pv_start: "2026-10-11T06:00:00Z",
+      });
+      await fixture.forecast("2026-10-11T11:46:00Z", observation);
+      const description = fixture.root.querySelector(
+        ".charge-plan__description",
+      )!;
+      expect(fixture.root.querySelectorAll("p")).toHaveLength(1);
+      expect(fixture.root.querySelectorAll("h2, h3")).toHaveLength(1);
+      expect(description.textContent?.match(/342 W/g)).toHaveLength(1);
+      expect(description.textContent?.match(/13:46/g)).toHaveLength(1);
+      expect(description.textContent).toContain(
+        language === "de"
+          ? "Eine Netzladung ist nicht erforderlich"
+          : "No grid charging is needed",
+      );
+      expect(description.textContent).toContain("08:00");
+      expect(fixture.root.textContent).not.toContain(
+        language === "de"
+          ? "Schätzung aus dem gemessenen"
+          : "An estimate based on measured",
+      );
+      expect(fixture.callService).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a running plan's consumption basis when live measurements disappear", async () => {
+    const fixture = await mount();
+    await fixture.update("charging");
+    await fixture.forecast("unavailable");
+    expect(fixture.root.textContent).toContain("durchschnittlich 456 W");
+    expect(fixture.root.textContent).toContain("Niedertarifladung läuft seit");
+    expect(fixture.root.querySelector(".charge-plan__forecast")).toBeNull();
+  });
+
   it.each(["off", "waiting_for_data", "paused", "planned"])(
     "shows the independent current forecast while planning is %s",
     async (status) => {
@@ -498,11 +544,10 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
       await fixture.update(status, { reason: "pv_start_missing" });
       await fixture.forecast("2026-09-14T00:30:00Z");
       const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
-      expect(forecast.textContent).toContain("Aktuelle Entladeprognose");
       expect(forecast.textContent).toContain("durchschnittlich 800 W");
       expect(forecast.textContent).toContain("letzten 12,0 Minuten");
       expect(forecast.textContent).toContain("14.09.2026, 02:30 Uhr");
-      expect(forecast.textContent).toContain("bis zur unteren Ladegrenze");
+      expect(fixture.root.querySelectorAll("h2, h3")).toHaveLength(1);
       expect(fixture.root.querySelector("button, input, form")).toBeNull();
       expect(fixture.callService).not.toHaveBeenCalled();
       expect(fixture.callWS).not.toHaveBeenCalled();
@@ -513,7 +558,6 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
     const fixture = await mount("en-GB");
     await fixture.forecast("2026-09-14T00:30:00Z");
     const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
-    expect(forecast.textContent).toContain("Current discharge forecast");
     expect(forecast.textContent).toContain("average consumption of 800 W");
     expect(forecast.textContent).not.toContain("456 W");
     expect(forecast.textContent).not.toContain("32.5 minutes");

@@ -313,6 +313,7 @@ SENSOR_DESCRIPTIONS: tuple[SaxPowerSensorEntityDescription, ...] = (
         value_fn=_direct("charging_pv_forecast_kwh"),
         attributes_fn=lambda coordinator: {
             "source_entity_id": coordinator.pv_forecast_reading.source_entity_id,
+            "reading_status": coordinator.pv_forecast_reading.status,
             "last_successful_update": (
                 coordinator.pv_forecast_reading.last_successful_update
             ),
@@ -1063,7 +1064,9 @@ class SaxPowerChargingForecastSensor(SaxPowerSensor):
 
     @property
     def available(self) -> bool:
-        return self.native_value is not None
+        # REQ-VUE-ELECTRICITY-TARIFF: HA omits status attributes for unavailable
+        # entities. This local reader remains available; a missing yield is unknown.
+        return True
 
     @property
     def native_value(self) -> float | None:

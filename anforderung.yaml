@@ -3098,8 +3098,8 @@ requirement_vue_charging:
     unter stromtarif nach REQ-VUE-ELECTRICITY-TARIFF. Die frühere Ansicht
     ladeautomatik und ihr separater Aktivierungsschalter sind entfernt.
     Native Entities und ihre Services bleiben erhalten. ChargePlan zeigt die
-    Backend-Ladeplanung unter Ladeplan & Prognose ohne zweiten Hauptschalter;
-    Aktivierung und Ladeweise werden gemeinsam in der Karte Netzladung bedient.
+    Backend-Ladeplanung im dauerhaft sichtbaren Planungsbereich ohne zweiten
+    Hauptschalter; Aktivierung und Ladeweise werden gemeinsam in der Karte Netzladung bedient.
     Tarifpreisfenster sind in Stromtarif und Amortisation dieselbe TarifPlan-Karte
     nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
     aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
@@ -3430,7 +3430,7 @@ requirement_vue_electricity_tariff:
     „Preise & Zeiten“ enthält Tarifkonfiguration, aktuellen Preis und
     aufklappbaren Tagespreisverlauf; „Netzladung“ enthält Automatikschalter,
     Ladeweise, bestätigte Zielwerte, dynamischen Ladestatus und
-    aufklappbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
+    dauerhaft sichtbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
     darüber.
     Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
     untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
@@ -3452,21 +3452,40 @@ requirement_vue_electricity_tariff:
     Dashboard-Sprache (DE/EN) mit passender Einzahl oder Mehrzahl ausgeschrieben;
     Nullanteile entfallen bei Dauern ab einer Minute.
 
-    Die PV-Zeile steht im aufklappbaren Bereich „Ladeplan & Prognose“, auch
+    Die Zeile PV-Ertragsprognose (EN: Solar yield forecast) steht im dauerhaft
+    sichtbaren Planungsbereich, auch
     während der Bearbeitung der Netzladung. Sie zeigt den Zahlenwert der
     gewählten Prognosequelle mit
     Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
     charging_pv_forecast liest die Quelle beim Einrichten und nach einem
-    Quellenwechsel und fordert danach alle zehn Minuten über Home Assistant
-    eine Aktualisierung an, auch bei geschlossenem Dashboard. Gültige,
-    nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
+    Quellenwechsel sofort und fordert mit gültigem Anzeigewert im Abstand von
+    zehn Minuten über Home Assistant eine Aktualisierung an, auch bei geschlossenem
+    Dashboard. Fehlt ein gültiger Anzeigewert, wird 30 Sekunden nach Abschluss jedes
+    erfolglosen Abrufs erneut angefragt; ein Abruf darf höchstens 30 Sekunden dauern.
+    Neue Ertragswerte und Verfügbarkeitsänderungen der PV-Quelle werden sofort
+    ohne weitere Abfrage übernommen. Ein gültiger Wert einschließlich 0 kWh
+    beendet schnelle Wiederholungen.
+    Pro aktuellem Quellenstand darf nur ein Abruf gleichzeitig laufen; Quellereignisse
+    und erneute Einrichtung dürfen weder Abrufschleifen noch doppelte Timer auslösen.
+    Quellenwechsel, Quellenentfernung und Entladen der Integration beenden alte
+    Timer und Listener; verspätete Ereignisse, Antworten und Fehler bleiben wirkungslos.
+    Reine Metadatenänderungen lösen keine Rückmeldeschleifen aus.
+    Gültige, nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
     Bei Lesefehlern, fehlenden, unbekannten, nicht verfügbaren oder ungültigen
     Quellwerten bleibt der letzte gültige Wert verfügbar, auch bei einem
-    Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint Nicht verfügbar;
-    ohne ausgewählte Quelle Nicht eingerichtet. Ein Quellenwechsel verwirft
+    Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint bei fehlender oder
+    noch unbekannter Quelle Warte auf Ertragswert … (EN: Waiting for yield data …).
+    Ein fehlgeschlagener Abruf, Timeout, ungültiger oder nicht verfügbarer
+    Quellwert zeigt Ertragswert derzeit nicht abrufbar
+    (EN: Yield data currently unavailable); ebenso eine getrennte Dashboard-Verbindung.
+    Ohne ausgewählte Quelle erscheint Nicht eingerichtet. Ein Quellenwechsel verwirft
     den alten Anzeigewert und verspätete Antworten der vorherigen Quelle.
     source_entity_id und last_successful_update machen Herkunft und Zeitpunkt
-    nachvollziehbar. Diese Anzeige ersetzt keine Sicherheitsprüfung oder
+    nachvollziehbar; reading_status unterscheidet waiting, available und error.
+    Der lokale Sensor bleibt verfügbar und veröffentlicht fehlenden Ertrag als
+    unknown, damit Home Assistant auch dann die Statusattribute überträgt.
+    Der separat berechnete PV-Start bleibt von diesem Anzeigestatus unabhängig.
+    Diese Anzeige ersetzt keine Sicherheitsprüfung oder
     Aktualitätsprüfung der Ladeplanung; deren ungültige Prognosen bleiben
     ein Ausschlussgrund für die betroffene Ladefreigabe.
 
@@ -3476,15 +3495,24 @@ requirement_vue_electricity_tariff:
     Festpreis und deaktivierte Tarife bleiben als bestehende Optionswerte gültig;
     die neue Auswahl erfindet dafür weder einen zeitvariablen noch dynamischen Preis.
 
-    Unter Ladeplan & Prognose zeigt ChargePlan im zeitvariablen Tarif zusätzlich
+    Unter Ladeplanung zeigt ChargePlan im zeitvariablen Tarif
     die aktuelle Entladeprognose aus sensor.discharge_forecast unabhängig vom
     Aktivierungsstatus der Ladeplanung. Voraussetzungen sind ein verfügbarer,
     verbundener Sensor, ein gültiger Zeitstempel mit Zeitzone, eine endliche
     Beobachtungsdauer von 1 bis 60 Minuten und positive mittlere Entladeleistung.
     Datum und Werte werden nach HA-Sprache und -Zeitzone formatiert. Die Anzeige
-    benennt die untere Ladegrenze; ungültige Daten werden nicht ergänzt oder aus
-    früheren Ladeplanwerten ersetzt. Berechneter Ladeplan und aktuelle Prognose
-    stehen getrennt. Die bisherige zweite Aktivierung in ChargePlan entfällt.
+    ergänzt ungültige aktuelle Messwerte nicht aus früheren Ladeplanwerten.
+    Aktuelle Prognose und Ladeentscheidung stehen in einem zusammenhängenden
+    Absatz unter einer einzigen Überschrift Ladeplanung. Die doppelte
+    Verbrauchsbeschreibung und die Zwischenüberschriften Aktuelle Entladeprognose
+    und Berechneter Ladeplan entfallen ebenso wie der allgemeine Hinweis zur
+    Schätzung und zu möglichen Verbrauchsänderungen (in DE und EN).
+    Eine gültige aktuelle Prognose ersetzt die wiederholte Verbrauchsbasis im
+    Text des Plans. Liegt keine aktuelle Prognose vor, bleiben die bisherigen
+    Verbrauchsangaben für geplante/laufende Aufträge erhalten; sie werden nicht
+    als aktuelle Messung ausgegeben. Der Planungsbereich einschließlich der
+    PV-Zeile bleibt bei zeitvariablem und dynamischem Tarif ohne Einklappung
+    dauerhaft sichtbar. Die bisherige zweite Aktivierung in ChargePlan entfällt.
     Im dynamischen Tarif stammt die angerechnete PV-Energie ausschließlich aus
     price_charge_status_text.pv_prognose_kwh und nur bei passender
     pv_prognose_sensor-Quelle zum gespeicherten Tarifprofil. 0 kWh ist erlaubt,
@@ -3740,6 +3768,22 @@ requirement_vue_electricity_tariff:
        Feldfehler in DE/EN, Fokus, erhaltene Quellen und bewusste Preiseingabe."
     - "Ladeentscheidung, aktuelle Preisanzeige und Amortisation verwenden denselben
        gültigen Bezugspreis; die zeitliche Buchung folgt REQ-ECONOMICS-ACCOUNTING."
+    - "ChargePlan-Komponenten- und Browsertests prüfen in DE/EN eine einzige
+       Verbrauchsbeschreibung mit direkt anschließender Ladeentscheidung,
+       dauerhaft sichtbare Planung ohne Aufklappen, entfernte Zwischenüberschriften
+       und Schätzungshinweise, aktuelle Messwerte vor gespeicherter Planbasis
+       sowie den Erhalt laufender Aufträge bei ausfallender aktueller Prognose."
+    - "tests/test_pv_forecast_reading.py prüft Warten, Abruffehler, Timeout,
+       Erholung zu 0 kWh, gültigen Cache bei Ausfällen und verspätete Fehler
+       alter Quellen sowie die Statusübertragung über echte HA-Entitäten.
+       Komponenten- und Browsertests prüfen die übersetzte PV-Ertragsprognose,
+       Quellenwechsel und den unabhängig weiterhin sichtbaren PV-Start."
+    - "Zeitgesteuerte Tests prüfen den sofortigen Erstabruf, wiederholte Versuche
+       mit 30 Sekunden Abstand nach Abschluss, sofortige Quellwertübernahme
+       einschließlich 0 kWh ohne Zusatzabruf, Rückkehr zum Zehn-Minuten-Takt,
+       parallele Auslöser, Quellenwechsel, Quellenentfernung und Shutdown.
+       Echte HA-Zustandsereignisse aktualisieren den Anzeigesensor auch bei
+       ausstehendem oder später fehlschlagendem Abruf."
     - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver
        Ladeplanung, vorhandene/fehlende Laufzeit, ausgeschalteten Hauptschalter,
        Archiv-Restore, zulässigen Quellenwechsel und konkurrierende Optionsänderungen."

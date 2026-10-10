@@ -1,5 +1,96 @@
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
-import type { HomeAssistant } from "../src/types";
+import type { HomeAssistant, TariffProfile } from "../src/types";
+
+test("matching forecast and no-charge plan form one permanently visible description", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  await page.goto("/sax-power-vue/stromtarif?bridge-plan");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.evaluate((element) => {
+    const host = element as HTMLElement & { hass: HomeAssistant };
+    const observation = { observation_minutes: 7.3, average_discharge_w: 342 };
+    const planId = "sensor.demo_bridge_charge_plan";
+    const forecastId = "sensor.demo_discharge_forecast";
+    const original = host.hass.callWS!;
+    host.hass = {
+      ...host.hass,
+      callWS: async <T>(
+        request: Readonly<Record<string, unknown>>,
+      ): Promise<T> => {
+        const result = await original<T>(request);
+        if (request.type !== "sax_power/dashboard/tariff/get") return result;
+        const profile = result as TariffProfile;
+        return {
+          ...profile,
+          profiles: {
+            ...profile.profiles,
+            time_of_use: {
+              ...profile.profiles!.time_of_use,
+              pv_sensor: "sensor.pv_forecast",
+            },
+          },
+        } as T;
+      },
+      states: {
+        ...host.hass.states,
+        [planId]: {
+          ...host.hass.states[planId]!,
+          state: "not_needed",
+          attributes: {
+            ...observation,
+            discharge_at: "2026-10-11T11:46:00Z",
+            pv_start: "2026-10-11T06:00:00Z",
+          },
+        },
+        [forecastId]: {
+          ...host.hass.states[forecastId]!,
+          state: "2026-10-11T11:46:00Z",
+          attributes: observation,
+        },
+      },
+    };
+  });
+  const prices = panel.locator(".tariff-plan");
+  await prices.locator("header .editor-actions > button:first-child").click();
+  await prices
+    .getByRole("button", {
+      name: english ? "Cancel" : "Abbrechen",
+      exact: true,
+    })
+    .last()
+    .click();
+  await expect(panel.locator(".electricity-pv-summary dd")).toHaveText(
+    english ? "12.4 kWh" : "12,4 kWh",
+  );
+  const card = panel.locator(".charge-plan");
+  await expect(card).toBeVisible();
+  await expect(card.locator("h2, h3")).toHaveText([
+    english ? "Charging plan" : "Ladeplanung",
+  ]);
+  await expect(card.locator("p")).toHaveCount(1);
+  const content = await card.innerText();
+  expect(content.match(/342 W/g)).toHaveLength(1);
+  expect(content.match(/13:46/g)).toHaveLength(1);
+  expect(content).toContain(
+    english
+      ? "No grid charging is needed"
+      : "Eine Netzladung ist nicht erforderlich",
+  );
+  expect(content).toContain("08:00");
+  expect(content).not.toContain(
+    english ? "An estimate based on measured" : "Schätzung aus dem gemessenen",
+  );
+  await expect(
+    panel.locator("details.electricity-plan, .electricity-plan > summary"),
+  ).toHaveCount(0);
+  await verifyCardGeometry(card);
+  await panel.screenshot({ path: testInfo.outputPath("combined-plan.png") });
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
 
 test("completion and missing assessment remain distinct after a forecast gap", async ({
   page,
@@ -11,8 +102,8 @@ test("completion and missing assessment remain distinct after a forecast gap", a
   if (testInfo.project.name.includes("dark"))
     await page.locator("#theme").click();
   const panel = page.locator("sax-power-vue-panel");
-  await panel.locator(".electricity-plan > summary").click();
   const card = panel.locator(".charge-plan");
+  await expect(card).toBeVisible();
   await page.setViewportSize({ width: mobile ? 320 : 1440, height: 1000 });
 
   for (const state of ["waiting_for_data", "insufficient", "complete"]) {
@@ -143,8 +234,10 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
   await page.goto("/sax-power-vue/stromtarif?bridge-plan");
   const panel = page.locator("sax-power-vue-panel");
   const plan = panel.locator(".charge-plan");
-  await panel.locator(".electricity-plan > summary").click();
   await expect(plan).toBeVisible();
+  await expect(
+    panel.locator("details.electricity-plan, .electricity-plan > summary"),
+  ).toHaveCount(0);
   if (english) await page.locator("#language").click();
   if (testInfo.project.name.includes("dark"))
     await page.locator("#theme").click();
@@ -155,20 +248,18 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
     english ? "Charging plan" : "Ladeplanung",
   );
   await expect(plan).toContainText(
-    english ? "last 30.0 minutes" : "letzten 30,0 Minuten",
+    english ? "last 12.0 minutes" : "letzten 12,0 Minuten",
   );
   await expect(plan).toContainText(
-    english ? "an average of 1,000 W" : "durchschnittlich 1.000 W",
+    english ? "average consumption of 800 W" : "durchschnittlich 800 W",
+  );
+  await expect(plan).toContainText(
+    english ? "last until 14 Sept 2026, 03:15" : "bis 14.09.2026, 03:15 Uhr",
   );
   await expect(plan).toContainText(
     english
-      ? "depleted by 14 Sept 2026, 02:00"
-      : "bis 14.09.2026, 02:00 Uhr entleert",
-  );
-  await expect(plan).toContainText(
-    english
-      ? "low-tariff charging will start at 14 Sept 2026, 01:00"
-      : "Aufladung im Niedertarif um 14.09.2026, 01:00 Uhr",
+      ? "Low-tariff charging will start at 14 Sept 2026, 01:00"
+      : "Aufladung im Niedertarif beginnt um 14.09.2026, 01:00 Uhr",
   );
   await expect(plan).toContainText(
     english

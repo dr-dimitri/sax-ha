@@ -1598,6 +1598,14 @@ und interne Aufrufe ohne Benutzerkontext bleiben erlaubt.
 `tests/test_service_permissions.py` prüft erlaubte und abgelehnte Aufrufe
 über die echte HA-WebSocket-Grenze.
 
+Die Gerätezuordnung der SAX-Services liest `DeviceEntry.config_entry_id`.
+Für alte zusammengesetzte Geräte-IDs aus Automationen löst
+`async_get_devices_for_composite_device_id` die zugehörigen Einzelgeräte auf;
+maßgeblich bleibt ein geladener SAX-Eintrag. Dadurch benötigen weder reguläre
+noch migrierte Geräte die veraltete Eigenschaft `DeviceEntry.config_entries`,
+deren Zugriff ab Home Assistant 2026.10 warnt und ab 2027.10 entfällt.
+Die verwendete API ist bereits in der Mindestversion 2026.8.2 verfügbar.
+
 **Max-SOC-Sperre, zeitgesteuertes Laden, netzdienliches Laden &
 preisoptimiertes Laden:** Kein natives Max-SOC-Register. Alle vier teilen
 sich eine zentrale Auswertung (`SaxPowerCoordinator._async_enforce_grid_

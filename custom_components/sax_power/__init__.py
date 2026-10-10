@@ -463,7 +463,12 @@ def _entry_id_for_device(hass: HomeAssistant, device_id: str) -> str:
     device = device_registry.async_get(device_id)
     if device is None:
         raise HomeAssistantError(f"Unbekanntes Gerät: {device_id}")
-    for entry_id in device.config_entries:
+    # REQ-MANUAL-GRID-CHARGE: Gespeicherte Automationen können alte Geräte-IDs nutzen.
+    devices = device_registry.async_get_devices_for_composite_device_id(device_id) or (
+        device,
+    )
+    for entry_device in devices:
+        entry_id = entry_device.config_entry_id
         if entry_id in hass.data.get(DOMAIN, {}):
             return entry_id
     raise HomeAssistantError(

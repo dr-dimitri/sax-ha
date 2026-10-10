@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import attr
 import pytest
 from homeassistant.auth.permissions import PermissionLookup
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.exceptions import Unauthorized, UnknownUser
+from homeassistant.exceptions import HomeAssistantError, Unauthorized, UnknownUser
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
@@ -62,6 +63,7 @@ CASES = (
         (("time", "grid_serving_start"), ("time", "grid_serving_end")),
     ),
     ServiceCase("restart_economics_accounting", {"confirm": True}, ()),
+    ServiceCase("set_charging_settings", {"max_soc": 80}, (("number", "max_soc"),)),
 )
 
 
@@ -204,6 +206,89 @@ async def test_admin_and_internal_calls_remain_supported(
     getattr(
         service_device.coordinator, f"async_{service_case.service}"
     ).assert_awaited_once()
+
+
+@pytest.mark.parametrize("legacy_device_id", [False, True])
+async def test_services_resolve_device_without_deprecated_config_entries(
+    hass: HomeAssistant,
+    service_device: ServiceDevice,
+    service_case: ServiceCase,
+    legacy_device_id: bool,
+) -> None:
+    """REQ-MANUAL-GRID-CHARGE: Gerätezuordnung bleibt ohne veraltete HA-API möglich."""
+    device_id = service_device.device_id
+    if legacy_device_id:
+        registry = dr.async_get(hass)
+        foreign_entry = MockConfigEntry(domain="other_integration")
+        foreign_entry.add_to_hass(hass)
+        foreign_device = registry.async_get_or_create(
+            config_entry_id=foreign_entry.entry_id,
+            identifiers={("other_integration", "battery")},
+        )
+        device_id = "pre_migration_device_id"
+        for split_id in (foreign_device.id, service_device.device_id):
+            registry.devices[split_id] = attr.evolve(
+                registry.async_get(split_id),
+                composite_device_id=device_id,
+                composite_primary_config_entry=foreign_entry.entry_id,
+            )
+
+    await hass.async_block_till_done()
+    with patch.object(
+        dr.DeviceEntry,
+        "config_entries",
+        new_callable=PropertyMock,
+        side_effect=AssertionError(
+            "DeviceEntry.config_entries darf nicht gelesen werden"
+        ),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            service_case.service,
+            {"device_id": device_id, **service_case.data},
+            blocking=True,
+        )
+    getattr(
+        service_device.coordinator, f"async_{service_case.service}"
+    ).assert_awaited_once()
+
+
+@pytest.mark.parametrize("problem", ["unknown", "foreign", "unloaded"])
+async def test_service_device_requires_loaded_sax_entry(
+    hass: HomeAssistant,
+    service_device: ServiceDevice,
+    service_case: ServiceCase,
+    problem: str,
+) -> None:
+    """REQ-MANUAL-GRID-CHARGE: Ungültige Geräteziele erreichen keinen Coordinator."""
+    device_id = service_device.device_id
+    if problem == "unknown":
+        device_id = "unknown_device_id"
+    elif problem == "foreign":
+        entry = MockConfigEntry(domain="other_integration")
+        entry.add_to_hass(hass)
+        device_id = (
+            dr.async_get(hass)
+            .async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(entry.domain, entry.entry_id)},
+            )
+            .id
+        )
+    else:
+        hass.data[DOMAIN].pop(service_device.entry.entry_id)
+
+    expected_error = (
+        "Unbekanntes Gerät" if problem == "unknown" else "Kein geladener SAX Power"
+    )
+    with pytest.raises(HomeAssistantError, match=expected_error):
+        await hass.services.async_call(
+            DOMAIN,
+            service_case.service,
+            {"device_id": device_id, **service_case.data},
+            blocking=True,
+        )
+    assert not service_device.coordinator.mock_calls
 
 
 @pytest.mark.parametrize("actor", ["unknown", "inactive", "inactive_admin"])

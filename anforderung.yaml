@@ -1378,6 +1378,13 @@ requirement_manual_grid_charge:
     Aufrufe ohne Benutzerkontext bleiben erlaubt. Dieselbe Prüfung gilt
     auch bei direktem Aufruf über Home Assistants WebSocket-Servicegrenze.
 
+    Die Gerätezuordnung aller SAX-Services verwendet DeviceEntry.config_entry_id
+    statt der veralteten Eigenschaft config_entries. Alte, von Home Assistant
+    aufgeteilte Geräte-IDs aus gespeicherten Automationen werden über die
+    zugehörigen Einzelgeräte weiterhin zum geladenen SAX-Eintrag aufgelöst.
+    Unbekannte Geräte, fremde Integrationen und nicht geladene SAX-Einträge
+    werden vor dem Coordinator-Aufruf abgelehnt.
+
     Der Service schreibt Register 41 (Basic Mode) nicht. Er hinterlegt nur
     den manuellen Ladeauftrag und wertet unter _charge_control_lock sofort
     SaxPowerCoordinator._async_enforce_grid_charge_locked aus. Die
@@ -1432,6 +1439,10 @@ requirement_manual_grid_charge:
        Lesebenutzer dürfen weder manuelles Laden starten noch stoppen;
        berechtigte aktive Benutzer und Administratoren dürfen dies weiterhin.
        Abgelehnte Aufrufe erreichen den Coordinator nicht."
+    - "tests/test_service_permissions.py prüft sämtliche SAX-Services mit
+       gesperrtem Zugriff auf DeviceEntry.config_entries, auch für alte
+       zusammengesetzte Geräte-IDs mit fremdem primären Eintrag. Unbekannte,
+       fremde und nicht geladene Geräteziele erreichen keinen Coordinator."
     - "tests/test_manual_stop_response.py prüft echte HA-Service-/WebSocket-
        Fehler bei Timeout, ModbusException und Fehlerantwort, Lock-/ACK-
        Wartezeit, Retry ohne Auftrag, Teilstart-/Rollbackfehler sowie

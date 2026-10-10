@@ -481,8 +481,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await prices.locator("header .editor-actions > button:first-child").click();
     const plan = panel.locator(".electricity-plan");
     const value = plan.locator(".electricity-pv-summary dd");
-    await expect(value).not.toBeVisible();
-    await plan.locator("summary").first().click();
+    await expect(plan.locator("summary")).toHaveCount(0);
     await expect(value).toBeVisible();
     await expect(value).toHaveText(english ? "12.4 kWh" : "12,4 kWh");
     await expect(value).not.toContainText("PV-Ertragsprognose");
@@ -515,8 +514,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await charging
       .locator("header .editor-actions > button:last-child")
       .click();
-    await plan.locator("summary").first().click();
-    await expect(value).not.toBeVisible();
+    await expect(value).toBeVisible();
     await expect(page.locator("#actions")).toHaveText("Keine Aktion");
   });
 }

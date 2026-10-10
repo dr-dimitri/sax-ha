@@ -1270,8 +1270,12 @@ async function applyCharging(): Promise<void> {
         <div v-if="active === 'dynamic'" class="electricity-charge-status">
           <EntityValue domain="sensor" entity-key="price_charge_status_text" />
         </div>
-        <details v-if="known" class="electricity-plan">
-          <summary>{{ text.details }}</summary>
+        <section
+          v-if="known"
+          class="electricity-plan"
+          :aria-label="text.details"
+        >
+          <h3 v-if="active !== 'time_of_use'">{{ text.details }}</h3>
           <dl class="electricity-summary-rows electricity-pv-summary">
             <div>
               <dt>{{ text.pvSummary }}</dt>
@@ -1294,7 +1298,7 @@ async function applyCharging(): Promise<void> {
               {{ text.plannedPv }}: <strong>{{ plannedPv }} kWh</strong>
             </p></template
           >
-        </details>
+        </section>
       </section>
     </div>
     <p v-if="known" class="electricity-footnote">{{ text.gross }}</p>
@@ -1513,7 +1517,6 @@ async function applyCharging(): Promise<void> {
 .electricity-charging-editor .entity-control {
   margin-top: 12px;
 }
-.electricity-plan > summary,
 .electricity-price-details > summary {
   font-size: 14px;
   font-weight: 500;

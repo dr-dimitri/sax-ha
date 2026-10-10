@@ -2086,11 +2086,20 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
   });
 });
 
-describe("PV forecast content inside the collapsible charging plan", () => {
+describe("PV forecast content inside the always-visible charging plan", () => {
   for (const type of ["time_of_use", "dynamic"] as const) {
     for (const language of ["de", "en"]) {
       it(`${type} shows the cached value and unit in ${language}, including zero and HA updates`, async () => {
         const fixture = await mount({ type, language });
+        expect(
+          fixture.root.querySelector("section.electricity-plan"),
+        ).not.toBeNull();
+        expect(
+          fixture.root.querySelector(".electricity-plan")?.closest("details"),
+        ).toBeNull();
+        expect(
+          fixture.root.querySelector(".electricity-plan > summary"),
+        ).toBeNull();
         fixture.stored.profiles![type].pv_sensor = "sensor.pv_forecast";
         fixture.hass.value = {
           ...fixture.hass.value,

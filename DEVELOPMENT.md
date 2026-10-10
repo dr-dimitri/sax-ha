@@ -132,7 +132,7 @@ keine Vue-/Vorschaukennzeichnung.
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
-Die PV-Zeile im aufklappbaren Bereich „Ladeplan & Prognose“ der Netzladung
+Die PV-Zeile im dauerhaft sichtbaren Planungsbereich der Netzladung
 verwendet den Metadaten-Schlüssel
 `sensor.charging_pv_forecast`. `infrastructure/pv_forecast_reading.py` fordert die
 gewählte Quelle beim Einrichten/Quellenwechsel und alle zehn Minuten über
@@ -252,8 +252,8 @@ Uhrzeiten, auch über Mitternacht, mit ausgeschriebenen Stunden und Minuten
 in der Dashboard-Sprache (REQ-VUE-ELECTRICITY-TARIFF).
 „Netzladung“ enthält Hauptschalter mit lokalem Status-/Fehlerfeedback,
 Ladeweise, bestätigte Ziel- und Startwerte, PV-Quelle, Gerätestatus und
-„Ladeplan & Prognose“. Ab 860 px nutzbarer Inhaltsbreite stehen die Karten
-nebeneinander, darunter in derselben DOM-Reihenfolge untereinander.
+den dauerhaft sichtbaren Planungsbereich. Ab 860 px nutzbarer Inhaltsbreite
+stehen die Karten nebeneinander, darunter in derselben DOM-Reihenfolge untereinander.
 Die Tarifwahl steht separat oberhalb. Die zeitvariable Übersicht stellt
 Netzladeziel und Startschwelle nebeneinander dar; Monate und PV-Quelle bilden
 beschriftete Zeilen. Die 100-%-Kalibrierungsausnahme bleibt als kurzer
@@ -811,8 +811,14 @@ Entladeprognose aus `discharge_forecast`, unabhängig vom Status des Bridge-Plan
 Verfügbarer Sensor, explizite Zeitzone, 1–60 Minuten gültige Beobachtung und
 positive mittlere Entladeleistung sind Voraussetzung. Verbindungsverlust oder
 ungültige Daten entfernen diese Prognose; frühere Bridge-Attribute dienen nicht
-als Ersatz. Die Anzeige benennt die untere Ladegrenze und berechnet keine Zeit
-selbst. Der berechnete Ladeplan bleibt als eigener Abschnitt erkennbar.
+als Ersatz für aktuelle Messwerte. Die Anzeige berechnet keine Zeit selbst.
+Prognose und Ladeentscheidung stehen als zusammenhängender Text unter
+„Ladeplanung“, ohne doppelte Verbrauchsangaben, Zwischenüberschriften oder
+allgemeinen Schätzungshinweis. Eine gültige aktuelle Prognose hat Vorrang vor
+der gespeicherten Verbrauchsbasis des Plans. Ohne aktuelle Prognose bleiben
+die vorhandenen Verbrauchsangaben für geplante/laufende Ladeaufträge erhalten.
+Der Planungsbereich einschließlich PV-Zeile ist ständig sichtbar und hat
+keine Aufklappfunktion, auch beim dynamischen Tarif.
 Dynamisch zeigt `ElectricityTariffView.vue` die tatsächlich angerechnete
 `pv_prognose_kwh` aus `price_charge_status_text` nur bei passender
 `pv_prognose_sensor` zum gespeicherten Tarifprofil. Die netzdienliche Prognose

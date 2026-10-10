@@ -38,10 +38,6 @@ const text = computed(() =>
   german.value
     ? {
         title: "Ladeplanung",
-        currentForecast: "Aktuelle Entladeprognose",
-        calculatedPlan: "Berechneter Ladeplan",
-        forecastHint:
-          "Schätzung aus dem gemessenen Verbrauch bis zur unteren Ladegrenze. Änderungen beim Verbrauch oder neue Ladung verändern die Prognose.",
         unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
         incomplete:
           "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
@@ -61,10 +57,6 @@ const text = computed(() =>
       }
     : {
         title: "Charging plan",
-        currentForecast: "Current discharge forecast",
-        calculatedPlan: "Calculated charging plan",
-        forecastHint:
-          "An estimate based on measured consumption until the lower charge limit is reached. Changes in consumption or additional charging change the forecast.",
         unavailable: "The charging plan is currently unavailable.",
         incomplete:
           "The charging plan is still incomplete. Charging times cannot currently be displayed.",
@@ -182,6 +174,9 @@ const assessment = computed(() => {
     : `Assessed at ${at} using current battery measurements.`;
 });
 const forecast = computed(() => {
+  // REQ-VUE-ELECTRICITY-TARIFF: prefer live observations without repeating
+  // the plan's retained consumption basis during the same description.
+  if (currentForecast.value) return null;
   const minutes = number(attributes.value.observation_minutes, 1, 60);
   if (!minutes || !dates.value.discharge) return null;
   const average = number(attributes.value.average_discharge_w, 0, Infinity, 0);
@@ -264,6 +259,9 @@ const paragraphs = computed(() => {
       return [text.value.unavailable];
   }
 });
+const description = computed(() =>
+  [currentForecast.value, ...paragraphs.value].filter(Boolean).join(" "),
+);
 const target = computed(() => {
   if (
     completed.value ||
@@ -286,16 +284,13 @@ const target = computed(() => {
     :aria-labelledby="`${id}-charge-plan`"
   >
     <h2 :id="`${id}-charge-plan`">{{ text.title }}</h2>
-    <section v-if="currentForecast" class="charge-plan__forecast">
-      <h3>{{ text.currentForecast }}</h3>
-      <p>{{ currentForecast }}</p>
-      <p class="charge-plan__forecast-hint">{{ text.forecastHint }}</p>
-    </section>
-    <h3 v-if="currentForecast && plan">{{ text.calculatedPlan }}</h3>
     <p v-if="configurationHint">{{ configurationHint }}</p>
-    <template v-for="(paragraph, index) in paragraphs" :key="index">
-      <p v-if="paragraph">{{ paragraph }}</p>
-    </template>
+    <p
+      class="charge-plan__description"
+      :class="{ 'charge-plan__forecast': currentForecast }"
+    >
+      {{ description }}
+    </p>
     <p v-if="dataGap">{{ dataGap }}</p>
     <p v-if="assessment">{{ assessment }}</p>
     <p v-if="target" class="charge-plan__target">{{ target }}</p>
@@ -326,14 +321,6 @@ const target = computed(() => {
 .charge-plan p:last-child {
   margin-bottom: 0;
 }
-.charge-plan__forecast {
-  margin-bottom: 20px;
-}
-.charge-plan__forecast h3 {
-  margin-top: 0;
-  font-size: 16px;
-}
-.charge-plan__forecast-hint,
 .charge-plan__target {
   color: var(--secondary-text-color, #666);
 }

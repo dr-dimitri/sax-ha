@@ -3098,8 +3098,8 @@ requirement_vue_charging:
     unter stromtarif nach REQ-VUE-ELECTRICITY-TARIFF. Die frühere Ansicht
     ladeautomatik und ihr separater Aktivierungsschalter sind entfernt.
     Native Entities und ihre Services bleiben erhalten. ChargePlan zeigt die
-    Backend-Ladeplanung unter Ladeplan & Prognose ohne zweiten Hauptschalter;
-    Aktivierung und Ladeweise werden gemeinsam in der Karte Netzladung bedient.
+    Backend-Ladeplanung im dauerhaft sichtbaren Planungsbereich ohne zweiten
+    Hauptschalter; Aktivierung und Ladeweise werden gemeinsam in der Karte Netzladung bedient.
     Tarifpreisfenster sind in Stromtarif und Amortisation dieselbe TarifPlan-Karte
     nach REQ-VUE-TARIFF-EDITOR. Gemeinsame Bedienkomponenten verwenden den Kontext
     aus REQ-VUE-ENTITY-BINDING und übersetzte HA-Metadaten.
@@ -3430,7 +3430,7 @@ requirement_vue_electricity_tariff:
     „Preise & Zeiten“ enthält Tarifkonfiguration, aktuellen Preis und
     aufklappbaren Tagespreisverlauf; „Netzladung“ enthält Automatikschalter,
     Ladeweise, bestätigte Zielwerte, dynamischen Ladestatus und
-    aufklappbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
+    dauerhaft sichtbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
     darüber.
     Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
     untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
@@ -3452,7 +3452,7 @@ requirement_vue_electricity_tariff:
     Dashboard-Sprache (DE/EN) mit passender Einzahl oder Mehrzahl ausgeschrieben;
     Nullanteile entfallen bei Dauern ab einer Minute.
 
-    Die PV-Zeile steht im aufklappbaren Bereich „Ladeplan & Prognose“, auch
+    Die PV-Zeile steht im dauerhaft sichtbaren Planungsbereich, auch
     während der Bearbeitung der Netzladung. Sie zeigt den Zahlenwert der
     gewählten Prognosequelle mit
     Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
@@ -3476,15 +3476,24 @@ requirement_vue_electricity_tariff:
     Festpreis und deaktivierte Tarife bleiben als bestehende Optionswerte gültig;
     die neue Auswahl erfindet dafür weder einen zeitvariablen noch dynamischen Preis.
 
-    Unter Ladeplan & Prognose zeigt ChargePlan im zeitvariablen Tarif zusätzlich
+    Unter Ladeplanung zeigt ChargePlan im zeitvariablen Tarif
     die aktuelle Entladeprognose aus sensor.discharge_forecast unabhängig vom
     Aktivierungsstatus der Ladeplanung. Voraussetzungen sind ein verfügbarer,
     verbundener Sensor, ein gültiger Zeitstempel mit Zeitzone, eine endliche
     Beobachtungsdauer von 1 bis 60 Minuten und positive mittlere Entladeleistung.
     Datum und Werte werden nach HA-Sprache und -Zeitzone formatiert. Die Anzeige
-    benennt die untere Ladegrenze; ungültige Daten werden nicht ergänzt oder aus
-    früheren Ladeplanwerten ersetzt. Berechneter Ladeplan und aktuelle Prognose
-    stehen getrennt. Die bisherige zweite Aktivierung in ChargePlan entfällt.
+    ergänzt ungültige aktuelle Messwerte nicht aus früheren Ladeplanwerten.
+    Aktuelle Prognose und Ladeentscheidung stehen in einem zusammenhängenden
+    Absatz unter einer einzigen Überschrift Ladeplanung. Die doppelte
+    Verbrauchsbeschreibung und die Zwischenüberschriften Aktuelle Entladeprognose
+    und Berechneter Ladeplan entfallen ebenso wie der allgemeine Hinweis zur
+    Schätzung und zu möglichen Verbrauchsänderungen (in DE und EN).
+    Eine gültige aktuelle Prognose ersetzt die wiederholte Verbrauchsbasis im
+    Text des Plans. Liegt keine aktuelle Prognose vor, bleiben die bisherigen
+    Verbrauchsangaben für geplante/laufende Aufträge erhalten; sie werden nicht
+    als aktuelle Messung ausgegeben. Der Planungsbereich einschließlich der
+    PV-Zeile bleibt bei zeitvariablem und dynamischem Tarif ohne Einklappung
+    dauerhaft sichtbar. Die bisherige zweite Aktivierung in ChargePlan entfällt.
     Im dynamischen Tarif stammt die angerechnete PV-Energie ausschließlich aus
     price_charge_status_text.pv_prognose_kwh und nur bei passender
     pv_prognose_sensor-Quelle zum gespeicherten Tarifprofil. 0 kWh ist erlaubt,
@@ -3740,6 +3749,11 @@ requirement_vue_electricity_tariff:
        Feldfehler in DE/EN, Fokus, erhaltene Quellen und bewusste Preiseingabe."
     - "Ladeentscheidung, aktuelle Preisanzeige und Amortisation verwenden denselben
        gültigen Bezugspreis; die zeitliche Buchung folgt REQ-ECONOMICS-ACCOUNTING."
+    - "ChargePlan-Komponenten- und Browsertests prüfen in DE/EN eine einzige
+       Verbrauchsbeschreibung mit direkt anschließender Ladeentscheidung,
+       dauerhaft sichtbare Planung ohne Aufklappen, entfernte Zwischenüberschriften
+       und Schätzungshinweise, aktuelle Messwerte vor gespeicherter Planbasis
+       sowie den Erhalt laufender Aufträge bei ausfallender aktueller Prognose."
     - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver
        Ladeplanung, vorhandene/fehlende Laufzeit, ausgeschalteten Hauptschalter,
        Archiv-Restore, zulässigen Quellenwechsel und konkurrierende Optionsänderungen."

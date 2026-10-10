@@ -121,7 +121,8 @@ dynamischen Tarifen auch die bereits verfügbaren Preise für morgen.
 Beide Tarifarten bündeln die Einstellungen in **Preise & Zeiten** und
 **Netzladung**. Auf breiten Ansichten stehen die Bereiche nebeneinander, auf
 dem Smartphone untereinander. Netzladeziel, Startschwelle und Monate sind direkt
-sichtbar; Preisverlauf und Ladeplan lassen sich bei Bedarf aufklappen.
+sichtbar. Auch die Ladeplanung ist dauerhaft sichtbar; den Preisverlauf kannst
+du bei Bedarf aufklappen.
 
 ![Zeitvariabler Stromtarif: Preise und Zeiten links, Netzladung mit Netzladeziel und Automatik rechts](docs/images/vue-stromtarif-desktop-light-de.png)
 
@@ -247,10 +248,12 @@ bleiben erhalten. Bei **Preise & Zeiten** steht **Übernehmen** oben und unten
 zur Verfügung; beide Buttons speichern dieselben Eingaben.
 Bereits gespeicherte Werte ändern sich beim Öffnen nicht.
 
-Unter **Ladeplan & Prognose** erscheint die aktuelle Entladeprognose, sobald
+Unter **Ladeplanung** erscheint die aktuelle Entladeprognose, sobald
 ausreichend gültige Verbrauchsdaten vorliegen. Sie zeigt, wie lange der Speicher
 voraussichtlich bis zur unteren Ladegrenze reicht, auch bei ausgeschalteter
-Ladeautomatik. Ohne gültige Prognose werden keine Zeiten geschätzt.
+Ladeautomatik. Prognose und Ladeentscheidung stehen ohne Wiederholung in einem
+zusammenhängenden Text. Die Planung bleibt dauerhaft sichtbar und muss nicht
+aufgeklappt werden. Ohne gültige Prognose werden keine Zeiten geschätzt.
 
 Der bisherige Tab **Zeitvariabler Tarif** entfällt. Alte Links öffnen automatisch
 **Stromtarif**. Die folgenden technischen Namen bezeichnen weiterhin die
@@ -302,12 +305,12 @@ Netzladung und der Speicher kann Sonnenstrom nutzen.
 
 #### Verbrauchsabhängig bis zum PV-Start laden
 
-![Aktuelle Entladeprognose und davon getrennt berechneter Ladeplan](docs/images/vue-stromtarif-prognose-desktop-light-de.png)
+![Zusammengefasste, dauerhaft sichtbare Ladeplanung](docs/images/vue-stromtarif-prognose-desktop-light-de.png)
 
 <details>
 <summary>Prognose und Ladeplan auf dem Smartphone</summary>
 
-<img src="docs/images/vue-stromtarif-prognose-mobile-dark-en.png" alt="Aktuelle Entladeprognose und berechneter Ladeplan auf dem Smartphone im dunklen Design, englische Sprache" width="320">
+<img src="docs/images/vue-stromtarif-prognose-mobile-dark-en.png" alt="Zusammengefasste Ladeplanung auf dem Smartphone im dunklen Design, englische Sprache" width="320">
 
 </details>
 
@@ -346,7 +349,7 @@ oder die prognostizierte Tagesenergiemenge allein bestimmen den Start nicht.
 Ohne passende PV-Prognose, ausreichenden vorhergesagten Ertrag oder gültige
 Batteriemesswerte startet keine geplante Netzladung.
 
-Die Karte **Ladeplanung** unter **Stromtarif → Ladeplan & Prognose** nennt die beobachteten
+Die Karte **Ladeplanung** unter **Stromtarif → Netzladung** nennt die beobachteten
 Minuten, den erwarteten Entladezeitpunkt, Ladebeginn und Ladeende sowie den
 PV-Start. Reicht die vorhandene Energie aus, meldet sie ausdrücklich, dass keine
 Netzladung nötig ist. Reichen Ladefenster oder Speicherkapazität nicht aus, zeigt

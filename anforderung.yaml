@@ -3430,6 +3430,12 @@ requirement_vue_electricity_tariff:
     Bedienelement sichtbar, auch nach dem Schließen der Bearbeitung.
     Aktueller Preis und Status bleiben sichtbar; Tagespreiskurve und Prognose
     sind anfangs eingeklappt.
+    Die Übersicht „Preise & Zeiten“ ergänzt hinter jedem täglichen Zeitfenster
+    dessen Dauer in Klammern, beispielsweise 00:00 – 04:59 (4 Stunden 59 Minuten).
+    Die Dauer ist die Differenz zwischen Start und Ende, bei Zeitfenstern über
+    Mitternacht bis zum Ende am Folgetag. Stunden und Minuten werden in der
+    Dashboard-Sprache (DE/EN) mit passender Einzahl oder Mehrzahl ausgeschrieben;
+    Nullanteile entfallen bei Dauern ab einer Minute.
 
     Die PV-Zeile steht im aufklappbaren Bereich „Ladeplan & Prognose“, auch
     während der Bearbeitung der Netzladung. Sie zeigt den Zahlenwert der

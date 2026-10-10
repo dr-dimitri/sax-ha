@@ -84,7 +84,9 @@ test("time-of-use groups prices and grid charging into compact responsive cards"
     .locator(".tariff-plan__periods li")
     .filter({ has: page.locator(".tariff-plan__badge") });
   await expect(cheapestPeriod).toHaveCount(1);
-  await expect(cheapestPeriod).toContainText("00:00 – 06:00");
+  await expect(cheapestPeriod).toContainText(
+    english ? "00:00 – 06:00 (6 hours)" : "00:00 – 06:00 (6 Stunden)",
+  );
   await expect(cheapestPeriod).toContainText(
     english ? "18.00 ct/kWh" : "18,00 ct/kWh",
   );

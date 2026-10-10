@@ -125,9 +125,8 @@ def _setpoint_mode_writes(client: MagicMock) -> list[int]:
 
     Genau die dürfen ausbleiben, wenn keine Automatik greifen darf. Der
     einmalige Abgleich auf die SmartMeter-Nullregelung (Modus 0) beim
-    Bootstrap-Abschluss ist dagegen erwünscht: Eine frisch gestartete
-    Instanz kennt den Gerätezustand nicht und schreibt ihn deshalb genau
-    einmal fest (siehe SaxPowerCoordinator._sun_charge_commanded_mode)."""
+    Bootstrap-Abschluss bleibt ohne frischen Modus-0-Readback erforderlich
+    (siehe REQ-GRID-SERVING-CHARGE)."""
     return [
         write.kwargs["value"]
         for write in client.write_register.await_args_list

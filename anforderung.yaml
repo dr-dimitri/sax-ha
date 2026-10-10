@@ -426,7 +426,18 @@ requirement_extended_mode_resilience:
         Fehlerbehandlung gilt ausschließlich für den Poll-Pfad; Services
         und Entity-Setter geben Fehler weiterhin an den Aufrufer zurück
         (REQ-MANUAL-GRID-CHARGE / REQ-TIMED-SOC-CHARGE).
+      - Das SAX-Gateway kann einer FC06-Fehlerantwort die MBAP-Länge 6 des
+        Schreibauftrags statt der korrekten Länge 3 mitgeben. Der
+        Infrastrukturadapter korrigiert ausschließlich diese Länge bei
+        passender Transaktions-ID, Protokoll-ID, konfigurierter SunSpec-ID,
+        Funktion 0x86 und bekanntem Exception-Code. TCP-Fragmentierung bleibt
+        beim Modbus-Client. Die Antwort bleibt ein Fehler, niemals eine
+        Schreibquittung; Ausnahme 6 wird als "Gerät beschäftigt" gemeldet.
+        Damit verursacht eine empfangene Ablehnung keine Timeout-/Retry-Kette,
+        die den Messverlauf der Entladeprognose wiederholt zurücksetzt.
   acceptance_criteria:
+    - "tests/test_modbus_framing.py spielt die fehlerhafte SAX-Antwort über TCP einschließlich Fragmentierung nach: genau ein Schreibversuch, zeitnahe Ablehnung, nachfolgender Read erfolgreich, keine optimistische Quittung."
+    - "Eine Minute gültiger Messungen liefert trotz abgelehnter eigener Rücksetzversuche eine Prognose; der unquittierte Rücksetzauftrag bleibt erhalten. Erfolgsantworten, andere Geräte/Transaktionen und korrekt gerahmte Fehler bleiben unverändert."
     - "Live-Test gegen einen simulierten Modbus-Server ohne SunSpec-Modus-
        Gerät zeigt: Config Entry lädt erfolgreich, Basic-Mode-Sensoren
        liefern echte Werte, SunSpec-Sensoren existieren als Entity mit
@@ -1654,13 +1665,17 @@ requirement_grid_serving_charge:
     erneut, obwohl _sun_charge_task bereits None ist. Jeder inaktive Pfad
     ruft async_stop_sun_charge auf. Die Methode gleicht einen einfachen
     Sollzustand ab: _sun_charge_commanded_mode startet mit None (noch nicht
-    synchronisiert), daher schreibt jede neue Coordinator-Instanz bei ihrer
-    ersten inaktiven Entscheidung Register 40051 genau einmal ausdrücklich
-    auf 0 - auch wenn der erste Read bereits 0 meldet und kein Task existiert.
-    Erst nach dieser quittierten Synchronisierung sind weitere unveränderte
-    inaktive Takte No-Ops. Damit hängt die Nullregelung direkt nach Reload/
-    Neuinstallation nicht mehr von einem nur im RAM vorhandenen Task- oder
-    Besitzmerker und auch nicht von einer erkannten Zustandsflanke ab.
+    synchronisiert). Meldet eine frische, erfolgreiche HIGH-Messung bereits
+    Modus 0 und existiert weder ein eigener Task noch ein offener
+    Rücksetzauftrag, übernimmt die erste inaktive Entscheidung diesen
+    beobachteten Ausgangszustand ohne redundanten Schreibzugriff. Ein
+    veralteter/fehlender Readback oder Modus 1 erfordert weiterhin einen
+    quittierten Reset. Die Übernahme erzeugt keine Schreibquittung und
+    löscht keine offenen Rücksetzaufträge; ein expliziter Stopp mit
+    require_confirmation bleibt an die Gerätequittung gebunden.
+    Weitere unveränderte inaktive Takte sind No-Ops. Damit hängt die
+    Nullregelung nach Reload/Neuinstallation von gültigen Gerätemesswerten
+    oder einer Schreibquittung ab, nicht allein von RAM-Besitzmerkern.
     Zusätzlich wird die tatsächliche Rückmeldung aus Register 40051 weiter
     ausgewertet: Meldet das Gerät später Modus 1, obwohl der Sollzustand 0
     ist, wird die Nullregelung erneut geschrieben. Ein transient

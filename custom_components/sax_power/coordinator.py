@@ -576,12 +576,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Modbus-Fehler nicht zusammen mit der Task-Referenz verloren
         # (REQ-GRID-SERVING-CHARGE).
         self._sun_charge_reset_required = False
-        # Letzter von dieser Coordinator-Instanz erfolgreich geschriebener
-        # Sollzustand für Register 40051. None bedeutet bewusst "noch nie
-        # abgeglichen": Auch eine frisch gestartete, inaktive Instanz
-        # schreibt dadurch genau einmal die Nullregelung, statt aus einem
-        # leeren Python-Taskzustand fälschlich auf den Gerätezustand zu
-        # schließen (REQ-GRID-SERVING-CHARGE).
+        # None erzwingt einen Abgleich mit frischem Readback oder quittiertem
+        # Write statt einer Annahme aus dem leeren Python-Taskzustand
+        # (REQ-GRID-SERVING-CHARGE). Die Revision zählt nur echte Write-ACKs.
         self._sun_charge_commanded_mode: int | None = None
         self._sun_charge_command_revision = 0
         self._last_observed_ic_control_mode: int | None = None
@@ -2956,9 +2953,15 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     f"fehlgeschlagen: {err}"
                 ) from err
             if result.isError():
+                detail = str(result)
+                if getattr(result, "exception_code", None) == 6:
+                    detail = (
+                        "Gerät beschäftigt (Modbus-Ausnahme 6); bei dauerhaftem "
+                        "Fehler Schreibfreigabe und Geräte-Firmware prüfen"
+                    )
                 raise HomeAssistantError(
                     f"Modbus-Fehler beim Schreiben von Register {address} "
-                    f"(Slave-ID {device_id}): {result}"
+                    f"(Slave-ID {device_id}): {detail}"
                 )
 
     # -- Max-SOC -----------------------------------------------------------
@@ -3959,12 +3962,24 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Gleiche Register 40051 mit dem Sollzustand Nullregelung ab.
 
-        Die erste inaktive Entscheidung jeder Coordinator-Instanz schreibt
-        immer. Danach ist die Methode ein No-Op, solange weder Task/
-        Rücksetzauftrag noch eine abweichende Geräte-Rückmeldung vorliegen.
+        Ein frischer initialer Readback von Modus 0 genügt ohne eigenen
+        Steuerauftrag. Eigene Rücksetzaufträge benötigen weiterhin ein ACK.
         Fehlgeschlagene Rücksetzungen werden beim nächsten Takt wiederholt.
         Explizite manuelle Stopps melden sie zusätzlich dem Serviceaufrufer.
         """
+        if (
+            not require_confirmation
+            and self._sun_charge_commanded_mode is None
+            and self._sun_charge_task is None
+            and not self._sun_charge_reset_required
+            and self._last_observed_ic_control_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+            and self._high_sample_control_mode == SUN_IC_CONTROL_MODE_SMARTMETER
+            and self._timed_discharge_measurements_fresh()
+        ):
+            # REQ-GRID-SERVING-CHARGE: this is observed initial state, not a
+            # write acknowledgement or permission to clear a failed reset.
+            self._sun_charge_commanded_mode = SUN_IC_CONTROL_MODE_SMARTMETER
+            return
         needs_reset = (
             self._sun_charge_task is not None
             or self._sun_charge_reset_required
@@ -5781,9 +5796,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 grid_serving_active_now = False
                 # Nicht aus dem Vorhandensein eines Python-Tasks auf den
-                # Gerätezustand schließen: Der erste inaktive Takt gleicht
-                # Register 40051 ausdrücklich mit Modus 0 ab, danach ist der
-                # Aufruf bei unverändertem Sollzustand ein No-Op.
+                # Gerätezustand schließen (REQ-GRID-SERVING-CHARGE).
                 await self.async_stop_sun_charge()
 
         # _async_update_data arbeitet beim ersten Refresh noch mit einem

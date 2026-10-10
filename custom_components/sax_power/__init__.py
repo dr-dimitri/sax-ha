@@ -63,6 +63,7 @@ from .const import (
 )
 from .coordinator import SaxPowerCoordinator
 from .domain.tariff import TariffType
+from .infrastructure.modbus_framing import SaxModbusPacketTrace
 from .vue_dashboard import async_sync_vue_dashboard, async_unload_vue_dashboard
 
 _LOGGER = logging.getLogger(__name__)
@@ -234,6 +235,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = AsyncModbusTcpClient(
         host=entry.data[CONF_HOST],
         port=entry.data.get(CONF_PORT, 502),
+        trace_packet=SaxModbusPacketTrace(
+            entry.data.get(CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED)
+        ),
     )
     coordinator: SaxPowerCoordinator | None = None
     try:

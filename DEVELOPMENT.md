@@ -140,7 +140,13 @@ gewählte Quelle beim Einrichten/Quellenwechsel und alle zehn Minuten über
 der Sensor veröffentlicht den letzten gültigen, nach kWh normalisierten Wert
 auch während Quell- oder Modbus-Ausfällen. Quellenwechsel löschen den alten
 Anzeigewert. `source_entity_id` und `last_successful_update` erklären Herkunft
-und Alter. Der Anzeigecache ist unabhängig von den weiterhin strikt geprüften
+und Alter. `reading_status` unterscheidet `waiting`, `available` und `error`:
+Fehlende/noch unbekannte Quellwerte warten, fehlgeschlagene Abrufe und ungültige
+oder nicht verfügbare Quellwerte melden einen Fehler. Ein gültiger Cachewert
+behält Vorrang. Ohne Zahlenwert veröffentlicht der lokale Sensor `unknown`,
+damit Home Assistant seine Statusattribute weiterhin an das Dashboard überträgt.
+Die Zeile heißt **PV-Ertragsprognose** und unterscheidet Warten, Ertragswert und
+Abruffehler. Der Anzeigecache ist unabhängig von den weiterhin strikt geprüften
 Prognosen der Ladeplanung (siehe `REQ-VUE-ELECTRICITY-TARIFF`).
 
 Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,

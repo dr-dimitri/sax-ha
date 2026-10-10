@@ -174,8 +174,10 @@ function example({ domain, key, entity_id }) {
     ["grid_serving_forecast", "charging_pv_forecast"].includes(key)
   )
     attributes.unit_of_measurement = "kWh";
-  if (key === "charging_pv_forecast")
+  if (key === "charging_pv_forecast") {
     attributes.source_entity_id = "sensor.pv_forecast";
+    attributes.reading_status = "available";
+  }
   if (key === "grid_serving_forecast_threshold")
     attributes = { min: 0, max: 100, step: 0.1, unit_of_measurement: "kWh" };
   if (key === "next_cell_calibration") attributes.device_class = "date";

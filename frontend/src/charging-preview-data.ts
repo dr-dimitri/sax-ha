@@ -87,6 +87,7 @@ export function chargingSample(language = "de"): {
           attributes = {
             unit_of_measurement: "kWh",
             source_entity_id: "sensor.pv_forecast",
+            reading_status: "available",
           };
         }
         if (key === "grid_serving_forecast") {

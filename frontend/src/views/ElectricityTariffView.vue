@@ -98,7 +98,9 @@ const text = computed(() =>
         invalidPvFactor:
           "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
         charging: "Netzladung",
-        pvSummary: "PV-Prognose",
+        pvSummary: "PV-Ertragsprognose",
+        pvWaiting: "Warte auf Ertragswert …",
+        pvReadError: "Ertragswert derzeit nicht abrufbar",
         noPv: "Nicht eingerichtet",
         gross: "Alle Preise brutto in ct/kWh.",
         activationOff: "Keine automatische Ladung aus dem Netz.",
@@ -198,7 +200,9 @@ const text = computed(() =>
           "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
         invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
         charging: "Grid charging",
-        pvSummary: "Solar forecast",
+        pvSummary: "Solar yield forecast",
+        pvWaiting: "Waiting for yield data …",
+        pvReadError: "Yield data currently unavailable",
         noPv: "Not configured",
         gross: "All prices include tax and use ct/kWh.",
         activationOff: "No automatic charging from the grid.",
@@ -430,10 +434,14 @@ const pvForecast = computed(() => {
       ? profile.value?.profiles?.dynamic.pv_sensor
       : profile.value?.profiles?.time_of_use.pv_sensor;
   if (!source) return text.value.noPv;
+  if (!dashboard?.connected.value) return text.value.pvReadError;
   const entity = dashboard?.entity("sensor", "charging_pv_forecast");
-  return entity?.state?.attributes.source_entity_id === source
-    ? entity.displayValue
-    : text.value.unavailable;
+  if (entity?.state?.attributes.source_entity_id !== source)
+    return text.value.pvWaiting;
+  if (entity.available) return entity.displayValue;
+  return entity.state?.attributes.reading_status === "error"
+    ? text.value.pvReadError
+    : text.value.pvWaiting;
 });
 function showPriceError(field: PriceErrorField, message: string) {
   error.value = message;

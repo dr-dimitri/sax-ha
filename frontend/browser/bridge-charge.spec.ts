@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
-import type { HomeAssistant } from "../src/types";
+import type { HomeAssistant, TariffProfile } from "../src/types";
 
 test("matching forecast and no-charge plan form one permanently visible description", async ({
   page,
@@ -15,8 +15,26 @@ test("matching forecast and no-charge plan form one permanently visible descript
     const observation = { observation_minutes: 7.3, average_discharge_w: 342 };
     const planId = "sensor.demo_bridge_charge_plan";
     const forecastId = "sensor.demo_discharge_forecast";
+    const original = host.hass.callWS!;
     host.hass = {
       ...host.hass,
+      callWS: async <T>(
+        request: Readonly<Record<string, unknown>>,
+      ): Promise<T> => {
+        const result = await original<T>(request);
+        if (request.type !== "sax_power/dashboard/tariff/get") return result;
+        const profile = result as TariffProfile;
+        return {
+          ...profile,
+          profiles: {
+            ...profile.profiles,
+            time_of_use: {
+              ...profile.profiles!.time_of_use,
+              pv_sensor: "sensor.pv_forecast",
+            },
+          },
+        } as T;
+      },
       states: {
         ...host.hass.states,
         [planId]: {
@@ -36,6 +54,18 @@ test("matching forecast and no-charge plan form one permanently visible descript
       },
     };
   });
+  const prices = panel.locator(".tariff-plan");
+  await prices.locator("header .editor-actions > button:first-child").click();
+  await prices
+    .getByRole("button", {
+      name: english ? "Cancel" : "Abbrechen",
+      exact: true,
+    })
+    .last()
+    .click();
+  await expect(panel.locator(".electricity-pv-summary dd")).toHaveText(
+    english ? "12.4 kWh" : "12,4 kWh",
+  );
   const card = panel.locator(".charge-plan");
   await expect(card).toBeVisible();
   await expect(card.locator("h2, h3")).toHaveText([

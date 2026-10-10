@@ -3452,7 +3452,8 @@ requirement_vue_electricity_tariff:
     Dashboard-Sprache (DE/EN) mit passender Einzahl oder Mehrzahl ausgeschrieben;
     Nullanteile entfallen bei Dauern ab einer Minute.
 
-    Die PV-Zeile steht im dauerhaft sichtbaren Planungsbereich, auch
+    Die Zeile PV-Ertragsprognose (EN: Solar yield forecast) steht im dauerhaft
+    sichtbaren Planungsbereich, auch
     während der Bearbeitung der Netzladung. Sie zeigt den Zahlenwert der
     gewählten Prognosequelle mit
     Energieeinheit statt deren Sensornamen. Der abgeleitete HA-Sensor
@@ -3462,11 +3463,19 @@ requirement_vue_electricity_tariff:
     nichtnegative Energieangaben werden nach kWh umgerechnet; 0 kWh ist gültig.
     Bei Lesefehlern, fehlenden, unbekannten, nicht verfügbaren oder ungültigen
     Quellwerten bleibt der letzte gültige Wert verfügbar, auch bei einem
-    Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint Nicht verfügbar;
-    ohne ausgewählte Quelle Nicht eingerichtet. Ein Quellenwechsel verwirft
+    Modbus-Ausfall. Ohne vorherigen gültigen Wert erscheint bei fehlender oder
+    noch unbekannter Quelle Warte auf Ertragswert … (EN: Waiting for yield data …).
+    Ein fehlgeschlagener Abruf, Timeout, ungültiger oder nicht verfügbarer
+    Quellwert zeigt Ertragswert derzeit nicht abrufbar
+    (EN: Yield data currently unavailable); ebenso eine getrennte Dashboard-Verbindung.
+    Ohne ausgewählte Quelle erscheint Nicht eingerichtet. Ein Quellenwechsel verwirft
     den alten Anzeigewert und verspätete Antworten der vorherigen Quelle.
     source_entity_id und last_successful_update machen Herkunft und Zeitpunkt
-    nachvollziehbar. Diese Anzeige ersetzt keine Sicherheitsprüfung oder
+    nachvollziehbar; reading_status unterscheidet waiting, available und error.
+    Der lokale Sensor bleibt verfügbar und veröffentlicht fehlenden Ertrag als
+    unknown, damit Home Assistant auch dann die Statusattribute überträgt.
+    Der separat berechnete PV-Start bleibt von diesem Anzeigestatus unabhängig.
+    Diese Anzeige ersetzt keine Sicherheitsprüfung oder
     Aktualitätsprüfung der Ladeplanung; deren ungültige Prognosen bleiben
     ein Ausschlussgrund für die betroffene Ladefreigabe.
 
@@ -3754,6 +3763,11 @@ requirement_vue_electricity_tariff:
        dauerhaft sichtbare Planung ohne Aufklappen, entfernte Zwischenüberschriften
        und Schätzungshinweise, aktuelle Messwerte vor gespeicherter Planbasis
        sowie den Erhalt laufender Aufträge bei ausfallender aktueller Prognose."
+    - "tests/test_pv_forecast_reading.py prüft Warten, Abruffehler, Timeout,
+       Erholung zu 0 kWh, gültigen Cache bei Ausfällen und verspätete Fehler
+       alter Quellen sowie die Statusübertragung über echte HA-Entitäten.
+       Komponenten- und Browsertests prüfen die übersetzte PV-Ertragsprognose,
+       Quellenwechsel und den unabhängig weiterhin sichtbaren PV-Start."
     - "tests/test_dashboard_bridge_source.py prüft Quellenentfernung bei aktiver
        Ladeplanung, vorhandene/fehlende Laufzeit, ausgeschalteten Hauptschalter,
        Archiv-Restore, zulässigen Quellenwechsel und konkurrierende Optionsänderungen."

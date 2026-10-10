@@ -255,6 +255,13 @@ Ladeautomatik. Prognose und Ladeentscheidung stehen ohne Wiederholung in einem
 zusammenhängenden Text. Die Planung bleibt dauerhaft sichtbar und muss nicht
 aufgeklappt werden. Ohne gültige Prognose werden keine Zeiten geschätzt.
 
+Die **PV-Ertragsprognose** zeigt den Ertragswert in kWh. Solange noch kein Wert
+vorliegt, erscheint **Warte auf Ertragswert …**; bei einem Abruffehler
+**Ertragswert derzeit nicht abrufbar**. Bereits gelesene gültige Werte bleiben
+bei vorübergehenden Ausfällen erhalten. Der PV-Start wird separat aus den
+Zeitabschnitten der Solarprognose berechnet und kann bereits bekannt sein,
+während der Ertragswert noch fehlt.
+
 Der bisherige Tab **Zeitvariabler Tarif** entfällt. Alte Links öffnen automatisch
 **Stromtarif**. Die folgenden technischen Namen bezeichnen weiterhin die
 vorhandenen Home-Assistant-Entitäten.

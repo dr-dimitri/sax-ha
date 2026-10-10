@@ -6493,7 +6493,9 @@ var Hl = ["aria-busy"], Ul = {
 			invalidAttribute: "Bitte einen Attributnamen mit höchstens 128 Zeichen eingeben oder das Feld für die automatische Erkennung leer lassen.",
 			invalidPvFactor: "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
 			charging: "Netzladung",
-			pvSummary: "PV-Prognose",
+			pvSummary: "PV-Ertragsprognose",
+			pvWaiting: "Warte auf Ertragswert …",
+			pvReadError: "Ertragswert derzeit nicht abrufbar",
 			noPv: "Nicht eingerichtet",
 			gross: "Alle Preise brutto in ct/kWh.",
 			activationOff: "Keine automatische Ladung aus dem Netz.",
@@ -6572,7 +6574,9 @@ var Hl = ["aria-busy"], Ul = {
 			invalidAttribute: "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
 			invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
 			charging: "Grid charging",
-			pvSummary: "Solar forecast",
+			pvSummary: "Solar yield forecast",
+			pvWaiting: "Waiting for yield data …",
+			pvReadError: "Yield data currently unavailable",
 			noPv: "Not configured",
 			gross: "All prices include tax and use ct/kWh.",
 			activationOff: "No automatic charging from the grid.",
@@ -6650,8 +6654,9 @@ var Hl = ["aria-busy"], Ul = {
 		}), _e = Z(() => ro(o.value?.profiles?.dynamic.feed_in_price_ct_kwh, t.hass, 2)), ve = Z(() => {
 			let e = s.value === "dynamic" ? o.value?.profiles?.dynamic.pv_sensor : o.value?.profiles?.time_of_use.pv_sensor;
 			if (!e) return i.value.noPv;
+			if (!n?.connected.value) return i.value.pvReadError;
 			let t = n?.entity("sensor", "charging_pv_forecast");
-			return t?.state?.attributes.source_entity_id === e ? t.displayValue : i.value.unavailable;
+			return t?.state?.attributes.source_entity_id === e ? t.available ? t.displayValue : t.state?.attributes.reading_status === "error" ? i.value.pvReadError : i.value.pvWaiting : i.value.pvWaiting;
 		});
 		function ye(e, t) {
 			_.value = t, O.value && (y.value = e, mn(() => {

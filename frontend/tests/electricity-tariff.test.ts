@@ -219,13 +219,21 @@ async function mount(
       listeners.get("ready")?.forEach((callback) => callback());
       await flush();
     },
-    async update(key: string, state: string) {
+    async update(
+      key: string,
+      state: string,
+      attributes: Record<string, unknown> = {},
+    ) {
       const id = sample.metadata.find((item) => item.key === key)?.entity_id!;
       hass.value = {
         ...hass.value,
         states: {
           ...hass.value.states,
-          [id]: { ...hass.value.states[id]!, state },
+          [id]: {
+            ...hass.value.states[id]!,
+            state,
+            attributes: { ...hass.value.states[id]!.attributes, ...attributes },
+          },
         },
       };
       await flush();
@@ -2089,6 +2097,51 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: consistent dynamic setup", () => {
 describe("PV forecast content inside the always-visible charging plan", () => {
   for (const type of ["time_of_use", "dynamic"] as const) {
     for (const language of ["de", "en"]) {
+      it(`${type} distinguishes a pending yield from an error and preserves numbers in ${language}`, async () => {
+        const fixture = await mount({ type, language });
+        fixture.stored.profiles![type].pv_sensor = "sensor.pv_forecast";
+        await fixture.dashboard.loadTariff();
+        const summary = () =>
+          fixture.root.querySelector(".electricity-pv-summary dd")!.textContent;
+        expect(
+          fixture.root.querySelector(".electricity-pv-summary dt")!.textContent,
+        ).toBe(
+          language === "de" ? "PV-Ertragsprognose" : "Solar yield forecast",
+        );
+        const waiting =
+          language === "de"
+            ? "Warte auf Ertragswert …"
+            : "Waiting for yield data …";
+        const failure =
+          language === "de"
+            ? "Ertragswert derzeit nicht abrufbar"
+            : "Yield data currently unavailable";
+        await fixture.update("charging_pv_forecast", "unknown", {
+          reading_status: "waiting",
+        });
+        expect(summary()).toBe(waiting);
+        await fixture.update("charging_pv_forecast", "unknown", {
+          reading_status: "error",
+        });
+        expect(summary()).toBe(failure);
+        fixture.stored.profiles![type].pv_sensor = "sensor.new_plant";
+        await fixture.dashboard.loadTariff();
+        expect(summary()).toBe(waiting);
+        await fixture.update("charging_pv_forecast", "0", {
+          source_entity_id: "sensor.new_plant",
+          reading_status: "available",
+        });
+        expect(summary()).toBe("0 kWh");
+        await fixture.update("charging_pv_forecast", "14.8");
+        expect(summary()).toBe(language === "de" ? "14,8 kWh" : "14.8 kWh");
+        await fixture.disconnect();
+        expect(summary()).toBe(failure);
+        await fixture.reconnect();
+        expect(summary()).toBe(language === "de" ? "14,8 kWh" : "14.8 kWh");
+        expect(fixture.callService).not.toHaveBeenCalled();
+        expect(writes(fixture)).toHaveLength(0);
+      });
+
       it(`${type} shows the cached value and unit in ${language}, including zero and HA updates`, async () => {
         const fixture = await mount({ type, language });
         expect(
@@ -2149,12 +2202,12 @@ describe("PV forecast content inside the always-visible charging plan", () => {
     fixture.stored.profiles!.time_of_use.pv_sensor = "sensor.pv_forecast";
     await fixture.dashboard.loadTariff();
     await fixture.update("charging_pv_forecast", "unavailable");
-    expect(summary()).toBe("Nicht verfügbar");
+    expect(summary()).toBe("Warte auf Ertragswert …");
     await fixture.update("charging_pv_forecast", "12.4");
     expect(summary()).toBe("12,4 kWh");
     fixture.stored.profiles!.time_of_use.pv_sensor = "sensor.another_plant";
     await fixture.dashboard.loadTariff();
     await flush();
-    expect(summary()).toBe("Nicht verfügbar");
+    expect(summary()).toBe("Warte auf Ertragswert …");
   });
 });

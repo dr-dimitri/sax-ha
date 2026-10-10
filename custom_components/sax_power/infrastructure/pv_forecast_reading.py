@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Literal
 
+from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_component import async_update_entity
@@ -33,6 +35,7 @@ class PvForecastReading:
         self.source_entity_id: str | None = None
         self.value_kwh: float | None = None
         self.last_successful_update: datetime | None = None
+        self._read_failed = False
         self._unsubscribe: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
@@ -51,6 +54,7 @@ class PvForecastReading:
         self.source_entity_id = source
         self.value_kwh = None
         self.last_successful_update = None
+        self._read_failed = False
         if source is not None:
             self._read(source)
             self._unsubscribe = async_track_time_interval(
@@ -59,15 +63,25 @@ class PvForecastReading:
             self._schedule_refresh()
         self._notify()
 
+    @property
+    def status(self) -> Literal["waiting", "available", "error"]:
+        """Keep a valid cached yield visible during transient read failures."""
+        if self.value_kwh is not None:
+            return "available"
+        return "error" if self._read_failed else "waiting"
+
     def _read(self, source: str) -> None:
         state = self._hass.states.get(source)
-        if state is None:
+        if state is None or state.state == STATE_UNKNOWN:
+            self._read_failed = False
             return
         value = normalize_energy_kwh(
             state.state, state.attributes.get("unit_of_measurement")
         )
         if value is None or value < 0:
+            self._read_failed = True
             return
+        self._read_failed = False
         self.value_kwh = value
         self.last_successful_update = dt_util.utcnow()
 
@@ -99,9 +113,18 @@ class PvForecastReading:
             async with asyncio.timeout(UPDATE_TIMEOUT):
                 await async_update_entity(self._hass, source)
         except HomeAssistantError, TimeoutError, OSError, ValueError:
+            # REQ-VUE-ELECTRICITY-TARIFF: failures from an old source must
+            # not replace the new source's pending or successful reading.
+            if (
+                not self._shutdown
+                and revision == self._revision
+                and source == self._source()
+            ):
+                self._read_failed = True
+                self._notify()
             return
         # REQ-VUE-ELECTRICITY-TARIFF: A late response belongs to its old source.
-        if revision != self._revision or source != self._source():
+        if self._shutdown or revision != self._revision or source != self._source():
             return
         self._read(source)
         self._notify()

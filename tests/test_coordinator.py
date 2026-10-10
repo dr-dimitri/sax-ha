@@ -650,24 +650,24 @@ async def test_normal_block_throttled_high_block_follows_own_interval(hass) -> N
     ):
         await coordinator._async_update_data()
     assert basic_read_count() == 1  # < scan_interval (10s): kein Reread
-    # Der initiale Nullregelungs-Write hat den HIGH-Cache absichtlich
-    # invalidiert; daher wird sein Readback unabhängig vom Intervall sofort
-    # beim nächsten Takt verifiziert.
-    assert high_read_count() == 2
+    # Der frische Modus-0-Readback benötigt keinen initialen Reset und
+    # invalidiert daher den HIGH-Cache nicht (REQ-GRID-SERVING-CHARGE).
+    assert high_read_count() == 1
+    client.write_register.assert_not_awaited()
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
     ):
         await coordinator._async_update_data()
     assert basic_read_count() == 1  # weiterhin < scan_interval
-    assert high_read_count() == 3  # >= HIGH-Intervall seit t=1001 -> Reread
+    assert high_read_count() == 2  # >= HIGH-Intervall seit t=1000 -> Reread
 
     with patch(
         "custom_components.sax_power.coordinator.monotonic", return_value=1011.0
     ):
         await coordinator._async_update_data()
     assert basic_read_count() == 2  # >= scan_interval seit t=1000 -> Reread
-    assert high_read_count() == 4  # >= HIGH-Intervall seit t=1003 -> Reread
+    assert high_read_count() == 3  # >= HIGH-Intervall seit t=1003 -> Reread
 
 
 async def test_low_block_read_only_once_per_interval(hass) -> None:
@@ -3137,8 +3137,9 @@ async def test_enforce_grid_charge_starts_when_smartmeter_power_missing(hass) ->
 async def test_stop_sun_charge_initially_reconciles_then_is_noop(hass) -> None:
     """REQ-GRID-SERVING-CHARGE: Eine neue Coordinator-Instanz darf aus dem
     fehlenden Python-Task nicht auf den Gerätezustand schließen. Die erste
-    inaktive Entscheidung schreibt Modus 0 genau einmal; danach ist derselbe
-    Sollzustand ein No-Op und der HA-Cache zeigt die Quittung sofort."""
+    inaktive Entscheidung bei beobachtetem Modus 1 schreibt Modus 0 genau
+    einmal; danach ist derselbe Sollzustand ein No-Op und der HA-Cache zeigt
+    die Quittung sofort."""
     client = _make_client()
     write_result = MagicMock()
     write_result.isError.return_value = False

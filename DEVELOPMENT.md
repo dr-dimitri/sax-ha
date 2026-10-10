@@ -949,6 +949,23 @@ Sonderfall.
 
 ### Entladeprognose (REQ-DISCHARGE-FORECAST)
 
+Empfangene Modbus-Schreibablehnungen dürfen die Messreihe nicht durch
+Timeout-Wiederholungen unterbrechen: `infrastructure/modbus_framing.py` wird
+beim produktiven Client als `trace_packet` eingebunden und korrigiert die
+beobachtete SAX-FC06-Exception mit kopierter Auftragslänge im MBAP-Header.
+Die Korrektur ist an den ausstehenden Auftrag und die konfigurierte
+SunSpec-ID gebunden; sie erhält den Fehlercode und verändert keine ACKs.
+Ausnahme 6 bedeutet „Gerät beschäftigt“, nicht erfolgreiche Steuerung.
+`tests/test_modbus_framing.py` prüft den echten TCP-Pfad einschließlich
+fragmentierter Antworten, Folge-Reads und Prognoseaufbau trotz Ablehnung.
+
+Beim ersten inaktiven Steuerabgleich genügt ein frischer Modus-0-Readback,
+solange kein eigener Writer oder Rücksetzauftrag existiert. Ein eigener
+fehlgeschlagener Reset wird weiterhin nur durch seine Schreibquittung
+erledigt; auch ein expliziter manueller Stopp bleibt quittungspflichtig.
+So erzeugt ein bereits frei regelnder Speicher nach Neustart keine unnötige
+Rücksetzschleife (REQ-GRID-SERVING-CHARGE).
+
 Die unabhängige Entladeprognose (`REQ-DISCHARGE-FORECAST`) liegt in
 `domain/discharge_forecast.py`. Der Coordinator übergibt pro neuer, frischer
 HIGH-Messung Speicherleistung, Kapazität, SunSpec-SOC und Geräte-Minimal-SOC.

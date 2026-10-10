@@ -253,7 +253,7 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
         patch(
             "custom_components.sax_power.AsyncModbusTcpClient",
             return_value=client,
-        ),
+        ) as client_factory,
         patch(
             "custom_components.sax_power.SaxPowerCoordinator."
             "async_load_calibration_state",
@@ -297,6 +297,12 @@ async def test_setup_loads_persisted_state_before_first_refresh(hass) -> None:
     ):
         assert await async_setup_entry(hass, entry) is True
 
+    trace = client_factory.call_args.kwargs["trace_packet"]
+    request = bytes.fromhex("0002 0000 0006 64 06 0033 0000")
+    trace(True, request)
+    assert trace(False, bytes.fromhex("0002 0000 0006 64 86 06")) == bytes.fromhex(
+        "0002 0000 0003 64 86 06"
+    )
     assert order == [
         "calibration",
         "energy",

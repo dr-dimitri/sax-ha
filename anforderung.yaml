@@ -2346,7 +2346,10 @@ requirement_diagnostics:
     tariff zeigt das ausgewertete Tarifmodell einschließlich Fenstergültigkeit,
     aller Preisfenster, aktueller Quote und Fehlergrund. Eine gezielte Auswahl
     aktiver Rohoptionen erhält auch unlesbare Preisfenster, Preisattribut,
-    Einheit, PV-Faktor und Prognosequellen für die Fehleranalyse. source_states
+    Einheit, PV-Faktor und Prognosequellen für die Fehleranalyse.
+    tariff.source_configuration_errors benennt beschädigte Quelloptionen,
+    ohne dass der Export scheitert; fehlerhafte dynamische Quellen liefern
+    keine Quote. source_states
     zeigt konfigurierte Preis-/PV-Quellen mit Zustand, Verfügbarkeit, Einheit
     und Zeitstempeln; nur vom Preisparser berücksichtigte Attribute werden
     zusätzlich exportiert. Inaktive Tarifprofile und beliebige Fremdsensor-

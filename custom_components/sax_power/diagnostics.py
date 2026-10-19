@@ -99,11 +99,12 @@ async def async_get_config_entry_diagnostics(
         DATA_COORDINATOR
     ]
     planner = coordinator.price_planner
-    price_attributes = (
-        (planner.price_attribute,)
-        if planner.price_attribute
-        else tuple(key for group in ATTRIBUTE_GROUPS for key in group)
-    )
+    price_attribute = planner.price_attribute
+    price_attributes = tuple(key for group in ATTRIBUTE_GROUPS for key in group)
+    if price_attribute:
+        price_attributes = (
+            (price_attribute,) if isinstance(price_attribute, str) else ()
+        )
     tariff = coordinator.tariff_provider.diagnostics
     # REQ-DIAGNOSTICS: parsed windows alone hide malformed input; inactive
     # dashboard profiles and legacy entry.data settings do not control charging.

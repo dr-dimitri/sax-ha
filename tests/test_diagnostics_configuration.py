@@ -373,3 +373,67 @@ async def test_export_handles_unconfigured_control_and_missing_sources(
     assert diagnostics["source_states"]["grid_serving_pv_forecast"]["entity_id"] is None
     assert diagnostics["state"]["control_config_status"] == "missing"
     json.dumps(diagnostics, allow_nan=False)
+
+
+@pytest.mark.parametrize("tariff_type", ["fixed", "dynamic"])
+@pytest.mark.parametrize(
+    ("option_key", "invalid_value"),
+    [
+        (CONF_PRICE_ATTRIBUTE, ["raw_today"]),
+        (CONF_PRICE_UNIT, {"unit": "ct_kwh"}),
+        (CONF_PRICE_UNIT, ["ct_kwh"]),
+        (CONF_PRICE_SENSOR, ["sensor.preis"]),
+    ],
+    ids=["attribute_list", "unit_dict", "unit_list", "sensor_list"],
+)
+async def test_export_reports_invalid_source_option_types_without_side_effects(
+    hass: HomeAssistant,
+    tariff_type: str,
+    option_key: str,
+    invalid_value: Any,
+) -> None:
+    """REQ-DIAGNOSTICS: Auch defekte Quelloptionen müssen diagnostizierbar sein."""
+    entry, coordinator, client = _make_coordinator(hass)
+    coordinator.options = {
+        CONF_ECONOMICS_TARIFF_TYPE: tariff_type,
+        CONF_ECONOMICS_FEED_IN_PRICE: 0.08,
+        CONF_ECONOMICS_FIXED_IMPORT_PRICE: 0.3,
+        CONF_PRICE_SENSOR: "sensor.preis",
+        CONF_PRICE_ATTRIBUTE: "raw_today",
+        CONF_PRICE_UNIT: "ct_kwh",
+        option_key: invalid_value,
+    }
+    hass.states.async_set(
+        "sensor.preis",
+        "19.09",
+        {
+            "unit_of_measurement": "ct/kWh",
+            "raw_today": [{"start": "2026-10-19T01:00:00+02:00", "value": 19.09}],
+        },
+    )
+    before_options = deepcopy(coordinator.options)
+    before_data = deepcopy(coordinator.data)
+    before_tariff_result = coordinator.tariff_provider.last_result
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    tariff = diagnostics["tariff"]
+    assert tariff["source_configuration_errors"] == {option_key: "expected_string"}
+    assert tariff["configuration"][option_key] == invalid_value
+    if tariff_type == "fixed":
+        assert tariff["quote_price_eur_kwh"] == 0.3
+        assert tariff["quote_unavailable_reason"] is None
+    else:
+        assert tariff["quote_price_eur_kwh"] is None
+        assert tariff["quote_unavailable_reason"] == "tariff_incomplete"
+    if option_key == CONF_PRICE_SENSOR:
+        assert diagnostics["source_states"]["price"]["state"] is None
+        assert diagnostics["source_states"]["price"]["available"] is False
+    assert coordinator.options == before_options
+    assert coordinator.data == before_data
+    assert coordinator.tariff_provider.last_result is before_tariff_result
+    client.connect.assert_not_called()
+    client.read_holding_registers.assert_not_called()
+    client.write_register.assert_not_called()
+    client.write_registers.assert_not_called()
+    json.dumps(diagnostics, allow_nan=False)

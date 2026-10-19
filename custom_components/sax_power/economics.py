@@ -371,7 +371,19 @@ class SaxTariffProvider:
     def diagnostics(self) -> dict[str, Any]:
         """Tarifzustand für den Diagnose-Download (diagnostics.py)."""
         config = self.config
-        result = self.quote()
+        source_errors = {
+            key: "expected_string"
+            for key in (CONF_PRICE_SENSOR, CONF_PRICE_ATTRIBUTE, CONF_PRICE_UNIT)
+            if (value := self.coordinator.options.get(key)) is not None
+            and not isinstance(value, str)
+        }
+        # REQ-DIAGNOSTICS: malformed source options must stay inspectable even
+        # when the live price parser cannot consume them.
+        result = (
+            QuoteResult(reason=QuoteUnavailable.TARIFF_INCOMPLETE)
+            if config.tariff_type is TariffType.DYNAMIC and source_errors
+            else self.quote()
+        )
         quote = result.quote
         return {
             "tariff_type": str(config.tariff_type),
@@ -388,6 +400,7 @@ class SaxTariffProvider:
             "fixed_import_price_eur_kwh": config.fixed_import_price_eur_kwh,
             "tou_base_price_eur_kwh": config.tou_base_price_eur_kwh,
             "windows_valid": config.windows_valid,
+            "source_configuration_errors": source_errors,
             "tou_windows": [
                 {
                     "start": window.start.isoformat(),

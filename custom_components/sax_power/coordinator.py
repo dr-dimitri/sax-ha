@@ -2753,6 +2753,120 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         diagnostics.py."""
         return self._extended_available
 
+    @property
+    def charge_control_diagnostics(self) -> dict[str, Any]:
+        """Snapshot charge-control evidence without polling or changing state."""
+        now = monotonic()
+        moment = dt_util.now()
+
+        def age(sample: float | None) -> float | None:
+            return None if sample is None else now - sample
+
+        def timestamp(value: datetime | None) -> str | None:
+            return None if value is None else value.isoformat()
+
+        def window(state: TimedChargeState | None) -> dict[str, Any] | None:
+            if state is None:
+                return None
+            return {
+                "start": state.start.isoformat(),
+                "end": state.end.isoformat(),
+                "expires_at": state.expires_at.isoformat(),
+                "source": state.source,
+            }
+
+        high_age = age(self._high_sample_time)
+        low_age = age(self._low_block_last_read)
+        discharge = self._timed_discharge_state
+        return {
+            "telemetry": {
+                "last_update_success": self.last_update_success,
+                "basic_read_failed": self._basic_read_failed,
+                "basic_sample_age_seconds": age(self._basic_last_read),
+                "basic_poll_interval_seconds": self._scan_interval,
+                "high_sample_age_seconds": high_age,
+                "high_max_age_seconds": READ_BLOCK_EXT_HIGH_MAX_AGE,
+                "high_measurements_fresh": (
+                    self._extended_available
+                    and high_age is not None
+                    and 0 <= high_age <= READ_BLOCK_EXT_HIGH_MAX_AGE
+                ),
+                "low_sample_age_seconds": low_age,
+                # LOW values remain usable after a failed refresh; this is
+                # polling evidence, not a control veto (REQ-LOW-INTERVAL-REGISTERS).
+                "low_refresh_due": (
+                    low_age is None or low_age >= READ_BLOCK_EXT_LOW_INTERVAL
+                ),
+                "low_refresh_interval_seconds": READ_BLOCK_EXT_LOW_INTERVAL,
+            },
+            "writer": {
+                "control_worker_running": (
+                    self._month_control_task is not None
+                    and not self._month_control_task.done()
+                ),
+                "control_lock_locked": self._charge_control_lock.locked(),
+                "modbus_lock_locked": self._write_lock.locked(),
+                "sun_write_lock_locked": self._sun_charge_write_lock.locked(),
+                "periodic_writer_running": (
+                    self._sun_charge_task is not None
+                    and not self._sun_charge_task.done()
+                ),
+                "immediate_writer_running": (
+                    self._sun_charge_write_task is not None
+                    and not self._sun_charge_write_task.done()
+                ),
+                "requested_power_w": self._sun_charge_power,
+                "manual_grid_charge_power_w": self._grid_charge_power,
+                "commanded_mode": self._sun_charge_commanded_mode,
+                "observed_mode": self._last_observed_ic_control_mode,
+                "command_revision": self._sun_charge_command_revision,
+                "reset_required": self._sun_charge_reset_required,
+                "active_deadline": timestamp(self._active_charge_deadline()),
+                "bridge_deadline": timestamp(self._bridge_charge_deadline),
+                "tariff_deadline": timestamp(self._tariff_charge_deadline),
+                "price_deadline": timestamp(self._price_charge_deadline),
+                "tariff_source": self._tariff_charge_source,
+                "tariff_source_revision": self._tariff_source_revision,
+                "tariff_control_revision": self._tariff_control_revision,
+                "configuration_revision": self._month_control_revision,
+                "shutdown_started": self._shutdown_started,
+            },
+            "timed_charge": {
+                "armed": self._timed_charge_armed,
+                "window": window(self._timed_charge_window),
+                "restore_window": window(self._timed_charge_restore_state),
+                "persisted_window": window(self._timed_charge_persisted_state),
+                "window_completed": self._timed_window_completed(moment),
+                "discharge_hold": (
+                    None
+                    if discharge is None
+                    else {
+                        "expires_at": discharge.expires_at.isoformat(),
+                        "source": discharge.source,
+                    }
+                ),
+                "discharge_hold_active": self._timed_discharge_is_active(moment),
+                "discharge_hold_applied": self._sun_charge_timed_discharge,
+                "last_window_end": timestamp(self._timed_discharge_last_window_end),
+                "last_window_source": self._timed_discharge_last_source,
+                "discharge_store_save_pending": (
+                    self._timed_discharge_store.save_pending
+                ),
+                "grid_charge_measured": self._timed_charge_grid_measured,
+                "confirmation_cycles": self._timed_charge_confirmation_cycles,
+                "pv_surplus_cycles": self._timed_charge_pv_surplus_cycles,
+            },
+            "grid_serving": {
+                "setpoint_active": self._grid_serving_setpoint_active,
+                "wait_cycles": self._grid_serving_wait_cycles,
+                "charge_confirmation_cycles": self._grid_serving_charge_confirm_cycles,
+                "release_confirmation_cycles": (
+                    self._grid_serving_release_confirm_cycles
+                ),
+                "import_confirmation_cycles": self._grid_serving_import_confirm_cycles,
+            },
+        }
+
     async def _async_read_high_block(self) -> dict[str, Any]:
         """Read+parse den HIGH-Block (dynamische Mess-/Zustandswerte) des
         SunSpec-Modus, ohne bei Fehlern das gesamte Update scheitern zu

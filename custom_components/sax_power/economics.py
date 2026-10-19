@@ -371,7 +371,7 @@ class SaxTariffProvider:
     def diagnostics(self) -> dict[str, Any]:
         """Tarifzustand für den Diagnose-Download (diagnostics.py)."""
         config = self.config
-        result = self.evaluate()
+        result = self.quote()
         quote = result.quote
         return {
             "tariff_type": str(config.tariff_type),
@@ -387,6 +387,7 @@ class SaxTariffProvider:
             "feed_in_price_eur_kwh": config.feed_in_price_eur_kwh,
             "fixed_import_price_eur_kwh": config.fixed_import_price_eur_kwh,
             "tou_base_price_eur_kwh": config.tou_base_price_eur_kwh,
+            "windows_valid": config.windows_valid,
             "tou_windows": [
                 {
                     "start": window.start.isoformat(),

@@ -93,9 +93,9 @@ custom_components/sax_power/
 │                          netzdienliches Laden
 ├── repairs.py             Bestätigungsdialog für den Konflikt zwischen Netzladung
 │                          und preisoptimiertem Laden
-├── diagnostics.py          Diagnose-Download (Geräteseite): Coordinator-Zustand
-│                          + coordinator.data + Ladeplan + Roh-/Startwerte der
-│                          Energie- und Geldzähler, IP-Adresse redigiert
+├── diagnostics.py          Diagnose-Download (Geräteseite), Schema 2: aktuelle
+│                          Lade-/Tarifkonfiguration, Quellen, Messwerte und
+│                          Writer-/Fensterzustand; siehe REQ-DIAGNOSTICS
 ├── vue_dashboard.py        Dashboard SAX Power als integriertes Vue-Panel, siehe
 │                          REQ-VUE-DASHBOARD; Registrierung und Asset-Auslieferung
 ├── dashboard_api.py        Berechtigungsgefiltertes Entity-Metadatenabo für Vue,

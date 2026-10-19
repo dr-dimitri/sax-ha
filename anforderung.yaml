@@ -51,7 +51,7 @@
 # REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
 # REQ-DISCHARGE-FORECAST          done       Entladezeitpunkt aus 1 bis 60 Minuten gemessener Entladeleistung schätzen
 # REQ-BRIDGE-CHARGE              done       Verbrauchsabhängige Niedertarifladung zur Überbrückung bis zum PV-Start
-# REQ-DIAGNOSTICS                 done       Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)
+# REQ-DIAGNOSTICS                 done       Diagnose-Download mit Lade-/Tarifkonfiguration und Laufzeitzustand, IP redigiert
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
 # REQ-BUNDLED-DASHBOARD           superseded Abgelöst durch das einzige Dashboard SAX Power (REQ-VUE-DASHBOARD)
 # REQ-VUE-DASHBOARD               done       Dashboard SAX Power mit Navigation, automatischer Einrichtung und lokalem Build (#197)
@@ -2327,28 +2327,51 @@ requirement_energy_dashboard_compatibility:
 # ==============================================================================
 requirement_diagnostics:
   id: REQ-DIAGNOSTICS
-  title: "Diagnose-Download über die Geräteseite (Coordinator-Zustand, IP redigiert)"
+  title: "Diagnose-Download mit vollständiger Lade-/Tarifkonfiguration und Laufzeitzustand"
   status: done
   description: >
     diagnostics.py implementiert async_get_config_entry_diagnostics - Home
     Assistant bietet dadurch automatisch "Diagnose herunterladen" auf der
     Geräteseite an (keine eigene Registrierung nötig). Für Support-/
-    Bugreport-Zwecke werden neben den redigierten Config-Entry-Daten auch
-    coordinator.data (alle aktuellen Messwerte) sowie der relevante interne
-    Coordinator-Zustand exportiert (Max-SOC-Sperre,
-    Netzladung/SunSpec-Netzladung aktiv, zeitgesteuertes/netzdienliches
-    Laden, SunSpec-Modus-Erreichbarkeit) - reine Aggregation bereits
-    vorhandener Coordinator-Properties, keine neue Business-Logik.
+    Bugreport-Zwecke enthält das JSON schema_version 2, einen UTC-
+    Aufnahmezeitpunkt und die Home-Assistant-Zeitzone. connection enthält
+    ausschließlich Verbindungsparameter mit redigiertem Host. control_config
+    stammt aus dem aktuellen Coordinator-Snapshot, nicht aus überholten
+    Einrichtungswerten: globale SOC-Grenze, Netzlade-Startschwelle und -Ziel,
+    beide Zeitfenster und Monatsfreigaben, netzdienliche Prognoseschwelle
+    sowie Preisstrategie, Preis-/Neutralgrenze und Stundenbudget einschließlich
+    ungelöster Migrationsfelder. Gespeicherte und effektive SOC-Ziele sowie
+    wirksame Tarifzeitquelle und Bridge-Freigabe bleiben unterscheidbar.
 
-    Die IP-Adresse (CONF_HOST) ist die einzige potenziell identifizierende
-    Information in entry.data (lokales Modbus TCP ohne Cloud-Auth, siehe
-    AGENTS.md "Security considerations") und wird über
-    homeassistant.components.diagnostics.async_redact_data redigiert; Port
-    und Slave-IDs sind keine Geheimnisse und bleiben sichtbar.
+    tariff zeigt das ausgewertete Tarifmodell einschließlich Fenstergültigkeit,
+    aller Preisfenster, aktueller Quote und Fehlergrund. Eine gezielte Auswahl
+    aktiver Rohoptionen erhält auch unlesbare Preisfenster, Preisattribut,
+    Einheit, PV-Faktor und Prognosequellen für die Fehleranalyse. source_states
+    zeigt konfigurierte Preis-/PV-Quellen mit Zustand, Verfügbarkeit, Einheit
+    und Zeitstempeln; nur vom Preisparser berücksichtigte Attribute werden
+    zusätzlich exportiert. Inaktive Tarifprofile und beliebige Fremdsensor-
+    Attribute werden nicht kopiert.
+
+    coordinator_data bewahrt Messwerte, Gerätefehler, Firmware und veröffentlichte
+    Ladepläne. state und charge_control ergänzen Bootstrap, SOC-Sperren,
+    Kalibrierung, Messwertalter und gültige Aktualitätsregeln, laufende Writer,
+    gesperrte Steuerpfade, Sollwert und Fristen, Tarifrevisionen, fenstergebundene
+    Ladefreigaben, Entladeschutz und netzdienliche Zustandszähler. Die Daten
+    werden ausschließlich gelesen: kein Modbus-/Serviceaufruf, keine
+    Lock-Anforderung und keine Änderung von Ladeplan oder Tarifcache.
+
+    energy und economics behalten Rohsummen, Abrechnungszeiträume,
+    Preisabdeckung sowie Speicher-/Backupfehler für Bilanzdiagnosen. Die lange
+    tägliche Bilanzhistorie, Seriennummer, Frontend-Assetkennungen sowie
+    vollständige entry_data-/entry_options-Kopien entfallen. Eine Änderung
+    des Exportobjekts darf keine internen Daten verändern. Uhrzeiten, Daten,
+    Mengen und nichtendliche Fehlerwerte werden unmittelbar JSON-kompatibel
+    serialisiert; fehlende Werte bleiben null und leere Monatsmengen leer.
   acceptance_criteria:
-    - "tests/test_diagnostics.py deckt ab: CONF_HOST ist im Ergebnis
-       redigiert, Port bleibt unverändert sichtbar, coordinator_data und
-       die relevanten state-Felder sind befüllt."
+    - "Tests prüfen tatsächliche Ladeeinstellungen trotz widersprechender Legacy-Werte, SOC-Begrenzung/Kalibrierung, netzdienliche Zeitfenster/Monate und Preisstrategie einschließlich Neutralpreis."
+    - "Zeitvariabler Tarif mit mehreren oder fehlerhaften Fenstern sowie dynamischer Tarif mit Preisattribut/-einheit und unabhängigen PV-Quellen bleiben diagnostizierbar."
+    - "Fehlende/veraltete Messungen, Bootstrap, fenstergebundene Zustände und ein laufender Writer bzw. gehaltener Lock sind unterscheidbar; der Export führt keine Geräte-/Serviceaufrufe aus und wartet nicht auf Locks."
+    - "Das Ergebnis lässt sich direkt als JSON serialisieren, ist von Coordinator/Options/Quellen unabhängig und enthält weder Host-Klartext, Seriennummer noch inaktive Tarifprofile, Assetkennungen oder tägliche Bilanzhistorie."
 
 # ==============================================================================
 # ANFORDERUNG: PREISOPTIMIERTES LADEN

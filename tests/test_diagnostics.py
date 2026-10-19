@@ -65,10 +65,10 @@ async def test_diagnostics_redacts_host(hass) -> None:
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert diagnostics["entry_data"]["host"] == "**REDACTED**"
+    assert diagnostics["connection"]["host"] == "**REDACTED**"
     assert "host" in TO_REDACT
     # Port ist kein Geheimnis und bleibt unverändert sichtbar.
-    assert diagnostics["entry_data"]["port"] == 502
+    assert diagnostics["connection"]["port"] == 502
 
 
 async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
@@ -93,11 +93,14 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     # hier interessieren nur die ursprünglich gesetzten Messwerte.
     assert diagnostics["coordinator_data"]["soc"] == 42
     assert diagnostics["coordinator_data"]["storage_power_active"] == -500
-    assert diagnostics["state"]["max_soc"] == 80
+    assert diagnostics["control_config"]["max_soc"] == 80
     assert diagnostics["state"]["effective_max_soc"] == 100
     assert diagnostics["state"]["cell_calibration_active"] is True
-    assert diagnostics["state"]["last_full_charge_at"] == last_full
-    assert diagnostics["state"]["next_cell_calibration_at"] > last_full
+    assert diagnostics["state"]["last_full_charge_at"] == last_full.isoformat()
+    assert (
+        datetime.fromisoformat(diagnostics["state"]["next_cell_calibration_at"])
+        > last_full
+    )
     assert diagnostics["state"]["extended_available"] is True
     assert diagnostics["state"]["grid_charge_active"] is False
     assert diagnostics["state"]["sun_charge_active"] is False

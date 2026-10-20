@@ -836,3 +836,344 @@ async def test_invalid_new_consumption_cannot_erase_completed_plan(
         "shortfall_kwh"
     ] == pytest.approx(0.4)
     assert coordinator._bridge_session.completed_at == deadline
+
+
+def _publish_at(
+    coordinator: SaxPowerCoordinator,
+    now: datetime,
+    data: dict[str, Any],
+    *,
+    update_high: bool = True,
+) -> dict[str, Any]:
+    coordinator.data = data
+    if update_high:
+        coordinator._high_data = dict(data)
+    with (
+        patch(_CLOCK, return_value=100),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow", return_value=now
+        ),
+    ):
+        coordinator._publish_charge_state(data)
+    return data["bridge_charge_plan_attributes"]
+
+
+def _measure_running_charge(coordinator: SaxPowerCoordinator) -> None:
+    """Supply a new HIGH measurement taken after the acknowledged start."""
+    coordinator._sun_charge_task = asyncio.get_running_loop().create_future()
+    coordinator._sun_charge_power = -2000
+    coordinator._sun_charge_commanded_mode = SUN_IC_CONTROL_MODE_SETPOINT
+    coordinator._high_sample_control_mode = SUN_IC_CONTROL_MODE_SETPOINT
+    coordinator._high_sample_revision = coordinator._timed_charge_start_revision + 1
+    coordinator._high_sample_started_at = coordinator._timed_charge_started_at
+
+
+async def test_live_charge_progress_updates_without_mutating_frozen_plan(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: the actual target and measured rate drive the ETA."""
+    data = _data(NOW) | {"storage_power_active": -2000}
+    await _evaluate(coordinator, NOW, data)
+    frozen = dict(coordinator._bridge_session.attributes)
+    _measure_running_charge(coordinator)
+    first = _publish_at(coordinator, NOW, data)
+    assert first["charging_active"] is True
+    assert first["charging_power_w"] == 2000
+    assert first["charging_target_soc"] == 15
+    assert first["charging_max_soc"] == 80
+    assert first["charging_remaining_seconds"] == 900
+    later = NOW + timedelta(minutes=2)
+    next_data = _data(later, soc=12, observation=False) | {
+        "storage_power_active": -4000
+    }
+    updated = _publish_at(coordinator, later, next_data)
+    assert updated["charging_power_w"] == 4000
+    assert updated["charging_remaining_seconds"] == 270
+    assert coordinator._bridge_session.attributes == frozen
+    coordinator.async_start_sun_charge.reset_mock()
+    coordinator.async_write_extended_register.reset_mock()
+    next_data["storage_power_active"] = -100
+    bounded = _publish_at(coordinator, later, next_data)
+    assert bounded["charging_remaining_seconds"] == 28 * 60
+    coordinator.async_start_sun_charge.assert_not_awaited()
+    coordinator.async_write_extended_register.assert_not_awaited()
+
+
+@pytest.mark.parametrize("calibration", [False, True])
+async def test_fixed_soc_charging_publishes_progress_while_bridge_is_off(
+    coordinator: SaxPowerCoordinator, calibration: bool
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: fixed charging uses its effective SOC cap."""
+    coordinator.options = dict(coordinator.options) | {
+        CONF_BRIDGE_CHARGE_ENABLED: False
+    }
+    coordinator._timed_charge_min_soc = 50
+    coordinator._max_soc = 60
+    coordinator._cell_calibration_active = calibration
+    coordinator._async_update_cell_calibration = AsyncMock(return_value=False)
+    await coordinator.hass.config.async_set_time_zone("UTC")
+    now = NOW + timedelta(hours=2)
+    data = _data(now, soc=40) | {"storage_power_active": -2000}
+    await _evaluate(coordinator, now, data)
+    assert coordinator._timed_charge_active
+    _measure_running_charge(coordinator)
+    attributes = _publish_at(coordinator, now, data)
+    assert data["bridge_charge_plan"] == "off"
+    assert attributes["charging_active"] is True
+    assert attributes["charging_target_soc"] == (100 if calibration else 60)
+    assert attributes["charging_max_soc"] == (100 if calibration else 60)
+    assert attributes["charging_remaining_seconds"] == (10800 if calibration else 3600)
+    coordinator._tariff_charge_deadline = now + timedelta(minutes=10)
+    attributes = _publish_at(coordinator, now, data)
+    assert attributes["charging_remaining_seconds"] == 600
+
+
+@pytest.mark.parametrize(
+    "unavailable",
+    [
+        "stale",
+        "basic_failed",
+        "no_power",
+        "discharging",
+        "paused",
+        "end",
+        "old_revision",
+        "read_started_before_ack",
+        "readback_mode",
+        "commanded_mode",
+        "writer_finished",
+        "zero_setpoint",
+    ],
+)
+async def test_inactive_or_unmeasured_charge_clears_all_live_progress(
+    coordinator: SaxPowerCoordinator, unavailable: str
+) -> None:
+    """REQ-BRIDGE-CHARGE: a retained plan alone cannot claim running charge."""
+    data = _data(NOW) | {"storage_power_active": -2000}
+    await _evaluate(coordinator, NOW, data)
+    _measure_running_charge(coordinator)
+    assert _publish_at(coordinator, NOW, data)["charging_active"] is True
+    if unavailable == "stale":
+        coordinator._high_sample_time = 94.9
+    elif unavailable == "basic_failed":
+        coordinator._basic_read_failed = True
+    elif unavailable == "no_power":
+        data["storage_power_active"] = None
+    elif unavailable == "discharging":
+        data["storage_power_active"] = 1000
+    elif unavailable == "paused":
+        coordinator._bridge_session.pause("pv_surplus")
+    elif unavailable == "old_revision":
+        coordinator._high_sample_revision = coordinator._timed_charge_start_revision
+    elif unavailable == "read_started_before_ack":
+        coordinator._high_sample_started_at = coordinator._timed_charge_started_at - 1
+    elif unavailable == "readback_mode":
+        coordinator._high_sample_control_mode = SUN_IC_CONTROL_MODE_SMARTMETER
+    elif unavailable == "commanded_mode":
+        coordinator._sun_charge_commanded_mode = SUN_IC_CONTROL_MODE_SMARTMETER
+    elif unavailable == "writer_finished":
+        coordinator._sun_charge_task.cancel()
+        await asyncio.gather(coordinator._sun_charge_task, return_exceptions=True)
+    elif unavailable == "zero_setpoint":
+        coordinator._sun_charge_power = 0
+    now = coordinator._bridge_charge_deadline if unavailable == "end" else NOW
+    assert now is not None
+    attributes = _publish_at(coordinator, now, data)
+    assert attributes["charging_active"] is False
+    for key in (
+        "charging_power_w",
+        "charging_target_soc",
+        "charging_max_soc",
+        "charging_remaining_seconds",
+    ):
+        assert attributes[key] is None
+
+
+@pytest.mark.parametrize("phase", ["mode", "setpoint"])
+@pytest.mark.parametrize("failed", [False, True])
+async def test_progress_waits_for_both_physical_charge_acknowledgments(
+    coordinator: SaxPowerCoordinator, phase: str, failed: bool
+) -> None:
+    """REQ-BRIDGE-CHARGE: pending physical writes never publish charging."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed_write(address: int, value: int) -> None:
+        if (
+            phase == "mode"
+            and address == REG_SUN_IC_CONTROL_MODE
+            and value == SUN_IC_CONTROL_MODE_SETPOINT
+            or phase == "setpoint"
+            and address == REG_SUN_IC_POWER_SETPOINT_PCT
+        ):
+            entered.set()
+            await release.wait()
+            if failed:
+                raise HomeAssistantError("delayed failed acknowledgment")
+
+    coordinator.async_start_sun_charge = (
+        SaxPowerCoordinator.async_start_sun_charge.__get__(coordinator)
+    )
+    coordinator.async_write_extended_register = AsyncMock(side_effect=delayed_write)
+    data = _data(NOW) | {"storage_power_active": -2000}
+    task = asyncio.create_task(_evaluate(coordinator, NOW, data))
+    try:
+        await entered.wait()
+        pending = _publish_at(coordinator, NOW, data)
+        assert pending["charging_active"] is False
+        assert pending["charging_remaining_seconds"] is None
+        release.set()
+        if failed:
+            with pytest.raises(HomeAssistantError):
+                await task
+        else:
+            await task
+        assert data["bridge_charge_plan_attributes"]["charging_active"] is False
+        if not failed:
+            coordinator._high_sample_revision += 1
+            coordinator._high_sample_started_at = coordinator._timed_charge_started_at
+            coordinator._high_sample_control_mode = SUN_IC_CONTROL_MODE_SETPOINT
+            assert _publish_at(coordinator, NOW, data)["charging_active"] is True
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await coordinator._async_cancel_sun_charge_task()
+
+
+async def test_completed_charge_returns_to_current_status_without_old_eta(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: completion must not retain the live running label."""
+    await _evaluate(coordinator, NOW, _data(NOW) | {"storage_power_active": -2000})
+    deadline = coordinator._bridge_charge_deadline
+    assert deadline is not None
+    data = _data(deadline, soc=15, observation=False) | {"storage_power_active": 1000}
+    await _evaluate(coordinator, deadline, data)
+    attributes = data["bridge_charge_plan_attributes"]
+    assert data["bridge_charge_plan"] == "complete"
+    assert attributes["charging_active"] is False
+    assert attributes["charging_remaining_seconds"] is None
+    assert attributes["post_charge_status"] == "unknown"
+    assert attributes["post_charge_forecast_attributes"] == {}
+    later = deadline + timedelta(minutes=1)
+    data = _data(later, soc=15)
+    data["discharge_forecast"] = later + timedelta(minutes=30)
+    await _evaluate(coordinator, later, data)
+    assert data["bridge_charge_plan"] == "not_needed"
+    assert data["bridge_charge_plan_attributes"]["charging_active"] is False
+    assert "post_charge_status" not in data["bridge_charge_plan_attributes"]
+
+
+@pytest.mark.parametrize("soc,expected", [(20, "not_needed"), (15, "needed")])
+async def test_post_charge_display_uses_live_energy_and_preserves_historical_verdict(
+    coordinator: SaxPowerCoordinator, soc: float, expected: str
+) -> None:
+    """REQ-VUE-ELECTRICITY-TARIFF: the archive cannot supply a green all-clear."""
+    session = coordinator._bridge_session
+    session.completed_at = NOW
+    session.status = "complete"
+    session.attributes = {"completed_at": NOW.isoformat(), "shortfall_kwh": 0}
+    now = NOW + timedelta(minutes=2)
+    data = _data(now, soc=soc)
+    data["discharge_forecast"] = now + timedelta(minutes=30)
+    coordinator._high_sample_time = 100
+    attributes = _publish_at(coordinator, now, data)
+    assert attributes["post_charge_status"] == expected
+    assert attributes["post_charge_forecast_attributes"] == {
+        "observed_at": now.isoformat(),
+        "observation_minutes": 15,
+        "average_discharge_w": 1000,
+        "discharge_at": (now + timedelta(minutes=6 * (soc - 10))).isoformat(),
+        "pv_start": (NOW + timedelta(hours=1)).isoformat(),
+    }
+    assert session.status == "complete"
+    assert session.attributes == {"completed_at": NOW.isoformat(), "shortfall_kwh": 0}
+    coordinator.async_start_sun_charge.assert_not_awaited()
+    coordinator.async_write_extended_register.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "stale_measurement",
+        "missing_observation",
+        "stale_observation",
+        "precharge_observation",
+        "first_minute",
+        "pv_start",
+        "overflow_forecast",
+        "unrepresentable_forecast",
+        "capacity",
+    ],
+)
+async def test_post_charge_verdict_needs_new_fresh_consumption_data(
+    coordinator: SaxPowerCoordinator, missing: str
+) -> None:
+    """REQ-BRIDGE-CHARGE: missing current inputs stay unknown after completion."""
+    session = coordinator._bridge_session
+    session.completed_at = NOW
+    session.status = "complete"
+    session.attributes = {"completed_at": NOW.isoformat(), "shortfall_kwh": 0}
+    now = NOW + timedelta(seconds=59 if missing == "first_minute" else 120)
+    data = _data(now, soc=80)
+    data["discharge_forecast"] = now + timedelta(hours=7)
+    coordinator._high_sample_time = 94 if missing == "stale_measurement" else 100
+    if missing == "missing_observation":
+        data["discharge_forecast_attributes"] = {}
+    elif missing == "stale_observation":
+        data["discharge_forecast_attributes"]["observed_at"] = (
+            now - timedelta(seconds=6)
+        ).isoformat()
+    elif missing == "precharge_observation":
+        data["discharge_forecast_attributes"]["observed_at"] = (
+            NOW - timedelta(seconds=1)
+        ).isoformat()
+    elif missing == "pv_start":
+        coordinator._pv_bridge_forecast.pv_start.return_value = None
+    elif missing == "overflow_forecast":
+        data["discharge_forecast_attributes"]["average_discharge_w"] = 1e-308
+    elif missing == "unrepresentable_forecast":
+        data["discharge_forecast_attributes"]["average_discharge_w"] = 1e-9
+    elif missing == "capacity":
+        data["battery_capacity"] = None
+    attributes = _publish_at(coordinator, now, data)
+    assert attributes["post_charge_status"] == "unknown"
+    assert attributes["post_charge_forecast_attributes"] == {}
+    assert attributes["charging_active"] is False
+
+
+@pytest.mark.parametrize("current_power", [0, 500])
+async def test_high_measurement_evidence_cannot_validate_an_old_charging_snapshot(
+    coordinator: SaxPowerCoordinator, current_power: int
+) -> None:
+    """REQ-BRIDGE-CHARGE: a worker may publish self.data during a newer poll."""
+    old_data = _data(NOW) | {"storage_power_active": -2000}
+    await _evaluate(coordinator, NOW, old_data)
+    _measure_running_charge(coordinator)
+    coordinator._high_data = old_data | {"storage_power_active": current_power}
+    attributes = _publish_at(coordinator, NOW, old_data, update_high=False)
+    assert attributes["charging_active"] is False
+    assert attributes["charging_remaining_seconds"] is None
+
+
+async def test_post_charge_verdict_uses_the_latest_high_soc(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: a previous full SOC cannot mask fresh missing energy."""
+    coordinator._bridge_session.completed_at = NOW
+    coordinator._bridge_session.status = "complete"
+    now = NOW + timedelta(minutes=2)
+    old_data = _data(now, soc=80)
+    old_data["discharge_forecast"] = now + timedelta(hours=7)
+    coordinator._high_data = _data(now, soc=15)
+    coordinator._high_sample_time = 100
+    attributes = _publish_at(coordinator, now, old_data, update_high=False)
+    assert attributes["post_charge_status"] == "needed"
+    assert (
+        attributes["post_charge_forecast_attributes"]["discharge_at"]
+        == (now + timedelta(minutes=30)).isoformat()
+    )
+    assert (
+        attributes["post_charge_forecast_attributes"]["discharge_at"]
+        != old_data["discharge_forecast"].isoformat()
+    )

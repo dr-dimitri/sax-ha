@@ -40,7 +40,10 @@ const text = computed(() =>
         title: "Ladeplanung",
         noCharge: "Keine Ladung nötig",
         chargeNeeded: "Ladung voraussichtlich nötig",
+        charging: "Ladung läuft...",
         demandUnknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
+        postChargeWaiting:
+          "Nach Ladeende werden neue Verbrauchsdaten für die Ladeplanung gesammelt.",
         unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
         incomplete:
           "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
@@ -62,7 +65,10 @@ const text = computed(() =>
         title: "Charging plan",
         noCharge: "No charging needed",
         chargeNeeded: "Charging likely needed",
+        charging: "Charging in progress...",
         demandUnknown: "Charging time could not be calculated yet",
+        postChargeWaiting:
+          "After charging ends, fresh consumption data is collected for the charging plan.",
         unavailable: "The charging plan is currently unavailable.",
         incomplete:
           "The charging plan is still incomplete. Charging times cannot currently be displayed.",
@@ -83,6 +89,11 @@ const text = computed(() =>
 );
 const status = computed(() =>
   plan.value?.available ? plan.value.state?.state : "unavailable",
+);
+const chargingActive = computed(
+  () =>
+    ["charging", "off"].includes(status.value ?? "") &&
+    attributes.value.charging_active === true,
 );
 const reasons = computed<Record<string, string>>(() =>
   german.value
@@ -129,13 +140,11 @@ function timestamp(value: unknown) {
     ? formatSavingsDate(value, props.hass)
     : null;
 }
-const currentForecast = computed(() => {
-  if (!discharge.value?.available) return null;
-  const state = discharge.value.state;
-  const at = timestamp(state?.state);
-  const minutes = number(state?.attributes.observation_minutes, 1, 15, 0);
+function forecastDescription(value: Record<string, unknown>, atValue: unknown) {
+  const at = timestamp(atValue);
+  const minutes = number(value.observation_minutes, 1, 15, 0);
   const average = number(
-    state?.attributes.average_discharge_w,
+    value.average_discharge_w,
     Number.MIN_VALUE,
     Infinity,
     0,
@@ -144,6 +153,32 @@ const currentForecast = computed(() => {
   return german.value
     ? `Bei durchschnittlich ${average} W Verbrauch in den letzten ${minutes} Minuten reicht der Speicher voraussichtlich bis ${at} Uhr.`
     : `With average consumption of ${average} W over the last ${minutes} minutes, the battery is expected to last until ${at}.`;
+}
+const postChargeStatus = computed(() => {
+  if (
+    !plan.value?.available ||
+    !completed.value ||
+    !("post_charge_status" in attributes.value)
+  )
+    return null;
+  const value = attributes.value.post_charge_status;
+  return value === "needed" || value === "not_needed" ? value : "unknown";
+});
+const postChargeForecast = computed(() => {
+  const value = attributes.value.post_charge_forecast_attributes;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+});
+const currentForecast = computed(() => {
+  if (chargingActive.value) return null;
+  if (postChargeStatus.value !== null) {
+    const value = postChargeForecast.value;
+    return value ? forecastDescription(value, value.discharge_at) : null;
+  }
+  if (!discharge.value?.available) return null;
+  const state = discharge.value.state;
+  return forecastDescription(state?.attributes ?? {}, state?.state);
 });
 const dates = computed(() => ({
   discharge: timestamp(attributes.value.discharge_at),
@@ -158,6 +193,11 @@ const completed = computed(
     ) && timestamp(attributes.value.completed_at) !== null,
 );
 const demand = computed(() => {
+  if (chargingActive.value) return "charging";
+  if (postChargeStatus.value !== null)
+    return postChargeStatus.value === "not_needed"
+      ? "not-needed"
+      : postChargeStatus.value;
   const shortfall = finiteValue(attributes.value.shortfall_kwh);
   const hasCompletion = attributes.value.completed_at != null;
   const evaluatedCompletion =
@@ -194,12 +234,74 @@ const demand = computed(() => {
   }
 });
 const demandLabel = computed(() =>
-  demand.value === "not-needed"
-    ? text.value.noCharge
-    : demand.value === "needed"
-      ? text.value.chargeNeeded
-      : text.value.demandUnknown,
+  demand.value === "charging"
+    ? text.value.charging
+    : demand.value === "not-needed"
+      ? text.value.noCharge
+      : demand.value === "needed"
+        ? text.value.chargeNeeded
+        : text.value.demandUnknown,
 );
+function remainingDuration(seconds: number) {
+  const minutes = Math.ceil(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  const parts: string[] = [];
+  if (hours)
+    parts.push(
+      `${number(hours, 1, Infinity, 0)} ${german.value ? (hours === 1 ? "Stunde" : "Stunden") : hours === 1 ? "hour" : "hours"}`,
+    );
+  if (remainder || !hours)
+    parts.push(
+      `${remainder} ${german.value ? (remainder === 1 ? "Minute" : "Minuten") : remainder === 1 ? "minute" : "minutes"}`,
+    );
+  return parts.join(" ");
+}
+const chargingDescription = computed(() => {
+  const power = number(
+    attributes.value.charging_power_w,
+    Number.MIN_VALUE,
+    Infinity,
+    0,
+  );
+  const target = number(
+    attributes.value.charging_target_soc,
+    0,
+    100,
+    Number.isInteger(finiteValue(attributes.value.charging_target_soc)) ? 0 : 1,
+  );
+  const max = number(
+    attributes.value.charging_max_soc,
+    0,
+    100,
+    Number.isInteger(finiteValue(attributes.value.charging_max_soc)) ? 0 : 1,
+  );
+  const seconds = finiteValue(attributes.value.charging_remaining_seconds);
+  const duration =
+    seconds !== null && seconds >= 0 ? remainingDuration(seconds) : null;
+  const unavailable = german.value
+    ? "Die Restdauer kann mit den aktuellen Batteriemesswerten noch nicht berechnet werden."
+    : "The remaining time cannot yet be calculated from the current battery measurements.";
+  const estimate =
+    power && target
+      ? german.value
+        ? duration
+          ? `Bei aktuell ${power} W Ladeleistung dauert die Ladung voraussichtlich noch ${duration}. Ladeziel: ${target} %.`
+          : `Der Speicher lädt aktuell mit ${power} W. Ladeziel: ${target} %. ${unavailable}`
+        : duration
+          ? `At the current charging power of ${power} W, charging is expected to take another ${duration}. Charging target: ${target} %.`
+          : `The battery is currently charging at ${power} W. Charging target: ${target} %. ${unavailable}`
+      : unavailable;
+  const limit =
+    max &&
+    finiteValue(attributes.value.charging_max_soc) !==
+      finiteValue(attributes.value.charging_target_soc)
+      ? german.value
+        ? ` Maximale Netzladegrenze: ${max} %.`
+        : ` Maximum grid charging limit: ${max} %.`
+      : "";
+  return estimate + limit;
+});
 const dataGap = computed(() => {
   if (!completed.value) return null;
   switch (attributes.value.data_gap_reason) {
@@ -238,6 +340,34 @@ const forecast = computed(() => {
 });
 const paragraphs = computed(() => {
   const { start, end, pv } = dates.value;
+  if (status.value === "charging" && attributes.value.charging_active === false)
+    return [
+      german.value
+        ? "Eine laufende Netzladung ist noch nicht durch aktuelle Messwerte bestätigt."
+        : "Current measurements do not yet confirm that grid charging is in progress.",
+    ];
+  if (postChargeStatus.value !== null) {
+    const currentPv = timestamp(postChargeForecast.value?.pv_start);
+    if (postChargeStatus.value === "unknown")
+      return [text.value.postChargeWaiting];
+    if (postChargeStatus.value === "not_needed")
+      return [
+        currentPv
+          ? german.value
+            ? `Eine Netzladung ist nicht erforderlich: Der Speicher reicht voraussichtlich bis zum PV-Start um ${currentPv} Uhr.`
+            : `No grid charging is needed: the battery is expected to last until PV starts at ${currentPv}.`
+          : text.value.not_needed,
+      ];
+    return [
+      currentPv
+        ? german.value
+          ? `Eine Netzladung ist voraussichtlich nötig, um die Zeit bis zum PV-Start um ${currentPv} Uhr zu überbrücken.`
+          : `Grid charging is likely needed to cover the period until PV starts at ${currentPv}.`
+        : german.value
+          ? "Eine Netzladung ist voraussichtlich nötig."
+          : "Grid charging is likely needed.",
+    ];
+  }
   const runningPartial =
     status.value === "charging" &&
     (finiteValue(attributes.value.shortfall_kwh) ?? 0) > 0;
@@ -309,10 +439,14 @@ const paragraphs = computed(() => {
   }
 });
 const description = computed(() =>
-  [currentForecast.value, ...paragraphs.value].filter(Boolean).join(" "),
+  chargingActive.value
+    ? chargingDescription.value
+    : [currentForecast.value, ...paragraphs.value].filter(Boolean).join(" "),
 );
 const target = computed(() => {
   if (
+    chargingActive.value ||
+    postChargeStatus.value !== null ||
     completed.value ||
     !["planned", "charging", "insufficient"].includes(status.value ?? "")
   )
@@ -378,7 +512,8 @@ const target = computed(() => {
     var(--primary-text-color, #212121)
   );
 }
-.charge-plan__demand--needed {
+.charge-plan__demand--needed,
+.charge-plan__demand--charging {
   color: color-mix(
     in srgb,
     var(--info-color, #1475e8) 70%,

@@ -225,6 +225,11 @@ function example({ domain, key, entity_id }) {
   if (key === "bridge_charge_plan")
     attributes = {
       enabled: true,
+      charging_active: false,
+      charging_power_w: null,
+      charging_target_soc: null,
+      charging_max_soc: null,
+      charging_remaining_seconds: null,
       observation_minutes: 15,
       average_discharge_w: 1000,
       discharge_at: "2026-09-14T00:00:00Z",

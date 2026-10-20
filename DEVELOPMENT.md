@@ -37,7 +37,8 @@ custom_components/sax_power/
 │                          Amortisationsstand darüber
 │                          (economics_amortization.py), Entladeprognose
 │                          (discharge_forecast.py) und PV-Überbrückungsplanung
-│                          (bridge_charge.py)
+│                          (bridge_charge.py) sowie gemessener Ladefortschritt
+│                          und aktuelle Bedarfsbewertung (charge_progress.py)
 ├── application/         Use-Case-Policies für Ladeprioritäten und periodische
 │                          Vollkalibrierung, die Abbildung der Tarif-Options auf
 │                          das Domänenmodell (economics.py), getrennte
@@ -852,9 +853,17 @@ Zusatz hinter dem Doppelpunkt ist grün beziehungsweise blau, in beiden
 HA-Themes; die Aussage bleibt zusätzlich als Text erkennbar. Fehlende oder
 noch nicht bewertete Daten zeigen den orangefarbenen Zusatz **Ladezeitpunkt
 konnte noch nicht errechnet werden**.
-Ein beendeter Auftrag wird erst nach erfolgreicher Abschlussbewertung ohne
-Fehlbetrag über 1 Wh grün; pausierte Aufträge benötigen eine erhaltene
-Bedarfsgrundlage für den blauen Zusatz.
+Pausierte Aufträge benötigen eine erhaltene Bedarfsgrundlage für den blauen
+Zusatz. Eine frisch gemessene, bestätigte Netzladung zeigt stattdessen
+**Ladeplanung: Ladung läuft...** in Blau. Der Hinweis verwendet die zentral
+veröffentlichte Restdauer und aktuelle Ladeleistung. Restminuten werden
+aufgerundet; längere Dauern werden als Stunden und Minuten formatiert.
+Fehlende Schätzwerte bleiben ausdrücklich unbekannt. Laufende Anzeige und
+Restdauer werden bei Pause, Ende oder Ausfall sofort verworfen.
+Nach Ladeende verwendet die Ansicht die getrennte aktuelle Bedarfsbewertung
+statt des historischen Abschlussergebnisses. Bis neue gültige Verbrauchsdaten
+vorliegen, zeigt sie den orangefarbenen Hinweis und erklärt, dass nach Ladeende
+neue Verbrauchsdaten gesammelt werden.
 Der Planungsbereich einschließlich PV-Zeile ist ständig sichtbar und hat
 keine Aufklappfunktion, auch beim dynamischen Tarif.
 Dynamisch zeigt `ElectricityTariffView.vue` die tatsächlich angerechnete
@@ -1180,6 +1189,24 @@ Daten für die deutsch-/englischsprachige Meldung im zeitvariablen Tab. Die
 Komponente formatiert Datum und Uhrzeit in der HA-Zeitzone, erklärt bekannte
 Fehlergründe und behält einen Fehlbetrag auch während einer laufenden Teilladung
 sichtbar. Sie plant nicht selbst und ruft keine Services auf.
+Die zusätzlichen `charging_*`-Attribute werden pro Veröffentlichung aus
+bestätigtem Ladeauftrag, frischem HIGH-Messwert nach dessen Start und
+Sollwertmodus abgeleitet. `charging_remaining_seconds` verwendet Kapazität,
+präzisen SunSpec-SOC und tatsächliche Ladeleistung. Das kleinere tatsächliche
+Planziel und die effektive Netzladegrenze begrenzen das Ziel; die bestätigte
+Auftragsfrist begrenzt die Restdauer zusätzlich. Diese Angaben verändern
+weder die Session noch Gerätebefehle. `post_charge_status` und
+`post_charge_forecast_attributes` bewerten die Anzeige nach Ladeende separat:
+frühestens nach einer Minute, mit neuer gültiger Verbrauchsbeobachtung,
+frischen Batteriedaten und aktuellem PV-Start aus dem vorhandenen Cache.
+Ohne diese Grundlage bleibt der aktuelle Bedarf unbekannt. Die historische
+Abschlussbewertung und die Sperre für neue physische Aufträge bleiben erhalten.
+Ladefortschritt, aktuelle Bedarfsbewertung und angezeigter Entladezeitpunkt
+verwenden konsistente HIGH-Messwerte; ein noch alter Veröffentlichungssnapshot
+während eines parallelen Polls darf keine veraltete Ladung oder Restzeit belegen.
+`tests/test_charge_progress.py` prüft die reinen Schätzregeln;
+`tests/test_bridge_coordinator.py` belegt Gerätebestätigung, Messfrische,
+Snapshot-Konsistenz, beide Netzlademodi und die neue Bewertung nach Ladeende.
 Bei `bridge_charge_plan.attributes.enabled=true` blendet der zeitvariable Tab
 das separate Netzladezeitfenster und `timed_charge_min_soc` aus, da beide die
 Verbrauchsplanung nicht steuern. Netzlade-Max-SOC und Monatsfreigaben bleiben

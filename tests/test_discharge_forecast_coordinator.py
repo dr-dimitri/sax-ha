@@ -160,7 +160,21 @@ async def test_charging_reset_clears_published_observation(
 async def test_observation_minutes_preserve_fractional_window(
     coordinator: SaxPowerCoordinator,
 ) -> None:
-    """REQ-DISCHARGE-FORECAST: displayed minutes retain actual elapsed time."""
+    """REQ-DISCHARGE-FORECAST: calculation metadata retain actual elapsed time."""
     for time in range(0, 63, 2):
         data = _sample(coordinator, time)
     assert data["discharge_forecast_attributes"]["observation_minutes"] == 62 / 60
+
+
+async def test_published_consumption_excludes_measurements_older_than_fifteen_minutes(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-DISCHARGE-FORECAST: planning receives only the latest 15 minutes."""
+    for time in range(0, 1201, 2):
+        data = _sample(coordinator, time, 1000 if time < 300 else 2000)
+    assert data["discharge_forecast_attributes"] == {
+        "average_discharge_w": 2000,
+        "observation_minutes": 15,
+        "observed_at": (_NOW + timedelta(seconds=1200)).isoformat(),
+    }
+    assert data["discharge_forecast"] == _NOW + timedelta(seconds=1200, hours=2.5)

@@ -226,7 +226,7 @@ def test_bridge_sensor_exposes_short_state_and_full_explanation(
     coordinator = MagicMock()
     attributes = {
         "message": "Die Planung erläutert alle Zeitpunkte ausführlich. " * 8,
-        "observation_minutes": 25.5,
+        "observation_minutes": 12.5,
         "charge_start": "2026-09-14T01:00:00+00:00",
         "charge_end": "2026-09-14T02:00:00+00:00",
         "pv_start": "2026-09-14T05:00:00+00:00",

@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..domain.bridge_charge import BridgeChargePlan, ChargeWindow, plan_bridge_charge
+from ..domain.discharge_forecast import MAX_OBSERVATION_MINUTES
 
 
 class BridgeChargeSession:
@@ -164,7 +165,7 @@ class BridgeChargeSession:
                 for value in (average, minutes)
             )
             or average <= 0
-            or not 1 <= minutes <= 60
+            or not 1 <= minutes <= MAX_OBSERVATION_MINUTES
         ):
             if self.completed_at is None:
                 self.reset("waiting_for_data", "consumption_missing")

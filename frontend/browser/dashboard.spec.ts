@@ -31,6 +31,41 @@ test.afterEach(({ page }) => {
   expect(pageErrors.get(page)).toEqual([]);
 });
 
+test("device information shows the reported capacity and live availability", async ({
+  page,
+}, testInfo) => {
+  const panel = page.locator("sax-power-vue-panel");
+  const english = testInfo.project.name.endsWith("en");
+  const capacity = panel.locator(
+    ".general-view__card--device .entity-value:first-child",
+  );
+  await expect(capacity.locator(".entity-value__name")).toHaveText(
+    english ? "Storage capacity" : "Speicherkapazität",
+  );
+  await expect(capacity.locator(".entity-value__state")).toHaveText(
+    english ? "5,300 Wh" : "5.300 Wh",
+  );
+  for (const [state, expected] of [
+    ["8000", english ? "8,000 Wh" : "8.000 Wh"],
+    ["unknown", english ? "Unknown" : "Unbekannt"],
+    ["unavailable", english ? "Unavailable" : "Nicht verfügbar"],
+  ]) {
+    await panel.evaluate((element, nextState) => {
+      const host = element as HTMLElement & { hass: HomeAssistant };
+      const entityId = "sensor.demo_battery_capacity";
+      host.hass = {
+        ...host.hass,
+        states: {
+          ...host.hass.states,
+          [entityId]: { ...host.hass.states[entityId], state: nextState },
+        },
+      };
+    }, state);
+    await expect(capacity.locator(".entity-value__state")).toHaveText(expected);
+  }
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
 test("compact views retain readable controls and all entities across available panel widths", async ({
   page,
 }, testInfo) => {

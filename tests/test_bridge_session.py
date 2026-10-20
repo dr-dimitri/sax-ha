@@ -24,7 +24,7 @@ def _observation(now: datetime = NOW, **values: Any) -> dict[str, Any]:
     return {
         "observed_at": now.isoformat(),
         "average_discharge_w": 500,
-        "observation_minutes": 60,
+        "observation_minutes": 15,
     } | values
 
 
@@ -272,7 +272,7 @@ def test_sufficient_existing_energy_reports_no_charge_with_observation() -> None
     session = BridgeChargeSession()
     assert not _prepare(session, data={"battery_soc": 60})
     assert session.status == "not_needed"
-    assert session.attributes["observation_minutes"] == 60
+    assert session.attributes["observation_minutes"] == 15
     assert session.attributes["average_discharge_w"] == 500
     assert session.attributes["charge_start"] is None
     assert session.attributes["charge_end"] is None
@@ -317,7 +317,7 @@ def test_invalid_battery_plan_reports_waiting_instead_of_charging() -> None:
         _observation(average_discharge_w=0),
         _observation(average_discharge_w=-1),
         _observation(observation_minutes=0.99),
-        _observation(observation_minutes=60.01),
+        _observation(observation_minutes=15.01),
     ],
 )
 def test_missing_invalid_or_stale_observation_rejects_new_plan(
@@ -338,7 +338,7 @@ def test_invalid_observation_numbers_are_rejected(key: str, invalid: Any) -> Non
     assert session.status == "waiting_for_data" and session.plan is None
 
 
-@pytest.mark.parametrize("minutes", [1, 60])
+@pytest.mark.parametrize("minutes", [1, 15])
 def test_five_second_freshness_and_observation_duration_boundaries_are_valid(
     minutes: float,
 ) -> None:

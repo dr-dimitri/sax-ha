@@ -49,7 +49,7 @@
 # REQ-HIGH-INTERVAL-REGISTERS     done       Dynamische SunSpec-Register (HIGH-Block) mit eigenem festen 2s-Intervall
 # REQ-ENERGY-DASHBOARD            done       Selbst akkumulierte kWh-Zähler (geladen/entladen) fürs Home-Assistant-Energy-Dashboard
 # REQ-GRID-ENERGY                 done       Gesamten Netzbezug und gesamte Einspeisung als persistente kWh-Zähler erfassen
-# REQ-DISCHARGE-FORECAST          done       Entladezeitpunkt aus 1 bis 60 Minuten gemessener Entladeleistung schätzen
+# REQ-DISCHARGE-FORECAST          done       Entladezeitpunkt aus 1 bis 15 Minuten gemessener Entladeleistung schätzen
 # REQ-BRIDGE-CHARGE              done       Verbrauchsabhängige Niedertarifladung zur Überbrückung bis zum PV-Start
 # REQ-DIAGNOSTICS                 done       Diagnose-Download mit Lade-/Tarifkonfiguration und Laufzeitzustand, IP redigiert
 # REQ-DYNAMIC-PRICE-CHARGE        done       Preisoptimiertes Laden aus dem Netz nach dynamischem Strompreis (+ PV-Prognose)
@@ -95,7 +95,7 @@ requirement_discharge_forecast:
     max(battery_soc - battery_soc_min, 0) / 100, geteilt durch die mittlere
     Entladeleistung in W. Sie wird in Stunden zum aktuellen Zeitpunkt addiert.
     Der Verlauf beginnt mit einer positiven Speicherleistung und umfasst
-    mindestens 60 Sekunden und höchstens die letzten 3600 Sekunden. Die positive
+    mindestens 60 Sekunden und höchstens die letzten 900 Sekunden. Die positive
     Speicherleistung wird zeitgewichtet mit dem vorherigen Messwert integriert;
     ein angeschnittenes Intervall an der Fenstergrenze wird anteilig gewertet.
     Leerlauf und kurze Ladungen zählen mit 0 W Entladeleistung zur Fensterdauer.
@@ -108,9 +108,11 @@ requirement_discharge_forecast:
     - "60 Sekunden durchgehend negative Speicherleistung löschen Verlauf und Prognose; kürzere Ladeimpulse nicht."
     - "Nach bestätigtem Laden beginnt erst eine neue positive Speicherleistung einen neuen Verlauf."
     - "Nur neue, gültige HIGH-Messungen zählen; Cache-Refreshs verschieben den Zeitpunkt nicht."
+    - "Nur die letzten 15 Minuten beeinflussen die mittlere Entladeleistung; ältere Leistungsspitzen entfallen vollständig. Ein Intervall an der 15-Minuten-Grenze wird zeitanteilig berücksichtigt."
     - "Die Attribute gehören zur veröffentlichten Prognose; Cache-Refreshs erneuern observed_at nicht. Bei verworfener Prognose werden auch ihre Metadaten verworfen."
     - "Neustarts, Basic-/SunSpec-Ausfälle, veraltete Messwerte, Messlücken über READ_BLOCK_EXT_HIGH_MAX_AGE (zwei HIGH-Intervalle plus eine Sekunde Reserve, derzeit 5 Sekunden) und ungültige Eingaben verwerfen den Verlauf."
     - "Kapazität muss positiv und endlich sein, beide SOC-Werte müssen endlich und zwischen 0 und 100 liegen; fehlende Werte werden nicht geschätzt."
+    - "Die gerätespezifische Gesamtkapazität aus SunSpec 40097 mit Skalierungsfaktor 40110 bestimmt die Restenergie; unterschiedliche Kapazitäten verändern bei gleichem SOC und Verbrauch die prognostizierte Restzeit entsprechend."
     - "Bei gültiger Prognose und erreichtem Minimal-SOC ist der Entladezeitpunkt jetzt. Nicht darstellbare Zeitpunkte bleiben unbekannt."
     - "Die Berechnung verwendet vorhandene Messwerte und löst keine zusätzlichen Modbus-Abfragen oder Schreibzugriffe aus."
 
@@ -149,7 +151,7 @@ requirement_bridge_charge:
     erlaubte Ladeintervalle. Die Berechnung kennt weder Home Assistant noch
     eine konkrete Tarifquelle. Sie berücksichtigt nutzbare Energie oberhalb
     der Geräte-SOC-Untergrenze, den zeitgewichteten Entladedurchschnitt aus
-    mindestens einer und maximal 60 Minuten, die Geräte-Ladeleistung und den
+    mindestens einer und maximal 15 Minuten, die Geräte-Ladeleistung und den
     Verbrauch bis PV-Start. Während Netzladung wird der Hausverbrauch direkt
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
@@ -2131,6 +2133,12 @@ requirement_low_interval_registers:
     - "Ein Scheitern des LOW-Intervall-Reads (bei ansonsten erreichbarem
        SunSpec-Modus) lässt das Update nicht fehlschlagen - die zuletzt
        gelesenen Werte bleiben erhalten, bis der nächste Refresh gelingt."
+    - "Bis zum ersten erfolgreichen LOW-Read bleibt battery_capacity
+       unbekannt: Der anfängliche Vorgabefaktor 0 darf keine Kapazität für
+       Anzeige, Ladeplanung, Entladeprognose oder Energiebilanz bestätigen.
+       Nach erfolgreichem Lesen bleibt der bestätigte Faktor bei späteren
+       LOW-Ausfällen erhalten. Das gilt auch bei einem reinen LOW1-Ausfall,
+       da die beiden Teilblöcke gemeinsam übernommen werden."
     - "Sicherheits-/steuerungsrelevante Register (SOC, Zustände,
        Fehlercodes, Smart-Meter-Leistung) bleiben ausdrücklich im
        HIGH-Block und werden weiterhin bei jedem Poll gelesen."
@@ -2356,7 +2364,9 @@ requirement_diagnostics:
     Attribute werden nicht kopiert.
 
     coordinator_data bewahrt Messwerte, Gerätefehler, Firmware und veröffentlichte
-    Ladepläne. state und charge_control ergänzen Bootstrap, SOC-Sperren,
+    Ladepläne. Dazu gehört battery_capacity als geräteseitig skalierte
+    Gesamtkapazität in Wh; ohne bestätigten Wert steht dort null.
+    state und charge_control ergänzen Bootstrap, SOC-Sperren,
     Kalibrierung, Messwertalter und gültige Aktualitätsregeln, laufende Writer,
     gesperrte Steuerpfade, Sollwert und Fristen, Tarifrevisionen, fenstergebundene
     Ladefreigaben, Entladeschutz und netzdienliche Zustandszähler. Die Daten
@@ -2374,6 +2384,7 @@ requirement_diagnostics:
     - "Tests prüfen tatsächliche Ladeeinstellungen trotz widersprechender Legacy-Werte, SOC-Begrenzung/Kalibrierung, netzdienliche Zeitfenster/Monate und Preisstrategie einschließlich Neutralpreis."
     - "Zeitvariabler Tarif mit mehreren oder fehlerhaften Fenstern sowie dynamischer Tarif mit Preisattribut/-einheit und unabhängigen PV-Quellen bleiben diagnostizierbar."
     - "Fehlende/veraltete Messungen, Bootstrap, fenstergebundene Zustände und ein laufender Writer bzw. gehaltener Lock sind unterscheidbar; der Export führt keine Geräte-/Serviceaufrufe aus und wartet nicht auf Locks."
+    - "tests/test_diagnostics_configuration.py prüft battery_capacity nach positiven/negativen Skalierungsfaktoren, unbestätigtem Erstlesen und nicht implementierten Registern. Der Download selbst fragt das Gerät nicht erneut ab."
     - "Das Ergebnis lässt sich direkt als JSON serialisieren, ist von Coordinator/Options/Quellen unabhängig und enthält weder Host-Klartext, Seriennummer noch inaktive Tarifprofile, Assetkennungen oder tägliche Bilanzhistorie."
 
 # ==============================================================================
@@ -2475,7 +2486,9 @@ requirement_dynamic_price_charge:
                  mitten in einem Slot drei nutzbare Stunden ergibt.
       smart    - wie relative, leitet die Stundenzahl aber aus dem noch
                  fehlenden Energiebedarf ab: ("Max. SOC" - SOC) × Kapazität
-                 (SunSpec-Register 40097) abzüglich des nutzbaren Anteils
+                 (geräteabhängige Gesamtkapazität aus SunSpec-Register
+                 40097, skaliert mit 40110 und von Wh nach kWh umgerechnet;
+                 keine fest angenommene SAX-Kapazitätsstufe) abzüglich des nutzbaren Anteils
                  der PV-Prognose, geteilt durch die angenommene Ladeleistung
                  ("ic_max_power_reference", Register 40053 - der vom Gerät
                  selbst gemeldete Bezugspunkt, seit dem Wegfall von "Max.
@@ -3068,7 +3081,13 @@ requirement_vue_general:
     Leistung enthält
     number.max_soc als Bedienfeld sowie sensor.charge_power,
     sensor.discharge_power und sensor.smartmeter_power (Netzleistung).
-    Gerät beginnt mit sensor.energy_charged und sensor.energy_discharged.
+    Gerät beginnt mit sensor.battery_capacity (Speicherkapazität, vom Gerät
+    gemeldete Gesamtkapazität in Wh), gefolgt von sensor.energy_charged und
+    sensor.energy_discharged. Die Kapazität stammt aus SunSpec 40097 mit
+    Skalierungsfaktor 40110 und ist dieselbe Grundlage wie in Smart-Ladeplanung,
+    verbrauchsabhängiger Netzladung und Entladeprognose. Sie bezeichnet die
+    Gesamtkapazität, nicht die aktuell gespeicherte Energie oder einen
+    Software-SOC-Grenzwert. Eine fehlende Kapazität wird nicht geschätzt.
     Danach folgen sensor.sun_version_master, sensor.sun_version_gateway,
     sensor.sun_serial_number, sensor.storage_event_text,
     sensor.ic_control_mode_text (Steuermodus), binary_sensor.cell_calibration_active
@@ -3098,8 +3117,11 @@ requirement_vue_general:
     beim Öffnen, Rendern oder Tabwechsel keine Schreibaktionen aus.
   acceptance_criteria:
     - "Die oben aufgeführten Entitäten und Beschriftungen sind vollständig
-       geprüft; Energiezähler stehen zuerst und Speicherschalter zuletzt
+       geprüft; Speicherkapazität und Energiezähler stehen zuerst, Speicherschalter zuletzt
        in der Gerätekarte, ohne zusätzliche Energie-Karte."
+    - "Die Speicherkapazität verwendet Registry-Name, Einheit und Live-Zustand
+       der vorhandenen Entity. Änderungen, unknown, unavailable, fehlender
+       Zustand und fehlende Metadaten sind auf Deutsch und Englisch geprüft."
     - "Grenzen 20/50 Prozent und 5/32 Grad sowie nicht verfügbare Werte
        sind getestet; Farbskalen besitzen eine verständliche Textalternative."
     - "Hauptschalter und Max-SOC verwenden gemeinsame Validierung,
@@ -3525,8 +3547,12 @@ requirement_vue_electricity_tariff:
     die aktuelle Entladeprognose aus sensor.discharge_forecast unabhängig vom
     Aktivierungsstatus der Ladeplanung. Voraussetzungen sind ein verfügbarer,
     verbundener Sensor, ein gültiger Zeitstempel mit Zeitzone, eine endliche
-    Beobachtungsdauer von 1 bis 60 Minuten und positive mittlere Entladeleistung.
+    Beobachtungsdauer von 1 bis 15 Minuten und positive mittlere Entladeleistung.
     Datum und Werte werden nach HA-Sprache und -Zeitzone formatiert. Die Anzeige
+    rundet die Beobachtungsdauer in Minuten auf ganze Zahlen ohne Nachkommastelle;
+    die Prüfung auf 1 bis 15 Minuten erfolgt vor der Rundung. Berechnung und
+    veröffentlichte Messattribute behalten die genaue Beobachtungsdauer.
+    Die Anzeige
     ergänzt ungültige aktuelle Messwerte nicht aus früheren Ladeplanwerten.
     Aktuelle Prognose und Ladeentscheidung stehen in einem zusammenhängenden
     Absatz unter einer einzigen Überschrift Ladeplanung. Die doppelte
@@ -3539,6 +3565,19 @@ requirement_vue_electricity_tariff:
     als aktuelle Messung ausgegeben. Der Planungsbereich einschließlich der
     PV-Zeile bleibt bei zeitvariablem und dynamischem Tarif ohne Einklappung
     dauerhaft sichtbar. Die bisherige zweite Aktivierung in ChargePlan entfällt.
+    Im zeitvariablen Tarif ergänzt die Überschrift den bestätigten Bedarf:
+    "Ladeplanung: Keine Ladung nötig" oder "Ladeplanung: Ladung voraussichtlich
+    nötig". Nur der Zusatz nach dem Doppelpunkt ist grün bei fehlendem Bedarf
+    beziehungsweise blau bei voraussichtlichem Ladebedarf. Beide Zustände
+    bleiben durch den Text unabhängig von der Farbe unterscheidbar.
+    Fehlende, nicht verfügbare, ausgeschaltete oder noch nicht bewertete
+    Planung erhält den orangefarbenen Zusatz "Ladezeitpunkt konnte noch nicht
+    errechnet werden";
+    aus fehlenden Daten darf keine grüne Entwarnung entstehen.
+    Pausierte Aufträge zeigen nur bei erhaltener Bedarfsgrundlage den blauen
+    Zusatz. Abgeschlossene Aufträge zeigen nur nach erfolgreicher Bewertung
+    ohne Fehlbetrag über der 1-Wh-Toleranz den grünen Zusatz. Alle Zusätze
+    werden auch ins Englische übersetzt und reagieren auf HA-Zustandswechsel.
     Im dynamischen Tarif stammt die angerechnete PV-Energie ausschließlich aus
     price_charge_status_text.pv_prognose_kwh und nur bei passender
     pv_prognose_sensor-Quelle zum gespeicherten Tarifprofil. 0 kWh ist erlaubt,

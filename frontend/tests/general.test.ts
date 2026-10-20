@@ -27,6 +27,7 @@ const entities: readonly (readonly [EntityDomain, string])[] = [
   ["sensor", "charge_power"],
   ["sensor", "discharge_power"],
   ["sensor", "smartmeter_power"],
+  ["sensor", "battery_capacity"],
   ["sensor", "energy_charged"],
   ["sensor", "energy_discharged"],
   ["sensor", "sun_version_master"],
@@ -45,6 +46,7 @@ const names: Record<string, string> = {
   charge_power: "Ladeleistung",
   discharge_power: "Entladeleistung",
   smartmeter_power: "Netzleistung",
+  battery_capacity: "Speicherkapazität",
   energy_charged: "Energie geladen",
   energy_discharged: "Energie entladen",
   sun_version_master: "Firmware Master",
@@ -88,13 +90,15 @@ async function mount(
           ? { unit_of_measurement: "%", min: 0, max: 100, step: 1 }
           : item.key === "storage_max_cell_temp"
             ? { unit_of_measurement: "°C" }
-            : item.key.includes("power")
-              ? { unit_of_measurement: "W" }
-              : item.key.startsWith("energy_")
-                ? { unit_of_measurement: "kWh" }
-                : item.key === "next_cell_calibration"
-                  ? { device_class: "date" }
-                  : {};
+            : item.key === "battery_capacity"
+              ? { unit_of_measurement: "Wh" }
+              : item.key.includes("power")
+                ? { unit_of_measurement: "W" }
+                : item.key.startsWith("energy_")
+                  ? { unit_of_measurement: "kWh" }
+                  : item.key === "next_cell_calibration"
+                    ? { device_class: "date" }
+                    : {};
       return [
         item.entity_id,
         {
@@ -245,7 +249,7 @@ afterEach(() => {
 });
 
 describe("REQ-VUE-GENERAL: general dashboard view", () => {
-  it("renders all general entities with energy first and storage last in Device", async () => {
+  it("renders all general entities with capacity first and storage last in Device", async () => {
     const { root, callService } = await mount();
     expect(
       [
@@ -261,6 +265,7 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
         "charge_power",
         "discharge_power",
         "smartmeter_power",
+        "battery_capacity",
         "energy_charged",
         "energy_discharged",
         "sun_version_master",
@@ -284,7 +289,8 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
     const deviceRows = [
       ...device.querySelectorAll(".entity-control__name, .entity-value__name"),
     ].map((item) => item.textContent);
-    expect(deviceRows.slice(0, 2)).toEqual([
+    expect(deviceRows.slice(0, 3)).toEqual([
+      "Speicherkapazität",
       "Energie geladen",
       "Energie entladen",
     ]);
@@ -293,6 +299,60 @@ describe("REQ-VUE-GENERAL: general dashboard view", () => {
     expect(root.textContent).toContain("Steuermodus");
     expect(root.querySelectorAll("input")).toHaveLength(2);
     expect(callService).not.toHaveBeenCalled();
+  });
+
+  it("renders and updates the device-reported capacity with registry metadata and Wh", async () => {
+    const { root, update, emit, metadata, callService } = await mount({
+      keys: ["battery_capacity"],
+      values: { battery_capacity: "5300" },
+    });
+    expect(root.querySelector(".entity-value__name")?.textContent).toBe(
+      "Speicherkapazität",
+    );
+    expect(root.querySelector(".entity-value__state")?.textContent).toBe(
+      "5.300 Wh",
+    );
+    await update("battery_capacity", "8000");
+    expect(root.querySelector(".entity-value__state")?.textContent).toBe(
+      "8.000 Wh",
+    );
+    await emit(metadata.map((item) => ({ ...item, name: "SAX-Kapazität" })));
+    expect(root.querySelector(".entity-value__name")?.textContent).toBe(
+      "SAX-Kapazität",
+    );
+    expect(callService).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unknown", "Unbekannt"],
+    ["unavailable", "Nicht verfügbar"],
+  ])("labels capacity %s without a fabricated value", async (state, label) => {
+    const { root, update } = await mount({
+      keys: ["battery_capacity"],
+      values: { battery_capacity: "5300" },
+    });
+    await update("battery_capacity", state);
+    expect(root.querySelector(".entity-value__name")?.textContent).toBe(
+      "Speicherkapazität",
+    );
+    expect(root.querySelector(".entity-value__state")?.textContent).toBe(label);
+  });
+
+  it("keeps a registered capacity without state unavailable and omits an absent entity", async () => {
+    const { root, hass, emit, metadata } = await mount({
+      keys: ["battery_capacity", "energy_charged"],
+    });
+    const states = { ...hass.value.states };
+    delete states["sensor.renamed_battery_capacity"];
+    hass.value = { ...hass.value, states };
+    await flush();
+    expect(root.querySelector(".entity-value__state")?.textContent).toBe(
+      "Nicht verfügbar",
+    );
+    await emit(metadata.filter((item) => item.key !== "battery_capacity"));
+    expect(root.textContent).not.toContain("Speicherkapazität");
+    expect(root.textContent).toContain("Energie geladen");
+    expect(root.querySelectorAll(".entity-value")).toHaveLength(1);
   });
 
   it("shows the SOC and temperature scales with their specified color ranges", async () => {

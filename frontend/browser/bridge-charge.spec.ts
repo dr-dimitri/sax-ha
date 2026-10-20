@@ -1,6 +1,134 @@
 import { expect, test, type Locator, type TestInfo } from "@playwright/test";
 import type { HomeAssistant, TariffProfile } from "../src/types";
 
+test("confirmed charging decisions update only the colored heading suffix", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  await page.goto("/sax-power-vue/stromtarif?bridge-plan");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const panel = page.locator("sax-power-vue-panel");
+  const card = panel.locator(".charge-plan");
+  const heading = card.locator("h2");
+  const suffix = heading.locator(".charge-plan__demand");
+  const scheduled = {
+    charge_start: "2026-09-13T23:00:00Z",
+    charge_end: "2026-09-14T00:00:00Z",
+    pv_start: "2026-09-14T05:00:00Z",
+    target_soc: 60,
+    shortfall_kwh: 0,
+  };
+  const evaluated = {
+    ...scheduled,
+    completed_at: scheduled.charge_end,
+    completion_evaluated_at: "2026-09-14T00:02:00Z",
+  };
+  const cases: [string, Record<string, unknown>, string][] = [
+    ["not_needed", {}, "not-needed"],
+    ["planned", scheduled, "needed"],
+    ["charging", scheduled, "needed"],
+    ["paused", scheduled, "needed"],
+    ["paused", {}, "unknown"],
+    ["insufficient", { ...evaluated, shortfall_kwh: 0.56 }, "needed"],
+    ["off", scheduled, "unknown"],
+    [
+      "waiting_for_data",
+      { ...evaluated, completion_evaluated_at: null, shortfall_kwh: null },
+      "unknown",
+    ],
+    ["complete", evaluated, "not-needed"],
+    ["complete", { ...evaluated, shortfall_kwh: 0.56 }, "unknown"],
+    ["unavailable", scheduled, "unknown"],
+  ];
+  const labels: Record<string, string> = english
+    ? {
+        "not-needed": "No charging needed",
+        needed: "Charging likely needed",
+        unknown: "Charging time could not be calculated yet",
+      }
+    : {
+        "not-needed": "Keine Ladung nötig",
+        needed: "Ladung voraussichtlich nötig",
+        unknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
+      };
+  for (const [state, attributes, demand] of cases) {
+    await panel.evaluate(
+      (element, next) => {
+        const host = element as HTMLElement & { hass: HomeAssistant };
+        const entityId = "sensor.demo_bridge_charge_plan";
+        host.hass = {
+          ...host.hass,
+          states: {
+            ...host.hass.states,
+            [entityId]: {
+              entity_id: entityId,
+              state: next.state,
+              attributes: next.attributes,
+            },
+          },
+        };
+      },
+      { state, attributes },
+    );
+    await expect(heading).toHaveText(
+      `${english ? "Charging plan" : "Ladeplanung"}: ${labels[demand]}`,
+    );
+    await expect(suffix).toHaveClass(
+      `charge-plan__demand charge-plan__demand--${demand}`,
+    );
+    await expect(suffix).toHaveAttribute("aria-live", "polite");
+    const colors = await suffix.evaluate((element) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext("2d")!;
+      function rgb(value: string) {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = value;
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      }
+      return {
+        suffix: rgb(getComputedStyle(element).color),
+        heading: rgb(getComputedStyle(element.parentElement!).color),
+        card: rgb(getComputedStyle(element.closest(".charge-plan")!).color),
+        background: rgb(
+          getComputedStyle(element.closest(".charge-plan")!).backgroundColor,
+        ),
+      };
+    });
+    expect(colors.heading).toEqual(colors.card);
+    {
+      const [red, green, blue] = colors.suffix;
+      if (demand === "not-needed") {
+        expect(green).toBeGreaterThan(red);
+        expect(green).toBeGreaterThan(blue);
+      } else if (demand === "needed") {
+        expect(blue).toBeGreaterThan(red);
+        expect(blue).toBeGreaterThan(green);
+      } else {
+        expect(red).toBeGreaterThan(green);
+        expect(green).toBeGreaterThan(blue);
+      }
+      const luminance = (color: number[]) =>
+        color.reduce((sum, channel, index) => {
+          const value = channel / 255;
+          const linear =
+            value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+          return sum + linear * [0.2126, 0.7152, 0.0722][index];
+        }, 0);
+      const foreground = luminance(colors.suffix);
+      const background = luminance(colors.background);
+      expect(
+        (Math.max(foreground, background) + 0.05) /
+          (Math.min(foreground, background) + 0.05),
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
 test("matching forecast and no-charge plan form one permanently visible description", async ({
   page,
 }, testInfo) => {
@@ -69,12 +197,15 @@ test("matching forecast and no-charge plan form one permanently visible descript
   const card = panel.locator(".charge-plan");
   await expect(card).toBeVisible();
   await expect(card.locator("h2, h3")).toHaveText([
-    english ? "Charging plan" : "Ladeplanung",
+    english
+      ? "Charging plan: No charging needed"
+      : "Ladeplanung: Keine Ladung nötig",
   ]);
   await expect(card.locator("p")).toHaveCount(1);
   const content = await card.innerText();
   expect(content.match(/342 W/g)).toHaveLength(1);
   expect(content.match(/13:46/g)).toHaveLength(1);
+  expect(content).toContain(english ? "last 7 minutes" : "letzten 7 Minuten");
   expect(content).toContain(
     english
       ? "No grid charging is needed"
@@ -245,10 +376,12 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
     english ? "Electricity tariff" : "Stromtarif",
   );
   await expect(plan.getByRole("heading", { level: 2 })).toHaveText(
-    english ? "Charging plan" : "Ladeplanung",
+    english
+      ? "Charging plan: Charging likely needed"
+      : "Ladeplanung: Ladung voraussichtlich nötig",
   );
   await expect(plan).toContainText(
-    english ? "last 12.0 minutes" : "letzten 12,0 Minuten",
+    english ? "last 12 minutes" : "letzten 12 Minuten",
   );
   await expect(plan).toContainText(
     english ? "average consumption of 800 W" : "durchschnittlich 800 W",

@@ -53,6 +53,8 @@ from custom_components.sax_power.const import (
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
     REG_SOC,
+    REG_SUN_BATTERY_CAPACITY,
+    REG_SUN_BATTERY_CAPACITY_SF,
     REG_SUN_BATTERY_SOC,
     REG_SUN_BATTERY_SOC_SF,
     REG_SUN_IC_CONTROL_MODE,
@@ -744,6 +746,61 @@ async def test_low_block_failure_does_not_fail_update(hass) -> None:
     assert data["soc"] == 55
     assert data["storage_power_active"] == 0
     assert "sun_manufacturer" not in data
+
+
+@pytest.mark.parametrize(
+    "failed_block", [READ_BLOCK_EXT_LOW1_START, READ_BLOCK_EXT_LOW2_START]
+)
+async def test_capacity_requires_confirmed_scaling_and_survives_later_low_failure(
+    hass, failed_block: int
+) -> None:
+    """REQ-LOW-INTERVAL-REGISTERS: never plan with an assumed capacity factor."""
+    client = _make_client()
+    low_readable = False
+
+    def read(*, address: int, count: int, device_id: int) -> MagicMock:
+        result = MagicMock()
+        result.isError.return_value = (
+            device_id == 100 and address == failed_block and not low_readable
+        )
+        result.registers = [0] * count
+        if device_id == 64:
+            result.registers[REG_SOC - READ_BLOCK_START] = 55
+        elif address == READ_BLOCK_EXT_START:
+            result.registers[REG_SUN_BATTERY_CAPACITY - READ_BLOCK_EXT_START] = 768
+        elif address == READ_BLOCK_EXT_LOW2_START:
+            result.registers[
+                REG_SUN_BATTERY_CAPACITY_SF - READ_BLOCK_EXT_LOW2_START
+            ] = 1
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=read)
+    coordinator = _make_coordinator(hass, client)
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1000.0
+    ):
+        first = await coordinator._async_update_data()
+    assert first["soc"] == 55
+    assert first["battery_capacity"] is None
+    coordinator.data = first
+    assert coordinator.price_planner._context().capacity_kwh is None
+
+    low_readable = True
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
+    ):
+        recovered = await coordinator._async_update_data()
+    assert recovered["battery_capacity"] == 7680
+    coordinator.data = recovered
+    assert coordinator.price_planner._context().capacity_kwh == pytest.approx(7.68)
+
+    low_readable = False
+    with patch(
+        "custom_components.sax_power.coordinator.monotonic",
+        return_value=1003.0 + READ_BLOCK_EXT_LOW_INTERVAL + 1,
+    ):
+        later = await coordinator._async_update_data()
+    assert later["battery_capacity"] == 7680
 
 
 @pytest.mark.parametrize(

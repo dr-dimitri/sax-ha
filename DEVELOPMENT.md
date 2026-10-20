@@ -132,6 +132,21 @@ keine Vue-/Vorschaukennzeichnung.
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
+Die Gerätekarte unter **Allgemeine Informationen** beginnt mit
+`sensor.battery_capacity` (Speicherkapazität). Die vorhandene Diagnose-Entity
+liefert die vom Gerät gemeldete Gesamtkapazität in Wh aus SunSpec 40097
+(interne Adresse 97, Slave-ID 100), skaliert mit 40110. Die Ansicht verwendet
+Registry-Name, Einheit und Live-Zustand; unbekannte Werte bleiben als solche
+sichtbar, fehlende Entities werden ausgelassen. Dieselbe `battery_capacity`
+fließt in Smart-Ladeplanung, verbrauchsabhängige Netzladung und Entladeprognose
+ein. Es gibt keine fest angenommene SAX-Kapazitätsstufe. Die Kapazität beschreibt
+den ganzen Speicher; die nutzbare Energie ergibt sich erst mit SOC und
+SOC-Grenzen.
+Der Diagnosedownload enthält denselben skalierten Wh-Wert bereits unter
+`coordinator_data.battery_capacity`; unbestätigte oder nicht verfügbare Werte
+bleiben `null`. Die Kapazitätsfälle in `tests/test_diagnostics_configuration.py`
+belegen den Export ohne zusätzliche Geräteabfragen.
+
 Die PV-Zeile im dauerhaft sichtbaren Planungsbereich der Netzladung
 verwendet den Metadaten-Schlüssel
 `sensor.charging_pv_forecast`. `infrastructure/pv_forecast_reading.py` fordert die
@@ -819,7 +834,7 @@ Restbudget nach Neustart und konkurrierende Planänderungen.
 
 `ChargePlan.vue` zeigt im zeitvariablen Tarif zusätzlich die aktuelle
 Entladeprognose aus `discharge_forecast`, unabhängig vom Status des Bridge-Plans.
-Verfügbarer Sensor, explizite Zeitzone, 1–60 Minuten gültige Beobachtung und
+Verfügbarer Sensor, explizite Zeitzone, 1–15 Minuten gültige Beobachtung und
 positive mittlere Entladeleistung sind Voraussetzung. Verbindungsverlust oder
 ungültige Daten entfernen diese Prognose; frühere Bridge-Attribute dienen nicht
 als Ersatz für aktuelle Messwerte. Die Anzeige berechnet keine Zeit selbst.
@@ -828,6 +843,18 @@ Prognose und Ladeentscheidung stehen als zusammenhängender Text unter
 allgemeinen Schätzungshinweis. Eine gültige aktuelle Prognose hat Vorrang vor
 der gespeicherten Verbrauchsbasis des Plans. Ohne aktuelle Prognose bleiben
 die vorhandenen Verbrauchsangaben für geplante/laufende Ladeaufträge erhalten.
+Die Beobachtungsdauer wird in beiden Textpfaden auf ganze Minuten ohne
+Nachkommastelle gerundet, nachdem der Rohwert auf 1–15 Minuten geprüft wurde.
+Die Messattribute behalten ihre genaue Dauer für die Berechnung.
+Die Überschrift ergänzt den bestätigten Bedarf als **Ladeplanung: Keine
+Ladung nötig** oder **Ladeplanung: Ladung voraussichtlich nötig**. Nur der
+Zusatz hinter dem Doppelpunkt ist grün beziehungsweise blau, in beiden
+HA-Themes; die Aussage bleibt zusätzlich als Text erkennbar. Fehlende oder
+noch nicht bewertete Daten zeigen den orangefarbenen Zusatz **Ladezeitpunkt
+konnte noch nicht errechnet werden**.
+Ein beendeter Auftrag wird erst nach erfolgreicher Abschlussbewertung ohne
+Fehlbetrag über 1 Wh grün; pausierte Aufträge benötigen eine erhaltene
+Bedarfsgrundlage für den blauen Zusatz.
 Der Planungsbereich einschließlich PV-Zeile ist ständig sichtbar und hat
 keine Aufklappfunktion, auch beim dynamischen Tarif.
 Dynamisch zeigt `ElectricityTariffView.vue` die tatsächlich angerechnete
@@ -986,9 +1013,13 @@ Rücksetzschleife (REQ-GRID-SERVING-CHARGE).
 Die unabhängige Entladeprognose (`REQ-DISCHARGE-FORECAST`) liegt in
 `domain/discharge_forecast.py`. Der Coordinator übergibt pro neuer, frischer
 HIGH-Messung Speicherleistung, Kapazität, SunSpec-SOC und Geräte-Minimal-SOC.
-Die Domain hält höchstens 60 Minuten Verlauf, integriert die positive Leistung
+Die Domain hält höchstens 15 Minuten Verlauf, integriert die positive Leistung
 zeitgewichtet mit dem jeweils vorherigen Messwert und liefert nach mindestens
 60 Sekunden die verbleibende Zeit. Kurzes Laden und Leerlauf zählen mit 0 W;
+ältere Messungen beeinflussen den Verbrauchsdurchschnitt nicht mehr.
+`MAX_OBSERVATION_MINUTES` begrenzt sowohl diesen Verlauf als auch die
+zulässige Verbrauchsbasis neuer Bridge-Pläne. Ein an der 15-Minuten-Grenze
+angeschnittenes Messintervall zählt nur mit seinem Anteil innerhalb des Fensters;
 60 Sekunden ununterbrochenes Laden löschen den Verlauf. Messlücken über
 `READ_BLOCK_EXT_HIGH_MAX_AGE` (zwei HIGH-Intervalle plus eine Sekunde Reserve,
 derzeit fünf Sekunden) sowie ungültige Eingaben verwerfen die Historie. Es gibt
@@ -2223,6 +2254,12 @@ SunSpec-HIGH-Sensoren zeigen "unbekannt", bis der Block wieder lesbar ist
 das Update ebenfalls nicht fehlschlagen – die betroffenen
 Diagnose-Sensoren behalten ihren letzten Wert. Ein dauerhafter
 HIGH-Ausfall wird zusätzlich als Home-Assistant-Repair-Issue angezeigt.
+Vor dem ersten erfolgreichen LOW-Read bleibt `battery_capacity` unbekannt,
+auch wenn der HIGH-Block erreichbar ist. So gelangen keine Kapazitätswerte
+mit lediglich angenommenem Skalierungsfaktor in Anzeige oder Berechnungen.
+Nach dem ersten Erfolg behalten spätere LOW-Ausfälle den bestätigten Faktor.
+`tests/test_coordinator.py` prüft Startausfall, Wiederherstellung mit einem
+Faktor ungleich 0 sowie den späteren Ausfall für beide LOW-Teilblöcke.
 
 Die genaue Zuordnung Protokolladresse ↔ interne Adresse ↔ Bedeutung steht in
 `modbus_llm.yaml`; `const.py` referenziert nur die intern verwendeten

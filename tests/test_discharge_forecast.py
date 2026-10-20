@@ -43,18 +43,18 @@ def test_irregular_intervals_are_time_weighted() -> None:
     assert forecast.observation_seconds == 60
 
 
-def test_only_last_hour_counts_including_partial_boundary_interval() -> None:
+def test_only_last_fifteen_minutes_count_including_partial_boundary_interval() -> None:
     forecast = DischargeForecast(max_sample_gap=60)
-    for time in range(0, 3601, 60):
+    for time in range(0, 901, 60):
         _update(forecast, time, 1000 if time < 60 else 2000)
-    average = (30 * 1000 + 3570 * 2000) / 3600
-    assert _update(forecast, 3630, 2000) == pytest.approx(5000 / average * 3600)
+    average = (30 * 1000 + 870 * 2000) / 900
+    assert _update(forecast, 930, 2000) == pytest.approx(5000 / average * 3600)
     assert forecast.average_discharge_w == pytest.approx(average)
-    assert forecast.observation_seconds == 3600
-    assert _update(forecast, 3660, 2000) == 9000
-    assert _update(forecast, 3720, 2000) == 9000
+    assert forecast.observation_seconds == 900
+    assert _update(forecast, 960, 2000) == 9000
+    assert _update(forecast, 1020, 2000) == 9000
     assert forecast.average_discharge_w == 2000
-    assert forecast.observation_seconds == 3600
+    assert forecast.observation_seconds == 900
 
 
 def test_charging_resets_at_sixty_seconds_and_requires_new_discharge() -> None:
@@ -99,9 +99,9 @@ def test_idle_before_discharge_does_not_count_as_history() -> None:
 def test_zero_average_has_no_forecast() -> None:
     forecast = DischargeForecast(max_sample_gap=60)
     _update(forecast, 0)
-    for time in range(60, 3660, 60):
+    for time in range(60, 960, 60):
         assert _update(forecast, time, 0) is not None
-    assert _update(forecast, 3660, 0) is None
+    assert _update(forecast, 960, 0) is None
     assert forecast.average_discharge_w is None
     assert forecast.observation_seconds is None
 

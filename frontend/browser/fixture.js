@@ -31,6 +31,7 @@ const general = [
   "charge_power",
   "discharge_power",
   "smartmeter_power",
+  "battery_capacity",
   "energy_charged",
   "energy_discharged",
   "sun_version_master",
@@ -132,6 +133,7 @@ function example({ domain, key, entity_id }) {
     charge_power: "1820",
     discharge_power: "0",
     smartmeter_power: "-420",
+    battery_capacity: "5300",
     energy_charged: "1245.8",
     energy_discharged: "1028.4",
     sun_version_master: "1.2.3",
@@ -167,6 +169,7 @@ function example({ domain, key, entity_id }) {
   if (["soc", "economics_amortization_progress", "economics_roi"].includes(key))
     attributes.unit_of_measurement = "%";
   if (key === "storage_max_cell_temp") attributes.unit_of_measurement = "°C";
+  if (key === "battery_capacity") attributes.unit_of_measurement = "Wh";
   if (["charge_power", "discharge_power", "smartmeter_power"].includes(key))
     attributes.unit_of_measurement = "W";
   if (
@@ -222,7 +225,7 @@ function example({ domain, key, entity_id }) {
   if (key === "bridge_charge_plan")
     attributes = {
       enabled: true,
-      observation_minutes: 30,
+      observation_minutes: 15,
       average_discharge_w: 1000,
       discharge_at: "2026-09-14T00:00:00Z",
       charge_start: "2026-09-13T23:00:00Z",

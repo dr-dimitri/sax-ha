@@ -30,9 +30,13 @@ from custom_components.sax_power.const import (
     CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
     DOMAIN,
+    READ_BLOCK_EXT_LOW1_START,
+    READ_BLOCK_EXT_LOW2_START,
+    REG_SUN_BATTERY_CAPACITY,
+    REG_SUN_BATTERY_CAPACITY_SF,
     economics_tou_window_key,
 )
-from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsigned16
 from custom_components.sax_power.diagnostics import async_get_config_entry_diagnostics
 from custom_components.sax_power.domain.economics_amortization import DayEconomicsResult
 from custom_components.sax_power.infrastructure.control_store import ControlConfig
@@ -64,6 +68,59 @@ def _make_coordinator(
     entry.add_to_hass(hass)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {DATA_COORDINATOR: coordinator}
     return entry, coordinator, client
+
+
+@pytest.mark.parametrize(
+    ("raw_capacity", "scale_factor", "low_readable", "capacity_wh"),
+    [
+        (768, 1, True, 7680),
+        (50000, -1, True, 5000),
+        (768, 1, False, None),
+        (0xFFFF, 0, True, None),
+        (768, 0x8000, True, None),
+    ],
+)
+async def test_export_preserves_device_capacity_in_wh_without_polling(
+    hass: HomeAssistant,
+    raw_capacity: int,
+    scale_factor: int,
+    low_readable: bool,
+    capacity_wh: int | None,
+) -> None:
+    """REQ-DIAGNOSTICS: the existing data snapshot includes scaled capacity.
+
+    Register 40097 uses Wh after scaling with 40110. An unread or invalid
+    factor must remain unknown in the download, as in the planning inputs.
+    """
+    entry, coordinator, client = _make_coordinator(hass)
+    extended = [0] * 115
+    extended[REG_SUN_BATTERY_CAPACITY] = raw_capacity
+    extended[REG_SUN_BATTERY_CAPACITY_SF] = to_unsigned16(scale_factor)
+
+    def read(*, address: int, count: int, device_id: int) -> MagicMock:
+        result = MagicMock()
+        result.isError.return_value = not low_readable and address in (
+            READ_BLOCK_EXT_LOW1_START,
+            READ_BLOCK_EXT_LOW2_START,
+        )
+        result.registers = extended[address : address + count]
+        return result
+
+    client.read_holding_registers.side_effect = read
+    coordinator.data.update(await coordinator._async_read_extended())
+    assert client.read_holding_registers.await_count == 3
+    client.read_holding_registers.reset_mock()
+    before = deepcopy(coordinator.data)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["coordinator_data"]["battery_capacity"] == capacity_wh
+    assert coordinator.data == before
+    client.connect.assert_not_called()
+    client.read_holding_registers.assert_not_called()
+    client.write_register.assert_not_called()
+    client.write_registers.assert_not_called()
+    json.dumps(diagnostics, allow_nan=False)
 
 
 async def test_export_uses_current_control_configuration_instead_of_legacy_entry(

@@ -47,6 +47,7 @@ const definitions: {
   {
     title: "device",
     entities: [
+      ["sensor", "battery_capacity"],
       ["sensor", "energy_charged"],
       ["sensor", "energy_discharged"],
       ["sensor", "sun_version_master"],

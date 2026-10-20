@@ -38,6 +38,14 @@ const definitions = [
   ["sensor", "smartmeter_power", "Netzleistung", "Grid power", "-420", "W"],
   [
     "sensor",
+    "battery_capacity",
+    "Speicherkapazität",
+    "Storage capacity",
+    "5300",
+    "Wh",
+  ],
+  [
+    "sensor",
     "energy_charged",
     "Energie geladen",
     "Energy charged",

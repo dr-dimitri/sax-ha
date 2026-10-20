@@ -426,7 +426,9 @@ test("current discharge forecast remains visible independently of automatic char
   await expect(forecast).toContainText("800 W");
   await expect(forecast).toContainText("03:15");
   await expect(panel.locator(".charge-plan h2, .charge-plan h3")).toHaveText([
-    english ? "Charging plan" : "Ladeplanung",
+    english
+      ? "Charging plan: Charging likely needed"
+      : "Ladeplanung: Ladung voraussichtlich nötig",
   ]);
   await expect(panel.locator(".charge-plan")).not.toContainText(
     english ? "An estimate based on measured" : "Schätzung aus dem gemessenen",

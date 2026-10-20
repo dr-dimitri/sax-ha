@@ -2951,6 +2951,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # die Sentinel-Prüfung dieses Rohwerts eigenständig vor jedem Write.
         self._ic_power_setpoint_sf_raw = decoded.ic_power_setpoint_sf_raw
         self._high_data = dict(decoded.values)
+        # REQ-LOW-INTERVAL-REGISTERS: Keine Kapazitätsprognose mit einem
+        # lediglich angenommenen, noch nicht vom Gerät bestätigten Faktor.
+        if self._low_block_last_read is None:
+            self._high_data["battery_capacity"] = None
         self._high_last_read = now
         self._high_sample_revision += 1
         self._high_sample_started_at = now

@@ -20,7 +20,7 @@ const forecastMetadata = {
   can_control: false,
 };
 const planned = {
-  observation_minutes: 32.5,
+  observation_minutes: 12.5,
   average_discharge_w: 456,
   discharge_at: "2026-09-13T21:30:00Z",
   charge_start: "2026-09-13T22:00:00Z",
@@ -186,6 +186,92 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging need in the heading", () => {
+  it.each(["de", "en-GB"])(
+    "follows live plan decisions without inventing an assessment (%s)",
+    async (language) => {
+      const fixture = await mount(language);
+      const evaluated = {
+        ...planned,
+        completed_at: planned.charge_end,
+        completion_evaluated_at: "2026-09-13T22:42:00Z",
+      };
+      const cases: [string, Record<string, unknown>, string][] = [
+        ["not_needed", {}, "not-needed"],
+        ["planned", planned, "needed"],
+        ["charging", planned, "needed"],
+        ["insufficient", { ...planned, shortfall_kwh: 0.56 }, "needed"],
+        ["paused", planned, "needed"],
+        ["paused", { shortfall_kwh: 0.56 }, "needed"],
+        ["paused", {}, "unknown"],
+        ["paused", { ...planned, target_soc: 101 }, "unknown"],
+        ["off", planned, "unknown"],
+        ["waiting_for_data", planned, "unknown"],
+        ["unknown", planned, "unknown"],
+        ["unavailable", planned, "unknown"],
+        ["unrecognized_state", planned, "unknown"],
+        ["complete", planned, "unknown"],
+        ["complete", evaluated, "not-needed"],
+        ["complete", { ...evaluated, shortfall_kwh: 0.001 }, "not-needed"],
+        ["complete", { ...evaluated, shortfall_kwh: 0.0011 }, "unknown"],
+        ["complete", { ...evaluated, shortfall_kwh: null }, "unknown"],
+        ["complete", { ...evaluated, shortfall_kwh: -1 }, "unknown"],
+        [
+          "complete",
+          { ...evaluated, completion_evaluated_at: null },
+          "unknown",
+        ],
+        [
+          "complete",
+          { ...evaluated, completion_evaluated_at: "invalid" },
+          "unknown",
+        ],
+        ["complete", { ...evaluated, completed_at: null }, "unknown"],
+        ["insufficient", { ...evaluated, shortfall_kwh: 0.56 }, "needed"],
+        [
+          "insufficient",
+          { ...evaluated, completion_evaluated_at: null },
+          "unknown",
+        ],
+        ["waiting_for_data", { ...evaluated, shortfall_kwh: null }, "unknown"],
+      ];
+      const labels: Record<string, string> =
+        language === "de"
+          ? {
+              "not-needed": "Keine Ladung nötig",
+              needed: "Ladung voraussichtlich nötig",
+              unknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
+            }
+          : {
+              "not-needed": "No charging needed",
+              needed: "Charging likely needed",
+              unknown: "Charging time could not be calculated yet",
+            };
+      for (const [state, attributes, demand] of cases) {
+        await fixture.update(state, attributes);
+        const heading = fixture.root.querySelector("h2")!;
+        const suffix = heading.querySelector(".charge-plan__demand")!;
+        expect(heading.textContent?.trim()).toBe(
+          `${language === "de" ? "Ladeplanung" : "Charging plan"}: ${labels[demand]}`,
+        );
+        expect(suffix.textContent).toBe(labels[demand]);
+        expect(
+          suffix.classList.contains(`charge-plan__demand--${demand}`),
+        ).toBe(true);
+        expect(suffix.getAttribute("aria-live")).toBe("polite");
+        expect(heading.querySelectorAll("span")).toHaveLength(1);
+      }
+      await fixture.update("not_needed", {});
+      await fixture.disconnect();
+      expect(
+        fixture.root.querySelector(".charge-plan__demand--not-needed"),
+      ).toBeNull();
+      expect(fixture.callService).not.toHaveBeenCalled();
+      expect(fixture.callWS).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("REQ-BRIDGE-CHARGE: completion during a data gap", () => {
   it.each(["de", "en-GB"])(
     "keeps the completed result and the outage visible separately (%s)",
@@ -278,8 +364,10 @@ describe("REQ-BRIDGE-CHARGE: completion during a data gap", () => {
 describe("consumption-based charging plan", () => {
   it("explains consumption, depletion, charging and PV start in the HA timezone across midnight", async () => {
     const { root, callService, callWS } = await mount();
-    expect(root.querySelector("h2")?.textContent).toBe("Ladeplanung");
-    expect(root.textContent).toContain("letzten 32,5 Minuten");
+    expect(root.querySelector("h2")?.textContent).toBe(
+      "Ladeplanung: Ladung voraussichtlich nötig",
+    );
+    expect(root.textContent).toContain("letzten 13 Minuten");
     expect(root.textContent).toContain("durchschnittlich 456 W");
     expect(root.textContent).toContain("13.09.2026, 23:30 Uhr entleert");
     expect(root.textContent).toContain("Niedertarif um 14.09.2026, 00:00 Uhr");
@@ -295,8 +383,10 @@ describe("consumption-based charging plan", () => {
 
   it("localizes the plan and formats times with the user's HA locale", async () => {
     const { root, hass } = await mount("en-GB");
-    expect(root.querySelector("h2")?.textContent).toBe("Charging plan");
-    expect(root.textContent).toContain("last 32.5 minutes");
+    expect(root.querySelector("h2")?.textContent).toBe(
+      "Charging plan: Charging likely needed",
+    );
+    expect(root.textContent).toContain("last 13 minutes");
     expect(root.textContent).toContain("low-tariff charging will start");
     expect(root.textContent).toContain("14 Sept 2026, 00:00");
     hass.value = {
@@ -308,6 +398,64 @@ describe("consumption-based charging plan", () => {
     expect(root.textContent).toContain("Sep 13, 2026, 6:00 PM");
     expect(root.textContent).toContain("Sep 14, 2026, 1:00 AM");
   });
+
+  it.each(["de", "en-GB"])(
+    "rounds only valid observation minutes to whole numbers in both forecast paths (%s)",
+    async (language) => {
+      const fixture = await mount(language);
+      for (const [minutes, rounded] of [
+        [1, 1],
+        [1.49, 1],
+        [1.5, 2],
+        [7.3, 7],
+        [14.9, 15],
+        [15, 15],
+      ]) {
+        await fixture.update("planned", {
+          ...planned,
+          observation_minutes: minutes,
+        });
+        const expected =
+          language === "de"
+            ? `letzten ${rounded} Minuten`
+            : `last ${rounded} minutes`;
+        expect(fixture.root.textContent).toContain(expected);
+        expect(
+          fixture.root.querySelector(".charge-plan__target")?.textContent,
+        ).toContain(language === "de" ? "42,5 %" : "42.5 %");
+        await fixture.forecast("2026-09-14T00:30:00Z", {
+          observation_minutes: minutes,
+          average_discharge_w: 800,
+        });
+        expect(
+          fixture.root.querySelector(".charge-plan__forecast")?.textContent,
+        ).toContain(expected);
+      }
+      expect(fixture.callService).not.toHaveBeenCalled();
+      expect(fixture.callWS).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["de", "en-GB"])(
+    "omits observations outside one to fifteen minutes without rounding them into range (%s)",
+    async (language) => {
+      const fixture = await mount(language);
+      for (const minutes of [0.99, 15.01, 60, null]) {
+        await fixture.update("planned", {
+          ...planned,
+          observation_minutes: minutes,
+        });
+        expect(fixture.root.textContent).not.toContain(
+          language === "de" ? "letzten" : "last",
+        );
+        await fixture.forecast("2026-09-14T00:30:00Z", {
+          observation_minutes: minutes,
+          average_discharge_w: 800,
+        });
+        expect(fixture.root.querySelector(".charge-plan__forecast")).toBeNull();
+      }
+    },
+  );
 
   it.each(["de", "en-GB"])(
     "clearly reports no charging is needed (%s)",
@@ -545,7 +693,7 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
       await fixture.forecast("2026-09-14T00:30:00Z");
       const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
       expect(forecast.textContent).toContain("durchschnittlich 800 W");
-      expect(forecast.textContent).toContain("letzten 12,0 Minuten");
+      expect(forecast.textContent).toContain("letzten 12 Minuten");
       expect(forecast.textContent).toContain("14.09.2026, 02:30 Uhr");
       expect(fixture.root.querySelectorAll("h2, h3")).toHaveLength(1);
       expect(fixture.root.querySelector("button, input, form")).toBeNull();
@@ -560,7 +708,7 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
     const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
     expect(forecast.textContent).toContain("average consumption of 800 W");
     expect(forecast.textContent).not.toContain("456 W");
-    expect(forecast.textContent).not.toContain("32.5 minutes");
+    expect(forecast.textContent).not.toContain("13 minutes");
     fixture.hass.value = {
       ...fixture.hass.value,
       config: { time_zone: "America/New_York" },
@@ -579,7 +727,7 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
     ["invalid", 12, 800],
     ["2026-09-14T00:30:00", 12, 800],
     ["2026-09-14T00:30:00Z", 0.5, 800],
-    ["2026-09-14T00:30:00Z", 61, 800],
+    ["2026-09-14T00:30:00Z", 15.01, 800],
     ["2026-09-14T00:30:00Z", true, 800],
     ["2026-09-14T00:30:00Z", 12, 0],
     ["2026-09-14T00:30:00Z", 12, -1],

@@ -38,6 +38,9 @@ const text = computed(() =>
   german.value
     ? {
         title: "Ladeplanung",
+        noCharge: "Keine Ladung nötig",
+        chargeNeeded: "Ladung voraussichtlich nötig",
+        demandUnknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
         unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
         incomplete:
           "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
@@ -57,6 +60,9 @@ const text = computed(() =>
       }
     : {
         title: "Charging plan",
+        noCharge: "No charging needed",
+        chargeNeeded: "Charging likely needed",
+        demandUnknown: "Charging time could not be calculated yet",
         unavailable: "The charging plan is currently unavailable.",
         incomplete:
           "The charging plan is still incomplete. Charging times cannot currently be displayed.",
@@ -127,7 +133,7 @@ const currentForecast = computed(() => {
   if (!discharge.value?.available) return null;
   const state = discharge.value.state;
   const at = timestamp(state?.state);
-  const minutes = number(state?.attributes.observation_minutes, 1, 60);
+  const minutes = number(state?.attributes.observation_minutes, 1, 15, 0);
   const average = number(
     state?.attributes.average_discharge_w,
     Number.MIN_VALUE,
@@ -150,6 +156,49 @@ const completed = computed(
     ["waiting_for_data", "complete", "insufficient"].includes(
       status.value ?? "",
     ) && timestamp(attributes.value.completed_at) !== null,
+);
+const demand = computed(() => {
+  const shortfall = finiteValue(attributes.value.shortfall_kwh);
+  const hasCompletion = attributes.value.completed_at != null;
+  const evaluatedCompletion =
+    completed.value &&
+    timestamp(attributes.value.completion_evaluated_at) !== null &&
+    shortfall !== null &&
+    shortfall >= 0;
+  // REQ-VUE-ELECTRICITY-TARIFF: an ended charge alone is no energy verdict.
+  if (hasCompletion && !evaluatedCompletion) return "unknown";
+  switch (status.value) {
+    case "not_needed":
+      return "not-needed";
+    case "complete":
+      return evaluatedCompletion && shortfall <= 0.001
+        ? "not-needed"
+        : "unknown";
+    case "planned":
+    case "charging":
+    case "insufficient":
+      return "needed";
+    case "paused": {
+      const target = finiteValue(attributes.value.target_soc);
+      return (shortfall !== null && shortfall > 0) ||
+        (dates.value.start &&
+          dates.value.end &&
+          target !== null &&
+          target > 0 &&
+          target <= 100)
+        ? "needed"
+        : "unknown";
+    }
+    default:
+      return "unknown";
+  }
+});
+const demandLabel = computed(() =>
+  demand.value === "not-needed"
+    ? text.value.noCharge
+    : demand.value === "needed"
+      ? text.value.chargeNeeded
+      : text.value.demandUnknown,
 );
 const dataGap = computed(() => {
   if (!completed.value) return null;
@@ -177,7 +226,7 @@ const forecast = computed(() => {
   // REQ-VUE-ELECTRICITY-TARIFF: prefer live observations without repeating
   // the plan's retained consumption basis during the same description.
   if (currentForecast.value) return null;
-  const minutes = number(attributes.value.observation_minutes, 1, 60);
+  const minutes = number(attributes.value.observation_minutes, 1, 15, 0);
   if (!minutes || !dates.value.discharge) return null;
   const average = number(attributes.value.average_discharge_w, 0, Infinity, 0);
   if (german.value) {
@@ -283,7 +332,15 @@ const target = computed(() => {
     class="charge-plan"
     :aria-labelledby="`${id}-charge-plan`"
   >
-    <h2 :id="`${id}-charge-plan`">{{ text.title }}</h2>
+    <h2 :id="`${id}-charge-plan`">
+      {{ text.title }}:
+      <span
+        class="charge-plan__demand"
+        :class="`charge-plan__demand--${demand}`"
+        aria-live="polite"
+        >{{ demandLabel }}</span
+      >
+    </h2>
     <p v-if="configurationHint">{{ configurationHint }}</p>
     <p
       class="charge-plan__description"
@@ -313,6 +370,27 @@ const target = computed(() => {
   font-size: 18px;
   font-weight: 500;
   line-height: 1.5;
+}
+.charge-plan__demand--not-needed {
+  color: color-mix(
+    in srgb,
+    var(--success-color, #008f35) 70%,
+    var(--primary-text-color, #212121)
+  );
+}
+.charge-plan__demand--needed {
+  color: color-mix(
+    in srgb,
+    var(--info-color, #1475e8) 70%,
+    var(--primary-text-color, #212121)
+  );
+}
+.charge-plan__demand--unknown {
+  color: color-mix(
+    in srgb,
+    var(--warning-color, #ef6c00) 70%,
+    var(--primary-text-color, #212121)
+  );
 }
 .charge-plan p {
   line-height: 1.6;

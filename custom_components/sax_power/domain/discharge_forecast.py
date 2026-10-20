@@ -6,6 +6,8 @@ import math
 from collections import deque
 from itertools import pairwise
 
+MAX_OBSERVATION_MINUTES = 15
+
 
 def _finite(value: object) -> bool:
     return (
@@ -16,7 +18,7 @@ def _finite(value: object) -> bool:
 
 
 class DischargeForecast:
-    """Keep at most one hour of time-weighted discharge observations."""
+    """Keep at most 15 minutes of time-weighted discharge observations."""
 
     def __init__(self, *, max_sample_gap: float) -> None:
         self._max_sample_gap = max_sample_gap
@@ -88,7 +90,7 @@ class DischargeForecast:
         if not self._samples and power <= 0:
             return None
         self._samples.append((time, max(power, 0.0)))
-        cutoff = time - 3600
+        cutoff = time - MAX_OBSERVATION_MINUTES * 60
         while len(self._samples) > 1 and self._samples[1][0] <= cutoff:
             self._samples.popleft()
         start = max(self._samples[0][0], cutoff)

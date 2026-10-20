@@ -81,7 +81,7 @@ def _data(
         "discharge_forecast_attributes": (
             {
                 "observed_at": now.isoformat(),
-                "observation_minutes": 30,
+                "observation_minutes": 15,
                 "average_discharge_w": 1000,
             }
             if observation
@@ -123,7 +123,7 @@ async def test_planned_charge_replaces_min_soc_trigger_and_survives_forecast_res
     assert coordinator._bridge_charge_deadline == deadline
     assert coordinator.data["bridge_charge_plan"] == "charging"
     assert (
-        coordinator.data["bridge_charge_plan_attributes"]["observation_minutes"] == 30
+        coordinator.data["bridge_charge_plan_attributes"]["observation_minutes"] == 15
     )
 
 
@@ -356,6 +356,45 @@ async def test_no_charge_if_existing_energy_covers_until_pv(
     await _evaluate(coordinator, NOW, _data(NOW, soc=60))
     assert coordinator.data["bridge_charge_plan"] == "not_needed"
     assert not coordinator._timed_charge_active
+    coordinator.async_start_sun_charge.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("capacity_wh", "required_wh", "charge_minutes"),
+    [(5000, 500, 15), (7500, 250, 7.5), (10000, 0, 0)],
+)
+async def test_device_capacity_reduces_bridge_charge_demand(
+    coordinator: SaxPowerCoordinator,
+    capacity_wh: int,
+    required_wh: int,
+    charge_minutes: float,
+) -> None:
+    """REQ-BRIDGE-CHARGE: equal SOC stores more usable energy at higher capacity.
+
+    At 20 % SOC and a 10 % floor, existing energy must cover one hour at 1 kW.
+    While charging, the grid also supplies the house, halving the charge time
+    required for the remaining deficit at 1 kW battery charge power.
+    """
+    data = _data(NOW, soc=20)
+    data["battery_capacity"] = capacity_wh
+
+    await _evaluate(coordinator, NOW, data)
+
+    plan = coordinator._bridge_session.plan
+    assert plan is not None
+    assert plan.required_energy_wh == required_wh
+    assert plan.charge_energy_wh == pytest.approx(charge_minutes / 60 * 1000)
+    assert plan.missing_energy_wh == 0
+    if charge_minutes:
+        assert plan.start is not None and plan.end is not None
+        assert plan.end - plan.start == timedelta(minutes=charge_minutes)
+        assert coordinator.data["bridge_charge_plan"] == "planned"
+        attributes = coordinator.data["bridge_charge_plan_attributes"]
+        assert attributes["charge_start"] == plan.start.isoformat()
+        assert attributes["charge_end"] == plan.end.isoformat()
+    else:
+        assert plan.start is None and plan.end is None
+        assert coordinator.data["bridge_charge_plan"] == "not_needed"
     coordinator.async_start_sun_charge.assert_not_awaited()
 
 

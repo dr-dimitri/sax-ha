@@ -25,10 +25,22 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
     completed_at: scheduled.charge_end,
     completion_evaluated_at: "2026-09-14T00:02:00Z",
   };
+  const charging = {
+    ...scheduled,
+    charging_active: true,
+    charging_power_w: 1450,
+    charging_target_soc: 60,
+    charging_max_soc: 80,
+    charging_remaining_seconds: 3661,
+  };
   const cases: [string, Record<string, unknown>, string][] = [
     ["not_needed", {}, "not-needed"],
     ["planned", scheduled, "needed"],
     ["charging", scheduled, "needed"],
+    ["charging", { ...charging, charging_active: false }, "needed"],
+    ["charging", charging, "charging"],
+    ["off", charging, "charging"],
+    ["waiting_for_data", charging, "unknown"],
     ["paused", scheduled, "needed"],
     ["paused", {}, "unknown"],
     ["insufficient", { ...evaluated, shortfall_kwh: 0.56 }, "needed"],
@@ -40,17 +52,26 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
     ],
     ["complete", evaluated, "not-needed"],
     ["complete", { ...evaluated, shortfall_kwh: 0.56 }, "unknown"],
-    ["unavailable", scheduled, "unknown"],
+    ["complete", { ...evaluated, post_charge_status: "unknown" }, "unknown"],
+    [
+      "complete",
+      { ...evaluated, post_charge_status: "not_needed" },
+      "not-needed",
+    ],
+    ["complete", { ...evaluated, post_charge_status: "needed" }, "needed"],
+    ["unavailable", charging, "unknown"],
   ];
   const labels: Record<string, string> = english
     ? {
         "not-needed": "No charging needed",
         needed: "Charging likely needed",
+        charging: "Charging in progress...",
         unknown: "Charging time could not be calculated yet",
       }
     : {
         "not-needed": "Keine Ladung nötig",
         needed: "Ladung voraussichtlich nötig",
+        charging: "Ladung läuft...",
         unknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
       };
   for (const [state, attributes, demand] of cases) {
@@ -104,7 +125,7 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
       if (demand === "not-needed") {
         expect(green).toBeGreaterThan(red);
         expect(green).toBeGreaterThan(blue);
-      } else if (demand === "needed") {
+      } else if (demand === "needed" || demand === "charging") {
         expect(blue).toBeGreaterThan(red);
         expect(blue).toBeGreaterThan(green);
       } else {
@@ -125,6 +146,138 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
           (Math.min(foreground, background) + 0.05),
       ).toBeGreaterThanOrEqual(4.5);
     }
+  }
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("acknowledged charging replaces the forecast with a live estimate and returns to the current decision after stopping", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  await page.goto("/sax-power-vue/stromtarif?bridge-plan");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const panel = page.locator("sax-power-vue-panel");
+  const card = panel.locator(".charge-plan");
+  const active = {
+    charging_active: true,
+    charging_power_w: 1450,
+    charging_target_soc: 60,
+    charging_max_soc: 80,
+    charging_remaining_seconds: 3661,
+  };
+  const stopped = {
+    charging_active: false,
+    charging_remaining_seconds: null,
+    completed_at: "2026-09-14T00:00:00Z",
+    completion_evaluated_at: "2026-09-14T00:02:00Z",
+    shortfall_kwh: 0,
+    pv_start: "2026-09-14T05:00:00Z",
+    post_charge_status: "unknown",
+  };
+  async function publish(state: string, attributes: Record<string, unknown>) {
+    await panel.evaluate(
+      (element, next) => {
+        const host = element as HTMLElement & { hass: HomeAssistant };
+        const entityId = "sensor.demo_bridge_charge_plan";
+        host.hass = {
+          ...host.hass,
+          states: {
+            ...host.hass.states,
+            [entityId]: { entity_id: entityId, ...next },
+          },
+        };
+      },
+      { state, attributes },
+    );
+  }
+  await publish("charging", { ...active, charging_active: false });
+  await expect(card).toContainText(
+    english
+      ? "Current measurements do not yet confirm"
+      : "noch nicht durch aktuelle Messwerte bestätigt",
+  );
+  await expect(card).not.toContainText(
+    english ? "Charging in progress..." : "Ladung läuft...",
+  );
+  for (const state of ["charging", "off"]) {
+    await publish(state, active);
+    await expect(card.locator("h2")).toHaveText(
+      english
+        ? "Charging plan: Charging in progress..."
+        : "Ladeplanung: Ladung läuft...",
+    );
+    await expect(card).toContainText(
+      english ? "1 hour 2 minutes" : "1 Stunde 2 Minuten",
+    );
+    await expect(card).toContainText(english ? "1,450 W" : "1.450 W");
+    await expect(card).toContainText(
+      english ? "Charging target: 60 %" : "Ladeziel: 60 %",
+    );
+    await expect(card).toContainText(
+      english
+        ? "Maximum grid charging limit: 80 %"
+        : "Maximale Netzladegrenze: 80 %",
+    );
+    await expect(card).not.toContainText("800 W");
+    await expect(card).not.toContainText("14.09.2026");
+    await verifyCardGeometry(card);
+  }
+  await attachScreenshot(
+    card,
+    testInfo,
+    "charging-progress",
+    page.viewportSize()!.width,
+  );
+  await publish("charging", {
+    ...active,
+    charging_remaining_seconds: null,
+  });
+  await expect(card).toContainText(
+    english
+      ? "remaining time cannot yet be calculated"
+      : "Restdauer kann mit den aktuellen Batteriemesswerten noch nicht berechnet werden",
+  );
+  await expect(card).not.toContainText(english ? "0 minutes" : "0 Minuten");
+  await publish("complete", stopped);
+  await expect(card.locator(".charge-plan__demand--unknown")).toBeVisible();
+  await expect(card).toContainText(
+    english
+      ? "After charging ends, fresh consumption data is collected"
+      : "Nach Ladeende werden neue Verbrauchsdaten für die Ladeplanung gesammelt",
+  );
+  await expect(card).not.toContainText("800 W");
+  for (const [status, css] of [
+    ["not_needed", "not-needed"],
+    ["needed", "needed"],
+  ]) {
+    await publish("complete", {
+      ...stopped,
+      post_charge_status: status,
+      post_charge_forecast_attributes: {
+        observation_minutes: 1.5,
+        average_discharge_w: 321,
+        observed_at: "2026-09-14T00:03:30Z",
+        discharge_at: "2026-09-14T08:30:00Z",
+        pv_start: "2026-09-14T09:00:00Z",
+      },
+    });
+    await expect(card.locator(`.charge-plan__demand--${css}`)).toBeVisible();
+    await expect(card).toContainText("321 W");
+    await expect(card).toContainText(
+      english ? "last 2 minutes" : "letzten 2 Minuten",
+    );
+    await expect(card).not.toContainText("800 W");
+    await expect(card).toContainText("11:00");
+    await expect(card).not.toContainText("07:00");
+    await expect(card).not.toContainText(
+      english ? "Charging in progress..." : "Ladung läuft...",
+    );
+    await expect(card).not.toContainText(
+      english ? "1 hour 2 minutes" : "1 Stunde 2 Minuten",
+    );
+    await verifyCardGeometry(card);
   }
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

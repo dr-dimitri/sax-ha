@@ -121,7 +121,12 @@ from .const import (
     SWITCH_STATE_UNKNOWN_LABEL,
     UNKNOWN_LABEL,
 )
-from .domain.discharge_forecast import DischargeForecast
+from .domain.charge_progress import (
+    assess_charge_demand,
+    estimate_charge_progress,
+    estimate_discharge_remaining_seconds,
+)
+from .domain.discharge_forecast import MAX_OBSERVATION_MINUTES, DischargeForecast
 from .domain.economics_accounting import (
     EconomicsDelta,
     capacity_inventory_correction,
@@ -819,6 +824,127 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["bridge_charge_plan"] = self._bridge_session.status
         data["bridge_charge_plan_attributes"] = dict(self._bridge_session.attributes)
         data["bridge_charge_plan_attributes"]["enabled"] = self.bridge_charge_enabled
+        self._publish_charge_progress(data)
+
+    def _publish_charge_progress(self, data: dict[str, Any]) -> None:
+        """REQ-BRIDGE-CHARGE: derive live display values outside retained plans."""
+        session = self._bridge_session
+        now = dt_util.utcnow()
+        measurements = self._high_data
+        fresh = (
+            not self._basic_read_failed and self._timed_discharge_measurements_fresh()
+        )
+        bridge = self.bridge_charge_enabled
+        deadline = (
+            session.plan.end
+            if bridge and session.plan is not None
+            else None if bridge else self._active_charge_deadline()
+        )
+        window = (
+            max(0.0, (deadline - now).total_seconds()) if deadline is not None else None
+        )
+        progress = estimate_charge_progress(
+            active=(
+                fresh
+                and self._timed_charge_active
+                and self.sun_charge_active
+                and self._sun_charge_power < 0
+                and not self._sun_charge_timed_discharge
+                and self._grid_charge_power is None
+                and self._sun_charge_commanded_mode == SUN_IC_CONTROL_MODE_SETPOINT
+                and self._high_sample_control_mode == SUN_IC_CONTROL_MODE_SETPOINT
+                and self._high_sample_revision > self._timed_charge_start_revision
+                and self._high_sample_started_at is not None
+                and self._high_sample_started_at >= self._timed_charge_started_at
+                and (window is None or window > 0)
+                and (
+                    not bridge
+                    or session.started
+                    and session.status == "charging"
+                    and window is not None
+                    and window > 0
+                )
+            ),
+            storage_power_w=measurements.get("storage_power_active"),
+            capacity_wh=measurements.get("battery_capacity"),
+            soc=measurements.get("battery_soc"),
+            target_soc=(
+                session.plan.target_soc
+                if bridge and session.plan is not None
+                else None if bridge else self.effective_timed_charge_max_soc
+            ),
+            max_soc=self.effective_timed_charge_max_soc,
+            window_seconds=window,
+        )
+        attributes = data["bridge_charge_plan_attributes"]
+        attributes.update(
+            charging_active=progress.active,
+            charging_power_w=progress.power_w,
+            charging_target_soc=progress.target_soc,
+            charging_max_soc=progress.max_soc,
+            charging_remaining_seconds=progress.remaining_seconds,
+        )
+        if session.completed_at is not None:
+            attributes["post_charge_status"] = "unknown"
+            attributes["post_charge_forecast_attributes"] = {}
+            observation = data.get("discharge_forecast_attributes")
+            if not fresh or not isinstance(observation, Mapping):
+                return
+            try:
+                observed_at = datetime.fromisoformat(
+                    str(observation.get("observed_at"))
+                )
+            except ValueError:
+                return
+            average = observation.get("average_discharge_w")
+            minutes = observation.get("observation_minutes")
+            if (
+                observed_at.tzinfo is None
+                or not 0 <= (now - observed_at).total_seconds() <= 5
+                or observed_at < session.completed_at + timedelta(minutes=1)
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, int | float)
+                    or not math.isfinite(value)
+                    for value in (average, minutes)
+                )
+                or average <= 0
+                or not 1 <= minutes <= MAX_OBSERVATION_MINUTES
+            ):
+                return
+            pv_start = self._pv_bridge_forecast.pv_start(now, average)
+            if pv_start is None:
+                return
+            status = assess_charge_demand(
+                capacity_wh=measurements.get("battery_capacity"),
+                soc=measurements.get("battery_soc"),
+                min_soc=measurements.get("battery_soc_min"),
+                average_discharge_w=average,
+                until_pv_seconds=(pv_start - now).total_seconds(),
+            )
+            if status != "unknown":
+                # A worker may publish an older coordinator snapshot after a
+                # newer HIGH read; its depletion time must use the same energy.
+                seconds = estimate_discharge_remaining_seconds(
+                    capacity_wh=measurements.get("battery_capacity"),
+                    soc=measurements.get("battery_soc"),
+                    min_soc=measurements.get("battery_soc_min"),
+                    average_discharge_w=average,
+                )
+                if seconds is None:
+                    return
+                try:
+                    forecast_at = now + timedelta(seconds=seconds)
+                except OverflowError:
+                    return
+                attributes["post_charge_status"] = status
+                attributes["post_charge_forecast_attributes"] = {
+                    "observed_at": observed_at.isoformat(),
+                    "observation_minutes": minutes,
+                    "average_discharge_w": average,
+                    "discharge_at": forecast_at.isoformat(),
+                    "pv_start": pv_start.isoformat(),
+                }
 
     @property
     def bridge_charge_enabled(self) -> bool:

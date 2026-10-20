@@ -261,6 +261,31 @@ requirement_bridge_charge:
     beendete Aufträge von erst geplanten Teilladungen, zeigt eine ausstehende
     Bewertung ausdrücklich als unbekannte Fehlmenge und nennt Datenlücke
     und Bewertungszeitpunkt zusätzlich zum Ergebnis.
+    Der Coordinator ergänzt pro Veröffentlichung reine Anzeigeattribute,
+    ohne den gebundenen Auftrag oder seine Abschlussbewertung zu verändern:
+    charging_active, charging_power_w, charging_target_soc, charging_max_soc
+    und charging_remaining_seconds. Laufende Ladung erfordert einen bestätigten
+    zeitgesteuerten Netzladeauftrag und einen frischen HIGH-Messwert nach dem
+    Ladebefehl mit negativem storage_power_active im Sollwertmodus.
+    Bei verbrauchsabhängiger Ladung muss die Sitzung zudem tatsächlich laufen;
+    feste SOC-Netzladung kann bei ausgeschalteter Bridge ebenfalls laufen.
+    Die Restdauer ist Gesamtkapazität in Wh mal verbleibender SOC-Anteil,
+    geteilt durch die aktuelle positive Ladeleistung, umgerechnet in Sekunden.
+    Das Ziel ist höchstens effective_timed_charge_max_soc und bei Bridge
+    zusätzlich höchstens deren tatsächliches Planziel; das verbleibende
+    Auftragsfenster begrenzt die Dauer. Fehlende, ungültige oder veraltete
+    Messwerte ergeben keine erfundene Restdauer. Pause, Ende oder Ausfall
+    verwerfen die laufenden Anzeigeattribute sofort.
+    Für abgeschlossene Sitzungen liefern post_charge_status und
+    post_charge_forecast_attributes eine getrennte aktuelle Anzeigebewertung.
+    Erst mindestens 60 Sekunden nach Ladeende und mit neuer gültiger
+    Verbrauchsmessung nach dem Ende, frischen Batteriedaten sowie aktuellem
+    PV-Start wird der aktuelle Bedarf bewertet. Ohne diese Grundlage ist
+    der Anzeigestatus unknown. Die historische Abschlussbewertung bleibt
+    davon unberührt; neue physische Aufträge behalten ihre bestehende Sperre.
+    Bedarf und angezeigter Entladezeitpunkt verwenden dieselbe aktuelle
+    HIGH-Kapazität, denselben SOC und Verbrauchsdurchschnitt. Ein früherer
+    Veröffentlichungs-Snapshot darf weder Ladefluss noch Entladezeit vortäuschen.
     Seine Zustände sind off, waiting_for_data, planned, charging, not_needed,
     insufficient, paused und complete. ChargePlan.vue stellt im
     zeitvariablen Tab daraus eine verständliche Meldung mit Verbrauchsbasis,
@@ -3575,8 +3600,20 @@ requirement_vue_electricity_tariff:
     errechnet werden";
     aus fehlenden Daten darf keine grüne Entwarnung entstehen.
     Pausierte Aufträge zeigen nur bei erhaltener Bedarfsgrundlage den blauen
-    Zusatz. Abgeschlossene Aufträge zeigen nur nach erfolgreicher Bewertung
-    ohne Fehlbetrag über der 1-Wh-Toleranz den grünen Zusatz. Alle Zusätze
+    Zusatz. Wird Ladung tatsächlich durchgeführt, lautet die Überschrift
+    "Ladeplanung: Ladung läuft..." mit blauem Zusatz. Ein bestätigter Befehl
+    allein ohne frisch gemessenen Ladefluss genügt dafür nicht. Der Hinweistext
+    verwendet die zentral berechnete Restdauer, aktuelle Ladeleistung und
+    tatsächliches Ladeziel; eine abweichende maximale Netzladegrenze wird
+    zusätzlich genannt. Ganze Minuten werden für die Restdauer aufgerundet;
+    längere Dauern dürfen als Stunden und Minuten erscheinen. Bei fehlender
+    Restdauer bleibt die laufende Ladung erkennbar, die Schätzung aber unbekannt.
+    Laufende Anzeige und Restdauer verschwinden bei Pause, Ende oder Ausfall.
+    Nach Ladeende bestimmt die aktuelle Anzeigebewertung den Status und den
+    Hinweistext. Während neue Verbrauchsdaten fehlen, erscheint der orange
+    Zusatz mit dem Hinweis, dass nach Ladeende neue Verbrauchsdaten gesammelt
+    werden. Frühere Laufzeiten, Verbrauchsprognosen und Abschlussergebnisse
+    ersetzen die aktuelle Bewertung nicht. Alle Zusätze
     werden auch ins Englische übersetzt und reagieren auf HA-Zustandswechsel.
     Im dynamischen Tarif stammt die angerechnete PV-Energie ausschließlich aus
     price_charge_status_text.pv_prognose_kwh und nur bei passender

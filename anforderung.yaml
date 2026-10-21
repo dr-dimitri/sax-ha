@@ -755,6 +755,14 @@ requirement_fixed_time_grid_charge:
     bleiben unabhängig von der Ladeweise aktiv.
 
     Die Oberfläche zeigt bestätigte Ladeweise, Startzeit und Netzladeziel.
+    Bei beiden Tarifarten bleibt die Ladeplanung bei fester Startzeit sichtbar:
+    Nach "Ladeplanung:" steht "Netzladen startet ab HH:MM Uhr" in Blau;
+    ausdrücklich gespeicherte Sekunden ungleich null bleiben sichtbar.
+    Der Hinweis verwendet ausschließlich die bestätigte Startzeit, keine
+    ungespeicherten Entwürfe, und wird auch ins Englische übersetzt.
+    Eine frisch gemessene laufende Ladung zeigt vorrangig "Ladung läuft..."
+    samt bestehender Restdauer. Inaktive verbrauchsbasierte Planung liefert
+    bei dieser Ladeweise keine widersprüchlichen Bedarfs-/Fehlermeldungen.
     Das Startzeitfeld verwendet vollständige Texteingaben HH:MM oder HH:MM:SS;
     vierstellige Eingaben werden erst bei Übernahme normalisiert.
     Unvollständige oder ungültige Zeiten werden am betroffenen Feld markiert,
@@ -773,6 +781,7 @@ requirement_fixed_time_grid_charge:
     - "Vor der Startzeit beginnt kein neuer Auftrag; ab Start lädt auch ein SOC oberhalb der bisherigen Startschwelle bis zum Netzladeziel. Bereits erreichtes Ziel startet keine Ladung."
     - "Tageswechsel, Neustart, täglicher Abschluss, deaktivierte Automatik/Monate, fehlender SOC und globale Obergrenze sind abgedeckt."
     - "Beide Tarifarten verwenden dasselbe Netzladeziel und dieselbe feste Startzeit; Preis-/Prognoseausfälle erteilen oder entziehen keine zeitbasierte Freigabe."
+    - "Der blaue Ladeplanungshinweis folgt bestätigten Startzeitänderungen in DE/EN bei beiden Tarifarten; Entwürfe/fehlgeschlagene Übernahmen ändern ihn nicht und echte laufende Ladung hat Vorrang."
     - "Echte WebSocket-Tests prüfen atomare Validierung, Revisionskonflikte, belegte Geräte-Locks sowie verzögerte/fehlgeschlagene Modus- und Sollwertantworten bei Start und periodischem Schreiben."
     - "Komponenten- und Chromium-/macOS-WebKit-Prüfungen sichern Tastatureingabe, Mitternacht, unvollständige Zeiten, sofortiges Pending, Doppelaufrufsperre und erhaltene Entwürfe bei Fehlern ab."
 

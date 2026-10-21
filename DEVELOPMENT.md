@@ -294,6 +294,12 @@ zusammen über den Tarif-WebSocket-Endpunkt angenommen;
 `charging_method` wechselt atomar zu einer bisherigen Ladeweise
 zurück. `fixed_time_charge_enabled` und `fixed_time_charge_start` sind gemeinsame
 Config-Entry-Optionen, unabhängig von den gespeicherten Preisprofilen.
+Bei fester Startzeit bleibt bei beiden Tarifarten `ChargePlan.vue` sichtbar.
+Die Überschrift ergänzt **Netzladen startet ab HH:MM Uhr** in Blau aus der
+bestätigten Tarifkonfiguration; gespeicherte Sekunden ungleich null bleiben
+erhalten. Entwürfe verändern den Hinweis nicht. Tatsächlich gemessene Ladung
+zeigt weiterhin vorrangig **Ladung läuft...** mit Restdauer. Die ausgeschaltete
+verbrauchsbasierte Planung liefert hier keine Bedarfs- oder Fehlertexte.
 Browserprüfungen in `time-of-use-usability.spec.ts` und `dynamic-tariff.spec.ts`
 sichern Gruppierung, Größen, Tastaturbedienung und Rückmeldungen ab.
 

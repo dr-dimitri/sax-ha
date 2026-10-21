@@ -212,6 +212,22 @@ noch unvollständigen Zielprofil bleibt sie bis zur Einrichtung ausgeschaltet.
 Netzdienliches Laden lässt sich zusätzlich nutzen
 und hat während seiner wirksamen Ladepause Vorrang vor der Preisoptimierung.
 
+### Netzladung ab fester Uhrzeit
+
+Bei beiden Tarifarten kannst du unter **Stromtarif → Netzladung → Bearbeiten**
+die Ladeweise **Ab fester Uhrzeit** wählen. Trage den **Täglichen Ladestart**
+ein, etwa **02:00**, stelle das **Netzladeziel (%)** ein und bestätige mit
+**Übernehmen**. Schalte anschließend **Automatische Netzladung** ein.
+
+Der Speicher lädt täglich ab dieser Uhrzeit bis zum maximalen Netzlade-SOC,
+auch wenn sein SOC bereits oberhalb der bisherigen Startschwelle liegt.
+Strompreis und Bedarfsprognose beeinflussen diesen Start nicht. Die aktiven
+Netzlademonate, PV-Überschussprüfung und globale SOC-Grenze gelten weiterhin;
+die bestehende Zellkalibrierung kann die Grenzen vorübergehend auf 100 % anheben.
+Nach Erreichen des Ziels wird erst am nächsten täglichen Start wieder geladen.
+Ein Neustart erhält den Tagesabschluss und setzt eine noch laufende Ladung fort.
+Die Startzeit verwendet die in Home Assistant eingestellte Zeitzone.
+
 ### Zeitgesteuerte Netzladung
 
 Wähle im Tab **Stromtarif** den Tarif **Zeitvariabel**. Er passt zu festen
@@ -472,15 +488,18 @@ beispielsweise von 10 kWh Vorhersage 7 kWh angerechnet.
 | Bedarfsgerecht laden (Smart) | In günstigen Stunden, abgestimmt auf Speicherfüllung und optionalen PV-Ertrag |
 | Günstigste Stunden nutzen (Relativ) | In der eingestellten Anzahl der günstigsten Stunden des 24-Stunden-Zyklus |
 | Bis zu einem festen Preis laden (Absolut) | Solange der aktuelle Preis höchstens der eingestellten Grenze entspricht |
+| Ab fester Uhrzeit | Täglich ab der gespeicherten Uhrzeit, unabhängig vom Preis und der SOC-Startschwelle, bis zum eigenen Netzladeziel |
 | Keine automatische Ladung (Aus) | Preisautomatik aus; Einstellungen bleiben erhalten |
 
 Die Ansicht zeigt nur die Felder, die zur gewählten Ladeweise passen.
 Bei einer festen Preisgrenze stellst du den höchsten erlaubten Preis ein;
 bei den beiden anderen aktiven Ladeweisen die maximale Ladedauer. Dort ist
 die absolute Preisgrenze unwirksam: Auch die günstigsten verfügbaren Stunden
-können teuer sein. Das **Netzladeziel (%)** ist dieselbe globale Obergrenze wie
+können teuer sein. Bei den preisabhängigen Ladeweisen ist das **Netzladeziel (%)** dieselbe globale Obergrenze wie
 **Max. SOC** und gilt auch für PV-Ladung. Zeitbudget, Preise und PV-Prognose
 können dazu führen, dass weniger Netzstrom geladen wird.
+**Ab fester Uhrzeit** verwendet dagegen das separate Netzladeziel und die
+Netzlademonate aus dem oben beschriebenen täglichen Start.
 
 **Relativ** und **Smart** benötigen eine Preisvorschau. Sie planen in festen
 24-Stunden-Zyklen; neue Preise können noch nicht begonnene Ladefenster
@@ -495,7 +514,8 @@ bleibt die Obergrenze; das Ladeziel ist **Max. SOC**.
 Fehlen Messwerte für Speicherfüllung, Kapazität oder Ladeleistung, nutzt
 Smart die eingestellte Anzahl der günstigsten Stunden. Die Übersicht zeigt
 die bestätigten Einstellungen; allein das Öffnen des Einstellbereichs
-verändert keine Werte. Eine andere Ladeweise wählst du direkt per Klick.
+verändert keine Werte. Preisabhängige Ladeweisen wählst du direkt per Klick.
+**Ab fester Uhrzeit** wird erst zusammen mit der eingegebenen Startzeit übernommen.
 Der gemeinsame Button **Übernehmen** speichert die geänderten Zahleneingaben
 und schließt den Bereich bei Erfolg. Bei Fehlern bleiben die Eingaben erhalten.
 

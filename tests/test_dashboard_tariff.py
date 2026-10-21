@@ -97,6 +97,7 @@ async def test_admin_roundtrip_preserves_euro_options_and_precision(
         "tariff_type": "time_of_use",
         "base_price_ct_kwh": 32.12,
         "feed_in_price_ct_kwh": 7.86,
+        "fixed_time_charging": {"enabled": False, "start": None},
         "windows": [{"start": "22:00:13", "end": "06:00:00", "price_ct_kwh": 21.0}],
         "revision": tariff["revision"],
         "can_edit": True,

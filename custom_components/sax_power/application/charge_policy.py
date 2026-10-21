@@ -104,6 +104,8 @@ class ChargePolicyInput:
     timed_window_completed: bool = False
     timed_plan_charge_now: bool | None = None
     timed_tariff_window_active: bool | None = None
+    fixed_time_selected: bool = False
+    fixed_time_charge_now: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,17 +125,21 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
     """Evaluate charging eligibility without accessing Home Assistant or Modbus."""
     soc_reached = inputs.current_soc >= inputs.target_soc
     timed_window_active = (
-        inputs.timed_enabled
-        and inputs.now.month in inputs.timed_months
-        and (
-            inputs.timed_plan_charge_now
-            if inputs.timed_plan_charge_now is not None
-            else not inputs.timed_window_completed
+        inputs.fixed_time_charge_now
+        if inputs.fixed_time_selected
+        else (
+            inputs.timed_enabled
+            and inputs.now.month in inputs.timed_months
             and (
-                inputs.timed_tariff_window_active
-                if inputs.timed_tariff_window_active is not None
-                else is_time_in_window(
-                    inputs.now.time(), inputs.timed_start, inputs.timed_end
+                inputs.timed_plan_charge_now
+                if inputs.timed_plan_charge_now is not None
+                else not inputs.timed_window_completed
+                and (
+                    inputs.timed_tariff_window_active
+                    if inputs.timed_tariff_window_active is not None
+                    else is_time_in_window(
+                        inputs.now.time(), inputs.timed_start, inputs.timed_end
+                    )
                 )
             )
         )
@@ -144,7 +150,8 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and not inputs.pv_surplus_active
         and timed_window_active
         and (
-            inputs.timed_plan_charge_now is not None
+            inputs.fixed_time_selected
+            or inputs.timed_plan_charge_now is not None
             or inputs.timed_min_soc is not None
             and inputs.timed_armed
         )
@@ -166,6 +173,7 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and not timed_should_charge
         and not grid_serving_window_active
         and inputs.price_enabled
+        and not inputs.fixed_time_selected
         and inputs.price_strategy != PRICE_STRATEGY_OFF
         and inputs.price_charge_now
     )
@@ -176,6 +184,7 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and not grid_serving_window_active
         and not price_should_charge
         and inputs.price_enabled
+        and not inputs.fixed_time_selected
         and inputs.current_price is not None
         and inputs.neutral_price is not None
         and inputs.current_price < inputs.neutral_price

@@ -40,6 +40,7 @@ from .application.economics import (
     prior_result_eur_from_options,
     tariff_config_from_options,
 )
+from .application.fixed_time_charge import FixedTimeChargeState, fixed_time_charge_state
 from .application.ports import ModbusClient
 from .application.tariff_charge import tariff_charge_state
 from .application.tariff_profiles import bridge_configuration_error
@@ -56,6 +57,8 @@ from .const import (
     CHARGING_SETTING_KEYS,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
+    CONF_FIXED_TIME_CHARGE_ENABLED,
+    CONF_FIXED_TIME_CHARGE_START,
     CONF_PRICE_SENSOR,
     CONF_VUE_DASHBOARD_ENABLED,
     CONTROL_MODE_LABELS,
@@ -190,6 +193,7 @@ from .infrastructure.economics_store import (
 )
 from .infrastructure.economics_store import EconomicsState, EconomicsStateStore
 from .infrastructure.energy_store import EnergyState, EnergyStateStore
+from .infrastructure.fixed_time_charge_store import FixedTimeChargeStateStore
 from .infrastructure.pv_bridge_forecast import PvBridgeForecast
 from .infrastructure.pv_forecast_reading import PvForecastReading
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
@@ -518,6 +522,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._timed_charge_store = TimedChargeStateStore(hass, entry_id)
         self._timed_charge_restore_state: TimedChargeState | None = None
         self._timed_charge_persisted_state: TimedChargeState | None = None
+        self._fixed_time_charge_store = FixedTimeChargeStateStore(hass, entry_id)
+        self._fixed_time_charge_state: FixedTimeChargeState | None = None
+        self._fixed_time_charge_persisted_state: FixedTimeChargeState | None = None
+        self._fixed_time_charge_writing = False
+        self._charge_soc_unavailable = False
         self._timed_charge_pv_surplus_cycles = 0
         self._timed_discharge_store = TimedDischargeStateStore(hass, entry_id)
         self._timed_discharge_state: TimedDischargeState | None = None
@@ -948,7 +957,82 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def bridge_charge_enabled(self) -> bool:
-        return self.options.get(CONF_BRIDGE_CHARGE_ENABLED) is True
+        return (
+            self.options.get(CONF_BRIDGE_CHARGE_ENABLED) is True
+            and not self.fixed_time_charge_enabled
+        )
+
+    @property
+    def fixed_time_charge_enabled(self) -> bool:
+        return self.options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is True
+
+    @property
+    def fixed_time_charge_start(self) -> dt_time | None:
+        value = self.options.get(CONF_FIXED_TIME_CHARGE_START)
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = dt_time.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is None else None
+
+    def _fixed_time_charge_permitted(self, now: datetime) -> bool:
+        state = self._fixed_time_charge_state
+        return (
+            self.fixed_time_charge_enabled
+            and (self._timed_charge_enabled or self._price_charge_enabled)
+            and self.tariff_provider.config.tariff_type
+            in (TariffType.TIME_OF_USE, TariffType.DYNAMIC)
+            and now.month in self._timed_charge_months
+            and state is not None
+            and not state.completed
+            and state.start == self.fixed_time_charge_start
+        )
+
+    async def _async_prepare_fixed_time_charge(
+        self, now: datetime, current_soc: int | float | None
+    ) -> bool:
+        start = self.fixed_time_charge_start
+        enabled = (
+            self.fixed_time_charge_enabled
+            and (self._timed_charge_enabled or self._price_charge_enabled)
+            and self.tariff_provider.config.tariff_type
+            in (TariffType.TIME_OF_USE, TariffType.DYNAMIC)
+            and now.month in self._timed_charge_months
+            and start is not None
+        )
+        if not enabled:
+            self._fixed_time_charge_state = None
+        elif current_soc is not None:
+            assert start is not None
+            self._fixed_time_charge_state = fixed_time_charge_state(
+                self._fixed_time_charge_state,
+                now=now,
+                start=start,
+                target_reached=current_soc >= self.effective_timed_charge_max_soc,
+            )
+        if (
+            self._fixed_time_charge_writing
+            and not self._fixed_time_charge_permitted(now)
+            and self._grid_charge_power is None
+        ):
+            # REQ-FIXED-TIME-GRID-CHARGE: Disk latency cannot prolong the
+            # physical charge; retain the global zero-power cap if reached.
+            if current_soc is not None and current_soc >= self.effective_max_soc:
+                await self.async_start_sun_charge(0)
+            else:
+                await self.async_stop_sun_charge()
+        if self._fixed_time_charge_state != self._fixed_time_charge_persisted_state:
+            try:
+                await self._fixed_time_charge_store.async_save(
+                    self._fixed_time_charge_state
+                )
+            except HomeAssistantError, OSError, ValueError:
+                _LOGGER.exception("Tägliche Netzladefreigabe nicht gespeichert")
+            else:
+                self._fixed_time_charge_persisted_state = self._fixed_time_charge_state
+        return self._fixed_time_charge_permitted(now)
 
     def _sync_bridge_charge_configuration(self) -> tuple[object, ...]:
         """Revoke frozen permissions even while a Basic outage prevents planning."""
@@ -2982,6 +3066,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "confirmation_cycles": self._timed_charge_confirmation_cycles,
                 "pv_surplus_cycles": self._timed_charge_pv_surplus_cycles,
             },
+            "fixed_time_charge": {
+                "enabled": self.fixed_time_charge_enabled,
+                "start": (
+                    self.fixed_time_charge_start.isoformat()
+                    if self.fixed_time_charge_start is not None
+                    else None
+                ),
+                "occurrence_day": (
+                    self._fixed_time_charge_state.day.isoformat()
+                    if self._fixed_time_charge_state is not None
+                    else None
+                ),
+                "completed": (
+                    self._fixed_time_charge_state.completed
+                    if self._fixed_time_charge_state is not None
+                    else None
+                ),
+                "permitted": self._fixed_time_charge_permitted(moment),
+            },
             "grid_serving": {
                 "setpoint_active": self._grid_serving_setpoint_active,
                 "wait_cycles": self._grid_serving_wait_cycles,
@@ -3421,6 +3524,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fields = self._control_unresolved_fields
         if self.timed_charge_uses_tariff:
             fields = fields - {"timed_charge_start", "timed_charge_end"}
+        if self.fixed_time_charge_enabled:
+            fields = fields - {
+                "timed_charge_start",
+                "timed_charge_end",
+                "timed_charge_min_soc",
+            }
         if not fields:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
@@ -3487,6 +3596,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._apply_control_config(
                 result.config.sanitized(
                     validate_legacy_windows=not self.timed_charge_uses_tariff
+                    and not self.fixed_time_charge_enabled
                 )
             )
 
@@ -3660,6 +3770,20 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Accept one validated dashboard draft before scheduling device work."""
         self._raise_if_shutdown()
+        validated = self._validate_charging_settings(values)
+        self._apply_charging_settings(validated)
+        self.price_planner.evaluate()
+        await self._async_apply_grid_charge_change(
+            defer_device_update=defer_device_update
+        )
+
+    def _validate_charging_settings(
+        self,
+        values: Mapping[str, Any],
+        *,
+        fixed_time_selected: bool | None = None,
+    ) -> dict[str, int | float]:
+        """Validate a complete draft against its selected method before mutation."""
         if not values:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -3718,7 +3842,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "timed_charge_min_soc", self._timed_charge_min_soc
             )
             self._validate_timed_charge_soc(
-                target, None if minimum_soc is None else int(minimum_soc)
+                target,
+                None if minimum_soc is None else int(minimum_soc),
+                fixed_time_selected=fixed_time_selected,
             )
         if validated.get("timed_charge_max_soc", 0) > maximum_soc:
             raise ServiceValidationError(
@@ -3732,15 +3858,14 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
             )
 
-        # REQ-VUE-ENTITY-BINDING: a shared Apply must never expose a partial draft.
+        return validated
+
+    def _apply_charging_settings(self, validated: Mapping[str, int | float]) -> None:
+        """REQ-VUE-ENTITY-BINDING: apply an already validated draft without yielding."""
         for key in CHARGING_SETTING_KEYS:
             if key in validated:
                 setattr(self, f"_{key}", validated[key])
                 self.clear_control_field_unresolved(key)
-        self.price_planner.evaluate()
-        await self._async_apply_grid_charge_change(
-            defer_device_update=defer_device_update
-        )
 
     async def async_set_max_soc(
         self, max_soc: int | None, *, defer_device_update: bool = False
@@ -4006,10 +4131,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._timed_charge_source_config != self.tariff_provider.config
         ):
             raise HomeAssistantError("Tarifquelle während der Netzladung geändert")
-        if power < 0 and self._basic_read_failed:
+        if power < 0 and (self._basic_read_failed or self._charge_soc_unavailable):
             raise HomeAssistantError(
                 "Negativer Ladesollwert ohne gültigen Basic-Mode-SOC gesperrt"
             )
+        if (
+            power < 0
+            and self._fixed_time_charge_writing
+            and not self._fixed_time_charge_permitted(dt_util.now())
+        ):
+            raise HomeAssistantError("Tägliche Netzladefreigabe nicht mehr gültig")
         if power < 0 and not self._tariff_charge_permission_valid():
             raise HomeAssistantError("Niedertarifzeit abgelaufen oder Tarif geändert")
         if power < 0 and not self._price_charge_permission_valid():
@@ -4434,6 +4565,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_load_timed_charge_state(self) -> None:
         """Defer restoring the latch until settings and a valid SOC are known."""
+        self._fixed_time_charge_state = await self._fixed_time_charge_store.async_load()
+        self._fixed_time_charge_persisted_state = self._fixed_time_charge_state
         try:
             state = await self._timed_charge_store.async_load()
         except HomeAssistantError, OSError, ValueError:
@@ -4528,10 +4661,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         enabled: bool | None,
         expected_options: dict[str, Any],
+        price_strategy: str | None = None,
+        charging_settings: Mapping[str, Any] | None = None,
     ) -> None:
         """Commit tariff and automation ownership together, before publishing either."""
         self._apply_dashboard_tariff_configuration(
-            options, enabled=enabled, expected_options=expected_options
+            options,
+            enabled=enabled,
+            expected_options=expected_options,
+            price_strategy=price_strategy,
+            charging_settings=charging_settings,
         )
 
     def _apply_dashboard_tariff_configuration(
@@ -4540,6 +4679,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         *,
         enabled: bool | None,
         expected_options: dict[str, Any],
+        price_strategy: str | None = None,
+        charging_settings: Mapping[str, Any] | None = None,
     ) -> None:
         """Validate and accept one snapshot without yielding between its mutations."""
         self._raise_if_shutdown()
@@ -4555,6 +4696,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key=error
             )
+        if price_strategy is not None and price_strategy not in PRICE_STRATEGIES:
+            raise ServiceValidationError("Ungültige Preis-Ladestrategie")
         target = tariff_config_from_options(options)
         controls = tariff_automation_controls(
             target.tariff_type,
@@ -4573,7 +4716,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ServiceValidationError(
                 "Bitte den Stromtarif vor dem Aktivieren vollständig einrichten."
             )
+        validated_settings = (
+            self._validate_charging_settings(
+                charging_settings,
+                fixed_time_selected=options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is True,
+            )
+            if charging_settings is not None
+            else None
+        )
+        if price_strategy is not None:
+            self._price_charge_strategy = price_strategy
+            self.clear_control_field_unresolved("price_charge_strategy")
         self._apply_tariff_options(options, enabled=enabled)
+        if validated_settings is not None:
+            self._apply_charging_settings(validated_settings)
+        if price_strategy is not None or validated_settings is not None:
+            self.price_planner.evaluate()
         if dict(entry.options) != options:
             # The listener sees this already-applied snapshot and cannot create
             # a second control decision. Toggles do not notify options listeners.
@@ -4645,6 +4803,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """REQ-TIMED-SOC-CHARGE: only this enabled window can restore a latch."""
         if (
             completed
+            or self.fixed_time_charge_enabled
             or not self._timed_charge_enabled
             or self._timed_charge_min_soc is None
             or now.month not in self._timed_charge_months
@@ -4726,6 +4885,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("Netzlade-Entladesperre konnte nicht gespeichert werden")
 
     def _timed_discharge_is_active(self, now: datetime) -> bool:
+        if self.fixed_time_charge_enabled:
+            return False
         if self.timed_charge_uses_tariff:
             window = self._active_tariff_charge_state(now)
             if (
@@ -4778,6 +4939,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             not self._timed_charge_enabled
             or self._price_charge_enabled
             or self.bridge_charge_enabled
+            or self.fixed_time_charge_enabled
         ):
             await self._async_set_timed_discharge_state(None)
             self._timed_charge_grid_measured = False
@@ -4950,11 +5112,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             defer_device_update=defer_device_update
         )
 
-    def _validate_timed_charge_soc(self, target: int, minimum: int | None) -> None:
+    def _validate_timed_charge_soc(
+        self,
+        target: int,
+        minimum: int | None,
+        *,
+        fixed_time_selected: bool | None = None,
+    ) -> None:
         # REQ-CONTROL-CONFIG-BOOTSTRAP: migration restores partial settings;
         # a temporary global cap must not rewrite the saved start/target pair.
         if (
             not self._control_bootstrap_pending
+            and not (
+                self.fixed_time_charge_enabled
+                if fixed_time_selected is None
+                else fixed_time_selected
+            )
             and minimum is not None
             and target < minimum
         ):
@@ -5372,8 +5545,12 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         months_b: set[int],
     ) -> bool:
         """Inactive legacy times must not restrict tariff months or PV pauses."""
-        return not self.timed_charge_uses_tariff and self._windows_overlap_with_months(
-            start_a, end_a, months_a, start_b, end_b, months_b
+        return (
+            not self.timed_charge_uses_tariff
+            and not self.fixed_time_charge_enabled
+            and self._windows_overlap_with_months(
+                start_a, end_a, months_a, start_b, end_b, months_b
+            )
         )
 
     def _assert_windows_dont_overlap(
@@ -5643,15 +5820,18 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or not math.isfinite(current_soc)
             or not MIN_SOC <= current_soc <= MAX_SOC
         ):
+            self._charge_soc_unavailable = True
             if self.bridge_charge_enabled:
                 self._bridge_session.wait_for_data(now, "measurements_missing")
             await self._async_suspend_charge_for_missing_soc()
+            await self._async_prepare_fixed_time_charge(now, None)
             await self._async_persist_timed_charge_state(
                 timed_window_state
                 if self._timed_charge_armed
                 else self._timed_charge_restore_state
             )
             return
+        self._charge_soc_unavailable = False
         # REQ-PERIODIC-FULL-CALIBRATION: Timer/Services können den ersten
         # Ladezyklus des Fälligkeitstags vor dem nächsten Poll beginnen.
         if await self._async_update_cell_calibration(current_soc):
@@ -5696,6 +5876,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_soc < target_soc:
             self._max_soc_released_for_discharge = False
         timed_target_soc = self.effective_timed_charge_max_soc
+        fixed_time_charge_now = await self._async_prepare_fixed_time_charge(
+            now, current_soc
+        )
         if self._timed_charge_restore_state is not None:
             self._timed_charge_armed = True
             self._timed_charge_restore_state = None
@@ -5771,6 +5954,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if self.timed_charge_uses_tariff
                     else None
                 ),
+                fixed_time_selected=self.fixed_time_charge_enabled,
+                fixed_time_charge_now=fixed_time_charge_now,
                 grid_serving_enabled=self._grid_serving_enabled,
                 grid_serving_start=self._grid_serving_start,
                 grid_serving_end=self._grid_serving_end,
@@ -5791,6 +5976,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         price_should_charge = policy.price_should_charge
         price_should_pause = policy.price_should_pause
         previous_charge_deadline = self._active_charge_deadline()
+        self._fixed_time_charge_writing = (
+            self.fixed_time_charge_enabled
+            and timed_should_charge
+            and self._grid_charge_power is None
+        )
         self._timed_charge_source_config = (
             decision_tariff
             if timed_should_charge and self._grid_charge_power is None
@@ -5808,6 +5998,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             timed_window_state
             if self.timed_charge_uses_tariff
             and not self.bridge_charge_enabled
+            and not self.fixed_time_charge_enabled
             and timed_should_charge
             and self._grid_charge_power is None
             else None
@@ -5834,7 +6025,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Ziel, darf aber weder eine Zielerhöhung noch Kalibrierung sperren.
             self._max_soc_hold_is_price_slot_bound = False
         price_slot_hold_active = (
-            self._max_soc_hold_is_price_slot_bound and price_plan.charge_now
+            self._max_soc_hold_is_price_slot_bound
+            and price_plan.charge_now
+            and not self.fixed_time_charge_enabled
         )
         max_soc_hold_active = soc_reached or price_slot_hold_active
         self._grid_serving_forecast_kwh = grid_serving_forecast_kwh
@@ -5864,6 +6057,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             in_grid_serving_window = policy.grid_serving_window_active
             in_price_slot = (
                 price_plan.charge_now
+                and not self.fixed_time_charge_enabled
                 and not in_timed_window
                 and not in_grid_serving_window
             )
@@ -6733,8 +6927,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 timed_min_soc=self._timed_charge_min_soc,
                 price_limit=self._price_charge_max_price,
                 neutral_price=self._price_charge_neutral_price,
-                timed_enabled=self._timed_charge_enabled,
+                timed_enabled=self._timed_charge_enabled
+                or self.fixed_time_charge_enabled
+                and self._price_charge_enabled,
                 timed_uses_tariff=self.timed_charge_uses_tariff,
+                fixed_time_enabled=self.fixed_time_charge_enabled,
                 price_strategy=self._price_charge_strategy,
                 timed_start=self._timed_charge_start,
                 timed_end=self._timed_charge_end,

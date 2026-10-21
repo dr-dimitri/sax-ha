@@ -249,6 +249,9 @@ watch(
 );
 const profile = computed(() => dashboard?.tariff.value ?? lastProfile.value);
 const active = computed(() => profile.value?.tariff_type);
+const fixedTimeEnabled = computed(
+  () => profile.value?.fixed_time_charging?.enabled === true,
+);
 const known = computed(
   () => active.value === "time_of_use" || active.value === "dynamic",
 );
@@ -1275,11 +1278,21 @@ async function applyCharging(): Promise<void> {
             {{ text.entityPending }}
           </p>
         </div>
-        <div v-if="active === 'dynamic'" class="electricity-charge-status">
-          <EntityValue domain="sensor" entity-key="price_charge_status_text" />
+        <div
+          v-if="fixedTimeEnabled || active === 'dynamic'"
+          class="electricity-charge-status"
+        >
+          <EntityValue
+            domain="sensor"
+            :entity-key="
+              fixedTimeEnabled
+                ? 'timed_charge_active_text'
+                : 'price_charge_status_text'
+            "
+          />
         </div>
         <section
-          v-if="known"
+          v-if="known && !fixedTimeEnabled"
           class="electricity-plan"
           :aria-label="text.details"
         >

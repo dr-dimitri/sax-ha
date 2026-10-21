@@ -21,6 +21,7 @@ let tariffConfigureRequests = 0;
 let writes = 0;
 let activeTariff = "time_of_use";
 let tariffRevision = 1;
+let fixedTimeCharging = { enabled: false, start: null };
 const bridgePlan = new URLSearchParams(location.search).has("bridge-plan");
 
 const general = [
@@ -446,9 +447,10 @@ function tariffResult() {
     revision: String(tariffRevision),
     can_edit: activeTariff === "time_of_use",
     can_configure: true,
+    fixed_time_charging: { ...fixedTimeCharging },
     automation_enabled:
       states[
-        `switch.demo_${activeTariff === "dynamic" ? "price" : "timed"}_charge_enabled`
+        `switch.demo_${!fixedTimeCharging.enabled && activeTariff === "dynamic" ? "price" : "timed"}_charge_enabled`
       ]?.state === "on",
   };
 }
@@ -556,6 +558,37 @@ async function callWS(request) {
     const enabled =
       request.automation_enabled ?? tariffResult().automation_enabled;
     activeTariff = request.tariff_type;
+    if (request.fixed_time_charging) {
+      const start = request.fixed_time_charging.start;
+      fixedTimeCharging = {
+        ...request.fixed_time_charging,
+        start: start?.length === 5 ? `${start}:00` : start,
+      };
+      if (fixedTimeCharging.enabled)
+        states["switch.demo_bridge_charge_enabled"] = {
+          ...states["switch.demo_bridge_charge_enabled"],
+          state: "off",
+        };
+    }
+    if (request.charging_method) {
+      fixedTimeCharging = { ...fixedTimeCharging, enabled: false };
+      if (["fixed", "bridge"].includes(request.charging_method))
+        states["switch.demo_bridge_charge_enabled"] = {
+          ...states["switch.demo_bridge_charge_enabled"],
+          state: request.charging_method === "bridge" ? "on" : "off",
+        };
+      else
+        states["select.demo_price_charge_strategy"] = {
+          ...states["select.demo_price_charge_strategy"],
+          state: request.charging_method,
+        };
+    }
+    for (const [key, value] of Object.entries(
+      request.charging_settings ?? {},
+    )) {
+      const entityId = `number.demo_${key}`;
+      states[entityId] = { ...states[entityId], state: String(value) };
+    }
     if (request.profile) {
       tariffProfiles[activeTariff] = { ...request.profile };
       if (activeTariff === "time_of_use") {
@@ -580,7 +613,9 @@ async function callWS(request) {
       states[id] = {
         ...states[id],
         state:
-          enabled && (kind === "price") === (activeTariff === "dynamic")
+          enabled &&
+          (kind === "price") ===
+            (!fixedTimeCharging.enabled && activeTariff === "dynamic")
             ? "on"
             : "off",
       };

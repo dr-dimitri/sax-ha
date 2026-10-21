@@ -287,6 +287,13 @@ beschriftete Zeilen. Die 100-%-Kalibrierungsausnahme bleibt als kurzer
 sichtbarer Hinweis erhalten. Lange Erklärungen und der Unterbereich
 „Laderegeln & Ausnahmen“ entfallen. Die bestehenden
 Bearbeitungsformulare, Entwürfe, Bestätigungen und Servicewege bleiben erhalten.
+Bei beiden Tarifarten bietet „Ab fester Uhrzeit“ einen täglichen Start ohne
+SOC-Startschwelle oder Preisbedingung bis zum vorhandenen Netzladeziel.
+Startzeit, Aktivierung und geänderte SOC-Ziele (`charging_settings`) werden
+zusammen über den Tarif-WebSocket-Endpunkt angenommen;
+`charging_method` wechselt atomar zu einer bisherigen Ladeweise
+zurück. `fixed_time_charge_enabled` und `fixed_time_charge_start` sind gemeinsame
+Config-Entry-Optionen, unabhängig von den gespeicherten Preisprofilen.
 Browserprüfungen in `time-of-use-usability.spec.ts` und `dynamic-tariff.spec.ts`
 sichern Gruppierung, Größen, Tastaturbedienung und Rückmeldungen ab.
 
@@ -1040,6 +1047,31 @@ veröffentlichen die zugehörige Beobachtungsdauer, mittlere Leistung und den
 Zeitpunkt der letzten ausgewerteten Messung. Sie werden zusammen mit einer
 ungültigen oder zurückgesetzten Prognose verworfen; ein Cache-Refresh erzeugt
 keinen neuen Messzeitpunkt.
+
+### Netzladung ab fester Uhrzeit (REQ-FIXED-TIME-GRID-CHARGE)
+
+`application/fixed_time_charge.py` bestimmt die tägliche Freigabe in lokaler
+HA-Zeit. Der getrennte Store `infrastructure/fixed_time_charge_store.py`
+speichert Startzeit, Kalendertag und Abschluss. Dadurch setzt ein Neustart
+eine noch laufende Ladung fort, ohne einen bereits erreichten Tagesauftrag
+erneut zu starten. Eine neue Konfiguration holt vor der heutigen Startzeit
+keinen gestrigen Termin nach. Eine bei der Zeitumstellung fehlende lokale
+Uhrzeit verschiebt sich um die Zeitlücke nach vorn; doppelte Uhrzeiten
+verwenden den ersten Termin.
+
+Die reine Ladepolicy bildet die feste Uhrzeit auf dieselbe priorisierte
+Netzladung und denselben SunSpec-Writer ab. Sie ignoriert Min.-SOC, Preisplan
+und Bedarfsprognose; der jeweilige Tarifhauptschalter, die Netzlademonate,
+PV-Überschussprüfung und Sicherheitsgrenzen bleiben wirksam. Ziel ist
+`effective_timed_charge_max_soc`, auch im dynamischen Tarif. Die bisherige
+fenstergebundene Entladesperre wird für diese Ladeweise nicht aufgebaut.
+Konfigurationsannahme und Geräteabgleich verwenden weiterhin Quellenrevision
+und gemeinsamen Worker, damit alte periodische Writer nach einer Änderung
+keine überholten Freigaben verwenden.
+Bei fehlendem SOC oder Tagesabschluss wird der Geräteauftrag vor einem
+möglicherweise langsamen Store-Schreibvorgang gestoppt. Die Regressionen in
+`tests/test_fixed_time_persistence_response.py` halten dafür die Speicherung
+gezielt zurück und prüfen den bestätigten SmartMeter-Modus.
 
 ### Verbrauchsabhängige Netzladung bis PV-Start (REQ-BRIDGE-CHARGE)
 

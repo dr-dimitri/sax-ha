@@ -1,18 +1,48 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import ChargingNumberFields from "./ChargingNumberFields.vue";
+import MonthSelection from "./MonthSelection.vue";
+import { useChargingMonths } from "../charging-months";
+import FixedTimeChargingInput from "./FixedTimeChargingInput.vue";
+import { useFixedTimeCharging } from "../fixed-time-charging";
 import { SAX_DASHBOARD_KEY } from "../ha";
 import { finiteValue } from "../savings";
 
 const props = defineProps<{ editing: boolean }>();
 const emit = defineEmits<{ apply: [] }>();
 const numbers = ref<InstanceType<typeof ChargingNumberFields>>();
-defineExpose({
-  submit: () => numbers.value?.submit() ?? Promise.resolve(true),
-  reset: () => numbers.value?.reset() ?? true,
-  pending: computed(() => numbers.value?.pending ?? false),
-});
 const dashboard = inject(SAX_DASHBOARD_KEY);
+const fixedTime = useFixedTimeCharging(dashboard);
+const timeInput = ref<InstanceType<typeof FixedTimeChargingInput>>();
+const pending = computed(
+  () =>
+    fixedTime.pending.value ||
+    numbers.value?.pending ||
+    strategy.value?.pending ||
+    false,
+);
+const saving = computed(
+  () => fixedTime.pending.value || numbers.value?.pending || false,
+);
+async function submit(): Promise<boolean> {
+  if (saving.value) return false;
+  if (!fixedTime.validate(timeInput.value?.value())) {
+    timeInput.value?.focus();
+    return false;
+  }
+  if (fixedTime.selected.value) {
+    const settings = numbers.value?.prepare() ?? null;
+    return settings !== null && fixedTime.submit(settings);
+  }
+  return (await numbers.value?.submit()) ?? true;
+}
+defineExpose({
+  submit,
+  reset: () =>
+    !saving.value && fixedTime.reset() && (numbers.value?.reset() ?? true),
+  pending: saving,
+});
+const { monthKeys, monthSummary } = useChargingMonths(dashboard);
 const visited = ref(props.editing);
 watch(
   () => props.editing,
@@ -25,6 +55,11 @@ const text = computed(() =>
   german.value
     ? {
         mode: "Ladeweise",
+        fixedTime: "Ab fester Uhrzeit",
+        startTime: "Täglicher Ladestart",
+        months: "Aktive Monate",
+        global: "Max SOC (%)",
+        globalSummary: "Max SOC",
         saved: "Ladeweise",
         targetLabel: "Netzladeziel (%)",
         targetHint: "Globale Ladegrenze · gilt auch für Solarstrom.",
@@ -50,6 +85,11 @@ const text = computed(() =>
       }
     : {
         mode: "Charging method",
+        fixedTime: "Start at a fixed time",
+        startTime: "Daily charging start",
+        months: "Active months",
+        global: "Max SOC (%)",
+        globalSummary: "Max SOC",
         saved: "Charging method",
         targetLabel: "Grid charge target (%)",
         targetHint: "Global charge limit · also applies to solar charging.",
@@ -80,35 +120,44 @@ const strategy = computed(() =>
 type Strategy = "smart" | "relative" | "absolute" | "off";
 const methods: Strategy[] = ["smart", "relative", "absolute", "off"];
 const selected = computed(() => {
+  if (fixedTime.active.value && dashboard?.connected.value) return "fixed_time";
   const value = strategy.value?.state?.state;
   return strategy.value?.available && methods.includes(value as Strategy)
     ? (value as Strategy)
     : null;
 });
-const options = computed(() => strategy.value?.state?.attributes.options);
-const blocked = computed(
-  () =>
-    !strategy.value?.canControl ||
-    strategy.value.pending ||
-    numbers.value?.pending,
+const editorMethod = computed(() =>
+  fixedTime.selected.value ? "fixed_time" : selected.value,
 );
+const options = computed(() => strategy.value?.state?.attributes.options);
+const blocked = computed(() => !strategy.value?.canControl || pending.value);
 const status = computed(() => {
   if (!dashboard?.connected.value) return text.value.disconnected;
   if (!strategy.value?.available) return text.value.unavailable;
   if (!strategy.value.metadata.can_control) return text.value.readonly;
-  return strategy.value.pending ? text.value.pending : "";
+  return fixedTime.pending.value || strategy.value.pending
+    ? text.value.pending
+    : "";
 });
 const limit = computed(() => dashboard?.entity("number", "max_soc"));
+const fixedLimit = computed(() =>
+  dashboard?.entity("number", "timed_charge_max_soc"),
+);
 const numberFields = computed(() =>
-  selected.value && selected.value !== "off"
+  editorMethod.value === "fixed_time"
     ? [
-        { key: "max_soc", label: text.value.targetLabel },
-        selected.value === "absolute"
-          ? { key: "price_charge_max_price", label: text.value.price }
-          : { key: "price_charge_hours", label: text.value.hours },
-        { key: "price_charge_neutral_price", label: text.value.neutral },
+        { key: "timed_charge_max_soc", label: text.value.targetLabel },
+        { key: "max_soc", label: text.value.global },
       ]
-    : [],
+    : editorMethod.value && editorMethod.value !== "off"
+      ? [
+          { key: "max_soc", label: text.value.targetLabel },
+          editorMethod.value === "absolute"
+            ? { key: "price_charge_max_price", label: text.value.price }
+            : { key: "price_charge_hours", label: text.value.hours },
+          { key: "price_charge_neutral_price", label: text.value.neutral },
+        ]
+      : [],
 );
 const chargeParameter = computed(() =>
   dashboard?.entity(
@@ -141,11 +190,16 @@ async function choose(method: Strategy) {
   if (
     blocked.value ||
     !Array.isArray(options.value) ||
-    !options.value.includes(method) ||
-    selected.value === method
+    !options.value.includes(method)
   )
     return;
-  await dashboard?.perform("select", "price_charge_strategy", method);
+  if (selected.value === method) {
+    if (fixedTime.selected.value) fixedTime.reset();
+    return;
+  }
+  await fixedTime.leave(method, () =>
+    dashboard!.perform("select", "price_charge_strategy", method),
+  );
 }
 </script>
 
@@ -156,25 +210,71 @@ async function choose(method: Strategy) {
         <div>
           <dt>{{ text.saved }}</dt>
           <dd>
-            {{ selected ? text.modes[selected] : text.unavailable }}
+            {{
+              selected === "fixed_time"
+                ? text.fixedTime
+                : selected
+                  ? text.modes[selected]
+                  : text.unavailable
+            }}
+          </dd>
+        </div>
+      </dl>
+      <dl
+        v-if="selected === 'fixed_time'"
+        class="electricity-summary-rows fixed-time-charging-summary"
+      >
+        <div>
+          <dt>{{ text.startTime }}</dt>
+          <dd>
+            {{ fixedTime.displayStart(fixedTime.confirmed.value?.start) }}
           </dd>
         </div>
       </dl>
       <div v-if="selected && selected !== 'off'" class="electricity-targets">
         <div class="electricity-target">
           <span>{{ text.targetSummary }}</span
-          ><strong>{{ limit?.available ? limit.displayValue : "—" }}</strong>
+          ><strong>{{
+            selected === "fixed_time"
+              ? fixedLimit?.available
+                ? fixedLimit.displayValue
+                : "—"
+              : limit?.available
+                ? limit.displayValue
+                : "—"
+          }}</strong>
         </div>
         <div class="electricity-target">
-          <span>{{ selected === "absolute" ? text.price : text.hours }}</span
+          <span>{{
+            selected === "fixed_time"
+              ? text.globalSummary
+              : selected === "absolute"
+                ? text.price
+                : text.hours
+          }}</span
           ><strong>{{
-            chargeParameter?.available ? chargeParameter.displayValue : "—"
+            selected === "fixed_time"
+              ? limit?.available
+                ? limit.displayValue
+                : "—"
+              : chargeParameter?.available
+                ? chargeParameter.displayValue
+                : "—"
           }}</strong>
         </div>
       </div>
+      <dl
+        v-if="selected === 'fixed_time'"
+        class="electricity-summary-rows fixed-time-month-summary"
+      >
+        <div>
+          <dt>{{ text.months }}</dt>
+          <dd>{{ monthSummary }}</dd>
+        </div>
+      </dl>
     </div>
     <p
-      v-if="selected && selected !== 'off'"
+      v-if="selected && selected !== 'off' && selected !== 'fixed_time'"
       class="electricity-muted dynamic-charging-neutral-summary"
     >
       {{ neutralSummary }}
@@ -189,14 +289,14 @@ async function choose(method: Strategy) {
         class="dynamic-charging-methods"
         role="group"
         :aria-label="text.mode"
-        :aria-busy="strategy?.pending ?? false"
+        :aria-busy="pending"
       >
         <button
           v-for="method in methods"
           :key="method"
           type="button"
           :data-strategy="method"
-          :aria-pressed="selected === method"
+          :aria-pressed="editorMethod === method"
           :disabled="
             blocked || !Array.isArray(options) || !options.includes(method)
           "
@@ -204,15 +304,56 @@ async function choose(method: Strategy) {
         >
           <strong>{{ text.modes[method] }}</strong>
         </button>
+        <button
+          type="button"
+          data-strategy="fixed_time"
+          :aria-pressed="editorMethod === 'fixed_time'"
+          :disabled="blocked || !fixedTime.canConfigure.value"
+          @click="fixedTime.choose"
+        >
+          <strong>{{ text.fixedTime }}</strong>
+        </button>
       </div>
+      <FixedTimeChargingInput
+        v-if="editorMethod === 'fixed_time'"
+        ref="timeInput"
+        :model-value="fixedTime.start.value"
+        :disabled="blocked || !fixedTime.canConfigure.value"
+        :error="fixedTime.error.value"
+        @update:model-value="fixedTime.edit"
+        @apply="emit('apply')"
+      />
+      <p
+        v-if="fixedTime.error.value && editorMethod !== 'fixed_time'"
+        class="electricity-error"
+        role="alert"
+      >
+        {{
+          german
+            ? "Die Änderung ist fehlgeschlagen. Bitte erneut versuchen."
+            : "The change failed. Please try again."
+        }}
+      </p>
       <ChargingNumberFields
         ref="numbers"
         :fields="numberFields"
+        :soc-threshold-applies="editorMethod !== 'fixed_time'"
+        :disabled="fixedTime.pending.value"
         @apply="emit('apply')"
       />
-      <template v-if="selected && selected !== 'off'">
+      <template v-if="editorMethod === 'fixed_time'"
+        ><h3>{{ text.months }}</h3>
+        <MonthSelection :entity-keys="monthKeys" always-expanded
+      /></template>
+      <template
+        v-if="
+          editorMethod &&
+          editorMethod !== 'off' &&
+          editorMethod !== 'fixed_time'
+        "
+      >
         <p class="electricity-muted">{{ text.targetHint }}</p>
-        <template v-if="selected !== 'absolute'">
+        <template v-if="editorMethod !== 'absolute'">
           <p class="dynamic-charging-notice">{{ text.noPriceLimit }}</p>
         </template>
       </template>

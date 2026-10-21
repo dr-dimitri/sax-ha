@@ -485,6 +485,8 @@ CONF_PV_FORECAST_SENSOR = "pv_forecast_sensor"
 CONF_GRID_SERVING_PV_FORECAST_SENSOR = "grid_serving_pv_forecast_sensor"
 CONF_PV_FORECAST_FACTOR = "pv_forecast_factor"
 CONF_BRIDGE_CHARGE_ENABLED = "bridge_charge_enabled"
+CONF_FIXED_TIME_CHARGE_ENABLED = "fixed_time_charge_enabled"
+CONF_FIXED_TIME_CHARGE_START = "fixed_time_charge_start"
 
 # Preis-Einheit des ausgewählten Sensors. "auto" leitet sie aus dessen
 # unit_of_measurement ab (alles mit "ct"/"cent" wird durch 100 geteilt),

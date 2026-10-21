@@ -1405,7 +1405,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         section.querySelector(".dynamic-charging-editor details"),
       ).toBeNull();
       expect(section.querySelectorAll("[data-strategy] span")).toHaveLength(0);
-      expect(section.querySelectorAll("[data-strategy]")).toHaveLength(4);
+      expect(section.querySelectorAll("[data-strategy]")).toHaveLength(5);
       expect(section.textContent).toContain(
         english ? "Maximum price for charging" : "Höchster Preis zum Laden",
       );

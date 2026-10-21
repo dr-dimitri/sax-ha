@@ -1023,7 +1023,12 @@ test("tariff months, grid-serving overnight window and guided negative price set
   await page.locator("#tariff-dynamic").click();
   await panel.locator("nav a[href$='/stromtarif']").click();
   await panel.locator(".electricity-charging header button").click();
-  await expect(panel.locator("[data-strategy]")).toHaveCount(4);
+  await expect(panel.locator("[data-strategy]")).toHaveCount(5);
+  await expect(panel.locator('[data-strategy="fixed_time"]')).toHaveText(
+    testInfo.project.name.endsWith("en")
+      ? "Start at a fixed time"
+      : "Ab fester Uhrzeit",
+  );
   await panel.locator('[data-strategy="smart"]').click();
   await expect(panel.locator('[data-strategy="smart"]')).toHaveAttribute(
     "aria-pressed",

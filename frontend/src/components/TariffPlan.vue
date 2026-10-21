@@ -23,6 +23,9 @@ const props = defineProps<{ hass?: HomeAssistant; compact?: boolean }>();
 const emit = defineEmits<{ saved: []; editing: [value: boolean] }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
+const fixedTimeEnabled = computed(
+  () => dashboard?.tariff.value?.fixed_time_charging?.enabled === true,
+);
 const text = computed(() =>
   dashboard?.language.value === "de"
     ? {
@@ -49,6 +52,8 @@ const text = computed(() =>
           "Nur für verbrauchsbasierte Ladeplanung erforderlich. Wähle die eingerichtete PV-Prognosequelle, damit die Planung den Bedarf bis zum Solarstart berechnen kann.",
         allPrices: "Alle Preise ansehen",
         compactImpact: "Die Netzladung nutzt die günstigsten Tarifzeiten.",
+        fixedTimeImpact:
+          "Die Netzladung beginnt täglich zur festgelegten Uhrzeit, unabhängig vom Strompreis. Netzladeziel und aktive Monate gelten weiterhin.",
         everyDay: "Täglich",
         remaining: "zu allen übrigen Zeiten",
         overnightLabel: "über Nacht",
@@ -140,6 +145,8 @@ const text = computed(() =>
           "Only required for consumption-based charging planning. Select your configured PV forecast source so planning can calculate the energy needed until solar production starts.",
         allPrices: "View all prices",
         compactImpact: "Grid charging uses the cheapest tariff periods.",
+        fixedTimeImpact:
+          "Grid charging starts daily at the configured time, regardless of the electricity price. The grid charging target and active months still apply.",
         everyDay: "Every day",
         remaining: "at all remaining times",
         overnightLabel: "overnight",
@@ -759,7 +766,10 @@ watch(tariffVisible, (visible) => {
     </p>
     <div v-if="compact" class="tariff-plan__price-highlights">
       <slot name="current-price" />
-      <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
+      <p
+        v-if="!fixedTimeEnabled && lowTariffAvailable"
+        class="tariff-plan__low-status"
+      >
         <span>{{ text.lowTariffPrice }}</span
         ><strong>{{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}</strong>
       </p>
@@ -800,19 +810,28 @@ watch(tariffVisible, (visible) => {
         <span>{{ text.feed }}</span
         ><strong>{{ tariffPrice(attributes.feed_in_price_eur_kwh) }}</strong>
       </div>
-      <p v-if="lowTariffAvailable" class="tariff-plan__period-status">
+      <p
+        v-if="!fixedTimeEnabled && lowTariffAvailable"
+        class="tariff-plan__period-status"
+      >
         <template v-if="lowTariffActive"
           >{{ text.lowUntil }} {{ lowTariffUntil }}.</template
         ><template v-else>{{ text.notLow }}</template>
       </p>
       <p
-        v-else-if="savedProfile || !tariffMetadataMatches"
+        v-else-if="
+          !fixedTimeEnabled && (savedProfile || !tariffMetadataMatches)
+        "
         class="tariff-plan__pending-status"
       >
         {{ text.awaitingTariff }}
       </p>
-      <p v-else class="tariff-plan__low-unavailable">{{ text.noLowTariff }}</p>
-      <p class="tariff-plan__impact">{{ text.compactImpact }}</p>
+      <p v-else-if="!fixedTimeEnabled" class="tariff-plan__low-unavailable">
+        {{ text.noLowTariff }}
+      </p>
+      <p class="tariff-plan__impact">
+        {{ fixedTimeEnabled ? text.fixedTimeImpact : text.compactImpact }}
+      </p>
     </div>
     <p v-if="saved" role="status">{{ text.saved }}</p>
     <p
@@ -971,7 +990,7 @@ watch(tariffVisible, (visible) => {
         </details>
         <div class="tariff-plan__impact">
           <strong>{{ text.impact }}</strong>
-          <p>{{ text.impactHint }}</p>
+          <p>{{ fixedTimeEnabled ? text.fixedTimeImpact : text.impactHint }}</p>
           <p>{{ text.saveHint }}</p>
         </div>
       </fieldset>
@@ -1006,7 +1025,10 @@ watch(tariffVisible, (visible) => {
         <span>{{ text.currentPrice }}</span
         ><strong>{{ hasPrice ? currentPrice : text.unavailable }}</strong>
       </p>
-      <p v-if="lowTariffAvailable" class="tariff-plan__low-status">
+      <p
+        v-if="!fixedTimeEnabled && lowTariffAvailable"
+        class="tariff-plan__low-status"
+      >
         <strong>{{ text.lowTariffPrice }}:</strong>
         {{ tariffPrice(attributes.low_tariff_price_eur_kwh) }}.
         <template v-if="lowTariffActive">
@@ -1014,7 +1036,7 @@ watch(tariffVisible, (visible) => {
         </template>
         <template v-else>{{ text.notLow }}</template>
       </p>
-      <p v-else class="tariff-plan__low-unavailable">
+      <p v-else-if="!fixedTimeEnabled" class="tariff-plan__low-unavailable">
         {{ text.noLowTariff }}
       </p>
     </div>
@@ -1090,7 +1112,7 @@ watch(tariffVisible, (visible) => {
     </details>
     <details class="tariff-plan__details">
       <summary>{{ text.details }}</summary>
-      <p>{{ text.rule }}</p>
+      <p>{{ fixedTimeEnabled ? text.fixedTimeImpact : text.rule }}</p>
       <p>{{ text.configure }}</p>
     </details>
   </section>

@@ -41,7 +41,8 @@
 # REQ-SUNSPEC-MODE-CORRECTION     done       SunSpec-Modus-Registerkarte (Slave-ID 100) als alleinige Quelle für Speicher-/Netz-/Akkudetails
 # REQ-SUNSPEC-DATATYPES           done       SunSpec-Datentypen (int16/uint16/enum16/bitfield16/sunssf) und ihre Not-Implemented-Sentinels korrekt decodieren
 # REQ-TIMED-SOC-CHARGE            done       Zeitgesteuertes Laden auf Ziel-SOC + geräteunabhängige Max-SOC-Sperre + PV-Überschuss-Hysterese
-# REQ-TIME-OF-USE-CHARGE-SOURCE   done       Tarifpreisfenster als einzige Ladezeitenquelle im zeitvariablen Tarif (#237)
+# REQ-TIME-OF-USE-CHARGE-SOURCE   done       Tarifpreisfenster für tarifgebundene Netzladung im zeitvariablen Tarif (#237)
+# REQ-FIXED-TIME-GRID-CHARGE     done       Täglich ab fester Uhrzeit unabhängig von Start-SOC und Preis bis zum Netzladeziel laden
 # REQ-MANUAL-GRID-CHARGE          done       Manueller Netzladeservice als sicherer Adapter auf die zentrale SunSpec-Steuerung
 # REQ-GRID-SERVING-CHARGE         done       Netzdienliches Laden: PV-Ladevorgang im eigenen Zeitfenster aktiv unterbrechen
 # REQ-MANUAL-DISCHARGE            verworfen  Manuelle Entladung mit fester Leistung - vom Hersteller nicht vorgesehen
@@ -716,9 +717,68 @@ requirement_sunspec_datatypes:
 # ==============================================================================
 # ANFORDERUNG: GEMEINSAME LADEZEITENQUELLE IM ZEITVARIABLEN TARIF
 # ==============================================================================
+requirement_fixed_time_grid_charge:
+  id: REQ-FIXED-TIME-GRID-CHARGE
+  title: "Tägliche Netzladung ab fester Uhrzeit bis zum maximalen Netzlade-SOC"
+  status: done
+  description: >
+    Unter Stromtarif → Netzladung ist bei zeitvariablem und dynamischem Tarif
+    die alternative Ladeweise „Ab fester Uhrzeit“ auswählbar. Eine ausdrücklich
+    gespeicherte lokale Startzeit in der Home-Assistant-Zeitzone gibt täglich
+    die Netzladung frei, unabhängig von Netzladung Min. SOC, Tarifpreisfenstern,
+    dynamischen Preisstrategien und Bedarfs-/PV-Ertragsprognosen. Ziel ist das
+    vorhandene Netzlade-Max-SOC; die globale Max-SOC-Grenze und die bestehende
+    Kalibrierungsausnahme bleiben maßgeblich. Ein gültiger gemessener SOC,
+    eingeschaltete Automatische Netzladung und ein freigegebener Netzlademonat
+    sind erforderlich. Bestätigter PV-Überschuss kann die Netzladung wie bei
+    der bisherigen SOC-Ladung pausieren. Manuelle Geräteaufträge und
+    Sicherheitsabschaltungen behalten ihre Priorität.
+
+    Nach Erreichen des effektiven Netzladeziels bleibt der tägliche Auftrag
+    abgeschlossen, auch wenn der SOC anschließend sinkt. Die nächste Freigabe
+    entsteht erst am folgenden täglichen Starttermin. Der Laufzeitzustand
+    einschließlich Abschluss wird separat gespeichert. Eine noch laufende
+    Ladung kann über Mitternacht und nach einem Neustart fortgesetzt werden;
+    eine abgeschlossene Ladung startet nach Neustart nicht erneut. Ohne
+    gespeicherte Sitzung wird vor der heutigen Startzeit kein gestriger
+    Auftrag nachgeholt; nach der heutigen Startzeit kann der heutige Auftrag
+    beginnen. Wirksam abgeglichene Änderungen der Startzeit oder Ladeweise
+    und das Ausschalten verwerfen alte Freigaben. Schnelle Änderungen werden
+    auf den zuletzt angenommenen Stand zusammengefasst. Entladesperren bisheriger Tarifzeitfenster
+    werden nicht auf diese Ladeweise übertragen.
+
+    Der tägliche Termin verwendet bei einer doppelt vorkommenden lokalen
+    Uhrzeit das erste Vorkommen; eine bei der Sommerzeitumstellung fehlende
+    Uhrzeit verschiebt sich um die Zeitlücke nach vorn. Monate beziehen sich
+    auf den aktuellen lokalen Kalendermonat. Die Auswahl einer anderen
+    Ladeweise beendet die feste Startzeit atomar; Tarif und Preisbewertung
+    bleiben unabhängig von der Ladeweise aktiv.
+
+    Die Oberfläche zeigt bestätigte Ladeweise, Startzeit und Netzladeziel.
+    Das Startzeitfeld verwendet vollständige Texteingaben HH:MM oder HH:MM:SS;
+    vierstellige Eingaben werden erst bei Übernahme normalisiert.
+    Unvollständige oder ungültige Zeiten werden am betroffenen Feld markiert,
+    fokussiert und nicht gespeichert. Eine neue Startzeit wird erst durch
+    Übernehmen angenommen. Geänderte Netzlade- und globale SOC-Ziele werden
+    mit der Startzeit atomar validiert und übernommen; eine unwirksame
+    SOC-Startschwelle begrenzt auch bei erstmaliger Auswahl nicht das neue Ziel.
+    Ein Gerätestopp wegen fehlendem SOC oder erreichtem Ziel darf nicht auf
+    das Speichern des täglichen Laufzeitzustands warten.
+    Ausstehende Antworten sperren Doppelaufrufe und
+    zeigen sofort zugänglichen Fortschritt; Fehler erhalten den Entwurf und
+    die zuvor bestätigten Werte. Die atomare WebSocket-Annahme wartet weder
+    auf Geräte-Locks noch auf Modbus. Der bestehende gemeinsame Worker
+    übernimmt sichere Geräteübergänge nach laufenden Quittierungssequenzen.
+  acceptance_criteria:
+    - "Vor der Startzeit beginnt kein neuer Auftrag; ab Start lädt auch ein SOC oberhalb der bisherigen Startschwelle bis zum Netzladeziel. Bereits erreichtes Ziel startet keine Ladung."
+    - "Tageswechsel, Neustart, täglicher Abschluss, deaktivierte Automatik/Monate, fehlender SOC und globale Obergrenze sind abgedeckt."
+    - "Beide Tarifarten verwenden dasselbe Netzladeziel und dieselbe feste Startzeit; Preis-/Prognoseausfälle erteilen oder entziehen keine zeitbasierte Freigabe."
+    - "Echte WebSocket-Tests prüfen atomare Validierung, Revisionskonflikte, belegte Geräte-Locks sowie verzögerte/fehlgeschlagene Modus- und Sollwertantworten bei Start und periodischem Schreiben."
+    - "Komponenten- und Chromium-/macOS-WebKit-Prüfungen sichern Tastatureingabe, Mitternacht, unvollständige Zeiten, sofortiges Pending, Doppelaufrufsperre und erhaltene Entwürfe bei Fehlern ab."
+
 requirement_time_of_use_charge_source:
   id: REQ-TIME-OF-USE-CHARGE-SOURCE
-  title: "Tarifpreisfenster als einzige Ladezeitenquelle im zeitvariablen Tarif (Issue #237)"
+  title: "Tarifpreisfenster für tarifgebundene Netzladung im zeitvariablen Tarif (Issue #237)"
   status: done
   description: >
     Bei gespeichertem TIME_OF_USE-Tarif verwenden feste SOC-Ladung nach
@@ -731,6 +791,8 @@ requirement_time_of_use_charge_source:
     REQ-ECONOMICS-TARIFFS. Min.-SOC-Startschwelle, Netzlade-Max-SOC,
     globales Max-SOC und aktive Monate gelten weiter für feste SOC-Ladung;
     Bridge ersetzt ausschließlich die Startschwelle durch den Bedarf.
+    Die alternative Ladeweise ab fester Uhrzeit folgt stattdessen
+    REQ-FIXED-TIME-GRID-CHARGE und nutzt keine Tarifpreisfenster.
 
     Der Tarif gilt unmittelbar nach Update, Neustart und Optionsänderung.
     Gespeicherte timed_charge_start/end bleiben für andere Tarifarten
@@ -746,8 +808,8 @@ requirement_time_of_use_charge_source:
     prüft Tarifänderungen nach verzögerten Modusantworten erneut. Ein
     bestätigter 0-W-Entladeschutz bei SOC-Ausfall behält seine eigene Frist.
     Ungültige Tarifdaten erlauben keine Tarifladung und keinen Rückfall auf
-    alte Zeiten. Dashboard und Konfigurations-Hilfetext erklären die einzige
-    Tarifquelle; es gibt keine weitere Checkbox oder Quellenwahl.
+    alte Zeiten. Dashboard und Konfigurations-Hilfetext erklären die
+    Tarifquelle für diese tarifgebundenen Ladeweisen.
   acceptance_criteria:
     - "Feste SOC-Ladung und Bridge nutzen dieselben billigsten Tarifabschnitte; mehrere gleich niedrige Fenster und tatsächlich wirksame Basispreislücken sind abgedeckt."
     - "Ein vollständig abgedeckter Tag ignoriert den nirgendwo geltenden Basispreis. Ein teurerer Restabschnitt ersetzt keinen verpassten Niedertarif."
@@ -764,6 +826,9 @@ requirement_timed_soc_charge:
   title: "Speicher innerhalb eines Zeitfensters auf einen festgelegten SOC laden, plus geräteunabhängige Max-SOC-Sperre"
   status: done
   description: >
+    Die alternative tägliche Netzladung ab fester Uhrzeit ist in
+    REQ-FIXED-TIME-GRID-CHARGE beschrieben; sie verwendet denselben
+    Gerätepfad und dasselbe Netzladeziel, aber keine Min.-SOC-Startschwelle.
     Im TIME_OF_USE-Modus stammen die hier beschriebenen Ladefenster
     ausschließlich aus dem gespeicherten Tarif nach
     REQ-TIME-OF-USE-CHARGE-SOURCE; bei anderen Tarifarten gilt weiterhin
@@ -931,7 +996,9 @@ requirement_timed_soc_charge:
        Netzladeziel wird dagegen auf den aktuellen Sliderbereich begrenzt
        und gespeichert. Änderungen am Netzladeziel gelten sofort.
        Ausdrückliche Änderungen von Ladeziel oder Ladestart müssen
-       Ladestart <= Ladeziel einhalten; gleiche Werte sind erlaubt.
+       bei schwellengebundener Ladung Ladestart <= Ladeziel einhalten;
+       gleiche Werte sind erlaubt. Bei der Ladeweise ab fester Uhrzeit
+       ist die SOC-Startschwelle unwirksam und begrenzt das Netzladeziel nicht.
        Dashboard und Coordinator lehnen ein kleineres Ziel oder einen
        höheren Ladestart feldbezogen ab, bevor Zustand, Store oder
        Geräteauftrag verändert werden. Die Prüfung verwendet die aktuell
@@ -3505,6 +3572,11 @@ requirement_vue_electricity_tariff:
     Ladeweise, bestätigte Zielwerte, dynamischen Ladestatus und
     dauerhaft sichtbaren Ladeplan samt PV-Prognosewert. Die Tarifwahl steht separat
     darüber.
+    Beide Tarifarten bieten zusätzlich die Ladeweise ab fester Uhrzeit nach
+    REQ-FIXED-TIME-GRID-CHARGE. Sie zeigt das eigene Netzladeziel und die
+    globale SOC-Grenze sowie die wirksamen Netzlademonate; die irrelevante
+    SOC-Startschwelle und Preisstrategie werden nicht als Startbedingungen
+    dargestellt.
     Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
     untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
     Die Übersichten verwenden kurze Beschriftungen, Wertpaare und kompakte

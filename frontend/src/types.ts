@@ -39,6 +39,7 @@ export interface TariffProfile {
   can_edit: boolean;
   can_configure?: boolean;
   automation_enabled?: boolean | null;
+  fixed_time_charging?: FixedTimeCharging;
   profiles?: {
     time_of_use: TimeOfUseProfile;
     dynamic: DynamicTariffProfile;
@@ -61,11 +62,22 @@ export interface DynamicTariffProfile {
   pv_factor: number;
 }
 
+export interface FixedTimeCharging {
+  enabled: boolean;
+  start: string | null;
+}
+
+export type ChargingMethod =
+  "fixed" | "bridge" | "smart" | "relative" | "absolute" | "off";
+
 export interface TariffConfiguration {
   revision: string;
   tariff_type: "time_of_use" | "dynamic";
   profile?: TimeOfUseProfile | DynamicTariffProfile;
   automation_enabled?: boolean;
+  fixed_time_charging?: FixedTimeCharging;
+  charging_method?: ChargingMethod;
+  charging_settings?: { max_soc?: number; timed_charge_max_soc?: number };
 }
 
 export interface TariffPriceSeries {

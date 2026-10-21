@@ -32,6 +32,8 @@ from .const import (
     CONF_ECONOMICS_WINDOW_END,
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
+    CONF_FIXED_TIME_CHARGE_ENABLED,
+    CONF_FIXED_TIME_CHARGE_START,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -91,6 +93,7 @@ class _Tariff(TypedDict):
     can_configure: bool
     automation_enabled: bool | None
     profiles: dict[str, dict[str, Any]]
+    fixed_time_charging: dict[str, bool | str | None]
 
 
 @callback
@@ -110,6 +113,8 @@ def _revision(entry: ConfigEntry) -> str:
     """Nur Tarifänderungen erzeugen Konflikte; andere Options bleiben erhalten."""
     keys = {
         CONF_DASHBOARD_TARIFF_PROFILES,
+        CONF_FIXED_TIME_CHARGE_ENABLED,
+        CONF_FIXED_TIME_CHARGE_START,
         *ECONOMICS_OPTION_KEYS,
         *(key for group in TARIFF_PROFILE_KEYS.values() for key in group),
     }
@@ -129,10 +134,21 @@ def _result(
     hass: HomeAssistant, entry: ConfigEntry, connection: websocket_api.ActiveConnection
 ) -> _Tariff:
     config = tariff_config_from_options(entry.options)
+    fixed_start = entry.options.get(CONF_FIXED_TIME_CHARGE_START)
+    fixed_start_valid = (
+        isinstance(fixed_start, str)
+        and _TIME_PATTERN.fullmatch(fixed_start)
+        and parse_time(fixed_start) is not None
+    )
     return {
         "can_configure": connection.user.is_active and connection.user.is_admin,
         "automation_enabled": _automation_enabled(hass, entry),
         "profiles": _dashboard_profiles(entry),
+        "fixed_time_charging": {
+            "enabled": entry.options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is True
+            and bool(fixed_start_valid),
+            "start": fixed_start if fixed_start_valid else None,
+        },
         "tariff_type": config.tariff_type.value,
         "base_price_ct_kwh": _cent(config.tou_base_price_eur_kwh),
         "feed_in_price_ct_kwh": _cent(config.feed_in_price_eur_kwh),
@@ -454,6 +470,25 @@ def _configuration_profile(
     }
 
 
+def _fixed_time_configuration(submitted: Any) -> dict[str, Any]:
+    """REQ-FIXED-TIME-GRID-CHARGE: never infer an incomplete daily start."""
+    if (
+        not isinstance(submitted, dict)
+        or set(submitted) != {"enabled", "start"}
+        or not isinstance(submitted["enabled"], bool)
+        or not isinstance(submitted["start"], str)
+        or not _TIME_PATTERN.fullmatch(submitted["start"])
+        or (start := parse_time(submitted["start"])) is None
+    ):
+        raise _TariffFieldError(
+            "invalid_fixed_time_start", "Enter a complete local start time"
+        )
+    return {
+        CONF_FIXED_TIME_CHARGE_ENABLED: submitted["enabled"],
+        CONF_FIXED_TIME_CHARGE_START: start.isoformat(),
+    }
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): CONFIGURE_COMMAND,
@@ -464,6 +499,11 @@ def _configuration_profile(
         ),
         vol.Optional("profile"): object,
         vol.Optional("automation_enabled"): bool,
+        vol.Optional("fixed_time_charging"): object,
+        vol.Optional("charging_settings"): object,
+        vol.Optional("charging_method"): vol.In(
+            ["fixed", "bridge", "smart", "relative", "absolute", "off"]
+        ),
     }
 )
 @websocket_api.async_response
@@ -483,22 +523,57 @@ async def websocket_configure_tariff(
         return
     expected_options = dict(entry.options)
     enabled = msg.get("automation_enabled")
+    method = msg.get("charging_method")
+    charging_settings = msg.get("charging_settings")
+    price_strategy = None
     try:
+        fixed_time = (
+            _fixed_time_configuration(msg["fixed_time_charging"])
+            if "fixed_time_charging" in msg
+            else None
+        )
+        if method is not None:
+            allowed_methods = (
+                {"fixed", "bridge"}
+                if msg["tariff_type"] == TariffType.TIME_OF_USE
+                else {"smart", "relative", "absolute", "off"}
+            )
+            if method not in allowed_methods or (
+                fixed_time is not None and fixed_time[CONF_FIXED_TIME_CHARGE_ENABLED]
+            ):
+                raise ValueError("Select one charging method for the active tariff")
         profile = (
             _configuration_profile(hass, entry, msg["tariff_type"], msg["profile"])
             if "profile" in msg
             else None
         )
         if (
-            enabled is not None
+            (enabled is not None or fixed_time is not None or method is not None)
             and profile is None
             and msg["tariff_type"] == entry.options.get(CONF_ECONOMICS_TARIFF_TYPE)
         ):
             # REQ-VUE-ELECTRICITY-TARIFF: Der Hauptschalter verändert keine
             # Tarifquelle und braucht weder Profilmigration noch Geräte-Lock.
-            options = expected_options
+            options = dict(expected_options)
         else:
             options = options_for_tariff(entry.options, msg["tariff_type"], profile)
+        if fixed_time is not None:
+            options.update(fixed_time)
+            if fixed_time[CONF_FIXED_TIME_CHARGE_ENABLED]:
+                options[CONF_BRIDGE_CHARGE_ENABLED] = False
+        if method is not None:
+            options[CONF_FIXED_TIME_CHARGE_ENABLED] = False
+            if msg["tariff_type"] == TariffType.TIME_OF_USE:
+                options[CONF_BRIDGE_CHARGE_ENABLED] = method == "bridge"
+            else:
+                price_strategy = method
+        if "charging_settings" in msg and (
+            options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is not True
+            or not isinstance(charging_settings, dict)
+            or not charging_settings
+            or not set(charging_settings) <= {"max_soc", "timed_charge_max_soc"}
+        ):
+            raise ValueError("Submit grid charge limits with the fixed-time method")
         if error := bridge_configuration_error(options):
             connection.send_error(msg["id"], error, "Keep the required PV start source")
             return
@@ -519,7 +594,11 @@ async def websocket_configure_tariff(
         hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get(DATA_COORDINATOR)
     )
     if coordinator is None:
-        if enabled is not None:
+        if (
+            enabled is not None
+            or price_strategy is not None
+            or charging_settings is not None
+        ):
             connection.send_error(
                 msg["id"], "unavailable", "The integration is not loaded"
             )
@@ -528,7 +607,15 @@ async def websocket_configure_tariff(
     else:
         try:
             await coordinator.async_apply_dashboard_tariff(
-                options, enabled=enabled, expected_options=expected_options
+                options,
+                enabled=enabled,
+                expected_options=expected_options,
+                **({"price_strategy": price_strategy} if price_strategy else {}),
+                **(
+                    {"charging_settings": charging_settings}
+                    if charging_settings is not None
+                    else {}
+                ),
             )
         except ServiceValidationError as err:
             code = (

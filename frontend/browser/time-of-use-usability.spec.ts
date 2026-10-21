@@ -267,8 +267,16 @@ test("charging choices explain their effects and retain the confirmed method whi
   });
   await expect(methods.locator("strong")).toHaveText(
     english
-      ? ["Fixed grid charge target", "Only what is needed until solar power"]
-      : ["Festes Netzladeziel", "Nur Bedarf bis Solarstrom"],
+      ? [
+          "Fixed grid charge target",
+          "Only what is needed until solar power",
+          "Start at a fixed time",
+        ]
+      : [
+          "Festes Netzladeziel",
+          "Nur Bedarf bis Solarstrom",
+          "Ab fester Uhrzeit",
+        ],
   );
   await expect(fixed).toHaveAttribute("aria-pressed", "true");
   await expect(bridge).toHaveAttribute("aria-pressed", "false");

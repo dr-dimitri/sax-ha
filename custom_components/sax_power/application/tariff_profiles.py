@@ -12,6 +12,7 @@ from ..const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
+    CONF_FIXED_TIME_CHARGE_ENABLED,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -43,7 +44,10 @@ TARIFF_PROFILE_KEYS: dict[str, tuple[str, ...]] = {
 
 def bridge_configuration_error(options: Mapping[str, Any]) -> str | None:
     """REQ-BRIDGE-CHARGE: an enabled bridge must retain its configured source."""
-    if options.get(CONF_BRIDGE_CHARGE_ENABLED) is not True:
+    if (
+        options.get(CONF_BRIDGE_CHARGE_ENABLED) is not True
+        or options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is True
+    ):
         return None
     if not options.get(CONF_PV_FORECAST_SENSOR):
         return "bridge_pv_start_required"

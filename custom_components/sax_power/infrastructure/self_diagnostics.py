@@ -49,6 +49,7 @@ class DiagnosticSnapshot:
     grid_serving_months: frozenset[int]
     unsupported_price_unit: bool = False
     timed_uses_tariff: bool = False
+    fixed_time_enabled: bool = False
     # REQ-ECONOMICS-OBSERVABILITY: economics_price_unavailable ist bereits
     # vom Coordinator fertig ausgewertet (Karenzzeit bzw. sofortiger
     # Konfigurationsfehler bei Fest-/Zeitfenstertarif, siehe
@@ -83,7 +84,9 @@ class SelfDiagnostics:
         self._check_economics_price_unavailable(snapshot)
         self._check_empty_charge_window(
             "timed_charge",
-            snapshot.timed_enabled and not snapshot.timed_uses_tariff,
+            snapshot.timed_enabled
+            and not snapshot.timed_uses_tariff
+            and not snapshot.fixed_time_enabled,
             snapshot.timed_start,
             snapshot.timed_end,
             "Netzladung (zeitgesteuertes Laden)",
@@ -184,6 +187,7 @@ class SelfDiagnostics:
     def _check_max_soc_below_min_soc(self, snapshot: DiagnosticSnapshot) -> None:
         problem = (
             snapshot.timed_enabled
+            and not snapshot.fixed_time_enabled
             and snapshot.timed_max_soc is not None
             and snapshot.timed_min_soc is not None
             and snapshot.timed_max_soc < snapshot.timed_min_soc
@@ -201,6 +205,7 @@ class SelfDiagnostics:
     def _check_price_neutral_below_limit(self, snapshot: DiagnosticSnapshot) -> None:
         problem = (
             snapshot.price_strategy == PRICE_STRATEGY_ABSOLUTE
+            and not snapshot.fixed_time_enabled
             and snapshot.price_limit is not None
             and snapshot.neutral_price is not None
             and snapshot.neutral_price <= snapshot.price_limit

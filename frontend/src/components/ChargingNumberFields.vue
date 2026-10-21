@@ -21,7 +21,14 @@ type Draft = {
   edited: boolean;
 };
 
-const props = defineProps<{ fields: Field[] }>();
+const props = withDefaults(
+  defineProps<{
+    fields: Field[];
+    socThresholdApplies?: boolean;
+    disabled?: boolean;
+  }>(),
+  { socThresholdApplies: true, disabled: false },
+);
 const emit = defineEmits<{ apply: [] }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = `sax-charging-number-${useId()}`;
@@ -62,7 +69,12 @@ const pending = computed(
     props.fields.some((field) => entity(field.key)?.pending),
 );
 function blocked(key: string): boolean {
-  return pending.value || !dashboard?.ready.value || !entity(key)?.canControl;
+  return (
+    props.disabled ||
+    pending.value ||
+    !dashboard?.ready.value ||
+    !entity(key)?.canControl
+  );
 }
 function numeric(value: string): number | null {
   return value.trim() === "" ? null : finiteValue(value);
@@ -186,8 +198,12 @@ function reset(): boolean {
   return true;
 }
 
-async function submit(): Promise<boolean> {
-  if (pending.value || !dashboard) return false;
+function prepare(): Record<string, number> | null {
+  if (pending.value || props.disabled || !dashboard) return null;
+  const invalid = (key: string, cause: LocalError): null => {
+    fail(key, cause);
+    return null;
+  };
   for (const { key } of props.fields) {
     const input = inputs.get(key);
     const draft = drafts[key];
@@ -201,17 +217,17 @@ async function submit(): Promise<boolean> {
   const dirty = props.fields.filter(({ key }) => changed(key));
   if (!dirty.length) {
     for (const key of Object.keys(errors)) delete errors[key];
-    return true;
+    return {};
   }
   for (const { key } of props.fields) {
     delete errors[key];
     const item = entity(key);
     if (!item?.available) {
-      if (changed(key)) return fail(key, "unavailable");
+      if (changed(key)) return invalid(key, "unavailable");
       continue;
     }
     if (changed(key) && (!item.canControl || !dashboard.ready.value))
-      return fail(key, "readonly");
+      return invalid(key, "readonly");
     const value = numeric(drafts[key]?.value ?? "");
     const min = attribute(key, "min");
     const max = attribute(key, "max");
@@ -229,13 +245,13 @@ async function submit(): Promise<boolean> {
       !Number.isFinite((value - min) / step) ||
       Math.abs((value - min) / step - Math.round((value - min) / step)) > 1e-7
     )
-      return fail(key, "invalid");
+      return invalid(key, "invalid");
   }
   const minKey = "timed_charge_min_soc";
   const targetKey = "timed_charge_max_soc";
   const minChanged = dirty.some(({ key }) => key === minKey);
   const targetChanged = dirty.some(({ key }) => key === targetKey);
-  if (minChanged || targetChanged) {
+  if (props.socThresholdApplies !== false && (minChanged || targetChanged)) {
     const value = (key: string) =>
       props.fields.some((field) => field.key === key)
         ? numeric(drafts[key]?.value ?? "")
@@ -246,9 +262,23 @@ async function submit(): Promise<boolean> {
     const target = value(targetKey);
     if (minimum !== null && target !== null && minimum > target) {
       if (minChanged && targetChanged) errors[minKey] = "order";
-      return fail(targetChanged ? targetKey : minKey, "order");
+      return invalid(targetChanged ? targetKey : minKey, "order");
     }
   }
+  return Object.fromEntries(
+    dirty.map(({ key }) => [key, numeric(drafts[key]!.value)!]),
+  );
+}
+
+async function submit(): Promise<boolean> {
+  const prepared = prepare();
+  if (!prepared || !dashboard) return false;
+  const dirty = props.fields.filter(({ key }) => key in prepared);
+  if (!dirty.length) return true;
+  const minKey = "timed_charge_min_soc";
+  const targetKey = "timed_charge_max_soc";
+  const minChanged = dirty.some(({ key }) => key === minKey);
+  const targetChanged = dirty.some(({ key }) => key === targetKey);
   localPending.value = true;
   const current = revision;
   const identities = dirty.map(({ key }) => [key, drafts[key]?.entityId]);
@@ -292,7 +322,7 @@ async function submit(): Promise<boolean> {
   }
 }
 
-defineExpose({ submit, reset, pending });
+defineExpose({ submit, prepare, reset, pending });
 </script>
 
 <template>

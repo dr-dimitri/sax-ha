@@ -7,6 +7,7 @@ import {
   formatSavingsNumber,
 } from "../savings";
 import type { HomeAssistant } from "../types";
+import { timeSeconds } from "../time";
 
 const props = defineProps<{ hass?: HomeAssistant }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
@@ -17,6 +18,14 @@ const control = computed(() =>
   dashboard?.entity("switch", "bridge_charge_enabled"),
 );
 const attributes = computed(() => plan.value?.state?.attributes ?? {});
+const fixedTimeStart = computed(() => {
+  const fixed = dashboard?.tariff.value?.fixed_time_charging;
+  if (!fixed?.enabled || !fixed.start || timeSeconds(fixed.start) === null)
+    return null;
+  return fixed.start.endsWith(":00") && fixed.start.length === 8
+    ? fixed.start.slice(0, 5)
+    : fixed.start;
+});
 const discharge = computed(() =>
   dashboard?.entity("sensor", "discharge_forecast"),
 );
@@ -194,6 +203,7 @@ const completed = computed(
 );
 const demand = computed(() => {
   if (chargingActive.value) return "charging";
+  if (fixedTimeStart.value) return "fixed-time";
   if (postChargeStatus.value !== null)
     return postChargeStatus.value === "not_needed"
       ? "not-needed"
@@ -236,11 +246,15 @@ const demand = computed(() => {
 const demandLabel = computed(() =>
   demand.value === "charging"
     ? text.value.charging
-    : demand.value === "not-needed"
-      ? text.value.noCharge
-      : demand.value === "needed"
-        ? text.value.chargeNeeded
-        : text.value.demandUnknown,
+    : demand.value === "fixed-time"
+      ? german.value
+        ? `Netzladen startet ab ${fixedTimeStart.value} Uhr`
+        : `Grid charging starts at ${fixedTimeStart.value}`
+      : demand.value === "not-needed"
+        ? text.value.noCharge
+        : demand.value === "needed"
+          ? text.value.chargeNeeded
+          : text.value.demandUnknown,
 );
 function remainingDuration(seconds: number) {
   const minutes = Math.ceil(seconds / 60);
@@ -462,7 +476,7 @@ const target = computed(() => {
 
 <template>
   <section
-    v-if="plan || control || currentForecast"
+    v-if="plan || control || currentForecast || fixedTimeStart"
     class="charge-plan"
     :aria-labelledby="`${id}-charge-plan`"
   >
@@ -475,16 +489,20 @@ const target = computed(() => {
         >{{ demandLabel }}</span
       >
     </h2>
-    <p v-if="configurationHint">{{ configurationHint }}</p>
-    <p
-      class="charge-plan__description"
-      :class="{ 'charge-plan__forecast': currentForecast }"
-    >
-      {{ description }}
-    </p>
-    <p v-if="dataGap">{{ dataGap }}</p>
-    <p v-if="assessment">{{ assessment }}</p>
-    <p v-if="target" class="charge-plan__target">{{ target }}</p>
+    <template v-if="!fixedTimeStart || chargingActive">
+      <p v-if="configurationHint && !fixedTimeStart">
+        {{ configurationHint }}
+      </p>
+      <p
+        class="charge-plan__description"
+        :class="{ 'charge-plan__forecast': currentForecast }"
+      >
+        {{ description }}
+      </p>
+      <p v-if="dataGap">{{ dataGap }}</p>
+      <p v-if="assessment">{{ assessment }}</p>
+      <p v-if="target" class="charge-plan__target">{{ target }}</p>
+    </template>
   </section>
 </template>
 
@@ -513,6 +531,7 @@ const target = computed(() => {
   );
 }
 .charge-plan__demand--needed,
+.charge-plan__demand--fixed-time,
 .charge-plan__demand--charging {
   color: color-mix(
     in srgb,

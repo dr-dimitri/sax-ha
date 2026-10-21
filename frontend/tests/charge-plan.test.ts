@@ -4,8 +4,10 @@ import ChargePlan from "../src/components/ChargePlan.vue";
 import { SAX_DASHBOARD_KEY, useSaxDashboard } from "../src/ha";
 import type {
   DashboardMetadata,
+  FixedTimeCharging,
   HassConnection,
   HomeAssistant,
+  TariffProfile,
 } from "../src/types";
 
 const apps: App[] = [];
@@ -43,6 +45,8 @@ async function flush() {
   await nextTick();
 }
 async function mount(language = "de", withControl = false) {
+  let profile: TariffProfile | null = null;
+  let dashboard!: ReturnType<typeof useSaxDashboard>;
   const switchId = "switch.renamed_planning";
   const switchMetadata = {
     domain: "switch" as const,
@@ -102,20 +106,20 @@ async function mount(language = "de", withControl = false) {
     callService,
     callWS: <T>(message: Readonly<Record<string, unknown>>) =>
       message.type === "sax_power/dashboard/tariff/get"
-        ? Promise.reject({ code: "not_found" })
+        ? profile
+          ? Promise.resolve(profile as T)
+          : Promise.reject({ code: "not_found" })
         : (callWS(message) as Promise<T>),
   });
   const root = document.createElement("div");
   document.body.append(root);
   const app = createApp({
     setup() {
-      provide(
-        SAX_DASHBOARD_KEY,
-        useSaxDashboard(
-          () => hass.value,
-          () => "entry-1",
-        ),
+      dashboard = useSaxDashboard(
+        () => hass.value,
+        () => "entry-1",
       );
+      provide(SAX_DASHBOARD_KEY, dashboard);
       return () => h(ChargePlan, { hass: hass.value });
     },
   });
@@ -127,6 +131,19 @@ async function mount(language = "de", withControl = false) {
     hass,
     callService,
     callWS,
+    async tariff(fixed: FixedTimeCharging, type = "time_of_use") {
+      profile = {
+        tariff_type: type,
+        revision: "1",
+        base_price_ct_kwh: 32,
+        feed_in_price_ct_kwh: 8,
+        windows: [],
+        can_edit: true,
+        fixed_time_charging: fixed,
+      };
+      await dashboard.loadTariff();
+      await flush();
+    },
     async control(
       state: string,
       canControl = true,
@@ -192,6 +209,79 @@ async function mount(language = "de", withControl = false) {
 afterEach(() => {
   for (const app of apps.splice(0)) app.unmount();
   document.body.replaceChildren();
+});
+
+describe("REQ-FIXED-TIME-GRID-CHARGE: confirmed start in the planning heading", () => {
+  it.each(["de", "en-GB"])(
+    "shows the saved local time without inactive consumption planning messages (%s)",
+    async (language) => {
+      const fixture = await mount(language);
+      await fixture.update("off", { reason: "disabled" });
+      for (const type of ["time_of_use", "dynamic"]) {
+        for (const [start, displayed] of [
+          ["00:00:00", "00:00"],
+          ["02:00:00", "02:00"],
+          ["23:45", "23:45"],
+          ["03:15:42", "03:15:42"],
+        ]) {
+          await fixture.tariff({ enabled: true, start: start! }, type);
+          const suffix = fixture.root.querySelector(
+            ".charge-plan__demand--fixed-time",
+          )!;
+          expect(fixture.root.querySelector("h2")?.textContent).toBe(
+            language === "de"
+              ? `Ladeplanung: Netzladen startet ab ${displayed} Uhr`
+              : `Charging plan: Grid charging starts at ${displayed}`,
+          );
+          expect(suffix.getAttribute("aria-live")).toBe("polite");
+          expect(fixture.root.querySelector("p")).toBeNull();
+        }
+      }
+      await fixture.metadata(false);
+      expect(fixture.root.querySelector("h2")).not.toBeNull();
+      await fixture.disconnect();
+      expect(
+        fixture.root.querySelector(".charge-plan__demand--fixed-time"),
+      ).toBeNull();
+      expect(fixture.callService).not.toHaveBeenCalled();
+      expect(fixture.callWS).not.toHaveBeenCalled();
+    },
+  );
+
+  it("prioritizes measured charging and returns to the saved start after it stops", async () => {
+    const fixture = await mount("de", true);
+    await fixture.tariff({ enabled: true, start: "02:00:00" });
+    await fixture.update("off", charging);
+    await fixture.control("off", true, "bridge_pv_start_required");
+    expect(fixture.root.querySelector("h2")?.textContent).toBe(
+      "Ladeplanung: Ladung läuft...",
+    );
+    expect(fixture.root.textContent).toContain("1 Stunde 2 Minuten");
+    expect(fixture.root.textContent).not.toContain("Zum Einschalten");
+    await fixture.update("off", { charging_active: false });
+    expect(fixture.root.querySelector("h2")?.textContent).toBe(
+      "Ladeplanung: Netzladen startet ab 02:00 Uhr",
+    );
+    await fixture.tariff({ enabled: false, start: "02:00:00" });
+    expect(
+      fixture.root.querySelector(".charge-plan__demand--unknown"),
+    ).not.toBeNull();
+  });
+
+  it.each([null, "", "02", "24:00:00", "02:60:00", "invalid"])(
+    "does not invent a start for invalid confirmed values (%s)",
+    async (start) => {
+      const fixture = await mount();
+      await fixture.update("off", {});
+      await fixture.tariff({ enabled: true, start });
+      expect(
+        fixture.root.querySelector(".charge-plan__demand--fixed-time"),
+      ).toBeNull();
+      expect(
+        fixture.root.querySelector(".charge-plan__demand--unknown"),
+      ).not.toBeNull();
+    },
+  );
 });
 
 describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {

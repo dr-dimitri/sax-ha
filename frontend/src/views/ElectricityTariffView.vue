@@ -1292,19 +1292,26 @@ async function applyCharging(): Promise<void> {
           />
         </div>
         <section
-          v-if="known && !fixedTimeEnabled"
+          v-if="known"
           class="electricity-plan"
           :aria-label="text.details"
         >
-          <h3 v-if="active !== 'time_of_use'">{{ text.details }}</h3>
-          <dl class="electricity-summary-rows electricity-pv-summary">
+          <h3 v-if="active !== 'time_of_use' && !fixedTimeEnabled">
+            {{ text.details }}
+          </h3>
+          <dl
+            v-if="!fixedTimeEnabled"
+            class="electricity-summary-rows electricity-pv-summary"
+          >
             <div>
               <dt>{{ text.pvSummary }}</dt>
               <dd>{{ pvForecast }}</dd>
             </div>
           </dl>
-          <ChargePlan v-if="active === 'time_of_use'" :hass="hass" /><template
-            v-else
+          <ChargePlan
+            v-if="active === 'time_of_use' || fixedTimeEnabled"
+            :hass="hass"
+          /><template v-else
             ><EntityValue
               domain="sensor"
               entity-key="price_charge_active_text"

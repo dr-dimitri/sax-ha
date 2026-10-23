@@ -779,12 +779,6 @@ describe("consumption-based charging plan", () => {
     ["paused", "calibration", "Batteriekalibrierung", "Battery calibration"],
     ["paused", "pv_surplus", "PV-Überschuss", "PV surplus"],
     ["paused", "manual_charge", "manuelle Ladung", "Manual charging"],
-    [
-      "off",
-      "disabled",
-      "Nur Bedarf bis Solarstrom",
-      "Only what is needed until solar power",
-    ],
   ])(
     "explains the reason %s/%s in both languages without exposing internal codes",
     async (state, reason, german, english) => {
@@ -802,17 +796,26 @@ describe("consumption-based charging plan", () => {
     },
   );
 
-  it("gives an activation hint without a reason and keeps unknown reasons generic", async () => {
-    const { root, update } = await mount();
-    await update("off", {});
-    expect(root.textContent).toContain("Nur Bedarf bis Solarstrom");
-    expect(root.textContent).toContain("die Automatik einschalten");
-    await update("waiting_for_data", { reason: "private_new_reason" });
-    expect(root.textContent).toContain(
-      "mindestens eine Minute Beobachtungszeit",
-    );
-    expect(root.textContent).not.toContain("private_new_reason");
-  });
+  it.each(["de", "en-GB"])(
+    "omits the disabled planning hint and keeps unknown reasons generic (%s)",
+    async (language) => {
+      const { root, update } = await mount(language);
+      for (const attributes of [{}, { reason: "disabled" }]) {
+        await update("off", attributes);
+        expect(root.querySelector(".charge-plan__description")).toBeNull();
+        expect(
+          root.querySelector(".charge-plan__demand--unknown"),
+        ).not.toBeNull();
+      }
+      await update("waiting_for_data", { reason: "private_new_reason" });
+      expect(root.textContent).toContain(
+        language === "de"
+          ? "mindestens eine Minute Beobachtungszeit"
+          : "at least one minute of observations",
+      );
+      expect(root.textContent).not.toContain("private_new_reason");
+    },
+  );
 
   it("updates running, paused, complete and disabled plans without stale promises", async () => {
     const { root, update } = await mount();
@@ -821,7 +824,7 @@ describe("consumption-based charging plan", () => {
     for (const [state, expected] of [
       ["paused", "Ladeplanung ist pausiert"],
       ["complete", "Netzladung ist abgeschlossen"],
-      ["off", "Ladeplanung ist ausgeschaltet"],
+      ["off", "Ladezeitpunkt konnte noch nicht errechnet werden"],
       ["waiting_for_data", "mindestens eine Minute Beobachtungszeit"],
     ]) {
       await update(state);

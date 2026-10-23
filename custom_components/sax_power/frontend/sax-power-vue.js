@@ -4803,8 +4803,8 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			_: 1
 		}));
 	}
-}), vc = ["aria-labelledby"], yc = ["id"], bc = { key: 0 }, xc = { key: 2 }, Sc = { key: 3 }, Cc = {
-	key: 4,
+}), vc = ["aria-labelledby"], yc = ["id"], bc = { key: 0 }, xc = { key: 1 }, Sc = { key: 2 }, Cc = {
+	key: 3,
 	class: "charge-plan__target"
 }, wc = /*#__PURE__*/ go(/* @__PURE__ */ Bn({
 	__name: "ChargePlan",
@@ -4828,6 +4828,7 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			postChargeWaiting: "Nach Ladeende werden neue Verbrauchsdaten für die Ladeplanung gesammelt.",
 			unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
 			incomplete: "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
+			off: "Die verbrauchsabhängige Ladeplanung ist ausgeschaltet.",
 			waiting_for_data: "Für die Ladeplanung werden noch gültige Verbrauchsdaten und ein PV-Start benötigt. Die Verbrauchsprognose benötigt mindestens eine Minute Beobachtungszeit.",
 			paused: "Die Ladeplanung ist pausiert. Die geplante Netzladung ist derzeit nicht freigegeben.",
 			complete: "Die geplante Netzladung ist abgeschlossen.",
@@ -4844,6 +4845,7 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			postChargeWaiting: "After charging ends, fresh consumption data is collected for the charging plan.",
 			unavailable: "The charging plan is currently unavailable.",
 			incomplete: "The charging plan is still incomplete. Charging times cannot currently be displayed.",
+			off: "Consumption-based charging planning is turned off.",
 			waiting_for_data: "Charging planning is waiting for valid consumption data and a PV start. The consumption forecast needs at least one minute of observations.",
 			paused: "The charging plan is paused. Planned grid charging is currently not permitted.",
 			complete: "The planned grid charging is complete.",
@@ -4857,14 +4859,16 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			measurements_missing: "Aktuelle Batteriemesswerte fehlen.",
 			calibration: "Die Batteriekalibrierung hat Vorrang.",
 			pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
-			manual_charge: "Die manuelle Ladung hat Vorrang."
+			manual_charge: "Die manuelle Ladung hat Vorrang.",
+			disabled: "Unter „Netzladung“ die Ladeweise wählen und die Automatik einschalten."
 		} : {
 			pv_start_missing: "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source under “Prices & times”.",
 			consumption_missing: "The consumption forecast needs at least one minute of discharge measurements.",
 			measurements_missing: "Current battery measurements are missing.",
 			calibration: "Battery calibration takes priority.",
 			pv_surplus: "PV surplus pauses planned grid charging.",
-			manual_charge: "Manual charging takes priority."
+			manual_charge: "Manual charging takes priority.",
+			disabled: "Under “Grid charging”, choose the charging mode and turn on automatic charging."
 		}), h = Z(() => typeof s.value.reason == "string" ? m.value[s.value.reason] : void 0);
 		function g(e, n, r, i = 1) {
 			let a = Q(e);
@@ -4971,7 +4975,7 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 						l
 					];
 				}
-				case "off": return [];
+				case "off": return [d.value.off, h.value ?? m.value.disabled];
 				case "waiting_for_data": return [C.value ? d.value.completionPending : h.value ?? d.value.waiting_for_data];
 				case "paused": return [d.value.paused, h.value];
 				case "complete": return [d.value.complete];
@@ -4995,10 +4999,7 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			"aria-live": "polite"
 		}, I(T.value), 3)], 8, yc), !c.value || p.value ? (G(), K(W, { key: 0 }, [
 			u.value && !c.value ? (G(), K("p", bc, I(u.value), 1)) : X("", !0),
-			te.value ? (G(), K("p", {
-				key: 1,
-				class: P(["charge-plan__description", { "charge-plan__forecast": x.value }])
-			}, I(te.value), 3)) : X("", !0),
+			q("p", { class: P(["charge-plan__description", { "charge-plan__forecast": x.value }]) }, I(te.value), 3),
 			O.value ? (G(), K("p", xc, I(O.value), 1)) : X("", !0),
 			ee.value ? (G(), K("p", Sc, I(ee.value), 1)) : X("", !0),
 			j.value ? (G(), K("p", Cc, I(j.value), 1)) : X("", !0)

@@ -459,11 +459,16 @@ test("current discharge forecast remains visible independently of automatic char
   });
   await expect(forecast).toBeVisible();
   await expect(forecast).toContainText("03:15");
-  await expect(panel.locator(".charge-plan")).not.toContainText(
+  await expect(panel.locator(".charge-plan")).toContainText(
     english ? "planning is turned off" : "Ladeplanung ist ausgeschaltet",
   );
-  await expect(panel.locator(".charge-plan")).not.toContainText(
+  await expect(panel.locator(".charge-plan")).toContainText(
     english ? "turn on automatic charging" : "die Automatik einschalten",
+  );
+  await expect(panel.locator(".charge-plan")).not.toContainText(
+    english
+      ? "Only what is needed until solar power"
+      : "Nur Bedarf bis Solarstrom",
   );
   await expectControlsToFit(panel);
   await capture(page, testInfo, "current-forecast");
@@ -479,7 +484,9 @@ test("current discharge forecast remains visible independently of automatic char
     };
   });
   await expect(forecast).toHaveCount(0);
-  await expect(panel.locator(".charge-plan__description")).toHaveCount(0);
+  await expect(panel.locator(".charge-plan__description")).toContainText(
+    english ? "planning is turned off" : "Ladeplanung ist ausgeschaltet",
+  );
   await expect(panel.locator(".charge-plan")).not.toContainText("03:15");
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

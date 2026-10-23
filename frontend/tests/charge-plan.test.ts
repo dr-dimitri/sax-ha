@@ -797,12 +797,18 @@ describe("consumption-based charging plan", () => {
   );
 
   it.each(["de", "en-GB"])(
-    "omits the disabled planning hint and keeps unknown reasons generic (%s)",
+    "keeps the disabled planning hint without naming a charging mode (%s)",
     async (language) => {
       const { root, update } = await mount(language);
       for (const attributes of [{}, { reason: "disabled" }]) {
         await update("off", attributes);
-        expect(root.querySelector(".charge-plan__description")).toBeNull();
+        expect(
+          root.querySelector(".charge-plan__description")?.textContent?.trim(),
+        ).toBe(
+          language === "de"
+            ? "Die verbrauchsabhängige Ladeplanung ist ausgeschaltet. Unter „Netzladung“ die Ladeweise wählen und die Automatik einschalten."
+            : "Consumption-based charging planning is turned off. Under “Grid charging”, choose the charging mode and turn on automatic charging.",
+        );
         expect(
           root.querySelector(".charge-plan__demand--unknown"),
         ).not.toBeNull();
@@ -824,7 +830,7 @@ describe("consumption-based charging plan", () => {
     for (const [state, expected] of [
       ["paused", "Ladeplanung ist pausiert"],
       ["complete", "Netzladung ist abgeschlossen"],
-      ["off", "Ladezeitpunkt konnte noch nicht errechnet werden"],
+      ["off", "Ladeplanung ist ausgeschaltet"],
       ["waiting_for_data", "mindestens eine Minute Beobachtungszeit"],
     ]) {
       await update(state);

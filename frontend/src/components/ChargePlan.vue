@@ -56,7 +56,6 @@ const text = computed(() =>
         unavailable: "Die Ladeplanung ist derzeit nicht verfügbar.",
         incomplete:
           "Die Angaben zum Ladeplan sind noch unvollständig. Ladezeiten können derzeit nicht angezeigt werden.",
-        off: "Die verbrauchsabhängige Ladeplanung ist ausgeschaltet.",
         waiting_for_data:
           "Für die Ladeplanung werden noch gültige Verbrauchsdaten und ein PV-Start benötigt. Die Verbrauchsprognose benötigt mindestens eine Minute Beobachtungszeit.",
         paused:
@@ -81,7 +80,6 @@ const text = computed(() =>
         unavailable: "The charging plan is currently unavailable.",
         incomplete:
           "The charging plan is still incomplete. Charging times cannot currently be displayed.",
-        off: "Consumption-based charging planning is turned off.",
         waiting_for_data:
           "Charging planning is waiting for valid consumption data and a PV start. The consumption forecast needs at least one minute of observations.",
         paused:
@@ -115,8 +113,6 @@ const reasons = computed<Record<string, string>>(() =>
         calibration: "Die Batteriekalibrierung hat Vorrang.",
         pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
         manual_charge: "Die manuelle Ladung hat Vorrang.",
-        disabled:
-          "Unter „Netzladung“ die Ladeweise „Nur Bedarf bis Solarstrom“ wählen und die Automatik einschalten.",
       }
     : {
         pv_start_missing:
@@ -127,8 +123,6 @@ const reasons = computed<Record<string, string>>(() =>
         calibration: "Battery calibration takes priority.",
         pv_surplus: "PV surplus pauses planned grid charging.",
         manual_charge: "Manual charging takes priority.",
-        disabled:
-          "Under “Grid charging”, choose “Only what is needed until solar power” and turn on automatic charging.",
       },
 );
 const reason = computed(() =>
@@ -437,7 +431,7 @@ const paragraphs = computed(() => {
       ];
     }
     case "off":
-      return [text.value.off, reason.value ?? reasons.value.disabled];
+      return [];
     case "waiting_for_data":
       return [
         completed.value
@@ -494,6 +488,7 @@ const target = computed(() => {
         {{ configurationHint }}
       </p>
       <p
+        v-if="description"
         class="charge-plan__description"
         :class="{ 'charge-plan__forecast': currentForecast }"
       >

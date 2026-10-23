@@ -3671,6 +3671,10 @@ requirement_vue_electricity_tariff:
     als aktuelle Messung ausgegeben. Der Planungsbereich einschließlich der
     PV-Zeile bleibt bei zeitvariablem und dynamischem Tarif ohne Einklappung
     dauerhaft sichtbar. Die bisherige zweite Aktivierung in ChargePlan entfällt.
+    Bei ausgeschalteter verbrauchsabhängiger Ladeplanung entfallen der
+    Ausschalthinweis und die Anleitung zur Aktivierung unter Netzladung in DE
+    und EN. Eine gültige aktuelle Entladeprognose bleibt sichtbar; ohne
+    Beschreibung wird kein leerer Absatz ausgegeben.
     Im zeitvariablen Tarif ergänzt die Überschrift den bestätigten Bedarf:
     "Ladeplanung: Keine Ladung nötig" oder "Ladeplanung: Ladung voraussichtlich
     nötig". Nur der Zusatz nach dem Doppelpunkt ist grün bei fehlendem Bedarf

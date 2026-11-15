@@ -3680,10 +3680,16 @@ requirement_vue_electricity_tariff:
     nötig". Nur der Zusatz nach dem Doppelpunkt ist grün bei fehlendem Bedarf
     beziehungsweise blau bei voraussichtlichem Ladebedarf. Beide Zustände
     bleiben durch den Text unabhängig von der Farbe unterscheidbar.
-    Fehlende, nicht verfügbare, ausgeschaltete oder noch nicht bewertete
-    Planung erhält den orangefarbenen Zusatz "Ladezeitpunkt konnte noch nicht
-    errechnet werden";
-    aus fehlenden Daten darf keine grüne Entwarnung entstehen.
+    Bei aktiver automatischer Netzladung mit festem Netzladeziel und
+    ausgeschaltetem Verbrauchsplan erklärt ein neutraler Zusatz den Start:
+    "Start im Niedertarif, sobald der Akkustand unter X % fällt" in DE und
+    entsprechend in EN. Bei 0 % lautet die Bedingung "bei 0 % Akkustand".
+    Der Zusatz verwendet ausschließlich die bestätigte, verfügbare Startschwelle.
+    Eine verfügbare Entladeprognose bleibt darunter sichtbar.
+    In den übrigen Fällen erhält eine fehlende, nicht verfügbare,
+    ausgeschaltete oder noch nicht bewertete Planung den orangefarbenen Zusatz
+    "Ladezeitpunkt konnte noch nicht errechnet werden". Aus fehlenden Daten
+    darf keine grüne Entwarnung entstehen.
     Pausierte Aufträge zeigen nur bei erhaltener Bedarfsgrundlage den blauen
     Zusatz. Wird Ladung tatsächlich durchgeführt, lautet die Überschrift
     "Ladeplanung: Ladung läuft..." mit blauem Zusatz. Ein bestätigter Befehl

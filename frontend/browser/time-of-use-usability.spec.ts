@@ -417,6 +417,58 @@ test("charge target keeps its draft and confirmed value through delayed failure 
   await expect(panel.locator(".electricity-master input")).not.toBeChecked();
 });
 
+test("fixed-target charging shows the confirmed low-tariff start rule beside the discharge forecast", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  await page.goto("/sax-power-vue/stromtarif?discharge-forecast");
+  if (english) await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+  const panel = page.locator("sax-power-vue-panel");
+  const master = panel.locator(".electricity-activation").getByRole("switch");
+  const heading = panel.locator(".charge-plan h2");
+  const suffix = heading.locator(".charge-plan__demand");
+  await master.click();
+  await expect(master).toBeChecked();
+
+  const publishThreshold = (state: string) =>
+    panel.evaluate((element, state) => {
+      const host = element as HTMLElement & { hass: HomeAssistant };
+      const thresholdId = "number.demo_timed_charge_min_soc";
+      host.hass = {
+        ...host.hass,
+        states: {
+          ...host.hass.states,
+          [thresholdId]: { ...host.hass.states[thresholdId]!, state },
+        },
+      };
+    }, state);
+
+  await publishThreshold("10");
+  await expect(heading).toHaveText(
+    english
+      ? "Charging plan: Starts during low-tariff hours when the battery falls below 10%"
+      : "Ladeplanung: Start im Niedertarif, sobald der Akkustand unter 10 % fällt",
+  );
+  await expect(suffix).toHaveCSS(
+    "color",
+    await heading.evaluate((element) => getComputedStyle(element).color),
+  );
+  const forecast = panel.locator(".charge-plan__forecast");
+  await expect(forecast).toContainText("03:15");
+
+  await publishThreshold("0");
+  await expect(suffix).toHaveText(
+    english
+      ? "Starts during low-tariff hours at 0% battery charge"
+      : "Start im Niedertarif bei 0 % Akkustand",
+  );
+  await publishThreshold("unavailable");
+  await expect(suffix).toHaveClass(/charge-plan__demand--unknown/);
+  await expect(forecast).toContainText("03:15");
+});
+
 test("current discharge forecast remains visible independently of automatic charging and hides when measurements are unavailable", async ({
   page,
 }, testInfo) => {
